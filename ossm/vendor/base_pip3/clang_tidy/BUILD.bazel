@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "clang_tidy",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_clang_tidy//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_clang_tidy//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_clang_tidy//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_clang_tidy//:dist_info",
+)

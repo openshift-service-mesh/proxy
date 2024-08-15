@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "envoy_github_abstract",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_envoy_github_abstract//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_envoy_github_abstract//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_envoy_github_abstract//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_envoy_github_abstract//:dist_info",
+)

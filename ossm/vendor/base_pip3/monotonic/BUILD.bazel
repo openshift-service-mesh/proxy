@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "monotonic",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_monotonic//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_monotonic//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_monotonic//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_monotonic//:dist_info",
+)

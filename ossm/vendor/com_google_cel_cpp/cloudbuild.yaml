@@ -1,0 +1,31 @@
+steps:
+- name: 'gcr.io/cel-analysis/gcc-9:latest'
+  args:
+  - '--output_base=/bazel' # This is mandatory to avoid steps accidently sharing data.
+  - 'test'
+  - '...'
+  - '--compilation_mode=fastbuild'
+  - '--test_output=errors'
+  - '--distdir=/bazel-distdir'
+  - '--show_timestamps'
+  - '--test_tag_filters=-benchmark'
+  id: gcc-9
+  waitFor: ['-']
+- name: 'gcr.io/cel-analysis/gcc-9:latest'
+  env:
+  - 'CC=clang-11'
+  - 'CXX=clang++-11'
+  args:
+  - '--output_base=/bazel' # This is mandatory to avoid steps accidently sharing data.
+  - 'test'
+  - '...'
+  - '--compilation_mode=fastbuild'
+  - '--test_output=errors'
+  - '--distdir=/bazel-distdir'
+  - '--show_timestamps'
+  - '--test_tag_filters=-benchmark'
+  id: clang-11
+  waitFor: ['-']
+timeout: 1h
+options:
+  machineType: 'N1_HIGHCPU_32'

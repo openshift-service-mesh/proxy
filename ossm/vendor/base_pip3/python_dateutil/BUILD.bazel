@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "python_dateutil",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_python_dateutil//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_python_dateutil//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_python_dateutil//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_python_dateutil//:dist_info",
+)

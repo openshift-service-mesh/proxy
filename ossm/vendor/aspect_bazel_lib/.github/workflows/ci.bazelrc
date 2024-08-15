@@ -1,0 +1,19 @@
+# Directories caches by GitHub actions
+common:local --disk_cache=~/.cache/bazel-disk-cache
+common --repository_cache=~/.cache/bazel-repository-cache
+
+# Debug where options came from
+common --announce_rc
+
+# Allows tests to run bazelisk-in-bazel, since this is the cache folder used
+common --test_env=XDG_CACHE_HOME
+
+# Remote build execution
+build:rbe --extra_execution_platforms=@aspect_bazel_lib//platforms:x86_64_linux_remote
+build:rbe --host_platform=@aspect_bazel_lib//platforms:x86_64_linux_remote
+build:rbe --jobs=32
+
+# BuildBuddy remote exec
+build:rbe --bes_results_url=https://app.buildbuddy.io/invocation/
+build:rbe --bes_backend=grpcs://remote.buildbuddy.io
+build:rbe --remote_executor=grpcs://remote.buildbuddy.io

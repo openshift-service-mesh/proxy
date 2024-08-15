@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "aio_api_github",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_aio_api_github//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_aio_api_github//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_aio_api_github//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_aio_api_github//:dist_info",
+)
