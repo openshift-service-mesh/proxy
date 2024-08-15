@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "aio_run_checker",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_aio_run_checker//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_aio_run_checker//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_aio_run_checker//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_aio_run_checker//:dist_info",
+)

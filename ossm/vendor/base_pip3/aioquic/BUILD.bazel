@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "aioquic",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_aioquic//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_aioquic//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_aioquic//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_aioquic//:dist_info",
+)

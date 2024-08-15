@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "icalendar",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_icalendar//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_icalendar//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_icalendar//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_icalendar//:dist_info",
+)

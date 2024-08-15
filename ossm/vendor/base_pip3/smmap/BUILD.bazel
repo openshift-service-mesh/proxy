@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "smmap",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_smmap//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_smmap//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_smmap//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_smmap//:dist_info",
+)

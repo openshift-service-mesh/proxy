@@ -1,0 +1,2 @@
+# DO NOT EDIT: automatically generated WORKSPACE file for define_envoy_implementation rule
+workspace(name = "pick_envoy")

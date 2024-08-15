@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "cachetools",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_cachetools//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_cachetools//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_cachetools//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_cachetools//:dist_info",
+)

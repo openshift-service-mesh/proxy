@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "dependatool",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_dependatool//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_dependatool//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_dependatool//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_dependatool//:dist_info",
+)

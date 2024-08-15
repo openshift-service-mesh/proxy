@@ -1,0 +1,37 @@
+load("@bazel_skylib//rules:diff_test.bzl", "diff_test")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_python//python:pip.bzl", "compile_pip_requirements")
+
+# This rule adds a convenient way to update the requirements.txt
+# lockfile based on the requirements.in.
+compile_pip_requirements(
+    name = "requirements",
+    src = "requirements.in",
+)
+
+write_file(
+    name = "gen_update",
+    out = "update.sh",
+    content = [
+        # This depends on bash, would need tweaks for Windows
+        "#!/usr/bin/env bash",
+        # Bazel gives us a way to access the source folder!
+        "cd $BUILD_WORKSPACE_DIRECTORY",
+        "cp -fv bazel-pip_parse_vendored/external/pip/requirements.bzl requirements.bzl",
+    ],
+)
+
+sh_binary(
+    name = "vendor_requirements",
+    srcs = ["update.sh"],
+    data = ["@pip//:requirements.bzl"],
+)
+
+# Similarly ensures that the requirements.bzl file is updated
+# based on the requirements.txt lockfile.
+diff_test(
+    name = "test_vendored",
+    failure_message = "Please run:  bazel run //:vendor_requirements",
+    file1 = "requirements.bzl",
+    file2 = "@pip//:requirements.bzl",
+)

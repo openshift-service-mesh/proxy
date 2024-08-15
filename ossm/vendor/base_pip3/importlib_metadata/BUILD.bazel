@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "importlib_metadata",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_importlib_metadata//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_importlib_metadata//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_importlib_metadata//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_importlib_metadata//:dist_info",
+)

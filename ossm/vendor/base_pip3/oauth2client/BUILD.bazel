@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "oauth2client",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_oauth2client//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_oauth2client//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_oauth2client//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_oauth2client//:dist_info",
+)
