@@ -15,7 +15,7 @@
 
 set -eo pipefail
 
-export CC=clang CXX=clang++
+export CC=clang CXX=clang++ ENVOY_OPENSSL=1
 
 function init(){
   ROOT_DIR="$(pwd)"
@@ -51,6 +51,7 @@ function init(){
         "python3_11_x86_64"
         "python3_11_ppc"
         "python3_11_s390x"
+        "python3_11_aarch64"
   )
 }
 
@@ -105,6 +106,8 @@ function run_bazel() {
   # Workaround to force fetch of protoc for arm
   bazel --output_base="${OUTPUT_BASE}" fetch @com_google_protobuf_protoc_linux_aarch_64//:protoc
 
+  bazel --output_base="${OUTPUT_BASE}" fetch @com_github_gperftools_gperftools//:all
+
   # Fetch all the rest and check everything using "build --nobuild "option
   for config in x86_64 aarch64 s390x ppc; do
     bazel --output_base="${OUTPUT_BASE}" build --nobuild --config="${config}" //...
@@ -114,7 +117,7 @@ function run_bazel() {
 function patch_python() {
   local dir repo_name
 
-  for arch in x86_64 s390x ppc64le; do
+  for arch in x86_64 s390x ppc64le aarch64; do
     repo_name="python3_11_${arch}-unknown-linux-gnu"
     dir="${VENDOR_DIR}/${repo_name}"
 
