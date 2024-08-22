@@ -31,10 +31,12 @@ build --override_repository=com_github_google_flatbuffers=/work/ossm/vendor/com_
 build --override_repository=com_github_google_jwt_verify=/work/ossm/vendor/com_github_google_jwt_verify
 build --override_repository=com_github_google_quiche=/work/ossm/vendor/com_github_google_quiche
 build --override_repository=com_github_google_tcmalloc=/work/ossm/vendor/com_github_google_tcmalloc
+build --override_repository=com_github_gperftools_gperftools=/work/ossm/vendor/com_github_gperftools_gperftools
 build --override_repository=com_github_grpc_grpc=/work/ossm/vendor/com_github_grpc_grpc
 build --override_repository=com_github_iancoleman_strcase=/work/ossm/vendor/com_github_iancoleman_strcase
 build --override_repository=com_github_jbeder_yaml_cpp=/work/ossm/vendor/com_github_jbeder_yaml_cpp
 build --override_repository=com_github_libevent_libevent=/work/ossm/vendor/com_github_libevent_libevent
+build --override_repository=com_github_luajit2_luajit2=/work/ossm/vendor/com_github_luajit2_luajit2
 build --override_repository=com_github_luajit_luajit=/work/ossm/vendor/com_github_luajit_luajit
 build --override_repository=com_github_lyft_protoc_gen_star_v2=/work/ossm/vendor/com_github_lyft_protoc_gen_star_v2
 build --override_repository=com_github_mirror_tclap=/work/ossm/vendor/com_github_mirror_tclap
@@ -130,3 +132,4 @@ build --override_repository=yq_toolchains=/work/ossm/vendor/yq_toolchains
 build --override_repository=python3_11_x86_64-unknown-linux-gnu=/work/ossm/vendor/python3_11_x86_64-unknown-linux-gnu
 build --override_repository=python3_11_s390x-unknown-linux-gnu=/work/ossm/vendor/python3_11_s390x-unknown-linux-gnu
 build --override_repository=python3_11_ppc64le-unknown-linux-gnu=/work/ossm/vendor/python3_11_ppc64le-unknown-linux-gnu
+build --override_repository=python3_11_aarch64-unknown-linux-gnu=/work/ossm/vendor/python3_11_aarch64-unknown-linux-gnu
