@@ -275,6 +275,9 @@ cc_import(
 
                 # This patch is required as rules_foreign_cc runs in MSYS2 on Windows and MSYS2's "mkdir" is used
                 Label("//toolchains:pkgconfig-makefile-vc.patch"),
+
+               # This patch is required to overcome type mismatch error
+               Label("//toolchains:pkgconfig-valgrind.patch"),
             ],
             urls = [
                 "https://pkgconfig.freedesktop.org/releases/pkg-config-0.29.2.tar.gz",
