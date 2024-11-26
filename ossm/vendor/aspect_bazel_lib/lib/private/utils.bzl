@@ -180,7 +180,7 @@ def _is_bazel_6_or_greater():
     be used in rules and BUILD files.
 
     An alternate approach to make the Bazel version available in BUILD files and rules would be to
-    use the [host_repo](https://github.com/aspect-build/bazel-lib/blob/main/docs/host_repo.md) repository rule
+    use the [host_repo](https://github.com/bazel-contrib/bazel-lib/blob/main/docs/host_repo.md) repository rule
     which contains the bazel_version in the exported `host` struct:
 
     WORKSPACE:
@@ -212,7 +212,7 @@ def _is_bazel_7_or_greater():
     be used in rules and BUILD files.
 
     An alternate approach to make the Bazel version available in BUILD files and rules would be to
-    use the [host_repo](https://github.com/aspect-build/bazel-lib/blob/main/docs/host_repo.md) repository rule
+    use the [host_repo](https://github.com/bazel-contrib/bazel-lib/blob/main/docs/host_repo.md) repository rule
     which contains the bazel_version in the exported `host` struct:
 
     WORKSPACE:
@@ -312,7 +312,7 @@ _COMMON_BINARY_RULE_ATTRIBUTES = _COMMON_RULE_ATTRIBUTES + [
 ]
 
 def _propagate_common_rule_attributes(attrs):
-    """Returns a dict of rule parameters filtered from the input dict that only contains the onces that are common to all rules
+    """Returns a dict of rule parameters filtered from the input dict that only contains the ones that are common to all rules
 
     These are listed in Bazel's documentation:
     https://bazel.build/reference/be/common-definitions#common-attributes
@@ -331,7 +331,7 @@ def _propagate_common_rule_attributes(attrs):
     }
 
 def _propagate_common_test_rule_attributes(attrs):
-    """Returns a dict of rule parameters filtered from the input dict that only contains the onces that are common to all test rules
+    """Returns a dict of rule parameters filtered from the input dict that only contains the ones that are common to all test rules
 
     These are listed in Bazel's documentation:
     https://bazel.build/reference/be/common-definitions#common-attributes
@@ -351,7 +351,7 @@ def _propagate_common_test_rule_attributes(attrs):
     }
 
 def _propagate_common_binary_rule_attributes(attrs):
-    """Returns a dict of rule parameters filtered from the input dict that only contains the onces that are common to all binary rules
+    """Returns a dict of rule parameters filtered from the input dict that only contains the ones that are common to all binary rules
 
     These are listed in Bazel's documentation:
     https://bazel.build/reference/be/common-definitions#common-attributes

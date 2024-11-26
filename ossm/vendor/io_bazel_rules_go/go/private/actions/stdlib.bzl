@@ -16,16 +16,17 @@ load(
     "//go/private:common.bzl",
     "COVERAGE_OPTIONS_DENYLIST",
     "GO_TOOLCHAIN_LABEL",
-)
-load(
-    "//go/private:providers.bzl",
-    "GoStdLib",
+    "SUPPORTS_PATH_MAPPING_REQUIREMENT",
 )
 load(
     "//go/private:mode.bzl",
     "LINKMODE_NORMAL",
     "extldflags_from_cc_toolchain",
     "link_mode_args",
+)
+load(
+    "//go/private:providers.bzl",
+    "GoStdLib",
 )
 load("//go/private:sdk.bzl", "parse_version")
 load("//go/private/actions:utils.bzl", "quote_opts")
@@ -120,10 +121,16 @@ def _sdk_stdlib(go):
         root_file = go.sdk.root_file,
     )
 
+def _dirname(file):
+    return file.dirname
+
 def _build_stdlib(go):
     pkg = go.declare_directory(go, path = "pkg")
-    args = go.builder_args(go, "stdlib")
-    args.add("-out", pkg.dirname)
+    args = go.builder_args(go, "stdlib", use_path_mapping = True)
+
+    # Use a file rather than pkg.dirname as the latter is just a string and thus
+    # not subject to path mapping.
+    args.add_all("-out", [pkg], map_each = _dirname, expand_directories = False)
     if go.mode.race:
         args.add("-race")
     args.add("-package", "std")
@@ -152,6 +159,7 @@ def _build_stdlib(go):
         arguments = [args],
         env = _build_env(go),
         toolchain = GO_TOOLCHAIN_LABEL,
+        execution_requirements = SUPPORTS_PATH_MAPPING_REQUIREMENT,
     )
     return GoStdLib(
         _list_json = _build_stdlib_list_json(go),

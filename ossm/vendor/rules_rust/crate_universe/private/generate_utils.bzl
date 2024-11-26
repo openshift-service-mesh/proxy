@@ -90,7 +90,8 @@ def render_config(
         generate_target_compatible_with = True,
         platforms_template = "@rules_rust//rust/platform:{triple}",
         regen_command = None,
-        vendor_mode = None):
+        vendor_mode = None,
+        generate_rules_license_metadata = False):
     """Various settings used to configure rendered outputs
 
     The template parameters each support a select number of format keys. A description of each key
@@ -128,6 +129,7 @@ def render_config(
             keys are [`{triple}`].
         regen_command (str, optional): An optional command to demonstrate how generated files should be regenerated.
         vendor_mode (str, optional): An optional configuration for rendirng content to be rendered into repositories.
+        generate_rules_license_metadata (bool, optional): Whether to generate rules license metedata
 
     Returns:
         string: A json encoded struct to match the Rust `config::RenderConfig` struct
@@ -143,6 +145,7 @@ def render_config(
         platforms_template = platforms_template,
         regen_command = regen_command,
         vendor_mode = vendor_mode,
+        generate_rules_license_metadata = generate_rules_license_metadata,
     ))
 
 def _crate_id(name, version):
@@ -333,7 +336,7 @@ def get_lockfiles(repository_ctx):
         bazel = repository_ctx.path(repository_ctx.attr.lockfile) if repository_ctx.attr.lockfile else None,
     )
 
-def determine_repin(repository_ctx, generator, lockfile_path, config, splicing_manifest, cargo, rustc):
+def determine_repin(repository_ctx, generator, lockfile_path, config, splicing_manifest, cargo, rustc, repin_instructions = None):
     """Use the `cargo-bazel` binary to determine whether or not dpeendencies need to be re-pinned
 
     Args:
@@ -344,6 +347,7 @@ def determine_repin(repository_ctx, generator, lockfile_path, config, splicing_m
         lockfile_path (path): The path to a "lock" file for reproducible outputs.
         cargo (path): The path to a Cargo binary.
         rustc (path): The path to a Rustc binary.
+        repin_instructions (optional string): Instructions to re-pin dependencies in your repository. Will be shown when re-pinning is required.
 
     Returns:
         bool: True if dependencies need to be re-pinned
@@ -393,20 +397,29 @@ def determine_repin(repository_ctx, generator, lockfile_path, config, splicing_m
         repository_ctx = repository_ctx,
         args = args,
         env = env,
+        allow_fail = True,
     )
 
     # If it was determined repinning should occur but there was no
     # flag indicating repinning was requested, an error is raised
     # since repinning should be an explicit action
-    if result.stdout.strip().lower() == "repin":
-        fail(("\n".join([
-            result.stderr,
-            (
-                "The current `lockfile` is out of date for '{}'. Please re-run " +
-                "bazel using `CARGO_BAZEL_REPIN=true` if this is expected " +
-                "and the lockfile should be updated."
-            ).format(repository_ctx.name),
-        ])))
+    if result.return_code:
+        if repin_instructions:
+            msg = ("\n".join([
+                result.stderr,
+                "The current `lockfile` is out of date for '{}'.".format(repository_ctx.name),
+                repin_instructions,
+            ]))
+        else:
+            msg = ("\n".join([
+                result.stderr,
+                (
+                    "The current `lockfile` is out of date for '{}'. Please re-run " +
+                    "bazel using `CARGO_BAZEL_REPIN=true` if this is expected " +
+                    "and the lockfile should be updated."
+                ).format(repository_ctx.name),
+            ]))
+        fail(msg)
 
     return False
 

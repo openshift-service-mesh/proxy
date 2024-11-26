@@ -14,6 +14,18 @@
 
 """Implementation of macOS rules."""
 
+load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
+load(
+    "@build_bazel_rules_apple//apple:providers.bzl",
+    "AppleBinaryInfoplistInfo",
+    "AppleBundleInfo",
+    "AppleBundleVersionInfo",
+    "ApplePlatformInfo",
+    "MacosExtensionBundleInfo",
+    "MacosFrameworkBundleInfo",
+    "MacosStaticFrameworkBundleInfo",
+    "MacosXPCServiceBundleInfo",
+)
 load(
     "@build_bazel_rules_apple//apple/internal:apple_product_type.bzl",
     "apple_product_type",
@@ -29,6 +41,10 @@ load(
     "bundling_support",
 )
 load(
+    "@build_bazel_rules_apple//apple/internal:cc_info_support.bzl",
+    "cc_info_support",
+)
+load(
     "@build_bazel_rules_apple//apple/internal:codesigning_support.bzl",
     "codesigning_support",
 )
@@ -39,6 +55,10 @@ load(
 load(
     "@build_bazel_rules_apple//apple/internal:features_support.bzl",
     "features_support",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal:framework_import_support.bzl",
+    "libraries_to_link_for_dynamic_framework",
 )
 load(
     "@build_bazel_rules_apple//apple/internal:linking_support.bzl",
@@ -109,38 +129,25 @@ load(
     "apple_resource_aspect",
 )
 load(
-    "@build_bazel_rules_apple//apple/internal/utils:clang_rt_dylibs.bzl",
-    "clang_rt_dylibs",
-)
-load(
-    "@build_bazel_rules_apple//apple/internal:cc_info_support.bzl",
-    "cc_info_support",
-)
-load(
-    "@build_bazel_rules_swift//swift:swift.bzl",
-    "SwiftInfo",
-)
-load(
     "@build_bazel_rules_apple//apple/internal/aspects:swift_dynamic_framework_aspect.bzl",
     "SwiftDynamicFrameworkInfo",
     "swift_dynamic_framework_aspect",
 )
 load(
-    "@build_bazel_rules_apple//apple/internal:framework_import_support.bzl",
-    "libraries_to_link_for_dynamic_framework",
+    "@build_bazel_rules_apple//apple/internal/utils:clang_rt_dylibs.bzl",
+    "clang_rt_dylibs",
 )
 load(
-    "@build_bazel_rules_apple//apple:providers.bzl",
-    "AppleBinaryInfoplistInfo",
-    "AppleBundleInfo",
-    "AppleBundleVersionInfo",
-    "ApplePlatformInfo",
-    "MacosExtensionBundleInfo",
-    "MacosFrameworkBundleInfo",
-    "MacosStaticFrameworkBundleInfo",
-    "MacosXPCServiceBundleInfo",
+    "@build_bazel_rules_apple//apple/internal/utils:main_thread_checker_dylibs.bzl",
+    "main_thread_checker_dylibs",
 )
-load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
+load(
+    "@build_bazel_rules_swift//swift:swift.bzl",
+    "SwiftInfo",
+)
+
+# TODO: Remove once we drop bazel 7.x
+_OBJC_PROVIDER_LINKING = hasattr(apple_common.new_objc_provider(), "linkopt")
 
 def _macos_application_impl(ctx):
     """Implementation of macos_application."""
@@ -277,6 +284,15 @@ def _macos_application_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -302,7 +318,7 @@ def _macos_application_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -310,6 +326,9 @@ def _macos_application_impl(ctx):
             bundle_embedded_bundles = True,
             embeddable_targets = embedded_targets,
             platform_prerequisites = platform_prerequisites,
+        ),
+        partials.cc_info_dylibs_partial(
+            embedded_targets = embedded_targets,
         ),
         partials.framework_import_partial(
             actions = actions,
@@ -334,6 +353,7 @@ def _macos_application_impl(ctx):
             bundle_verification_targets = bundle_verification_targets,
             environment_plist = ctx.file._environment_plist,
             launch_storyboard = None,
+            locales_to_include = ctx.attr.locales_to_include,
             platform_prerequisites = platform_prerequisites,
             resource_deps = resource_deps,
             rule_descriptor = rule_descriptor,
@@ -385,6 +405,7 @@ def _macos_application_impl(ctx):
         entitlements = entitlements.codesigning,
         features = features,
         ipa_post_processor = ctx.executable.ipa_post_processor,
+        locales_to_include = ctx.attr.locales_to_include,
         partials = processor_partials,
         platform_prerequisites = platform_prerequisites,
         predeclared_outputs = predeclared_outputs,
@@ -435,7 +456,7 @@ def _macos_application_impl(ctx):
                 processor_result.output_groups,
             )
         ),
-        apple_common.new_executable_binary_provider(
+        linking_support.new_executable_binary_provider(
             binary = binary_artifact,
             cc_info = link_result.cc_info,
             objc = link_result.objc,
@@ -568,6 +589,15 @@ def _macos_bundle_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -593,7 +623,7 @@ def _macos_bundle_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -820,6 +850,15 @@ def _macos_extension_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -846,7 +885,7 @@ def _macos_extension_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -868,6 +907,7 @@ def _macos_extension_impl(ctx):
             executable_name = executable_name,
             extensionkit_keys_required = ctx.attr.extensionkit_extension,
             launch_storyboard = None,
+            locales_to_include = ctx.attr.locales_to_include,
             platform_prerequisites = platform_prerequisites,
             resource_deps = resource_deps,
             rule_descriptor = rule_descriptor,
@@ -917,6 +957,7 @@ def _macos_extension_impl(ctx):
         entitlements = entitlements.codesigning,
         features = features,
         ipa_post_processor = ctx.executable.ipa_post_processor,
+        locales_to_include = ctx.attr.locales_to_include,
         partials = processor_partials,
         platform_prerequisites = platform_prerequisites,
         predeclared_outputs = predeclared_outputs,
@@ -930,8 +971,9 @@ def _macos_extension_impl(ctx):
         DefaultInfo(
             files = processor_result.output_files,
         ),
-        apple_common.new_executable_binary_provider(
+        linking_support.new_executable_binary_provider(
             binary = binary_artifact,
+            cc_info = link_result.cc_info,
             objc = link_result.objc,
         ),
         new_macosextensionbundleinfo(),
@@ -1014,16 +1056,11 @@ def _macos_quick_look_plugin_impl(ctx):
         validation_mode = ctx.attr.entitlements_validation,
     )
 
-    extra_linkopts = [
-        "-dynamiclib",
-        "-install_name",
-        "\"/Library/Frameworks/{0}.qlgenerator/{0}\"".format(ctx.attr.bundle_name),
-    ]
     link_result = linking_support.register_binary_linking_action(
         ctx,
         entitlements = entitlements.linking,
         exported_symbols_lists = ctx.files.exported_symbols_lists,
-        extra_linkopts = extra_linkopts,
+        extra_linkopts = ["-bundle"],
         platform_prerequisites = platform_prerequisites,
         rule_descriptor = rule_descriptor,
         stamp = ctx.attr.stamp,
@@ -1073,6 +1110,15 @@ def _macos_quick_look_plugin_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -1099,7 +1145,7 @@ def _macos_quick_look_plugin_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -1314,6 +1360,15 @@ def _macos_kernel_extension_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -1340,7 +1395,7 @@ def _macos_kernel_extension_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -1545,6 +1600,15 @@ def _macos_spotlight_importer_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -1571,7 +1635,7 @@ def _macos_spotlight_importer_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -1775,6 +1839,15 @@ def _macos_xpc_service_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -1801,7 +1874,7 @@ def _macos_xpc_service_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -1950,7 +2023,7 @@ def _macos_command_line_application_impl(ctx):
         label_name = label.name,
         linkmaps = debug_outputs.linkmaps,
         platform_prerequisites = platform_prerequisites,
-        resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+        plisttool = apple_mac_toolchain_info.plisttool,
         rule_label = label,
         version = ctx.attr.version,
     )
@@ -1977,12 +2050,12 @@ def _macos_command_line_application_impl(ctx):
     codesigning_support.sign_binary_action(
         actions = actions,
         codesign_inputs = ctx.files.codesign_inputs,
+        codesigningtool = apple_mac_toolchain_info.codesigningtool,
         codesignopts = codesigning_support.codesignopts_from_rule_ctx(ctx),
         input_binary = binary_artifact,
         output_binary = output_file,
         platform_prerequisites = platform_prerequisites,
         provisioning_profile = provisioning_profile,
-        resolved_codesigningtool = apple_mac_toolchain_info.resolved_codesigningtool,
         rule_descriptor = rule_descriptor,
     )
 
@@ -2024,8 +2097,8 @@ def _macos_command_line_application_impl(ctx):
                 processor_result.output_groups,
             )
         ),
-        apple_common.new_executable_binary_provider(
-            binary = output_file,
+        linking_support.new_executable_binary_provider(
+            binary = binary_artifact,
             cc_info = link_result.cc_info,
             objc = link_result.objc,
         ),
@@ -2092,7 +2165,7 @@ def _macos_dylib_impl(ctx):
         label_name = label.name,
         linkmaps = debug_outputs.linkmaps,
         platform_prerequisites = platform_prerequisites,
-        resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+        plisttool = apple_mac_toolchain_info.plisttool,
         rule_label = label,
         version = ctx.attr.version,
     )
@@ -2120,12 +2193,12 @@ def _macos_dylib_impl(ctx):
     codesigning_support.sign_binary_action(
         actions = actions,
         codesign_inputs = ctx.files.codesign_inputs,
+        codesigningtool = apple_mac_toolchain_info.codesigningtool,
         codesignopts = codesigning_support.codesignopts_from_rule_ctx(ctx),
         input_binary = binary_artifact,
         output_binary = output_file,
         platform_prerequisites = platform_prerequisites,
         provisioning_profile = provisioning_profile,
-        resolved_codesigningtool = apple_mac_toolchain_info.resolved_codesigningtool,
         rule_descriptor = rule_descriptor,
     )
 
@@ -2195,6 +2268,7 @@ simple command line tool as a standalone binary, use
         ),
         rule_attrs.infoplist_attrs(),
         rule_attrs.ipa_post_processor_attrs(),
+        rule_attrs.locales_to_include_attrs(),
         rule_attrs.platform_attrs(
             add_environment_plist = True,
             platform_type = "macos",
@@ -2346,6 +2420,7 @@ point (typically expressed through Swift's `@main` attribute).""",
         rule_attrs.extensionkit_attrs(),
         rule_attrs.infoplist_attrs(),
         rule_attrs.ipa_post_processor_attrs(),
+        rule_attrs.locales_to_include_attrs(),
         rule_attrs.platform_attrs(
             add_environment_plist = True,
             platform_type = "macos",
@@ -2819,6 +2894,15 @@ def _macos_framework_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.debug_symbols_partial(
             actions = actions,
             bundle_extension = bundle_extension,
@@ -2830,7 +2914,7 @@ def _macos_framework_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -3088,6 +3172,15 @@ def _macos_dynamic_framework_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.debug_symbols_partial(
             actions = actions,
             bundle_extension = bundle_extension,
@@ -3099,7 +3192,7 @@ def _macos_dynamic_framework_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -3183,7 +3276,9 @@ def _macos_dynamic_framework_impl(ctx):
 
     additional_providers = []
     for provider in providers:
-        if type(provider) == "AppleDynamicFramework":
+        # HACK: this should be updated so we do not need to dynamically check the provider instance.
+        # See: https://github.com/bazelbuild/bazel/issues/22095
+        if hasattr(provider, "framework_files"):
             # Make the ObjC provider using the framework_files depset found
             # in the AppleDynamicFramework provider. This is to make the
             # macos_dynamic_framework usable as a dependency in swift_library
@@ -3193,10 +3288,7 @@ def _macos_dynamic_framework_impl(ctx):
                 feature_configuration = cc_features,
                 libraries = provider.framework_files.to_list(),
             )
-            additional_providers.extend([
-                apple_common.new_objc_provider(
-                    dynamic_framework_file = provider.framework_files,
-                ),
+            additional_providers.append(
                 CcInfo(
                     linking_context = cc_common.create_linking_context(
                         linker_inputs = depset([
@@ -3207,7 +3299,13 @@ def _macos_dynamic_framework_impl(ctx):
                         ]),
                     ),
                 ),
-            ])
+            )
+            if _OBJC_PROVIDER_LINKING:
+                additional_providers.append(
+                    apple_common.new_objc_provider(
+                        dynamic_framework_file = provider.framework_files,
+                    ),
+                )
     providers.extend(additional_providers)
 
     return [

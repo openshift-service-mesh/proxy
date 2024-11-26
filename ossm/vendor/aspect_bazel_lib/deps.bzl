@@ -1,7 +1,7 @@
 """This module contains the project repository dependencies.
 """
 
-load("@bazel_gazelle//:deps.bzl", "go_repository")
+load("@gazelle//:deps.bzl", "go_repository")
 
 def go_dependencies():
     """The Go dependencies.
@@ -24,8 +24,8 @@ def go_dependencies():
         name = "org_golang_x_exp",
         build_file_proto_mode = "disable_global",
         importpath = "golang.org/x/exp",
-        sum = "h1:c0vyKkb6yr3KR7jEfJaOSv4lG7xPkbN6r52aJz1d8a8=",
-        version = "v0.0.0-20231206192017-f3f8817b8deb",
+        sum = "h1:Q8/wZp0KX97QFTc2ywcOE0YRjZPVIx+MXInMzdvQqcA=",
+        version = "v0.0.0-20240119083558-1b970713d09a",
     )
     go_repository(
         name = "org_golang_x_mod",
@@ -33,4 +33,11 @@ def go_dependencies():
         importpath = "golang.org/x/mod",
         sum = "h1:dGoOF9QVLYng8IHTm7BAyWqCqSheQ5pYWGhzW00YJr0=",
         version = "v0.14.0",
+    )
+    go_repository(
+        name = "org_golang_x_sys",
+        build_file_proto_mode = "disable_global",
+        importpath = "golang.org/x/sys",
+        sum = "h1:Twjiwq9dn6R1fQcyiK+wQyHWfaz/BJB+YIpzU/Cv3Xg=",
+        version = "v0.24.0",
     )

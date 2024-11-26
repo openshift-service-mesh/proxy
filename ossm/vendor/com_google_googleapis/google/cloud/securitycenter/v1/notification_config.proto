@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
 
 option csharp_namespace = "Google.Cloud.SecurityCenter.V1";
-option go_package = "google.golang.org/genproto/googleapis/cloud/securitycenter/v1;securitycenter";
+option go_package = "cloud.google.com/go/securitycenter/apiv1/securitycenterpb;securitycenterpb";
 option java_multiple_files = true;
 option java_outer_classname = "NotificationConfigProto";
 option java_package = "com.google.cloud.securitycenter.v1";
@@ -41,6 +41,8 @@ message NotificationConfig {
     pattern: "organizations/{organization}/notificationConfigs/{notification_config}"
     pattern: "folders/{folder}/notificationConfigs/{notification_config}"
     pattern: "projects/{project}/notificationConfigs/{notification_config}"
+    plural: "notificationConfigs"
+    singular: "notificationConfig"
   };
 
   // The config for streaming-based notifications, which send each event as soon
@@ -83,9 +85,9 @@ message NotificationConfig {
 
   // The Pub/Sub topic to send notifications to. Its format is
   // "projects/[project_id]/topics/[topic]".
-  string pubsub_topic = 3 [(google.api.resource_reference) = {
-                             type: "pubsub.googleapis.com/Topic"
-                           }];
+  string pubsub_topic = 3 [
+    (google.api.resource_reference) = { type: "pubsub.googleapis.com/Topic" }
+  ];
 
   // Output only. The service account that needs "pubsub.topics.publish"
   // permission to publish to the Pub/Sub topic.

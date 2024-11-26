@@ -15,10 +15,6 @@
 """ios_sticker_pack_extension Starlark tests."""
 
 load(
-    ":common.bzl",
-    "common",
-)
-load(
     "//test/starlark_tests/rules:apple_verification_test.bzl",
     "apple_verification_test",
 )
@@ -29,6 +25,10 @@ load(
 load(
     "//test/starlark_tests/rules:infoplist_contents_test.bzl",
     "infoplist_contents_test",
+)
+load(
+    ":common.bzl",
+    "common",
 )
 
 def ios_sticker_pack_extension_test_suite(name):
@@ -76,7 +76,7 @@ def ios_sticker_pack_extension_test_suite(name):
         build_type = "device",
         target_under_test = "//test/starlark_tests/targets_under_test/ios:sticker_ext",
         binary_test_file = "$BUNDLE_ROOT/sticker_ext",
-        macho_load_commands_contain = ["segname __LLVM"],  # TODO: This might need to change in the future to not contain bitcode
+        macho_load_commands_not_contain = ["segname __LLVM"],
         tags = [name],
     )
 

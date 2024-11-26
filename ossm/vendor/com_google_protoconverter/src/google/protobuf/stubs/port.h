@@ -27,9 +27,6 @@
 
 #include "google/protobuf/stubs/platform_macros.h"
 
-// Must be last.
-#include "google/protobuf/util/converter/port_def.inc"  // NOLINT
-
 #undef PROTOBUF_LITTLE_ENDIAN
 #ifdef _WIN32
   // Assuming windows is always little-endian.
@@ -217,7 +214,7 @@ static inline uint64_t bswap_64(uint64_t x) {
 
 // ===================================================================
 // from google3/util/endian/endian.h
-PROTOBUF_EXPORT uint32_t ghtonl(uint32_t x);
+uint32_t ghtonl(uint32_t x);
 
 class BigEndian {
  public:
@@ -277,7 +274,5 @@ class BigEndian {
 
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_STUBS_PORT_H_

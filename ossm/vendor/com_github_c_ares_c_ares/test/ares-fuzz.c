@@ -1,5 +1,5 @@
 /*
- * Copyright (C) Brad House
+ * Copyright (C) The c-ares project
  *
  * Permission to use, copy, modify, and distribute this
  * software and its documentation for any purpose and without
@@ -26,38 +26,44 @@
 #include <stdlib.h>
 #include <string.h>
 #ifdef WIN32
-#include <io.h>
+#  include <io.h>
 #else
-#include <unistd.h>
+#  include <unistd.h>
 #endif
+
+#include "ares.h"
 
 #define kMaxAflInputSize (1 << 20)
 static unsigned char afl_buffer[kMaxAflInputSize];
 
 #ifdef __AFL_LOOP
 /* If we are built with afl-clang-fast, use persistent mode */
-#define KEEP_FUZZING(count)  __AFL_LOOP(1000)
+#  define KEEP_FUZZING(count) __AFL_LOOP(1000)
 #else
 /* If we are built with afl-clang, execute each input once */
-#define KEEP_FUZZING(count) ((count) < 1)
+#  define KEEP_FUZZING(count) ((count) < 1)
 #endif
 
 /* In ares-test-fuzz.c and ares-test-fuzz-name.c: */
 int LLVMFuzzerTestOneInput(const unsigned char *data, unsigned long size);
 
-static void ProcessFile(int fd) {
-  int count = read(fd, afl_buffer, kMaxAflInputSize);
+static void ProcessFile(int fd)
+{
+  ares_ssize_t count = read(fd, afl_buffer, kMaxAflInputSize);
   /*
    * Make a copy of the data so that it's not part of a larger
    * buffer (where buffer overflows would go unnoticed).
    */
-  unsigned char *copied_data = (unsigned char *)malloc(count);
-  memcpy(copied_data, afl_buffer, count);
-  LLVMFuzzerTestOneInput(copied_data, count);
-  free(copied_data);
+  if (count > 0) {
+    unsigned char *copied_data = (unsigned char *)malloc((size_t)count);
+    memcpy(copied_data, afl_buffer, (size_t)count);
+    LLVMFuzzerTestOneInput(copied_data, (size_t)count);
+    free(copied_data);
+  }
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
   if (argc == 1) {
     int count = 0;
     while (KEEP_FUZZING(count)) {

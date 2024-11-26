@@ -1202,6 +1202,26 @@ TEST_P(QuicPacketCreatorTest,
       encrypted->encrypted_buffer, encrypted->encrypted_length));
 }
 
+TEST_P(QuicPacketCreatorTest, SerializeLargePacketNumberConnectionClosePacket) {
+  creator_.set_encryption_level(ENCRYPTION_FORWARD_SECURE);
+  std::unique_ptr<SerializedPacket> encrypted(
+      creator_.SerializeLargePacketNumberConnectionClosePacket(
+          QuicPacketNumber(1), QUIC_CLIENT_LOST_NETWORK_ACCESS,
+          "QuicPacketCreatorTest"));
+
+  InSequence s;
+  EXPECT_CALL(framer_visitor_, OnPacket());
+  EXPECT_CALL(framer_visitor_, OnUnauthenticatedPublicHeader(_));
+  EXPECT_CALL(framer_visitor_, OnUnauthenticatedHeader(_));
+  EXPECT_CALL(framer_visitor_, OnDecryptedPacket(_, _));
+  EXPECT_CALL(framer_visitor_, OnPacketHeader(_));
+  EXPECT_CALL(framer_visitor_, OnConnectionCloseFrame(_));
+  EXPECT_CALL(framer_visitor_, OnPacketComplete());
+
+  server_framer_.ProcessPacket(QuicEncryptedPacket(
+      encrypted->encrypted_buffer, encrypted->encrypted_length));
+}
+
 TEST_P(QuicPacketCreatorTest, UpdatePacketSequenceNumberLengthLeastAwaiting) {
   if (!GetParam().version.SendsVariableLengthPacketNumberInLongHeader()) {
     EXPECT_EQ(PACKET_4BYTE_PACKET_NUMBER,
@@ -2932,22 +2952,13 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
   QuicStreamId stream_id = QuicUtils::GetFirstBidirectionalStreamId(
       framer_.transport_version(), Perspective::IS_CLIENT);
 
-  if (GetQuicRestartFlag(quic_opport_bundle_qpack_decoder_data5)) {
-    EXPECT_CALL(delegate_, GetFlowControlSendWindowSize(stream_id))
-        .WillOnce(Return(data.length() - 1));
-  } else {
-    EXPECT_CALL(delegate_, GetFlowControlSendWindowSize(_)).Times(0);
-  }
+  EXPECT_CALL(delegate_, GetFlowControlSendWindowSize(stream_id))
+      .WillOnce(Return(data.length() - 1));
 
   QuicConsumedData consumed = creator_.ConsumeData(stream_id, data, 0u, FIN);
 
-  if (GetQuicRestartFlag(quic_opport_bundle_qpack_decoder_data5)) {
-    EXPECT_EQ(consumed.bytes_consumed, data.length() - 1);
-    EXPECT_FALSE(consumed.fin_consumed);
-  } else {
-    EXPECT_EQ(consumed.bytes_consumed, data.length());
-    EXPECT_TRUE(consumed.fin_consumed);
-  }
+  EXPECT_EQ(consumed.bytes_consumed, data.length() - 1);
+  EXPECT_FALSE(consumed.fin_consumed);
 }
 
 // Tests the case that after bundling data, send window is exactly as big as
@@ -2962,12 +2973,8 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
   QuicStreamId stream_id = QuicUtils::GetFirstBidirectionalStreamId(
       framer_.transport_version(), Perspective::IS_CLIENT);
 
-  if (GetQuicRestartFlag(quic_opport_bundle_qpack_decoder_data5)) {
-    EXPECT_CALL(delegate_, GetFlowControlSendWindowSize(stream_id))
-        .WillOnce(Return(data.length()));
-  } else {
-    EXPECT_CALL(delegate_, GetFlowControlSendWindowSize(_)).Times(0);
-  }
+  EXPECT_CALL(delegate_, GetFlowControlSendWindowSize(stream_id))
+      .WillOnce(Return(data.length()));
 
   QuicConsumedData consumed = creator_.ConsumeData(stream_id, data, 0u, FIN);
 
@@ -4159,7 +4166,7 @@ TEST_F(QuicPacketCreatorMultiplePacketsTest,
 
   QuicSocketAddress peer_addr1(QuicIpAddress::Any4(), 12346);
   EXPECT_CALL(delegate_, OnSerializedPacket(_))
-      .WillOnce(Invoke([=](SerializedPacket packet) {
+      .WillOnce(Invoke([=, this](SerializedPacket packet) {
         EXPECT_EQ(peer_addr, packet.peer_address);
         ASSERT_EQ(1u, packet.retransmittable_frames.size());
         EXPECT_EQ(STREAM_FRAME, packet.retransmittable_frames.front().type);

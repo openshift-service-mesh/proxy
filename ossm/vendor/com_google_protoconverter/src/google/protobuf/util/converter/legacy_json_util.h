@@ -24,9 +24,6 @@
 #include "google/protobuf/message.h"
 #include "google/protobuf/util/type_resolver.h"
 
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
-
 namespace google {
 namespace protobuf {
 namespace util {
@@ -57,27 +54,27 @@ struct JsonPrintOptions {
 
 typedef JsonPrintOptions JsonOptions;
 
-PROTOBUF_EXPORT absl::Status MessageToJsonString(const Message& message,
-                                                 std::string* output,
-                                                 const JsonOptions& options);
+absl::Status MessageToJsonString(const Message& message, std::string* output,
+                                 const JsonOptions& options);
 
 inline absl::Status MessageToJsonString(const Message& message,
                                         std::string* output) {
   return MessageToJsonString(message, output, JsonOptions());
 }
 
-PROTOBUF_EXPORT absl::Status JsonStringToMessage(
-    absl::string_view input, Message* message, const JsonParseOptions& options);
+absl::Status JsonStringToMessage(absl::string_view input, Message* message,
+                                 const JsonParseOptions& options);
 
 inline absl::Status JsonStringToMessage(absl::string_view input,
                                         Message* message) {
   return JsonStringToMessage(input, message, JsonParseOptions());
 }
 
-PROTOBUF_EXPORT absl::Status BinaryToJsonStream(
-    TypeResolver* resolver, const std::string& type_url,
-    io::ZeroCopyInputStream* binary_input,
-    io::ZeroCopyOutputStream* json_output, const JsonPrintOptions& options);
+absl::Status BinaryToJsonStream(TypeResolver* resolver,
+                                const std::string& type_url,
+                                io::ZeroCopyInputStream* binary_input,
+                                io::ZeroCopyOutputStream* json_output,
+                                const JsonPrintOptions& options);
 
 inline absl::Status BinaryToJsonStream(TypeResolver* resolver,
                                        const std::string& type_url,
@@ -87,10 +84,11 @@ inline absl::Status BinaryToJsonStream(TypeResolver* resolver,
                             JsonPrintOptions());
 }
 
-PROTOBUF_EXPORT absl::Status BinaryToJsonString(
-    TypeResolver* resolver, const std::string& type_url,
-    const std::string& binary_input, std::string* json_output,
-    const JsonPrintOptions& options);
+absl::Status BinaryToJsonString(TypeResolver* resolver,
+                                const std::string& type_url,
+                                const std::string& binary_input,
+                                std::string* json_output,
+                                const JsonPrintOptions& options);
 
 inline absl::Status BinaryToJsonString(TypeResolver* resolver,
                                        const std::string& type_url,
@@ -100,10 +98,11 @@ inline absl::Status BinaryToJsonString(TypeResolver* resolver,
                             JsonPrintOptions());
 }
 
-PROTOBUF_EXPORT absl::Status JsonToBinaryStream(
-    TypeResolver* resolver, const std::string& type_url,
-    io::ZeroCopyInputStream* json_input,
-    io::ZeroCopyOutputStream* binary_output, const JsonParseOptions& options);
+absl::Status JsonToBinaryStream(TypeResolver* resolver,
+                                const std::string& type_url,
+                                io::ZeroCopyInputStream* json_input,
+                                io::ZeroCopyOutputStream* binary_output,
+                                const JsonParseOptions& options);
 
 inline absl::Status JsonToBinaryStream(
     TypeResolver* resolver, const std::string& type_url,
@@ -113,10 +112,11 @@ inline absl::Status JsonToBinaryStream(
                             JsonParseOptions());
 }
 
-PROTOBUF_EXPORT absl::Status JsonToBinaryString(
-    TypeResolver* resolver, const std::string& type_url,
-    absl::string_view json_input, std::string* binary_output,
-    const JsonParseOptions& options);
+absl::Status JsonToBinaryString(TypeResolver* resolver,
+                                const std::string& type_url,
+                                absl::string_view json_input,
+                                std::string* binary_output,
+                                const JsonParseOptions& options);
 
 inline absl::Status JsonToBinaryString(TypeResolver* resolver,
                                        const std::string& type_url,
@@ -129,7 +129,5 @@ inline absl::Status JsonToBinaryString(TypeResolver* resolver,
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_JSON_LEGACY_UTIL_H_

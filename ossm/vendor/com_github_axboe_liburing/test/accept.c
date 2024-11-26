@@ -311,6 +311,9 @@ static int test_loop(struct io_uring *ring,
 				multishot ? "Multishot" : "",
 				i, s_fd[i]);
 			goto err;
+		} else if (s_fd[i] == 195 && args.overflow) {
+			fprintf(stderr, "Broken overflow handling\n");
+			goto err;
 		}
 
 		if (multishot && fixed) {
@@ -428,7 +431,7 @@ struct test_accept_many_args {
 };
 
 /*
- * Test issue many accepts and see if we handle cancellation on exit
+ * Test issue many accepts and see if we handle cancelation on exit
  */
 static int test_accept_many(struct test_accept_many_args args)
 {
@@ -483,7 +486,7 @@ static int test_accept_many(struct test_accept_many_args args)
 		if (io_uring_peek_cqe(&m_io_uring, &cqe))
 			break;
 		if (cqe->res != -ECANCELED) {
-			fprintf(stderr, "Expected cqe to be cancelled %d\n", cqe->res);
+			fprintf(stderr, "Expected cqe to be canceled %d\n", cqe->res);
 			ret = 1;
 			goto out;
 		}
@@ -555,6 +558,9 @@ static int test_accept_cancel(unsigned usecs, unsigned int nr, bool multishot)
 			fprintf(stderr, "unexpected 0 user data\n");
 			goto err;
 		} else if (cqe->user_data <= nr) {
+			/* no multishot */
+			if (cqe->res == -EINVAL)
+				return T_EXIT_SKIP;
 			if (cqe->res != -EINTR && cqe->res != -ECANCELED) {
 				fprintf(stderr, "Cancelled accept got %d\n", cqe->res);
 				goto err;
@@ -679,7 +685,12 @@ static int test_accept_fixed(void)
 	ret = io_uring_queue_init(32, &m_io_uring, 0);
 	assert(ret >= 0);
 	ret = io_uring_register_files(&m_io_uring, &fd, 1);
-	assert(ret == 0);
+	if (ret) {
+		/* kernel doesn't support sparse registered files, skip */
+		if (ret == -EBADF || ret == -EINVAL)
+			return T_EXIT_SKIP;
+		return T_EXIT_FAIL;
+	}
 	ret = test(&m_io_uring, args);
 	io_uring_queue_exit(&m_io_uring);
 	return ret;
@@ -701,7 +712,12 @@ static int test_multishot_fixed_accept(void)
 	ret = io_uring_queue_init(MAX_FDS + 10, &m_io_uring, 0);
 	assert(ret >= 0);
 	ret = io_uring_register_files(&m_io_uring, fd, MAX_FDS);
-	assert(ret == 0);
+	if (ret) {
+		/* kernel doesn't support sparse registered files, skip */
+		if (ret == -EBADF || ret == -EINVAL)
+			return T_EXIT_SKIP;
+		return T_EXIT_FAIL;
+	}
 	ret = test(&m_io_uring, args);
 	io_uring_queue_exit(&m_io_uring);
 	return ret;

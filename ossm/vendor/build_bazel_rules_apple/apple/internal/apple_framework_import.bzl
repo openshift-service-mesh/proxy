@@ -30,13 +30,14 @@ load(
     "@bazel_skylib//lib:sets.bzl",
     "sets",
 )
+load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain", "use_cpp_toolchain")
 load(
     "@build_bazel_rules_apple//apple:providers.bzl",
     "AppleFrameworkImportInfo",
 )
 load(
-    "@build_bazel_rules_apple//apple/internal/providers:framework_import_bundle_info.bzl",
-    "AppleFrameworkImportBundleInfo",
+    "@build_bazel_rules_apple//apple:utils.bzl",
+    "group_files_by_directory",
 )
 load(
     "@build_bazel_rules_apple//apple/internal:apple_toolchains.bzl",
@@ -47,24 +48,28 @@ load(
     "cc_toolchain_info_support",
 )
 load(
-    "@build_bazel_rules_apple//apple/internal/utils:bundle_paths.bzl",
-    "bundle_paths",
-)
-load(
     "@build_bazel_rules_apple//apple/internal:experimental.bzl",
     "is_experimental_tree_artifact_enabled",
 )
 load(
-    "@build_bazel_rules_apple//apple/internal/aspects:swift_usage_aspect.bzl",
-    "SwiftUsageInfo",
+    "@build_bazel_rules_apple//apple/internal:framework_import_support.bzl",
+    "framework_import_support",
 )
 load(
     "@build_bazel_rules_apple//apple/internal:rule_attrs.bzl",
     "rule_attrs",
 )
 load(
-    "@build_bazel_rules_apple//apple:utils.bzl",
-    "group_files_by_directory",
+    "@build_bazel_rules_apple//apple/internal/aspects:swift_usage_aspect.bzl",
+    "SwiftUsageInfo",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/providers:framework_import_bundle_info.bzl",
+    "AppleFrameworkImportBundleInfo",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/utils:bundle_paths.bzl",
+    "bundle_paths",
 )
 load(
     "@build_bazel_rules_swift//swift:swift.bzl",
@@ -72,11 +77,6 @@ load(
     "swift_clang_module_aspect",
     "swift_common",
 )
-load(
-    "@build_bazel_rules_apple//apple/internal:framework_import_support.bzl",
-    "framework_import_support",
-)
-load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain", "use_cpp_toolchain")
 
 def _swiftmodule_for_cpu(swiftmodule_files, cpu):
     """Select the cpu specific swiftmodule."""
@@ -276,7 +276,11 @@ def _apple_dynamic_framework_import_impl(ctx):
         deps = deps,
         disabled_features = disabled_features,
         features = features,
-        framework_includes = _framework_search_paths(framework.header_imports),
+        framework_includes = _framework_search_paths(
+            framework.header_imports +
+            framework.swift_interface_imports +
+            framework.swift_module_imports,
+        ),
         header_imports = framework.header_imports,
         kind = "dynamic",
         label = label,
@@ -289,7 +293,7 @@ def _apple_dynamic_framework_import_impl(ctx):
     # Create AppleDynamicFramework provider.
     framework_groups = _grouped_framework_files(framework_imports)
     framework_dirs_set = depset(framework_groups.keys())
-    providers.append(apple_common.new_dynamic_framework_provider(
+    providers.append(framework_import_support.new_dynamic_framework_provider(
         objc = objc_provider,
         cc_info = cc_info,
         framework_dirs = framework_dirs_set,
@@ -428,7 +432,9 @@ def _apple_static_framework_import_impl(ctx):
             disabled_features = disabled_features,
             features = features,
             framework_includes = _framework_search_paths(
-                framework.header_imports,
+                framework.header_imports +
+                framework.swift_interface_imports +
+                framework.swift_module_imports,
             ),
             header_imports = framework.header_imports,
             kind = "static",

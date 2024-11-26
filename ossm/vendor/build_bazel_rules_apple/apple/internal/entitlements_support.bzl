@@ -19,8 +19,8 @@ load(
     "apple_support",
 )
 load(
-    "@build_bazel_rules_apple//apple/internal/utils:defines.bzl",
-    "defines",
+    "@build_bazel_rules_apple//apple:common.bzl",
+    "entitlements_validation_mode",
 )
 load(
     "@build_bazel_rules_apple//apple/internal:apple_product_type.bzl",
@@ -35,8 +35,8 @@ load(
     "resource_actions",
 )
 load(
-    "@build_bazel_rules_apple//apple:common.bzl",
-    "entitlements_validation_mode",
+    "@build_bazel_rules_apple//apple/internal/utils:defines.bzl",
+    "defines",
 )
 
 def _tool_validation_mode(*, is_device, rules_mode):
@@ -121,7 +121,7 @@ def _extract_signing_info(
         entitlements,
         platform_prerequisites,
         provisioning_profile,
-        resolved_provisioning_profile_tool,
+        provisioning_profile_tool,
         rule_label):
     """Inspects the current context and extracts the signing information.
 
@@ -130,7 +130,8 @@ def _extract_signing_info(
       entitlements: The entitlements file to sign with. Can be `None` if one was not provided.
       platform_prerequisites: Struct containing information on the platform being targeted.
       provisioning_profile: File for the provisioning profile.
-      resolved_provisioning_profile_tool: A tool used to extract info from a provisioning profile.
+      provisioning_profile_tool: A files_to_run for a tool used to extract info from a provisioning
+        profile.
       rule_label: The label of the target being analyzed.
 
     Returns:
@@ -168,22 +169,18 @@ def _extract_signing_info(
         )
         actions.write(
             output = control_file,
-            content = struct(**control).to_json(),
+            content = json.encode(struct(**control)),
         )
 
         apple_support.run(
             actions = actions,
             apple_fragment = platform_prerequisites.apple_fragment,
             arguments = [control_file.path],
-            executable = resolved_provisioning_profile_tool.files_to_run,
+            executable = provisioning_profile_tool,
             # Since the tools spawns openssl and/or security tool, it doesn't
             # support being sandboxed.
             execution_requirements = {"no-sandbox": "1"},
-            inputs = depset(
-                [control_file, provisioning_profile],
-                transitive = [resolved_provisioning_profile_tool.inputs],
-            ),
-            input_manifests = resolved_provisioning_profile_tool.input_manifests,
+            inputs = [control_file, provisioning_profile],
             mnemonic = "ExtractFromProvisioningProfile",
             outputs = outputs,
             xcode_config = platform_prerequisites.xcode_version_config,
@@ -253,9 +250,7 @@ def _process_entitlements(
         entitlements = entitlements_file,
         platform_prerequisites = platform_prerequisites,
         provisioning_profile = provisioning_profile,
-        resolved_provisioning_profile_tool = (
-            apple_mac_toolchain_info.resolved_provisioning_profile_tool
-        ),
+        provisioning_profile_tool = apple_mac_toolchain_info.provisioning_profile_tool,
         rule_label = rule_label,
     )
     plists = []
@@ -305,7 +300,7 @@ def _process_entitlements(
     )
     actions.write(
         output = control_file,
-        content = control.to_json(),
+        content = json.encode(control),
     )
 
     resource_actions.plisttool_action(
@@ -315,7 +310,7 @@ def _process_entitlements(
         mnemonic = "ProcessEntitlementsFiles",
         outputs = [final_entitlements],
         platform_prerequisites = platform_prerequisites,
-        resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+        plisttool = apple_mac_toolchain_info.plisttool,
     )
 
     if platform_prerequisites.platform.is_device:
@@ -344,7 +339,7 @@ def _process_entitlements(
         )
         actions.write(
             output = simulator_control_file,
-            content = simulator_control.to_json(),
+            content = json.encode(simulator_control),
         )
 
         resource_actions.plisttool_action(
@@ -354,7 +349,7 @@ def _process_entitlements(
             mnemonic = "ProcessSimulatorEntitlementsFile",
             outputs = [simulator_entitlements],
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
         )
 
     return struct(

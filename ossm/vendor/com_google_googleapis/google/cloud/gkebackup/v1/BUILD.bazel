@@ -9,45 +9,17 @@
 #    * extra_protoc_file_parameters
 # The complete list of preserved parameters can be found in the source code.
 
-##############################################################################
-# Common
-##############################################################################
-load("@rules_proto//proto:defs.bzl", "proto_library")
-load(
-    "@com_google_googleapis_imports//:imports.bzl",
-    "cc_grpc_library",
-    "cc_proto_library",
-    "csharp_gapic_assembly_pkg",
-    "csharp_gapic_library",
-    "csharp_grpc_library",
-    "csharp_proto_library",
-    "go_gapic_assembly_pkg",
-    "go_gapic_library",
-    "go_proto_library",
-    "go_test",
-    "java_gapic_assembly_gradle_pkg",
-    "java_gapic_library",
-    "java_gapic_test",
-    "java_grpc_library",
-    "java_proto_library",
-    "nodejs_gapic_assembly_pkg",
-    "nodejs_gapic_library",
-    "php_gapic_assembly_pkg",
-    "php_gapic_library",
-    "php_grpc_library",
-    "php_proto_library",
-    "proto_library_with_info",
-    "py_gapic_assembly_pkg",
-    "py_gapic_library",
-    "py_test",
-    "ruby_cloud_gapic_library",
-    "ruby_gapic_assembly_pkg",
-    "ruby_grpc_library",
-    "ruby_proto_library",
-)
+# buildifier: disable=load-on-top
 
 # This is an API workspace, having public visibility by default makes perfect sense.
 package(default_visibility = ["//visibility:public"])
+
+##############################################################################
+# Common
+##############################################################################
+# buildifier: disable=same-origin-load
+load("@com_google_googleapis_imports//:imports.bzl", "proto_library_with_info")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 
 proto_library(
     name = "gkebackup_proto",
@@ -66,6 +38,11 @@ proto_library(
         "//google/api:field_behavior_proto",
         "//google/api:resource_proto",
         "//google/longrunning:operations_proto",
+        "//google/type:date_proto",
+        "//google/type:dayofweek_proto",
+        "//google/type:timeofday_proto",
+        "@com_google_protobuf//:duration_proto",
+        "@com_google_protobuf//:empty_proto",
         "@com_google_protobuf//:field_mask_proto",
         "@com_google_protobuf//:timestamp_proto",
     ],
@@ -76,7 +53,22 @@ proto_library_with_info(
     deps = [
         ":gkebackup_proto",
         "//google/cloud:common_resources_proto",
+        "//google/cloud/location:location_proto",
+        "//google/iam/v1:iam_policy_proto",
     ],
+)
+
+##############################################################################
+# Java
+##############################################################################
+# buildifier: disable=same-origin-load
+load(
+    "@com_google_googleapis_imports//:imports.bzl",
+    "java_gapic_assembly_gradle_pkg",
+    "java_gapic_library",
+    "java_gapic_test",
+    "java_grpc_library",
+    "java_proto_library",
 )
 
 java_proto_library(
@@ -99,11 +91,15 @@ java_gapic_library(
     service_yaml = "gkebackup_v1.yaml",
     test_deps = [
         ":gkebackup_java_grpc",
+        "//google/cloud/location:location_java_grpc",
+        "//google/iam/v1:iam_java_grpc",
     ],
     transport = "grpc+rest",
     deps = [
         ":gkebackup_java_proto",
         "//google/api:api_java_proto",
+        "//google/cloud/location:location_java_proto",
+        "//google/iam/v1:iam_java_proto",
     ],
 )
 
@@ -129,14 +125,28 @@ java_gapic_assembly_gradle_pkg(
     ],
 )
 
+##############################################################################
+# Go
+##############################################################################
+# buildifier: disable=same-origin-load
+load(
+    "@com_google_googleapis_imports//:imports.bzl",
+    "go_gapic_assembly_pkg",
+    "go_gapic_library",
+    "go_proto_library",
+)
+
 go_proto_library(
     name = "gkebackup_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/gkebackup/v1",
+    importpath = "cloud.google.com/go/gkebackup/apiv1/gkebackuppb",
     protos = [":gkebackup_proto"],
     deps = [
         "//google/api:annotations_go_proto",
         "//google/longrunning:longrunning_go_proto",
+        "//google/type:date_go_proto",
+        "//google/type:dayofweek_go_proto",
+        "//google/type:timeofday_go_proto",
     ],
 )
 
@@ -146,22 +156,19 @@ go_gapic_library(
     grpc_service_config = "gkebackup_grpc_service_config.json",
     importpath = "cloud.google.com/go/gkebackup/apiv1;gkebackup",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "gkebackup_v1.yaml",
     transport = "grpc+rest",
     deps = [
         ":gkebackup_go_proto",
+        "//google/cloud/location:location_go_proto",
+        "//google/iam/v1:iam_go_proto",
         "//google/longrunning:longrunning_go_proto",
         "@com_google_cloud_go_longrunning//:go_default_library",
         "@com_google_cloud_go_longrunning//autogen:go_default_library",
+        "@io_bazel_rules_go//proto/wkt:duration_go_proto",
     ],
-)
-
-go_test(
-    name = "gkebackup_go_gapic_test",
-    srcs = [":gkebackup_go_gapic_srcjar_test"],
-    embed = [":gkebackup_go_gapic"],
-    importpath = "cloud.google.com/go/gkebackup/apiv1",
 )
 
 # Open Source Packages
@@ -170,9 +177,21 @@ go_gapic_assembly_pkg(
     deps = [
         ":gkebackup_go_gapic",
         ":gkebackup_go_gapic_srcjar-metadata.srcjar",
+        ":gkebackup_go_gapic_srcjar-snippets.srcjar",
         ":gkebackup_go_gapic_srcjar-test.srcjar",
         ":gkebackup_go_proto",
     ],
+)
+
+##############################################################################
+# Python
+##############################################################################
+# buildifier: disable=same-origin-load
+load(
+    "@com_google_googleapis_imports//:imports.bzl",
+    "py_gapic_assembly_pkg",
+    "py_gapic_library",
+    "py_test",
 )
 
 py_gapic_library(
@@ -180,12 +199,16 @@ py_gapic_library(
     srcs = [":gkebackup_proto"],
     grpc_service_config = "gkebackup_grpc_service_config.json",
     opt_args = [
-        "warehouse-package-name=google-cloud-gke-backup",
-        "python-gapic-namespace=google.cloud",
         "python-gapic-name=gke_backup",
+        "python-gapic-namespace=google.cloud",
+        "warehouse-package-name=google-cloud-gke-backup",
     ],
     rest_numeric_enums = True,
+    service_yaml = "gkebackup_v1.yaml",
     transport = "grpc+rest",
+    deps = [
+        "//google/iam/v1:iam_policy_py_proto",
+    ],
 )
 
 py_test(
@@ -206,26 +229,31 @@ py_gapic_assembly_pkg(
     ],
 )
 
+##############################################################################
+# PHP
+##############################################################################
+# buildifier: disable=same-origin-load
+load(
+    "@com_google_googleapis_imports//:imports.bzl",
+    "php_gapic_assembly_pkg",
+    "php_gapic_library",
+    "php_proto_library",
+)
+
 php_proto_library(
     name = "gkebackup_php_proto",
     deps = [":gkebackup_proto"],
-)
-
-php_grpc_library(
-    name = "gkebackup_php_grpc",
-    srcs = [":gkebackup_proto"],
-    deps = [":gkebackup_php_proto"],
 )
 
 php_gapic_library(
     name = "gkebackup_php_gapic",
     srcs = [":gkebackup_proto_with_info"],
     grpc_service_config = "gkebackup_grpc_service_config.json",
+    migration_mode = "NEW_SURFACE_ONLY",
     rest_numeric_enums = True,
     service_yaml = "gkebackup_v1.yaml",
     transport = "grpc+rest",
     deps = [
-        ":gkebackup_php_grpc",
         ":gkebackup_php_proto",
     ],
 )
@@ -235,9 +263,18 @@ php_gapic_assembly_pkg(
     name = "google-cloud-gkebackup-v1-php",
     deps = [
         ":gkebackup_php_gapic",
-        ":gkebackup_php_grpc",
         ":gkebackup_php_proto",
     ],
+)
+
+##############################################################################
+# Node.js
+##############################################################################
+# buildifier: disable=same-origin-load
+load(
+    "@com_google_googleapis_imports//:imports.bzl",
+    "nodejs_gapic_assembly_pkg",
+    "nodejs_gapic_library",
 )
 
 nodejs_gapic_library(
@@ -259,6 +296,18 @@ nodejs_gapic_assembly_pkg(
         ":gkebackup_nodejs_gapic",
         ":gkebackup_proto",
     ],
+)
+
+##############################################################################
+# Ruby
+##############################################################################
+# buildifier: disable=same-origin-load
+load(
+    "@com_google_googleapis_imports//:imports.bzl",
+    "ruby_cloud_gapic_library",
+    "ruby_gapic_assembly_pkg",
+    "ruby_grpc_library",
+    "ruby_proto_library",
 )
 
 ruby_proto_library(
@@ -285,6 +334,8 @@ ruby_cloud_gapic_library(
     rest_numeric_enums = True,
     ruby_cloud_description = "Backup for GKE lets you protect, manage, and restore your containerized applications and data for stateful workloads running on Google Kubernetes Engine clusters.",
     ruby_cloud_title = "Backup for GKE V1",
+    service_yaml = "gkebackup_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":gkebackup_ruby_grpc",
         ":gkebackup_ruby_proto",
@@ -301,8 +352,21 @@ ruby_gapic_assembly_pkg(
     ],
 )
 
+##############################################################################
+# C#
+##############################################################################
+# buildifier: disable=same-origin-load
+load(
+    "@com_google_googleapis_imports//:imports.bzl",
+    "csharp_gapic_assembly_pkg",
+    "csharp_gapic_library",
+    "csharp_grpc_library",
+    "csharp_proto_library",
+)
+
 csharp_proto_library(
     name = "gkebackup_csharp_proto",
+    extra_opts = [],
     deps = [":gkebackup_proto"],
 )
 
@@ -319,6 +383,7 @@ csharp_gapic_library(
     grpc_service_config = "gkebackup_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "gkebackup_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":gkebackup_csharp_grpc",
         ":gkebackup_csharp_proto",
@@ -333,6 +398,16 @@ csharp_gapic_assembly_pkg(
         ":gkebackup_csharp_grpc",
         ":gkebackup_csharp_proto",
     ],
+)
+
+##############################################################################
+# C++
+##############################################################################
+# buildifier: disable=same-origin-load
+load(
+    "@com_google_googleapis_imports//:imports.bzl",
+    "cc_grpc_library",
+    "cc_proto_library",
 )
 
 cc_proto_library(

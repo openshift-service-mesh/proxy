@@ -21,21 +21,14 @@
 #include <stack>
 #include <string>
 
-#include "google/protobuf/stubs/common.h"
 #include "absl/status/status.h"
-#include "absl/types/optional.h"
-
 #include "absl/strings/string_view.h"
-
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
+#include "absl/types/optional.h"
 
 namespace google {
 namespace protobuf {
 namespace util {
 namespace converter {
-
 
 class ObjectWriter;
 
@@ -59,7 +52,7 @@ class ObjectWriter;
 //
 // This parser is thread-compatible as long as only one thread is calling a
 // Parse() method at a time.
-class PROTOBUF_EXPORT JsonStreamParser {
+class JsonStreamParser {
  public:
   // Creates a JsonStreamParser that will write to the given ObjectWriter.
   explicit JsonStreamParser(ObjectWriter* ow);
@@ -74,13 +67,11 @@ class PROTOBUF_EXPORT JsonStreamParser {
   // string snippet of the error with type_url kParseErrorSnippetUrl.
   absl::Status Parse(absl::string_view json);
 
-
   // Finish parsing the JSON string. If the returned status is non-ok, the
   // status might contain a payload ParseErrorType with type_url
   // kParseErrorTypeUrl and a payload containing string snippet of the error
   // with type_url kParseErrorSnippetUrl.
   absl::Status FinishParse();
-
 
   // Sets the max recursion depth of JSON message to be deserialized. JSON
   // messages over this depth will fail to be deserialized.
@@ -330,7 +321,5 @@ class PROTOBUF_EXPORT JsonStreamParser {
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_JSON_STREAM_PARSER_H_

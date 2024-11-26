@@ -7,10 +7,21 @@ load("//rust/platform:triple_mappings.bzl", "SUPPORTED_PLATFORM_TRIPLES")
 
 _UNIX_WRAPPER = """\
 #!/usr/bin/env bash
+
 set -euo pipefail
+
 export RUNTIME_PWD="$(pwd)"
 if [[ -z "${{BAZEL_REAL:-}}" ]]; then
     BAZEL_REAL="$(which bazel || echo 'bazel')"
+fi
+
+_ENVIRON=()
+_ENVIRON+=(BAZEL_REAL="${{BAZEL_REAL}}")
+_ENVIRON+=(BUILD_WORKSPACE_DIRECTORY="${{BUILD_WORKSPACE_DIRECTORY}}")
+_ENVIRON+=(PATH="${{PATH}}")
+
+if [[ -n "${{CARGO_BAZEL_DEBUG:-}}" ]]; then
+    _ENVIRON+=(CARGO_BAZEL_DEBUG="${{CARGO_BAZEL_DEBUG}}")
 fi
 
 # The path needs to be preserved to prevent bazel from starting with different
@@ -18,8 +29,12 @@ fi
 # If you provide an empty path, bazel starts itself with
 # --default_system_javabase set to the empty string, but if you provide a path,
 # it may set it to a value (eg. "/usr/local/buildtools/java/jdk11").
-exec env - BAZEL_REAL="${{BAZEL_REAL}}" BUILD_WORKSPACE_DIRECTORY="${{BUILD_WORKSPACE_DIRECTORY}}" PATH="${{PATH}}" {env} \\
-"{bin}" {args} "$@"
+exec env - \\
+${{_ENVIRON[@]}} \\
+{env} \\
+    "{bin}" \\
+    {args} \\
+    "$@"
 """
 
 _WINDOWS_WRAPPER = """\
@@ -27,7 +42,8 @@ _WINDOWS_WRAPPER = """\
 set RUNTIME_PWD=%CD%
 {env}
 
-call {bin} {args} %@%
+{bin} {args} %*
+exit %ERRORLEVEL%
 """
 
 CARGO_BAZEL_GENERATOR_PATH = "CARGO_BAZEL_GENERATOR_PATH"
@@ -118,7 +134,7 @@ def _write_splicing_manifest(ctx):
     return args, runfiles
 
 def generate_splicing_manifest(packages, splicing_config, cargo_config, manifests, manifest_to_path):
-    # Deserialize information about direct packges
+    # Deserialize information about direct packages
     direct_packages_info = {
         # Ensure the data is using kebab-case as that's what `cargo_toml::DependencyDetail` expects.
         pkg: kebab_case_keys(dict(json.decode(data)))
@@ -127,7 +143,7 @@ def generate_splicing_manifest(packages, splicing_config, cargo_config, manifest
 
     config = json.decode(splicing_config or generate_splicing_config())
     splicing_manifest_content = {
-        "cargo_config": manifest_to_path(cargo_config) if cargo_config else None,
+        "cargo_config": str(manifest_to_path(cargo_config)) if cargo_config else None,
         "direct_packages": direct_packages_info,
         "manifests": manifests,
     }
@@ -176,7 +192,8 @@ def generate_config_file(
         repository_name,
         output_pkg,
         workspace_name,
-        render_config):
+        render_config,
+        repository_ctx = None):
     """Writes the rendering config to cargo-bazel-config.json.
 
     Args:
@@ -192,6 +209,8 @@ def generate_config_file(
         output_pkg: The path to the package containing the build files.
         workspace_name (str): The name of the workspace.
         render_config: The render config to use.
+        repository_ctx (repository_ctx, optional): A repository context object
+            used for enabling certain functionality.
 
     Returns:
         file: The cargo-bazel-config.json written.
@@ -201,29 +220,40 @@ def generate_config_file(
         render_config = default_render_config
 
     if mode == "local":
-        build_file_base_template = "@{}//{}/{{name}}-{{version}}:BUILD.bazel"
+        build_file_base_template = "//{}/{{name}}-{{version}}:BUILD.bazel".format(output_pkg)
+        if workspace_name != "":
+            build_file_base_template = "@{}//{}/{{name}}-{{version}}:BUILD.bazel".format(workspace_name, output_pkg)
         crate_label_template = "//{}/{{name}}-{{version}}:{{target}}".format(
             output_pkg,
         )
     else:
-        build_file_base_template = "@{}//{}:BUILD.{{name}}-{{version}}.bazel"
+        build_file_base_template = "//{}:BUILD.{{name}}-{{version}}.bazel".format(output_pkg)
+        if workspace_name != "":
+            build_file_base_template = "@{}//{}:BUILD.{{name}}-{{version}}.bazel".format(workspace_name, output_pkg)
         crate_label_template = render_config["crate_label_template"]
 
+    # If `workspace_name` is blank (such as when using modules), the `@{}//{}:{{file}}` template would generate
+    # a reference like `Label(@//<stuff>)`. This causes issues if the module doing the `crates_vendor`ing is not the root module.
+    # See: https://github.com/bazelbuild/rules_rust/issues/2661
+    crates_module_template_value = "//{}:{{file}}".format(output_pkg)
+    if workspace_name != "":
+        crates_module_template_value = "@{}//{}:{{file}}".format(
+            workspace_name,
+            output_pkg,
+        )
+
     updates = {
-        "build_file_template": build_file_base_template.format(
-            workspace_name,
-            output_pkg,
-        ),
+        "build_file_template": build_file_base_template,
         "crate_label_template": crate_label_template,
-        "crates_module_template": "@{}//{}:{{file}}".format(
-            workspace_name,
-            output_pkg,
-        ),
+        "crates_module_template": crates_module_template_value,
         "vendor_mode": mode,
     }
 
+    # "crate_label_template" is explicitly supported above in non-local modes
+    excluded_from_key_check = ["crate_label_template"]
+
     for key in updates:
-        if render_config[key] != default_render_config[key]:
+        if (render_config[key] != default_render_config[key]) and key not in excluded_from_key_check:
             fail("The `crates_vendor.render_config` attribute does not support the `{}` parameter. Please update {} to remove this value.".format(
                 key,
                 ctx.label,
@@ -244,6 +274,7 @@ def generate_config_file(
         render_config = render_config,
         supported_platform_triples = supported_platform_triples,
         repository_name = repository_name or ctx.label.name,
+        repository_ctx = repository_ctx,
     )
 
     return json.encode_indent(

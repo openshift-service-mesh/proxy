@@ -41,7 +41,6 @@ proto_library_with_info(
     name = "billing_proto_with_info",
     deps = [
         ":billing_proto",
-        "//google/cloud:common_resources_proto",
     ],
 )
 
@@ -90,7 +89,9 @@ java_gapic_library(
 java_gapic_test(
     name = "billing_java_gapic_test_suite",
     test_classes = [
-        "com.google.cloud.billing.v1.CloudBillingClientHttpJsonTest",
+        # This test is temporarily disabled due to the issue:
+        # https://github.com/googleapis/sdk-platform-java/issues/1780
+        # "com.google.cloud.billing.v1.CloudBillingClientHttpJsonTest",
         "com.google.cloud.billing.v1.CloudBillingClientTest",
         "com.google.cloud.billing.v1.CloudCatalogClientHttpJsonTest",
         "com.google.cloud.billing.v1.CloudCatalogClientTest",
@@ -119,13 +120,12 @@ load(
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "billing_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/billing/v1",
+    importpath = "cloud.google.com/go/billing/apiv1/billingpb",
     protos = [":billing_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -140,6 +140,7 @@ go_gapic_library(
     grpc_service_config = "cloud_billing_grpc_service_config.json",
     importpath = "cloud.google.com/go/billing/apiv1;billing",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "cloudbilling_v1.yaml",
     transport = "grpc+rest",
@@ -149,19 +150,13 @@ go_gapic_library(
     ],
 )
 
-go_test(
-    name = "billing_go_gapic_test",
-    srcs = [":billing_go_gapic_srcjar_test"],
-    embed = [":billing_go_gapic"],
-    importpath = "cloud.google.com/go/billing/apiv1",
-)
-
 # Open Source Packages
 go_gapic_assembly_pkg(
     name = "gapi-cloud-billing-v1-go",
     deps = [
         ":billing_go_gapic",
         ":billing_go_gapic_srcjar-metadata.srcjar",
+        ":billing_go_gapic_srcjar-snippets.srcjar",
         ":billing_go_gapic_srcjar-test.srcjar",
         ":billing_go_proto",
     ],
@@ -183,7 +178,7 @@ py_gapic_library(
     grpc_service_config = "cloud_billing_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "cloudbilling_v1.yaml",
-    transport = "grpc",
+    transport = "grpc+rest",
     deps = [
         "//google/iam/v1:iam_policy_py_proto",
     ],
@@ -214,7 +209,6 @@ load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -223,23 +217,15 @@ php_proto_library(
     deps = [":billing_proto"],
 )
 
-php_grpc_library(
-    name = "billing_php_grpc",
-    srcs = [":billing_proto"],
-    deps = [":billing_php_proto"],
-)
-
 php_gapic_library(
     name = "billing_php_gapic",
     srcs = [":billing_proto_with_info"],
     grpc_service_config = "cloud_billing_grpc_service_config.json",
+    migration_mode = "NEW_SURFACE_ONLY",
     rest_numeric_enums = True,
     service_yaml = "cloudbilling_v1.yaml",
     transport = "grpc+rest",
-    deps = [
-        ":billing_php_grpc",
-        ":billing_php_proto",
-    ],
+    deps = [":billing_php_proto"],
 )
 
 # Open Source Packages
@@ -247,7 +233,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-billing-v1-php",
     deps = [
         ":billing_php_gapic",
-        ":billing_php_grpc",
         ":billing_php_proto",
     ],
 )
@@ -319,6 +304,7 @@ ruby_cloud_gapic_library(
     ruby_cloud_description = "Allows developers to manage billing for their Google Cloud Platform projects programmatically.",
     ruby_cloud_title = "Billing V1",
     service_yaml = "cloudbilling_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":billing_ruby_grpc",
         ":billing_ruby_proto",
@@ -364,6 +350,7 @@ csharp_gapic_library(
     grpc_service_config = "cloud_billing_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "cloudbilling_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":billing_csharp_grpc",
         ":billing_csharp_proto",

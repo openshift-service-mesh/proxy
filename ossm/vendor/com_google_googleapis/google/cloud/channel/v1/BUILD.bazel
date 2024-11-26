@@ -21,9 +21,11 @@ load("@com_google_googleapis_imports//:imports.bzl", "proto_library_with_info")
 proto_library(
     name = "channel_proto",
     srcs = [
+        "billing_accounts.proto",
         "channel_partner_links.proto",
         "common.proto",
         "customers.proto",
+        "entitlement_changes.proto",
         "entitlements.proto",
         "offers.proto",
         "operations.proto",
@@ -129,13 +131,12 @@ load(
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "channel_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/channel/v1",
+    importpath = "cloud.google.com/go/channel/apiv1/channelpb",
     protos = [":channel_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -154,6 +155,7 @@ go_gapic_library(
     grpc_service_config = "cloudchannel_grpc_service_config.json",
     importpath = "cloud.google.com/go/channel/apiv1;channel",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "cloudchannel_v1.yaml",
     transport = "grpc+rest",
@@ -166,19 +168,13 @@ go_gapic_library(
     ],
 )
 
-go_test(
-    name = "channel_go_gapic_test",
-    srcs = [":channel_go_gapic_srcjar_test"],
-    embed = [":channel_go_gapic"],
-    importpath = "cloud.google.com/go/channel/apiv1",
-)
-
 # Open Source Packages
 go_gapic_assembly_pkg(
     name = "gapi-cloud-channel-v1-go",
     deps = [
         ":channel_go_gapic",
         ":channel_go_gapic_srcjar-metadata.srcjar",
+        ":channel_go_gapic_srcjar-snippets.srcjar",
         ":channel_go_gapic_srcjar-test.srcjar",
         ":channel_go_proto",
     ],
@@ -228,7 +224,6 @@ load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -237,23 +232,15 @@ php_proto_library(
     deps = [":channel_proto"],
 )
 
-php_grpc_library(
-    name = "channel_php_grpc",
-    srcs = [":channel_proto"],
-    deps = [":channel_php_proto"],
-)
-
 php_gapic_library(
     name = "channel_php_gapic",
     srcs = [":channel_proto_with_info"],
     grpc_service_config = "cloudchannel_grpc_service_config.json",
+    migration_mode = "NEW_SURFACE_ONLY",
     rest_numeric_enums = True,
     service_yaml = "cloudchannel_v1.yaml",
     transport = "grpc+rest",
-    deps = [
-        ":channel_php_grpc",
-        ":channel_php_proto",
-    ],
+    deps = [":channel_php_proto"],
 )
 
 # Open Source Packages
@@ -261,7 +248,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-channel-v1-php",
     deps = [
         ":channel_php_gapic",
-        ":channel_php_grpc",
         ":channel_php_proto",
     ],
 )
@@ -332,6 +318,8 @@ ruby_cloud_gapic_library(
     rest_numeric_enums = True,
     ruby_cloud_description = "You can use Channel Services to manage your relationships with your partners and your customers. Channel Services include a console and APIs to view and provision links between distributors and resellers, customers and entitlements.",
     ruby_cloud_title = "Cloud Channel V1",
+    service_yaml = "cloudchannel_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":channel_ruby_grpc",
         ":channel_ruby_proto",
@@ -377,6 +365,7 @@ csharp_gapic_library(
     grpc_service_config = "cloudchannel_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "cloudchannel_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":channel_csharp_grpc",
         ":channel_csharp_proto",

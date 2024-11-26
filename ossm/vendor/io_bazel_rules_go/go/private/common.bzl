@@ -72,6 +72,10 @@ cgo_exts = [
     ".mm",
 ]
 
+syso_exts = [
+    ".syso",
+]
+
 def split_srcs(srcs):
     """Returns a struct of sources, divided by extension."""
     sources = struct(
@@ -81,6 +85,7 @@ def split_srcs(srcs):
         c = [],
         cxx = [],
         objc = [],
+        syso = [],
     )
     ext_pairs = (
         (sources.go, go_exts),
@@ -89,6 +94,7 @@ def split_srcs(srcs):
         (sources.c, c_exts),
         (sources.cxx, cxx_exts),
         (sources.objc, objc_exts),
+        (sources.syso, syso_exts),
     )
     extmap = {}
     for outs, exts in ext_pairs:
@@ -106,7 +112,7 @@ def split_srcs(srcs):
 
 def join_srcs(source):
     """Combines source from a split_srcs struct into a single list."""
-    return source.go + source.headers + source.asm + source.c + source.cxx + source.objc
+    return source.go + source.headers + source.asm + source.c + source.cxx + source.objc + source.syso
 
 def os_path(ctx, path):
     path = str(path)  # maybe convert from path type
@@ -262,3 +268,10 @@ _RULES_GO_RAW_REPO_NAME = str(Label("//:unused"))[:-len("//:unused")]
 # not start with a "@", so we need to add it.
 RULES_GO_REPO_NAME = _RULES_GO_RAW_REPO_NAME if _RULES_GO_RAW_REPO_NAME.startswith("@") else "@" + _RULES_GO_RAW_REPO_NAME
 RULES_GO_STDLIB_PREFIX = RULES_GO_REPO_NAME + "//stdlib:"
+
+# TODO: Remove the "and" once the rules_go repo itself uses Bzlmod.
+RULES_GO_IS_BZLMOD_REPO = _RULES_GO_RAW_REPO_NAME.lstrip("@") != "io_bazel_rules_go" and _RULES_GO_RAW_REPO_NAME.lstrip("@")
+
+# Marks an action as supporting path mapping (--experimental_output_paths=strip).
+# See https://www.youtube.com/watch?v=Et1rjb7ixUU for more details.
+SUPPORTS_PATH_MAPPING_REQUIREMENT = {"supports-path-mapping": "1"}

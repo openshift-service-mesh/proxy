@@ -18,11 +18,11 @@ on:
 
   pull_request:
     branches:
-    - master
+    - main
 
   push:
     branches:
-    - master
+    - main
 
   schedule:
     - cron: '0 0 * * *'
@@ -42,7 +42,7 @@ jobs:
       run: |
         go install github.com/google/addlicense@latest
         export PATH=$PATH:$(go env GOPATH)/bin
-        addlicense -check .
+        addlicense -check -ignore "bazel/cargo/remote/**" .
 
   bazel:
     runs-on: ubuntu-latest
@@ -52,6 +52,11 @@ jobs:
     - uses: actions/setup-go@v2
       with:
         go-version: '^1.16'
+
+    - name: Install dependencies
+      if: ${{ env.ACT }}
+      run: |
+        go install github.com/bazelbuild/bazelisk@v1.19.0
 
     - name: Cache
       uses: actions/cache@v2
@@ -63,13 +68,13 @@ jobs:
           ~/.cargo/.crates2.json
           ~/.cargo/bin
           ~/.cargo/registry
-        key: ${{ hashFiles('WORKSPACE', '.bazelrc', '.bazelversion', 'bazel/cargo/Cargo.raze.lock', 'bazel/dependencies.bzl', 'bazel/repositories.bzl') }}
+        key: ${{ hashFiles('WORKSPACE', '.bazelrc', '.bazelversion', 'bazel/cargo/Cargo.Bazel.lock', 'bazel/dependencies.bzl', 'bazel/repositories.bzl') }}
 
     - name: Build (wasm32-unknown-unknown)
-      run: bazelisk --noworkspace_rc build --platforms=@rules_rust//rust/platform:wasm //...
+      run: bazelisk --noworkspace_rc build --noenable_bzlmod --platforms=@rules_rust//rust/platform:wasm //...
 
     - name: Build (wasm32-wasi)
-      run: bazelisk --noworkspace_rc build --platforms=@rules_rust//rust/platform:wasi //...
+      run: bazelisk --noworkspace_rc build --noenable_bzlmod --platforms=@rules_rust//rust/platform:wasi //...
 
     - name: Format (buildifier)
       run: |
@@ -78,11 +83,9 @@ jobs:
         buildifier -mode=check WORKSPACE
         buildifier -mode=check BUILD
 
-    - name: Format (cargo raze)
+    - name: Format (rules_rust)
       run: |
-        mv bazel/cargo/Cargo.raze.lock Cargo.lock
-        bazelisk --noworkspace_rc run @cargo_raze//:raze -- --manifest-path=$(pwd)/Cargo.toml
-        mv Cargo.lock bazel/cargo/Cargo.raze.lock
+        bazelisk --noworkspace_rc run --noenable_bzlmod //bazel/cargo:crates_vendor
         git diff --exit-code
 
   stable:
@@ -93,6 +96,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      if: ${{ env.ACT }}
+      run: |
+        curl -OL https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+        chmod +x ./rustup-init
+        ./rustup-init -y
+        rm rustup-init
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
     - name: Update Rust
       run: |
@@ -133,6 +145,15 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - name: Install dependencies
+      if: ${{ env.ACT }}
+      run: |
+        curl -OL https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+        chmod +x ./rustup-init
+        ./rustup-init -y
+        rm rustup-init
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
     - name: Update Rust
       run: |
         rustup toolchain install nightly --component clippy --component rustfmt
@@ -170,6 +191,17 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - name: Install dependencies
+      if: ${{ env.ACT }}
+      run: |
+        curl -OL https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+        chmod +x ./rustup-init
+        ./rustup-init -y
+        rm rustup-init
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        export PATH=$PATH:$HOME/.cargo/bin
+        cargo install cargo-outdated
+
     - name: Run cargo outdated
       run: cargo outdated --root-deps-only --exit-code 1
 
@@ -179,9 +211,20 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - name: Install dependencies
+      if: ${{ env.ACT }}
+      run: |
+        curl -OL https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+        chmod +x ./rustup-init
+        ./rustup-init -y
+        rm rustup-init
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        export PATH=$PATH:$HOME/.cargo/bin
+        cargo install cargo-audit
+
     - name: Run cargo audit
       run: |
-        cp -p bazel/cargo/Cargo.raze.lock .
+        cp -p bazel/cargo/Cargo.Bazel.lock Cargo.lock
         cargo audit
 
   example:
@@ -195,6 +238,7 @@ jobs:
         - 'http_body'
         - 'http_config'
         - 'http_headers'
+        - 'grpc_auth_random'
 
     defaults:
       run:
@@ -205,6 +249,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      if: ${{ env.ACT }}
+      run: |
+        curl -OL https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+        chmod +x ./rustup-init
+        ./rustup-init -y
+        rm rustup-init
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
     - name: Update Rust
       run: |
@@ -234,7 +287,7 @@ jobs:
         docker run --rm \
           -v $(pwd)/envoy.yaml:/envoy.yaml \
           -v $(pwd)/target/wasm32-wasi/release:/etc/envoy/proxy-wasm-plugins \
-          envoyproxy/envoy:v1.24-latest \
+          envoyproxy/envoy:v1.31-latest \
           --mode validate \
           -c envoy.yaml
 
@@ -249,6 +302,7 @@ jobs:
         - 'http_body'
         - 'http_config'
         - 'http_headers'
+        - 'grpc_auth_random'
 
     defaults:
       run:
@@ -259,6 +313,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      if: ${{ env.ACT }}
+      run: |
+        curl -OL https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+        chmod +x ./rustup-init
+        ./rustup-init -y
+        rm rustup-init
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
     - name: Update Rust
       run: |
@@ -302,6 +365,6 @@ jobs:
         docker run --rm \
           -v $(pwd)/envoy.yaml:/envoy.yaml \
           -v $(pwd)/target/wasm32-wasi/release:/etc/envoy/proxy-wasm-plugins \
-          envoyproxy/envoy:v1.24-latest \
+          envoyproxy/envoy:v1.31-latest \
           --mode validate \
           -c envoy.yaml

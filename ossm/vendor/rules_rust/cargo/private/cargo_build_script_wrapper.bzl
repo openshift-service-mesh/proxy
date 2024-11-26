@@ -2,6 +2,7 @@
 
 load(
     "//cargo/private:cargo_build_script.bzl",
+    "cargo_build_script_runfiles",
     "name_to_crate_name",
     "name_to_pkg_name",
     _build_script_run = "cargo_build_script",
@@ -31,6 +32,7 @@ def cargo_build_script(
         visibility = None,
         tags = None,
         aliases = None,
+        pkg_name = None,
         **kwargs):
     """Compile and execute a rust build script to generate build attributes
 
@@ -73,7 +75,7 @@ def cargo_build_script(
         # one.
         build_script_env = {
             "SOME_TOOL_OR_FILE": "$(execpath @tool//:binary)"
-        }
+        },
         # Optional data/tool dependencies
         data = ["@tool//:binary"],
     )
@@ -92,7 +94,7 @@ def cargo_build_script(
 
     Args:
         name (str): The name for the underlying rule. This should be the name of the package
-            being compiled, optionally with a suffix of `_build_script`.
+            being compiled, optionally with a suffix of `_bs`. Otherwise, you can set the package name via `pkg_name`.
         edition (str): The rust edition to use for the internal binary crate.
         crate_name (str): Crate name to use for build script.
         crate_root (label): The file that will be passed to rustc to be used for building this crate.
@@ -100,6 +102,7 @@ def cargo_build_script(
         crate_features (list, optional): A list of features to enable for the build script.
         version (str, optional): The semantic version (semver) of the crate.
         deps (list, optional): The build-dependencies of the crate.
+        pkg_name (string, optional): Override the package name used for the build script. This is useful if the build target name gets too long otherwise.
         link_deps (list, optional): The subset of the (normal) dependencies of the crate that have the
             links attribute and therefore provide environment variables to this build script.
         proc_macro_deps (list of label, optional): List of rust_proc_macro targets used to build the script.
@@ -131,16 +134,30 @@ def cargo_build_script(
     # available both when we invoke rustc (this code) and when we run the compiled build
     # script (_cargo_build_script_impl). https://github.com/bazelbuild/rules_rust/issues/661
     # will hopefully remove this duplication.
+    if pkg_name == None:
+        pkg_name = name_to_pkg_name(name)
+
     rustc_env = dict(rustc_env)
     if "CARGO_PKG_NAME" not in rustc_env:
-        rustc_env["CARGO_PKG_NAME"] = name_to_pkg_name(name)
+        rustc_env["CARGO_PKG_NAME"] = pkg_name
     if "CARGO_CRATE_NAME" not in rustc_env:
         rustc_env["CARGO_CRATE_NAME"] = name_to_crate_name(name_to_pkg_name(name))
 
-    binary_tags = [tag for tag in tags or []]
-    if "manual" not in binary_tags:
-        binary_tags.append("manual")
+    script_kwargs = {}
+    for arg in ("exec_compatible_with", "testonly"):
+        if arg in kwargs:
+            script_kwargs[arg] = kwargs[arg]
 
+    wrapper_kwargs = dict(script_kwargs)
+    for arg in ("compatible_with", "target_compatible_with"):
+        if arg in kwargs:
+            wrapper_kwargs[arg] = kwargs[arg]
+
+    binary_tags = depset(
+        (tags if tags else []) + ["manual"],
+    ).to_list()
+
+    # This target exists as the actual build script.
     rust_binary(
         name = name + "_",
         crate_name = crate_name,
@@ -149,7 +166,7 @@ def cargo_build_script(
         crate_features = crate_features,
         deps = deps,
         proc_macro_deps = proc_macro_deps,
-        data = data,
+        data = tools,
         compile_data = compile_data,
         rustc_env = rustc_env,
         rustc_env_files = rustc_env_files,
@@ -157,21 +174,37 @@ def cargo_build_script(
         edition = edition,
         tags = binary_tags,
         aliases = aliases,
+        **script_kwargs
     )
+
+    # Because the build script is expected to be run on the exec host, the
+    # script above needs to be in the exec configuration but the script may
+    # need data files that are in the target configuration. This rule wraps
+    # the script above so the `cfg=exec` target can be run without issue in
+    # a `cfg=target` environment. More details can be found on the rule.
+    cargo_build_script_runfiles(
+        name = name + "-",
+        script = ":{}_".format(name),
+        data = data,
+        tools = tools,
+        tags = binary_tags,
+        **wrapper_kwargs
+    )
+
+    # This target executes the build script.
     _build_script_run(
         name = name,
-        script = ":{}_".format(name),
+        script = ":{}-".format(name),
         crate_features = crate_features,
         version = version,
         build_script_env = build_script_env,
         links = links,
         deps = deps,
         link_deps = link_deps,
-        data = data,
-        tools = tools,
         rundir = rundir,
         rustc_flags = rustc_flags,
         visibility = visibility,
         tags = tags,
+        pkg_name = pkg_name,
         **kwargs
     )

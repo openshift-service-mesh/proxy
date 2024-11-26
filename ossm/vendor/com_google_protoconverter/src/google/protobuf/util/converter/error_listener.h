@@ -22,13 +22,9 @@
 #include <string>
 #include <vector>
 
-#include "google/protobuf/stubs/callback.h"
-#include "google/protobuf/stubs/common.h"
 #include "absl/strings/string_view.h"
+#include "google/protobuf/stubs/callback.h"
 #include "google/protobuf/util/converter/location_tracker.h"
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
 
 namespace google {
 namespace protobuf {
@@ -36,7 +32,7 @@ namespace util {
 namespace converter {
 
 // Interface for error listener.
-class PROTOBUF_EXPORT ErrorListener {
+class ErrorListener {
  public:
   ErrorListener(const ErrorListener&) = delete;
   ErrorListener& operator=(const ErrorListener&) = delete;
@@ -61,7 +57,7 @@ class PROTOBUF_EXPORT ErrorListener {
 };
 
 // An error listener that ignores all errors.
-class PROTOBUF_EXPORT NoopErrorListener : public ErrorListener {
+class NoopErrorListener : public ErrorListener {
  public:
   NoopErrorListener() {}
   NoopErrorListener(const NoopErrorListener&) = delete;
@@ -80,12 +76,9 @@ class PROTOBUF_EXPORT NoopErrorListener : public ErrorListener {
                     absl::string_view /* missing_name */) override {}
 };
 
-
 }  // namespace converter
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_ERROR_LISTENER_H_

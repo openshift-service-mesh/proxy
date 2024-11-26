@@ -15,10 +15,6 @@
 """ios_extension Starlark tests."""
 
 load(
-    ":common.bzl",
-    "common",
-)
-load(
     "//test/starlark_tests/rules:analysis_output_group_info_files_test.bzl",
     "analysis_output_group_info_files_test",
 )
@@ -42,6 +38,10 @@ load(
 load(
     "//test/starlark_tests/rules:linkmap_test.bzl",
     "linkmap_test",
+)
+load(
+    ":common.bzl",
+    "common",
 )
 
 def ios_extension_test_suite(name):
@@ -255,6 +255,17 @@ def ios_extension_test_suite(name):
         contains = [
             "$BUNDLE_ROOT/Metadata.appintents/extract.actionsdata",
             "$BUNDLE_ROOT/Metadata.appintents/version.json",
+        ],
+        tags = [name],
+    )
+
+    # Test ext with resources bundles them at the top level
+    archive_contents_test(
+        name = "{}_contains_resources_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:ext_with_resources",
+        contains = [
+            "$BUNDLE_ROOT/additional.txt",
         ],
         tags = [name],
     )

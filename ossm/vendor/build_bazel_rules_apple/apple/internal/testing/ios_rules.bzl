@@ -15,12 +15,12 @@
 """Implementation of iOS test rules."""
 
 load(
-    "@build_bazel_rules_apple//apple/internal/testing:apple_test_rule_support.bzl",
-    "apple_test_rule_support",
-)
-load(
-    "@build_bazel_rules_apple//apple/internal/testing:apple_test_bundle_support.bzl",
-    "apple_test_bundle_support",
+    "@build_bazel_rules_apple//apple:providers.bzl",
+    "AppleBundleInfo",
+    "IosApplicationBundleInfo",
+    "IosExtensionBundleInfo",
+    "IosFrameworkBundleInfo",
+    "IosImessageApplicationBundleInfo",
 )
 load(
     "@build_bazel_rules_apple//apple/internal:apple_product_type.bzl",
@@ -55,12 +55,12 @@ load(
     "apple_resource_aspect",
 )
 load(
-    "@build_bazel_rules_apple//apple:providers.bzl",
-    "AppleBundleInfo",
-    "IosApplicationBundleInfo",
-    "IosExtensionBundleInfo",
-    "IosFrameworkBundleInfo",
-    "IosImessageApplicationBundleInfo",
+    "@build_bazel_rules_apple//apple/internal/testing:apple_test_bundle_support.bzl",
+    "apple_test_bundle_support",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/testing:apple_test_rule_support.bzl",
+    "apple_test_rule_support",
 )
 
 def _ios_ui_test_bundle_impl(ctx):
@@ -83,13 +83,21 @@ def _ios_unit_test_bundle_impl(ctx):
 
 def _ios_ui_test_impl(ctx):
     """Implementation of ios_ui_test."""
-    return apple_test_rule_support.apple_test_rule_impl(ctx, "xcuitest") + [
+    return apple_test_rule_support.apple_test_rule_impl(
+        ctx = ctx,
+        requires_dossiers = False,
+        test_type = "xcuitest",
+    ) + [
         new_iosxctestbundleinfo(),
     ]
 
 def _ios_unit_test_impl(ctx):
     """Implementation of ios_unit_test."""
-    return apple_test_rule_support.apple_test_rule_impl(ctx, "xctest") + [
+    return apple_test_rule_support.apple_test_rule_impl(
+        ctx = ctx,
+        requires_dossiers = False,
+        test_type = "xctest",
+    ) + [
         new_iosxctestbundleinfo(),
     ]
 

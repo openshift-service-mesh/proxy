@@ -23,10 +23,10 @@
 #include "absl/types/variant.h"
 #include "quiche/http2/core/spdy_alt_svc_wire_format.h"
 #include "quiche/http2/core/spdy_bitmasks.h"
+#include "quiche/common/http/http_header_block.h"
 #include "quiche/common/platform/api/quiche_export.h"
 #include "quiche/common/platform/api/quiche_flags.h"
 #include "quiche/common/platform/api/quiche_logging.h"
-#include "quiche/spdy/core/http2_header_block.h"
 
 namespace spdy {
 
@@ -338,15 +338,7 @@ QUICHE_EXPORT extern const char* const kHttp2Npn;
 //   - 1 byte for the opcode.
 //   - 2 bytes for the name length (assuming new name).
 //   - 3 bytes for the value length.
-// TODO(b/322146543): Remove the `New` suffix with deprecation of
-// --gfe2_reloadable_flag_http2_add_hpack_overhead_bytes2.
-inline constexpr size_t kPerHeaderHpackOverheadNew = 6;
-// An estimate size of the HPACK overhead for each header field. 1 bytes for
-// indexed literal, 1 bytes for key literal and length encoding, and 2 bytes for
-// value literal and length encoding.
-// TODO(b/322146543): Remove with deprecation of
-// --gfe2_reloadable_flag_http2_add_hpack_overhead_bytes2.
-inline constexpr size_t kPerHeaderHpackOverheadOld = 4;
+inline constexpr size_t kPerHeaderHpackOverhead = 6;
 
 // Names of pseudo-headers defined for HTTP/2 requests.
 QUICHE_EXPORT extern const char* const kHttp2AuthorityHeader;
@@ -509,8 +501,8 @@ class QUICHE_EXPORT SpdyFrameWithHeaderBlockIR : public SpdyFrameWithFinIR {
  public:
   ~SpdyFrameWithHeaderBlockIR() override;
 
-  const Http2HeaderBlock& header_block() const { return header_block_; }
-  void set_header_block(Http2HeaderBlock header_block) {
+  const quiche::HttpHeaderBlock& header_block() const { return header_block_; }
+  void set_header_block(quiche::HttpHeaderBlock header_block) {
     // Deep copy.
     header_block_ = std::move(header_block);
   }
@@ -520,13 +512,13 @@ class QUICHE_EXPORT SpdyFrameWithHeaderBlockIR : public SpdyFrameWithFinIR {
 
  protected:
   SpdyFrameWithHeaderBlockIR(SpdyStreamId stream_id,
-                             Http2HeaderBlock header_block);
+                             quiche::HttpHeaderBlock header_block);
   SpdyFrameWithHeaderBlockIR(const SpdyFrameWithHeaderBlockIR&) = delete;
   SpdyFrameWithHeaderBlockIR& operator=(const SpdyFrameWithHeaderBlockIR&) =
       delete;
 
  private:
-  Http2HeaderBlock header_block_;
+  quiche::HttpHeaderBlock header_block_;
 };
 
 class QUICHE_EXPORT SpdyDataIR : public SpdyFrameWithFinIR {
@@ -720,8 +712,8 @@ class QUICHE_EXPORT SpdyGoAwayIR : public SpdyFrameIR {
 class QUICHE_EXPORT SpdyHeadersIR : public SpdyFrameWithHeaderBlockIR {
  public:
   explicit SpdyHeadersIR(SpdyStreamId stream_id)
-      : SpdyHeadersIR(stream_id, Http2HeaderBlock()) {}
-  SpdyHeadersIR(SpdyStreamId stream_id, Http2HeaderBlock header_block)
+      : SpdyHeadersIR(stream_id, quiche::HttpHeaderBlock()) {}
+  SpdyHeadersIR(SpdyStreamId stream_id, quiche::HttpHeaderBlock header_block)
       : SpdyFrameWithHeaderBlockIR(stream_id, std::move(header_block)) {}
   SpdyHeadersIR(const SpdyHeadersIR&) = delete;
   SpdyHeadersIR& operator=(const SpdyHeadersIR&) = delete;
@@ -757,8 +749,6 @@ class QUICHE_EXPORT SpdyHeadersIR : public SpdyFrameWithHeaderBlockIR {
   bool exclusive_ = false;
   bool padded_ = false;
   int padding_payload_len_ = 0;
-  const bool add_hpack_overhead_bytes_ =
-      GetQuicheReloadableFlag(http2_add_hpack_overhead_bytes2);
 };
 
 class QUICHE_EXPORT SpdyWindowUpdateIR : public SpdyFrameIR {
@@ -790,9 +780,10 @@ class QUICHE_EXPORT SpdyWindowUpdateIR : public SpdyFrameIR {
 class QUICHE_EXPORT SpdyPushPromiseIR : public SpdyFrameWithHeaderBlockIR {
  public:
   SpdyPushPromiseIR(SpdyStreamId stream_id, SpdyStreamId promised_stream_id)
-      : SpdyPushPromiseIR(stream_id, promised_stream_id, Http2HeaderBlock()) {}
+      : SpdyPushPromiseIR(stream_id, promised_stream_id,
+                          quiche::HttpHeaderBlock()) {}
   SpdyPushPromiseIR(SpdyStreamId stream_id, SpdyStreamId promised_stream_id,
-                    Http2HeaderBlock header_block)
+                    quiche::HttpHeaderBlock header_block)
       : SpdyFrameWithHeaderBlockIR(stream_id, std::move(header_block)),
         promised_stream_id_(promised_stream_id),
         padded_(false),
@@ -1020,6 +1011,9 @@ class QUICHE_EXPORT SpdySerializedFrame {
 
   // Returns the actual size of the underlying buffer.
   size_t size() const { return size_; }
+
+  char* begin() { return data(); }
+  char* end() { return data() + size(); }
 
   operator absl::string_view() const {
     return absl::string_view{frame_.get(), size_};

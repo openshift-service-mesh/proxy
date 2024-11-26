@@ -12,280 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Defines Starlark providers that propagated by the Swift BUILD rules."""
+"""Internal providers and utility functions.
+Note that some of these definitions are exported via the `swift_common` module.
+*Public* providers should be defined in `swift:providers.bzl`, not in this file
+(`swift/internal:providers.bzl`).
+"""
 
-SwiftCompilerPluginInfo = provider(
-    doc = "Information about compiler plugins, like macros.",
-    fields = {
-        "cc_info": """\
-A `CcInfo` provider containing the `swift_compiler_plugin`'s code compiled as a
-static library, which is suitable for linking into a `swift_test` so that unit
-tests can be written against it.
-""",
-        "executable": "A `File` representing the plugin's binary executable.",
-        "module_names": """\
-A `depset` of strings denoting the names of the Swift modules that provide
-plugin types looked up by the compiler. This currently contains a single
-element, the name of the module created by the `swift_compiler_plugin` target.
-""",
-        "swift_info": """\
-A `SwiftInfo` provider representing the Swift module created by the
-`swift_compiler_plugin` target. This is used specifically by `swift_test` to
-allow test code to depend on the plugin's module without making it possible for
-arbitrary libraries/binaries to depend on a plugin.
-""",
-    },
-)
-
-SwiftFeatureAllowlistInfo = provider(
-    doc = """\
-Describes a set of features and the packages that are allowed to request or
-disable them.
-
-This provider is an internal implementation detail of the rules; users should
-not rely on it or assume that its structure is stable.
-""",
-    fields = {
-        "allowlist_label": """\
-A string containing the label of the `swift_feature_allowlist` target that
-created this provider.
-""",
-        "managed_features": """\
-A list of strings representing feature names or their negations that packages in
-the `packages` list are allowed to explicitly request or disable.
-""",
-        "package_specs": """\
-A list of `struct` values representing package specifications that indicate
-which packages (possibly recursive) can request or disable a feature managed by
-the allowlist.
-""",
-    },
-)
-
-SwiftGRPCInfo = provider(
-    doc = "Propagates Swift-specific information about a `swift_grpc_library`.",
-    fields = {
-        "flavor": """\
-The flavor of GRPC that was generated. E.g. server, client, or client_stubs.
-""",
-        "direct_pbgrpc_files": """\
-`Depset` of `File`s. The Swift source files (`.grpc.swift`) generated
-from the `.proto` files in direct dependencies.
-""",
-    },
-)
-
-SwiftInfo = provider(
-    doc = """\
-Contains information about the compiled artifacts of a Swift module.
-
-This provider contains a large number of fields and many custom rules may not
-need to set all of them. Instead of constructing a `SwiftInfo` provider
-directly, consider using the `swift_common.create_swift_info` function, which
-has reasonable defaults for any fields not explicitly set.
-""",
-    fields = {
-        "direct_modules": """\
-`List` of values returned from `swift_common.create_module`. The modules (both
-Swift and C/Objective-C) emitted by the library that propagated this provider.
-""",
-        "transitive_modules": """\
-`Depset` of values returned from `swift_common.create_module`. The transitive
-modules (both Swift and C/Objective-C) emitted by the library that propagated
-this provider and all of its dependencies.
-""",
-    },
-)
-
-SwiftPackageConfigurationInfo = provider(
-    doc = """\
-Describes a compiler configuration that is applied by default to targets in a
-specific set of packages.
-
-This provider is an internal implementation detail of the rules; users should
-not rely on it or assume that its structure is stable.
-""",
-    fields = {
-        "disabled_features": """\
-`List` of strings. Features that will be disabled by default on targets in the
-packages listed in this package configuration.
-""",
-        "enabled_features": """\
-`List` of strings. Features that will be enabled by default on targets in the
-packages listed in this package configuration.
-""",
-        "package_specs": """\
-A list of `struct` values representing package specifications that indicate
-the set of packages (possibly recursive) to which this configuration is applied.
-""",
-    },
-)
-
-SwiftProtoInfo = provider(
-    doc = "Propagates Swift-specific information about a `proto_library`.",
-    fields = {
-        "module_mappings": """\
-`Sequence` of `struct`s. Each struct contains `module_name` and
-`proto_file_paths` fields that denote the transitive mappings from `.proto`
-files to Swift modules. This allows messages that reference messages in other
-libraries to import those modules in generated code.
-""",
-        "pbswift_files": """\
-`Depset` of `File`s. The transitive Swift source files (`.pb.swift`) generated
-from the `.proto` files.
-""",
-        "direct_pbswift_files": """\
-`list` of `File`s. The Swift source files (`.pb.swift`) generated
-from the `.proto` files in direct dependencies.
-""",
-    },
-)
-
-SwiftToolchainInfo = provider(
-    doc = """
-Propagates information about a Swift toolchain to compilation and linking rules
-that use the toolchain.
-""",
-    fields = {
-        "action_configs": """\
-This field is an internal implementation detail of the build rules.
-""",
-        "cc_toolchain_info": """\
-The `cc_common.CcToolchainInfo` provider from the Bazel C++ toolchain that this
-Swift toolchain depends on.
-""",
-        "clang_implicit_deps_providers": """\
-A `struct` with the following fields, which represent providers from targets
-that should be added as implicit dependencies of any precompiled explicit
-C/Objective-C modules:
-
-*   `cc_infos`: A list of `CcInfo` providers from targets specified as the
-    toolchain's implicit dependencies.
-*   `objc_infos`: A list of `apple_common.Objc` providers from targets specified
-    as the toolchain's implicit dependencies.
-*   `swift_infos`: A list of `SwiftInfo` providers from targets specified as the
-    toolchain's implicit dependencies.
-
-For ease of use, this field is never `None`; it will always be a valid `struct`
-containing the fields described above, even if those lists are empty.
-""",
-        "developer_dirs": """
-A list of `structs` containing the following fields:\
-*   `developer_path_label`: A `string` representing the type of developer path.
-*   `path`: A `string` representing the path to the developer framework.
-""",
-        "entry_point_linkopts_provider": """\
-A function that returns flags that should be passed to the linker to control the
-name of the entry point of a linked binary for rules that customize their entry
-point.
-This function must take the following keyword arguments:
-*   `entry_point_name`: The name of the entry point function, as was passed to
-    the Swift compiler using the `-entry-point-function-name` flag.
-It must return a `struct` with the following fields:
-*   `linkopts`: A list of strings that will be passed as additional linker flags
-    when linking a binary with a custom entry point.
-""",
-        "feature_allowlists": """\
-A list of `SwiftFeatureAllowlistInfo` providers that allow or prohibit packages
-from requesting or disabling features.
-""",
-        "generated_header_module_implicit_deps_providers": """\
-A `struct` with the following fields, which are providers from targets that
-should be treated as compile-time inputs to actions that precompile the explicit
-module for the generated Objective-C header of a Swift module:
-
-*   `cc_infos`: A list of `CcInfo` providers from targets specified as the
-    toolchain's implicit dependencies.
-*   `objc_infos`: A list of `apple_common.Objc` providers from targets specified
-    as the toolchain's implicit dependencies.
-*   `swift_infos`: A list of `SwiftInfo` providers from targets specified as the
-    toolchain's implicit dependencies.
-
-This is used to provide modular dependencies for the fixed inclusions (Darwin,
-Foundation) that are unconditionally emitted in those files.
-
-For ease of use, this field is never `None`; it will always be a valid `struct`
-containing the fields described above, even if those lists are empty.
-""",
-        "implicit_deps_providers": """\
-A `struct` with the following fields, which represent providers from targets
-that should be added as implicit dependencies of any Swift compilation or
-linking target (but not to precompiled explicit C/Objective-C modules):
-
-*   `cc_infos`: A list of `CcInfo` providers from targets specified as the
-    toolchain's implicit dependencies.
-*   `objc_infos`: A list of `apple_common.Objc` providers from targets specified
-    as the toolchain's implicit dependencies.
-*   `swift_infos`: A list of `SwiftInfo` providers from targets specified as the
-    toolchain's implicit dependencies.
-
-For ease of use, this field is never `None`; it will always be a valid `struct`
-containing the fields described above, even if those lists are empty.
-""",
-        "package_configurations": """\
-A list of `SwiftPackageConfigurationInfo` providers that specify additional
-compilation configuration options that are applied to targets on a per-package
-basis.
-""",
-        "requested_features": """\
-`List` of `string`s. Features that should be implicitly enabled by default for
-targets built using this toolchain, unless overridden by the user by listing
-their negation in the `features` attribute of a target/package or in the
-`--features` command line flag.
-
-These features determine various compilation and debugging behaviors of the
-Swift build rules, and they are also passed to the C++ APIs used when linking
-(so features defined in CROSSTOOL may be used here).
-""",
-        "root_dir": """\
-`String`. The workspace-relative root directory of the toolchain.
-""",
-        "swift_worker": """\
-`File`. The executable representing the worker executable used to invoke the
-compiler and other Swift tools (for both incremental and non-incremental
-compiles).
-""",
-        "test_configuration": """\
-`Struct` containing two fields:
-
-*   `env`: A `dict` of environment variables to be set when running tests
-    that were built with this toolchain.
-
-*   `execution_requirements`: A `dict` of execution requirements for tests
-    that were built with this toolchain.
-
-This is used, for example, with Xcode-based toolchains to ensure that the
-`xctest` helper and coverage tools are found in the correct developer
-directory when running tests.
-""",
-        "tool_configs": """\
-This field is an internal implementation detail of the build rules.
-""",
-        "unsupported_features": """\
-`List` of `string`s. Features that should be implicitly disabled by default for
-targets built using this toolchain, unless overridden by the user by listing
-them in the `features` attribute of a target/package or in the `--features`
-command line flag.
-
-These features determine various compilation and debugging behaviors of the
-Swift build rules, and they are also passed to the C++ APIs used when linking
-(so features defined in CROSSTOOL may be used here).
-""",
-    },
-)
-
-SwiftUsageInfo = provider(
-    doc = """\
-A provider that indicates that Swift was used by a target or any target that it
-depends on.
-""",
-    fields = {},
-)
+load("@build_bazel_rules_swift//swift:providers.bzl", "SwiftInfo")
 
 def create_module(
         *,
         name,
         clang = None,
+        const_gather_protocols = [],
         compilation_context = None,
         is_system = False,
         swift = None):
@@ -313,6 +52,9 @@ def create_module(
             contains artifacts related to Clang modules, such as a module map or
             precompiled module. This may be `None` if the module is a pure Swift
             module with no generated Objective-C interface.
+        const_gather_protocols: A list of protocol names from which constant
+            values should be extracted from source code that takes this module
+            as a *direct* dependency.
         compilation_context: A value returned from
             `swift_common.create_compilation_context` that contains the
             context needed to compile the module being built. This may be `None`
@@ -343,6 +85,7 @@ def create_module(
     """
     return struct(
         clang = clang,
+        const_gather_protocols = tuple(const_gather_protocols),
         compilation_context = compilation_context,
         is_system = is_system,
         name = name,
@@ -353,27 +96,9 @@ def create_clang_module(
         *,
         compilation_context,
         module_map,
-        precompiled_module = None):
+        precompiled_module = None,
+        strict_includes = None):
     """Creates a value representing a Clang module used as a Swift dependency.
-
-    Note: The `compilation_context` argument of this function is primarily
-    intended to communicate information *to* the Swift build rules, not to
-    retrieve information *back out.* In most cases, it is better to depend on
-    the `CcInfo` provider propagated by a Swift target to collect transitive
-    C/Objective-C compilation information about that target. This is because the
-    context used when compiling the module itself may not be the same as the
-    context desired when depending on it. (For example, `apple_common.Objc`
-    supports "strict include paths" which are only propagated to direct
-    dependents.)
-
-    One valid exception to the guidance above is retrieving the generated header
-    associated with a specific Swift module. Since the `CcInfo` provider
-    propagated by the library will have already merged them transitively (or,
-    in the case of a hypothetical custom rule that propagates multiple direct
-    modules, the `direct_public_headers` of the `CcInfo` would also have them
-    merged), it is acceptable to read the headers from the compilation context
-    of the module struct itself in order to associate them with the module that
-    generated them.
 
     Args:
         compilation_context: A `CcCompilationContext` that contains the header
@@ -390,15 +115,23 @@ def create_clang_module(
             explicit module was built for the module; in that case, targets that
             depend on the module will fall back to the text module map and
             headers.
+        strict_includes: A `depset` of strings representing additional Clang
+            include paths that should be passed to the compiler when this module
+            is a _direct_ dependency of the module being compiled. May be
+            `None`. **This field only exists to support a specific legacy use
+            case and should otherwise not be used, as it is fundamentally
+            incompatible with Swift's import model.**
 
     Returns:
-        A `struct` containing the `compilation_context`, `module_map`, and
-        `precompiled_module` fields provided as arguments.
+        A `struct` containing the `compilation_context`, `module_map`,
+        `precompiled_module`, and `strict_includes` fields provided as
+        arguments.
     """
     return struct(
         compilation_context = compilation_context,
         module_map = module_map,
         precompiled_module = precompiled_module,
+        strict_includes = strict_includes,
     )
 
 def create_swift_module(
@@ -411,7 +144,8 @@ def create_swift_module(
         plugins = [],
         swiftsourceinfo = None,
         swiftinterface = None,
-        symbol_graph = None):
+        private_swiftinterface = None,
+        const_protocols_to_gather = []):
     """Creates a value representing a Swift module use as a Swift dependency.
 
     Args:
@@ -428,30 +162,33 @@ def create_swift_module(
         plugins: A list of `SwiftCompilerPluginInfo` providers representing
             compiler plugins that are required by this module and should be
             loaded by the compiler when this module is directly depended on.
+        private_swiftinterface: The `.private.swiftinterface` file emitted by
+            the compiler for this module. May be `None` if no private module
+            interface file was emitted.
         swiftsourceinfo: The `.swiftsourceinfo` file emitted by the compiler for
             this module. May be `None` if no source info file was emitted.
         swiftinterface: The `.swiftinterface` file emitted by the compiler for
             this module. May be `None` if no module interface file was emitted.
-        symbol_graph: A `File` representing the directory that contains the
-            symbol graph data generated by the compiler if the
-            `"swift.emit_symbol_graph"` feature is enabled, otherwise this will
-            be `None`.
+        const_protocols_to_gather: A list of protocol names from which constant
+            values should be extracted from source code that takes this module
+            as a *direct* dependency.
 
     Returns:
         A `struct` containing the `ast_files`, `defines`, `indexstore,
-        `swiftdoc`, `swiftmodule`, `swiftinterface`, and `symbol_graph` fields
+        `swiftdoc`, `swiftmodule`, and `swiftinterface` fields
         provided as arguments.
     """
     return struct(
         ast_files = tuple(ast_files),
         defines = tuple(defines),
         plugins = plugins,
+        private_swiftinterface = private_swiftinterface,
         indexstore = indexstore,
         swiftdoc = swiftdoc,
         swiftinterface = swiftinterface,
         swiftmodule = swiftmodule,
         swiftsourceinfo = swiftsourceinfo,
-        symbol_graph = symbol_graph,
+        const_protocols_to_gather = tuple(const_protocols_to_gather),
     )
 
 def create_swift_info(
@@ -487,8 +224,9 @@ def create_swift_info(
     """
 
     direct_modules = modules + [
-        provider.modules
+        module
         for provider in direct_swift_infos
+        for module in provider.direct_modules
     ]
     transitive_modules = [
         provider.transitive_modules

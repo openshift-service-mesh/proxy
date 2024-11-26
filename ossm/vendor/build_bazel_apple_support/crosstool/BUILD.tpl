@@ -58,7 +58,7 @@ cc_toolchain_suite(
 ]
 
 [
-    apple_cc_toolchain(
+    cc_toolchain(
         name = "cc-compiler-" + arch,
         all_files = ":osx_tools_" + arch,
         ar_files = ":osx_tools_" + arch,
@@ -78,7 +78,6 @@ cc_toolchain_suite(
 [
     cc_toolchain_config(
         name = arch,
-        compiler = "clang",
         cpu = arch,
         cxx_builtin_include_directories = [
 %{cxx_builtin_include_directories}

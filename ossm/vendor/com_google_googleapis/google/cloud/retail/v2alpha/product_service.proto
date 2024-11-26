@@ -1,4 +1,4 @@
-// Copyright 2021 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 
 option csharp_namespace = "Google.Cloud.Retail.V2Alpha";
-option go_package = "google.golang.org/genproto/googleapis/cloud/retail/v2alpha;retail";
+option go_package = "cloud.google.com/go/retail/apiv2alpha/retailpb;retailpb";
 option java_multiple_files = true;
 option java_outer_classname = "ProductServiceProto";
 option java_package = "com.google.cloud.retail.v2alpha";
@@ -184,9 +184,6 @@ service ProductService {
   // [Operation][google.longrunning.Operation]s associated with the stale
   // updates are not marked as [done][google.longrunning.Operation.done] until
   // they are obsolete.
-  //
-  // This feature is only available for users who have Retail Search enabled.
-  // Enable Retail Search on Cloud Console before using this feature.
   rpc SetInventory(SetInventoryRequest) returns (google.longrunning.Operation) {
     option (google.api.http) = {
       post: "/v2alpha/{inventory.name=projects/*/locations/*/catalogs/*/branches/*/products/**}:setInventory"
@@ -199,6 +196,15 @@ service ProductService {
     };
   }
 
+  // We recommend that you use the
+  // [ProductService.AddLocalInventories][google.cloud.retail.v2alpha.ProductService.AddLocalInventories]
+  // method instead of the
+  // [ProductService.AddFulfillmentPlaces][google.cloud.retail.v2alpha.ProductService.AddFulfillmentPlaces]
+  // method.
+  // [ProductService.AddLocalInventories][google.cloud.retail.v2alpha.ProductService.AddLocalInventories]
+  // achieves the same results but provides more fine-grained control over
+  // ingesting local inventory data.
+  //
   // Incrementally adds place IDs to
   // [Product.fulfillment_info.place_ids][google.cloud.retail.v2alpha.FulfillmentInfo.place_ids].
   //
@@ -220,9 +226,6 @@ service ProductService {
   // [Operation][google.longrunning.Operation]s associated with the stale
   // updates will not be marked as [done][google.longrunning.Operation.done]
   // until being obsolete.
-  //
-  // This feature is only available for users who have Retail Search enabled.
-  // Enable Retail Search on Cloud Console before using this feature.
   rpc AddFulfillmentPlaces(AddFulfillmentPlacesRequest)
       returns (google.longrunning.Operation) {
     option (google.api.http) = {
@@ -236,6 +239,15 @@ service ProductService {
     };
   }
 
+  // We recommend that you use the
+  // [ProductService.RemoveLocalInventories][google.cloud.retail.v2alpha.ProductService.RemoveLocalInventories]
+  // method instead of the
+  // [ProductService.RemoveFulfillmentPlaces][google.cloud.retail.v2alpha.ProductService.RemoveFulfillmentPlaces]
+  // method.
+  // [ProductService.RemoveLocalInventories][google.cloud.retail.v2alpha.ProductService.RemoveLocalInventories]
+  // achieves the same results but provides more fine-grained control over
+  // ingesting local inventory data.
+  //
   // Incrementally removes place IDs from a
   // [Product.fulfillment_info.place_ids][google.cloud.retail.v2alpha.FulfillmentInfo.place_ids].
   //
@@ -257,9 +269,6 @@ service ProductService {
   // [Operation][google.longrunning.Operation]s associated with the stale
   // updates will not be marked as [done][google.longrunning.Operation.done]
   // until being obsolete.
-  //
-  // This feature is only available for users who have Retail Search enabled.
-  // Enable Retail Search on Cloud Console before using this feature.
   rpc RemoveFulfillmentPlaces(RemoveFulfillmentPlacesRequest)
       returns (google.longrunning.Operation) {
     option (google.api.http) = {
@@ -301,9 +310,6 @@ service ProductService {
   // [Operation][google.longrunning.Operation]s associated with the stale
   // updates will not be marked as [done][google.longrunning.Operation.done]
   // until being obsolete.
-  //
-  // This feature is only available for users who have Retail Search enabled.
-  // Enable Retail Search on Cloud Console before using this feature.
   rpc AddLocalInventories(AddLocalInventoriesRequest)
       returns (google.longrunning.Operation) {
     option (google.api.http) = {
@@ -343,9 +349,6 @@ service ProductService {
   // [Operation][google.longrunning.Operation]s associated with the stale
   // updates will not be marked as [done][google.longrunning.Operation.done]
   // until being obsolete.
-  //
-  // This feature is only available for users who have Retail Search enabled.
-  // Enable Retail Search on Cloud Console before using this feature.
   rpc RemoveLocalInventories(RemoveLocalInventoriesRequest)
       returns (google.longrunning.Operation) {
     option (google.api.http) = {
@@ -478,6 +481,16 @@ message DeleteProductRequest {
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference) = { type: "retail.googleapis.com/Product" }
   ];
+
+  // This value only applies to the case when the target product is of type
+  // PRIMARY.
+  // When deleting a product of VARIANT/COLLECTION type, this value
+  // will be ignored.
+  // When set to true, the subsequent variant products will be
+  // deleted.
+  // When set to false, if the primary product has active variant products, an
+  // error will be returned.
+  bool force = 4;
 }
 
 // Request message for

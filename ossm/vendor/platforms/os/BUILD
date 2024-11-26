@@ -48,6 +48,12 @@ constraint_value(
     constraint_setting = ":os",
 )
 
+# For the VXworks OS, usefull for embedded systems
+constraint_value(
+    name = "vxworks",
+    constraint_setting = ":os",
+)
+
 # For platforms with no OS, like microcontrollers.
 constraint_value(
     name = "none",
@@ -97,6 +103,11 @@ constraint_value(
 # a non-standard (and undefined) location on the filesystem.
 constraint_value(
     name = "nixos",
+    constraint_setting = ":os",
+)
+
+constraint_value(
+    name = "emscripten",
     constraint_setting = ":os",
 )
 

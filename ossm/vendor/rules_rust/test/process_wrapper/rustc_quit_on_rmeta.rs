@@ -15,7 +15,8 @@ mod test {
         should_succeed: bool,
     ) -> String {
         let r = Runfiles::create().unwrap();
-        let fake_rustc = r.rlocation(
+        let fake_rustc = runfiles::rlocation!(
+            r,
             [
                 "rules_rust",
                 "test",
@@ -27,10 +28,12 @@ mod test {
                 },
             ]
             .iter()
-            .collect::<PathBuf>(),
-        );
+            .collect::<PathBuf>()
+        )
+        .unwrap();
 
-        let process_wrapper = r.rlocation(
+        let process_wrapper = runfiles::rlocation!(
+            r,
             [
                 "rules_rust",
                 "util",
@@ -42,8 +45,9 @@ mod test {
                 },
             ]
             .iter()
-            .collect::<PathBuf>(),
-        );
+            .collect::<PathBuf>()
+        )
+        .unwrap();
 
         let output = Command::new(process_wrapper)
             .args(process_wrapper_args)

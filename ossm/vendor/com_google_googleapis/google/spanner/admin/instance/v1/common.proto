@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ package google.spanner.admin.instance.v1;
 import "google/protobuf/timestamp.proto";
 
 option csharp_namespace = "Google.Cloud.Spanner.Admin.Instance.V1";
-option go_package = "google.golang.org/genproto/googleapis/spanner/admin/instance/v1;instance";
+option go_package = "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb;instancepb";
 option java_multiple_files = true;
 option java_outer_classname = "CommonProto";
 option java_package = "com.google.spanner.admin.instance.v1";
@@ -39,4 +39,18 @@ message OperationProgress {
   // If set, the time at which this operation failed or was completed
   // successfully.
   google.protobuf.Timestamp end_time = 3;
+}
+
+// Indicates the expected fulfillment period of an operation.
+enum FulfillmentPeriod {
+  // Not specified.
+  FULFILLMENT_PERIOD_UNSPECIFIED = 0;
+
+  // Normal fulfillment period. The operation is expected to complete within
+  // minutes.
+  FULFILLMENT_PERIOD_NORMAL = 1;
+
+  // Extended fulfillment period. It can take up to an hour for the operation
+  // to complete.
+  FULFILLMENT_PERIOD_EXTENDED = 2;
 }

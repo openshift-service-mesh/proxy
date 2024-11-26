@@ -23,29 +23,6 @@ documentation:
   - selector: google.cloud.location.Locations.ListLocations
     description: Lists information about the supported locations for this service.
 
-backend:
-  rules:
-  - selector: google.cloud.location.Locations.ListLocations
-    deadline: 5.0
-  - selector: 'google.cloud.run.v2.Executions.*'
-    deadline: 5.0
-  - selector: 'google.cloud.run.v2.Jobs.*'
-    deadline: 5.0
-  - selector: 'google.cloud.run.v2.Revisions.*'
-    deadline: 5.0
-  - selector: 'google.cloud.run.v2.Services.*'
-    deadline: 5.0
-  - selector: google.cloud.run.v2.Services.CreateService
-    deadline: 10.0
-  - selector: google.cloud.run.v2.Services.UpdateService
-    deadline: 10.0
-  - selector: google.cloud.run.v2.Tasks.GetTask
-    deadline: 5.0
-  - selector: google.cloud.run.v2.Tasks.ListTasks
-    deadline: 5.0
-  - selector: 'google.longrunning.Operations.*'
-    deadline: 5.0
-
 http:
   rules:
   - selector: google.longrunning.Operations.DeleteOperation
@@ -54,6 +31,9 @@ http:
     get: '/v2/{name=projects/*/locations/*/operations/*}'
   - selector: google.longrunning.Operations.ListOperations
     get: '/v2/{name=projects/*/locations/*}/operations'
+  - selector: google.longrunning.Operations.WaitOperation
+    post: '/v2/{name=projects/*/locations/*/operations/*}:wait'
+    body: '*'
 
 authentication:
   rules:

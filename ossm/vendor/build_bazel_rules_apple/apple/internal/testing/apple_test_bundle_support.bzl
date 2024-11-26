@@ -15,6 +15,15 @@
 """Helper methods for implementing the test bundles."""
 
 load(
+    "@bazel_skylib//lib:types.bzl",
+    "types",
+)
+load(
+    "@build_bazel_rules_apple//apple:providers.bzl",
+    "AppleBundleInfo",
+    "AppleTestInfo",
+)
+load(
     "@build_bazel_rules_apple//apple/internal:apple_product_type.bzl",
     "apple_product_type",
 )
@@ -32,12 +41,12 @@ load(
     "codesigning_support",
 )
 load(
-    "@build_bazel_rules_apple//apple/internal:features_support.bzl",
-    "features_support",
-)
-load(
     "@build_bazel_rules_apple//apple/internal:experimental.bzl",
     "is_experimental_tree_artifact_enabled",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal:features_support.bzl",
+    "features_support",
 )
 load(
     "@build_bazel_rules_apple//apple/internal:linking_support.bzl",
@@ -81,17 +90,12 @@ load(
     "clang_rt_dylibs",
 )
 load(
-    "@build_bazel_rules_apple//apple:providers.bzl",
-    "AppleBundleInfo",
-    "AppleTestInfo",
+    "@build_bazel_rules_apple//apple/internal/utils:main_thread_checker_dylibs.bzl",
+    "main_thread_checker_dylibs",
 )
 load(
     "@build_bazel_rules_swift//swift:swift.bzl",
     "SwiftInfo",
-)
-load(
-    "@bazel_skylib//lib:types.bzl",
-    "types",
 )
 
 # Default test bundle ID for tests that don't have a test host or were not given
@@ -430,6 +434,28 @@ def _apple_test_bundle_impl(*, ctx, product_type):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.codesigning_dossier_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            apple_xplat_toolchain_info = apple_xplat_toolchain_info,
+            bundle_extension = bundle_extension,
+            bundle_name = bundle_name,
+            entitlements = None,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            predeclared_outputs = predeclared_outputs,
+            provisioning_profile = provisioning_profile,
+            rule_descriptor = rule_descriptor,
+        ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.debug_symbols_partial(
             actions = actions,
             bundle_extension = bundle_extension,
@@ -441,7 +467,7 @@ def _apple_test_bundle_impl(*, ctx, product_type):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),

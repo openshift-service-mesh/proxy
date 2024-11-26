@@ -3,15 +3,13 @@
 
 #pragma once
 
+#include <chrono>
+#include <string>
+
 #include "opentelemetry/exporters/otlp/otlp_environment.h"
 #include "opentelemetry/exporters/otlp/otlp_http.h"
 #include "opentelemetry/exporters/otlp/otlp_preferred_temporality.h"
 #include "opentelemetry/version.h"
-
-#include <chrono>
-#include <cstddef>
-#include <memory>
-#include <string>
 
 OPENTELEMETRY_BEGIN_NAMESPACE
 namespace exporter
@@ -103,6 +101,9 @@ struct OPENTELEMETRY_EXPORT OtlpHttpMetricExporterOptions
 
   /** TLS cipher suite. */
   std::string ssl_cipher_suite;
+
+  /** Compression type. */
+  std::string compression;
 };
 
 }  // namespace otlp

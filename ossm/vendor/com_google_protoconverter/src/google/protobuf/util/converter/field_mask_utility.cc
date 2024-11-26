@@ -17,11 +17,8 @@
 #include "absl/status/status.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
-#include "google/protobuf/util/converter/utility.h"
 #include "google/protobuf/stubs/status_macros.h"
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
+#include "google/protobuf/util/converter/utility.h"
 
 namespace google {
 namespace protobuf {

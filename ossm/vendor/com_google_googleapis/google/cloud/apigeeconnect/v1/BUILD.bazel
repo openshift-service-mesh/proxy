@@ -70,6 +70,7 @@ java_gapic_library(
     srcs = [":apigeeconnect_proto_with_info"],
     grpc_service_config = "connection_grpc_service_config.json",
     rest_numeric_enums = True,
+    service_yaml = "apigeeconnect_v1.yaml",
     test_deps = [
         ":apigeeconnect_java_grpc",
     ],
@@ -84,7 +85,6 @@ java_gapic_test(
     test_classes = [
         "com.google.cloud.apigeeconnect.v1.ConnectionServiceClientHttpJsonTest",
         "com.google.cloud.apigeeconnect.v1.ConnectionServiceClientTest",
-        "com.google.cloud.apigeeconnect.v1.TetherClientHttpJsonTest",
         "com.google.cloud.apigeeconnect.v1.TetherClientTest",
     ],
     runtime_deps = [":apigeeconnect_java_gapic_test"],
@@ -111,13 +111,12 @@ load(
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "apigeeconnect_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/apigeeconnect/v1",
+    importpath = "cloud.google.com/go/apigeeconnect/apiv1/apigeeconnectpb",
     protos = [":apigeeconnect_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -131,6 +130,7 @@ go_gapic_library(
     grpc_service_config = "connection_grpc_service_config.json",
     importpath = "cloud.google.com/go/apigeeconnect/apiv1;apigeeconnect",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "apigeeconnect_v1.yaml",
     deps = [
@@ -139,19 +139,13 @@ go_gapic_library(
     ],
 )
 
-go_test(
-    name = "apigeeconnect_go_gapic_test",
-    srcs = [":apigeeconnect_go_gapic_srcjar_test"],
-    embed = [":apigeeconnect_go_gapic"],
-    importpath = "cloud.google.com/go/apigeeconnect/apiv1",
-)
-
 # Open Source Packages
 go_gapic_assembly_pkg(
     name = "gapi-cloud-apigeeconnect-v1-go",
     deps = [
         ":apigeeconnect_go_gapic",
         ":apigeeconnect_go_gapic_srcjar-metadata.srcjar",
+        ":apigeeconnect_go_gapic_srcjar-snippets.srcjar",
         ":apigeeconnect_go_gapic_srcjar-test.srcjar",
         ":apigeeconnect_go_proto",
     ],
@@ -173,6 +167,7 @@ py_gapic_library(
     grpc_service_config = "connection_grpc_service_config.json",
     opt_args = ["warehouse-package-name=google-cloud-apigee-connect"],
     rest_numeric_enums = True,
+    service_yaml = "apigeeconnect_v1.yaml",
     transport = "grpc",
 )
 
@@ -201,7 +196,6 @@ load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -210,23 +204,15 @@ php_proto_library(
     deps = [":apigeeconnect_proto"],
 )
 
-php_grpc_library(
-    name = "apigeeconnect_php_grpc",
-    srcs = [":apigeeconnect_proto"],
-    deps = [":apigeeconnect_php_proto"],
-)
-
 php_gapic_library(
     name = "apigeeconnect_php_gapic",
     srcs = [":apigeeconnect_proto_with_info"],
     grpc_service_config = "connection_grpc_service_config.json",
+    migration_mode = "NEW_SURFACE_ONLY",
     rest_numeric_enums = True,
     service_yaml = "apigeeconnect_v1.yaml",
     transport = "grpc+rest",
-    deps = [
-        ":apigeeconnect_php_grpc",
-        ":apigeeconnect_php_proto",
-    ],
+    deps = [":apigeeconnect_php_proto"],
 )
 
 # Open Source Packages
@@ -234,7 +220,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-apigeeconnect-v1-php",
     deps = [
         ":apigeeconnect_php_gapic",
-        ":apigeeconnect_php_grpc",
         ":apigeeconnect_php_proto",
     ],
 )
@@ -305,6 +290,8 @@ ruby_cloud_gapic_library(
     rest_numeric_enums = True,
     ruby_cloud_description = "Apigee Connect allows the Apigee hybrid management plane to connect securely to the MART service in the runtime plane without requiring you to expose the MART endpoint on the internet. If you use Apigee Connect, you do not need to configure the MART ingress gateway with a host alias and an authorized DNS certificate.",
     ruby_cloud_title = "Apigee Connect V1",
+    service_yaml = "apigeeconnect_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":apigeeconnect_ruby_grpc",
         ":apigeeconnect_ruby_proto",
@@ -350,6 +337,7 @@ csharp_gapic_library(
     grpc_service_config = "connection_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "apigeeconnect_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":apigeeconnect_csharp_grpc",
         ":apigeeconnect_csharp_proto",

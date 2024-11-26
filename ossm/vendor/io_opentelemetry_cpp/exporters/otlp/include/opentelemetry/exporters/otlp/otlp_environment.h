@@ -3,18 +3,14 @@
 
 #pragma once
 
-#include "opentelemetry/common/kv_properties.h"
-#include "opentelemetry/nostd/string_view.h"
-
-#include "opentelemetry/sdk/common/attribute_utils.h"
-#include "opentelemetry/sdk/common/env_variables.h"
-#include "opentelemetry/sdk/version/version.h"
-
+#include <ctype.h>
 #include <algorithm>
 #include <chrono>
 #include <map>
 #include <string>
-#include <unordered_set>
+
+#include "opentelemetry/sdk/version/version.h"
+#include "opentelemetry/version.h"
 
 OPENTELEMETRY_BEGIN_NAMESPACE
 namespace exporter
@@ -40,6 +36,10 @@ inline std::string GetOtlpDefaultGrpcEndpoint()
 std::string GetOtlpDefaultHttpTracesEndpoint();
 std::string GetOtlpDefaultHttpMetricsEndpoint();
 std::string GetOtlpDefaultHttpLogsEndpoint();
+
+std::string GetOtlpDefaultHttpTracesProtocol();
+std::string GetOtlpDefaultHttpMetricsProtocol();
+std::string GetOtlpDefaultHttpLogsProtocol();
 
 // Compatibility with OTELCPP 1.8.2
 inline std::string GetOtlpDefaultHttpEndpoint()
@@ -107,7 +107,7 @@ std::string GetOtlpDefaultTracesSslTlsMaxVersion();
 std::string GetOtlpDefaultMetricsSslTlsMaxVersion();
 std::string GetOtlpDefaultLogsSslTlsMaxVersion();
 
-// For TLS 1.0, 1.1, 1.2
+// For TLS 1.2
 std::string GetOtlpDefaultTracesSslTlsCipher();
 std::string GetOtlpDefaultMetricsSslTlsCipher();
 std::string GetOtlpDefaultLogsSslTlsCipher();
@@ -147,6 +147,10 @@ inline OtlpHeaders GetOtlpDefaultHeaders()
 {
   return GetOtlpDefaultTracesHeaders();
 }
+
+std::string GetOtlpDefaultTracesCompression();
+std::string GetOtlpDefaultMetricsCompression();
+std::string GetOtlpDefaultLogsCompression();
 
 }  // namespace otlp
 }  // namespace exporter

@@ -15,12 +15,10 @@
 """Implementation of watchOS test rules."""
 
 load(
-    "@build_bazel_rules_apple//apple/internal/testing:apple_test_rule_support.bzl",
-    "apple_test_rule_support",
-)
-load(
-    "@build_bazel_rules_apple//apple/internal/testing:apple_test_bundle_support.bzl",
-    "apple_test_bundle_support",
+    "@build_bazel_rules_apple//apple:providers.bzl",
+    "AppleBundleInfo",
+    "WatchosApplicationBundleInfo",
+    "WatchosFrameworkBundleInfo",
 )
 load(
     "@build_bazel_rules_apple//apple/internal:apple_product_type.bzl",
@@ -55,10 +53,12 @@ load(
     "apple_resource_aspect",
 )
 load(
-    "@build_bazel_rules_apple//apple:providers.bzl",
-    "AppleBundleInfo",
-    "WatchosApplicationBundleInfo",
-    "WatchosFrameworkBundleInfo",
+    "@build_bazel_rules_apple//apple/internal/testing:apple_test_bundle_support.bzl",
+    "apple_test_bundle_support",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/testing:apple_test_rule_support.bzl",
+    "apple_test_rule_support",
 )
 
 _WATCHOS_TEST_HOST_PROVIDERS = [[AppleBundleInfo, WatchosApplicationBundleInfo]]
@@ -83,13 +83,21 @@ def _watchos_unit_test_bundle_impl(ctx):
 
 def _watchos_ui_test_impl(ctx):
     """Implementation of watchos_ui_test."""
-    return apple_test_rule_support.apple_test_rule_impl(ctx, "xcuitest") + [
+    return apple_test_rule_support.apple_test_rule_impl(
+        ctx = ctx,
+        requires_dossiers = False,
+        test_type = "xcuitest",
+    ) + [
         new_watchosxctestbundleinfo(),
     ]
 
 def _watchos_unit_test_impl(ctx):
     """Implementation of watchos_unit_test."""
-    return apple_test_rule_support.apple_test_rule_impl(ctx, "xctest") + [
+    return apple_test_rule_support.apple_test_rule_impl(
+        ctx = ctx,
+        requires_dossiers = False,
+        test_type = "xctest",
+    ) + [
         new_watchosxctestbundleinfo(),
     ]
 

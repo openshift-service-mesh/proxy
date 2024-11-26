@@ -132,7 +132,7 @@ static std::string GetFileContentsOrInMemoryContents(const std::string &file_pat
 #ifdef ENABLE_ASYNC_EXPORT
 template <class StubType, class RequestType, class ResponseType>
 static sdk::common::ExportResult InternalDelegateAsyncExport(
-    std::shared_ptr<OtlpGrpcClientAsyncData> async_data,
+    const std::shared_ptr<OtlpGrpcClientAsyncData> &async_data,
     StubType *stub,
     std::unique_ptr<grpc::ClientContext> &&context,
     std::unique_ptr<google::protobuf::Arena> &&arena,
@@ -163,8 +163,8 @@ static sdk::common::ExportResult InternalDelegateAsyncExport(
   call_data->arena.swap(arena);
   call_data->result_callback.swap(result_callback);
 
-  call_data->request =
-      google::protobuf::Arena::Create<RequestType>(call_data->arena.get(), std::move(request));
+  call_data->request = google::protobuf::Arena::Create<RequestType>(
+      call_data->arena.get(), std::forward<RequestType>(request));
   call_data->response = google::protobuf::Arena::Create<ResponseType>(call_data->arena.get());
 
   if (call_data->request == nullptr || call_data->response == nullptr)
@@ -297,6 +297,11 @@ std::shared_ptr<grpc::Channel> OtlpGrpcClient::MakeChannel(const OtlpGrpcClientO
     grpc_arguments.SetResourceQuota(quota);
   }
 
+  if (options.compression == "gzip")
+  {
+    grpc_arguments.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+  }
+
   if (options.use_ssl_credentials)
   {
     grpc::SslCredentialsOptions ssl_opts;
@@ -306,7 +311,7 @@ std::shared_ptr<grpc::Channel> OtlpGrpcClient::MakeChannel(const OtlpGrpcClientO
     ssl_opts.pem_private_key = GetFileContentsOrInMemoryContents(options.ssl_client_key_path,
                                                                  options.ssl_client_key_string);
     ssl_opts.pem_cert_chain  = GetFileContentsOrInMemoryContents(options.ssl_client_cert_path,
-                                                                options.ssl_client_cert_string);
+                                                                 options.ssl_client_cert_string);
 
 #endif
     channel =
@@ -337,7 +342,8 @@ std::unique_ptr<grpc::ClientContext> OtlpGrpcClient::MakeClientContext(
 
   for (auto &header : options.metadata)
   {
-    context->AddMetadata(header.first, header.second);
+    context->AddMetadata(header.first,
+                         opentelemetry::ext::http::common::UrlDecoder::Decode(header.second));
   }
 
   return context;

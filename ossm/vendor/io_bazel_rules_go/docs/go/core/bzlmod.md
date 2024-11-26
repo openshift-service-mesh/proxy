@@ -44,6 +44,10 @@ go_sdk.download(
 go_sdk.host()
 ```
 
+Nota bene: The use of `go_sdk.host()` [may break builds](https://github.com/enola-dev/enola/issues/713) whenever the host Go version is upgraded
+(because many OS package managers, such as Debian/Ubuntu's `apt`, distribute Go into a directory which contains the version, such as `/usr/lib/go-1.22/`).
+As package upgrades happen outside of Bazel's control, this will lead to non-reproducible builds. Due to this, use of `go_sdk.host()` is discouraged.
+
 You can register multiple Go SDKs and select which one to use on a per-target basis using [`go_cross_binary`](rules.md#go_cross_binary).
 As long as you specify the `version` of an SDK, it will be downloaded lazily, that is, only when it is actually needed during a particular build.
 The usual rules of [toolchain resolution](https://bazel.build/extending/toolchains#toolchain-resolution) apply, with SDKs registered in the root module taking precedence over those registered in dependencies.
@@ -147,8 +151,8 @@ use_repo(
 )
 ```
 
-Bazel emits a warning if the `use_repo` statement is out of date or missing entirely (requires Bazel 6.2.0 or higher).
-The warning contains a `buildozer` command to automatically fix the `MODULE.bazel` file (requires buildozer 6.1.1 or higher).
+When using Bazel 7.1.1 or higher, the [`@rules_go//go` target](#using-a-go-sdk) automatically updates the `use_repo` call whenever the `go.mod` file changes, using `bazel mod tidy`.
+With older versions of Bazel, a warning with a fixup command will be emitted during a build if the `use_repo` call is out of date or missing.
 
 Alternatively, you can specify a module extension tag to add an individual dependency:
 
@@ -159,6 +163,28 @@ go_deps.module(
     version = "v1.50.0",
 )
 ```
+
+#### Specifying Workspaces
+
+The `go.work` functionality is supported by the `go_deps` module extension in Gazelle.
+
+```starlark
+go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
+go_deps.from_file(go_work = "//:go.work")
+
+# All *direct* Go dependencies of all `go.mod` files referenced by the `go.work` file have to be listed explicitly.
+use_repo(
+    go_deps,
+    "com_github_gogo_protobuf",
+    "com_github_golang_mock",
+    "com_github_golang_protobuf",
+    "org_golang_x_net",
+)
+```
+
+Limitations:
+* `go.work` is supported exclusively in the root module.
+* Dependencies that are indirect and depend on a go module specified in `go.work` will have that dependency diverge from the one in `go.work`. More details can be found here: https://github.com/bazelbuild/bazel-gazelle/issues/1797.
 
 #### Depending on tools
 
@@ -187,7 +213,7 @@ Instead, if you want the tools' dependencies to be resolved independently of the
 4. Add an isolated usage of the `go_deps` extension to your module file:
 
     ```starlark
-    go_tool_deps = use_extension("@gazelle//:extensions.bzl", "go_deps", isolated = True)
+    go_tool_deps = use_extension("@gazelle//:extensions.bzl", "go_deps", isolate = True)
     go_tool_deps.from_file(go_mod = "//tools:go.mod")
     ```
 
@@ -205,6 +231,21 @@ A dependency can be added via
 bazel run @rules_go//go get golang.org/x/text@v0.3.2
 ```
 
+### Environment variables
+
+Environment variables (such as `GOPROXY` and `GOPRIVATE`) required for fetching Go dependencies can be set as follows:
+
+```starlark
+go_deps.config(
+   go_env = {
+      "GOPRIVATE": "...",
+   },
+)
+```
+
+Variables set in this way are used by `go_deps` as well as `@rules_go//go`, with other variables inheriting their value from the host environment.
+`go_env` does *not* affect Go build actions.
+
 ### Overrides
 
 The root module can override certain aspects of the dependency resolution performed by the `go_deps` extension.
@@ -217,6 +258,7 @@ The root module can override certain aspects of the dependency resolution perfor
 replace(
     golang.org/x/net v1.2.3 => example.com/fork/net v1.4.5
     golang.org/x/mod => example.com/my/mod v1.4.5
+    example.org/hello => ../../../fixtures/hello
 )
 ```
 
@@ -273,5 +315,4 @@ go_deps.archive_override(
 ### Not yet supported
 
 * Fetching dependencies from Git repositories
-* `go.mod` `replace` directives referencing local files
 * `go.mod` `exclude` directices

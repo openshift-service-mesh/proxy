@@ -1,4 +1,4 @@
-// Copyright 2021 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import "google/cloud/retail/v2beta/import_config.proto";
 import "google/longrunning/operations.proto";
 
 option csharp_namespace = "Google.Cloud.Retail.V2Beta";
-option go_package = "google.golang.org/genproto/googleapis/cloud/retail/v2beta;retail";
+option go_package = "cloud.google.com/go/retail/apiv2beta/retailpb;retailpb";
 option java_multiple_files = true;
 option java_outer_classname = "CompletionServiceProto";
 option java_package = "com.google.cloud.retail.v2beta";
@@ -33,7 +33,7 @@ option objc_class_prefix = "RETAIL";
 option php_namespace = "Google\\Cloud\\Retail\\V2beta";
 option ruby_package = "Google::Cloud::Retail::V2beta";
 
-// Auto-completion service for retail.
+// Autocomplete service for retail.
 //
 // This feature is only available for users who have Retail Search enabled.
 // Enable Retail Search on Cloud Console before using this feature.
@@ -74,7 +74,7 @@ service CompletionService {
   }
 }
 
-// Auto-complete parameters.
+// Autocomplete parameters.
 message CompleteQueryRequest {
   // Required. Catalog for which the completion is performed.
   //
@@ -150,9 +150,22 @@ message CompleteQueryRequest {
   // The maximum allowed max suggestions is 20. If it is set higher, it will be
   // capped by 20.
   int32 max_suggestions = 5;
+
+  // If true, attribute suggestions are enabled and provided in response.
+  //
+  // This field is only available for "cloud-retail" dataset.
+  bool enable_attribute_suggestions = 9;
+
+  // The entity for customers who run multiple entities, domains, sites, or
+  // regions, for example, `Google US`, `Google Ads`, `Waymo`,
+  // `google.com`, `youtube.com`, etc.
+  // If this is set, it must be an exact match with
+  // [UserEvent.entity][google.cloud.retail.v2beta.UserEvent.entity] to get
+  // per-entity autocomplete results.
+  string entity = 10;
 }
 
-// Response of the auto-complete query.
+// Response of the autocomplete query.
 message CompleteQueryResponse {
   // Resource that represents completion results.
   message CompletionResult {
@@ -171,8 +184,10 @@ message CompleteQueryResponse {
     map<string, CustomAttribute> attributes = 2;
   }
 
-  // Recent search of this user.
+  // Deprecated: Recent search of this user.
   message RecentSearchResult {
+    option deprecated = true;
+
     // The recent search query.
     string recent_search = 1;
   }
@@ -187,9 +202,9 @@ message CompleteQueryResponse {
   // attribution of complete model performance.
   string attribution_token = 2;
 
-  // Matched recent searches of this user. The maximum number of recent searches
-  // is 10. This field is a restricted feature. Contact Retail Search support
-  // team if you are interested in enabling it.
+  // Deprecated. Matched recent searches of this user. The maximum number of
+  // recent searches is 10. This field is a restricted feature. If you want to
+  // enable it, contact Retail Search support.
   //
   // This feature is only available when
   // [CompleteQueryRequest.visitor_id][google.cloud.retail.v2beta.CompleteQueryRequest.visitor_id]
@@ -208,5 +223,5 @@ message CompleteQueryResponse {
   //
   // Recent searches are deduplicated. More recent searches will be reserved
   // when duplication happens.
-  repeated RecentSearchResult recent_search_results = 3;
+  repeated RecentSearchResult recent_search_results = 3 [deprecated = true];
 }

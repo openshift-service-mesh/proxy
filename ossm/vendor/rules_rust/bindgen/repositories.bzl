@@ -18,7 +18,7 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 load("//bindgen/3rdparty/crates:defs.bzl", "crate_repositories")
 
-BINDGEN_VERSION = "0.65.1"
+BINDGEN_VERSION = "0.70.1"
 
 # buildifier: disable=unnamed-macro
 def rust_bindgen_dependencies():
@@ -47,9 +47,9 @@ def rust_bindgen_dependencies():
     maybe(
         http_archive,
         name = bindgen_name,
-        sha256 = "33373a4e0ec8b6fa2654e0c941ad16631b0d564cfd20e7e4b3db4c5b28f4a237",
+        integrity = "sha256-Mz+eRtWNh1r7irkjwi27fmF4j1WtKPK12Yv5ENkL1ao=",
         type = "tar.gz",
-        urls = ["https://crates.io/api/v1/crates/bindgen-cli/{}/download".format(BINDGEN_VERSION)],
+        urls = ["https://static.crates.io/crates/bindgen-cli/bindgen-cli-{}.crate".format(BINDGEN_VERSION)],
         strip_prefix = "bindgen-cli-{}".format(BINDGEN_VERSION),
         build_file = Label("//bindgen/3rdparty:BUILD.bindgen-cli.bazel"),
     )

@@ -15,7 +15,7 @@ filegroup(
 
 filegroup(
     name = "whl",
-    srcs = ["MarkupSafe-2.1.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"],
+    srcs = ["MarkupSafe-2.1.5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"],
     data = [],
     visibility = ["//visibility:public"],
 )

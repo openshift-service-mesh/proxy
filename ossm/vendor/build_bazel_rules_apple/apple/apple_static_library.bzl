@@ -15,6 +15,10 @@
 """apple_static_library Starlark implementation"""
 
 load(
+    "@build_bazel_rules_apple//apple:providers.bzl",
+    "ApplePlatformInfo",
+)
+load(
     "@build_bazel_rules_apple//apple/internal:linking_support.bzl",
     "linking_support",
 )
@@ -34,18 +38,13 @@ load(
     "@build_bazel_rules_apple//apple/internal:transition_support.bzl",
     "transition_support",
 )
-load(
-    "@build_bazel_rules_apple//apple:providers.bzl",
-    "ApplePlatformInfo",
-)
 
 def _apple_static_library_impl(ctx):
-    # Fail early if using the not yet fully supported visionOS platform type outside of testing.
     if ctx.attr.platform_type == "visionos":
         xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
-        if xcode_version_config.xcode_version() < apple_common.dotted_version("15.0"):
+        if xcode_version_config.xcode_version() < apple_common.dotted_version("15.1"):
             fail("""
-visionOS static libraries require a visionOS SDK provided by Xcode 15 or later.
+visionOS static libraries require a visionOS SDK provided by Xcode 15.1 beta or later.
 
 Resolved Xcode is version {xcode_version}.
 """.format(xcode_version = str(xcode_version_config.xcode_version())))

@@ -32,6 +32,7 @@ proto_library(
         "//google/type:dayofweek_proto",
         "//google/type:timeofday_proto",
         "@com_google_protobuf//:duration_proto",
+        "@com_google_protobuf//:empty_proto",
         "@com_google_protobuf//:field_mask_proto",
         "@com_google_protobuf//:timestamp_proto",
     ],
@@ -118,13 +119,12 @@ load(
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "memcache_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/memcache/v1",
+    importpath = "cloud.google.com/go/memcache/apiv1/memcachepb",
     protos = [":memcache_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -140,6 +140,7 @@ go_gapic_library(
     grpc_service_config = "memcache_grpc_service_config.json",
     importpath = "cloud.google.com/go/memcache/apiv1;memcache",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "memcache_v1.yaml",
     transport = "grpc+rest",
@@ -153,19 +154,13 @@ go_gapic_library(
     ],
 )
 
-go_test(
-    name = "memcache_go_gapic_test",
-    srcs = [":memcache_go_gapic_srcjar_test"],
-    embed = [":memcache_go_gapic"],
-    importpath = "cloud.google.com/go/memcache/apiv1",
-)
-
 # Open Source Packages
 go_gapic_assembly_pkg(
     name = "gapi-cloud-memcache-v1-go",
     deps = [
         ":memcache_go_gapic",
         ":memcache_go_gapic_srcjar-metadata.srcjar",
+        ":memcache_go_gapic_srcjar-snippets.srcjar",
         ":memcache_go_gapic_srcjar-test.srcjar",
         ":memcache_go_proto",
     ],
@@ -187,7 +182,7 @@ py_gapic_library(
     grpc_service_config = "memcache_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "memcache_v1.yaml",
-    transport = "grpc",
+    transport = "grpc+rest",
     deps = [
     ],
 )
@@ -217,7 +212,6 @@ load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -226,23 +220,15 @@ php_proto_library(
     deps = [":memcache_proto"],
 )
 
-php_grpc_library(
-    name = "memcache_php_grpc",
-    srcs = [":memcache_proto"],
-    deps = [":memcache_php_proto"],
-)
-
 php_gapic_library(
     name = "memcache_php_gapic",
     srcs = [":memcache_proto_with_info"],
     grpc_service_config = "memcache_grpc_service_config.json",
+    migration_mode = "NEW_SURFACE_ONLY",
     rest_numeric_enums = True,
     service_yaml = "memcache_v1.yaml",
     transport = "grpc+rest",
-    deps = [
-        ":memcache_php_grpc",
-        ":memcache_php_proto",
-    ],
+    deps = [":memcache_php_proto"],
 )
 
 # Open Source Packages
@@ -250,7 +236,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-memcache-v1-php",
     deps = [
         ":memcache_php_gapic",
-        ":memcache_php_grpc",
         ":memcache_php_proto",
     ],
 )
@@ -322,6 +307,7 @@ ruby_cloud_gapic_library(
     ruby_cloud_description = "Google Cloud Memorystore for Memcached API is used for creating and managing Memcached instances in GCP.",
     ruby_cloud_title = "Google Cloud Memorystore for Memcached V1",
     service_yaml = "memcache_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":memcache_ruby_grpc",
         ":memcache_ruby_proto",
@@ -367,6 +353,7 @@ csharp_gapic_library(
     grpc_service_config = "memcache_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "memcache_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":memcache_csharp_grpc",
         ":memcache_csharp_proto",

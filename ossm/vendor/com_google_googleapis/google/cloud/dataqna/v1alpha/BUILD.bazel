@@ -75,6 +75,7 @@ java_gapic_library(
     srcs = [":dataqna_proto_with_info"],
     grpc_service_config = "dataqna_grpc_service_config.json",
     rest_numeric_enums = False,
+    service_yaml = "dataqna_v1alpha.yaml",
     test_deps = [
         ":dataqna_java_grpc",
     ],
@@ -116,13 +117,12 @@ load(
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "dataqna_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/dataqna/v1alpha",
+    importpath = "cloud.google.com/go/dataqna/apiv1alpha/dataqnapb",
     protos = [":dataqna_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -135,6 +135,8 @@ go_gapic_library(
     srcs = [":dataqna_proto_with_info"],
     grpc_service_config = "dataqna_grpc_service_config.json",
     importpath = "cloud.google.com/go/dataqna/apiv1alpha;dataqna",
+    metadata = True,
+    release_level = "alpha",
     rest_numeric_enums = False,
     service_yaml = "dataqna_v1alpha.yaml",
     transport = "grpc+rest",
@@ -143,18 +145,12 @@ go_gapic_library(
     ],
 )
 
-go_test(
-    name = "dataqna_go_gapic_test",
-    srcs = [":dataqna_go_gapic_srcjar_test"],
-    embed = [":dataqna_go_gapic"],
-    importpath = "cloud.google.com/go/dataqna/apiv1alpha",
-)
-
 # Open Source Packages
 go_gapic_assembly_pkg(
     name = "gapi-cloud-dataqna-v1alpha-go",
     deps = [
         ":dataqna_go_gapic",
+        ":dataqna_go_gapic_srcjar-snippets.srcjar",
         ":dataqna_go_gapic_srcjar-test.srcjar",
         ":dataqna_go_proto",
     ],
@@ -178,7 +174,8 @@ py_gapic_library(
         "warehouse-package-name=google-cloud-data-qna",
     ],
     rest_numeric_enums = False,
-    transport = "grpc",
+    service_yaml = "dataqna_v1alpha.yaml",
+    transport = "grpc+rest",
 )
 
 py_test(
@@ -205,7 +202,6 @@ load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -214,22 +210,14 @@ php_proto_library(
     deps = [":dataqna_proto"],
 )
 
-php_grpc_library(
-    name = "dataqna_php_grpc",
-    srcs = [":dataqna_proto"],
-    deps = [":dataqna_php_proto"],
-)
-
 php_gapic_library(
     name = "dataqna_php_gapic",
     srcs = [":dataqna_proto_with_info"],
     grpc_service_config = "dataqna_grpc_service_config.json",
     rest_numeric_enums = False,
+    service_yaml = "dataqna_v1alpha.yaml",
     transport = "grpc+rest",
-    deps = [
-        ":dataqna_php_grpc",
-        ":dataqna_php_proto",
-    ],
+    deps = [":dataqna_php_proto"],
 )
 
 # Open Source Packages
@@ -237,7 +225,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-dataqna-v1alpha-php",
     deps = [
         ":dataqna_php_gapic",
-        ":dataqna_php_grpc",
         ":dataqna_php_proto",
     ],
 )
@@ -260,7 +247,7 @@ nodejs_gapic_library(
     package = "google.cloud.dataqna.v1alpha",
     rest_numeric_enums = False,
     service_yaml = "dataqna_v1alpha.yaml",
-    transport = "grpc",
+    transport = "grpc+rest",
     deps = [],
 )
 
@@ -309,6 +296,7 @@ ruby_cloud_gapic_library(
     rest_numeric_enums = False,
     ruby_cloud_description = "Data QnA is a natural language question and answer service for BigQuery data.",
     ruby_cloud_title = "BigQuery Data QnA V1alpha",
+    service_yaml = "dataqna_v1alpha.yaml",
     deps = [
         ":dataqna_ruby_grpc",
         ":dataqna_ruby_proto",

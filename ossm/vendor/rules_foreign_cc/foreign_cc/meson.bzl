@@ -3,6 +3,12 @@
 load("//foreign_cc:utils.bzl", "full_label")
 load("//foreign_cc/built_tools:meson_build.bzl", "meson_tool")
 load(
+    "//foreign_cc/private:cc_toolchain_util.bzl",
+    "absolutize_path_in_str",
+    "get_flags_info",
+    "get_tools_info",
+)
+load(
     "//foreign_cc/private:detect_root.bzl",
     "detect_root",
 )
@@ -61,7 +67,33 @@ def _create_meson_script(configureParameters):
     attrs = configureParameters.attrs
     inputs = configureParameters.inputs
 
+    tools = get_tools_info(ctx)
     script = pkgconfig_script(inputs.ext_build_dirs)
+
+    # CFLAGS and CXXFLAGS are also set in foreign_cc/private/cmake_script.bzl, so that meson
+    # can use the intended tools.
+    # However, they are split by meson on whitespace. For Windows it's common to have spaces in path
+    # https://github.com/mesonbuild/meson/issues/3565
+    # Skip setting them in this case.
+    if " " not in tools.cc:
+        script.append("##export_var## CC {}".format(_absolutize(ctx.workspace_name, tools.cc)))
+    if " " not in tools.cxx:
+        script.append("##export_var## CXX {}".format(_absolutize(ctx.workspace_name, tools.cxx)))
+
+    # set flags same as foreign_cc/private/cc_toolchain_util.bzl
+    # cannot use get_flags_info() because bazel adds additional flags that
+    # aren't compatible with compiler or linker above
+    copts = (ctx.fragments.cpp.copts + ctx.fragments.cpp.conlyopts + getattr(ctx.attr, "copts", [])) or []
+    cxxopts = (ctx.fragments.cpp.copts + ctx.fragments.cpp.cxxopts + getattr(ctx.attr, "copts", [])) or []
+
+    if copts:
+        script.append("##export_var## CFLAGS \"{} ${{CFLAGS:-}}\"".format(" ".join(copts).replace("\"", "'")))
+    if cxxopts:
+        script.append("##export_var## CXXFLAGS \"{} ${{CXXFLAGS:-}}\"".format(" ".join(cxxopts).replace("\"", "'")))
+
+    flags = get_flags_info(ctx)
+    if flags.cxx_linker_executable:
+        script.append("##export_var## LDFLAGS \"{} ${{LDFLAGS:-}}\"".format(" ".join(flags.cxx_linker_executable).replace("\"", "'")))
 
     script.append("##export_var## CMAKE {}".format(attrs.cmake_path))
     script.append("##export_var## NINJA {}".format(attrs.ninja_path))
@@ -78,10 +110,13 @@ def _create_meson_script(configureParameters):
 
     prefix = "{} ".format(expand_locations_and_make_variables(ctx, attrs.tool_prefix, "tool_prefix", data)) if attrs.tool_prefix else ""
 
-    script.append("{prefix}{meson} --prefix={install_dir} {options} {source_dir}".format(
+    setup_args_str = " ".join(expand_locations_and_make_variables(ctx, ctx.attr.setup_args, "setup_args", data))
+
+    script.append("{prefix}{meson} setup --prefix={install_dir} {setup_args} {options} {source_dir}".format(
         prefix = prefix,
         meson = attrs.meson_path,
         install_dir = "$$INSTALLDIR$$",
+        setup_args = setup_args_str,
         options = options_str,
         source_dir = "$$EXT_BUILD_ROOT$$/" + root,
     ))
@@ -138,6 +173,10 @@ def _attrs():
             ),
             mandatory = False,
             default = {},
+        ),
+        "setup_args": attr.string_list(
+            doc = "Arguments for the Meson setup command",
+            mandatory = False,
         ),
     })
     return attrs
@@ -201,3 +240,9 @@ def meson_with_requirements(name, requirements, **kwargs):
         toolchain = full_label("built_meson_toolchain_for_{}".format(name)),
         **kwargs
     )
+
+def _absolutize(workspace_name, text, force = False):
+    if text.strip(" ").startswith("C:") or text.strip(" ").startswith("c:"):
+        return "\"{}\"".format(text)
+
+    return absolutize_path_in_str(workspace_name, "$EXT_BUILD_ROOT/", text, force)

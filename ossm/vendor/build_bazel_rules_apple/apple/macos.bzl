@@ -15,21 +15,6 @@
 """Bazel rules for creating macOS applications and bundles."""
 
 load(
-    "@build_bazel_rules_apple//apple/internal/testing:apple_test_assembler.bzl",
-    "apple_test_assembler",
-)
-load(
-    "@build_bazel_rules_apple//apple/internal/testing:build_test_rules.bzl",
-    "apple_build_test_rule",
-)
-load(
-    "@build_bazel_rules_apple//apple/internal/testing:macos_rules.bzl",
-    _macos_internal_ui_test_bundle = "macos_internal_ui_test_bundle",
-    _macos_internal_unit_test_bundle = "macos_internal_unit_test_bundle",
-    _macos_ui_test = "macos_ui_test",
-    _macos_unit_test = "macos_unit_test",
-)
-load(
     "@build_bazel_rules_apple//apple/internal:macos_binary_support.bzl",
     "macos_binary_infoplist",
     "macos_command_line_launchdplist",
@@ -48,6 +33,21 @@ load(
     _macos_spotlight_importer = "macos_spotlight_importer",
     _macos_static_framework = "macos_static_framework",
     _macos_xpc_service = "macos_xpc_service",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/testing:apple_test_assembler.bzl",
+    "apple_test_assembler",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/testing:build_test_rules.bzl",
+    "apple_build_test_rule",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/testing:macos_rules.bzl",
+    _macos_internal_ui_test_bundle = "macos_internal_ui_test_bundle",
+    _macos_internal_unit_test_bundle = "macos_internal_unit_test_bundle",
+    _macos_ui_test = "macos_ui_test",
+    _macos_unit_test = "macos_unit_test",
 )
 
 # TODO(b/118104491): Remove these re-exports and move the rule definitions into this file.
@@ -242,7 +242,7 @@ def macos_dynamic_framework(name, **kwargs):
         **bundling_args
     )
 
-_DEFAULT_TEST_RUNNER = "@build_bazel_rules_apple//apple/testing/default_runner:macos_default_runner"
+_DEFAULT_TEST_RUNNER = str(Label("//apple/testing/default_runner:macos_default_runner"))
 
 def macos_unit_test(name, **kwargs):
     runner = kwargs.pop("runner", _DEFAULT_TEST_RUNNER)

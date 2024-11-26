@@ -10,9 +10,9 @@ def rules_foreign_cc_dependencies(
         native_tools_toolchains = [],
         register_default_tools = True,
         cmake_version = "3.23.2",
-        make_version = "4.4",
-        ninja_version = "1.11.1",
-        meson_version = "1.1.1",
+        make_version = "4.4.1",
+        ninja_version = "1.12.1",
+        meson_version = "1.5.1",
         pkgconfig_version = "0.29.2",
         register_preinstalled_tools = True,
         register_built_tools = True,
@@ -82,6 +82,14 @@ def rules_foreign_cc_dependencies(
 
     if register_preinstalled_tools:
         preinstalled_toolchains()
+
+    maybe(
+        http_archive,
+        name = "bazel_features",
+        sha256 = "ba1282c1aa1d1fffdcf994ab32131d7c7551a9bc960fbf05f42d55a1b930cbfb",
+        strip_prefix = "bazel_features-1.15.0",
+        url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.15.0/bazel_features-v1.15.0.tar.gz",
+    )
 
     maybe(
         http_archive,

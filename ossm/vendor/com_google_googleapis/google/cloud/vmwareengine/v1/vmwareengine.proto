@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,13 +19,16 @@ package google.cloud.vmwareengine.v1;
 import "google/api/annotations.proto";
 import "google/api/client.proto";
 import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
 import "google/api/resource.proto";
+import "google/cloud/vmwareengine/v1/vmwareengine_resources.proto";
 import "google/longrunning/operations.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 
 option csharp_namespace = "Google.Cloud.VmwareEngine.V1";
-option go_package = "google.golang.org/genproto/googleapis/cloud/vmwareengine/v1;vmwareengine";
+option go_package = "cloud.google.com/go/vmwareengine/apiv1/vmwareenginepb;vmwareenginepb";
 option java_multiple_files = true;
 option java_outer_classname = "VmwareengineProto";
 option java_package = "com.google.cloud.vmwareengine.v1";
@@ -60,9 +63,9 @@ service VmwareEngine {
   }
 
   // Creates a new `PrivateCloud` resource in a given project and location.
-  // Private clouds can only be created in zones, regional private clouds are
-  // not supported.
-  //
+  // Private clouds of type `STANDARD` and
+  // `TIME_LIMITED` are zonal resources, `STRETCHED` private clouds are
+  // regional.
   // Creating a private cloud also creates a [management
   // cluster](https://cloud.google.com/vmware-engine/docs/concepts-vmware-components)
   // for that private cloud.
@@ -178,8 +181,7 @@ service VmwareEngine {
     };
   }
 
-  // Modifies a `Cluster` resource. Only the following fields can be updated:
-  // `node_type_configs.*.node_count`. Only fields specified in `updateMask` are
+  // Modifies a `Cluster` resource. Only fields specified in `updateMask` are
   // applied.
   //
   // During operation processing, the resource is temporarily in the `ACTIVE`
@@ -215,12 +217,257 @@ service VmwareEngine {
     };
   }
 
+  // Lists nodes in a given cluster.
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse) {
+    option (google.api.http) = {
+      get: "/v1/{parent=projects/*/locations/*/privateClouds/*/clusters/*}/nodes"
+    };
+    option (google.api.method_signature) = "parent";
+  }
+
+  // Gets details of a single node.
+  rpc GetNode(GetNodeRequest) returns (Node) {
+    option (google.api.http) = {
+      get: "/v1/{name=projects/*/locations/*/privateClouds/*/clusters/*/nodes/*}"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Lists external IP addresses assigned to VMware workload VMs in a given
+  // private cloud.
+  rpc ListExternalAddresses(ListExternalAddressesRequest)
+      returns (ListExternalAddressesResponse) {
+    option (google.api.http) = {
+      get: "/v1/{parent=projects/*/locations/*/privateClouds/*}/externalAddresses"
+    };
+    option (google.api.method_signature) = "parent";
+  }
+
+  // Lists external IP addresses assigned to VMware workload VMs within the
+  // scope of the given network policy.
+  rpc FetchNetworkPolicyExternalAddresses(
+      FetchNetworkPolicyExternalAddressesRequest)
+      returns (FetchNetworkPolicyExternalAddressesResponse) {
+    option (google.api.http) = {
+      get: "/v1/{network_policy=projects/*/locations/*/networkPolicies/*}:fetchExternalAddresses"
+    };
+    option (google.api.method_signature) = "network_policy";
+  }
+
+  // Gets details of a single external IP address.
+  rpc GetExternalAddress(GetExternalAddressRequest) returns (ExternalAddress) {
+    option (google.api.http) = {
+      get: "/v1/{name=projects/*/locations/*/privateClouds/*/externalAddresses/*}"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Creates a new `ExternalAddress` resource in a given private cloud. The
+  // network policy that corresponds to the private cloud must have the external
+  // IP address network service enabled (`NetworkPolicy.external_ip`).
+  rpc CreateExternalAddress(CreateExternalAddressRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      post: "/v1/{parent=projects/*/locations/*/privateClouds/*}/externalAddresses"
+      body: "external_address"
+    };
+    option (google.api.method_signature) =
+        "parent,external_address,external_address_id";
+    option (google.longrunning.operation_info) = {
+      response_type: "ExternalAddress"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Updates the parameters of a single external IP address.
+  // Only fields specified in `update_mask` are applied.
+  //
+  // During operation processing, the resource is temporarily in the `ACTIVE`
+  // state before the operation fully completes. For that period of time, you
+  // can't update the resource. Use the operation status to determine when the
+  // processing fully completes.
+  rpc UpdateExternalAddress(UpdateExternalAddressRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      patch: "/v1/{external_address.name=projects/*/locations/*/privateClouds/*/externalAddresses/*}"
+      body: "external_address"
+    };
+    option (google.api.method_signature) = "external_address,update_mask";
+    option (google.longrunning.operation_info) = {
+      response_type: "ExternalAddress"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Deletes a single external IP address. When you delete an external IP
+  // address, connectivity between the external IP address and the corresponding
+  // internal IP address is lost.
+  rpc DeleteExternalAddress(DeleteExternalAddressRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      delete: "/v1/{name=projects/*/locations/*/privateClouds/*/externalAddresses/*}"
+    };
+    option (google.api.method_signature) = "name";
+    option (google.longrunning.operation_info) = {
+      response_type: "google.protobuf.Empty"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
   // Lists subnets in a given private cloud.
   rpc ListSubnets(ListSubnetsRequest) returns (ListSubnetsResponse) {
     option (google.api.http) = {
       get: "/v1/{parent=projects/*/locations/*/privateClouds/*}/subnets"
     };
     option (google.api.method_signature) = "parent";
+  }
+
+  // Gets details of a single subnet.
+  rpc GetSubnet(GetSubnetRequest) returns (Subnet) {
+    option (google.api.http) = {
+      get: "/v1/{name=projects/*/locations/*/privateClouds/*/subnets/*}"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Updates the parameters of a single subnet. Only fields specified in
+  // `update_mask` are applied.
+  //
+  // *Note*: This API is synchronous and always returns a successful
+  // `google.longrunning.Operation` (LRO). The returned LRO will only have
+  // `done` and `response` fields.
+  rpc UpdateSubnet(UpdateSubnetRequest) returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      patch: "/v1/{subnet.name=projects/*/locations/*/privateClouds/*/subnets/*}"
+      body: "subnet"
+    };
+    option (google.api.method_signature) = "subnet,update_mask";
+    option (google.longrunning.operation_info) = {
+      response_type: "Subnet"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Lists `ExternalAccessRule` resources in the specified network policy.
+  rpc ListExternalAccessRules(ListExternalAccessRulesRequest)
+      returns (ListExternalAccessRulesResponse) {
+    option (google.api.http) = {
+      get: "/v1/{parent=projects/*/locations/*/networkPolicies/*}/externalAccessRules"
+    };
+    option (google.api.method_signature) = "parent";
+  }
+
+  // Gets details of a single external access rule.
+  rpc GetExternalAccessRule(GetExternalAccessRuleRequest)
+      returns (ExternalAccessRule) {
+    option (google.api.http) = {
+      get: "/v1/{name=projects/*/locations/*/networkPolicies/*/externalAccessRules/*}"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Creates a new external access rule in a given network policy.
+  rpc CreateExternalAccessRule(CreateExternalAccessRuleRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      post: "/v1/{parent=projects/*/locations/*/networkPolicies/*}/externalAccessRules"
+      body: "external_access_rule"
+    };
+    option (google.api.method_signature) =
+        "parent,external_access_rule,external_access_rule_id";
+    option (google.longrunning.operation_info) = {
+      response_type: "ExternalAccessRule"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Updates the parameters of a single external access rule.
+  // Only fields specified in `update_mask` are applied.
+  rpc UpdateExternalAccessRule(UpdateExternalAccessRuleRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      patch: "/v1/{external_access_rule.name=projects/*/locations/*/networkPolicies/*/externalAccessRules/*}"
+      body: "external_access_rule"
+    };
+    option (google.api.method_signature) = "external_access_rule,update_mask";
+    option (google.longrunning.operation_info) = {
+      response_type: "ExternalAccessRule"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Deletes a single external access rule.
+  rpc DeleteExternalAccessRule(DeleteExternalAccessRuleRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      delete: "/v1/{name=projects/*/locations/*/networkPolicies/*/externalAccessRules/*}"
+    };
+    option (google.api.method_signature) = "name";
+    option (google.longrunning.operation_info) = {
+      response_type: "google.protobuf.Empty"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Lists logging servers configured for a given private
+  // cloud.
+  rpc ListLoggingServers(ListLoggingServersRequest)
+      returns (ListLoggingServersResponse) {
+    option (google.api.http) = {
+      get: "/v1/{parent=projects/*/locations/*/privateClouds/*}/loggingServers"
+    };
+    option (google.api.method_signature) = "parent";
+  }
+
+  // Gets details of a logging server.
+  rpc GetLoggingServer(GetLoggingServerRequest) returns (LoggingServer) {
+    option (google.api.http) = {
+      get: "/v1/{name=projects/*/locations/*/privateClouds/*/loggingServers/*}"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Create a new logging server for a given private cloud.
+  rpc CreateLoggingServer(CreateLoggingServerRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      post: "/v1/{parent=projects/*/locations/*/privateClouds/*}/loggingServers"
+      body: "logging_server"
+    };
+    option (google.api.method_signature) =
+        "parent,logging_server,logging_server_id";
+    option (google.longrunning.operation_info) = {
+      response_type: "LoggingServer"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Updates the parameters of a single logging server.
+  // Only fields specified in `update_mask` are applied.
+  rpc UpdateLoggingServer(UpdateLoggingServerRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      patch: "/v1/{logging_server.name=projects/*/locations/*/privateClouds/*/loggingServers/*}"
+      body: "logging_server"
+    };
+    option (google.api.method_signature) = "logging_server,update_mask";
+    option (google.longrunning.operation_info) = {
+      response_type: "LoggingServer"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Deletes a single logging server.
+  rpc DeleteLoggingServer(DeleteLoggingServerRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      delete: "/v1/{name=projects/*/locations/*/privateClouds/*/loggingServers/*}"
+    };
+    option (google.api.method_signature) = "name";
+    option (google.longrunning.operation_info) = {
+      response_type: "google.protobuf.Empty"
+      metadata_type: "OperationMetadata"
+    };
   }
 
   // Lists node types
@@ -282,6 +529,109 @@ service VmwareEngine {
       response_type: "PrivateCloud"
       metadata_type: "OperationMetadata"
     };
+  }
+
+  // Gets details of the `DnsForwarding` config.
+  rpc GetDnsForwarding(GetDnsForwardingRequest) returns (DnsForwarding) {
+    option (google.api.http) = {
+      get: "/v1/{name=projects/*/locations/*/privateClouds/*/dnsForwarding}"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Updates the parameters of the `DnsForwarding` config, like associated
+  // domains. Only fields specified in `update_mask` are applied.
+  rpc UpdateDnsForwarding(UpdateDnsForwardingRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      patch: "/v1/{dns_forwarding.name=projects/*/locations/*/privateClouds/*/dnsForwarding}"
+      body: "dns_forwarding"
+    };
+    option (google.api.method_signature) = "dns_forwarding,update_mask";
+    option (google.longrunning.operation_info) = {
+      response_type: "DnsForwarding"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Retrieves a `NetworkPeering` resource by its resource name. The resource
+  // contains details of the network peering, such as peered
+  // networks, import and export custom route configurations, and peering state.
+  // NetworkPeering is a global resource and location can only be global.
+  rpc GetNetworkPeering(GetNetworkPeeringRequest) returns (NetworkPeering) {
+    option (google.api.http) = {
+      get: "/v1/{name=projects/*/locations/*/networkPeerings/*}"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Lists `NetworkPeering` resources in a given project. NetworkPeering is a
+  // global resource and location can only be global.
+  rpc ListNetworkPeerings(ListNetworkPeeringsRequest)
+      returns (ListNetworkPeeringsResponse) {
+    option (google.api.http) = {
+      get: "/v1/{parent=projects/*/locations/*}/networkPeerings"
+    };
+    option (google.api.method_signature) = "parent";
+  }
+
+  // Creates a new network peering between the peer network and VMware Engine
+  // network provided in a `NetworkPeering` resource. NetworkPeering is a
+  // global resource and location can only be global.
+  rpc CreateNetworkPeering(CreateNetworkPeeringRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      post: "/v1/{parent=projects/*/locations/*}/networkPeerings"
+      body: "network_peering"
+    };
+    option (google.api.method_signature) =
+        "parent,network_peering,network_peering_id";
+    option (google.longrunning.operation_info) = {
+      response_type: "NetworkPeering"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Deletes a `NetworkPeering` resource. When a network peering is deleted for
+  // a VMware Engine network, the peer network becomes inaccessible to that
+  // VMware Engine network. NetworkPeering is a global resource and location can
+  // only be global.
+  rpc DeleteNetworkPeering(DeleteNetworkPeeringRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      delete: "/v1/{name=projects/*/locations/*/networkPeerings/*}"
+    };
+    option (google.api.method_signature) = "name";
+    option (google.longrunning.operation_info) = {
+      response_type: "google.protobuf.Empty"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Modifies a `NetworkPeering` resource. Only the `description` field can be
+  // updated. Only fields specified in `updateMask` are applied. NetworkPeering
+  // is a global resource and location can only be global.
+  rpc UpdateNetworkPeering(UpdateNetworkPeeringRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      patch: "/v1/{network_peering.name=projects/*/locations/*/networkPeerings/*}"
+      body: "network_peering"
+    };
+    option (google.api.method_signature) = "network_peering,update_mask";
+    option (google.longrunning.operation_info) = {
+      response_type: "NetworkPeering"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Lists the network peering routes exchanged over a peering connection.
+  // NetworkPeering is a global resource and location can only be global.
+  rpc ListPeeringRoutes(ListPeeringRoutesRequest)
+      returns (ListPeeringRoutesResponse) {
+    option (google.api.http) = {
+      get: "/v1/{parent=projects/*/locations/*/networkPeerings/*}/peeringRoutes"
+    };
+    option (google.api.method_signature) = "parent";
   }
 
   // Creates a new HCX activation key in a given private cloud.
@@ -391,6 +741,91 @@ service VmwareEngine {
     };
   }
 
+  // Lists Consumer VPCs bound to Management DNS Zone of a given private cloud.
+  rpc ListManagementDnsZoneBindings(ListManagementDnsZoneBindingsRequest)
+      returns (ListManagementDnsZoneBindingsResponse) {
+    option (google.api.http) = {
+      get: "/v1/{parent=projects/*/locations/*/privateClouds/*}/managementDnsZoneBindings"
+    };
+    option (google.api.method_signature) = "parent";
+  }
+
+  // Retrieves a 'ManagementDnsZoneBinding' resource by its resource name.
+  rpc GetManagementDnsZoneBinding(GetManagementDnsZoneBindingRequest)
+      returns (ManagementDnsZoneBinding) {
+    option (google.api.http) = {
+      get: "/v1/{name=projects/*/locations/*/privateClouds/*/managementDnsZoneBindings/*}"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // Creates a new `ManagementDnsZoneBinding` resource in a private cloud.
+  // This RPC creates the DNS binding and the resource that represents the
+  // DNS binding of the consumer VPC network to the management DNS zone. A
+  // management DNS zone is the Cloud DNS cross-project binding zone that
+  // VMware Engine creates for each private cloud. It contains FQDNs and
+  // corresponding IP addresses for the private cloud's ESXi hosts and
+  // management VM appliances like vCenter and NSX Manager.
+  rpc CreateManagementDnsZoneBinding(CreateManagementDnsZoneBindingRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      post: "/v1/{parent=projects/*/locations/*/privateClouds/*}/managementDnsZoneBindings"
+      body: "management_dns_zone_binding"
+    };
+    option (google.api.method_signature) =
+        "parent,management_dns_zone_binding,management_dns_zone_binding_id";
+    option (google.longrunning.operation_info) = {
+      response_type: "ManagementDnsZoneBinding"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Updates a `ManagementDnsZoneBinding` resource.
+  // Only fields specified in `update_mask` are applied.
+  rpc UpdateManagementDnsZoneBinding(UpdateManagementDnsZoneBindingRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      patch: "/v1/{management_dns_zone_binding.name=projects/*/locations/*/privateClouds/*/managementDnsZoneBindings/*}"
+      body: "management_dns_zone_binding"
+    };
+    option (google.api.method_signature) =
+        "management_dns_zone_binding,update_mask";
+    option (google.longrunning.operation_info) = {
+      response_type: "ManagementDnsZoneBinding"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Deletes a `ManagementDnsZoneBinding` resource. When a management DNS zone
+  // binding is deleted, the corresponding consumer VPC network is no longer
+  // bound to the management DNS zone.
+  rpc DeleteManagementDnsZoneBinding(DeleteManagementDnsZoneBindingRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      delete: "/v1/{name=projects/*/locations/*/privateClouds/*/managementDnsZoneBindings/*}"
+    };
+    option (google.api.method_signature) = "name";
+    option (google.longrunning.operation_info) = {
+      response_type: "google.protobuf.Empty"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
+  // Retries to create a `ManagementDnsZoneBinding` resource that is
+  // in failed state.
+  rpc RepairManagementDnsZoneBinding(RepairManagementDnsZoneBindingRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      post: "/v1/{name=projects/*/locations/*/privateClouds/*/managementDnsZoneBindings/*}:repair"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+    option (google.longrunning.operation_info) = {
+      response_type: "ManagementDnsZoneBinding"
+      metadata_type: "OperationMetadata"
+    };
+  }
+
   // Creates a new VMware Engine network that can be used by a private cloud.
   rpc CreateVmwareEngineNetwork(CreateVmwareEngineNetworkRequest)
       returns (google.longrunning.Operation) {
@@ -458,163 +893,127 @@ service VmwareEngine {
     };
     option (google.api.method_signature) = "parent";
   }
-}
 
-// Network configuration in the consumer project
-// with which the peering has to be done.
-message NetworkConfig {
-  // Required. Management CIDR used by VMware management appliances.
-  string management_cidr = 4 [(google.api.field_behavior) = REQUIRED];
-
-  // Optional. The relative resource name of the VMware Engine network attached
-  // to the private cloud. Specify the name in the following form:
-  // `projects/{project}/locations/{location}/vmwareEngineNetworks/{vmware_engine_network_id}`
-  // where `{project}` can either be a project number or a project ID.
-  string vmware_engine_network = 5 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.resource_reference) = {
-      type: "vmwareengine.googleapis.com/VmwareEngineNetwork"
-    }
-  ];
-
-  // Output only. The canonical name of the VMware Engine network in the form:
-  // `projects/{project_number}/locations/{location}/vmwareEngineNetworks/{vmware_engine_network_id}`
-  string vmware_engine_network_canonical = 6 [
-    (google.api.field_behavior) = OUTPUT_ONLY,
-    (google.api.resource_reference) = {
-      type: "vmwareengine.googleapis.com/VmwareEngineNetwork"
-    }
-  ];
-
-  // Output only. The IP address layout version of the management IP address
-  // range. Possible versions include:
-  // * `managementIpAddressLayoutVersion=1`: Indicates the legacy IP address
-  // layout used by some existing private clouds. This is no longer supported
-  // for new private clouds as it does not support all features.
-  // * `managementIpAddressLayoutVersion=2`: Indicates the latest IP address
-  // layout used by all newly created private clouds. This version supports all
-  // current features.
-  int32 management_ip_address_layout_version = 8
-      [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// Information about the type and number of nodes associated with the cluster.
-message NodeTypeConfig {
-  // Required. The number of nodes of this type in the cluster
-  int32 node_count = 1 [(google.api.field_behavior) = REQUIRED];
-
-  // Optional. Customized number of cores available to each node of the type.
-  // This number must always be one of `nodeType.availableCustomCoreCounts`.
-  // If zero is provided max value from `nodeType.availableCustomCoreCounts`
-  // will be used.
-  int32 custom_core_count = 2 [(google.api.field_behavior) = OPTIONAL];
-}
-
-// Represents a private cloud resource. Private clouds are zonal resources.
-message PrivateCloud {
-  option (google.api.resource) = {
-    type: "vmwareengine.googleapis.com/PrivateCloud"
-    pattern: "projects/{project}/locations/{location}/privateClouds/{private_cloud}"
-  };
-
-  // Enum State defines possible states of private clouds.
-  enum State {
-    // The default value. This value should never be used.
-    STATE_UNSPECIFIED = 0;
-
-    // The private cloud is ready.
-    ACTIVE = 1;
-
-    // The private cloud is being created.
-    CREATING = 2;
-
-    // The private cloud is being updated.
-    UPDATING = 3;
-
-    // The private cloud is in failed state.
-    FAILED = 5;
-
-    // The private cloud is scheduled for deletion. The deletion process can be
-    // cancelled by using the corresponding undelete method.
-    DELETED = 6;
-
-    // The private cloud is irreversibly deleted and is being removed from the
-    // system.
-    PURGING = 7;
+  // Creates a new private connection that can be used for accessing private
+  // Clouds.
+  rpc CreatePrivateConnection(CreatePrivateConnectionRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      post: "/v1/{parent=projects/*/locations/*}/privateConnections"
+      body: "private_connection"
+    };
+    option (google.api.method_signature) =
+        "parent,private_connection,private_connection_id";
+    option (google.longrunning.operation_info) = {
+      response_type: "PrivateConnection"
+      metadata_type: "OperationMetadata"
+    };
   }
 
-  // Management cluster configuration.
-  message ManagementCluster {
-    // Required. The user-provided identifier of the new `Cluster`.
-    // The identifier must meet the following requirements:
-    //
-    // * Only contains 1-63 alphanumeric characters and hyphens
-    // * Begins with an alphabetical character
-    // * Ends with a non-hyphen character
-    // * Not formatted as a UUID
-    // * Complies with [RFC
-    // 1034](https://datatracker.ietf.org/doc/html/rfc1034) (section 3.5)
-    string cluster_id = 1 [(google.api.field_behavior) = REQUIRED];
-
-    // Required. The map of cluster node types in this cluster, where the key is
-    // canonical identifier of the node type (corresponds to the `NodeType`).
-    map<string, NodeTypeConfig> node_type_configs = 7
-        [(google.api.field_behavior) = REQUIRED];
+  // Retrieves a `PrivateConnection` resource by its resource name. The resource
+  // contains details of the private connection, such as connected
+  // network, routing mode and state.
+  rpc GetPrivateConnection(GetPrivateConnectionRequest)
+      returns (PrivateConnection) {
+    option (google.api.http) = {
+      get: "/v1/{name=projects/*/locations/*/privateConnections/*}"
+    };
+    option (google.api.method_signature) = "name";
   }
 
-  // Output only. The resource name of this private cloud.
-  // Resource names are schemeless URIs that follow the conventions in
-  // https://cloud.google.com/apis/design/resource_names.
-  // For example:
-  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud`
-  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Lists `PrivateConnection` resources in a given project and location.
+  rpc ListPrivateConnections(ListPrivateConnectionsRequest)
+      returns (ListPrivateConnectionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/{parent=projects/*/locations/*}/privateConnections"
+    };
+    option (google.api.method_signature) = "parent";
+  }
 
-  // Output only. Creation time of this resource.
-  google.protobuf.Timestamp create_time = 2
-      [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Modifies a `PrivateConnection` resource. Only `description` and
+  // `routing_mode` fields can be updated. Only fields specified in `updateMask`
+  // are applied.
+  rpc UpdatePrivateConnection(UpdatePrivateConnectionRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      patch: "/v1/{private_connection.name=projects/*/locations/*/privateConnections/*}"
+      body: "private_connection"
+    };
+    option (google.api.method_signature) = "private_connection,update_mask";
+    option (google.longrunning.operation_info) = {
+      response_type: "PrivateConnection"
+      metadata_type: "OperationMetadata"
+    };
+  }
 
-  // Output only. Last update time of this resource.
-  google.protobuf.Timestamp update_time = 3
-      [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Deletes a `PrivateConnection` resource. When a private connection is
+  // deleted for a VMware Engine network, the connected network becomes
+  // inaccessible to that VMware Engine network.
+  rpc DeletePrivateConnection(DeletePrivateConnectionRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      delete: "/v1/{name=projects/*/locations/*/privateConnections/*}"
+    };
+    option (google.api.method_signature) = "name";
+    option (google.longrunning.operation_info) = {
+      response_type: "google.protobuf.Empty"
+      metadata_type: "OperationMetadata"
+    };
+  }
 
-  // Output only. Time when the resource was scheduled for deletion.
-  google.protobuf.Timestamp delete_time = 4
-      [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Lists the private connection routes exchanged over a peering connection.
+  rpc ListPrivateConnectionPeeringRoutes(
+      ListPrivateConnectionPeeringRoutesRequest)
+      returns (ListPrivateConnectionPeeringRoutesResponse) {
+    option (google.api.http) = {
+      get: "/v1/{parent=projects/*/locations/*/privateConnections/*}/peeringRoutes"
+    };
+    option (google.api.method_signature) = "parent";
+  }
 
-  // Output only. Time when the resource will be irreversibly deleted.
-  google.protobuf.Timestamp expire_time = 5
-      [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Grants the bind permission to the customer provided principal(user /
+  // service account) to bind their DNS zone with the intranet VPC associated
+  // with the project. DnsBindPermission is a global resource and location can
+  // only be global.
+  rpc GrantDnsBindPermission(GrantDnsBindPermissionRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      post: "/v1/{name=projects/*/locations/*/dnsBindPermission}:grant"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,principal";
+    option (google.longrunning.operation_info) = {
+      response_type: "DnsBindPermission"
+      metadata_type: "OperationMetadata"
+    };
+  }
 
-  // Output only. State of the resource. New values may be added to this enum
-  // when appropriate.
-  State state = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Gets all the principals having bind permission on the intranet VPC
+  // associated with the consumer project granted by the Grant API.
+  // DnsBindPermission is a global resource and location can only be global.
+  rpc GetDnsBindPermission(GetDnsBindPermissionRequest)
+      returns (DnsBindPermission) {
+    option (google.api.http) = {
+      get: "/v1/{name=projects/*/locations/*/dnsBindPermission}"
+    };
+    option (google.api.method_signature) = "name";
+  }
 
-  // Required. Network configuration of the private cloud.
-  NetworkConfig network_config = 9 [(google.api.field_behavior) = REQUIRED];
-
-  // Input only. The management cluster for this private cloud.
-  // This field is required during creation of the private cloud to provide
-  // details for the default cluster.
-  //
-  // The following fields can't be changed after private cloud creation:
-  // `ManagementCluster.clusterId`, `ManagementCluster.nodeTypeId`.
-  ManagementCluster management_cluster = 10
-      [(google.api.field_behavior) = INPUT_ONLY];
-
-  // User-provided description for this private cloud.
-  string description = 11;
-
-  // Output only. HCX appliance.
-  Hcx hcx = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. NSX appliance.
-  Nsx nsx = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. Vcenter appliance.
-  Vcenter vcenter = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. System-generated unique identifier for the resource.
-  string uid = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Revokes the bind permission from the customer provided principal(user /
+  // service account) on the intranet VPC associated with the consumer project.
+  // DnsBindPermission is a global resource and location can only be global.
+  rpc RevokeDnsBindPermission(RevokeDnsBindPermissionRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      post: "/v1/{name=projects/*/locations/*/dnsBindPermission}:revoke"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,principal";
+    option (google.longrunning.operation_info) = {
+      response_type: "DnsBindPermission"
+      metadata_type: "OperationMetadata"
+    };
+  }
 }
 
 // Request message for
@@ -828,68 +1227,6 @@ message UndeletePrivateCloudRequest {
   string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
-// A cluster in a private cloud.
-message Cluster {
-  option (google.api.resource) = {
-    type: "vmwareengine.googleapis.com/Cluster"
-    pattern: "projects/{project}/locations/{location}/privateClouds/{private_cloud}/clusters/{cluster}"
-  };
-
-  // Enum State defines possible states of private cloud clusters.
-  enum State {
-    // The default value. This value should never be used.
-    STATE_UNSPECIFIED = 0;
-
-    // The Cluster is operational and can be used by the user.
-    ACTIVE = 1;
-
-    // The Cluster is being deployed.
-    CREATING = 2;
-
-    // Adding or removing of a node to the cluster, any other cluster specific
-    // updates.
-    UPDATING = 3;
-
-    // The Cluster is being deleted.
-    DELETING = 4;
-
-    // The Cluster is undergoing maintenance, for example: a failed node is
-    // getting replaced.
-    REPAIRING = 5;
-  }
-
-  // Output only. The resource name of this cluster.
-  // Resource names are schemeless URIs that follow the conventions in
-  // https://cloud.google.com/apis/design/resource_names.
-  // For example:
-  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud/clusters/my-cluster`
-  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. Creation time of this resource.
-  google.protobuf.Timestamp create_time = 2
-      [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. Last update time of this resource.
-  google.protobuf.Timestamp update_time = 3
-      [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. State of the resource.
-  State state = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. True if the cluster is a management cluster; false otherwise.
-  // There can only be one management cluster in a private cloud
-  // and it has to be the first one.
-  bool management = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. System-generated unique identifier for the resource.
-  string uid = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Required. The map of cluster node types in this cluster, where the key is
-  // canonical identifier of the node type (corresponds to the `NodeType`).
-  map<string, NodeTypeConfig> node_type_configs = 16
-      [(google.api.field_behavior) = REQUIRED];
-}
-
 // Request message for
 // [VmwareEngine.ListClusters][google.cloud.vmwareengine.v1.VmwareEngine.ListClusters]
 message ListClustersRequest {
@@ -1056,52 +1393,309 @@ message DeleteClusterRequest {
   string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
-// Subnet in a private cloud. Either `management` subnets (such as vMotion) that
-// are read-only, or `userDefined`, which can also be updated.
-message Subnet {
-  option (google.api.resource) = {
-    type: "vmwareengine.googleapis.com/Subnet"
-    pattern: "projects/{project}/locations/{location}/privateClouds/{private_cloud}/subnets/{subnet}"
-  };
-
-  // Defines possible states of subnets.
-  enum State {
-    // The default value. This value should never be used.
-    STATE_UNSPECIFIED = 0;
-
-    // The subnet is ready.
-    ACTIVE = 1;
-
-    // The subnet is being created.
-    CREATING = 2;
-
-    // The subnet is being updated.
-    UPDATING = 3;
-
-    // The subnet is being deleted.
-    DELETING = 4;
-  }
-
-  // Output only. The resource name of this subnet.
+// Request message for
+// [VmwareEngine.ListNodes][google.cloud.vmwareengine.v1.VmwareEngine.ListNodes]
+message ListNodesRequest {
+  // Required. The resource name of the cluster to be queried for nodes.
   // Resource names are schemeless URIs that follow the conventions in
   // https://cloud.google.com/apis/design/resource_names.
   // For example:
-  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud/subnets/my-subnet`
-  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud/clusters/my-cluster`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/Cluster"
+    }
+  ];
 
-  // The IP address range of the subnet in CIDR format '10.0.0.0/24'.
-  string ip_cidr_range = 7;
+  // The maximum number of nodes to return in one page.
+  // The service may return fewer than this value.
+  // The maximum value is coerced to 1000.
+  // The default value of this field is 500.
+  int32 page_size = 2;
 
-  // The IP address of the gateway of this subnet.
-  // Must fall within the IP prefix defined above.
-  string gateway_ip = 8;
+  // A page token, received from a previous `ListNodes` call.
+  // Provide this to retrieve the subsequent page.
+  //
+  // When paginating, all other parameters provided to
+  // `ListNodes` must match the call that provided the page
+  // token.
+  string page_token = 3;
+}
 
-  // Output only. The type of the subnet. For example "management" or
-  // "userDefined".
-  string type = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+// Response message for
+// [VmwareEngine.ListNodes][google.cloud.vmwareengine.v1.VmwareEngine.ListNodes]
+message ListNodesResponse {
+  // The nodes.
+  repeated Node nodes = 1;
 
-  // Output only. The state of the resource.
-  State state = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A token, which can be sent as `page_token` to retrieve the next page.
+  // If this field is omitted, there are no subsequent pages.
+  string next_page_token = 2;
+}
+
+// Request message for
+// [VmwareEngine.GetNode][google.cloud.vmwareengine.v1.VmwareEngine.GetNode]
+message GetNodeRequest {
+  // Required. The resource name of the node to retrieve.
+  // For example:
+  // `projects/{project}/locations/{location}/privateClouds/{private_cloud}/clusters/{cluster}/nodes/{node}`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/Node"
+    }
+  ];
+}
+
+// Request message for
+// [VmwareEngine.ListExternalAddresses][google.cloud.vmwareengine.v1.VmwareEngine.ListExternalAddresses]
+message ListExternalAddressesRequest {
+  // Required. The resource name of the private cloud to be queried for
+  // external IP addresses.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/PrivateCloud"
+    }
+  ];
+
+  // The maximum number of external IP addresses to return in one page.
+  // The service may return fewer than this value.
+  // The maximum value is coerced to 1000.
+  // The default value of this field is 500.
+  int32 page_size = 2;
+
+  // A page token, received from a previous `ListExternalAddresses` call.
+  // Provide this to retrieve the subsequent page.
+  //
+  // When paginating, all other parameters provided to
+  // `ListExternalAddresses` must match the call that provided the page token.
+  string page_token = 3;
+
+  // A filter expression that matches resources returned in the response.
+  // The expression must specify the field name, a comparison
+  // operator, and the value that you want to use for filtering. The value
+  // must be a string, a number, or a boolean. The comparison operator
+  // must be `=`, `!=`, `>`, or `<`.
+  //
+  // For example, if you are filtering a list of IP addresses, you can
+  // exclude the ones named `example-ip` by specifying
+  // `name != "example-ip"`.
+  //
+  // To filter on multiple expressions, provide each separate expression within
+  // parentheses. For example:
+  // ```
+  // (name = "example-ip")
+  // (createTime > "2021-04-12T08:15:10.40Z")
+  // ```
+  //
+  // By default, each expression is an `AND` expression. However, you
+  // can include `AND` and `OR` expressions explicitly.
+  // For example:
+  // ```
+  // (name = "example-ip-1") AND
+  // (createTime > "2021-04-12T08:15:10.40Z") OR
+  // (name = "example-ip-2")
+  // ```
+  string filter = 4;
+
+  // Sorts list results by a certain order. By default, returned results
+  // are ordered by `name` in ascending order.
+  // You can also sort results in descending order based on the `name` value
+  // using `orderBy="name desc"`.
+  // Currently, only ordering by `name` is supported.
+  string order_by = 5;
+}
+
+// Response message for
+// [VmwareEngine.ListExternalAddresses][google.cloud.vmwareengine.v1.VmwareEngine.ListExternalAddresses]
+message ListExternalAddressesResponse {
+  // A list of external IP addresses.
+  repeated ExternalAddress external_addresses = 1;
+
+  // A token, which can be sent as `page_token` to retrieve the next page.
+  // If this field is omitted, there are no subsequent pages.
+  string next_page_token = 2;
+
+  // Locations that could not be reached when making an aggregated query using
+  // wildcards.
+  repeated string unreachable = 3;
+}
+
+// Request message for
+// [VmwareEngine.FetchNetworkPolicyExternalAddresses][google.cloud.vmwareengine.v1.VmwareEngine.FetchNetworkPolicyExternalAddresses]
+message FetchNetworkPolicyExternalAddressesRequest {
+  // Required. The resource name of the network policy to query for assigned
+  // external IP addresses. Resource names are schemeless URIs that follow the
+  // conventions in https://cloud.google.com/apis/design/resource_names. For
+  // example:
+  // `projects/my-project/locations/us-central1/networkPolicies/my-policy`
+  string network_policy = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/NetworkPolicy"
+    }
+  ];
+
+  // The maximum number of external IP addresses to return in one page.
+  // The service may return fewer than this value.
+  // The maximum value is coerced to 1000.
+  // The default value of this field is 500.
+  int32 page_size = 2;
+
+  // A page token, received from a previous
+  // `FetchNetworkPolicyExternalAddresses` call. Provide this to retrieve the
+  // subsequent page.
+  //
+  // When paginating, all parameters provided to
+  // `FetchNetworkPolicyExternalAddresses`, except for `page_size` and
+  // `page_token`, must match the call that provided the page token.
+  string page_token = 3;
+}
+
+// Response message for
+// [VmwareEngine.FetchNetworkPolicyExternalAddresses][google.cloud.vmwareengine.v1.VmwareEngine.FetchNetworkPolicyExternalAddresses]
+message FetchNetworkPolicyExternalAddressesResponse {
+  // A list of external IP addresses assigned to VMware workload VMs within the
+  // scope of the given network policy.
+  repeated ExternalAddress external_addresses = 1;
+
+  // A token, which can be sent as `page_token` to retrieve the next page.
+  // If this field is omitted, there are no subsequent pages.
+  string next_page_token = 2;
+}
+
+// Request message for
+// [VmwareEngine.GetExternalAddress][google.cloud.vmwareengine.v1.VmwareEngine.GetExternalAddress]
+message GetExternalAddressRequest {
+  // Required. The resource name of the external IP address to retrieve.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud/externalAddresses/my-ip`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/ExternalAddress"
+    }
+  ];
+}
+
+// Request message for
+// [VmwareEngine.CreateExternalAddress][google.cloud.vmwareengine.v1.VmwareEngine.CreateExternalAddress]
+message CreateExternalAddressRequest {
+  // Required. The resource name of the private cloud
+  // to create a new external IP address in.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/PrivateCloud"
+    }
+  ];
+
+  // Required. The initial description of a new external IP address.
+  ExternalAddress external_address = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Required. The user-provided identifier of the `ExternalAddress` to be
+  // created. This identifier must be unique among `ExternalAddress` resources
+  // within the parent and becomes the final token in the name URI. The
+  // identifier must meet the following requirements:
+  //
+  // * Only contains 1-63 alphanumeric characters and hyphens
+  // * Begins with an alphabetical character
+  // * Ends with a non-hyphen character
+  // * Not formatted as a UUID
+  // * Complies with [RFC 1034](https://datatracker.ietf.org/doc/html/rfc1034)
+  // (section 3.5)
+  string external_address_id = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request ID,
+  // the server can check if the original operation with the same request ID was
+  // received, and if so, will ignore the second request. This prevents clients
+  // from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.UpdateExternalAddress][google.cloud.vmwareengine.v1.VmwareEngine.UpdateExternalAddress]
+message UpdateExternalAddressRequest {
+  // Required. Field mask is used to specify the fields to be overwritten in the
+  // `ExternalAddress` resource by the update.
+  // The fields specified in the `update_mask` are relative to the resource, not
+  // the full request. A field will be overwritten if it is in the mask. If the
+  // user does not provide a mask then all fields will be overwritten.
+  google.protobuf.FieldMask update_mask = 1
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Required. External IP address description.
+  ExternalAddress external_address = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request ID,
+  // the server can check if the original operation with the same request ID was
+  // received, and if so, will ignore the second request. This prevents clients
+  // from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.DeleteExternalAddress][google.cloud.vmwareengine.v1.VmwareEngine.DeleteExternalAddress]
+message DeleteExternalAddressRequest {
+  // Required. The resource name of the external IP address to delete.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud/externalAddresses/my-ip`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/ExternalAddress"
+    }
+  ];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request
+  // ID, the server can check if the original operation with the same request ID
+  // was received, and if so, will ignore the second request. This prevents
+  // clients from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Request message for
@@ -1143,6 +1737,458 @@ message ListSubnetsResponse {
   // A token, which can be sent as `page_token` to retrieve the next page.
   // If this field is omitted, there are no subsequent pages.
   string next_page_token = 2;
+
+  // Locations that could not be reached when making an aggregated query using
+  // wildcards.
+  repeated string unreachable = 3;
+}
+
+// Request message for
+// [VmwareEngine.GetSubnet][google.cloud.vmwareengine.v1.VmwareEngine.GetSubnet]
+message GetSubnetRequest {
+  // Required. The resource name of the subnet to retrieve.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud/subnets/my-subnet`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/Subnet"
+    }
+  ];
+}
+
+// Request message for
+// [VmwareEngine.UpdateSubnet][google.cloud.vmwareengine.v1.VmwareEngine.UpdateSubnet]
+message UpdateSubnetRequest {
+  // Required. Field mask is used to specify the fields to be overwritten in the
+  // `Subnet` resource by the update.
+  // The fields specified in the `update_mask` are relative to the resource, not
+  // the full request. A field will be overwritten if it is in the mask. If the
+  // user does not provide a mask then all fields will be overwritten.
+  google.protobuf.FieldMask update_mask = 1
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Required. Subnet description.
+  Subnet subnet = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Request message for
+// [VmwareEngine.ListExternalAccessRules][google.cloud.vmwareengine.v1.VmwareEngine.ListExternalAccessRules]
+message ListExternalAccessRulesRequest {
+  // Required. The resource name of the network policy to query for external
+  // access firewall rules. Resource names are schemeless URIs that follow the
+  // conventions in https://cloud.google.com/apis/design/resource_names. For
+  // example:
+  // `projects/my-project/locations/us-central1/networkPolicies/my-policy`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/NetworkPolicy"
+    }
+  ];
+
+  // The maximum number of external access rules to return in one page.
+  // The service may return fewer than this value.
+  // The maximum value is coerced to 1000.
+  // The default value of this field is 500.
+  int32 page_size = 2;
+
+  // A page token, received from a previous `ListExternalAccessRulesRequest`
+  // call. Provide this to retrieve the subsequent page.
+  //
+  // When paginating, all other parameters provided to
+  // `ListExternalAccessRulesRequest` must match the call that provided the page
+  // token.
+  string page_token = 3;
+
+  // A filter expression that matches resources returned in the response.
+  // The expression must specify the field name, a comparison
+  // operator, and the value that you want to use for filtering. The value
+  // must be a string, a number, or a boolean. The comparison operator
+  // must be `=`, `!=`, `>`, or `<`.
+  //
+  // For example, if you are filtering a list of external access rules, you can
+  // exclude the ones named `example-rule` by specifying
+  // `name != "example-rule"`.
+  //
+  // To filter on multiple expressions, provide each separate expression within
+  // parentheses. For example:
+  // ```
+  // (name = "example-rule")
+  // (createTime > "2021-04-12T08:15:10.40Z")
+  // ```
+  //
+  // By default, each expression is an `AND` expression. However, you
+  // can include `AND` and `OR` expressions explicitly.
+  // For example:
+  // ```
+  // (name = "example-rule-1") AND
+  // (createTime > "2021-04-12T08:15:10.40Z") OR
+  // (name = "example-rule-2")
+  // ```
+  string filter = 4;
+
+  // Sorts list results by a certain order. By default, returned results
+  // are ordered by `name` in ascending order.
+  // You can also sort results in descending order based on the `name` value
+  // using `orderBy="name desc"`.
+  // Currently, only ordering by `name` is supported.
+  string order_by = 5;
+}
+
+// Response message for
+// [VmwareEngine.ListExternalAccessRules][google.cloud.vmwareengine.v1.VmwareEngine.ListExternalAccessRules]
+message ListExternalAccessRulesResponse {
+  // A list of external access firewall rules.
+  repeated ExternalAccessRule external_access_rules = 1;
+
+  // A token, which can be sent as `page_token` to retrieve the next page.
+  // If this field is omitted, there are no subsequent pages.
+  string next_page_token = 2;
+
+  // Locations that could not be reached when making an aggregated query using
+  // wildcards.
+  repeated string unreachable = 3;
+}
+
+// Request message for
+// [VmwareEngine.GetExternalAccessRule][google.cloud.vmwareengine.v1.VmwareEngine.GetExternalAccessRule]
+message GetExternalAccessRuleRequest {
+  // Required. The resource name of the external access firewall rule to
+  // retrieve. Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1/networkPolicies/my-policy/externalAccessRules/my-rule`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/ExternalAccessRule"
+    }
+  ];
+}
+
+// Request message for
+// [VmwareEngine.CreateExternalAccessRule][google.cloud.vmwareengine.v1.VmwareEngine.CreateExternalAccessRule]
+message CreateExternalAccessRuleRequest {
+  // Required. The resource name of the network policy
+  // to create a new external access firewall rule in.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1/networkPolicies/my-policy`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/NetworkPolicy"
+    }
+  ];
+
+  // Required. The initial description of a new external access rule.
+  ExternalAccessRule external_access_rule = 2
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Required. The user-provided identifier of the `ExternalAccessRule` to be
+  // created. This identifier must be unique among `ExternalAccessRule`
+  // resources within the parent and becomes the final token in the name URI.
+  // The identifier must meet the following requirements:
+  //
+  // * Only contains 1-63 alphanumeric characters and hyphens
+  // * Begins with an alphabetical character
+  // * Ends with a non-hyphen character
+  // * Not formatted as a UUID
+  // * Complies with [RFC 1034](https://datatracker.ietf.org/doc/html/rfc1034)
+  // (section 3.5)
+  string external_access_rule_id = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request ID,
+  // the server can check if the original operation with the same request ID was
+  // received, and if so, will ignore the second request. This prevents clients
+  // from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 4;
+}
+
+// Request message for
+// [VmwareEngine.UpdateExternalAccessRule][google.cloud.vmwareengine.v1.VmwareEngine.UpdateExternalAccessRule]
+message UpdateExternalAccessRuleRequest {
+  // Required. Field mask is used to specify the fields to be overwritten in the
+  // `ExternalAccessRule` resource by the update.
+  // The fields specified in the `update_mask` are relative to the resource, not
+  // the full request. A field will be overwritten if it is in the mask. If the
+  // user does not provide a mask then all fields will be overwritten.
+  google.protobuf.FieldMask update_mask = 1
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Required. Description of the external access rule.
+  ExternalAccessRule external_access_rule = 2
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request ID,
+  // the server can check if the original operation with the same request ID was
+  // received, and if so, will ignore the second request. This prevents clients
+  // from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.DeleteExternalAccessRule][google.cloud.vmwareengine.v1.VmwareEngine.DeleteExternalAccessRule]
+message DeleteExternalAccessRuleRequest {
+  // Required. The resource name of the external access firewall rule to delete.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1/networkPolicies/my-policy/externalAccessRules/my-rule`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/ExternalAccessRule"
+    }
+  ];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request
+  // ID, the server can check if the original operation with the same request ID
+  // was received, and if so, will ignore the second request. This prevents
+  // clients from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.ListLoggingServers][google.cloud.vmwareengine.v1.VmwareEngine.ListLoggingServers]
+message ListLoggingServersRequest {
+  // Required. The resource name of the private cloud to be queried for
+  // logging servers.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/PrivateCloud"
+    }
+  ];
+
+  // The maximum number of logging servers to return in one page.
+  // The service may return fewer than this value.
+  // The maximum value is coerced to 1000.
+  // The default value of this field is 500.
+  int32 page_size = 2;
+
+  // A page token, received from a previous `ListLoggingServersRequest` call.
+  // Provide this to retrieve the subsequent page.
+  //
+  // When paginating, all other parameters provided to
+  // `ListLoggingServersRequest` must match the call that provided the page
+  // token.
+  string page_token = 3;
+
+  // A filter expression that matches resources returned in the response.
+  // The expression must specify the field name, a comparison
+  // operator, and the value that you want to use for filtering. The value
+  // must be a string, a number, or a boolean. The comparison operator
+  // must be `=`, `!=`, `>`, or `<`.
+  //
+  // For example, if you are filtering a list of logging servers, you can
+  // exclude the ones named `example-server` by specifying
+  // `name != "example-server"`.
+  //
+  // To filter on multiple expressions, provide each separate expression within
+  // parentheses. For example:
+  // ```
+  // (name = "example-server")
+  // (createTime > "2021-04-12T08:15:10.40Z")
+  // ```
+  //
+  // By default, each expression is an `AND` expression. However, you
+  // can include `AND` and `OR` expressions explicitly.
+  // For example:
+  // ```
+  // (name = "example-server-1") AND
+  // (createTime > "2021-04-12T08:15:10.40Z") OR
+  // (name = "example-server-2")
+  // ```
+  string filter = 4;
+
+  // Sorts list results by a certain order. By default, returned results
+  // are ordered by `name` in ascending order.
+  // You can also sort results in descending order based on the `name` value
+  // using `orderBy="name desc"`.
+  // Currently, only ordering by `name` is supported.
+  string order_by = 5;
+}
+
+// Response message for
+// [VmwareEngine.ListLoggingServers][google.cloud.vmwareengine.v1.VmwareEngine.ListLoggingServers]
+message ListLoggingServersResponse {
+  // A list of Logging Servers.
+  repeated LoggingServer logging_servers = 1;
+
+  // A token, which can be send as `page_token` to retrieve the next page.
+  // If this field is omitted, there are no subsequent pages.
+  string next_page_token = 2;
+
+  // Locations that could not be reached when making an aggregated query using
+  // wildcards.
+  repeated string unreachable = 3;
+}
+
+// Request message for
+// [VmwareEngine.GetLoggingServer][google.cloud.vmwareengine.v1.VmwareEngine.GetLoggingServer]
+message GetLoggingServerRequest {
+  // Required. The resource name of the Logging Server to retrieve.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud/loggingServers/my-logging-server`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/LoggingServer"
+    }
+  ];
+}
+
+// Request message for
+// [VmwareEngine.CreateLoggingServer][google.cloud.vmwareengine.v1.VmwareEngine.CreateLoggingServer]
+message CreateLoggingServerRequest {
+  // Required. The resource name of the private cloud
+  // to create a new Logging Server in.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/PrivateCloud"
+    }
+  ];
+
+  // Required. The initial description of a new logging server.
+  LoggingServer logging_server = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Required. The user-provided identifier of the `LoggingServer` to be
+  // created. This identifier must be unique among `LoggingServer` resources
+  // within the parent and becomes the final token in the name URI.
+  // The identifier must meet the following requirements:
+  //
+  // * Only contains 1-63 alphanumeric characters and hyphens
+  // * Begins with an alphabetical character
+  // * Ends with a non-hyphen character
+  // * Not formatted as a UUID
+  // * Complies with [RFC 1034](https://datatracker.ietf.org/doc/html/rfc1034)
+  // (section 3.5)
+  string logging_server_id = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request ID,
+  // the server can check if original operation with the same request ID was
+  // received, and if so, will ignore the second request. This prevents clients
+  // from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.UpdateLoggingServer][google.cloud.vmwareengine.v1.VmwareEngine.UpdateLoggingServer]
+message UpdateLoggingServerRequest {
+  // Required. Field mask is used to specify the fields to be overwritten in the
+  // `LoggingServer` resource by the update.
+  // The fields specified in the `update_mask` are relative to the resource, not
+  // the full request. A field will be overwritten if it is in the mask. If the
+  // user does not provide a mask then all fields will be overwritten.
+  google.protobuf.FieldMask update_mask = 1
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Required. Logging server description.
+  LoggingServer logging_server = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request ID,
+  // the server can check if original operation with the same request ID was
+  // received, and if so, will ignore the second request. This prevents clients
+  // from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.DeleteLoggingServer][google.cloud.vmwareengine.v1.VmwareEngine.DeleteLoggingServer]
+message DeleteLoggingServerRequest {
+  // Required. The resource name of the logging server to delete.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud/loggingServers/my-logging-server`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/LoggingServer"
+    }
+  ];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request
+  // ID, the server can check if original operation with the same request ID
+  // was received, and if so, will ignore the second request. This prevents
+  // clients from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Represents the metadata of the long-running operation.
@@ -1174,45 +2220,6 @@ message OperationMetadata {
 
   // Output only. API version used to start the operation.
   string api_version = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// Describes node type.
-message NodeType {
-  option (google.api.resource) = {
-    type: "vmwareengine.googleapis.com/NodeType"
-    pattern: "projects/{project}/locations/{location}/nodeTypes/{node_type}"
-  };
-
-  // Output only. The resource name of this node type.
-  // Resource names are schemeless URIs that follow the conventions in
-  // https://cloud.google.com/apis/design/resource_names.
-  // For example:
-  // `projects/my-proj/locations/us-central1-a/nodeTypes/standard-72`
-  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. The canonical identifier of the node type
-  // (corresponds to the `NodeType`). For example: standard-72.
-  string node_type_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. The friendly name for this node type.
-  // For example: ve1-standard-72
-  string display_name = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. The total number of virtual CPUs in a single node.
-  int32 virtual_cpu_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. The total number of CPU cores in a single node.
-  int32 total_core_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. The amount of physical memory available, defined in GB.
-  int32 memory_gb = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. The amount of storage available, defined in GB.
-  int32 disk_size_gb = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. List of possible values of custom core count.
-  repeated int32 available_custom_core_counts = 11
-      [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Request message for
@@ -1302,15 +2309,6 @@ message GetNodeTypeRequest {
   ];
 }
 
-// Credentials for a private cloud.
-message Credentials {
-  // Initial username.
-  string username = 1;
-
-  // Initial password.
-  string password = 2;
-}
-
 // Request message for
 // [VmwareEngine.ShowNsxCredentials][google.cloud.vmwareengine.v1.VmwareEngine.ShowNsxCredentials]
 message ShowNsxCredentialsRequest {
@@ -1343,6 +2341,18 @@ message ShowVcenterCredentialsRequest {
       type: "vmwareengine.googleapis.com/PrivateCloud"
     }
   ];
+
+  // Optional. The username of the user to be queried for credentials.
+  // The default value of this field is CloudOwner@gve.local.
+  // The provided value must be one of the following:
+  // CloudOwner@gve.local,
+  // solution-user-01@gve.local,
+  // solution-user-02@gve.local,
+  // solution-user-03@gve.local,
+  // solution-user-04@gve.local,
+  // solution-user-05@gve.local,
+  // zertoadmin@gve.local.
+  string username = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Request message for
@@ -1409,6 +2419,17 @@ message ResetVcenterCredentialsRequest {
   // The request ID must be a valid UUID with the exception that zero UUID is
   // not supported (00000000-0000-0000-0000-000000000000).
   string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // Optional. The username of the user to be to reset the credentials.
+  // The default value of this field is CloudOwner@gve.local.
+  // The provided value should be one of the following:
+  // solution-user-01@gve.local,
+  // solution-user-02@gve.local,
+  // solution-user-03@gve.local,
+  // solution-user-04@gve.local,
+  // solution-user-05@gve.local,
+  // zertoadmin@gve.local.
+  string username = 3 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Response message for
@@ -1424,56 +2445,6 @@ message ListHcxActivationKeysResponse {
   // Locations that could not be reached when making an aggregated query using
   // wildcards.
   repeated string unreachable = 3;
-}
-
-// HCX activation key. A default key is created during
-// private cloud provisioning, but this behavior is subject to change
-// and you should always verify active keys.
-// Use
-// [VmwareEngine.ListHcxActivationKeys][google.cloud.vmwareengine.v1.VmwareEngine.ListHcxActivationKeys]
-// to retrieve existing keys and
-// [VmwareEngine.CreateHcxActivationKey][google.cloud.vmwareengine.v1.VmwareEngine.CreateHcxActivationKey]
-// to create new ones.
-message HcxActivationKey {
-  option (google.api.resource) = {
-    type: "vmwareengine.googleapis.com/HcxActivationKey"
-    pattern: "projects/{project}/locations/{location}/privateClouds/{private_cloud}/hcxActivationKeys/{hcx_activation_key}"
-  };
-
-  // State of HCX activation key
-  enum State {
-    // Unspecified state.
-    STATE_UNSPECIFIED = 0;
-
-    // State of a newly generated activation key.
-    AVAILABLE = 1;
-
-    // State of key when it has been used to activate HCX appliance.
-    CONSUMED = 2;
-
-    // State of key when it is being created.
-    CREATING = 3;
-  }
-
-  // Output only. The resource name of this HcxActivationKey.
-  // Resource names are schemeless URIs that follow the conventions in
-  // https://cloud.google.com/apis/design/resource_names.
-  // For example:
-  // `projects/my-project/locations/us-central1/privateClouds/my-cloud/hcxActivationKeys/my-key`
-  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. Creation time of HCX activation key.
-  google.protobuf.Timestamp create_time = 2
-      [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. State of HCX activation key.
-  State state = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. HCX activation key.
-  string activation_key = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. System-generated unique identifier for the resource.
-  string uid = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Request message for
@@ -1572,183 +2543,299 @@ message CreateHcxActivationKeyRequest {
   string request_id = 4;
 }
 
-// Details about a HCX Cloud Manager appliance.
-message Hcx {
-  // State of the appliance
-  enum State {
-    // Unspecified appliance state. This is the default value.
-    STATE_UNSPECIFIED = 0;
-
-    // The appliance is operational and can be used.
-    ACTIVE = 1;
-
-    // The appliance is being deployed.
-    CREATING = 2;
-  }
-
-  // Internal IP address of the appliance.
-  string internal_ip = 2;
-
-  // Version of the appliance.
-  string version = 4;
-
-  // Output only. The state of the appliance.
-  State state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Fully qualified domain name of the appliance.
-  string fqdn = 6;
-}
-
-// Details about a NSX Manager appliance.
-message Nsx {
-  // State of the appliance
-  enum State {
-    // Unspecified appliance state. This is the default value.
-    STATE_UNSPECIFIED = 0;
-
-    // The appliance is operational and can be used.
-    ACTIVE = 1;
-
-    // The appliance is being deployed.
-    CREATING = 2;
-  }
-
-  // Internal IP address of the appliance.
-  string internal_ip = 2;
-
-  // Version of the appliance.
-  string version = 4;
-
-  // Output only. The state of the appliance.
-  State state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Fully qualified domain name of the appliance.
-  string fqdn = 6;
-}
-
-// Details about a vCenter Server management appliance.
-message Vcenter {
-  // State of the appliance
-  enum State {
-    // Unspecified appliance state. This is the default value.
-    STATE_UNSPECIFIED = 0;
-
-    // The appliance is operational and can be used.
-    ACTIVE = 1;
-
-    // The appliance is being deployed.
-    CREATING = 2;
-  }
-
-  // Internal IP address of the appliance.
-  string internal_ip = 2;
-
-  // Version of the appliance.
-  string version = 4;
-
-  // Output only. The state of the appliance.
-  State state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Fully qualified domain name of the appliance.
-  string fqdn = 6;
-}
-
-// Represents a network policy resource. Network policies are regional
-// resources. You can use a network policy to enable or disable internet access
-// and external IP access. Network policies are associated with a VMware Engine
-// network, which might span across regions. For a given region, a network
-// policy applies to all private clouds in the VMware Engine network associated
-// with the policy.
-message NetworkPolicy {
-  option (google.api.resource) = {
-    type: "vmwareengine.googleapis.com/NetworkPolicy"
-    pattern: "projects/{project}/locations/{location}/networkPolicies/{network_policy}"
-  };
-
-  // Represents a network service that is managed by a `NetworkPolicy` resource.
-  // A network service provides a way to control an aspect of external access to
-  // VMware workloads. For example, whether the VMware workloads in the
-  // private clouds governed by a network policy can access or be accessed from
-  // the internet.
-  message NetworkService {
-    // Enum State defines possible states of a network policy controlled
-    // service.
-    enum State {
-      // Unspecified service state. This is the default value.
-      STATE_UNSPECIFIED = 0;
-
-      // Service is not provisioned.
-      UNPROVISIONED = 1;
-
-      // Service is in the process of being provisioned/deprovisioned.
-      RECONCILING = 2;
-
-      // Service is active.
-      ACTIVE = 3;
-    }
-
-    // True if the service is enabled; false otherwise.
-    bool enabled = 1;
-
-    // Output only. State of the service. New values may be added to this enum
-    // when appropriate.
-    State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  }
-
-  // Output only. The resource name of this network policy.
+// Request message for
+// [VmwareEngine.GetDnsForwarding][google.cloud.vmwareengine.v1.VmwareEngine.GetDnsForwarding]
+message GetDnsForwardingRequest {
+  // Required. The resource name of a `DnsForwarding` to retrieve.
   // Resource names are schemeless URIs that follow the conventions in
   // https://cloud.google.com/apis/design/resource_names.
   // For example:
-  // `projects/my-project/locations/us-central1/networkPolicies/my-network-policy`
-  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. Creation time of this resource.
-  google.protobuf.Timestamp create_time = 2
-      [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Output only. Last update time of this resource.
-  google.protobuf.Timestamp update_time = 3
-      [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Network service that allows VMware workloads to access the internet.
-  NetworkService internet_access = 6;
-
-  // Network service that allows External IP addresses to be assigned to VMware
-  // workloads. This service can only be enabled when `internet_access` is also
-  // enabled.
-  NetworkService external_ip = 7;
-
-  // Required. IP address range in CIDR notation used to create internet access
-  // and external IP access. An RFC 1918 CIDR block, with a "/26" prefix, is
-  // required. The range cannot overlap with any prefixes either in the consumer
-  // VPC network or in use by the private clouds attached to that VPC network.
-  string edge_services_cidr = 9 [(google.api.field_behavior) = REQUIRED];
-
-  // Output only. System-generated unique identifier for the resource.
-  string uid = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Optional. The relative resource name of the VMware Engine network.
-  // Specify the name in the following form:
-  // `projects/{project}/locations/{location}/vmwareEngineNetworks/{vmware_engine_network_id}`
-  // where `{project}` can either be a project number or a project ID.
-  string vmware_engine_network = 12 [
-    (google.api.field_behavior) = OPTIONAL,
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud/dnsForwarding`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference) = {
-      type: "vmwareengine.googleapis.com/VmwareEngineNetwork"
+      type: "vmwareengine.googleapis.com/DnsForwarding"
+    }
+  ];
+}
+
+// Request message for
+// [VmwareEngine.UpdateDnsForwarding][google.cloud.vmwareengine.v1.VmwareEngine.UpdateDnsForwarding]
+message UpdateDnsForwardingRequest {
+  // Required. DnsForwarding config details.
+  DnsForwarding dns_forwarding = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Required. Field mask is used to specify the fields to be overwritten in the
+  // `DnsForwarding` resource by the update.
+  // The fields specified in the `update_mask` are relative to the resource, not
+  // the full request. A field will be overwritten if it is in the mask. If the
+  // user does not provide a mask then all fields will be overwritten.
+  google.protobuf.FieldMask update_mask = 2
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request ID,
+  // the server can check if original operation with the same request ID was
+  // received, and if so, will ignore the second request. This prevents clients
+  // from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.CreateNetworkPeering][google.cloud.vmwareengine.v1.VmwareEngine.CreateNetworkPeering]
+message CreateNetworkPeeringRequest {
+  // Required. The resource name of the location to create the new network
+  // peering in. This value is always `global`, because `NetworkPeering` is a
+  // global resource. Resource names are schemeless URIs that follow the
+  // conventions in https://cloud.google.com/apis/design/resource_names. For
+  // example: `projects/my-project/locations/global`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "locations.googleapis.com/Location"
     }
   ];
 
-  // Optional. User-provided description for this network policy.
-  string description = 13 [(google.api.field_behavior) = OPTIONAL];
+  // Required. The user-provided identifier of the new `NetworkPeering`.
+  // This identifier must be unique among `NetworkPeering` resources within the
+  // parent and becomes the final token in the name URI.
+  // The identifier must meet the following requirements:
+  //
+  // * Only contains 1-63 alphanumeric characters and hyphens
+  // * Begins with an alphabetical character
+  // * Ends with a non-hyphen character
+  // * Not formatted as a UUID
+  // * Complies with [RFC 1034](https://datatracker.ietf.org/doc/html/rfc1034)
+  // (section 3.5)
+  string network_peering_id = 2 [(google.api.field_behavior) = REQUIRED];
 
-  // Output only. The canonical name of the VMware Engine network in the form:
-  // `projects/{project_number}/locations/{location}/vmwareEngineNetworks/{vmware_engine_network_id}`
-  string vmware_engine_network_canonical = 14 [
-    (google.api.field_behavior) = OUTPUT_ONLY,
+  // Required. The initial description of the new network peering.
+  NetworkPeering network_peering = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request
+  // ID, the server can check if original operation with the same request ID
+  // was received, and if so, will ignore the second request. This prevents
+  // clients from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.DeleteNetworkPeering][google.cloud.vmwareengine.v1.VmwareEngine.DeleteNetworkPeering]
+message DeleteNetworkPeeringRequest {
+  // Required. The resource name of the network peering to be deleted.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/global/networkPeerings/my-peering`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference) = {
-      type: "vmwareengine.googleapis.com/VmwareEngineNetwork"
+      type: "vmwareengine.googleapis.com/NetworkPeering"
     }
   ];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request
+  // ID, the server can check if original operation with the same request ID
+  // was received, and if so, will ignore the second request. This prevents
+  // clients from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.GetNetworkPeering][google.cloud.vmwareengine.v1.VmwareEngine.GetNetworkPeering]
+message GetNetworkPeeringRequest {
+  // Required. The resource name of the network peering to retrieve.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/global/networkPeerings/my-peering`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/NetworkPeering"
+    }
+  ];
+}
+
+// Request message for
+// [VmwareEngine.ListNetworkPeerings][google.cloud.vmwareengine.v1.VmwareEngine.ListNetworkPeerings]
+message ListNetworkPeeringsRequest {
+  // Required. The resource name of the location (global) to query for
+  // network peerings. Resource names are schemeless URIs that follow the
+  // conventions in https://cloud.google.com/apis/design/resource_names. For
+  // example: `projects/my-project/locations/global`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      child_type: "vmwareengine.googleapis.com/NetworkPeering"
+    }
+  ];
+
+  // The maximum number of network peerings to return in one page.
+  // The maximum value is coerced to 1000.
+  // The default value of this field is 500.
+  int32 page_size = 2;
+
+  // A page token, received from a previous `ListNetworkPeerings` call.
+  // Provide this to retrieve the subsequent page.
+  //
+  // When paginating, all other parameters provided to
+  // `ListNetworkPeerings` must match the call that provided the page
+  // token.
+  string page_token = 3;
+
+  // A filter expression that matches resources returned in the response.
+  // The expression must specify the field name, a comparison
+  // operator, and the value that you want to use for filtering. The value
+  // must be a string, a number, or a boolean. The comparison operator
+  // must be `=`, `!=`, `>`, or `<`.
+  //
+  // For example, if you are filtering a list of network peerings, you can
+  // exclude the ones named `example-peering` by specifying
+  // `name != "example-peering"`.
+  //
+  // To filter on multiple expressions, provide each separate expression within
+  // parentheses. For example:
+  // ```
+  // (name = "example-peering")
+  // (createTime > "2021-04-12T08:15:10.40Z")
+  // ```
+  //
+  // By default, each expression is an `AND` expression. However, you
+  // can include `AND` and `OR` expressions explicitly.
+  // For example:
+  // ```
+  // (name = "example-peering-1") AND
+  // (createTime > "2021-04-12T08:15:10.40Z") OR
+  // (name = "example-peering-2")
+  // ```
+  string filter = 4;
+
+  // Sorts list results by a certain order. By default, returned results
+  // are ordered by `name` in ascending order.
+  // You can also sort results in descending order based on the `name` value
+  // using `orderBy="name desc"`.
+  // Currently, only ordering by `name` is supported.
+  string order_by = 5;
+}
+
+// Request message for
+// [VmwareEngine.UpdateNetworkPeering][google.cloud.vmwareengine.v1.VmwareEngine.UpdateNetworkPeering]
+message UpdateNetworkPeeringRequest {
+  // Required. Network peering description.
+  NetworkPeering network_peering = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Required. Field mask is used to specify the fields to be overwritten in the
+  // `NetworkPeering` resource by the update.
+  // The fields specified in the `update_mask` are relative to the resource, not
+  // the full request. A field will be overwritten if it is in the mask. If the
+  // user does not provide a mask then all fields will be overwritten.
+  google.protobuf.FieldMask update_mask = 2
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request
+  // ID, the server can check if original operation with the same request ID
+  // was received, and if so, will ignore the second request. This prevents
+  // clients from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Response message for
+// [VmwareEngine.ListNetworkPeerings][google.cloud.vmwareengine.v1.VmwareEngine.ListNetworkPeerings]
+message ListNetworkPeeringsResponse {
+  // A list of network peerings.
+  repeated NetworkPeering network_peerings = 1;
+
+  // A token, which can be sent as `page_token` to retrieve the next page.
+  // If this field is omitted, there are no subsequent pages.
+  string next_page_token = 2;
+
+  // Unreachable resources.
+  repeated string unreachable = 3;
+}
+
+// Request message for
+// [VmwareEngine.ListPeeringRoutes][google.cloud.vmwareengine.v1.VmwareEngine.ListPeeringRoutes]
+message ListPeeringRoutesRequest {
+  // Required. The resource name of the network peering to retrieve peering
+  // routes from. Resource names are schemeless URIs that follow the conventions
+  // in https://cloud.google.com/apis/design/resource_names. For example:
+  // `projects/my-project/locations/global/networkPeerings/my-peering`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/NetworkPeering"
+    }
+  ];
+
+  // The maximum number of peering routes to return in one page.
+  // The service may return fewer than this value.
+  // The maximum value is coerced to 1000.
+  // The default value of this field is 500.
+  int32 page_size = 2;
+
+  // A page token, received from a previous `ListPeeringRoutes` call.
+  // Provide this to retrieve the subsequent page.
+  // When paginating, all other parameters provided to `ListPeeringRoutes` must
+  // match the call that provided the page token.
+  string page_token = 3;
+
+  // A filter expression that matches resources returned in the response.
+  // Currently, only filtering on the `direction` field is supported. To return
+  // routes imported from the peer network, provide "direction=INCOMING". To
+  // return routes exported from the VMware Engine network, provide
+  // "direction=OUTGOING". Other filter expressions return an error.
+  string filter = 6;
+}
+
+// Response message for
+// [VmwareEngine.ListPeeringRoutes][google.cloud.vmwareengine.v1.VmwareEngine.ListPeeringRoutes]
+message ListPeeringRoutesResponse {
+  // A list of peering routes.
+  repeated PeeringRoute peering_routes = 1;
+
+  // A token, which can be sent as `page_token` to retrieve the next page.
+  // If this field is omitted, there are no subsequent pages.
+  string next_page_token = 2;
 }
 
 // Request message for
@@ -1958,119 +3045,246 @@ message DeleteNetworkPolicyRequest {
   string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
-// VMware Engine network resource that provides connectivity for VMware Engine
-// private clouds.
-message VmwareEngineNetwork {
-  option (google.api.resource) = {
-    type: "vmwareengine.googleapis.com/VmwareEngineNetwork"
-    pattern: "projects/{project}/locations/{location}/vmwareEngineNetworks/{vmware_engine_network}"
-  };
-
-  // Represents a VMware Engine VPC network that is managed by a
-  // VMware Engine network resource.
-  message VpcNetwork {
-    // Enum Type defines possible types of a VMware Engine network controlled
-    // service.
-    enum Type {
-      // The default value. This value should never be used.
-      TYPE_UNSPECIFIED = 0;
-
-      // VPC network that will be peered with a consumer VPC network or the
-      // intranet VPC of another VMware Engine network. Access a private cloud
-      // through Compute Engine VMs on a peered VPC network or an on-premises
-      // resource connected to a peered consumer VPC network.
-      INTRANET = 1;
-
-      // VPC network used for internet access to and from a private cloud.
-      INTERNET = 2;
-
-      // VPC network used for access to Google Cloud services like
-      // Cloud Storage.
-      GOOGLE_CLOUD = 3;
-    }
-
-    // Output only. Type of VPC network (INTRANET, INTERNET, or
-    // GOOGLE_CLOUD)
-    Type type = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-    // Output only. The relative resource name of the service VPC network this
-    // VMware Engine network is attached to. For example:
-    // `projects/123123/global/networks/my-network`
-    string network = 2 [
-      (google.api.field_behavior) = OUTPUT_ONLY,
-      (google.api.resource_reference) = {
-        type: "compute.googleapis.com/Network"
-      }
-    ];
-  }
-
-  // Enum State defines possible states of VMware Engine network.
-  enum State {
-    // The default value. This value is used if the state is omitted.
-    STATE_UNSPECIFIED = 0;
-
-    // The VMware Engine network is being created.
-    CREATING = 1;
-
-    // The VMware Engine network is ready.
-    ACTIVE = 2;
-
-    // The VMware Engine network is being updated.
-    UPDATING = 3;
-
-    // The VMware Engine network is being deleted.
-    DELETING = 4;
-  }
-
-  // Enum Type defines possible types of VMware Engine network.
-  enum Type {
-    // The default value. This value should never be used.
-    TYPE_UNSPECIFIED = 0;
-
-    // Network type used by private clouds created in projects without a network
-    // of type `STANDARD`. This network type is no longer used for new VMware
-    // Engine private cloud deployments.
-    LEGACY = 1;
-  }
-
-  // Output only. The resource name of the VMware Engine network.
+// Request message for
+// [VmwareEngine.ListManagementDnsZoneBindings][google.cloud.vmwareengine.v1.VmwareEngine.ListManagementDnsZoneBindings]
+message ListManagementDnsZoneBindingsRequest {
+  // Required. The resource name of the private cloud to be queried for
+  // management DNS zone bindings.
   // Resource names are schemeless URIs that follow the conventions in
   // https://cloud.google.com/apis/design/resource_names.
   // For example:
-  // `projects/my-project/locations/global/vmwareEngineNetworks/my-network`
-  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/PrivateCloud"
+    }
+  ];
 
-  // Output only. Creation time of this resource.
-  google.protobuf.Timestamp create_time = 2
-      [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The maximum number of management DNS zone bindings to return in one page.
+  // The service may return fewer than this value.
+  // The maximum value is coerced to 1000.
+  // The default value of this field is 500.
+  int32 page_size = 2;
 
-  // Output only. Last update time of this resource.
-  google.protobuf.Timestamp update_time = 3
-      [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A page token, received from a previous `ListManagementDnsZoneBindings`
+  // call. Provide this to retrieve the subsequent page.
+  //
+  // When paginating, all other parameters provided to
+  // `ListManagementDnsZoneBindings` must match the call that provided the page
+  // token.
+  string page_token = 3;
 
-  // User-provided description for this VMware Engine network.
-  string description = 5;
+  // A filter expression that matches resources returned in the response.
+  // The expression must specify the field name, a comparison
+  // operator, and the value that you want to use for filtering. The value
+  // must be a string, a number, or a boolean. The comparison operator
+  // must be `=`, `!=`, `>`, or `<`.
+  //
+  // For example, if you are filtering a list of Management DNS Zone Bindings,
+  // you can exclude the ones named `example-management-dns-zone-binding` by
+  // specifying `name != "example-management-dns-zone-binding"`.
+  //
+  // To filter on multiple expressions, provide each separate expression within
+  // parentheses. For example:
+  // ```
+  // (name = "example-management-dns-zone-binding")
+  // (createTime > "2021-04-12T08:15:10.40Z")
+  // ```
+  //
+  // By default, each expression is an `AND` expression. However, you
+  // can include `AND` and `OR` expressions explicitly.
+  // For example:
+  // ```
+  // (name = "example-management-dns-zone-binding-1") AND
+  // (createTime > "2021-04-12T08:15:10.40Z") OR
+  // (name = "example-management-dns-zone-binding-2")
+  // ```
+  string filter = 4;
 
-  // Output only. VMware Engine service VPC networks that provide connectivity
-  // from a private cloud to customer projects, the internet, and other Google
-  // Cloud services.
-  repeated VpcNetwork vpc_networks = 6
-      [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Sorts list results by a certain order. By default, returned results
+  // are ordered by `name` in ascending order.
+  // You can also sort results in descending order based on the `name` value
+  // using `orderBy="name desc"`.
+  // Currently, only ordering by `name` is supported.
+  string order_by = 5;
+}
 
-  // Output only. State of the VMware Engine network.
-  State state = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+// Response message for
+// [VmwareEngine.ListManagementDnsZoneBindings][google.cloud.vmwareengine.v1.VmwareEngine.ListManagementDnsZoneBindings]
+message ListManagementDnsZoneBindingsResponse {
+  // A list of management DNS zone bindings.
+  repeated ManagementDnsZoneBinding management_dns_zone_bindings = 1;
 
-  // Required. VMware Engine network type.
-  Type type = 8 [(google.api.field_behavior) = REQUIRED];
+  // A token, which can be sent as `page_token` to retrieve the next page.
+  // If this field is omitted, there are no subsequent pages.
+  string next_page_token = 2;
 
-  // Output only. System-generated unique identifier for the resource.
-  string uid = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Locations that could not be reached when making an aggregated query using
+  // wildcards.
+  repeated string unreachable = 3;
+}
 
-  // Checksum that may be sent on update and delete requests to ensure that the
-  // user-provided value is up to date before the server processes a request.
-  // The server computes checksums based on the value of other fields in the
-  // request.
-  string etag = 10;
+// Request message for
+// [VmwareEngine.GetManagementDnsZoneBinding][google.cloud.vmwareengine.v1.VmwareEngine.GetManagementDnsZoneBinding]
+message GetManagementDnsZoneBindingRequest {
+  // Required. The resource name of the management DNS zone binding to
+  // retrieve. Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud/managementDnsZoneBindings/my-management-dns-zone-binding`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/ManagementDnsZoneBinding"
+    }
+  ];
+}
+
+// Request message for [VmwareEngine.CreateManagementDnsZoneBindings][]
+message CreateManagementDnsZoneBindingRequest {
+  // Required. The resource name of the private cloud
+  // to create a new management DNS zone binding for.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/PrivateCloud"
+    }
+  ];
+
+  // Required. The initial values for a new management DNS zone binding.
+  ManagementDnsZoneBinding management_dns_zone_binding = 2
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Required. The user-provided identifier of the `ManagementDnsZoneBinding`
+  // resource to be created. This identifier must be unique among
+  // `ManagementDnsZoneBinding` resources within the parent and becomes the
+  // final token in the name URI. The identifier must meet the following
+  // requirements:
+  //
+  // * Only contains 1-63 alphanumeric characters and hyphens
+  // * Begins with an alphabetical character
+  // * Ends with a non-hyphen character
+  // * Not formatted as a UUID
+  // * Complies with [RFC 1034](https://datatracker.ietf.org/doc/html/rfc1034)
+  // (section 3.5)
+  string management_dns_zone_binding_id = 3
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request ID,
+  // the server can check if the original operation with the same request ID was
+  // received, and if so, will ignore the second request. This prevents clients
+  // from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.UpdateManagementDnsZoneBinding][google.cloud.vmwareengine.v1.VmwareEngine.UpdateManagementDnsZoneBinding]
+message UpdateManagementDnsZoneBindingRequest {
+  // Required. Field mask is used to specify the fields to be overwritten in the
+  // `ManagementDnsZoneBinding` resource by the update.
+  // The fields specified in the `update_mask` are relative to the resource, not
+  // the full request. A field will be overwritten if it is in the mask. If the
+  // user does not provide a mask then all fields will be overwritten.
+  google.protobuf.FieldMask update_mask = 1
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Required. New values to update the management DNS zone binding with.
+  ManagementDnsZoneBinding management_dns_zone_binding = 2
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request ID,
+  // the server can check if the original operation with the same request ID was
+  // received, and if so, will ignore the second request. This prevents clients
+  // from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.DeleteManagementDnsZoneBinding][google.cloud.vmwareengine.v1.VmwareEngine.DeleteManagementDnsZoneBinding]
+message DeleteManagementDnsZoneBindingRequest {
+  // Required. The resource name of the management DNS zone binding to delete.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud/managementDnsZoneBindings/my-management-dns-zone-binding`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/ManagementDnsZoneBinding"
+    }
+  ];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request
+  // ID, the server can check if the original operation with the same request ID
+  // was received, and if so, will ignore the second request. This prevents
+  // clients from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for [VmwareEngine.RepairManagementDnsZoneBindings][]
+message RepairManagementDnsZoneBindingRequest {
+  // Required. The resource name of the management DNS zone binding to repair.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1-a/privateClouds/my-cloud/managementDnsZoneBindings/my-management-dns-zone-binding`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/ManagementDnsZoneBinding"
+    }
+  ];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request ID,
+  // the server can check if the original operation with the same request ID was
+  // received, and if so, will ignore the second request. This prevents clients
+  // from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Request message for
@@ -2288,4 +3502,340 @@ message ListVmwareEngineNetworksResponse {
 
   // Unreachable resources.
   repeated string unreachable = 3;
+}
+
+// Request message for
+// [VmwareEngine.CreatePrivateConnection][google.cloud.vmwareengine.v1.VmwareEngine.CreatePrivateConnection]
+message CreatePrivateConnectionRequest {
+  // Required. The resource name of the location to create the new private
+  // connection in. Private connection is a regional resource.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names. For example:
+  // `projects/my-project/locations/us-central1`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      child_type: "vmwareengine.googleapis.com/PrivateConnection"
+    }
+  ];
+
+  // Required. The user-provided identifier of the new private connection.
+  // This identifier must be unique among private connection resources
+  // within the parent and becomes the final token in the name URI. The
+  // identifier must meet the following requirements:
+  //
+  // * Only contains 1-63 alphanumeric characters and hyphens
+  // * Begins with an alphabetical character
+  // * Ends with a non-hyphen character
+  // * Not formatted as a UUID
+  // * Complies with [RFC 1034](https://datatracker.ietf.org/doc/html/rfc1034)
+  // (section 3.5)
+  string private_connection_id = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Required. The initial description of the new private connection.
+  PrivateConnection private_connection = 3
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request
+  // ID, the server can check if original operation with the same request ID
+  // was received, and if so, will ignore the second request. This prevents
+  // clients from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.GetPrivateConnection][google.cloud.vmwareengine.v1.VmwareEngine.GetPrivateConnection]
+message GetPrivateConnectionRequest {
+  // Required. The resource name of the private connection to retrieve.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1/privateConnections/my-connection`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/PrivateConnection"
+    }
+  ];
+}
+
+// Request message for
+// [VmwareEngine.ListPrivateConnections][google.cloud.vmwareengine.v1.VmwareEngine.ListPrivateConnections]
+message ListPrivateConnectionsRequest {
+  // Required. The resource name of the location to query for
+  // private connections. Resource names are schemeless URIs that follow the
+  // conventions in https://cloud.google.com/apis/design/resource_names. For
+  // example: `projects/my-project/locations/us-central1`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      child_type: "vmwareengine.googleapis.com/PrivateConnection"
+    }
+  ];
+
+  // The maximum number of private connections to return in one page.
+  // The maximum value is coerced to 1000.
+  // The default value of this field is 500.
+  int32 page_size = 2;
+
+  // A page token, received from a previous `ListPrivateConnections` call.
+  // Provide this to retrieve the subsequent page.
+  //
+  // When paginating, all other parameters provided to
+  // `ListPrivateConnections` must match the call that provided the page
+  // token.
+  string page_token = 3;
+
+  // A filter expression that matches resources returned in the response.
+  // The expression must specify the field name, a comparison
+  // operator, and the value that you want to use for filtering. The value
+  // must be a string, a number, or a boolean. The comparison operator
+  // must be `=`, `!=`, `>`, or `<`.
+  //
+  // For example, if you are filtering a list of private connections, you can
+  // exclude the ones named `example-connection` by specifying
+  // `name != "example-connection"`.
+  //
+  // To filter on multiple expressions, provide each separate expression within
+  // parentheses. For example:
+  // ```
+  // (name = "example-connection")
+  // (createTime > "2022-09-22T08:15:10.40Z")
+  // ```
+  //
+  // By default, each expression is an `AND` expression. However, you
+  // can include `AND` and `OR` expressions explicitly.
+  // For example:
+  // ```
+  // (name = "example-connection-1") AND
+  // (createTime > "2021-04-12T08:15:10.40Z") OR
+  // (name = "example-connection-2")
+  // ```
+  string filter = 4;
+
+  // Sorts list results by a certain order. By default, returned results
+  // are ordered by `name` in ascending order.
+  // You can also sort results in descending order based on the `name` value
+  // using `orderBy="name desc"`.
+  // Currently, only ordering by `name` is supported.
+  string order_by = 5;
+}
+
+// Response message for
+// [VmwareEngine.ListPrivateConnections][google.cloud.vmwareengine.v1.VmwareEngine.ListPrivateConnections]
+message ListPrivateConnectionsResponse {
+  // A list of private connections.
+  repeated PrivateConnection private_connections = 1;
+
+  // A token, which can be sent as `page_token` to retrieve the next page.
+  // If this field is omitted, there are no subsequent pages.
+  string next_page_token = 2;
+
+  // Unreachable resources.
+  repeated string unreachable = 3;
+}
+
+// Request message for
+// [VmwareEngine.UpdatePrivateConnection][google.cloud.vmwareengine.v1.VmwareEngine.UpdatePrivateConnection]
+message UpdatePrivateConnectionRequest {
+  // Required. Private connection description.
+  PrivateConnection private_connection = 1
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Required. Field mask is used to specify the fields to be overwritten in the
+  // `PrivateConnection` resource by the update.
+  // The fields specified in the `update_mask` are relative to the resource, not
+  // the full request. A field will be overwritten if it is in the mask. If the
+  // user does not provide a mask then all fields will be overwritten.
+  google.protobuf.FieldMask update_mask = 2
+      [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request
+  // ID, the server can check if original operation with the same request ID
+  // was received, and if so, will ignore the second request. This prevents
+  // clients from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.DeletePrivateConnection][google.cloud.vmwareengine.v1.VmwareEngine.DeletePrivateConnection]
+message DeletePrivateConnectionRequest {
+  // Required. The resource name of the private connection to be deleted.
+  // Resource names are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names.
+  // For example:
+  // `projects/my-project/locations/us-central1/privateConnections/my-connection`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/PrivateConnection"
+    }
+  ];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request
+  // ID, the server can check if original operation with the same request ID
+  // was received, and if so, will ignore the second request. This prevents
+  // clients from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.ListPrivateConnectionPeeringRoutes][google.cloud.vmwareengine.v1.VmwareEngine.ListPrivateConnectionPeeringRoutes]
+message ListPrivateConnectionPeeringRoutesRequest {
+  // Required. The resource name of the private connection to retrieve peering
+  // routes from. Resource names are schemeless URIs that follow the conventions
+  // in https://cloud.google.com/apis/design/resource_names. For example:
+  // `projects/my-project/locations/us-west1/privateConnections/my-connection`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/PrivateConnection"
+    }
+  ];
+
+  // The maximum number of peering routes to return in one page.
+  // The service may return fewer than this value.
+  // The maximum value is coerced to 1000.
+  // The default value of this field is 500.
+  int32 page_size = 2;
+
+  // A page token, received from a previous `ListPrivateConnectionPeeringRoutes`
+  // call. Provide this to retrieve the subsequent page. When paginating, all
+  // other parameters provided to `ListPrivateConnectionPeeringRoutes` must
+  // match the call that provided the page token.
+  string page_token = 3;
+}
+
+// Response message for
+// [VmwareEngine.ListPrivateConnectionPeeringRoutes][google.cloud.vmwareengine.v1.VmwareEngine.ListPrivateConnectionPeeringRoutes]
+message ListPrivateConnectionPeeringRoutesResponse {
+  // A list of peering routes.
+  repeated PeeringRoute peering_routes = 1;
+
+  // A token, which can be sent as `page_token` to retrieve the next page.
+  // If this field is omitted, there are no subsequent pages.
+  string next_page_token = 2;
+}
+
+// Request message for
+// [VmwareEngine.GrantDnsBindPermission][google.cloud.vmwareengine.v1.VmwareEngine.GrantDnsBindPermission]
+message GrantDnsBindPermissionRequest {
+  // Required. The name of the resource which stores the users/service accounts
+  // having the permission to bind to the corresponding intranet VPC of the
+  // consumer project. DnsBindPermission is a global resource. Resource names
+  // are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names. For example:
+  // `projects/my-project/locations/global/dnsBindPermission`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/DnsBindPermission"
+    }
+  ];
+
+  // Required. The consumer provided user/service account which needs to be
+  // granted permission to bind with the intranet VPC corresponding to the
+  // consumer project.
+  Principal principal = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request
+  // ID, the server can check if original operation with the same request ID
+  // was received, and if so, will ignore the second request. This prevents
+  // clients from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.RevokeDnsBindPermission][google.cloud.vmwareengine.v1.VmwareEngine.RevokeDnsBindPermission]
+message RevokeDnsBindPermissionRequest {
+  // Required. The name of the resource which stores the users/service accounts
+  // having the permission to bind to the corresponding intranet VPC of the
+  // consumer project. DnsBindPermission is a global resource. Resource names
+  // are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names. For example:
+  // `projects/my-project/locations/global/dnsBindPermission`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/DnsBindPermission"
+    }
+  ];
+
+  // Required. The consumer provided user/service account which needs to be
+  // granted permission to bind with the intranet VPC corresponding to the
+  // consumer project.
+  Principal principal = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. A request ID to identify requests. Specify a unique request ID
+  // so that if you must retry your request, the server will know to ignore
+  // the request if it has already been completed. The server guarantees that a
+  // request doesn't result in creation of duplicate commitments for at least 60
+  // minutes.
+  //
+  // For example, consider a situation where you make an initial request and the
+  // request times out. If you make the request again with the same request
+  // ID, the server can check if original operation with the same request ID
+  // was received, and if so, will ignore the second request. This prevents
+  // clients from accidentally creating duplicate commitments.
+  //
+  // The request ID must be a valid UUID with the exception that zero UUID is
+  // not supported (00000000-0000-0000-0000-000000000000).
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Request message for
+// [VmwareEngine.GetDnsBindPermission][google.cloud.vmwareengine.v1.VmwareEngine.GetDnsBindPermission]
+message GetDnsBindPermissionRequest {
+  // Required. The name of the resource which stores the users/service accounts
+  // having the permission to bind to the corresponding intranet VPC of the
+  // consumer project. DnsBindPermission is a global resource. Resource names
+  // are schemeless URIs that follow the conventions in
+  // https://cloud.google.com/apis/design/resource_names. For example:
+  // `projects/my-project/locations/global/dnsBindPermission`
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "vmwareengine.googleapis.com/DnsBindPermission"
+    }
+  ];
 }

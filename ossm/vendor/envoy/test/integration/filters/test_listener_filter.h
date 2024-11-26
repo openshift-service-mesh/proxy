@@ -6,8 +6,9 @@
 
 #include "source/common/router/string_accessor_impl.h"
 #include "source/common/stream_info/uint32_accessor_impl.h"
-
+#ifdef ENVOY_ENABLE_QUIC
 #include "quiche/quic/core/quic_packets.h"
+#endif
 
 namespace Envoy {
 /**
@@ -91,15 +92,19 @@ public:
   static const absl::string_view key() { return "test.filter_state.quic_first_packet_received"; }
   void incrementPacketCount() { packet_count_++; }
   void setPacketLength(size_t packet_length) { packet_length_ = packet_length; }
+  void setPacketHeadersLength(size_t packet_headers_length) {
+    packet_headers_length_ = packet_headers_length;
+  }
 
   // FilterState::Object
   absl::optional<std::string> serializeAsString() const override {
-    return absl::StrCat(packet_count_, ",", packet_length_);
+    return absl::StrCat(packet_count_, ",", packet_length_, ",", packet_headers_length_);
   }
 
 private:
   uint32_t packet_count_ = 0;
   size_t packet_length_ = 0;
+  size_t packet_headers_length_ = 0;
 };
 
 /**
@@ -149,6 +154,7 @@ public:
   Network::FilterStatus onFirstPacketReceived(const quic::QuicReceivedPacket& packet) override {
     test_first_packet_received_filter_state_->incrementPacketCount();
     test_first_packet_received_filter_state_->setPacketLength(packet.length());
+    test_first_packet_received_filter_state_->setPacketHeadersLength(packet.headers_length());
     return Network::FilterStatus::Continue;
   }
 

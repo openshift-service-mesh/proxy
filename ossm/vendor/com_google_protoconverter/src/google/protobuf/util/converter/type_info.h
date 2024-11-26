@@ -17,15 +17,11 @@
 #ifndef GOOGLE_PROTOBUF_UTIL_CONVERTER_TYPE_INFO_H_
 #define GOOGLE_PROTOBUF_UTIL_CONVERTER_TYPE_INFO_H_
 
-#include "google/protobuf/type.pb.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "google/protobuf/type.pb.h"
 #include "google/protobuf/util/type_resolver.h"
-
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
 
 namespace google {
 namespace protobuf {
@@ -33,7 +29,7 @@ namespace util {
 namespace converter {
 // Internal helper class for type resolving. Note that this class is not
 // thread-safe and should only be accessed in one thread.
-class PROTOBUF_EXPORT TypeInfo {
+class TypeInfo {
  public:
   TypeInfo() {}
   TypeInfo(const TypeInfo&) = delete;
@@ -76,7 +72,5 @@ class PROTOBUF_EXPORT TypeInfo {
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_TYPE_INFO_H_

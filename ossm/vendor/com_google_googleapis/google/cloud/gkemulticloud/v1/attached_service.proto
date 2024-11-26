@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,11 +21,13 @@ import "google/api/client.proto";
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
 import "google/cloud/gkemulticloud/v1/attached_resources.proto";
+import "google/cloud/gkemulticloud/v1/common_resources.proto";
 import "google/longrunning/operations.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 
 option csharp_namespace = "Google.Cloud.GkeMultiCloud.V1";
-option go_package = "google.golang.org/genproto/googleapis/cloud/gkemulticloud/v1;gkemulticloud";
+option go_package = "cloud.google.com/go/gkemulticloud/apiv1/gkemulticloudpb;gkemulticloudpb";
 option java_multiple_files = true;
 option java_outer_classname = "AttachedServiceProto";
 option java_package = "com.google.cloud.gkemulticloud.v1";
@@ -42,7 +44,7 @@ service AttachedClusters {
 
   // Creates a new
   // [AttachedCluster][google.cloud.gkemulticloud.v1.AttachedCluster] resource
-  // on a given GCP project and region.
+  // on a given Google Cloud Platform project and region.
   //
   // If successful, the response contains a newly created
   // [Operation][google.longrunning.Operation] resource that can be
@@ -155,6 +157,16 @@ service AttachedClusters {
     };
     option (google.api.method_signature) = "parent,attached_cluster_id";
   }
+
+  // Generates an access token for a cluster agent.
+  rpc GenerateAttachedClusterAgentToken(
+      GenerateAttachedClusterAgentTokenRequest)
+      returns (GenerateAttachedClusterAgentTokenResponse) {
+    option (google.api.http) = {
+      post: "/v1/{attached_cluster=projects/*/locations/*/attachedClusters/*}:generateAttachedClusterAgentToken"
+      body: "*"
+    };
+  }
 }
 
 // Request message for `AttachedClusters.GenerateAttachedClusterInstallManifest`
@@ -175,7 +187,7 @@ message GenerateAttachedClusterInstallManifestRequest {
     }
   ];
 
-  // Required. A client provided ID the resource. Must be unique within the
+  // Required. A client provided ID of the resource. Must be unique within the
   // parent resource.
   //
   // The provided ID will be part of the
@@ -188,7 +200,7 @@ message GenerateAttachedClusterInstallManifestRequest {
   // When generating an install manifest for importing an existing Membership
   // resource, the attached_cluster_id field must be the Membership id.
   //
-  // Membership names are formatted as `resource name formatted as
+  // Membership names are formatted as
   // `projects/<project-id>/locations/<region>/memberships/<membership-id>`.
   string attached_cluster_id = 2 [(google.api.field_behavior) = REQUIRED];
 
@@ -198,6 +210,9 @@ message GenerateAttachedClusterInstallManifestRequest {
   // calling
   // [GetAttachedServerConfig][google.cloud.gkemulticloud.v1.AttachedClusters.GetAttachedServerConfig].
   string platform_version = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. Proxy configuration for outbound HTTP(S) traffic.
+  AttachedProxyConfig proxy_config = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Response message for
@@ -276,8 +291,11 @@ message ImportAttachedClusterRequest {
 
   // Required. The Kubernetes distribution of the underlying attached cluster.
   //
-  // Supported values: ["eks", "aks"].
+  // Supported values: ["eks", "aks", "generic"].
   string distribution = 5 [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. Proxy configuration for outbound HTTP(S) traffic.
+  AttachedProxyConfig proxy_config = 6 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Request message for `AttachedClusters.UpdateAttachedCluster` method.
@@ -295,12 +313,17 @@ message UpdateAttachedClusterRequest {
   // fields from
   // [AttachedCluster][google.cloud.gkemulticloud.v1.AttachedCluster]:
   //
-  //  *   `description`.
   //  *   `annotations`.
-  //  *   `platform_version`.
+  //  *   `authorization.admin_groups`.
   //  *   `authorization.admin_users`.
+  //  *   `binary_authorization.evaluation_mode`.
+  //  *   `description`.
   //  *   `logging_config.component_config.enable_components`.
   //  *   `monitoring_config.managed_prometheus_config.enabled`.
+  //  *   `platform_version`.
+  //  *   `proxy_config.kubernetes_secret.name`.
+  //  *   `proxy_config.kubernetes_secret.namespace`.
+  //  *   `security_posture_config.vulnerability_mode`
   google.protobuf.FieldMask update_mask = 3
       [(google.api.field_behavior) = REQUIRED];
 }
@@ -315,7 +338,7 @@ message GetAttachedClusterRequest {
   // `projects/<project-id>/locations/<region>/attachedClusters/<cluster-id>`.
   //
   // See [Resource Names](https://cloud.google.com/apis/design/resource_names)
-  // for more details on GCP resource names.
+  // for more details on Google Cloud Platform resource names.
   string name = 1 [
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference) = {
@@ -332,7 +355,7 @@ message ListAttachedClustersRequest {
   // Location names are formatted as `projects/<project-id>/locations/<region>`.
   //
   // See [Resource Names](https://cloud.google.com/apis/design/resource_names)
-  // for more details on GCP resource names.
+  // for more details on Google Cloud Platform resource names.
   string parent = 1 [
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference) = {
@@ -358,7 +381,7 @@ message ListAttachedClustersRequest {
 // Response message for `AttachedClusters.ListAttachedClusters` method.
 message ListAttachedClustersResponse {
   // A list of [AttachedCluster][google.cloud.gkemulticloud.v1.AttachedCluster]
-  // resources in the specified GCP project and region region.
+  // resources in the specified Google Cloud Platform project and region region.
   repeated AttachedCluster attached_clusters = 1;
 
   // Token to retrieve the next page of results, or empty if there are no more
@@ -375,7 +398,7 @@ message DeleteAttachedClusterRequest {
   // `projects/<project-id>/locations/<region>/attachedClusters/<cluster-id>`.
   //
   // See [Resource Names](https://cloud.google.com/apis/design/resource_names)
-  // for more details on GCP resource names.
+  // for more details on Google Cloud Platform resource names.
   string name = 1 [
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference) = {
@@ -429,4 +452,46 @@ message GetAttachedServerConfigRequest {
       type: "gkemulticloud.googleapis.com/AttachedServerConfig"
     }
   ];
+}
+
+message GenerateAttachedClusterAgentTokenRequest {
+  // Required.
+  string attached_cluster = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "gkemulticloud.googleapis.com/AttachedCluster"
+    }
+  ];
+
+  // Required.
+  string subject_token = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Required.
+  string subject_token_type = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Required.
+  string version = 4 [(google.api.field_behavior) = REQUIRED];
+
+  // Optional.
+  string grant_type = 6 [(google.api.field_behavior) = OPTIONAL];
+
+  // Optional.
+  string audience = 7 [(google.api.field_behavior) = OPTIONAL];
+
+  // Optional.
+  string scope = 8 [(google.api.field_behavior) = OPTIONAL];
+
+  // Optional.
+  string requested_token_type = 9 [(google.api.field_behavior) = OPTIONAL];
+
+  // Optional.
+  string options = 10 [(google.api.field_behavior) = OPTIONAL];
+}
+
+message GenerateAttachedClusterAgentTokenResponse {
+  string access_token = 1;
+
+  int32 expires_in = 2;
+
+  string token_type = 3;
 }

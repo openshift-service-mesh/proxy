@@ -1,6 +1,6 @@
 //! Convert annotated metadata into a renderable context
 
-pub mod crate_context;
+pub(crate) mod crate_context;
 mod platforms;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -11,49 +11,48 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::config::CrateId;
-use crate::context::crate_context::{CrateContext, CrateDependency, Rule};
 use crate::context::platforms::resolve_cfg_platforms;
 use crate::lockfile::Digest;
 use crate::metadata::{Annotations, Dependency};
 use crate::select::Select;
 use crate::utils::target_triple::TargetTriple;
 
-pub use self::crate_context::*;
+pub(crate) use self::crate_context::*;
 
 /// A struct containing information about a Cargo dependency graph in an easily to consume
 /// format for rendering reproducible Bazel targets.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Context {
+pub(crate) struct Context {
     /// The collective checksum of all inputs to the context
-    pub checksum: Option<Digest>,
+    pub(crate) checksum: Option<Digest>,
 
     /// The collection of all crates that make up the dependency graph
-    pub crates: BTreeMap<CrateId, CrateContext>,
+    pub(crate) crates: BTreeMap<CrateId, CrateContext>,
 
     /// A subset of only crates with binary targets
-    pub binary_crates: BTreeSet<CrateId>,
+    pub(crate) binary_crates: BTreeSet<CrateId>,
 
     /// A subset of workspace members mapping to their workspace
     /// path relative to the workspace root
-    pub workspace_members: BTreeMap<CrateId, String>,
+    pub(crate) workspace_members: BTreeMap<CrateId, String>,
 
     /// A mapping of `cfg` flags to platform triples supporting the configuration
-    pub conditions: BTreeMap<String, BTreeSet<TargetTriple>>,
+    pub(crate) conditions: BTreeMap<String, BTreeSet<TargetTriple>>,
 
     /// A list of crates visible to any bazel module.
-    pub direct_deps: BTreeSet<CrateId>,
+    pub(crate) direct_deps: BTreeSet<CrateId>,
 
     /// A list of crates visible to this bazel module.
-    pub direct_dev_deps: BTreeSet<CrateId>,
+    pub(crate) direct_dev_deps: BTreeSet<CrateId>,
 }
 
 impl Context {
-    pub fn try_from_path<T: AsRef<Path>>(path: T) -> Result<Self> {
+    pub(crate) fn try_from_path<T: AsRef<Path>>(path: T) -> Result<Self> {
         let data = fs::read_to_string(path.as_ref())?;
         Ok(serde_json::from_str(&data)?)
     }
 
-    pub fn new(annotations: Annotations) -> Result<Self> {
+    pub(crate) fn new(annotations: Annotations, sources_are_present: bool) -> anyhow::Result<Self> {
         // Build a map of crate contexts
         let crates: BTreeMap<CrateId, CrateContext> = annotations
             .metadata
@@ -65,14 +64,15 @@ impl Context {
                     &annotations.metadata.packages,
                     &annotations.lockfile.crates,
                     &annotations.pairred_extras,
-                    &annotations.crate_features,
+                    &annotations.metadata.workspace_metadata.tree_metadata,
                     annotations.config.generate_binaries,
                     annotations.config.generate_build_scripts,
-                );
+                    sources_are_present,
+                )?;
                 let id = CrateId::new(context.name.clone(), context.version.clone());
-                (id, context)
+                Ok::<_, anyhow::Error>((id, context))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         // Filter for any crate that contains a binary
         let binary_crates: BTreeSet<CrateId> = crates
@@ -84,7 +84,7 @@ impl Context {
             .collect();
 
         // Given a list of all conditional dependencies, build a set of platform
-        // triples which satsify the conditions.
+        // triples which satisfy the conditions.
         let conditions = resolve_cfg_platforms(
             crates.values().collect(),
             &annotations.config.supported_platform_triples,
@@ -192,7 +192,7 @@ impl Context {
     }
 
     /// Create a set of all direct dependencies of workspace member crates.
-    pub fn workspace_member_deps(&self) -> BTreeSet<CrateDependency> {
+    pub(crate) fn workspace_member_deps(&self) -> BTreeSet<CrateDependency> {
         self.workspace_members
             .keys()
             .map(move |id| &self.crates[id])
@@ -208,7 +208,7 @@ impl Context {
             .collect()
     }
 
-    pub fn has_duplicate_workspace_member_dep(&self, dep: &CrateDependency) -> bool {
+    pub(crate) fn has_duplicate_workspace_member_dep(&self, dep: &CrateDependency) -> bool {
         1 < self
             .workspace_member_deps()
             .into_iter()
@@ -216,7 +216,7 @@ impl Context {
             .count()
     }
 
-    pub fn has_duplicate_binary_crate(&self, bin: &CrateId) -> bool {
+    pub(crate) fn has_duplicate_binary_crate(&self, bin: &CrateId) -> bool {
         1 < self
             .binary_crates
             .iter()
@@ -228,6 +228,7 @@ impl Context {
 #[cfg(test)]
 mod test {
     use super::*;
+    use semver::Version;
 
     use crate::config::Config;
 
@@ -239,7 +240,7 @@ mod test {
         )
         .unwrap();
 
-        Context::new(annotations).unwrap()
+        Context::new(annotations, false).unwrap()
     }
 
     fn mock_context_aliases() -> Context {
@@ -250,11 +251,11 @@ mod test {
         )
         .unwrap();
 
-        Context::new(annotations).unwrap()
+        Context::new(annotations, false).unwrap()
     }
 
     #[test]
-    fn workspace_member_deps() {
+    fn workspace_member_deps_collection() {
         let context = mock_context_common();
         let workspace_member_deps = context.workspace_member_deps();
 
@@ -264,8 +265,8 @@ mod test {
                 .map(|dep| (&dep.id, context.has_duplicate_workspace_member_dep(dep)))
                 .collect::<Vec<_>>(),
             [
-                (&CrateId::new("bitflags".to_owned(), "1.3.2".to_owned()), false),
-                (&CrateId::new("cfg-if".to_owned(), "1.0.0".to_owned()), false),
+                (&CrateId::new("bitflags".to_owned(), Version::new(1, 3, 2)), false),
+                (&CrateId::new("cfg-if".to_owned(), Version::new(1, 0, 0)), false),
             ],
         }
     }
@@ -281,20 +282,21 @@ mod test {
                 .map(|dep| (&dep.id, context.has_duplicate_workspace_member_dep(dep)))
                 .collect::<Vec<_>>(),
             [
-                (&CrateId::new("log".to_owned(), "0.3.9".to_owned()), false),
-                (&CrateId::new("log".to_owned(), "0.4.14".to_owned()), false),
-                (&CrateId::new("names".to_owned(), "0.12.1-dev".to_owned()), false),
-                (&CrateId::new("names".to_owned(), "0.13.0".to_owned()), false),
-                (&CrateId::new("value-bag".to_owned(), "1.0.0-alpha.7".to_owned()), false),
+                (&CrateId::new("log".to_owned(), Version::new(0, 3, 9)), false),
+                (&CrateId::new("log".to_owned(), Version::new(0, 4, 21)), false),
+                (&CrateId::new("names".to_owned(), Version::parse("0.12.1-dev").unwrap()), false),
+                (&CrateId::new("names".to_owned(), Version::new(0, 13, 0)), false),
+                (&CrateId::new("surrealdb".to_owned(), Version::new(1, 3, 1)), false),
+                (&CrateId::new("value-bag".to_owned(), Version::parse("1.0.0-alpha.7").unwrap()), false),
             ],
         }
     }
 
     #[test]
-    fn seralization() {
+    fn serialization() {
         let context = mock_context_aliases();
 
-        // Seralize and deseralize the context object
+        // Serialize and deserialize the context object
         let json_text = serde_json::to_string(&context).unwrap();
         let deserialized_context: Context = serde_json::from_str(&json_text).unwrap();
 

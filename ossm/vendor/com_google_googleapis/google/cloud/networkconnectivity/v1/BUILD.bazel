@@ -31,6 +31,7 @@ proto_library(
         "//google/api:field_behavior_proto",
         "//google/api:resource_proto",
         "//google/longrunning:operations_proto",
+        "@com_google_protobuf//:empty_proto",
         "@com_google_protobuf//:field_mask_proto",
         "@com_google_protobuf//:timestamp_proto",
     ],
@@ -41,6 +42,8 @@ proto_library_with_info(
     deps = [
         ":networkconnectivity_proto",
         "//google/cloud:common_resources_proto",
+        "//google/cloud/location:location_proto",
+        "//google/iam/v1:iam_policy_proto",
     ],
 )
 
@@ -75,12 +78,16 @@ java_gapic_library(
     rest_numeric_enums = True,
     service_yaml = "networkconnectivity_v1.yaml",
     test_deps = [
+        "//google/cloud/location:location_java_grpc",
+        "//google/iam/v1:iam_java_grpc",
         ":networkconnectivity_java_grpc",
     ],
     transport = "grpc",
     deps = [
         ":networkconnectivity_java_proto",
         "//google/api:api_java_proto",
+        "//google/cloud/location:location_java_proto",
+        "//google/iam/v1:iam_java_proto",
     ],
 )
 
@@ -114,13 +121,12 @@ load(
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "networkconnectivity_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/networkconnectivity/v1",
+    importpath = "cloud.google.com/go/networkconnectivity/apiv1/networkconnectivitypb",
     protos = [":networkconnectivity_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -134,6 +140,7 @@ go_gapic_library(
     grpc_service_config = "networkconnectivity_v1_grpc_service_config.json",
     importpath = "cloud.google.com/go/networkconnectivity/apiv1;networkconnectivity",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "networkconnectivity_v1.yaml",
     transport = "grpc",
@@ -147,19 +154,13 @@ go_gapic_library(
     ],
 )
 
-go_test(
-    name = "networkconnectivity_go_gapic_test",
-    srcs = [":networkconnectivity_go_gapic_srcjar_test"],
-    embed = [":networkconnectivity_go_gapic"],
-    importpath = "cloud.google.com/go/networkconnectivity/apiv1",
-)
-
 # Open Source Packages
 go_gapic_assembly_pkg(
     name = "gapi-cloud-networkconnectivity-v1-go",
     deps = [
         ":networkconnectivity_go_gapic",
         ":networkconnectivity_go_gapic_srcjar-metadata.srcjar",
+        ":networkconnectivity_go_gapic_srcjar-snippets.srcjar",
         ":networkconnectivity_go_gapic_srcjar-test.srcjar",
         ":networkconnectivity_go_proto",
     ],
@@ -181,7 +182,11 @@ py_gapic_library(
     grpc_service_config = "networkconnectivity_v1_grpc_service_config.json",
     opt_args = ["warehouse-package-name=google-cloud-network-connectivity"],
     rest_numeric_enums = True,
+    service_yaml = "networkconnectivity_v1.yaml",
     transport = "grpc",
+    deps = [
+        "//google/iam/v1:iam_policy_py_proto",
+    ],
 )
 
 py_test(
@@ -209,7 +214,6 @@ load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -218,21 +222,15 @@ php_proto_library(
     deps = [":networkconnectivity_proto"],
 )
 
-php_grpc_library(
-    name = "networkconnectivity_php_grpc",
-    srcs = [":networkconnectivity_proto"],
-    deps = [":networkconnectivity_php_proto"],
-)
-
 php_gapic_library(
     name = "networkconnectivity_php_gapic",
     srcs = [":networkconnectivity_proto_with_info"],
     grpc_service_config = "networkconnectivity_v1_grpc_service_config.json",
+    migration_mode = "NEW_SURFACE_ONLY",
     rest_numeric_enums = True,
     service_yaml = "networkconnectivity_v1.yaml",
     transport = "grpc+rest",
     deps = [
-        ":networkconnectivity_php_grpc",
         ":networkconnectivity_php_proto",
     ],
 )
@@ -242,7 +240,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-networkconnectivity-v1-php",
     deps = [
         ":networkconnectivity_php_gapic",
-        ":networkconnectivity_php_grpc",
         ":networkconnectivity_php_proto",
     ],
 )
@@ -313,6 +310,8 @@ ruby_cloud_gapic_library(
     rest_numeric_enums = True,
     ruby_cloud_description = "Network Connectivity is Google's suite of products that provide enterprise connectivity from your on-premises network or from another cloud provider to your Virtual Private Cloud (VPC) network.",
     ruby_cloud_title = "Network Connectivity V1",
+    service_yaml = "networkconnectivity_v1.yaml",
+    transport = "grpc",
     deps = [
         ":networkconnectivity_ruby_grpc",
         ":networkconnectivity_ruby_proto",
@@ -358,6 +357,7 @@ csharp_gapic_library(
     grpc_service_config = "networkconnectivity_v1_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "networkconnectivity_v1.yaml",
+    transport = "grpc",
     deps = [
         ":networkconnectivity_csharp_grpc",
         ":networkconnectivity_csharp_proto",

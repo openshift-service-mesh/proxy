@@ -1,12 +1,29 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <curl/curl.h>
+#include <curl/curlver.h>
+#include <curl/system.h>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <cstring>
-
-#include "opentelemetry/ext/http/client/curl/http_operation_curl.h"
+#include <functional>
+#include <future>
+#include <istream>
+#include <map>
+#include <memory>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
 
 #include "opentelemetry/ext/http/client/curl/http_client_curl.h"
+#include "opentelemetry/ext/http/client/curl/http_operation_curl.h"
+#include "opentelemetry/ext/http/client/http_client.h"
 #include "opentelemetry/sdk/common/global_log_handler.h"
+#include "opentelemetry/version.h"
 
 // CURL_VERSION_BITS was added in CURL 7.43.0
 #ifndef CURL_VERSION_BITS
@@ -60,7 +77,7 @@ size_t HttpOperation::WriteVectorHeaderCallback(void *ptr, size_t size, size_t n
     return 0;
   }
 
-  const unsigned char *begin = (unsigned char *)(ptr);
+  const unsigned char *begin = static_cast<unsigned char *>(ptr);
   const unsigned char *end   = begin + size * nmemb;
   self->response_headers_.insert(self->response_headers_.end(), begin, end);
 
@@ -90,7 +107,7 @@ size_t HttpOperation::WriteVectorBodyCallback(void *ptr, size_t size, size_t nme
     return 0;
   }
 
-  const unsigned char *begin = (unsigned char *)(ptr);
+  const unsigned char *begin = static_cast<unsigned char *>(ptr);
   const unsigned char *end   = begin + size * nmemb;
   self->response_body_.insert(self->response_body_.end(), begin, end);
 
@@ -223,7 +240,7 @@ int HttpOperation::OnProgressCallback(void *clientp,
 #endif
 
 void HttpOperation::DispatchEvent(opentelemetry::ext::http::client::SessionState type,
-                                  std::string reason)
+                                  const std::string &reason)
 {
   if (event_handle_ != nullptr)
   {
@@ -240,6 +257,7 @@ HttpOperation::HttpOperation(opentelemetry::ext::http::client::Method method,
                              // Default empty headers and empty request body
                              const opentelemetry::ext::http::client::Headers &request_headers,
                              const opentelemetry::ext::http::client::Body &request_body,
+                             const opentelemetry::ext::http::client::Compression &compression,
                              // Default connectivity and response size options
                              bool is_raw_response,
                              std::chrono::milliseconds http_conn_timeout,
@@ -255,13 +273,14 @@ HttpOperation::HttpOperation(opentelemetry::ext::http::client::Method method,
       last_curl_result_(CURLE_OK),
       event_handle_(event_handle),
       method_(method),
-      url_(url),
+      url_(std::move(url)),
       ssl_options_(ssl_options),
       // Local vars
       request_headers_(request_headers),
       request_body_(request_body),
       request_nwrite_(0),
       session_state_(opentelemetry::ext::http::client::SessionState::Created),
+      compression_(compression),
       response_code_(0)
 {
   /* get a curl handle */
@@ -412,16 +431,16 @@ void HttpOperation::Cleanup()
   To represent versions, the following symbols are needed:
 
   Added in CURL 7.34.0:
-  - CURL_SSLVERSION_TLSv1_0
-  - CURL_SSLVERSION_TLSv1_1
+  - CURL_SSLVERSION_TLSv1_0 (do not use)
+  - CURL_SSLVERSION_TLSv1_1 (do not use)
   - CURL_SSLVERSION_TLSv1_2
 
   Added in CURL 7.52.0:
   - CURL_SSLVERSION_TLSv1_3
 
   Added in CURL 7.54.0:
-  - CURL_SSLVERSION_MAX_TLSv1_0
-  - CURL_SSLVERSION_MAX_TLSv1_1
+  - CURL_SSLVERSION_MAX_TLSv1_0 (do not use)
+  - CURL_SSLVERSION_MAX_TLSv1_1 (do not use)
   - CURL_SSLVERSION_MAX_TLSv1_2
   - CURL_SSLVERSION_MAX_TLSv1_3
 
@@ -434,19 +453,9 @@ void HttpOperation::Cleanup()
 #  define HAVE_TLS_VERSION
 #endif
 
-static long parse_min_ssl_version(std::string version)
+static long parse_min_ssl_version(const std::string &version)
 {
 #ifdef HAVE_TLS_VERSION
-  if (version == "1.0")
-  {
-    return CURL_SSLVERSION_TLSv1_0;
-  }
-
-  if (version == "1.1")
-  {
-    return CURL_SSLVERSION_TLSv1_1;
-  }
-
   if (version == "1.2")
   {
     return CURL_SSLVERSION_TLSv1_2;
@@ -461,19 +470,9 @@ static long parse_min_ssl_version(std::string version)
   return 0;
 }
 
-static long parse_max_ssl_version(std::string version)
+static long parse_max_ssl_version(const std::string &version)
 {
 #ifdef HAVE_TLS_VERSION
-  if (version == "1.0")
-  {
-    return CURL_SSLVERSION_MAX_TLSv1_0;
-  }
-
-  if (version == "1.1")
-  {
-    return CURL_SSLVERSION_MAX_TLSv1_1;
-  }
-
   if (version == "1.2")
   {
     return CURL_SSLVERSION_MAX_TLSv1_2;
@@ -728,7 +727,12 @@ CURLcode HttpOperation::Setup()
 
     /* 4 - TLS */
 
+#ifdef HAVE_TLS_VERSION
+    /* By default, TLSv1.2 or better is required (if we have TLS). */
+    long min_ssl_version = CURL_SSLVERSION_TLSv1_2;
+#else
     long min_ssl_version = 0;
+#endif
 
     if (!ssl_options_.ssl_min_tls.empty())
     {
@@ -746,6 +750,11 @@ CURLcode HttpOperation::Setup()
 #endif
     }
 
+    /*
+     * Do not set a max TLS version by default.
+     * The CURL + openssl library may be more recent than this code,
+     * and support a version we do not know about.
+     */
     long max_ssl_version = 0;
 
     if (!ssl_options_.ssl_max_tls.empty())
@@ -778,7 +787,7 @@ CURLcode HttpOperation::Setup()
 
     if (!ssl_options_.ssl_cipher.empty())
     {
-      /* TLS 1.0, 1.1, 1.2 */
+      /* TLS 1.2 */
       const char *cipher_list = ssl_options_.ssl_cipher.c_str();
 
       rc = SetCurlStrOption(CURLOPT_SSL_CIPHER_LIST, cipher_list);
@@ -810,7 +819,7 @@ CURLcode HttpOperation::Setup()
     if (ssl_options_.ssl_insecure_skip_verify)
     {
       /* 6 - DO NOT ENFORCE VERIFICATION, This is not secure. */
-      rc = SetCurlLongOption(CURLOPT_USE_SSL, (long)CURLUSESSL_NONE);
+      rc = SetCurlLongOption(CURLOPT_USE_SSL, static_cast<long>(CURLUSESSL_NONE));
       if (rc != CURLE_OK)
       {
         return rc;
@@ -831,7 +840,7 @@ CURLcode HttpOperation::Setup()
     else
     {
       /* 6 - ENFORCE VERIFICATION */
-      rc = SetCurlLongOption(CURLOPT_USE_SSL, (long)CURLUSESSL_ALL);
+      rc = SetCurlLongOption(CURLOPT_USE_SSL, static_cast<long>(CURLUSESSL_ALL));
       if (rc != CURLE_OK)
       {
         return rc;
@@ -859,6 +868,15 @@ CURLcode HttpOperation::Setup()
     }
 
     rc = SetCurlLongOption(CURLOPT_SSL_VERIFYHOST, 0L);
+    if (rc != CURLE_OK)
+    {
+      return rc;
+    }
+  }
+
+  if (compression_ == opentelemetry::ext::http::client::Compression::kGzip)
+  {
+    rc = SetCurlStrOption(CURLOPT_ACCEPT_ENCODING, "gzip");
     if (rc != CURLE_OK)
     {
       return rc;
@@ -932,13 +950,14 @@ CURLcode HttpOperation::Setup()
       return rc;
     }
 
-    rc = SetCurlPtrOption(CURLOPT_WRITEFUNCTION, (void *)&HttpOperation::WriteMemoryCallback);
+    rc = SetCurlPtrOption(CURLOPT_WRITEFUNCTION,
+                          reinterpret_cast<void *>(&HttpOperation::WriteMemoryCallback));
     if (rc != CURLE_OK)
     {
       return rc;
     }
 
-    rc = SetCurlPtrOption(CURLOPT_WRITEDATA, (void *)this);
+    rc = SetCurlPtrOption(CURLOPT_WRITEDATA, this);
     if (rc != CURLE_OK)
     {
       return rc;
@@ -946,26 +965,27 @@ CURLcode HttpOperation::Setup()
   }
   else
   {
-    rc = SetCurlPtrOption(CURLOPT_WRITEFUNCTION, (void *)&HttpOperation::WriteVectorBodyCallback);
+    rc = SetCurlPtrOption(CURLOPT_WRITEFUNCTION,
+                          reinterpret_cast<void *>(&HttpOperation::WriteVectorBodyCallback));
     if (rc != CURLE_OK)
     {
       return rc;
     }
 
-    rc = SetCurlPtrOption(CURLOPT_WRITEDATA, (void *)this);
+    rc = SetCurlPtrOption(CURLOPT_WRITEDATA, this);
     if (rc != CURLE_OK)
     {
       return rc;
     }
 
-    rc =
-        SetCurlPtrOption(CURLOPT_HEADERFUNCTION, (void *)&HttpOperation::WriteVectorHeaderCallback);
+    rc = SetCurlPtrOption(CURLOPT_HEADERFUNCTION,
+                          reinterpret_cast<void *>(&HttpOperation::WriteVectorHeaderCallback));
     if (rc != CURLE_OK)
     {
       return rc;
     }
 
-    rc = SetCurlPtrOption(CURLOPT_HEADERDATA, (void *)this);
+    rc = SetCurlPtrOption(CURLOPT_HEADERDATA, this);
     if (rc != CURLE_OK)
     {
       return rc;
@@ -996,13 +1016,14 @@ CURLcode HttpOperation::Setup()
       return rc;
     }
 
-    rc = SetCurlPtrOption(CURLOPT_READFUNCTION, (void *)&HttpOperation::ReadMemoryCallback);
+    rc = SetCurlPtrOption(CURLOPT_READFUNCTION,
+                          reinterpret_cast<void *>(&HttpOperation::ReadMemoryCallback));
     if (rc != CURLE_OK)
     {
       return rc;
     }
 
-    rc = SetCurlPtrOption(CURLOPT_READDATA, (void *)this);
+    rc = SetCurlPtrOption(CURLOPT_READDATA, this);
     if (rc != CURLE_OK)
     {
       return rc;
@@ -1019,13 +1040,14 @@ CURLcode HttpOperation::Setup()
   }
 
 #if LIBCURL_VERSION_NUM >= 0x072000
-  rc = SetCurlPtrOption(CURLOPT_XFERINFOFUNCTION, (void *)&HttpOperation::OnProgressCallback);
+  rc = SetCurlPtrOption(CURLOPT_XFERINFOFUNCTION,
+                        reinterpret_cast<void *>(&HttpOperation::OnProgressCallback));
   if (rc != CURLE_OK)
   {
     return rc;
   }
 
-  rc = SetCurlPtrOption(CURLOPT_XFERINFODATA, (void *)this);
+  rc = SetCurlPtrOption(CURLOPT_XFERINFODATA, this);
   if (rc != CURLE_OK)
   {
     return rc;
@@ -1037,7 +1059,7 @@ CURLcode HttpOperation::Setup()
     return rc;
   }
 
-  rc = SetCurlPtrOption(CURLOPT_PROGRESSDATA, (void *)this);
+  rc = SetCurlPtrOption(CURLOPT_PROGRESSDATA, this);
   if (rc != CURLE_OK)
   {
     return rc;
@@ -1045,13 +1067,14 @@ CURLcode HttpOperation::Setup()
 #endif
 
 #if LIBCURL_VERSION_NUM >= 0x075000
-  rc = SetCurlPtrOption(CURLOPT_PREREQFUNCTION, (void *)&HttpOperation::PreRequestCallback);
+  rc = SetCurlPtrOption(CURLOPT_PREREQFUNCTION,
+                        reinterpret_cast<void *>(&HttpOperation::PreRequestCallback));
   if (rc != CURLE_OK)
   {
     return rc;
   }
 
-  rc = SetCurlPtrOption(CURLOPT_PREREQDATA, (void *)this);
+  rc = SetCurlPtrOption(CURLOPT_PREREQDATA, this);
   if (rc != CURLE_OK)
   {
     return rc;
@@ -1148,7 +1171,8 @@ Headers HttpOperation::GetResponseHeaders()
     return result;
 
   std::stringstream ss;
-  std::string headers((const char *)&response_headers_[0], response_headers_.size());
+  std::string headers(reinterpret_cast<const char *>(&response_headers_[0]),
+                      response_headers_.size());
   ss.str(headers);
 
   std::string header;

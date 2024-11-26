@@ -50,6 +50,7 @@ def _crates_repository_impl(repository_ctx):
         splicing_manifest = splicing_manifest,
         cargo = cargo_path,
         rustc = rustc_path,
+        repin_instructions = repository_ctx.attr.repin_instructions,
     )
 
     # If re-pinning is enabled, gather additional inputs for the generator
@@ -125,8 +126,8 @@ Given the following workspace structure:
 
 ```text
 [workspace]/
-    WORKSPACE
-    BUILD
+    WORKSPACE.bazel
+    BUILD.bazel
     Cargo.toml
     Cargo.Bazel.lock
     src/
@@ -183,7 +184,8 @@ that is called behind the scenes to update dependencies.
 | Any of [`true`, `1`, `yes`, `on`, `workspace`] | `cargo update --workspace` |
 | Any of [`full`, `eager`, `all`] | `cargo update` |
 | `package_name` | `cargo upgrade --package package_name` |
-| `package_name@1.2.3` | `cargo upgrade --package package_name --precise 1.2.3` |
+| `package_name@1.2.3` | `cargo upgrade --package package_name@1.2.3` |
+| `package_name@1.2.3=4.5.6` | `cargo upgrade --package package_name@1.2.3 --precise=4.5.6` |
 
 If the `crates_repository` is used multiple times in the same Bazel workspace (e.g. for multiple independent
 Rust workspaces), it may additionally be useful to use the `CARGO_BAZEL_REPIN_ONLY` environment variable, which
@@ -279,6 +281,9 @@ CARGO_BAZEL_REPIN=1 CARGO_BAZEL_REPIN_ONLY=crate_index bazel sync --only=crate_i
                 "The configuration flags to use for rendering. Use `//crate_universe:defs.bzl\\%render_config` to " +
                 "generate the value for this field. If unset, the defaults defined there will be used."
             ),
+        ),
+        "repin_instructions": attr.string(
+            doc = "Instructions to re-pin the repository if required. Many people have wrapper scripts for keeping dependencies up to date, and would like to point users to that instead of the default.",
         ),
         "rust_toolchain_cargo_template": attr.string(
             doc = (

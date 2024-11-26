@@ -15,6 +15,13 @@
 """Bazel rules for creating visionOS applications and bundles."""
 
 load(
+    "@build_bazel_rules_apple//apple/internal:visionos_rules.bzl",
+    _visionos_application = "visionos_application",
+    _visionos_dynamic_framework = "visionos_dynamic_framework",
+    _visionos_framework = "visionos_framework",
+    _visionos_static_framework = "visionos_static_framework",
+)
+load(
     "@build_bazel_rules_apple//apple/internal/testing:apple_test_assembler.bzl",
     "apple_test_assembler",
 )
@@ -29,20 +36,15 @@ load(
     _visionos_ui_test = "visionos_ui_test",
     _visionos_unit_test = "visionos_unit_test",
 )
-load(
-    "@build_bazel_rules_apple//apple/internal:visionos_rules.bzl",
-    _visionos_application = "visionos_application",
-    _visionos_dynamic_framework = "visionos_dynamic_framework",
-    _visionos_framework = "visionos_framework",
-    _visionos_static_framework = "visionos_static_framework",
-)
+
+visibility("public")
 
 visionos_application = _visionos_application
 visionos_dynamic_framework = _visionos_dynamic_framework
 visionos_framework = _visionos_framework
 visionos_static_framework = _visionos_static_framework
 
-_DEFAULT_TEST_RUNNER = "@build_bazel_rules_apple//apple/testing/default_runner:visionos_default_runner"
+_DEFAULT_TEST_RUNNER = str(Label("//apple/testing/default_runner:visionos_default_runner"))
 
 def visionos_unit_test(name, **kwargs):
     runner = kwargs.pop("runner", _DEFAULT_TEST_RUNNER)
@@ -74,7 +76,7 @@ Typical usage:
 ```starlark
 visionos_build_test(
     name = "my_build_test",
-    minimum_os_version = "6.0",
+    minimum_os_version = "1.0",
     targets = [
         "//some/package:my_library",
     ],

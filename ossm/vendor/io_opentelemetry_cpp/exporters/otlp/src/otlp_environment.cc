@@ -1,15 +1,20 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <chrono>
+#include <map>
+#include <string>
+#include <type_traits>
+#include <unordered_set>
+#include <utility>
+
+#include "opentelemetry/common/kv_properties.h"
 #include "opentelemetry/exporters/otlp/otlp_environment.h"
-
+#include "opentelemetry/nostd/string_view.h"
+#include "opentelemetry/sdk/common/attribute_utils.h"
 #include "opentelemetry/sdk/common/env_variables.h"
-#include "opentelemetry/sdk/version/version.h"
+#include "opentelemetry/version.h"
 
-#include "opentelemetry/sdk/common/global_log_handler.h"
-#include "opentelemetry/sdk_config.h"
-
-namespace nostd      = opentelemetry::nostd;
 namespace sdk_common = opentelemetry::sdk::common;
 
 /*
@@ -201,6 +206,78 @@ std::string GetOtlpDefaultHttpLogsEndpoint()
   if (exists)
   {
     value += "/v1/logs";
+    return value;
+  }
+
+  return kDefault;
+}
+
+std::string GetOtlpDefaultHttpTracesProtocol()
+{
+  constexpr char kSignalEnv[]  = "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL";
+  constexpr char kGenericEnv[] = "OTEL_EXPORTER_OTLP_PROTOCOL";
+  constexpr char kDefault[]    = "http/protobuf";
+
+  std::string value;
+  bool exists;
+
+  exists = sdk_common::GetStringEnvironmentVariable(kSignalEnv, value);
+  if (exists)
+  {
+    return value;
+  }
+
+  exists = sdk_common::GetStringEnvironmentVariable(kGenericEnv, value);
+  if (exists)
+  {
+    return value;
+  }
+
+  return kDefault;
+}
+
+std::string GetOtlpDefaultHttpMetricsProtocol()
+{
+  constexpr char kSignalEnv[]  = "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL";
+  constexpr char kGenericEnv[] = "OTEL_EXPORTER_OTLP_PROTOCOL";
+  constexpr char kDefault[]    = "http/protobuf";
+
+  std::string value;
+  bool exists;
+
+  exists = sdk_common::GetStringEnvironmentVariable(kSignalEnv, value);
+  if (exists)
+  {
+    return value;
+  }
+
+  exists = sdk_common::GetStringEnvironmentVariable(kGenericEnv, value);
+  if (exists)
+  {
+    return value;
+  }
+
+  return kDefault;
+}
+
+std::string GetOtlpDefaultHttpLogsProtocol()
+{
+  constexpr char kSignalEnv[]  = "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL";
+  constexpr char kGenericEnv[] = "OTEL_EXPORTER_OTLP_PROTOCOL";
+  constexpr char kDefault[]    = "http/protobuf";
+
+  std::string value;
+  bool exists;
+
+  exists = sdk_common::GetStringEnvironmentVariable(kSignalEnv, value);
+  if (exists)
+  {
+    return value;
+  }
+
+  exists = sdk_common::GetStringEnvironmentVariable(kGenericEnv, value);
+  if (exists)
+  {
     return value;
   }
 
@@ -995,6 +1072,57 @@ OtlpHeaders GetOtlpDefaultLogsHeaders()
   constexpr char kGenericEnv[] = "OTEL_EXPORTER_OTLP_HEADERS";
 
   return GetHeaders(kSignalEnv, kGenericEnv);
+}
+
+std::string GetOtlpDefaultTracesCompression()
+{
+  constexpr char kSignalEnv[]  = "OTEL_EXPORTER_OTLP_TRACES_COMPRESSION";
+  constexpr char kGenericEnv[] = "OTEL_EXPORTER_OTLP_COMPRESSION";
+
+  std::string value;
+  bool exists;
+
+  exists = GetStringDualEnvVar(kSignalEnv, kGenericEnv, value);
+  if (exists)
+  {
+    return value;
+  }
+
+  return std::string{"none"};
+}
+
+std::string GetOtlpDefaultMetricsCompression()
+{
+  constexpr char kSignalEnv[]  = "OTEL_EXPORTER_OTLP_METRICS_COMPRESSION";
+  constexpr char kGenericEnv[] = "OTEL_EXPORTER_OTLP_COMPRESSION";
+
+  std::string value;
+  bool exists;
+
+  exists = GetStringDualEnvVar(kSignalEnv, kGenericEnv, value);
+  if (exists)
+  {
+    return value;
+  }
+
+  return std::string{"none"};
+}
+
+std::string GetOtlpDefaultLogsCompression()
+{
+  constexpr char kSignalEnv[]  = "OTEL_EXPORTER_OTLP_LOGS_COMPRESSION";
+  constexpr char kGenericEnv[] = "OTEL_EXPORTER_OTLP_COMPRESSION";
+
+  std::string value;
+  bool exists;
+
+  exists = GetStringDualEnvVar(kSignalEnv, kGenericEnv, value);
+  if (exists)
+  {
+    return value;
+  }
+
+  return std::string{"none"};
 }
 
 }  // namespace otlp

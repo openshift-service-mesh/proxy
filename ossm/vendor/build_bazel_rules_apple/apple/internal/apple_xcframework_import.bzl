@@ -14,6 +14,9 @@
 
 """Implementation of XCFramework import rules."""
 
+load("@bazel_skylib//lib:dicts.bzl", "dicts")
+load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain", "use_cpp_toolchain")
 load("@build_bazel_apple_support//lib:apple_support.bzl", "apple_support")
 load(
     "@build_bazel_rules_apple//apple/internal:apple_toolchains.bzl",
@@ -32,21 +35,18 @@ load(
     "@build_bazel_rules_apple//apple/internal:framework_import_support.bzl",
     "framework_import_support",
 )
-load("@build_bazel_rules_apple//apple/internal:intermediates.bzl", "intermediates")
-load("@build_bazel_rules_apple//apple/internal:rule_attrs.bzl", "rule_attrs")
 load(
     "@build_bazel_rules_apple//apple/internal/aspects:swift_usage_aspect.bzl",
     "SwiftUsageInfo",
 )
-load("@build_bazel_rules_apple//apple:providers.bzl", "AppleFrameworkImportInfo")
 load(
     "@build_bazel_rules_apple//apple/internal/providers:framework_import_bundle_info.bzl",
     "AppleFrameworkImportBundleInfo",
 )
 load("@build_bazel_rules_swift//swift:swift.bzl", "SwiftToolchainInfo", "swift_clang_module_aspect", "swift_common")
-load("@bazel_skylib//lib:dicts.bzl", "dicts")
-load("@bazel_skylib//lib:paths.bzl", "paths")
-load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain", "use_cpp_toolchain")
+load("//apple:providers.bzl", "AppleFrameworkImportInfo")
+load("//apple/internal:intermediates.bzl", "intermediates")
+load("//apple/internal:rule_attrs.bzl", "rule_attrs")
 
 # Currently, XCFramework bundles can contain Apple frameworks or libraries.
 # This defines an _enum_ to identify an imported XCFramework bundle type.
@@ -347,18 +347,14 @@ def _get_xcframework_library_with_xcframework_processor(
         )
         outputs.append(swiftinterface_file)
 
-    xcframework_processor_tool = apple_mac_toolchain_info.resolved_xcframework_processor_tool
+    xcframework_processor_tool = apple_mac_toolchain_info.xcframework_processor_tool
 
     apple_support.run(
         actions = actions,
         apple_fragment = apple_fragment,
         arguments = [args],
-        executable = xcframework_processor_tool.files_to_run,
-        inputs = depset(
-            inputs,
-            transitive = [xcframework_processor_tool.inputs],
-        ),
-        input_manifests = xcframework_processor_tool.input_manifests,
+        executable = xcframework_processor_tool,
+        inputs = inputs,
         mnemonic = "ProcessXCFrameworkFiles",
         outputs = outputs,
         xcode_config = xcode_config,
@@ -528,7 +524,7 @@ def _apple_dynamic_xcframework_import_impl(ctx):
     providers.append(cc_info)
 
     # Create AppleDynamicFrameworkInfo provider
-    apple_dynamic_framework_info = apple_common.new_dynamic_framework_provider(
+    apple_dynamic_framework_info = framework_import_support.new_dynamic_framework_provider(
         objc = objc_provider,
         cc_info = cc_info,
     )
@@ -668,8 +664,8 @@ def _apple_static_xcframework_import_impl(ctx):
         libraries = [xcframework_library.binary],
         framework_includes = xcframework_library.framework_includes,
         linkopts = sdk_linkopts + linkopts,
-        swiftinterface_imports = [],
-        swiftmodule_imports = [],
+        swiftinterface_imports = [xcframework_library.swift_module_interface] if xcframework_library.swift_module_interface else [],
+        swiftmodule_imports = xcframework_library.swiftmodule,
         includes = xcframework_library.includes + ctx.attr.includes,
     )
     providers.append(cc_info)

@@ -32,6 +32,7 @@
 #include "quiche/quic/core/crypto/crypto_utils.h"
 #include "quiche/quic/core/crypto/quic_decrypter.h"
 #include "quiche/quic/core/crypto/quic_encrypter.h"
+#include "quiche/quic/core/frames/quic_reset_stream_at_frame.h"
 #include "quiche/quic/core/quic_bandwidth.h"
 #include "quiche/quic/core/quic_config.h"
 #include "quiche/quic/core/quic_connection_id.h"
@@ -389,9 +390,21 @@ bool QuicConnection::ValidateConfigConnectionIds(const QuicConfig& config) {
 
 void QuicConnection::SetFromConfig(const QuicConfig& config) {
   if (config.negotiated()) {
-    // Handshake complete, set handshake timeout to Infinite.
-    SetNetworkTimeouts(QuicTime::Delta::Infinite(),
-                       config.IdleNetworkTimeout());
+    if (ShouldFixTimeouts(config)) {
+      if (!IsHandshakeComplete()) {
+        QUIC_RELOADABLE_FLAG_COUNT_N(quic_fix_timeouts, 1, 2);
+        SetNetworkTimeouts(config.max_time_before_crypto_handshake(),
+                           config.max_idle_time_before_crypto_handshake());
+      } else {
+        QUIC_BUG(set_from_config_after_handshake_complete)
+            << "SetFromConfig is called after Handshake complete";
+        // Network timeouts has been set by session on handshake complete.
+      }
+    } else {
+      // Handshake complete, set handshake timeout to Infinite.
+      SetNetworkTimeouts(QuicTime::Delta::Infinite(),
+                         config.IdleNetworkTimeout());
+    }
     idle_timeout_connection_close_behavior_ =
         ConnectionCloseBehavior::SILENT_CLOSE;
     if (perspective_ == Perspective::IS_SERVER) {
@@ -566,6 +579,36 @@ void QuicConnection::SetFromConfig(const QuicConfig& config) {
       multi_port_migration_enabled_ = true;
     }
   }
+
+  reliable_stream_reset_ = config.SupportsReliableStreamReset();
+  framer_.set_process_reset_stream_at(reliable_stream_reset_);
+}
+
+void QuicConnection::AddDispatcherSentPackets(
+    absl::Span<const DispatcherSentPacket> dispatcher_sent_packets) {
+  QUICHE_DCHECK_EQ(stats_.packets_sent, 0u);
+  QUICHE_DCHECK_EQ(stats_.packets_sent_by_dispatcher, 0u);
+  QUICHE_DCHECK(!sent_packet_manager_.GetLargestSentPacket().IsInitialized());
+  if (dispatcher_sent_packets.empty()) {
+    return;
+  }
+  stats_.packets_sent_by_dispatcher = dispatcher_sent_packets.size();
+
+  for (const DispatcherSentPacket& packet : dispatcher_sent_packets) {
+    const QuicTransmissionInfo& info =
+        sent_packet_manager_.AddDispatcherSentPacket(packet);
+    if (debug_visitor_ != nullptr) {
+      debug_visitor_->OnPacketSent(
+          packet.packet_number, info.bytes_sent, info.has_crypto_handshake,
+          info.transmission_type, info.encryption_level,
+          info.retransmittable_frames,
+          /*nonretransmittable_frames=*/{}, info.sent_time,
+          /*batch_id=*/0);
+    }
+  }
+
+  packet_creator_.set_packet_number(
+      dispatcher_sent_packets.back().packet_number);
 }
 
 bool QuicConnection::MaybeTestLiveness() {
@@ -636,6 +679,12 @@ void QuicConnection::SetMaxPacingRate(QuicBandwidth max_pacing_rate) {
   sent_packet_manager_.SetMaxPacingRate(max_pacing_rate);
 }
 
+void QuicConnection::SetApplicationDrivenPacingRate(
+    QuicBandwidth application_driven_pacing_rate) {
+  sent_packet_manager_.SetApplicationDrivenPacingRate(
+      application_driven_pacing_rate);
+}
+
 void QuicConnection::AdjustNetworkParameters(
     const SendAlgorithmInterface::NetworkParams& params) {
   sent_packet_manager_.AdjustNetworkParameters(params);
@@ -658,6 +707,10 @@ void QuicConnection::OnConfigNegotiated() {
 
 QuicBandwidth QuicConnection::MaxPacingRate() const {
   return sent_packet_manager_.MaxPacingRate();
+}
+
+QuicBandwidth QuicConnection::ApplicationDrivenPacingRate() const {
+  return sent_packet_manager_.ApplicationDrivenPacingRate();
 }
 
 bool QuicConnection::SelectMutualVersion(
@@ -803,6 +856,12 @@ void QuicConnection::OnRetryPacket(QuicConnectionId original_connection_id,
   InstallInitialCrypters(default_path_.server_connection_id);
 
   sent_packet_manager_.MarkInitialPacketsForRetransmission();
+}
+
+void QuicConnection::SetMultiPacketClientHello() {
+  if (debug_visitor_ != nullptr) {
+    debug_visitor_->SetMultiPacketClientHello();
+  }
 }
 
 void QuicConnection::SetOriginalDestinationConnectionId(
@@ -1033,6 +1092,13 @@ void QuicConnection::OnEncryptedClientHelloReceived(
     absl::string_view client_hello) const {
   if (debug_visitor_ != nullptr) {
     debug_visitor_->OnEncryptedClientHelloReceived(client_hello);
+  }
+}
+
+void QuicConnection::OnParsedClientHelloInfo(
+    const ParsedClientHello& client_hello) {
+  if (debug_visitor_ != nullptr) {
+    debug_visitor_->OnParsedClientHelloInfo(client_hello);
   }
 }
 
@@ -2011,10 +2077,15 @@ bool QuicConnection::OnResetStreamAtFrame(const QuicResetStreamAtFrame& frame) {
   if (!UpdatePacketContent(RESET_STREAM_AT_FRAME)) {
     return false;
   }
-
-  // TODO(b/278878322): implement.
+  if (!reliable_stream_reset_) {
+    CloseConnection(IETF_QUIC_PROTOCOL_VIOLATION,
+                    "Received RESET_STREAM_AT while not negotiated.",
+                    ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
+    return false;
+  }
 
   MaybeUpdateAckTimeout();
+  visitor_->OnResetStreamAt(frame);
   return true;
 }
 
@@ -2139,6 +2210,7 @@ void QuicConnection::OnAuthenticatedIetfStatelessResetPacket(
           << "STATELESS_RESET received on alternate path after it's "
              "validated.";
       path_validator_.CancelPathValidation();
+      ++stats_.num_stateless_resets_on_alternate_path;
     } else {
       QUIC_BUG(quic_bug_10511_17)
           << "Received Stateless Reset on unknown socket.";
@@ -3066,35 +3138,21 @@ bool QuicConnection::ShouldGeneratePacket(
 
 void QuicConnection::MaybeBundleOpportunistically(
     TransmissionType transmission_type) {
-  if (GetQuicRestartFlag(quic_opport_bundle_qpack_decoder_data5)) {
-    QUIC_RESTART_FLAG_COUNT_N(quic_opport_bundle_qpack_decoder_data5, 1, 4);
+  const bool should_bundle_ack_frequency =
+      !ack_frequency_sent_ && sent_packet_manager_.CanSendAckFrequency() &&
+      transmission_type == NOT_RETRANSMISSION &&
+      packet_creator_.NextSendingPacketNumber() >=
+          FirstSendingPacketNumber() + kMinReceivedBeforeAckDecimation;
 
-    const bool should_bundle_ack_frequency =
-        !ack_frequency_sent_ && sent_packet_manager_.CanSendAckFrequency() &&
-        transmission_type == NOT_RETRANSMISSION &&
-        packet_creator_.NextSendingPacketNumber() >=
-            FirstSendingPacketNumber() + kMinReceivedBeforeAckDecimation;
+  if (should_bundle_ack_frequency) {
+    QUIC_RELOADABLE_FLAG_COUNT_N(quic_can_send_ack_frequency, 3, 3);
+    ack_frequency_sent_ = true;
+    auto frame = sent_packet_manager_.GetUpdatedAckFrequencyFrame();
+    visitor_->SendAckFrequency(frame);
+  }
 
-    if (should_bundle_ack_frequency) {
-      QUIC_RELOADABLE_FLAG_COUNT_N(quic_can_send_ack_frequency, 3, 3);
-      ack_frequency_sent_ = true;
-      auto frame = sent_packet_manager_.GetUpdatedAckFrequencyFrame();
-      visitor_->SendAckFrequency(frame);
-    }
-
-    if (transmission_type == NOT_RETRANSMISSION) {
-      visitor_->MaybeBundleOpportunistically();
-    }
-  } else {
-    if (!ack_frequency_sent_ && sent_packet_manager_.CanSendAckFrequency()) {
-      if (packet_creator_.NextSendingPacketNumber() >=
-          FirstSendingPacketNumber() + kMinReceivedBeforeAckDecimation) {
-        QUIC_RELOADABLE_FLAG_COUNT_N(quic_can_send_ack_frequency, 3, 3);
-        ack_frequency_sent_ = true;
-        auto frame = sent_packet_manager_.GetUpdatedAckFrequencyFrame();
-        visitor_->SendAckFrequency(frame);
-      }
-    }
+  if (transmission_type == NOT_RETRANSMISSION) {
+    visitor_->MaybeBundleOpportunistically();
   }
 
   if (packet_creator_.has_ack() || !CanWrite(NO_RETRANSMITTABLE_DATA)) {
@@ -4633,6 +4691,9 @@ void QuicConnection::SetNetworkTimeouts(QuicTime::Delta handshake_timeout,
   QUIC_BUG_IF(quic_bug_12714_29, idle_timeout > handshake_timeout)
       << "idle_timeout:" << idle_timeout.ToMilliseconds()
       << " handshake_timeout:" << handshake_timeout.ToMilliseconds();
+  QUIC_DVLOG(1) << ENDPOINT << "Setting network timeouts: "
+                << "handshake_timeout:" << handshake_timeout.ToMilliseconds()
+                << " idle_timeout:" << idle_timeout.ToMilliseconds();
   // Adjust the idle timeout on client and server to prevent clients from
   // sending requests to servers which have already closed the connection.
   if (perspective_ == Perspective::IS_SERVER) {
@@ -5745,10 +5806,7 @@ void QuicConnection::SendAllPendingAcks() {
       uber_received_packet_manager_.GetEarliestAckTimeout();
   QUIC_BUG_IF(quic_bug_12714_32, !earliest_ack_timeout.IsInitialized());
   MaybeBundleCryptoDataWithAcks();
-  if (GetQuicRestartFlag(quic_opport_bundle_qpack_decoder_data5)) {
-    QUIC_RESTART_FLAG_COUNT_N(quic_opport_bundle_qpack_decoder_data5, 2, 4);
-    visitor_->MaybeBundleOpportunistically();
-  }
+  visitor_->MaybeBundleOpportunistically();
   earliest_ack_timeout = uber_received_packet_manager_.GetEarliestAckTimeout();
   if (!earliest_ack_timeout.IsInitialized()) {
     return;
@@ -6053,6 +6111,11 @@ QuicPacketNumber QuicConnection::GetLargestReceivedPacket() const {
 bool QuicConnection::EnforceAntiAmplificationLimit() const {
   return version().SupportsAntiAmplificationLimit() &&
          perspective_ == Perspective::IS_SERVER && !default_path_.validated;
+}
+
+bool QuicConnection::ShouldFixTimeouts(const QuicConfig& config) const {
+  return quic_fix_timeouts_ && version().UsesTls() &&
+         config.HasClientSentConnectionOption(kFTOE, perspective_);
 }
 
 // TODO(danzh) Pass in path object or its reference of some sort to use this
@@ -6641,6 +6704,10 @@ void QuicConnection::ValidatePath(
       reason == PathValidationReason::kMultiPort) {
     multi_port_stats_->num_client_probing_attempts++;
   }
+  if (perspective_ == Perspective::IS_CLIENT) {
+    stats_.num_client_probing_attempts++;
+  }
+
   path_validator_.StartPathValidation(std::move(context),
                                       std::move(result_delegate), reason);
   if (perspective_ == Perspective::IS_CLIENT &&
@@ -7357,6 +7424,18 @@ void QuicConnection::OnPingAlarm() { ping_manager_.OnAlarm(); }
 
 void QuicConnection::OnNetworkBlackholeDetectorAlarm() {
   blackhole_detector_.OnAlarm();
+}
+
+std::unique_ptr<SerializedPacket>
+QuicConnection::SerializeLargePacketNumberConnectionClosePacket(
+    QuicErrorCode error, const std::string& error_details) {
+  QUICHE_DCHECK(IsHandshakeConfirmed());
+  QUICHE_DCHECK(!error_details.empty());
+  if (!IsHandshakeConfirmed()) {
+    return nullptr;
+  }
+  return packet_creator_.SerializeLargePacketNumberConnectionClosePacket(
+      GetLargestAckedPacket(), error, error_details);
 }
 
 #undef ENDPOINT  // undef for jumbo builds

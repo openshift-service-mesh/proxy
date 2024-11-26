@@ -21,19 +21,14 @@
 #include <memory>
 #include <string>
 
+#include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/stubs/bytestream.h"
 #include "google/protobuf/util/converter/structured_objectwriter.h"
-#include "google/protobuf/io/coded_stream.h"
-
-// clang-format off
-#include "google/protobuf/util/converter/port_def.inc"
-// clang-format on
 
 namespace google {
 namespace protobuf {
 namespace util {
 namespace converter {
-
 
 // An ObjectWriter implementation that outputs JSON. This ObjectWriter
 // supports writing a compact form or a pretty printed form.
@@ -74,7 +69,7 @@ namespace converter {
 // uint64 would lose precision if rendered as numbers.
 //
 // JsonObjectWriter is thread-unsafe.
-class PROTOBUF_EXPORT JsonObjectWriter : public StructuredObjectWriter {
+class JsonObjectWriter : public StructuredObjectWriter {
  public:
   JsonObjectWriter(absl::string_view indent_string, io::CodedOutputStream* out)
       : element_(new Element(/*parent=*/nullptr, /*is_json_object=*/false)),
@@ -88,7 +83,7 @@ class PROTOBUF_EXPORT JsonObjectWriter : public StructuredObjectWriter {
     if (!indent_string.empty()) {
       indent_char_ = indent_string[0];
       indent_count_ = indent_string.length();
-      for (int i = 1; i < indent_string.length(); i++) {
+      for (int i = 1; i < static_cast<int>(indent_string.length()); i++) {
         if (indent_char_ != indent_string_[i]) {
           indent_char_ = '\0';
           indent_count_ = 0;
@@ -127,7 +122,7 @@ class PROTOBUF_EXPORT JsonObjectWriter : public StructuredObjectWriter {
   }
 
  protected:
-  class PROTOBUF_EXPORT Element : public BaseElement {
+  class Element : public BaseElement {
    public:
     Element(Element* parent, bool is_json_object)
         : BaseElement(parent),
@@ -158,7 +153,7 @@ class PROTOBUF_EXPORT JsonObjectWriter : public StructuredObjectWriter {
   Element* element() override { return element_.get(); }
 
  private:
-  class PROTOBUF_EXPORT ByteSinkWrapper : public strings::ByteSink {
+  class ByteSinkWrapper : public strings::ByteSink {
    public:
     explicit ByteSinkWrapper(io::CodedOutputStream* stream) : stream_(stream) {}
     ByteSinkWrapper(const ByteSinkWrapper&) = delete;
@@ -259,7 +254,5 @@ class PROTOBUF_EXPORT JsonObjectWriter : public StructuredObjectWriter {
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_JSON_OBJECTWRITER_H_

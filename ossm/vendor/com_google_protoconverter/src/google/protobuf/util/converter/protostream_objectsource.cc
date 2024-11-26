@@ -18,10 +18,6 @@
 #include <utility>
 #include <vector>
 
-#include "google/protobuf/descriptor.h"
-#include "google/protobuf/unknown_field_set.h"
-#include "google/protobuf/stubs/strutil.h"
-#include "google/protobuf/stubs/strutil.h"
 #include "absl/base/call_once.h"
 #include "absl/base/casts.h"
 #include "absl/container/btree_map.h"
@@ -32,19 +28,17 @@
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
+#include "google/protobuf/descriptor.h"
+#include "google/protobuf/io/coded_stream.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
+#include "google/protobuf/stubs/status_macros.h"
+#include "google/protobuf/stubs/strutil.h"
+#include "google/protobuf/unknown_field_set.h"
 #include "google/protobuf/util/converter/constants.h"
 #include "google/protobuf/util/converter/field_mask_utility.h"
 #include "google/protobuf/util/converter/utility.h"
-#include "google/protobuf/io/coded_stream.h"
-#include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/wire_format.h"
 #include "google/protobuf/wire_format_lite.h"
-#include "google/protobuf/stubs/status_macros.h"
-
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
-
 
 namespace google {
 namespace protobuf {
@@ -93,7 +87,6 @@ absl::StatusOr<std::string> MapKeyDefaultValueAsString(
   }
 }
 }  // namespace
-
 
 ProtoStreamObjectSource::ProtoStreamObjectSource(
     io::CodedInputStream* stream, TypeResolver* type_resolver,
@@ -162,7 +155,6 @@ absl::Status ProtoStreamObjectSource::WriteMessage(
     const google::protobuf::Type& type, absl::string_view name,
     const uint32_t end_tag, bool include_start_and_end,
     ObjectWriter* ow) const {
-
   const TypeRenderer* type_renderer = FindTypeRenderer(type.name());
   if (type_renderer != nullptr) {
     return (*type_renderer)(this, type, name, ow);
@@ -173,7 +165,6 @@ absl::Status ProtoStreamObjectSource::WriteMessage(
   // last_tag set to dummy value that is different from tag.
   uint32_t tag = stream_->ReadTag(), last_tag = tag + 1;
   UnknownFieldSet unknown_fields;
-
 
   if (include_start_and_end) {
     ow->StartObject(name);
@@ -193,9 +184,7 @@ absl::Status ProtoStreamObjectSource::WriteMessage(
     if (field == nullptr) {
       // If we didn't find a field, skip this unknown tag.
       // TODO(wpoon): Check return boolean value.
-      WireFormat::SkipField(
-          stream_, tag,
-                                                nullptr);
+      WireFormat::SkipField(stream_, tag, nullptr);
       tag = stream_->ReadTag();
       continue;
     }
@@ -214,7 +203,6 @@ absl::Status ProtoStreamObjectSource::WriteMessage(
       tag = stream_->ReadTag();
     }
   }
-
 
   if (include_start_and_end) {
     ow->EndObject();
@@ -323,12 +311,7 @@ absl::Status ProtoStreamObjectSource::RenderTimestamp(
   std::string formatted_seconds =
       absl::FormatTime(kRfc3339TimeFormat, tm, absl::UTCTimeZone());
   std::string formatted_time = absl::StrFormat(
-      "%s%sZ", formatted_seconds.c_str(),
-      FormatNanos(
-          nanos,
-          false
-          )
-          .c_str());
+      "%s%sZ", formatted_seconds.c_str(), FormatNanos(nanos, false).c_str());
   ow->RenderString(field_name, formatted_time);
   return absl::Status();
 }
@@ -366,11 +349,7 @@ absl::Status ProtoStreamObjectSource::RenderDuration(
   }
   std::string formatted_duration = absl::StrFormat(
       "%s%lld%ss", sign.c_str(), static_cast<long long>(seconds),  // NOLINT
-      FormatNanos(
-          nanos,
-          false
-          )
-          .c_str());
+      FormatNanos(nanos, false).c_str());
   ow->RenderString(field_name, formatted_duration);
   return absl::Status();
 }
@@ -665,11 +644,9 @@ absl::Status ProtoStreamObjectSource::RenderFieldMask(
   return absl::Status();
 }
 
-
 absl::flat_hash_map<std::string, ProtoStreamObjectSource::TypeRenderer>*
     ProtoStreamObjectSource::renderers_ = nullptr;
 absl::once_flag source_renderers_init_;
-
 
 void ProtoStreamObjectSource::InitRendererMap() {
   renderers_ = new absl::flat_hash_map<std::string,
@@ -866,10 +843,10 @@ absl::Status ProtoStreamObjectSource::RenderNonMessageField(
             ow->RenderString(field_name, enum_value->name());
           }
         } else {
-            ow->RenderInt32(field_name, buffer32);
+          ow->RenderInt32(field_name, buffer32);
         }
       } else {
-          ow->RenderInt32(field_name, buffer32);
+        ow->RenderInt32(field_name, buffer32);
       }
       break;
     }

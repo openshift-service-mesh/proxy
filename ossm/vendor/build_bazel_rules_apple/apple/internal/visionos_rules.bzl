@@ -14,6 +14,7 @@
 
 """Implementation of visionOS rules."""
 
+load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 load(
     "@build_bazel_rules_apple//apple/internal:apple_product_type.bzl",
     "apple_product_type",
@@ -126,10 +127,13 @@ load(
     "clang_rt_dylibs",
 )
 load(
+    "@build_bazel_rules_apple//apple/internal/utils:main_thread_checker_dylibs.bzl",
+    "main_thread_checker_dylibs",
+)
+load(
     "@build_bazel_rules_swift//swift:swift.bzl",
     "SwiftInfo",
 )
-load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 
 visibility([
     "//apple/...",
@@ -137,12 +141,11 @@ visibility([
 ])
 
 def _visionos_application_impl(ctx):
-    """WIP implementation of visionos_application."""
-
+    """Implementation of visionos_application."""
     xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
-    if xcode_version_config.xcode_version() < apple_common.dotted_version("15.0"):
+    if xcode_version_config.xcode_version() < apple_common.dotted_version("15.1"):
         fail("""
-visionOS bundles require a visionOS SDK provided by Xcode 15 or later.
+visionOS bundles require a visionOS SDK provided by Xcode 15.1 beta or later.
 
 Resolved Xcode is version {xcode_version}.
 """.format(xcode_version = str(xcode_version_config.xcode_version())))
@@ -276,6 +279,15 @@ Resolved Xcode is version {xcode_version}.
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -301,7 +313,7 @@ Resolved Xcode is version {xcode_version}.
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -330,7 +342,9 @@ Resolved Xcode is version {xcode_version}.
             bundle_verification_targets = bundle_verification_targets,
             environment_plist = ctx.file._environment_plist,
             launch_storyboard = None,
+            locales_to_include = ctx.attr.locales_to_include,
             platform_prerequisites = platform_prerequisites,
+            primary_icon_name = ctx.attr.primary_app_icon,
             resource_deps = resource_deps,
             rule_descriptor = rule_descriptor,
             rule_label = label,
@@ -338,12 +352,6 @@ Resolved Xcode is version {xcode_version}.
             top_level_infoplists = top_level_infoplists,
             top_level_resources = top_level_resources,
             version = ctx.attr.version,
-        ),
-        partials.settings_bundle_partial(
-            actions = actions,
-            platform_prerequisites = platform_prerequisites,
-            rule_label = label,
-            settings_bundle = ctx.attr.settings_bundle,
         ),
         partials.swift_dylibs_partial(
             actions = actions,
@@ -386,6 +394,7 @@ Resolved Xcode is version {xcode_version}.
         entitlements = entitlements.codesigning,
         features = features,
         ipa_post_processor = ctx.executable.ipa_post_processor,
+        locales_to_include = ctx.attr.locales_to_include,
         partials = processor_partials,
         platform_prerequisites = platform_prerequisites,
         predeclared_outputs = predeclared_outputs,
@@ -399,17 +408,31 @@ Resolved Xcode is version {xcode_version}.
         actions = actions,
         label_name = label.name,
     )
-    run_support.register_simulator_executable(
-        actions = actions,
-        bundle_extension = bundle_extension,
-        bundle_name = bundle_name,
-        label_name = label.name,
-        output = executable,
-        platform_prerequisites = platform_prerequisites,
-        predeclared_outputs = predeclared_outputs,
-        rule_descriptor = rule_descriptor,
-        runner_template = ctx.file._runner_template,
-    )
+
+    if platform_prerequisites.platform.is_device:
+        run_support.register_device_executable(
+            actions = actions,
+            bundle_extension = bundle_extension,
+            bundle_name = bundle_name,
+            label_name = label.name,
+            output = executable,
+            platform_prerequisites = platform_prerequisites,
+            predeclared_outputs = predeclared_outputs,
+            rule_descriptor = rule_descriptor,
+            runner_template = ctx.file._device_runner_template,
+        )
+    else:
+        run_support.register_simulator_executable(
+            actions = actions,
+            bundle_extension = bundle_extension,
+            bundle_name = bundle_name,
+            label_name = label.name,
+            output = executable,
+            platform_prerequisites = platform_prerequisites,
+            predeclared_outputs = predeclared_outputs,
+            rule_descriptor = rule_descriptor,
+            runner_template = ctx.file._simulator_runner_template,
+        )
 
     archive = outputs.archive(
         actions = actions,
@@ -439,7 +462,7 @@ Resolved Xcode is version {xcode_version}.
             )
         ),
         new_visionosapplicationbundleinfo(),
-        apple_common.new_executable_binary_provider(
+        linking_support.new_executable_binary_provider(
             binary = binary_artifact,
             cc_info = link_result.cc_info,
             objc = link_result.objc,
@@ -600,6 +623,15 @@ def _visionos_dynamic_framework_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.debug_symbols_partial(
             actions = actions,
             bundle_extension = bundle_extension,
@@ -611,7 +643,7 @@ def _visionos_dynamic_framework_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -695,7 +727,9 @@ def _visionos_dynamic_framework_impl(ctx):
     providers = processor_result.providers
     additional_providers = []
     for provider in providers:
-        if type(provider) == "AppleDynamicFramework":
+        # HACK: this should be updated so we do not need to dynamically check the provider instance.
+        # See: https://github.com/bazelbuild/bazel/issues/22095
+        if hasattr(provider, "framework_files"):
             # Make the ObjC provider using the framework_files depset found
             # in the AppleDynamicFramework provider. This is to make the
             # visionos_dynamic_framework usable as a dependency in swift_library
@@ -863,6 +897,15 @@ def _visionos_framework_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -889,7 +932,7 @@ def _visionos_framework_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -1129,6 +1172,15 @@ def _visionos_extension_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -1156,7 +1208,7 @@ def _visionos_extension_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -1180,6 +1232,7 @@ def _visionos_extension_impl(ctx):
             executable_name = executable_name,
             extensionkit_keys_required = ctx.attr.extensionkit_extension,
             launch_storyboard = None,
+            locales_to_include = ctx.attr.locales_to_include,
             platform_prerequisites = platform_prerequisites,
             resource_deps = resource_deps,
             rule_descriptor = rule_descriptor,
@@ -1228,6 +1281,7 @@ def _visionos_extension_impl(ctx):
         entitlements = entitlements.codesigning,
         features = features,
         ipa_post_processor = ctx.executable.ipa_post_processor,
+        locales_to_include = ctx.attr.locales_to_include,
         partials = processor_partials,
         platform_prerequisites = platform_prerequisites,
         predeclared_outputs = predeclared_outputs,
@@ -1247,8 +1301,9 @@ def _visionos_extension_impl(ctx):
                 processor_result.output_groups,
             )
         ),
-        apple_common.new_executable_binary_provider(
+        linking_support.new_executable_binary_provider(
             binary = binary_artifact,
+            cc_info = link_result.cc_info,
             objc = link_result.objc,
         ),
         new_visionosextensionbundleinfo(),
@@ -1407,6 +1462,7 @@ visionos_application = rule_factory.create_apple_rule(
         rule_attrs.app_icon_attrs(
             icon_extension = ".solidimagestack",
             icon_parent_extension = ".xcassets",
+            supports_alternate_icons = True,
         ),
         rule_attrs.app_intents_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
@@ -1430,13 +1486,14 @@ visionos_application = rule_factory.create_apple_rule(
         rule_attrs.device_family_attrs(
             allowed_families = rule_attrs.defaults.allowed_families.visionos,
         ),
+        rule_attrs.device_runner_template_attr(),
         rule_attrs.infoplist_attrs(),
         rule_attrs.ipa_post_processor_attrs(),
+        rule_attrs.locales_to_include_attrs(),
         rule_attrs.platform_attrs(
             add_environment_plist = True,
             platform_type = "visionos",
         ),
-        rule_attrs.settings_bundle_attrs(),
         rule_attrs.signing_attrs(
             default_bundle_id_suffix = bundle_id_suffix_default.bundle_name,
         ),
@@ -1554,6 +1611,7 @@ visionos_extension = rule_factory.create_apple_rule(
         ),
         rule_attrs.extensionkit_attrs(),
         rule_attrs.infoplist_attrs(),
+        rule_attrs.locales_to_include_attrs(),
         rule_attrs.platform_attrs(
             add_environment_plist = True,
             platform_type = "visionos",
@@ -1657,7 +1715,7 @@ dependency of other Bazel targets. For that use case, use the corresponding
 Unlike other visionos bundles, the fat binary in an `visionos_static_framework` may
 simultaneously contain simulator and device architectures (that is, you can
 build a single framework artifact that works for all architectures by specifying
-`--visionos_cpus=x86_64,arm64` when you build).
+`--visionos_cpus=sim_arm64,arm64` when you build).
 
 `visionos_static_framework` supports Swift, but there are some constraints:
 

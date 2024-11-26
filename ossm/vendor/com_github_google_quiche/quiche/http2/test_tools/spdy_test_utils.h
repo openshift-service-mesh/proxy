@@ -11,13 +11,13 @@
 
 #include "absl/strings/string_view.h"
 #include "quiche/http2/core/spdy_protocol.h"
-#include "quiche/spdy/core/http2_header_block.h"
+#include "quiche/common/http/http_header_block.h"
 
 // TODO(b/318698478): update the namespace and file name
 namespace spdy {
 
 inline bool operator==(absl::string_view x,
-                       const Http2HeaderBlock::ValueProxy& y) {
+                       const quiche::HttpHeaderBlock::ValueProxy& y) {
   return y.operator==(x);
 }
 

@@ -15,12 +15,12 @@
 """Starlark test rule for OutputGroupInfo output group files."""
 
 load(
-    "@build_bazel_rules_apple//test/starlark_tests/rules:assertions.bzl",
-    "assertions",
-)
-load(
     "@build_bazel_rules_apple//test/starlark_tests/rules:analysis_provider_test.bzl",
     "make_provider_test_rule",
+)
+load(
+    "@build_bazel_rules_apple//test/starlark_tests/rules:assertions.bzl",
+    "assertions",
 )
 
 visibility("//test/starlark_tests/...")
@@ -64,6 +64,7 @@ analysis_output_group_info_files_test = make_provider_test_rule(
         "//command_line_option:macos_cpus": "arm64,x86_64",
         "//command_line_option:ios_multi_cpus": "sim_arm64,x86_64",
         "//command_line_option:tvos_cpus": "sim_arm64,x86_64",
+        "//command_line_option:visionos_cpus": "sim_arm64",
         "//command_line_option:watchos_cpus": "arm64,x86_64",
     },
 )

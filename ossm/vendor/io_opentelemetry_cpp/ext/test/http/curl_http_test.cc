@@ -12,6 +12,7 @@
 #include <fstream>
 #include <memory>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #define HTTP_PORT 19000
@@ -74,7 +75,9 @@ class PostEventHandler : public CustomEventHandler
 class FinishInCallbackHandler : public CustomEventHandler
 {
 public:
-  FinishInCallbackHandler(std::shared_ptr<http_client::Session> session) : session_(session) {}
+  FinishInCallbackHandler(std::shared_ptr<http_client::Session> session)
+      : session_(std::move(session))
+  {}
 
   void OnResponse(http_client::Response &response) noexcept override
   {
@@ -300,16 +303,18 @@ TEST_F(BasicCurlHttpTests, CurlHttpOperations)
   http_client::Headers headers = {
       {"name1", "value1_1"}, {"name1", "value1_2"}, {"name2", "value3"}, {"name3", "value3"}};
 
+  http_client::Compression compression = http_client::Compression::kNone;
+
   curl::HttpOperation http_operations1(http_client::Method::Head, "/get", no_ssl, handler, headers,
-                                       body, true);
+                                       body, compression, true);
   http_operations1.Send();
 
   curl::HttpOperation http_operations2(http_client::Method::Get, "/get", no_ssl, handler, headers,
-                                       body, true);
+                                       body, compression, true);
   http_operations2.Send();
 
   curl::HttpOperation http_operations3(http_client::Method::Get, "/get", no_ssl, handler, headers,
-                                       body, false);
+                                       body, compression, false);
   http_operations3.Send();
   delete handler;
 }

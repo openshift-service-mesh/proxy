@@ -23,20 +23,15 @@
 #include <stack>
 #include <string>
 
-#include "google/protobuf/stubs/common.h"
-#include "google/protobuf/type.pb.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "google/protobuf/type.pb.h"
 #include "google/protobuf/util/converter/object_source.h"
 #include "google/protobuf/util/converter/object_writer.h"
 #include "google/protobuf/util/converter/type_info.h"
 #include "google/protobuf/util/type_resolver.h"
-
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
 
 namespace google {
 namespace protobuf {
@@ -58,9 +53,8 @@ class TypeInfo;
 //                              <your message google::protobuf::Type>);
 //
 //   Status status = os.WriteTo(<some ObjectWriter>);
-class PROTOBUF_EXPORT ProtoStreamObjectSource : public ObjectSource {
+class ProtoStreamObjectSource : public ObjectSource {
  public:
-
   struct RenderOptions {
     // Sets whether or not to use lowerCamelCase casing for enum values. If set
     // to false, enum values are output without any case conversions.
@@ -94,7 +88,6 @@ class PROTOBUF_EXPORT ProtoStreamObjectSource : public ObjectSource {
 
     // Whether to preserve proto field names
     bool preserve_proto_field_names = false;
-
   };
 
   ProtoStreamObjectSource(io::CodedInputStream* stream,
@@ -157,7 +150,6 @@ class PROTOBUF_EXPORT ProtoStreamObjectSource : public ObjectSource {
   // types).
   std::string ReadFieldValueAsString(
       const google::protobuf::Field& field) const;
-
 
   // Returns the input stream.
   io::CodedInputStream* stream() const { return stream_; }
@@ -266,7 +258,6 @@ class PROTOBUF_EXPORT ProtoStreamObjectSource : public ObjectSource {
                                      absl::string_view field_name,
                                      ObjectWriter* ow) const;
 
-
   // Utility function to detect proto maps. The 'field' MUST be repeated.
   bool IsMap(const google::protobuf::Field& field) const;
 
@@ -295,7 +286,6 @@ class PROTOBUF_EXPORT ProtoStreamObjectSource : public ObjectSource {
   // google::protobuf::Type of the message source.
   const google::protobuf::Type& type_;
 
-
   const RenderOptions render_options_;
 
   // Tracks current recursion depth.
@@ -309,7 +299,5 @@ class PROTOBUF_EXPORT ProtoStreamObjectSource : public ObjectSource {
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_PROTOSTREAM_OBJECTSOURCE_H_

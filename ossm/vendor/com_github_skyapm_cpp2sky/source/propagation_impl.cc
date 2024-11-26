@@ -15,8 +15,11 @@
 #include "source/propagation_impl.h"
 
 #include <array>
-#include <string_view>
+#include <memory>
 
+#include "absl/memory/memory.h"
+#include "absl/strings/numbers.h"
+#include "absl/strings/string_view.h"
 #include "cpp2sky/exception.h"
 #include "source/utils/base64.h"
 
@@ -31,7 +34,7 @@ static constexpr size_t EXPECTED_FIELD_COUNT = 8;
 static constexpr size_t EXPECTED_EXTENSION_FIELD_COUNT = 1;
 }  // namespace
 
-SpanContextImpl::SpanContextImpl(std::string_view header_value) {
+SpanContextImpl::SpanContextImpl(absl::string_view header_value) {
   std::array<std::string, EXPECTED_FIELD_COUNT> fields;
   size_t current_field_idx = 0;
   std::string value;
@@ -58,22 +61,29 @@ SpanContextImpl::SpanContextImpl(std::string_view header_value) {
 
   if (fields[0] != "0" && fields[0] != "1") {
     throw TracerException(
-        "Invalid span context format. sample field must be 0 or 1.");
+        "Invalid span context format. Sample field must be 0 or 1.");
   }
 
   // Sampling is always true
   sample_ = true;
-  trace_id_ = Base64::decodeWithoutPadding(std::string_view(fields[1]));
-  trace_segment_id_ = Base64::decodeWithoutPadding(std::string_view(fields[2]));
-  span_id_ = std::stoi(fields[3]);
-  service_ = Base64::decodeWithoutPadding(std::string_view(fields[4]));
-  service_instance_ = Base64::decodeWithoutPadding(std::string_view(fields[5]));
-  endpoint_ = Base64::decodeWithoutPadding(std::string_view(fields[6]));
-  target_address_ = Base64::decodeWithoutPadding(std::string_view(fields[7]));
+  trace_id_ = Base64::decodeWithoutPadding(absl::string_view(fields[1]));
+  trace_segment_id_ =
+      Base64::decodeWithoutPadding(absl::string_view(fields[2]));
+
+  if (!absl::SimpleAtoi(fields[3], &span_id_)) {
+    throw TracerException(
+        "Invalid span id format. Span id field must be integer number.");
+  }
+
+  service_ = Base64::decodeWithoutPadding(absl::string_view(fields[4]));
+  service_instance_ =
+      Base64::decodeWithoutPadding(absl::string_view(fields[5]));
+  endpoint_ = Base64::decodeWithoutPadding(absl::string_view(fields[6]));
+  target_address_ = Base64::decodeWithoutPadding(absl::string_view(fields[7]));
 }
 
 SpanContextExtensionImpl::SpanContextExtensionImpl(
-    std::string_view header_value) {
+    absl::string_view header_value) {
   std::array<std::string, EXPECTED_EXTENSION_FIELD_COUNT> fields;
   size_t current_field_idx = 0;
   std::string value;
@@ -108,12 +118,13 @@ SpanContextExtensionImpl::SpanContextExtensionImpl(
   }
 }
 
-SpanContextPtr createSpanContext(std::string_view ctx) {
-  return std::make_unique<SpanContextImpl>(ctx);
+SpanContextSharedPtr createSpanContext(absl::string_view ctx) {
+  return std::make_shared<SpanContextImpl>(ctx);
 }
 
-SpanContextExtensionPtr createSpanContextExtension(std::string_view ctx) {
-  return std::make_unique<SpanContextExtensionImpl>(ctx);
+SpanContextExtensionSharedPtr createSpanContextExtension(
+    absl::string_view ctx) {
+  return std::make_shared<SpanContextExtensionImpl>(ctx);
 }
 
 }  // namespace cpp2sky

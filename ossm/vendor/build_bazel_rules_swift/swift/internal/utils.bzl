@@ -14,8 +14,8 @@
 
 """Common utility definitions used by various BUILD rules."""
 
-load(":providers.bzl", "SwiftInfo")
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("//swift:providers.bzl", "SwiftInfo")
 
 def collect_implicit_deps_providers(
         targets,
@@ -72,13 +72,14 @@ def compact(sequence):
 
 def compilation_context_for_explicit_module_compilation(
         compilation_contexts,
-        deps):
+        swift_infos):
     """Returns a compilation context suitable for compiling an explicit module.
 
     Args:
         compilation_contexts: `CcCompilationContext`s that provide information
             about headers and include paths for the target being compiled.
-        deps: Direct dependencies of the target being compiled.
+        swift_infos: `SwiftInfo` providers propagated by direct dependencies of
+            the target being compiled.
 
     Returns:
         A `CcCompilationContext` containing information needed when compiling an
@@ -88,18 +89,23 @@ def compilation_context_for_explicit_module_compilation(
     """
     all_compilation_contexts = list(compilation_contexts)
 
-    for dep in deps:
-        if CcInfo in dep:
-            all_compilation_contexts.append(dep[CcInfo].compilation_context)
-        if apple_common.Objc in dep:
-            all_compilation_contexts.append(
-                cc_common.create_compilation_context(
-                    includes = dep[apple_common.Objc].strict_include,
-                ),
-            )
+    for swift_info in swift_infos:
+        for module in swift_info.direct_modules:
+            clang = module.clang
+            if not clang:
+                continue
 
-    return cc_common.merge_compilation_contexts(
-        compilation_contexts = all_compilation_contexts,
+            if clang.compilation_context:
+                all_compilation_contexts.append(clang.compilation_context)
+            if clang.strict_includes:
+                all_compilation_contexts.append(
+                    cc_common.create_compilation_context(
+                        includes = clang.strict_includes,
+                    ),
+                )
+
+    return merge_compilation_contexts(
+        direct_compilation_contexts = all_compilation_contexts,
     )
 
 def expand_locations(ctx, values, targets = []):
@@ -356,44 +362,6 @@ def owner_relative_path(file):
     else:
         return paths.relativize(file.short_path, package)
 
-def resolve_optional_tool(ctx, *, target):
-    """Resolves a tool and returns a `struct` describing its inputs.
-
-    This function uses `ctx.resolve_tools` which allows an executable and any of
-    its required runfiles to be propagated correctly across the target boundary.
-
-    Args:
-        ctx: The rule or aspect context.
-        target: The `Target` representing the tool whose inputs should be
-            resolved. This may be `None`, in which case the returned `struct`
-            will be valid but its fields will be appropriately empty.
-
-    Returns:
-        A `struct` containing three fields:
-
-        *   `executable`: The `File` representing the tool's executable (or
-            `None` if `target` was `None`).
-        *   `input_manifests`: A list of input manifests that should be passed
-            as `tool_input_manifests` when configuring the tool in the
-            toolchain (or the empty list if `target` was `None`.)
-        *   `inputs`: A `depset` of `File`s that should be passed as
-            `tool_inputs` when configuring the tool in the toolchain (or the
-            empty `depset` if `target` was `None`.)
-    """
-    if target:
-        executable = target[DefaultInfo].files_to_run.executable
-        inputs, input_manifests = ctx.resolve_tools(tools = [target])
-    else:
-        executable = None
-        input_manifests = []
-        inputs = depset()
-
-    return struct(
-        executable = executable,
-        input_manifests = input_manifests,
-        inputs = inputs,
-    )
-
 def struct_fields(s):
     """Returns a dictionary containing the fields in the struct `s`.
 
@@ -409,3 +377,19 @@ def struct_fields(s):
         # TODO(b/36412967): Remove the `to_json` and `to_proto` checks.
         if field not in ("to_json", "to_proto")
     }
+
+def include_developer_search_paths(attr):
+    """Determines whether to include developer search paths.
+
+    Args:
+        attr: A rule's `ctx.attr`.
+
+    Returns:
+        A `bool` where `True` indicates that the developer search paths should
+        be included during compilation. Otherwise, `False`.
+    """
+    return attr.testonly or getattr(
+        attr,
+        "always_include_developer_search_paths",
+        False,
+    )

@@ -33,7 +33,6 @@ extern "C" {
 #undef PACKAGE_TARNAME
 // ... so we can include the library's config without symbol redefinitions.
 #include "ares_setup.h"
-#include "ares_nowarn.h"
 #include "ares_inet_net_pton.h"
 #include "ares_data.h"
 #include "ares_strsplit.h"
@@ -298,20 +297,6 @@ TEST(Misc, Bitncmp) {
   EXPECT_GT(0, ares__bitncmp(a, b, 3*8 + 7));
 }
 
-TEST_F(LibraryTest, Casts) {
-  ares_ssize_t ssz = 100;
-  unsigned int u = 100;
-  int i = 100;
-  long l = 100;
-
-  unsigned int ru = aresx_sztoui(ssz);
-  EXPECT_EQ(u, ru);
-  int ri = aresx_sztosi(ssz);
-  EXPECT_EQ(i, ri);
-
-  ri = aresx_sltosi(l);
-  EXPECT_EQ(l, (long)ri);
-}
 
 TEST_F(LibraryTest, ReadLine) {
   TempFile temp("abcde\n0123456789\nXYZ\n012345678901234567890\n\n");
@@ -558,7 +543,7 @@ TEST_F(LibraryTest, Striendstr) {
   const char *str = "plugh";
   EXPECT_NE(nullptr, ares_striendstr(str, str));
 }
-extern "C" int ares__single_domain(ares_channel, const char*, char**);
+extern "C" ares_status_t ares__single_domain(ares_channel, const char*, char**);
 TEST_F(DefaultChannelTest, SingleDomain) {
   TempFile aliases("www www.google.com\n");
   EnvValue with_env("HOSTALIASES", aliases.filename());
@@ -581,7 +566,7 @@ TEST_F(DefaultChannelTest, SingleDomain) {
 
 TEST_F(DefaultChannelTest, SaveInvalidChannel) {
   int saved = channel_->nservers;
-  channel_->nservers = -1;
+  channel_->nservers = 0;
   struct ares_options opts;
   int optmask = 0;
   EXPECT_EQ(ARES_ENODATA, ares_save_options(channel_, &opts, &optmask));

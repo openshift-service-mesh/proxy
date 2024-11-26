@@ -15,8 +15,24 @@
 """Common sets of attributes to be shared between the Apple rules."""
 
 load(
+    "@bazel_skylib//lib:dicts.bzl",
+    "dicts",
+)
+load(
     "@build_bazel_apple_support//lib:apple_support.bzl",
     "apple_support",
+)
+load(
+    "@build_bazel_rules_apple//apple:common.bzl",
+    "entitlements_validation_mode",
+)
+load(
+    "@build_bazel_rules_apple//apple:providers.bzl",
+    "AppleBaseBundleIdInfo",
+    "AppleBundleVersionInfo",
+    "ApplePlatformInfo",
+    "AppleResourceBundleInfo",
+    "AppleSharedCapabilityInfo",
 )
 load(
     "@build_bazel_rules_apple//apple/internal:apple_toolchains.bzl",
@@ -47,24 +63,8 @@ load(
     "apple_test_info_aspect",
 )
 load(
-    "@build_bazel_rules_apple//apple:common.bzl",
-    "entitlements_validation_mode",
-)
-load(
-    "@build_bazel_rules_apple//apple:providers.bzl",
-    "AppleBaseBundleIdInfo",
-    "AppleBundleVersionInfo",
-    "ApplePlatformInfo",
-    "AppleResourceBundleInfo",
-    "AppleSharedCapabilityInfo",
-)
-load(
     "@build_bazel_rules_swift//swift:swift.bzl",
     "SwiftInfo",
-)
-load(
-    "@bazel_skylib//lib:dicts.bzl",
-    "dicts",
 )
 
 def _common_attrs():
@@ -617,8 +617,7 @@ def _device_family_attrs(*, allowed_families, is_mandatory = False):
             mandatory = is_mandatory,
             allow_empty = False,
             doc = """
-A list of device families supported by this extension. Valid values are `iphone` and `ipad`; at
-least one must be specified.
+A list of device families supported by this rule. At least one must be specified.
 """,
             **extra_args
         ),
@@ -652,7 +651,11 @@ hermetic given these inputs to ensure that the result can be safely cached.
         ),
     }
 
-def _app_icon_attrs(*, icon_extension = ".appiconset", icon_parent_extension = ".xcassets"):
+def _app_icon_attrs(
+        *,
+        icon_extension = ".appiconset",
+        icon_parent_extension = ".xcassets",
+        supports_alternate_icons = False):
     """Returns the attribute required to define app icons for the given target.
 
     Args:
@@ -660,8 +663,10 @@ def _app_icon_attrs(*, icon_extension = ".appiconset", icon_parent_extension = "
             app icon assets. Optional. Defaults to `.appiconset`.
         icon_parent_extension: A String representing the extension required of the parent directory
             of the directory containing the app icon assets. Optional. Defaults to `.xcassets`.
+        supports_alternate_icons: Bool representing if the rule supports alternate icons. False by
+            default.
     """
-    return {
+    app_icon_attrs = {
         "app_icons": attr.label_list(
             allow_files = True,
             doc = """
@@ -673,6 +678,16 @@ named `*.{app_icon_parent_extension}/*.{app_icon_extension}` and there may be on
             ),
         ),
     }
+    if supports_alternate_icons:
+        app_icon_attrs = dicts.add(app_icon_attrs, {
+            "primary_app_icon": attr.string(
+                doc = """
+An optional String to identify the name of the primary app icon when alternate app icons have been
+provided for the app.
+""",
+            ),
+        })
+    return app_icon_attrs
 
 def _launch_images_attrs():
     """Returns the attribute required to support launch images for a given target."""
@@ -704,12 +719,36 @@ bundle in a directory named `Settings.bundle`.
 def _simulator_runner_template_attr():
     """Returns the attribute required to `bazel run` a *_application target with an Apple sim."""
     return {
-        "_runner_template": attr.label(
+        "_simulator_runner_template": attr.label(
             cfg = "exec",
             allow_single_file = True,
             default = Label(
                 "@build_bazel_rules_apple//apple/internal/templates:apple_simulator_template",
             ),
+        ),
+    }
+
+def _device_runner_template_attr():
+    """Returns the attribute required to `bazel run` a *_application target on a physical device."""
+    return {
+        "_device_runner_template": attr.label(
+            cfg = "exec",
+            allow_single_file = True,
+            default = Label(
+                "@build_bazel_rules_apple//apple/internal/templates:apple_device_template",
+            ),
+        ),
+    }
+
+def _locales_to_include_attr():
+    """Returns the attribute required to support configuring the explicit set of locales supported for the bundle."""
+    return {
+        "locales_to_include": attr.string_list(
+            mandatory = False,
+            doc = """
+A list of locales to include in the bundle. Only *.lproj directories that are matched will be copied as a part of the build.
+This value takes precedence (and is preferred) over locales defined using `--define "apple.locales_to_include=..."`.
+""",
         ),
     }
 
@@ -730,9 +769,11 @@ rule_attrs = struct(
     common_tool_attrs = _common_tool_attrs,
     custom_transition_allowlist_attr = _custom_transition_allowlist_attr,
     device_family_attrs = _device_family_attrs,
+    device_runner_template_attr = _device_runner_template_attr,
     extensionkit_attrs = _extensionkit_attrs,
     infoplist_attrs = _infoplist_attrs,
     ipa_post_processor_attrs = _ipa_post_processor_attrs,
+    locales_to_include_attrs = _locales_to_include_attr,
     launch_images_attrs = _launch_images_attrs,
     platform_attrs = _platform_attrs,
     settings_bundle_attrs = _settings_bundle_attrs,
@@ -746,7 +787,7 @@ rule_attrs = struct(
             ios = ["iphone", "ipad"],
             macos = ["mac"],
             tvos = ["tv"],
-            visionos = ["reality"],
+            visionos = ["vision"],
             watchos = ["watch"],
         ),
         test_bundle_infoplist = _test_bundle_infoplist,

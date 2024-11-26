@@ -13,13 +13,14 @@
 # limitations under the License.
 
 load(
-    "//go/private:context.bzl",
-    "go_context",
+    "@bazel_skylib//lib:structs.bzl",
+    "structs",
 )
 load(
     "//go/private:common.bzl",
     "GO_TOOLCHAIN",
     "GO_TOOLCHAIN_LABEL",
+    "SUPPORTS_PATH_MAPPING_REQUIREMENT",
     "as_list",
     "asm_exts",
     "cgo_exts",
@@ -27,8 +28,12 @@ load(
     "split_srcs",
 )
 load(
-    "//go/private/rules:binary.bzl",
-    "gc_linkopts",
+    "//go/private:context.bzl",
+    "go_context",
+)
+load(
+    "//go/private:mode.bzl",
+    "LINKMODES",
 )
 load(
     "//go/private:providers.bzl",
@@ -39,16 +44,12 @@ load(
     "get_archive",
 )
 load(
+    "//go/private/rules:binary.bzl",
+    "gc_linkopts",
+)
+load(
     "//go/private/rules:transition.bzl",
     "go_transition",
-)
-load(
-    "//go/private:mode.bzl",
-    "LINKMODES",
-)
-load(
-    "@bazel_skylib//lib:structs.bzl",
-    "structs",
 )
 
 def _go_test_impl(ctx):
@@ -80,7 +81,7 @@ def _go_test_impl(ctx):
         x_defs = ctx.attr.x_defs,
     ), external_library, ctx.coverage_instrumented())
     external_source, internal_archive = _recompile_external_deps(go, external_source, internal_archive, [t.label for t in ctx.attr.embed])
-    external_archive = go.archive(go, external_source)
+    external_archive = go.archive(go, external_source, is_external_pkg = True)
 
     # now generate the main function
     repo_relative_rundir = ctx.attr.rundir or ctx.label.package or "."
@@ -94,7 +95,7 @@ def _go_test_impl(ctx):
         run_dir = repo_relative_rundir
 
     main_go = go.declare_file(go, path = "testmain.go")
-    arguments = go.builder_args(go, "gentestmain")
+    arguments = go.builder_args(go, "gentestmain", use_path_mapping = True)
     arguments.add("-output", main_go)
     if go.coverage_enabled:
         if go.mode.race:
@@ -114,6 +115,7 @@ def _go_test_impl(ctx):
     )
     arguments.add("-pkgname", internal_source.library.importpath)
     arguments.add_all(go_srcs, before_each = "-src", format_each = "l=%s")
+
     ctx.actions.run(
         inputs = go_srcs,
         outputs = [main_go],
@@ -121,7 +123,8 @@ def _go_test_impl(ctx):
         executable = go.toolchain._builder,
         arguments = [arguments],
         toolchain = GO_TOOLCHAIN_LABEL,
-        env = go.env,
+        env = go.env_for_path_mapping,
+        execution_requirements = SUPPORTS_PATH_MAPPING_REQUIREMENT,
     )
 
     test_gc_linkopts = gc_linkopts(ctx)

@@ -322,12 +322,13 @@ genrule(
     for annotation_processor in artifact.get("annotation_processors", []):
         to_return.append(
             """java_plugin(
-\tname = "{name}",
+\tname = "{name}",{testonly}
 \tdeps = [":{jar_target}"],
 \tgenerates_api = True,
 processor_class = "{processor_class}",
 {alias_visibility})""".format(
                 name = "{}__java_plugin__{}".format(target_label, escape(annotation_processor)),
+                testonly = "\n\ttestonly = True," if testonly_artifacts.get(simple_coord) else "",
                 jar_target = target_label,
                 processor_class = annotation_processor,
                 alias_visibility = alias_visibility,
@@ -454,6 +455,7 @@ def _generate_imports(repository_ctx, dependencies, explicit_artifacts, neverlin
             ))
 
         elif artifact_path != None:
+            seen_imports[target_label] = True
             all_imports.extend(_generate_target(
                 repository_ctx,
                 jar_versionless_target_labels,

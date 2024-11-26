@@ -9,6 +9,7 @@
 #include "source/common/common/empty_string.h"
 #include "source/common/config/datasource.h"
 #include "source/common/network/cidr_range.h"
+#include "source/common/protobuf/message_validator_impl.h"
 #include "source/common/protobuf/utility.h"
 #include "source/common/secret/sds_api.h"
 #include "source/common/ssl/certificate_validation_context_config_impl.h"
@@ -23,21 +24,7 @@ namespace Tls {
 
 namespace {
 
-bool getFipsEnabled() {
-  std::ifstream file("/proc/sys/crypto/fips_enabled");
-  if (file.fail()) {
-    return false;
-  }
-
-  std::stringstream file_string;
-  file_string << file.rdbuf();
-
-  std::string fipsEnabledText = file_string.str();
-  fipsEnabledText.erase(fipsEnabledText.find_last_not_of("\n") + 1);
-  return fipsEnabledText.compare("1") == 0;
-}
-
-static const bool isFipsEnabled = getFipsEnabled();
+static const bool isFipsEnabled = ContextConfigImpl::getFipsEnabled();
 
 std::vector<Secret::TlsCertificateConfigProviderSharedPtr> getTlsCertificateConfigProviders(
     const envoy::extensions::transport_sockets::tls::v3::CommonTlsContext& config,

@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,10 @@ import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
 import "google/cloud/gkemulticloud/v1/common_resources.proto";
 import "google/protobuf/timestamp.proto";
+import "google/type/date.proto";
 
 option csharp_namespace = "Google.Cloud.GkeMultiCloud.V1";
-option go_package = "google.golang.org/genproto/googleapis/cloud/gkemulticloud/v1;gkemulticloud";
+option go_package = "cloud.google.com/go/gkemulticloud/apiv1/gkemulticloudpb;gkemulticloudpb";
 option java_multiple_files = true;
 option java_outer_classname = "AzureResourcesProto";
 option java_package = "com.google.cloud.gkemulticloud.v1";
@@ -70,7 +71,7 @@ message AzureCluster {
   // `projects/<project-number>/locations/<region>/azureClusters/<cluster-id>`.
   //
   // See [Resource Names](https://cloud.google.com/apis/design/resource_names)
-  // for more details on GCP resource names.
+  // for more details on Google Cloud Platform resource names.
   string name = 1;
 
   // Optional. A human readable description of this cluster.
@@ -90,20 +91,22 @@ message AzureCluster {
   // `/subscriptions/<subscription-id>/resourceGroups/<resource-group-name>`
   string resource_group_id = 17 [(google.api.field_behavior) = REQUIRED];
 
-  // Required. Name of the
+  // Optional. Name of the
   // [AzureClient][google.cloud.gkemulticloud.v1.AzureClient] that contains
   // authentication configuration for how the Anthos Multi-Cloud API connects to
   // Azure APIs.
   //
-  // The `AzureClient` resource must reside on the same GCP project and region
-  // as the `AzureCluster`.
+  // Either azure_client or azure_services_authentication should be provided.
+  //
+  // The `AzureClient` resource must reside on the same Google Cloud Platform
+  // project and region as the `AzureCluster`.
   //
   // `AzureClient` names are formatted as
   // `projects/<project-number>/locations/<region>/azureClients/<client-id>`.
   //
   // See [Resource Names](https://cloud.google.com/apis/design/resource_names)
   // for more details on Google Cloud resource names.
-  string azure_client = 16 [(google.api.field_behavior) = REQUIRED];
+  string azure_client = 16 [(google.api.field_behavior) = OPTIONAL];
 
   // Required. Cluster-wide networking configuration.
   AzureClusterNetworking networking = 4
@@ -114,6 +117,12 @@ message AzureCluster {
 
   // Required. Configuration related to the cluster RBAC settings.
   AzureAuthorization authorization = 6 [(google.api.field_behavior) = REQUIRED];
+
+  // Optional. Authentication configuration for management of Azure resources.
+  //
+  // Either azure_client or azure_services_authentication should be provided.
+  AzureServicesAuthentication azure_services_authentication = 22
+      [(google.api.field_behavior) = OPTIONAL];
 
   // Output only. The current state of the cluster.
   State state = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -326,7 +335,7 @@ message AzureProxyConfig {
   //
   // The secret must be a JSON encoded proxy configuration
   // as described in
-  // https://cloud.google.com/anthos/clusters/docs/multi-cloud/azure/how-to/use-a-proxy#create_a_proxy_configuration_file
+  // https://cloud.google.com/kubernetes-engine/multi-cloud/docs/azure/how-to/use-a-proxy#create_a_proxy_configuration_file
   //
   // Secret ids are formatted as
   // `https://<key-vault-name>.vault.azure.net/secrets/<secret-name>/<secret-version>`.
@@ -410,6 +419,9 @@ message AzureClient {
   // Required. The Azure Active Directory Application ID.
   string application_id = 3 [(google.api.field_behavior) = REQUIRED];
 
+  // Output only. If set, there are currently pending changes to the client.
+  bool reconciling = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+
   // Optional. Annotations on the resource.
   //
   // This field has the same restrictions as Kubernetes annotations.
@@ -430,24 +442,52 @@ message AzureClient {
   // Output only. The time at which this resource was created.
   google.protobuf.Timestamp create_time = 6
       [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Output only. The time at which this client was last updated.
+  google.protobuf.Timestamp update_time = 10
+      [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Configuration related to the cluster RBAC settings.
 message AzureAuthorization {
-  // Required. Users that can perform operations as a cluster admin. A managed
+  // Optional. Users that can perform operations as a cluster admin. A managed
   // ClusterRoleBinding will be created to grant the `cluster-admin` ClusterRole
   // to the users. Up to ten admin users can be provided.
   //
   // For more info on RBAC, see
   // https://kubernetes.io/docs/reference/access-authn-authz/rbac/#user-facing-roles
   repeated AzureClusterUser admin_users = 1
-      [(google.api.field_behavior) = REQUIRED];
+      [(google.api.field_behavior) = OPTIONAL];
+
+  // Optional. Groups of users that can perform operations as a cluster admin. A
+  // managed ClusterRoleBinding will be created to grant the `cluster-admin`
+  // ClusterRole to the groups. Up to ten admin groups can be provided.
+  //
+  // For more info on RBAC, see
+  // https://kubernetes.io/docs/reference/access-authn-authz/rbac/#user-facing-roles
+  repeated AzureClusterGroup admin_groups = 2
+      [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Authentication configuration for the management of Azure resources.
+message AzureServicesAuthentication {
+  // Required. The Azure Active Directory Tenant ID.
+  string tenant_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Required. The Azure Active Directory Application ID.
+  string application_id = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
 // Identities of a user-type subject for Azure clusters.
 message AzureClusterUser {
   // Required. The name of the user, e.g. `my-gcp-id@gmail.com`.
   string username = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Identities of a group-type subject for Azure clusters.
+message AzureClusterGroup {
+  // Required. The name of the group, e.g. `my-group@domain.com`.
+  string group = 1 [(google.api.field_behavior) = REQUIRED];
 }
 
 // An Anthos node pool running on Azure.
@@ -557,6 +597,19 @@ message AzureNodePool {
   // Output only. A set of errors found in the node pool.
   repeated AzureNodePoolError errors = 29
       [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Optional. The Management configuration for this node pool.
+  AzureNodeManagement management = 30 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// AzureNodeManagement defines the set of node management features turned on for
+// an Azure node pool.
+message AzureNodeManagement {
+  // Optional. Whether or not the nodes will be automatically repaired. When set
+  // to true, the nodes in this node pool will be monitored and if they fail
+  // health checks consistently over a period of time, an automatic repair
+  // action will be triggered to replace them with new nodes.
+  bool auto_repair = 1 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Parameters that describe the configuration of all node machines
@@ -585,8 +638,7 @@ message AzureNodeConfig {
   map<string, string> tags = 3 [(google.api.field_behavior) = OPTIONAL];
 
   // Optional. The OS image type to use on node pool instances.
-  // Can have a value of `ubuntu`, or `windows` if the cluster enables
-  // the Windows node pool preview feature.
+  // Can be unspecified, or have a value of `ubuntu`.
   //
   // When unspecified, it defaults to `ubuntu`.
   string image_type = 8 [(google.api.field_behavior) = OPTIONAL];
@@ -624,6 +676,38 @@ message AzureNodePoolAutoscaling {
   int32 max_node_count = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
+// AzureOpenIdConfig is an OIDC discovery document for the cluster.
+// See the OpenID Connect Discovery 1.0 specification for details.
+message AzureOpenIdConfig {
+  // OIDC Issuer.
+  string issuer = 1;
+
+  // JSON Web Key uri.
+  string jwks_uri = 2;
+
+  // Supported response types.
+  repeated string response_types_supported = 3;
+
+  // Supported subject types.
+  repeated string subject_types_supported = 4;
+
+  // supported ID Token signing Algorithms.
+  repeated string id_token_signing_alg_values_supported = 5;
+
+  // Supported claims.
+  repeated string claims_supported = 6;
+
+  // Supported grant types.
+  repeated string grant_types = 7;
+}
+
+// AzureJsonWebKeys is a valid JSON Web Key Set as specififed in RFC 7517.
+message AzureJsonWebKeys {
+  // The public component of the keys used by the cluster to sign token
+  // requests.
+  repeated Jwk keys = 1;
+}
+
 // AzureServerConfig contains information about a Google Cloud location, such as
 // supported Azure regions and Kubernetes versions.
 message AzureServerConfig {
@@ -638,20 +722,44 @@ message AzureServerConfig {
   // `projects/<project-number>/locations/<region>/azureServerConfig`.
   //
   // See [Resource Names](https://cloud.google.com/apis/design/resource_names)
-  // for more details on GCP resource names.
+  // for more details on Google Cloud Platform resource names.
   string name = 1;
 
-  // List of valid Kubernetes versions.
+  // List of all released Kubernetes versions, including ones which are end of
+  // life and can no longer be used.  Filter by the `enabled`
+  // property to limit to currently available versions.
+  // Valid versions supported for both create and update operations
   repeated AzureK8sVersionInfo valid_versions = 2;
 
   // The list of supported Azure regions.
   repeated string supported_azure_regions = 3;
 }
 
-// Information about a supported Kubernetes version.
+// Kubernetes version information of GKE cluster on Azure.
 message AzureK8sVersionInfo {
-  // A supported Kubernetes version (for example, `1.19.10-gke.1000`)
+  // Kubernetes version name (for example, `1.19.10-gke.1000`)
   string version = 1;
+
+  // Optional. True if the version is available for cluster creation. If a
+  // version is enabled for creation, it can be used to create new clusters.
+  // Otherwise, cluster creation will fail. However, cluster upgrade operations
+  // may succeed, even if the version is not enabled.
+  bool enabled = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // Optional. True if this cluster version belongs to a minor version that has
+  // reached its end of life and is no longer in scope to receive security and
+  // bug fixes.
+  bool end_of_life = 4 [(google.api.field_behavior) = OPTIONAL];
+
+  // Optional. The estimated date (in Pacific Time) when this cluster version
+  // will reach its end of life. Or if this version is no longer supported (the
+  // `end_of_life` field is true), this is the actual date (in Pacific time)
+  // when the version reached its end of life.
+  google.type.Date end_of_life_date = 5
+      [(google.api.field_behavior) = OPTIONAL];
+
+  // Optional. The date (in Pacific Time) when the cluster version was released.
+  google.type.Date release_date = 6 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // SSH configuration for Azure resources.

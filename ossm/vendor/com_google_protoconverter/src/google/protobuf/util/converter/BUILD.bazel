@@ -28,8 +28,7 @@ cc_library(
     hdrs = ["constants.h"],
     strip_include_prefix = "/src",
     deps = [
-        "//src/google/protobuf/stubs",
-        "//src/google/protobuf/util/converter:port_def",
+        "//src/google/protobuf/util/converter:port",
     ],
 )
 
@@ -42,19 +41,16 @@ cc_library(
     deps = [
         ":constants",
         ":utility",
-        "//src/google/protobuf/stubs",
-        "//src/google/protobuf/util/converter:port_def",
+        "//src/google/protobuf/util/converter:port",
         "@com_google_absl//absl/strings",
         "@com_google_protobuf//:protobuf",
     ],
 )
 
 cc_library(
-    name = "port_def",
+    name = "port",
     hdrs = [
         "port.h",
-        "port_def.inc",
-        "port_undef.inc",
     ],
     strip_include_prefix = "/src",
     visibility = [
@@ -78,7 +74,7 @@ cc_library(
         ":type_info",
         ":utility",
         "//src/google/protobuf/stubs",
-        "//src/google/protobuf/util/converter:port_def",
+        "//src/google/protobuf/util/converter:port",
     ],
 )
 
@@ -133,7 +129,7 @@ cc_library(
         ":object_writer",
         ":utility",
         "//src/google/protobuf/stubs",
-        "//src/google/protobuf/util/converter:port_def",
+        "//src/google/protobuf/util/converter:port",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_protobuf//:protobuf",

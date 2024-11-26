@@ -18,13 +18,13 @@ on:
 
   pull_request:
     branches:
-    - master
+    - main
     - 'envoy-release/**'
     - 'istio-release/**'
 
   push:
     branches:
-    - master
+    - main
     - 'envoy-release/**'
     - 'istio-release/**'
 
@@ -41,7 +41,7 @@ jobs:
   test_data:
     name: build test data
 
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v2
@@ -83,11 +83,11 @@ jobs:
         retention-days: 3
 
     - name: Skip Bazel cache update
-      if: ${{ github.ref != 'refs/heads/master' }}
+      if: ${{ github.ref != 'refs/heads/main' }}
       run: echo "CACHE_SKIP_SAVE=true" >> $GITHUB_ENV
 
     - name: Cleanup Bazel cache
-      if: ${{ github.ref == 'refs/heads/master' }}
+      if: ${{ github.ref == 'refs/heads/main' }}
       run: |
         export OUTPUT=$(bazel info output_base)
         # Distfiles for Rust toolchains (350 MiB).
@@ -109,19 +109,19 @@ jobs:
         include:
         - name: 'NullVM on Linux/x86_64'
           engine: 'null'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=gcc
         - name: 'NullVM on Linux/x86_64 with ASan'
           engine: 'null'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=clang-asan-strict --define=crypto=system
         - name: 'NullVM on Linux/x86_64 with TSan'
           engine: 'null'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=clang-tsan
@@ -134,7 +134,7 @@ jobs:
         - name: 'V8 on Linux/x86_64'
           engine: 'v8'
           repo: 'v8'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=clang --define=crypto=system
@@ -142,7 +142,7 @@ jobs:
         - name: 'V8 on Linux/x86_64 with ASan'
           engine: 'v8'
           repo: 'v8'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=clang-asan
@@ -150,7 +150,7 @@ jobs:
         - name: 'V8 on Linux/x86_64 with TSan'
           engine: 'v8'
           repo: 'v8'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=clang-tsan
@@ -158,7 +158,7 @@ jobs:
         - name: 'V8 on Linux/x86_64 with GCC'
           engine: 'v8'
           repo: 'v8'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=gcc
@@ -166,7 +166,7 @@ jobs:
         - name: 'V8 on Linux/aarch64'
           engine: 'v8'
           repo: 'v8'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: aarch64
           action: test
           targets: -//test/fuzz/...
@@ -176,27 +176,27 @@ jobs:
         - name: 'V8 on macOS/x86_64'
           engine: 'v8'
           repo: 'v8'
-          os: macos-11
+          os: macos-13
           arch: x86_64
           action: test
           cache: true
         - name: 'WAMR interp on Linux/x86_64'
           engine: 'wamr-interp'
           repo: 'com_github_bytecodealliance_wasm_micro_runtime'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=clang
         - name: 'WAMR interp on macOS/x86_64'
           engine: 'wamr-interp'
           repo: 'com_github_bytecodealliance_wasm_micro_runtime'
-          os: macos-11
+          os: macos-13
           arch: x86_64
           action: test
         - name: 'WAMR jit on Linux/x86_64'
           engine: 'wamr-jit'
           repo: 'com_github_bytecodealliance_wasm_micro_runtime'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=clang
@@ -205,41 +205,41 @@ jobs:
         - name: 'WAMR jit on macOS/x86_64'
           engine: 'wamr-jit'
           repo: 'com_github_bytecodealliance_wasm_micro_runtime'
-          os: macos-11
+          os: macos-13
           arch: x86_64
           action: test
           cache: true
         - name: 'WasmEdge on Linux/x86_64'
           engine: 'wasmedge'
           repo: 'com_github_wasmedge_wasmedge'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=clang
         - name: 'WasmEdge on macOS/x86_64'
           engine: 'wasmedge'
           repo: 'com_github_wasmedge_wasmedge'
-          os: macos-11
+          os: macos-13
           arch: x86_64
           action: test
         - name: 'Wasmtime on Linux/x86_64'
           engine: 'wasmtime'
           repo: 'com_github_bytecodealliance_wasmtime'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=clang -c opt
         - name: 'Wasmtime on Linux/x86_64 with ASan'
           engine: 'wasmtime'
           repo: 'com_github_bytecodealliance_wasmtime'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=clang-asan-strict --define=crypto=system
         - name: 'Wasmtime on Linux/aarch64'
           engine: 'wasmtime'
           repo: 'com_github_bytecodealliance_wasmtime'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: aarch64
           action: build
           flags: --config=zig-cc-linux-aarch64
@@ -247,16 +247,17 @@ jobs:
         - name: 'Wasmtime on Linux/s390x'
           engine: 'wasmtime'
           repo: 'com_github_bytecodealliance_wasmtime'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: s390x
           action: test
           flags: --config=clang --test_timeout=1800
-          run_under: docker run --rm --env HOME=$HOME --env USER=$(id -un) --volume "$HOME:$HOME" --workdir $(pwd) --user $(id -u):$(id -g) --platform linux/s390x piotrsikora/build-tools:bazel-5.2.0-clang-14-gcc-12
+          # s390x build-tools image built from bazel/external/Dockerfile.bazel
+          run_under: docker run --rm --env HOME=$HOME --env USER=$(id -un) --volume "$HOME:$HOME" --workdir $(pwd) --user $(id -u):$(id -g) --platform linux/s390x ghcr.io/proxy-wasm/build-tools:ubuntu-22.04-bazel-6.5.0
           cache: true
         - name: 'Wasmtime on macOS/x86_64'
           engine: 'wasmtime'
           repo: 'com_github_bytecodealliance_wasmtime'
-          os: macos-11
+          os: macos-13
           arch: x86_64
           action: test
         - name: 'Wasmtime on Windows/x86_64'
@@ -269,7 +270,7 @@ jobs:
         - name: 'WAVM on Linux/x86_64'
           engine: 'wavm'
           repo: 'com_github_wavm_wavm'
-          os: ubuntu-20.04
+          os: ubuntu-22.04
           arch: x86_64
           action: test
           flags: --config=clang
@@ -281,6 +282,15 @@ jobs:
     - name: Install dependencies (Linux)
       if: ${{ matrix.deps != '' && startsWith(matrix.os, 'ubuntu') }}
       run: sudo apt update -y && sudo apt install -y ${{ matrix.deps }}
+
+    # Needed for s390x test which runs on a GHCR Docker Ubuntu image.
+    - name: Login to GitHub Container Registry
+      if: startsWith(matrix.run_under, 'docker')
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Activate Docker/QEMU
       if: startsWith(matrix.run_under, 'docker')
@@ -341,11 +351,11 @@ jobs:
         //test:signature_util_test
 
     - name: Skip Bazel cache update
-      if: ${{ matrix.cache && github.ref != 'refs/heads/master' }}
+      if: ${{ matrix.cache && github.ref != 'refs/heads/main' }}
       run: echo "CACHE_SKIP_SAVE=true" >> $GITHUB_ENV
 
     - name: Cleanup Bazel cache
-      if: ${{ matrix.cache && github.ref == 'refs/heads/master' }}
+      if: ${{ matrix.cache && github.ref == 'refs/heads/main' }}
       run: |
         export OUTPUT=$(${{ matrix.run_under }} bazel info output_base)
         echo "===== BEFORE ====="

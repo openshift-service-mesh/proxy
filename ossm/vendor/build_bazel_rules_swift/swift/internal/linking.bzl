@@ -16,20 +16,22 @@
 
 load("@bazel_skylib//lib:collections.bzl", "collections")
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
-load(":actions.bzl", "is_action_enabled", "swift_action_names")
-load(":autolinking.bzl", "register_autolink_extract_action")
+load(
+    "//swift:swift_clang_module_aspect.bzl",
+    "swift_clang_module_aspect",
+)
+load(":action_names.bzl", "SWIFT_ACTION_AUTOLINK_EXTRACT")
+load(":actions.bzl", "is_action_enabled")
 load(":attrs.bzl", "swift_compilation_attrs")
+load(":autolinking.bzl", "register_autolink_extract_action")
 load(
     ":debugging.bzl",
     "ensure_swiftmodule_is_embedded",
     "should_embed_swiftmodule_for_debugging",
 )
-load(":derived_files.bzl", "derived_files")
 load(
-    ":features.bzl",
-    "configure_features",
-    "get_cc_feature_configuration",
-    "is_feature_enabled",
+    ":developer_dirs.bzl",
+    "developer_dirs_linkopts",
 )
 load(
     ":feature_names.bzl",
@@ -38,20 +40,26 @@ load(
     "SWIFT_FEATURE__FORCE_ALWAYSLINK_TRUE",
 )
 load(
-    ":developer_dirs.bzl",
-    "developer_dirs_linkopts",
+    ":features.bzl",
+    "configure_features",
+    "get_cc_feature_configuration",
+    "is_feature_enabled",
 )
-load(":providers.bzl", "SwiftToolchainInfo")
-load(":swift_clang_module_aspect.bzl", "swift_clang_module_aspect")
 load(":utils.bzl", "get_providers")
+
+# TODO: Remove once we drop bazel 7.x
+_OBJC_PROVIDER_LINKING = hasattr(apple_common.new_objc_provider(), "linkopt")
 
 def binary_rule_attrs(
         *,
+        additional_deps_aspects = [],
         additional_deps_providers = [],
         stamp_default):
     """Returns attributes common to both `swift_binary` and `swift_test`.
 
     Args:
+        additional_deps_aspects: A list of additional aspects that should be
+            applied to the `deps` attribute of the rule.
         additional_deps_providers: A list of lists representing additional
             providers that should be allowed by the `deps` attribute of the
             rule.
@@ -62,7 +70,9 @@ def binary_rule_attrs(
     """
     return dicts.add(
         swift_compilation_attrs(
-            additional_deps_aspects = [swift_clang_module_aspect],
+            additional_deps_aspects = [
+                swift_clang_module_aspect,
+            ] + additional_deps_aspects,
             additional_deps_providers = additional_deps_providers,
             requires_srcs = False,
         ),
@@ -122,8 +132,10 @@ into the binary. Possible values are:
     )
 
 def configure_features_for_binary(
+        *,
         ctx,
         requested_features = [],
+        swift_toolchain,
         unsupported_features = []):
     """Creates and returns the feature configuration for binary linking.
 
@@ -132,20 +144,18 @@ def configure_features_for_binary(
 
     Args:
         ctx: The rule context.
-        requested_features: Additional features that are requested for a
-            particular rule/target.
-        unsupported_features: Additional features that are unsupported for a
-            particular rule/target.
+        requested_features: Features that are requested for the target.
+        swift_toolchain: The Swift toolchain provider.
+        unsupported_features: Features that are unsupported for the target.
 
     Returns:
         The `FeatureConfiguration` that was created.
     """
-    swift_toolchain = ctx.attr._toolchain[SwiftToolchainInfo]
+    requested_features = list(requested_features)
+    unsupported_features = list(unsupported_features)
 
-    # Combine the features from the rule context with those passed into this
-    # function.
-    requested_features = ctx.features + requested_features
-    unsupported_features = ctx.disabled_features + unsupported_features
+    # Require static linking for now.
+    requested_features.append("static_linking_mode")
 
     # Enable LLVM coverage in CROSSTOOL if this is a coverage build. Note that
     # we explicitly enable LLVM format and disable GCC format because the former
@@ -161,6 +171,108 @@ def configure_features_for_binary(
         unsupported_features = unsupported_features,
     )
 
+def _create_autolink_linking_context(
+        *,
+        actions,
+        compilation_outputs,
+        feature_configuration,
+        label,
+        name,
+        swift_toolchain):
+    """Creates a linking context that embeds a .swiftmodule for debugging.
+
+    Args:
+        actions: The context's `actions` object.
+        compilation_outputs: A `CcCompilationOutputs` value containing the
+            object files to link. Typically, this is the second tuple element in
+            the value returned by `swift_common.compile`.
+        feature_configuration: A feature configuration obtained from
+            `swift_common.configure_features`.
+        label: The `Label` of the target being built. This is used as the owner
+            of the linker inputs created for post-compile actions (if any).
+        name: The name of the target being linked, which is used to derive the
+            output artifact.
+        swift_toolchain: The `SwiftToolchainInfo` provider of the toolchain.
+
+    Returns:
+        A valid `CcLinkingContext`, or `None` if no linking context was created.
+    """
+    if compilation_outputs.objects and is_action_enabled(
+        action_name = SWIFT_ACTION_AUTOLINK_EXTRACT,
+        swift_toolchain = swift_toolchain,
+    ):
+        autolink_file = actions.declare_file(
+            "{}.autolink".format(name),
+        )
+        register_autolink_extract_action(
+            actions = actions,
+            autolink_file = autolink_file,
+            feature_configuration = feature_configuration,
+            object_files = compilation_outputs.objects,
+            swift_toolchain = swift_toolchain,
+        )
+        post_compile_linker_inputs = [
+            cc_common.create_linker_input(
+                owner = label,
+                user_link_flags = depset(
+                    ["@{}".format(autolink_file.path)],
+                ),
+                additional_inputs = depset([autolink_file]),
+            ),
+        ]
+        return cc_common.create_linking_context(
+            linker_inputs = depset(post_compile_linker_inputs),
+        )
+
+    return None
+
+def _create_embedded_debugging_linking_context(
+        *,
+        actions,
+        feature_configuration,
+        label,
+        module_context,
+        swift_toolchain):
+    """Creates a linking context that embeds a .swiftmodule for debugging.
+
+    Args:
+        actions: The context's `actions` object.
+        feature_configuration: A feature configuration obtained from
+            `swift_common.configure_features`.
+        label: The `Label` of the target being built. This is used as the owner
+            of the linker inputs created for post-compile actions (if any).
+        module_context: The module context returned by `swift_common.compile`
+            containing information about the Swift module that was compiled.
+            Typically, this is the first tuple element in the value returned by
+            `swift_common.compile`.
+        swift_toolchain: The `SwiftToolchainInfo` provider of the toolchain.
+
+    Returns:
+        A valid `CcLinkingContext`, or `None` if no linking context was created.
+    """
+    if (
+        module_context and
+        module_context.swift and
+        should_embed_swiftmodule_for_debugging(
+            feature_configuration = feature_configuration,
+            module_context = module_context,
+        )
+    ):
+        post_compile_linker_inputs = [
+            ensure_swiftmodule_is_embedded(
+                actions = actions,
+                feature_configuration = feature_configuration,
+                label = label,
+                swiftmodule = module_context.swift.swiftmodule,
+                swift_toolchain = swift_toolchain,
+            ),
+        ]
+        return cc_common.create_linking_context(
+            linker_inputs = depset(post_compile_linker_inputs),
+        )
+
+    return None
+
 def create_linking_context_from_compilation_outputs(
         *,
         actions,
@@ -168,7 +280,8 @@ def create_linking_context_from_compilation_outputs(
         alwayslink = False,
         compilation_outputs,
         feature_configuration,
-        is_test,
+        is_test = None,
+        include_dev_srch_paths = None,
         label,
         linking_contexts = [],
         module_context,
@@ -197,7 +310,11 @@ def create_linking_context_from_compilation_outputs(
             the value returned by `swift_common.compile`.
         feature_configuration: A feature configuration obtained from
             `swift_common.configure_features`.
-        is_test: Represents if the `testonly` value of the context.
+        is_test: Deprecated. This argument will be removed in the next major
+            release. Use the `include_dev_srch_paths` attribute instead.
+            Represents if the `testonly` value of the context.
+        include_dev_srch_paths: A `bool` that indicates whether the developer
+            framework search paths will be added to the compilation command.
         label: The `Label` of the target being built. This is used as the owner
             of the linker inputs created for post-compile actions (if any), and
             the label's name component also determines the name of the artifact
@@ -226,56 +343,29 @@ def create_linking_context_from_compilation_outputs(
         for cc_info in swift_toolchain.implicit_deps_providers.cc_infos
     ]
 
-    if module_context and module_context.swift:
-        post_compile_linker_inputs = []
+    debugging_linking_context = _create_embedded_debugging_linking_context(
+        actions = actions,
+        feature_configuration = feature_configuration,
+        label = label,
+        module_context = module_context,
+        swift_toolchain = swift_toolchain,
+    )
+    if debugging_linking_context:
+        extra_linking_contexts.append(debugging_linking_context)
 
-        # Ensure that the .swiftmodule file is embedded in the final library or
-        # binary for debugging purposes.
-        if should_embed_swiftmodule_for_debugging(
-            feature_configuration = feature_configuration,
-            module_context = module_context,
-        ):
-            post_compile_linker_inputs.append(
-                ensure_swiftmodule_is_embedded(
-                    actions = actions,
-                    feature_configuration = feature_configuration,
-                    label = label,
-                    swiftmodule = module_context.swift.swiftmodule,
-                    swift_toolchain = swift_toolchain,
-                ),
-            )
+    if not name:
+        name = label.name
 
-        # Invoke an autolink-extract action for toolchains that require it.
-        if is_action_enabled(
-            action_name = swift_action_names.AUTOLINK_EXTRACT,
-            swift_toolchain = swift_toolchain,
-        ):
-            autolink_file = derived_files.autolink_flags(
-                actions = actions,
-                target_name = label.name,
-            )
-            register_autolink_extract_action(
-                actions = actions,
-                autolink_file = autolink_file,
-                feature_configuration = feature_configuration,
-                object_files = compilation_outputs.objects,
-                swift_toolchain = swift_toolchain,
-            )
-            post_compile_linker_inputs.append(
-                cc_common.create_linker_input(
-                    owner = label,
-                    user_link_flags = depset(
-                        ["@{}".format(autolink_file.path)],
-                    ),
-                    additional_inputs = depset([autolink_file]),
-                ),
-            )
-
-        extra_linking_contexts.append(
-            cc_common.create_linking_context(
-                linker_inputs = depset(post_compile_linker_inputs),
-            ),
-        )
+    autolink_linking_context = _create_autolink_linking_context(
+        actions = actions,
+        compilation_outputs = compilation_outputs,
+        feature_configuration = feature_configuration,
+        label = label,
+        name = name,
+        swift_toolchain = swift_toolchain,
+    )
+    if autolink_linking_context:
+        extra_linking_contexts.append(autolink_linking_context)
 
     if not alwayslink:
         alwayslink = is_feature_enabled(
@@ -314,10 +404,24 @@ def create_linking_context_from_compilation_outputs(
             ),
         )
 
-    if not name:
-        name = label.name
+    if include_dev_srch_paths != None and is_test != None:
+        fail("""\
+Both `include_dev_srch_paths` and `is_test` cannot be specified. Please select \
+one, preferring `include_dev_srch_paths`.\
+""")
+    include_dev_srch_paths_value = False
+    if include_dev_srch_paths != None:
+        include_dev_srch_paths_value = include_dev_srch_paths
+    elif is_test != None:
+        print("""\
+WARNING: swift_common.create_linking_context_from_compilation_outputs(is_test \
+= ...) is deprecated. Update your rules to use swift_common.\
+create_linking_context_from_compilation_outputs(include_dev_srch_paths = ...) \
+instead.\
+""")  # buildifier: disable=print
+        include_dev_srch_paths_value = is_test
 
-    if is_test:
+    if include_dev_srch_paths_value:
         developer_paths_linkopts = developer_dirs_linkopts(swift_toolchain.developer_dirs)
     else:
         developer_paths_linkopts = []
@@ -439,32 +543,39 @@ def new_objc_provider(
     ):
         extra_linkopts.append("-ObjC")
 
-    return apple_common.new_objc_provider(
-        force_load_library = depset(
-            force_load_libraries,
-            order = "topological",
-        ),
-        library = depset(
-            direct_libraries,
-            transitive = transitive_cc_libs,
-            order = "topological",
-        ),
-        link_inputs = depset(additional_link_inputs + debug_link_inputs),
-        linkopt = depset(user_link_flags + extra_linkopts),
-        providers = get_providers(
+    kwargs = {
+        "providers": get_providers(
             deps,
             apple_common.Objc,
         ) + additional_objc_infos,
-    )
+    }
+
+    if _OBJC_PROVIDER_LINKING:
+        kwargs = dicts.add(kwargs, {
+            "force_load_library": depset(
+                force_load_libraries,
+                order = "topological",
+            ),
+            "library": depset(
+                direct_libraries,
+                transitive = transitive_cc_libs,
+                order = "topological",
+            ),
+            "link_inputs": depset(additional_link_inputs + debug_link_inputs),
+            "linkopt": depset(user_link_flags + extra_linkopts),
+        })
+
+    return apple_common.new_objc_provider(**kwargs)
 
 def register_link_binary_action(
         actions,
         additional_inputs,
         additional_linking_contexts,
-        cc_feature_configuration,
         compilation_outputs,
         deps,
+        feature_configuration,
         name,
+        module_contexts,
         output_type,
         owner,
         stamp,
@@ -479,12 +590,15 @@ def register_link_binary_action(
             scripts, and so forth.
         additional_linking_contexts: Additional linking contexts that provide
             libraries or flags that should be linked into the executable.
-        cc_feature_configuration: The C++ feature configuration to use when
-            constructing the action.
         compilation_outputs: A `CcCompilationOutputs` object containing object
             files that will be passed to the linker.
         deps: A list of targets representing additional libraries that will be
             passed to the linker.
+        feature_configuration: The Swift feature configuration.
+        module_contexts: A list of module contexts resulting from the
+            compilation of the sources in the binary target, which are embedded
+            in the binary for debugging if this is a debug build. This list may
+            be empty if the target had no sources of its own.
         name: The name of the target being linked, which is used to derive the
             output artifact.
         output_type: A string indicating the output type; "executable" or
@@ -514,32 +628,37 @@ def register_link_binary_action(
         if apple_common.Objc in dep:
             objc = dep[apple_common.Objc]
 
+            def get_objc_list(objc, attr):
+                return getattr(objc, attr, depset([])).to_list()
+
             # We don't need to handle the `objc.sdk_framework` field here
             # because those values have also been put into the user link flags
             # of a CcInfo, but the others don't seem to have been.
             dep_link_flags = [
                 "-l{}".format(dylib)
-                for dylib in objc.sdk_dylib.to_list()
+                for dylib in get_objc_list(objc, "sdk_dylib")
             ]
             dep_link_flags.extend([
                 "-F{}".format(path)
-                for path in objc.dynamic_framework_paths.to_list()
+                for path in get_objc_list(objc, "dynamic_framework_paths")
             ])
             dep_link_flags.extend(collections.before_each(
                 "-framework",
-                objc.dynamic_framework_names.to_list(),
+                get_objc_list(objc, "dynamic_framework_names"),
             ))
             dep_link_flags.extend([
                 "-F{}".format(path)
-                for path in objc.static_framework_paths.to_list()
+                for path in get_objc_list(objc, "static_framework_paths")
             ])
             dep_link_flags.extend(collections.before_each(
                 "-framework",
-                objc.static_framework_names.to_list(),
+                get_objc_list(objc, "static_framework_names"),
             ))
 
             is_bazel_6 = hasattr(apple_common, "link_multi_arch_static_library")
-            if is_bazel_6:
+            if not hasattr(objc, "static_framework_file"):
+                additional_inputs = depset([])
+            elif is_bazel_6:
                 additional_inputs = objc.static_framework_file
             else:
                 additional_inputs = depset(
@@ -567,12 +686,74 @@ def register_link_binary_action(
 
     linking_contexts.extend(additional_linking_contexts)
 
+    for module_context in module_contexts:
+        debugging_linking_context = _create_embedded_debugging_linking_context(
+            actions = actions,
+            feature_configuration = feature_configuration,
+            label = owner,
+            module_context = module_context,
+            swift_toolchain = swift_toolchain,
+        )
+        if debugging_linking_context:
+            linking_contexts.append(debugging_linking_context)
+
+    autolink_linking_context = _create_autolink_linking_context(
+        actions = actions,
+        compilation_outputs = compilation_outputs,
+        feature_configuration = feature_configuration,
+        label = owner,
+        name = name,
+        swift_toolchain = swift_toolchain,
+    )
+    if autolink_linking_context:
+        linking_contexts.append(autolink_linking_context)
+
+    if is_feature_enabled(
+        feature_configuration = feature_configuration,
+        feature_name = SWIFT_FEATURE_LLD_GC_WORKAROUND,
+    ):
+        linking_contexts.append(
+            cc_common.create_linking_context(
+                linker_inputs = depset([
+                    cc_common.create_linker_input(
+                        owner = owner,
+                        user_link_flags = depset(["-Wl,-z,nostart-stop-gc"]),
+                    ),
+                ]),
+            ),
+        )
+
+    if is_feature_enabled(
+        feature_configuration = feature_configuration,
+        feature_name = SWIFT_FEATURE_OBJC_LINK_FLAGS,
+    ):
+        # TODO: Remove once we can rely on folks using the new toolchain
+        linking_contexts.append(
+            cc_common.create_linking_context(
+                linker_inputs = depset([
+                    cc_common.create_linker_input(
+                        owner = owner,
+                        user_link_flags = depset(["-ObjC"]),
+                    ),
+                ]),
+            ),
+        )
+
+    # Collect linking contexts from any of the toolchain's implicit
+    # dependencies.
+    linking_contexts.extend([
+        cc_info.linking_context
+        for cc_info in swift_toolchain.implicit_deps_providers.cc_infos
+    ])
+
     return cc_common.link(
         actions = actions,
         additional_inputs = additional_inputs,
         cc_toolchain = swift_toolchain.cc_toolchain_info,
         compilation_outputs = compilation_outputs,
-        feature_configuration = cc_feature_configuration,
+        feature_configuration = get_cc_feature_configuration(
+            feature_configuration,
+        ),
         name = name,
         user_link_flags = user_link_flags,
         linking_contexts = linking_contexts,

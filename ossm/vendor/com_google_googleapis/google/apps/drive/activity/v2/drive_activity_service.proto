@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,7 +39,8 @@ service DriveActivityService {
       "https://www.googleapis.com/auth/drive.activity.readonly";
 
   // Query past activity in Google Drive.
-  rpc QueryDriveActivity(QueryDriveActivityRequest) returns (QueryDriveActivityResponse) {
+  rpc QueryDriveActivity(QueryDriveActivityRequest)
+      returns (QueryDriveActivityResponse) {
     option (google.api.http) = {
       post: "/v2/activity:query"
       body: "*"

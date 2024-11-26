@@ -43,6 +43,7 @@ proto_library_with_info(
     deps = [
         ":scheduler_proto",
         "//google/cloud:common_resources_proto",
+        "//google/cloud/location:location_proto",
     ],
 )
 
@@ -78,11 +79,13 @@ java_gapic_library(
     service_yaml = "cloudscheduler_v1.yaml",
     test_deps = [
         ":scheduler_java_grpc",
+        "//google/cloud/location:location_java_grpc",
     ],
     transport = "grpc+rest",
     deps = [
         ":scheduler_java_proto",
         "//google/api:api_java_proto",
+        "//google/cloud/location:location_java_proto",
     ],
 )
 
@@ -116,13 +119,12 @@ load(
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "scheduler_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/scheduler/v1",
+    importpath = "cloud.google.com/go/scheduler/apiv1/schedulerpb",
     protos = [":scheduler_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -136,20 +138,15 @@ go_gapic_library(
     grpc_service_config = "cloudscheduler_grpc_service_config.json",
     importpath = "cloud.google.com/go/scheduler/apiv1;scheduler",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "cloudscheduler_v1.yaml",
     transport = "grpc+rest",
     deps = [
         ":scheduler_go_proto",
+        "//google/cloud/location:location_go_proto",
         "@io_bazel_rules_go//proto/wkt:duration_go_proto",
     ],
-)
-
-go_test(
-    name = "scheduler_go_gapic_test",
-    srcs = [":scheduler_go_gapic_srcjar_test"],
-    embed = [":scheduler_go_gapic"],
-    importpath = "cloud.google.com/go/scheduler/apiv1",
 )
 
 # Open Source Packages
@@ -158,6 +155,7 @@ go_gapic_assembly_pkg(
     deps = [
         ":scheduler_go_gapic",
         ":scheduler_go_gapic_srcjar-metadata.srcjar",
+        ":scheduler_go_gapic_srcjar-snippets.srcjar",
         ":scheduler_go_gapic_srcjar-test.srcjar",
         ":scheduler_go_proto",
     ],
@@ -179,7 +177,7 @@ py_gapic_library(
     grpc_service_config = "cloudscheduler_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "cloudscheduler_v1.yaml",
-    transport = "grpc",
+    transport = "grpc+rest",
     deps = [
     ],
 )
@@ -209,7 +207,6 @@ load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -218,23 +215,15 @@ php_proto_library(
     deps = [":scheduler_proto"],
 )
 
-php_grpc_library(
-    name = "scheduler_php_grpc",
-    srcs = [":scheduler_proto"],
-    deps = [":scheduler_php_proto"],
-)
-
 php_gapic_library(
     name = "scheduler_php_gapic",
     srcs = [":scheduler_proto_with_info"],
     grpc_service_config = "cloudscheduler_grpc_service_config.json",
+    migration_mode = "NEW_SURFACE_ONLY",
     rest_numeric_enums = True,
     service_yaml = "cloudscheduler_v1.yaml",
     transport = "grpc+rest",
-    deps = [
-        ":scheduler_php_grpc",
-        ":scheduler_php_proto",
-    ],
+    deps = [":scheduler_php_proto"],
 )
 
 # Open Source Packages
@@ -242,7 +231,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-scheduler-v1-php",
     deps = [
         ":scheduler_php_gapic",
-        ":scheduler_php_grpc",
         ":scheduler_php_proto",
     ],
 )
@@ -315,6 +303,7 @@ ruby_cloud_gapic_library(
     ruby_cloud_description = "Cloud Scheduler is a fully managed enterprise-grade cron job scheduler. It allows you to schedule virtually any job, including batch, big data jobs, cloud infrastructure operations, and more. You can automate everything, including retries in case of failure to reduce manual toil and intervention. Cloud Scheduler even acts as a single pane of glass, allowing you to manage all your automation tasks from one place.",
     ruby_cloud_title = "Cloud Scheduler V1",
     service_yaml = "cloudscheduler_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":scheduler_ruby_grpc",
         ":scheduler_ruby_proto",

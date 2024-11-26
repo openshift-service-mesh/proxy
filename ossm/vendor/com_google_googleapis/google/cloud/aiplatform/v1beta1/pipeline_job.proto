@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import "google/protobuf/timestamp.proto";
 import "google/rpc/status.proto";
 
 option csharp_namespace = "Google.Cloud.AIPlatform.V1Beta1";
-option go_package = "google.golang.org/genproto/googleapis/cloud/aiplatform/v1beta1;aiplatform";
+option go_package = "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb;aiplatformpb";
 option java_multiple_files = true;
 option java_outer_classname = "Pipeline";
 option java_package = "com.google.cloud.aiplatform.v1beta1";
@@ -147,6 +147,9 @@ message PipelineJob {
   // characters, underscores and dashes. International characters are allowed.
   //
   // See https://goo.gl/xmQnxf for more information and examples of labels.
+  //
+  // Note there is some reserved label key for Vertex AI Pipelines.
+  // - `vertex-ai-pipelines-run-billing-id`, user set value will get overrided.
   map<string, string> labels = 11;
 
   // Runtime config of the pipeline.
@@ -184,9 +187,21 @@ message PipelineJob {
     (google.api.resource_reference) = { type: "compute.googleapis.com/Network" }
   ];
 
+  // A list of names for the reserved ip ranges under the VPC network
+  // that can be used for this Pipeline Job's workload.
+  //
+  // If set, we will deploy the Pipeline Job's workload within the provided ip
+  // ranges. Otherwise, the job will be deployed to any ip ranges under the
+  // provided VPC network.
+  //
+  // Example: ['vertex-ai-ip-range'].
+  repeated string reserved_ip_ranges = 25;
+
   // A template uri from where the
   // [PipelineJob.pipeline_spec][google.cloud.aiplatform.v1beta1.PipelineJob.pipeline_spec],
-  // if empty, will be downloaded.
+  // if empty, will be downloaded. Currently, only uri from Vertex Template
+  // Registry & Gallery is supported. Reference to
+  // https://cloud.google.com/vertex-ai/docs/pipelines/create-pipeline-template.
   string template_uri = 19;
 
   // Output only. Pipeline template metadata. Will fill up fields if
@@ -194,6 +209,19 @@ message PipelineJob {
   // is from supported template registry.
   PipelineTemplateMetadata template_metadata = 20
       [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Output only. The schedule resource name.
+  // Only returned if the Pipeline is created by Schedule API.
+  string schedule_name = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Optional. Whether to do component level validations before job creation.
+  bool preflight_validations = 26 [(google.api.field_behavior) = OPTIONAL];
+
+  // Output only. Reserved for future use.
+  bool satisfies_pzs = 27 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Output only. Reserved for future use.
+  bool satisfies_pzi = 28 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Pipeline template metadata if
@@ -293,7 +321,7 @@ message PipelineTaskDetail {
   int64 parent_task_id = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
 
   // Output only. The user specified name of the task that is defined in
-  // [PipelineJob.spec][].
+  // [pipeline_spec][google.cloud.aiplatform.v1beta1.PipelineJob.pipeline_spec].
   string task_name = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
 
   // Output only. Task create time.
@@ -382,8 +410,6 @@ message PipelineTaskExecutorDetail {
 
   // The detailed info for a custom job executor.
   message CustomJobDetail {
-    option deprecated = true;
-
     // Output only. The name of the
     // [CustomJob][google.cloud.aiplatform.v1beta1.CustomJob].
     string job = 1 [
@@ -392,6 +418,11 @@ message PipelineTaskExecutorDetail {
         type: "aiplatform.googleapis.com/CustomJob"
       }
     ];
+
+    // Output only. The names of the previously failed
+    // [CustomJob][google.cloud.aiplatform.v1beta1.CustomJob]. The list includes
+    // the all attempts in chronological order.
+    repeated string failed_jobs = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   }
 
   oneof details {
@@ -401,6 +432,6 @@ message PipelineTaskExecutorDetail {
 
     // Output only. The detailed info for a custom job executor.
     CustomJobDetail custom_job_detail = 2
-        [deprecated = true, (google.api.field_behavior) = OUTPUT_ONLY];
+        [(google.api.field_behavior) = OUTPUT_ONLY];
   }
 }

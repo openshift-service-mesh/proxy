@@ -1,3 +1,4 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 load(
     "//test:configurations.bzl",
     "IOS_64BIT_SIMULATOR_FAT_DEVICE_CONFIGURATIONS",
@@ -7,15 +8,14 @@ load(
     "WATCHOS_CONFIGURATIONS",
 )
 load(
-    "//test/starlark_tests:common.bzl",
-    "common",
-)
-load(
     "//test:test_rules.bzl",
     "apple_multi_shell_test",
     "apple_shell_test",
 )
-load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load(
+    "//test/starlark_tests:common.bzl",
+    "common",
+)
 
 licenses(["notice"])
 
@@ -43,22 +43,6 @@ filegroup(
     # This is required as a default attribute of apple_verification_test but
     # should be considered private for other uses
     visibility = ["//visibility:public"],
-)
-
-# Gather external dependencies into a target that can be injected into the
-# integration tests. The test script will then mock out the files required
-# to make these proper WORKSPACES that can be used in tests.
-# This enables us to:
-#   1. Reuse the download of the external dependencies across all tests.
-#   2. Remove the need to update dependency versions in the repo's
-#      WORKSPACE and the test WORKSPACE.
-filegroup(
-    name = "external_deps",
-    testonly = 1,
-    srcs = [
-        "@bazel_skylib//:test_deps",
-        "@xctestrunner//:ios_test_runner",
-    ],
 )
 
 # ----------------------------------------------------------------------------
@@ -95,6 +79,15 @@ apple_shell_test(
     src = "apple_intent_library_test.sh",
     data = [
         "//test/testdata/resources:intent_srcs",
+    ],
+)
+
+apple_shell_test(
+    name = "apple_metal_library_test",
+    size = "medium",
+    src = "apple_metal_library_test.sh",
+    data = [
+        "//test/testdata/resources:metal_files",
     ],
 )
 
@@ -203,7 +196,7 @@ apple_multi_shell_test(
 
 apple_shell_test(
     name = "ios_coverage_test",
-    size = "medium",
+    size = "large",
     src = "ios_coverage_test.sh",
 )
 
@@ -255,6 +248,7 @@ apple_shell_test(
     args = [
         "--ios_multi_cpus=sim_arm64,x86_64",
     ],
+    tags = common.skip_ci_tags,
 )
 
 apple_shell_test(

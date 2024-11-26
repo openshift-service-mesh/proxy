@@ -20,7 +20,6 @@ using opentelemetry::common::SystemTimestamp;
 namespace nostd     = opentelemetry::nostd;
 namespace common    = opentelemetry::common;
 namespace trace_api = opentelemetry::trace;
-using opentelemetry::common::KeyValueIterableView;
 using opentelemetry::exporter::memory::InMemorySpanData;
 using opentelemetry::exporter::memory::InMemorySpanExporter;
 using opentelemetry::trace::SpanContext;
@@ -109,8 +108,8 @@ std::shared_ptr<opentelemetry::trace::Tracer> initTracer(
   processors.push_back(std::move(processor));
   auto resource = Resource::Create({});
   auto context  = std::make_shared<TracerContext>(std::move(processors), resource,
-                                                 std::unique_ptr<Sampler>(sampler),
-                                                 std::unique_ptr<IdGenerator>(id_generator));
+                                                  std::unique_ptr<Sampler>(sampler),
+                                                  std::unique_ptr<IdGenerator>(id_generator));
   return std::shared_ptr<opentelemetry::trace::Tracer>(new Tracer(context));
 }
 
@@ -237,11 +236,11 @@ TEST(Tracer, StartSpanWithAttributes)
       ->StartSpan("span 1", {{"attr1", "string"},
                              {"attr2", false},
                              {"attr1", 314159},
-                             {"attr3", (unsigned int)314159},
-                             {"attr4", (int32_t)-20},
-                             {"attr5", (uint32_t)20},
-                             {"attr6", (int64_t)-20},
-                             {"attr7", (uint64_t)20},
+                             {"attr3", static_cast<unsigned int>(314159)},
+                             {"attr4", static_cast<int32_t>(-20)},
+                             {"attr5", static_cast<uint32_t>(20)},
+                             {"attr6", static_cast<int64_t>(-20)},
+                             {"attr7", static_cast<uint64_t>(20)},
                              {"attr8", 3.1},
                              {"attr9", "string"}})
       ->End();
@@ -276,11 +275,14 @@ TEST(Tracer, StartSpanWithAttributes)
   ASSERT_EQ(9, cur_span_data->GetAttributes().size());
   ASSERT_EQ(314159, nostd::get<int32_t>(cur_span_data->GetAttributes().at("attr1")));
   ASSERT_EQ(false, nostd::get<bool>(cur_span_data->GetAttributes().at("attr2")));
-  ASSERT_EQ((uint32_t)314159, nostd::get<uint32_t>(cur_span_data->GetAttributes().at("attr3")));
+  ASSERT_EQ(static_cast<uint32_t>(314159),
+            nostd::get<uint32_t>(cur_span_data->GetAttributes().at("attr3")));
   ASSERT_EQ(-20, nostd::get<int32_t>(cur_span_data->GetAttributes().at("attr4")));
-  ASSERT_EQ((uint32_t)20, nostd::get<uint32_t>(cur_span_data->GetAttributes().at("attr5")));
+  ASSERT_EQ(static_cast<uint32_t>(20),
+            nostd::get<uint32_t>(cur_span_data->GetAttributes().at("attr5")));
   ASSERT_EQ(-20, nostd::get<int64_t>(cur_span_data->GetAttributes().at("attr6")));
-  ASSERT_EQ((uint64_t)20, nostd::get<uint64_t>(cur_span_data->GetAttributes().at("attr7")));
+  ASSERT_EQ(static_cast<uint64_t>(20),
+            nostd::get<uint64_t>(cur_span_data->GetAttributes().at("attr7")));
   ASSERT_EQ(3.1, nostd::get<double>(cur_span_data->GetAttributes().at("attr8")));
   ASSERT_EQ("string", nostd::get<std::string>(cur_span_data->GetAttributes().at("attr9")));
 

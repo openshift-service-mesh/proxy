@@ -3,15 +3,6 @@
 
 #pragma once
 
-#include "opentelemetry/common/spin_lock_mutex.h"
-#include "opentelemetry/ext/http/client/http_client.h"
-#include "opentelemetry/nostd/variant.h"
-#include "opentelemetry/sdk/common/exporter_utils.h"
-
-#include "opentelemetry/exporters/otlp/otlp_environment.h"
-#include "opentelemetry/exporters/otlp/otlp_http.h"
-
-#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -21,6 +12,14 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+
+#include "opentelemetry/exporters/otlp/otlp_environment.h"
+#include "opentelemetry/exporters/otlp/otlp_http.h"
+#include "opentelemetry/ext/http/client/http_client.h"
+#include "opentelemetry/nostd/string_view.h"
+#include "opentelemetry/nostd/variant.h"
+#include "opentelemetry/sdk/common/exporter_utils.h"
+#include "opentelemetry/version.h"
 
 // forward declare google::protobuf::Message
 namespace google
@@ -52,12 +51,15 @@ struct OtlpHttpClientOptions
   /** SSL options. */
   ext::http::client::HttpSslOptions ssl_options;
 
-  // By default, post json data
-  HttpRequestContentType content_type = HttpRequestContentType::kJson;
+  // By default, post binary data
+  HttpRequestContentType content_type = HttpRequestContentType::kBinary;
 
   // If convert bytes into hex. By default, we will convert all bytes but id into base64
   // This option is ignored if content_type is not kJson
   JsonBytesMappingKind json_bytes_mapping = JsonBytesMappingKind::kHexId;
+
+  // By default, do not compress data
+  std::string compression = "none";
 
   // If using the json name of protobuf field to set the key of json. By default, we will use the
   // field name just like proto files.
@@ -94,6 +96,7 @@ struct OtlpHttpClientOptions
                                nostd::string_view input_ssl_cipher_suite,
                                HttpRequestContentType input_content_type,
                                JsonBytesMappingKind input_json_bytes_mapping,
+                               nostd::string_view input_compression,
                                bool input_use_json_name,
                                bool input_console_debug,
                                std::chrono::system_clock::duration input_timeout,
@@ -116,6 +119,7 @@ struct OtlpHttpClientOptions
                     input_ssl_cipher_suite),
         content_type(input_content_type),
         json_bytes_mapping(input_json_bytes_mapping),
+        compression(input_compression),
         use_json_name(input_use_json_name),
         console_debug(input_console_debug),
         timeout(input_timeout),

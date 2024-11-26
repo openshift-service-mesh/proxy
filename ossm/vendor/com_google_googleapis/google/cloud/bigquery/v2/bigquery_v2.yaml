@@ -4,7 +4,16 @@ name: bigquery.googleapis.com
 title: BigQuery API
 
 apis:
+- name: google.cloud.bigquery.v2.DatasetService
+- name: google.cloud.bigquery.v2.JobService
 - name: google.cloud.bigquery.v2.ModelService
+- name: google.cloud.bigquery.v2.ProjectService
+- name: google.cloud.bigquery.v2.RoutineService
+- name: google.cloud.bigquery.v2.RowAccessPolicyService
+- name: google.cloud.bigquery.v2.TableService
+
+types:
+- name: google.cloud.bigquery.v2.LocationMetadata
 
 documentation:
   summary: 'A data platform for customers to create, manage, share and query data.'
@@ -42,11 +51,15 @@ http:
       body: '*'
     - post: '/bigquery/v2/{resource=projects/*/datasets/*/tables/*/rowAccessPolicies/*}:getIamPolicy'
       body: '*'
+    - post: '/bigquery/v2/{resource=projects/*/datasets/*/routines/*}:getIamPolicy'
+      body: '*'
   - selector: google.iam.v1.IAMPolicy.SetIamPolicy
     post: '/bigquery/v2/{resource=projects/*/datasets/*}:setIamPolicy'
     body: '*'
     additional_bindings:
     - post: '/bigquery/v2/{resource=projects/*/datasets/*/tables/*}:setIamPolicy'
+      body: '*'
+    - post: '/bigquery/v2/{resource=projects/*/datasets/*/routines/*}:setIamPolicy'
       body: '*'
   - selector: google.iam.v1.IAMPolicy.TestIamPermissions
     post: '/bigquery/v2/{resource=projects/*/datasets/*}:testIamPermissions'
@@ -59,6 +72,47 @@ http:
 
 authentication:
   rules:
+  - selector: 'google.cloud.bigquery.v2.DatasetService.*'
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform
+  - selector: google.cloud.bigquery.v2.DatasetService.GetDataset
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform,
+        https://www.googleapis.com/auth/cloud-platform.read-only
+  - selector: google.cloud.bigquery.v2.DatasetService.ListDatasets
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform,
+        https://www.googleapis.com/auth/cloud-platform.read-only
+  - selector: 'google.cloud.bigquery.v2.JobService.*'
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform,
+        https://www.googleapis.com/auth/cloud-platform.read-only
+  - selector: google.cloud.bigquery.v2.JobService.CancelJob
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform
+  - selector: google.cloud.bigquery.v2.JobService.DeleteJob
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform
+  - selector: google.cloud.bigquery.v2.JobService.InsertJob
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform,
+        https://www.googleapis.com/auth/devstorage.full_control,
+        https://www.googleapis.com/auth/devstorage.read_only,
+        https://www.googleapis.com/auth/devstorage.read_write
   - selector: google.cloud.bigquery.v2.ModelService.DeleteModel
     oauth:
       canonical_scopes: |-
@@ -68,14 +122,12 @@ authentication:
     oauth:
       canonical_scopes: |-
         https://www.googleapis.com/auth/bigquery,
-        https://www.googleapis.com/auth/bigquery.readonly,
         https://www.googleapis.com/auth/cloud-platform,
         https://www.googleapis.com/auth/cloud-platform.read-only
   - selector: google.cloud.bigquery.v2.ModelService.ListModels
     oauth:
       canonical_scopes: |-
         https://www.googleapis.com/auth/bigquery,
-        https://www.googleapis.com/auth/bigquery.readonly,
         https://www.googleapis.com/auth/cloud-platform,
         https://www.googleapis.com/auth/cloud-platform.read-only
   - selector: google.cloud.bigquery.v2.ModelService.PatchModel
@@ -83,11 +135,56 @@ authentication:
       canonical_scopes: |-
         https://www.googleapis.com/auth/bigquery,
         https://www.googleapis.com/auth/cloud-platform
+  - selector: google.cloud.bigquery.v2.ProjectService.GetServiceAccount
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform,
+        https://www.googleapis.com/auth/cloud-platform.read-only
+  - selector: 'google.cloud.bigquery.v2.RoutineService.*'
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform
+  - selector: google.cloud.bigquery.v2.RoutineService.GetRoutine
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform,
+        https://www.googleapis.com/auth/cloud-platform.read-only
+  - selector: google.cloud.bigquery.v2.RoutineService.ListRoutines
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform,
+        https://www.googleapis.com/auth/cloud-platform.read-only
+  - selector: google.cloud.bigquery.v2.RowAccessPolicyService.ListRowAccessPolicies
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform,
+        https://www.googleapis.com/auth/cloud-platform.read-only
+  - selector: 'google.cloud.bigquery.v2.TableService.*'
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform
+  - selector: google.cloud.bigquery.v2.TableService.GetTable
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform,
+        https://www.googleapis.com/auth/cloud-platform.read-only
+  - selector: google.cloud.bigquery.v2.TableService.ListTables
+    oauth:
+      canonical_scopes: |-
+        https://www.googleapis.com/auth/bigquery,
+        https://www.googleapis.com/auth/cloud-platform,
+        https://www.googleapis.com/auth/cloud-platform.read-only
   - selector: google.iam.v1.IAMPolicy.GetIamPolicy
     oauth:
       canonical_scopes: |-
         https://www.googleapis.com/auth/bigquery,
-        https://www.googleapis.com/auth/bigquery.readonly,
         https://www.googleapis.com/auth/cloud-platform,
         https://www.googleapis.com/auth/cloud-platform.read-only
   - selector: google.iam.v1.IAMPolicy.SetIamPolicy
@@ -99,6 +196,5 @@ authentication:
     oauth:
       canonical_scopes: |-
         https://www.googleapis.com/auth/bigquery,
-        https://www.googleapis.com/auth/bigquery.readonly,
         https://www.googleapis.com/auth/cloud-platform,
         https://www.googleapis.com/auth/cloud-platform.read-only

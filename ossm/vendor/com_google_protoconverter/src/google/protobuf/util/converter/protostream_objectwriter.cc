@@ -18,7 +18,6 @@
 #include <functional>
 #include <stack>
 
-#include "google/protobuf/stubs/strutil.h"
 #include "absl/base/call_once.h"
 #include "absl/log/absl_check.h"
 #include "absl/log/absl_log.h"
@@ -28,15 +27,12 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/strip.h"
 #include "absl/time/time.h"
+#include "google/protobuf/stubs/strutil.h"
 #include "google/protobuf/util/converter/constants.h"
 #include "google/protobuf/util/converter/field_mask_utility.h"
 #include "google/protobuf/util/converter/object_location_tracker.h"
 #include "google/protobuf/util/converter/utility.h"
 #include "google/protobuf/wire_format_lite.h"
-
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
 
 namespace google {
 namespace protobuf {
@@ -46,7 +42,6 @@ namespace converter {
 using ::absl::Status;
 using ::google::protobuf::internal::WireFormatLite;
 using std::placeholders::_1;
-
 
 ProtoStreamObjectWriter::ProtoStreamObjectWriter(
     TypeResolver* type_resolver, const google::protobuf::Type& type,
@@ -482,7 +477,6 @@ bool ProtoStreamObjectWriter::Item::InsertMapKeyIfNotPresent(
   return map_keys_.insert(std::string(map_key)).second;
 }
 
-
 ProtoStreamObjectWriter* ProtoStreamObjectWriter::StartObject(
     absl::string_view name) {
   if (invalid_depth() > 0) {
@@ -677,7 +671,6 @@ ProtoStreamObjectWriter* ProtoStreamObjectWriter::EndObject() {
 
   return this;
 }
-
 
 ProtoStreamObjectWriter* ProtoStreamObjectWriter::StartList(
     absl::string_view name) {
@@ -924,8 +917,7 @@ Status ProtoStreamObjectWriter::RenderStructValue(ProtoStreamObjectWriter* ow,
         absl::StatusOr<int32_t> int_value = data.ToInt32();
         if (int_value.ok()) {
           ow->ProtoWriter::RenderDataPiece(
-              "string_value",
-              DataPiece(SimpleDtoa(int_value.value()), true));
+              "string_value", DataPiece(SimpleDtoa(int_value.value()), true));
           return Status();
         }
       }
@@ -937,8 +929,7 @@ Status ProtoStreamObjectWriter::RenderStructValue(ProtoStreamObjectWriter* ow,
         absl::StatusOr<uint32_t> int_value = data.ToUint32();
         if (int_value.ok()) {
           ow->ProtoWriter::RenderDataPiece(
-              "string_value",
-              DataPiece(SimpleDtoa(int_value.value()), true));
+              "string_value", DataPiece(SimpleDtoa(int_value.value()), true));
           return Status();
         }
       }
@@ -978,8 +969,7 @@ Status ProtoStreamObjectWriter::RenderStructValue(ProtoStreamObjectWriter* ow,
         absl::StatusOr<float> float_value = data.ToFloat();
         if (float_value.ok()) {
           ow->ProtoWriter::RenderDataPiece(
-              "string_value",
-              DataPiece(SimpleDtoa(float_value.value()), true));
+              "string_value", DataPiece(SimpleDtoa(float_value.value()), true));
           return Status();
         }
       }
@@ -1368,9 +1358,9 @@ bool ProtoStreamObjectWriter::ValidMapKey(absl::string_view unnormalized_name) {
   return true;
 }
 
-void ProtoStreamObjectWriter::Push(
-    absl::string_view name, Item::ItemType item_type, bool is_placeholder,
-    bool is_list) {
+void ProtoStreamObjectWriter::Push(absl::string_view name,
+                                   Item::ItemType item_type,
+                                   bool is_placeholder, bool is_list) {
   is_list ? ProtoWriter::StartList(name) : ProtoWriter::StartObject(name);
 
   // invalid_depth == 0 means it is a successful StartObject or StartList.

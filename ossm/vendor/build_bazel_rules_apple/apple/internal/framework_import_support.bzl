@@ -14,17 +14,20 @@
 
 """Support methods for Apple framework import rules."""
 
-load("@build_bazel_rules_apple//apple/internal/utils:files.bzl", "files")
-load("@build_bazel_rules_apple//apple/internal:providers.bzl", "new_appleframeworkimportinfo")
-load("@build_bazel_rules_apple//apple:providers.bzl", "AppleFrameworkImportInfo")
-load("@build_bazel_rules_apple//apple/internal/utils:defines.bzl", "defines")
-load("@build_bazel_rules_apple//apple:utils.bzl", "group_files_by_directory")
+load("@bazel_skylib//lib:paths.bzl", "paths")
 load(
     "@build_bazel_rules_swift//swift:swift.bzl",
     "SwiftInfo",
     "swift_common",
 )
-load("@bazel_skylib//lib:paths.bzl", "paths")
+load("//apple:providers.bzl", "AppleFrameworkImportInfo")
+load("//apple:utils.bzl", "group_files_by_directory")
+load("//apple/internal:providers.bzl", "new_appleframeworkimportinfo")
+load("//apple/internal/utils:defines.bzl", "defines")
+load("//apple/internal/utils:files.bzl", "files")
+
+# TODO: Remove once we drop bazel 7.x
+_OBJC_PROVIDER_LINKING = hasattr(apple_common.new_objc_provider(), "linkopt")
 
 def _cc_info_with_dependencies(
         *,
@@ -198,6 +201,10 @@ def _classify_file_imports(config_vars, import_files):
         framework_relative_path = file.short_path.split(".framework/")[-1]
         if framework_relative_path.startswith("Headers/"):
             header_imports.append(file)
+            continue
+        if framework_relative_path.startswith("Modules/") and framework_relative_path.endswith(".abi.json"):
+            # Ignore abi.json files, as they don't matter in the build, and are most commonly used to detect source-breaking API changes during the evolution of a Swift library.
+            # See: https://github.com/swiftlang/swift/blob/main/lib/DriverTool/swift_api_digester_main.cpp
             continue
 
         # Unknown file type, sending to unknown (i.e. resources, Info.plist, etc.)
@@ -457,7 +464,21 @@ def _objc_provider_with_dependencies(
         objc_provider_fields["weak_sdk_framework"] = depset(weak_sdk_framework)
 
     objc_provider_fields.update(**additional_objc_provider_fields)
+    if not _OBJC_PROVIDER_LINKING:
+        objc_provider_fields = {"providers": additional_objc_providers}
+
     return apple_common.new_objc_provider(**objc_provider_fields)
+
+def _new_dynamic_framework_provider(**kwargs):
+    """A wrapper API for the Bazel API of the same name to better support multiple Bazel versions
+
+    Args:
+        **kwargs: Arguments to pass if supported.
+    """
+    if not _OBJC_PROVIDER_LINKING:
+        kwargs.pop("objc", None)
+
+    return apple_common.new_dynamic_framework_provider(**kwargs)
 
 def _swift_info_from_module_interface(
         *,
@@ -502,6 +523,7 @@ def _swift_info_from_module_interface(
         swiftinterface_file = swiftinterface_file,
         swift_infos = swift_infos,
         swift_toolchain = swift_toolchain,
+        target_name = ctx.label.name,
     )
 
     return swift_common.create_swift_info(
@@ -530,6 +552,7 @@ framework_import_support = struct(
     framework_import_info_with_dependencies = _framework_import_info_with_dependencies,
     get_swift_module_files_with_target_triplet = _get_swift_module_files_with_target_triplet,
     has_versioned_framework_files = _has_versioned_framework_files,
+    new_dynamic_framework_provider = _new_dynamic_framework_provider,
     objc_provider_with_dependencies = _objc_provider_with_dependencies,
     swift_info_from_module_interface = _swift_info_from_module_interface,
     swift_interop_info_with_dependencies = _swift_interop_info_with_dependencies,

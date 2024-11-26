@@ -21,10 +21,7 @@
 
 #include "absl/base/casts.h"
 #include "google/protobuf/util/converter/object_writer.h"
-
-// Must be included last.
 #include "google/protobuf/util/converter/port.h"
-#include "google/protobuf/util/converter/port_def.inc"
 
 namespace google {
 namespace protobuf {
@@ -42,7 +39,7 @@ namespace converter {
 // StructuredObjectWriter and its use.
 //
 // Derived classes could be thread-unsafe.
-class PROTOBUF_EXPORT StructuredObjectWriter : public ObjectWriter {
+class StructuredObjectWriter : public ObjectWriter {
  public:
   StructuredObjectWriter(const StructuredObjectWriter&) = delete;
   StructuredObjectWriter& operator=(const StructuredObjectWriter&) = delete;
@@ -54,7 +51,7 @@ class PROTOBUF_EXPORT StructuredObjectWriter : public ObjectWriter {
   // StructuredObjectWriter behaves as a visitor. BaseElement represents a node
   // in the input tree. Implementation of StructuredObjectWriter should also
   // extend BaseElement to keep track of the location in the input tree.
-  class PROTOBUF_EXPORT BaseElement {
+  class BaseElement {
    public:
     // Takes ownership of the parent Element.
     explicit BaseElement(BaseElement* parent)
@@ -104,7 +101,5 @@ class PROTOBUF_EXPORT StructuredObjectWriter : public ObjectWriter {
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_STRUCTURED_OBJECTWRITER_H_

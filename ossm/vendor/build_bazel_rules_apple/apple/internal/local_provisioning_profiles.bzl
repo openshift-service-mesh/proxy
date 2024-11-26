@@ -63,7 +63,7 @@ provisioning_profile_repository.setup(
 ### In your `WORKSPACE` file:
 
 ```starlark
-load("@build_bazel_rules_apple//apple:apple.bzl", "provisioning_profile_repository")
+load("//apple:apple.bzl", "provisioning_profile_repository")
 
 provisioning_profile_repository(
     name = "local_provisioning_profiles",
@@ -74,7 +74,7 @@ provisioning_profile_repository(
 ### In your `BUILD` files (see `local_provisioning_profile` for more examples):
 
 ```starlark
-load("@build_bazel_rules_apple//apple:apple.bzl", "local_provisioning_profile")
+load("//apple:apple.bzl", "local_provisioning_profile")
 
 local_provisioning_profile(
     name = "app_debug_profile",
@@ -141,7 +141,7 @@ def _local_provisioning_profile(ctx):
         args.add_all("--local_profiles", ctx.files._local_srcs)
     if ctx.files._fallback_srcs:
         args.add_all("--fallback_profiles", ctx.files._fallback_srcs)
-    if not ctx.files._local_srcs and not ctx.attr._fallback_srcs:
+    if not ctx.files._local_srcs and not ctx.files._fallback_srcs:
         fail("Either local or fallback provisioning profiles must exist")
 
     ctx.actions.run(
@@ -199,7 +199,7 @@ same profile name.
 ## Example
 
 ```starlark
-load("@build_bazel_rules_apple//apple:apple.bzl", "local_provisioning_profile")
+load("//apple:apple.bzl", "local_provisioning_profile")
 
 local_provisioning_profile(
     name = "app_debug_profile",

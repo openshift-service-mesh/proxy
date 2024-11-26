@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ import "google/protobuf/timestamp.proto";
 import "google/rpc/status.proto";
 
 option csharp_namespace = "Google.Cloud.AIPlatform.V1";
-option go_package = "google.golang.org/genproto/googleapis/cloud/aiplatform/v1;aiplatform";
+option go_package = "cloud.google.com/go/aiplatform/apiv1/aiplatformpb;aiplatformpb";
 option java_multiple_files = true;
 option java_outer_classname = "BatchPredictionJobProto";
 option java_package = "com.google.cloud.aiplatform.v1";
@@ -153,7 +153,7 @@ message BatchPredictionJob {
     // [excluded_fields][google.cloud.aiplatform.v1.BatchPredictionJob.InstanceConfig.excluded_fields]
     // must be empty.
     //
-    // The input must be JSONL with objects at each line, CSV, BigQuery
+    // The input must be JSONL with objects at each line, BigQuery
     // or TfRecord.
     repeated string included_fields = 3;
 
@@ -168,7 +168,7 @@ message BatchPredictionJob {
     // [included_fields][google.cloud.aiplatform.v1.BatchPredictionJob.InstanceConfig.included_fields]
     // must be empty.
     //
-    // The input must be JSONL with objects at each line, CSV, BigQuery
+    // The input must be JSONL with objects at each line, BigQuery
     // or TfRecord.
     repeated string excluded_fields = 4;
   }
@@ -273,7 +273,16 @@ message BatchPredictionJob {
   // Exactly one of model and unmanaged_container_model must be set.
   //
   // The model resource name may contain version id or version alias to specify
-  // the version, if no version is specified, the default version will be used.
+  // the version.
+  //  Example: `projects/{project}/locations/{location}/models/{model}@2`
+  //              or
+  //            `projects/{project}/locations/{location}/models/{model}@golden`
+  // if no version is specified, the default version will be deployed.
+  //
+  // The model resource could also be a publisher model.
+  //  Example: `publishers/{publisher}/models/{model}`
+  //              or
+  //           `projects/{project}/locations/{location}/publishers/{publisher}/models/{model}`
   string model = 3 [(google.api.resource_reference) = {
     type: "aiplatform.googleapis.com/Model"
   }];
@@ -439,4 +448,19 @@ message BatchPredictionJob {
   // is set, then all resources created by the BatchPredictionJob will be
   // encrypted with the provided encryption key.
   EncryptionSpec encryption_spec = 24;
+
+  // For custom-trained Models and AutoML Tabular Models, the container of the
+  // DeployedModel instances will send `stderr` and `stdout` streams to
+  // Cloud Logging by default. Please note that the logs incur cost,
+  // which are subject to [Cloud Logging
+  // pricing](https://cloud.google.com/logging/pricing).
+  //
+  // User can disable container logging by setting this flag to true.
+  bool disable_container_logging = 34;
+
+  // Output only. Reserved for future use.
+  bool satisfies_pzs = 36 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Output only. Reserved for future use.
+  bool satisfies_pzi = 37 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

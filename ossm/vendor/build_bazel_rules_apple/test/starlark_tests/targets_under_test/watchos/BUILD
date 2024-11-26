@@ -1,4 +1,15 @@
 load(
+    "@build_bazel_rules_swift//swift:swift.bzl",
+    "swift_library",
+)
+load(
+    "//apple:apple.bzl",
+    "apple_dynamic_framework_import",
+    "apple_dynamic_xcframework_import",
+    "apple_static_framework_import",
+    "apple_static_xcframework_import",
+)
+load(
     "//apple:ios.bzl",
     "ios_application",
 )
@@ -13,13 +24,6 @@ load(
     "watchos_unit_test",
 )
 load(
-    "//apple:apple.bzl",
-    "apple_dynamic_framework_import",
-    "apple_dynamic_xcframework_import",
-    "apple_static_framework_import",
-    "apple_static_xcframework_import",
-)
-load(
     "//test/starlark_tests:common.bzl",
     "common",
 )
@@ -31,10 +35,6 @@ load(
     "//test/starlark_tests/rules:generate_xcframework.bzl",
     "generate_dynamic_xcframework",
     "generate_static_xcframework",
-)
-load(
-    "@build_bazel_rules_swift//swift:swift.bzl",
-    "swift_library",
 )
 
 licenses(["notice"])
@@ -75,6 +75,28 @@ watchos_application(
     app_icons = ["//test/starlark_tests/resources:WatchAppIcon.xcassets"],
     bundle_id = "com.google.example",
     entitlements = "//test/starlark_tests/resources:entitlements.plist",
+    infoplists = [
+        "//test/starlark_tests/resources:WatchosAppInfo.plist",
+    ],
+    minimum_os_version = common.min_os_watchos.single_target_app,
+    provisioning_profile = "//test/testdata/provisioning:integration_testing_ios.mobileprovision",
+    resources = [
+        "//test/starlark_tests/resources:example_filegroup",
+        "//test/starlark_tests/resources:localization",
+        "//test/starlark_tests/resources:resource_bundle",
+    ],
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:watchkit_single_target_app_main_lib",
+    ],
+)
+
+watchos_application(
+    name = "single_target_app_with_extension",
+    app_icons = ["//test/starlark_tests/resources:WatchAppIcon.xcassets"],
+    bundle_id = "com.google.example",
+    entitlements = "//test/starlark_tests/resources:entitlements.plist",
+    extensions = [":watchos_app_extension"],
     infoplists = [
         "//test/starlark_tests/resources:WatchosAppInfo.plist",
     ],
@@ -508,6 +530,23 @@ ios_application(
 )
 
 ios_application(
+    name = "ios_watchos_with_watchos_extension_within_extensions",
+    bundle_id = "com.google",
+    bundle_name = "companion",
+    families = ["iphone"],
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_ios.arm_sim_support,
+    provisioning_profile = "//test/testdata/provisioning:integration_testing_ios.mobileprovision",
+    tags = common.fixture_tags,
+    watch_application = ":watchos_app_with_extension_within_extensions",
+    deps = [
+        ":swift_lib",
+    ],
+)
+
+ios_application(
     name = "ios_watchos_with_watchos_extension_and_symbols_in_bundle",
     bundle_id = "com.google",
     bundle_name = "companion",
@@ -564,6 +603,20 @@ watchos_application(
     bundle_id = "com.google.example",
     bundle_name = "app",
     extension = ":watchos_ext_with_extension",
+    infoplists = [
+        "//test/starlark_tests/resources:WatchosAppInfo.plist",
+    ],
+    minimum_os_version = common.min_os_watchos.baseline,
+    provisioning_profile = "//test/testdata/provisioning:integration_testing_ios.mobileprovision",
+    tags = common.fixture_tags,
+)
+
+watchos_application(
+    name = "watchos_app_with_extension_within_extensions",
+    app_icons = ["//test/starlark_tests/resources:WatchAppIcon.xcassets"],
+    bundle_id = "com.google.example",
+    bundle_name = "app",
+    extensions = [":watchos_ext_with_extension"],
     infoplists = [
         "//test/starlark_tests/resources:WatchosAppInfo.plist",
     ],
@@ -1067,8 +1120,10 @@ generate_dynamic_xcframework(
     },
     platforms = {
         "watchos": [
-            "armv7k",
+            "arm64",
             "arm64_32",
+            "arm64e",
+            "armv7k",
         ],
         "watchos_simulator": [
             "x86_64",

@@ -19,9 +19,6 @@
 
 #include <string>
 
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
-
 namespace google {
 namespace protobuf {
 namespace util {
@@ -29,7 +26,7 @@ namespace converter {
 
 // LocationTrackerInterface is an interface for classes that track
 // the location information for the purpose of error reporting.
-class PROTOBUF_EXPORT LocationTrackerInterface {
+class LocationTrackerInterface {
  public:
   LocationTrackerInterface(const LocationTrackerInterface&) = delete;
   LocationTrackerInterface& operator=(const LocationTrackerInterface&) = delete;
@@ -49,7 +46,5 @@ class PROTOBUF_EXPORT LocationTrackerInterface {
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_LOCATION_TRACKER_H_

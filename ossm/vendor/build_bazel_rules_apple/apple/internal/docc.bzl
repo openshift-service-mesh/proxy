@@ -15,12 +15,12 @@
 """Defines rules for building Apple DocC targets."""
 
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
-)
-load(
     "@bazel_skylib//lib:dicts.bzl",
     "dicts",
+)
+load(
+    "@build_bazel_apple_support//lib:apple_support.bzl",
+    "apple_support",
 )
 load(
     "@build_bazel_rules_apple//apple:providers.bzl",
@@ -48,11 +48,12 @@ def _docc_archive_impl(ctx):
     fallback_bundle_identifier = ctx.attr.fallback_bundle_identifier
     fallback_bundle_version = ctx.attr.fallback_bundle_version
     fallback_display_name = ctx.attr.fallback_display_name
+    hosting_base_path = ctx.attr.hosting_base_path
     kinds = ctx.attr.kinds
     platform = ctx.fragments.apple.single_arch_platform
     transform_for_static_hosting = ctx.attr.transform_for_static_hosting
     xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
-    dep = ctx.attr.dep[0]  # this isn't actually a list target but transition makes it one.
+    dep = ctx.attr.dep
     symbol_graphs_info = None
     docc_bundle_info = None
     docc_build_inputs = []
@@ -91,10 +92,16 @@ def _docc_archive_impl(ctx):
         arguments.add_all("--kind", kinds)
     if transform_for_static_hosting:
         arguments.add("--transform-for-static-hosting")
+    if hosting_base_path:
+        arguments.add("--hosting-base-path", hosting_base_path)
 
     # Add symbol graphs
     if symbol_graphs_info:
-        arguments.add_all("--additional-symbol-graph-dir", symbol_graphs_info.symbol_graphs, expand_directories = False)
+        arguments.add_all(
+            symbol_graphs_info.symbol_graphs,
+            before_each = "--additional-symbol-graph-dir",
+            expand_directories = False,
+        )
         docc_build_inputs.extend(symbol_graphs_info.symbol_graphs)
 
     # The .docc bundle (if provided, only one is allowed)
@@ -152,19 +159,6 @@ def _docc_archive_impl(ctx):
         doccarchive_binary_info,
     ]
 
-def _swift_emit_symbol_graph_transition_impl(settings, _attr):
-    """A transition that enables "swift.emit_symbol_graph" feature"""
-    if "//command_line_option:features" in settings:
-        return {"//command_line_option:features": settings["//command_line_option:features"] + ["swift.emit_symbol_graph"]}
-    else:
-        return {"//command_line_option:features": ["swift.emit_symbol_graph"]}
-
-swift_emit_symbol_graph_transition = transition(
-    implementation = _swift_emit_symbol_graph_transition_impl,
-    inputs = ["//command_line_option:features"],
-    outputs = ["//command_line_option:features"],
-)
-
 docc_archive = rule(
     implementation = _docc_archive_impl,
     fragments = ["apple"],
@@ -176,7 +170,7 @@ NOTE: At this time Swift is the only supported language for this rule.
 
 Example:
 
-```python
+```starlark
 load("@build_bazel_rules_apple//apple:docc.bzl", "docc_archive")
 
 docc_archive(
@@ -195,7 +189,6 @@ docc_archive(
                     docc_bundle_info_aspect,
                     docc_symbol_graphs_aspect,
                 ],
-                cfg = swift_emit_symbol_graph_transition,
                 providers = [[DocCBundleInfo], [DocCSymbolGraphsInfo]],
             ),
             "default_code_listing_language": attr.string(
@@ -208,6 +201,19 @@ This filter level is inclusive. If a level of `information` is specified, diagno
 Must be one of "error", "warning", "information", or "hint"
                 """,
                 values = ["error", "warning", "information", "hint"],
+            ),
+            # TODO: use `attr.bool` once https://github.com/bazelbuild/bazel/issues/22809 is resolved.
+            "emit_extension_block_symbols": attr.string(
+                default = "0",
+                doc = """
+Defines if the symbol graph information for `extension` blocks should be
+emitted in addition to the default symbol graph information.
+
+This value must be either `"0"` or `"1"`.When the value is `"1"`, the symbol
+graph information for `extension` blocks will be emitted in addition to
+the default symbol graph information. The default value is `"0"`.
+                """,
+                values = ["0", "1"],
             ),
             "enable_inherited_docs": attr.bool(
                 default = False,
@@ -225,14 +231,28 @@ Must be one of "error", "warning", "information", or "hint"
                 doc = "A fallback display name if no value is provided in the documentation bundle's Info.plist file.",
                 mandatory = True,
             ),
+            "hosting_base_path": attr.string(
+                doc = "The base path your documentation website will be hosted at. For example, to deploy your site to 'example.com/my_name/my_project/documentation' instead of 'example.com/documentation', pass '/my_name/my_project' as the base path.",
+                mandatory = False,
+            ),
             "kinds": attr.string_list(
                 doc = "The kinds of entities to filter generated documentation for.",
             ),
+            "minimum_access_level": attr.string(
+                default = "public",
+                doc = """"
+The minimum access level of the declarations that should be emitted in the symbol graphs.
+This value must be either `fileprivate`, `internal`, `private`, or `public`. The default value is `public`.
+                """,
+                values = [
+                    "fileprivate",
+                    "internal",
+                    "private",
+                    "public",
+                ],
+            ),
             "transform_for_static_hosting": attr.bool(
                 default = True,
-            ),
-            "_allowlist_function_transition": attr.label(
-                default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
             ),
             "_preview_template": attr.label(
                 allow_single_file = True,

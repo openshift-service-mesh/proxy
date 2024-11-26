@@ -16,7 +16,7 @@ all_whl_requirements = all_whl_requirements_by_package.values()
 all_data_requirements = ["@fuzzing_pip3//absl_py:data", "@fuzzing_pip3//six:data"]
 
 _packages = [("fuzzing_pip3_absl_py", "absl-py==2.0.0 --hash=sha256:9a28abb62774ae4e8edbe2dd4c49ffcd45a6a848952a5eccc6a49f3f0fc1e2f3"), ("fuzzing_pip3_six", "six==1.16.0 --hash=sha256:8abb2f1d86890a2dfb989f9a77cfcfd3e47c2a354b01111771326f8aa26e0254")]
-_config = {"download_only": False, "enable_implicit_namespace_pkgs": False, "environment": {}, "envsubst": [], "extra_pip_args": ["--require-hashes"], "isolated": True, "pip_data_exclude": [], "python_interpreter": "python3", "python_interpreter_target": "@python3_11_x86_64-unknown-linux-gnu//:bin/python3", "quiet": True, "repo": "fuzzing_pip3", "repo_prefix": "fuzzing_pip3_", "timeout": 600}
+_config = {"download_only": False, "enable_implicit_namespace_pkgs": False, "environment": {}, "envsubst": [], "extra_pip_args": ["--require-hashes"], "isolated": True, "pip_data_exclude": [], "python_interpreter": "python3", "python_interpreter_target": "@python3_12_x86_64-unknown-linux-gnu//:bin/python3", "quiet": True, "repo": "fuzzing_pip3", "repo_prefix": "fuzzing_pip3_", "timeout": 600}
 _annotations = {}
 
 def requirement(name):

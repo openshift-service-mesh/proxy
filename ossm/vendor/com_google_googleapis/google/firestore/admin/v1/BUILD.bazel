@@ -9,24 +9,29 @@
 #    * extra_protoc_file_parameters
 # The complete list of preserved parameters can be found in the source code.
 
+# buildifier: disable=load-on-top
+
 # This is an API workspace, having public visibility by default makes perfect sense.
 package(default_visibility = ["//visibility:public"])
 
 ##############################################################################
 # Common
 ##############################################################################
-load("@rules_proto//proto:defs.bzl", "proto_library")
+# buildifier: disable=same-origin-load
 load("@com_google_googleapis_imports//:imports.bzl", "proto_library_with_info")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 
 proto_library(
     name = "admin_proto",
     srcs = [
+        "backup.proto",
         "database.proto",
         "field.proto",
         "firestore_admin.proto",
         "index.proto",
         "location.proto",
         "operation.proto",
+        "schedule.proto",
     ],
     deps = [
         "//google/api:annotations_proto",
@@ -34,6 +39,8 @@ proto_library(
         "//google/api:field_behavior_proto",
         "//google/api:resource_proto",
         "//google/longrunning:operations_proto",
+        "//google/type:dayofweek_proto",
+        "@com_google_protobuf//:duration_proto",
         "@com_google_protobuf//:empty_proto",
         "@com_google_protobuf//:field_mask_proto",
         "@com_google_protobuf//:timestamp_proto",
@@ -52,6 +59,7 @@ proto_library_with_info(
 ##############################################################################
 # Java
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "java_gapic_assembly_gradle_pkg",
@@ -116,22 +124,23 @@ java_gapic_assembly_gradle_pkg(
 ##############################################################################
 # Go
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "admin_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/firestore/admin/v1",
+    importpath = "cloud.google.com/go/firestore/apiv1/admin/adminpb",
     protos = [":admin_proto"],
     deps = [
         "//google/api:annotations_go_proto",
         "//google/longrunning:longrunning_go_proto",
+        "//google/type:dayofweek_go_proto",
     ],
 )
 
@@ -139,8 +148,9 @@ go_gapic_library(
     name = "admin_go_gapic",
     srcs = [":admin_proto_with_info"],
     grpc_service_config = "firestore_admin_grpc_service_config.json",
-    importpath = "cloud.google.com/go/firestore/admin/apiv1;admin",
+    importpath = "cloud.google.com/go/firestore/apiv1/admin;apiv1",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "firestore_v1.yaml",
     transport = "grpc+rest",
@@ -150,14 +160,8 @@ go_gapic_library(
         "//google/longrunning:longrunning_go_proto",
         "@com_google_cloud_go_longrunning//:go_default_library",
         "@com_google_cloud_go_longrunning//autogen:go_default_library",
+        "@io_bazel_rules_go//proto/wkt:duration_go_proto",
     ],
-)
-
-go_test(
-    name = "admin_go_gapic_test",
-    srcs = [":admin_go_gapic_srcjar_test"],
-    embed = [":admin_go_gapic"],
-    importpath = "cloud.google.com/go/firestore/admin/apiv1",
 )
 
 # Open Source Packages
@@ -166,6 +170,7 @@ go_gapic_assembly_pkg(
     deps = [
         ":admin_go_gapic",
         ":admin_go_gapic_srcjar-metadata.srcjar",
+        ":admin_go_gapic_srcjar-snippets.srcjar",
         ":admin_go_gapic_srcjar-test.srcjar",
         ":admin_go_proto",
     ],
@@ -174,6 +179,7 @@ go_gapic_assembly_pkg(
 ##############################################################################
 # Python
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "py_gapic_assembly_pkg",
@@ -191,7 +197,7 @@ py_gapic_library(
     ],
     rest_numeric_enums = True,
     service_yaml = "firestore_v1.yaml",
-    transport = "grpc",
+    transport = "grpc+rest",
     deps = [
     ],
 )
@@ -217,11 +223,11 @@ py_gapic_assembly_pkg(
 ##############################################################################
 # PHP
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -230,21 +236,15 @@ php_proto_library(
     deps = [":admin_proto"],
 )
 
-php_grpc_library(
-    name = "admin_php_grpc",
-    srcs = [":admin_proto"],
-    deps = [":admin_php_proto"],
-)
-
 php_gapic_library(
     name = "admin_php_gapic",
     srcs = [":admin_proto_with_info"],
     grpc_service_config = "firestore_admin_grpc_service_config.json",
+    migration_mode = "MIGRATING",
     rest_numeric_enums = True,
     service_yaml = "firestore_v1.yaml",
     transport = "grpc+rest",
     deps = [
-        ":admin_php_grpc",
         ":admin_php_proto",
     ],
 )
@@ -254,7 +254,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-firestore-admin-v1-php",
     deps = [
         ":admin_php_gapic",
-        ":admin_php_grpc",
         ":admin_php_proto",
     ],
 )
@@ -262,6 +261,7 @@ php_gapic_assembly_pkg(
 ##############################################################################
 # Node.js
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "nodejs_gapic_assembly_pkg",
@@ -292,6 +292,7 @@ nodejs_gapic_assembly_pkg(
 ##############################################################################
 # Ruby
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "ruby_cloud_gapic_library",
@@ -320,13 +321,13 @@ ruby_cloud_gapic_library(
         "ruby-cloud-env-prefix=FIRESTORE",
         "ruby-cloud-gem-name=google-cloud-firestore-admin-v1",
         "ruby-cloud-product-url=https://cloud.google.com/firestore",
-        "ruby-cloud-wrapper-gem-override=google-cloud-firestore",
     ],
     grpc_service_config = "firestore_admin_grpc_service_config.json",
     rest_numeric_enums = True,
     ruby_cloud_description = "Cloud Firestore is a NoSQL document database built for automatic scaling, high performance, and ease of application development.",
     ruby_cloud_title = "Cloud Firestore Admin V1",
     service_yaml = "firestore_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":admin_ruby_grpc",
         ":admin_ruby_proto",
@@ -346,6 +347,7 @@ ruby_gapic_assembly_pkg(
 ##############################################################################
 # C#
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "csharp_gapic_assembly_pkg",
@@ -372,6 +374,7 @@ csharp_gapic_library(
     grpc_service_config = "firestore_admin_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "firestore_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":admin_csharp_grpc",
         ":admin_csharp_proto",
@@ -391,6 +394,7 @@ csharp_gapic_assembly_pkg(
 ##############################################################################
 # C++
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "cc_grpc_library",

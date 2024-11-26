@@ -24,6 +24,10 @@ UNSUPPORTED_FEATURES = [
     "use_header_modules",
     "fdo_instrument",
     "fdo_optimize",
+    # This feature is unsupported by definition. The authors of C++ toolchain
+    # configuration can place any linker flags that should not be applied when
+    # linking Rust targets in a feature with this name.
+    "rules_rust_unsupported_feature",
 ]
 
 def find_toolchain(ctx):
@@ -37,11 +41,12 @@ def find_toolchain(ctx):
     """
     return ctx.toolchains[Label("//rust:toolchain_type")]
 
-def find_cc_toolchain(ctx):
+def find_cc_toolchain(ctx, extra_unsupported_features = tuple()):
     """Extracts a CcToolchain from the current target's context
 
     Args:
         ctx (ctx): The current target's rule context object
+        extra_unsupported_features (sequence of str): Extra featrures to disable
 
     Returns:
         tuple: A tuple of (CcToolchain, FeatureConfiguration)
@@ -52,7 +57,8 @@ def find_cc_toolchain(ctx):
         ctx = ctx,
         cc_toolchain = cc_toolchain,
         requested_features = ctx.features,
-        unsupported_features = UNSUPPORTED_FEATURES + ctx.disabled_features,
+        unsupported_features = UNSUPPORTED_FEATURES + ctx.disabled_features +
+                               list(extra_unsupported_features),
     )
     return cc_toolchain, feature_configuration
 
@@ -416,7 +422,7 @@ def dedent(doc_string):
         block = " " * space_count
         return "\n".join([line.replace(block, "", 1).rstrip() for line in lines])
 
-def make_static_lib_symlink(actions, rlib_file):
+def make_static_lib_symlink(ctx_package, actions, rlib_file):
     """Add a .a symlink to an .rlib file.
 
     The name of the symlink is derived from the <name> of the <name>.rlib file as follows:
@@ -428,17 +434,31 @@ def make_static_lib_symlink(actions, rlib_file):
     * `crateb.rlib` is `libcrateb.a`.
 
     Args:
+        ctx_package (string): The rule's context package name.
         actions (actions): The rule's context actions object.
         rlib_file (File): The file to symlink, which must end in .rlib.
 
     Returns:
         The symlink's File.
     """
+
     if not rlib_file.basename.endswith(".rlib"):
         fail("file is not an .rlib: ", rlib_file.basename)
     basename = rlib_file.basename[:-5]
     if not basename.startswith("lib"):
         basename = "lib" + basename
+
+    # The .a symlink below is created as a sibling to the .rlib file.
+    # Bazel doesn't allow creating a symlink outside of the rule's package,
+    # so if the .rlib file comes from a different package, first symlink it
+    # to the rule's package. The name of the new .rlib symlink is derived
+    # as the name of the original .rlib relative to its package.
+    if rlib_file.owner.package != ctx_package:
+        new_path = rlib_file.short_path.removeprefix(rlib_file.owner.package).removeprefix("/")
+        new_rlib_file = actions.declare_file(new_path)
+        actions.symlink(output = new_rlib_file, target_file = rlib_file)
+        rlib_file = new_rlib_file
+
     dot_a = actions.declare_file(basename + ".a", sibling = rlib_file)
     actions.symlink(output = dot_a, target_file = rlib_file)
     return dot_a
@@ -489,6 +509,9 @@ def get_import_macro_deps(ctx):
         list of Targets. Either empty (if the fake import macro implementation
         is being used), or a singleton list with the real implementation.
     """
+    if not hasattr(ctx.attr, "_import_macro_dep"):
+        return []
+
     if ctx.attr._import_macro_dep.label.name == "fake_import_macro_impl":
         return []
 
@@ -685,11 +708,12 @@ def can_build_metadata(toolchain, ctx, crate_type):
            ctx.attr._process_wrapper and \
            crate_type in ("rlib", "lib")
 
-def crate_root_src(name, srcs, crate_type):
+def crate_root_src(name, crate_name, srcs, crate_type):
     """Determines the source file for the crate root, should it not be specified in `attr.crate_root`.
 
     Args:
         name (str): The name of the target.
+        crate_name (str): The target's `crate_name` attribute.
         srcs (list): A list of all sources for the target Crate.
         crate_type (str): The type of this crate ("bin", "lib", "rlib", "cdylib", etc).
 
@@ -700,10 +724,14 @@ def crate_root_src(name, srcs, crate_type):
     """
     default_crate_root_filename = "main.rs" if crate_type == "bin" else "lib.rs"
 
+    if not crate_name:
+        crate_name = name
+
     crate_root = (
         (srcs[0] if len(srcs) == 1 else None) or
         _shortest_src_with_basename(srcs, default_crate_root_filename) or
-        _shortest_src_with_basename(srcs, name + ".rs")
+        _shortest_src_with_basename(srcs, name + ".rs") or
+        _shortest_src_with_basename(srcs, crate_name + ".rs")
     )
     if not crate_root:
         file_names = [default_crate_root_filename, name + ".rs"]
@@ -760,7 +788,7 @@ def determine_lib_name(name, crate_type, toolchain, lib_hash = None):
     prefix = "lib"
     if toolchain.target_triple and toolchain.target_os == "windows" and crate_type not in ("lib", "rlib"):
         prefix = ""
-    if toolchain.target_arch == "wasm32" and crate_type == "cdylib":
+    if toolchain.target_arch in ("wasm32", "wasm64") and crate_type == "cdylib":
         prefix = ""
 
     return "{prefix}{name}{lib_hash}{extension}".format(
@@ -794,7 +822,7 @@ def transform_sources(ctx, srcs, crate_root):
     if not has_generated_sources:
         return srcs, crate_root
 
-    package_root = paths.dirname(paths.join(ctx.label.workspace_root, ctx.build_file_path))
+    package_root = paths.join(ctx.label.workspace_root, ctx.label.package)
     generated_sources = [_symlink_for_non_generated_source(ctx, src, package_root) for src in srcs if src != crate_root]
     generated_root = crate_root
     if crate_root:
@@ -874,4 +902,16 @@ def generate_output_diagnostics(ctx, sibling, require_process_wrapper = True):
     return ctx.actions.declare_file(
         sibling.basename + ".rustc-output",
         sibling = sibling,
+    )
+
+def is_std_dylib(file):
+    """Whether the file is a dylib crate for std
+
+    """
+    basename = file.basename
+    return (
+        # for linux and darwin
+        basename.startswith("libstd-") and (basename.endswith(".so") or basename.endswith(".dylib")) or
+        # for windows
+        basename.startswith("std-") and basename.endswith(".dll")
     )

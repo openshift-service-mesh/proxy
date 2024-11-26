@@ -34,6 +34,18 @@ ClippyFlagsInfo = provider(
     fields = {"clippy_flags": "List[string] Flags to pass to clippy"},
 )
 
+def _clippy_flag_impl(ctx):
+    return ClippyFlagsInfo(clippy_flags = [f for f in ctx.build_setting_value if f != ""])
+
+clippy_flag = rule(
+    doc = (
+        "Add a custom clippy flag from the command line with `--@rules_rust//:clippy_flag`." +
+        "Multiple uses are accumulated and appended after the extra_rustc_flags."
+    ),
+    implementation = _clippy_flag_impl,
+    build_setting = config.string(flag = True, allow_multiple = True),
+)
+
 def _clippy_flags_impl(ctx):
     return ClippyFlagsInfo(clippy_flags = ctx.build_setting_value)
 
@@ -87,19 +99,18 @@ def _clippy_aspect_impl(target, ctx):
     toolchain = find_toolchain(ctx)
     cc_toolchain, feature_configuration = find_cc_toolchain(ctx)
 
-    dep_info, build_info, linkstamps = collect_deps(
+    dep_info, build_info, _ = collect_deps(
         deps = crate_info.deps,
         proc_macro_deps = crate_info.proc_macro_deps,
         aliases = crate_info.aliases,
-        # Clippy doesn't need to invoke transitive linking, therefore doesn't need linkstamps.
-        are_linkstamps_supported = False,
     )
 
     compile_inputs, out_dir, build_env_files, build_flags_files, linkstamp_outs, ambiguous_libs = collect_inputs(
         ctx,
         ctx.rule.file,
         ctx.rule.files,
-        linkstamps,
+        # Clippy doesn't need to invoke transitive linking, therefore doesn't need linkstamps.
+        depset([]),
         toolchain,
         cc_toolchain,
         feature_configuration,
@@ -134,6 +145,9 @@ def _clippy_aspect_impl(target, ctx):
 
     clippy_flags = ctx.attr._clippy_flags[ClippyFlagsInfo].clippy_flags
 
+    if hasattr(ctx.attr, "_clippy_flag"):
+        clippy_flags = clippy_flags + ctx.attr._clippy_flag[ClippyFlagsInfo].clippy_flags
+
     # For remote execution purposes, the clippy_out file must be a sibling of crate_info.output
     # or rustc may fail to create intermediate output files because the directory does not exist.
     if ctx.attr._capture_output[CaptureClippyOutputInfo].capture_output:
@@ -141,12 +155,11 @@ def _clippy_aspect_impl(target, ctx):
         args.process_wrapper_flags.add("--stderr-file", clippy_out)
 
         if clippy_flags:
-            fail("""Combining @rules_rust//:clippy_flags with @rules_rust//:capture_clippy_output=true is currently not supported.
-See https://github.com/bazelbuild/rules_rust/pull/1264#discussion_r853241339 for more detail.""")
+            args.rustc_flags.add_all(clippy_flags)
 
         # If we are capturing the output, we want the build system to be able to keep going
-        # and consume the output. Some clippy lints are denials, so we treat them as warnings.
-        args.rustc_flags.add("-Wclippy::all")
+        # and consume the output. Some clippy lints are denials, so we cap everything at warn.
+        args.rustc_flags.add("--cap-lints=warn")
     else:
         # A marker file indicating clippy has executed successfully.
         # This file is necessary because "ctx.actions.run" mandates an output.
@@ -193,7 +206,6 @@ See https://github.com/bazelbuild/rules_rust/pull/1264#discussion_r853241339 for
 #               //...
 rust_clippy_aspect = aspect(
     fragments = ["cpp"],
-    host_fragments = ["cpp"],
     attrs = {
         "_capture_output": attr.label(
             doc = "Value of the `capture_clippy_output` build setting",
@@ -205,6 +217,11 @@ rust_clippy_aspect = aspect(
                 "(https://docs.bazel.build/versions/master/integrating-with-rules-cc.html#accessing-the-c-toolchain)"
             ),
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
+        ),
+        "_clippy_flag": attr.label(
+            doc = "Arguments to pass to clippy." +
+                  "Multiple uses are accumulated and appended after the extra_rustc_flags.",
+            default = Label("//:clippy_flag"),
         ),
         "_clippy_flags": attr.label(
             doc = "Arguments to pass to clippy",
@@ -241,7 +258,6 @@ rust_clippy_aspect = aspect(
         str(Label("//rust:toolchain_type")),
         "@bazel_tools//tools/cpp:toolchain_type",
     ],
-    incompatible_use_toolchain_transition = True,
     implementation = _clippy_aspect_impl,
     doc = """\
 Executes the clippy checker on specified targets.

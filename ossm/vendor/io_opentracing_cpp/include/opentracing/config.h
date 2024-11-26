@@ -1,3 +1,0 @@
-#pragma once
-
-#define OPENTRACING_BUILD_DYNAMIC_LOADING

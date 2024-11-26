@@ -6,6 +6,8 @@
 # Run 'bazel run //crate_universe/private:srcs_module.install' to regenerate.
 
 CARGO_BAZEL_SRCS = [
+    Label("//crate_universe:src/api.rs"),
+    Label("//crate_universe:src/api/lockfile.rs"),
     Label("//crate_universe:src/cli.rs"),
     Label("//crate_universe:src/cli/generate.rs"),
     Label("//crate_universe:src/cli/query.rs"),
@@ -19,6 +21,10 @@ CARGO_BAZEL_SRCS = [
     Label("//crate_universe:src/lockfile.rs"),
     Label("//crate_universe:src/main.rs"),
     Label("//crate_universe:src/metadata.rs"),
+    Label("//crate_universe:src/metadata/cargo_bin.rs"),
+    Label("//crate_universe:src/metadata/cargo_tree_resolver.rs"),
+    Label("//crate_universe:src/metadata/cargo_tree_rustc_wrapper.bat"),
+    Label("//crate_universe:src/metadata/cargo_tree_rustc_wrapper.sh"),
     Label("//crate_universe:src/metadata/dependency.rs"),
     Label("//crate_universe:src/metadata/metadata_annotation.rs"),
     Label("//crate_universe:src/rendering.rs"),
@@ -48,5 +54,6 @@ CARGO_BAZEL_SRCS = [
     Label("//crate_universe:src/utils/starlark/select_set.rs"),
     Label("//crate_universe:src/utils/starlark/serialize.rs"),
     Label("//crate_universe:src/utils/starlark/target_compatible_with.rs"),
+    Label("//crate_universe:src/utils/symlink.rs"),
     Label("//crate_universe:src/utils/target_triple.rs"),
 ]

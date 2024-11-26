@@ -1,6 +1,6 @@
 "copy_to_directory implementation"
 
-load(":copy_common.bzl", _COPY_EXECUTION_REQUIREMENTS = "COPY_EXECUTION_REQUIREMENTS", _progress_path = "progress_path")
+load(":copy_common.bzl", _COPY_EXECUTION_REQUIREMENTS = "COPY_EXECUTION_REQUIREMENTS")
 load(":directory_path.bzl", "DirectoryPathInfo")
 load(":paths.bzl", "paths")
 
@@ -51,6 +51,7 @@ _copy_to_directory_attr_doc = {
 
 If not set, the name of the target is used.
 """,
+    "add_directory_to_runfiles": """Whether to add the outputted directory to the target's runfiles.""",
     # root_paths
     "root_paths": """List of paths (with glob support) that are roots in the output directory.
 
@@ -205,6 +206,9 @@ removed from sources files.
 - `off`: all files are copied
 - `on`: hardlinks are used for all files (not recommended)
     """,
+    "preserve_mtime": """If True, the last modified time of copied files is preserved.
+    See the [caveats on copy_directory](/docs/copy_directory.md#preserving-modification-times)
+    about interactions with remote execution and caching.""",
     # verbose
     "verbose": """If true, prints out verbose logs to stdout""",
 }
@@ -218,6 +222,12 @@ _copy_to_directory_attr = {
     # TreeArtifact outputs.
     "out": attr.string(
         doc = _copy_to_directory_attr_doc["out"],
+    ),
+    # TODO(3.0): Remove this attribute and do not add directory to runfiles by default.
+    # https://github.com/aspect-build/bazel-lib/issues/748
+    "add_directory_to_runfiles": attr.bool(
+        default = True,
+        doc = _copy_to_directory_attr_doc["add_directory_to_runfiles"],
     ),
     "root_paths": attr.string_list(
         default = ["."],
@@ -250,6 +260,10 @@ _copy_to_directory_attr = {
         values = ["auto", "off", "on"],
         default = "auto",
         doc = _copy_to_directory_attr_doc["hardlink"],
+    ),
+    "preserve_mtime": attr.bool(
+        default = False,
+        doc = _copy_to_directory_attr_doc["preserve_mtime"],
     ),
     "verbose": attr.bool(
         doc = _copy_to_directory_attr_doc["verbose"],
@@ -285,13 +299,16 @@ def _copy_to_directory_impl(ctx):
         replace_prefixes = ctx.attr.replace_prefixes,
         allow_overwrites = ctx.attr.allow_overwrites,
         hardlink = ctx.attr.hardlink,
+        preserve_mtime = ctx.attr.preserve_mtime,
         verbose = ctx.attr.verbose,
     )
+
+    runfiles = ctx.runfiles([dst]) if ctx.attr.add_directory_to_runfiles else None
 
     return [
         DefaultInfo(
             files = depset([dst]),
-            runfiles = ctx.runfiles([dst]),
+            runfiles = runfiles,
         ),
     ]
 
@@ -324,6 +341,7 @@ def copy_to_directory_bin_action(
         replace_prefixes = {},
         allow_overwrites = False,
         hardlink = "auto",
+        preserve_mtime = False,
         verbose = False):
     """Factory function to copy files to a directory using a tool binary.
 
@@ -381,6 +399,8 @@ def copy_to_directory_bin_action(
         hardlink: Controls when to use hardlinks to files instead of making copies.
 
             See copy_to_directory rule documentation for more details.
+
+        preserve_mtime: If true, preserve the modified time from the source.
 
         verbose: If true, prints out verbose logs to stdout
     """
@@ -461,9 +481,6 @@ def copy_to_directory_bin_action(
         })
         file_inputs.append(f.file)
 
-    if not file_inputs:
-        fail("No files to copy")
-
     config = {
         "allow_overwrites": allow_overwrites,
         "dst": dst.path,
@@ -475,6 +492,7 @@ def copy_to_directory_bin_action(
         "include_srcs_patterns": include_srcs_patterns,
         "replace_prefixes": replace_prefixes,
         "root_paths": root_paths,
+        "preserve_mtime": preserve_mtime,
         "verbose": verbose,
     }
 
@@ -490,7 +508,7 @@ def copy_to_directory_bin_action(
         executable = copy_to_directory_bin,
         arguments = [config_file.path, ctx.label.workspace_name],
         mnemonic = "CopyToDirectory",
-        progress_message = "Copying files to directory %s" % _progress_path(dst),
+        progress_message = "Copying files to directory %{output}",
         execution_requirements = _COPY_EXECUTION_REQUIREMENTS,
     )
 

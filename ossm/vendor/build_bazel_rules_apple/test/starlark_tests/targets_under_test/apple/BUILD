@@ -1,3 +1,8 @@
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load(
+    "@build_bazel_rules_swift//swift:swift.bzl",
+    "swift_library",
+)
 load(
     "//apple:apple.bzl",
     "apple_dynamic_xcframework_import",
@@ -6,18 +11,10 @@ load(
     "apple_universal_binary",
     "apple_xcframework",
 )
-load(
-    "//test/starlark_tests/rules:generate_xcframework.bzl",
-    "generate_dynamic_xcframework",
-    "generate_static_xcframework",
-)
+load("//apple:header_map.bzl", "header_map")
 load(
     "//apple:ios.bzl",
     "ios_application",
-)
-load(
-    "//apple:versioning.bzl",
-    "apple_bundle_version",
 )
 load(
     "//apple:macos.bzl",
@@ -27,21 +24,26 @@ load(
     "//apple:resources.bzl",
     "apple_core_data_model",
     "apple_core_ml_library",
+    "apple_metal_library",
     "swift_apple_core_ml_library",
 )
 load(
-    "@build_bazel_rules_swift//swift:swift.bzl",
-    "swift_library",
+    "//apple:versioning.bzl",
+    "apple_bundle_version",
 )
 load(
     "//test/starlark_tests:common.bzl",
     "common",
 )
 load(
+    "//test/starlark_tests/rules:generate_xcframework.bzl",
+    "generate_dynamic_xcframework",
+    "generate_static_xcframework",
+)
+load(
     "//test/testdata/rules:dummy_test_runner.bzl",
     "dummy_test_runner",
 )
-load("@bazel_skylib//rules:write_file.bzl", "write_file")
 
 licenses(["notice"])
 
@@ -1403,5 +1405,128 @@ apple_core_ml_library(
 swift_apple_core_ml_library(
     name = "SampleSwiftCoreML",
     mlmodel = "//test/testdata/resources:sample.mlmodel",
+    tags = common.fixture_tags,
+)
+
+# ---------------------------------------------------------------------------------------
+# Targets for header map rule tests.
+
+objc_library(
+    name = "header_map_objc_lib",
+    srcs = [
+        "//test/starlark_tests/resources:shared.m",
+    ],
+    hdrs = [
+        "//test/starlark_tests/resources:shared.h",
+    ],
+    tags = common.fixture_tags,
+)
+
+swift_library(
+    name = "header_map_swift_lib",
+    srcs = ["DummyFmwk.swift"],
+    generates_header = True,
+    tags = common.fixture_tags,
+)
+
+header_map(
+    name = "header_map_with_header",
+    hdrs = [
+        "//test/starlark_tests/resources:shared.h",
+    ],
+    tags = common.fixture_tags,
+)
+
+header_map(
+    name = "header_map_with_objc_lib_dep",
+    hdrs = [],
+    tags = common.fixture_tags,
+    deps = [
+        ":header_map_objc_lib",
+    ],
+)
+
+header_map(
+    name = "header_map_with_swift_lib_dep",
+    hdrs = [],
+    tags = common.fixture_tags,
+    deps = [
+        ":header_map_swift_lib",
+    ],
+)
+
+# ---------------------------------------------------------------------------------------
+# Targets for Apple Metal library tests.
+
+ios_application(
+    name = "app_with_metal_library",
+    bundle_id = "my.bundle.id",
+    families = ["iphone"],
+    infoplists = ["//test/starlark_tests/resources:Info.plist"],
+    minimum_os_version = common.min_os_ios.baseline,
+    tags = common.fixture_tags,
+    deps = [":metal_library_depending_lib"],
+)
+
+objc_library(
+    name = "metal_library_depending_lib",
+    srcs = ["//test/starlark_tests/resources:main.m"],
+    tags = common.fixture_tags,
+    deps = [
+        ":metal_objc_lib",
+        ":metal_swift_lib",
+    ],
+)
+
+objc_library(
+    name = "metal_objc_lib",
+    srcs = [":metal_objc_lib_src"],
+    data = [":SampleMetal"],
+    tags = common.fixture_tags,
+)
+
+write_file(
+    name = "metal_objc_lib_src",
+    out = "metal_objc_lib.m",
+    content = ["""
+#import <Foundation/Foundation.h>
+#import <Metal/Metal.h>
+
+@interface ObjcLib: NSObject
+@end
+
+@implementation ObjcLib
+- (void)test {
+  NSLog(@"Hello, world");
+}
+@end
+"""],
+    tags = common.fixture_tags,
+)
+
+swift_library(
+    name = "metal_swift_lib",
+    srcs = [":metal_swift_lib_src"],
+    data = [":SampleMetal"],
+    tags = common.fixture_tags,
+)
+
+write_file(
+    name = "metal_swift_lib_src",
+    out = "metal_swift_lib.swift",
+    content = ["""
+import Foundation
+import Metal
+
+public struct SwiftLib {
+}
+"""],
+    tags = common.fixture_tags,
+)
+
+apple_metal_library(
+    name = "SampleMetal",
+    srcs = ["@build_bazel_rules_apple//test/testdata/resources:metal_srcs"],
+    hdrs = ["@build_bazel_rules_apple//test/testdata/resources:metal_hdrs"],
     tags = common.fixture_tags,
 )

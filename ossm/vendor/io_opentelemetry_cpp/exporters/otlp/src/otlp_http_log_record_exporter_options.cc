@@ -1,12 +1,13 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "opentelemetry/exporters/otlp/otlp_http_log_record_exporter_options.h"
-
 #include <chrono>
-#include <cstddef>
-#include <memory>
 #include <string>
+
+#include "opentelemetry/exporters/otlp/otlp_environment.h"
+#include "opentelemetry/exporters/otlp/otlp_http.h"
+#include "opentelemetry/exporters/otlp/otlp_http_log_record_exporter_options.h"
+#include "opentelemetry/version.h"
 
 OPENTELEMETRY_BEGIN_NAMESPACE
 namespace exporter
@@ -17,7 +18,7 @@ namespace otlp
 OtlpHttpLogRecordExporterOptions::OtlpHttpLogRecordExporterOptions()
 {
   url                = GetOtlpDefaultHttpLogsEndpoint();
-  content_type       = HttpRequestContentType::kJson;
+  content_type       = GetOtlpHttpProtocolFromString(GetOtlpDefaultHttpLogsProtocol());
   json_bytes_mapping = JsonBytesMappingKind::kHexId;
   use_json_name      = false;
   console_debug      = false;
@@ -41,6 +42,8 @@ OtlpHttpLogRecordExporterOptions::OtlpHttpLogRecordExporterOptions()
   ssl_max_tls      = GetOtlpDefaultLogsSslTlsMaxVersion();
   ssl_cipher       = GetOtlpDefaultLogsSslTlsCipher();
   ssl_cipher_suite = GetOtlpDefaultLogsSslTlsCipherSuite();
+
+  compression = GetOtlpDefaultLogsCompression();
 }
 
 OtlpHttpLogRecordExporterOptions::~OtlpHttpLogRecordExporterOptions() {}

@@ -1,4 +1,14 @@
 load(
+    "@build_bazel_rules_swift//swift:swift.bzl",
+    "swift_library",
+)
+load(
+    "//apple:apple.bzl",
+    "apple_dynamic_framework_import",
+    "apple_dynamic_xcframework_import",
+    "apple_static_framework_import",
+)
+load(
     "//apple:macos.bzl",
     "macos_application",
     "macos_bundle",
@@ -18,16 +28,6 @@ load(
     "apple_resource_group",
 )
 load(
-    "//apple:apple.bzl",
-    "apple_dynamic_framework_import",
-    "apple_dynamic_xcframework_import",
-    "apple_static_framework_import",
-)
-load(
-    "@build_bazel_rules_swift//swift:swift.bzl",
-    "swift_library",
-)
-load(
     "//test/starlark_tests:common.bzl",
     "common",
 )
@@ -36,11 +36,11 @@ load(
     "generate_import_framework",
 )
 load("//test/starlark_tests/rules:generate_framework_dsym.bzl", "generate_import_framework_dsym")
-load("//test/testdata/rules:substitution.bzl", "substitution")
 load(
     "//test/starlark_tests/rules:generate_xcframework.bzl",
     "generate_dynamic_xcframework",
 )
+load("//test/testdata/rules:substitution.bzl", "substitution")
 
 licenses(["notice"])
 
@@ -1314,8 +1314,8 @@ macos_application(
     minimum_os_version = common.min_os_macos.baseline,
     tags = common.fixture_tags,
     deps = [
+        ":macOSImportedDynamicFrameworkWithDebugInfo",
         "//test/starlark_tests/resources:objc_main_lib",
-        "//test/starlark_tests/targets_under_test/apple:macOSImportedDynamicFrameworkWithDebugInfo",
     ],
 )
 
@@ -2026,8 +2026,8 @@ macos_application(
     minimum_os_version = common.min_os_macos.baseline,
     tags = common.fixture_tags,
     deps = [
+        ":macOSImportedDynamicFrameworkWithBitcode",
         "//test/starlark_tests/resources:objc_main_lib",
-        "//test/starlark_tests/targets_under_test/apple:macOSImportedDynamicFrameworkWithBitcode",
     ],
 )
 
@@ -2041,9 +2041,9 @@ macos_application(
     minimum_os_version = common.min_os_macos.baseline,
     tags = common.fixture_tags,
     deps = [
+        ":macOSImportedDynamicFrameworkWithDebugInfo",
+        ":macOSImportedDynamicFrameworkWithDsym",
         "//test/starlark_tests/resources:objc_main_lib",
-        "//test/starlark_tests/targets_under_test/apple:macOSImportedDynamicFrameworkWithDebugInfo",
-        "//test/starlark_tests/targets_under_test/apple:macOSImportedDynamicFrameworkWithDsym",
     ],
 )
 
@@ -2415,6 +2415,8 @@ macos_command_line_application(
     linkopts = [
         "-alias",
         "_main",
+        "_linkopts_test_main",
+        "-u",
         "_linkopts_test_main",
     ],
     minimum_os_version = common.min_os_macos.baseline,
@@ -2904,4 +2906,60 @@ macos_unit_test(
     deps = [
         "//test/starlark_tests/resources:objc_test_lib",
     ],
+)
+
+# ---------------------------------------------------------------------------------------
+# Targets to test resource processing with C/C++ rules.
+
+macos_application(
+    name = "app_with_cc_library_with_runfiles",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:cc_library_with_runfile_a",
+    ],
+)
+
+macos_application(
+    name = "app_with_cc_library_with_resources",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:cc_library_with_resource_a",
+    ],
+)
+
+macos_application(
+    name = "app_with_cc_library_suppress_resources",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:cc_library_with_suppressed_resources",
+    ],
+)
+
+# ---------------------------------------------------------------------------------------
+# Targets for CcInfo dylib bundling tests
+
+macos_application(
+    name = "app_with_ccinfo_dylib_deps",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = ["//test/starlark_tests/resources:ccinfo_dylibs_libapp"],
 )

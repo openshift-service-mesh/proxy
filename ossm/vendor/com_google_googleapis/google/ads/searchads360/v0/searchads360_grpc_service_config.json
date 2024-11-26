@@ -6,13 +6,16 @@
           "service": "google.ads.searchads360.v0.services.CustomColumnService"
         },
         {
+          "service": "google.ads.searchads360.v0.services.CustomerService"
+        },
+        {
           "service": "google.ads.searchads360.v0.services.SearchAds360FieldService"
         },
         {
           "service": "google.ads.searchads360.v0.services.SearchAds360Service"
         }
       ],
-      "timeout": "3600s",
+      "timeout": "14400s",
       "retryPolicy": {
         "initialBackoff": "5s",
         "maxBackoff": "60s",

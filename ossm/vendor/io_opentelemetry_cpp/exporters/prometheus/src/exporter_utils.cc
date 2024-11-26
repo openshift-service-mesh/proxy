@@ -56,7 +56,7 @@ inline std::string Sanitize(std::string name, const T &valid)
   constexpr const auto replacement_dup = '=';
 
   bool has_dup = false;
-  for (int i = 0; i < (int)name.size(); ++i)
+  for (int i = 0; i < static_cast<int>(name.size()); ++i)
   {
     if (valid(i, name[i]) && name[i] != replacement)
     {
@@ -88,7 +88,7 @@ inline std::string Sanitize(std::string name, const T &valid)
  */
 std::string SanitizeLabel(std::string label_key)
 {
-  return Sanitize(label_key, [](int i, char c) {
+  return Sanitize(std::move(label_key), [](int i, char c) {
     return (c >= 'a' && c <= 'z') ||  //
            (c >= 'A' && c <= 'Z') ||  //
            c == '_' ||                //
@@ -172,8 +172,9 @@ std::vector<prometheus_client::MetricFamily> PrometheusExporterUtils::TranslateT
           {
             sum = static_cast<double>(nostd::get<int64_t>(histogram_point_data.sum_));
           }
-          SetData(std::vector<double>{sum, (double)histogram_point_data.count_}, boundaries, counts,
-                  point_data_attr.attributes, scope, time, &metric_family, data.resource_);
+          SetData(std::vector<double>{sum, static_cast<double>(histogram_point_data.count_)},
+                  boundaries, counts, point_data_attr.attributes, scope, time, &metric_family,
+                  data.resource_);
         }
         else if (type == prometheus_client::MetricType::Gauge)
         {
@@ -258,7 +259,7 @@ std::string PrometheusExporterUtils::SanitizeNames(std::string name)
   };
 
   bool has_dup = false;
-  for (int i = 0; i < (int)name.size(); ++i)
+  for (int i = 0; i < static_cast<int>(name.size()); ++i)
   {
     if (valid(i, name[i]))
     {
@@ -395,7 +396,7 @@ std::string PrometheusExporterUtils::RemoveUnitPortionInBraces(const std::string
 std::string PrometheusExporterUtils::ConvertRateExpressedToPrometheusUnit(
     const std::string &rate_expressed_unit)
 {
-  size_t pos = rate_expressed_unit.find("/");
+  size_t pos = rate_expressed_unit.find('/');
   if (pos == std::string::npos)
   {
     return rate_expressed_unit;

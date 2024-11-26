@@ -4,11 +4,16 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc", "rust_doc_test", "
 load("//crate_universe:version.bzl", "VERSION")
 
 exports_files(
-    glob(["src/**"]) + [
+    glob([
+        "src/**/*.bzl",
+        "src/**/*.j2",
+        "src/**/*.rs",
+    ]) + [
         "Cargo.toml",
         "Cargo.lock",
         "defs.bzl",
-        "docs.bzl",
+        "docs_bzlmod.bzl",
+        "docs_workspace.bzl",
     ],
     visibility = ["//visibility:public"],
 )
@@ -31,9 +36,23 @@ bzl_library(
 )
 
 filegroup(
+    name = "rust_data",
+    srcs = glob([
+        "src/**/*.bzl",
+        "src/**/*.j2",
+        "src/**/*.sh",
+        "src/**/*.bat",
+    ]),
+)
+
+filegroup(
     name = "rust_srcs",
-    srcs = glob(["src/**/*"]),
-    visibility = ["//:__subpackages__"],
+    srcs = glob([
+        "src/**/*.rs",
+    ]) + [
+        ":rust_data",
+    ],
+    visibility = ["//crate_universe:__subpackages__"],
 )
 
 rust_library(
@@ -43,10 +62,7 @@ rust_library(
         exclude = ["src/main.rs"],
     ),
     aliases = aliases(),
-    compile_data = glob(
-        include = ["src/**"],
-        exclude = ["src/**/*.rs"],
-    ),
+    compile_data = [":rust_data"],
     edition = "2021",
     proc_macro_deps = all_crate_deps(proc_macro = True),
     # This target embeds additional, stamping related information (see
@@ -110,16 +126,13 @@ rust_test(
     ],
     edition = "2021",
     env = {
-        "CARGO": "$(rootpath @rules_rust//rust/toolchain:current_cargo_files)",
-        "RUSTC": "$(rootpath @rules_rust//rust/toolchain:current_rustc_files)",
+        "CARGO": "$(rlocationpath @rules_rust//rust/toolchain:current_cargo_files)",
+        "RUSTC": "$(rlocationpath @rules_rust//rust/toolchain:current_rustc_files)",
     },
     proc_macro_deps = all_crate_deps(
         proc_macro_dev = True,
     ),
-    rustc_env = {
-        "CARGO": "$(rootpath @rules_rust//rust/toolchain:current_cargo_files)",
-        "RUSTC": "$(rootpath @rules_rust//rust/toolchain:current_rustc_files)",
-    },
+    tags = ["requires-network"],
     deps = [
         ":cargo_bazel",
         "@rules_rust//tools/runfiles",

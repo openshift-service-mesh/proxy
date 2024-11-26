@@ -4,6 +4,9 @@ build --override_repository=aspect_bazel_lib=/work/ossm/vendor/aspect_bazel_lib
 build --override_repository=base_pip3=/work/ossm/vendor/base_pip3
 build --override_repository=base_pip3_jinja2=/work/ossm/vendor/base_pip3_jinja2
 build --override_repository=base_pip3_markupsafe=/work/ossm/vendor/base_pip3_markupsafe
+build --override_repository=bazel_features=/work/ossm/vendor/bazel_features
+build --override_repository=bazel_features_globals=/work/ossm/vendor/bazel_features_globals
+build --override_repository=bazel_features_version=/work/ossm/vendor/bazel_features_version
 build --override_repository=bazel_gazelle=/work/ossm/vendor/bazel_gazelle
 build --override_repository=bazel_gazelle_is_bazel_module=/work/ossm/vendor/bazel_gazelle_is_bazel_module
 build --override_repository=bazel_skylib=/work/ossm/vendor/bazel_skylib
@@ -26,7 +29,6 @@ build --override_repository=com_github_facebook_zstd=/work/ossm/vendor/com_githu
 build --override_repository=com_github_fmtlib_fmt=/work/ossm/vendor/com_github_fmtlib_fmt
 build --override_repository=com_github_gabime_spdlog=/work/ossm/vendor/com_github_gabime_spdlog
 build --override_repository=com_github_golang_protobuf=/work/ossm/vendor/com_github_golang_protobuf
-build --override_repository=com_github_google_benchmark=/work/ossm/vendor/com_github_google_benchmark
 build --override_repository=com_github_google_flatbuffers=/work/ossm/vendor/com_github_google_flatbuffers
 build --override_repository=com_github_google_jwt_verify=/work/ossm/vendor/com_github_google_jwt_verify
 build --override_repository=com_github_google_quiche=/work/ossm/vendor/com_github_google_quiche
@@ -45,7 +47,6 @@ build --override_repository=com_github_nghttp2_nghttp2=/work/ossm/vendor/com_git
 build --override_repository=com_github_nlohmann_json=/work/ossm/vendor/com_github_nlohmann_json
 build --override_repository=com_github_openhistogram_libcircllhist=/work/ossm/vendor/com_github_openhistogram_libcircllhist
 build --override_repository=com_github_openzipkin_zipkinapi=/work/ossm/vendor/com_github_openzipkin_zipkinapi
-build --override_repository=com_github_rules_proto_grpc=/work/ossm/vendor/com_github_rules_proto_grpc
 build --override_repository=com_github_skyapm_cpp2sky=/work/ossm/vendor/com_github_skyapm_cpp2sky
 build --override_repository=com_github_spf13_afero=/work/ossm/vendor/com_github_spf13_afero
 build --override_repository=com_google_absl=/work/ossm/vendor/com_google_absl
@@ -73,7 +74,6 @@ build --override_repository=io_bazel_rules_go=/work/ossm/vendor/io_bazel_rules_g
 build --override_repository=io_bazel_rules_go_bazel_features=/work/ossm/vendor/io_bazel_rules_go_bazel_features
 build --override_repository=io_bazel_rules_nogo=/work/ossm/vendor/io_bazel_rules_nogo
 build --override_repository=io_opentelemetry_cpp=/work/ossm/vendor/io_opentelemetry_cpp
-build --override_repository=io_opentracing_cpp=/work/ossm/vendor/io_opentracing_cpp
 build --override_repository=jq_toolchains=/work/ossm/vendor/jq_toolchains
 build --override_repository=net_zlib=/work/ossm/vendor/net_zlib
 build --override_repository=ocp=/work/ossm/vendor/ocp
@@ -106,8 +106,9 @@ build --override_repository=pypi__setuptools=/work/ossm/vendor/pypi__setuptools
 build --override_repository=pypi__tomli=/work/ossm/vendor/pypi__tomli
 build --override_repository=pypi__wheel=/work/ossm/vendor/pypi__wheel
 build --override_repository=pypi__zipp=/work/ossm/vendor/pypi__zipp
-build --override_repository=python3_11=/work/ossm/vendor/python3_11
-build --override_repository=python3_11_toolchains=/work/ossm/vendor/python3_11_toolchains
+build --override_repository=python3_12=/work/ossm/vendor/python3_12
+build --override_repository=python3_12_toolchains=/work/ossm/vendor/python3_12_toolchains
+build --override_repository=python3_12_x86_64-unknown-linux-gnu=/work/ossm/vendor/python3_12_x86_64-unknown-linux-gnu
 build --override_repository=remote_java_tools=/work/ossm/vendor/remote_java_tools
 build --override_repository=remote_java_tools_linux=/work/ossm/vendor/remote_java_tools_linux
 build --override_repository=rules_cc=/work/ossm/vendor/rules_cc
@@ -129,7 +130,7 @@ build --override_repository=skywalking_data_collect_protocol=/work/ossm/vendor/s
 build --override_repository=utf8_range=/work/ossm/vendor/utf8_range
 build --override_repository=v8=/work/ossm/vendor/v8
 build --override_repository=yq_toolchains=/work/ossm/vendor/yq_toolchains
-build --override_repository=python3_11_x86_64-unknown-linux-gnu=/work/ossm/vendor/python3_11_x86_64-unknown-linux-gnu
-build --override_repository=python3_11_s390x-unknown-linux-gnu=/work/ossm/vendor/python3_11_s390x-unknown-linux-gnu
-build --override_repository=python3_11_ppc64le-unknown-linux-gnu=/work/ossm/vendor/python3_11_ppc64le-unknown-linux-gnu
-build --override_repository=python3_11_aarch64-unknown-linux-gnu=/work/ossm/vendor/python3_11_aarch64-unknown-linux-gnu
+build --override_repository=python3_12_x86_64-unknown-linux-gnu=/work/ossm/vendor/python3_12_x86_64-unknown-linux-gnu
+build --override_repository=python3_12_s390x-unknown-linux-gnu=/work/ossm/vendor/python3_12_s390x-unknown-linux-gnu
+build --override_repository=python3_12_ppc64le-unknown-linux-gnu=/work/ossm/vendor/python3_12_ppc64le-unknown-linux-gnu
+build --override_repository=python3_12_aarch64-unknown-linux-gnu=/work/ossm/vendor/python3_12_aarch64-unknown-linux-gnu

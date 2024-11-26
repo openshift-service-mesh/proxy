@@ -1,24 +1,33 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <stdint.h>
+#include <stdio.h>
+#include <chrono>
+#include <iostream>
+#include <string>
+#include <thread>
+#include <utility>
+
 #include "opentelemetry/exporters/ostream/span_exporter_factory.h"
+#include "opentelemetry/nostd/shared_ptr.h"
 #include "opentelemetry/sdk/resource/resource.h"
 #include "opentelemetry/sdk/trace/batch_span_processor_factory.h"
 #include "opentelemetry/sdk/trace/batch_span_processor_options.h"
-#include "opentelemetry/sdk/trace/exporter.h"
 #include "opentelemetry/sdk/trace/processor.h"
+#include "opentelemetry/sdk/trace/recordable.h"
+#include "opentelemetry/sdk/trace/tracer_provider.h"
 #include "opentelemetry/sdk/trace/tracer_provider_factory.h"
 #include "opentelemetry/trace/provider.h"
-
-#include <chrono>
-#include <thread>
+#include "opentelemetry/trace/span_id.h"
+#include "opentelemetry/trace/tracer.h"
+#include "opentelemetry/trace/tracer_provider.h"
 
 constexpr int kNumSpans  = 10;
 namespace trace_api      = opentelemetry::trace;
 namespace resource       = opentelemetry::sdk::resource;
 namespace trace_sdk      = opentelemetry::sdk::trace;
 namespace trace_exporter = opentelemetry::exporter::trace;
-namespace nostd          = opentelemetry::nostd;
 
 namespace
 {
@@ -38,7 +47,8 @@ void InitTracer()
   // We export `kNumSpans` after every `schedule_delay_millis` milliseconds.
   options.max_export_batch_size = kNumSpans;
 
-  resource::ResourceAttributes attributes = {{"service", "test_service"}, {"version", (uint32_t)1}};
+  resource::ResourceAttributes attributes = {{"service", "test_service"},
+                                             {"version", static_cast<uint32_t>(1)}};
   auto resource                           = resource::Resource::Create(attributes);
 
   auto processor = trace_sdk::BatchSpanProcessorFactory::Create(std::move(exporter), options);
@@ -56,7 +66,7 @@ void CleanupTracer()
   trace_api::Provider::SetTracerProvider(none);
 }
 
-nostd::shared_ptr<trace_api::Tracer> get_tracer()
+opentelemetry::nostd::shared_ptr<trace_api::Tracer> get_tracer()
 {
   auto provider = trace_api::Provider::GetTracerProvider();
   return provider->GetTracer("foo_library");

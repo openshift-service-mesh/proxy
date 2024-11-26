@@ -13,24 +13,16 @@
 # limitations under the License.
 
 load(
-    "//go/private:context.bzl",
-    "go_context",
-)
-load(
     "//go/private:common.bzl",
     "GO_TOOLCHAIN",
     "asm_exts",
     "cgo_exts",
     "go_exts",
+    "syso_exts",
 )
 load(
-    "//go/private:providers.bzl",
-    "GoLibrary",
-    "GoSDK",
-)
-load(
-    "//go/private/rules:transition.bzl",
-    "go_transition",
+    "//go/private:context.bzl",
+    "go_context",
 )
 load(
     "//go/private:mode.bzl",
@@ -40,6 +32,15 @@ load(
     "LINKMODE_C_SHARED",
     "LINKMODE_PLUGIN",
     "LINKMODE_SHARED",
+)
+load(
+    "//go/private:providers.bzl",
+    "GoLibrary",
+    "GoSDK",
+)
+load(
+    "//go/private/rules:transition.bzl",
+    "go_transition",
 )
 
 _EMPTY_DEPSET = depset([])
@@ -188,9 +189,9 @@ _go_binary_kwargs = {
     "implementation": _go_binary_impl,
     "attrs": {
         "srcs": attr.label_list(
-            allow_files = go_exts + asm_exts + cgo_exts,
+            allow_files = go_exts + asm_exts + cgo_exts + syso_exts,
             doc = """The list of Go source files that are compiled to create the package.
-            Only `.go` and `.s` files are permitted, unless the `cgo`
+            Only `.go`, `.s`, and `.syso` files are permitted, unless the `cgo`
             attribute is set, in which case,
             `.c .cc .cpp .cxx .h .hh .hpp .hxx .inc .m .mm`
             files are also permitted. Files may be filtered at build time
@@ -436,11 +437,20 @@ def _go_tool_binary_impl(ctx):
 
     out = ctx.actions.declare_file(name)
     if sdk.goos == "windows":
-        gopath = ctx.actions.declare_directory("gopath")
-        gocache = ctx.actions.declare_directory("gocache")
-        cmd = "@echo off\nset GOMAXPROCS=1\nset GOCACHE=%cd%\\{gocache}\nset GOPATH=%cd%\\{gopath}\n{go} build -o {out} -trimpath -ldflags \"{ldflags}\" {srcs}".format(
-            gopath = gopath.path,
-            gocache = gocache.path,
+        # Using pre-declared directory for temporary output as there is no safe
+        # way under Windows to create unique temporary dir.
+        gotmp = ctx.actions.declare_directory("gotmp")
+        cmd = """@echo off
+set GOMAXPROCS=1
+set GOCACHE=%cd%\\{gotmp}\\gocache
+set GOPATH=%cd%"\\{gotmp}\\gopath
+{go} build -o {out} -trimpath -ldflags \"{ldflags}\" {srcs}
+set GO_EXIT_CODE=%ERRORLEVEL%
+RMDIR /S /Q "{gotmp}"
+MKDIR "{gotmp}"
+exit /b %GO_EXIT_CODE%
+""".format(
+            gotmp = gotmp.path.replace("/", "\\"),
             go = sdk.go.path.replace("/", "\\"),
             out = out.path,
             srcs = " ".join([f.path for f in ctx.files.srcs]),
@@ -452,15 +462,14 @@ def _go_tool_binary_impl(ctx):
             content = cmd,
         )
         ctx.actions.run(
-            executable = "cmd.exe",
-            arguments = ["/S", "/C", bat.path.replace("/", "\\")],
-            inputs = sdk.headers + sdk.tools + sdk.srcs + ctx.files.srcs + [sdk.go, bat],
-            outputs = [out, gopath, gocache],
+            executable = bat,
+            inputs = sdk.headers + sdk.tools + sdk.srcs + ctx.files.srcs + [sdk.go],
+            outputs = [out, gotmp],
             mnemonic = "GoToolchainBinaryBuild",
         )
     else:
         # Note: GOPATH is needed for Go 1.16.
-        cmd = "GOMAXPROCS=1 GOCACHE=$(mktemp -d) GOPATH=$(mktemp -d) {go} build -o {out} -trimpath -ldflags '{ldflags}' {srcs}".format(
+        cmd = """GOTMP=$(mktemp -d);trap "rm -rf \"$GOTMP\"" EXIT;GOMAXPROCS=1 GOCACHE="$GOTMP"/gocache GOPATH="$GOTMP"/gopath {go} build -o {out} -trimpath -ldflags '{ldflags}' {srcs}""".format(
             go = sdk.go.path,
             out = out.path,
             srcs = " ".join([f.path for f in ctx.files.srcs]),

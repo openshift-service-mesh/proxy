@@ -35,10 +35,8 @@ Both these dependencies are listed here:
       `OPENTELEMETRY_OPTION_USE_STD_SPAN=0` to indicate nostd:span will always
       not be a alias for std::span.
   - Uses Abseil C++ Library for `absl::variant` as default `nostd::variant` if
-    `WITH_ABSEIL` cmake option or
-    `--@io_opentelemetry_cpp//api:with_abseil=true` (aka
-    `--//api:with_abseil=true`) bazel option is enabled. License: `Apache
-    License 2.0`
+    `WITH_ABSEIL` cmake option (always enabled with bazel)
+    License: `Apache License 2.0`
 
 - [OTLP/HTTP+JSON](/exporters/otlp)
   exporter:
@@ -63,6 +61,12 @@ Both these dependencies are listed here:
     - protobuf serialized otlp messages are encoded in JSON format using this
       library.
     - License: `MIT License`
+  - [zlib](https://www.zlib.net/): A Massively Spiffy Yet Delicately
+    Unobtrusive Compression Library.
+    - The `http_client` utilizes zlib to compress the message body and send
+      it in gzip format.
+    - License: The library is licensed
+      [here](https://www.zlib.net/zlib_license.html)
 
 - [OTLP/gRPC](/exporters/otlp)
   exporter:

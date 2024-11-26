@@ -559,13 +559,13 @@ def _to_char(n):
     return alpha[n]
 
 def hex(number):
-    """Format integer to hexdecimal representation
+    """Format integer to hexadecimal representation
 
     Args:
         number: number to format
 
     Returns:
-        hexdecimal representation of the number argument
+        hexadecimal representation of the number argument
     """
 
     hex_string = ""
@@ -583,3 +583,73 @@ def hex(number):
         hex_string = "0"
 
     return "{}0x{}".format("-" if is_signed else "", hex_string)
+
+def split_args(s):
+    """Split a string into a list space separated arguments
+
+    Unlike the naive `.split(" ")`, this function takes quoted strings
+    and escapes into account.
+
+    Args:
+        s: input string
+
+    Returns:
+        list of strings with each an argument found in the input string
+    """
+    args = []
+    arg = ""
+    single_quote = False
+    double_quote = False
+    escape = False
+    for c in s.elems():
+        if c == "\\":
+            escape = True
+            continue
+        if escape:
+            # this is an escaped character
+            if c == " ":
+                # a dangling escape is not an escape, put the backslack back
+                arg = arg + "\\"
+            else:
+                escape = False
+        else:
+            # not an escaped character, look for quotes & spaces
+            if c == "'":
+                # single quote char
+                if double_quote:
+                    # we're in a double quote so single quotes are just chars
+                    pass
+                elif single_quote:
+                    # end of single quote
+                    single_quote = False
+                    continue
+                else:
+                    # start of single quote
+                    single_quote = True
+                    continue
+            elif c == "\"":
+                # double quote char
+                if single_quote:
+                    # we're in a single quote so double quotes are just chars
+                    pass
+                elif double_quote:
+                    # end of double quote
+                    double_quote = False
+                    continue
+                else:
+                    # start of double quote
+                    double_quote = True
+                    continue
+        if c == " ":
+            if not single_quote and not double_quote:
+                # splitting space
+                if arg != "":
+                    args.append(arg)
+                arg = ""
+                continue
+        arg = arg + c
+
+    # final arg?
+    if arg != "":
+        args.append(arg)
+    return args

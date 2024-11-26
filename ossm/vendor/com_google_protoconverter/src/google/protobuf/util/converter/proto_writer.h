@@ -22,28 +22,23 @@
 #include <string>
 #include <vector>
 
-#include "google/protobuf/type.pb.h"
-#include "google/protobuf/descriptor.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
+#include "google/protobuf/descriptor.h"
+#include "google/protobuf/io/coded_stream.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/stubs/bytestream.h"
+#include "google/protobuf/type.pb.h"
 #include "google/protobuf/util/converter/datapiece.h"
 #include "google/protobuf/util/converter/error_listener.h"
 #include "google/protobuf/util/converter/structured_objectwriter.h"
 #include "google/protobuf/util/converter/type_info.h"
-#include "google/protobuf/io/coded_stream.h"
-#include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/util/type_resolver.h"
-
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
 
 namespace google {
 namespace protobuf {
 namespace util {
 namespace converter {
-
 
 class ObjectLocationTracker;
 
@@ -53,9 +48,9 @@ class ObjectLocationTracker;
 // special types by inheriting from it or by wrapping it.
 //
 // It also supports streaming.
-class PROTOBUF_EXPORT ProtoWriter : public StructuredObjectWriter {
+class ProtoWriter : public StructuredObjectWriter {
  public:
-// Constructor. Does not take ownership of any parameter passed in.
+  // Constructor. Does not take ownership of any parameter passed in.
   ProtoWriter(TypeResolver* type_resolver, const google::protobuf::Type& type,
               strings::ByteSink* output, ErrorListener* listener);
   ProtoWriter() = delete;
@@ -105,12 +100,10 @@ class PROTOBUF_EXPORT ProtoWriter : public StructuredObjectWriter {
     return RenderDataPiece(name, DataPiece::NullData());
   }
 
-
   // Renders a DataPiece 'value' into a field whose wire type is determined
   // from the given field 'name'.
   virtual ProtoWriter* RenderDataPiece(absl::string_view name,
                                        const DataPiece& data);
-
 
   // Returns the location tracker to use for tracking locations for errors.
   const LocationTrackerInterface& location() {
@@ -156,8 +149,7 @@ class PROTOBUF_EXPORT ProtoWriter : public StructuredObjectWriter {
   }
 
  protected:
-  class PROTOBUF_EXPORT ProtoElement : public BaseElement,
-                                       public LocationTrackerInterface {
+  class ProtoElement : public BaseElement, public LocationTrackerInterface {
    public:
     // Constructor for the root element. No parent nor field.
     ProtoElement(const TypeInfo* typeinfo, const google::protobuf::Type& type,
@@ -278,7 +270,6 @@ class PROTOBUF_EXPORT ProtoWriter : public StructuredObjectWriter {
   // Helper method to write proto tags based on the given field.
   void WriteTag(const google::protobuf::Field& field);
 
-
   // Returns true if the field for type_ can be set as a oneof. If field is not
   // a oneof type, this function does nothing and returns true.
   // If another field for this oneof is already set, this function returns
@@ -370,7 +361,5 @@ class PROTOBUF_EXPORT ProtoWriter : public StructuredObjectWriter {
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_PROTO_WRITER_H_

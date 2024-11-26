@@ -12,9 +12,19 @@
 #include "opentelemetry/common/timestamp.h"
 #include "opentelemetry/nostd/function_ref.h"
 #include "opentelemetry/nostd/span.h"
+#include "opentelemetry/nostd/string_view.h"
+#include "opentelemetry/sdk/metrics/metric_reader.h"
+#include "opentelemetry/sdk/metrics/state/metric_collector.h"
+#include "opentelemetry/sdk/metrics/view/instrument_selector.h"
+#include "opentelemetry/sdk/metrics/view/meter_selector.h"
+#include "opentelemetry/sdk/metrics/view/view.h"
 #include "opentelemetry/sdk/metrics/view/view_registry.h"
 #include "opentelemetry/sdk/resource/resource.h"
 #include "opentelemetry/version.h"
+
+#ifdef ENABLE_METRICS_EXEMPLAR_PREVIEW
+#  include "opentelemetry/sdk/metrics/exemplar/filter_type.h"
+#endif
 
 OPENTELEMETRY_BEGIN_NAMESPACE
 namespace sdk
@@ -44,7 +54,7 @@ public:
    */
   MeterContext(
       std::unique_ptr<ViewRegistry> views = std::unique_ptr<ViewRegistry>(new ViewRegistry()),
-      opentelemetry::sdk::resource::Resource resource =
+      const opentelemetry::sdk::resource::Resource &resource =
           opentelemetry::sdk::resource::Resource::Create({})) noexcept;
 
   /**
@@ -107,13 +117,21 @@ public:
                std::unique_ptr<MeterSelector> meter_selector,
                std::unique_ptr<View> view) noexcept;
 
+#ifdef ENABLE_METRICS_EXEMPLAR_PREVIEW
+
+  void SetExemplarFilter(ExemplarFilterType exemplar_filter_type) noexcept;
+
+  ExemplarFilterType GetExemplarFilter() const noexcept;
+
+#endif
+
   /**
    * NOTE - INTERNAL method, can change in future.
    * Adds a meter to the list of configured meters in thread safe manner.
    *
    * @param meter
    */
-  void AddMeter(std::shared_ptr<Meter> meter);
+  void AddMeter(const std::shared_ptr<Meter> &meter);
 
   void RemoveMeter(nostd::string_view name,
                    nostd::string_view version,
@@ -137,6 +155,10 @@ private:
   std::unique_ptr<ViewRegistry> views_;
   opentelemetry::common::SystemTimestamp sdk_start_ts_;
   std::vector<std::shared_ptr<Meter>> meters_;
+
+#ifdef ENABLE_METRICS_EXEMPLAR_PREVIEW
+  metrics::ExemplarFilterType exemplar_filter_type_ = metrics::ExemplarFilterType::kAlwaysOff;
+#endif
 
 #if defined(__cpp_lib_atomic_value_initialization) && \
     __cpp_lib_atomic_value_initialization >= 201911L

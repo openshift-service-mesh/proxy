@@ -18,8 +18,8 @@
 
 #include <memory>
 #include <string>
-#include <string_view>
 
+#include "absl/strings/string_view.h"
 #include "external/skywalking_data_collect_protocol/language-agent/Tracing.pb.h"
 #include "mocks.h"
 #include "source/propagation_impl.h"
@@ -31,7 +31,7 @@ using testing::Return;
 
 namespace cpp2sky {
 
-static constexpr std::string_view sample_ctx =
+static constexpr absl::string_view sample_ctx =
     "1-MQ==-NQ==-3-bWVzaA==-aW5zdGFuY2U=-L2FwaS92MS9oZWFsdGg=-"
     "ZXhhbXBsZS5jb206ODA4MA==";
 
@@ -44,7 +44,7 @@ class TracingContextTest : public testing::Test {
     span_ctx_ = std::make_shared<SpanContextImpl>(sample_ctx);
     span_ext_ctx_ = std::make_shared<SpanContextExtensionImpl>("1");
 
-    factory_ = std::make_unique<TracingContextFactory>(config_);
+    factory_.reset(new TracingContextFactory(config_));
   }
 
  protected:
@@ -52,8 +52,8 @@ class TracingContextTest : public testing::Test {
   std::string service_name_ = "mesh";
   std::string instance_name_ = "service_0";
   TracerConfig config_;
-  SpanContextPtr span_ctx_;
-  SpanContextExtensionPtr span_ext_ctx_;
+  SpanContextSharedPtr span_ctx_;
+  SpanContextExtensionSharedPtr span_ext_ctx_;
   std::unique_ptr<TracingContextFactory> factory_;
 };
 
@@ -191,8 +191,8 @@ TEST_F(TracingContextTest, ChildSegmentContext) {
   span_child->setPeer("localhost:9000");
   span_child->addTag("category", "database");
 
-  std::string_view key = "method";
-  std::string_view value = "GETxxxx";
+  absl::string_view key = "method";
+  absl::string_view value = "GETxxxx";
   value.remove_suffix(4);
   span_child->addTag(key, value);
 
@@ -202,8 +202,8 @@ TEST_F(TracingContextTest, ChildSegmentContext) {
       SystemTime(std::chrono::duration<int, std::milli>(300)));
   span_child->addLog(log_key, log_value, t3);
 
-  std::string_view log_key2 = "service_1";
-  std::string_view log_value2 = "succeeded\x01\x03";
+  absl::string_view log_key2 = "service_1";
+  absl::string_view log_value2 = "succeeded\x01\x03";
   log_value2.remove_suffix(2);
 
   auto t4 = TimePoint<SystemTime>(
@@ -218,16 +218,6 @@ TEST_F(TracingContextTest, ChildSegmentContext) {
     "parentSpanId": "0",
     "startTime": "100",
     "endTime": "200",
-    "refs": {
-      "refType": "CrossProcess",
-      "traceId": "1",
-      "parentTraceSegmentId": "5",
-      "parentSpanId": 3,
-      "parentService": "mesh",
-      "parentServiceInstance": "instance",
-      "parentEndpoint": "/api/v1/health",
-      "networkAddressUsedAtPeer": "example.com:8080"
-    },
     "peer": "localhost:9000",
     "spanType": "Exit",
     "spanLayer": "Http",
@@ -340,7 +330,8 @@ TEST_F(TracingContextTest, SW8CreateTest) {
   span2->endSpan();
 
   std::string expect_sw8(
-      "1-MQ==-dXVpZA==-1-bWVzaA==-c2VydmljZV8w-c2FtcGxlMQ==-MTAuMC4wLjE6NDQz");
+      "1-MQ==-dXVpZA==-1-bWVzaA==-c2VydmljZV8w-c2FtcGxlMQ==-"
+      "MTAuMC4wLjE6NDQz");
 
   EXPECT_EQ(expect_sw8, *sc.createSW8HeaderValue(target_address));
 
@@ -350,7 +341,7 @@ TEST_F(TracingContextTest, SW8CreateTest) {
   target_address_based_vector = {'1', '0', '.', '0', '.', '0',
                                  '.', '1', ':', '4', '4', '3'};
 
-  std::string_view target_address_based_vector_view{
+  absl::string_view target_address_based_vector_view{
       target_address_based_vector.data(), target_address_based_vector.size()};
 
   EXPECT_EQ(target_address_based_vector.size(), target_address.size());

@@ -1,6 +1,6 @@
 """Unit tests for crate names."""
 
-load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest")
 load("//rust:defs.bzl", "rust_binary", "rust_library", "rust_shared_library", "rust_static_library", "rust_test")
 load("//test/unit:common.bzl", "assert_argv_contains", "assert_argv_contains_prefix_not")
 
@@ -44,16 +44,6 @@ def _custom_crate_name_test_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
     assert_argv_contains(env, tut.actions[0], "--crate-name=custom_name")
-    return analysistest.end(env)
-
-def _invalid_default_crate_name_test_impl(ctx):
-    env = analysistest.begin(ctx)
-    asserts.expect_failure(env, "contains invalid character(s): @")
-    return analysistest.end(env)
-
-def _invalid_custom_crate_name_test_impl(ctx):
-    env = analysistest.begin(ctx)
-    asserts.expect_failure(env, "contains invalid character(s): -")
     return analysistest.end(env)
 
 def _slib_library_name_test_impl(ctx):
@@ -102,14 +92,6 @@ default_crate_name_test_test = analysistest.make(
 custom_crate_name_test_test = analysistest.make(
     _custom_crate_name_test_test_impl,
 )
-invalid_default_crate_name_test = analysistest.make(
-    _invalid_default_crate_name_test_impl,
-    expect_failure = True,
-)
-invalid_custom_crate_name_test = analysistest.make(
-    _invalid_custom_crate_name_test_impl,
-    expect_failure = True,
-)
 slib_library_name_test = analysistest.make(
     _slib_library_name_test_impl,
 )
@@ -144,6 +126,16 @@ def _crate_name_test():
         edition = "2018",
     )
 
+    rust_binary(
+        name = "custom_bin_target_name",
+        crate_name = "smain",
+        srcs = [
+            "smain.rs",
+            "add.rs",
+        ],
+        edition = "2018",
+    )
+
     rust_test(
         name = "default/crate-name-test",
         srcs = ["main.rs"],
@@ -157,24 +149,29 @@ def _crate_name_test():
         edition = "2018",
     )
 
-    rust_library(
-        name = "invalid@default-crate-name",
-        srcs = ["lib.rs"],
+    rust_test(
+        name = "custom_named_test",
+        crate_name = "stest",
+        srcs = [
+            "stest.rs",
+            "add.rs",
+        ],
         edition = "2018",
-        tags = ["manual", "norustfmt"],
-    )
-
-    rust_library(
-        name = "invalid-custom-crate-name",
-        crate_name = "hyphens-not-allowed",
-        srcs = ["lib.rs"],
-        edition = "2018",
-        tags = ["manual", "norustfmt"],
     )
 
     rust_library(
         name = "slib",
         srcs = ["slib.rs"],
+        edition = "2018",
+    )
+
+    rust_library(
+        name = "custom_lib_target_name",
+        crate_name = "slib",
+        srcs = [
+            "slib.rs",
+            "add.rs",
+        ],
         edition = "2018",
     )
 
@@ -225,16 +222,6 @@ def _crate_name_test():
         target_under_test = ":custom-crate-name-test",
     )
 
-    invalid_default_crate_name_test(
-        name = "invalid_default_crate_name_test",
-        target_under_test = ":invalid@default-crate-name",
-    )
-
-    invalid_custom_crate_name_test(
-        name = "invalid_custom_crate_name_test",
-        target_under_test = ":invalid-custom-crate-name",
-    )
-
     no_extra_filename_test(
         name = "no_extra_filename_for_shared_library_test",
         target_under_test = ":shared_lib",
@@ -263,7 +250,5 @@ def crate_name_test_suite(name):
             ":custom_crate_name_binary_test",
             ":default_crate_name_test_test",
             ":custom_crate_name_test_test",
-            ":invalid_default_crate_name_test",
-            ":invalid_custom_crate_name_test",
         ],
     )

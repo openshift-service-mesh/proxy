@@ -35,6 +35,7 @@
 #include "quiche/quic/core/frames/quic_max_streams_frame.h"
 #include "quiche/quic/core/frames/quic_new_connection_id_frame.h"
 #include "quiche/quic/core/frames/quic_reset_stream_at_frame.h"
+#include "quiche/quic/core/frames/quic_rst_stream_frame.h"
 #include "quiche/quic/core/quic_alarm.h"
 #include "quiche/quic/core/quic_alarm_factory.h"
 #include "quiche/quic/core/quic_blocked_writer_interface.h"
@@ -51,6 +52,7 @@
 #include "quiche/quic/core/quic_network_blackhole_detector.h"
 #include "quiche/quic/core/quic_one_block_arena.h"
 #include "quiche/quic/core/quic_packet_creator.h"
+#include "quiche/quic/core/quic_packet_number.h"
 #include "quiche/quic/core/quic_packet_writer.h"
 #include "quiche/quic/core/quic_packets.h"
 #include "quiche/quic/core/quic_path_validator.h"
@@ -107,6 +109,7 @@ class QUICHE_EXPORT QuicConnectionVisitorInterface {
 
   // Called when the stream is reset by the peer.
   virtual void OnRstStream(const QuicRstStreamFrame& frame) = 0;
+  virtual void OnResetStreamAt(const QuicResetStreamAtFrame& frame) = 0;
 
   // Called when the connection is going away according to the peer.
   virtual void OnGoAway(const QuicGoAwayFrame& frame) = 0;
@@ -468,6 +471,13 @@ class QUICHE_EXPORT QuicConnectionDebugVisitor
   // Called after an ClientHelloInner is received and decrypted as a server.
   virtual void OnEncryptedClientHelloReceived(
       absl::string_view /*client_hello*/) {}
+
+  // Called after the QuicSession is created.
+  virtual void OnParsedClientHelloInfo(
+      const ParsedClientHello& /*client_hello*/) {}
+
+  // Called by QuicConnection::SetMultiPacketClientHello.
+  virtual void SetMultiPacketClientHello() {}
 };
 
 class QUICHE_EXPORT QuicConnectionHelperInterface {
@@ -532,6 +542,12 @@ class QUICHE_EXPORT QuicConnection
   // Sets connection parameters from the supplied |config|.
   void SetFromConfig(const QuicConfig& config);
 
+  // Indicates that packets in |dispatcher_sent_packets| have been sent by the
+  // QuicDispatcher on behalf of this connection. Must be called at most once
+  // before any packet is sent by this QuicConnection.
+  void AddDispatcherSentPackets(
+      absl::Span<const DispatcherSentPacket> dispatcher_sent_packets);
+
   // Apply |connection_options| for this connection. Unlike SetFromConfig, this
   // can happen at anytime in the life of a connection.
   // Note there is no guarantee that all options can be applied. Components will
@@ -554,6 +570,15 @@ class QUICHE_EXPORT QuicConnection
   // Called by the Session when a max pacing rate for the connection is needed.
   virtual void SetMaxPacingRate(QuicBandwidth max_pacing_rate);
 
+  // Called by the Session when an application driven pacing rate for the
+  // connection is needed.  Experimental, see b/364614652 for more context.
+  // This is only used by an experimental feature for bbr2_sender to support
+  // soft pacing based on application layer hints when there are signs of
+  // congestion.  application_driven_pacing_rat| is the bandwidth that is
+  // considered sufficient for the application's need.
+  virtual void SetApplicationDrivenPacingRate(
+      QuicBandwidth application_driven_pacing_rate);
+
   // Allows the client to adjust network parameters based on external
   // information.
   void AdjustNetworkParameters(
@@ -569,6 +594,9 @@ class QUICHE_EXPORT QuicConnection
 
   // Returns the max pacing rate for the connection.
   virtual QuicBandwidth MaxPacingRate() const;
+
+  // Returns the application driven pacing rate for the connection.
+  virtual QuicBandwidth ApplicationDrivenPacingRate() const;
 
   // Sends crypto handshake messages of length |write_length| to the peer in as
   // few packets as possible. Returns the number of bytes consumed from the
@@ -1150,6 +1178,11 @@ class QUICHE_EXPORT QuicConnection
   // Returns the largest received packet number sent by peer.
   QuicPacketNumber GetLargestReceivedPacket() const;
 
+  // Called if the ClientHello of the connection spans multiple packets. Should
+  // only be called at the beginning of the connection, but after
+  // |debug_visitor_| is set. For debugging purpose only.
+  void SetMultiPacketClientHello();
+
   // Sets the original destination connection ID on the connection.
   // This is called by QuicDispatcher when it has replaced the connection ID.
   void SetOriginalDestinationConnectionId(
@@ -1202,6 +1235,9 @@ class QUICHE_EXPORT QuicConnection
 
   // Called after an ClientHelloInner is received and decrypted as a server.
   void OnEncryptedClientHelloReceived(absl::string_view client_hello) const;
+
+  // Called after the QuicSession is created.
+  virtual void OnParsedClientHelloInfo(const ParsedClientHello& client_hello);
 
   // Returns true if ack_alarm_ is set.
   bool HasPendingAcks() const;
@@ -1376,6 +1412,24 @@ class QUICHE_EXPORT QuicConnection
   void OnIdleDetectorAlarm() override;
   void OnNetworkBlackholeDetectorAlarm() override;
   void OnPingAlarm() override;
+
+  // Create a CONNECTION_CLOSE packet with a large packet number.
+  // If this method is called before handshake is confirmed, this method returns
+  // nullptr.
+  // This packet can be pre-generated and other processes can send it later to
+  // close the connection.
+  // For example, on Android, the system server stores this packet and sends it
+  // to the server when the app is frozen, loses network access due to the
+  // firewall, or crashes. This will stop servers sending packets to the
+  // device and wasting the device battery.
+  // Note that the generated packet uses the packet number larger than the
+  // current largest acked packet number by (1 << 31) + 1 but the server will
+  // ignore this packet after the connection uses this packet number.
+  std::unique_ptr<SerializedPacket>
+  SerializeLargePacketNumberConnectionClosePacket(
+      QuicErrorCode error, const std::string& error_details);
+
+  bool ShouldFixTimeouts(const QuicConfig& config) const;
 
  protected:
   // Calls cancel() on all the alarms owned by this connection.
@@ -2472,11 +2526,16 @@ class QUICHE_EXPORT QuicConnection
   // might be different from the next codepoint in per_packet_options_.
   QuicEcnCodepoint last_ecn_codepoint_sent_ = ECN_NOT_ECT;
 
+  // If true, the peer has indicated that it supports the RESET_STREAM_AT frame.
+  bool reliable_stream_reset_ = false;
+
   const bool quic_limit_new_streams_per_loop_2_ =
       GetQuicReloadableFlag(quic_limit_new_streams_per_loop_2);
 
   const bool quic_test_peer_addr_change_after_normalize_ =
       GetQuicReloadableFlag(quic_test_peer_addr_change_after_normalize);
+
+  const bool quic_fix_timeouts_ = GetQuicReloadableFlag(quic_fix_timeouts);
 };
 
 }  // namespace quic

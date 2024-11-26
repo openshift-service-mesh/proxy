@@ -15,20 +15,16 @@
 """ios_application Starlark tests."""
 
 load(
-    ":common.bzl",
-    "common",
-)
-load(
     "//apple/build_settings:build_settings.bzl",
     "build_settings_labels",
 )
 load(
-    "//test/starlark_tests/rules:apple_verification_test.bzl",
-    "apple_verification_test",
-)
-load(
     "//test/starlark_tests/rules:analysis_failure_message_test.bzl",
     "analysis_failure_message_test",
+)
+load(
+    "//test/starlark_tests/rules:analysis_output_group_info_files_test.bzl",
+    "analysis_output_group_info_files_test",
 )
 load(
     "//test/starlark_tests/rules:analysis_target_actions_test.bzl",
@@ -40,6 +36,18 @@ load(
     "analysis_target_tree_artifacts_outputs_test",
 )
 load(
+    "//test/starlark_tests/rules:apple_codesigning_dossier_info_provider_test.bzl",
+    "apple_codesigning_dossier_info_provider_test",
+)
+load(
+    "//test/starlark_tests/rules:apple_dsym_bundle_info_test.bzl",
+    "apple_dsym_bundle_info_test",
+)
+load(
+    "//test/starlark_tests/rules:apple_verification_test.bzl",
+    "apple_verification_test",
+)
+load(
     "//test/starlark_tests/rules:common_verification_tests.bzl",
     "apple_symbols_file_test",
     "archive_contents_test",
@@ -49,24 +57,20 @@ load(
     "entitlements_contents_test",
 )
 load(
-    "//test/starlark_tests/rules:analysis_output_group_info_files_test.bzl",
-    "analysis_output_group_info_files_test",
-)
-load(
-    "//test/starlark_tests/rules:apple_dsym_bundle_info_test.bzl",
-    "apple_dsym_bundle_info_test",
-)
-load(
     "//test/starlark_tests/rules:infoplist_contents_test.bzl",
     "infoplist_contents_test",
+)
+load(
+    "//test/starlark_tests/rules:linkmap_test.bzl",
+    "linkmap_test",
 )
 load(
     "//test/starlark_tests/rules:output_group_zip_contents_test.bzl",
     "output_group_zip_contents_test",
 )
 load(
-    "//test/starlark_tests/rules:linkmap_test.bzl",
-    "linkmap_test",
+    ":common.bzl",
+    "common",
 )
 
 def ios_application_test_suite(name):
@@ -85,6 +89,12 @@ def ios_application_test_suite(name):
         name = "{}_tree_artifact_outputs_test".format(name),
         target_under_test = "//test/starlark_tests/targets_under_test/ios:app_minimal",
         expected_outputs = ["app_minimal.app"],
+        tags = [name],
+    )
+    analysis_target_tree_artifacts_outputs_test(
+        name = "{}_tree_artifact_outputs_with_space_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_minimal_with_space_and_post_processor",
+        expected_outputs = ["app_minimal_with_space_and_post_processor_archive-root/Payload/app minimal.app"],
         tags = [name],
     )
 
@@ -769,6 +779,49 @@ def ios_application_test_suite(name):
         tags = [name],
     )
 
+    # Test app with a Widget Configuration Intent with a computed property generates and bundles Metadata.appintents bundle.
+    archive_contents_test(
+        name = "{}_with_widget_configuration_intent_contains_app_intents_metadata_bundle_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_widget_configuration_intent",
+        contains = [
+            "$BUNDLE_ROOT/Metadata.appintents/extract.actionsdata",
+            "$BUNDLE_ROOT/Metadata.appintents/version.json",
+        ],
+        tags = [
+            name,
+        ],
+    )
+
+    # Test app that has two Intents defined as top level modules generates an error message.
+    analysis_failure_message_test(
+        name = "{}_with_two_app_intents_and_two_modules_fails".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_app_intent_and_widget_configuration_intent",
+        expected_error = (
+            "App Intents must have only one module name for metadata generation to work correctly."
+        ).format(
+            package = "//test/starlark_tests/targets_under_test/ios",
+        ),
+        tags = [
+            name,
+        ],
+    )
+
+    # Test app with App Intents generates and bundles Metadata.appintents bundle for fat binaries.
+    archive_contents_test(
+        name = "{}_fat_build_contains_app_intents_metadata_bundle_test".format(name),
+        build_type = "simulator",
+        cpus = {
+            "ios_multi_cpus": ["x86_64", "sim_arm64"],
+        },
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_app_intents",
+        contains = [
+            "$BUNDLE_ROOT/Metadata.appintents/extract.actionsdata",
+            "$BUNDLE_ROOT/Metadata.appintents/version.json",
+        ],
+        tags = [name],
+    )
+
     # Test Metadata.appintents bundle contents for simulator and device.
     archive_contents_test(
         name = "{}_metadata_appintents_bundle_contents_for_simulator_test".format(name),
@@ -972,6 +1025,13 @@ Error: Received conflicting base bundle IDs from more than one assigned Apple sh
 
 Found "com.bazel.app.example" which does not match previously defined "com.altbazel.app.example".
 """,
+        tags = [name],
+    )
+
+    apple_codesigning_dossier_info_provider_test(
+        name = "{}_codesigning_dossier_info_provider_test".format(name),
+        expected_dossier = "app_dossier.zip",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app",
         tags = [name],
     )
 

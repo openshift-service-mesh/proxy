@@ -11,15 +11,15 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT/Apache-2.0
-# ])
-
 rust_library(
     name = "winapi_i686_pc_windows_gnu",
-    srcs = glob(["**/*.rs"]),
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = True,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -85,12 +85,29 @@ rust_library(
 )
 
 cargo_build_script(
-    name = "winapi-i686-pc-windows-gnu_build_script",
-    srcs = glob(["**/*.rs"]),
+    name = "_bs",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = True,
+    ),
+    compile_data = glob(
+        include = ["**"],
+        allow_empty = True,
+        exclude = [
+            "**/* *",
+            "**/*.rs",
+            ".tmp_git_root/**/*",
+            "BUILD",
+            "BUILD.bazel",
+            "WORKSPACE",
+            "WORKSPACE.bazel",
+        ],
+    ),
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -101,6 +118,7 @@ cargo_build_script(
         ],
     ),
     edition = "2015",
+    pkg_name = "winapi-i686-pc-windows-gnu",
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -117,6 +135,6 @@ cargo_build_script(
 
 alias(
     name = "build_script_build",
-    actual = "winapi-i686-pc-windows-gnu_build_script",
+    actual = ":_bs",
     tags = ["manual"],
 )

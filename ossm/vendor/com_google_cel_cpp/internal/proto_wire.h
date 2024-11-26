@@ -75,7 +75,7 @@ inline constexpr size_t VarintSize(bool x ABSL_ATTRIBUTE_UNUSED) { return 1; }
 // Compile-time constant for the size required to encode any value of the
 // integral type `T` using varint.
 template <typename T>
-inline constexpr size_t kMaxVarintSize = VarintSize(static_cast<T>(~T{0}));
+inline constexpr size_t kMaxVarintSize = VarintSize(static_cast<T>(!T{0}));
 
 // Enumeration of the protocol buffer wire tags, see
 // https://protobuf.dev/programming-guides/encoding/#structure.

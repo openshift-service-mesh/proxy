@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,11 +22,12 @@ import "google/api/field_behavior.proto";
 import "google/api/httpbody.proto";
 import "google/api/resource.proto";
 import "google/cloud/discoveryengine/v1beta/import_config.proto";
+import "google/cloud/discoveryengine/v1beta/purge_config.proto";
 import "google/cloud/discoveryengine/v1beta/user_event.proto";
 import "google/longrunning/operations.proto";
 
 option csharp_namespace = "Google.Cloud.DiscoveryEngine.V1Beta";
-option go_package = "google.golang.org/genproto/googleapis/cloud/discoveryengine/v1beta;discoveryengine";
+option go_package = "cloud.google.com/go/discoveryengine/apiv1beta/discoveryenginepb;discoveryenginepb";
 option java_multiple_files = true;
 option java_outer_classname = "UserEventServiceProto";
 option java_package = "com.google.cloud.discoveryengine.v1beta";
@@ -45,21 +46,55 @@ service UserEventService {
     option (google.api.http) = {
       post: "/v1beta/{parent=projects/*/locations/*/dataStores/*}/userEvents:write"
       body: "user_event"
+      additional_bindings {
+        post: "/v1beta/{parent=projects/*/locations/*/collections/*/dataStores/*}/userEvents:write"
+        body: "user_event"
+      }
+      additional_bindings {
+        post: "/v1beta/{parent=projects/*/locations/*}/userEvents:write"
+        body: "user_event"
+      }
     };
   }
 
   // Writes a single user event from the browser. This uses a GET request to
-  // due to browser restriction of POST-ing to a 3rd party domain.
+  // due to browser restriction of POST-ing to a third-party domain.
   //
   // This method is used only by the Discovery Engine API JavaScript pixel and
   // Google Tag Manager. Users should not call this method directly.
   rpc CollectUserEvent(CollectUserEventRequest) returns (google.api.HttpBody) {
     option (google.api.http) = {
       get: "/v1beta/{parent=projects/*/locations/*/dataStores/*}/userEvents:collect"
+      additional_bindings {
+        get: "/v1beta/{parent=projects/*/locations/*/collections/*/dataStores/*}/userEvents:collect"
+      }
+      additional_bindings {
+        get: "/v1beta/{parent=projects/*/locations/*}/userEvents:collect"
+      }
     };
   }
 
-  // Bulk import of User events. Request processing might be
+  // Deletes permanently all user events specified by the filter provided.
+  // Depending on the number of events specified by the filter, this operation
+  // could take hours or days to complete. To test a filter, use the list
+  // command first.
+  rpc PurgeUserEvents(PurgeUserEventsRequest)
+      returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      post: "/v1beta/{parent=projects/*/locations/*/dataStores/*}/userEvents:purge"
+      body: "*"
+      additional_bindings {
+        post: "/v1beta/{parent=projects/*/locations/*/collections/*/dataStores/*}/userEvents:purge"
+        body: "*"
+      }
+    };
+    option (google.longrunning.operation_info) = {
+      response_type: "google.cloud.discoveryengine.v1beta.PurgeUserEventsResponse"
+      metadata_type: "google.cloud.discoveryengine.v1beta.PurgeUserEventsMetadata"
+    };
+  }
+
+  // Bulk import of user events. Request processing might be
   // synchronous. Events that already exist are skipped.
   // Use this method for backfilling historical user events.
   //
@@ -71,6 +106,10 @@ service UserEventService {
     option (google.api.http) = {
       post: "/v1beta/{parent=projects/*/locations/*/dataStores/*}/userEvents:import"
       body: "*"
+      additional_bindings {
+        post: "/v1beta/{parent=projects/*/locations/*/collections/*/dataStores/*}/userEvents:import"
+        body: "*"
+      }
     };
     option (google.longrunning.operation_info) = {
       response_type: "google.cloud.discoveryengine.v1beta.ImportUserEventsResponse"
@@ -81,8 +120,16 @@ service UserEventService {
 
 // Request message for WriteUserEvent method.
 message WriteUserEventRequest {
-  // Required. The parent DataStore resource name, such as
-  // `projects/{project}/locations/{location}/dataStores/{data_store}`.
+  // Required. The parent resource name.
+  // If the write user event action is applied in
+  // [DataStore][google.cloud.discoveryengine.v1beta.DataStore] level, the
+  // format is:
+  // `projects/{project}/locations/{location}/collections/{collection}/dataStores/{data_store}`.
+  // If the write user event action is applied in [Location][] level, for
+  // example, the event with
+  // [Document][google.cloud.discoveryengine.v1beta.Document] across multiple
+  // [DataStore][google.cloud.discoveryengine.v1beta.DataStore], the format is:
+  // `projects/{project}/locations/{location}`.
   string parent = 1 [
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference) = {
@@ -92,12 +139,16 @@ message WriteUserEventRequest {
 
   // Required. User event to write.
   optional UserEvent user_event = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // If set to true, the user event is written asynchronously after
+  // validation, and the API responds without waiting for the write.
+  bool write_async = 3;
 }
 
 // Request message for CollectUserEvent method.
 message CollectUserEventRequest {
   // Required. The parent DataStore resource name, such as
-  // `projects/{project}/locations/{location}/dataStores/{data_store}`.
+  // `projects/{project}/locations/{location}/collections/{collection}/dataStores/{data_store}`.
   string parent = 1 [
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference) = {
@@ -111,7 +162,7 @@ message CollectUserEventRequest {
 
   // The URL including cgi-parameters but excluding the hash fragment with a
   // length limit of 5,000 characters. This is often more useful than the
-  // referer URL, because many browsers only send the domain for 3rd party
+  // referer URL, because many browsers only send the domain for third-party
   // requests.
   optional string uri = 3;
 

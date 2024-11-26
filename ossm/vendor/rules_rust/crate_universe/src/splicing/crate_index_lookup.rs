@@ -3,13 +3,13 @@ use anyhow::{Context, Result};
 use crates_index::IndexConfig;
 use hex::ToHex;
 
-pub enum CrateIndexLookup {
+pub(crate) enum CrateIndexLookup {
     Git(crates_index::GitIndex),
     Http(crates_index::SparseIndex),
 }
 
 impl CrateIndexLookup {
-    pub fn get_source_info(&self, pkg: &cargo_lock::Package) -> Result<Option<SourceInfo>> {
+    pub(crate) fn get_source_info(&self, pkg: &cargo_lock::Package) -> Result<Option<SourceInfo>> {
         let index_config = self
             .index_config()
             .context("Failed to get crate index config")?;
@@ -66,9 +66,11 @@ mod test {
         {
             let _e = EnvVarResetter::set(
                 "CARGO_HOME",
-                runfiles.rlocation(
-                    "rules_rust/crate_universe/test_data/crate_indexes/lazy_static/cargo_home",
-                ),
+                runfiles::rlocation!(
+                    runfiles,
+                    "rules_rust/crate_universe/test_data/crate_indexes/lazy_static/cargo_home"
+                )
+                .unwrap(),
             );
 
             let index = CrateIndexLookup::Http(
@@ -95,7 +97,8 @@ mod test {
             );
         }
         {
-            let _e = EnvVarResetter::set("CARGO_HOME", runfiles.rlocation("rules_rust/crate_universe/test_data/crate_indexes/rewritten_lazy_static/cargo_home"));
+            let _e = EnvVarResetter::set("CARGO_HOME", 
+                runfiles::rlocation!(runfiles, "rules_rust/crate_universe/test_data/crate_indexes/rewritten_lazy_static/cargo_home").unwrap());
 
             let index = CrateIndexLookup::Http(
                 crates_index::SparseIndex::from_url("sparse+https://index.crates.io/").unwrap(),

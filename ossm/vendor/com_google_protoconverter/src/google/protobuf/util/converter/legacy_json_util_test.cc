@@ -14,6 +14,9 @@
 
 #include "google/protobuf/util/converter/legacy_json_util.h"
 
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <list>
@@ -21,29 +24,24 @@
 #include <string>
 #include <vector>
 
-#include "google/protobuf/duration.pb.h"
-#include "google/protobuf/field_mask.pb.h"
-#include "google/protobuf/struct.pb.h"
-#include "google/protobuf/timestamp.pb.h"
-#include "google/protobuf/wrappers.pb.h"
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "google/protobuf/util/converter/testdata/maps.pb.h"
 #include "google/protobuf/descriptor_database.h"
+#include "google/protobuf/duration.pb.h"
 #include "google/protobuf/dynamic_message.h"
+#include "google/protobuf/field_mask.pb.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
+#include "google/protobuf/struct.pb.h"
+#include "google/protobuf/stubs/status_macros.h"
+#include "google/protobuf/timestamp.pb.h"
+#include "google/protobuf/unittest.pb.h"
+#include "google/protobuf/util/converter/testdata/maps.pb.h"
 #include "google/protobuf/util/json_format.pb.h"
 #include "google/protobuf/util/json_format_proto3.pb.h"
-#include "google/protobuf/unittest.pb.h"
 #include "google/protobuf/util/type_resolver.h"
 #include "google/protobuf/util/type_resolver_util.h"
-#include "google/protobuf/stubs/status_macros.h"
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
+#include "google/protobuf/wrappers.pb.h"
 
 namespace google {
 namespace protobuf {
@@ -257,7 +255,6 @@ TEST_P(JsonTest, TestPreserveProtoFieldNames) {
   JsonPrintOptions options;
   options.preserve_proto_field_names = true;
   EXPECT_THAT(ToJson(m, options), IsOkAndHolds("{\"message_value\":{}}"));
-
 }
 
 TEST_P(JsonTest, Camels) {
@@ -970,7 +967,6 @@ TEST_P(JsonTest, TestOverwriteRepeated) {
   ASSERT_OK(ToProto(m, R"json({"repeated_int32_value": [1, 2, 3]})json"));
   EXPECT_THAT(m.repeated_int32_value(), ElementsAre(1, 2, 3));
 }
-
 
 TEST_P(JsonTest, TestDuration) {
   auto m = ToProto<proto3::TestDuration>(R"json(

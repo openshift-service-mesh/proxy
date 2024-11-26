@@ -33,7 +33,8 @@ A C++ `FeatureConfiguration` value (see
 ## swift_common.compilation_attrs
 
 <pre>
-swift_common.compilation_attrs(<a href="#swift_common.compilation_attrs-additional_deps_aspects">additional_deps_aspects</a>, <a href="#swift_common.compilation_attrs-additional_deps_providers">additional_deps_providers</a>, <a href="#swift_common.compilation_attrs-requires_srcs">requires_srcs</a>)
+swift_common.compilation_attrs(<a href="#swift_common.compilation_attrs-additional_deps_aspects">additional_deps_aspects</a>, <a href="#swift_common.compilation_attrs-additional_deps_providers">additional_deps_providers</a>,
+                               <a href="#swift_common.compilation_attrs-include_dev_srch_paths_attrib">include_dev_srch_paths_attrib</a>, <a href="#swift_common.compilation_attrs-requires_srcs">requires_srcs</a>)
 </pre>
 
 Returns an attribute dictionary for rules that compile Swift code.
@@ -70,6 +71,7 @@ attributes from the earlier items in the list.
 | :------------- | :------------- | :------------- |
 | <a id="swift_common.compilation_attrs-additional_deps_aspects"></a>additional_deps_aspects |  A list of additional aspects that should be applied to `deps`. Defaults to the empty list. These must be passed by the individual rules to avoid potential circular dependencies between the API and the aspects; the API loaded the aspects directly, then those aspects would not be able to load the API.   |  `[]` |
 | <a id="swift_common.compilation_attrs-additional_deps_providers"></a>additional_deps_providers |  A list of lists representing additional providers that should be allowed by the `deps` attribute of the rule.   |  `[]` |
+| <a id="swift_common.compilation_attrs-include_dev_srch_paths_attrib"></a>include_dev_srch_paths_attrib |  A `bool` that indicates whether to include the `always_include_developer_search_paths` attribute.   |  `False` |
 | <a id="swift_common.compilation_attrs-requires_srcs"></a>requires_srcs |  Indicates whether the `srcs` attribute should be marked as mandatory and non-empty. Defaults to `True`.   |  `True` |
 
 **RETURNS**
@@ -84,9 +86,10 @@ A new attribute dictionary that can be added to the attributes of a
 ## swift_common.compile
 
 <pre>
-swift_common.compile(<a href="#swift_common.compile-actions">actions</a>, <a href="#swift_common.compile-additional_inputs">additional_inputs</a>, <a href="#swift_common.compile-copts">copts</a>, <a href="#swift_common.compile-defines">defines</a>, <a href="#swift_common.compile-deps">deps</a>, <a href="#swift_common.compile-extra_swift_infos">extra_swift_infos</a>,
-                     <a href="#swift_common.compile-feature_configuration">feature_configuration</a>, <a href="#swift_common.compile-generated_header_name">generated_header_name</a>, <a href="#swift_common.compile-is_test">is_test</a>, <a href="#swift_common.compile-module_name">module_name</a>, <a href="#swift_common.compile-package_name">package_name</a>,
-                     <a href="#swift_common.compile-plugins">plugins</a>, <a href="#swift_common.compile-private_deps">private_deps</a>, <a href="#swift_common.compile-srcs">srcs</a>, <a href="#swift_common.compile-swift_toolchain">swift_toolchain</a>, <a href="#swift_common.compile-target_name">target_name</a>, <a href="#swift_common.compile-workspace_name">workspace_name</a>)
+swift_common.compile(<a href="#swift_common.compile-actions">actions</a>, <a href="#swift_common.compile-additional_inputs">additional_inputs</a>, <a href="#swift_common.compile-cc_infos">cc_infos</a>, <a href="#swift_common.compile-copts">copts</a>, <a href="#swift_common.compile-defines">defines</a>, <a href="#swift_common.compile-extra_swift_infos">extra_swift_infos</a>,
+                     <a href="#swift_common.compile-feature_configuration">feature_configuration</a>, <a href="#swift_common.compile-generated_header_name">generated_header_name</a>, <a href="#swift_common.compile-is_test">is_test</a>, <a href="#swift_common.compile-include_dev_srch_paths">include_dev_srch_paths</a>,
+                     <a href="#swift_common.compile-module_name">module_name</a>, <a href="#swift_common.compile-objc_infos">objc_infos</a>, <a href="#swift_common.compile-package_name">package_name</a>, <a href="#swift_common.compile-plugins">plugins</a>, <a href="#swift_common.compile-private_swift_infos">private_swift_infos</a>, <a href="#swift_common.compile-srcs">srcs</a>,
+                     <a href="#swift_common.compile-swift_infos">swift_infos</a>, <a href="#swift_common.compile-swift_toolchain">swift_toolchain</a>, <a href="#swift_common.compile-target_name">target_name</a>, <a href="#swift_common.compile-workspace_name">workspace_name</a>)
 </pre>
 
 Compiles a Swift module.
@@ -98,44 +101,59 @@ Compiles a Swift module.
 | :------------- | :------------- | :------------- |
 | <a id="swift_common.compile-actions"></a>actions |  The context's `actions` object.   |  none |
 | <a id="swift_common.compile-additional_inputs"></a>additional_inputs |  A list of `File`s representing additional input files that need to be passed to the Swift compile action because they are referenced by compiler flags.   |  `[]` |
+| <a id="swift_common.compile-cc_infos"></a>cc_infos |  A list of `CcInfo` providers that represent C/Objective-C requirements of the target being compiled, such as Swift-compatible preprocessor defines, header search paths, and so forth. These are typically retrieved from a target's dependencies.   |  none |
 | <a id="swift_common.compile-copts"></a>copts |  A list of compiler flags that apply to the target being built. These flags, along with those from Bazel's Swift configuration fragment (i.e., `--swiftcopt` command line flags) are scanned to determine whether whole module optimization is being requested, which affects the nature of the output files.   |  `[]` |
 | <a id="swift_common.compile-defines"></a>defines |  Symbols that should be defined by passing `-D` to the compiler.   |  `[]` |
-| <a id="swift_common.compile-deps"></a>deps |  Non-private dependencies of the target being compiled. These targets are used as dependencies of both the Swift module being compiled and the Clang module for the generated header. These targets must propagate one of the following providers: `CcInfo`, `SwiftInfo`, or `apple_common.Objc`.   |  `[]` |
 | <a id="swift_common.compile-extra_swift_infos"></a>extra_swift_infos |  Extra `SwiftInfo` providers that aren't contained by the `deps` of the target being compiled but are required for compilation.   |  `[]` |
 | <a id="swift_common.compile-feature_configuration"></a>feature_configuration |  A feature configuration obtained from `swift_common.configure_features`.   |  none |
 | <a id="swift_common.compile-generated_header_name"></a>generated_header_name |  The name of the Objective-C generated header that should be generated for this module. If omitted, no header will be generated.   |  `None` |
-| <a id="swift_common.compile-is_test"></a>is_test |  Represents if the `testonly` value of the context.   |  none |
+| <a id="swift_common.compile-is_test"></a>is_test |  Deprecated. This argument will be removed in the next major release. Use the `include_dev_srch_paths` attribute instead. Represents if the `testonly` value of the context.   |  `None` |
+| <a id="swift_common.compile-include_dev_srch_paths"></a>include_dev_srch_paths |  A `bool` that indicates whether the developer framework search paths will be added to the compilation command.   |  `None` |
 | <a id="swift_common.compile-module_name"></a>module_name |  The name of the Swift module being compiled. This must be present and valid; use `swift_common.derive_module_name` to generate a default from the target's label if needed.   |  none |
+| <a id="swift_common.compile-objc_infos"></a>objc_infos |  A list of `apple_common.ObjC` providers that represent C/Objective-C requirements of the target being compiled, such as Swift-compatible preprocessor defines, header search paths, and so forth. These are typically retrieved from a target's dependencies.   |  none |
 | <a id="swift_common.compile-package_name"></a>package_name |  The semantic package of the name of the Swift module being compiled.   |  none |
 | <a id="swift_common.compile-plugins"></a>plugins |  A list of `SwiftCompilerPluginInfo` providers that represent plugins that should be loaded by the compiler.   |  `[]` |
-| <a id="swift_common.compile-private_deps"></a>private_deps |  Private (implementation-only) dependencies of the target being compiled. These are only used as dependencies of the Swift module, not of the Clang module for the generated header. These targets must propagate one of the following providers: `CcInfo`, `SwiftInfo`, or `apple_common.Objc`.   |  `[]` |
+| <a id="swift_common.compile-private_swift_infos"></a>private_swift_infos |  A list of `SwiftInfo` providers from private (implementation-only) dependencies of the target being compiled. The modules defined by these providers are used as dependencies of the Swift module being compiled but not of the Clang module for the generated header.   |  `[]` |
 | <a id="swift_common.compile-srcs"></a>srcs |  The Swift source files to compile.   |  none |
+| <a id="swift_common.compile-swift_infos"></a>swift_infos |  A list of `SwiftInfo` providers from non-private dependencies of the target being compiled. The modules defined by these providers are used as dependencies of both the Swift module being compiled and the Clang module for the generated header.   |  none |
 | <a id="swift_common.compile-swift_toolchain"></a>swift_toolchain |  The `SwiftToolchainInfo` provider of the toolchain.   |  none |
 | <a id="swift_common.compile-target_name"></a>target_name |  The name of the target for which the code is being compiled, which is used to determine unique file paths for the outputs.   |  none |
 | <a id="swift_common.compile-workspace_name"></a>workspace_name |  The name of the workspace for which the code is being compiled, which is used to determine unique file paths for some outputs.   |  none |
 
 **RETURNS**
 
-A tuple containing three elements:
+A `struct` with the following fields:
 
-  1.  A Swift module context (as returned by `swift_common.create_module`)
-      that contains the Swift (and potentially C/Objective-C) compilation
-      prerequisites of the compiled module. This should typically be
-      propagated by a `SwiftInfo` provider of the calling rule.
-  2.  A `CcCompilationOutputs` object (as returned by
-      `cc_common.create_compilation_outputs`) that contains the compiled
-      object files.
-  3.  A struct containing:
+  *   `module_context`: A Swift module context (as returned by
+      `swift_common.create_module`) that contains the Swift (and
+      potentially C/Objective-C) compilation prerequisites of the compiled
+      module. This should typically be propagated by a `SwiftInfo`
+      provider of the calling rule, and the `CcCompilationContext` inside
+      the Clang module substructure should be propagated by the `CcInfo`
+      provider of the calling rule.
+
+  *   `compilation_outputs`: A `CcCompilationOutputs` object (as returned
+      by `cc_common.create_compilation_outputs`) that contains the
+      compiled object files.
+
+  *   `supplemental_outputs`: A `struct` representing supplemental,
+      optional outputs. Its fields are:
+
       *   `ast_files`: A list of `File`s output from the `DUMP_AST`
           action.
-      *   `indexstore`: A `File` representing the directory that contains
-          the index store data generated by the compiler if the
-          `"swift.index_while_building"` feature is enabled, otherwise
-          this will be `None`.
-      *   `symbol_graph`: A `File` representing the directory that
-          contains the symbol graph data generated by the compiler if the
-          `"swift.emit_symbol_graph"` feature is enabled, otherwise this
-          will be `None`.
+
+      *   `const_values_files`: A list of `File`s that contains JSON
+          representations of constant values extracted from the source
+          files, if requested via a direct dependency.
+
+      *   `indexstore_directory`: A directory-type `File` that represents
+          the indexstore output files created when the feature
+          `swift.index_while_building` is enabled.
+
+      *   `macro_expansion_directory`: A directory-type `File` that
+          represents the location where macro expansion files were written
+          (only in debug/fastbuild and only when the toolchain supports
+          macros).
 
 
 <a id="swift_common.compile_module_interface"></a>
@@ -144,7 +162,8 @@ A tuple containing three elements:
 
 <pre>
 swift_common.compile_module_interface(<a href="#swift_common.compile_module_interface-actions">actions</a>, <a href="#swift_common.compile_module_interface-compilation_contexts">compilation_contexts</a>, <a href="#swift_common.compile_module_interface-feature_configuration">feature_configuration</a>,
-                                      <a href="#swift_common.compile_module_interface-module_name">module_name</a>, <a href="#swift_common.compile_module_interface-swiftinterface_file">swiftinterface_file</a>, <a href="#swift_common.compile_module_interface-swift_infos">swift_infos</a>, <a href="#swift_common.compile_module_interface-swift_toolchain">swift_toolchain</a>)
+                                      <a href="#swift_common.compile_module_interface-module_name">module_name</a>, <a href="#swift_common.compile_module_interface-swiftinterface_file">swiftinterface_file</a>, <a href="#swift_common.compile_module_interface-swift_infos">swift_infos</a>, <a href="#swift_common.compile_module_interface-swift_toolchain">swift_toolchain</a>,
+                                      <a href="#swift_common.compile_module_interface-target_name">target_name</a>)
 </pre>
 
 Compiles a Swift module interface.
@@ -161,6 +180,7 @@ Compiles a Swift module interface.
 | <a id="swift_common.compile_module_interface-swiftinterface_file"></a>swiftinterface_file |  The Swift module interface file to compile.   |  none |
 | <a id="swift_common.compile_module_interface-swift_infos"></a>swift_infos |  A list of `SwiftInfo` providers from dependencies of the target being compiled.   |  none |
 | <a id="swift_common.compile_module_interface-swift_toolchain"></a>swift_toolchain |  The `SwiftToolchainInfo` provider of the toolchain.   |  none |
+| <a id="swift_common.compile_module_interface-target_name"></a>target_name |  The name of the target for which the code is being compiled, which is used to determine unique file paths for the outputs.   |  none |
 
 **RETURNS**
 
@@ -211,30 +231,11 @@ An opaque value representing the feature configuration that can be
 ## swift_common.create_clang_module
 
 <pre>
-swift_common.create_clang_module(<a href="#swift_common.create_clang_module-compilation_context">compilation_context</a>, <a href="#swift_common.create_clang_module-module_map">module_map</a>, <a href="#swift_common.create_clang_module-precompiled_module">precompiled_module</a>)
+swift_common.create_clang_module(<a href="#swift_common.create_clang_module-compilation_context">compilation_context</a>, <a href="#swift_common.create_clang_module-module_map">module_map</a>, <a href="#swift_common.create_clang_module-precompiled_module">precompiled_module</a>,
+                                 <a href="#swift_common.create_clang_module-strict_includes">strict_includes</a>)
 </pre>
 
 Creates a value representing a Clang module used as a Swift dependency.
-
-Note: The `compilation_context` argument of this function is primarily
-intended to communicate information *to* the Swift build rules, not to
-retrieve information *back out.* In most cases, it is better to depend on
-the `CcInfo` provider propagated by a Swift target to collect transitive
-C/Objective-C compilation information about that target. This is because the
-context used when compiling the module itself may not be the same as the
-context desired when depending on it. (For example, `apple_common.Objc`
-supports "strict include paths" which are only propagated to direct
-dependents.)
-
-One valid exception to the guidance above is retrieving the generated header
-associated with a specific Swift module. Since the `CcInfo` provider
-propagated by the library will have already merged them transitively (or,
-in the case of a hypothetical custom rule that propagates multiple direct
-modules, the `direct_public_headers` of the `CcInfo` would also have them
-merged), it is acceptable to read the headers from the compilation context
-of the module struct itself in order to associate them with the module that
-generated them.
-
 
 **PARAMETERS**
 
@@ -244,11 +245,13 @@ generated them.
 | <a id="swift_common.create_clang_module-compilation_context"></a>compilation_context |  A `CcCompilationContext` that contains the header files and other context (such as include paths, preprocessor defines, and so forth) needed to compile this module as an explicit module.   |  none |
 | <a id="swift_common.create_clang_module-module_map"></a>module_map |  The text module map file that defines this module. This argument may be specified as a `File` or as a `string`; in the latter case, it is assumed to be the path to a file that cannot be provided as an action input because it is outside the workspace (for example, the module map for a module from an Xcode SDK).   |  none |
 | <a id="swift_common.create_clang_module-precompiled_module"></a>precompiled_module |  A `File` representing the precompiled module (`.pcm` file) if one was emitted for the module. This may be `None` if no explicit module was built for the module; in that case, targets that depend on the module will fall back to the text module map and headers.   |  `None` |
+| <a id="swift_common.create_clang_module-strict_includes"></a>strict_includes |  A `depset` of strings representing additional Clang include paths that should be passed to the compiler when this module is a _direct_ dependency of the module being compiled. May be `None`. **This field only exists to support a specific legacy use case and should otherwise not be used, as it is fundamentally incompatible with Swift's import model.**   |  `None` |
 
 **RETURNS**
 
-A `struct` containing the `compilation_context`, `module_map`, and
-  `precompiled_module` fields provided as arguments.
+A `struct` containing the `compilation_context`, `module_map`,
+  `precompiled_module`, and `strict_includes` fields provided as
+  arguments.
 
 
 <a id="swift_common.create_compilation_context"></a>
@@ -291,7 +294,8 @@ A `struct` containing four fields:
 <pre>
 swift_common.create_linking_context_from_compilation_outputs(<a href="#swift_common.create_linking_context_from_compilation_outputs-actions">actions</a>, <a href="#swift_common.create_linking_context_from_compilation_outputs-additional_inputs">additional_inputs</a>, <a href="#swift_common.create_linking_context_from_compilation_outputs-alwayslink">alwayslink</a>,
                                                              <a href="#swift_common.create_linking_context_from_compilation_outputs-compilation_outputs">compilation_outputs</a>,
-                                                             <a href="#swift_common.create_linking_context_from_compilation_outputs-feature_configuration">feature_configuration</a>, <a href="#swift_common.create_linking_context_from_compilation_outputs-is_test">is_test</a>, <a href="#swift_common.create_linking_context_from_compilation_outputs-label">label</a>,
+                                                             <a href="#swift_common.create_linking_context_from_compilation_outputs-feature_configuration">feature_configuration</a>, <a href="#swift_common.create_linking_context_from_compilation_outputs-is_test">is_test</a>,
+                                                             <a href="#swift_common.create_linking_context_from_compilation_outputs-include_dev_srch_paths">include_dev_srch_paths</a>, <a href="#swift_common.create_linking_context_from_compilation_outputs-label">label</a>,
                                                              <a href="#swift_common.create_linking_context_from_compilation_outputs-linking_contexts">linking_contexts</a>, <a href="#swift_common.create_linking_context_from_compilation_outputs-module_context">module_context</a>, <a href="#swift_common.create_linking_context_from_compilation_outputs-name">name</a>,
                                                              <a href="#swift_common.create_linking_context_from_compilation_outputs-swift_toolchain">swift_toolchain</a>, <a href="#swift_common.create_linking_context_from_compilation_outputs-user_link_flags">user_link_flags</a>)
 </pre>
@@ -316,7 +320,8 @@ command line parameters file, those actions will be created here.
 | <a id="swift_common.create_linking_context_from_compilation_outputs-alwayslink"></a>alwayslink |  If True, any binary that depends on the providers returned by this function will link in all of the library's object files, even if some contain no symbols referenced by the binary.   |  `False` |
 | <a id="swift_common.create_linking_context_from_compilation_outputs-compilation_outputs"></a>compilation_outputs |  A `CcCompilationOutputs` value containing the object files to link. Typically, this is the second tuple element in the value returned by `swift_common.compile`.   |  none |
 | <a id="swift_common.create_linking_context_from_compilation_outputs-feature_configuration"></a>feature_configuration |  A feature configuration obtained from `swift_common.configure_features`.   |  none |
-| <a id="swift_common.create_linking_context_from_compilation_outputs-is_test"></a>is_test |  Represents if the `testonly` value of the context.   |  none |
+| <a id="swift_common.create_linking_context_from_compilation_outputs-is_test"></a>is_test |  Deprecated. This argument will be removed in the next major release. Use the `include_dev_srch_paths` attribute instead. Represents if the `testonly` value of the context.   |  `None` |
+| <a id="swift_common.create_linking_context_from_compilation_outputs-include_dev_srch_paths"></a>include_dev_srch_paths |  A `bool` that indicates whether the developer framework search paths will be added to the compilation command.   |  `None` |
 | <a id="swift_common.create_linking_context_from_compilation_outputs-label"></a>label |  The `Label` of the target being built. This is used as the owner of the linker inputs created for post-compile actions (if any), and the label's name component also determines the name of the artifact unless it is overridden by the `name` argument.   |  none |
 | <a id="swift_common.create_linking_context_from_compilation_outputs-linking_contexts"></a>linking_contexts |  A `list` of `CcLinkingContext`s containing libraries from dependencies.   |  `[]` |
 | <a id="swift_common.create_linking_context_from_compilation_outputs-module_context"></a>module_context |  The module context returned by `swift_common.compile` containing information about the Swift module that was compiled. Typically, this is the first tuple element in the value returned by `swift_common.compile`.   |  none |
@@ -336,7 +341,8 @@ A tuple of `(CcLinkingContext, CcLinkingOutputs)` containing the linking
 ## swift_common.create_module
 
 <pre>
-swift_common.create_module(<a href="#swift_common.create_module-name">name</a>, <a href="#swift_common.create_module-clang">clang</a>, <a href="#swift_common.create_module-compilation_context">compilation_context</a>, <a href="#swift_common.create_module-is_system">is_system</a>, <a href="#swift_common.create_module-swift">swift</a>)
+swift_common.create_module(<a href="#swift_common.create_module-name">name</a>, <a href="#swift_common.create_module-clang">clang</a>, <a href="#swift_common.create_module-const_gather_protocols">const_gather_protocols</a>, <a href="#swift_common.create_module-compilation_context">compilation_context</a>, <a href="#swift_common.create_module-is_system">is_system</a>,
+                           <a href="#swift_common.create_module-swift">swift</a>)
 </pre>
 
 Creates a value containing Clang/Swift module artifacts of a dependency.
@@ -365,6 +371,7 @@ the set of transitive module names that are propagated by dependencies
 | :------------- | :------------- | :------------- |
 | <a id="swift_common.create_module-name"></a>name |  The name of the module.   |  none |
 | <a id="swift_common.create_module-clang"></a>clang |  A value returned by `swift_common.create_clang_module` that contains artifacts related to Clang modules, such as a module map or precompiled module. This may be `None` if the module is a pure Swift module with no generated Objective-C interface.   |  `None` |
+| <a id="swift_common.create_module-const_gather_protocols"></a>const_gather_protocols |  A list of protocol names from which constant values should be extracted from source code that takes this module as a *direct* dependency.   |  `[]` |
 | <a id="swift_common.create_module-compilation_context"></a>compilation_context |  A value returned from `swift_common.create_compilation_context` that contains the context needed to compile the module being built. This may be `None` if the module wasn't compiled from sources.   |  `None` |
 | <a id="swift_common.create_module-is_system"></a>is_system |  Indicates whether the module is a system module. The default value is `False`. System modules differ slightly from non-system modules in the way that they are passed to the compiler. For example, non-system modules have their Clang module maps passed to the compiler in both implicit and explicit module builds. System modules, on the other hand, do not have their module maps passed to the compiler in implicit module builds because there is currently no way to indicate that modules declared in a file passed via `-fmodule-map-file` should be treated as system modules even if they aren't declared with the `[system]` attribute, and some system modules may not build cleanly with respect to warnings otherwise. Therefore, it is assumed that any module with `is_system == True` must be able to be found using import search paths in order for implicit module builds to succeed.   |  `False` |
 | <a id="swift_common.create_module-swift"></a>swift |  A value returned by `swift_common.create_swift_module` that contains artifacts related to Swift modules, such as the `.swiftmodule`, `.swiftdoc`, and/or `.swiftinterface` files emitted by the compiler. This may be `None` if the module is a pure C/Objective-C module.   |  `None` |
@@ -415,8 +422,8 @@ A new `SwiftInfo` provider with the given values.
 ## swift_common.create_swift_interop_info
 
 <pre>
-swift_common.create_swift_interop_info(<a href="#swift_common.create_swift_interop_info-module_map">module_map</a>, <a href="#swift_common.create_swift_interop_info-module_name">module_name</a>, <a href="#swift_common.create_swift_interop_info-requested_features">requested_features</a>, <a href="#swift_common.create_swift_interop_info-swift_infos">swift_infos</a>,
-                                       <a href="#swift_common.create_swift_interop_info-unsupported_features">unsupported_features</a>)
+swift_common.create_swift_interop_info(<a href="#swift_common.create_swift_interop_info-exclude_headers">exclude_headers</a>, <a href="#swift_common.create_swift_interop_info-module_map">module_map</a>, <a href="#swift_common.create_swift_interop_info-module_name">module_name</a>, <a href="#swift_common.create_swift_interop_info-requested_features">requested_features</a>,
+                                       <a href="#swift_common.create_swift_interop_info-suppressed">suppressed</a>, <a href="#swift_common.create_swift_interop_info-swift_infos">swift_infos</a>, <a href="#swift_common.create_swift_interop_info-unsupported_features">unsupported_features</a>)
 </pre>
 
 Returns a provider that lets a target expose C/Objective-C APIs to Swift.
@@ -450,9 +457,11 @@ exclude dependencies if necessary.
 
 | Name  | Description | Default Value |
 | :------------- | :------------- | :------------- |
+| <a id="swift_common.create_swift_interop_info-exclude_headers"></a>exclude_headers |  A `list` of `File`s representing headers that should be excluded from the module if the module map is generated.   |  `[]` |
 | <a id="swift_common.create_swift_interop_info-module_map"></a>module_map |  A `File` representing an existing module map that should be used to represent the module, or `None` (the default) if the module map should be generated based on the headers in the target's compilation context. If this argument is provided, then `module_name` must also be provided.   |  `None` |
 | <a id="swift_common.create_swift_interop_info-module_name"></a>module_name |  A string denoting the name of the module, or `None` (the default) if the name should be derived automatically from the target label.   |  `None` |
 | <a id="swift_common.create_swift_interop_info-requested_features"></a>requested_features |  A list of features (empty by default) that should be requested for the target, which are added to those supplied in the `features` attribute of the target. These features will be enabled unless they are otherwise marked as unsupported (either on the target or by the toolchain). This allows the rule implementation to have additional control over features that should be supported by default for all instances of that rule as if it were creating the feature configuration itself; for example, a rule can request that `swift.emit_c_module` always be enabled for its targets even if it is not explicitly enabled in the toolchain or on the target directly.   |  `[]` |
+| <a id="swift_common.create_swift_interop_info-suppressed"></a>suppressed |  A `bool` indicating whether the module that the aspect would create for the target should instead be suppressed.   |  `False` |
 | <a id="swift_common.create_swift_interop_info-swift_infos"></a>swift_infos |  A list of `SwiftInfo` providers from dependencies, which will be merged with the new `SwiftInfo` created by the aspect.   |  `[]` |
 | <a id="swift_common.create_swift_interop_info-unsupported_features"></a>unsupported_features |  A list of features (empty by default) that should be considered unsupported for the target, which are added to those supplied as negations in the `features` attribute. This allows the rule implementation to have additional control over features that should be disabled by default for all instances of that rule as if it were creating the feature configuration itself; for example, a rule that processes frameworks with headers that do not follow strict layering can request that `swift.strict_module` always be disabled for its targets even if it is enabled by default in the toolchain.   |  `[]` |
 
@@ -468,7 +477,8 @@ A provider whose type/layout is an implementation detail and should not
 
 <pre>
 swift_common.create_swift_module(<a href="#swift_common.create_swift_module-swiftdoc">swiftdoc</a>, <a href="#swift_common.create_swift_module-swiftmodule">swiftmodule</a>, <a href="#swift_common.create_swift_module-ast_files">ast_files</a>, <a href="#swift_common.create_swift_module-defines">defines</a>, <a href="#swift_common.create_swift_module-indexstore">indexstore</a>, <a href="#swift_common.create_swift_module-plugins">plugins</a>,
-                                 <a href="#swift_common.create_swift_module-swiftsourceinfo">swiftsourceinfo</a>, <a href="#swift_common.create_swift_module-swiftinterface">swiftinterface</a>, <a href="#swift_common.create_swift_module-symbol_graph">symbol_graph</a>)
+                                 <a href="#swift_common.create_swift_module-swiftsourceinfo">swiftsourceinfo</a>, <a href="#swift_common.create_swift_module-swiftinterface">swiftinterface</a>, <a href="#swift_common.create_swift_module-private_swiftinterface">private_swiftinterface</a>,
+                                 <a href="#swift_common.create_swift_module-const_protocols_to_gather">const_protocols_to_gather</a>)
 </pre>
 
 Creates a value representing a Swift module use as a Swift dependency.
@@ -486,12 +496,13 @@ Creates a value representing a Swift module use as a Swift dependency.
 | <a id="swift_common.create_swift_module-plugins"></a>plugins |  A list of `SwiftCompilerPluginInfo` providers representing compiler plugins that are required by this module and should be loaded by the compiler when this module is directly depended on.   |  `[]` |
 | <a id="swift_common.create_swift_module-swiftsourceinfo"></a>swiftsourceinfo |  The `.swiftsourceinfo` file emitted by the compiler for this module. May be `None` if no source info file was emitted.   |  `None` |
 | <a id="swift_common.create_swift_module-swiftinterface"></a>swiftinterface |  The `.swiftinterface` file emitted by the compiler for this module. May be `None` if no module interface file was emitted.   |  `None` |
-| <a id="swift_common.create_swift_module-symbol_graph"></a>symbol_graph |  A `File` representing the directory that contains the symbol graph data generated by the compiler if the `"swift.emit_symbol_graph"` feature is enabled, otherwise this will be `None`.   |  `None` |
+| <a id="swift_common.create_swift_module-private_swiftinterface"></a>private_swiftinterface |  The `.private.swiftinterface` file emitted by the compiler for this module. May be `None` if no private module interface file was emitted.   |  `None` |
+| <a id="swift_common.create_swift_module-const_protocols_to_gather"></a>const_protocols_to_gather |  A list of protocol names from which constant values should be extracted from source code that takes this module as a *direct* dependency.   |  `[]` |
 
 **RETURNS**
 
 A `struct` containing the `ast_files`, `defines`, `indexstore,
-  `swiftdoc`, `swiftmodule`, `swiftinterface`, and `symbol_graph` fields
+  `swiftdoc`, `swiftmodule`, and `swiftinterface` fields
   provided as arguments.
 
 
@@ -531,6 +542,58 @@ This mapping is intended to be fairly predictable, but not reversible.
 **RETURNS**
 
 The module name derived from the label.
+
+
+<a id="swift_common.extract_symbol_graph"></a>
+
+## swift_common.extract_symbol_graph
+
+<pre>
+swift_common.extract_symbol_graph(<a href="#swift_common.extract_symbol_graph-actions">actions</a>, <a href="#swift_common.extract_symbol_graph-compilation_contexts">compilation_contexts</a>, <a href="#swift_common.extract_symbol_graph-emit_extension_block_symbols">emit_extension_block_symbols</a>,
+                                  <a href="#swift_common.extract_symbol_graph-feature_configuration">feature_configuration</a>, <a href="#swift_common.extract_symbol_graph-include_dev_srch_paths">include_dev_srch_paths</a>, <a href="#swift_common.extract_symbol_graph-minimum_access_level">minimum_access_level</a>,
+                                  <a href="#swift_common.extract_symbol_graph-module_name">module_name</a>, <a href="#swift_common.extract_symbol_graph-output_dir">output_dir</a>, <a href="#swift_common.extract_symbol_graph-swift_infos">swift_infos</a>, <a href="#swift_common.extract_symbol_graph-swift_toolchain">swift_toolchain</a>)
+</pre>
+
+Extracts the symbol graph from a Swift module.
+
+**PARAMETERS**
+
+
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="swift_common.extract_symbol_graph-actions"></a>actions |  The object used to register actions.   |  none |
+| <a id="swift_common.extract_symbol_graph-compilation_contexts"></a>compilation_contexts |  A list of `CcCompilationContext`s that represent C/Objective-C requirements of the target being compiled, such as Swift-compatible preprocessor defines, header search paths, and so forth. These are typically retrieved from the `CcInfo` providers of a target's dependencies.   |  none |
+| <a id="swift_common.extract_symbol_graph-emit_extension_block_symbols"></a>emit_extension_block_symbols |  A `bool` that indicates whether `extension` block information should be included in the symbol graph.   |  `None` |
+| <a id="swift_common.extract_symbol_graph-feature_configuration"></a>feature_configuration |  The Swift feature configuration.   |  none |
+| <a id="swift_common.extract_symbol_graph-include_dev_srch_paths"></a>include_dev_srch_paths |  A `bool` that indicates whether the developer framework search paths will be added to the compilation command.   |  none |
+| <a id="swift_common.extract_symbol_graph-minimum_access_level"></a>minimum_access_level |  The minimum access level of the declarations that should be extracted into the symbol graphs. The default value is `None`, which means the Swift compiler's default behavior should be used (at the time of this writing, the default behavior is "public").   |  `None` |
+| <a id="swift_common.extract_symbol_graph-module_name"></a>module_name |  The name of the module whose symbol graph should be extracted.   |  none |
+| <a id="swift_common.extract_symbol_graph-output_dir"></a>output_dir |  A directory-type `File` into which `.symbols.json` files representing the module's symbol graph will be extracted. If extraction is successful, this directory will contain a file named `${MODULE_NAME}.symbols.json`. Optionally, if the module contains extensions to types in other modules, then there will also be files named `${MODULE_NAME}@${EXTENDED_MODULE}.symbols.json`.   |  none |
+| <a id="swift_common.extract_symbol_graph-swift_infos"></a>swift_infos |  A list of `SwiftInfo` providers from dependencies of the target being compiled. This should include both propagated and non-propagated (implementation-only) dependencies.   |  none |
+| <a id="swift_common.extract_symbol_graph-swift_toolchain"></a>swift_toolchain |  The `SwiftToolchainInfo` provider of the toolchain.   |  none |
+
+
+<a id="swift_common.get_toolchain"></a>
+
+## swift_common.get_toolchain
+
+<pre>
+swift_common.get_toolchain(<a href="#swift_common.get_toolchain-ctx">ctx</a>, <a href="#swift_common.get_toolchain-attr">attr</a>)
+</pre>
+
+Gets the Swift toolchain associated with the rule or aspect.
+
+**PARAMETERS**
+
+
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="swift_common.get_toolchain-ctx"></a>ctx |  The rule or aspect context.   |  none |
+| <a id="swift_common.get_toolchain-attr"></a>attr |  The name of the attribute on the calling rule or aspect that should be used to retrieve the toolchain if it is not provided by the `toolchains` argument of the rule/aspect. Note that this is only supported for legacy/migration purposes and will be removed once migration to toolchains is complete.   |  `"_toolchain"` |
+
+**RETURNS**
+
+A `SwiftToolchainInfo` provider.
 
 
 <a id="swift_common.is_enabled"></a>
@@ -688,5 +751,31 @@ attributes from the earlier items in the list.
 
 A new attribute dictionary that can be added to the attributes of a
   custom build rule to provide access to the Swift toolchain.
+
+
+<a id="swift_common.use_toolchain"></a>
+
+## swift_common.use_toolchain
+
+<pre>
+swift_common.use_toolchain()
+</pre>
+
+Returns a list of toolchain types needed to use the Swift toolchain.
+
+This function returns a list so that it can be easily composed with other
+toolchains if necessary. For example, a rule with multiple toolchain
+dependencies could write:
+
+```
+toolchains = swift_common.use_toolchain() + [other toolchains...]
+```
+
+
+
+**RETURNS**
+
+A list of toolchain types that should be passed to `rule()` or
+  `aspect()`.
 
 

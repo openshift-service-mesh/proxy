@@ -14,13 +14,22 @@
 
 services:
   envoy:
-    image: envoyproxy/envoy:v1.24-latest
+    image: envoyproxy/envoy:v1.31-latest
     hostname: envoy
     ports:
       - "10000:10000"
     volumes:
       - ./envoy.yaml:/etc/envoy/envoy.yaml
       - ./target/wasm32-wasi/release:/etc/envoy/proxy-wasm-plugins
+    networks:
+      - envoymesh
+    depends_on:
+      - httpbin
+  httpbin:
+    image: mccutchen/go-httpbin
+    hostname: httpbin
+    ports:
+      - "8080:8080"
     networks:
       - envoymesh
 networks:

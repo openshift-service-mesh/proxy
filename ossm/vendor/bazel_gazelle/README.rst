@@ -106,7 +106,7 @@ Gazelle can generate Bazel BUILD files for many languages:
   generating ``java_library``, ``java_binary``, ``java_test``, and ``java_test_suite`` rules.
 
 * JavaScript / TypeScript
-  
+
   Aspect provides `JavaScript and TypeScript Support`_ in aspect-cli (also usable separately).
 
   BenchSci's `rules_nodejs_gazelle`_ supports generating `ts_project`, `js_library`, `jest_test`,
@@ -172,19 +172,19 @@ should look like this:
 
     http_archive(
         name = "io_bazel_rules_go",
-        sha256 = "80a98277ad1311dacd837f9b16db62887702e9f1d1c4c9f796d0121a46c8e184",
+        integrity = "sha256-M6zErg9wUC20uJPJ/B3Xqb+ZjCPn/yxFF3QdQEmpdvg=",
         urls = [
-            "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.46.0/rules_go-v0.46.0.zip",
-            "https://github.com/bazelbuild/rules_go/releases/download/v0.46.0/rules_go-v0.46.0.zip",
+            "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.48.0/rules_go-v0.48.0.zip",
+            "https://github.com/bazelbuild/rules_go/releases/download/v0.48.0/rules_go-v0.48.0.zip",
         ],
     )
 
     http_archive(
         name = "bazel_gazelle",
-        integrity = "sha256-MpOL2hbmcABjA1R5Bj2dJMYO2o15/Uc5Vj9Q0zHLMgk=",
+        integrity = "sha256-12v3pg/YsFBEQJDfooN6Tq+YKeEWVhjuNdzspcvfWNU=",
         urls = [
-            "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.35.0/bazel-gazelle-v0.35.0.tar.gz",
-            "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.35.0/bazel-gazelle-v0.35.0.tar.gz",
+            "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.37.0/bazel-gazelle-v0.37.0.tar.gz",
+            "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.37.0/bazel-gazelle-v0.37.0.tar.gz",
         ],
     )
 
@@ -257,6 +257,19 @@ You can also pass additional arguments to Gazelle after a ``--`` argument.
 
 After running ``update-repos``, you might want to run ``bazel run //:gazelle`` again, as the
 ``update-repos`` command can affect the output of a normal run of Gazelle.
+
+To verify that all BUILD files are update-to-date, you can use the ``gazelle_test`` rule.
+
+.. code:: bzl
+
+  load("@bazel_gazelle//:def.bzl", "gazelle_test")
+
+  gazelle_test(
+      name = "gazelle_test",
+      workspace = "//:BUILD.bazel", # a file in the workspace root, where the gazelle will be run
+  )
+
+However, please note that gazelle_test cannot be cached.
 
 Running Gazelle with Go
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -363,6 +376,10 @@ you're using a compatible version.
 | 0.34                | 0.41                         | n/a                          |
 +---------------------+------------------------------+------------------------------+
 | 0.35                | 0.41                         | n/a                          |
++---------------------+------------------------------+------------------------------+
+| 0.36                | 0.41                         | n/a                          |
++---------------------+------------------------------+------------------------------+
+| 0.37                | 0.41                         | n/a                          |
 +---------------------+------------------------------+------------------------------+
 
 Usage
@@ -674,7 +691,7 @@ The following flags are accepted:
 +----------------------------------------------------------------------------------------------------------+----------------------------------------------+
 | Sets the ``build_extra_args attribute`` for the generated `go_repository`_ rule(s).                                                                     |
 +----------------------------------------------------------------------------------------------------------+----------------------------------------------+
-| :flag:`-build_file_generation auto|on|off`                                                               |                                              |
+| :flag:`-build_file_generation auto|on|off|clean`                                                         |                                              |
 +----------------------------------------------------------------------------------------------------------+----------------------------------------------+
 | Sets the ``build_file_generation`` attribute for the generated `go_repository`_ rule(s).                                                                |
 +----------------------------------------------------------------------------------------------------------+----------------------------------------------+
@@ -991,7 +1008,9 @@ The following directives are recognized:
 |   ``import-lang`` may be omitted if it is the same as ``source-lang``.                     |
 | * ``import-string-regex`` is the regex applied to the import in the source code.           |
 |   If it matches, that import will be resolved to the label specified below.                |
-| * ``label`` is the Bazel label that Gazelle should write in ``deps``.                      |
+| * ``label`` is the Bazel label that Gazelle should write in ``deps``. The label            |
+|   can be constructed using captured strings from the subpattern matching in                |
+|   import-string-regex                                                                      |
 |                                                                                            |
 | For example:                                                                               |
 |                                                                                            |
@@ -999,6 +1018,7 @@ The following directives are recognized:
 |                                                                                            |
 |   # gazelle:resolve_regexp go example.com/.* //foo:go_default_library                      |
 |   # gazelle:resolve_regexp proto go foo/.*\.proto //foo:foo_go_proto                       |
+|   # gazelle:resolve_regexp proto go foo/(.*)\.proto //foo/$1:foo_rule_proto                |
 |                                                                                            |
 +---------------------------------------------------+----------------------------------------+
 | :direc:`# gazelle:go_visibility label`            | n/a                                    |

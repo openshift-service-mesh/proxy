@@ -70,7 +70,7 @@ struct HttpCurlEasyResource
     return *this;
   }
 
-  HttpCurlEasyResource(const HttpCurlEasyResource &other) = delete;
+  HttpCurlEasyResource(const HttpCurlEasyResource &other)            = delete;
   HttpCurlEasyResource &operator=(const HttpCurlEasyResource &other) = delete;
 };
 
@@ -124,7 +124,8 @@ private:
                                 double ulnow);
 #endif
 public:
-  void DispatchEvent(opentelemetry::ext::http::client::SessionState type, std::string reason = "");
+  void DispatchEvent(opentelemetry::ext::http::client::SessionState type,
+                     const std::string &reason = "");
 
   /**
    * Create local CURL instance for url and body
@@ -146,6 +147,8 @@ public:
                     opentelemetry::ext::http::client::Headers(),
                 const opentelemetry::ext::http::client::Body &request_body =
                     opentelemetry::ext::http::client::Body(),
+                const opentelemetry::ext::http::client::Compression &compression =
+                    opentelemetry::ext::http::client::Compression::kNone,
                 // Default connectivity and response size options
                 bool is_raw_response                        = false,
                 std::chrono::milliseconds http_conn_timeout = default_http_conn_timeout,
@@ -294,6 +297,8 @@ private:
   const opentelemetry::ext::http::client::Body &request_body_;
   size_t request_nwrite_;
   opentelemetry::ext::http::client::SessionState session_state_;
+
+  const opentelemetry::ext::http::client::Compression &compression_;
 
   // Processed response headers and body
   long response_code_;

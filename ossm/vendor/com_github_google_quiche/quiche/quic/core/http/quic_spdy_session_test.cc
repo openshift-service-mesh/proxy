@@ -17,6 +17,7 @@
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "quiche/http2/core/spdy_framer.h"
 #include "quiche/quic/core/crypto/crypto_protocol.h"
 #include "quiche/quic/core/frames/quic_stream_frame.h"
 #include "quiche/quic/core/frames/quic_streams_blocked_frame.h"
@@ -51,9 +52,8 @@
 #include "quiche/common/platform/api/quiche_mem_slice.h"
 #include "quiche/common/quiche_endian.h"
 #include "quiche/common/test_tools/quiche_test_utils.h"
-#include "quiche/spdy/core/spdy_framer.h"
 
-using spdy::Http2HeaderBlock;
+using quiche::HttpHeaderBlock;
 using spdy::kV3HighestPriority;
 using spdy::Spdy3PriorityToHttp2Weight;
 using spdy::SpdyFramer;
@@ -590,14 +590,13 @@ class QuicSpdySessionTestBase : public QuicTestWithParam<ParsedQuicVersion> {
     QuicSpdyStream* stream =
         static_cast<QuicSpdyStream*>(session_->GetOrCreateStream(session_id));
     QuicHeaderList headers;
-    headers.OnHeaderBlockStart();
     headers.OnHeader(":method", "CONNECT");
     headers.OnHeader(":protocol", "webtransport");
     stream->OnStreamHeaderList(/*fin=*/true, 0, headers);
     WebTransportHttp3* web_transport =
         session_->GetWebTransportSession(session_id);
     ASSERT_TRUE(web_transport != nullptr);
-    spdy::Http2HeaderBlock header_block;
+    quiche::HttpHeaderBlock header_block;
     web_transport->HeadersReceived(header_block);
   }
 
@@ -1360,13 +1359,6 @@ TEST_P(QuicSpdySessionTestServer, RstStreamBeforeHeadersDecompressed) {
                 OnStreamReset(GetNthClientInitiatedBidirectionalId(0), _));
   }
 
-  // In HTTP/3, Qpack stream will send data on stream reset and cause packet to
-  // be flushed.
-  if (VersionUsesHttp3(transport_version()) &&
-      !GetQuicRestartFlag(quic_opport_bundle_qpack_decoder_data5)) {
-    EXPECT_CALL(*writer_, WritePacket(_, _, _, _, _, _))
-        .WillOnce(Return(WriteResult(WRITE_STATUS_OK, 0)));
-  }
   EXPECT_CALL(*connection_, SendControlFrame(_));
   QuicRstStreamFrame rst1(kInvalidControlFrameId,
                           GetNthClientInitiatedBidirectionalId(0),
@@ -1549,7 +1541,7 @@ TEST_P(QuicSpdySessionTestServer,
   // Write until the header stream is flow control blocked.
   EXPECT_CALL(*connection_, SendControlFrame(_))
       .WillOnce(Invoke(&ClearControlFrame));
-  Http2HeaderBlock headers;
+  HttpHeaderBlock headers;
   SimpleRandom random;
   while (!headers_stream->IsFlowControlBlocked() && stream_id < 2000) {
     EXPECT_FALSE(session_->IsConnectionFlowControlBlocked());
@@ -1608,9 +1600,6 @@ TEST_P(QuicSpdySessionTestServer,
     // the STOP_SENDING, so set up the EXPECT there.
     EXPECT_CALL(*connection_, OnStreamReset(stream->id(), _));
     EXPECT_CALL(*connection_, SendControlFrame(_));
-  } else if (!GetQuicRestartFlag(quic_opport_bundle_qpack_decoder_data5)) {
-    EXPECT_CALL(*writer_, WritePacket(_, _, _, _, _, _))
-        .WillOnce(Return(WriteResult(WRITE_STATUS_OK, 0)));
   }
   QuicRstStreamFrame rst_frame(kInvalidControlFrameId, stream->id(),
                                QUIC_STREAM_CANCELLED, kByteOffset);
@@ -1904,7 +1893,7 @@ TEST_P(QuicSpdySessionTestClient, TooLargeHeadersMustNotCauseWriteAfterReset) {
       .WillOnce(Return(WriteResult(WRITE_STATUS_OK, 0)));
   // Write headers with FIN set to close write side of stream.
   // Header block does not matter.
-  stream->WriteHeaders(Http2HeaderBlock(), /* fin = */ true, nullptr);
+  stream->WriteHeaders(HttpHeaderBlock(), /* fin = */ true, nullptr);
 
   // Receive headers that are too large or empty, with FIN set.
   // This causes the stream to be reset.  No frames must be written after this.
@@ -4160,7 +4149,7 @@ TEST_P(QuicSpdySessionTestClient, LimitEncoderDynamicTableSize) {
 
   TestStream* stream = session_->CreateOutgoingBidirectionalStream();
   EXPECT_CALL(*writer_, IsWriteBlocked()).WillRepeatedly(Return(true));
-  Http2HeaderBlock headers;
+  HttpHeaderBlock headers;
   headers[":method"] = "GET";  // entry with index 2 in HPACK static table
   stream->WriteHeaders(std::move(headers), /* fin = */ true, nullptr);
 

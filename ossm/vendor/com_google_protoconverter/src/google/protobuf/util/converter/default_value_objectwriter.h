@@ -31,9 +31,6 @@
 #include "google/protobuf/util/converter/utility.h"
 #include "google/protobuf/util/type_resolver.h"
 
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
-
 namespace google {
 namespace protobuf {
 namespace util {
@@ -45,7 +42,7 @@ namespace converter {
 // ObjectWriter when EndObject() is called on the root object. It also writes
 // out all non-repeated primitive fields that haven't been explicitly rendered
 // with their default values (0 for numbers, "" for strings, etc).
-class PROTOBUF_EXPORT DefaultValueObjectWriter : public ObjectWriter {
+class DefaultValueObjectWriter : public ObjectWriter {
  public:
   // A Callback function to check whether a field needs to be scrubbed.
   //
@@ -134,7 +131,7 @@ class PROTOBUF_EXPORT DefaultValueObjectWriter : public ObjectWriter {
 
   // "Node" represents a node in the tree that holds the input of
   // DefaultValueObjectWriter.
-  class PROTOBUF_EXPORT Node {
+  class Node {
    public:
     Node(const std::string& name, const google::protobuf::Type* type,
          NodeKind kind, const DataPiece& data, bool is_placeholder,
@@ -311,7 +308,5 @@ class PROTOBUF_EXPORT DefaultValueObjectWriter : public ObjectWriter {
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_DEFAULT_VALUE_OBJECTWRITER_H_

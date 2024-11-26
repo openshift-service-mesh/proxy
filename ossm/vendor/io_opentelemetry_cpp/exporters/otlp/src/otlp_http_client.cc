@@ -1,7 +1,22 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "opentelemetry/exporters/otlp/otlp_http_client.h"
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstddef>
+#include <functional>
+#include <iostream>
+#include <list>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <ratio>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #if defined(HAVE_GSL)
 #  include <gsl/gsl>
@@ -9,38 +24,33 @@
 #  include <assert.h>
 #endif
 
+#include "nlohmann/json.hpp"
+#include "opentelemetry/common/timestamp.h"
+#include "opentelemetry/exporters/otlp/otlp_environment.h"
+#include "opentelemetry/exporters/otlp/otlp_http.h"
+#include "opentelemetry/exporters/otlp/otlp_http_client.h"
+#include "opentelemetry/ext/http/client/http_client.h"
 #include "opentelemetry/ext/http/client/http_client_factory.h"
 #include "opentelemetry/ext/http/common/url_parser.h"
-
-#include "opentelemetry/exporters/otlp/protobuf_include_prefix.h"
-
-#include "google/protobuf/message.h"
-#include "google/protobuf/reflection.h"
-#include "google/protobuf/stubs/common.h"
-#include "nlohmann/json.hpp"
-
-#include "opentelemetry/exporters/otlp/protobuf_include_suffix.h"
-
-#include "opentelemetry/common/timestamp.h"
 #include "opentelemetry/nostd/string_view.h"
+#include "opentelemetry/nostd/variant.h"
 #include "opentelemetry/sdk/common/base64.h"
+#include "opentelemetry/sdk/common/exporter_utils.h"
 #include "opentelemetry/sdk/common/global_log_handler.h"
-#include "opentelemetry/sdk_config.h"
+#include "opentelemetry/version.h"
 
-#include <atomic>
-#include <condition_variable>
-#include <cstring>
-#include <fstream>
-#include <mutex>
-#include <sstream>
-#include <string>
-#include <vector>
+// clang-format off
+#include "opentelemetry/exporters/otlp/protobuf_include_prefix.h" // IWYU pragma: keep
+#include <google/protobuf/message.h>
+#include <google/protobuf/descriptor.h>
+#include <google/protobuf/stubs/port.h>
+#include "opentelemetry/exporters/otlp/protobuf_include_suffix.h" // IWYU pragma: keep
+// clang-format on
 
 #ifdef GetMessage
 #  undef GetMessage
 #endif
 
-namespace nostd       = opentelemetry::nostd;
 namespace http_client = opentelemetry::ext::http::client;
 
 OPENTELEMETRY_BEGIN_NAMESPACE
@@ -96,7 +106,7 @@ public:
       // Store the body of the request
       body_ = std::string(response.GetBody().begin(), response.GetBody().end());
 
-      if (response.GetStatusCode() != 200 && response.GetStatusCode() != 202)
+      if (!(response.GetStatusCode() >= 200 && response.GetStatusCode() <= 299))
       {
         log_message = BuildResponseLogMessage(response, body_);
 
@@ -424,6 +434,7 @@ static void ConvertListFieldToJson(nlohmann::json &value,
                                    const google::protobuf::FieldDescriptor *field_descriptor,
                                    const OtlpHttpClientOptions &options);
 
+// NOLINTBEGIN(misc-no-recursion)
 static void ConvertGenericMessageToJson(nlohmann::json &value,
                                         const google::protobuf::Message &message,
                                         const OtlpHttpClientOptions &options)
@@ -644,6 +655,9 @@ void ConvertListFieldToJson(nlohmann::json &value,
   }
 }
 
+// NOLINTEND(misc-no-recursion) suppressing for performance, if implemented iterative process needs
+// Dynamic memory allocation
+
 }  // namespace
 
 OtlpHttpClient::OtlpHttpClient(OtlpHttpClientOptions &&options)
@@ -686,7 +700,7 @@ OtlpHttpClient::~OtlpHttpClient()
 
 OtlpHttpClient::OtlpHttpClient(OtlpHttpClientOptions &&options,
                                std::shared_ptr<ext::http::client::HttpClient> http_client)
-    : is_shutdown_(false), options_(options), http_client_(http_client)
+    : is_shutdown_(false), options_(options), http_client_(std::move(http_client))
 {
   http_client_->SetMaxSessionsPerConnection(options_.max_requests_per_connection);
 }
@@ -871,7 +885,7 @@ OtlpHttpClient::createSession(
       std::string error_message = "[OTLP HTTP Client] Export failed, invalid url: " + options_.url;
       if (options_.console_debug)
       {
-        std::cerr << error_message << std::endl;
+        std::cerr << error_message << '\n';
       }
       OTEL_INTERNAL_LOG_ERROR(error_message.c_str());
 
@@ -936,7 +950,7 @@ OtlpHttpClient::createSession(
     const char *error_message = "[OTLP HTTP Client] Export failed, exporter is shutdown";
     if (options_.console_debug)
     {
-      std::cerr << error_message << std::endl;
+      std::cerr << error_message << '\n';
     }
     OTEL_INTERNAL_LOG_ERROR(error_message);
 
@@ -948,7 +962,8 @@ OtlpHttpClient::createSession(
 
   for (auto &header : options_.http_headers)
   {
-    request->AddHeader(header.first, header.second);
+    request->AddHeader(header.first,
+                       opentelemetry::ext::http::common::UrlDecoder::Decode(header.second));
   }
   request->SetUri(http_uri_);
   request->SetSslOptions(options_.ssl_options);
@@ -957,6 +972,11 @@ OtlpHttpClient::createSession(
   request->SetBody(body_vec);
   request->ReplaceHeader("Content-Type", content_type);
   request->ReplaceHeader("User-Agent", options_.user_agent);
+
+  if (options_.compression == "gzip")
+  {
+    request->SetCompression(opentelemetry::ext::http::client::Compression::kGzip);
+  }
 
   // Returns the created session data
   return HttpSessionData{

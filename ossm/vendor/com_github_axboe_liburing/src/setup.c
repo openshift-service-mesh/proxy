@@ -5,6 +5,7 @@
 #include "syscall.h"
 #include "liburing.h"
 #include "int_flags.h"
+#include "setup.h"
 #include "liburing/compat.h"
 #include "liburing/io_uring.h"
 
@@ -76,7 +77,8 @@ static void io_uring_setup_ring_pointers(struct io_uring_params *p,
 	sq->kring_entries = sq->ring_ptr + p->sq_off.ring_entries;
 	sq->kflags = sq->ring_ptr + p->sq_off.flags;
 	sq->kdropped = sq->ring_ptr + p->sq_off.dropped;
-	sq->array = sq->ring_ptr + p->sq_off.array;
+	if (!(p->flags & IORING_SETUP_NO_SQARRAY))
+		sq->array = sq->ring_ptr + p->sq_off.array;
 
 	cq->khead = cq->ring_ptr + p->cq_off.head;
 	cq->ktail = cq->ring_ptr + p->cq_off.tail;
@@ -197,6 +199,8 @@ __cold int io_uring_ring_dontfork(struct io_uring *ring)
 /* FIXME */
 static size_t huge_page_size = 2 * 1024 * 1024;
 
+#define KRING_SIZE	64
+
 /*
  * Returns negative for error, or number of bytes used in the buffer on success
  */
@@ -206,7 +210,7 @@ static int io_uring_alloc_huge(unsigned entries, struct io_uring_params *p,
 {
 	unsigned long page_size = get_page_size();
 	unsigned sq_entries, cq_entries;
-	size_t ring_mem, sqes_mem;
+	size_t ring_mem, sqes_mem, cqes_mem;
 	unsigned long mem_used = 0;
 	void *ptr;
 	int ret;
@@ -215,13 +219,18 @@ static int io_uring_alloc_huge(unsigned entries, struct io_uring_params *p,
 	if (ret)
 		return ret;
 
+	ring_mem = KRING_SIZE;
+
 	sqes_mem = sq_entries * sizeof(struct io_uring_sqe);
 	sqes_mem = (sqes_mem + page_size - 1) & ~(page_size - 1);
-	ring_mem = cq_entries * sizeof(struct io_uring_cqe);
+	if (!(p->flags & IORING_SETUP_NO_SQARRAY))
+		sqes_mem += sq_entries * sizeof(unsigned);
+
+	cqes_mem = cq_entries * sizeof(struct io_uring_cqe);
 	if (p->flags & IORING_SETUP_CQE32)
-		ring_mem *= 2;
-	ring_mem += sq_entries * sizeof(unsigned);
-	mem_used = sqes_mem + ring_mem;
+		cqes_mem *= 2;
+	ring_mem += sqes_mem + cqes_mem;
+	mem_used = ring_mem;
 	mem_used = (mem_used + page_size - 1) & ~(page_size - 1);
 
 	/*
@@ -285,9 +294,9 @@ static int io_uring_alloc_huge(unsigned entries, struct io_uring_params *p,
 	return (int) mem_used;
 }
 
-static int __io_uring_queue_init_params(unsigned entries, struct io_uring *ring,
-					struct io_uring_params *p, void *buf,
-					size_t buf_size)
+int __io_uring_queue_init_params(unsigned entries, struct io_uring *ring,
+				 struct io_uring_params *p, void *buf,
+				 size_t buf_size)
 {
 	int fd, ret = 0;
 	unsigned *sq_array;
@@ -335,11 +344,13 @@ static int __io_uring_queue_init_params(unsigned entries, struct io_uring *ring,
 	/*
 	 * Directly map SQ slots to SQEs
 	 */
-	sq_array = ring->sq.array;
 	sq_entries = ring->sq.ring_entries;
-	for (index = 0; index < sq_entries; index++)
-		sq_array[index] = index;
 
+	if (!(p->flags & IORING_SETUP_NO_SQARRAY)) {
+		sq_array = ring->sq.array;
+		for (index = 0; index < sq_entries; index++)
+			sq_array[index] = index;
+	}
 	ring->features = p->features;
 	ring->flags = p->flags;
 	ring->enter_ring_fd = fd;
@@ -353,11 +364,29 @@ static int __io_uring_queue_init_params(unsigned entries, struct io_uring *ring,
 	return ret;
 }
 
+static int io_uring_queue_init_try_nosqarr(unsigned entries, struct io_uring *ring,
+					   struct io_uring_params *p, void *buf,
+					   size_t buf_size)
+{
+	unsigned flags = p->flags;
+	int ret;
+
+	p->flags |= IORING_SETUP_NO_SQARRAY;
+	ret = __io_uring_queue_init_params(entries, ring, p, buf, buf_size);
+
+	/* don't fallback if explicitly asked for NOSQARRAY */
+	if (ret != -EINVAL || (flags & IORING_SETUP_NO_SQARRAY))
+		return ret;
+
+	p->flags = flags;
+	return __io_uring_queue_init_params(entries, ring, p, buf, buf_size);
+}
+
 /*
  * Like io_uring_queue_init_params(), except it allows the application to pass
  * in a pre-allocated memory range that is used for the shared data between
  * the kernel and the application. This includes the sqes array, and the two
- * rings. The memory must be contigious, the use case here is that the app
+ * rings. The memory must be contiguous, the use case here is that the app
  * allocates a huge page and passes it in.
  *
  * Returns the number of bytes used in the buffer, the app can then reuse
@@ -371,7 +400,7 @@ int io_uring_queue_init_mem(unsigned entries, struct io_uring *ring,
 {
 	/* should already be set... */
 	p->flags |= IORING_SETUP_NO_MMAP;
-	return __io_uring_queue_init_params(entries, ring, p, buf, buf_size);
+	return io_uring_queue_init_try_nosqarr(entries, ring, p, buf, buf_size);
 }
 
 int io_uring_queue_init_params(unsigned entries, struct io_uring *ring,
@@ -379,7 +408,7 @@ int io_uring_queue_init_params(unsigned entries, struct io_uring *ring,
 {
 	int ret;
 
-	ret = __io_uring_queue_init_params(entries, ring, p, NULL, 0);
+	ret = io_uring_queue_init_try_nosqarr(entries, ring, p, NULL, 0);
 	return ret >= 0 ? 0 : ret;
 }
 
@@ -474,8 +503,6 @@ static size_t npages(size_t size, long page_size)
 	size /= page_size;
 	return __fls((int) size);
 }
-
-#define KRING_SIZE	320
 
 static size_t rings_size(struct io_uring_params *p, unsigned entries,
 			 unsigned cq_entries, long page_size)

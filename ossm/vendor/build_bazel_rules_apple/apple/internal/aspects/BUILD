@@ -16,6 +16,10 @@ bzl_library(
     deps = [
         "//apple/internal:cc_info_support",
         "//apple/internal/providers:app_intents_info",
+        "@bazel_skylib//lib:collections",
+        "@build_bazel_apple_support//lib:apple_support",
+        "@build_bazel_rules_swift//swift",
+        "@build_bazel_rules_swift//swift:module_name",
     ],
 )
 
@@ -50,6 +54,18 @@ bzl_library(
         "@bazel_skylib//lib:dicts",
         "@bazel_skylib//lib:partial",
         "@build_bazel_apple_support//lib:apple_support",
+        "@build_bazel_rules_swift//swift",
+    ],
+)
+
+bzl_library(
+    name = "resource_aspect_hint",
+    srcs = ["resource_aspect_hint.bzl"],
+    visibility = [
+        "//apple/internal:__pkg__",
+        "//apple/internal/testing:__pkg__",
+    ],
+    deps = [
         "@build_bazel_rules_swift//swift",
     ],
 )

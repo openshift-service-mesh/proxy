@@ -122,6 +122,7 @@ To create an update *only* this file, run:
             message = message,
             visibility = kwargs.get("visibility"),
             tags = kwargs.get("tags"),
+            size = "small",
         )
     else:
         if suggested_update_target == None:
@@ -163,7 +164,7 @@ _write_source_file_attrs = {
     # out_file in the list of source file deps. ibazel uses this query to determine
     # which source files to watch so if the out_file is returned then ibazel watches
     # and it goes into an infinite update, notify loop when running this target.
-    # See https://github.com/aspect-build/bazel-lib/pull/52 for more context.
+    # See https://github.com/bazel-contrib/bazel-lib/pull/52 for more context.
     "out_file": attr.string(mandatory = False),
     "executable": attr.bool(),
     # buildifier: disable=attr-cfg
@@ -201,7 +202,7 @@ fi"""]
 
     if ctx.attr.executable:
         executable_file = "chmod +x \"$out\""
-        executable_dir = "chmod -R +x \"$out\"/*"
+        executable_dir = "chmod -R +x \"$out\""
     else:
         executable_file = "chmod -x \"$out\""
         if is_macos:
@@ -209,7 +210,7 @@ fi"""]
             executable_dir = "find \"$out\" -type f | xargs chmod -x"
         else:
             # Remove execute/search bit recursively from files bit not directories: https://superuser.com/a/434418
-            executable_dir = "chmod -R -x+X \"$out\"/*"
+            executable_dir = "chmod -R -x+X \"$out\""
 
     for in_path, out_path in paths:
         contents.append("""
@@ -231,10 +232,10 @@ else
     echo "Copying directory $in to $out in $PWD"
     # in case `cp` from previous command was terminated midway which can result in read-only files/dirs
     chmod -R ug+w "$out" > /dev/null 2>&1 || true
-    rm -Rf "$out"/*
+    rm -Rf "$out"/{{*,.[!.]*}}
     mkdir -p "$out"
-    cp -fRL "$in"/* "$out"
-    chmod -R ug+w "$out"/*
+    cp -fRL "$in"/. "$out"
+    chmod -R ug+w "$out"
     {executable_dir}
 fi
 """.format(

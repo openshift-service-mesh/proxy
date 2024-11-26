@@ -1,4 +1,4 @@
-// Copyright 2021 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ import "google/rpc/status.proto";
 import "google/type/date.proto";
 
 option csharp_namespace = "Google.Cloud.Retail.V2";
-option go_package = "google.golang.org/genproto/googleapis/cloud/retail/v2;retail";
+option go_package = "cloud.google.com/go/retail/apiv2/retailpb;retailpb";
 option java_multiple_files = true;
 option java_outer_classname = "ImportConfigProto";
 option java_package = "com.google.cloud.retail.v2";
@@ -126,7 +126,7 @@ message BigQuerySource {
   //   The schema is available here:
   //   https://support.google.com/analytics/answer/7029846.
   //
-  // Supported values for auto-completion imports:
+  // Supported values for autocomplete imports:
   //
   // * `suggestions` (default): One JSON completion suggestion per line.
   // * `denylist`:  One JSON deny suggestion per line.
@@ -196,7 +196,8 @@ message ImportProductsRequest {
   ImportErrorsConfig errors_config = 3;
 
   // Indicates which fields in the provided imported `products` to update. If
-  // not set, all fields are updated.
+  // not set, all fields are updated. If provided, only the existing product
+  // fields are updated. Missing products will not be created.
   google.protobuf.FieldMask update_mask = 4;
 
   // The mode of reconciliation between existing products and the products to be
@@ -212,9 +213,14 @@ message ImportProductsRequest {
   // Format of the Pub/Sub topic is `projects/{project}/topics/{topic}`. It has
   // to be within the same project as
   // [ImportProductsRequest.parent][google.cloud.retail.v2.ImportProductsRequest.parent].
-  // Make sure that `service-<project
-  // number>@gcp-sa-retail.iam.gserviceaccount.com` has the
-  // `pubsub.topics.publish` IAM permission on the topic.
+  // Make sure that both
+  // `cloud-retail-customer-data-access@system.gserviceaccount.com` and
+  // `service-<project number>@gcp-sa-retail.iam.gserviceaccount.com`
+  // have the `pubsub.topics.publish` IAM permission on the topic.
+  //
+  // Only supported when
+  // [ImportProductsRequest.reconciliation_mode][google.cloud.retail.v2.ImportProductsRequest.reconciliation_mode]
+  // is set to `FULL`.
   string notification_pubsub_topic = 7;
 }
 

@@ -18,18 +18,17 @@
 #include <cstdint>
 #include <limits>
 
-#include "google/protobuf/struct.pb.h"
-#include "google/protobuf/type.pb.h"
-#include "google/protobuf/descriptor.h"
 #include "absl/status/status.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/cord.h"
 #include "absl/strings/escaping.h"
-#include "absl/strings/str_cat.h"
-#include "google/protobuf/util/converter/utility.h"
-#include "google/protobuf/stubs/strutil.h"
-#include "google/protobuf/stubs/strutil.h"
 #include "absl/strings/match.h"
+#include "absl/strings/str_cat.h"
+#include "google/protobuf/descriptor.h"
+#include "google/protobuf/struct.pb.h"
+#include "google/protobuf/stubs/strutil.h"
+#include "google/protobuf/type.pb.h"
+#include "google/protobuf/util/converter/utility.h"
 
 namespace google {
 namespace protobuf {

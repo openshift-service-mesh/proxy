@@ -118,6 +118,24 @@ def apple_dynamic_xcframework_import_test_suite(name):
         ],
         tags = [name],
     )
+    archive_contents_test(
+        name = "{}_contains_implementation_deps_imported_xcframework_framework_files".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_implementation_deps_imported_xcframework",
+        contains = [
+            "$BUNDLE_ROOT/Frameworks/generated_dynamic_xcframework_with_headers.framework/Info.plist",
+            "$BUNDLE_ROOT/Frameworks/generated_dynamic_xcframework_with_headers.framework/generated_dynamic_xcframework_with_headers",
+        ],
+        not_contains = [
+            "$BUNDLE_ROOT/Frameworks/generated_dynamic_xcframework_with_headers.framework/Headers/",
+            "$BUNDLE_ROOT/Frameworks/generated_dynamic_xcframework_with_headers.framework/Modules/",
+        ],
+        binary_test_file = "$BINARY",
+        macho_load_commands_contain = [
+            "name @rpath/generated_dynamic_xcframework_with_headers.framework/generated_dynamic_xcframework_with_headers (offset 24)",
+        ],
+        tags = [name, "skip_bazel6_ci"],
+    )
 
     # Verify the correct XCFramework library was bundled and sliced for the required architecture.
     binary_contents_test(
@@ -292,6 +310,24 @@ def apple_dynamic_xcframework_import_test_suite(name):
         cpus = {"watchos_cpus": ["arm64_32"]},
         macho_load_commands_contain = ["cmd LC_BUILD_VERSION", "platform WATCHOS"],
     )
+    archive_contents_test(
+        name = "{}_links_watchos_device_arm64_macho_load_cmd_for_device_test".format(name),
+        build_type = "device",
+        target_under_test = "//test/starlark_tests/targets_under_test/watchos:app_with_imported_xcframework",
+        binary_test_file = "$BUNDLE_ROOT/Frameworks/generated_dynamic_watchos_xcframework.framework/generated_dynamic_watchos_xcframework",
+        binary_test_architecture = "arm64",
+        cpus = {"watchos_cpus": ["device_arm64"]},
+        macho_load_commands_contain = ["cmd LC_BUILD_VERSION", "platform WATCHOS"],
+    )
+    archive_contents_test(
+        name = "{}_links_watchos_device_arm64e_macho_load_cmd_for_device_test".format(name),
+        build_type = "device",
+        target_under_test = "//test/starlark_tests/targets_under_test/watchos:app_with_imported_xcframework",
+        binary_test_file = "$BUNDLE_ROOT/Frameworks/generated_dynamic_watchos_xcframework.framework/generated_dynamic_watchos_xcframework",
+        binary_test_architecture = "arm64e",
+        cpus = {"watchos_cpus": ["device_arm64e"]},
+        macho_load_commands_contain = ["cmd LC_BUILD_VERSION", "platform WATCHOS"],
+    )
 
     # Verify tvos_application bundles XCFramework library for device and simulator architectures.
     archive_contents_test(
@@ -410,6 +446,7 @@ def apple_dynamic_xcframework_import_test_suite(name):
         target_under_test = "//test/starlark_tests/targets_under_test/macos:app_with_imported_dynamic_versioned_xcframework",
         binary_test_file = "$CONTENT_ROOT/Frameworks/generated_dynamic_macos_versioned_xcframework.framework/generated_dynamic_macos_versioned_xcframework",
         binary_test_architecture = "arm64e",
+        binary_not_contains_architectures = ["arm64", "x86_64"],
         macho_load_commands_contain = ["cmd LC_BUILD_VERSION", "platform MACOS"],
         tags = [name],
     )

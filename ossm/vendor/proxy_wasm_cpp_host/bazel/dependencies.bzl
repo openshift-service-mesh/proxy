@@ -14,21 +14,21 @@
 
 load("@bazel-zig-cc//toolchain:defs.bzl", zig_register_toolchains = "register_toolchains")
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
-load("@proxy_wasm_cpp_host//bazel/cargo/wasmsign:crates.bzl", "wasmsign_fetch_remote_crates")
-load("@proxy_wasm_cpp_host//bazel/cargo/wasmtime:crates.bzl", "wasmtime_fetch_remote_crates")
-load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_dependencies")
-load("@rules_fuzzing//fuzzing:init.bzl", "rules_fuzzing_init")
-load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
-load("@rules_python//python:pip.bzl", "pip_install")
+load("@proxy_wasm_cpp_host//bazel/cargo/wasmsign/remote:crates.bzl", wasmsign_crate_repositories = "crate_repositories")
+load("@proxy_wasm_cpp_host//bazel/cargo/wasmtime/remote:crates.bzl", wasmtime_crate_repositories = "crate_repositories")
+load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
+load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
 load("@rules_rust//rust:repositories.bzl", "rust_repositories", "rust_repository_set")
 
 def proxy_wasm_cpp_host_dependencies():
     # Bazel extensions.
 
-    rules_foreign_cc_dependencies()
-
-    rules_fuzzing_dependencies()
-    rules_fuzzing_init()
+    py_repositories()
+    python_register_toolchains(
+        name = "python_3_9",
+        python_version = "3.9",
+        ignore_root_user_error = True,  # for docker run
+    )
 
     rust_repositories()
     rust_repository_set(
@@ -37,9 +37,9 @@ def proxy_wasm_cpp_host_dependencies():
         extra_target_triples = [
             "aarch64-unknown-linux-gnu",
             "wasm32-unknown-unknown",
-            "wasm32-wasi",
+            "wasm32-wasi",  # TODO: Change to wasm32-wasip1 once https://github.com/bazelbuild/rules_rust/issues/2782 is fixed
         ],
-        version = "1.68.0",
+        version = "1.77.2",
     )
     rust_repository_set(
         name = "rust_linux_s390x",
@@ -48,8 +48,9 @@ def proxy_wasm_cpp_host_dependencies():
             "wasm32-unknown-unknown",
             "wasm32-wasi",
         ],
-        version = "1.68.0",
+        version = "1.77.2",
     )
+    crate_universe_dependencies(bootstrap = True)
 
     zig_register_toolchains(
         version = "0.9.1",
@@ -62,22 +63,14 @@ def proxy_wasm_cpp_host_dependencies():
         },
     )
 
-    # Test dependencies.
-
-    wasmsign_fetch_remote_crates()
-
     # NullVM dependencies.
 
     protobuf_deps()
 
-    # V8 dependencies.
-
-    pip_install(
-        name = "v8_python_deps",
-        extra_pip_args = ["--require-hashes"],
-        requirements = "@v8//:bazel/requirements.txt",
-    )
-
     # Wasmtime dependencies.
 
-    wasmtime_fetch_remote_crates()
+    wasmtime_crate_repositories()
+
+    # Test dependencies.
+
+    wasmsign_crate_repositories()

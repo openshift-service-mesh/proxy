@@ -19,8 +19,6 @@
 
 #include <type_traits>
 
-#include "google/protobuf/util/converter/port_def.inc"
-
 // ===================================================================
 // emulates google3/base/callback.h
 
@@ -84,7 +82,7 @@ namespace protobuf {
 //   std::string my_str;
 //   NewCallback(&Foo, my_str);  // WON'T WORK:  Can't use references.
 // However, correctly-typed pointers will work just fine.
-class PROTOBUF_EXPORT Closure {
+class Closure {
  public:
   Closure() {}
   Closure(const Closure&) = delete;
@@ -106,7 +104,7 @@ class ResultCallback {
 };
 
 template <typename R, typename A1>
-class PROTOBUF_EXPORT ResultCallback1 {
+class ResultCallback1 {
  public:
   ResultCallback1() {}
   ResultCallback1(const ResultCallback1&) = delete;
@@ -117,7 +115,7 @@ class PROTOBUF_EXPORT ResultCallback1 {
 };
 
 template <typename R, typename A1, typename A2>
-class PROTOBUF_EXPORT ResultCallback2 {
+class ResultCallback2 {
  public:
   ResultCallback2() {}
   ResultCallback2(const ResultCallback2&) = delete;
@@ -129,7 +127,7 @@ class PROTOBUF_EXPORT ResultCallback2 {
 
 namespace internal {
 
-class PROTOBUF_EXPORT FunctionClosure0 : public Closure {
+class FunctionClosure0 : public Closure {
  public:
   typedef void (*FunctionType)();
 
@@ -583,11 +581,9 @@ inline ResultCallback2<R, A1, A2>* NewPermanentCallback(
 
 // A function which does nothing.  Useful for creating no-op callbacks, e.g.:
 //   Closure* nothing = NewCallback(&DoNothing);
-void PROTOBUF_EXPORT DoNothing();
+void DoNothing();
 
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_STUBS_CALLBACK_H_

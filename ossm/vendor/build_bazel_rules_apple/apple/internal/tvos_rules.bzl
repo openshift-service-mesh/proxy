@@ -14,14 +14,13 @@
 
 """Implementation of tvOS rules."""
 
+load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 load(
-    "@build_bazel_rules_apple//apple/internal/aspects:swift_dynamic_framework_aspect.bzl",
-    "SwiftDynamicFrameworkInfo",
-    "swift_dynamic_framework_aspect",
-)
-load(
-    "@build_bazel_rules_apple//apple/internal/utils:clang_rt_dylibs.bzl",
-    "clang_rt_dylibs",
+    "@build_bazel_rules_apple//apple:providers.bzl",
+    "AppleBundleInfo",
+    "ApplePlatformInfo",
+    "TvosExtensionBundleInfo",
+    "TvosFrameworkBundleInfo",
 )
 load(
     "@build_bazel_rules_apple//apple/internal:apple_product_type.bzl",
@@ -38,12 +37,12 @@ load(
     "bundling_support",
 )
 load(
-    "@build_bazel_rules_apple//apple/internal:codesigning_support.bzl",
-    "codesigning_support",
-)
-load(
     "@build_bazel_rules_apple//apple/internal:cc_info_support.bzl",
     "cc_info_support",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal:codesigning_support.bzl",
+    "codesigning_support",
 )
 load(
     "@build_bazel_rules_apple//apple/internal:entitlements_support.bzl",
@@ -52,6 +51,10 @@ load(
 load(
     "@build_bazel_rules_apple//apple/internal:features_support.bzl",
     "features_support",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal:framework_import_support.bzl",
+    "libraries_to_link_for_dynamic_framework",
 )
 load(
     "@build_bazel_rules_apple//apple/internal:linking_support.bzl",
@@ -110,10 +113,6 @@ load(
     "transition_support",
 )
 load(
-    "@build_bazel_rules_apple//apple/internal:framework_import_support.bzl",
-    "libraries_to_link_for_dynamic_framework",
-)
-load(
     "@build_bazel_rules_apple//apple/internal/aspects:framework_provider_aspect.bzl",
     "framework_provider_aspect",
 )
@@ -122,17 +121,25 @@ load(
     "apple_resource_aspect",
 )
 load(
-    "@build_bazel_rules_apple//apple:providers.bzl",
-    "AppleBundleInfo",
-    "ApplePlatformInfo",
-    "TvosExtensionBundleInfo",
-    "TvosFrameworkBundleInfo",
+    "@build_bazel_rules_apple//apple/internal/aspects:swift_dynamic_framework_aspect.bzl",
+    "SwiftDynamicFrameworkInfo",
+    "swift_dynamic_framework_aspect",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/utils:clang_rt_dylibs.bzl",
+    "clang_rt_dylibs",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/utils:main_thread_checker_dylibs.bzl",
+    "main_thread_checker_dylibs",
 )
 load(
     "@build_bazel_rules_swift//swift:swift.bzl",
     "SwiftInfo",
 )
-load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
+
+# TODO: Remove once we drop bazel 7.x
+_OBJC_PROVIDER_LINKING = hasattr(apple_common.new_objc_provider(), "linkopt")
 
 def _tvos_application_impl(ctx):
     """Experimental implementation of tvos_application."""
@@ -268,6 +275,15 @@ def _tvos_application_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -293,7 +309,7 @@ def _tvos_application_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -322,7 +338,9 @@ def _tvos_application_impl(ctx):
             bundle_verification_targets = bundle_verification_targets,
             environment_plist = ctx.file._environment_plist,
             launch_storyboard = ctx.file.launch_storyboard,
+            locales_to_include = ctx.attr.locales_to_include,
             platform_prerequisites = platform_prerequisites,
+            primary_icon_name = ctx.attr.primary_app_icon,
             resource_deps = resource_deps,
             rule_descriptor = rule_descriptor,
             rule_label = label,
@@ -378,6 +396,7 @@ def _tvos_application_impl(ctx):
         entitlements = entitlements.codesigning,
         features = features,
         ipa_post_processor = ctx.executable.ipa_post_processor,
+        locales_to_include = ctx.attr.locales_to_include,
         partials = processor_partials,
         platform_prerequisites = platform_prerequisites,
         predeclared_outputs = predeclared_outputs,
@@ -392,18 +411,30 @@ def _tvos_application_impl(ctx):
         label_name = label.name,
     )
 
-    # TODO(b/254511920): Consider creating a custom build config for tvOS simulator device/version.
-    run_support.register_simulator_executable(
-        actions = actions,
-        bundle_extension = bundle_extension,
-        bundle_name = bundle_name,
-        label_name = label.name,
-        output = executable,
-        platform_prerequisites = platform_prerequisites,
-        predeclared_outputs = predeclared_outputs,
-        rule_descriptor = rule_descriptor,
-        runner_template = ctx.file._runner_template,
-    )
+    if platform_prerequisites.platform.is_device:
+        run_support.register_device_executable(
+            actions = actions,
+            bundle_extension = bundle_extension,
+            bundle_name = bundle_name,
+            label_name = label.name,
+            output = executable,
+            platform_prerequisites = platform_prerequisites,
+            predeclared_outputs = predeclared_outputs,
+            rule_descriptor = rule_descriptor,
+            runner_template = ctx.file._device_runner_template,
+        )
+    else:
+        run_support.register_simulator_executable(
+            actions = actions,
+            bundle_extension = bundle_extension,
+            bundle_name = bundle_name,
+            label_name = label.name,
+            output = executable,
+            platform_prerequisites = platform_prerequisites,
+            predeclared_outputs = predeclared_outputs,
+            rule_descriptor = rule_descriptor,
+            runner_template = ctx.file._simulator_runner_template,
+        )
 
     archive = outputs.archive(
         actions = actions,
@@ -430,7 +461,7 @@ def _tvos_application_impl(ctx):
             )
         ),
         new_tvosapplicationbundleinfo(),
-        apple_common.new_executable_binary_provider(
+        linking_support.new_executable_binary_provider(
             binary = binary_artifact,
             cc_info = link_result.cc_info,
             objc = link_result.objc,
@@ -593,6 +624,15 @@ def _tvos_dynamic_framework_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.debug_symbols_partial(
             actions = actions,
             bundle_extension = bundle_extension,
@@ -604,7 +644,7 @@ def _tvos_dynamic_framework_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -688,7 +728,9 @@ def _tvos_dynamic_framework_impl(ctx):
     providers = processor_result.providers
     additional_providers = []
     for provider in providers:
-        if type(provider) == "AppleDynamicFramework":
+        # HACK: this should be updated so we do not need to dynamically check the provider instance.
+        # See: https://github.com/bazelbuild/bazel/issues/22095
+        if hasattr(provider, "framework_files"):
             # Make the ObjC provider using the framework_files depset found
             # in the AppleDynamicFramework provider. This is to make the
             # tvos_dynamic_framework usable as a dependency in swift_library
@@ -698,10 +740,7 @@ def _tvos_dynamic_framework_impl(ctx):
                 feature_configuration = cc_features,
                 libraries = provider.framework_files.to_list(),
             )
-            additional_providers.extend([
-                apple_common.new_objc_provider(
-                    dynamic_framework_file = provider.framework_files,
-                ),
+            additional_providers.append(
                 CcInfo(
                     linking_context = cc_common.create_linking_context(
                         linker_inputs = depset([
@@ -712,7 +751,13 @@ def _tvos_dynamic_framework_impl(ctx):
                         ]),
                     ),
                 ),
-            ])
+            )
+            if _OBJC_PROVIDER_LINKING:
+                additional_providers.append(
+                    apple_common.new_objc_provider(
+                        dynamic_framework_file = provider.framework_files,
+                    ),
+                )
     providers.extend(additional_providers)
 
     return [
@@ -856,6 +901,15 @@ def _tvos_framework_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -882,7 +936,7 @@ def _tvos_framework_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -1126,6 +1180,15 @@ def _tvos_extension_impl(ctx):
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
+        partials.main_thread_checker_dylibs_partial(
+            actions = actions,
+            apple_mac_toolchain_info = apple_mac_toolchain_info,
+            binary_artifact = binary_artifact,
+            features = features,
+            label_name = label.name,
+            platform_prerequisites = platform_prerequisites,
+            dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
+        ),
         partials.codesigning_dossier_partial(
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
@@ -1153,7 +1216,7 @@ def _tvos_extension_impl(ctx):
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
             platform_prerequisites = platform_prerequisites,
-            resolved_plisttool = apple_mac_toolchain_info.resolved_plisttool,
+            plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
             version = ctx.attr.version,
         ),
@@ -1177,6 +1240,7 @@ def _tvos_extension_impl(ctx):
             executable_name = executable_name,
             extensionkit_keys_required = ctx.attr.extensionkit_extension,
             launch_storyboard = None,
+            locales_to_include = ctx.attr.locales_to_include,
             platform_prerequisites = platform_prerequisites,
             resource_deps = resource_deps,
             rule_descriptor = rule_descriptor,
@@ -1225,6 +1289,7 @@ def _tvos_extension_impl(ctx):
         entitlements = entitlements.codesigning,
         features = features,
         ipa_post_processor = ctx.executable.ipa_post_processor,
+        locales_to_include = ctx.attr.locales_to_include,
         partials = processor_partials,
         platform_prerequisites = platform_prerequisites,
         predeclared_outputs = predeclared_outputs,
@@ -1244,8 +1309,9 @@ def _tvos_extension_impl(ctx):
                 processor_result.output_groups,
             )
         ),
-        apple_common.new_executable_binary_provider(
+        linking_support.new_executable_binary_provider(
             binary = binary_artifact,
+            cc_info = link_result.cc_info,
             objc = link_result.objc,
         ),
         new_tvosextensionbundleinfo(),
@@ -1398,7 +1464,9 @@ tvos_application = rule_factory.create_apple_rule(
     is_executable = True,
     predeclared_outputs = {"archive": "%{name}.ipa"},
     attrs = [
-        rule_attrs.app_icon_attrs(),
+        rule_attrs.app_icon_attrs(
+            supports_alternate_icons = True,
+        ),
         rule_attrs.app_intents_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
         ),
@@ -1421,8 +1489,10 @@ tvos_application = rule_factory.create_apple_rule(
         rule_attrs.device_family_attrs(
             allowed_families = rule_attrs.defaults.allowed_families.tvos,
         ),
+        rule_attrs.device_runner_template_attr(),
         rule_attrs.infoplist_attrs(),
         rule_attrs.ipa_post_processor_attrs(),
+        rule_attrs.locales_to_include_attrs(),
         rule_attrs.launch_images_attrs(),
         rule_attrs.platform_attrs(
             add_environment_plist = True,
@@ -1545,6 +1615,7 @@ tvos_extension = rule_factory.create_apple_rule(
         rule_attrs.extensionkit_attrs(),
         rule_attrs.infoplist_attrs(),
         rule_attrs.ipa_post_processor_attrs(),
+        rule_attrs.locales_to_include_attrs(),
         rule_attrs.platform_attrs(
             add_environment_plist = True,
             platform_type = "tvos",

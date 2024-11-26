@@ -11,7 +11,7 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
 
 // Note, run regen_go_proto.sh after making modifications to this file.
-option go_package = "github.com/google/cel-spec/test/v1/proto2/test_all_types";
+option go_package = "cel.dev/expr/test/v1/proto2/test_all_types";
 option cc_enable_arenas = true;
 option java_outer_classname = "TestAllTypesProto";
 option java_package = "com.google.api.expr.test.v1.proto2";
@@ -100,7 +100,7 @@ message TestAllTypes {
   repeated NestedEnum repeated_nested_enum = 52;
   repeated string repeated_string_piece = 53 [ctype = STRING_PIECE];
   repeated string repeated_cord = 54 [ctype = CORD];
-  repeated NestedMessage repeated_lazy_message = 55 [lazy = true];
+  repeated NestedMessage repeated_lazy_message = 55;
 
   // Repeated wellknown.
   repeated google.protobuf.Any repeated_any = 120;
@@ -290,6 +290,17 @@ message TestAllTypes {
   map<string, google.protobuf.StringValue> map_string_string_wrapper = 321;
   map<string, google.protobuf.BoolValue> map_string_bool_wrapper = 322;
   map<string, google.protobuf.BytesValue> map_string_bytes_wrapper = 323;
+
+  oneof kind {
+    NestedTestAllTypes oneof_type = 400;
+    NestedMessage oneof_msg = 401;
+    bool oneof_bool = 402;
+  }
+
+  optional group NestedGroup = 403 {
+    optional int32 single_id = 404;
+    optional string single_name = 405;
+  }
 
   extensions 1000 to max;
 }

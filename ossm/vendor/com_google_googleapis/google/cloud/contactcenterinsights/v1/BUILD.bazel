@@ -74,12 +74,14 @@ java_gapic_library(
     srcs = [":contactcenterinsights_proto_with_info"],
     grpc_service_config = "contactcenterinsights_grpc_service_config.json",
     rest_numeric_enums = True,
+    service_yaml = "contactcenterinsights_v1.yaml",
     test_deps = [
         ":contactcenterinsights_java_grpc",
     ],
     transport = "grpc+rest",
     deps = [
         ":contactcenterinsights_java_proto",
+        "//google/api:api_java_proto",
     ],
 )
 
@@ -113,13 +115,12 @@ load(
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "contactcenterinsights_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/contactcenterinsights/v1",
+    importpath = "cloud.google.com/go/contactcenterinsights/apiv1/contactcenterinsightspb",
     protos = [":contactcenterinsights_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -134,6 +135,7 @@ go_gapic_library(
     grpc_service_config = "contactcenterinsights_grpc_service_config.json",
     importpath = "cloud.google.com/go/contactcenterinsights/apiv1;contactcenterinsights",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "contactcenterinsights_v1.yaml",
     transport = "grpc+rest",
@@ -146,19 +148,13 @@ go_gapic_library(
     ],
 )
 
-go_test(
-    name = "contactcenterinsights_go_gapic_test",
-    srcs = [":contactcenterinsights_go_gapic_srcjar_test"],
-    embed = [":contactcenterinsights_go_gapic"],
-    importpath = "cloud.google.com/go/contactcenterinsights/apiv1",
-)
-
 # Open Source Packages
 go_gapic_assembly_pkg(
     name = "gapi-cloud-contactcenterinsights-v1-go",
     deps = [
         ":contactcenterinsights_go_gapic",
         ":contactcenterinsights_go_gapic_srcjar-metadata.srcjar",
+        ":contactcenterinsights_go_gapic_srcjar-snippets.srcjar",
         ":contactcenterinsights_go_gapic_srcjar-test.srcjar",
         ":contactcenterinsights_go_proto",
     ],
@@ -184,7 +180,8 @@ py_gapic_library(
         "python-gapic-name=contact_center_insights",
     ],
     rest_numeric_enums = True,
-    transport = "grpc",
+    service_yaml = "contactcenterinsights_v1.yaml",
+    transport = "grpc+rest",
 )
 
 py_test(
@@ -212,7 +209,6 @@ load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -221,23 +217,15 @@ php_proto_library(
     deps = [":contactcenterinsights_proto"],
 )
 
-php_grpc_library(
-    name = "contactcenterinsights_php_grpc",
-    srcs = [":contactcenterinsights_proto"],
-    deps = [":contactcenterinsights_php_proto"],
-)
-
 php_gapic_library(
     name = "contactcenterinsights_php_gapic",
     srcs = [":contactcenterinsights_proto_with_info"],
     grpc_service_config = "contactcenterinsights_grpc_service_config.json",
+    migration_mode = "NEW_SURFACE_ONLY",
     rest_numeric_enums = True,
     service_yaml = "contactcenterinsights_v1.yaml",
     transport = "grpc+rest",
-    deps = [
-        ":contactcenterinsights_php_grpc",
-        ":contactcenterinsights_php_proto",
-    ],
+    deps = [":contactcenterinsights_php_proto"],
 )
 
 # Open Source Packages
@@ -245,7 +233,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-contactcenterinsights-v1-php",
     deps = [
         ":contactcenterinsights_php_gapic",
-        ":contactcenterinsights_php_grpc",
         ":contactcenterinsights_php_proto",
     ],
 )
@@ -315,6 +302,8 @@ ruby_cloud_gapic_library(
     rest_numeric_enums = True,
     ruby_cloud_description = "Contact Center AI Insights helps users detect and visualize patterns in their contact center data. Understanding conversational data drives business value, improves operational efficiency, and provides a voice for customer feedback.",
     ruby_cloud_title = "Contact Center AI Insights V1",
+    service_yaml = "contactcenterinsights_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":contactcenterinsights_ruby_grpc",
         ":contactcenterinsights_ruby_proto",
@@ -360,6 +349,7 @@ csharp_gapic_library(
     grpc_service_config = "contactcenterinsights_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "contactcenterinsights_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":contactcenterinsights_csharp_grpc",
         ":contactcenterinsights_csharp_proto",

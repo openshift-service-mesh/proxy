@@ -56,8 +56,8 @@ def swift_rules_dependencies(include_bzlmod_ready_dependencies = True):
         _maybe(
             http_archive,
             name = "build_bazel_apple_support",
-            url = "https://github.com/bazelbuild/apple_support/releases/download/1.11.1/apple_support.1.11.1.tar.gz",
-            sha256 = "cf4d63f39c7ba9059f70e995bf5fe1019267d3f77379c2028561a5d7645ef67c",
+            url = "https://github.com/bazelbuild/apple_support/releases/download/1.15.1/apple_support.1.15.1.tar.gz",
+            sha256 = "c4bb2b7367c484382300aee75be598b92f847896fb31bbd22f3a2346adf66a80",
         )
 
         _maybe(
@@ -81,6 +81,23 @@ def swift_rules_dependencies(include_bzlmod_ready_dependencies = True):
             build_file = "@build_bazel_rules_swift//third_party:com_github_nlohmann_json/BUILD.overlay",
         )
 
+        _maybe(
+            http_archive,
+            name = "bazel_features",
+            sha256 = "53182a68f172a2af4ad37051f82201e222bc19f7a40825b877da3ff4c922b9e0",
+            strip_prefix = "bazel_features-1.3.0",
+            url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.3.0/bazel_features-v1.3.0.tar.gz",
+        )
+
+        _maybe(
+            http_archive,
+            name = "com_github_apple_swift_argument_parser",
+            urls = ["https://github.com/apple/swift-argument-parser/archive/refs/tags/1.3.0.tar.gz"],
+            sha256 = "e5010ff37b542807346927ba68b7f06365a53cf49d36a6df13cef50d86018204",
+            strip_prefix = "swift-argument-parser-1.3.0",
+            build_file = "@build_bazel_rules_swift//third_party:com_github_apple_swift_argument_parser/BUILD.overlay",
+        )
+
     _maybe(
         http_archive,
         name = "com_github_apple_swift_protobuf",
@@ -97,6 +114,15 @@ def swift_rules_dependencies(include_bzlmod_ready_dependencies = True):
         sha256 = "58b60431d0064969f9679411264b82e40a217ae6bd34e17096d92cc4e47556a5",
         strip_prefix = "grpc-swift-1.16.0/",
         build_file = "@build_bazel_rules_swift//third_party:com_github_grpc_grpc_swift/BUILD.overlay",
+    )
+
+    _maybe(
+        http_archive,
+        name = "com_github_apple_swift_docc_symbolkit",
+        urls = ["https://github.com/apple/swift-docc-symbolkit/archive/refs/tags/swift-5.10-RELEASE.tar.gz"],
+        sha256 = "de1d4b6940468ddb53b89df7aa1a81323b9712775b0e33e8254fa0f6f7469a97",
+        strip_prefix = "swift-docc-symbolkit-swift-5.10-RELEASE",
+        build_file = "@build_bazel_rules_swift//third_party:com_github_apple_swift_docc_symbolkit/BUILD.overlay",
     )
 
     _maybe(

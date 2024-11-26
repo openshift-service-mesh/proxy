@@ -15,7 +15,6 @@ load(
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
     "java_gapic_assembly_gradle_pkg",
     "java_gapic_library",
     "java_gapic_test",
@@ -25,7 +24,6 @@ load(
     "nodejs_gapic_library",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
     "proto_library_with_info",
     "py_gapic_assembly_pkg",
@@ -84,6 +82,7 @@ java_gapic_library(
     gapic_yaml = "bigquerystorage_gapic.yaml",
     grpc_service_config = "bigquerystorage_grpc_service_config.json",
     rest_numeric_enums = False,
+    service_yaml = "bigquerystorage_v1beta1.yaml",
     test_deps = [
         ":storage_java_grpc",
     ],
@@ -117,7 +116,7 @@ java_gapic_assembly_gradle_pkg(
 go_proto_library(
     name = "storage_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/bigquery/storage/v1beta1",
+    importpath = "cloud.google.com/go/bigquery/storage/apiv1beta1/storagepb",
     protos = [":storage_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -129,6 +128,8 @@ go_gapic_library(
     srcs = [":storage_proto_with_info"],
     grpc_service_config = "bigquerystorage_grpc_service_config.json",
     importpath = "cloud.google.com/go/bigquery/storage/apiv1beta1;storage",
+    metadata = True,
+    release_level = "beta",
     rest_numeric_enums = False,
     service_yaml = "bigquerystorage_v1beta1.yaml",
     transport = "grpc+rest",
@@ -137,18 +138,12 @@ go_gapic_library(
     ],
 )
 
-go_test(
-    name = "storage_go_gapic_test",
-    srcs = [":storage_go_gapic_srcjar_test"],
-    embed = [":storage_go_gapic"],
-    importpath = "cloud.google.com/go/bigquery/storage/apiv1beta1",
-)
-
 # Open Source Packages
 go_gapic_assembly_pkg(
     name = "gapi-cloud-bigquery-storage-v1beta1-go",
     deps = [
         ":storage_go_gapic",
+        ":storage_go_gapic_srcjar-snippets.srcjar",
         ":storage_go_gapic_srcjar-test.srcjar",
         ":storage_go_proto",
     ],
@@ -159,6 +154,7 @@ py_gapic_library(
     srcs = [":storage_proto"],
     grpc_service_config = "bigquerystorage_grpc_service_config.json",
     rest_numeric_enums = False,
+    service_yaml = "bigquerystorage_v1beta1.yaml",
     transport = "grpc",
 )
 
@@ -184,22 +180,14 @@ php_proto_library(
     deps = [":storage_proto"],
 )
 
-php_grpc_library(
-    name = "storage_php_grpc",
-    srcs = [":storage_proto"],
-    deps = [":storage_php_proto"],
-)
-
 php_gapic_library(
     name = "storage_php_gapic",
     srcs = [":storage_proto_with_info"],
     grpc_service_config = "bigquerystorage_grpc_service_config.json",
     rest_numeric_enums = False,
+    service_yaml = "bigquerystorage_v1beta1.yaml",
     transport = "grpc+rest",
-    deps = [
-        ":storage_php_grpc",
-        ":storage_php_proto",
-    ],
+    deps = [":storage_php_proto"],
 )
 
 # Open Source Packages
@@ -207,7 +195,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-bigquery-storage-v1beta1-php",
     deps = [
         ":storage_php_gapic",
-        ":storage_php_grpc",
         ":storage_php_proto",
     ],
 )
@@ -221,7 +208,7 @@ nodejs_gapic_library(
     package = "google.cloud.bigquery.storage.v1beta1",
     rest_numeric_enums = False,
     service_yaml = "bigquerystorage_v1beta1.yaml",
-    transport = "grpc",
+    transport = "grpc+rest",
     deps = [],
 )
 
@@ -249,6 +236,7 @@ ruby_cloud_gapic_library(
     srcs = [":storage_proto_with_info"],
     extra_protoc_parameters = ["ruby-cloud-gem-name=google-cloud-bigquery-storage-v1beta1"],
     rest_numeric_enums = False,
+    service_yaml = "bigquerystorage_v1beta1.yaml",
     deps = [
         ":storage_ruby_grpc",
         ":storage_ruby_proto",

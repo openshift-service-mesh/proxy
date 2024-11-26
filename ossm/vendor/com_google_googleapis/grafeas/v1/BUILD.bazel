@@ -9,14 +9,17 @@
 #    * extra_protoc_file_parameters
 # The complete list of preserved parameters can be found in the source code.
 
+# buildifier: disable=load-on-top
+
 # This is an API workspace, having public visibility by default makes perfect sense.
 package(default_visibility = ["//visibility:public"])
 
 ##############################################################################
 # Common
 ##############################################################################
-load("@rules_proto//proto:defs.bzl", "proto_library")
+# buildifier: disable=same-origin-load
 load("@com_google_googleapis_imports//:imports.bzl", "proto_library_with_info")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 
 proto_library(
     name = "grafeas_proto",
@@ -35,10 +38,12 @@ proto_library(
         "intoto_statement.proto",
         "package.proto",
         "provenance.proto",
+        "sbom.proto",
         "severity.proto",
         "slsa_provenance.proto",
         "slsa_provenance_zero_two.proto",
         "upgrade.proto",
+        "vex.proto",
         "vulnerability.proto",
     ],
     deps = [
@@ -126,6 +131,7 @@ proto_library(
 ##############################################################################
 # Java
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "java_gapic_assembly_gradle_pkg",
@@ -152,7 +158,7 @@ java_gapic_library(
     gapic_yaml = None,
     grpc_service_config = "grafeas_grpc_service_config.json",
     rest_numeric_enums = True,
-    service_yaml = "//grafeas:grafeas_v1.yaml",
+    service_yaml = "grafeas_v1.yaml",
     test_deps = [
         ":grafeas_java_grpc",
     ],
@@ -196,12 +202,12 @@ java_proto_library(
 ##############################################################################
 # Go
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
@@ -222,18 +228,11 @@ go_gapic_library(
     importpath = "cloud.google.com/go/grafeas/apiv1;grafeas",
     metadata = True,
     rest_numeric_enums = True,
-    service_yaml = "//grafeas:grafeas_v1.yaml",
+    service_yaml = "grafeas_v1.yaml",
     transport = "grpc",
     deps = [
         ":grafeas_go_proto",
     ],
-)
-
-go_test(
-    name = "grafeas_go_gapic_test",
-    srcs = [":grafeas_go_gapic_srcjar_test"],
-    embed = [":grafeas_go_gapic"],
-    importpath = "cloud.google.com/go/grafeas/apiv1",
 )
 
 # Open Source Packages
@@ -242,6 +241,7 @@ go_gapic_assembly_pkg(
     deps = [
         ":grafeas_go_gapic",
         ":grafeas_go_gapic_srcjar-metadata.srcjar",
+        ":grafeas_go_gapic_srcjar-snippets.srcjar",
         ":grafeas_go_gapic_srcjar-test.srcjar",
         ":grafeas_go_proto",
     ],
@@ -292,6 +292,7 @@ go_proto_library(
 ##############################################################################
 # Python
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "py_gapic_assembly_pkg",
@@ -314,8 +315,8 @@ py_gapic_library(
         "warehouse-package-name=grafeas",
     ],
     rest_numeric_enums = True,
-    service_yaml = "//grafeas:grafeas_v1.yaml",
-    transport = "grpc",
+    service_yaml = "grafeas_v1.yaml",
+    transport = "grpc+rest",
     deps = [
     ],
 )
@@ -341,11 +342,11 @@ py_gapic_assembly_pkg(
 ##############################################################################
 # PHP
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -354,21 +355,15 @@ php_proto_library(
     deps = [":grafeas_proto"],
 )
 
-php_grpc_library(
-    name = "grafeas_php_grpc",
-    srcs = [":grafeas_proto"],
-    deps = [":grafeas_php_proto"],
-)
-
 php_gapic_library(
     name = "grafeas_php_gapic",
     srcs = [":grafeas_proto_with_info"],
     grpc_service_config = "grafeas_grpc_service_config.json",
+    migration_mode = "NEW_SURFACE_ONLY",
     rest_numeric_enums = True,
-    service_yaml = "//grafeas:grafeas_v1.yaml",
+    service_yaml = "grafeas_v1.yaml",
     transport = "grpc+rest",
     deps = [
-        ":grafeas_php_grpc",
         ":grafeas_php_proto",
     ],
 )
@@ -378,7 +373,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-grafeas-v1-php",
     deps = [
         ":grafeas_php_gapic",
-        ":grafeas_php_grpc",
         ":grafeas_php_proto",
     ],
 )
@@ -386,6 +380,7 @@ php_gapic_assembly_pkg(
 ##############################################################################
 # Node.js
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "nodejs_gapic_assembly_pkg",
@@ -400,8 +395,8 @@ nodejs_gapic_library(
     grpc_service_config = "grafeas_grpc_service_config.json",
     package = "grafeas.v1",
     rest_numeric_enums = True,
-    service_yaml = "//grafeas:grafeas_v1.yaml",
-    transport = "grpc+rest",
+    service_yaml = "grafeas_v1.yaml",
+    transport = "grpc",
     deps = [],
 )
 
@@ -416,6 +411,7 @@ nodejs_gapic_assembly_pkg(
 ##############################################################################
 # Ruby
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "ruby_cloud_gapic_library",
@@ -447,7 +443,8 @@ ruby_cloud_gapic_library(
     rest_numeric_enums = True,
     ruby_cloud_description = "The Grafeas API stores, and enables querying and retrieval of, critical metadata about all of your software artifacts.",
     ruby_cloud_title = "Grafeas V1",
-    service_yaml = "//grafeas:grafeas_v1.yaml",
+    service_yaml = "grafeas_v1.yaml",
+    transport = "grpc",
     deps = [
         ":grafeas_ruby_grpc",
         ":grafeas_ruby_proto",
@@ -467,6 +464,7 @@ ruby_gapic_assembly_pkg(
 ##############################################################################
 # C#
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "csharp_gapic_assembly_pkg",
@@ -492,7 +490,8 @@ csharp_gapic_library(
     common_resources_config = "@gax_dotnet//:Google.Api.Gax/ResourceNames/CommonResourcesConfig.json",
     grpc_service_config = "grafeas_grpc_service_config.json",
     rest_numeric_enums = True,
-    service_yaml = "//grafeas:grafeas_v1.yaml",
+    service_yaml = "grafeas_v1.yaml",
+    transport = "grpc",
     deps = [
         ":grafeas_csharp_grpc",
         ":grafeas_csharp_proto",
@@ -512,6 +511,7 @@ csharp_gapic_assembly_pkg(
 ##############################################################################
 # C++
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "cc_grpc_library",

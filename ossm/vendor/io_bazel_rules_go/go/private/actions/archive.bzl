@@ -31,15 +31,15 @@ load(
     "get_archive",
 )
 load(
-    "//go/private/rules:cgo.bzl",
-    "cgo_configure",
-)
-load(
     "//go/private/actions:compilepkg.bzl",
     "emit_compilepkg",
 )
+load(
+    "//go/private/rules:cgo.bzl",
+    "cgo_configure",
+)
 
-def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_deps = None):
+def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_deps = None, is_external_pkg = False):
     """See go/toolchains.rst#archive for full documentation."""
 
     if source == None:
@@ -75,7 +75,7 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
         files.append(a.runfiles)
         if a.source.mode != go.mode:
             fail("Archive mode does not match {} is {} expected {}".format(a.data.label, mode_string(a.source.mode), mode_string(go.mode)))
-    runfiles.merge_all(files)
+    runfiles = runfiles.merge_all(files)
 
     importmap = "main" if source.library.is_main else source.library.importmap
     importpath, _ = effective_importpath_pkgpath(source.library)
@@ -88,7 +88,7 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
         clinkopts = [f for fs in source.clinkopts for f in fs.split(" ")]
         cgo = cgo_configure(
             go,
-            srcs = split.go + split.c + split.asm + split.cxx + split.objc + split.headers,
+            srcs = split.go + split.c + split.asm + split.cxx + split.objc + split.headers + split.syso,
             cdeps = source.cdeps,
             cppopts = cppopts,
             copts = copts,
@@ -101,7 +101,7 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
         runfiles = runfiles.merge(cgo.runfiles)
         emit_compilepkg(
             go,
-            sources = split.go + split.c + split.asm + split.cxx + split.objc + split.headers,
+            sources = split.go + split.c + split.asm + split.cxx + split.objc + split.headers + split.syso,
             cover = source.cover,
             embedsrcs = source.embedsrcs,
             importpath = importpath,
@@ -122,12 +122,13 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
             objcxxopts = cgo.objcxxopts,
             clinkopts = cgo.clinkopts,
             testfilter = testfilter,
+            is_external_pkg = is_external_pkg,
         )
     else:
         cgo_deps = depset()
         emit_compilepkg(
             go,
-            sources = split.go + split.c + split.asm + split.cxx + split.objc + split.headers,
+            sources = split.go + split.c + split.asm + split.cxx + split.objc + split.headers + split.syso,
             cover = source.cover,
             embedsrcs = source.embedsrcs,
             importpath = importpath,
@@ -141,6 +142,7 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
             cgo = False,
             testfilter = testfilter,
             recompile_internal_deps = recompile_internal_deps,
+            is_external_pkg = is_external_pkg,
         )
 
     data = GoArchiveData(

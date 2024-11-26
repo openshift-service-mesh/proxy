@@ -13,7 +13,7 @@ def _get_rustfmt_ready_crate_info(target):
     """
 
     # Ignore external targets
-    if target.label.workspace_root.startswith("external"):
+    if target.label.workspace_name:
         return None
 
     # Obviously ignore any targets that don't contain `CrateInfo`
@@ -53,16 +53,19 @@ def _find_rustfmtable_srcs(crate_info, aspect_ctx = None):
     return srcs
 
 def _generate_manifest(edition, srcs, ctx):
+    workspace = ctx.label.workspace_name or ctx.workspace_name
+
     # Gather the source paths to non-generated files
-    src_paths = [src.path for src in srcs]
+    content = ctx.actions.args()
+    content.set_param_file_format("multiline")
+    content.add_all(srcs, format_each = workspace + "/%s")
+    content.add(edition)
 
     # Write the rustfmt manifest
     manifest = ctx.actions.declare_file(ctx.label.name + ".rustfmt")
     ctx.actions.write(
         output = manifest,
-        content = "\n".join(src_paths + [
-            edition,
-        ]),
+        content = content,
     )
 
     return manifest
@@ -146,13 +149,11 @@ generated source files are also ignored by this aspect.
             default = Label("//util/process_wrapper"),
         ),
     },
-    incompatible_use_toolchain_transition = True,
     required_providers = [
         [rust_common.crate_info],
         [rust_common.test_crate_info],
     ],
     fragments = ["cpp"],
-    host_fragments = ["cpp"],
     toolchains = [
         str(Label("//rust/rustfmt:toolchain_type")),
     ],
@@ -188,9 +189,7 @@ Output Groups:
 
 - `rustfmt_manifest`: A manifest used by rustfmt binaries to provide crate specific settings.
 """,
-    incompatible_use_toolchain_transition = True,
     fragments = ["cpp"],
-    host_fragments = ["cpp"],
     toolchains = [
         str(Label("//rust/rustfmt:toolchain_type")),
     ],
@@ -228,7 +227,7 @@ def _rustfmt_test_impl(ctx):
         ctx.attr._runner[DefaultInfo].default_runfiles,
     )
 
-    path_env_sep = ";" if is_windows else ":"
+    workspace = ctx.label.workspace_name or ctx.workspace_name
 
     return [
         DefaultInfo(
@@ -236,13 +235,15 @@ def _rustfmt_test_impl(ctx):
             runfiles = runfiles,
             executable = runner,
         ),
-        testing.TestEnvironment({
-            "RUSTFMT_MANIFESTS": path_env_sep.join([
-                manifest.short_path
-                for manifest in sorted(manifests.to_list())
-            ]),
-            "RUST_BACKTRACE": "1",
-        }),
+        RunEnvironmentInfo(
+            environment = {
+                "RUSTFMT_MANIFESTS": ctx.configuration.host_path_separator.join([
+                    workspace + "/" + manifest.short_path
+                    for manifest in sorted(manifests.to_list())
+                ]),
+                "RUST_BACKTRACE": "1",
+            },
+        ),
     ]
 
 rustfmt_test = rule(
@@ -299,7 +300,6 @@ def _rustfmt_toolchain_impl(ctx):
 rustfmt_toolchain = rule(
     doc = "A toolchain for [rustfmt](https://rust-lang.github.io/rustfmt/)",
     implementation = _rustfmt_toolchain_impl,
-    incompatible_use_toolchain_transition = True,
     attrs = {
         "rustc": attr.label(
             doc = "The location of the `rustc` binary. Can be a direct source or a filegroup containing one item.",
@@ -342,5 +342,4 @@ current_rustfmt_toolchain = rule(
     toolchains = [
         str(Label("@rules_rust//rust/rustfmt:toolchain_type")),
     ],
-    incompatible_use_toolchain_transition = True,
 )

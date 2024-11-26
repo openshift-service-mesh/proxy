@@ -11,15 +11,15 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT OR Apache-2.0
-# ])
-
 rust_library(
     name = "rayon_core",
-    srcs = glob(["**/*.rs"]),
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = True,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -87,12 +87,29 @@ rust_library(
 )
 
 cargo_build_script(
-    name = "rayon-core_build_script",
-    srcs = glob(["**/*.rs"]),
+    name = "_bs",
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = True,
+    ),
+    compile_data = glob(
+        include = ["**"],
+        allow_empty = True,
+        exclude = [
+            "**/* *",
+            "**/*.rs",
+            ".tmp_git_root/**/*",
+            "BUILD",
+            "BUILD.bazel",
+            "WORKSPACE",
+            "WORKSPACE.bazel",
+        ],
+    ),
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -104,6 +121,7 @@ cargo_build_script(
     ),
     edition = "2021",
     links = "rayon-core",
+    pkg_name = "rayon-core",
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -120,6 +138,6 @@ cargo_build_script(
 
 alias(
     name = "build_script_build",
-    actual = "rayon-core_build_script",
+    actual = ":_bs",
     tags = ["manual"],
 )

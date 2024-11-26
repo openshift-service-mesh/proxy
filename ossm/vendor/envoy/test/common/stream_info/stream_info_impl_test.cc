@@ -45,7 +45,7 @@ protected:
         sizeof(stream_info) == 776 || sizeof(stream_info) == 728 || sizeof(stream_info) == 744 ||
         sizeof(stream_info) == 680 || sizeof(stream_info) == 696 || sizeof(stream_info) == 688 ||
         sizeof(stream_info) == 736 || sizeof(stream_info) == 728 || sizeof(stream_info) == 712 ||
-        sizeof(stream_info) == 704)
+        sizeof(stream_info) == 704 || sizeof(stream_info) == 720) 
         << "If adding fields to StreamInfoImpl, please check to see if you "
            "need to add them to setFromForRecreateStream or setFrom! Current size "
         << sizeof(stream_info);
@@ -87,6 +87,10 @@ TEST_F(StreamInfoImplTest, TimingTest) {
   EXPECT_FALSE(timing.lastUpstreamRxByteReceived());
   upstream_timing.onLastUpstreamRxByteReceived(test_time_.timeSystem());
   dur = checkDuration(dur, timing.lastUpstreamRxByteReceived());
+
+  EXPECT_FALSE(timing.lastDownstreamHeaderRxByteReceived());
+  info.downstreamTiming().onLastDownstreamHeaderRxByteReceived(test_time_.timeSystem());
+  dur = checkDuration(dur, timing.lastDownstreamHeaderRxByteReceived());
 
   EXPECT_FALSE(timing.firstDownstreamTxByteSent());
   info.downstreamTiming().onFirstDownstreamTxByteSent(test_time_.timeSystem());

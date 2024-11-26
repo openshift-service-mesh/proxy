@@ -15,6 +15,14 @@
 """Implementation of ObjC/Swift Intent library rule."""
 
 load(
+    "@bazel_skylib//lib:dicts.bzl",
+    "dicts",
+)
+load(
+    "@build_bazel_apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
+load(
     "@build_bazel_rules_apple//apple/internal:apple_toolchains.bzl",
     "AppleMacToolsToolchainInfo",
     "AppleXPlatToolsToolchainInfo",
@@ -25,20 +33,12 @@ load(
     "features_support",
 )
 load(
-    "@build_bazel_rules_apple//apple/internal:resource_actions.bzl",
-    "resource_actions",
-)
-load(
     "@build_bazel_rules_apple//apple/internal:platform_support.bzl",
     "platform_support",
 )
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
-)
-load(
-    "@bazel_skylib//lib:dicts.bzl",
-    "dicts",
+    "@build_bazel_rules_apple//apple/internal:resource_actions.bzl",
+    "resource_actions",
 )
 
 def _apple_intent_library_impl(ctx):
@@ -94,7 +94,7 @@ def _apple_intent_library_impl(ctx):
         swift_version = ctx.attr.swift_version,
         class_visibility = ctx.attr.class_visibility,
         platform_prerequisites = platform_prerequisites,
-        resolved_xctoolrunner = apple_mac_toolchain_info.resolved_xctoolrunner,
+        xctoolrunner = apple_mac_toolchain_info.xctoolrunner,
     )
 
     if is_swift:

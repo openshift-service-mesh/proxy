@@ -38,7 +38,6 @@
 #include "quiche/quic/core/quic_time.h"
 #include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/core/quic_utils.h"
-#include "quiche/quic/platform/api/quic_mutex.h"
 #include "quiche/quic/platform/api/quic_socket_address.h"
 #include "quiche/quic/test_tools/mock_clock.h"
 #include "quiche/quic/test_tools/mock_connection_id_generator.h"
@@ -457,6 +456,8 @@ class MockQuicConnectionVisitor : public QuicConnectionVisitorInterface {
   MOCK_METHOD(void, OnBlockedFrame, (const QuicBlockedFrame& frame),
               (override));
   MOCK_METHOD(void, OnRstStream, (const QuicRstStreamFrame& frame), (override));
+  MOCK_METHOD(void, OnResetStreamAt, (const QuicResetStreamAtFrame& frame),
+              (override));
   MOCK_METHOD(void, OnGoAway, (const QuicGoAwayFrame& frame), (override));
   MOCK_METHOD(void, OnMessageReceived, (absl::string_view message), (override));
   MOCK_METHOD(void, OnHandshakeDoneReceived, (), (override));
@@ -656,6 +657,11 @@ class MockQuicConnection : public QuicConnection {
               (const CachedNetworkParameters&, bool), (override));
   MOCK_METHOD(void, SetMaxPacingRate, (QuicBandwidth), (override));
 
+  MOCK_METHOD(void, SetApplicationDrivenPacingRate, (quic::QuicBandwidth),
+              (override));
+  MOCK_METHOD(quic::QuicBandwidth, ApplicationDrivenPacingRate, (),
+              (const, override));
+
   MOCK_METHOD(void, OnStreamReset, (QuicStreamId, QuicRstStreamErrorCode),
               (override));
   MOCK_METHOD(bool, SendControlFrame, (const QuicFrame& frame), (override));
@@ -666,6 +672,8 @@ class MockQuicConnection : public QuicConnection {
               (const QuicPathFrameBuffer&, const QuicSocketAddress&,
                const QuicSocketAddress&, const QuicSocketAddress&,
                QuicPacketWriter*),
+              (override));
+  MOCK_METHOD(void, OnParsedClientHelloInfo, (const ParsedClientHello&),
               (override));
 
   MOCK_METHOD(void, OnError, (QuicFramer*), (override));
@@ -1028,6 +1036,7 @@ class MockHttp3DebugVisitor : public Http3DebugVisitor {
   MOCK_METHOD(void, OnGoAwayFrameReceived, (const GoAwayFrame&), (override));
   MOCK_METHOD(void, OnPriorityUpdateFrameReceived, (const PriorityUpdateFrame&),
               (override));
+  MOCK_METHOD(void, OnOriginFrameReceived, (const OriginFrame&), (override));
   MOCK_METHOD(void, OnAcceptChFrameReceived, (const AcceptChFrame&),
               (override));
 
@@ -1216,6 +1225,8 @@ class MockSendAlgorithm : public SendAlgorithmInterface {
               (const QuicTagVector& connection_options), (override));
   MOCK_METHOD(void, SetInitialCongestionWindowInPackets,
               (QuicPacketCount packets), (override));
+  MOCK_METHOD(void, SetApplicationDrivenPacingRate,
+              (QuicBandwidth application_bandwidth_target), (override));
   MOCK_METHOD(void, OnCongestionEvent,
               (bool rtt_updated, QuicByteCount bytes_in_flight,
                QuicTime event_time, const AckedPacketVector& acked_packets,
@@ -1384,6 +1395,8 @@ class MockQuicConnectionDebugVisitor : public QuicConnectionDebugVisitor {
 
   MOCK_METHOD(void, OnZeroRttRejected, (int), (override));
   MOCK_METHOD(void, OnZeroRttPacketAcked, (), (override));
+  MOCK_METHOD(void, OnParsedClientHelloInfo, (const ParsedClientHello&),
+              (override));
 };
 
 class MockReceivedPacketManager : public QuicReceivedPacketManager {
@@ -1500,6 +1513,9 @@ class MockHttpDecoderVisitor : public HttpDecoder::Visitor {
   MOCK_METHOD(bool, OnPriorityUpdateFrame, (const PriorityUpdateFrame& frame),
               (override));
 
+  MOCK_METHOD(bool, OnOriginFrameStart, (QuicByteCount header_length),
+              (override));
+  MOCK_METHOD(bool, OnOriginFrame, (const OriginFrame& frame), (override));
   MOCK_METHOD(bool, OnAcceptChFrameStart, (QuicByteCount header_length),
               (override));
   MOCK_METHOD(bool, OnAcceptChFrame, (const AcceptChFrame& frame), (override));
@@ -1603,7 +1619,6 @@ void ExpectApproxEq(T expected, T actual, float relative_margin) {
 template <typename T>
 QuicHeaderList AsHeaderList(const T& container) {
   QuicHeaderList l;
-  l.OnHeaderBlockStart();
   size_t total_size = 0;
   for (auto p : container) {
     total_size += p.first.size() + p.second.size();
@@ -2074,7 +2089,7 @@ class DroppingPacketsWithSpecificDestinationWriter
                           const QuicSocketAddress& peer_address,
                           PerPacketOptions* options,
                           const QuicPacketWriterParams& params) override {
-    QuicReaderMutexLock lock(&mutex_);
+    quiche::QuicheReaderMutexLock lock(&mutex_);
     QUIC_LOG(ERROR) << "DroppingPacketsWithSpecificDestinationWriter::"
                        "WritePacket with peer address "
                     << peer_address.ToString() << " and peer_address_to_drop_ "
@@ -2090,12 +2105,12 @@ class DroppingPacketsWithSpecificDestinationWriter
   }
 
   void set_peer_address_to_drop(const QuicSocketAddress& peer_address) {
-    QuicWriterMutexLock lock(&mutex_);
+    quiche::QuicheWriterMutexLock lock(&mutex_);
     peer_address_to_drop_ = peer_address;
   }
 
  private:
-  QuicMutex mutex_;
+  quiche::QuicheMutex mutex_;
   QuicSocketAddress peer_address_to_drop_ ABSL_GUARDED_BY(mutex_);
 };
 

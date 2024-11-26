@@ -1,12 +1,12 @@
 load(
+    "@build_bazel_rules_swift//swift:swift.bzl",
+    "swift_library",
+)
+load(
     "//apple:resources.bzl",
     "apple_bundle_import",
     "apple_resource_bundle",
     "apple_resource_group",
-)
-load(
-    "@build_bazel_rules_swift//swift:swift.bzl",
-    "swift_library",
 )
 load(
     "//test/starlark_tests:common.bzl",
@@ -486,6 +486,11 @@ filegroup(
 )
 
 filegroup(
+    name = "app_icons_with_alts_ios",
+    srcs = glob(["app_icons_with_alts_ios.xcassets/**"]),
+)
+
+filegroup(
     name = "launch_images_ios",
     srcs = glob(["launch_images_ios.xcassets/**"]),
 )
@@ -537,11 +542,6 @@ filegroup(
 filegroup(
     name = "mapping_model",
     srcs = glob(["mapping_model.xcmappingmodel/**"]),
-)
-
-filegroup(
-    name = "metal_files",
-    srcs = glob(["*.metal"]) + ["shader_defines.h"],
 )
 
 filegroup(
@@ -704,9 +704,9 @@ apple_resource_bundle(
         ":localized_strings",
         ":localized_xibs_ios",
         ":mapping_model",
-        ":metal_files",
         ":unversioned_datamodel",
         ":versioned_datamodel",
+        "//test/testdata/resources:metal_files",
     ],
     structured_resources = [
         ":generate_structured_strings",
@@ -734,9 +734,9 @@ apple_resource_bundle(
         ":localized_plists",
         ":localized_strings",
         ":mapping_model",
-        ":metal_files",
         ":unversioned_datamodel",
         ":versioned_datamodel",
+        "//test/testdata/resources:metal_files",
     ],
     structured_resources = [
         ":generate_structured_strings",
@@ -769,9 +769,9 @@ apple_resource_bundle(
         ":localized_plists",
         ":localized_strings",
         ":mapping_model",
-        ":metal_files",
         ":unversioned_datamodel",
         ":versioned_datamodel",
+        "//test/testdata/resources:metal_files",
     ],
     structured_resources = [
         ":generate_structured_strings",
@@ -1121,4 +1121,108 @@ swift_library(
     srcs = ["app_intent.swift"],
     linkopts = ["-Wl,-framework,AppIntents"],
     tags = common.fixture_tags,
+)
+
+swift_library(
+    name = "widget_configuration_intent",
+    srcs = ["widget_configuration_intent.swift"],
+    linkopts = ["-Wl,-framework,AppIntents"],
+    module_name = "WidgetConfigurationIntent",
+    tags = common.fixture_tags,
+)
+
+# --------------------------------------------------------------------------------
+# C/C++ rules with data
+
+cc_library(
+    name = "cc_library_with_runfile_a",
+    srcs = ["main.cc"],
+    data = [
+        # this file should be placed in nested runfiles-like structure
+        "//test/starlark_tests/resources:cc_lib_resources/runfile_a.txt",
+    ],
+    tags = common.fixture_tags,
+    deps = [
+        ":cc_library_with_runfile_b",
+    ],
+)
+
+cc_library(
+    name = "cc_library_with_runfile_b",
+    srcs = ["main.cc"],
+    data = [
+        # this file should be placed in nested runfiles-like structure
+        "//test/starlark_tests/resources:cc_lib_resources/runfile_b.txt",
+    ],
+    tags = common.fixture_tags,
+)
+
+cc_library(
+    name = "cc_library_with_resource_a",
+    srcs = ["main.cc"],
+    aspect_hints = ["@build_bazel_rules_apple//apple:use_resources"],
+    data = [
+        # because of aspect-hint, this file should be placed in /Resources/nested.txt
+        "//test/starlark_tests/resources:cc_lib_resources/resource_a.txt",
+    ],
+    tags = common.fixture_tags,
+)
+
+cc_library(
+    name = "cc_library_with_suppressed_resources",
+    srcs = ["main.cc"],
+    aspect_hints = ["@build_bazel_rules_apple//apple:suppress_resources"],
+    data = [
+        # because of aspect-hint, this file should not be included in the application
+        "//test/starlark_tests/resources:cc_lib_resources/suppressed_resource.txt",
+    ],
+    tags = common.fixture_tags,
+    deps = [
+        # dep will follow cc_library_runfileB rules and be included as a runfile
+        ":cc_library_with_runfile_b",
+    ],
+)
+
+# Targets for CcInfo dylib tests
+
+# Generate a .dylib for testing as if it were a precompiled library supplied by a third party
+cc_binary(
+    name = "ccinfo_dylibs_mylib-shared",
+    srcs = ["ccinfo_dylibs/mylib/lib.cpp"],
+    linkshared = True,
+)
+
+# Set up the rpath of the .dylib using install_name_tool. Bazel should probably do this again when packaging
+genrule(
+    name = "ccinfo_dylibs_mylib-shared-with-rpath",
+    srcs = [":ccinfo_dylibs_mylib-shared"],
+    outs = ["libmylib_with_rpath.dylib"],
+    cmd = "install_name_tool -id @rpath/libmylib_with_rpath.dylib $(location :ccinfo_dylibs_mylib-shared) && cp $(location :ccinfo_dylibs_mylib-shared) $@",
+)
+
+# Import our dynamically linked library.
+cc_import(
+    name = "ccinfo_dylibs_mylib-import",
+    hdrs = ["ccinfo_dylibs/mylib/lib.hpp"],
+    shared_library = ":ccinfo_dylibs_mylib-shared-with-rpath",
+)
+
+# Wrap our dylib in a cc_library so we can add data[] to it. This is common practice for adding
+# data or include paths.
+cc_library(
+    name = "ccinfo_dylibs_mylib-import-with-data",
+    data = ["ccinfo_dylibs/mylib/data.txt"],
+    deps = ["ccinfo_dylibs_mylib-import"],
+)
+
+# This is our main executable, except we make it into a cc_library so macos_application can do
+# the actual linking.
+cc_library(
+    name = "ccinfo_dylibs_libapp",
+    srcs = [
+        "ccinfo_dylibs/main.cpp",
+    ],
+    deps = [
+        ":ccinfo_dylibs_mylib-import-with-data",
+    ],
 )

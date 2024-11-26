@@ -49,6 +49,8 @@ SUPPORTED_T2_PLATFORM_TRIPLES = [
     "x86_64-unknown-none",
 ]
 
+# Note that only platforms with `std` artifacts should be added
+# to this list: https://doc.rust-lang.org/nightly/rustc/platform-support.html#tier-3
 SUPPORTED_T3_PLATFORM_TRIPLES = [
     "aarch64-unknown-nto-qnx710",
 ]
@@ -82,6 +84,7 @@ _CPU_ARCH_TO_BUILTIN_PLAT_SUFFIX = {
     "thumbv7m": "armv7-m",
     "thumbv8m.main": "armv8-m",
     "wasm32": None,
+    "wasm64": None,
     "x86_64": "x86_64",
 }
 
@@ -263,16 +266,23 @@ def abi_to_constraints(abi, *, arch = None, system = None):
         List: A list of labels to constraint values
     """
 
+    all_abi_constraints = []
+
+    # add constraints for MUSL static compilation and linking
+    # to separate the MUSL from the non-MUSL toolchain on x86_64
+    # if abi == "musl" and system == "linux" and arch == "x86_64":
+    # all_abi_constraints.append("//rust/platform/constraints:musl_on")
+
     # add constraints for iOS + watchOS simulator and device triples
     if system in ["ios", "watchos"]:
         if arch == "x86_64" or abi == "sim":
-            return ["@build_bazel_apple_support//constraints:simulator"]
+            all_abi_constraints.append("@build_bazel_apple_support//constraints:simulator")
         else:
-            return ["@build_bazel_apple_support//constraints:device"]
+            all_abi_constraints.append("@build_bazel_apple_support//constraints:device")
 
     # TODO(bazelbuild/platforms#38): Implement when C++ toolchain is more mature and we
     # figure out how they're doing this
-    return []
+    return all_abi_constraints
 
 def triple_to_system(target_triple):
     """Returns a system name for a given platform triple
@@ -348,6 +358,11 @@ def triple_to_constraint_set(target_triple):
     if target_triple == "wasm32-unknown-unknown":
         return [
             "@platforms//cpu:wasm32",
+            "@platforms//os:none",
+        ]
+    if target_triple == "wasm64-unknown-unknown":
+        return [
+            "@platforms//cpu:wasm64",
             "@platforms//os:none",
         ]
 

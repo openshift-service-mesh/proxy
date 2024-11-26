@@ -15,8 +15,8 @@
 """# Rules related to Apple bundle versioning."""
 
 load(
-    "@build_bazel_rules_apple//apple/internal:providers.bzl",
-    "new_applebundleversioninfo",
+    "@bazel_skylib//lib:dicts.bzl",
+    "dicts",
 )
 load(
     "@build_bazel_rules_apple//apple/internal:apple_toolchains.bzl",
@@ -24,8 +24,8 @@ load(
     "apple_toolchain_utils",
 )
 load(
-    "@bazel_skylib//lib:dicts.bzl",
-    "dicts",
+    "@build_bazel_rules_apple//apple/internal:providers.bzl",
+    "new_applebundleversioninfo",
 )
 
 def _collect_group_names(s):
@@ -129,17 +129,16 @@ def _apple_bundle_version_impl(ctx):
     )
     ctx.actions.write(
         output = control_file,
-        content = control.to_json(),
+        content = json.encode(control),
     )
     inputs.append(control_file)
 
-    resolved_versiontool = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo].resolved_versiontool
+    versiontool = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo].versiontool
 
     ctx.actions.run(
-        executable = resolved_versiontool.executable,
+        executable = versiontool,
         arguments = [control_file.path, bundle_version_file.path],
-        inputs = depset(inputs, transitive = [resolved_versiontool.inputs]),
-        input_manifests = resolved_versiontool.input_manifests,
+        inputs = inputs,
         outputs = [bundle_version_file],
         mnemonic = "AppleBundleVersion",
     )

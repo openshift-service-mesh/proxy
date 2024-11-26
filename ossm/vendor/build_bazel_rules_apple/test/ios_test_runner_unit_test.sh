@@ -41,7 +41,7 @@ load(
 
 ios_test_runner(
     name = "ios_x86_64_sim_runner",
-    device_type = "iPhone 8",
+    device_type = "iPhone Xs",
 )
 
 EOF
@@ -323,6 +323,79 @@ ios_unit_test(
 EOF
 }
 
+function create_ios_unit_make_var_test() {
+  if [[ ! -f ios/BUILD ]]; then
+    fail "create_sim_runners must be called first."
+  fi
+
+  cat > ios/make_var_unit_test.m <<EOF
+#import <XCTest/XCTest.h>
+#include <assert.h>
+#include <stdlib.h>
+
+@interface MakeVarUnitTest : XCTestCase
+
+@end
+
+@implementation MakeVarUnitTest
+
+- (void)testMakeVar {
+  XCTAssertEqualObjects([NSProcessInfo processInfo].environment[@"MY_MAKE_VAR"], @"$1", @"should pass");
+}
+
+@end
+EOF
+
+  cat >ios/MakeVarUnitTest-Info.plist <<EOF
+<plist version="1.0">
+<dict>
+        <key>CFBundleExecutable</key>
+        <string>MakeVarUnitTest</string>
+</dict>
+</plist>
+EOF
+
+  cat >> ios/BUILD <<EOF
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+
+string_flag(
+    name = "my_make_var",
+    build_setting_default = "",
+    make_variable = "MY_MAKE_VAR",
+)
+
+objc_library(
+    name = "make_var_unit_test_lib",
+    srcs = ["make_var_unit_test.m"],
+)
+
+ios_unit_test(
+    name = 'MakeVarUnitTest',
+    infoplists = ["MakeVarUnitTest-Info.plist"],
+    deps = [":make_var_unit_test_lib"],
+    minimum_os_version = "${MIN_OS_IOS}",
+    runner = ":ios_x86_64_sim_runner",
+    env = {
+        "MY_MAKE_VAR": "\$(MY_MAKE_VAR)",
+    },
+    toolchains = [":my_make_var"],
+)
+
+ios_unit_test(
+    name = 'MakeVarWithHost',
+    infoplists = ["MakeVarUnitTest-Info.plist"],
+    deps = [":make_var_unit_test_lib"],
+    minimum_os_version = "${MIN_OS_IOS}",
+    test_host = ":app",
+    runner = ":ios_x86_64_sim_runner",
+    env = {
+        "MY_MAKE_VAR": "\$(MY_MAKE_VAR)",
+    },
+    toolchains = [":my_make_var"],
+)
+EOF
+}
+
 function create_ios_unit_argtest() {
   if [[ ! -f ios/BUILD ]]; then
     fail "create_sim_runners must be called first."
@@ -433,6 +506,60 @@ ios_unit_test(
     test_host = ":app",
     runner = ":ios_x86_64_sim_runner",
     test_filter = "$1",
+)
+EOF
+}
+
+function create_ios_unit_main_thread_checker_tests() { 
+  cat > ios/main_thread_checker_violation.swift <<EOF
+import XCTest
+
+class MainThreadCheckerViolationTest : XCTestCase {
+  func testTriggerMainThreadChecker() {
+        let expectation = self.expectation(description: "Background operation")
+
+        DispatchQueue.global().async {
+            // This will trigger the Main Thread Checker because we are 
+            // trying to update the UI from a background thread.
+            let label = UILabel()
+            label.text = "Test"
+
+            expectation.fulfill()
+        }
+
+        waitForExpectations(timeout: 5) { (error) in
+            if let error = error {
+                XCTFail("waitForExpectations errored: \(error)")
+            }
+            
+        }
+    }
+}
+EOF
+
+  cat > ios/MainThreadCheckerViolationTest-Info.plist <<EOF
+<plist version="1.0">
+<dict>
+        <key>CFBundleExecutable</key>
+        <string>MainThreadCheckerViolationTest</string>
+</dict>
+</plist>
+EOF
+
+  cat >> ios/BUILD <<EOF
+swift_library(
+    name = "main_thread_checker_violation_test_lib",
+    testonly = True,
+    srcs = ["main_thread_checker_violation.swift"],
+)
+
+ios_unit_test(
+    name = "MainThreadCheckerViolationTest",
+    infoplists = ["MainThreadCheckerViolationTest-Info.plist"],
+    deps = [":main_thread_checker_violation_test_lib"],
+    minimum_os_version = "${MIN_OS_IOS}",
+    test_host = ":app",
+    runner = ":ios_x86_64_sim_runner",
 )
 EOF
 }
@@ -588,6 +715,40 @@ function test_ios_unit_test_with_host_with_env() {
   expect_log "Test Suite 'EnvUnitTest' passed"
 }
 
+function test_ios_unit_test_with_make_var_empty() {
+  create_sim_runners
+  create_ios_unit_make_var_test ""
+  do_ios_test //ios:MakeVarUnitTest || fail "should pass"
+
+  expect_log "Test Suite 'MakeVarUnitTest' passed"
+}
+
+function test_ios_unit_test_with_make_var_set() {
+  create_sim_runners
+  create_ios_unit_make_var_test MAKE_VAR_VALUE1
+  do_ios_test --//ios:my_make_var=MAKE_VAR_VALUE1 //ios:MakeVarUnitTest || fail "should pass"
+
+  expect_log "Test Suite 'MakeVarUnitTest' passed"
+}
+
+function test_ios_unit_test_with_host_with_make_var_empty() {
+  create_sim_runners
+  create_test_host_app
+  create_ios_unit_make_var_test ""
+  do_ios_test //ios:MakeVarWithHost || fail "should pass"
+
+  expect_log "Test Suite 'MakeVarUnitTest' passed"
+}
+
+function test_ios_unit_test_with_host_with_make_var_set() {
+  create_sim_runners
+  create_test_host_app
+  create_ios_unit_make_var_test MAKE_VAR_VALUE1
+  do_ios_test --//ios:my_make_var=MAKE_VAR_VALUE1 //ios:MakeVarWithHost || fail "should pass"
+
+  expect_log "Test Suite 'MakeVarUnitTest' passed"
+}
+
 function test_ios_unit_simulator_id() {
   create_sim_runners
   create_ios_unit_tests
@@ -729,6 +890,28 @@ function test_ios_unit_test_with_build_attribute_and_test_env_filters() {
   expect_log "Test Suite 'TestFilterUnitTest' passed"
   expect_log "Test Suite 'TestFilterUnitTest.xctest' passed"
   expect_log "Executed 2 tests, with 0 failures"
+}
+
+function test_ios_unit_test_pass_main_thread_checker_without_crash_on_report_pass() {
+  create_sim_runners
+  create_test_host_app
+  create_ios_unit_main_thread_checker_tests
+  do_ios_test --features=apple.include_main_thread_checker //ios:MainThreadCheckerViolationTest || fail "should pass"
+
+  expect_log "Test Suite 'MainThreadCheckerViolationTest' passed"
+  expect_log "Test Suite 'MainThreadCheckerViolationTest.xctest' passed"
+  expect_log "Executed 1 test, with 0 failures"
+}
+
+function test_ios_unit_test_pass_main_thread_checker_with_crash_on_report_fail() {
+  create_sim_runners
+  create_test_host_app
+  create_ios_unit_main_thread_checker_tests
+  ! do_ios_test --features=apple.include_main_thread_checker --features=apple.fail_on_main_thread_checker //ios:MainThreadCheckerViolationTest || fail "should fail"
+
+  expect_log "Test Suite 'MainThreadCheckerViolationTest' failed"
+  expect_log "Test Suite 'MainThreadCheckerViolationTest.xctest' failed"
+  expect_log "Executed 1 test, with 1 failure"
 }
 
 run_suite "ios_unit_test with iOS test runner bundling tests"

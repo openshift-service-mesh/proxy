@@ -1,44 +1,70 @@
 //! Gathering dependencies is the largest part of annotating.
-use std::collections::BTreeSet;
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{bail, Result};
 use cargo_metadata::{
-    DependencyKind, Metadata as CargoMetadata, Node, NodeDep, Package, PackageId,
+    DependencyKind, Metadata as CargoMetadata, Node, NodeDep, Package, PackageId, Target,
 };
 use cargo_platform::Platform;
 use serde::{Deserialize, Serialize};
 
+use crate::config::CrateId;
+use crate::metadata::TreeResolverMetadata;
 use crate::select::Select;
 use crate::utils::sanitize_module_name;
 
 /// A representation of a crate dependency
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Dependency {
+pub(crate) struct Dependency {
     /// The PackageId of the target
-    pub package_id: PackageId,
+    pub(crate) package_id: PackageId,
 
     /// The library target name of the dependency.
-    pub target_name: String,
+    pub(crate) target_name: String,
 
     /// The alias for the dependency from the perspective of the current package
-    pub alias: Option<String>,
+    pub(crate) alias: Option<String>,
 }
 
 /// A collection of [Dependency]s sorted by dependency kind.
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct DependencySet {
-    pub normal_deps: Select<BTreeSet<Dependency>>,
-    pub normal_dev_deps: Select<BTreeSet<Dependency>>,
-    pub proc_macro_deps: Select<BTreeSet<Dependency>>,
-    pub proc_macro_dev_deps: Select<BTreeSet<Dependency>>,
-    pub build_deps: Select<BTreeSet<Dependency>>,
-    pub build_link_deps: Select<BTreeSet<Dependency>>,
-    pub build_proc_macro_deps: Select<BTreeSet<Dependency>>,
+pub(crate) struct DependencySet {
+    pub(crate) normal_deps: Select<BTreeSet<Dependency>>,
+    pub(crate) normal_dev_deps: Select<BTreeSet<Dependency>>,
+    pub(crate) proc_macro_deps: Select<BTreeSet<Dependency>>,
+    pub(crate) proc_macro_dev_deps: Select<BTreeSet<Dependency>>,
+    pub(crate) build_deps: Select<BTreeSet<Dependency>>,
+    pub(crate) build_link_deps: Select<BTreeSet<Dependency>>,
+    pub(crate) build_proc_macro_deps: Select<BTreeSet<Dependency>>,
 }
 
 impl DependencySet {
     /// Collect all dependencies for a given node in the resolve graph.
-    pub fn new_for_node(node: &Node, metadata: &CargoMetadata) -> Self {
+    pub(crate) fn new_for_node(
+        node: &Node,
+        metadata: &CargoMetadata,
+        resolver_data: &TreeResolverMetadata,
+    ) -> Self {
+        // Build a dep tree mapping that's easily indexable via `cargo_metadata::PackageId`
+        let dep_tree: BTreeMap<CrateId, Select<BTreeSet<CrateId>>> = resolver_data
+            .iter()
+            .map(|(id, tree_data)| {
+                let mut select = Select::new();
+                for (config, data) in tree_data.items() {
+                    for dep in data.deps {
+                        select.insert(dep, config.clone());
+                    }
+                }
+                (id.clone(), select)
+            })
+            .collect();
+
+        let crate_id = {
+            let package = &metadata[&node.id];
+            CrateId::from(package)
+        };
+
         let (normal_dev_deps, normal_deps) = {
             let (dev, normal) = node
                 .deps
@@ -50,8 +76,20 @@ impl DependencySet {
                 .partition(|dep| is_dev_dependency(dep));
 
             (
-                collect_deps_selectable(node, dev, metadata, DependencyKind::Development),
-                collect_deps_selectable(node, normal, metadata, DependencyKind::Normal),
+                collect_deps_selectable(
+                    node,
+                    dev,
+                    metadata,
+                    DependencyKind::Development,
+                    dep_tree.get(&crate_id),
+                ),
+                collect_deps_selectable(
+                    node,
+                    normal,
+                    metadata,
+                    DependencyKind::Normal,
+                    dep_tree.get(&crate_id),
+                ),
             )
         };
 
@@ -66,8 +104,20 @@ impl DependencySet {
                 .partition(|dep| is_dev_dependency(dep));
 
             (
-                collect_deps_selectable(node, dev, metadata, DependencyKind::Development),
-                collect_deps_selectable(node, normal, metadata, DependencyKind::Normal),
+                collect_deps_selectable(
+                    node,
+                    dev,
+                    metadata,
+                    DependencyKind::Development,
+                    dep_tree.get(&crate_id),
+                ),
+                collect_deps_selectable(
+                    node,
+                    normal,
+                    metadata,
+                    DependencyKind::Normal,
+                    dep_tree.get(&crate_id),
+                ),
             )
         };
 
@@ -84,8 +134,20 @@ impl DependencySet {
                 .partition(|dep| is_proc_macro_package(&metadata[&dep.pkg]));
 
             (
-                collect_deps_selectable(node, proc_macro, metadata, DependencyKind::Build),
-                collect_deps_selectable(node, normal, metadata, DependencyKind::Build),
+                collect_deps_selectable(
+                    node,
+                    proc_macro,
+                    metadata,
+                    DependencyKind::Build,
+                    dep_tree.get(&crate_id),
+                ),
+                collect_deps_selectable(
+                    node,
+                    normal,
+                    metadata,
+                    DependencyKind::Build,
+                    dep_tree.get(&crate_id),
+                ),
             )
         };
 
@@ -120,7 +182,7 @@ impl DependencySet {
 }
 
 /// For details on optional dependencies see [the Rust docs](https://doc.rust-lang.org/cargo/reference/features.html#optional-dependencies).
-fn is_optional_crate_enabled(
+fn is_optional_dependency(
     parent: &Node,
     dep: &NodeDep,
     target: Option<&Platform>,
@@ -129,27 +191,12 @@ fn is_optional_crate_enabled(
 ) -> bool {
     let pkg = &metadata[&parent.id];
 
-    let mut enabled_deps = pkg
-        .features
-        .iter()
-        .filter(|(pkg_feature, _)| parent.features.contains(pkg_feature))
-        .flat_map(|(_, features)| features)
-        .filter_map(|f| f.strip_prefix("dep:"));
-
-    // if the crate is marked as optional dependency, we check whether
-    // a feature prefixed with dep: is enabled
-    if let Some(toml_dep) = pkg
-        .dependencies
+    pkg.dependencies
         .iter()
         .filter(|&d| d.kind == kind)
         .filter(|&d| d.target.as_ref() == target)
         .filter(|&d| d.optional)
-        .find(|&d| sanitize_module_name(d.rename.as_ref().unwrap_or(&d.name)) == dep.name)
-    {
-        enabled_deps.any(|d| d == toml_dep.rename.as_ref().unwrap_or(&toml_dep.name))
-    } else {
-        true
-    }
+        .any(|d| sanitize_module_name(d.rename.as_ref().unwrap_or(&d.name)) == dep.name)
 }
 
 fn collect_deps_selectable(
@@ -157,17 +204,46 @@ fn collect_deps_selectable(
     deps: Vec<&NodeDep>,
     metadata: &cargo_metadata::Metadata,
     kind: DependencyKind,
+    tree_data: Option<&Select<BTreeSet<CrateId>>>,
 ) -> Select<BTreeSet<Dependency>> {
     let mut select: Select<BTreeSet<Dependency>> = Select::default();
 
+    // Unfortunately, Cargo metadata is not as accurate as it could be due
+    // to the lack of `resolver = 2` support in the `cargo metadata` subcommand.
+    // To ensure accurate dependencies are determined, metadata is only used to
+    // determine the general list of dependencies but any one of them can be demoted
+    // to a platform specific dep depending on the `cargo tree` data provided.
+    //
+    // For more details see: https://github.com/rust-lang/cargo/issues/9863
     for dep in deps.into_iter() {
         let dep_pkg = &metadata[&dep.pkg];
         let target_name = get_library_target_name(dep_pkg, &dep.name)
             .expect("Nodes Dependencies are expected to exclusively be library-like targets");
         let alias = get_target_alias(&dep.name, dep_pkg);
+        let crate_id = CrateId::from(dep_pkg);
 
         for kind_info in &dep.dep_kinds {
-            if is_optional_crate_enabled(node, dep, kind_info.target.as_ref(), metadata, kind) {
+            if kind_info.kind != kind {
+                continue;
+            }
+
+            // For optional dependencies, use the Feature tree resolver data to determine
+            // if or how the dependency should be added.
+            if is_optional_dependency(node, dep, kind_info.target.as_ref(), metadata, kind) {
+                // Collect the dependency from any configuration.
+                if let Some(data) = tree_data {
+                    for (config, tree_dep) in data.items() {
+                        if crate_id == tree_dep {
+                            let dependency = Dependency {
+                                package_id: dep.pkg.clone(),
+                                target_name: target_name.clone(),
+                                alias: alias.clone(),
+                            };
+                            select.insert(dependency, config);
+                        }
+                    }
+                }
+            } else {
                 let dependency = Dependency {
                     package_id: dep.pkg.clone(),
                     target_name: target_name.clone(),
@@ -187,20 +263,29 @@ fn collect_deps_selectable(
     select
 }
 
+/// Packages may have targets that match aliases of dependents. This function
+/// checks a target to see if it's an unexpected type for a dependency.
+fn is_ignored_package_target(target: &Target) -> bool {
+    target
+        .kind
+        .iter()
+        .any(|t| ["example", "bench", "test"].contains(&t.as_str()))
+}
+
 fn is_lib_package(package: &Package) -> bool {
     package.targets.iter().any(|target| {
         target
             .crate_types
             .iter()
             .any(|t| ["lib", "rlib"].contains(&t.as_str()))
+            && !is_ignored_package_target(target)
     })
 }
 
 fn is_proc_macro_package(package: &Package) -> bool {
-    package
-        .targets
-        .iter()
-        .any(|target| target.crate_types.iter().any(|t| t == "proc-macro"))
+    package.targets.iter().any(|target| {
+        target.crate_types.iter().any(|t| t == "proc-macro") && !is_ignored_package_target(target)
+    })
 }
 
 fn is_dev_dependency(node_dep: &NodeDep) -> bool {
@@ -238,8 +323,13 @@ fn is_workspace_member(node_dep: &NodeDep, metadata: &CargoMetadata) -> bool {
 
 fn get_library_target_name(package: &Package, potential_name: &str) -> Result<String> {
     // If the potential name is not an alias in a dependent's package, a target's name
-    // should match which means we already know what the target library name is.
-    if package.targets.iter().any(|t| t.name == potential_name) {
+    // should match which means we already know what the target library name is. The
+    // only exception is for targets that are otherwise ignored (like benchmarks or examples).
+    if package
+        .targets
+        .iter()
+        .any(|t| t.name == potential_name && !is_ignored_package_target(t))
+    {
         return Ok(potential_name.to_string());
     }
 
@@ -271,11 +361,13 @@ fn get_library_target_name(package: &Package, potential_name: &str) -> Result<St
 /// for targets where packages (packages[#].targets[#].name) uses crate names. In order to
 /// determine whether or not a dependency is aliased, we compare it with all available targets
 /// on it's package. Note that target names are not guaranteed to be module names where Node
-/// dependencies are, so we need to do a conversion to check for this
+/// dependencies are, so we need to do a conversion to check for this. This function will
+/// return the name of a target's alias in the content of the current dependent if it is aliased.
 fn get_target_alias(target_name: &str, package: &Package) -> Option<String> {
     match package
         .targets
         .iter()
+        .filter(|t| !is_ignored_package_target(t))
         .all(|t| sanitize_module_name(&t.name) != target_name)
     {
         true => Some(target_name.to_string()),
@@ -285,10 +377,11 @@ fn get_target_alias(target_name: &str, package: &Package) -> Option<String> {
 
 #[cfg(test)]
 mod test {
-    use std::collections::BTreeSet;
-
     use super::*;
 
+    use semver::Version;
+
+    use crate::metadata::CargoTreeEntry;
     use crate::test::*;
 
     #[test]
@@ -424,7 +517,55 @@ mod test {
                 let pkg = &metadata[&node.id];
                 pkg.name == name
             })
-            .unwrap()
+            .unwrap_or_else(|| panic!("Unable to find node '{}'", name))
+    }
+
+    #[test]
+    fn example_proc_macro_dep() {
+        let metadata = metadata::example_proc_macro_dep();
+
+        let node = find_metadata_node("example-proc-macro-dep", &metadata);
+        let dependencies =
+            DependencySet::new_for_node(node, &metadata, &TreeResolverMetadata::default());
+
+        let normal_deps: Vec<_> = dependencies
+            .normal_deps
+            .items()
+            .into_iter()
+            .map(|(_, dep)| dep.target_name)
+            .collect();
+        assert_eq!(normal_deps, vec!["proc_macro_rules"]);
+
+        let proc_macro_deps: Vec<_> = dependencies
+            .proc_macro_deps
+            .items()
+            .into_iter()
+            .map(|(_, dep)| dep.target_name)
+            .collect();
+        assert_eq!(proc_macro_deps, Vec::<&str>::new());
+    }
+
+    #[test]
+    fn bench_name_alias_dep() {
+        let metadata = metadata::alias();
+
+        let node = find_metadata_node("surrealdb-core", &metadata);
+        let dependencies =
+            DependencySet::new_for_node(node, &metadata, &TreeResolverMetadata::default());
+
+        let bindings = dependencies.normal_deps.items();
+
+        // It's critical that the dep be found with the correct name and not the
+        // alias that the `aliases` package is using that coincidentally matches the
+        // `bench` target `executor` in the `async-executor` package.
+        let async_executor = bindings
+            .iter()
+            .find(|(_, dep)| dep.target_name == "async_executor")
+            .map(|(_, dep)| dep)
+            .unwrap();
+
+        // Ensure alias data is still tracked.
+        assert_eq!(async_executor.alias, Some("executor".to_owned()));
     }
 
     #[test]
@@ -433,7 +574,8 @@ mod test {
 
         let openssl_node = find_metadata_node("openssl", &metadata);
 
-        let dependencies = DependencySet::new_for_node(openssl_node, &metadata);
+        let dependencies =
+            DependencySet::new_for_node(openssl_node, &metadata, &TreeResolverMetadata::default());
 
         let normal_sys_crate =
             dependencies
@@ -466,7 +608,8 @@ mod test {
         let metadata = metadata::build_scripts();
 
         let libssh2 = find_metadata_node("libssh2-sys", &metadata);
-        let libssh2_depset = DependencySet::new_for_node(libssh2, &metadata);
+        let libssh2_depset =
+            DependencySet::new_for_node(libssh2, &metadata, &TreeResolverMetadata::default());
 
         // Collect build dependencies into a set
         let build_deps: BTreeSet<String> = libssh2_depset
@@ -478,10 +621,10 @@ mod test {
 
         assert_eq!(
             BTreeSet::from([
-                "cc 1.0.72 (registry+https://github.com/rust-lang/crates.io-index)".to_owned(),
-                "pkg-config 0.3.24 (registry+https://github.com/rust-lang/crates.io-index)"
+                "registry+https://github.com/rust-lang/crates.io-index#cc@1.0.72".to_owned(),
+                "registry+https://github.com/rust-lang/crates.io-index#pkg-config@0.3.24"
                     .to_owned(),
-                "vcpkg 0.2.15 (registry+https://github.com/rust-lang/crates.io-index)".to_owned()
+                "registry+https://github.com/rust-lang/crates.io-index#vcpkg@0.2.15".to_owned()
             ]),
             build_deps,
         );
@@ -496,9 +639,9 @@ mod test {
 
         assert_eq!(
             BTreeSet::from([
-                "libc 0.2.112 (registry+https://github.com/rust-lang/crates.io-index)".to_owned(),
-                "libz-sys 1.1.8 (registry+https://github.com/rust-lang/crates.io-index)".to_owned(),
-                "openssl-sys 0.9.87 (registry+https://github.com/rust-lang/crates.io-index)"
+                "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.112".to_owned(),
+                "registry+https://github.com/rust-lang/crates.io-index#libz-sys@1.1.8".to_owned(),
+                "registry+https://github.com/rust-lang/crates.io-index#openssl-sys@0.9.87"
                     .to_owned(),
             ]),
             normal_deps,
@@ -515,7 +658,8 @@ mod test {
         let metadata = metadata::alias();
 
         let aliases_node = find_metadata_node("aliases", &metadata);
-        let dependencies = DependencySet::new_for_node(aliases_node, &metadata);
+        let dependencies =
+            DependencySet::new_for_node(aliases_node, &metadata, &TreeResolverMetadata::default());
 
         let aliases: Vec<Dependency> = dependencies
             .normal_deps
@@ -541,7 +685,8 @@ mod test {
         let metadata = metadata::crate_types();
 
         let node = find_metadata_node("crate-types", &metadata);
-        let dependencies = DependencySet::new_for_node(node, &metadata);
+        let dependencies =
+            DependencySet::new_for_node(node, &metadata, &TreeResolverMetadata::default());
 
         let rlib_deps: Vec<Dependency> = dependencies
             .normal_deps
@@ -570,7 +715,8 @@ mod test {
         let metadata = metadata::multi_cfg_dep();
 
         let node = find_metadata_node("cpufeatures", &metadata);
-        let dependencies = DependencySet::new_for_node(node, &metadata);
+        let dependencies =
+            DependencySet::new_for_node(node, &metadata, &TreeResolverMetadata::default());
 
         let libc_cfgs: BTreeSet<Option<String>> = dependencies
             .normal_deps
@@ -595,7 +741,8 @@ mod test {
         let metadata = metadata::multi_kind_proc_macro_dep();
 
         let node = find_metadata_node("multi-kind-proc-macro-dep", &metadata);
-        let dependencies = DependencySet::new_for_node(node, &metadata);
+        let dependencies =
+            DependencySet::new_for_node(node, &metadata, &TreeResolverMetadata::default());
 
         let lib_deps: Vec<_> = dependencies
             .proc_macro_deps
@@ -619,7 +766,8 @@ mod test {
         let metadata = metadata::optional_deps_disabled();
 
         let node = find_metadata_node("clap", &metadata);
-        let dependencies = DependencySet::new_for_node(node, &metadata);
+        let dependencies =
+            DependencySet::new_for_node(node, &metadata, &TreeResolverMetadata::default());
 
         assert!(!dependencies
             .normal_deps
@@ -634,7 +782,8 @@ mod test {
         let metadata = metadata::renamed_optional_deps_disabled();
 
         let serde_with = find_metadata_node("serde_with", &metadata);
-        let serde_with_depset = DependencySet::new_for_node(serde_with, &metadata);
+        let serde_with_depset =
+            DependencySet::new_for_node(serde_with, &metadata, &TreeResolverMetadata::new());
         assert!(!serde_with_depset
             .normal_deps
             .items()
@@ -645,22 +794,38 @@ mod test {
     #[test]
     fn optional_deps_enabled() {
         let metadata = metadata::optional_deps_enabled();
+        let mut select = Select::new();
+        select.insert(
+            CargoTreeEntry {
+                features: BTreeSet::new(),
+                deps: BTreeSet::from([
+                    CrateId::new("is-terminal".to_owned(), Version::new(0, 4, 5)),
+                    CrateId::new("termcolor".to_owned(), Version::new(1, 2, 0)),
+                ]),
+            },
+            None,
+        );
+        let resolver_data = TreeResolverMetadata::from([(
+            CrateId::new("clap".to_owned(), Version::new(4, 1, 1)),
+            select,
+        )]);
 
         let clap = find_metadata_node("clap", &metadata);
-        let clap_depset = DependencySet::new_for_node(clap, &metadata);
+        let clap_depset = DependencySet::new_for_node(clap, &metadata, &resolver_data);
         assert_eq!(
             clap_depset
                 .normal_deps
                 .items()
                 .iter()
                 .filter(|(configuration, dep)| configuration.is_none()
-                    && (dep.target_name == "is-terminal" || dep.target_name == "termcolor"))
+                    && (dep.target_name == "is_terminal" || dep.target_name == "termcolor"))
                 .count(),
             2
         );
 
         let notify = find_metadata_node("notify", &metadata);
-        let notify_depset = DependencySet::new_for_node(notify, &metadata);
+        let notify_depset =
+            DependencySet::new_for_node(notify, &metadata, &TreeResolverMetadata::default());
 
         // mio is not present in the common list of dependencies
         assert!(!notify_depset
@@ -693,7 +858,8 @@ mod test {
         let metadata = metadata::optional_deps_disabled_build_dep_enabled();
 
         let node = find_metadata_node("gherkin", &metadata);
-        let dependencies = DependencySet::new_for_node(node, &metadata);
+        let dependencies =
+            DependencySet::new_for_node(node, &metadata, &TreeResolverMetadata::default());
 
         assert!(!dependencies
             .normal_deps
@@ -712,8 +878,21 @@ mod test {
     fn renamed_optional_deps_enabled() {
         let metadata = metadata::renamed_optional_deps_enabled();
 
+        let mut select = Select::new();
+        select.insert(
+            CargoTreeEntry {
+                features: BTreeSet::new(),
+                deps: BTreeSet::from([CrateId::new("ecdsa".to_owned(), Version::new(0, 16, 8))]),
+            },
+            None,
+        );
+        let resolver_data = TreeResolverMetadata::from([(
+            CrateId::new("p256".to_owned(), Version::new(0, 13, 2)),
+            select,
+        )]);
+
         let p256 = find_metadata_node("p256", &metadata);
-        let p256_depset = DependencySet::new_for_node(p256, &metadata);
+        let p256_depset = DependencySet::new_for_node(p256, &metadata, &resolver_data);
         assert_eq!(
             p256_depset
                 .normal_deps
@@ -722,6 +901,71 @@ mod test {
                 .filter(|(configuration, dep)| configuration.is_none() && dep.target_name == "ecdsa")
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn tree_resolver_deps() {
+        let metadata = metadata::resolver_2_deps();
+
+        let mut select = Select::new();
+        select.insert(
+            CargoTreeEntry {
+                deps: BTreeSet::from([
+                    CrateId::new("libc".to_owned(), Version::new(0, 2, 153)),
+                    CrateId::new("mio".to_owned(), Version::new(0, 8, 11)),
+                    CrateId::new("socket2".to_owned(), Version::new(0, 5, 6)),
+                ]),
+                features: BTreeSet::from([
+                    "io-std".to_owned(),
+                    "libc".to_owned(),
+                    "mio".to_owned(),
+                    "net".to_owned(),
+                    "rt".to_owned(),
+                    "socket2".to_owned(),
+                    "sync".to_owned(),
+                    "time".to_owned(),
+                ]),
+            },
+            Some("x86_64-unknown-linux-gnu".to_owned()),
+        );
+        select.insert(
+            CargoTreeEntry {
+                deps: BTreeSet::from([
+                    CrateId::new("bytes".to_owned(), Version::new(1, 6, 0)),
+                    CrateId::new("pin-project-lite".to_owned(), Version::new(0, 2, 14)),
+                ]),
+                features: BTreeSet::from([
+                    "bytes".to_owned(),
+                    "default".to_owned(),
+                    "io-util".to_owned(),
+                ]),
+            },
+            None,
+        );
+
+        let tree_metadata = TreeResolverMetadata::from([(
+            CrateId::new("tokio".to_owned(), Version::new(1, 37, 0)),
+            select,
+        )]);
+
+        let tokio_node = find_metadata_node("tokio", &metadata);
+        let tokio_depset = DependencySet::new_for_node(tokio_node, &metadata, &tree_metadata);
+        assert_eq!(
+            tokio_depset
+                .normal_deps
+                .items()
+                .iter()
+                .filter(|(configuration, dep)| {
+                    let is_common = configuration.is_none();
+                    let is_mio =
+                        dep.target_name == "mio" || dep.package_id.to_string().contains("mio");
+
+                    is_common && is_mio
+                })
+                .count(),
+            0,
+            "`mio` is a platform specific dependency and therefore should not be identified under the common configuration."
         );
     }
 }

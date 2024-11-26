@@ -1,7 +1,15 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <stddef.h>
+#include <cstdint>
+#include <limits>
+#include <utility>
+#include <vector>
+
+#include "opentelemetry/nostd/variant.h"
 #include "opentelemetry/sdk/metrics/data/circular_buffer.h"
+#include "opentelemetry/version.h"
 
 OPENTELEMETRY_BEGIN_NAMESPACE
 namespace sdk
@@ -21,7 +29,7 @@ struct AdaptingIntegerArrayIncrement
   uint64_t operator()(std::vector<T> &backing)
   {
     const uint64_t result = backing[index] + count;
-    OPENTELEMETRY_LIKELY_IF(result <= uint64_t(std::numeric_limits<T>::max()))
+    if OPENTELEMETRY_LIKELY_CONDITION (result <= uint64_t(std::numeric_limits<T>::max()))
     {
       backing[index] = static_cast<T>(result);
       return 0;
@@ -76,7 +84,10 @@ struct AdaptingIntegerArrayCopy
 void AdaptingIntegerArray::Increment(size_t index, uint64_t count)
 {
   const uint64_t result = nostd::visit(AdaptingIntegerArrayIncrement{index, count}, backing_);
-  OPENTELEMETRY_LIKELY_IF(result == 0) { return; }
+  if OPENTELEMETRY_LIKELY_CONDITION (result == 0)
+  {
+    return;
+  }
   EnlargeToFit(result);
   Increment(index, count);
 }

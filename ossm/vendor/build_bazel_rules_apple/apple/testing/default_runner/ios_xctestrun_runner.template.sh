@@ -22,6 +22,7 @@ custom_xcodebuild_args=(%(xcodebuild_args)s)
 simulator_name=""
 device_id=""
 command_line_args=(%(command_line_args)s)
+attachment_lifetime="%(attachment_lifetime)s"
 while [[ $# -gt 0 ]]; do
   arg="$1"
   case $arg in
@@ -37,6 +38,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --command_line_args=*)
       command_line_args+=("${arg##*=}")
+      ;;
+    --xctestrun_attachment_lifetime=*)
+      attachment_lifetime="${arg##*=}"
       ;;
     *)
       echo "error: Unsupported argument '${arg}'" >&2
@@ -65,6 +69,7 @@ fi
 
 test_bundle_path="%(test_bundle_path)s"
 test_bundle_name=$(basename_without_extension "$test_bundle_path")
+test_bundle_binary="$test_tmp_dir/$test_bundle_name.xctest/$test_bundle_name"
 
 if [[ "$test_bundle_path" == *.xctest ]]; then
   cp -cRL "$test_bundle_path" "$test_tmp_dir"
@@ -155,6 +160,15 @@ if [[ -n "$test_host_path" ]]; then
   # If this is set in the case there is no test host, some tests hang indefinitely
   xctestrun_env+="<key>XCInjectBundleInto</key><string>$(escape "__TESTHOST__/$test_host_name.app/$test_host_name")</string>"
 
+  developer_path="$(xcode-select -p)/Platforms/$test_execution_platform/Developer"
+  libraries_path="$developer_path/Library"
+
+  # Added in Xcode 16.0
+  testing_framework_path="$libraries_path/Frameworks/Testing.framework"
+  if [[ -d "$testing_framework_path" ]]; then
+    xctestrun_env+="<key>DYLD_FRAMEWORK_PATH</key><string>$libraries_path/Frameworks</string>"
+  fi
+
   if [[ "$test_type" = "XCUITEST" ]]; then
     xcrun_is_xctrunner_hosted_bundle="true"
     xcrun_is_ui_test_bundle="true"
@@ -164,8 +178,6 @@ if [[ -n "$test_host_path" ]]; then
     readonly runner_app_name="$test_bundle_name-Runner"
     readonly runner_app="$runner_app_name.app"
     readonly runner_app_destination="$test_tmp_dir/$runner_app"
-    developer_path="$(xcode-select -p)/Platforms/$test_execution_platform/Developer"
-    libraries_path="$developer_path/Library"
     cp -R "$libraries_path/Xcode/Agents/XCTRunner.app" "$runner_app_destination"
     chmod -R 777 "$runner_app_destination"
     xctestrun_test_host_path="__TESTROOT__/$runner_app"
@@ -173,6 +185,7 @@ if [[ -n "$test_host_path" ]]; then
     plugins_path="$test_tmp_dir/$runner_app/PlugIns"
     mkdir -p "$plugins_path"
     mv "$test_tmp_dir/$test_bundle_name.xctest" "$plugins_path"
+    test_bundle_binary="$plugins_path/$test_bundle_name.xctest/$test_bundle_name"
     mkdir -p "$plugins_path/$test_bundle_name.xctest/Frameworks"
     # We need this dylib for 14.x OSes. This intentionally doesn't use `test_execution_platform`
     # since this file isn't present in the `iPhoneSimulator.platform`.
@@ -184,7 +197,9 @@ if [[ -n "$test_host_path" ]]; then
     xcrun_test_bundle_path="__TESTHOST__/PlugIns/$test_bundle_name.xctest"
 
     /usr/bin/sed \
+      -e "s@\$(WRAPPEDPRODUCTNAME)@XCTRunner@g"\
       -e "s@WRAPPEDPRODUCTNAME@XCTRunner@g"\
+      -e "s@\$(WRAPPEDPRODUCTBUNDLEIDENTIFIER)@$xcrun_test_host_bundle_identifier@g"\
       -e "s@WRAPPEDPRODUCTBUNDLEIDENTIFIER@$xcrun_test_host_bundle_identifier@g"\
       -i "" \
       "$runner_app_destination/Info.plist"
@@ -202,6 +217,10 @@ if [[ -n "$test_host_path" ]]; then
     xctestsupport_framework_path="$libraries_path/PrivateFrameworks/XCTestSupport.framework"
     if [[ -d "$xctestsupport_framework_path" ]]; then
       cp -R "$xctestsupport_framework_path" "$runner_app_frameworks_destination/XCTestSupport.framework"
+    fi
+    # Added in Xcode 16.0
+    if [[ -d "$testing_framework_path" ]]; then
+      cp -R "$testing_framework_path" "$runner_app_frameworks_destination/Testing.framework"
     fi
     if [[ "$build_for_device" == true ]]; then
       # XCTRunner is multi-archs. When launching XCTRunner on arm64e device, it
@@ -258,9 +277,32 @@ for sanitizer in "$sanitizer_root"/libclang_rt.*.dylib; do
   sanitizer_dyld_env="${sanitizer_dyld_env}${sanitizer}"
 done
 
-xctestrun_libraries="__PLATFORMS__/$test_execution_platform/Developer/usr/lib/libXCTestBundleInject.dylib"
+main_thread_checker_dyld_env=""
+readonly main_thread_checker_root="$test_tmp_dir/$test_bundle_name.xctest/Frameworks"
+main_thread_checker="$main_thread_checker_root/libMainThreadChecker.dylib"
+if [[ -e "$main_thread_checker" ]]; then
+    main_thread_checker_dyld_env="$main_thread_checker"
+fi
+
+xctestrun_libraries=""
+if [[ "$test_type" != "XCUITEST" ]]; then
+  xctestrun_libraries="__PLATFORMS__/$test_execution_platform/Developer/usr/lib/libXCTestBundleInject.dylib"
+fi
+
 if [[ -n "$sanitizer_dyld_env" ]]; then
-  xctestrun_libraries="${xctestrun_libraries}:${sanitizer_dyld_env}"
+  if [[ -n "$xctestrun_libraries" ]]; then
+    xctestrun_libraries="${xctestrun_libraries}:${sanitizer_dyld_env}"
+  else
+    xctestrun_libraries="${sanitizer_dyld_env}"
+  fi
+fi
+
+if [[ -n "$main_thread_checker_dyld_env" ]]; then
+  if [[ -n "$xctestrun_libraries" ]]; then
+    xctestrun_libraries="${xctestrun_libraries}:${main_thread_checker_dyld_env}"
+  else
+    xctestrun_libraries="${main_thread_checker_dyld_env}"
+  fi
 fi
 
 TEST_FILTER="%(test_filter)s"
@@ -341,8 +383,8 @@ fi
 
 test_exit_code=0
 readonly testlog=$test_tmp_dir/test.log
+test_file=$(file "$test_bundle_binary")
 
-test_file=$(file "$test_tmp_dir/$test_bundle_name.xctest/$test_bundle_name")
 intel_simulator_hack=false
 architecture="arm64"
 if [[ $(arch) == arm64 && "$test_file" != *arm64* ]]; then
@@ -387,6 +429,12 @@ if [[ "$should_use_xcodebuild" == true ]]; then
     exit 1
   fi
 
+  # Set xctest attachment liftime
+  xctestrun_attachment_lifetime_section+="    <key>SystemAttachmentLifetime</key>\n"
+  xctestrun_attachment_lifetime_section+="    <string>$attachment_lifetime</string>\n"
+  xctestrun_attachment_lifetime_section+="    <key>UserAttachmentLifetime</key>\n"
+  xctestrun_attachment_lifetime_section+="    <string>$attachment_lifetime</string>"
+
   readonly xctestrun_file="$test_tmp_dir/tests.xctestrun"
   /usr/bin/sed \
     -e "s@BAZEL_INSERT_LIBRARIES@$xctestrun_libraries@g" \
@@ -403,6 +451,7 @@ if [[ "$should_use_xcodebuild" == true ]]; then
     -e "s@BAZEL_DYLD_LIBRARY_PATH@__PLATFORMS__/$test_execution_platform/Developer/usr/lib@g" \
     -e "s@BAZEL_COVERAGE_OUTPUT_DIR@$test_tmp_dir@g" \
     -e "s@BAZEL_COMMAND_LINE_ARGS_SECTION@$xctestrun_cmd_line_args_section@g" \
+    -e "s@BAZEL_ATTACHMENT_LIFETIME_SECTION@$xctestrun_attachment_lifetime_section@g" \
     -e "s@BAZEL_SKIP_TEST_SECTION@$xctestrun_skip_test_section@g" \
     -e "s@BAZEL_ONLY_TEST_SECTION@$xctestrun_only_test_section@g" \
     -e "s@BAZEL_ARCHITECTURE@$architecture@g" \
@@ -410,6 +459,13 @@ if [[ "$should_use_xcodebuild" == true ]]; then
     -e "s@BAZEL_PRODUCT_PATH@$xcrun_test_bundle_path@g" \
     "%(xctestrun_template)s" > "$xctestrun_file"
 
+
+  if [[ -n "${DEBUG_XCTESTRUNNER:-}" ]]; then
+    echo
+    echo "xctestrun contents:"
+    cat "$xctestrun_file"
+    echo
+  fi
 
   args=(
     -destination-timeout 15 \
@@ -462,7 +518,7 @@ else
 fi
 
 if [[ "$reuse_simulator" == false ]]; then
-  xcrun simctl shutdown "$simulator_id"
+  # Delete will shutdown down the simulator if it's still currently running.
   xcrun simctl delete "$simulator_id"
 fi
 

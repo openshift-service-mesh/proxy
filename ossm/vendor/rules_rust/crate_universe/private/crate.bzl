@@ -1,4 +1,4 @@
-"""Macros used for represeting crates or annotations for existing crates"""
+"""Macros used for representing crates or annotations for existing crates"""
 
 load(":common_utils.bzl", "parse_alias_rule")
 
@@ -76,16 +76,18 @@ def _assert_absolute(label):
         label (Label): The label to check
     """
     label_str = str(label)
-    if not label.startswith("@"):
+    if not label_str.startswith("@"):
         fail("The labels must be absolute. Please update '{}'".format(
             label_str,
         ))
 
+# This should be kept in sync crate_universe/extension.bzl.
 def _annotation(
         version = "*",
         additive_build_file = None,
         additive_build_file_content = None,
         alias_rule = None,
+        build_script_compile_data = None,
         build_script_data = None,
         build_script_tools = None,
         build_script_data_glob = None,
@@ -112,7 +114,8 @@ def _annotation(
         rustc_env = None,
         rustc_env_files = None,
         rustc_flags = None,
-        shallow_since = None):
+        shallow_since = None,
+        override_targets = None):
     """A collection of extra attributes and settings for a particular crate
 
     Args:
@@ -123,6 +126,7 @@ def _annotation(
             generated BUILD files.
         alias_rule (str, optional): Alias rule to use instead of `native.alias()`.  Overrides [render_config](#render_config)'s
             'default_alias_rule'.
+        build_script_compile_data (list, optional): A list of labels to add to a crate's `cargo_build_script::compile_data` attribute.
         build_script_data (list, optional): A list of labels to add to a crate's `cargo_build_script::data` attribute.
         build_script_tools (list, optional): A list of labels to add to a crate's `cargo_build_script::tools` attribute.
         build_script_data_glob (list, optional): A list of glob patterns to add to a crate's `cargo_build_script::data`
@@ -153,7 +157,7 @@ def _annotation(
             `cargo_build_script` targets for the current crate.
         patch_args (list, optional): The `patch_args` attribute of a Bazel repository rule. See
             [http_archive.patch_args](https://docs.bazel.build/versions/main/repo/http.html#http_archive-patch_args)
-        patch_tool (list, optional): The `patch_tool` attribute of a Bazel repository rule. See
+        patch_tool (string, optional): The `patch_tool` attribute of a Bazel repository rule. See
             [http_archive.patch_tool](https://docs.bazel.build/versions/main/repo/http.html#http_archive-patch_tool)
         patches (list, optional): The `patches` attribute of a Bazel repository rule. See
             [http_archive.patches](https://docs.bazel.build/versions/main/repo/http.html#http_archive-patches)
@@ -165,6 +169,8 @@ def _annotation(
         rustc_flags (list, optional): A list of strings to set on a crate's `rust_library::rustc_flags` attribute.
         shallow_since (str, optional): An optional timestamp used for crates originating from a git repository
             instead of a crate registry. This flag optimizes fetching the source code.
+        override_targets (dict, optional): A dictionary of alternate tagets to use when something depends on this crate to allow
+            the parent repo to provide its own version of this dependency. Keys can be `proc_marco`, `build_script`, `lib`, `bin`.
 
     Returns:
         string: A json encoded string containing the specified version and separately all other inputs.
@@ -178,38 +184,53 @@ def _annotation(
     return json.encode((
         version,
         struct(
-            additive_build_file = additive_build_file,
+            additive_build_file = _stringify_label(additive_build_file),
             additive_build_file_content = additive_build_file_content,
             alias_rule = parse_alias_rule(alias_rule),
-            build_script_data = build_script_data,
-            build_script_tools = build_script_tools,
+            build_script_compile_data = _stringify_list(build_script_compile_data),
+            build_script_data = _stringify_list(build_script_data),
+            build_script_tools = _stringify_list(build_script_tools),
             build_script_data_glob = build_script_data_glob,
-            build_script_deps = build_script_deps,
+            build_script_deps = _stringify_list(build_script_deps),
             build_script_env = build_script_env,
-            build_script_proc_macro_deps = build_script_proc_macro_deps,
+            build_script_proc_macro_deps = _stringify_list(build_script_proc_macro_deps),
             build_script_rundir = build_script_rundir,
             build_script_rustc_env = build_script_rustc_env,
-            build_script_toolchains = build_script_toolchains,
-            compile_data = compile_data,
+            build_script_toolchains = _stringify_list(build_script_toolchains),
+            compile_data = _stringify_list(compile_data),
             compile_data_glob = compile_data_glob,
             crate_features = crate_features,
-            data = data,
+            data = _stringify_list(data),
             data_glob = data_glob,
-            deps = deps,
+            deps = _stringify_list(deps),
             extra_aliased_targets = extra_aliased_targets,
             gen_binaries = gen_binaries,
             disable_pipelining = disable_pipelining,
             gen_build_script = gen_build_script,
             patch_args = patch_args,
             patch_tool = patch_tool,
-            patches = patches,
-            proc_macro_deps = proc_macro_deps,
+            patches = _stringify_list(patches),
+            proc_macro_deps = _stringify_list(proc_macro_deps),
             rustc_env = rustc_env,
-            rustc_env_files = rustc_env_files,
+            rustc_env_files = _stringify_list(rustc_env_files),
             rustc_flags = rustc_flags,
             shallow_since = shallow_since,
+            override_targets = override_targets,
         ),
     ))
+
+def _stringify_label(value):
+    if not value:
+        return value
+    return str(value)
+
+# In bzlmod, attributes of type `attr.label_list` end up as `Label`s not `str`,
+# and the `json` module doesn't know how to serialize `Label`s,
+# so we proactively convert them to strings before serializing.
+def _stringify_list(values):
+    if not values:
+        return values
+    return [str(x) for x in values]
 
 def _select(common, selects):
     """A Starlark Select for `crate.annotation()`.

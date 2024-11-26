@@ -29,17 +29,17 @@ class Tracer {
   /**
    * Start new segment. It will be called per request, for example.
    */
-  virtual TracingContextPtr newContext() = 0;
-  virtual TracingContextPtr newContext(SpanContextPtr span) = 0;
+  virtual TracingContextSharedPtr newContext() = 0;
+  virtual TracingContextSharedPtr newContext(SpanContextSharedPtr span) = 0;
 
   /**
    * Send SegmentContext to the collector.
    */
-  virtual bool report(TracingContextPtr obj) = 0;
+  virtual bool report(TracingContextSharedPtr obj) = 0;
 };
 
 using TracerPtr = std::unique_ptr<Tracer>;
 
-TracerPtr createInsecureGrpcTracer(TracerConfig& cfg);
+TracerPtr createInsecureGrpcTracer(const TracerConfig& cfg);
 
 }  // namespace cpp2sky

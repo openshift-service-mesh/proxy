@@ -16,7 +16,6 @@ using opentelemetry::logs::LoggerProvider;
 using opentelemetry::logs::Provider;
 using opentelemetry::logs::Severity;
 using opentelemetry::nostd::shared_ptr;
-using opentelemetry::nostd::span;
 using opentelemetry::nostd::string_view;
 namespace common = opentelemetry::common;
 namespace nostd  = opentelemetry::nostd;
@@ -28,9 +27,11 @@ TEST(Logger, GetLoggerDefault)
   auto lp = Provider::GetLoggerProvider();
   const std::string schema_url{"https://opentelemetry.io/schemas/1.11.0"};
   auto logger = lp->GetLogger("TestLogger", "opentelelemtry_library", "", schema_url);
-  auto name   = logger->GetName();
   EXPECT_NE(nullptr, logger);
+  auto name = logger->GetName();
   EXPECT_EQ(name, "noop logger");
+  auto record = logger->CreateLogRecord();
+  EXPECT_NE(nullptr, record);
 }
 
 // Test the two additional overloads for GetLogger()

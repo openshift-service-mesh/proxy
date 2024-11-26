@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@ import "google/api/annotations.proto";
 import "google/api/client.proto";
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
+import "google/cloud/aiplatform/v1beta1/encryption_spec.proto";
+import "google/cloud/aiplatform/v1beta1/evaluated_annotation.proto";
 import "google/cloud/aiplatform/v1beta1/explanation.proto";
 import "google/cloud/aiplatform/v1beta1/io.proto";
 import "google/cloud/aiplatform/v1beta1/model.proto";
@@ -27,10 +29,11 @@ import "google/cloud/aiplatform/v1beta1/model_evaluation.proto";
 import "google/cloud/aiplatform/v1beta1/model_evaluation_slice.proto";
 import "google/cloud/aiplatform/v1beta1/operation.proto";
 import "google/longrunning/operations.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 
 option csharp_namespace = "Google.Cloud.AIPlatform.V1Beta1";
-option go_package = "google.golang.org/genproto/googleapis/cloud/aiplatform/v1beta1;aiplatform";
+option go_package = "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb;aiplatformpb";
 option java_multiple_files = true;
 option java_outer_classname = "ModelServiceProto";
 option java_package = "com.google.cloud.aiplatform.v1beta1";
@@ -125,8 +128,9 @@ service ModelService {
 
   // Deletes a Model version.
   //
-  // Model version can only be deleted if there are no [DeployedModels][]
-  // created from it. Deleting the only version in the Model is not allowed. Use
+  // Model version can only be deleted if there are no
+  // [DeployedModels][google.cloud.aiplatform.v1beta1.DeployedModel] created
+  // from it. Deleting the only version in the Model is not allowed. Use
   // [DeleteModel][google.cloud.aiplatform.v1beta1.ModelService.DeleteModel] for
   // deleting the Model instead.
   rpc DeleteModelVersion(DeleteModelVersionRequest)
@@ -166,6 +170,24 @@ service ModelService {
     };
   }
 
+  // Copies an already existing Vertex AI Model into the specified Location.
+  // The source Model must exist in the same Project.
+  // When copying custom Models, the users themselves are responsible for
+  // [Model.metadata][google.cloud.aiplatform.v1beta1.Model.metadata] content to
+  // be region-agnostic, as well as making sure that any resources (e.g. files)
+  // it depends on remain accessible.
+  rpc CopyModel(CopyModelRequest) returns (google.longrunning.Operation) {
+    option (google.api.http) = {
+      post: "/v1beta1/{parent=projects/*/locations/*}/models:copy"
+      body: "*"
+    };
+    option (google.api.method_signature) = "parent,source_model";
+    option (google.longrunning.operation_info) = {
+      response_type: "CopyModelResponse"
+      metadata_type: "CopyModelOperationMetadata"
+    };
+  }
+
   // Imports an externally generated ModelEvaluation.
   rpc ImportModelEvaluation(ImportModelEvaluationRequest)
       returns (ModelEvaluation) {
@@ -184,6 +206,16 @@ service ModelService {
       body: "*"
     };
     option (google.api.method_signature) = "parent,model_evaluation_slices";
+  }
+
+  // Imports a list of externally generated EvaluatedAnnotations.
+  rpc BatchImportEvaluatedAnnotations(BatchImportEvaluatedAnnotationsRequest)
+      returns (BatchImportEvaluatedAnnotationsResponse) {
+    option (google.api.http) = {
+      post: "/v1beta1/{parent=projects/*/locations/*/models/*/evaluations/*/slices/*}:batchImport"
+      body: "*"
+    };
+    option (google.api.method_signature) = "parent,evaluated_annotations";
   }
 
   // Gets a ModelEvaluation.
@@ -251,10 +283,10 @@ message UploadModelRequest {
   // Optional. The user-provided custom service account to use to do the model
   // upload. If empty, [Vertex AI Service
   // Agent](https://cloud.google.com/vertex-ai/docs/general/access-control#service-agents)
-  // will be used. Users uploading the Model must have the
-  // `iam.serviceAccounts.actAs` permission on this service account. Also, this
-  // account must belong to the project specified in the `parent` field and have
-  // all necessary read permissions.
+  // will be used to access resources needed to upload the model. This account
+  // must belong to the target project where the model is uploaded to, i.e., the
+  // project specified in the `parent` field of this request and have necessary
+  // read permissions (to Google Cloud Storage, Artifact Registry, etc.).
   string service_account = 6 [(google.api.field_behavior) = OPTIONAL];
 }
 
@@ -326,12 +358,14 @@ message ListModelsRequest {
   //     * `labels.key=value` - key:value equality
   //     * `labels.key:* or labels:key - key existence
   //     * A key including a space must be quoted. `labels."a key"`.
+  //   * `base_model_name` only supports =
   //
   // Some examples:
   //
   //   * `model=1234`
   //   * `displayName="myDisplayName"`
   //   * `labels.myKey="myValue"`
+  //   * `baseModelName="text-bison"`
   string filter = 2;
 
   // The standard list page size.
@@ -378,8 +412,10 @@ message ListModelVersionsRequest {
 
   // The standard list page token.
   // Typically obtained via
-  // [ListModelVersionsResponse.next_page_token][google.cloud.aiplatform.v1beta1.ListModelVersionsResponse.next_page_token]
-  // of the previous [ModelService.ListModelversions][] call.
+  // [next_page_token][google.cloud.aiplatform.v1beta1.ListModelVersionsResponse.next_page_token]
+  // of the previous
+  // [ListModelVersions][google.cloud.aiplatform.v1beta1.ModelService.ListModelVersions]
+  // call.
   string page_token = 3;
 
   // An expression for filtering the results of the request. For field names
@@ -613,6 +649,75 @@ message UpdateExplanationDatasetResponse {}
 message ExportModelResponse {}
 
 // Request message for
+// [ModelService.CopyModel][google.cloud.aiplatform.v1beta1.ModelService.CopyModel].
+message CopyModelRequest {
+  // If both fields are unset, a new Model will be created with a generated ID.
+  oneof destination_model {
+    // Optional. Copy source_model into a new Model with this ID. The ID will
+    // become the final component of the model resource name.
+    //
+    // This value may be up to 63 characters, and valid characters are
+    // `[a-z0-9_-]`. The first character cannot be a number or hyphen.
+    string model_id = 4 [(google.api.field_behavior) = OPTIONAL];
+
+    // Optional. Specify this field to copy source_model into this existing
+    // Model as a new version. Format:
+    // `projects/{project}/locations/{location}/models/{model}`
+    string parent_model = 5 [
+      (google.api.field_behavior) = OPTIONAL,
+      (google.api.resource_reference) = {
+        type: "aiplatform.googleapis.com/Model"
+      }
+    ];
+  }
+
+  // Required. The resource name of the Location into which to copy the Model.
+  // Format: `projects/{project}/locations/{location}`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "locations.googleapis.com/Location"
+    }
+  ];
+
+  // Required. The resource name of the Model to copy. That Model must be in the
+  // same Project. Format:
+  // `projects/{project}/locations/{location}/models/{model}`
+  string source_model = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "aiplatform.googleapis.com/Model"
+    }
+  ];
+
+  // Customer-managed encryption key options. If this is set,
+  // then the Model copy will be encrypted with the provided encryption key.
+  EncryptionSpec encryption_spec = 3;
+}
+
+// Details of
+// [ModelService.CopyModel][google.cloud.aiplatform.v1beta1.ModelService.CopyModel]
+// operation.
+message CopyModelOperationMetadata {
+  // The common part of the operation metadata.
+  GenericOperationMetadata generic_metadata = 1;
+}
+
+// Response message of
+// [ModelService.CopyModel][google.cloud.aiplatform.v1beta1.ModelService.CopyModel]
+// operation.
+message CopyModelResponse {
+  // The name of the copied Model resource.
+  // Format: `projects/{project}/locations/{location}/models/{model}`
+  string model = 1 [(google.api.resource_reference) = {
+    type: "aiplatform.googleapis.com/Model"
+  }];
+
+  // Output only. The version ID of the model that is copied.
+  string model_version_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Request message for
 // [ModelService.ImportModelEvaluation][google.cloud.aiplatform.v1beta1.ModelService.ImportModelEvaluation]
 message ImportModelEvaluationRequest {
   // Required. The name of the parent model resource.
@@ -652,6 +757,32 @@ message BatchImportModelEvaluationSlicesResponse {
   // Output only. List of imported
   // [ModelEvaluationSlice.name][google.cloud.aiplatform.v1beta1.ModelEvaluationSlice.name].
   repeated string imported_model_evaluation_slices = 1
+      [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Request message for
+// [ModelService.BatchImportEvaluatedAnnotations][google.cloud.aiplatform.v1beta1.ModelService.BatchImportEvaluatedAnnotations]
+message BatchImportEvaluatedAnnotationsRequest {
+  // Required. The name of the parent ModelEvaluationSlice resource.
+  // Format:
+  // `projects/{project}/locations/{location}/models/{model}/evaluations/{evaluation}/slices/{slice}`
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "aiplatform.googleapis.com/ModelEvaluationSlice"
+    }
+  ];
+
+  // Required. Evaluated annotations resource to be imported.
+  repeated EvaluatedAnnotation evaluated_annotations = 2
+      [(google.api.field_behavior) = REQUIRED];
+}
+
+// Response message for
+// [ModelService.BatchImportEvaluatedAnnotations][google.cloud.aiplatform.v1beta1.ModelService.BatchImportEvaluatedAnnotations]
+message BatchImportEvaluatedAnnotationsResponse {
+  // Output only. Number of EvaluatedAnnotations imported.
+  int32 imported_evaluated_annotations_count = 1
       [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 

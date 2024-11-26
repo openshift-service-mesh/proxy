@@ -2,7 +2,7 @@
 
 # This is automagically replace by git during git archive using `git export-subst`
 # See https://git-scm.com/docs/git-archive#Documentation/git-archive.txt-export-subst
-_VERSION_PRIVATE = "v2.7.7"
+_VERSION_PRIVATE = "v2.9.0"
 
 VERSION = "0.0.0" if _VERSION_PRIVATE.startswith("$Format") else _VERSION_PRIVATE.replace("v", "", 1)
 

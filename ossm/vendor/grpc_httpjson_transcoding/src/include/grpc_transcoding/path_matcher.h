@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "absl/strings/str_split.h"
 #include "http_template.h"
 #include "path_matcher_node.h"
 #include "percent_encoding.h"
@@ -55,8 +56,6 @@ class PathMatcher {
  public:
   ~PathMatcher(){};
 
-  // TODO: Do not template VariableBinding
-  template <class VariableBinding>
   Method Lookup(const std::string& http_method, const std::string& path,
                 const std::string& query_params,
                 std::vector<VariableBinding>* variable_bindings,
@@ -172,17 +171,6 @@ class PathMatcherBuilder {
 
 namespace {
 
-std::vector<std::string>& split(const std::string& s, char delim,
-                                std::vector<std::string>& elems) {
-  std::stringstream ss(s);
-  std::string item;
-  while (std::getline(ss, item, delim)) {
-    elems.push_back(item);
-  }
-  return elems;
-}
-
-template <class VariableBinding>
 void ExtractBindingsFromPath(const std::vector<HttpTemplate::Variable>& vars,
                              const std::vector<std::string>& parts,
                              UrlUnescapeSpec unescape_spec,
@@ -219,7 +207,6 @@ void ExtractBindingsFromPath(const std::vector<HttpTemplate::Variable>& vars,
   }
 }
 
-template <class VariableBinding>
 void ExtractBindingsFromQueryParameters(
     const std::string& query_params,
     const std::unordered_set<std::string>& system_params,
@@ -229,8 +216,7 @@ void ExtractBindingsFromQueryParameters(
   // Query parameters may also contain system parameters such as `api_key`.
   // We'll need to ignore these. Example:
   //      book.id=123&book.author=Neal%20Stephenson&api_key=AIzaSyAz7fhBkC35D2M
-  std::vector<std::string> params;
-  split(query_params, '&', params);
+  std::vector<std::string> params = absl::StrSplit(query_params, '&');
   for (const auto& param : params) {
     size_t pos = param.find('=');
     if (pos != 0 && pos != std::string::npos) {
@@ -242,7 +228,7 @@ void ExtractBindingsFromQueryParameters(
         // sequence of field names that identify the (potentially deep) field
         // in the request, e.g. `book.author.name`.
         VariableBinding binding;
-        split(name, '.', binding.field_path);
+        binding.field_path = absl::StrSplit(name, '.');
         binding.value = UrlUnescapeString(param.substr(pos + 1),
                                           UrlUnescapeSpec::kAllCharacters,
                                           query_param_unescape_plus);
@@ -286,7 +272,7 @@ std::vector<std::string> ExtractRequestParts(
 
   std::vector<std::string> result;
   if (path.size() > 0) {
-    split(path.substr(1), '/', result);
+    result = absl::StrSplit(path.substr(1), '/');
   }
   // Removes all trailing empty parts caused by extra "/".
   while (!result.empty() && (*(--result.end())).empty()) {
@@ -335,7 +321,6 @@ PathMatcher<Method>::PathMatcher(PathMatcherBuilder<Method>&& builder)
 // TODO: cache results by adding get/put methods here (if profiling reveals
 // benefit)
 template <class Method>
-template <class VariableBinding>
 Method PathMatcher<Method>::Lookup(
     const std::string& http_method, const std::string& path,
     const std::string& query_params,

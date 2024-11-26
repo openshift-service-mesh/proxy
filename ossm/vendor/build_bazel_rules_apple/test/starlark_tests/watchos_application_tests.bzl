@@ -15,12 +15,12 @@
 """watchos_application Starlark tests."""
 
 load(
-    ":common.bzl",
-    "common",
-)
-load(
     "//test/starlark_tests/rules:analysis_failure_message_test.bzl",
     "analysis_failure_message_test",
+)
+load(
+    "//test/starlark_tests/rules:analysis_target_actions_test.bzl",
+    "analysis_target_actions_test",
 )
 load(
     "//test/starlark_tests/rules:apple_verification_test.bzl",
@@ -36,8 +36,8 @@ load(
     "infoplist_contents_test",
 )
 load(
-    "//test/starlark_tests/rules:analysis_target_actions_test.bzl",
-    "analysis_target_actions_test",
+    ":common.bzl",
+    "common",
 )
 
 def watchos_application_test_suite(name):
@@ -95,7 +95,6 @@ def watchos_application_test_suite(name):
         expected_argv = [
             "xctoolrunner actool --compile",
             "--minimum-deployment-target " + common.min_os_watchos.baseline,
-            "--product-type com.apple.product-type.application.watchapp2",
             "--platform watchsimulator",
         ],
         tags = [name],
@@ -172,6 +171,17 @@ def watchos_application_test_suite(name):
         name = "{}_contains_watchos_extension_extension".format(name),
         build_type = "device",
         target_under_test = "//test/starlark_tests/targets_under_test/watchos:ios_watchos_with_watchos_extension",
+        contains = [
+            "$BUNDLE_ROOT/Watch/app.app/PlugIns/ext.appex/PlugIns/watchos_app_extension.appex/watchos_app_extension",
+        ],
+        tags = [name],
+    )
+
+    # Tests inclusion of extensions within Watch extensions if defined with `extensions` as opposed to `extension`
+    archive_contents_test(
+        name = "{}_contains_watchos_extension_extensions".format(name),
+        build_type = "device",
+        target_under_test = "//test/starlark_tests/targets_under_test/watchos:ios_watchos_with_watchos_extension_within_extensions",
         contains = [
             "$BUNDLE_ROOT/Watch/app.app/PlugIns/ext.appex/PlugIns/watchos_app_extension.appex/watchos_app_extension",
         ],

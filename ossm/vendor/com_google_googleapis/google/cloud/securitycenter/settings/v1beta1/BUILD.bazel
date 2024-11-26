@@ -22,7 +22,6 @@ load(
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
     "java_gapic_assembly_gradle_pkg",
     "java_gapic_library",
     "java_gapic_test",
@@ -32,7 +31,6 @@ load(
     "nodejs_gapic_library",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
     "proto_library_with_info",
     "py_gapic_assembly_pkg",
@@ -92,6 +90,7 @@ java_gapic_library(
     srcs = [":settings_proto_with_info"],
     grpc_service_config = "securitycenter_settings_grpc_service_config.json",
     rest_numeric_enums = False,
+    service_yaml = "securitycenter_settings.yaml",
     test_deps = [
         ":settings_java_grpc",
     ],
@@ -125,7 +124,7 @@ java_gapic_assembly_gradle_pkg(
 go_proto_library(
     name = "settings_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/securitycenter/settings/v1beta1",
+    importpath = "cloud.google.com/go/securitycenter/settings/apiv1beta1/settingspb",
     protos = [":settings_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -137,6 +136,8 @@ go_gapic_library(
     srcs = [":settings_proto_with_info"],
     grpc_service_config = "securitycenter_settings_grpc_service_config.json",
     importpath = "cloud.google.com/go/securitycenter/settings/apiv1beta1;settings",
+    metadata = True,
+    release_level = "beta",
     rest_numeric_enums = False,
     service_yaml = "securitycenter_settings.yaml",
     transport = "grpc+rest",
@@ -145,18 +146,12 @@ go_gapic_library(
     ],
 )
 
-go_test(
-    name = "settings_go_gapic_test",
-    srcs = [":settings_go_gapic_srcjar_test"],
-    embed = [":settings_go_gapic"],
-    importpath = "cloud.google.com/go/securitycenter/settings/apiv1beta1",
-)
-
 # Open Source Packages
 go_gapic_assembly_pkg(
     name = "gapi-cloud-securitycenter-settings-v1beta1-go",
     deps = [
         ":settings_go_gapic",
+        ":settings_go_gapic_srcjar-snippets.srcjar",
         ":settings_go_gapic_srcjar-test.srcjar",
         ":settings_go_proto",
     ],
@@ -167,6 +162,7 @@ py_gapic_library(
     srcs = [":settings_proto"],
     grpc_service_config = "securitycenter_settings_grpc_service_config.json",
     rest_numeric_enums = False,
+    service_yaml = "securitycenter_settings.yaml",
     transport = "grpc",
 )
 
@@ -193,22 +189,14 @@ php_proto_library(
     deps = [":settings_proto"],
 )
 
-php_grpc_library(
-    name = "settings_php_grpc",
-    srcs = [":settings_proto"],
-    deps = [":settings_php_proto"],
-)
-
 php_gapic_library(
     name = "settings_php_gapic",
     srcs = [":settings_proto_with_info"],
     grpc_service_config = "securitycenter_settings_grpc_service_config.json",
     rest_numeric_enums = False,
+    service_yaml = "securitycenter_settings.yaml",
     transport = "grpc+rest",
-    deps = [
-        ":settings_php_grpc",
-        ":settings_php_proto",
-    ],
+    deps = [":settings_php_proto"],
 )
 
 # Open Source Packages
@@ -216,7 +204,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-securitycenter-settings-v1beta1-php",
     deps = [
         ":settings_php_gapic",
-        ":settings_php_grpc",
         ":settings_php_proto",
     ],
 )
@@ -229,7 +216,7 @@ nodejs_gapic_library(
     package = "google.cloud.securitycenter.settings.v1beta1",
     rest_numeric_enums = False,
     service_yaml = "securitycenter_settings.yaml",
-    transport = "grpc",
+    transport = "grpc+rest",
     deps = [],
 )
 
@@ -257,6 +244,7 @@ ruby_cloud_gapic_library(
     srcs = [":settings_proto_with_info"],
     extra_protoc_parameters = ["ruby-cloud-gem-name=google-cloud-settings-v1beta1"],
     rest_numeric_enums = False,
+    service_yaml = "securitycenter_settings.yaml",
     deps = [
         ":settings_ruby_grpc",
         ":settings_ruby_proto",

@@ -1,18 +1,18 @@
 # Internal implementation details of the Apple rules.
 
-load(
-    ":environment_plist.bzl",
-    "environment_plist",
-)
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load(
+    "//apple/build_settings:build_settings.bzl",
+    "build_settings_labels",
+)
 load(
     "//apple/internal:apple_toolchains.bzl",
     "apple_mac_tools_toolchain",
     "apple_xplat_tools_toolchain",
 )
 load(
-    "//apple/build_settings:build_settings.bzl",
-    "build_settings_labels",
+    ":environment_plist.bzl",
+    "environment_plist",
 )
 
 licenses(["notice"])
@@ -27,6 +27,7 @@ apple_mac_tools_toolchain(
     dsym_info_plist_template = "//apple/internal/templates:dsym_info_plist_template",
     environment_plist_tool = "//tools/environment_plist",
     imported_dynamic_framework_processor = "//tools/imported_dynamic_framework_processor",
+    main_thread_checker_tool = "//tools/main_thread_checker_tool",
     plisttool = "//tools/plisttool",
     process_and_sign_template = "//tools/bundletool:process_and_sign_template",
     provisioning_profile_tool = "//tools/provisioning_profile_tool",
@@ -81,6 +82,7 @@ bzl_library(
         "//apple:__subpackages__",
     ],
     deps = [
+        "//apple/internal:header_map_support",
         "@bazel_skylib//lib:paths",
         "@build_bazel_rules_swift//swift",
     ],
@@ -317,7 +319,9 @@ bzl_library(
         "//apple:providers",
         "//apple/internal/aspects:framework_provider_aspect",
         "//apple/internal/aspects:resource_aspect",
+        "//apple/internal/aspects:resource_aspect_hint",
         "//apple/internal/utils:clang_rt_dylibs",
+        "//apple/internal/utils:main_thread_checker_dylibs",
         "@bazel_skylib//lib:collections",
         "@bazel_tools//tools/cpp:toolchain_utils.bzl",
         "@build_bazel_rules_swift//swift",
@@ -391,7 +395,9 @@ bzl_library(
         "//apple:providers",
         "//apple/internal/aspects:framework_provider_aspect",
         "//apple/internal/aspects:resource_aspect",
+        "//apple/internal/aspects:resource_aspect_hint",
         "//apple/internal/utils:clang_rt_dylibs",
+        "//apple/internal/utils:main_thread_checker_dylibs",
     ],
 )
 
@@ -409,14 +415,6 @@ bzl_library(
 )
 
 bzl_library(
-    name = "bitcode_support",
-    srcs = ["bitcode_support.bzl"],
-    visibility = [
-        "//apple:__subpackages__",
-    ],
-)
-
-bzl_library(
     name = "partials",
     srcs = ["partials.bzl"],
     visibility = [
@@ -428,6 +426,7 @@ bzl_library(
         "//apple/internal/partials:apple_bundle_info",
         "//apple/internal/partials:apple_symbols_file",
         "//apple/internal/partials:binary",
+        "//apple/internal/partials:cc_info_dylibs",
         "//apple/internal/partials:clang_rt_dylibs",
         "//apple/internal/partials:codesigning_dossier",
         "//apple/internal/partials:debug_symbols",
@@ -438,6 +437,7 @@ bzl_library(
         "//apple/internal/partials:framework_import",
         "//apple/internal/partials:framework_provider",
         "//apple/internal/partials:macos_additional_contents",
+        "//apple/internal/partials:main_thread_checker_dylibs",
         "//apple/internal/partials:messages_stub",
         "//apple/internal/partials:provisioning_profile",
         "//apple/internal/partials:resources",
@@ -535,6 +535,7 @@ bzl_library(
         "//apple/internal/aspects:app_intents_aspect",
         "//apple/internal/aspects:framework_provider_aspect",
         "//apple/internal/aspects:resource_aspect",
+        "//apple/internal/aspects:resource_aspect_hint",
         "//apple/internal/aspects:swift_usage_aspect",
         "//apple/internal/testing:apple_test_bundle_support",
         "@bazel_skylib//lib:dicts",
@@ -558,6 +559,7 @@ bzl_library(
         "//apple:providers",
         "//apple/internal/aspects:framework_provider_aspect",
         "//apple/internal/aspects:resource_aspect",
+        "//apple/internal/aspects:resource_aspect_hint",
         "//apple/internal/aspects:swift_dynamic_framework_aspect",
         "//apple/internal/aspects:swift_usage_aspect",
         "//apple/internal/testing:apple_test_bundle_support",
@@ -669,7 +671,9 @@ bzl_library(
         "//apple:providers",
         "//apple/internal/aspects:framework_provider_aspect",
         "//apple/internal/aspects:resource_aspect",
+        "//apple/internal/aspects:resource_aspect_hint",
         "//apple/internal/utils:clang_rt_dylibs",
+        "//apple/internal/utils:main_thread_checker_dylibs",
         "@bazel_tools//tools/cpp:toolchain_utils.bzl",
         "@build_bazel_rules_swift//swift",
     ],
@@ -704,7 +708,9 @@ bzl_library(
         "//apple:providers",
         "//apple/internal/aspects:framework_provider_aspect",
         "//apple/internal/aspects:resource_aspect",
+        "//apple/internal/aspects:resource_aspect_hint",
         "//apple/internal/utils:clang_rt_dylibs",
+        "//apple/internal/utils:main_thread_checker_dylibs",
         "@bazel_skylib//lib:sets",
         "@bazel_tools//tools/cpp:toolchain_utils.bzl",
     ],
@@ -738,7 +744,9 @@ bzl_library(
         "//apple:providers",
         "//apple/internal/aspects:framework_provider_aspect",
         "//apple/internal/aspects:resource_aspect",
+        "//apple/internal/aspects:resource_aspect_hint",
         "//apple/internal/utils:clang_rt_dylibs",
+        "//apple/internal/utils:main_thread_checker_dylibs",
         "@bazel_skylib//lib:sets",
         "@bazel_tools//tools/cpp:toolchain_utils.bzl",
     ],
@@ -770,6 +778,7 @@ bzl_library(
         ":transition_support",
         "//apple:providers",
         "//apple/internal/aspects:resource_aspect",
+        "//apple/internal/aspects:resource_aspect_hint",
         "//apple/internal/aspects:swift_usage_aspect",
         "//apple/internal/utils:files",
         "@bazel_skylib//lib:partial",
@@ -813,6 +822,28 @@ bzl_library(
         "//apple/internal/aspects:docc_archive_aspect",
         "@bazel_skylib//lib:dicts",
         "@build_bazel_apple_support//lib:apple_support",
+    ],
+)
+
+bzl_library(
+    name = "header_map",
+    srcs = ["header_map.bzl"],
+    visibility = [
+        "//apple:__subpackages__",
+    ],
+    deps = [
+        "@build_bazel_rules_swift//swift",
+    ],
+)
+
+bzl_library(
+    name = "header_map_support",
+    srcs = ["header_map_support.bzl"],
+    visibility = [
+        "//apple:__subpackages__",
+    ],
+    deps = [
+        ":header_map",
     ],
 )
 

@@ -5,6 +5,8 @@ load("@com_github_grpc_grpc//bazel:python_rules.bzl", _py_grpc_library = "py_grp
 
 load("@io_bazel_rules_go//proto:def.bzl", _go_proto_library = "go_proto_library")
 
+load("@io_bazel_rules_go//proto:def.bzl", _go_grpc_library = "go_grpc_library")
+
 load("@io_bazel_rules_go//go:def.bzl", _go_library = "go_library")
 
 load("@com_github_grpc_grpc//bazel:cc_grpc_library.bzl", _cc_grpc_library = "cc_grpc_library")
@@ -43,7 +45,12 @@ def py_test(**kwargs):
 def py_gapic_assembly_pkg(**kwargs):
     pass
 
+def py_import(**kwargs):
+    pass
+
 go_proto_library = _go_proto_library
+
+go_grpc_library = _go_grpc_library
 
 go_library = _go_library
 

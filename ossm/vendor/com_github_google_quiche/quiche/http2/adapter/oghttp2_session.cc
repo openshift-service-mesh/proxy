@@ -19,8 +19,8 @@
 #include "quiche/http2/adapter/http2_visitor_interface.h"
 #include "quiche/http2/adapter/noop_header_validator.h"
 #include "quiche/http2/adapter/oghttp2_util.h"
+#include "quiche/http2/core/spdy_protocol.h"
 #include "quiche/common/quiche_callbacks.h"
-#include "quiche/spdy/core/spdy_protocol.h"
 
 namespace http2 {
 namespace adapter {
@@ -1369,13 +1369,11 @@ void OgHttp2Session::OnSetting(spdy::SpdySettingsId id, uint32_t value) {
       }
       peer_enables_connect_protocol_ = (value == 1u);
       break;
+    case kMetadataExtensionId:
+      peer_supports_metadata_ = (value != 0);
+      break;
     default:
-      // TODO(bnc): See if C++17 inline constants are allowed in QUICHE.
-      if (id == kMetadataExtensionId) {
-        peer_supports_metadata_ = (value != 0);
-      } else {
-        QUICHE_VLOG(1) << "Unimplemented SETTING id: " << id;
-      }
+      QUICHE_VLOG(1) << "Unimplemented SETTING id: " << id;
   }
   visitor_.OnSetting({id, value});
 }

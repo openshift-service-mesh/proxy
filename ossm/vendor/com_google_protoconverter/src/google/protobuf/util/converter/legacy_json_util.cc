@@ -18,26 +18,22 @@
 
 #include "absl/base/call_once.h"
 #include "absl/status/status.h"
-#include "google/protobuf/stubs/bytestream.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "google/protobuf/io/coded_stream.h"
+#include "google/protobuf/io/zero_copy_sink.h"
+#include "google/protobuf/io/zero_copy_stream.h"
+#include "google/protobuf/stubs/bytestream.h"
+#include "google/protobuf/stubs/status_macros.h"
 #include "google/protobuf/util/converter/default_value_objectwriter.h"
 #include "google/protobuf/util/converter/error_listener.h"
 #include "google/protobuf/util/converter/json_objectwriter.h"
 #include "google/protobuf/util/converter/json_stream_parser.h"
 #include "google/protobuf/util/converter/protostream_objectsource.h"
 #include "google/protobuf/util/converter/protostream_objectwriter.h"
-#include "google/protobuf/io/coded_stream.h"
-#include "google/protobuf/io/zero_copy_sink.h"
-#include "google/protobuf/io/zero_copy_stream.h"
 #include "google/protobuf/util/type_resolver.h"
 #include "google/protobuf/util/type_resolver_util.h"
-#include "google/protobuf/stubs/status_macros.h"
 
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
-
-namespace google {
 namespace protobuf {
 namespace util {
 using ::google::protobuf::io::zc_sink_internal::ZeroCopyStreamByteSink;

@@ -1,10 +1,9 @@
-//! A template engine backed by [Tera] for rendering Files.
+//! A template engine backed by [tera::Tera] for rendering Files.
 
 use std::collections::HashMap;
 
 use anyhow::{Context as AnyhowContext, Result};
 use serde_json::{from_value, to_value, Value};
-use tera::{self, Tera};
 
 use crate::config::RenderConfig;
 use crate::context::Context;
@@ -15,14 +14,14 @@ use crate::rendering::{
 use crate::select::Select;
 use crate::utils::sanitize_repository_name;
 
-pub struct TemplateEngine {
-    engine: Tera,
+pub(crate) struct TemplateEngine {
+    engine: tera::Tera,
     context: tera::Context,
 }
 
 impl TemplateEngine {
-    pub fn new(render_config: &RenderConfig) -> Self {
-        let mut tera = Tera::default();
+    pub(crate) fn new(render_config: &RenderConfig) -> Self {
+        let mut tera = tera::Tera::default();
         tera.add_raw_templates(vec![
             (
                 "partials/module/aliases_map.j2",
@@ -123,7 +122,7 @@ impl TemplateEngine {
         self.context.clone()
     }
 
-    pub fn render_header(&self) -> Result<String> {
+    pub(crate) fn render_header(&self) -> Result<String> {
         let context = self.new_tera_ctx();
         let mut header = self
             .engine
@@ -133,7 +132,11 @@ impl TemplateEngine {
         Ok(header)
     }
 
-    pub fn render_module_bzl(&self, data: &Context, platforms: &Platforms) -> Result<String> {
+    pub(crate) fn render_module_bzl(
+        &self,
+        data: &Context,
+        platforms: &Platforms,
+    ) -> Result<String> {
         let mut context = self.new_tera_ctx();
         context.insert("context", data);
         context.insert("platforms", platforms);
@@ -143,7 +146,7 @@ impl TemplateEngine {
             .context("Failed to render crates module")
     }
 
-    pub fn render_vendor_module_file(&self, data: &Context) -> Result<String> {
+    pub(crate) fn render_vendor_module_file(&self, data: &Context) -> Result<String> {
         let mut context = self.new_tera_ctx();
         context.insert("context", data);
 

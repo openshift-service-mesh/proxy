@@ -5,19 +5,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use cargo_metadata::MetadataCommand;
 use cargo_toml::{Dependency, Manifest};
 use normpath::PathExt;
 
 use crate::config::CrateId;
-use crate::splicing::{SplicedManifest, SplicingManifest};
+use crate::splicing::{Cargo, SplicedManifest, SplicingManifest};
 use crate::utils::starlark::Label;
+use crate::utils::symlink::{remove_symlink, symlink};
 
 use super::{read_manifest, DirectPackageManifest, WorkspaceMetadata};
 
 /// The core splicer implementation. Each style of Bazel workspace should be represented
 /// here and a splicing implementation defined.
-pub enum SplicerKind<'a> {
+pub(crate) enum SplicerKind<'a> {
     /// Splice a manifest which is represented by a Cargo workspace
     Workspace {
         path: &'a PathBuf,
@@ -42,10 +42,10 @@ pub enum SplicerKind<'a> {
 const IGNORE_LIST: &[&str] = &[".git", "bazel-*", ".svn"];
 
 impl<'a> SplicerKind<'a> {
-    pub fn new(
+    pub(crate) fn new(
         manifests: &'a BTreeMap<PathBuf, Manifest>,
         splicing_manifest: &'a SplicingManifest,
-        cargo: &Path,
+        cargo_bin: &Cargo,
     ) -> Result<Self> {
         // First check for any workspaces in the provided manifests
         let workspace_owned: BTreeMap<&PathBuf, &Manifest> = manifests
@@ -75,10 +75,8 @@ impl<'a> SplicerKind<'a> {
             if workspace_roots.is_empty() {
                 let sorted_manifests: BTreeSet<_> = manifests.keys().collect();
                 for manifest_path in sorted_manifests {
-                    let metadata_result = MetadataCommand::new()
-                        .cargo_path(cargo)
-                        .current_dir(manifest_path.parent().unwrap())
-                        .manifest_path(manifest_path)
+                    let metadata_result = cargo_bin
+                        .metadata_command_with_options(manifest_path, Vec::new())?
                         .no_deps()
                         .exec();
                     if let Ok(metadata) = metadata_result {
@@ -185,7 +183,8 @@ impl<'a> SplicerKind<'a> {
     }
 
     /// Performs splicing based on the current variant.
-    pub fn splice(&self, workspace_dir: &Path) -> Result<SplicedManifest> {
+    #[tracing::instrument(skip_all)]
+    pub(crate) fn splice(&self, workspace_dir: &Path) -> Result<SplicedManifest> {
         match self {
             SplicerKind::Workspace {
                 path,
@@ -205,6 +204,7 @@ impl<'a> SplicerKind<'a> {
     }
 
     /// Implementation for splicing Cargo workspaces
+    #[tracing::instrument(skip_all)]
     fn splice_workspace(
         workspace_dir: &Path,
         path: &&PathBuf,
@@ -241,6 +241,7 @@ impl<'a> SplicerKind<'a> {
     }
 
     /// Implementation for splicing individual Cargo packages
+    #[tracing::instrument(skip_all)]
     fn splice_package(
         workspace_dir: &Path,
         path: &&PathBuf,
@@ -283,6 +284,7 @@ impl<'a> SplicerKind<'a> {
     }
 
     /// Implementation for splicing together multiple Cargo packages/workspaces
+    #[tracing::instrument(skip_all)]
     fn splice_multi_package(
         workspace_dir: &Path,
         manifests: &&BTreeMap<PathBuf, Manifest>,
@@ -478,7 +480,7 @@ impl<'a> SplicerKind<'a> {
         for (name, details) in direct_packages_manifest.iter() {
             manifest.dependencies.insert(
                 name.clone(),
-                cargo_toml::Dependency::Detailed(details.clone()),
+                cargo_toml::Dependency::Detailed(Box::new(details.clone())),
             );
         }
 
@@ -517,14 +519,14 @@ impl<'a> SplicerKind<'a> {
     }
 }
 
-pub struct Splicer {
+pub(crate) struct Splicer {
     workspace_dir: PathBuf,
     manifests: BTreeMap<PathBuf, Manifest>,
     splicing_manifest: SplicingManifest,
 }
 
 impl Splicer {
-    pub fn new(workspace_dir: PathBuf, splicing_manifest: SplicingManifest) -> Result<Self> {
+    pub(crate) fn new(workspace_dir: PathBuf, splicing_manifest: SplicingManifest) -> Result<Self> {
         // Load all manifests
         let manifests = splicing_manifest
             .manifests
@@ -544,16 +546,15 @@ impl Splicer {
     }
 
     /// Build a new workspace root
-    pub fn splice_workspace(&self, cargo: &Path) -> Result<SplicedManifest> {
+    pub(crate) fn splice_workspace(&self, cargo: &Cargo) -> Result<SplicedManifest> {
         SplicerKind::new(&self.manifests, &self.splicing_manifest, cargo)?
             .splice(&self.workspace_dir)
     }
 }
-
 const DEFAULT_SPLICING_PACKAGE_NAME: &str = "direct-cargo-bazel-deps";
 const DEFAULT_SPLICING_PACKAGE_VERSION: &str = "0.0.1";
 
-pub fn default_cargo_package_manifest() -> cargo_toml::Manifest {
+pub(crate) fn default_cargo_package_manifest() -> cargo_toml::Manifest {
     // A manifest is generated with a fake workspace member so the [cargo_toml::Manifest::Workspace]
     // member is deseralized and is not `None`.
     cargo_toml::Manifest::from_str(
@@ -573,14 +574,15 @@ pub fn default_cargo_package_manifest() -> cargo_toml::Manifest {
     .unwrap()
 }
 
-pub fn default_splicing_package_crate_id() -> CrateId {
+pub(crate) fn default_splicing_package_crate_id() -> CrateId {
     CrateId::new(
         DEFAULT_SPLICING_PACKAGE_NAME.to_string(),
-        DEFAULT_SPLICING_PACKAGE_VERSION.to_string(),
+        semver::Version::parse(DEFAULT_SPLICING_PACKAGE_VERSION)
+            .expect("Known good version didn't parse"),
     )
 }
 
-pub fn default_cargo_workspace_manifest(
+pub(crate) fn default_cargo_workspace_manifest(
     resolver_version: &cargo_toml::Resolver,
 ) -> cargo_toml::Manifest {
     // A manifest is generated with a fake workspace member so the [cargo_toml::Manifest::Workspace]
@@ -600,14 +602,14 @@ pub fn default_cargo_workspace_manifest(
 }
 
 /// Determine whtether or not the manifest is a workspace root
-pub fn is_workspace_root(manifest: &Manifest) -> bool {
+pub(crate) fn is_workspace_root(manifest: &Manifest) -> bool {
     // Anything with any workspace data is considered a workspace
     manifest.workspace.is_some()
 }
 
 /// Evaluates whether or not a manifest is considered a "workspace" manifest.
 /// See [Cargo workspaces](https://doc.rust-lang.org/cargo/reference/workspaces.html).
-pub fn is_workspace_owned(manifest: &Manifest) -> bool {
+pub(crate) fn is_workspace_owned(manifest: &Manifest) -> bool {
     if is_workspace_root(manifest) {
         return true;
     }
@@ -620,7 +622,7 @@ pub fn is_workspace_owned(manifest: &Manifest) -> bool {
 }
 
 /// Determines whether or not a particular manifest is a workspace member to a given root manifest
-pub fn is_workspace_member(
+pub(crate) fn is_workspace_member(
     root_manifest: &Manifest,
     root_manifest_path: &Path,
     manifest_path: &Path,
@@ -641,7 +643,7 @@ pub fn is_workspace_member(
     })
 }
 
-pub fn write_root_manifest(path: &Path, manifest: cargo_toml::Manifest) -> Result<()> {
+pub(crate) fn write_root_manifest(path: &Path, manifest: cargo_toml::Manifest) -> Result<()> {
     // Remove the file in case one exists already, preventing symlinked files
     // from having their contents overwritten.
     if path.exists() {
@@ -653,46 +655,30 @@ pub fn write_root_manifest(path: &Path, manifest: cargo_toml::Manifest) -> Resul
         fs::create_dir_all(parent)?;
     }
 
+    // Write an intermediate manifest so we can run `cargo metadata` to list all the transitive proc-macros.
+    write_manifest(path, &manifest)?;
+
+    Ok(())
+}
+
+pub(crate) fn write_manifest(path: &Path, manifest: &cargo_toml::Manifest) -> Result<()> {
     // TODO(https://gitlab.com/crates.rs/cargo_toml/-/issues/3)
     let value = toml::Value::try_from(manifest)?;
-    fs::write(path, toml::to_string(&value)?)
-        .context(format!("Failed to write manifest to {}", path.display()))
-}
-
-/// Create a symlink file on unix systems
-#[cfg(target_family = "unix")]
-fn symlink(src: &Path, dest: &Path) -> Result<(), std::io::Error> {
-    std::os::unix::fs::symlink(src, dest)
-}
-
-/// Create a symlink file on windows systems
-#[cfg(target_family = "windows")]
-fn symlink(src: &Path, dest: &Path) -> Result<(), std::io::Error> {
-    if src.is_dir() {
-        std::os::windows::fs::symlink_dir(src, dest)
-    } else {
-        std::os::windows::fs::symlink_file(src, dest)
-    }
-}
-
-/// Create a symlink file on unix systems
-#[cfg(target_family = "unix")]
-fn remove_symlink(path: &Path) -> Result<(), std::io::Error> {
-    fs::remove_file(path)
-}
-
-/// Create a symlink file on windows systems
-#[cfg(target_family = "windows")]
-fn remove_symlink(path: &Path) -> Result<(), std::io::Error> {
-    if path.is_dir() {
-        fs::remove_dir(path)
-    } else {
-        fs::remove_file(path)
-    }
+    let content = toml::to_string(&value)?;
+    tracing::debug!(
+        "Writing Cargo manifest '{}':\n```toml\n{}```",
+        path.display(),
+        content
+    );
+    fs::write(path, content).context(format!("Failed to write manifest to {}", path.display()))
 }
 
 /// Symlinks the root contents of a source directory into a destination directory
-pub fn symlink_roots(source: &Path, dest: &Path, ignore_list: Option<&[&str]>) -> Result<()> {
+pub(crate) fn symlink_roots(
+    source: &Path,
+    dest: &Path,
+    ignore_list: Option<&[&str]>,
+) -> Result<()> {
     // Ensure the source exists and is a directory
     if !source.is_dir() {
         bail!("Source path is not a directory: {}", source.display());
@@ -742,14 +728,13 @@ pub fn symlink_roots(source: &Path, dest: &Path, ignore_list: Option<&[&str]>) -
 mod test {
     use super::*;
 
-    use std::fs;
     use std::fs::File;
     use std::str::FromStr;
 
-    use cargo_metadata::{MetadataCommand, PackageId};
+    use cargo_metadata::PackageId;
     use maplit::btreeset;
 
-    use crate::utils::starlark::Label;
+    use crate::splicing::Cargo;
 
     /// Clone and compare two items after calling `.sort()` on them.
     macro_rules! assert_sort_eq {
@@ -762,12 +747,26 @@ mod test {
         };
     }
 
+    fn should_skip_network_test() -> bool {
+        // Some test cases require network access to build pull crate metadata
+        // so that we can actually run `cargo tree`. However, RBE (and perhaps
+        // other environments) disallow or don't support this. In those cases,
+        // we just skip this test case.
+        use std::net::ToSocketAddrs;
+        if "github.com:443".to_socket_addrs().is_err() {
+            eprintln!("This test case requires network access.");
+            true
+        } else {
+            false
+        }
+    }
+
     /// Get cargo and rustc binaries the Bazel way
     #[cfg(not(feature = "cargo"))]
     fn get_cargo_and_rustc_paths() -> (PathBuf, PathBuf) {
-        let runfiles = runfiles::Runfiles::create().unwrap();
-        let cargo_path = runfiles.rlocation(concat!("rules_rust/", env!("CARGO")));
-        let rustc_path = runfiles.rlocation(concat!("rules_rust/", env!("RUSTC")));
+        let r = runfiles::Runfiles::create().unwrap();
+        let cargo_path = runfiles::rlocation!(r, concat!("rules_rust/", env!("CARGO"))).unwrap();
+        let rustc_path = runfiles::rlocation!(r, concat!("rules_rust/", env!("RUSTC"))).unwrap();
 
         (cargo_path, rustc_path)
     }
@@ -778,29 +777,15 @@ mod test {
         (PathBuf::from("cargo"), PathBuf::from("rustc"))
     }
 
-    fn cargo() -> PathBuf {
-        get_cargo_and_rustc_paths().0
+    fn cargo() -> Cargo {
+        let (cargo, rustc) = get_cargo_and_rustc_paths();
+        Cargo::new(cargo, rustc)
     }
 
     fn generate_metadata(manifest_path: &Path) -> cargo_metadata::Metadata {
-        let manifest_dir = manifest_path.parent().unwrap_or_else(|| {
-            panic!(
-                "The given manifest has no parent directory: {}",
-                manifest_path.display()
-            )
-        });
-
-        let (cargo_path, rustc_path) = get_cargo_and_rustc_paths();
-
-        MetadataCommand::new()
-            .cargo_path(cargo_path)
-            // Cargo detects config files based on `pwd` when running so
-            // to ensure user provided Cargo config files are used, it's
-            // critical to set the working directory to the manifest dir.
-            .current_dir(manifest_dir)
-            .manifest_path(manifest_path)
-            .other_options(["--offline".to_owned()])
-            .env("RUSTC", rustc_path)
+        cargo()
+            .metadata_command_with_options(manifest_path, vec!["--offline".to_owned()])
+            .unwrap()
             .exec()
             .unwrap()
     }
@@ -851,7 +836,7 @@ mod test {
                             "url": "https://crates.io/"
                         }
                     },
-                    "features": {}
+                    "tree_metadata": {}
                 }
             })
         } else {
@@ -859,7 +844,7 @@ mod test {
                 "cargo-bazel": {
                     "package_prefixes": {},
                     "sources": {},
-                    "features": {}
+                    "tree_metadata": {}
                 }
             })
         };
@@ -1022,7 +1007,12 @@ mod test {
         (splicing_manifest, cache_dir)
     }
 
-    fn new_package_id(name: &str, workspace_root: &Path, is_root: bool) -> PackageId {
+    fn new_package_id(
+        name: &str,
+        workspace_root: &Path,
+        is_root: bool,
+        cargo: &Cargo,
+    ) -> PackageId {
         let mut workspace_root = workspace_root.display().to_string();
 
         // On windows, make sure we normalize the path to match what Cargo would
@@ -1031,13 +1021,27 @@ mod test {
             workspace_root = format!("/{}", workspace_root.replace('\\', "/"))
         };
 
+        // Cargo updated the way package id's are represented. We should make sure
+        // to render the correct version based on the current cargo binary.
+        let use_format_v2 = cargo.uses_new_package_id_format().expect(
+            "Tests should have a fully controlled environment and consistent access to cargo.",
+        );
+
         if is_root {
             PackageId {
-                repr: format!("{name} 0.0.1 (path+file://{workspace_root})"),
+                repr: if use_format_v2 {
+                    format!("path+file://{workspace_root}#{name}@0.0.1")
+                } else {
+                    format!("{name} 0.0.1 (path+file://{workspace_root})")
+                },
             }
         } else {
             PackageId {
-                repr: format!("{name} 0.0.1 (path+file://{workspace_root}/{name})"),
+                repr: if use_format_v2 {
+                    format!("path+file://{workspace_root}/{name}#0.0.1")
+                } else {
+                    format!("{name} 0.0.1 (path+file://{workspace_root}/{name})")
+                },
             }
         }
     }
@@ -1054,14 +1058,17 @@ mod test {
                 .splice_workspace(&cargo())
                 .unwrap();
 
+        // Locate cargo
+        let cargo = cargo();
+
         // Ensure metadata is valid
         let metadata = generate_metadata(workspace_manifest.as_path_buf());
         assert_sort_eq!(
             metadata.workspace_members,
             vec![
-                new_package_id("sub_pkg_a", workspace_root.as_ref(), false),
-                new_package_id("sub_pkg_b", workspace_root.as_ref(), false),
-                new_package_id("root_pkg", workspace_root.as_ref(), true),
+                new_package_id("sub_pkg_a", workspace_root.as_ref(), false, &cargo),
+                new_package_id("sub_pkg_b", workspace_root.as_ref(), false, &cargo),
+                new_package_id("root_pkg", workspace_root.as_ref(), true, &cargo),
             ]
         );
 
@@ -1094,14 +1101,17 @@ mod test {
                 .splice_workspace(&cargo())
                 .unwrap();
 
+        // Locate cargo
+        let cargo = cargo();
+
         // Ensure metadata is valid
         let metadata = generate_metadata(workspace_manifest.as_path_buf());
         assert_sort_eq!(
             metadata.workspace_members,
             vec![
-                new_package_id("sub_pkg_a", workspace_root.as_ref(), false),
-                new_package_id("sub_pkg_b", workspace_root.as_ref(), false),
-                new_package_id("root_pkg", workspace_root.as_ref(), true),
+                new_package_id("sub_pkg_a", workspace_root.as_ref(), false, &cargo),
+                new_package_id("sub_pkg_b", workspace_root.as_ref(), false, &cargo),
+                new_package_id("root_pkg", workspace_root.as_ref(), true, &cargo),
             ]
         );
 
@@ -1282,11 +1292,19 @@ mod test {
                 .splice_workspace(&cargo())
                 .unwrap();
 
+        // Locate cargo
+        let cargo = cargo();
+
         // Ensure metadata is valid
         let metadata = generate_metadata(workspace_manifest.as_path_buf());
         assert_sort_eq!(
             metadata.workspace_members,
-            vec![new_package_id("root_pkg", workspace_root.as_ref(), true)]
+            vec![new_package_id(
+                "root_pkg",
+                workspace_root.as_ref(),
+                true,
+                &cargo
+            )]
         );
 
         // Ensure the workspace metadata annotations are not populated
@@ -1322,14 +1340,17 @@ mod test {
             Some(cargo_toml::Resolver::V1)
         );
 
+        // Locate cargo
+        let cargo = cargo();
+
         // Ensure metadata is valid
         let metadata = generate_metadata(workspace_manifest.as_path_buf());
         assert_sort_eq!(
             metadata.workspace_members,
             vec![
-                new_package_id("pkg_a", workspace_root.as_ref(), false),
-                new_package_id("pkg_b", workspace_root.as_ref(), false),
-                new_package_id("pkg_c", workspace_root.as_ref(), false),
+                new_package_id("pkg_a", workspace_root.as_ref(), false, &cargo),
+                new_package_id("pkg_b", workspace_root.as_ref(), false, &cargo),
+                new_package_id("pkg_c", workspace_root.as_ref(), false, &cargo),
             ]
         );
 
@@ -1369,14 +1390,17 @@ mod test {
             Some(cargo_toml::Resolver::V2)
         );
 
+        // Locate cargo
+        let cargo = cargo();
+
         // Ensure metadata is valid
         let metadata = generate_metadata(workspace_manifest.as_path_buf());
         assert_sort_eq!(
             metadata.workspace_members,
             vec![
-                new_package_id("pkg_a", workspace_root.as_ref(), false),
-                new_package_id("pkg_b", workspace_root.as_ref(), false),
-                new_package_id("pkg_c", workspace_root.as_ref(), false),
+                new_package_id("pkg_a", workspace_root.as_ref(), false, &cargo),
+                new_package_id("pkg_b", workspace_root.as_ref(), false, &cargo),
+                new_package_id("pkg_c", workspace_root.as_ref(), false, &cargo),
             ]
         );
 
@@ -1392,14 +1416,18 @@ mod test {
 
     #[test]
     fn splice_multi_package_with_direct_deps() {
-        let (mut splicing_manifest, _cache_dir) = mock_splicing_manifest_with_multi_package();
+        if should_skip_network_test() {
+            return;
+        }
+
+        let (mut splicing_manifest, cache_dir) = mock_splicing_manifest_with_multi_package();
 
         // Add a "direct dependency" entry
         splicing_manifest.direct_packages.insert(
-            "fake_pkg".to_owned(),
+            "syn".to_owned(),
             cargo_toml::DependencyDetail {
-                version: Some("1.2.3".to_owned()),
-                ..cargo_toml::DependencyDetail::default()
+                version: Some("1.0.109".to_owned()),
+                ..syn_dependency_detail()
             },
         );
 
@@ -1408,7 +1436,7 @@ mod test {
         let workspace_manifest =
             Splicer::new(workspace_root.as_ref().to_path_buf(), splicing_manifest)
                 .unwrap()
-                .splice_workspace(&cargo())
+                .splice_workspace(&cargo().with_cargo_home(cache_dir.path().to_owned()))
                 .unwrap();
 
         // Check the default resolver version
@@ -1423,14 +1451,18 @@ mod test {
 
     #[test]
     fn splice_multi_package_with_patch() {
+        if should_skip_network_test() {
+            return;
+        }
+
         let (splicing_manifest, cache_dir) = mock_splicing_manifest_with_multi_package();
 
         // Generate a patch entry
         let expected = cargo_toml::PatchSet::from([(
-            "registry".to_owned(),
+            "crates-io".to_owned(),
             BTreeMap::from([(
-                "foo".to_owned(),
-                cargo_toml::Dependency::Simple("1.2.3".to_owned()),
+                "syn".to_owned(),
+                cargo_toml::Dependency::Detailed(Box::new(syn_dependency_detail())),
             )]),
         )]);
 
@@ -1446,49 +1478,7 @@ mod test {
         let workspace_manifest =
             Splicer::new(workspace_root.as_ref().to_path_buf(), splicing_manifest)
                 .unwrap()
-                .splice_workspace(&cargo())
-                .unwrap();
-
-        // Ensure the patches match the expected value
-        let cargo_manifest = cargo_toml::Manifest::from_str(
-            &fs::read_to_string(workspace_manifest.as_path_buf()).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(expected, cargo_manifest.patch);
-    }
-
-    #[test]
-    fn splice_multi_package_with_multiple_patch_registries() {
-        let (splicing_manifest, cache_dir) = mock_splicing_manifest_with_multi_package();
-
-        let mut expected = cargo_toml::PatchSet::new();
-
-        for pkg in ["pkg_a", "pkg_b"] {
-            // Generate a patch entry
-            let new_patch = cargo_toml::PatchSet::from([(
-                format!("{pkg}_registry"),
-                BTreeMap::from([(
-                    "foo".to_owned(),
-                    cargo_toml::Dependency::Simple("1.2.3".to_owned()),
-                )]),
-            )]);
-            expected.extend(new_patch.clone());
-
-            // Insert the patch entry to the manifests
-            let manifest_path = cache_dir.as_ref().join(pkg).join("Cargo.toml");
-            let mut manifest =
-                cargo_toml::Manifest::from_str(&fs::read_to_string(&manifest_path).unwrap())
-                    .unwrap();
-            manifest.patch.extend(new_patch);
-            fs::write(manifest_path, toml::to_string(&manifest).unwrap()).unwrap();
-        }
-
-        // Splice the workspace
-        let workspace_root = tempfile::tempdir().unwrap();
-        let workspace_manifest =
-            Splicer::new(workspace_root.as_ref().to_path_buf(), splicing_manifest)
-                .unwrap()
-                .splice_workspace(&cargo())
+                .splice_workspace(&cargo().with_cargo_home(cache_dir.path().to_owned()))
                 .unwrap();
 
         // Ensure the patches match the expected value
@@ -1501,31 +1491,41 @@ mod test {
 
     #[test]
     fn splice_multi_package_with_merged_patch_registries() {
+        if should_skip_network_test() {
+            return;
+        }
+
         let (splicing_manifest, cache_dir) = mock_splicing_manifest_with_multi_package();
 
         let expected = cargo_toml::PatchSet::from([(
-            "registry".to_owned(),
+            "crates-io".to_owned(),
             cargo_toml::DepsSet::from([
                 (
-                    "foo-pkg_a".to_owned(),
-                    cargo_toml::Dependency::Simple("1.2.3".to_owned()),
+                    "syn".to_owned(),
+                    cargo_toml::Dependency::Detailed(Box::new(syn_dependency_detail())),
                 ),
                 (
-                    "foo-pkg_b".to_owned(),
-                    cargo_toml::Dependency::Simple("1.2.3".to_owned()),
+                    "lazy_static".to_owned(),
+                    cargo_toml::Dependency::Detailed(Box::new(lazy_static_dependency_detail())),
                 ),
             ]),
         )]);
 
         for pkg in ["pkg_a", "pkg_b"] {
             // Generate a patch entry
-            let new_patch = cargo_toml::PatchSet::from([(
-                "registry".to_owned(),
-                BTreeMap::from([(
-                    format!("foo-{pkg}"),
-                    cargo_toml::Dependency::Simple("1.2.3".to_owned()),
-                )]),
-            )]);
+            let mut map = BTreeMap::new();
+            if pkg == "pkg_a" {
+                map.insert(
+                    "syn".to_owned(),
+                    cargo_toml::Dependency::Detailed(Box::new(syn_dependency_detail())),
+                );
+            } else {
+                map.insert(
+                    "lazy_static".to_owned(),
+                    cargo_toml::Dependency::Detailed(Box::new(lazy_static_dependency_detail())),
+                );
+            }
+            let new_patch = cargo_toml::PatchSet::from([("crates-io".to_owned(), map)]);
 
             // Insert the patch entry to the manifests
             let manifest_path = cache_dir.as_ref().join(pkg).join("Cargo.toml");
@@ -1541,7 +1541,7 @@ mod test {
         let workspace_manifest =
             Splicer::new(workspace_root.as_ref().to_path_buf(), splicing_manifest)
                 .unwrap()
-                .splice_workspace(&cargo())
+                .splice_workspace(&cargo().with_cargo_home(cache_dir.path().to_owned()))
                 .unwrap();
 
         // Ensure the patches match the expected value
@@ -1554,23 +1554,27 @@ mod test {
 
     #[test]
     fn splice_multi_package_with_merged_identical_patch_registries() {
+        if should_skip_network_test() {
+            return;
+        }
+
         let (splicing_manifest, cache_dir) = mock_splicing_manifest_with_multi_package();
 
         let expected = cargo_toml::PatchSet::from([(
-            "registry".to_owned(),
+            "crates-io".to_owned(),
             cargo_toml::DepsSet::from([(
-                "foo".to_owned(),
-                cargo_toml::Dependency::Simple("1.2.3".to_owned()),
+                "syn".to_owned(),
+                cargo_toml::Dependency::Detailed(Box::new(syn_dependency_detail())),
             )]),
         )]);
 
         for pkg in ["pkg_a", "pkg_b"] {
             // Generate a patch entry
             let new_patch = cargo_toml::PatchSet::from([(
-                "registry".to_owned(),
+                "crates-io".to_owned(),
                 BTreeMap::from([(
-                    "foo".to_owned(),
-                    cargo_toml::Dependency::Simple("1.2.3".to_owned()),
+                    "syn".to_owned(),
+                    cargo_toml::Dependency::Detailed(Box::new(syn_dependency_detail())),
                 )]),
             )]);
 
@@ -1588,7 +1592,7 @@ mod test {
         let workspace_manifest =
             Splicer::new(workspace_root.as_ref().to_path_buf(), splicing_manifest)
                 .unwrap()
-                .splice_workspace(&cargo())
+                .splice_workspace(&cargo().with_cargo_home(cache_dir.path().to_owned()))
                 .unwrap();
 
         // Ensure the patches match the expected value
@@ -1926,5 +1930,21 @@ mod test {
     fn touch(path: &Path) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, []).unwrap();
+    }
+
+    fn syn_dependency_detail() -> cargo_toml::DependencyDetail {
+        cargo_toml::DependencyDetail {
+            git: Some("https://github.com/dtolnay/syn.git".to_owned()),
+            tag: Some("1.0.109".to_owned()),
+            ..cargo_toml::DependencyDetail::default()
+        }
+    }
+
+    fn lazy_static_dependency_detail() -> cargo_toml::DependencyDetail {
+        cargo_toml::DependencyDetail {
+            git: Some("https://github.com/rust-lang-nursery/lazy-static.rs.git".to_owned()),
+            tag: Some("1.5.0".to_owned()),
+            ..cargo_toml::DependencyDetail::default()
+        }
     }
 }

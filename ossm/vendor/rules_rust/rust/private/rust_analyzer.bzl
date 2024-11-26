@@ -20,9 +20,9 @@ given targets. This file can be consumed by rust-analyzer as an alternative
 to Cargo.toml files.
 """
 
-load("//proto/prost:providers.bzl", "ProstProtoInfo")
 load("//rust/platform:triple_mappings.bzl", "system_to_dylib_ext", "triple_to_system")
 load("//rust/private:common.bzl", "rust_common")
+load("//rust/private:providers.bzl", "RustAnalyzerGroupInfo", "RustAnalyzerInfo")
 load("//rust/private:rustc.bzl", "BuildInfo")
 load(
     "//rust/private:utils.bzl",
@@ -32,30 +32,68 @@ load(
     "find_toolchain",
 )
 
-RustAnalyzerInfo = provider(
-    doc = "RustAnalyzerInfo holds rust crate metadata for targets",
-    fields = {
-        "build_info": "BuildInfo: build info for this crate if present",
-        "cfgs": "List[String]: features or other compilation --cfg settings",
-        "crate": "rust_common.crate_info",
-        "crate_specs": "Depset[File]: transitive closure of OutputGroupInfo files",
-        "deps": "List[RustAnalyzerInfo]: direct dependencies",
-        "env": "Dict{String: String}: Environment variables, used for the `env!` macro",
-        "proc_macro_dylib_path": "File: compiled shared library output of proc-macro rule",
-    },
-)
+def write_rust_analyzer_spec_file(ctx, attrs, owner, base_info):
+    """Write a rust-analyzer spec info file.
 
-RustAnalyzerGroupInfo = provider(
-    doc = "RustAnalyzerGroupInfo holds multiple RustAnalyzerInfos",
-    fields = {
-        "deps": "List[RustAnalyzerInfo]: direct dependencies",
-    },
-)
+    Args:
+        ctx (ctx): The current rule's context object.
+        attrs (dict): A mapping of attributes.
+        owner (Label): The label of the owner of the spec info.
+        base_info (RustAnalyzerInfo): The data the resulting RustAnalyzerInfo is based on.
+
+    Returns:
+        RustAnalyzerInfo: Info with the embedded spec file.
+    """
+    crate_spec = ctx.actions.declare_file("{}.rust_analyzer_crate_spec.json".format(owner.name))
+
+    # Recreate the provider with the spec file embedded in it.
+    rust_analyzer_info = RustAnalyzerInfo(
+        aliases = base_info.aliases,
+        crate = base_info.crate,
+        cfgs = base_info.cfgs,
+        env = base_info.env,
+        deps = base_info.deps,
+        crate_specs = depset(direct = [crate_spec], transitive = [base_info.crate_specs]),
+        proc_macro_dylib_path = base_info.proc_macro_dylib_path,
+        build_info = base_info.build_info,
+    )
+
+    ctx.actions.write(
+        output = crate_spec,
+        content = json.encode_indent(
+            _create_single_crate(
+                ctx,
+                attrs,
+                rust_analyzer_info,
+            ),
+            indent = " " * 4,
+        ),
+    )
+
+    return rust_analyzer_info
+
+def _accumulate_rust_analyzer_info(dep_infos_to_accumulate, label_index_to_accumulate, dep):
+    if dep == None:
+        return
+    if RustAnalyzerInfo in dep:
+        label_index_to_accumulate[dep.label] = dep[RustAnalyzerInfo]
+        dep_infos_to_accumulate.append(dep[RustAnalyzerInfo])
+    if RustAnalyzerGroupInfo in dep:
+        for expanded_dep in dep[RustAnalyzerGroupInfo].deps:
+            label_index_to_accumulate[expanded_dep.crate.owner] = expanded_dep
+            dep_infos_to_accumulate.append(expanded_dep)
+
+def _accumulate_rust_analyzer_infos(dep_infos_to_accumulate, label_index_to_accumulate, deps_attr):
+    for dep in deps_attr:
+        _accumulate_rust_analyzer_info(dep_infos_to_accumulate, label_index_to_accumulate, dep)
 
 def _rust_analyzer_aspect_impl(target, ctx):
     if (rust_common.crate_info not in target and
         rust_common.test_crate_info not in target and
         rust_common.crate_group_info not in target):
+        return []
+
+    if RustAnalyzerInfo in target or RustAnalyzerGroupInfo in target:
         return []
 
     toolchain = find_toolchain(ctx)
@@ -70,60 +108,20 @@ def _rust_analyzer_aspect_impl(target, ctx):
 
     build_info = None
     dep_infos = []
-    if hasattr(ctx.rule.attr, "deps"):
-        for dep in ctx.rule.attr.deps:
-            # Save BuildInfo if we find any (for build script output)
-            if BuildInfo in dep:
-                build_info = dep[BuildInfo]
-        dep_infos = [dep[RustAnalyzerInfo] for dep in ctx.rule.attr.deps if RustAnalyzerInfo in dep]
+    labels_to_rais = {}
 
-        group_infos = [dep[RustAnalyzerGroupInfo] for dep in ctx.rule.attr.deps if RustAnalyzerGroupInfo in dep]
-        for group_info in group_infos:
-            dep_infos.extend(group_info.deps)
+    for dep in getattr(ctx.rule.attr, "deps", []):
+        # Save BuildInfo if we find any (for build script output)
+        if BuildInfo in dep:
+            build_info = dep[BuildInfo]
 
-    if hasattr(ctx.rule.attr, "proc_macro_deps"):
-        dep_infos += [dep[RustAnalyzerInfo] for dep in ctx.rule.attr.proc_macro_deps if RustAnalyzerInfo in dep]
+    _accumulate_rust_analyzer_infos(dep_infos, labels_to_rais, getattr(ctx.rule.attr, "deps", []))
+    _accumulate_rust_analyzer_infos(dep_infos, labels_to_rais, getattr(ctx.rule.attr, "proc_macro_deps", []))
 
-        group_infos = [dep[RustAnalyzerGroupInfo] for dep in ctx.rule.attr.proc_macro_deps if RustAnalyzerGroupInfo in dep]
-        for group_info in group_infos:
-            dep_infos.extend(group_info.deps)
+    _accumulate_rust_analyzer_info(dep_infos, labels_to_rais, getattr(ctx.rule.attr, "crate", None))
+    _accumulate_rust_analyzer_info(dep_infos, labels_to_rais, getattr(ctx.rule.attr, "actual", None))
 
-    if hasattr(ctx.rule.attr, "crate") and ctx.rule.attr.crate != None:
-        if RustAnalyzerInfo in ctx.rule.attr.crate:
-            dep_infos.append(ctx.rule.attr.crate[RustAnalyzerInfo])
-
-        if RustAnalyzerGroupInfo in ctx.rule.attr.crate:
-            dep_infos.extend(ctx.rule.attr.crate[RustAnalyzerGroupInfo])
-
-    if hasattr(ctx.rule.attr, "actual") and ctx.rule.attr.actual != None:
-        if RustAnalyzerInfo in ctx.rule.attr.actual:
-            dep_infos.append(ctx.rule.attr.actual[RustAnalyzerInfo])
-
-        if RustAnalyzerGroupInfo in ctx.rule.attr.actual:
-            dep_infos.extend(ctx.rule.attr.actual[RustAnalyzerGroupInfo])
-
-    if ProstProtoInfo in target:
-        for info in target[ProstProtoInfo].transitive_dep_infos.to_list():
-            crate_info = info.crate_info
-            crate_spec = ctx.actions.declare_file(crate_info.owner.name + ".rust_analyzer_crate_spec")
-            rust_analyzer_info = RustAnalyzerInfo(
-                crate = crate_info,
-                cfgs = cfgs,
-                env = crate_info.rustc_env,
-                deps = [],
-                crate_specs = depset(direct = [crate_spec]),
-                proc_macro_dylib_path = None,
-                build_info = info.build_info,
-            )
-            ctx.actions.write(
-                output = crate_spec,
-                content = json.encode(_create_single_crate(ctx, rust_analyzer_info)),
-            )
-            dep_infos.append(rust_analyzer_info)
-
-    if ProstProtoInfo in target:
-        crate_info = target[ProstProtoInfo].dep_variant_info.crate_info
-    elif rust_common.crate_group_info in target:
+    if rust_common.crate_group_info in target:
         return [RustAnalyzerGroupInfo(deps = dep_infos)]
     elif rust_common.crate_info in target:
         crate_info = target[rust_common.crate_info]
@@ -132,22 +130,21 @@ def _rust_analyzer_aspect_impl(target, ctx):
     else:
         fail("Unexpected target type: {}".format(target))
 
-    crate_spec = ctx.actions.declare_file(ctx.label.name + ".rust_analyzer_crate_spec")
+    aliases = {}
+    for aliased_target, aliased_name in getattr(ctx.rule.attr, "aliases", {}).items():
+        if aliased_target.label in labels_to_rais:
+            aliases[labels_to_rais[aliased_target.label]] = aliased_name
 
-    rust_analyzer_info = RustAnalyzerInfo(
+    rust_analyzer_info = write_rust_analyzer_spec_file(ctx, ctx.rule.attr, ctx.label, RustAnalyzerInfo(
+        aliases = aliases,
         crate = crate_info,
         cfgs = cfgs,
         env = crate_info.rustc_env,
         deps = dep_infos,
-        crate_specs = depset(direct = [crate_spec], transitive = [dep.crate_specs for dep in dep_infos]),
+        crate_specs = depset(transitive = [dep.crate_specs for dep in dep_infos]),
         proc_macro_dylib_path = find_proc_macro_dylib_path(toolchain, target),
         build_info = build_info,
-    )
-
-    ctx.actions.write(
-        output = crate_spec,
-        content = json.encode(_create_single_crate(ctx, rust_analyzer_info)),
-    )
+    ))
 
     return [
         rust_analyzer_info,
@@ -187,7 +184,6 @@ rust_analyzer_aspect = aspect(
     attr_aspects = ["deps", "proc_macro_deps", "crate", "actual", "proto"],
     implementation = _rust_analyzer_aspect_impl,
     toolchains = [str(Label("//rust:toolchain_type"))],
-    incompatible_use_toolchain_transition = True,
     doc = "Annotates rust rules with RustAnalyzerInfo later used to build a rust-project.json",
 )
 
@@ -202,12 +198,13 @@ def _crate_id(crate_info):
     """
     return "ID-" + crate_info.root.path
 
-def _create_single_crate(ctx, info):
+def _create_single_crate(ctx, attrs, info):
     """Creates a crate in the rust-project.json format.
 
     Args:
-        ctx (ctx): The rule context
-        info (RustAnalyzerInfo): RustAnalyzerInfo for the current crate
+        ctx (ctx): The rule context.
+        attrs (dict): A mapping of attributes.
+        info (RustAnalyzerInfo): RustAnalyzerInfo for the current crate.
 
     Returns:
         (dict) The crate rust-project.json representation
@@ -228,20 +225,28 @@ def _create_single_crate(ctx, info):
     path_prefix = _EXEC_ROOT_TEMPLATE if is_external or is_generated else ""
     crate["is_workspace_member"] = not is_external
     crate["root_module"] = path_prefix + info.crate.root.path
-    crate_root = path_prefix + info.crate.root.dirname
+    crate["source"] = {"exclude_dirs": [], "include_dirs": []}
 
-    if info.build_info != None:
+    if is_generated:
+        srcs = getattr(ctx.rule.files, "srcs", [])
+        src_map = {src.short_path: src for src in srcs if src.is_source}
+        if info.crate.root.short_path in src_map:
+            crate["root_module"] = src_map[info.crate.root.short_path].path
+            crate["source"]["include_dirs"].append(path_prefix + info.crate.root.dirname)
+
+    if info.build_info != None and info.build_info.out_dir != None:
         out_dir_path = info.build_info.out_dir.path
         crate["env"].update({"OUT_DIR": _EXEC_ROOT_TEMPLATE + out_dir_path})
-        crate["source"] = {
-            # We have to tell rust-analyzer about our out_dir since it's not under the crate root.
-            "exclude_dirs": [],
-            "include_dirs": [crate_root, _EXEC_ROOT_TEMPLATE + out_dir_path],
-        }
+
+        # We have to tell rust-analyzer about our out_dir since it's not under the crate root.
+        crate["source"]["include_dirs"].extend([
+            path_prefix + info.crate.root.dirname,
+            _EXEC_ROOT_TEMPLATE + out_dir_path,
+        ])
 
     # TODO: The only imagined use case is an env var holding a filename in the workspace passed to a
     # macro like include_bytes!. Other use cases might exist that require more complex logic.
-    expand_targets = concat([getattr(ctx.rule.attr, attr, []) for attr in ["data", "compile_data"]])
+    expand_targets = concat([getattr(attrs, attr, []) for attr in ["data", "compile_data"]])
 
     crate["env"].update({k: dedup_expand_location(ctx, v, expand_targets) for k, v in info.env.items()})
 
@@ -256,8 +261,9 @@ def _create_single_crate(ctx, info):
     # the crate being processed, we don't add it as a dependency to itself. This is
     # common and expected - `rust_test.crate` pointing to the `rust_library`.
     crate["deps"] = [_crate_id(dep.crate) for dep in info.deps if _crate_id(dep.crate) != crate_id]
+    crate["aliases"] = {_crate_id(alias_target.crate): alias_name for alias_target, alias_name in info.aliases.items()}
     crate["cfg"] = info.cfgs
-    crate["target"] = find_toolchain(ctx).target_triple.str
+    crate["target"] = find_toolchain(ctx).target_flag_value
     if info.proc_macro_dylib_path != None:
         crate["proc_macro_dylib_path"] = _EXEC_ROOT_TEMPLATE + info.proc_macro_dylib_path
     return crate
@@ -293,7 +299,6 @@ rust_analyzer_toolchain = rule(
             mandatory = True,
         ),
     },
-    incompatible_use_toolchain_transition = True,
 )
 
 def _rust_analyzer_detect_sysroot_impl(ctx):
@@ -342,7 +347,6 @@ rust_analyzer_detect_sysroot = rule(
         "@rules_rust//rust:toolchain_type",
         "@rules_rust//rust/rust_analyzer:toolchain_type",
     ],
-    incompatible_use_toolchain_transition = True,
     doc = dedent("""\
         Detect the sysroot and store in a file for use by the gen_rust_project tool.
     """),

@@ -13,8 +13,8 @@
 # limitations under the License.
 
 load("@io_bazel_rules_go_bazel_features//:features.bzl", "bazel_features")
-load("//go/private:sdk.bzl", "detect_host_platform", "go_download_sdk_rule", "go_host_sdk_rule", "go_multiple_toolchains")
 load("//go/private:nogo.bzl", "DEFAULT_NOGO", "NOGO_DEFAULT_EXCLUDES", "NOGO_DEFAULT_INCLUDES", "go_register_nogo")
+load("//go/private:sdk.bzl", "detect_host_platform", "go_download_sdk_rule", "go_host_sdk_rule", "go_multiple_toolchains")
 
 def host_compatible_toolchain_impl(ctx):
     ctx.file("BUILD.bazel")
@@ -224,8 +224,8 @@ def _go_sdk_impl(ctx):
                     )
                     go_download_sdk_rule(
                         name = default_name,
-                        goos = download_tag.goos,
-                        goarch = download_tag.goarch,
+                        goos = goos,
+                        goarch = goarch,
                         sdks = download_tag.sdks,
                         urls = download_tag.urls,
                         version = download_tag.version,
@@ -288,6 +288,11 @@ def _go_sdk_impl(ctx):
         sdk_types = [toolchain.sdk_type for toolchain in toolchains],
         sdk_versions = [toolchain.sdk_version for toolchain in toolchains],
     )
+
+    if bazel_features.external_deps.extension_metadata_has_reproducible:
+        return ctx.extension_metadata(reproducible = True)
+    else:
+        return None
 
 def _default_go_sdk_name(*, module, multi_version, tag_type, index, suffix = ""):
     # Keep the version out of the repository name if possible to prevent unnecessary rebuilds when

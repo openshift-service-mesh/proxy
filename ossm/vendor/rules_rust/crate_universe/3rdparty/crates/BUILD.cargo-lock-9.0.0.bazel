@@ -10,15 +10,15 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # Apache-2.0 OR MIT
-# ])
-
 rust_library(
     name = "cargo_lock",
-    srcs = glob(["**/*.rs"]),
+    srcs = glob(
+        include = ["**/*.rs"],
+        allow_empty = True,
+    ),
     compile_data = glob(
         include = ["**"],
+        allow_empty = True,
         exclude = [
             "**/* *",
             ".tmp_git_root/**/*",
@@ -82,6 +82,6 @@ rust_library(
         "@cui__semver-1.0.20//:semver",
         "@cui__serde-1.0.190//:serde",
         "@cui__toml-0.7.6//:toml",
-        "@cui__url-2.4.0//:url",
+        "@cui__url-2.5.2//:url",
     ],
 )

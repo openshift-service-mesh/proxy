@@ -15,12 +15,16 @@
 """watchos_application Starlark tests."""
 
 load(
-    ":common.bzl",
-    "common",
-)
-load(
     "//test/starlark_tests/rules:analysis_failure_message_test.bzl",
     "analysis_failure_message_test",
+)
+load(
+    "//test/starlark_tests/rules:analysis_target_actions_test.bzl",
+    "analysis_target_actions_test",
+)
+load(
+    "//test/starlark_tests/rules:apple_dsym_bundle_info_test.bzl",
+    "apple_dsym_bundle_info_test",
 )
 load(
     "//test/starlark_tests/rules:apple_verification_test.bzl",
@@ -35,8 +39,8 @@ load(
     "infoplist_contents_test",
 )
 load(
-    "//test/starlark_tests/rules:analysis_target_actions_test.bzl",
-    "analysis_target_actions_test",
+    ":common.bzl",
+    "common",
 )
 
 def watchos_single_target_application_test_suite(name):
@@ -90,6 +94,30 @@ delegate is referenced in the single-target `watchos_application`'s `deps`.
         ],
     )
 
+    apple_verification_test(
+        name = "{}_entitlements_simulator_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/watchos:single_target_app",
+        verifier_script = "verifier_scripts/entitlements_verifier.sh",
+        tags = [name],
+    )
+
+    apple_verification_test(
+        name = "{}_entitlements_device_test".format(name),
+        build_type = "device",
+        target_under_test = "//test/starlark_tests/targets_under_test/watchos:single_target_app",
+        verifier_script = "verifier_scripts/entitlements_verifier.sh",
+        tags = [name],
+    )
+
+    apple_dsym_bundle_info_test(
+        name = "{}_dsym_bundle_info_files_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/watchos:single_target_app",
+        expected_direct_dsyms = ["dSYMs/single_target_app.app.dSYM"],
+        expected_transitive_dsyms = ["dSYMs/single_target_app.app.dSYM"],
+        tags = [name],
+    )
+
     infoplist_contents_test(
         name = "{}_plist_test".format(name),
         target_under_test = "//test/starlark_tests/targets_under_test/watchos:single_target_app",
@@ -126,7 +154,6 @@ delegate is referenced in the single-target `watchos_application`'s `deps`.
         expected_argv = [
             "xctoolrunner actool --compile",
             "--minimum-deployment-target " + common.min_os_watchos.single_target_app,
-            "--product-type com.apple.product-type.application",
             "--platform watchsimulator",
         ],
         tags = [
@@ -149,6 +176,19 @@ delegate is referenced in the single-target `watchos_application`'s `deps`.
         tags = [
             name,
             "never-on-beta",  # TODO(b/249829891): Remove once internal beta testing issue is fixed.
+        ],
+    )
+
+    archive_contents_test(
+        name = "{}_contains_extension_bundle_test".format(name),
+        build_type = "device",
+        contains = [
+            "$BUNDLE_ROOT/single_target_app_with_extension",
+            "$BUNDLE_ROOT/PlugIns/watchos_app_extension.appex/watchos_app_extension",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/watchos:single_target_app_with_extension",
+        tags = [
+            name,
         ],
     )
 

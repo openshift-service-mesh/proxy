@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import "google/protobuf/timestamp.proto";
 
 option cc_enable_arenas = true;
 option csharp_namespace = "Google.Cloud.TextToSpeech.V1Beta1";
-option go_package = "google.golang.org/genproto/googleapis/cloud/texttospeech/v1beta1;texttospeech";
+option go_package = "cloud.google.com/go/texttospeech/apiv1beta1/texttospeechpb;texttospeechpb";
 option java_multiple_files = true;
 option java_outer_classname = "TextToSpeechLongAudioSynthesisProto";
 option java_package = "com.google.cloud.texttospeech.v1beta1";
@@ -42,12 +42,12 @@ service TextToSpeechLongAudioSynthesize {
   rpc SynthesizeLongAudio(SynthesizeLongAudioRequest)
       returns (google.longrunning.Operation) {
     option (google.api.http) = {
-      post: "/v1beta1/{parent=projects/*/locations/*/voices/*}:SynthesizeLongAudio"
+      post: "/v1beta1/{parent=projects/*/locations/*}:synthesizeLongAudio"
       body: "*"
     };
     option (google.longrunning.operation_info) = {
-      response_type: "SynthesizeLongAudioResponse"
-      metadata_type: "SynthesizeLongAudioMetadata"
+      response_type: "google.cloud.texttospeech.v1beta1.SynthesizeLongAudioResponse"
+      metadata_type: "google.cloud.texttospeech.v1beta1.SynthesizeLongAudioMetadata"
     };
   }
 }
@@ -56,7 +56,7 @@ service TextToSpeechLongAudioSynthesize {
 // `SynthesizeLongAudio` method.
 message SynthesizeLongAudioRequest {
   // The resource states of the request in the form of
-  // `projects/*/locations/*/voices/*`.
+  // `projects/*/locations/*`.
   string parent = 1;
 
   // Required. The Synthesizer requires either plain text or SSML as input.
@@ -65,13 +65,13 @@ message SynthesizeLongAudioRequest {
   // Required. The configuration of the synthesized audio.
   AudioConfig audio_config = 3 [(google.api.field_behavior) = REQUIRED];
 
-  // Specifies a Cloud Storage URI for the synthesis results. Must be
+  // Required. Specifies a Cloud Storage URI for the synthesis results. Must be
   // specified in the format: `gs://bucket_name/object_name`, and the bucket
   // must already exist.
-  string output_gcs_uri = 4;
+  string output_gcs_uri = 4 [(google.api.field_behavior) = REQUIRED];
 
-  // The desired voice of the synthesized audio.
-  VoiceSelectionParams voice = 5;
+  // Required. The desired voice of the synthesized audio.
+  VoiceSelectionParams voice = 5 [(google.api.field_behavior) = REQUIRED];
 }
 
 // The message returned to the client by the `SynthesizeLongAudio` method.
@@ -82,8 +82,8 @@ message SynthesizeLongAudioMetadata {
   // Time when the request was received.
   google.protobuf.Timestamp start_time = 1;
 
-  // Time of the most recent processing update.
-  google.protobuf.Timestamp last_update_time = 2;
+  // Deprecated. Do not use.
+  google.protobuf.Timestamp last_update_time = 2 [deprecated = true];
 
   // The progress of the most recent processing update in percentage, ie. 70.0%.
   double progress_percentage = 3;

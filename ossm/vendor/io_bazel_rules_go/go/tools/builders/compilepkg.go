@@ -88,7 +88,7 @@ func compilePkg(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if err := goenv.checkFlags(); err != nil {
+	if err := goenv.checkFlagsAndSetGoroot(); err != nil {
 		return err
 	}
 	if importPath == "" {
@@ -453,7 +453,7 @@ func compileArchive(
 		ctx, cancel := context.WithCancel(context.Background())
 		nogoChan = make(chan error)
 		go func() {
-			nogoChan <- runNogo(ctx, workDir, nogoPath, goSrcsNogo, facts, packagePath, importcfgPath, outFactsPath)
+			nogoChan <- runNogo(ctx, workDir, nogoPath, goSrcsNogo, facts, importPath, importcfgPath, outFactsPath)
 		}()
 		defer func() {
 			if nogoChan != nil {
@@ -514,8 +514,13 @@ func compileArchive(
 		}
 	}
 
-	// Pack .o files into the archive. These may come from cgo generated code,
-	// cgo dependencies (cdeps), or assembly.
+	// Windows resource files (.syso) are treated the same as object files.
+	for _, src := range srcs.sysoSrcs {
+		objFiles = append(objFiles, src.filename)
+	}
+
+	// Pack .o and .syso files into the archive. These may come from cgo generated code,
+	// cgo dependencies (cdeps), windows resource file generation, or assembly.
 	if len(objFiles) > 0 {
 		if err := appendToArchive(goenv, outLinkObj, objFiles); err != nil {
 			return err

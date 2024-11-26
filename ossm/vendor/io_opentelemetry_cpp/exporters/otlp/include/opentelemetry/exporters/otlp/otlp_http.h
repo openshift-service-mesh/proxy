@@ -3,7 +3,8 @@
 
 #pragma once
 
-#include "opentelemetry/sdk/version/version.h"
+#include "opentelemetry/nostd/string_view.h"
+#include "opentelemetry/version.h"
 
 OPENTELEMETRY_BEGIN_NAMESPACE
 namespace exporter
@@ -23,6 +24,9 @@ enum class HttpRequestContentType
   kJson,
   kBinary,
 };
+
+OPENTELEMETRY_EXPORT HttpRequestContentType
+GetOtlpHttpProtocolFromString(nostd::string_view name) noexcept;
 
 }  // namespace otlp
 }  // namespace exporter

@@ -8,12 +8,12 @@ load(
     "AppleDsymBundleInfo",
 )
 load(
-    "@build_bazel_rules_apple//apple/internal/providers:apple_debug_info.bzl",
-    "AppleDebugInfo",
-)
-load(
     "@build_bazel_rules_apple//apple/internal:providers.bzl",
     "new_applebinaryinfo",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/providers:apple_debug_info.bzl",
+    "AppleDebugInfo",
 )
 
 def _xcarchive_impl(ctx):
@@ -33,18 +33,24 @@ def _xcarchive_impl(ctx):
     arguments.add("--bundle", bundle_info.archive.path)
     arguments.add("--output", xcarchive.path)
 
-    for dsym in dsym_info.direct_dsyms:
-        arguments.add("--dsym", dsym.path)
+    arguments.add_all(
+        dsym_info.transitive_dsyms,
+        before_each = "--dsym",
+        expand_directories = False,
+    )
 
     linkmaps = debug_info.linkmaps.to_list()
     for linkmap in linkmaps:
         arguments.add("--linkmap", linkmap.path)
 
     ctx.actions.run(
-        inputs = depset([
-            bundle_info.archive,
-            bundle_info.infoplist,
-        ] + dsym_info.direct_dsyms + linkmaps),
+        inputs = depset(
+            [
+                bundle_info.archive,
+                bundle_info.infoplist,
+            ] + linkmaps,
+            transitive = [dsym_info.transitive_dsyms],
+        ),
         outputs = [xcarchive],
         executable = ctx.executable._make_xcarchive,
         arguments = [arguments],
@@ -95,7 +101,7 @@ metadata for the .xcarchive.
 Example:
 
 ````starlark
-load("@build_bazel_rules_apple//apple:xcarchive.bzl", "xcarchive")
+load("//apple:xcarchive.bzl", "xcarchive")
 
 ios_application(
     name = "App",

@@ -15,8 +15,16 @@
 """# Rules related to Apple resources and resource bundles."""
 
 load(
+    "@build_bazel_rules_apple//apple/internal:resources.bzl",
+    _resources_common = "resources",
+)
+load(
     "@build_bazel_rules_apple//apple/internal/resource_rules:apple_bundle_import.bzl",
     _apple_bundle_import = "apple_bundle_import",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/resource_rules:apple_core_data_model.bzl",
+    _apple_core_data_model = "apple_core_data_model",
 )
 load(
     "@build_bazel_rules_apple//apple/internal/resource_rules:apple_core_ml_library.bzl",
@@ -27,6 +35,10 @@ load(
     _apple_intent_library = "apple_intent_library",
 )
 load(
+    "@build_bazel_rules_apple//apple/internal/resource_rules:apple_metal_library.bzl",
+    _apple_metal_library = "apple_metal_library",
+)
+load(
     "@build_bazel_rules_apple//apple/internal/resource_rules:apple_resource_bundle.bzl",
     _apple_resource_bundle = "apple_resource_bundle",
 )
@@ -34,18 +46,11 @@ load(
     "@build_bazel_rules_apple//apple/internal/resource_rules:apple_resource_group.bzl",
     _apple_resource_group = "apple_resource_group",
 )
-load(
-    "@build_bazel_rules_apple//apple/internal/resource_rules:apple_core_data_model.bzl",
-    _apple_core_data_model = "apple_core_data_model",
-)
-load(
-    "@build_bazel_rules_apple//apple/internal:resources.bzl",
-    _resources_common = "resources",
-)
 load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
 
 apple_bundle_import = _apple_bundle_import
 apple_intent_library = _apple_intent_library
+apple_metal_library = _apple_metal_library
 apple_resource_bundle = _apple_resource_bundle
 apple_resource_group = _apple_resource_group
 apple_core_data_model = _apple_core_data_model

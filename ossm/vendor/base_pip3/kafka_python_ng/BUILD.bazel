@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "kafka_python_ng",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_kafka_python_ng//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_kafka_python_ng//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_kafka_python_ng//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_kafka_python_ng//:dist_info",
+)

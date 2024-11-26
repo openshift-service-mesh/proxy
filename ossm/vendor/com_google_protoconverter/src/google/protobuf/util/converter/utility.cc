@@ -20,22 +20,17 @@
 #include <iterator>
 #include <limits>
 
-#include "google/protobuf/stubs/callback.h"
-#include "google/protobuf/stubs/common.h"
-#include "google/protobuf/wrappers.pb.h"
-#include "google/protobuf/descriptor.pb.h"
-#include "google/protobuf/descriptor.h"
-#include "google/protobuf/stubs/strutil.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/cord.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "google/protobuf/descriptor.h"
+#include "google/protobuf/descriptor.pb.h"
+#include "google/protobuf/stubs/strutil.h"
 #include "google/protobuf/util/converter/constants.h"
-
-// must be last
-#include "google/protobuf/util/converter/port_def.inc"
+#include "google/protobuf/wrappers.pb.h"
 
 namespace google {
 namespace protobuf {

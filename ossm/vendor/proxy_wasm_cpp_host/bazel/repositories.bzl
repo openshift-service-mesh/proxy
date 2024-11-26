@@ -19,6 +19,17 @@ load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 def proxy_wasm_cpp_host_repositories():
     # Bazel extensions.
 
+    # Update platforms for crate_universe. Can remove when we update Bazel version.
+    maybe(
+        http_archive,
+        name = "platforms",
+        urls = [
+            "https://mirror.bazel.build/github.com/bazelbuild/platforms/releases/download/0.0.10/platforms-0.0.10.tar.gz",
+            "https://github.com/bazelbuild/platforms/releases/download/0.0.10/platforms-0.0.10.tar.gz",
+        ],
+        sha256 = "218efe8ee736d26a3572663b374a253c012b716d8af0c07e842e82f238a0a7ee",
+    )
+
     maybe(
         http_archive,
         name = "bazel_skylib",
@@ -27,6 +38,14 @@ def proxy_wasm_cpp_host_repositories():
             "https://github.com/bazelbuild/bazel-skylib/releases/download/1.1.1/bazel-skylib-1.1.1.tar.gz",
         ],
         sha256 = "c6966ec828da198c5d9adbaa94c05e3a1c7f21bd012a0b29ba8ddbccb2c93b0d",
+    )
+
+    maybe(
+        http_archive,
+        name = "rules_cc",
+        sha256 = "2037875b9a4456dce4a79d112a8ae885bbc4aad968e6587dca6e64f3a0900cdf",
+        strip_prefix = "rules_cc-0.0.9",
+        urls = ["https://github.com/bazelbuild/rules_cc/releases/download/0.0.9/rules_cc-0.0.9.tar.gz"],
     )
 
     maybe(
@@ -58,39 +77,54 @@ def proxy_wasm_cpp_host_repositories():
     maybe(
         http_archive,
         name = "rules_fuzzing",
-        sha256 = "23bb074064c6f488d12044934ab1b0631e8e6898d5cf2f6bde087adb01111573",
-        strip_prefix = "rules_fuzzing-0.3.1",
-        url = "https://github.com/bazelbuild/rules_fuzzing/archive/v0.3.1.zip",
+        sha256 = "3ec0eee05b243552cc4a784b30323d088bf73cb2177ddda02c827e68981933f1",
+        strip_prefix = "rules_fuzzing-0.5.2",
+        urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.5.2.tar.gz"],
     )
 
     maybe(
         http_archive,
         name = "rules_python",
-        sha256 = "a30abdfc7126d497a7698c29c46ea9901c6392d6ed315171a6df5ce433aa4502",
-        strip_prefix = "rules_python-0.6.0",
-        url = "https://github.com/bazelbuild/rules_python/archive/0.6.0.tar.gz",
+        sha256 = "778aaeab3e6cfd56d681c89f5c10d7ad6bf8d2f1a72de9de55b23081b2d31618",
+        strip_prefix = "rules_python-0.34.0",
+        url = "https://github.com/bazelbuild/rules_python/releases/download/0.34.0/rules_python-0.34.0.tar.gz",
     )
 
+    # Keep at 0.42 one because https://github.com/bazelbuild/rules_rust/issues/2665
+    # manifests at 0.43
     maybe(
         http_archive,
         name = "rules_rust",
-        sha256 = "e3fe2a255589d128c5e59e407ee57c832533f25ce14cc23605d368cf507ce08d",
-        strip_prefix = "rules_rust-0.24.1",
+        integrity = "sha256-JLN47ZcAbx9wEr5Jiib4HduZATGLiDgK7oUi/fvotzU=",
         # NOTE: Update Rust version in bazel/dependencies.bzl.
-        url = "https://github.com/bazelbuild/rules_rust/archive/0.24.1.tar.gz",
+        url = "https://github.com/bazelbuild/rules_rust/releases/download/0.42.1/rules_rust-v0.42.1.tar.gz",
         patches = ["@proxy_wasm_cpp_host//bazel/external:rules_rust.patch"],
         patch_args = ["-p1"],
     )
 
-    # Core.
+    # Core deps. Keep them updated.
+
+    # Note: we depend on Abseil via rules_fuzzing. Remove this pin when we update that.
+    #
+    # This is the latest LTS release, which picks up:
+    # - Build fix: https://github.com/abseil/abseil-cpp/pull/1187
+    # - A bugfix found in local fuzzing:
+    #   https://github.com/abseil/abseil-cpp/commit/e7858c73279d81cbc005d9c76a385ab535520635
+    maybe(
+        http_archive,
+        name = "com_google_absl",
+        sha256 = "733726b8c3a6d39a4120d7e45ea8b41a434cdacde401cba500f14236c49b39dc",
+        strip_prefix = "abseil-cpp-20240116.2",
+        urls = ["https://github.com/abseil/abseil-cpp/archive/20240116.2.tar.gz"],
+    )
 
     maybe(
         http_archive,
         name = "boringssl",
-        # 2022-02-07 (master-with-bazel)
-        sha256 = "7dec97795a7ac7e3832228e4440ee06cceb18d3663f4580b0840e685281e28a0",
-        strip_prefix = "boringssl-eaa29f431f71b8121e1da76bcd3ddc2248238ade",
-        urls = ["https://github.com/google/boringssl/archive/eaa29f431f71b8121e1da76bcd3ddc2248238ade.tar.gz"],
+        # 2023-08-28 (master-with-bazel)
+        sha256 = "f1f421738e9ba39dd88daf8cf3096ddba9c53e2b6b41b32fff5a3ff82f4cd162",
+        strip_prefix = "boringssl-45cf810dbdbd767f09f8cb0b0fcccd342c39041f",
+        urls = ["https://github.com/google/boringssl/archive/45cf810dbdbd767f09f8cb0b0fcccd342c39041f.tar.gz"],
     )
 
     maybe(
@@ -109,6 +143,8 @@ def proxy_wasm_cpp_host_repositories():
         sha256 = "9dc9157a9a1551ec7a7e43daea9a694a0bb5fb8bec81235d8a1e6ef64c716dcb",
         strip_prefix = "googletest-release-1.10.0",
         urls = ["https://github.com/google/googletest/archive/release-1.10.0.tar.gz"],
+        patches = ["@proxy_wasm_cpp_host//bazel/external:googletest.patch"],
+        patch_args = ["-p1"],
     )
 
     # NullVM dependencies.
@@ -130,7 +166,10 @@ def proxy_wasm_cpp_host_repositories():
         commit = "6c8b357a84847a479cd329478522feefc1c3195a",
         remote = "https://chromium.googlesource.com/v8/v8",
         shallow_since = "1664374400 +0000",
-        patches = ["@proxy_wasm_cpp_host//bazel/external:v8.patch"],
+        patches = [
+            "@proxy_wasm_cpp_host//bazel/external:v8.patch",
+            "@proxy_wasm_cpp_host//bazel/external:v8_include.patch",
+        ],
         patch_args = ["-p1"],
     )
 

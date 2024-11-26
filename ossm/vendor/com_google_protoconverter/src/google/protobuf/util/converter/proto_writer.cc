@@ -34,17 +34,12 @@
 #include "google/protobuf/util/converter/utility.h"
 #include "google/protobuf/wire_format_lite.h"
 
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
-
 namespace google {
 namespace protobuf {
 namespace util {
 namespace converter {
 using ::google::protobuf::internal::WireFormatLite;
 using ::google::protobuf::io::CodedOutputStream;
-
 
 ProtoWriter::ProtoWriter(TypeResolver* type_resolver,
                          const google::protobuf::Type& type,
@@ -437,8 +432,7 @@ void ProtoWriter::MissingField(absl::string_view missing_name) {
   listener_->MissingField(location(), missing_name);
 }
 
-ProtoWriter* ProtoWriter::StartObject(
-    absl::string_view name) {
+ProtoWriter* ProtoWriter::StartObject(absl::string_view name) {
   // Starting the root message. Create the root ProtoElement and return.
   if (element_ == nullptr) {
     if (!name.empty()) {
@@ -470,7 +464,6 @@ ProtoWriter* ProtoWriter::StartObject(
   return StartObjectField(*field, *type);
 }
 
-
 ProtoWriter* ProtoWriter::EndObject() {
   if (invalid_depth_ > 0) {
     --invalid_depth_;
@@ -481,7 +474,6 @@ ProtoWriter* ProtoWriter::EndObject() {
     element_.reset(element_->pop());
   }
 
-
   // If ending the root element,
   // then serialize the full message with calculated sizes.
   if (element_ == nullptr) {
@@ -490,9 +482,7 @@ ProtoWriter* ProtoWriter::EndObject() {
   return this;
 }
 
-ProtoWriter* ProtoWriter::StartList(
-    absl::string_view name) {
-
+ProtoWriter* ProtoWriter::StartList(absl::string_view name) {
   const google::protobuf::Field* field = BeginNamed(name, true);
 
   if (field == nullptr) return this;
@@ -513,7 +503,6 @@ ProtoWriter* ProtoWriter::StartList(
   return StartListField(*field, *type);
 }
 
-
 ProtoWriter* ProtoWriter::EndList() {
   if (invalid_depth_ > 0) {
     --invalid_depth_;
@@ -523,8 +512,8 @@ ProtoWriter* ProtoWriter::EndList() {
   return this;
 }
 
-ProtoWriter* ProtoWriter::RenderDataPiece(
-    absl::string_view name, const DataPiece& data) {
+ProtoWriter* ProtoWriter::RenderDataPiece(absl::string_view name,
+                                          const DataPiece& data) {
   absl::Status status;
   if (invalid_depth_ > 0) return this;
 
@@ -568,7 +557,7 @@ bool ProtoWriter::IsRepeated(const google::protobuf::Field& field) {
 
 ProtoWriter* ProtoWriter::StartObjectField(const google::protobuf::Field& field,
                                            const google::protobuf::Type& type) {
-    WriteTag(field);
+  WriteTag(field);
   element_.reset(new ProtoElement(element_.release(), &field, type, false));
   return this;
 }
@@ -802,7 +791,6 @@ void ProtoWriter::WriteTag(const google::protobuf::Field& field) {
       static_cast<WireFormatLite::FieldType>(field.kind()));
   stream_->WriteTag(WireFormatLite::MakeTag(field.number(), wire_type));
 }
-
 
 }  // namespace converter
 }  // namespace util

@@ -20,24 +20,20 @@
 #include <deque>
 #include <string>
 
-#include "google/protobuf/type.pb.h"
-#include "google/protobuf/descriptor.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
-#include "google/protobuf/stubs/bytestream.h"
 #include "absl/strings/string_view.h"
+#include "google/protobuf/descriptor.h"
+#include "google/protobuf/io/coded_stream.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
+#include "google/protobuf/stubs/bytestream.h"
+#include "google/protobuf/type.pb.h"
 #include "google/protobuf/util/converter/datapiece.h"
 #include "google/protobuf/util/converter/error_listener.h"
 #include "google/protobuf/util/converter/proto_writer.h"
 #include "google/protobuf/util/converter/structured_objectwriter.h"
 #include "google/protobuf/util/converter/type_info.h"
-#include "google/protobuf/io/coded_stream.h"
-#include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/util/type_resolver.h"
-
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
 
 namespace google {
 namespace protobuf {
@@ -51,7 +47,7 @@ class ObjectLocationTracker;
 // the ProtoWriter class to write raw proto bytes.
 //
 // It also supports streaming.
-class PROTOBUF_EXPORT ProtoStreamObjectWriter : public ProtoWriter {
+class ProtoStreamObjectWriter : public ProtoWriter {
  public:
   // Options that control ProtoStreamObjectWriter class's behavior.
   struct Options {
@@ -158,7 +154,7 @@ class PROTOBUF_EXPORT ProtoStreamObjectWriter : public ProtoWriter {
                                        const DataPiece&);
 
   // Handles writing Anys out using nested object writers and the like.
-  class PROTOBUF_EXPORT AnyWriter {
+  class AnyWriter {
    public:
     explicit AnyWriter(ProtoStreamObjectWriter* parent);
     ~AnyWriter();
@@ -183,7 +179,7 @@ class PROTOBUF_EXPORT ProtoStreamObjectWriter : public ProtoWriter {
    private:
     // Before the "@type" field is encountered, we store all incoming data
     // into this Event struct and replay them after we get the "@type" field.
-    class PROTOBUF_EXPORT Event {
+    class Event {
      public:
       enum Type {
         START_OBJECT = 0,
@@ -272,7 +268,7 @@ class PROTOBUF_EXPORT ProtoStreamObjectWriter : public ProtoWriter {
 
   // Represents an item in a stack of items used to keep state between
   // ObjectWrier events.
-  class PROTOBUF_EXPORT Item : public BaseElement {
+  class Item : public BaseElement {
    public:
     // Indicates the type of item.
     enum ItemType {
@@ -405,7 +401,6 @@ class PROTOBUF_EXPORT ProtoStreamObjectWriter : public ProtoWriter {
   void Push(absl::string_view name, Item::ItemType item_type,
             bool is_placeholder, bool is_list);
 
-
   // Pops items from the stack. All placeholder items are popped until a
   // non-placeholder item is found.
   void Pop();
@@ -434,7 +429,5 @@ class PROTOBUF_EXPORT ProtoStreamObjectWriter : public ProtoWriter {
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_PROTOSTREAM_OBJECTWRITER_H_

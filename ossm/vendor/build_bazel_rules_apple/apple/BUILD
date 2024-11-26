@@ -1,5 +1,6 @@
-load(":cc_toolchain_forwarder.bzl", "cc_toolchain_forwarder")
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("//apple/internal/aspects:resource_aspect_hint.bzl", "apple_resource_hint", "apple_resource_hint_action")
+load(":cc_toolchain_forwarder.bzl", "cc_toolchain_forwarder")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -27,6 +28,7 @@ licenses(["notice"])
         "watchos_arm64_32",
         "watchos_x86_64",
         "watchos_device_arm64",
+        "watchos_device_arm64e",
     ]
 ]
 
@@ -48,7 +50,6 @@ bzl_library(
     name = "apple_binary",
     srcs = ["apple_binary.bzl"],
     deps = [
-        "//apple/internal:apple_toolchains",
         "//apple/internal:linking_support",
         "//apple/internal:rule_attrs",
         "//apple/internal:rule_factory",
@@ -61,7 +62,6 @@ bzl_library(
     srcs = ["apple_static_library.bzl"],
     deps = [
         ":providers",
-        "//apple/internal:apple_toolchains",
         "//apple/internal:linking_support",
         "//apple/internal:providers",
         "//apple/internal:rule_attrs",
@@ -174,6 +174,7 @@ bzl_library(
         "//apple/internal/resource_rules:apple_core_data_model",
         "//apple/internal/resource_rules:apple_core_ml_library",
         "//apple/internal/resource_rules:apple_intent_library",
+        "//apple/internal/resource_rules:apple_metal_library",
         "//apple/internal/resource_rules:apple_resource_bundle",
         "//apple/internal/resource_rules:apple_resource_group",
     ],
@@ -257,6 +258,12 @@ bzl_library(
     deps = ["//apple/internal:docc"],
 )
 
+bzl_library(
+    name = "header_map",
+    srcs = ["header_map.bzl"],
+    deps = ["//apple/internal:header_map"],
+)
+
 cc_toolchain_forwarder(
     name = "default_cc_toolchain_forwarder",
 )
@@ -271,4 +278,21 @@ filegroup(
         "//apple/testing:for_bazel_tests",
     ],
     visibility = ["//:__pkg__"],
+)
+
+# An aspect hint that enables runfile inclusion as AppleResources
+# for cc_libraries. Runfiles keep their folder structure.
+apple_resource_hint(
+    name = "use_resources",
+    action = apple_resource_hint_action.resources,
+)
+
+apple_resource_hint(
+    name = "use_runfiles",
+    action = apple_resource_hint_action.runfiles,
+)
+
+apple_resource_hint(
+    name = "suppress_resources",
+    action = apple_resource_hint_action.suppress,
 )

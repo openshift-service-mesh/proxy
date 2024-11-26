@@ -43,10 +43,6 @@
 #include "absl/log/absl_check.h"
 #include "absl/log/absl_log.h"
 #include "absl/strings/string_view.h"
-#include "google/protobuf/stubs/common.h"
-
-// Must be last.
-#include "google/protobuf/util/converter/port_def.inc"  // NOLINT
 
 class CordByteSink;
 
@@ -65,7 +61,7 @@ namespace strings {
 //   sink->Append(my_data.data(), my_data.size());
 //   sink->Flush();
 //
-class PROTOBUF_EXPORT ByteSink {
+class ByteSink {
  public:
   ByteSink() {}
   ByteSink(const ByteSink&) = delete;
@@ -93,7 +89,7 @@ class PROTOBUF_EXPORT ByteSink {
 //     source->Skip(data.length());
 //   }
 //
-class PROTOBUF_EXPORT ByteSource {
+class ByteSource {
  public:
   ByteSource() {}
   ByteSource(const ByteSource&) = delete;
@@ -149,7 +145,7 @@ class PROTOBUF_EXPORT ByteSource {
 //   sink.Append("hi", 2);    // OK
 //   sink.Append(data, 100);  // WOOPS! Overflows buf[10].
 //
-class PROTOBUF_EXPORT UncheckedArrayByteSink : public ByteSink {
+class UncheckedArrayByteSink : public ByteSink {
  public:
   UncheckedArrayByteSink(const UncheckedArrayByteSink&) = delete;
   UncheckedArrayByteSink& operator=(const UncheckedArrayByteSink&) = delete;
@@ -178,7 +174,7 @@ class PROTOBUF_EXPORT UncheckedArrayByteSink : public ByteSink {
 //   sink.Append("hi", 2);    // OK
 //   sink.Append(data, 100);  // Will only write 8 more bytes
 //
-class PROTOBUF_EXPORT CheckedArrayByteSink : public ByteSink {
+class CheckedArrayByteSink : public ByteSink {
  public:
   CheckedArrayByteSink(char* outbuf, size_t capacity);
   CheckedArrayByteSink(const CheckedArrayByteSink&) = delete;
@@ -215,7 +211,7 @@ class PROTOBUF_EXPORT CheckedArrayByteSink : public ByteSink {
 //   const char* buf = sink.GetBuffer();  // Ownership transferred
 //   delete[] buf;
 //
-class PROTOBUF_EXPORT GrowingArrayByteSink : public strings::ByteSink {
+class GrowingArrayByteSink : public strings::ByteSink {
  public:
   explicit GrowingArrayByteSink(size_t estimated_size);
   GrowingArrayByteSink(const GrowingArrayByteSink&) = delete;
@@ -246,7 +242,7 @@ class PROTOBUF_EXPORT GrowingArrayByteSink : public strings::ByteSink {
 //   sink.Append("World", 5);
 //   assert(dest == "Hello World");
 //
-class PROTOBUF_EXPORT StringByteSink : public ByteSink {
+class StringByteSink : public ByteSink {
  public:
   explicit StringByteSink(std::string* dest) : dest_(dest) {}
   StringByteSink(const StringByteSink&) = delete;
@@ -264,7 +260,7 @@ class PROTOBUF_EXPORT StringByteSink : public ByteSink {
 //   NullByteSink sink;
 //   sink.Append(data, data.size());  // All data ignored.
 //
-class PROTOBUF_EXPORT NullByteSink : public ByteSink {
+class NullByteSink : public ByteSink {
  public:
   NullByteSink() {}
   NullByteSink(const NullByteSink&) = delete;
@@ -285,7 +281,7 @@ class PROTOBUF_EXPORT NullByteSink : public ByteSink {
 //   assert(source.Available() == 5);
 //   assert(source.Peek() == "Hello");
 //
-class PROTOBUF_EXPORT ArrayByteSource : public ByteSource {
+class ArrayByteSource : public ByteSource {
  public:
   explicit ArrayByteSource(absl::string_view s) : input_(s) {}
   ArrayByteSource(const ArrayByteSource&) = delete;
@@ -317,7 +313,7 @@ class PROTOBUF_EXPORT ArrayByteSource : public ByteSource {
 //   assert(limit.Available() == 5);
 //   assert(limit.Peek() == "Hello");
 //
-class PROTOBUF_EXPORT LimitByteSource : public ByteSource {
+class LimitByteSource : public ByteSource {
  public:
   // Returns at most "limit" bytes from "source".
   LimitByteSource(ByteSource* source, size_t limit);
@@ -338,7 +334,5 @@ class PROTOBUF_EXPORT LimitByteSource : public ByteSource {
 }  // namespace strings
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"  // NOLINT
 
 #endif  // GOOGLE_PROTOBUF_STUBS_BYTESTREAM_H_

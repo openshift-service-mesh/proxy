@@ -9,6 +9,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "quiche/http2/core/spdy_protocol.h"
 #include "quiche/quic/core/http/quic_spdy_client_session.h"
 #include "quiche/quic/core/http/spdy_utils.h"
 #include "quiche/quic/core/http/web_transport_http3.h"
@@ -17,9 +18,8 @@
 #include "quiche/quic/platform/api/quic_logging.h"
 #include "quiche/common/platform/api/quiche_flag_utils.h"
 #include "quiche/common/quiche_text_utils.h"
-#include "quiche/spdy/core/spdy_protocol.h"
 
-using spdy::Http2HeaderBlock;
+using quiche::HttpHeaderBlock;
 
 namespace quic {
 
@@ -46,7 +46,7 @@ QuicSpdyClientStream::~QuicSpdyClientStream() = default;
 
 bool QuicSpdyClientStream::CopyAndValidateHeaders(
     const QuicHeaderList& header_list, int64_t& content_length,
-    spdy::Http2HeaderBlock& headers) {
+    quiche::HttpHeaderBlock& headers) {
   return SpdyUtils::CopyAndValidateHeaders(header_list, &content_length,
                                            &headers);
 }
@@ -158,7 +158,7 @@ void QuicSpdyClientStream::OnBodyAvailable() {
   }
 }
 
-size_t QuicSpdyClientStream::SendRequest(Http2HeaderBlock headers,
+size_t QuicSpdyClientStream::SendRequest(HttpHeaderBlock headers,
                                          absl::string_view body, bool fin) {
   QuicConnection::ScopedPacketFlusher flusher(session_->connection());
   bool send_fin_with_headers = fin && body.empty();

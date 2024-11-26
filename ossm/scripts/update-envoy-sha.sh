@@ -26,7 +26,7 @@ function init() {
 
 function get_envoy_sha() {
   local branch
-  branch="${BRANCH:-release/v1.31}"
+  branch="${BRANCH:-release/v1.32}"
 
   SHA=$(git ls-remote https://github.com/envoyproxy/envoy-openssl.git "refs/heads/${branch}" | cut -f 1)
 }

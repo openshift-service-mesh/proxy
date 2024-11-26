@@ -9,7 +9,7 @@ APPLE_PLATFORMS_CONSTRAINTS = {
     ],
     "darwin_arm64e": [
         "@platforms//os:macos",
-        "@platforms//cpu:arm64",
+        "@platforms//cpu:arm64e",
         "@build_bazel_apple_support//constraints:apple",
         "@build_bazel_apple_support//constraints:device",
     ],
@@ -73,17 +73,23 @@ APPLE_PLATFORMS_CONSTRAINTS = {
         "@build_bazel_apple_support//constraints:apple",
         "@build_bazel_apple_support//constraints:simulator",
     ],
-    "visionos_x86_64": [
-        "@platforms//os:visionos",
-        "@platforms//cpu:x86_64",
-        "@build_bazel_apple_support//constraints:apple",
-        "@build_bazel_apple_support//constraints:simulator",
-    ],
     "watchos_arm64": [
         "@platforms//os:watchos",
         "@platforms//cpu:arm64",
         "@build_bazel_apple_support//constraints:apple",
         "@build_bazel_apple_support//constraints:simulator",
+    ],
+    "watchos_device_arm64": [
+        "@platforms//os:watchos",
+        "@platforms//cpu:arm64",
+        "@build_bazel_apple_support//constraints:apple",
+        "@build_bazel_apple_support//constraints:device",
+    ],
+    "watchos_device_arm64e": [
+        "@platforms//os:watchos",
+        "@platforms//cpu:arm64e",
+        "@build_bazel_apple_support//constraints:apple",
+        "@build_bazel_apple_support//constraints:device",
     ],
     "watchos_arm64_32": [
         "@platforms//os:watchos",
@@ -118,9 +124,10 @@ CPU_TO_DEFAULT_PLATFORM_NAME = {
     "tvos_sim_arm64": "tvos_sim_arm64",
     "visionos_arm64": "visionos_arm64",
     "visionos_sim_arm64": "visionos_sim_arm64",
-    "visionos_x86_64": "visionos_x86_64",
     "watchos_arm64": "watchos_arm64",
     "watchos_arm64_32": "watchos_arm64_32",
     "watchos_armv7k": "watchos_armv7k",
+    "watchos_device_arm64": "watchos_device_arm64",
+    "watchos_device_arm64e": "watchos_device_arm64e",
     "watchos_x86_64": "watchos_x86_64",
 }

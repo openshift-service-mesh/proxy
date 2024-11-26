@@ -35,6 +35,10 @@ load(
     _binary_partial = "binary_partial",
 )
 load(
+    "@build_bazel_rules_apple//apple/internal/partials:cc_info_dylibs.bzl",
+    _cc_info_dylibs_partial = "cc_info_dylibs_partial",
+)
+load(
     "@build_bazel_rules_apple//apple/internal/partials:clang_rt_dylibs.bzl",
     _clang_rt_dylibs_partial = "clang_rt_dylibs_partial",
 )
@@ -75,6 +79,10 @@ load(
     _macos_additional_contents_partial = "macos_additional_contents_partial",
 )
 load(
+    "@build_bazel_rules_apple//apple/internal/partials:main_thread_checker_dylibs.bzl",
+    _main_thread_checker_dylibs_partial = "main_thread_checker_dylibs_partial",
+)
+load(
     "@build_bazel_rules_apple//apple/internal/partials:messages_stub.bzl",
     _messages_stub_partial = "messages_stub_partial",
 )
@@ -113,9 +121,11 @@ partials = struct(
     apple_bundle_info_partial = _apple_bundle_info_partial,
     binary_partial = _binary_partial,
     clang_rt_dylibs_partial = _clang_rt_dylibs_partial,
+    main_thread_checker_dylibs_partial = _main_thread_checker_dylibs_partial,
     codesigning_dossier_partial = _codesigning_dossier_partial,
     debug_symbols_partial = _debug_symbols_partial,
     embedded_bundles_partial = _embedded_bundles_partial,
+    cc_info_dylibs_partial = _cc_info_dylibs_partial,
     extension_safe_validation_partial = _extension_safe_validation_partial,
     framework_import_partial = _framework_import_partial,
     framework_header_modulemap_partial = _framework_header_modulemap_partial,

@@ -20,15 +20,10 @@
 #include <cstdint>
 #include <string>
 
-#include "google/protobuf/stubs/common.h"
-#include "google/protobuf/type.pb.h"
 #include "absl/log/absl_log.h"
-
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
+#include "google/protobuf/type.pb.h"
 
 namespace google {
 namespace protobuf {
@@ -46,7 +41,7 @@ class ProtoWriter;
 // storage for the actual string or Cord, so it is the user's responsibility to
 // guarantee that the underlying storage is still valid when the DataPiece is
 // accessed.
-class PROTOBUF_EXPORT DataPiece {
+class DataPiece {
  public:
   // Identifies data type of the value.
   // These are the types supported by DataPiece.
@@ -107,8 +102,7 @@ class PROTOBUF_EXPORT DataPiece {
 
   static DataPiece NullData() { return DataPiece(TYPE_NULL, 0); }
 
-  virtual ~DataPiece() {
-  }
+  virtual ~DataPiece() {}
 
   // Accessors
   Type type() const { return type_; }
@@ -119,7 +113,6 @@ class PROTOBUF_EXPORT DataPiece {
     ABSL_DLOG_IF(FATAL, type_ != TYPE_STRING) << "Not a string type.";
     return str_;
   }
-
 
   // Parses, casts or converts the value stored in the DataPiece into an int32.
   absl::StatusOr<int32_t> ToInt32() const;
@@ -205,7 +198,5 @@ class PROTOBUF_EXPORT DataPiece {
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_DATAPIECE_H_

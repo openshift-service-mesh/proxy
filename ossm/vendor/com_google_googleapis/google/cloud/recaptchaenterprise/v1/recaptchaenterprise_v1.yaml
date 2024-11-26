@@ -10,7 +10,7 @@ documentation:
   summary: |-
     Help protect your website from fraudulent activity, spam, and abuse without
     creating friction.
-  overview: reCAPTCHA Enterprise Overview
+  overview: reCAPTCHA Overview
 
 authentication:
   rules:
@@ -18,6 +18,3 @@ authentication:
     oauth:
       canonical_scopes: |-
         https://www.googleapis.com/auth/cloud-platform
-
-publishing:
-  organization: CLIENT_LIBRARY_ORGANIZATION_UNSPECIFIED

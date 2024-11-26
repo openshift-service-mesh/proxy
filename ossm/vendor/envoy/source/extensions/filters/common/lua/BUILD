@@ -28,6 +28,7 @@ envoy_cc_library(
     srcs = ["lua.cc"],
     hdrs = ["lua.h"],
     deps = [
+        "//bazel/foreign_cc:luajit",
         "//envoy/thread_local:thread_local_interface",
         "//source/common/common:assert_lib",
         "//source/common/common:c_smart_ptr_lib",

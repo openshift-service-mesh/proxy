@@ -3,15 +3,20 @@
 
 #pragma once
 
-#include "opentelemetry/common/spin_lock_mutex.h"
-#include "opentelemetry/exporters/zipkin/zipkin_exporter_options.h"
-#include "opentelemetry/ext/http/client/http_client_factory.h"
-#include "opentelemetry/ext/http/common/url_parser.h"
-#include "opentelemetry/sdk/common/env_variables.h"
-#include "opentelemetry/sdk/trace/exporter.h"
-#include "opentelemetry/sdk/trace/span_data.h"
+#include <atomic>
+#include <chrono>
+#include <memory>
 
 #include "nlohmann/json.hpp"
+
+#include "opentelemetry/exporters/zipkin/zipkin_exporter_options.h"
+#include "opentelemetry/ext/http/client/http_client.h"
+#include "opentelemetry/ext/http/common/url_parser.h"
+#include "opentelemetry/nostd/span.h"
+#include "opentelemetry/sdk/common/exporter_utils.h"
+#include "opentelemetry/sdk/trace/exporter.h"
+#include "opentelemetry/sdk/trace/recordable.h"
+#include "opentelemetry/version.h"
 
 OPENTELEMETRY_BEGIN_NAMESPACE
 namespace exporter
@@ -69,7 +74,7 @@ private:
 
 private:
   // The configuration options associated with this exporter.
-  bool is_shutdown_ = false;
+  std::atomic<bool> is_shutdown_{false};
   ZipkinExporterOptions options_;
   std::shared_ptr<opentelemetry::ext::http::client::HttpClientSync> http_client_;
   opentelemetry::ext::http::common::UrlParser url_parser_;
@@ -84,7 +89,6 @@ private:
    */
   ZipkinExporter(std::shared_ptr<opentelemetry::ext::http::client::HttpClientSync> http_client);
 
-  mutable opentelemetry::common::SpinLockMutex lock_;
   bool isShutdown() const noexcept;
 };
 }  // namespace zipkin

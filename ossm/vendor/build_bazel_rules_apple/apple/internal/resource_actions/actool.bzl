@@ -15,30 +15,6 @@
 """ACTool related actions."""
 
 load(
-    "@build_bazel_apple_support//lib:xcode_support.bzl",
-    "xcode_support",
-)
-load(
-    "@build_bazel_rules_apple//apple/internal:intermediates.bzl",
-    "intermediates",
-)
-load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
-)
-load(
-    "@build_bazel_rules_apple//apple/internal/utils:xctoolrunner.bzl",
-    "xctoolrunner",
-)
-load(
-    "@build_bazel_rules_apple//apple/internal:apple_product_type.bzl",
-    "apple_product_type",
-)
-load(
-    "@build_bazel_rules_apple//apple:utils.bzl",
-    "group_files_by_directory",
-)
-load(
     "@bazel_skylib//lib:collections.bzl",
     "collections",
 )
@@ -46,12 +22,39 @@ load(
     "@bazel_skylib//lib:paths.bzl",
     "paths",
 )
+load(
+    "@bazel_skylib//lib:sets.bzl",
+    "sets",
+)
+load(
+    "@build_bazel_apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
+load(
+    "@build_bazel_rules_apple//apple:utils.bzl",
+    "group_files_by_directory",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal:apple_product_type.bzl",
+    "apple_product_type",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal:intermediates.bzl",
+    "intermediates",
+)
+load(
+    "@build_bazel_rules_apple//apple/internal/utils:xctoolrunner.bzl",
+    xctoolrunner_support = "xctoolrunner",
+)
+
+_supports_visionos = hasattr(apple_common.platform_type, "visionos")
 
 def _actool_args_for_special_file_types(
         *,
         asset_files,
         bundle_id,
         platform_prerequisites,
+        primary_icon_name,
         product_type):
     """Returns command line arguments needed to compile special assets.
 
@@ -65,6 +68,8 @@ def _actool_args_for_special_file_types(
       asset_files: The asset catalog files.
       bundle_id: The bundle ID to configure for this target.
       platform_prerequisites: Struct containing information on the platform being targeted.
+      primary_icon_name: An optional String to identify the name of the primary app icon when
+        alternate app icons have been provided for the app.
       product_type: The product type identifier used to describe the current bundle type.
 
     Returns:
@@ -79,9 +84,10 @@ def _actool_args_for_special_file_types(
         appicon_extension = "stickersiconset"
         icon_files = [f for f in asset_files if ".stickersiconset/" in f.path]
 
-        # TODO(kaipi): We might be processing a resource bundle inside an
-        # ios_extension, in which case the bundle ID might not be appropriate here.
         args.extend([
+            "--include-sticker-content",
+            "--stickers-icon-role",
+            "extension",
             "--sticker-pack-identifier-prefix",
             bundle_id + ".sticker-pack.",
         ])
@@ -110,7 +116,8 @@ def _actool_args_for_special_file_types(
     elif platform_prerequisites.platform_type == apple_common.platform_type.tvos:
         appicon_extension = "brandassets"
         icon_files = [f for f in asset_files if ".brandassets/" in f.path]
-    elif platform_prerequisites.platform_type == getattr(apple_common.platform_type, "visionos", None):
+    elif (_supports_visionos and
+          platform_prerequisites.platform_type == apple_common.platform_type.visionos):
         appicon_extension = "solidimagestack"
         icon_files = [f for f in asset_files if ".solidimagestack/" in f.path]
     else:
@@ -124,14 +131,55 @@ def _actool_args_for_special_file_types(
             [appicon_extension],
             attr = "app_icons",
         ).keys()
-        if len(icon_dirs) != 1:
+        if len(icon_dirs) != 1 and not primary_icon_name:
             formatted_dirs = "[\n  %s\n]" % ",\n  ".join(icon_dirs)
-            fail("The asset catalogs should contain exactly one directory named " +
-                 "*.%s among its asset catalogs, " % appicon_extension +
-                 "but found the following: " + formatted_dirs, "app_icons")
 
-        app_icon_name = paths.split_extension(paths.basename(icon_dirs[0]))[0]
-        args += ["--app-icon", app_icon_name]
+            # Alternate icons are only supported for UIKit applications on iOS, tvOS, visionOS and
+            # iOS-on-macOS (Catalyst)
+            if (platform_prerequisites.platform_type == apple_common.platform_type.watchos or
+                platform_prerequisites.platform_type == apple_common.platform_type.macos or
+                product_type != apple_product_type.application):
+                fail("The asset catalogs should contain exactly one directory named " +
+                     "*.%s among its asset catalogs, " % appicon_extension +
+                     "but found the following: " + formatted_dirs, "app_icons")
+            else:
+                fail("""
+Found multiple app icons among the asset catalogs with no primary_app_icon assigned.
+
+If you intend to assign multiple app icons to this target, please declare which of these is intended
+to be the primary app icon with the primary_app_icon attribute on the rule itself.
+
+app_icons was assigned the following: {formatted_dirs}
+""".format(formatted_dirs = formatted_dirs))
+        elif primary_icon_name:
+            # Check that primary_icon_name matches one of the icon sets, then add actool arguments
+            # for `--alternate-app-icon` and `--app_icon` as appropriate. These do NOT overlap.
+            app_icon_names = sets.make()
+            for icon_dir in icon_dirs:
+                app_icon_names = sets.insert(
+                    app_icon_names,
+                    paths.split_extension(paths.basename(icon_dir))[0],
+                )
+            app_icon_name_list = sets.to_list(app_icon_names)
+            found_primary = False
+            for app_icon_name in app_icon_name_list:
+                if app_icon_name == primary_icon_name:
+                    found_primary = True
+                    args += ["--app-icon", primary_icon_name]
+                else:
+                    args += ["--alternate-app-icon", app_icon_name]
+            if not found_primary:
+                fail("""
+Could not find the primary icon named "{primary_icon_name}" in the list of app_icons provided.
+
+Found the following icon names from those provided: {app_icon_names}.
+""".format(
+                    primary_icon_name = primary_icon_name,
+                    app_icon_names = ", ".join(app_icon_name_list),
+                ))
+        else:
+            app_icon_name = paths.split_extension(paths.basename(icon_dirs[0]))[0]
+            args += ["--app-icon", app_icon_name]
 
     # Add arguments for watch extension complication, if there is one.
     complication_files = [f for f in asset_files if ".complicationset/" in f.path]
@@ -187,15 +235,16 @@ def compile_asset_catalog(
         *,
         actions,
         alternate_icons,
+        alticonstool,
         asset_files,
         bundle_id,
         output_dir,
         output_plist,
         platform_prerequisites,
+        primary_icon_name,
         product_type,
-        resolved_alticonstool,
-        resolved_xctoolrunner,
-        rule_label):
+        rule_label,
+        xctoolrunner):
     """Creates an action that compiles asset catalogs.
 
     This action populates a directory with compiled assets that must be merged
@@ -206,6 +255,7 @@ def compile_asset_catalog(
     Args:
       actions: The actions provider from `ctx.actions`.
       alternate_icons: Alternate icons files, organized in .alticon directories.
+      alticonstool: A files_to_run for the alticonstool tool.
       asset_files: An iterable of files in all asset catalogs that should be
           packaged as part of this catalog. This should include transitive
           dependencies (i.e., assets not just from the application target, but
@@ -216,10 +266,11 @@ def compile_asset_catalog(
       output_plist: The file reference for the output plist that should be merged
         into Info.plist. May be None if the output plist is not desired.
       platform_prerequisites: Struct containing information on the platform being targeted.
+      primary_icon_name: An optional String to identify the name of the primary app icon when
+        alternate app icons have been provided for the app.
       product_type: The product type identifier used to describe the current bundle type.
-      resolved_alticonstool: A struct referencing the resolved alticonstool tool.
-      resolved_xctoolrunner: A struct referencing the resolved wrapper for "xcrun" tools.
       rule_label: The label of the target being analyzed.
+      xctoolrunner: A files_to_run for the wrapper around the "xcrun" tool.
     """
     platform = platform_prerequisites.platform
     actool_platform = platform.name_in_plist.lower()
@@ -227,7 +278,7 @@ def compile_asset_catalog(
     args = [
         "actool",
         "--compile",
-        xctoolrunner.prefixed_path(output_dir.path),
+        xctoolrunner_support.prefixed_path(output_dir.path),
         "--platform",
         actool_platform,
         "--minimum-deployment-target",
@@ -235,14 +286,11 @@ def compile_asset_catalog(
         "--compress-pngs",
     ]
 
-    if xcode_support.is_xcode_at_least_version(platform_prerequisites.xcode_version_config, "8"):
-        if product_type:
-            args.extend(["--product-type", product_type])
-
     args.extend(_actool_args_for_special_file_types(
         asset_files = asset_files,
         bundle_id = bundle_id,
         platform_prerequisites = platform_prerequisites,
+        primary_icon_name = primary_icon_name,
         product_type = product_type,
     ))
     args.extend(collections.before_each(
@@ -268,7 +316,7 @@ def compile_asset_catalog(
         actool_outputs.append(actool_output_plist)
         args.extend([
             "--output-partial-info-plist",
-            xctoolrunner.prefixed_path(actool_output_plist.path),
+            xctoolrunner_support.prefixed_path(actool_output_plist.path),
         ])
 
     xcassets = group_files_by_directory(
@@ -277,16 +325,15 @@ def compile_asset_catalog(
         attr = "asset_catalogs",
     ).keys()
 
-    args.extend([xctoolrunner.prefixed_path(xcasset) for xcasset in xcassets])
+    args.extend([xctoolrunner_support.prefixed_path(xcasset) for xcasset in xcassets])
 
     apple_support.run(
         actions = actions,
         arguments = args,
         apple_fragment = platform_prerequisites.apple_fragment,
-        executable = resolved_xctoolrunner.files_to_run,
+        executable = xctoolrunner,
         execution_requirements = {"no-sandbox": "1"},
-        inputs = depset(asset_files, transitive = [resolved_xctoolrunner.inputs]),
-        input_manifests = resolved_xctoolrunner.input_manifests,
+        inputs = asset_files,
         mnemonic = "AssetCatalogCompile",
         outputs = actool_outputs,
         xcode_config = platform_prerequisites.xcode_version_config,
@@ -303,9 +350,8 @@ def compile_asset_catalog(
                 alticons_files = alternate_icons,
                 device_families = platform_prerequisites.device_families,
             ),
-            executable = resolved_alticonstool.files_to_run,
-            inputs = depset([actool_output_plist] + alternate_icons, transitive = [resolved_alticonstool.inputs]),
-            input_manifests = resolved_alticonstool.input_manifests,
+            executable = alticonstool,
+            inputs = [actool_output_plist] + alternate_icons,
             mnemonic = "AlternateIconsInsert",
             outputs = alticons_outputs,
             xcode_config = platform_prerequisites.xcode_version_config,

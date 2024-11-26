@@ -36,7 +36,7 @@ unicode string of the position
 hex(<a href="#hex-number">number</a>)
 </pre>
 
-Format integer to hexdecimal representation
+Format integer to hexadecimal representation
 
 **PARAMETERS**
 
@@ -47,7 +47,7 @@ Format integer to hexdecimal representation
 
 **RETURNS**
 
-hexdecimal representation of the number argument
+hexadecimal representation of the number argument
 
 
 <a id="ord"></a>
@@ -78,5 +78,31 @@ Unicode replacement character, U+FFFD.
 **RETURNS**
 
 codepoint of `c` argument.
+
+
+<a id="split_args"></a>
+
+## split_args
+
+<pre>
+split_args(<a href="#split_args-s">s</a>)
+</pre>
+
+Split a string into a list space separated arguments
+
+Unlike the naive `.split(" ")`, this function takes quoted strings
+and escapes into account.
+
+
+**PARAMETERS**
+
+
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="split_args-s"></a>s |  input string   |  none |
+
+**RETURNS**
+
+list of strings with each an argument found in the input string
 
 

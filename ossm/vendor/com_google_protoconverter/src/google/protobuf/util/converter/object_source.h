@@ -20,10 +20,6 @@
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
-
 namespace google {
 namespace protobuf {
 namespace util {
@@ -37,7 +33,7 @@ class ObjectWriter;
 // example, a character stream, or protobuf.
 //
 // Derived classes could be thread-unsafe.
-class PROTOBUF_EXPORT ObjectSource {
+class ObjectSource {
  public:
   ObjectSource(const ObjectSource&) = delete;
   ObjectSource& operator=(const ObjectSource&) = delete;
@@ -62,7 +58,5 @@ class PROTOBUF_EXPORT ObjectSource {
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_OBJECT_SOURCE_H_

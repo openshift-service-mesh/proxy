@@ -19,8 +19,8 @@ bzl_library(
         "//apple/internal/utils:xctoolrunner",
         "@bazel_skylib//lib:collections",
         "@bazel_skylib//lib:paths",
+        "@bazel_skylib//lib:sets",
         "@build_bazel_apple_support//lib:apple_support",
-        "@build_bazel_apple_support//lib:xcode_support",
     ],
 )
 

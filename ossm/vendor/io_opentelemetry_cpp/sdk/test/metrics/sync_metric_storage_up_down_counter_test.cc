@@ -5,7 +5,11 @@
 
 #include "opentelemetry/common/key_value_iterable_view.h"
 #include "opentelemetry/nostd/shared_ptr.h"
-#include "opentelemetry/sdk/metrics/exemplar/histogram_exemplar_reservoir.h"
+
+#ifdef ENABLE_METRICS_EXEMPLAR_PREVIEW
+#  include "opentelemetry/sdk/metrics/exemplar/filter_type.h"
+#endif
+
 #include "opentelemetry/sdk/metrics/instruments.h"
 #include "opentelemetry/sdk/metrics/state/sync_metric_storage.h"
 #include "opentelemetry/sdk/metrics/view/attributes_processor.h"
@@ -37,7 +41,10 @@ TEST_P(WritableMetricStorageTestFixture, LongUpDownCounterSumAggregation)
       new DefaultAttributesProcessor{}};
   opentelemetry::sdk::metrics::SyncMetricStorage storage(
       instr_desc, AggregationType::kSum, default_attributes_processor.get(),
-      ExemplarReservoir::GetNoExemplarReservoir(), nullptr);
+#ifdef ENABLE_METRICS_EXEMPLAR_PREVIEW
+      ExemplarFilterType::kAlwaysOff, ExemplarReservoir::GetNoExemplarReservoir(),
+#endif
+      nullptr);
 
   int64_t val1 = 10, val2 = 30, val3 = -5, val4 = -10;
   storage.RecordLong(val1, KeyValueIterableView<std::map<std::string, std::string>>(attributes_get),
@@ -64,7 +71,7 @@ TEST_P(WritableMetricStorageTestFixture, LongUpDownCounterSumAggregation)
   auto collection_ts      = std::chrono::system_clock::now();
   size_t count_attributes = 0;
   storage.Collect(collector.get(), collectors, sdk_start_ts, collection_ts,
-                  [&](const MetricData data) {
+                  [&](const MetricData &data) {
                     for (auto data_attr : data.point_data_attr_)
                     {
                       auto sum_data = opentelemetry::nostd::get<SumPointData>(data_attr.point_data);
@@ -98,7 +105,7 @@ TEST_P(WritableMetricStorageTestFixture, LongUpDownCounterSumAggregation)
   collection_ts    = std::chrono::system_clock::now();
   count_attributes = 0;
   storage.Collect(collector.get(), collectors, sdk_start_ts, collection_ts,
-                  [&](const MetricData data) {
+                  [&](const MetricData &data) {
                     if (temporality == AggregationTemporality::kCumulative)
                     {
                       EXPECT_EQ(data.start_ts, sdk_start_ts);
@@ -140,7 +147,7 @@ TEST_P(WritableMetricStorageTestFixture, LongUpDownCounterSumAggregation)
   collection_ts    = std::chrono::system_clock::now();
   count_attributes = 0;
   storage.Collect(collector.get(), collectors, sdk_start_ts, collection_ts,
-                  [&](const MetricData data) {
+                  [&](const MetricData &data) {
                     for (auto data_attr : data.point_data_attr_)
                     {
                       auto sum_data = opentelemetry::nostd::get<SumPointData>(data_attr.point_data);
@@ -184,7 +191,10 @@ TEST_P(WritableMetricStorageTestFixture, DoubleUpDownCounterSumAggregation)
       new DefaultAttributesProcessor{}};
   opentelemetry::sdk::metrics::SyncMetricStorage storage(
       instr_desc, AggregationType::kSum, default_attributes_processor.get(),
-      ExemplarReservoir::GetNoExemplarReservoir(), nullptr);
+#ifdef ENABLE_METRICS_EXEMPLAR_PREVIEW
+      ExemplarFilterType::kAlwaysOff, ExemplarReservoir::GetNoExemplarReservoir(),
+#endif
+      nullptr);
 
   storage.RecordDouble(10.0,
                        KeyValueIterableView<std::map<std::string, std::string>>(attributes_get),
@@ -214,7 +224,7 @@ TEST_P(WritableMetricStorageTestFixture, DoubleUpDownCounterSumAggregation)
   auto collection_ts      = std::chrono::system_clock::now();
   size_t count_attributes = 0;
   storage.Collect(collector.get(), collectors, sdk_start_ts, collection_ts,
-                  [&](const MetricData data) {
+                  [&](const MetricData &data) {
                     for (auto data_attr : data.point_data_attr_)
                     {
                       auto sum_data = opentelemetry::nostd::get<SumPointData>(data_attr.point_data);
@@ -249,7 +259,7 @@ TEST_P(WritableMetricStorageTestFixture, DoubleUpDownCounterSumAggregation)
   collection_ts    = std::chrono::system_clock::now();
   count_attributes = 0;
   storage.Collect(collector.get(), collectors, sdk_start_ts, collection_ts,
-                  [&](const MetricData data) {
+                  [&](const MetricData &data) {
                     if (temporality == AggregationTemporality::kCumulative)
                     {
                       EXPECT_EQ(data.start_ts, sdk_start_ts);
@@ -291,7 +301,7 @@ TEST_P(WritableMetricStorageTestFixture, DoubleUpDownCounterSumAggregation)
   collection_ts    = std::chrono::system_clock::now();
   count_attributes = 0;
   storage.Collect(collector.get(), collectors, sdk_start_ts, collection_ts,
-                  [&](const MetricData data) {
+                  [&](const MetricData &data) {
                     for (auto data_attr : data.point_data_attr_)
                     {
                       auto sum_data = opentelemetry::nostd::get<SumPointData>(data_attr.point_data);

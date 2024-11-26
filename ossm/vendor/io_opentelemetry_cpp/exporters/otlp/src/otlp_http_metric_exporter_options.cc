@@ -1,12 +1,14 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_options.h"
-
 #include <chrono>
-#include <cstddef>
-#include <memory>
 #include <string>
+
+#include "opentelemetry/exporters/otlp/otlp_environment.h"
+#include "opentelemetry/exporters/otlp/otlp_http.h"
+#include "opentelemetry/exporters/otlp/otlp_http_metric_exporter_options.h"
+#include "opentelemetry/exporters/otlp/otlp_preferred_temporality.h"
+#include "opentelemetry/version.h"
 
 OPENTELEMETRY_BEGIN_NAMESPACE
 namespace exporter
@@ -17,7 +19,7 @@ namespace otlp
 OtlpHttpMetricExporterOptions::OtlpHttpMetricExporterOptions()
 {
   url                     = GetOtlpDefaultMetricsEndpoint();
-  content_type            = HttpRequestContentType::kJson;
+  content_type            = GetOtlpHttpProtocolFromString(GetOtlpDefaultHttpMetricsProtocol());
   json_bytes_mapping      = JsonBytesMappingKind::kHexId;
   use_json_name           = false;
   console_debug           = false;
@@ -42,6 +44,8 @@ OtlpHttpMetricExporterOptions::OtlpHttpMetricExporterOptions()
   ssl_max_tls      = GetOtlpDefaultMetricsSslTlsMaxVersion();
   ssl_cipher       = GetOtlpDefaultMetricsSslTlsCipher();
   ssl_cipher_suite = GetOtlpDefaultMetricsSslTlsCipherSuite();
+
+  compression = GetOtlpDefaultMetricsCompression();
 }
 
 OtlpHttpMetricExporterOptions::~OtlpHttpMetricExporterOptions() {}

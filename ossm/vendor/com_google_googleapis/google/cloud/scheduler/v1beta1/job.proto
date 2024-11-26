@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "google/rpc/status.proto";
 
-option go_package = "google.golang.org/genproto/googleapis/cloud/scheduler/v1beta1;scheduler";
+option go_package = "cloud.google.com/go/scheduler/apiv1beta1/schedulerpb;schedulerpb";
 option java_multiple_files = true;
 option java_outer_classname = "JobProto";
 option java_package = "com.google.cloud.scheduler.v1beta1";

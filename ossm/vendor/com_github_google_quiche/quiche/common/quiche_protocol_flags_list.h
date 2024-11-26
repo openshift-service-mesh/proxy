@@ -15,6 +15,10 @@ QUICHE_PROTOCOL_FLAG(
     "future CHLO, and allow CHLO packets to be buffered until next "
     "iteration of the event loop.")
 
+QUICHE_PROTOCOL_FLAG(uint64_t, quic_dispatcher_max_ack_sent_per_connection, 2,
+                     "Number of INITIAL ack packets the dispatcher is allowed "
+                     "to send for each connection.")
+
 QUICHE_PROTOCOL_FLAG(bool, quic_disable_pacing_for_perf_tests, false,
                      "If true, disable pacing in QUIC")
 
@@ -267,4 +271,8 @@ QUICHE_PROTOCOL_FLAG(
     uint32_t, quic_max_num_path_degrading_to_mitigate, 5,
     "The maximum number of path degrading to mitigate with port migration. Any "
     "further path degrading will not kick off port migration.")
+
+QUICHE_PROTOCOL_FLAG(bool, quic_client_allow_invalid_sni_for_test, false,
+                     "If true, QUIC client will allow sending invalid SNI to "
+                     "the server. TLS only.")
 #endif

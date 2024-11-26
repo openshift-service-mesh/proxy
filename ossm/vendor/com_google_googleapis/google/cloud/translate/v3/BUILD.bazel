@@ -9,18 +9,22 @@
 #    * extra_protoc_file_parameters
 # The complete list of preserved parameters can be found in the source code.
 
-# This is an API workspace, having public visibility by default makes perfect sense.
-package(default_visibility = ["//visibility:public"])
+load("@com_google_googleapis_imports//:imports.bzl", "cc_grpc_library", "cc_proto_library", "csharp_gapic_assembly_pkg", "csharp_gapic_library", "csharp_grpc_library", "csharp_proto_library", "go_gapic_assembly_pkg", "go_gapic_library", "go_proto_library", "java_gapic_assembly_gradle_pkg", "java_gapic_library", "java_gapic_test", "java_grpc_library", "java_proto_library", "nodejs_gapic_assembly_pkg", "nodejs_gapic_library", "php_gapic_assembly_pkg", "php_gapic_library", "php_proto_library", "proto_library_with_info", "py_gapic_assembly_pkg", "py_gapic_library", "py_test", "ruby_cloud_gapic_library", "ruby_gapic_assembly_pkg", "ruby_grpc_library", "ruby_proto_library")
 
 ##############################################################################
 # Common
 ##############################################################################
 load("@rules_proto//proto:defs.bzl", "proto_library")
-load("@com_google_googleapis_imports//:imports.bzl", "proto_library_with_info")
+
+# This is an API workspace, having public visibility by default makes perfect sense.
+package(default_visibility = ["//visibility:public"])
 
 proto_library(
     name = "translation_proto",
     srcs = [
+        "adaptive_mt.proto",
+        "automl_translation.proto",
+        "common.proto",
         "translation_service.proto",
     ],
     deps = [
@@ -28,9 +32,11 @@ proto_library(
         "//google/api:client_proto",
         "//google/api:field_behavior_proto",
         "//google/api:resource_proto",
+        "//google/iam/v1:policy_proto",
         "//google/longrunning:operations_proto",
         "//google/rpc:status_proto",
         "@com_google_protobuf//:empty_proto",
+        "@com_google_protobuf//:field_mask_proto",
         "@com_google_protobuf//:timestamp_proto",
     ],
 )
@@ -41,18 +47,6 @@ proto_library_with_info(
         ":translation_proto",
         "//google/cloud:common_resources_proto",
     ],
-)
-
-##############################################################################
-# Java
-##############################################################################
-load(
-    "@com_google_googleapis_imports//:imports.bzl",
-    "java_gapic_assembly_gradle_pkg",
-    "java_gapic_library",
-    "java_gapic_test",
-    "java_grpc_library",
-    "java_proto_library",
 )
 
 java_proto_library(
@@ -81,8 +75,7 @@ java_gapic_library(
     deps = [
         ":translation_java_proto",
         "//google/api:api_java_proto",
-        "//google/cloud/location:location_java_grpc",
-        "//google/cloud/location:location_java_proto",
+        "//google/iam/v1:iam_java_proto",
     ],
 )
 
@@ -105,27 +98,13 @@ java_gapic_assembly_gradle_pkg(
         ":translation_java_grpc",
         ":translation_java_proto",
         ":translation_proto",
-        "//google/cloud/location:location_java_grpc",
-        "//google/cloud/location:location_java_proto",
-        "//google/cloud/location:location_proto",
     ],
-)
-
-##############################################################################
-# Go
-##############################################################################
-load(
-    "@com_google_googleapis_imports//:imports.bzl",
-    "go_gapic_assembly_pkg",
-    "go_gapic_library",
-    "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "translation_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/translate/v3",
+    importpath = "cloud.google.com/go/translate/apiv3/translatepb",
     protos = [":translation_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -140,6 +119,7 @@ go_gapic_library(
     grpc_service_config = "translate_grpc_service_config.json",
     importpath = "cloud.google.com/go/translate/apiv3;translate",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "translate_v3.yaml",
     transport = "grpc+rest",
@@ -152,32 +132,16 @@ go_gapic_library(
     ],
 )
 
-go_test(
-    name = "translation_go_gapic_test",
-    srcs = [":translation_go_gapic_srcjar_test"],
-    embed = [":translation_go_gapic"],
-    importpath = "cloud.google.com/go/translate/apiv3",
-)
-
 # Open Source Packages
 go_gapic_assembly_pkg(
     name = "gapi-cloud-translation-v3-go",
     deps = [
         ":translation_go_gapic",
         ":translation_go_gapic_srcjar-metadata.srcjar",
+        ":translation_go_gapic_srcjar-snippets.srcjar",
         ":translation_go_gapic_srcjar-test.srcjar",
         ":translation_go_proto",
     ],
-)
-
-##############################################################################
-# Python
-##############################################################################
-load(
-    "@com_google_googleapis_imports//:imports.bzl",
-    "py_gapic_assembly_pkg",
-    "py_gapic_library",
-    "py_test",
 )
 
 py_gapic_library(
@@ -186,7 +150,11 @@ py_gapic_library(
     grpc_service_config = "translate_grpc_service_config.json",
     opt_args = ["python-gapic-name=translate"],
     rest_numeric_enums = True,
-    transport = "grpc",
+    service_yaml = "translate_v3.yaml",
+    transport = "grpc+rest",
+    deps = [
+        "//google/iam/v1:iam_policy_py_proto",
+    ],
 )
 
 py_test(
@@ -207,37 +175,20 @@ py_gapic_assembly_pkg(
     ],
 )
 
-##############################################################################
-# PHP
-##############################################################################
-load(
-    "@com_google_googleapis_imports//:imports.bzl",
-    "php_gapic_assembly_pkg",
-    "php_gapic_library",
-    "php_grpc_library",
-    "php_proto_library",
-)
-
 php_proto_library(
     name = "translation_php_proto",
     deps = [":translation_proto"],
-)
-
-php_grpc_library(
-    name = "translation_php_grpc",
-    srcs = [":translation_proto"],
-    deps = [":translation_php_proto"],
 )
 
 php_gapic_library(
     name = "translation_php_gapic",
     srcs = [":translation_proto_with_info"],
     grpc_service_config = "translate_grpc_service_config.json",
+    migration_mode = "MIGRATING",
     rest_numeric_enums = True,
     service_yaml = "translate_v3.yaml",
     transport = "grpc+rest",
     deps = [
-        ":translation_php_grpc",
         ":translation_php_proto",
     ],
 )
@@ -247,18 +198,8 @@ php_gapic_assembly_pkg(
     name = "google-cloud-translation-v3-php",
     deps = [
         ":translation_php_gapic",
-        ":translation_php_grpc",
         ":translation_php_proto",
     ],
-)
-
-##############################################################################
-# Node.js
-##############################################################################
-load(
-    "@com_google_googleapis_imports//:imports.bzl",
-    "nodejs_gapic_assembly_pkg",
-    "nodejs_gapic_library",
 )
 
 nodejs_gapic_library(
@@ -280,17 +221,6 @@ nodejs_gapic_assembly_pkg(
         ":translation_nodejs_gapic",
         ":translation_proto",
     ],
-)
-
-##############################################################################
-# Ruby
-##############################################################################
-load(
-    "@com_google_googleapis_imports//:imports.bzl",
-    "ruby_cloud_gapic_library",
-    "ruby_gapic_assembly_pkg",
-    "ruby_grpc_library",
-    "ruby_proto_library",
 )
 
 ruby_proto_library(
@@ -318,6 +248,8 @@ ruby_cloud_gapic_library(
     rest_numeric_enums = True,
     ruby_cloud_description = "Cloud Translation can dynamically translate text between thousands of language pairs. Translation lets websites and programs programmatically integrate with the translation service.",
     ruby_cloud_title = "Cloud Translation V3",
+    service_yaml = "translate_v3.yaml",
+    transport = "grpc+rest",
     deps = [
         ":translation_ruby_grpc",
         ":translation_ruby_proto",
@@ -334,19 +266,9 @@ ruby_gapic_assembly_pkg(
     ],
 )
 
-##############################################################################
-# C#
-##############################################################################
-load(
-    "@com_google_googleapis_imports//:imports.bzl",
-    "csharp_gapic_assembly_pkg",
-    "csharp_gapic_library",
-    "csharp_grpc_library",
-    "csharp_proto_library",
-)
-
 csharp_proto_library(
     name = "translation_csharp_proto",
+    extra_opts = [],
     deps = [":translation_proto"],
 )
 
@@ -363,6 +285,7 @@ csharp_gapic_library(
     grpc_service_config = "translate_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "translate_v3.yaml",
+    transport = "grpc+rest",
     deps = [
         ":translation_csharp_grpc",
         ":translation_csharp_proto",
@@ -377,15 +300,6 @@ csharp_gapic_assembly_pkg(
         ":translation_csharp_grpc",
         ":translation_csharp_proto",
     ],
-)
-
-##############################################################################
-# C++
-##############################################################################
-load(
-    "@com_google_googleapis_imports//:imports.bzl",
-    "cc_grpc_library",
-    "cc_proto_library",
 )
 
 cc_proto_library(

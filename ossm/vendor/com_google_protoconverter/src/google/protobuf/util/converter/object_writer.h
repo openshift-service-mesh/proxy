@@ -19,18 +19,12 @@
 
 #include <cstdint>
 
-#include "google/protobuf/stubs/common.h"
-
 #include "absl/strings/string_view.h"
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
 
 namespace google {
 namespace protobuf {
 namespace util {
 namespace converter {
-
 
 class DataPiece;
 
@@ -48,7 +42,7 @@ class DataPiece;
 //
 // TODO(xinb): seems like a prime candidate to apply the RAII paradigm
 // and get rid the need to call EndXXX().
-class PROTOBUF_EXPORT ObjectWriter {
+class ObjectWriter {
  public:
   ObjectWriter(const ObjectWriter&) = delete;
   ObjectWriter& operator=(const ObjectWriter&) = delete;
@@ -83,7 +77,6 @@ class PROTOBUF_EXPORT ObjectWriter {
   virtual ObjectWriter* RenderUint64(absl::string_view name,
                                      uint64_t value) = 0;
 
-
   // Renders a double value.
   virtual ObjectWriter* RenderDouble(absl::string_view name, double value) = 0;
   // Renders a float value.
@@ -100,11 +93,9 @@ class PROTOBUF_EXPORT ObjectWriter {
   // Renders a Null value.
   virtual ObjectWriter* RenderNull(absl::string_view name) = 0;
 
-
   // Renders a DataPiece object to a ObjectWriter.
   static void RenderDataPieceTo(const DataPiece& data, absl::string_view name,
                                 ObjectWriter* ow);
-
 
   // Indicates whether this ObjectWriter has completed writing the root message,
   // usually this means writing of one complete object. Subclasses must override
@@ -132,7 +123,5 @@ class PROTOBUF_EXPORT ObjectWriter {
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_OBJECT_WRITER_H_

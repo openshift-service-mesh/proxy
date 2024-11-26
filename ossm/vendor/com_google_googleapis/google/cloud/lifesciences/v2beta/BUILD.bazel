@@ -115,13 +115,12 @@ load(
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "lifesciences_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/lifesciences/v2beta",
+    importpath = "cloud.google.com/go/lifesciences/apiv2beta/lifesciencespb",
     protos = [":lifesciences_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -136,6 +135,7 @@ go_gapic_library(
     grpc_service_config = "lifesciences_grpc_service_config.json",
     importpath = "cloud.google.com/go/lifesciences/apiv2beta;lifesciences",
     metadata = True,
+    release_level = "beta",
     rest_numeric_enums = True,
     service_yaml = "lifesciences_v2beta.yaml",
     transport = "grpc+rest",
@@ -149,19 +149,13 @@ go_gapic_library(
     ],
 )
 
-go_test(
-    name = "lifesciences_go_gapic_test",
-    srcs = [":lifesciences_go_gapic_srcjar_test"],
-    embed = [":lifesciences_go_gapic"],
-    importpath = "cloud.google.com/go/lifesciences/apiv2beta",
-)
-
 # Open Source Packages
 go_gapic_assembly_pkg(
     name = "gapi-cloud-lifesciences-v2beta-go",
     deps = [
         ":lifesciences_go_gapic",
         ":lifesciences_go_gapic_srcjar-metadata.srcjar",
+        ":lifesciences_go_gapic_srcjar-snippets.srcjar",
         ":lifesciences_go_gapic_srcjar-test.srcjar",
         ":lifesciences_go_proto",
     ],
@@ -214,7 +208,6 @@ load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -223,23 +216,15 @@ php_proto_library(
     deps = [":lifesciences_proto"],
 )
 
-php_grpc_library(
-    name = "lifesciences_php_grpc",
-    srcs = [":lifesciences_proto"],
-    deps = [":lifesciences_php_proto"],
-)
-
 php_gapic_library(
     name = "lifesciences_php_gapic",
     srcs = [":lifesciences_proto_with_info"],
     grpc_service_config = "lifesciences_grpc_service_config.json",
+    migration_mode = "MIGRATING",
     rest_numeric_enums = True,
     service_yaml = "lifesciences_v2beta.yaml",
     transport = "grpc+rest",
-    deps = [
-        ":lifesciences_php_grpc",
-        ":lifesciences_php_proto",
-    ],
+    deps = [":lifesciences_php_proto"],
 )
 
 # Open Source Packages
@@ -247,7 +232,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-lifesciences-v2beta-php",
     deps = [
         ":lifesciences_php_gapic",
-        ":lifesciences_php_grpc",
         ":lifesciences_php_proto",
     ],
 )
@@ -320,6 +304,7 @@ ruby_cloud_gapic_library(
     ruby_cloud_description = "Cloud Life Sciences is a suite of services and tools for managing, processing, and transforming life sciences data. It also enables advanced insights and operational workflows using highly scalable and compliant infrastructure.",
     ruby_cloud_title = "Cloud Life Sciences V2beta",
     service_yaml = "lifesciences_v2beta.yaml",
+    transport = "grpc+rest",
     deps = [
         ":lifesciences_ruby_grpc",
         ":lifesciences_ruby_proto",
@@ -365,6 +350,7 @@ csharp_gapic_library(
     grpc_service_config = "lifesciences_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "lifesciences_v2beta.yaml",
+    transport = "grpc+rest",
     deps = [
         ":lifesciences_csharp_grpc",
         ":lifesciences_csharp_proto",

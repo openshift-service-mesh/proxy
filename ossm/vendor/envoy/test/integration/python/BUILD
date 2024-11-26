@@ -12,7 +12,7 @@ envoy_py_test(
     size = "large",
     srcs = select({
         "//bazel:disable_hot_restart_or_admin": ["null_test.py"],
-        "//conditions:default": ["hotrestart_handoff_test.py"],
+        "//conditions:default": ["null_test.py"],
     }),
     args = [
         "--envoy-binary=$(location //test/integration:hotrestart_main)",
@@ -26,9 +26,13 @@ envoy_py_test(
         "//test/integration:hotrestart_main",
         "//tools/h3_request",
     ],
+    exec_properties = select({
+        "//bazel:engflow_rbe": {"Pool": "2core"},
+        "//conditions:default": {},
+    }),
     main = select({
         "//bazel:disable_hot_restart_or_admin": "null_test.py",
-        "//conditions:default": "hotrestart_handoff_test.py",
+        "//conditions:default": "null_test.py",
     }),
     # Hot restart does not apply on Windows.
     # py_test doesn't do coverage.

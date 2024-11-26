@@ -20,15 +20,24 @@ load(
 )
 load(
     "@build_bazel_rules_swift//test/rules:provider_test.bzl",
+    "make_provider_test_rule",
     "provider_test",
 )
 
-def generated_header_test_suite(name):
+private_deps_with_target_name_test = make_provider_test_rule(
+    config_settings = {
+        "//command_line_option:features": ["swift.add_target_name_to_output"],
+    },
+)
+
+def generated_header_test_suite(name, tags = []):
     """Test suite for `swift_library` generated headers.
 
     Args:
-      name: the base name to be used in things created by this macro
+        name: The base name to be used in targets created by this macro.
+        tags: Additional tags to apply to each test.
     """
+    all_tags = [name] + tags
 
     # Verify that the generated header by default gets an automatically
     # generated name and is an output of the rule.
@@ -40,7 +49,19 @@ def generated_header_test_suite(name):
         ],
         field = "files",
         provider = "DefaultInfo",
-        tags = [name],
+        tags = all_tags,
+        target_under_test = "@build_bazel_rules_swift//test/fixtures/generated_header:auto_header",
+    )
+
+    private_deps_with_target_name_test(
+        name = "{}_automatically_named_header_is_rule_output_with_target_name".format(name),
+        expected_files = [
+            "test/fixtures/generated_header/auto_header/auto_header-Swift.h",
+            "*",
+        ],
+        field = "files",
+        provider = "DefaultInfo",
+        tags = all_tags,
         target_under_test = "@build_bazel_rules_swift//test/fixtures/generated_header:auto_header",
     )
 
@@ -54,7 +75,7 @@ def generated_header_test_suite(name):
         ],
         field = "files",
         provider = "DefaultInfo",
-        tags = [name],
+        tags = all_tags,
         target_under_test = "@build_bazel_rules_swift//test/fixtures/generated_header:no_header",
     )
 
@@ -69,7 +90,20 @@ def generated_header_test_suite(name):
         ],
         field = "files",
         provider = "DefaultInfo",
-        tags = [name],
+        tags = all_tags,
+        target_under_test = "@build_bazel_rules_swift//test/fixtures/generated_header:explicit_header",
+    )
+
+    private_deps_with_target_name_test(
+        name = "{}_explicit_header_with_target_name".format(name),
+        expected_files = [
+            "test/fixtures/generated_header/explicit_header/SomeOtherName.h",
+            "-test/fixtures/generated_header/explicit_header-Swift.h",
+            "*",
+        ],
+        field = "files",
+        provider = "DefaultInfo",
+        tags = all_tags,
         target_under_test = "@build_bazel_rules_swift//test/fixtures/generated_header:explicit_header",
     )
 
@@ -77,7 +111,7 @@ def generated_header_test_suite(name):
     analysis_failure_test(
         name = "{}_invalid_extension".format(name),
         expected_message = "The generated header for a Swift module must have a '.h' extension",
-        tags = [name],
+        tags = all_tags,
         target_under_test = "@build_bazel_rules_swift//test/fixtures/generated_header:invalid_extension",
     )
 
@@ -90,7 +124,19 @@ def generated_header_test_suite(name):
         ],
         field = "files",
         provider = "DefaultInfo",
-        tags = [name],
+        tags = all_tags,
+        target_under_test = "@build_bazel_rules_swift//test/fixtures/generated_header:valid_path_separator",
+    )
+
+    private_deps_with_target_name_test(
+        name = "{}_valid_path_separator_with_target_name".format(name),
+        expected_files = [
+            "test/fixtures/generated_header/valid_path_separator/Valid/Separator.h",
+            "*",
+        ],
+        field = "files",
+        provider = "DefaultInfo",
+        tags = all_tags,
         target_under_test = "@build_bazel_rules_swift//test/fixtures/generated_header:valid_path_separator",
     )
 
@@ -99,11 +145,11 @@ def generated_header_test_suite(name):
     analysis_failure_test(
         name = "{}_fails_when_name_provided_but_generates_header_is_false".format(name),
         expected_message = "'generated_header_name' may only be provided when 'generates_header' is True",
-        tags = [name],
+        tags = all_tags,
         target_under_test = "@build_bazel_rules_swift//test/fixtures/generated_header:invalid_attribute_combination",
     )
 
     native.test_suite(
         name = name,
-        tags = [name],
+        tags = all_tags,
     )

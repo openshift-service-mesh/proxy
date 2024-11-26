@@ -26,6 +26,7 @@ proto_library(
         "document_io.proto",
         "document_processor_service.proto",
         "document_schema.proto",
+        "evaluation.proto",
         "geometry.proto",
         "operation_metadata.proto",
         "processor.proto",
@@ -44,6 +45,7 @@ proto_library(
         "//google/type:datetime_proto",
         "//google/type:money_proto",
         "//google/type:postal_address_proto",
+        "@com_google_protobuf//:empty_proto",
         "@com_google_protobuf//:field_mask_proto",
         "@com_google_protobuf//:timestamp_proto",
     ],
@@ -89,8 +91,8 @@ java_gapic_library(
     rest_numeric_enums = True,
     service_yaml = "documentai_v1.yaml",
     test_deps = [
-        ":documentai_java_grpc",
         "//google/cloud/location:location_java_grpc",
+        ":documentai_java_grpc",
     ],
     transport = "grpc+rest",
     deps = [
@@ -130,13 +132,12 @@ load(
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "documentai_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/documentai/v1",
+    importpath = "cloud.google.com/go/documentai/apiv1/documentaipb",
     protos = [":documentai_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -157,6 +158,7 @@ go_gapic_library(
     grpc_service_config = "documentai_v1_grpc_service_config.json",
     importpath = "cloud.google.com/go/documentai/apiv1;documentai",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "documentai_v1.yaml",
     transport = "grpc+rest",
@@ -169,19 +171,13 @@ go_gapic_library(
     ],
 )
 
-go_test(
-    name = "documentai_go_gapic_test",
-    srcs = [":documentai_go_gapic_srcjar_test"],
-    embed = [":documentai_go_gapic"],
-    importpath = "cloud.google.com/go/documentai/apiv1",
-)
-
 # Open Source Packages
 go_gapic_assembly_pkg(
     name = "gapi-cloud-documentai-v1-go",
     deps = [
         ":documentai_go_gapic",
         ":documentai_go_gapic_srcjar-metadata.srcjar",
+        ":documentai_go_gapic_srcjar-snippets.srcjar",
         ":documentai_go_gapic_srcjar-test.srcjar",
         ":documentai_go_proto",
     ],
@@ -194,13 +190,7 @@ load(
     "@com_google_googleapis_imports//:imports.bzl",
     "py_gapic_assembly_pkg",
     "py_gapic_library",
-    "py_proto_library",
     "py_test",
-)
-
-py_proto_library(
-    name = "documentai_py_proto",
-    deps = [":documentai_proto"],
 )
 
 py_gapic_library(
@@ -210,7 +200,7 @@ py_gapic_library(
     opt_args = ["autogen-snippets"],
     rest_numeric_enums = True,
     service_yaml = "documentai_v1.yaml",
-    transport = "grpc",
+    transport = "grpc+rest",
     deps = [
     ],
 )
@@ -240,7 +230,6 @@ load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -249,21 +238,15 @@ php_proto_library(
     deps = [":documentai_proto"],
 )
 
-php_grpc_library(
-    name = "documentai_php_grpc",
-    srcs = [":documentai_proto"],
-    deps = [":documentai_php_proto"],
-)
-
 php_gapic_library(
     name = "documentai_php_gapic",
     srcs = [":documentai_proto_with_info"],
     grpc_service_config = "documentai_v1_grpc_service_config.json",
+    migration_mode = "NEW_SURFACE_ONLY",
     rest_numeric_enums = True,
     service_yaml = "documentai_v1.yaml",
     transport = "grpc+rest",
     deps = [
-        ":documentai_php_grpc",
         ":documentai_php_proto",
     ],
 )
@@ -273,7 +256,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-documentai-v1-php",
     deps = [
         ":documentai_php_gapic",
-        ":documentai_php_grpc",
         ":documentai_php_proto",
     ],
 )
@@ -334,18 +316,16 @@ ruby_cloud_gapic_library(
     name = "documentai_ruby_gapic",
     srcs = [":documentai_proto_with_info"],
     extra_protoc_parameters = [
-        "ruby-cloud-api-id=us-documentai.googleapis.com",
-        "ruby-cloud-api-shortname=documentai",
         "ruby-cloud-env-prefix=DOCUMENT_AI",
         "ruby-cloud-gem-name=google-cloud-document_ai-v1",
         "ruby-cloud-namespace-override=DocumentAi=DocumentAI",
-        "ruby-cloud-product-url=https://cloud.google.com/document-ai/",
     ],
     grpc_service_config = "documentai_v1_grpc_service_config.json",
     rest_numeric_enums = True,
     ruby_cloud_description = "Document AI uses machine learning on a single cloud-based platform to automatically classify, extract, and enrich data within your documents to unlock insights.",
     ruby_cloud_title = "Document AI V1",
     service_yaml = "documentai_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":documentai_ruby_grpc",
         ":documentai_ruby_proto",
@@ -375,6 +355,7 @@ load(
 
 csharp_proto_library(
     name = "documentai_csharp_proto",
+    extra_opts = [],
     deps = [":documentai_proto"],
 )
 
@@ -391,6 +372,7 @@ csharp_gapic_library(
     grpc_service_config = "documentai_v1_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "documentai_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":documentai_csharp_grpc",
         ":documentai_csharp_proto",

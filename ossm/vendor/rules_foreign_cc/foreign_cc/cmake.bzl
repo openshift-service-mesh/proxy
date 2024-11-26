@@ -253,6 +253,7 @@ def _create_configure_script(configureParameters):
 
     configure_script = create_cmake_script(
         workspace_name = ctx.workspace_name,
+        current_label = ctx.label,
         target_os = target_os_name(ctx),
         target_arch = target_arch_name(ctx),
         host_os = os_name(ctx),
@@ -265,7 +266,7 @@ def _create_configure_script(configureParameters):
         no_toolchain_file = no_toolchain_file,
         user_cache = dict(ctx.attr.cache_entries),
         user_env = expand_locations_and_make_variables(ctx, ctx.attr.env, "env", data),
-        options = expand_locations_and_make_variables(ctx, ctx.attr.generate_args, "generate_args", data),
+        options = attrs.generate_args,
         cmake_commands = cmake_commands,
         cmake_prefix = prefix,
         include_dirs = inputs.include_dirs,

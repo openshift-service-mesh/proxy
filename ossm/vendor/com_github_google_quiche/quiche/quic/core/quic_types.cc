@@ -265,6 +265,7 @@ std::string MessageStatusToString(MessageStatus message_status) {
     RETURN_STRING_LITERAL(MESSAGE_STATUS_UNSUPPORTED);
     RETURN_STRING_LITERAL(MESSAGE_STATUS_BLOCKED);
     RETURN_STRING_LITERAL(MESSAGE_STATUS_TOO_LARGE);
+    RETURN_STRING_LITERAL(MESSAGE_STATUS_SETTINGS_NOT_RECEIVED);
     RETURN_STRING_LITERAL(MESSAGE_STATUS_INTERNAL_ERROR);
     default:
       return absl::StrCat("Unknown(", static_cast<int>(message_status), ")");
@@ -324,6 +325,8 @@ std::string CongestionControlTypeToString(CongestionControlType cc_type) {
       return "PCC";
     case kGoogCC:
       return "GoogCC";
+    case kPragueCubic:
+      return "PRAGUE_CUBIC";
   }
   return absl::StrCat("Unknown(", static_cast<int>(cc_type), ")");
 }
@@ -420,10 +423,17 @@ std::ostream& operator<<(std::ostream& os, const KeyUpdateReason reason) {
   return os;
 }
 
+std::string ParsedClientHello::ToString() const {
+  std::ostringstream oss;
+  oss << *this;
+  return oss.str();
+}
+
 bool operator==(const ParsedClientHello& a, const ParsedClientHello& b) {
   return a.sni == b.sni && a.uaid == b.uaid &&
-         a.supported_groups == b.supported_groups && a.alpns == b.alpns &&
-         a.retry_token == b.retry_token &&
+         a.supported_groups == b.supported_groups &&
+         a.cert_compression_algos == b.cert_compression_algos &&
+         a.alpns == b.alpns && a.retry_token == b.retry_token &&
          a.resumption_attempted == b.resumption_attempted &&
          a.early_data_attempted == b.early_data_attempted;
 }
@@ -434,6 +444,8 @@ std::ostream& operator<<(std::ostream& os,
      << ", alpns:" << quiche::PrintElements(parsed_chlo.alpns)
      << ", supported_groups:"
      << quiche::PrintElements(parsed_chlo.supported_groups)
+     << ", cert_compression_algos:"
+     << quiche::PrintElements(parsed_chlo.cert_compression_algos)
      << ", resumption_attempted:" << parsed_chlo.resumption_attempted
      << ", early_data_attempted:" << parsed_chlo.early_data_attempted
      << ", len(retry_token):" << parsed_chlo.retry_token.size() << " }";

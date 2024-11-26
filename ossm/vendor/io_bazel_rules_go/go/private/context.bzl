@@ -12,10 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@io_bazel_rules_go_bazel_features//:features.bzl", "bazel_features")
 load(
-    "@bazel_tools//tools/cpp:toolchain_utils.bzl",
-    "find_cpp_toolchain",
+    "@bazel_skylib//rules:common_settings.bzl",
+    "BuildSettingInfo",
 )
 load(
     "@bazel_tools//tools/build_defs/cc:action_names.bzl",
@@ -26,6 +25,38 @@ load(
     "C_COMPILE_ACTION_NAME",
     "OBJCPP_COMPILE_ACTION_NAME",
     "OBJC_COMPILE_ACTION_NAME",
+)
+load(
+    "@bazel_tools//tools/cpp:toolchain_utils.bzl",
+    "find_cpp_toolchain",
+)
+load("@io_bazel_rules_go_bazel_features//:features.bzl", "bazel_features")
+load(
+    "@io_bazel_rules_nogo//:scope.bzl",
+    NOGO_EXCLUDES = "EXCLUDES",
+    NOGO_INCLUDES = "INCLUDES",
+)
+load(
+    "//go/platform:apple.bzl",
+    "apple_ensure_options",
+)
+load(
+    "//go/private/rules:transition.bzl",
+    "request_nogo_transition",
+)
+load(
+    ":common.bzl",
+    "COVERAGE_OPTIONS_DENYLIST",
+    "GO_TOOLCHAIN",
+    "as_iterable",
+    "goos_to_extension",
+    "goos_to_shared_extension",
+    "is_struct",
+)
+load(
+    ":mode.bzl",
+    "get_mode",
+    "installsuffix",
 )
 load(
     ":providers.bzl",
@@ -40,37 +71,6 @@ load(
     "GoStdLib",
     "INFERRED_PATH",
     "get_source",
-)
-load(
-    ":mode.bzl",
-    "get_mode",
-    "installsuffix",
-)
-load(
-    ":common.bzl",
-    "COVERAGE_OPTIONS_DENYLIST",
-    "GO_TOOLCHAIN",
-    "as_iterable",
-    "goos_to_extension",
-    "goos_to_shared_extension",
-    "is_struct",
-)
-load(
-    "//go/platform:apple.bzl",
-    "apple_ensure_options",
-)
-load(
-    "@bazel_skylib//rules:common_settings.bzl",
-    "BuildSettingInfo",
-)
-load(
-    "//go/private/rules:transition.bzl",
-    "request_nogo_transition",
-)
-load(
-    "@io_bazel_rules_nogo//:scope.bzl",
-    NOGO_EXCLUDES = "EXCLUDES",
-    NOGO_INCLUDES = "INCLUDES",
 )
 
 # cgo requires a gcc/clang style compiler.
@@ -122,6 +122,9 @@ _UNSUPPORTED_FEATURES = [
     "use_header_modules",
     "fdo_instrument",
     "fdo_optimize",
+    # This is a nonspecific unsupported feature which allows the authors of C++
+    # toolchain to apply separate flags when compiling Go code.
+    "rules_go_unsupported_feature",
 ]
 
 def _match_option(option, pattern):
@@ -160,13 +163,28 @@ def _new_args(go):
     # TODO(jayconrod): print warning.
     return go.builder_args(go)
 
-def _builder_args(go, command = None):
+def _dirname(file):
+    return file.dirname
+
+def _builder_args(go, command = None, use_path_mapping = False):
     args = go.actions.args()
     args.use_param_file("-param=%s")
     args.set_param_file_format("shell")
     if command:
         args.add(command)
     args.add("-sdk", go.sdk.root_file.dirname)
+
+    # Path mapping can't map the values of environment variables, so we need to pass GOROOT to the
+    # action via an argument instead.
+    if use_path_mapping:
+        if go.stdlib:
+            goroot_file = go.stdlib.root_file
+        else:
+            goroot_file = go.sdk_root
+
+        # Use a file rather than goroot as the latter is just a string and thus
+        # not subject to path mapping.
+        args.add_all("-goroot", [goroot_file], map_each = _dirname, expand_directories = False)
     args.add("-installsuffix", installsuffix(go.mode))
     args.add_joined("-tags", go.tags, join_with = ",")
     return args
@@ -487,6 +505,12 @@ def go_context(ctx, attr = None):
         "GOTOOLCHAIN": "local",
     }
 
+    # Path mapping can't map the values of environment variables, so we pass GOROOT to the action
+    # via an argument instead in builder_args. We need to drop it from the environment to get cache
+    # hits across different configurations since the stdlib path typically contains a Bazel
+    # configuration segment.
+    env_for_path_mapping = {k: v for k, v in env.items() if k != "GOROOT"}
+
     # The level of support is determined by the platform constraints in
     # //go/constraints/amd64.
     # See https://go.dev/wiki/MinimumRequirements#amd64
@@ -572,6 +596,7 @@ def go_context(ctx, attr = None):
         coverage_enabled = ctx.configuration.coverage_enabled,
         coverage_instrumented = ctx.coverage_instrumented(),
         env = env,
+        env_for_path_mapping = env_for_path_mapping,
         tags = tags,
         stamp = mode.stamp,
         label = ctx.label,
@@ -837,6 +862,7 @@ def _cgo_context_data_impl(ctx):
             ld_static_lib_path = ld_static_lib_path,
             ld_dynamic_lib_path = ld_dynamic_lib_path,
             ld_dynamic_lib_options = ld_dynamic_lib_options,
+            ar_path = cc_toolchain.ar_executable,
         ),
     )]
 

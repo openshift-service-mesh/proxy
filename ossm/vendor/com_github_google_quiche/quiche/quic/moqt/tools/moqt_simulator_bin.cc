@@ -5,25 +5,35 @@
 // moqt_simulator simulates the behavior of MoQ Transport under various network
 // conditions and application settings.
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
+#include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
+#include "absl/time/time.h"
 #include "quiche/quic/core/crypto/quic_random.h"
 #include "quiche/quic/core/quic_bandwidth.h"
 #include "quiche/quic/core/quic_clock.h"
 #include "quiche/quic/core/quic_time.h"
 #include "quiche/quic/core/quic_types.h"
+#include "quiche/quic/moqt/moqt_bitrate_adjuster.h"
+#include "quiche/quic/moqt/moqt_known_track_publisher.h"
 #include "quiche/quic/moqt/moqt_messages.h"
 #include "quiche/quic/moqt/moqt_outgoing_queue.h"
+#include "quiche/quic/moqt/moqt_priority.h"
 #include "quiche/quic/moqt/moqt_session.h"
 #include "quiche/quic/moqt/moqt_track.h"
 #include "quiche/quic/moqt/test_tools/moqt_simulator_harness.h"
@@ -57,7 +67,7 @@ using ::quic::simulator::Simulator;
 // value just has to be sufficiently larger than the server link bandwidth.
 constexpr QuicBandwidth kClientLinkBandwidth =
     QuicBandwidth::FromBitsPerSecond(10.0e6);
-constexpr MoqtVersion kMoqtVersion = MoqtVersion::kDraft04;
+constexpr MoqtVersion kMoqtVersion = kDefaultMoqtVersion;
 
 // Track name used by the simulator.
 FullTrackName TrackName() { return FullTrackName("test", "track"); }
@@ -74,6 +84,12 @@ struct SimulationParameters {
   // Duration for which the simulation is run.
   QuicTimeDelta duration = QuicTimeDelta::FromSeconds(60);
 
+  // Count frames as useful only if they were received `deadline` after which
+  // they were generated.
+  QuicTimeDelta deadline = QuicTimeDelta::FromSeconds(2);
+  // Delivery order used by the publisher.
+  MoqtDeliveryOrder delivery_order = MoqtDeliveryOrder::kDescending;
+
   // Number of frames in an individual group.
   int keyframe_interval = 30 * 2;
   // Number of frames generated per second.
@@ -84,38 +100,35 @@ struct SimulationParameters {
   QuicBandwidth bitrate = QuicBandwidth::FromBitsPerSecond(1.0e6);
 };
 
+std::string FormatPercentage(size_t n, size_t total) {
+  float percentage = 100.0f * n / total;
+  return absl::StrFormat("%d / %d (%.2f%%)", n, total, percentage);
+}
+
 // Generates test objects at a constant rate.  The first eight bytes of every
 // object generated is a timestamp, the rest is all zeroes.  The first object in
 // the group can be made bigger than the rest, to simulate the profile of real
 // video bitstreams.
-class ObjectGenerator : public quic::simulator::Actor {
+class ObjectGenerator : public quic::simulator::Actor,
+                        public moqt::BitrateAdjustable {
  public:
   ObjectGenerator(Simulator* simulator, const std::string& actor_name,
                   MoqtSession* session, FullTrackName track_name,
                   int keyframe_interval, int fps, float i_to_p_ratio,
                   QuicBandwidth bitrate)
       : Actor(simulator, actor_name),
-        queue_(session, track_name),
+        queue_(std::make_shared<MoqtOutgoingQueue>(
+            track_name, MoqtForwardingPreference::kSubgroup)),
         keyframe_interval_(keyframe_interval),
-        time_between_frames_(QuicTimeDelta::FromMicroseconds(1.0e6 / fps)) {
-    int p_frame_count = keyframe_interval - 1;
-    // Compute the frame sizes as a fraction of the total group size.
-    float i_frame_fraction = i_to_p_ratio / (i_to_p_ratio + p_frame_count);
-    float p_frame_fraction = 1.0 / (i_to_p_ratio + p_frame_count);
-
-    QuicTimeDelta group_duration =
-        QuicTimeDelta::FromMicroseconds(1.0e6 * keyframe_interval / fps);
-    QuicByteCount group_byte_count = group_duration * bitrate;
-    i_frame_size_ = i_frame_fraction * group_byte_count;
-    p_frame_size_ = p_frame_fraction * group_byte_count;
-    QUICHE_CHECK_GE(i_frame_size_, 8u) << "Not enough space for a timestamp";
-    QUICHE_CHECK_GE(p_frame_size_, 8u) << "Not enough space for a timestamp";
-  }
+        time_between_frames_(QuicTimeDelta::FromMicroseconds(1.0e6 / fps)),
+        i_to_p_ratio_(i_to_p_ratio),
+        bitrate_(bitrate),
+        bitrate_history_({bitrate}) {}
 
   void Act() override {
     ++frame_number_;
     bool i_frame = (frame_number_ % keyframe_interval_) == 0;
-    size_t size = i_frame ? i_frame_size_ : p_frame_size_;
+    size_t size = GetFrameSize(i_frame);
 
     QuicheBuffer buffer(quiche::SimpleBufferAllocator::Get(), size);
     memset(buffer.data(), 0, buffer.size());
@@ -123,28 +136,60 @@ class ObjectGenerator : public quic::simulator::Actor {
     bool success = writer.WriteUInt64(clock_->Now().ToDebuggingValue());
     QUICHE_CHECK(success);
 
-    queue_.AddObject(QuicheMemSlice(std::move(buffer)), i_frame);
+    queue_->AddObject(QuicheMemSlice(std::move(buffer)), i_frame);
     Schedule(clock_->Now() + time_between_frames_);
   }
 
   void Start() { Schedule(clock_->Now()); }
   void Stop() { Unschedule(); }
 
-  MoqtOutgoingQueue& queue() { return queue_; }
+  std::shared_ptr<MoqtOutgoingQueue> queue() { return queue_; }
   size_t total_objects_sent() const { return frame_number_ + 1; }
 
+  size_t GetFrameSize(bool i_frame) const {
+    int p_frame_count = keyframe_interval_ - 1;
+    // Compute the frame sizes as a fraction of the total group size.
+    float i_frame_fraction = i_to_p_ratio_ / (i_to_p_ratio_ + p_frame_count);
+    float p_frame_fraction = 1.0 / (i_to_p_ratio_ + p_frame_count);
+    float frame_fraction = i_frame ? i_frame_fraction : p_frame_fraction;
+
+    QuicTimeDelta group_duration = time_between_frames_ * keyframe_interval_;
+    QuicByteCount group_byte_count = group_duration * bitrate_;
+    size_t frame_size = std::ceil(frame_fraction * group_byte_count);
+    QUICHE_CHECK_GE(frame_size, 8u)
+        << "Frame size is too small for a timestamp";
+    return frame_size;
+  }
+
+  quic::QuicBandwidth GetCurrentBitrate() const override { return bitrate_; }
+  bool AdjustBitrate(quic::QuicBandwidth bandwidth) override {
+    bitrate_ = bandwidth;
+    bitrate_history_.push_back(bandwidth);
+    return true;
+  }
+  std::string FormatBitrateHistory() const {
+    std::vector<std::string> bits;
+    bits.reserve(bitrate_history_.size());
+    for (QuicBandwidth bandwidth : bitrate_history_) {
+      bits.push_back(absl::StrCat(bandwidth));
+    }
+    return absl::StrJoin(bits, " -> ");
+  }
+
  private:
-  MoqtOutgoingQueue queue_;
+  std::shared_ptr<MoqtOutgoingQueue> queue_;
   int keyframe_interval_;
   QuicTimeDelta time_between_frames_;
-  QuicByteCount i_frame_size_;
-  QuicByteCount p_frame_size_;
+  float i_to_p_ratio_;
+  QuicBandwidth bitrate_;
   int frame_number_ = -1;
+  std::vector<QuicBandwidth> bitrate_history_;
 };
 
 class ObjectReceiver : public RemoteTrack::Visitor {
  public:
-  explicit ObjectReceiver(const QuicClock* clock) : clock_(clock) {}
+  explicit ObjectReceiver(const QuicClock* clock, QuicTimeDelta deadline)
+      : clock_(clock), deadline_(deadline) {}
 
   void OnReply(const FullTrackName& full_track_name,
                std::optional<absl::string_view> error_reason_phrase) override {
@@ -152,14 +197,22 @@ class ObjectReceiver : public RemoteTrack::Visitor {
     QUICHE_CHECK(!error_reason_phrase.has_value()) << *error_reason_phrase;
   }
 
+  void OnCanAckObjects(MoqtObjectAckFunction ack_function) override {
+    object_ack_function_ = std::move(ack_function);
+  }
+
   void OnObjectFragment(const FullTrackName& full_track_name,
                         uint64_t group_sequence, uint64_t object_sequence,
-                        uint64_t /*object_send_order*/,
-                        MoqtObjectStatus /*status*/,
+                        MoqtPriority /*publisher_priority*/,
+                        MoqtObjectStatus status,
                         MoqtForwardingPreference /*forwarding_preference*/,
                         absl::string_view object,
                         bool end_of_message) override {
     QUICHE_DCHECK(full_track_name == TrackName());
+    if (status != MoqtObjectStatus::kNormal) {
+      QUICHE_DCHECK(end_of_message);
+      return;
+    }
 
     // Buffer and assemble partially available objects.
     // TODO: this logic should be factored out. Also, this should take advantage
@@ -193,16 +246,40 @@ class ObjectReceiver : public RemoteTrack::Visitor {
     QUICHE_DCHECK(absl::c_all_of(reader.ReadRemainingPayload(),
                                  [](char c) { return c == 0; }));
     ++full_objects_received_;
+    if (delay > deadline_) {
+      ++full_objects_received_late_;
+    } else {
+      ++full_objects_received_on_time_;
+      total_bytes_received_on_time_ += payload.size();
+    }
+    if (object_ack_function_) {
+      object_ack_function_(sequence.group, sequence.object, deadline_ - delay);
+    }
   }
 
   size_t full_objects_received() const { return full_objects_received_; }
+  size_t full_objects_received_on_time() const {
+    return full_objects_received_on_time_;
+  }
+  size_t full_objects_received_late() const {
+    return full_objects_received_late_;
+  }
+  size_t total_bytes_received_on_time() const {
+    return total_bytes_received_on_time_;
+  }
 
  private:
   const QuicClock* clock_ = nullptr;
   // TODO: figure out when partial objects should be discarded.
   absl::flat_hash_map<FullSequence, std::string> partial_objects_;
+  MoqtObjectAckFunction object_ack_function_ = nullptr;
 
   size_t full_objects_received_ = 0;
+
+  QuicTimeDelta deadline_;
+  size_t full_objects_received_on_time_ = 0;
+  size_t full_objects_received_late_ = 0;
+  size_t total_bytes_received_on_time_ = 0;
 };
 
 // Computes the size of the network queue on the switch.
@@ -231,8 +308,12 @@ class MoqtSimulator {
         generator_(&simulator_, "Client generator", client_endpoint_.session(),
                    TrackName(), parameters.keyframe_interval, parameters.fps,
                    parameters.i_to_p_ratio, parameters.bitrate),
-        receiver_(simulator_.GetClock()),
-        parameters_(parameters) {}
+        receiver_(simulator_.GetClock(), parameters.deadline),
+        adjuster_(simulator_.GetClock(), client_endpoint_.session()->session(),
+                  &generator_),
+        parameters_(parameters) {
+    client_endpoint_.RecordTrace();
+  }
 
   MoqtSession* client_session() { return client_endpoint_.session(); }
   MoqtSession* server_session() { return server_endpoint_.session(); }
@@ -252,9 +333,11 @@ class MoqtSimulator {
     constexpr QuicTimeDelta kConnectionTimeout = QuicTimeDelta::FromSeconds(1);
 
     // Perform the QUIC and the MoQT handshake.
+    client_session()->set_support_object_acks(true);
     client_session()->callbacks().session_established_callback = [this] {
       client_established_ = true;
     };
+    server_session()->set_support_object_acks(true);
     server_session()->callbacks().session_established_callback = [this] {
       server_established_ = true;
     };
@@ -265,30 +348,52 @@ class MoqtSimulator {
     QUICHE_CHECK(client_established_) << "Client failed to establish session";
     QUICHE_CHECK(server_established_) << "Server failed to establish session";
 
+    generator_.queue()->SetDeliveryOrder(parameters_.delivery_order);
+    client_session()->set_publisher(&publisher_);
+    client_session()->SetMonitoringInterfaceForTrack(TrackName(), &adjuster_);
+    publisher_.Add(generator_.queue());
+
     // The simulation is started as follows.  At t=0:
     //   (1) The server issues a subscribe request.
     //   (2) The client starts immediately generating data.  At this point, the
     //       server does not yet have an active subscription, so the client has
     //       some catching up to do.
-    client_session()->AddLocalTrack(
-        TrackName(), MoqtForwardingPreference::kGroup, &generator_.queue());
     generator_.Start();
-    server_session()->SubscribeCurrentGroup(TrackName().track_namespace,
-                                            TrackName().track_name, &receiver_);
+    server_session()->SubscribeCurrentGroup(TrackName(), &receiver_);
     simulator_.RunFor(parameters_.duration);
 
     // At the end, we wait for eight RTTs until the connection settles down.
     generator_.Stop();
-    simulator_.RunFor(QuicTimeDelta(
-        8 * client_endpoint_.quic_session()->GetSessionStats().smoothed_rtt));
+    absl::Duration wait_at_the_end =
+        8 * client_endpoint_.quic_session()->GetSessionStats().smoothed_rtt;
+    simulator_.RunFor(QuicTimeDelta(wait_at_the_end));
+    const QuicTimeDelta total_time =
+        parameters_.duration + QuicTimeDelta(wait_at_the_end);
 
-    std::cout << "Ran simulation for " << parameters_.duration << std::endl;
-    std::cout << "Congestion control used : "
-              << GetClientSessionCongestionControl() << std::endl;
-    std::cout << "Objects sent: " << generator_.total_objects_sent()
-              << std::endl;
-    std::cout << "Objects received: " << receiver_.full_objects_received()
-              << std::endl;
+    absl::PrintF("Ran simulation for %v + %.1fms\n", parameters_.duration,
+                 absl::ToDoubleMilliseconds(wait_at_the_end));
+    absl::PrintF("Congestion control used: %s\n",
+                 GetClientSessionCongestionControl());
+
+    size_t total_sent = generator_.total_objects_sent();
+    size_t missing_objects =
+        generator_.total_objects_sent() - receiver_.full_objects_received();
+    absl::PrintF(
+        "Objects received: %s\n",
+        FormatPercentage(receiver_.full_objects_received(), total_sent));
+    absl::PrintF("  on time: %s\n",
+                 FormatPercentage(receiver_.full_objects_received_on_time(),
+                                  total_sent));
+    absl::PrintF(
+        "     late: %s\n",
+        FormatPercentage(receiver_.full_objects_received_late(), total_sent));
+    absl::PrintF("    never: %s\n",
+                 FormatPercentage(missing_objects, total_sent));
+    absl::PrintF("\n");
+    absl::PrintF("Average on-time goodput: %v\n",
+                 QuicBandwidth::FromBytesAndTimeDelta(
+                     receiver_.total_bytes_received_on_time(), total_time));
+    absl::PrintF("Bitrates: %s\n", generator_.FormatBitrateHistory());
   }
 
  private:
@@ -298,8 +403,10 @@ class MoqtSimulator {
   quic::simulator::Switch switch_;
   quic::simulator::SymmetricLink client_link_;
   quic::simulator::SymmetricLink server_link_;
+  MoqtKnownTrackPublisher publisher_;
   ObjectGenerator generator_;
   ObjectReceiver receiver_;
+  MoqtBitrateAdjuster adjuster_;
   SimulationParameters parameters_;
 
   bool client_established_ = false;
@@ -314,11 +421,40 @@ DEFINE_QUICHE_COMMAND_LINE_FLAG(
     moqt::test::SimulationParameters().bandwidth.ToKBitsPerSecond(),
     "Bandwidth of the simulated link, in kilobits per second.");
 
+DEFINE_QUICHE_COMMAND_LINE_FLAG(
+    absl::Duration, deadline,
+    moqt::test::SimulationParameters().deadline.ToAbsl(),
+    "Frame delivery deadline (used for measurement only).");
+
+DEFINE_QUICHE_COMMAND_LINE_FLAG(
+    absl::Duration, duration,
+    moqt::test::SimulationParameters().duration.ToAbsl(),
+    "Duration of the simulation");
+
+DEFINE_QUICHE_COMMAND_LINE_FLAG(
+    std::string, delivery_order, "desc",
+    "Delivery order used for the MoQT track simulated ('asc' or 'desc').");
+
 int main(int argc, char** argv) {
   moqt::test::SimulationParameters parameters;
   quiche::QuicheParseCommandLineFlags("moqt_simulator", argc, argv);
   parameters.bandwidth = quic::QuicBandwidth::FromKBitsPerSecond(
       quiche::GetQuicheCommandLineFlag(FLAGS_bandwidth));
+  parameters.deadline =
+      quic::QuicTimeDelta(quiche::GetQuicheCommandLineFlag(FLAGS_deadline));
+  parameters.duration =
+      quic::QuicTimeDelta(quiche::GetQuicheCommandLineFlag(FLAGS_duration));
+
+  std::string raw_delivery_order = absl::AsciiStrToLower(
+      quiche::GetQuicheCommandLineFlag(FLAGS_delivery_order));
+  if (raw_delivery_order == "asc") {
+    parameters.delivery_order = moqt::MoqtDeliveryOrder::kAscending;
+  } else if (raw_delivery_order == "desc") {
+    parameters.delivery_order = moqt::MoqtDeliveryOrder::kDescending;
+  } else {
+    std::cerr << "--delivery_order must be 'asc' or 'desc'." << std::endl;
+    return 1;
+  }
 
   moqt::test::MoqtSimulator simulator(parameters);
   simulator.Run();

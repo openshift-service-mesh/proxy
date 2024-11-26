@@ -9,14 +9,17 @@
 #    * extra_protoc_file_parameters
 # The complete list of preserved parameters can be found in the source code.
 
+# buildifier: disable=load-on-top
+
 # This is an API workspace, having public visibility by default makes perfect sense.
 package(default_visibility = ["//visibility:public"])
 
 ##############################################################################
 # Common
 ##############################################################################
-load("@rules_proto//proto:defs.bzl", "proto_library")
+# buildifier: disable=same-origin-load
 load("@com_google_googleapis_imports//:imports.bzl", "proto_library_with_info")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 
 proto_library(
     name = "livestream_proto",
@@ -29,9 +32,11 @@ proto_library(
         "//google/api:annotations_proto",
         "//google/api:client_proto",
         "//google/api:field_behavior_proto",
+        "//google/api:field_info_proto",
         "//google/api:resource_proto",
         "//google/longrunning:operations_proto",
         "//google/rpc:status_proto",
+        "//google/type:datetime_proto",
         "@com_google_protobuf//:duration_proto",
         "@com_google_protobuf//:empty_proto",
         "@com_google_protobuf//:field_mask_proto",
@@ -44,12 +49,14 @@ proto_library_with_info(
     deps = [
         ":livestream_proto",
         "//google/cloud:common_resources_proto",
+        "//google/cloud/location:location_proto",
     ],
 )
 
 ##############################################################################
 # Java
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "java_gapic_assembly_gradle_pkg",
@@ -79,11 +86,13 @@ java_gapic_library(
     service_yaml = "livestream_v1.yaml",
     test_deps = [
         ":livestream_java_grpc",
+        "//google/cloud/location:location_java_grpc",
     ],
     transport = "grpc+rest",
     deps = [
         ":livestream_java_proto",
         "//google/api:api_java_proto",
+        "//google/cloud/location:location_java_proto",
     ],
 )
 
@@ -112,23 +121,24 @@ java_gapic_assembly_gradle_pkg(
 ##############################################################################
 # Go
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "livestream_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/video/livestream/v1",
+    importpath = "cloud.google.com/go/video/livestream/apiv1/livestreampb",
     protos = [":livestream_proto"],
     deps = [
         "//google/api:annotations_go_proto",
         "//google/longrunning:longrunning_go_proto",
         "//google/rpc:status_go_proto",
+        "//google/type:datetime_go_proto",
     ],
 )
 
@@ -138,23 +148,18 @@ go_gapic_library(
     grpc_service_config = "livestream_grpc_service_config.json",
     importpath = "cloud.google.com/go/video/livestream/apiv1;livestream",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "livestream_v1.yaml",
     transport = "grpc+rest",
     deps = [
         ":livestream_go_proto",
+        "//google/cloud/location:location_go_proto",
         "//google/longrunning:longrunning_go_proto",
         "@com_google_cloud_go_longrunning//:go_default_library",
         "@com_google_cloud_go_longrunning//autogen:go_default_library",
         "@io_bazel_rules_go//proto/wkt:duration_go_proto",
     ],
-)
-
-go_test(
-    name = "livestream_go_gapic_test",
-    srcs = [":livestream_go_gapic_srcjar_test"],
-    embed = [":livestream_go_gapic"],
-    importpath = "cloud.google.com/go/video/livestream/apiv1",
 )
 
 # Open Source Packages
@@ -163,6 +168,7 @@ go_gapic_assembly_pkg(
     deps = [
         ":livestream_go_gapic",
         ":livestream_go_gapic_srcjar-metadata.srcjar",
+        ":livestream_go_gapic_srcjar-snippets.srcjar",
         ":livestream_go_gapic_srcjar-test.srcjar",
         ":livestream_go_proto",
     ],
@@ -171,6 +177,7 @@ go_gapic_assembly_pkg(
 ##############################################################################
 # Python
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "py_gapic_assembly_pkg",
@@ -183,12 +190,15 @@ py_gapic_library(
     srcs = [":livestream_proto"],
     grpc_service_config = "livestream_grpc_service_config.json",
     opt_args = [
-        "warehouse-package-name=google-cloud-video-live-stream",
-        "python-gapic-namespace=google.cloud.video",
         "python-gapic-name=live_stream",
+        "python-gapic-namespace=google.cloud.video",
+        "warehouse-package-name=google-cloud-video-live-stream",
     ],
     rest_numeric_enums = True,
-    transport = "grpc",
+    service_yaml = "livestream_v1.yaml",
+    transport = "grpc+rest",
+    deps = [
+    ],
 )
 
 py_test(
@@ -212,11 +222,11 @@ py_gapic_assembly_pkg(
 ##############################################################################
 # PHP
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -225,21 +235,15 @@ php_proto_library(
     deps = [":livestream_proto"],
 )
 
-php_grpc_library(
-    name = "livestream_php_grpc",
-    srcs = [":livestream_proto"],
-    deps = [":livestream_php_proto"],
-)
-
 php_gapic_library(
     name = "livestream_php_gapic",
     srcs = [":livestream_proto_with_info"],
     grpc_service_config = "livestream_grpc_service_config.json",
+    migration_mode = "NEW_SURFACE_ONLY",
     rest_numeric_enums = True,
     service_yaml = "livestream_v1.yaml",
     transport = "grpc+rest",
     deps = [
-        ":livestream_php_grpc",
         ":livestream_php_proto",
     ],
 )
@@ -249,7 +253,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-video-livestream-v1-php",
     deps = [
         ":livestream_php_gapic",
-        ":livestream_php_grpc",
         ":livestream_php_proto",
     ],
 )
@@ -257,6 +260,7 @@ php_gapic_assembly_pkg(
 ##############################################################################
 # Node.js
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "nodejs_gapic_assembly_pkg",
@@ -287,6 +291,7 @@ nodejs_gapic_assembly_pkg(
 ##############################################################################
 # Ruby
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "ruby_cloud_gapic_library",
@@ -319,6 +324,8 @@ ruby_cloud_gapic_library(
     rest_numeric_enums = True,
     ruby_cloud_description = "The Live Stream API transcodes mezzanine live signals into direct-to-consumer streaming formats, including Dynamic Adaptive Streaming over HTTP (DASH/MPEG-DASH), and HTTP Live Streaming (HLS), for multiple device platforms.",
     ruby_cloud_title = "Live Stream V1",
+    service_yaml = "livestream_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":livestream_ruby_grpc",
         ":livestream_ruby_proto",
@@ -338,6 +345,7 @@ ruby_gapic_assembly_pkg(
 ##############################################################################
 # C#
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "csharp_gapic_assembly_pkg",
@@ -348,6 +356,7 @@ load(
 
 csharp_proto_library(
     name = "livestream_csharp_proto",
+    extra_opts = [],
     deps = [":livestream_proto"],
 )
 
@@ -364,6 +373,7 @@ csharp_gapic_library(
     grpc_service_config = "livestream_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "livestream_v1.yaml",
+    transport = "grpc+rest",
     deps = [
         ":livestream_csharp_grpc",
         ":livestream_csharp_proto",
@@ -383,6 +393,7 @@ csharp_gapic_assembly_pkg(
 ##############################################################################
 # C++
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "cc_grpc_library",

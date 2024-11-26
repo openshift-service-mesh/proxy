@@ -15,10 +15,10 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "quiche/http2/core/spdy_alt_svc_wire_format.h"
+#include "quiche/common/http/http_header_block.h"
 #include "quiche/common/platform/api/quiche_bug_tracker.h"
 #include "quiche/common/platform/api/quiche_flag_utils.h"
 #include "quiche/common/platform/api/quiche_logging.h"
-#include "quiche/spdy/core/http2_header_block.h"
 
 namespace spdy {
 
@@ -309,7 +309,7 @@ int SpdyFrameIR::flow_control_window_consumed() const { return 0; }
 bool SpdyFrameWithFinIR::fin() const { return fin_; }
 
 SpdyFrameWithHeaderBlockIR::SpdyFrameWithHeaderBlockIR(
-    SpdyStreamId stream_id, Http2HeaderBlock header_block)
+    SpdyStreamId stream_id, quiche::HttpHeaderBlock header_block)
     : SpdyFrameWithFinIR(stream_id), header_block_(std::move(header_block)) {}
 
 SpdyFrameWithHeaderBlockIR::~SpdyFrameWithHeaderBlockIR() = default;
@@ -474,16 +474,9 @@ size_t SpdyHeadersIR::size() const {
     size += 5;
   }
 
-  // TODO(b/322146543): Remove `hpack_overhead` with deprecation of
-  // --gfe2_reloadable_flag_http2_add_hpack_overhead_bytes2.
-  size_t hpack_overhead = kPerHeaderHpackOverheadOld;
-  if (add_hpack_overhead_bytes_) {
-    QUICHE_RELOADABLE_FLAG_COUNT(http2_add_hpack_overhead_bytes2);
-    hpack_overhead = kPerHeaderHpackOverheadNew;
-  }
   // Assume no hpack encoding is applied.
-  size +=
-      header_block().TotalBytesUsed() + header_block().size() * hpack_overhead;
+  size += header_block().TotalBytesUsed() +
+          header_block().size() * kPerHeaderHpackOverhead;
   if (size > kHttp2MaxControlFrameSendSize) {
     size += GetNumberRequiredContinuationFrames(size) *
             kContinuationFrameMinimumSize;

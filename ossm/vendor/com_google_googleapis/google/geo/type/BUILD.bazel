@@ -45,7 +45,7 @@ java_gapic_assembly_gradle_pkg(
 ##############################################################################
 go_proto_library(
     name = "viewport_go_proto",
-    importpath = "google.golang.org/genproto/googleapis/geo/type",
+    importpath = "google.golang.org/genproto/googleapis/geo/type/viewport",
     protos = [":viewport_proto"],
     deps = ["//google/type:latlng_go_proto"],
 )
@@ -77,6 +77,28 @@ py_gapic_assembly_pkg(
     name = "viewport-py",
     deps = [
         ":viewport_py_gapic",
+    ],
+)
+
+##############################################################################
+# PHP
+##############################################################################
+load(
+    "@com_google_googleapis_imports//:imports.bzl",
+    "php_gapic_assembly_pkg",
+    "php_proto_library",
+)
+
+php_proto_library(
+    name = "viewport_php_proto",
+    deps = [":viewport_proto"],
+)
+
+# Open Source Packages
+php_gapic_assembly_pkg(
+    name = "viewport-php",
+    deps = [
+        ":viewport_php_proto",
     ],
 )
 

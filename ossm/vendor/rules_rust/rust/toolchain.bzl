@@ -14,6 +14,8 @@ load(
     "dedent",
     "dedup_expand_location",
     "find_cc_toolchain",
+    "is_exec_configuration",
+    "is_std_dylib",
     "make_static_lib_symlink",
 )
 load("//rust/settings:incompatible.bzl", "IncompatibleFlagInfo")
@@ -52,7 +54,7 @@ def _rust_stdlib_filegroup_impl(ctx):
         #
         # alloc depends on the allocator_library if it's configured, but we
         # do that later.
-        dot_a_files = [make_static_lib_symlink(ctx.actions, f) for f in std_rlibs]
+        dot_a_files = [make_static_lib_symlink(ctx.label.package, ctx.actions, f) for f in std_rlibs]
 
         alloc_files = [f for f in dot_a_files if "alloc" in f.basename and "std" not in f.basename]
         between_alloc_and_core_files = [f for f in dot_a_files if "compiler_builtins" in f.basename]
@@ -75,6 +77,13 @@ def _rust_stdlib_filegroup_impl(ctx):
                 print("File partitioned: {}".format(f.basename))
             fail("rust_toolchain couldn't properly partition rlibs in rust_std. Partitioned {} out of {} files. This is probably a bug in the rule implementation.".format(partitioned_files_len, len(dot_a_files)))
 
+    std_dylib = None
+
+    for file in rust_std:
+        if is_std_dylib(file):
+            std_dylib = file
+            break
+
     return [
         DefaultInfo(
             files = depset(ctx.files.srcs),
@@ -87,6 +96,7 @@ def _rust_stdlib_filegroup_impl(ctx):
             core_files = core_files,
             between_core_and_std_files = between_core_and_std_files,
             std_files = std_files,
+            std_dylib = std_dylib,
             test_files = test_files,
             memchr_files = memchr_files,
             alloc_files = alloc_files,
@@ -237,14 +247,27 @@ def _make_libstd_and_allocator_ccinfo(ctx, rust_std, allocator_library, std = "s
             transitive = [memchr_inputs],
             order = "topological",
         )
-        std_inputs = depset(
-            [
-                _ltl(f, ctx, cc_toolchain, feature_configuration)
-                for f in rust_stdlib_info.std_files
-            ],
-            transitive = [between_core_and_std_inputs],
-            order = "topological",
-        )
+
+        if _experimental_link_std_dylib(ctx):
+            # std dylib has everything so that we do not need to include all std_files
+            std_inputs = depset(
+                [cc_common.create_library_to_link(
+                    actions = ctx.actions,
+                    feature_configuration = feature_configuration,
+                    cc_toolchain = cc_toolchain,
+                    dynamic_library = rust_stdlib_info.std_dylib,
+                )],
+            )
+        else:
+            std_inputs = depset(
+                [
+                    _ltl(f, ctx, cc_toolchain, feature_configuration)
+                    for f in rust_stdlib_info.std_files
+                ],
+                transitive = [between_core_and_std_inputs],
+                order = "topological",
+            )
+
         test_inputs = depset(
             [
                 _ltl(f, ctx, cc_toolchain, feature_configuration)
@@ -354,6 +377,7 @@ def _generate_sysroot(
         rustc_lib,
         cargo = None,
         clippy = None,
+        cargo_clippy = None,
         llvm_tools = None,
         rust_std = None,
         rustfmt = None):
@@ -365,6 +389,7 @@ def _generate_sysroot(
         rustdoc (File): The path to a `rustdoc` executable.
         rustc_lib (Target): A collection of Files containing dependencies of `rustc`.
         cargo (File, optional): The path to a `cargo` executable.
+        cargo_clippy (File, optional): The path to a `cargo-clippy` executable.
         clippy (File, optional): The path to a `clippy-driver` executable.
         llvm_tools (Target, optional): A collection of llvm tools used by `rustc`.
         rust_std (Target, optional): A collection of Files containing Rust standard library components.
@@ -405,6 +430,12 @@ def _generate_sysroot(
         sysroot_cargo = _symlink_sysroot_bin(ctx, name, "bin", cargo)
         direct_files.extend([sysroot_cargo])
 
+    # Cargo-clippy
+    sysroot_cargo_clippy = None
+    if cargo_clippy:
+        sysroot_cargo_clippy = _symlink_sysroot_bin(ctx, name, "bin", cargo_clippy)
+        direct_files.extend([sysroot_cargo_clippy])
+
     # Rustfmt
     sysroot_rustfmt = None
     if rustfmt:
@@ -423,6 +454,9 @@ def _generate_sysroot(
         sysroot_rust_std = _symlink_sysroot_tree(ctx, name, rust_std)
         transitive_file_sets.extend([sysroot_rust_std])
 
+        # Made available to support $(location) expansion in stdlib_linkflags and extra_rustc_flags.
+        transitive_file_sets.append(depset(ctx.files.rust_std))
+
     # Declare a file in the root of the sysroot to make locating the sysroot easy
     sysroot_anchor = ctx.actions.declare_file("{}/rust.sysroot".format(name))
     ctx.actions.write(
@@ -430,6 +464,7 @@ def _generate_sysroot(
         content = "\n".join([
             "cargo: {}".format(cargo),
             "clippy: {}".format(clippy),
+            "cargo-clippy: {}".format(cargo_clippy),
             "llvm_tools: {}".format(llvm_tools),
             "rust_std: {}".format(rust_std),
             "rustc_lib: {}".format(rustc_lib),
@@ -446,6 +481,7 @@ def _generate_sysroot(
         all_files = all_files,
         cargo = sysroot_cargo,
         clippy = sysroot_clippy,
+        cargo_clippy = sysroot_cargo_clippy,
         rust_std = sysroot_rust_std,
         rustc = sysroot_rustc,
         rustc_lib = sysroot_rustc_lib,
@@ -453,6 +489,9 @@ def _generate_sysroot(
         rustfmt = sysroot_rustfmt,
         sysroot_anchor = sysroot_anchor,
     )
+
+def _experimental_use_cc_common_link(ctx):
+    return ctx.attr.experimental_use_cc_common_link[BuildSettingInfo].value
 
 def _rust_toolchain_impl(ctx):
     """The rust_toolchain implementation
@@ -464,11 +503,13 @@ def _rust_toolchain_impl(ctx):
         list: A list containing the target's toolchain Provider info
     """
     compilation_mode_opts = {}
-    for k, v in ctx.attr.opt_level.items():
+    for k, opt_level in ctx.attr.opt_level.items():
         if not k in ctx.attr.debug_info:
             fail("Compilation mode {} is not defined in debug_info but is defined opt_level".format(k))
-        compilation_mode_opts[k] = struct(debug_info = ctx.attr.debug_info[k], opt_level = v)
-    for k, v in ctx.attr.debug_info.items():
+        if not k in ctx.attr.strip_level:
+            fail("Compilation mode {} is not defined in strip_level but is defined opt_level".format(k))
+        compilation_mode_opts[k] = struct(debug_info = ctx.attr.debug_info[k], opt_level = opt_level, strip_level = ctx.attr.strip_level[k])
+    for k in ctx.attr.debug_info.keys():
         if not k in ctx.attr.opt_level:
             fail("Compilation mode {} is not defined in opt_level but is defined debug_info".format(k))
 
@@ -477,15 +518,14 @@ def _rust_toolchain_impl(ctx):
     pipelined_compilation = ctx.attr._pipelined_compilation[BuildSettingInfo].value
     no_std = ctx.attr._no_std[BuildSettingInfo].value
 
-    experimental_use_cc_common_link = ctx.attr.experimental_use_cc_common_link[BuildSettingInfo].value
     experimental_use_global_allocator = ctx.attr._experimental_use_global_allocator[BuildSettingInfo].value
-    if experimental_use_cc_common_link:
+    if _experimental_use_cc_common_link(ctx):
         if experimental_use_global_allocator and not ctx.attr.global_allocator_library:
             fail("rust_toolchain.experimental_use_cc_common_link with --@rules_rust//rust/settings:experimental_use_global_allocator " +
                  "requires rust_toolchain.global_allocator_library to be set")
         if not ctx.attr.allocator_library:
             fail("rust_toolchain.experimental_use_cc_common_link requires rust_toolchain.allocator_library to be set")
-    if experimental_use_global_allocator and not experimental_use_cc_common_link:
+    if experimental_use_global_allocator and not _experimental_use_cc_common_link(ctx):
         fail(
             "Using @rules_rust//rust/settings:experimental_use_global_allocator requires" +
             "--@rules_rust//rust/settings:experimental_use_cc_common_link to be set",
@@ -502,12 +542,23 @@ def _rust_toolchain_impl(ctx):
         rustfmt = ctx.file.rustfmt,
         clippy = ctx.file.clippy_driver,
         cargo = ctx.file.cargo,
+        cargo_clippy = ctx.file.cargo_clippy,
         llvm_tools = ctx.attr.llvm_tools,
     )
 
     expanded_stdlib_linkflags = []
     for flag in ctx.attr.stdlib_linkflags:
         expanded_stdlib_linkflags.append(
+            dedup_expand_location(
+                ctx,
+                flag,
+                targets = rust_std[rust_common.stdlib_info].srcs,
+            ),
+        )
+
+    expanded_extra_rustc_flags = []
+    for flag in ctx.attr.extra_rustc_flags:
+        expanded_extra_rustc_flags.append(
             dedup_expand_location(
                 ctx,
                 flag,
@@ -544,6 +595,7 @@ def _rust_toolchain_impl(ctx):
         "RUSTDOC": sysroot.rustdoc.path,
         "RUST_DEFAULT_EDITION": ctx.attr.default_edition or "",
         "RUST_SYSROOT": sysroot_path,
+        "RUST_SYSROOT_SHORT": sysroot_short_path,
     }
 
     if sysroot.cargo:
@@ -604,6 +656,7 @@ def _rust_toolchain_impl(ctx):
         binary_ext = ctx.attr.binary_ext,
         cargo = sysroot.cargo,
         clippy_driver = sysroot.clippy,
+        cargo_clippy = sysroot.cargo_clippy,
         compilation_mode_opts = compilation_mode_opts,
         crosstool_files = ctx.files._cc_toolchain,
         default_edition = ctx.attr.default_edition,
@@ -624,7 +677,8 @@ def _rust_toolchain_impl(ctx):
         rustfmt = sysroot.rustfmt,
         staticlib_ext = ctx.attr.staticlib_ext,
         stdlib_linkflags = stdlib_linkflags_cc_info,
-        extra_rustc_flags = ctx.attr.extra_rustc_flags,
+        extra_rustc_flags = expanded_extra_rustc_flags,
+        extra_rustc_flags_for_crate_types = ctx.attr.extra_rustc_flags_for_crate_types,
         extra_exec_rustc_flags = ctx.attr.extra_exec_rustc_flags,
         per_crate_rustc_flags = ctx.attr.per_crate_rustc_flags,
         sysroot = sysroot_path,
@@ -639,17 +693,23 @@ def _rust_toolchain_impl(ctx):
         _rename_first_party_crates = rename_first_party_crates,
         _third_party_dir = third_party_dir,
         _pipelined_compilation = pipelined_compilation,
-        _experimental_use_cc_common_link = experimental_use_cc_common_link,
+        _experimental_link_std_dylib = _experimental_link_std_dylib(ctx),
+        _experimental_use_cc_common_link = _experimental_use_cc_common_link(ctx),
         _experimental_use_global_allocator = experimental_use_global_allocator,
         _experimental_use_coverage_metadata_files = ctx.attr._experimental_use_coverage_metadata_files[BuildSettingInfo].value,
-        _experimental_toolchain_generated_sysroot = ctx.attr._experimental_toolchain_generated_sysroot[IncompatibleFlagInfo].enabled,
-        _incompatible_test_attr_crate_and_srcs_mutually_exclusive = ctx.attr._incompatible_test_attr_crate_and_srcs_mutually_exclusive[IncompatibleFlagInfo].enabled,
+        _incompatible_change_rust_test_compilation_output_directory = ctx.attr._incompatible_change_rust_test_compilation_output_directory[IncompatibleFlagInfo].enabled,
+        _toolchain_generated_sysroot = ctx.attr._toolchain_generated_sysroot[BuildSettingInfo].value,
         _no_std = no_std,
     )
     return [
         toolchain,
         make_variable_info,
     ]
+
+def _experimental_link_std_dylib(ctx):
+    return not is_exec_configuration(ctx) and \
+           ctx.attr.experimental_link_std_dylib[BuildSettingInfo].value and \
+           ctx.attr.rust_std[rust_common.stdlib_info].std_dylib != None
 
 rust_toolchain = rule(
     implementation = _rust_toolchain_impl,
@@ -665,6 +725,11 @@ rust_toolchain = rule(
         ),
         "cargo": attr.label(
             doc = "The location of the `cargo` binary. Can be a direct source or a filegroup containing one item.",
+            allow_single_file = True,
+            cfg = "exec",
+        ),
+        "cargo_clippy": attr.label(
+            doc = "The location of the `cargo_clippy` binary. Can be a direct source or a filegroup containing one item.",
             allow_single_file = True,
             cfg = "exec",
         ),
@@ -701,6 +766,10 @@ rust_toolchain = rule(
             ),
             mandatory = True,
         ),
+        "experimental_link_std_dylib": attr.label(
+            default = Label("@rules_rust//rust/settings:experimental_link_std_dylib"),
+            doc = "Label to a boolean build setting that controls whether whether to link libstd dynamically.",
+        ),
         "experimental_use_cc_common_link": attr.label(
             default = Label("//rust/settings:experimental_use_cc_common_link"),
             doc = "Label to a boolean build setting that controls whether cc_common.link is used to link rust binaries.",
@@ -709,7 +778,10 @@ rust_toolchain = rule(
             doc = "Extra flags to pass to rustc in exec configuration",
         ),
         "extra_rustc_flags": attr.string_list(
-            doc = "Extra flags to pass to rustc in non-exec configuration",
+            doc = "Extra flags to pass to rustc in non-exec configuration. Subject to location expansion with respect to the srcs of the `rust_std` attribute.",
+        ),
+        "extra_rustc_flags_for_crate_types": attr.string_list_dict(
+            doc = "Extra flags to pass to rustc based on crate type",
         ),
         "global_allocator_library": attr.label(
             doc = "Target that provides allocator functions for when a global allocator is present.",
@@ -777,6 +849,17 @@ rust_toolchain = rule(
             ),
             mandatory = True,
         ),
+        "strip_level": attr.string_dict(
+            doc = (
+                "Rustc strip levels. For all potential options, see " +
+                "https://doc.rust-lang.org/rustc/codegen-options/index.html#strip"
+            ),
+            default = {
+                "dbg": "none",
+                "fastbuild": "none",
+                "opt": "debuginfo",
+            },
+        ),
         "target_json": attr.string(
             doc = ("Override the target_triple with a custom target specification. " +
                    "For more details see: https://doc.rust-lang.org/rustc/targets/custom.html"),
@@ -790,13 +873,6 @@ rust_toolchain = rule(
         "_cc_toolchain": attr.label(
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
         ),
-        "_experimental_toolchain_generated_sysroot": attr.label(
-            default = Label("//rust/settings:experimental_toolchain_generated_sysroot"),
-            doc = (
-                "Label to a boolean build setting that lets the rule knows wheter to set --sysroot to rustc" +
-                "This flag is only relevant when used together with --@rules_rust//rust/settings:experimental_toolchain_generated_sysroot."
-            ),
-        ),
         "_experimental_use_coverage_metadata_files": attr.label(
             default = Label("//rust/settings:experimental_use_coverage_metadata_files"),
         ),
@@ -807,8 +883,8 @@ rust_toolchain = rule(
                 "This flag is only relevant when used together with --@rules_rust//rust/settings:experimental_use_global_allocator."
             ),
         ),
-        "_incompatible_test_attr_crate_and_srcs_mutually_exclusive": attr.label(
-            default = Label("//rust/settings:incompatible_test_attr_crate_and_srcs_mutually_exclusive"),
+        "_incompatible_change_rust_test_compilation_output_directory": attr.label(
+            default = Label("//rust/settings:incompatible_change_rust_test_compilation_output_directory"),
         ),
         "_no_std": attr.label(
             default = Label("//:no_std"),
@@ -822,11 +898,17 @@ rust_toolchain = rule(
         "_third_party_dir": attr.label(
             default = Label("//rust/settings:third_party_dir"),
         ),
+        "_toolchain_generated_sysroot": attr.label(
+            default = Label("//rust/settings:toolchain_generated_sysroot"),
+            doc = (
+                "Label to a boolean build setting that lets the rule knows wheter to set --sysroot to rustc. " +
+                "This flag is only relevant when used together with --@rules_rust//rust/settings:toolchain_generated_sysroot."
+            ),
+        ),
     },
     toolchains = [
         "@bazel_tools//tools/cpp:toolchain_type",
     ],
-    incompatible_use_toolchain_transition = True,
     doc = """Declares a Rust toolchain for use.
 
 This is for declaring a custom toolchain, eg. for configuring a particular version of rust or supporting a new platform.

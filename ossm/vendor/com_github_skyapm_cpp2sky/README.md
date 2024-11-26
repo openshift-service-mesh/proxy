@@ -2,7 +2,7 @@
 
 ![cpp2sky test](https://github.com/SkyAPM/cpp2sky/workflows/cpp2sky%20test/badge.svg)
 
-Distributed tracing and monitor SDK in CPP for Apache SkyWalking APM
+Distributed tracing and monitor SDK in CPP for Apache SkyWalking APM. This SDK is compatible with C++ 17, C++ 14, and C++ 11.
 
 ## Build
 
@@ -30,6 +30,36 @@ cc_binary(
   ],
 )
 ```
+
+#### Cmake
+
+You can compile this project, according to the following steps:
+```
+step 01: git clone git@github.com:SkyAPM/cpp2sky.git
+step 02: git clone -b v9.1.0 https://github.com/apache/skywalking-data-collect-protocol.git ./3rdparty/skywalking-data-collect-protocol
+step 03: git clone -b v1.46.6 https://github.com/grpc/grpc.git --recursive
+step 04: cmake -S ./grpc -B ./grpc/build && cmake --build ./grpc/build --parallel 8 --target install
+step 05: cmake -S . -B ./build && cmake --build ./build
+```
+
+You can also use find_package to get target libary in your project. Like this:
+```
+find_package(cpp2sky CONFIG REQUIRED)
+target_link_libraries(${PROJECT_NAME} cpp2sky::cpp2sky proto_lib)
+```
+Of course, if OS is similar to Unix, you can also use pkgconfig to build the project. Like this:
+```
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(CPP2SKY_PKG REQUIRED cpp2sky)
+```
+
+Note:
+- If you want to build this project over c11, you must update grpc version(current version:v1.46.6).
+- Only test cmake using Centos and Ubuntu.
+
+#### Develop
+
+Generate `compile_commands.json` for this repo by `bazel run :refresh_compile_commands`. Thank https://github.com/hedronvision/bazel-compile-commands-extractor for it provide the great script/tool to make this so easy!
 
 #### Docs
 
@@ -86,7 +116,7 @@ Tracing span will be delivered from `sw8` and `sw8-x` HTTP headers. For more det
 Then, you can create propagated span object by decoding these items.
 
 ```cpp
-SpanContextPtr parent_span = createSpanContext(parent);
+SpanContextSharedPtr parent_span = createSpanContext(parent);
 ```
 
 #### Create span
@@ -94,15 +124,15 @@ SpanContextPtr parent_span = createSpanContext(parent);
 First, you must create tracing context that holds all spans, then crete initial entry span.
 
 ```cpp
-TracingContextPtr tracing_context = tracer->newContext();
-TracingSpanPtr tracing_span = tracing_context->createEntrySpan();
+TracingContextSharedPtr tracing_context = tracer->newContext();
+TracingSpanSharedPtr tracing_span = tracing_context->createEntrySpan();
 ```
 
 After that, you can create another span to trace another workload, such as RPC to other services.
 Note that you must have parent span to create secondary span. It will construct parent-child relation when analysis.
 
 ```cpp
-TracingSpanPtr current_span = tracing_context->createExitSpan(current_span);
+TracingSpanSharedPtr current_span = tracing_context->createExitSpan(current_span);
 ```
 
 Alternative approach is RAII based one. It is used like below,
@@ -124,8 +154,8 @@ Note that TracingContext is unique pointer. So when you'd like to send data, you
 to avoid undefined behavior.
 
 ```cpp
-TracingContextPtr tracing_context = tracer->newContext();
-TracingSpanPtr tracing_span = tracing_context->createEntrySpan();
+TracingContextSharedPtr tracing_context = tracer->newContext();
+TracingSpanSharedPtr tracing_span = tracing_context->createEntrySpan();
 
 tracing_span->startSpan("sample_workload");
 tracing_span->endSpan();
@@ -152,7 +182,7 @@ configurations:
     ignore_suffix: '/ignore, /hoge'
 ```
 
-After setup configurations, try to put values with 
+After setup configurations, try to put values with
 
 ```
 curl --request PUT --data-binary "@./config.yaml" http://localhost:8500/v1/kv/configuration-discovery.default.agentConfigurations

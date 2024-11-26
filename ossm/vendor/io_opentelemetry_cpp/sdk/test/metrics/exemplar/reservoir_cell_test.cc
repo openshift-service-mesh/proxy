@@ -1,8 +1,10 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "opentelemetry/sdk/metrics/exemplar/reservoir_cell.h"
-#include <gtest/gtest.h>
+#ifdef ENABLE_METRICS_EXEMPLAR_PREVIEW
+
+#  include "opentelemetry/sdk/metrics/exemplar/reservoir_cell.h"
+#  include <gtest/gtest.h>
 
 OPENTELEMETRY_BEGIN_NAMESPACE
 namespace sdk
@@ -41,7 +43,7 @@ public:
 TEST_F(ReservoirCellTestPeer, recordMeasurement)
 {
   opentelemetry::sdk::metrics::ReservoirCell reservoir_cell;
-  reservoir_cell.RecordLongMeasurement((int64_t)1, MetricAttributes{},
+  reservoir_cell.RecordLongMeasurement(static_cast<int64_t>(1), MetricAttributes{},
                                        opentelemetry::context::Context{});
   ASSERT_TRUE(GetLongVal(reservoir_cell) == 1);
 
@@ -70,3 +72,5 @@ TEST_F(ReservoirCellTestPeer, Filtered)
 }  // namespace metrics
 }  // namespace sdk
 OPENTELEMETRY_END_NAMESPACE
+
+#endif  // ENABLE_METRICS_EXEMPLAR_PREVIEW

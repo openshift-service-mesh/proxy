@@ -15,6 +15,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "quiche/http2/adapter/header_validator.h"
+#include "quiche/http2/core/spdy_protocol.h"
 #include "quiche/http2/http2_constants.h"
 #include "quiche/quic/core/http/http_constants.h"
 #include "quiche/quic/core/http/http_decoder.h"
@@ -41,11 +42,10 @@
 #include "quiche/common/platform/api/quiche_logging.h"
 #include "quiche/common/quiche_mem_slice_storage.h"
 #include "quiche/common/quiche_text_utils.h"
-#include "quiche/spdy/core/spdy_protocol.h"
 
 using ::quiche::Capsule;
 using ::quiche::CapsuleType;
-using ::spdy::Http2HeaderBlock;
+using ::quiche::HttpHeaderBlock;
 
 namespace quic {
 
@@ -126,6 +126,16 @@ class QuicSpdyStream::HttpDecoderVisitor : public HttpDecoder::Visitor {
 
   bool OnPriorityUpdateFrame(const PriorityUpdateFrame& /*frame*/) override {
     CloseConnectionOnWrongFrame("Priority update");
+    return false;
+  }
+
+  bool OnOriginFrameStart(QuicByteCount /*header_length*/) override {
+    CloseConnectionOnWrongFrame("ORIGIN");
+    return false;
+  }
+
+  bool OnOriginFrame(const OriginFrame& /*frame*/) override {
+    CloseConnectionOnWrongFrame("ORIGIN");
     return false;
   }
 
@@ -267,7 +277,7 @@ QuicSpdyStream::QuicSpdyStream(PendingStream* pending,
 QuicSpdyStream::~QuicSpdyStream() {}
 
 size_t QuicSpdyStream::WriteHeaders(
-    Http2HeaderBlock header_block, bool fin,
+    HttpHeaderBlock header_block, bool fin,
     quiche::QuicheReferenceCountedPointer<QuicAckListenerInterface>
         ack_listener) {
   if (!AssertNotWebTransportDataStream("writing headers")) {
@@ -344,7 +354,7 @@ void QuicSpdyStream::WriteOrBufferBody(absl::string_view data, bool fin) {
 }
 
 size_t QuicSpdyStream::WriteTrailers(
-    Http2HeaderBlock trailer_block,
+    HttpHeaderBlock trailer_block,
     quiche::QuicheReferenceCountedPointer<QuicAckListenerInterface>
         ack_listener) {
   if (fin_sent()) {
@@ -681,10 +691,9 @@ void QuicSpdyStream::OnInitialHeadersComplete(
   }
 }
 
-bool QuicSpdyStream::CopyAndValidateTrailers(const QuicHeaderList& header_list,
-                                             bool expect_final_byte_offset,
-                                             size_t* final_byte_offset,
-                                             spdy::Http2HeaderBlock* trailers) {
+bool QuicSpdyStream::CopyAndValidateTrailers(
+    const QuicHeaderList& header_list, bool expect_final_byte_offset,
+    size_t* final_byte_offset, quiche::HttpHeaderBlock* trailers) {
   return SpdyUtils::CopyAndValidateTrailers(
       header_list, expect_final_byte_offset, final_byte_offset, trailers);
 }
@@ -933,9 +942,9 @@ bool QuicSpdyStream::FinishedReadingHeaders() const {
   return headers_decompressed_ && header_list_.empty();
 }
 
-bool QuicSpdyStream::ParseHeaderStatusCode(const Http2HeaderBlock& header,
+bool QuicSpdyStream::ParseHeaderStatusCode(const HttpHeaderBlock& header,
                                            int* status_code) {
-  Http2HeaderBlock::const_iterator it = header.find(spdy::kHttp2StatusHeader);
+  HttpHeaderBlock::const_iterator it = header.find(spdy::kHttp2StatusHeader);
   if (it == header.end()) {
     return false;
   }
@@ -1287,7 +1296,7 @@ bool QuicSpdyStream::OnUnknownFramePayload(absl::string_view payload) {
 bool QuicSpdyStream::OnUnknownFrameEnd() { return true; }
 
 size_t QuicSpdyStream::WriteHeadersImpl(
-    spdy::Http2HeaderBlock header_block, bool fin,
+    quiche::HttpHeaderBlock header_block, bool fin,
     quiche::QuicheReferenceCountedPointer<QuicAckListenerInterface>
         ack_listener) {
   if (!VersionUsesHttp3(transport_version())) {
@@ -1381,7 +1390,7 @@ void QuicSpdyStream::MaybeProcessReceivedWebTransportHeaders() {
 }
 
 void QuicSpdyStream::MaybeProcessSentWebTransportHeaders(
-    spdy::Http2HeaderBlock& headers) {
+    quiche::HttpHeaderBlock& headers) {
   if (!spdy_session_->SupportsWebTransport()) {
     return;
   }
@@ -1780,9 +1789,15 @@ bool QuicSpdyStream::ValidateReceivedHeaders(
     if (name == ":status") {
       is_response = !pair.second.empty();
     }
-    if (is_response && name == "host") {
-      // Host header is allowed in response.
-      continue;
+    if (name == "host") {
+      if (GetQuicReloadableFlag(quic_allow_host_in_request2)) {
+        QUICHE_RELOADABLE_FLAG_COUNT_N(quic_allow_host_in_request2, 1, 3);
+        continue;
+      }
+      if (is_response) {
+        // Host header is allowed in response.
+        continue;
+      }
     }
     if (http2::GetInvalidHttp2HeaderSet().contains(name)) {
       invalid_request_details_ = absl::StrCat(name, " header is not allowed");
@@ -1831,6 +1846,8 @@ void QuicSpdyStream::StopReading() {
           quic_stop_reading_also_stops_header_decompression) &&
       VersionUsesHttp3(transport_version()) && !fin_received() &&
       spdy_session_->qpack_decoder()) {
+    QUIC_RELOADABLE_FLAG_COUNT(
+        quic_stop_reading_also_stops_header_decompression);
     // Clean up Qpack decoding states.
     spdy_session_->qpack_decoder()->OnStreamReset(id());
     qpack_decoded_headers_accumulator_.reset();

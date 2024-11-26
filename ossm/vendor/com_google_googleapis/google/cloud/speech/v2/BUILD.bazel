@@ -9,24 +9,29 @@
 #    * extra_protoc_file_parameters
 # The complete list of preserved parameters can be found in the source code.
 
+# buildifier: disable=load-on-top
+
 # This is an API workspace, having public visibility by default makes perfect sense.
 package(default_visibility = ["//visibility:public"])
 
 ##############################################################################
 # Common
 ##############################################################################
-load("@rules_proto//proto:defs.bzl", "proto_library")
+# buildifier: disable=same-origin-load
 load("@com_google_googleapis_imports//:imports.bzl", "proto_library_with_info")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 
 proto_library(
     name = "speech_proto",
     srcs = [
         "cloud_speech.proto",
+        "locations_metadata.proto",
     ],
     deps = [
         "//google/api:annotations_proto",
         "//google/api:client_proto",
         "//google/api:field_behavior_proto",
+        "//google/api:field_info_proto",
         "//google/api:resource_proto",
         "//google/longrunning:operations_proto",
         "//google/rpc:status_proto",
@@ -41,12 +46,14 @@ proto_library_with_info(
     deps = [
         ":speech_proto",
         "//google/cloud:common_resources_proto",
+        "//google/cloud/location:location_proto",
     ],
 )
 
 ##############################################################################
 # Java
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "java_gapic_assembly_gradle_pkg",
@@ -76,11 +83,13 @@ java_gapic_library(
     service_yaml = "speech_v2.yaml",
     test_deps = [
         ":speech_java_grpc",
+        "//google/cloud/location:location_java_grpc",
     ],
     transport = "grpc+rest",
     deps = [
         ":speech_java_proto",
         "//google/api:api_java_proto",
+        "//google/cloud/location:location_java_proto",
     ],
 )
 
@@ -109,18 +118,18 @@ java_gapic_assembly_gradle_pkg(
 ##############################################################################
 # Go
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "go_gapic_assembly_pkg",
     "go_gapic_library",
     "go_proto_library",
-    "go_test",
 )
 
 go_proto_library(
     name = "speech_go_proto",
     compilers = ["@io_bazel_rules_go//proto:go_grpc"],
-    importpath = "google.golang.org/genproto/googleapis/cloud/speech/v2",
+    importpath = "cloud.google.com/go/speech/apiv2/speechpb",
     protos = [":speech_proto"],
     deps = [
         "//google/api:annotations_go_proto",
@@ -135,23 +144,18 @@ go_gapic_library(
     grpc_service_config = "speech_grpc_service_config.json",
     importpath = "cloud.google.com/go/speech/apiv2;speech",
     metadata = True,
+    release_level = "ga",
     rest_numeric_enums = True,
     service_yaml = "speech_v2.yaml",
     transport = "grpc+rest",
     deps = [
         ":speech_go_proto",
+        "//google/cloud/location:location_go_proto",
         "//google/longrunning:longrunning_go_proto",
         "@com_google_cloud_go_longrunning//:go_default_library",
         "@com_google_cloud_go_longrunning//autogen:go_default_library",
         "@io_bazel_rules_go//proto/wkt:duration_go_proto",
     ],
-)
-
-go_test(
-    name = "speech_go_gapic_test",
-    srcs = [":speech_go_gapic_srcjar_test"],
-    embed = [":speech_go_gapic"],
-    importpath = "cloud.google.com/go/speech/apiv2",
 )
 
 # Open Source Packages
@@ -160,6 +164,7 @@ go_gapic_assembly_pkg(
     deps = [
         ":speech_go_gapic",
         ":speech_go_gapic_srcjar-metadata.srcjar",
+        ":speech_go_gapic_srcjar-snippets.srcjar",
         ":speech_go_gapic_srcjar-test.srcjar",
         ":speech_go_proto",
     ],
@@ -168,6 +173,7 @@ go_gapic_assembly_pkg(
 ##############################################################################
 # Python
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "py_gapic_assembly_pkg",
@@ -181,6 +187,7 @@ py_gapic_library(
     grpc_service_config = "speech_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "speech_v2.yaml",
+    transport = "grpc+rest",
     deps = [
     ],
 )
@@ -206,11 +213,11 @@ py_gapic_assembly_pkg(
 ##############################################################################
 # PHP
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "php_gapic_assembly_pkg",
     "php_gapic_library",
-    "php_grpc_library",
     "php_proto_library",
 )
 
@@ -219,21 +226,15 @@ php_proto_library(
     deps = [":speech_proto"],
 )
 
-php_grpc_library(
-    name = "speech_php_grpc",
-    srcs = [":speech_proto"],
-    deps = [":speech_php_proto"],
-)
-
 php_gapic_library(
     name = "speech_php_gapic",
     srcs = [":speech_proto_with_info"],
     grpc_service_config = "speech_grpc_service_config.json",
+    migration_mode = "MIGRATING",
     rest_numeric_enums = True,
     service_yaml = "speech_v2.yaml",
     transport = "grpc+rest",
     deps = [
-        ":speech_php_grpc",
         ":speech_php_proto",
     ],
 )
@@ -243,7 +244,6 @@ php_gapic_assembly_pkg(
     name = "google-cloud-speech-v2-php",
     deps = [
         ":speech_php_gapic",
-        ":speech_php_grpc",
         ":speech_php_proto",
     ],
 )
@@ -251,6 +251,7 @@ php_gapic_assembly_pkg(
 ##############################################################################
 # Node.js
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "nodejs_gapic_assembly_pkg",
@@ -281,6 +282,7 @@ nodejs_gapic_assembly_pkg(
 ##############################################################################
 # Ruby
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "ruby_cloud_gapic_library",
@@ -315,6 +317,7 @@ ruby_cloud_gapic_library(
     ruby_cloud_description = "Google Speech-to-Text enables developers to convert audio to text by applying powerful neural network models in an easy-to-use API. The API recognizes more than 120 languages and variants to support your global user base. You can enable voice command-and-control, transcribe audio from call centers, and more. It can process real-time streaming or prerecorded audio, using Google's machine learning technology.",
     ruby_cloud_title = "Cloud Speech-to-Text V2",
     service_yaml = "speech_v2.yaml",
+    transport = "grpc+rest",
     deps = [
         ":speech_ruby_grpc",
         ":speech_ruby_proto",
@@ -334,6 +337,7 @@ ruby_gapic_assembly_pkg(
 ##############################################################################
 # C#
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "csharp_gapic_assembly_pkg",
@@ -344,6 +348,7 @@ load(
 
 csharp_proto_library(
     name = "speech_csharp_proto",
+    extra_opts = [],
     deps = [":speech_proto"],
 )
 
@@ -360,6 +365,7 @@ csharp_gapic_library(
     grpc_service_config = "speech_grpc_service_config.json",
     rest_numeric_enums = True,
     service_yaml = "speech_v2.yaml",
+    transport = "grpc+rest",
     deps = [
         ":speech_csharp_grpc",
         ":speech_csharp_proto",
@@ -379,6 +385,7 @@ csharp_gapic_assembly_pkg(
 ##############################################################################
 # C++
 ##############################################################################
+# buildifier: disable=same-origin-load
 load(
     "@com_google_googleapis_imports//:imports.bzl",
     "cc_grpc_library",

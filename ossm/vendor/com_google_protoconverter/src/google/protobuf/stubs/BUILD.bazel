@@ -27,13 +27,11 @@ cc_library(
     name = "lite",
     srcs = [
         "bytestream.cc",
-        "common.cc",
         "strutil.cc",
     ],
     hdrs = [
         "bytestream.h",
         "callback.h",
-        "common.h",
         "platform_macros.h",
         "port.h",
         "status_macros.h",
@@ -43,7 +41,7 @@ cc_library(
     include_prefix = "google/protobuf/stubs",
     linkopts = LINK_OPTS,
     deps = [
-        "//src/google/protobuf/util/converter:port_def",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/log:absl_log",
         "@com_google_absl//absl/status",
@@ -62,14 +60,12 @@ cc_library(
     include_prefix = "google/protobuf/stubs",
     textual_hdrs = [
         "callback.h",
-        "common.h",
         "platform_macros.h",
         "port.h",
         "status_macros.h",
     ],
     deps = [
         ":lite",
-        "//src/google/protobuf/util/converter:port_def",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -80,7 +76,6 @@ cc_test(
     name = "stubs_test",
     srcs = [
         "bytestream_unittest.cc",
-        "common_unittest.cc",
         "strutil_unittest.cc",
     ],
     copts = COPTS + select({

@@ -22,19 +22,13 @@
 #include <string>
 #include <utility>
 
-#include "google/protobuf/stubs/common.h"
-#include "google/protobuf/any.pb.h"
-#include "google/protobuf/type.pb.h"
-#include "google/protobuf/repeated_field.h"
-#include "google/protobuf/stubs/strutil.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-
-
-// Must be included last.
-#include "google/protobuf/util/converter/port_def.inc"
+#include "google/protobuf/any.pb.h"
+#include "google/protobuf/repeated_field.h"
+#include "google/protobuf/type.pb.h"
 
 namespace google {
 namespace protobuf {
@@ -47,25 +41,25 @@ static const int64_t kTypeUrlSize = 19;
 // Finds the tech option identified by option_name. Parses the boolean value and
 // returns it.
 // When the option with the given name is not found, default_value is returned.
-PROTOBUF_EXPORT bool GetBoolOptionOrDefault(
+bool GetBoolOptionOrDefault(
     const RepeatedPtrField<google::protobuf::Option>& options,
     absl::string_view option_name, bool default_value);
 
 // Returns int64 option value. If the option isn't found, returns the
 // default_value.
-PROTOBUF_EXPORT int64_t GetInt64OptionOrDefault(
+int64_t GetInt64OptionOrDefault(
     const RepeatedPtrField<google::protobuf::Option>& options,
     absl::string_view option_name, int64_t default_value);
 
 // Returns double option value. If the option isn't found, returns the
 // default_value.
-PROTOBUF_EXPORT double GetDoubleOptionOrDefault(
+double GetDoubleOptionOrDefault(
     const RepeatedPtrField<google::protobuf::Option>& options,
     absl::string_view option_name, double default_value);
 
 // Returns string option value. If the option isn't found, returns the
 // default_value.
-PROTOBUF_EXPORT std::string GetStringOptionOrDefault(
+std::string GetStringOptionOrDefault(
     const RepeatedPtrField<google::protobuf::Option>& options,
     absl::string_view option_name, absl::string_view default_value);
 
@@ -73,21 +67,20 @@ PROTOBUF_EXPORT std::string GetStringOptionOrDefault(
 // TODO(skarvaje): Make these utilities dealing with Any types more generic,
 // add more error checking and move to a more public/shareable location so
 // others can use.
-PROTOBUF_EXPORT bool GetBoolFromAny(const google::protobuf::Any& any);
+bool GetBoolFromAny(const google::protobuf::Any& any);
 
 // Returns int64 value contained in Any type.
-PROTOBUF_EXPORT int64_t GetInt64FromAny(const google::protobuf::Any& any);
+int64_t GetInt64FromAny(const google::protobuf::Any& any);
 
 // Returns double value contained in Any type.
-PROTOBUF_EXPORT double GetDoubleFromAny(const google::protobuf::Any& any);
+double GetDoubleFromAny(const google::protobuf::Any& any);
 
 // Returns string value contained in Any type.
-PROTOBUF_EXPORT std::string GetStringFromAny(const google::protobuf::Any& any);
+std::string GetStringFromAny(const google::protobuf::Any& any);
 
 // Returns the type string without the url prefix. e.g.: If the passed type is
 // 'type.googleapis.com/tech.type.Bool', the returned value is 'tech.type.Bool'.
-PROTOBUF_EXPORT absl::string_view GetTypeWithoutUrl(
-    absl::string_view type_url);
+absl::string_view GetTypeWithoutUrl(absl::string_view type_url);
 
 // Returns the simple_type with the base type url (kTypeServiceBaseUrl)
 // prefixed.
@@ -95,8 +88,7 @@ PROTOBUF_EXPORT absl::string_view GetTypeWithoutUrl(
 // E.g:
 // GetFullTypeWithUrl("google.protobuf.Timestamp") returns the string
 // "type.googleapis.com/google.protobuf.Timestamp".
-PROTOBUF_EXPORT std::string GetFullTypeWithUrl(
-    absl::string_view simple_type);
+std::string GetFullTypeWithUrl(absl::string_view simple_type);
 
 // Finds and returns option identified by name and option_name within the
 // provided map. Returns nullptr if none found.
@@ -136,31 +128,31 @@ const google::protobuf::EnumValue* FindEnumValueByNameWithoutUnderscoreOrNull(
     const google::protobuf::Enum* enum_type, absl::string_view enum_name);
 
 // Converts input to camel-case and returns it.
-PROTOBUF_EXPORT std::string ToCamelCase(const absl::string_view input);
+std::string ToCamelCase(const absl::string_view input);
 
 // Converts enum name string to camel-case and returns it.
 std::string EnumValueNameToLowerCamelCase(const absl::string_view input);
 
 // Converts input to snake_case and returns it.
-PROTOBUF_EXPORT std::string ToSnakeCase(absl::string_view input);
+std::string ToSnakeCase(absl::string_view input);
 
 // Returns true if type_name represents a well-known type.
-PROTOBUF_EXPORT bool IsWellKnownType(const std::string& type_name);
+bool IsWellKnownType(const std::string& type_name);
 
 // Returns true if 'bool_string' represents a valid boolean value. Only "true",
 // "false", "0" and "1" are allowed.
-PROTOBUF_EXPORT bool IsValidBoolString(absl::string_view bool_string);
+bool IsValidBoolString(absl::string_view bool_string);
 
 // Returns true if "field" is a protobuf map field based on its type.
-PROTOBUF_EXPORT bool IsMap(const google::protobuf::Field& field,
-                           const google::protobuf::Type& type);
+bool IsMap(const google::protobuf::Field& field,
+           const google::protobuf::Type& type);
 
 // Returns true if the given type has special MessageSet wire format.
 bool IsMessageSetWireFormat(const google::protobuf::Type& type);
 
 // Infinity/NaN-aware conversion to string.
-PROTOBUF_EXPORT std::string DoubleAsString(double value);
-PROTOBUF_EXPORT std::string FloatAsString(float value);
+std::string DoubleAsString(double value);
+std::string FloatAsString(float value);
 
 // Convert from int32, int64, uint32, uint64, double or float to string.
 template <typename T>
@@ -180,13 +172,11 @@ inline std::string ValueAsString(double value) {
 
 // Converts a string to float. Unlike safe_strtof, conversion will fail if the
 // value fits into double but not float (e.g., DBL_MAX).
-PROTOBUF_EXPORT bool SafeStrToFloat(absl::string_view str, float* value);
+bool SafeStrToFloat(absl::string_view str, float* value);
 
 }  // namespace converter
 }  // namespace util
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/util/converter/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_UTIL_CONVERTER_UTILITY_H_

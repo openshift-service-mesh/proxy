@@ -16,7 +16,7 @@ all_whl_requirements = all_whl_requirements_by_package.values()
 all_data_requirements = []
 
 _packages = []
-_config = {"download_only": False, "enable_implicit_namespace_pkgs": False, "environment": {}, "envsubst": [], "extra_pip_args": ["--require-hashes"], "isolated": True, "pip_data_exclude": [], "python_interpreter": "python3", "python_interpreter_target": "@python3_11_x86_64-unknown-linux-gnu//:bin/python3", "quiet": True, "repo": "dev_pip3", "repo_prefix": "dev_pip3_", "timeout": 600}
+_config = {"download_only": False, "enable_implicit_namespace_pkgs": False, "environment": {}, "envsubst": [], "extra_pip_args": ["--require-hashes"], "isolated": True, "pip_data_exclude": [], "python_interpreter": "python3", "python_interpreter_target": "@python3_12_x86_64-unknown-linux-gnu//:bin/python3", "quiet": True, "repo": "dev_pip3", "repo_prefix": "dev_pip3_", "timeout": 600}
 _annotations = {}
 
 def requirement(name):

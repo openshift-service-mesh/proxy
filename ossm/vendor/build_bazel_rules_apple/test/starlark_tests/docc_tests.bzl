@@ -57,7 +57,6 @@ def docc_test_suite(name):
             "$BUNDLE_ROOT/index.html",
             "$BUNDLE_ROOT/documentation/basicframework/readme/index.html",
         ],
-        text_file_not_contains = [],
         text_test_file = "$BUNDLE_ROOT/metadata.json",
         text_test_values = [
             "\"bundleDisplayName\":\"BasicFramework\"",
@@ -65,6 +64,55 @@ def docc_test_suite(name):
             "\"major\":0",
             "\"minor\":1",
             "\"patch\":0",
+        ],
+        tags = [name],
+    )
+
+    # Verify doccarchive bundle is created for an ObjC library which defines data and has a dependency on a Swift lib.
+    archive_contents_test(
+        name = "{}_contains_doccarchive_when_objc_library_with_swift_dep".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:basic_objc_lib_with_data_and_docc_bundle_dependency.doccarchive",
+        contains = [
+            "$BUNDLE_ROOT/index.html",
+            "$BUNDLE_ROOT/documentation/basiclib/readme/index.html",
+        ],
+        text_test_file = "$BUNDLE_ROOT/metadata.json",
+        text_test_values = [
+            "\"bundleDisplayName\":\"BasicLib\"",
+            "\"bundleIdentifier\":\"com.google.example.objc.lib\"",
+            "\"major\":0",
+            "\"minor\":1",
+            "\"patch\":0",
+        ],
+        tags = [name],
+    )
+
+    # Verify hosting_base_path support.
+    archive_contents_test(
+        name = "{}_contains_doccarchive_with_docc_bundle_when_ios_framework_with_hosting_base_path".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:basic_framework_with_docc_bundle_custom_base_path.doccarchive",
+        contains = [
+            "$BUNDLE_ROOT/index.html",
+            "$BUNDLE_ROOT/documentation/basicframework/readme/index.html",
+        ],
+        text_test_file = "$BUNDLE_ROOT/index.html",
+        text_test_values = [
+            "<script defer=\"defer\" src=\"/custom/base/path/js/",
+            "<link href=\"/custom/base/path/css/",
+        ],
+        tags = [name],
+    )
+
+    # Verifying multiple symbol graph conversion via transitive dependencies.
+    archive_contents_test(
+        name = "{}_contains_doccarchive_with_transitive_dependencies".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:basic_framework_with_transitive_dependency.doccarchive",
+        contains = [
+            "$BUNDLE_ROOT/index.html",
+            "$BUNDLE_ROOT/documentation/transitivedependencytest/index.html",
         ],
         tags = [name],
     )

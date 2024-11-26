@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
-use std::option::Option;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -40,6 +39,7 @@ struct Action {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CrateSpec {
+    pub aliases: BTreeMap<String, String>,
     pub crate_id: String,
     pub display_name: String,
     pub edition: String,
@@ -77,14 +77,18 @@ pub fn get_crate_specs(
 
     let aquery_output = Command::new(bazel)
         .current_dir(workspace)
+        .env_remove("BAZELISK_SKIP_WRAPPER")
+        .env_remove("BUILD_WORKING_DIRECTORY")
+        .env_remove("BUILD_WORKSPACE_DIRECTORY")
         .arg("aquery")
         .arg("--include_aspects")
+        .arg("--include_artifacts")
         .arg(format!(
             "--aspects={rules_rust_name}//rust:defs.bzl%rust_analyzer_aspect"
         ))
         .arg("--output_groups=rust_analyzer_crate_spec")
         .arg(format!(
-            r#"outputs(".*[.]rust_analyzer_crate_spec",{target_pattern})"#
+            r#"outputs(".*\.rust_analyzer_crate_spec\.json",{target_pattern})"#
         ))
         .arg("--output=jsonproto")
         .output()?;
@@ -109,7 +113,18 @@ fn parse_aquery_output_files(
     execution_root: &Path,
     aquery_stdout: &str,
 ) -> anyhow::Result<Vec<PathBuf>> {
-    let out: AqueryOutput = serde_json::from_str(aquery_stdout)?;
+    let out: AqueryOutput = serde_json::from_str(aquery_stdout).map_err(|_| {
+        // Parsing to `AqueryOutput` failed, try parsing into a `serde_json::Value`:
+        match serde_json::from_str::<serde_json::Value>(aquery_stdout) {
+            Ok(serde_json::Value::Object(_)) => {
+                // If the JSON is an object, it's likely that the aquery command failed.
+                anyhow::anyhow!("Aquery returned an empty result, are there any Rust targets in the specified paths?.")
+            }
+            _ => {
+                anyhow::anyhow!("Failed to parse aquery output as JSON")
+            }
+        }
+    })?;
 
     let artifacts = out
         .artifacts
@@ -205,6 +220,7 @@ mod test {
     fn consolidate_lib_then_test_specs() {
         let crate_specs = vec![
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-mylib.rs".into(),
                 display_name: "mylib".into(),
                 edition: "2018".into(),
@@ -219,6 +235,7 @@ mod test {
                 crate_type: "rlib".into(),
             },
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-extra_test_dep.rs".into(),
                 display_name: "extra_test_dep".into(),
                 edition: "2018".into(),
@@ -233,6 +250,7 @@ mod test {
                 crate_type: "rlib".into(),
             },
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-lib_dep.rs".into(),
                 display_name: "lib_dep".into(),
                 edition: "2018".into(),
@@ -247,6 +265,7 @@ mod test {
                 crate_type: "rlib".into(),
             },
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-mylib.rs".into(),
                 display_name: "mylib_test".into(),
                 edition: "2018".into(),
@@ -266,6 +285,7 @@ mod test {
             consolidate_crate_specs(crate_specs).unwrap(),
             BTreeSet::from([
                 CrateSpec {
+                    aliases: BTreeMap::new(),
                     crate_id: "ID-mylib.rs".into(),
                     display_name: "mylib".into(),
                     edition: "2018".into(),
@@ -280,6 +300,7 @@ mod test {
                     crate_type: "rlib".into(),
                 },
                 CrateSpec {
+                    aliases: BTreeMap::new(),
                     crate_id: "ID-extra_test_dep.rs".into(),
                     display_name: "extra_test_dep".into(),
                     edition: "2018".into(),
@@ -294,6 +315,7 @@ mod test {
                     crate_type: "rlib".into(),
                 },
                 CrateSpec {
+                    aliases: BTreeMap::new(),
                     crate_id: "ID-lib_dep.rs".into(),
                     display_name: "lib_dep".into(),
                     edition: "2018".into(),
@@ -315,6 +337,7 @@ mod test {
     fn consolidate_test_then_lib_specs() {
         let crate_specs = vec![
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-mylib.rs".into(),
                 display_name: "mylib_test".into(),
                 edition: "2018".into(),
@@ -329,6 +352,7 @@ mod test {
                 crate_type: "bin".into(),
             },
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-mylib.rs".into(),
                 display_name: "mylib".into(),
                 edition: "2018".into(),
@@ -343,6 +367,7 @@ mod test {
                 crate_type: "rlib".into(),
             },
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-extra_test_dep.rs".into(),
                 display_name: "extra_test_dep".into(),
                 edition: "2018".into(),
@@ -357,6 +382,7 @@ mod test {
                 crate_type: "rlib".into(),
             },
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-lib_dep.rs".into(),
                 display_name: "lib_dep".into(),
                 edition: "2018".into(),
@@ -376,6 +402,7 @@ mod test {
             consolidate_crate_specs(crate_specs).unwrap(),
             BTreeSet::from([
                 CrateSpec {
+                    aliases: BTreeMap::new(),
                     crate_id: "ID-mylib.rs".into(),
                     display_name: "mylib".into(),
                     edition: "2018".into(),
@@ -390,6 +417,7 @@ mod test {
                     crate_type: "rlib".into(),
                 },
                 CrateSpec {
+                    aliases: BTreeMap::new(),
                     crate_id: "ID-extra_test_dep.rs".into(),
                     display_name: "extra_test_dep".into(),
                     edition: "2018".into(),
@@ -404,6 +432,7 @@ mod test {
                     crate_type: "rlib".into(),
                 },
                 CrateSpec {
+                    aliases: BTreeMap::new(),
                     crate_id: "ID-lib_dep.rs".into(),
                     display_name: "lib_dep".into(),
                     edition: "2018".into(),
@@ -430,6 +459,7 @@ mod test {
         // mylib in mylib2.rs.
         let crate_specs = vec![
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-mylib.rs".into(),
                 display_name: "mylib".into(),
                 edition: "2018".into(),
@@ -444,6 +474,7 @@ mod test {
                 crate_type: "rlib".into(),
             },
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-mylib.rs".into(),
                 display_name: "mylib_test".into(),
                 edition: "2018".into(),
@@ -458,6 +489,7 @@ mod test {
                 crate_type: "bin".into(),
             },
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-mylib.rs".into(),
                 display_name: "mylib_main".into(),
                 edition: "2018".into(),
@@ -472,6 +504,7 @@ mod test {
                 crate_type: "bin".into(),
             },
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-mylib2.rs".into(),
                 display_name: "mylib2".into(),
                 edition: "2018".into(),
@@ -492,6 +525,7 @@ mod test {
                 consolidate_crate_specs(perm).unwrap(),
                 BTreeSet::from([
                     CrateSpec {
+                        aliases: BTreeMap::new(),
                         crate_id: "ID-mylib.rs".into(),
                         display_name: "mylib".into(),
                         edition: "2018".into(),
@@ -506,6 +540,7 @@ mod test {
                         crate_type: "rlib".into(),
                     },
                     CrateSpec {
+                        aliases: BTreeMap::new(),
                         crate_id: "ID-mylib2.rs".into(),
                         display_name: "mylib2".into(),
                         edition: "2018".into(),
@@ -531,6 +566,7 @@ mod test {
         // when explicitly building that target.
         let crate_specs = vec![
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-myproc_macro.rs".into(),
                 display_name: "myproc_macro".into(),
                 edition: "2018".into(),
@@ -548,6 +584,7 @@ mod test {
                 crate_type: "proc_macro".into(),
             },
             CrateSpec {
+                aliases: BTreeMap::new(),
                 crate_id: "ID-myproc_macro.rs".into(),
                 display_name: "myproc_macro".into(),
                 edition: "2018".into(),
@@ -569,6 +606,7 @@ mod test {
             assert_eq!(
                 consolidate_crate_specs(perm).unwrap(),
                 BTreeSet::from([CrateSpec {
+                    aliases: BTreeMap::new(),
                     crate_id: "ID-myproc_macro.rs".into(),
                     display_name: "myproc_macro".into(),
                     edition: "2018".into(),
