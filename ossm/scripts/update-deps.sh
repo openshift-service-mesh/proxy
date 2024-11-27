@@ -118,9 +118,9 @@ function patch_python() {
   local dir repo_name
 
   for arch in x86_64 s390x ppc64le aarch64; do
-    repo_name="python3_11_${arch}-unknown-linux-gnu"
+    repo_name="python3_12_${arch}-unknown-linux-gnu"
     dir="${VENDOR_DIR}/${repo_name}"
-
+    /bin/rm -rf "${dir}"
     mkdir -p "${dir}"
     cp "${ROOT_DIR}/ossm/scripts/BUILD.bazel.python" "${dir}/BUILD.bazel"
 
