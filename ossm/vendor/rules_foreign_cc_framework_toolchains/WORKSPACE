@@ -1,0 +1,2 @@
+# DO NOT EDIT: automatically generated WORKSPACE file for framework_toolchain_repository_hub rule
+workspace(name = "rules_foreign_cc_framework_toolchains")

@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "charset_normalizer",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_charset_normalizer//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_charset_normalizer//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_charset_normalizer//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_charset_normalizer//:dist_info",
+)

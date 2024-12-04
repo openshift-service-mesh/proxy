@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "sphinx_rtd_theme",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_sphinx_rtd_theme//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_sphinx_rtd_theme//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_sphinx_rtd_theme//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_sphinx_rtd_theme//:dist_info",
+)

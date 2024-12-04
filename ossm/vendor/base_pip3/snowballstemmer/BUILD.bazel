@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "snowballstemmer",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_snowballstemmer//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_snowballstemmer//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_snowballstemmer//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_snowballstemmer//:dist_info",
+)

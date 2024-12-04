@@ -1,0 +1,2 @@
+# DO NOT EDIT: automatically generated WORKSPACE file for version_repo rule
+workspace(name = "bazel_features_version")

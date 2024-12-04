@@ -1,0 +1,35 @@
+load("//private/rules:artifact.bzl", "artifact")
+
+java_library(
+    name = "coursier",
+    srcs = glob(["*.java"]),
+    javacopts = [
+        "--release",
+        "11",
+    ],
+    visibility = [
+        "//private/tools/java/com/github/bazelbuild/rules_jvm_external/resolver/cmd:__pkg__",
+        "//tests/com/github/bazelbuild/rules_jvm_external:__subpackages__",
+    ],
+    deps = [
+        "//private/tools/java/com/github/bazelbuild/rules_jvm_external",
+        "//private/tools/java/com/github/bazelbuild/rules_jvm_external/resolver",
+        artifact(
+            "com.google.code.gson:gson",
+            repository_name = "rules_jvm_external_deps",
+        ),
+    ],
+)
+
+java_binary(
+    name = "LockFileConverter",
+    javacopts = [
+        "--release",
+        "11",
+    ],
+    main_class = "com.github.bazelbuild.rules_jvm_external.coursier.LockFileConverter",
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        ":coursier",
+    ],
+)

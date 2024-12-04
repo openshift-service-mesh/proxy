@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "fasteners",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_fasteners//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_fasteners//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_fasteners//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_fasteners//:dist_info",
+)

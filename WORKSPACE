@@ -16,13 +16,12 @@
 #
 workspace(name = "io_istio_proxy")
 
-# http_archive is not a native function since bazel 0.19
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+load("//bazel:repositories.bzl", "define_envoy_implementation")
 
 # 1. Determine SHA256 `wget https://github.com/envoyproxy/envoy/archive/$COMMIT.tar.gz && sha256sum $COMMIT.tar.gz`
 # 2. Update .bazelversion, envoy.bazelrc and .bazelrc if needed.
 #
-# Commit date: 2024-10-30
+# Commit date: 11/25/24
 ENVOY_SHA = "75d1643e6f4fe46ebcd4c5bfbf8237e81981bbee"
 
 ENVOY_SHA256 = "c45c7bfac012c5bf5afcf8785dbfe7af6ab3d4be26bc331ce73d03f3d765d80c"
@@ -31,14 +30,31 @@ ENVOY_ORG = "envoyproxy"
 
 ENVOY_REPO = "envoy"
 
+OPENSSL_ENVOY_SHA = "6cacd8cdb13adb8ab3a2fb81e34b461d9de10a2c"
+OPENSSL_ENVOY_SHA256 = "8508246cf2ae25e25b1bc96857d995241e9a7999150886aac0ac4ec245e9551a"
+OPENSSL_ENVOY_ORG = "envoyproxy"
+OPENSSL_ENVOY_REPO = "envoy-openssl"
+
+boringssl = {
+    "sha": ENVOY_SHA,
+    "sha256": ENVOY_SHA256,
+    "org": ENVOY_ORG,
+    "repo": ENVOY_REPO,
+}
+
+openssl = {
+    "sha": OPENSSL_ENVOY_SHA,
+    "sha256": OPENSSL_ENVOY_SHA256,
+    "org": OPENSSL_ENVOY_ORG,
+    "repo": OPENSSL_ENVOY_REPO,
+}
+
 # To override with local envoy, just pass `--override_repository=envoy=/PATH/TO/ENVOY` to Bazel or
 # persist the option in `user.bazelrc`.
-http_archive(
-    name = "envoy",
-    sha256 = ENVOY_SHA256,
-    strip_prefix = ENVOY_REPO + "-" + ENVOY_SHA,
-    url = "https://github.com/" + ENVOY_ORG + "/" + ENVOY_REPO + "/archive/" + ENVOY_SHA + ".tar.gz",
-)
+
+define_envoy_implementation(name="pick_envoy", boringssl=boringssl, openssl=openssl)
+load("@pick_envoy//:load_envoy.bzl", "load_envoy")
+load_envoy()
 
 load("@envoy//bazel:api_binding.bzl", "envoy_api_binding")
 

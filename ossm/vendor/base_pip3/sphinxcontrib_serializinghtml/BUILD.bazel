@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "sphinxcontrib_serializinghtml",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_sphinxcontrib_serializinghtml//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_sphinxcontrib_serializinghtml//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_sphinxcontrib_serializinghtml//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_sphinxcontrib_serializinghtml//:dist_info",
+)

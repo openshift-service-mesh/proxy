@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "gidgethub",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_gidgethub//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_gidgethub//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_gidgethub//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_gidgethub//:dist_info",
+)

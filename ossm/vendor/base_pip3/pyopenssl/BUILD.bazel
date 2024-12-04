@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "pyopenssl",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_pyopenssl//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_pyopenssl//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_pyopenssl//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_pyopenssl//:dist_info",
+)

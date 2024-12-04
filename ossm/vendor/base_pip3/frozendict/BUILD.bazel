@@ -1,0 +1,28 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+package(default_visibility = ["//visibility:public"])
+
+alias(
+    name = "frozendict",
+    actual = ":pkg",
+)
+
+alias(
+    name = "pkg",
+    actual = "@base_pip3_frozendict//:pkg",
+)
+
+alias(
+    name = "whl",
+    actual = "@base_pip3_frozendict//:whl",
+)
+
+alias(
+    name = "data",
+    actual = "@base_pip3_frozendict//:data",
+)
+
+alias(
+    name = "dist_info",
+    actual = "@base_pip3_frozendict//:dist_info",
+)

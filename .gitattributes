@@ -14,3 +14,9 @@ vendor/**  linguist-vendored
 common/**  linguist-vendored
 archive/**  linquist-vendored
 **/vmlinux.h  linquist-vendored
+*.so filter=lfs diff=lfs merge=lfs -text
+libpython3.12.so.1.0 filter=lfs diff=lfs merge=lfs -text
+*.so !text !filter !merge !diff
+libpython3.12.so.1.0 !text !filter !merge !diff
+*.0 filter=lfs diff=lfs merge=lfs -text
+*.0 !text !filter !merge !diff
