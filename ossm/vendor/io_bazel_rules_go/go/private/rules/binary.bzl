@@ -462,8 +462,9 @@ exit /b %GO_EXIT_CODE%
             content = cmd,
         )
         ctx.actions.run(
-            executable = bat,
-            inputs = sdk.headers + sdk.tools + sdk.srcs + ctx.files.srcs + [sdk.go],
+            executable = "cmd.exe",
+            arguments = ["/S", "/C", bat.path.replace("/", "\\")],
+            inputs = sdk.headers + sdk.tools + sdk.srcs + ctx.files.srcs + [sdk.go, bat],
             outputs = [out, gotmp],
             mnemonic = "GoToolchainBinaryBuild",
         )
