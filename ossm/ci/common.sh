@@ -2,7 +2,7 @@
 
 export CC=clang CXX=clang++ ENVOY_OPENSSL=1
 
-ARCH=$(uname -p)
+ARCH=$(uname -m)
 if [ "${ARCH}" = "ppc64le" ]; then
   ARCH="ppc"
 fi
