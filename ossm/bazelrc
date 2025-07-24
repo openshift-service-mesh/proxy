@@ -1,6 +1,8 @@
 # Common build flags
 # build --cxxopt -w
 
+build --copt -Wno-implicit-function-declaration
+
 build --host_force_python=PY3
 build --extra_toolchains=@local_jdk//:all
 build --tool_java_runtime_version=local_jdk
@@ -23,7 +25,7 @@ build:ci-config --color=no
 build:ci-config --show_progress_rate_limit=10
 
 common --action_env=OPENSSL_ROOT_DIR
-common --action_env=Clang_DIR=/usr/lib/llvm
+common --action_env=Clang_DIR=/usr/lib64/llvm18
 
 # Import vendor flags
 import %workspace%/ossm/bazelrc-vendor
