@@ -52,6 +52,7 @@ func init() {
 		"TestStatsPayload/UseHostHeader/",
 		"TestStatsParserRegression",
 		"TestStatsExpiry",
+		"TestStatsEviction",
 		"TestTCPMetadataExchange/false",
 		"TestTCPMetadataExchange/true",
 		"TestTCPMetadataExchangeNoAlpn",
