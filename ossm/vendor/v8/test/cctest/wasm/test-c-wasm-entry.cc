@@ -59,10 +59,10 @@ class CWasmEntryArgTester {
     CWasmArgumentsPacker packer(CWasmArgumentsPacker::TotalSize(sig_));
     WriteToBuffer(&packer, args...);
     Address wasm_call_target = wasm_code_->instruction_start();
-    Handle<Object> object_ref = runner_.builder().instance_object();
+    DirectHandle<Object> object_ref = runner_.builder().instance_object();
     Execution::CallWasm(isolate_, c_wasm_entry_, wasm_call_target, object_ref,
                         packer.argv());
-    CHECK(!isolate_->has_pending_exception());
+    CHECK(!isolate_->has_exception());
     packer.Reset();
 
     // Check the result.
@@ -80,7 +80,7 @@ class CWasmEntryArgTester {
   Isolate* isolate_;
   std::function<ReturnType(Args...)> expected_fn_;
   const FunctionSig* sig_;
-  Handle<CodeT> c_wasm_entry_;
+  Handle<Code> c_wasm_entry_;
   WasmCode* wasm_code_;
 };
 

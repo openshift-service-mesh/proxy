@@ -264,7 +264,7 @@ TEST_P(InstructionSelectorCmpTest, Parameter) {
   m.Return((m.*cmp.mi.constructor)(m.Parameter(0), m.Parameter(1)));
   Stream s = m.Build();
 
-  if (FLAG_debug_code &&
+  if (v8_flags.debug_code &&
       type.representation() == MachineRepresentation::kWord32) {
     ASSERT_EQ(1U, s.size());
 
@@ -329,50 +329,6 @@ TEST_P(InstructionSelectorLogicalTest, Parameter) {
 INSTANTIATE_TEST_SUITE_P(InstructionSelectorTest,
                          InstructionSelectorLogicalTest,
                          ::testing::ValuesIn(kLogicalInstructions));
-
-TEST_F(InstructionSelectorTest, Word32XorMinusOneWithParameter) {
-  {
-    StreamBuilder m(this, MachineType::Int32(), MachineType::Int32());
-    m.Return(m.Word32Xor(m.Parameter(0), m.Int32Constant(-1)));
-    Stream s = m.Build();
-    ASSERT_EQ(1U, s.size());
-    EXPECT_EQ(kRiscvNor, s[0]->arch_opcode());
-    EXPECT_EQ(2U, s[0]->InputCount());
-    EXPECT_EQ(1U, s[0]->OutputCount());
-  }
-  {
-    StreamBuilder m(this, MachineType::Int32(), MachineType::Int32());
-    m.Return(m.Word32Xor(m.Int32Constant(-1), m.Parameter(0)));
-    Stream s = m.Build();
-    ASSERT_EQ(1U, s.size());
-    EXPECT_EQ(kRiscvNor, s[0]->arch_opcode());
-    EXPECT_EQ(2U, s[0]->InputCount());
-    EXPECT_EQ(1U, s[0]->OutputCount());
-  }
-}
-
-TEST_F(InstructionSelectorTest, Word32XorMinusOneWithWord32Or) {
-  {
-    StreamBuilder m(this, MachineType::Int32(), MachineType::Int32());
-    m.Return(m.Word32Xor(m.Word32Or(m.Parameter(0), m.Parameter(0)),
-                         m.Int32Constant(-1)));
-    Stream s = m.Build();
-    ASSERT_EQ(1U, s.size());
-    EXPECT_EQ(kRiscvNor, s[0]->arch_opcode());
-    EXPECT_EQ(2U, s[0]->InputCount());
-    EXPECT_EQ(1U, s[0]->OutputCount());
-  }
-  {
-    StreamBuilder m(this, MachineType::Int32(), MachineType::Int32());
-    m.Return(m.Word32Xor(m.Int32Constant(-1),
-                         m.Word32Or(m.Parameter(0), m.Parameter(0))));
-    Stream s = m.Build();
-    ASSERT_EQ(1U, s.size());
-    EXPECT_EQ(kRiscvNor, s[0]->arch_opcode());
-    EXPECT_EQ(2U, s[0]->InputCount());
-    EXPECT_EQ(1U, s[0]->OutputCount());
-  }
-}
 
 TEST_F(InstructionSelectorTest, Word32ShlWithWord32And) {
   TRACED_FORRANGE(int32_t, shift, 0, 30) {
@@ -910,8 +866,8 @@ TEST_P(InstructionSelectorMemoryAccessImmTest, StoreWithImmediateIndex) {
     EXPECT_EQ(memacc.store_opcode, s[0]->arch_opcode());
     EXPECT_EQ(kMode_MRI, s[0]->addressing_mode());
     ASSERT_EQ(3U, s[0]->InputCount());
-    ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(1)->kind());
-    EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(1)));
+    ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(2)->kind());
+    EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(2)));
     EXPECT_EQ(0U, s[0]->OutputCount());
   }
 }
@@ -928,10 +884,10 @@ TEST_P(InstructionSelectorMemoryAccessImmTest, StoreZero) {
     EXPECT_EQ(memacc.store_opcode, s[0]->arch_opcode());
     EXPECT_EQ(kMode_MRI, s[0]->addressing_mode());
     ASSERT_EQ(3U, s[0]->InputCount());
-    ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(1)->kind());
-    EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(1)));
     ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(2)->kind());
-    EXPECT_EQ(0, s.ToInt64(s[0]->InputAt(2)));
+    EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(2)));
+    ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(0)->kind());
+    EXPECT_EQ(0, s.ToInt64(s[0]->InputAt(0)));
     EXPECT_EQ(0U, s[0]->OutputCount());
   }
 }

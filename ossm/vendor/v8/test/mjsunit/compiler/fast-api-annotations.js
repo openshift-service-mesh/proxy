@@ -5,14 +5,13 @@
 // These tests exercise WebIDL annotations support in the fast API.
 
 // Flags: --turbo-fast-api-calls --expose-fast-api --allow-natives-syntax --turbofan
-// TODO(mslekova): Implement support for TryTruncateFloat64ToInt32.
-// Flags: --no-turboshaft
 // --always-turbofan is disabled because we rely on particular feedback for
 // optimizing to the fastest path.
 // Flags: --no-always-turbofan
 // The test relies on optimizing/deoptimizing at predictable moments, so
 // it's not suitable for deoptimization fuzzing.
 // Flags: --deopt-every-n-times=0
+// Flags: --fast-api-allow-float-in-sim
 
 const fast_c_api = new d8.test.FastCAPI();
 
@@ -42,8 +41,9 @@ assertEquals(limits_result, add_all_annotate_enforce_range(limits_params));
 
 // ----------- enforce_range_compare -----------
 // `enforce_range_compare` has the following signature:
-// double enforce_range_compare(bool /*should_fallback*/,
-//   double, int64_t)
+// bool enforce_range_compare(bool /*in_range*/,
+//   double, integer_type)
+// where integer_type = {int32_t, uint32_t, int64_t, uint64_t}
 
 // ----------- i32 -----------
 function compare_i32(in_range, arg) {

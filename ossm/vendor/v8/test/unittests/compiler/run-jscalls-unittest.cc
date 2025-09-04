@@ -137,7 +137,7 @@ TEST_F(RunJSCallsTest, ConstructorCall) {
 }
 
 TEST_F(RunJSCallsTest, RuntimeCall) {
-  FLAG_allow_natives_syntax = true;
+  v8_flags.allow_natives_syntax = true;
   FunctionTester T(i_isolate(), "(function(a) { return %IsJSReceiver(a); })");
 
   T.CheckCall(T.false_value(), T.NewNumber(23), T.undefined());
@@ -152,8 +152,7 @@ TEST_F(RunJSCallsTest, RuntimeCall) {
 
 TEST_F(RunJSCallsTest, EvalCall) {
   FunctionTester T(i_isolate(), "(function(a,b) { return eval(a); })");
-  Handle<JSObject> g(T.function->context().global_object().global_proxy(),
-                     T.isolate);
+  DirectHandle<JSObject> g(T.function->context()->global_proxy(), T.isolate);
 
   T.CheckCall(T.NewNumber(23), T.NewString("17 + 6"), T.undefined());
   T.CheckCall(T.NewString("'Y'; a"), T.NewString("'Y'; a"),
@@ -178,8 +177,7 @@ TEST_F(RunJSCallsTest, ReceiverPatching) {
   // patches an undefined receiver to the global receiver. If this starts to
   // fail once we fix the calling protocol, just remove this test.
   FunctionTester T(i_isolate(), "(function(a) { return this; })");
-  Handle<JSObject> g(T.function->context().global_object().global_proxy(),
-                     T.isolate);
+  DirectHandle<JSObject> g(T.function->context()->global_proxy(), T.isolate);
   T.CheckCall(g, T.undefined());
 }
 

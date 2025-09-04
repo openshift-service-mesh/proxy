@@ -13,6 +13,7 @@
 #include "include/v8-context.h"
 #include "include/v8-extension.h"
 #include "include/v8-local-handle.h"
+#include "include/v8-object.h"
 #include "include/v8-primitive.h"
 #include "include/v8-template.h"
 #include "src/api/api-inl.h"
@@ -20,6 +21,7 @@
 #include "src/base/utils/random-number-generator.h"
 #include "src/handles/handles.h"
 #include "src/heap/parked-scope.h"
+#include "src/logging/log.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/objects.h"
 #include "src/zone/accounting-allocator.h"
@@ -37,11 +39,11 @@ class WithDefaultPlatformMixin : public TMixin {
     platform_ = v8::platform::NewDefaultPlatform(
         0, v8::platform::IdleTaskSupport::kEnabled);
     CHECK_NOT_NULL(platform_.get());
-    v8::V8::InitializePlatform(platform_.get());
+    i::V8::InitializePlatformForTesting(platform_.get());
     // Allow changing flags in unit tests.
     // TODO(12887): Fix tests to avoid changing flag values after
     // initialization.
-    i::FLAG_freeze_flags_after_init = false;
+    i::v8_flags.freeze_flags_after_init = false;
     v8::V8::Initialize();
   }
 
@@ -60,7 +62,7 @@ class WithDefaultPlatformMixin : public TMixin {
 template <typename TMixin>
 class WithJSSharedMemoryFeatureFlagsMixin : public TMixin {
  public:
-  WithJSSharedMemoryFeatureFlagsMixin() { i::FLAG_harmony_struct = true; }
+  WithJSSharedMemoryFeatureFlagsMixin() { i::v8_flags.harmony_struct = true; }
 };
 
 using CounterMap = std::map<std::string, int>;
@@ -80,11 +82,36 @@ class IsolateWrapper final {
   IsolateWrapper& operator=(const IsolateWrapper&) = delete;
 
   v8::Isolate* isolate() const { return isolate_; }
+  i::Isolate* i_isolate() const {
+    return reinterpret_cast<i::Isolate*>(isolate_);
+  }
 
  private:
   std::unique_ptr<v8::ArrayBuffer::Allocator> array_buffer_allocator_;
   std::unique_ptr<CounterMap> counter_map_;
   v8::Isolate* isolate_;
+};
+
+class IsolateWithContextWrapper final {
+ public:
+  IsolateWithContextWrapper()
+      : isolate_wrapper_(kNoCounters),
+        isolate_scope_(isolate_wrapper_.isolate()),
+        handle_scope_(isolate_wrapper_.isolate()),
+        context_(v8::Context::New(isolate_wrapper_.isolate())),
+        context_scope_(context_) {}
+
+  v8::Isolate* v8_isolate() const { return isolate_wrapper_.isolate(); }
+  i::Isolate* isolate() const {
+    return reinterpret_cast<i::Isolate*>(v8_isolate());
+  }
+
+ private:
+  IsolateWrapper isolate_wrapper_;
+  v8::Isolate::Scope isolate_scope_;
+  v8::HandleScope handle_scope_;
+  v8::Local<v8::Context> context_;
+  v8::Context::Scope context_scope_;
 };
 
 //
@@ -96,6 +123,18 @@ class WithIsolateMixin : public TMixin {
   WithIsolateMixin() : isolate_wrapper_(kCountersMode) {}
 
   v8::Isolate* v8_isolate() const { return isolate_wrapper_.isolate(); }
+
+  Local<Value> RunJS(const char* source, Local<Context> context) {
+    return RunJS(
+        v8::String::NewFromUtf8(this->v8_isolate(), source).ToLocalChecked(),
+        context);
+  }
+
+  Local<Value> RunJS(Local<String> source, Local<Context> context) {
+    Local<Script> script =
+        v8::Script::Compile(context, source).ToLocalChecked();
+    return script->Run(context).ToLocalChecked();
+  }
 
  private:
   v8::IsolateWrapper isolate_wrapper_;
@@ -131,6 +170,12 @@ class WithIsolateScopeMixin : public TMixin {
         v8::String::NewFromUtf8(this->v8_isolate(), source).ToLocalChecked());
   }
 
+  Local<Value> RunJS(Local<Context> context, const char* source) {
+    return RunJS(
+        context,
+        v8::String::NewFromUtf8(this->v8_isolate(), source).ToLocalChecked());
+  }
+
   MaybeLocal<Value> TryRunJS(const char* source) {
     return TryRunJS(
         v8::String::NewFromUtf8(this->v8_isolate(), source).ToLocalChecked());
@@ -138,7 +183,11 @@ class WithIsolateScopeMixin : public TMixin {
 
   static MaybeLocal<Value> TryRunJS(Isolate* isolate, Local<String> source) {
     auto context = isolate->GetCurrentContext();
-    v8::Local<v8::Value> result;
+    return TryRunJS(context, source);
+  }
+
+  static MaybeLocal<Value> TryRunJS(Local<Context> context,
+                                    Local<String> source) {
     Local<Script> script =
         v8::Script::Compile(context, source).ToLocalChecked();
     return script->Run(context);
@@ -153,36 +202,22 @@ class WithIsolateScopeMixin : public TMixin {
                                   Local<String> origin_url,
                                   bool is_shared_cross_origin) {
     Isolate* isolate = Isolate::GetCurrent();
-    ScriptOrigin origin(isolate, origin_url, 0, 0, is_shared_cross_origin);
+    ScriptOrigin origin(origin_url, 0, 0, is_shared_cross_origin);
     ScriptCompiler::Source script_source(source, origin);
     return ScriptCompiler::Compile(isolate->GetCurrentContext(), &script_source)
         .ToLocalChecked();
   }
 
-  void CollectGarbage(i::AllocationSpace space, i::Isolate* isolate = nullptr) {
+  void InvokeMajorGC(i::Isolate* isolate = nullptr) {
     i::Isolate* iso = isolate ? isolate : i_isolate();
-    iso->heap()->CollectGarbage(space, i::GarbageCollectionReason::kTesting,
-                                kNoGCCallbackFlags);
+    iso->heap()->CollectGarbage(i::OLD_SPACE,
+                                i::GarbageCollectionReason::kTesting);
   }
 
-  void CollectAllGarbage(i::Isolate* isolate = nullptr) {
+  void InvokeMinorGC(i::Isolate* isolate = nullptr) {
     i::Isolate* iso = isolate ? isolate : i_isolate();
-    iso->heap()->CollectAllGarbage(i::Heap::kNoGCFlags,
-                                   i::GarbageCollectionReason::kTesting,
-                                   kNoGCCallbackFlags);
-  }
-
-  void CollectAllAvailableGarbage(i::Isolate* isolate = nullptr) {
-    i::Isolate* iso = isolate ? isolate : i_isolate();
-    iso->heap()->CollectAllAvailableGarbage(
-        i::GarbageCollectionReason::kTesting);
-  }
-
-  void PreciseCollectAllGarbage(i::Isolate* isolate = nullptr) {
-    i::Isolate* iso = isolate ? isolate : i_isolate();
-    iso->heap()->PreciseCollectAllGarbage(i::Heap::kNoGCFlags,
-                                          i::GarbageCollectionReason::kTesting,
-                                          kNoGCCallbackFlags);
+    iso->heap()->CollectGarbage(i::NEW_SPACE,
+                                i::GarbageCollectionReason::kTesting);
   }
 
   v8::Local<v8::String> NewString(const char* string) {
@@ -207,6 +242,10 @@ class WithIsolateScopeMixin : public TMixin {
     return TryRunJS(source).ToLocalChecked();
   }
 
+  Local<Value> RunJS(Local<Context> context, Local<String> source) {
+    return TryRunJS(context, source).ToLocalChecked();
+  }
+
   MaybeLocal<Value> TryRunJS(Local<String> source) {
     return TryRunJS(this->v8_isolate(), source);
   }
@@ -218,13 +257,20 @@ class WithIsolateScopeMixin : public TMixin {
 template <typename TMixin>
 class WithContextMixin : public TMixin {
  public:
-  WithContextMixin()
-      : context_(Context::New(this->v8_isolate())), context_scope_(context_) {}
+  WithContextMixin() {
+    v8::Local<v8::Context> context = Context::New(this->v8_isolate());
+    context->Enter();
+    context_.Reset(this->v8_isolate(), context);
+  }
+  ~WithContextMixin() {
+    context_.Get(this->v8_isolate())->Exit();
+    context_.Reset();
+  }
   WithContextMixin(const WithContextMixin&) = delete;
   WithContextMixin& operator=(const WithContextMixin&) = delete;
 
-  const Local<Context>& context() const { return v8_context(); }
-  const Local<Context>& v8_context() const { return context_; }
+  Local<Context> context() const { return v8_context(); }
+  Local<Context> v8_context() const { return context_.Get(this->v8_isolate()); }
 
   void SetGlobalProperty(const char* name, v8::Local<v8::Value> value) {
     CHECK(v8_context()
@@ -234,8 +280,7 @@ class WithContextMixin : public TMixin {
   }
 
  private:
-  v8::Local<v8::Context> context_;
-  v8::Context::Scope context_scope_;
+  v8::Global<v8::Context> context_;
 };
 
 using TestWithPlatform =       //
@@ -259,6 +304,18 @@ using TestWithContext =                    //
                 WithDefaultPlatformMixin<  //
                     ::testing::Test>>>>;
 
+// Use v8::internal::TestJSSharedMemoryWithNativeContext if you are testing
+// internals, aka. directly work with Handles.
+//
+// Using this will FATAL when !V8_CAN_CREATE_SHARED_HEAP_BOOL
+using TestJSSharedMemoryWithContext =                     //
+    WithContextMixin<                                     //
+        WithIsolateScopeMixin<                            //
+            WithIsolateMixin<                             //
+                WithDefaultPlatformMixin<                 //
+                    WithJSSharedMemoryFeatureFlagsMixin<  //
+                        ::testing::Test>>>>>;
+
 class PrintExtension : public v8::Extension {
  public:
   PrintExtension() : v8::Extension("v8/print", "native function print();") {}
@@ -266,11 +323,12 @@ class PrintExtension : public v8::Extension {
       v8::Isolate* isolate, v8::Local<v8::String> name) override {
     return v8::FunctionTemplate::New(isolate, PrintExtension::Print);
   }
-  static void Print(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    for (int i = 0; i < args.Length(); i++) {
+  static void Print(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    CHECK(i::ValidateCallbackInfo(info));
+    for (int i = 0; i < info.Length(); i++) {
       if (i != 0) printf(" ");
-      v8::HandleScope scope(args.GetIsolate());
-      v8::String::Utf8Value str(args.GetIsolate(), args[i]);
+      v8::HandleScope scope(info.GetIsolate());
+      v8::String::Utf8Value str(info.GetIsolate(), info[i]);
       if (*str == nullptr) return;
       printf("%s", *str);
     }
@@ -336,7 +394,7 @@ class WithInternalIsolateMixin : public TMixin {
 
   template <typename T = Object>
   Handle<T> RunJS(const char* source) {
-    return Handle<T>::cast(RunJSInternal(source));
+    return Cast<T>(RunJSInternal(source));
   }
 
   Handle<Object> RunJSInternal(const char* source) {
@@ -345,7 +403,7 @@ class WithInternalIsolateMixin : public TMixin {
 
   template <typename T = Object>
   Handle<T> RunJS(::v8::String::ExternalOneByteStringResource* source) {
-    return Handle<T>::cast(RunJSInternal(source));
+    return Cast<T>(RunJSInternal(source));
   }
 
   Handle<Object> RunJSInternal(
@@ -459,22 +517,12 @@ class V8_NODISCARD SaveFlags {
 };
 
 // For GTest.
-inline void PrintTo(Object o, ::std::ostream* os) {
+inline void PrintTo(Tagged<Object> o, ::std::ostream* os) {
   *os << reinterpret_cast<void*>(o.ptr());
 }
-inline void PrintTo(Smi o, ::std::ostream* os) {
+inline void PrintTo(Tagged<Smi> o, ::std::ostream* os) {
   *os << reinterpret_cast<void*>(o.ptr());
 }
-
-// ManualGCScope allows for disabling GC heuristics. This is useful for tests
-// that want to check specific corner cases around GC.
-//
-// The scope will finalize any ongoing GC on the provided Isolate.
-class V8_NODISCARD ManualGCScope final : private SaveFlags {
- public:
-  explicit ManualGCScope(i::Isolate* isolate);
-  ~ManualGCScope() = default;
-};
 
 static inline uint16_t* AsciiToTwoByteString(const char* source) {
   size_t array_length = strlen(source) + 1;
@@ -485,9 +533,9 @@ static inline uint16_t* AsciiToTwoByteString(const char* source) {
 
 class TestTransitionsAccessor : public TransitionsAccessor {
  public:
-  TestTransitionsAccessor(Isolate* isolate, Map map)
+  TestTransitionsAccessor(Isolate* isolate, Tagged<Map> map)
       : TransitionsAccessor(isolate, map) {}
-  TestTransitionsAccessor(Isolate* isolate, Handle<Map> map)
+  TestTransitionsAccessor(Isolate* isolate, DirectHandle<Map> map)
       : TransitionsAccessor(isolate, *map) {}
 
   // Expose internals for tests.
@@ -500,7 +548,9 @@ class TestTransitionsAccessor : public TransitionsAccessor {
 
   int Capacity() { return TransitionsAccessor::Capacity(); }
 
-  TransitionArray transitions() { return TransitionsAccessor::transitions(); }
+  Tagged<TransitionArray> transitions() {
+    return TransitionsAccessor::transitions();
+  }
 };
 
 // Helper class that allows to write tests in a slot size independent manner.
@@ -533,31 +583,29 @@ class FeedbackVectorHelper {
 
 template <typename Spec>
 Handle<FeedbackVector> NewFeedbackVector(Isolate* isolate, Spec* spec) {
-  Handle<FeedbackMetadata> metadata = FeedbackMetadata::New(isolate, spec);
-  Handle<SharedFunctionInfo> shared =
-      isolate->factory()->NewSharedFunctionInfoForBuiltin(
-          isolate->factory()->empty_string(), Builtin::kIllegal);
-  // Set the raw feedback metadata to circumvent checks that we are not
-  // overwriting existing metadata.
-  shared->set_raw_outer_scope_info_or_feedback_metadata(*metadata);
-  Handle<ClosureFeedbackCellArray> closure_feedback_cell_array =
-      ClosureFeedbackCellArray::New(isolate, shared);
-  IsCompiledScope is_compiled_scope(shared->is_compiled_scope(isolate));
-  return FeedbackVector::New(isolate, shared, closure_feedback_cell_array,
-                             &is_compiled_scope);
+  return FeedbackVector::NewForTesting(isolate, spec);
 }
 
-class ParkingThread : public v8::base::Thread {
+class FakeCodeEventLogger : public i::CodeEventLogger {
  public:
-  explicit ParkingThread(const Options& options) : v8::base::Thread(options) {}
+  explicit FakeCodeEventLogger(i::Isolate* isolate)
+      : CodeEventLogger(isolate) {}
 
-  void ParkedJoin(const ParkedScope& scope) {
-    USE(scope);
-    Join();
-  }
+  void CodeMoveEvent(i::Tagged<i::InstructionStream> from,
+                     i::Tagged<i::InstructionStream> to) override {}
+  void BytecodeMoveEvent(i::Tagged<i::BytecodeArray> from,
+                         i::Tagged<i::BytecodeArray> to) override {}
+  void CodeDisableOptEvent(i::Handle<i::AbstractCode> code,
+                           i::Handle<i::SharedFunctionInfo> shared) override {}
 
  private:
-  using v8::base::Thread::Join;
+  void LogRecordedBuffer(i::Tagged<i::AbstractCode> code,
+                         i::MaybeHandle<i::SharedFunctionInfo> maybe_shared,
+                         const char* name, int length) override {}
+#if V8_ENABLE_WEBASSEMBLY
+  void LogRecordedBuffer(const i::wasm::WasmCode* code, const char* name,
+                         int length) override {}
+#endif  // V8_ENABLE_WEBASSEMBLY
 };
 
 #ifdef V8_CC_GNU
@@ -580,6 +628,9 @@ class ParkingThread : public v8::base::Thread {
 #elif V8_HOST_ARCH_MIPS64
 #define GET_STACK_POINTER_TO(sp_addr) \
   __asm__ __volatile__("sd $sp, %0" : "=g"(sp_addr))
+#elif V8_OS_ZOS
+#define GET_STACK_POINTER_TO(sp_addr) \
+  __asm__ __volatile__(" stg 15,%0" : "=m"(sp_addr))
 #elif defined(__s390x__) || defined(_ARCH_S390X)
 #define GET_STACK_POINTER_TO(sp_addr) \
   __asm__ __volatile__("stg %%r15, %0" : "=m"(sp_addr))

@@ -14,7 +14,7 @@
 #include "test/fuzzer/fuzzer-support.h"
 #include "test/fuzzer/wasm-fuzzer-common.h"
 
-namespace v8::internal::wasm {
+namespace v8::internal::wasm::fuzzing {
 
 // Some properties of the compilation result to check. Extend if needed.
 struct CompilationResult {
@@ -40,17 +40,17 @@ struct CompilationResult {
 
 class TestResolver : public CompilationResultResolver {
  public:
-  explicit TestResolver(i::Isolate* isolate) : isolate_(isolate) {}
+  explicit TestResolver(Isolate* isolate) : isolate_(isolate) {}
 
-  void OnCompilationSucceeded(i::Handle<i::WasmModuleObject> module) override {
+  void OnCompilationSucceeded(Handle<WasmModuleObject> module) override {
     done_ = true;
     native_module_ = module->shared_native_module();
   }
 
-  void OnCompilationFailed(i::Handle<i::Object> error_reason) override {
+  void OnCompilationFailed(Handle<Object> error_reason) override {
     done_ = true;
     failed_ = true;
-    Handle<String> str =
+    DirectHandle<String> str =
         Object::ToString(isolate_, error_reason).ToHandleChecked();
     error_message_.assign(str->ToCString().get());
   }
@@ -66,7 +66,7 @@ class TestResolver : public CompilationResultResolver {
   const std::string& error_message() const { return error_message_; }
 
  private:
-  i::Isolate* isolate_;
+  Isolate* isolate_;
   bool done_ = false;
   bool failed_ = false;
   std::string error_message_;
@@ -74,7 +74,7 @@ class TestResolver : public CompilationResultResolver {
 };
 
 CompilationResult CompileStreaming(v8_fuzzer::FuzzerSupport* support,
-                                   WasmFeatures enabled_features,
+                                   WasmEnabledFeatures enabled_features,
                                    base::Vector<const uint8_t> data,
                                    uint8_t config) {
   v8::Isolate* isolate = support->GetIsolate();
@@ -88,8 +88,8 @@ CompilationResult CompileStreaming(v8_fuzzer::FuzzerSupport* support,
     Handle<Context> context = v8::Utils::OpenHandle(*support->GetContext());
     std::shared_ptr<StreamingDecoder> stream =
         GetWasmEngine()->StartStreamingCompilation(
-            i_isolate, enabled_features, context, "wasm-streaming-fuzzer",
-            resolver);
+            i_isolate, enabled_features, CompileTimeImports{}, context,
+            "wasm-streaming-fuzzer", resolver);
 
     if (data.size() > 0) {
       size_t split = config % data.size();
@@ -124,18 +124,20 @@ CompilationResult CompileStreaming(v8_fuzzer::FuzzerSupport* support,
   return result;
 }
 
-CompilationResult CompileSync(Isolate* isolate, WasmFeatures enabled_features,
+CompilationResult CompileSync(Isolate* isolate,
+                              WasmEnabledFeatures enabled_features,
                               base::Vector<const uint8_t> data) {
   ErrorThrower thrower{isolate, "wasm-streaming-fuzzer"};
   Handle<WasmModuleObject> module_object;
   CompilationResult result;
   if (!GetWasmEngine()
-           ->SyncCompile(isolate, enabled_features, &thrower,
-                         ModuleWireBytes{data})
+           ->SyncCompile(isolate, enabled_features, CompileTimeImports{},
+                         &thrower, ModuleWireBytes{data})
            .ToHandle(&module_object)) {
-    auto result = CompilationResult::ForFailure(thrower.error_msg());
-    thrower.Reset();
-    return result;
+    Handle<Object> error = thrower.Reify();
+    DirectHandle<String> error_msg =
+        Object::ToString(isolate, error).ToHandleChecked();
+    return CompilationResult::ForFailure(error_msg->ToCString().get());
   }
   return CompilationResult::ForSuccess(module_object->module());
 }
@@ -145,21 +147,22 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   v8_fuzzer::FuzzerSupport* support = v8_fuzzer::FuzzerSupport::Get();
   v8::Isolate* isolate = support->GetIsolate();
-  i::Isolate* i_isolate = reinterpret_cast<v8::internal::Isolate*>(isolate);
+  Isolate* i_isolate = reinterpret_cast<Isolate*>(isolate);
 
   v8::Isolate::Scope isolate_scope(isolate);
-  i::HandleScope handle_scope(i_isolate);
+  v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(support->GetContext());
 
-  // We explicitly enable staged WebAssembly features here to increase fuzzer
-  // coverage. For libfuzzer fuzzers it is not possible that the fuzzer enables
-  // the flag by itself.
-  fuzzer::OneTimeEnableStagedWasmFeatures(isolate);
+  // We explicitly enable staged/experimental WebAssembly features here to
+  // increase fuzzer coverage. For libfuzzer fuzzers it is not possible that the
+  // fuzzer enables the flag by itself.
+  EnableExperimentalWasmFeatures(isolate);
 
   // Limit the maximum module size to avoid OOM.
   v8_flags.wasm_max_module_size = 256 * KB;
 
-  WasmFeatures enabled_features = i::wasm::WasmFeatures::FromIsolate(i_isolate);
+  WasmEnabledFeatures enabled_features =
+      WasmEnabledFeatures::FromIsolate(i_isolate);
 
   base::Vector<const uint8_t> data_vec{data, size - 1};
   uint8_t config = data[size - 1];
@@ -180,20 +183,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         streaming_result.failed ? "" : " not", sync_result.failed ? "" : " not",
         error_msg);
   }
-  // TODO(12922): Enable this test later, after other bugs are flushed out.
-  // if (strcmp(streaming_result.error_message.begin(),
-  //            sync_result.error_message.begin()) != 0) {
-  //   FATAL("Error messages differ: %s / %s\n",
-  //         streaming_result.error_message.begin(),
-  //         sync_result.error_message.begin());
-  // }
+  if (streaming_result.error_message != sync_result.error_message) {
+    FATAL("Error messages differ:\nstreaming: %s\n     sync: %s",
+          streaming_result.error_message.c_str(),
+          sync_result.error_message.c_str());
+  }
   CHECK_EQ(streaming_result.imported_functions, sync_result.imported_functions);
   CHECK_EQ(streaming_result.declared_functions, sync_result.declared_functions);
 
-  // We should not leave pending exceptions behind.
-  DCHECK(!i_isolate->has_pending_exception());
+  // We should not leave exceptions behind.
+  DCHECK(!i_isolate->has_exception());
 
   return 0;
 }
 
-}  // namespace v8::internal::wasm
+}  // namespace v8::internal::wasm::fuzzing

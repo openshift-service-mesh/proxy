@@ -34,6 +34,10 @@ function check() {
     assertEquals('ch'.localeCompare('ca', 'cs-CZ'), 1);
     assertEquals('AA'.localeCompare('A-A', 'th'), 0);
 
+    // Invalid locales. Executed on slow path.
+    assertTrue("asdf".localeCompare("asdf", 0) == 0);
+    assertTrue("asdf".localeCompare("asdf", NaN) == 0);
+
     // Attempt to hit different cases of the localeCompare fast path.
     assertEquals('aAaaaö'.localeCompare('aaaaaö', 'en-US'), 1);
     assertEquals('aaaaaöA'.localeCompare('aaaaaöa', 'en-US'), 1);
@@ -50,8 +54,11 @@ function isOptimized(fun) {
 }
 
 assertFalse(isOptimized(check));
-while (true) {
-    var optimized = isOptimized(check);
-    check();
-    if (optimized) break;
-}
+%PrepareFunctionForOptimization(check);
+check();
+check();
+check();
+%OptimizeFunctionOnNextCall(check);
+check();
+check();
+assertTrue(isOptimized(check));

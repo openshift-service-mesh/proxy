@@ -31,7 +31,6 @@
   V(InvalidatedSlotsResetObjectRegression)                  \
   V(InvalidatedSlotsRightTrimFixedArray)                    \
   V(InvalidatedSlotsRightTrimLargeFixedArray)               \
-  V(InvalidatedSlotsLeftTrimFixedArray)                     \
   V(InvalidatedSlotsFastToSlow)                             \
   V(InvalidatedSlotsSomeInvalidatedRanges)                  \
   V(TestNewSpaceRefsInCopiedCode)                           \
@@ -82,10 +81,6 @@
 
 namespace v8 {
 namespace internal {
-
-template <typename T>
-class Handle;
-
 namespace heap {
 
 class HeapTester {
@@ -100,8 +95,8 @@ class HeapTester {
   static Handle<Object> TestAllocateAfterFailures();
 
   // test-invalidated-slots.cc
-  static Page* AllocateByteArraysOnPage(Heap* heap,
-                                        std::vector<ByteArray>* byte_arrays);
+  static PageMetadata* AllocateByteArraysOnPage(
+      Heap* heap, std::vector<ByteArray>* byte_arrays);
 
   // test-api.cc
   static void ResetWeakHandle(bool global_gc);

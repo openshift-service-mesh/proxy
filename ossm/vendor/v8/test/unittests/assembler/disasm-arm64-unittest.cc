@@ -49,7 +49,7 @@ using DisasmArm64Test = TestWithIsolate;
 #define INSTR_SIZE (1024)
 #define SET_UP_MASM()                                                         \
   HandleScope scope(isolate());                                               \
-  byte* buf = static_cast<byte*>(malloc(INSTR_SIZE));                         \
+  uint8_t* buf = static_cast<uint8_t*>(malloc(INSTR_SIZE));                   \
   uint32_t encoding = 0;                                                      \
   MacroAssembler* assm =                                                      \
       new MacroAssembler((isolate()), v8::internal::CodeObjectRequired::kYes, \
@@ -61,7 +61,7 @@ using DisasmArm64Test = TestWithIsolate;
 
 #define SET_UP_ASM()                                                         \
   HandleScope scope(isolate());                                              \
-  byte* buf = static_cast<byte*>(malloc(INSTR_SIZE));                        \
+  uint8_t* buf = static_cast<uint8_t*>(malloc(INSTR_SIZE));                  \
   uint32_t encoding = 0;                                                     \
   Assembler* assm = new Assembler(AssemblerOptions{},                        \
                                   ExternalAssemblerBuffer(buf, INSTR_SIZE)); \
@@ -1449,6 +1449,153 @@ TEST_F(DisasmArm64Test, load_store_acquire_release) {
   COMPARE(stlxrh(wzr, w1, sp), "stlxrh wzr, w1, [sp]");
   COMPARE(stlxr(w2, wzr, sp), "stlxr w2, wzr, [sp]");
 
+  CpuFeatureScope feature_scope(assm, LSE,
+                                CpuFeatureScope::kDontCheckSupported);
+
+  COMPARE(cas(w30, w0, MemOperand(x1)), "cas w30, w0, [x1]");
+  COMPARE(cas(w2, w3, MemOperand(sp)), "cas w2, w3, [sp]");
+  COMPARE(cas(x4, x5, MemOperand(x6)), "cas x4, x5, [x6]");
+  COMPARE(cas(x7, x8, MemOperand(sp)), "cas x7, x8, [sp]");
+  COMPARE(casa(w9, w10, MemOperand(x11)), "casa w9, w10, [x11]");
+  COMPARE(casa(w12, w13, MemOperand(sp)), "casa w12, w13, [sp]");
+  COMPARE(casa(x14, x15, MemOperand(x16)), "casa x14, x15, [x16]");
+  COMPARE(casa(x17, x18, MemOperand(sp)), "casa x17, x18, [sp]");
+  COMPARE(casl(w19, w20, MemOperand(x21)), "casl w19, w20, [x21]");
+  COMPARE(casl(w22, w23, MemOperand(sp)), "casl w22, w23, [sp]");
+  COMPARE(casl(x24, x25, MemOperand(x26)), "casl x24, x25, [x26]");
+  COMPARE(casl(x27, x28, MemOperand(sp)), "casl cp, x28, [sp]");
+  COMPARE(casal(w29, w30, MemOperand(x0)), "casal w29, w30, [x0]");
+  COMPARE(casal(w1, w2, MemOperand(sp)), "casal w1, w2, [sp]");
+  COMPARE(casal(x3, x4, MemOperand(x5)), "casal x3, x4, [x5]");
+  COMPARE(casal(x6, x7, MemOperand(sp)), "casal x6, x7, [sp]");
+  COMPARE(casb(w8, w9, MemOperand(x10)), "casb w8, w9, [x10]");
+  COMPARE(casb(w11, w12, MemOperand(sp)), "casb w11, w12, [sp]");
+  COMPARE(casab(w13, w14, MemOperand(x15)), "casab w13, w14, [x15]");
+  COMPARE(casab(w16, w17, MemOperand(sp)), "casab w16, w17, [sp]");
+  COMPARE(caslb(w18, w19, MemOperand(x20)), "caslb w18, w19, [x20]");
+  COMPARE(caslb(w21, w22, MemOperand(sp)), "caslb w21, w22, [sp]");
+  COMPARE(casalb(w23, w24, MemOperand(x25)), "casalb w23, w24, [x25]");
+  COMPARE(casalb(w26, w27, MemOperand(sp)), "casalb w26, w27, [sp]");
+  COMPARE(cash(w28, w29, MemOperand(x30)), "cash w28, w29, [lr]");
+  COMPARE(cash(w0, w1, MemOperand(sp)), "cash w0, w1, [sp]");
+  COMPARE(casah(w2, w3, MemOperand(x4)), "casah w2, w3, [x4]");
+  COMPARE(casah(w5, w6, MemOperand(sp)), "casah w5, w6, [sp]");
+  COMPARE(caslh(w7, w8, MemOperand(x9)), "caslh w7, w8, [x9]");
+  COMPARE(caslh(w10, w11, MemOperand(sp)), "caslh w10, w11, [sp]");
+  COMPARE(casalh(w12, w13, MemOperand(x14)), "casalh w12, w13, [x14]");
+  COMPARE(casalh(w15, w16, MemOperand(sp)), "casalh w15, w16, [sp]");
+  COMPARE(casp(w18, w19, w20, w21, MemOperand(x22)),
+          "casp w18, w19, w20, w21, [x22]");
+  COMPARE(casp(w24, w25, w26, w27, MemOperand(sp)),
+          "casp w24, w25, w26, w27, [sp]");
+  COMPARE(casp(x28, x29, x0, x1, MemOperand(x2)), "casp x28, fp, x0, x1, [x2]");
+  COMPARE(casp(x4, x5, x6, x7, MemOperand(sp)), "casp x4, x5, x6, x7, [sp]");
+  COMPARE(caspa(w8, w9, w10, w11, MemOperand(x12)),
+          "caspa w8, w9, w10, w11, [x12]");
+  COMPARE(caspa(w14, w15, w16, w17, MemOperand(sp)),
+          "caspa w14, w15, w16, w17, [sp]");
+  COMPARE(caspa(x18, x19, x20, x21, MemOperand(x22)),
+          "caspa x18, x19, x20, x21, [x22]");
+  COMPARE(caspa(x24, x25, x26, x27, MemOperand(sp)),
+          "caspa x24, x25, x26, cp, [sp]");
+  COMPARE(caspl(w28, w29, w0, w1, MemOperand(x2)),
+          "caspl w28, w29, w0, w1, [x2]");
+  COMPARE(caspl(w4, w5, w6, w7, MemOperand(sp)), "caspl w4, w5, w6, w7, [sp]");
+  COMPARE(caspl(x8, x9, x10, x11, MemOperand(x12)),
+          "caspl x8, x9, x10, x11, [x12]");
+  COMPARE(caspl(x14, x15, x16, x17, MemOperand(sp)),
+          "caspl x14, x15, x16, x17, [sp]");
+  COMPARE(caspal(w18, w19, w20, w21, MemOperand(x22)),
+          "caspal w18, w19, w20, w21, [x22]");
+  COMPARE(caspal(w24, w25, w26, w27, MemOperand(sp)),
+          "caspal w24, w25, w26, w27, [sp]");
+  COMPARE(caspal(x28, x29, x0, x1, MemOperand(x2)),
+          "caspal x28, fp, x0, x1, [x2]");
+  COMPARE(caspal(x4, x5, x6, x7, MemOperand(sp)),
+          "caspal x4, x5, x6, x7, [sp]");
+
+  CLEANUP();
+}
+
+#define ATOMIC_MEMORY_DISASM_LIST(V, DEF) \
+  V(DEF, add, "add")                      \
+  V(DEF, clr, "clr")                      \
+  V(DEF, eor, "eor")                      \
+  V(DEF, set, "set")                      \
+  V(DEF, smax, "smax")                    \
+  V(DEF, smin, "smin")                    \
+  V(DEF, umax, "umax")                    \
+  V(DEF, umin, "umin")
+
+#define ATOMIC_MEMORY_DISASM_STORE_X_MODES(V, NAME, STR) \
+  V(NAME, STR)                                           \
+  V(NAME##l, STR "l")
+
+#define ATOMIC_MEMORY_DISASM_STORE_W_MODES(V, NAME, STR) \
+  ATOMIC_MEMORY_DISASM_STORE_X_MODES(V, NAME, STR)       \
+  V(NAME##b, STR "b")                                    \
+  V(NAME##lb, STR "lb")                                  \
+  V(NAME##h, STR "h")                                    \
+  V(NAME##lh, STR "lh")
+
+#define ATOMIC_MEMORY_DISASM_LOAD_X_MODES(V, NAME, STR) \
+  ATOMIC_MEMORY_DISASM_STORE_X_MODES(V, NAME, STR)      \
+  V(NAME##a, STR "a")                                   \
+  V(NAME##al, STR "al")
+
+#define ATOMIC_MEMORY_DISASM_LOAD_W_MODES(V, NAME, STR) \
+  ATOMIC_MEMORY_DISASM_LOAD_X_MODES(V, NAME, STR)       \
+  V(NAME##ab, STR "ab")                                 \
+  V(NAME##alb, STR "alb")                               \
+  V(NAME##ah, STR "ah")                                 \
+  V(NAME##alh, STR "alh")
+
+TEST_F(DisasmArm64Test, atomic_memory) {
+  SET_UP_MASM();
+
+  CpuFeatureScope feature_scope(assm, LSE,
+                                CpuFeatureScope::kDontCheckSupported);
+
+  // These macros generate tests for all the variations of the atomic memory
+  // operations, e.g. ldadd, ldadda, ldaddb, staddl, etc.
+
+#define AM_LOAD_X_TESTS(N, MN)                                     \
+  COMPARE(ld##N(x0, x1, MemOperand(x2)), "ld" MN " x0, x1, [x2]"); \
+  COMPARE(ld##N(x3, x4, MemOperand(sp)), "ld" MN " x3, x4, [sp]");
+#define AM_LOAD_W_TESTS(N, MN)                                     \
+  COMPARE(ld##N(w0, w1, MemOperand(x2)), "ld" MN " w0, w1, [x2]"); \
+  COMPARE(ld##N(w3, w4, MemOperand(sp)), "ld" MN " w3, w4, [sp]");
+#define AM_STORE_X_TESTS(N, MN)                            \
+  COMPARE(st##N(x0, MemOperand(x1)), "st" MN " x0, [x1]"); \
+  COMPARE(st##N(x2, MemOperand(sp)), "st" MN " x2, [sp]");
+#define AM_STORE_W_TESTS(N, MN)                            \
+  COMPARE(st##N(w0, MemOperand(x1)), "st" MN " w0, [x1]"); \
+  COMPARE(st##N(w2, MemOperand(sp)), "st" MN " w2, [sp]");
+
+  ATOMIC_MEMORY_DISASM_LIST(ATOMIC_MEMORY_DISASM_LOAD_X_MODES, AM_LOAD_X_TESTS)
+  ATOMIC_MEMORY_DISASM_LIST(ATOMIC_MEMORY_DISASM_LOAD_W_MODES, AM_LOAD_W_TESTS)
+  ATOMIC_MEMORY_DISASM_LIST(ATOMIC_MEMORY_DISASM_STORE_X_MODES,
+                            AM_STORE_X_TESTS)
+  ATOMIC_MEMORY_DISASM_LIST(ATOMIC_MEMORY_DISASM_STORE_W_MODES,
+                            AM_STORE_W_TESTS)
+
+#define AM_SWP_X_TESTS(N, MN)                             \
+  COMPARE(N(x0, x1, MemOperand(x2)), MN " x0, x1, [x2]"); \
+  COMPARE(N(x3, x4, MemOperand(sp)), MN " x3, x4, [sp]");
+#define AM_SWP_W_TESTS(N, MN)                             \
+  COMPARE(N(w0, w1, MemOperand(x2)), MN " w0, w1, [x2]"); \
+  COMPARE(N(w3, w4, MemOperand(sp)), MN " w3, w4, [sp]");
+
+  ATOMIC_MEMORY_DISASM_LOAD_X_MODES(AM_SWP_X_TESTS, swp, "swp")
+  ATOMIC_MEMORY_DISASM_LOAD_W_MODES(AM_SWP_W_TESTS, swp, "swp")
+
+#undef AM_LOAD_X_TESTS
+#undef AM_LOAD_W_TESTS
+#undef AM_STORE_X_TESTS
+#undef AM_STORE_W_TESTS
+#undef AM_SWP_X_TESTS
+#undef AM_SWP_W_TESTS
+
   CLEANUP();
 }
 
@@ -1865,7 +2012,7 @@ TEST_F(DisasmArm64Test, debug) {
   for (int i = 0; i < 2; i++) {
     // Loop runs with and without the simulator code enabled.
     HandleScope scope(isolate());
-    byte* buf = static_cast<byte*>(malloc(INSTR_SIZE));
+    uint8_t* buf = static_cast<uint8_t*>(malloc(INSTR_SIZE));
     uint32_t encoding = 0;
     AssemblerOptions options;
 #ifdef USE_SIMULATOR
@@ -2094,6 +2241,8 @@ TEST_F(DisasmArm64Test, barriers) {
   V(V4S(), "4s")
 
 #define NEON_FORMAT_LIST_FP(V) \
+  V(V4H(), "4h")               \
+  V(V8H(), "8h")               \
   V(V2S(), "2s")               \
   V(V4S(), "4s")               \
   V(V2D(), "2d")
@@ -3891,6 +4040,25 @@ TEST_F(DisasmArm64Test, neon_3different) {
   COMPARE(Pmull(v0.V8H(), v1.V8B(), v2.V8B()), "pmull v0.8h, v1.8b, v2.8b");
   COMPARE(Pmull2(v2.V8H(), v3.V16B(), v4.V16B()),
           "pmull2 v2.8h, v3.16b, v4.16b");
+
+  {
+    CpuFeatureScope feature_scope(assm, PMULL1Q,
+                                  CpuFeatureScope::kDontCheckSupported);
+
+    COMPARE(Pmull(v5.V1Q(), v6.V1D(), v7.V1D()), "pmull v5.1q, v6.1d, v7.1d");
+    COMPARE(Pmull2(v8.V1Q(), v9.V2D(), v10.V2D()),
+            "pmull2 v8.1q, v9.2d, v10.2d");
+  }
+
+  {
+    CpuFeatureScope feature_scope(assm, DOTPROD,
+                                  CpuFeatureScope::kDontCheckSupported);
+
+    COMPARE(Sdot(v11.V2S(), v20.V8B(), v25.V8B()),
+            "sdot v11.2s, v20.8b, v25.8b");
+    COMPARE(Sdot(v26.V4S(), v5.V16B(), v14.V16B()),
+            "sdot v26.4s, v5.16b, v14.16b");
+  }
 
   CLEANUP();
 }

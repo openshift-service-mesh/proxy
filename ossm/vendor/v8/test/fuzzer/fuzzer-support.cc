@@ -17,13 +17,39 @@
 namespace v8_fuzzer {
 
 FuzzerSupport::FuzzerSupport(int* argc, char*** argv) {
-  i::FLAG_expose_gc = true;
+  // Disable hard abort, which generates a trap instead of a proper abortion.
+  // Traps by default do not cause libfuzzer to generate a crash file.
+  i::v8_flags.hard_abort = false;
+
+  i::v8_flags.expose_gc = true;
+  i::v8_flags.fuzzing = true;
 
   // Allow changing flags in fuzzers.
   // TODO(12887): Refactor fuzzers to not change flags after initialization.
-  i::FLAG_freeze_flags_after_init = false;
+  i::v8_flags.freeze_flags_after_init = false;
+
+#if V8_ENABLE_WEBASSEMBLY
+  if (V8_TRAP_HANDLER_SUPPORTED) {
+    constexpr bool kUseDefaultTrapHandler = true;
+    if (!v8::V8::EnableWebAssemblyTrapHandler(kUseDefaultTrapHandler)) {
+      FATAL("Could not register trap handler");
+    }
+  }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
   v8::V8::SetFlagsFromCommandLine(argc, *argv, true);
+  for (int arg_idx = 1; arg_idx < *argc; ++arg_idx) {
+    const char* const arg = (*argv)[arg_idx];
+    if (arg[0] != '-' || arg[1] != '-') continue;
+    // Stop processing args at '--'.
+    if (arg[2] == '\0') break;
+    fprintf(stderr, "Unrecognized flag %s\n", arg);
+    // Move remaining flags down.
+    std::move(*argv + arg_idx + 1, *argv + *argc, *argv + arg_idx);
+    --*argc, --arg_idx;
+  }
+  i::FlagList::ResolveContradictionsWhenFuzzing();
+
   v8::V8::InitializeICUDefaultLocation((*argv)[0]);
   v8::V8::InitializeExternalStartupData((*argv)[0]);
   platform_ = v8::platform::NewDefaultPlatform();
@@ -69,14 +95,6 @@ std::unique_ptr<FuzzerSupport> FuzzerSupport::fuzzer_support_;
 
 // static
 void FuzzerSupport::InitializeFuzzerSupport(int* argc, char*** argv) {
-#if V8_ENABLE_WEBASSEMBLY
-  if (V8_TRAP_HANDLER_SUPPORTED) {
-    constexpr bool kUseDefaultTrapHandler = true;
-    if (!v8::V8::EnableWebAssemblyTrapHandler(kUseDefaultTrapHandler)) {
-      FATAL("Could not register trap handler");
-    }
-  }
-#endif  // V8_ENABLE_WEBASSEMBLY
   DCHECK_NULL(FuzzerSupport::fuzzer_support_);
   FuzzerSupport::fuzzer_support_ =
       std::make_unique<v8_fuzzer::FuzzerSupport>(argc, argv);

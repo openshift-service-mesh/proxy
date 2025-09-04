@@ -11,10 +11,14 @@ import time
 
 from . import base
 from . import util
+from .stack_utils import stack_analyzer_util
+
+
+TRACK_N_HEAVY_TESTS = 20
 
 
 def print_failure_header(test, is_flaky=False):
-  text = [str(test)]
+  text = [test.full_name]
   if test.output_proc.negative:
     text.append('[negative]')
   if is_flaky:
@@ -22,6 +26,23 @@ def print_failure_header(test, is_flaky=False):
   output = '=== %s ===' % ' '.join(text)
   encoding = sys.stdout.encoding or 'utf-8'
   print(output.encode(encoding, errors='replace').decode(encoding))
+
+
+def formatted_result_output(result, relative=False):
+  lines = []
+  if result.output.stderr:
+    lines.append("--- stderr ---")
+    lines.append(result.output.stderr.strip())
+  if result.output.stdout:
+    lines.append("--- stdout ---")
+    lines.append(result.output.stdout.strip())
+  lines.append("Command: %s" % result.cmd.to_string(relative))
+  if result.output.HasCrashed():
+    lines.append("exit code: %s" % result.output.exit_code_string)
+    lines.append("--- CRASHED ---")
+  if result.output.HasTimedOut():
+    lines.append("--- TIMEOUT ---")
+  return '\n'.join(lines)
 
 
 class ProgressIndicator():
@@ -68,19 +89,7 @@ class SimpleProgressIndicator(ProgressIndicator):
     for test, result, is_flaky in self._failed:
       flaky += int(is_flaky)
       print_failure_header(test, is_flaky=is_flaky)
-      if result.output.stderr:
-        print("--- stderr ---")
-        print(result.output.stderr.strip())
-      if result.output.stdout:
-        print("--- stdout ---")
-        print(result.output.stdout.strip())
-      print("Command: %s" % result.cmd.to_string())
-      if result.output.HasCrashed():
-        print("exit code: %s" % result.output.exit_code_string)
-        print("--- CRASHED ---")
-        crashed += 1
-      if result.output.HasTimedOut():
-        print("--- TIMEOUT ---")
+      print(formatted_result_output(result))
     if len(self._failed) == 0:
       print("===")
       print("=== All tests succeeded")
@@ -230,7 +239,7 @@ class CompactProgressIndicator(ProgressIndicator):
     else:
       self._passed += 1
 
-    self._print_progress(str(test))
+    self._print_progress(test.full_name)
     if result.has_unexpected_output:
       output = result.output
       stdout = output.stdout.strip()
@@ -255,7 +264,7 @@ class CompactProgressIndicator(ProgressIndicator):
       else:
         if test.is_fail:
           self.printFormatted('failure', "--- UNEXPECTED PASS ---")
-          if test.expected_failure_reason != None:
+          if test.expected_failure_reason is not None:
             self.printFormatted('failure', test.expected_failure_reason)
         else:
           self.printFormatted('failure', "--- FAILED ---")
@@ -341,34 +350,36 @@ class MonochromeProgressIndicator(CompactProgressIndicator):
 
 class JsonTestProgressIndicator(ProgressIndicator):
 
-  def __init__(self, context, options, test_count, framework_name):
+  def __init__(self, context, options, test_count):
     super(JsonTestProgressIndicator, self).__init__(context, options,
                                                     test_count)
-    self.tests = util.FixedSizeTopList(
+    self.slowest_tests = util.FixedSizeTopList(
         self.options.slow_tests_cutoff, key=lambda rec: rec['duration'])
+    self.max_rss_tests = util.FixedSizeTopList(
+        TRACK_N_HEAVY_TESTS, key=lambda rec: rec['max_rss'])
+    self.max_vms_tests = util.FixedSizeTopList(
+        TRACK_N_HEAVY_TESTS, key=lambda rec: rec['max_vms'])
+
     # We want to drop stdout/err for all passed tests on the first try, but we
     # need to get outputs for all runs after the first one. To accommodate that,
     # reruns are set to keep the result no matter what requirement says, i.e.
     # keep_output set to True in the RerunProc.
     self._requirement = base.DROP_PASS_STDOUT
 
-    self.framework_name = framework_name
     self.results = []
     self.duration_sum = 0
     self.test_count = 0
+    self.stack_parser = stack_analyzer_util.create_stack_parser()
 
   def on_test_result(self, test, result):
-    if result.is_rerun:
-      self.process_results(test, result.results)
-    else:
-      self.process_results(test, [result])
+    self.process_results(test, result.as_list)
 
   def process_results(self, test, results):
     for run, result in enumerate(results):
       # TODO(majeski): Support for dummy/grouped results
       output = result.output
 
-      self._buffer_slow_tests(test, result, output, run)
+      self._buffer_top_tests(test, result, output, run)
 
       # Omit tests that run as expected on the first try.
       # Everything that happens after the first run is included in the output
@@ -376,46 +387,43 @@ class JsonTestProgressIndicator(ProgressIndicator):
       if not result.has_unexpected_output and run == 0:
         continue
 
-      record = self._test_record(test, result, output, run)
+      record = self._test_record(test, result, run)
       record.update({
           "result": test.output_proc.get_outcome(output),
           "stdout": output.stdout,
           "stderr": output.stderr,
           "error_details": result.error_details,
       })
+
+      record.update(self.stack_parser.analyze_crash(output.stderr))
+
       self.results.append(record)
 
-  def _buffer_slow_tests(self, test, result, output, run):
+  def _buffer_top_tests(self, test, result, output, run):
 
     def result_value(test, result, output):
       if not result.has_unexpected_output:
         return ""
       return test.output_proc.get_outcome(output)
 
-    record = self._test_record(test, result, output, run)
-    record.update({
-        "result": result_value(test, result, output),
-        "marked_slow": test.is_slow,
-    })
-    self.tests.add(record)
+    record = self._test_record(test, result, run)
+    record.update(
+        result=result_value(test, result, output),
+        marked_slow=test.is_slow,
+        marked_heavy=test.is_heavy,
+    )
+    self.slowest_tests.add(record)
+    self.max_rss_tests.add(record)
+    self.max_vms_tests.add(record)
     self.duration_sum += record['duration']
     self.test_count += 1
 
-  def _test_record(self, test, result, output, run):
-    return {
-        "name": str(test),
-        "flags": result.cmd.args,
-        "command": result.cmd.to_string(relative=True),
-        "run": run + 1,
-        "exit_code": output.exit_code,
-        "expected": test.expected_outcomes,
-        "duration": output.duration,
-        "random_seed": test.random_seed,
-        "target_name": test.get_shell(),
-        "variant": test.variant,
-        "variant_flags": test.variant_flags,
-        "framework_name": self.framework_name,
-    }
+  def _test_record(self, test, result, run):
+    record = util.base_test_record(test, result, run)
+    record.update(
+        command=result.cmd.to_string(relative=True),
+    )
+    return record
 
   def finished(self):
     duration_mean = None
@@ -423,14 +431,42 @@ class JsonTestProgressIndicator(ProgressIndicator):
       duration_mean = self.duration_sum / self.test_count
 
     result = {
-        "results": self.results,
-        "slowest_tests": self.tests.as_list(),
-        "duration_mean": duration_mean,
-        "test_total": self.test_count,
+        'results': self.results,
+        'max_rss_tests': self.max_rss_tests.as_list(),
+        'max_vms_tests': self.max_vms_tests.as_list(),
+        'slowest_tests': self.slowest_tests.as_list(),
+        'duration_mean': duration_mean,
+        'test_total': self.test_count,
     }
 
     with open(self.options.json_test_results, "w") as f:
       json.dump(result, f)
+
+
+class TestScheduleIndicator(ProgressIndicator):
+  """Indicator the logs the start:end interval as timestamps for each
+  executed test. Reruns and variants are accounted for separately.
+  """
+
+  def __init__(self, context, options, test_count):
+    super(TestScheduleIndicator, self).__init__(
+        context, options, test_count)
+    self._requirement = base.DROP_PASS_STDOUT
+    self.handle = open(self.options.log_test_schedule, 'w')
+
+  def on_test_result(self, test, result):
+    encoding = sys.stdout.encoding or 'utf-8'
+    for r in result.as_list:
+      # TODO(v8-infra): Ideally the full_name should already be encoded
+      # correctly. This takes care of one test with unicode characters in
+      # the file name.
+      name = test.full_name.encode(encoding, errors='replace').decode(encoding)
+      print(f'{name} {test.variant or "default"}: {r.status()} '
+            f'({r.output.start_time}:{r.output.end_time})',
+            file=self.handle)
+
+  def finished(self):
+    self.handle.close()
 
 
 PROGRESS_INDICATORS = {

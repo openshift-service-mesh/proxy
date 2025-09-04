@@ -56,6 +56,7 @@ class NonFinalizable : public GarbageCollected<NonFinalizable<Size>> {
 
  private:
   char array_[Size];
+  int padding_to_make_size_the_same_as_finalizible_;
 };
 
 using NormalNonFinalizable = NonFinalizable<32>;
@@ -73,14 +74,13 @@ class ConcurrentSweeperTest : public testing::TestWithHeap {
     // Pretend do finish marking as StatsCollector verifies that Notify*
     // methods are called in the right order.
     heap->stats_collector()->NotifyMarkingStarted(
-        GarbageCollector::Config::CollectionType::kMajor,
-        GarbageCollector::Config::MarkingType::kAtomic,
-        GarbageCollector::Config::IsForcedGC::kNotForced);
+        CollectionType::kMajor, GCConfig::MarkingType::kAtomic,
+        GCConfig::IsForcedGC::kNotForced);
     heap->stats_collector()->NotifyMarkingCompleted(0);
     Sweeper& sweeper = heap->sweeper();
-    const Sweeper::SweepingConfig sweeping_config{
-        Sweeper::SweepingConfig::SweepingType::kIncrementalAndConcurrent,
-        Sweeper::SweepingConfig::CompactableSpaceHandling::kSweep};
+    const SweepingConfig sweeping_config{
+        SweepingConfig::SweepingType::kIncrementalAndConcurrent,
+        SweepingConfig::CompactableSpaceHandling::kSweep};
     sweeper.Start(sweeping_config);
   }
 
@@ -138,6 +138,13 @@ class ConcurrentSweeperTest : public testing::TestWithHeap {
 
     return true;
   }
+
+  void MarkObject(void* payload) {
+    HeapObjectHeader& header = HeapObjectHeader::FromObject(payload);
+    header.TryMarkAtomic();
+    BasePage::FromPayload(&header)->IncrementMarkedBytes(
+        header.AllocatedSize());
+  }
 };
 
 TEST_F(ConcurrentSweeperTest, BackgroundSweepOfNormalPage) {
@@ -146,7 +153,7 @@ TEST_F(ConcurrentSweeperTest, BackgroundSweepOfNormalPage) {
 
   auto* unmarked_object = MakeGarbageCollected<GCedType>(GetAllocationHandle());
   auto* marked_object = MakeGarbageCollected<GCedType>(GetAllocationHandle());
-  HeapObjectHeader::FromObject(marked_object).TryMarkAtomic();
+  MarkObject(marked_object);
 
   auto* page = BasePage::FromPayload(unmarked_object);
   auto& space = page->space();
@@ -187,7 +194,7 @@ TEST_F(ConcurrentSweeperTest, BackgroundSweepOfLargePage) {
 
   auto* unmarked_object = MakeGarbageCollected<GCedType>(GetAllocationHandle());
   auto* marked_object = MakeGarbageCollected<GCedType>(GetAllocationHandle());
-  HeapObjectHeader::FromObject(marked_object).TryMarkAtomic();
+  MarkObject(marked_object);
 
   auto* unmarked_page = BasePage::FromPayload(unmarked_object);
   auto* marked_page = BasePage::FromPayload(marked_object);
@@ -331,8 +338,8 @@ TEST_F(ConcurrentSweeperTest, IncrementalSweeping) {
       HeapObjectHeader::FromObject(marked_normal_object);
   auto& marked_large_header = HeapObjectHeader::FromObject(marked_large_object);
 
-  marked_normal_header.TryMarkAtomic();
-  marked_large_header.TryMarkAtomic();
+  MarkObject(marked_normal_object);
+  MarkObject(marked_large_object);
 
   StartSweeping();
 
@@ -354,6 +361,47 @@ TEST_F(ConcurrentSweeperTest, IncrementalSweeping) {
   }
 
   FinishSweeping();
+}
+
+TEST_F(ConcurrentSweeperTest, SweepOnAllocationReturnEmptyPage) {
+  PreciseGC();
+
+  // First, allocate the full page of finalizable objects.
+  const size_t objects_to_allocated =
+      NormalPage::PayloadSize() /
+      (sizeof(HeapObjectHeader) + sizeof(NormalFinalizable));
+  auto* first_obj =
+      MakeGarbageCollected<NormalFinalizable>(GetAllocationHandle());
+  auto* finalizable_page =
+      NormalPage::FromInnerAddress(&HeapBase::From(GetHeapHandle()), first_obj);
+  for (size_t i = 1; i < objects_to_allocated; ++i) {
+    MakeGarbageCollected<NormalFinalizable>(GetAllocationHandle());
+  }
+
+  // Then, allocate a new unfinalizable object on a fresh page. We do that so
+  // that the sweeper on allocation doesn't allocate a new page.
+  auto* non_finalizable =
+      MakeGarbageCollected<NormalNonFinalizable>(GetAllocationHandle());
+  auto* non_finalizable_page = NormalPage::FromInnerAddress(
+      &HeapBase::From(GetHeapHandle()), non_finalizable);
+  ASSERT_NE(finalizable_page, non_finalizable_page);
+
+  // Start the GC without sweeping.
+  static constexpr GCConfig config = {
+      CollectionType::kMajor, StackState::kNoHeapPointers,
+      GCConfig::MarkingType::kAtomic,
+      GCConfig::SweepingType::kIncrementalAndConcurrent};
+  Heap::From(GetHeap())->CollectGarbage(config);
+
+  WaitForConcurrentSweeping();
+
+  // Allocate and sweep.
+  auto* allocated_after_sweeping =
+      MakeGarbageCollected<NormalFinalizable>(GetAllocationHandle());
+  // Check that the empty page of finalizable objects was returned.
+  EXPECT_EQ(finalizable_page,
+            NormalPage::FromInnerAddress(&HeapBase::From(GetHeapHandle()),
+                                         allocated_after_sweeping));
 }
 
 }  // namespace internal

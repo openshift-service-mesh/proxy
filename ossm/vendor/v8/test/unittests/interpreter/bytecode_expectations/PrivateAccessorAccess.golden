@@ -23,12 +23,12 @@ snippet: "
 "
 frame size: 5
 parameter count: 1
-bytecode array length: 82
+bytecode array length: 83
 bytecodes: [
                 B(LdaImmutableCurrentContextSlot), U8(3),
                 B(Star0),
                 B(Ldar), R(context),
-  /*   67 E> */ B(DefineKeyedOwnProperty), R(this), R(0), U8(0),
+  /*   67 E> */ B(DefineKeyedOwnProperty), R(this), R(0), U8(0), U8(0),
   /*   76 S> */ B(LdaImmutableCurrentContextSlot), U8(2),
                 B(Star2),
                 B(LdaImmutableCurrentContextSlot), U8(3),
@@ -75,15 +75,15 @@ snippet: "
 "
 frame size: 4
 parameter count: 1
-bytecode array length: 28
+bytecode array length: 29
 bytecodes: [
                 B(LdaImmutableCurrentContextSlot), U8(3),
                 B(Star0),
                 B(Ldar), R(context),
-  /*   48 E> */ B(DefineKeyedOwnProperty), R(this), R(0), U8(0),
+  /*   48 E> */ B(DefineKeyedOwnProperty), R(this), R(0), U8(0), U8(0),
   /*   53 S> */ B(LdaImmutableCurrentContextSlot), U8(3),
   /*   58 E> */ B(GetKeyedProperty), R(this), U8(2),
-                B(Wide), B(LdaSmi), I16(304),
+                B(Wide), B(LdaSmi), I16(325),
                 B(Star2),
                 B(LdaConstant), U8(0),
                 B(Star3),
@@ -91,7 +91,7 @@ bytecodes: [
                 B(Throw),
 ]
 constant pool: [
-  ONE_BYTE_INTERNALIZED_STRING_TYPE ["#b"],
+  INTERNALIZED_ONE_BYTE_STRING_TYPE ["#b"],
 ]
 handlers: [
 ]
@@ -107,15 +107,15 @@ snippet: "
 "
 frame size: 4
 parameter count: 1
-bytecode array length: 28
+bytecode array length: 29
 bytecodes: [
                 B(LdaImmutableCurrentContextSlot), U8(3),
                 B(Star0),
                 B(Ldar), R(context),
-  /*   41 E> */ B(DefineKeyedOwnProperty), R(this), R(0), U8(0),
+  /*   41 E> */ B(DefineKeyedOwnProperty), R(this), R(0), U8(0), U8(0),
   /*   46 S> */ B(LdaImmutableCurrentContextSlot), U8(3),
   /*   51 E> */ B(GetKeyedProperty), R(this), U8(2),
-                B(Wide), B(LdaSmi), I16(303),
+                B(Wide), B(LdaSmi), I16(324),
                 B(Star2),
                 B(LdaConstant), U8(0),
                 B(Star3),
@@ -123,7 +123,7 @@ bytecodes: [
                 B(Throw),
 ]
 constant pool: [
-  ONE_BYTE_INTERNALIZED_STRING_TYPE ["#c"],
+  INTERNALIZED_ONE_BYTE_STRING_TYPE ["#c"],
 ]
 handlers: [
 ]
@@ -139,17 +139,17 @@ snippet: "
 "
 frame size: 5
 parameter count: 1
-bytecode array length: 31
+bytecode array length: 32
 bytecodes: [
                 B(LdaImmutableCurrentContextSlot), U8(3),
                 B(Star0),
                 B(Ldar), R(context),
-  /*   48 E> */ B(DefineKeyedOwnProperty), R(this), R(0), U8(0),
+  /*   48 E> */ B(DefineKeyedOwnProperty), R(this), R(0), U8(0), U8(0),
   /*   53 S> */ B(LdaImmutableCurrentContextSlot), U8(2),
                 B(Star2),
                 B(LdaImmutableCurrentContextSlot), U8(3),
   /*   58 E> */ B(GetKeyedProperty), R(this), U8(2),
-                B(Wide), B(LdaSmi), I16(304),
+                B(Wide), B(LdaSmi), I16(325),
                 B(Star3),
                 B(LdaConstant), U8(0),
                 B(Star4),
@@ -157,7 +157,7 @@ bytecodes: [
                 B(Throw),
 ]
 constant pool: [
-  ONE_BYTE_INTERNALIZED_STRING_TYPE ["#d"],
+  INTERNALIZED_ONE_BYTE_STRING_TYPE ["#d"],
 ]
 handlers: [
 ]
@@ -173,15 +173,15 @@ snippet: "
 "
 frame size: 4
 parameter count: 1
-bytecode array length: 28
+bytecode array length: 29
 bytecodes: [
                 B(LdaImmutableCurrentContextSlot), U8(3),
                 B(Star0),
                 B(Ldar), R(context),
-  /*   41 E> */ B(DefineKeyedOwnProperty), R(this), R(0), U8(0),
+  /*   41 E> */ B(DefineKeyedOwnProperty), R(this), R(0), U8(0), U8(0),
   /*   46 S> */ B(LdaImmutableCurrentContextSlot), U8(3),
   /*   51 E> */ B(GetKeyedProperty), R(this), U8(2),
-                B(Wide), B(LdaSmi), I16(303),
+                B(Wide), B(LdaSmi), I16(324),
                 B(Star2),
                 B(LdaConstant), U8(0),
                 B(Star3),
@@ -189,7 +189,7 @@ bytecodes: [
                 B(Throw),
 ]
 constant pool: [
-  ONE_BYTE_INTERNALIZED_STRING_TYPE ["#e"],
+  INTERNALIZED_ONE_BYTE_STRING_TYPE ["#e"],
 ]
 handlers: [
 ]

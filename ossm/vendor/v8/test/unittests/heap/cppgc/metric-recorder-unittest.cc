@@ -51,15 +51,13 @@ class MetricRecorderTest : public testing::TestWithHeap {
   }
 
   void StartGC() {
-    stats->NotifyMarkingStarted(
-        GarbageCollector::Config::CollectionType::kMajor,
-        GarbageCollector::Config::MarkingType::kIncremental,
-        GarbageCollector::Config::IsForcedGC::kNotForced);
+    stats->NotifyMarkingStarted(CollectionType::kMajor,
+                                GCConfig::MarkingType::kIncremental,
+                                GCConfig::IsForcedGC::kNotForced);
   }
   void EndGC(size_t marked_bytes) {
     stats->NotifyMarkingCompleted(marked_bytes);
-    stats->NotifySweepingCompleted(
-        GarbageCollector::Config::SweepingType::kIncremental);
+    stats->NotifySweepingCompleted(GCConfig::SweepingType::kIncremental);
   }
 
   StatsCollector* stats;
@@ -268,7 +266,7 @@ TEST_F(MetricRecorderTest, CycleEndHistogramReportsCorrectValues) {
             kDurationComparisonTolerance);
   // Check collection rate and efficiency.
   EXPECT_DOUBLE_EQ(
-      0.3, MetricRecorderImpl::GCCycle_event.collection_rate_in_percent);
+      0.7, MetricRecorderImpl::GCCycle_event.collection_rate_in_percent);
   static constexpr double kEfficiencyComparisonTolerance = 0.0005;
   EXPECT_LT(
       std::abs(MetricRecorderImpl::GCCycle_event.efficiency_in_bytes_per_us -
@@ -308,8 +306,7 @@ TEST_F(MetricRecorderTest, ObjectSizeMetricsWithAllocations) {
   stats->NotifyAllocation(150);
   stats->NotifyAllocatedMemory(1000);
   stats->NotifyFreedMemory(400);
-  stats->NotifySweepingCompleted(
-      GarbageCollector::Config::SweepingType::kAtomic);
+  stats->NotifySweepingCompleted(GCConfig::SweepingType::kAtomic);
   EXPECT_EQ(1300u, MetricRecorderImpl::GCCycle_event.objects.before_bytes);
   EXPECT_EQ(800, MetricRecorderImpl::GCCycle_event.objects.after_bytes);
   EXPECT_EQ(500u, MetricRecorderImpl::GCCycle_event.objects.freed_bytes);

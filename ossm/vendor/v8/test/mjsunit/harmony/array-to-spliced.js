@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-change-array-by-copy
 
 assertEquals(2, Array.prototype.toSpliced.length);
 assertEquals("toSpliced", Array.prototype.toSpliced.name);
@@ -100,6 +99,24 @@ TestToSplicedBasicBehaviorHelper({ length: 4,
   }
   assertEquals(Array, (new MyArray()).toSpliced().constructor);
 })();
+
+(function TestEmpty() {
+  assertEquals([], [].toSpliced());
+})();
+
+function TestFastSourceEmpty(input, itemsToInsert) {
+  // Create an empty input Array of the same ElementsKind with splice().
+  TestToSplicedBasicBehaviorHelper(input.splice(), itemsToInsert);
+}
+
+// Packed
+TestFastSourceEmpty([1,2,3,4], [5,6]);
+
+// Double packed
+TestFastSourceEmpty([1.1,2.2,3.3,4.4], [5.5,6.6]);
+
+// Packed
+TestFastSourceEmpty([true,false,1,42.42], [null,"foo"]);
 
 // All tests after this have an invalidated elements-on-prototype protector.
 (function TestNoHoles() {

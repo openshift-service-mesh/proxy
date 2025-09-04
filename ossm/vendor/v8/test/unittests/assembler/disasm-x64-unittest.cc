@@ -49,8 +49,8 @@ using DisasmX64Test = TestWithIsolate;
 
 namespace {
 
-Handle<CodeT> CreateDummyCode(Isolate* isolate) {
-  i::byte buffer[128];
+Handle<Code> CreateDummyCode(Isolate* isolate) {
+  uint8_t buffer[128];
   Assembler assm(AssemblerOptions{},
                  ExternalAssemblerBuffer(buffer, sizeof(buffer)));
   __ nop();
@@ -59,14 +59,14 @@ Handle<CodeT> CreateDummyCode(Isolate* isolate) {
   assm.GetCode(isolate, &desc);
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
-  return ToCodeT(code, isolate);
+  return code;
 }
 
 }  // namespace
 
 TEST_F(DisasmX64Test, DisasmX64) {
   HandleScope handle_scope(isolate());
-  v8::internal::byte buffer[8192];
+  uint8_t buffer[8192];
   Assembler assm(AssemblerOptions{},
                  ExternalAssemblerBuffer(buffer, sizeof buffer));
   // Some instructions are tested in DisasmX64CheckOutput.
@@ -82,7 +82,7 @@ TEST_F(DisasmX64Test, DisasmX64) {
   __ bind(&L2);
   __ call(rcx);
   __ nop();
-  Handle<CodeT> ic = CreateDummyCode(isolate());
+  Handle<Code> ic = CreateDummyCode(isolate());
   __ call(ic, RelocInfo::CODE_TARGET);
   __ nop();
 
@@ -147,12 +147,22 @@ TEST_F(DisasmX64Test, DisasmX64) {
   {
     if (CpuFeatures::IsSupported(FMA3)) {
       CpuFeatureScope scope(&assm, FMA3);
-#define EMIT_FMA(instr, notUsed1, notUsed2, notUsed3, notUsed4, notUsed5, \
-                 notUsed6)                                                \
+#define EMIT_FMA(instr, notUsed1, notUsed2, notUsed3, notUsed4, notUsed5) \
   __ instr(xmm9, xmm10, xmm11);                                           \
   __ instr(xmm9, xmm10, Operand(rbx, rcx, times_4, 10000));
       FMA_INSTRUCTION_LIST(EMIT_FMA)
 #undef EMIT_FMA
+    }
+  }
+
+  // F16C instruction
+  {
+    if (CpuFeatures::IsSupported(F16C)) {
+      CpuFeatureScope scope(&assm, F16C);
+      __ vcvtph2ps(ymm0, xmm1);
+      __ vcvtph2ps(xmm2, xmm3);
+      __ vcvtps2ph(xmm4, ymm5, 0);
+      __ vcvtps2ph(xmm6, xmm7, 0);
     }
   }
 
@@ -304,11 +314,11 @@ TEST_F(DisasmX64Test, DisasmX64) {
   USE(code);
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
-  Address begin = code->raw_instruction_start();
-  Address end = code->raw_instruction_end();
-  disasm::Disassembler::Disassemble(stdout, reinterpret_cast<byte*>(begin),
-                                    reinterpret_cast<byte*>(end));
+  Print(*code, os);
+  Address begin = code->instruction_start();
+  Address end = code->instruction_start();
+  disasm::Disassembler::Disassemble(stdout, reinterpret_cast<uint8_t*>(begin),
+                                    reinterpret_cast<uint8_t*>(end));
 #endif
 }
 
@@ -331,7 +341,7 @@ struct DisassemblerTester {
 
   Assembler* assm() { return &assm_; }
 
-  v8::internal::byte buffer_[kAssemblerBufferSize];
+  uint8_t buffer_[kAssemblerBufferSize];
   Assembler assm_;
   disasm::NameConverter converter_;
   disasm::Disassembler disasm;
@@ -407,7 +417,7 @@ TEST_F(DisasmX64Test, DisasmX64CheckOutput) {
   COMPARE("4883448d0c0c         REX.W addq [rbp+rcx*4+0xc],0xc",
           addq(Operand(rbp, rcx, times_4, 12), Immediate(12)));
 
-  COMPARE("400fc8               bswapl rax", bswapl(rax));
+  COMPARE("0fc8                 bswapl rax", bswapl(rax));
   COMPARE("480fcf               REX.W bswapq rdi", bswapq(rdi));
   COMPARE("410fbdc7             bsrl rax,r15", bsrl(rax, r15));
   COMPARE("440fbd0ccd0f670100   bsrl r9,[rcx*8+0x1670f]",
@@ -568,6 +578,8 @@ TEST_F(DisasmX64Test, DisasmX64CheckOutput) {
   COMPARE("4885948b10270000     REX.W testq rdx,[rbx+rcx*4+0x2710]",
           testq(Operand(rbx, rcx, times_4, 10000), rdx));
 
+  COMPARE("48f7ac8b10270000     REX.W imulq [rbx+rcx*4+0x2710]",
+          imulq(Operand(rbx, rcx, times_4, 10000)));
   COMPARE("486bd10c             REX.W imulq rdx,rcx,0xc",
           imulq(rdx, rcx, Immediate(12)));
   COMPARE("4869d1e8030000       REX.W imulq rdx,rcx,0x3e8",
@@ -634,7 +646,7 @@ TEST_F(DisasmX64Test, DisasmX64CheckOutput) {
   COMPARE("4883fb0c             REX.W cmpq rbx,0xc", cmpq(rbx, Immediate(12)));
   COMPARE("4883bc8a102700000c   REX.W cmpq [rdx+rcx*4+0x2710],0xc",
           cmpq(Operand(rdx, rcx, times_4, 10000), Immediate(12)));
-  COMPARE("80f864               cmpb al,0x64", cmpb(rax, Immediate(100)));
+  COMPARE("3c64                 cmpb al,0x64", cmpb(rax, Immediate(100)));
 
   COMPARE("4881cb39300000       REX.W orq rbx,0x3039",
           orq(rbx, Immediate(12345)));
@@ -747,6 +759,15 @@ TEST_F(DisasmX64Test, DisasmX64CheckOutput) {
           cmovq(less_equal, rax, Operand(rdx, 2)));
   COMPARE("480f4f4203           REX.W cmovgq rax,[rdx+0x3]",
           cmovq(greater, rax, Operand(rdx, 3)));
+  COMPARE("4180f803             cmpb r8l,0x3", cmpb(r8, Immediate(0x3)));
+  COMPARE("6681fa1008           cmpw rdx,0x810", cmpw(rdx, Immediate(0x810)));
+  COMPARE("4180e208             andb r10l,0x8", andb(r10, Immediate(0x8)));
+  COMPARE("4181e1ff3f0000       andl r9,0x3fff", andl(r9, Immediate(0x3fff)));
+  COMPARE("4183e30f             andl r11,0xf", andl(r11, Immediate(0xf)));
+  COMPARE("4883c418             REX.W addq rsp,0x18",
+          addq(rsp, Immediate(0x18)));
+  COMPARE("4881c1cd000000       REX.W addq rcx,0xcd",
+          addq(rcx, Immediate(0xcd)));
 }
 
 // This compares just the disassemble instruction (without the hex).
@@ -1424,9 +1445,67 @@ TEST_F(DisasmX64Test, DisasmX64CheckOutputAVX) {
           vbroadcastss(xmm1, Operand(rbx, rcx, times_4, 10000)));
 }
 
+TEST_F(DisasmX64Test, DisasmX64CheckOutputVNNI) {
+  if (!CpuFeatures::IsSupported(AVX_VNNI)) {
+    return;
+  }
+
+  DisassemblerTester t;
+  CpuFeatureScope scope(&t.assm_, AVX_VNNI);
+  COMPARE("c4e26950cb           vpdpbusd xmm1,xmm2,xmm3",
+          vpdpbusd(xmm1, xmm2, xmm3));
+  COMPARE("c4622550c7           vpdpbusd ymm8,ymm11,ymm7",
+          vpdpbusd(ymm8, ymm11, ymm7));
+}
+
+TEST_F(DisasmX64Test, DisasmX64CheckOutputF16C) {
+  if (!CpuFeatures::IsSupported(F16C)) {
+    return;
+  }
+
+  DisassemblerTester t;
+  std::string actual, exp;
+  CpuFeatureScope scope(&t.assm_, F16C);
+
+  COMPARE("c4e27d13c1           vcvtph2ps ymm0,xmm1", vcvtph2ps(ymm0, xmm1));
+  COMPARE("c4e27913d3           vcvtph2ps xmm2,xmm3", vcvtph2ps(xmm2, xmm3));
+  COMPARE("c4e37d1dec00         vcvtps2ph xmm4,ymm5,0x0",
+          vcvtps2ph(xmm4, ymm5, 0));
+  COMPARE("c4e3791dfe00         vcvtps2ph xmm6,xmm7,0x0",
+          vcvtps2ph(xmm6, xmm7, 0));
+}
+
 TEST_F(DisasmX64Test, DisasmX64YMMRegister) {
   if (!CpuFeatures::IsSupported(AVX)) return;
   DisassemblerTester t;
+
+  {
+    CpuFeatureScope fscope(t.assm(), FMA3);
+    COMPARE("c4e26d98cc           vfmadd132ps ymm1,ymm2,ymm4",
+            vfmadd132ps(ymm1, ymm2, ymm4));
+    COMPARE("c4c255a8d9           vfmadd213ps ymm3,ymm5,ymm9",
+            vfmadd213ps(ymm3, ymm5, ymm9));
+    COMPARE("c4e265b8cd           vfmadd231ps ymm1,ymm3,ymm5",
+            vfmadd231ps(ymm1, ymm3, ymm5));
+    COMPARE("c4e26d9ccc           vfnmadd132ps ymm1,ymm2,ymm4",
+            vfnmadd132ps(ymm1, ymm2, ymm4));
+    COMPARE("c4c255acd9           vfnmadd213ps ymm3,ymm5,ymm9",
+            vfnmadd213ps(ymm3, ymm5, ymm9));
+    COMPARE("c4e265bccd           vfnmadd231ps ymm1,ymm3,ymm5",
+            vfnmadd231ps(ymm1, ymm3, ymm5));
+    COMPARE("c4e2ed98cc           vfmadd132pd ymm1,ymm2,ymm4",
+            vfmadd132pd(ymm1, ymm2, ymm4));
+    COMPARE("c4c2d5a8d9           vfmadd213pd ymm3,ymm5,ymm9",
+            vfmadd213pd(ymm3, ymm5, ymm9));
+    COMPARE("c4e2e5b8cd           vfmadd231pd ymm1,ymm3,ymm5",
+            vfmadd231pd(ymm1, ymm3, ymm5));
+    COMPARE("c4e2ed9ccc           vfnmadd132pd ymm1,ymm2,ymm4",
+            vfnmadd132pd(ymm1, ymm2, ymm4));
+    COMPARE("c4c2d5acd9           vfnmadd213pd ymm3,ymm5,ymm9",
+            vfnmadd213pd(ymm3, ymm5, ymm9));
+    COMPARE("c4e2e5bccd           vfnmadd231pd ymm1,ymm3,ymm5",
+            vfnmadd231pd(ymm1, ymm3, ymm5));
+  }
 
   {
     CpuFeatureScope fscope(t.assm(), AVX);
@@ -1439,12 +1518,23 @@ TEST_F(DisasmX64Test, DisasmX64YMMRegister) {
             vhaddps(ymm0, ymm1, Operand(rbx, rcx, times_4, 10000)));
     COMPARE("c4e27d18bc8b10270000 vbroadcastss ymm7,[rbx+rcx*4+0x2710]",
             vbroadcastss(ymm7, Operand(rbx, rcx, times_4, 10000)));
+    COMPARE("c4e27d19b48b10270000 vbroadcastsd ymm6,[rbx+rcx*4+0x2710]",
+            vbroadcastsd(ymm6, Operand(rbx, rcx, times_4, 10000)));
     COMPARE("c5ff12da             vmovddup ymm3,ymm2", vmovddup(ymm3, ymm2));
     COMPARE("c5ff12a48b10270000   vmovddup ymm4,[rbx+rcx*4+0x2710]",
             vmovddup(ymm4, Operand(rbx, rcx, times_4, 10000)));
     COMPARE("c5fe16ca             vmovshdup ymm1,ymm2", vmovshdup(ymm1, ymm2));
     COMPARE("c5f4c6da73           vshufps ymm3,ymm1,ymm2,0x73",
             vshufps(ymm3, ymm1, ymm2, 115));
+    COMPARE("c5fee6ca             vcvtdq2pd ymm1,xmm2", vcvtdq2pd(ymm1, xmm2));
+    COMPARE("c5fee68c8b10270000   vcvtdq2pd ymm1,[rbx+rcx*4+0x2710]",
+            vcvtdq2pd(ymm1, Operand(rbx, rcx, times_4, 10000)));
+    COMPARE("c5fe5bda             vcvttps2dq ymm3,ymm2",
+            vcvttps2dq(ymm3, ymm2));
+    COMPARE("c5fe5b9c8b10270000   vcvttps2dq ymm3,[rbx+rcx*4+0x2710]",
+            vcvttps2dq(ymm3, Operand256(rbx, rcx, times_4, 10000)));
+    COMPARE("c4e36d06cb02         vperm2f128 ymm1,ymm2,ymm3,0x2",
+            vperm2f128(ymm1, ymm2, ymm3, 2));
 
     // vcmp
     COMPARE("c5dcc2e900           vcmpps ymm5,ymm4,ymm1, (eq)",
@@ -1463,6 +1553,9 @@ TEST_F(DisasmX64Test, DisasmX64YMMRegister) {
             vcmpnlepd(ymm5, ymm4, Operand(rbx, rcx, times_4, 10000)));
     COMPARE("c5dcc2e90d           vcmpps ymm5,ymm4,ymm1, (ge)",
             vcmpgeps(ymm5, ymm4, ymm1));
+    COMPARE("c4e27d17f9           vptest ymm7,ymm1", vptest(ymm7, ymm1));
+    COMPARE("c4627d17948b10270000 vptest ymm10,[rbx+rcx*4+0x2710]",
+            vptest(ymm10, Operand(rbx, rcx, times_4, 10000)));
 
     // SSE2_UNOP
     COMPARE("c5fd51ca             vsqrtpd ymm1,ymm2", vsqrtpd(ymm1, ymm2));
@@ -1487,6 +1580,8 @@ TEST_F(DisasmX64Test, DisasmX64YMMRegister) {
     // Short immediate instructions
     COMPARE("c4e27d18d1           vbroadcastss ymm2,xmm1",
             vbroadcastss(ymm2, xmm1));
+    COMPARE("c4e27d19f1           vbroadcastsd ymm6,xmm1",
+            vbroadcastsd(ymm6, xmm1));
     COMPARE("c4e27d789c8b10270000 vpbroadcastb ymm3,[rbx+rcx*4+0x2710]",
             vpbroadcastb(ymm3, Operand(rbx, rcx, times_4, 10000)));
     COMPARE("c4e27d79d3           vpbroadcastw ymm2,xmm3",
@@ -1500,6 +1595,24 @@ TEST_F(DisasmX64Test, DisasmX64YMMRegister) {
             vpabsb(ymm3, Operand(rbx, rcx, times_4, 10000)));
     COMPARE("c4e27d1df5           vpabsw ymm6,ymm5", vpabsw(ymm6, ymm5));
     COMPARE("c4c27d1efa           vpabsd ymm7,ymm10", vpabsd(ymm7, ymm10));
+    COMPARE("c4e3fd00ebd8         vpermq ymm5,ymm3,0xd8",
+            vpermq(ymm5, ymm3, 0xD8));
+    COMPARE("c463fd00848b102700001e vpermq ymm8,[rbx+rcx*4+0x2710],0x1e",
+            vpermq(ymm8, Operand(rbx, rcx, times_4, 10000), 0x1E));
+
+    // SSE4_UNOP
+    COMPARE("c4e27d20f5           vpmovsxbw ymm6,ymm5", vpmovsxbw(ymm6, ymm5));
+    COMPARE("c4e27d238c8b10270000 vpmovsxwd ymm1,[rbx+rcx*4+0x2710]",
+            vpmovsxwd(ymm1, Operand(rbx, rcx, times_4, 10000)));
+    COMPARE("c4627d25f6           vpmovsxdq ymm14,ymm6",
+            vpmovsxdq(ymm14, ymm6));
+    COMPARE("c4e27d30848b10270000 vpmovzxbw ymm0,[rbx+rcx*4+0x2710]",
+            vpmovzxbw(ymm0, Operand(rbx, rcx, times_4, 10000)));
+    COMPARE("c4627d31f6           vpmovzxbd ymm14,ymm6",
+            vpmovzxbd(ymm14, ymm6));
+    COMPARE("c4e27d33bc8b10270000 vpmovzxwd ymm7,[rbx+rcx*4+0x2710]",
+            vpmovzxwd(ymm7, Operand(rbx, rcx, times_4, 10000)));
+    COMPARE("c4627d35c6           vpmovzxdq ymm8,ymm6", vpmovzxdq(ymm8, ymm6));
   }
 }
 

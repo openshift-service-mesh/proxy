@@ -95,20 +95,9 @@
   %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
 
-  // This is expected to deoptimize
+  // We optimize in the next call and  sum_js stays inlined.
   assertEquals(45.31, foo(16.11, 26.06));
-  assertTrue(sum_js_got_interpreted);
-  assertUnoptimized(foo);
-
-  // Optimize again
-  %PrepareFunctionForOptimization(foo);
-  assertEquals(45.31, foo(16.11, 26.06));
-  %OptimizeFunctionOnNextCall(foo);
-  assertTrue(sum_js_got_interpreted);
-
-  // This should stay optimized, but with the call not inlined.
-  assertEquals(45.31, foo(16.11, 26.06));
-  assertTrue(sum_js_got_interpreted);
+  assertFalse(sum_js_got_interpreted);
   assertOptimized(foo);
 })();
 
@@ -218,6 +207,62 @@
   assertEquals(42, foo());
   assertFalse(got_interpreted);
   assertOptimized(foo);
+})();
+
+// Test with FixedDoubleArray and Math.min/max.
+(function () {
+  "use strict";
+  function arrayMin(val) {
+    return Math.min.apply(Math, val);
+  }
+  function arrayMax(val) {
+    return Math.max.apply(Math, val);
+  }
+
+  %PrepareFunctionForOptimization(arrayMin);
+  %PrepareFunctionForOptimization(arrayMin);
+  assertEquals(11.03, arrayMin([11.03, 16.11, 26.06]));
+
+  %PrepareFunctionForOptimization(arrayMax);
+  %PrepareFunctionForOptimization(arrayMax);
+  assertEquals(26.06, arrayMax([11.03, 16.11, 26.06]));
+  %OptimizeFunctionOnNextCall(arrayMin);
+  %OptimizeFunctionOnNextCall(arrayMax);
+
+  assertEquals(11.03, arrayMin([11.03, 16.11, 26.06]));
+  assertEquals(26.06, arrayMax([11.03, 16.11, 26.06]));
+
+  assertOptimized(arrayMin);
+  assertOptimized(arrayMax);
+
+})();
+
+// Test with holey double array and Math.min/max.
+(function () {
+  "use strict";
+  function arrayMin(val) {
+    return Math.min.apply(Math, val);
+  }
+  function arrayMax(val) {
+    return Math.max.apply(Math, val);
+  }
+
+  %PrepareFunctionForOptimization(arrayMin);
+  %PrepareFunctionForOptimization(arrayMin);
+  assertEquals(NaN, arrayMin([11.03, 16.11, , 26.06]));
+
+  %PrepareFunctionForOptimization(arrayMax);
+  %PrepareFunctionForOptimization(arrayMax);
+  assertEquals(NaN, arrayMax([11.03, 16.11, , 26.06]));
+  %OptimizeFunctionOnNextCall(arrayMin);
+  %OptimizeFunctionOnNextCall(arrayMax);
+
+  assertEquals(NaN, arrayMin([11.03, 16.11, , 26.06]));
+  assertEquals(NaN, arrayMax([11.03, 16.11, , 26.06]));
+
+  assertOptimized(arrayMin);
+  assertOptimized(arrayMax);
+
 })();
 
 // Test Reflect.apply().
