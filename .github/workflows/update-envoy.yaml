@@ -1,0 +1,42 @@
+name: Update Envoy
+
+on:
+  schedule:
+    - cron: "10 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to update"
+        default: "release-1.27"
+        required: true
+
+env:
+  GIT_USER: ${{ secrets.GIT_USER }}
+  GH_TOKEN: ${{ secrets.GIT_TOKEN }}
+  AUTOMATOR_BRANCH:  ${{ inputs.branch || 'release-1.27' }}
+
+jobs:
+  update-envoy:
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/maistra-dev/maistra-builder:3.2
+      options: --entrypoint ''
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: istio/test-infra
+        ref: master
+
+    - name: Run Automator
+      run: |
+        ./tools/automator/automator.sh \
+          --org=openshift-service-mesh \
+          --repo=proxy \
+          --branch=$AUTOMATOR_BRANCH \
+          '--title=[$AUTOMATOR_BRANCH] Automator: Update Envoy' \
+          --labels=auto-merge \
+          --email=openshiftservicemeshbot@gmail.com \
+          --modifier=update_envoy \
+          --token-env \
+          --cmd='make ossm-update-everything'
