@@ -408,7 +408,7 @@ _packages = [
     ("base_pip3_dependatool", "dependatool==0.2.3 --hash=sha256:04bf88d01302eec697a69e8301d14668a89d676dbd2a3914e91c610a531e9db7 --hash=sha256:113a6641889d3dae7c81cb0a0483c31a2657f179474e11f4731b285963475ade"),
     ("base_pip3_deprecated", "deprecated==1.2.14 --hash=sha256:6fac8b097794a90302bdbb17b9b815e732d3c4720583ff1b198499d78470466c --hash=sha256:e5323eb936458dccc2582dc6f9c322c852a775a27065ff2b0c4970b9d53d01b3"),
     ("base_pip3_docutils", "docutils==0.21.2 --hash=sha256:3a6b18732edf182daa3cd12775bbb338cf5691468f91eeeb109deff6ebfa986f --hash=sha256:dafca5b9e384f0e419294eb4d2ff9fa826435bf15f15b7bd45723e8ad76811b2"),
-    ("base_pip3_envoy_base_utils", "envoy-base-utils==0.5.10 --hash=sha256:3e8be734b4fd27e798ea08e772e2a4df7965d3c7af04b4ab3c06a2aafda7b48c --hash=sha256:910349b02cc502eb6a2904dbd4925b690dcd9fc0479cbe40f89c75acbeaf37fc"),
+    ("base_pip3_envoy_base_utils", "envoy-base-utils==0.5.11 --hash=sha256:008ebe43ecbde736e8033a34242659ff784caf50cc3301b1d3214899e31fa83d --hash=sha256:be942364a42d92439281700486cf5040bdbcf3786a4e1dbcc9ea0af033a7e47e"),
     ("base_pip3_envoy_ci_report", "envoy-ci-report==0.0.3 --hash=sha256:1c4bf3cb9f92117eb482186ea4fa58ff15e26641cdaeeae45bb826ae8454859e --hash=sha256:cc59d0980330a4b73cfcaba2a1b5050348c1d6530baffeb354dccea3e46672d2"),
     ("base_pip3_envoy_code_check", "envoy-code-check==0.5.14 --hash=sha256:56ed152ba633b8d6846509424a4dc94996ed0eb3d656495ec2b32a94144ed904 --hash=sha256:83cce34e3c2ee3d1b9a375922ee0d08fedbd8d3621f72d3ee55dd0a7d26a0e0e"),
     ("base_pip3_envoy_dependency_check", "envoy-dependency-check==0.1.13 --hash=sha256:4337b9c4129ae723dc92f70733b167a8dde187368d873687c6c54732d6fb5e48 --hash=sha256:795e885eccd072d7878dc8ce11fe9f84761f0e449603e583fdab5e9e17111af2"),
