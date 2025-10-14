@@ -19,13 +19,14 @@
 #ifndef GRPC_SRC_CORE_LIB_GPRPP_REF_COUNTED_H
 #define GRPC_SRC_CORE_LIB_GPRPP_REF_COUNTED_H
 
-#include <grpc/support/port_platform.h>
-
 #include <atomic>
 #include <cassert>
 #include <cinttypes>
 
-#include <grpc/support/log.h>
+#include "absl/log/check.h"
+#include "absl/log/log.h"
+
+#include <grpc/support/port_platform.h>
 
 #include "src/core/lib/gprpp/atomic_utils.h"
 #include "src/core/lib/gprpp/debug_location.h"
@@ -72,8 +73,8 @@ class RefCount {
 #ifndef NDEBUG
     const Value prior = value_.fetch_add(n, std::memory_order_relaxed);
     if (trace_ != nullptr) {
-      gpr_log(GPR_INFO, "%s:%p ref %" PRIdPTR " -> %" PRIdPTR, trace_, this,
-              prior, prior + n);
+      LOG(INFO) << trace_ << ":" << this << " ref " << prior << " -> "
+                << prior + n;
     }
 #else
     value_.fetch_add(n, std::memory_order_relaxed);
@@ -83,9 +84,9 @@ class RefCount {
 #ifndef NDEBUG
     const Value prior = value_.fetch_add(n, std::memory_order_relaxed);
     if (trace_ != nullptr) {
-      gpr_log(GPR_INFO, "%s:%p %s:%d ref %" PRIdPTR " -> %" PRIdPTR " %s",
-              trace_, this, location.file(), location.line(), prior, prior + n,
-              reason);
+      LOG(INFO) << trace_ << ":" << this << " " << location.file() << ":"
+                << location.line() << " ref " << prior << " -> " << prior + n
+                << " " << reason;
     }
 #else
     // Use conditionally-important parameters
@@ -100,8 +101,8 @@ class RefCount {
 #ifndef NDEBUG
     const Value prior = value_.fetch_add(1, std::memory_order_relaxed);
     if (trace_ != nullptr) {
-      gpr_log(GPR_INFO, "%s:%p ref %" PRIdPTR " -> %" PRIdPTR, trace_, this,
-              prior, prior + 1);
+      LOG(INFO) << trace_ << ":" << this << " ref " << prior << " -> "
+                << prior + 1;
     }
     assert(prior > 0);
 #else
@@ -112,9 +113,9 @@ class RefCount {
 #ifndef NDEBUG
     const Value prior = value_.fetch_add(1, std::memory_order_relaxed);
     if (trace_ != nullptr) {
-      gpr_log(GPR_INFO, "%s:%p %s:%d ref %" PRIdPTR " -> %" PRIdPTR " %s",
-              trace_, this, location.file(), location.line(), prior, prior + 1,
-              reason);
+      LOG(INFO) << trace_ << ":" << this << " " << location.file() << ":"
+                << location.line() << " ref " << prior << " -> " << prior + 1
+                << " " << reason;
     }
     assert(prior > 0);
 #else
@@ -129,8 +130,8 @@ class RefCount {
 #ifndef NDEBUG
     if (trace_ != nullptr) {
       const Value prior = get();
-      gpr_log(GPR_INFO, "%s:%p ref_if_non_zero %" PRIdPTR " -> %" PRIdPTR,
-              trace_, this, prior, prior + 1);
+      LOG(INFO) << trace_ << ":" << this << " ref_if_non_zero " << prior
+                << " -> " << prior + 1;
     }
 #endif
     return IncrementIfNonzero(&value_);
@@ -139,10 +140,9 @@ class RefCount {
 #ifndef NDEBUG
     if (trace_ != nullptr) {
       const Value prior = get();
-      gpr_log(GPR_INFO,
-              "%s:%p %s:%d ref_if_non_zero %" PRIdPTR " -> %" PRIdPTR " %s",
-              trace_, this, location.file(), location.line(), prior, prior + 1,
-              reason);
+      LOG(INFO) << trace_ << ":" << this << " " << location.file() << ":"
+                << location.line() << " ref_if_non_zero " << prior << " -> "
+                << prior + 1 << " " << reason;
     }
 #endif
     // Avoid unused-parameter warnings for debug-only parameters
@@ -162,10 +162,10 @@ class RefCount {
     const Value prior = value_.fetch_sub(1, std::memory_order_acq_rel);
 #ifndef NDEBUG
     if (trace != nullptr) {
-      gpr_log(GPR_INFO, "%s:%p unref %" PRIdPTR " -> %" PRIdPTR, trace, this,
-              prior, prior - 1);
+      LOG(INFO) << trace << ":" << this << " unref " << prior << " -> "
+                << prior - 1;
     }
-    GPR_DEBUG_ASSERT(prior > 0);
+    DCHECK_GT(prior, 0);
 #endif
     return prior == 1;
   }
@@ -179,11 +179,11 @@ class RefCount {
     const Value prior = value_.fetch_sub(1, std::memory_order_acq_rel);
 #ifndef NDEBUG
     if (trace != nullptr) {
-      gpr_log(GPR_INFO, "%s:%p %s:%d unref %" PRIdPTR " -> %" PRIdPTR " %s",
-              trace, this, location.file(), location.line(), prior, prior - 1,
-              reason);
+      LOG(INFO) << trace << ":" << this << " " << location.file() << ":"
+                << location.line() << " unref " << prior << " -> " << prior - 1
+                << " " << reason;
     }
-    GPR_DEBUG_ASSERT(prior > 0);
+    DCHECK_GT(prior, 0);
 #else
     // Avoid unused-parameter warnings for debug-only parameters
     (void)location;
@@ -242,6 +242,15 @@ struct UnrefCallDtor {
   template <typename T>
   void operator()(T* p) const {
     p->~T();
+  }
+};
+
+// Call the Destroy method on the object. This is useful when the object
+// needs precise control of how it's deallocated.
+struct UnrefCallDestroy {
+  template <typename T>
+  void operator()(T* p) const {
+    p->Destroy();
   }
 };
 

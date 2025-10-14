@@ -17,7 +17,7 @@ Generate one e2e test & associated fuzzer
 """
 
 load("//bazel:grpc_build_system.bzl", "grpc_cc_library", "grpc_cc_test")
-load("//test/core/util:grpc_fuzzer.bzl", "grpc_proto_fuzzer")
+load("//test/core/test_util:grpc_fuzzer.bzl", "grpc_proto_fuzzer")
 
 END2END_TEST_DATA = [
     "//src/core/tsi/test_creds:ca.pem",
@@ -43,6 +43,9 @@ def grpc_core_end2end_test(name, shard_count = 10, tags = []):
         srcs = [
             "tests/%s.cc" % name,
         ],
+        external_deps = [
+            "absl/log:log",
+        ],
         deps = [
             "cq_verifier",
             "end2end_test_lib",
@@ -60,7 +63,6 @@ def grpc_core_end2end_test(name, shard_count = 10, tags = []):
             "//:grpc_security_base",
             "//:grpc_trace",
             "//:grpc_unsecure",
-            "//:legacy_context",
             "//:orphanable",
             "//:promise",
             "//:ref_counted_ptr",
@@ -86,9 +88,9 @@ def grpc_core_end2end_test(name, shard_count = 10, tags = []):
             "//src/core:stats_data",
             "//src/core:status_helper",
             "//src/core:time",
-            "//test/core/util:fake_stats_plugin",
-            "//test/core/util:grpc_test_util",
-            "//test/core/util:test_lb_policies",
+            "//test/core/test_util:fake_stats_plugin",
+            "//test/core/test_util:grpc_test_util",
+            "//test/core/test_util:test_lb_policies",
         ],
     )
 
@@ -109,7 +111,7 @@ def grpc_core_end2end_test(name, shard_count = 10, tags = []):
             "end2end_test_main",
             "%s_library" % name,
         ],
-        tags = ["core_end2end_test"] + tags,
+        tags = ["core_end2end_test", "thready_tsan"] + tags,
     )
 
     grpc_proto_fuzzer(

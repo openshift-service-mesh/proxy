@@ -23,16 +23,21 @@
 #
 ###########################################################################
 
+use strict;
+use warnings;
+
 my $root=$ARGV[0] || "..";
 
 my @m = `git ls-files -- $root`;
 
-my $errors;
+my $errors = 0;
 
 my %accepted=('curl' => 1,
               'libcurl' => 1,
               'macOS' => 1,
+              'wolfSSL' => 1,
               'mbedTLS' => 1,
+              'rustls' => 1,
               'c-ares' => 1);
 
 sub checkfile {
@@ -43,7 +48,7 @@ sub checkfile {
     }
     open(my $fh, "<", "$f");
     my $l;
-    my $prevl;
+    my $prevl = '';
     my $ignore = 0;
     my $metadata = 0;
     while(<$fh>) {

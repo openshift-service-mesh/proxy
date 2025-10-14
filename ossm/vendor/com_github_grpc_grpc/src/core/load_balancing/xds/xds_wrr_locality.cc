@@ -14,14 +14,13 @@
 // limitations under the License.
 //
 
-#include <grpc/support/port_platform.h>
-
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
 
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -31,8 +30,8 @@
 #include <grpc/impl/connectivity_state.h>
 #include <grpc/support/json.h>
 #include <grpc/support/log.h>
+#include <grpc/support/port_platform.h>
 
-#include "src/core/ext/xds/xds_client_stats.h"
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/config/core_configuration.h"
 #include "src/core/lib/debug/trace.h"
@@ -42,20 +41,19 @@
 #include "src/core/lib/gprpp/ref_counted_string.h"
 #include "src/core/lib/gprpp/validation_errors.h"
 #include "src/core/lib/iomgr/pollset_set.h"
-#include "src/core/lib/json/json.h"
-#include "src/core/lib/json/json_args.h"
-#include "src/core/lib/json/json_object_loader.h"
-#include "src/core/lib/json/json_writer.h"
 #include "src/core/load_balancing/delegating_helper.h"
 #include "src/core/load_balancing/lb_policy.h"
 #include "src/core/load_balancing/lb_policy_factory.h"
 #include "src/core/load_balancing/lb_policy_registry.h"
 #include "src/core/load_balancing/xds/xds_channel_args.h"
 #include "src/core/resolver/endpoint_addresses.h"
+#include "src/core/util/json/json.h"
+#include "src/core/util/json/json_args.h"
+#include "src/core/util/json/json_object_loader.h"
+#include "src/core/util/json/json_writer.h"
+#include "src/core/xds/xds_client/xds_client_stats.h"
 
 namespace grpc_core {
-
-TraceFlag grpc_xds_wrr_locality_lb_trace(false, "xds_wrr_locality_lb");
 
 namespace {
 
@@ -138,14 +136,14 @@ XdsWrrLocalityLb::XdsWrrLocalityLb(Args args)
     : LoadBalancingPolicy(std::move(args)) {}
 
 XdsWrrLocalityLb::~XdsWrrLocalityLb() {
-  if (GRPC_TRACE_FLAG_ENABLED(grpc_xds_wrr_locality_lb_trace)) {
-    gpr_log(GPR_INFO, "[xds_wrr_locality_lb %p] destroying", this);
+  if (GRPC_TRACE_FLAG_ENABLED(xds_wrr_locality_lb)) {
+    LOG(INFO) << "[xds_wrr_locality_lb " << this << "] destroying";
   }
 }
 
 void XdsWrrLocalityLb::ShutdownLocked() {
-  if (GRPC_TRACE_FLAG_ENABLED(grpc_xds_wrr_locality_lb_trace)) {
-    gpr_log(GPR_INFO, "[xds_wrr_locality_lb %p] shutting down", this);
+  if (GRPC_TRACE_FLAG_ENABLED(xds_wrr_locality_lb)) {
+    LOG(INFO) << "[xds_wrr_locality_lb " << this << "] shutting down";
   }
   if (child_policy_ != nullptr) {
     grpc_pollset_set_del_pollset_set(child_policy_->interested_parties(),
@@ -163,8 +161,8 @@ void XdsWrrLocalityLb::ResetBackoffLocked() {
 }
 
 absl::Status XdsWrrLocalityLb::UpdateLocked(UpdateArgs args) {
-  if (GRPC_TRACE_FLAG_ENABLED(grpc_xds_wrr_locality_lb_trace)) {
-    gpr_log(GPR_INFO, "[xds_wrr_locality_lb %p] Received update", this);
+  if (GRPC_TRACE_FLAG_ENABLED(xds_wrr_locality_lb)) {
+    LOG(INFO) << "[xds_wrr_locality_lb " << this << "] Received update";
   }
   auto config = args.config.TakeAsSubclass<XdsWrrLocalityLbConfig>();
   // Scan the addresses to find the weight for each locality.
@@ -178,10 +176,10 @@ absl::Status XdsWrrLocalityLb::UpdateLocked(UpdateArgs args) {
         auto p = locality_weights.emplace(
             locality_name->human_readable_string(), weight);
         if (!p.second && p.first->second != weight) {
-          gpr_log(GPR_ERROR,
-                  "INTERNAL ERROR: xds_wrr_locality found different weights "
-                  "for locality %s (%u vs %u); using first value",
-                  p.first->first.c_str(), p.first->second, weight);
+          LOG(ERROR) << "INTERNAL ERROR: xds_wrr_locality found different "
+                        "weights for locality "
+                     << p.first->first.c_str() << " (" << p.first->second
+                     << " vs " << weight << "); using first value";
         }
       }
     });
@@ -205,10 +203,10 @@ absl::Status XdsWrrLocalityLb::UpdateLocked(UpdateArgs args) {
            })},
       }),
   });
-  if (GRPC_TRACE_FLAG_ENABLED(grpc_xds_wrr_locality_lb_trace)) {
-    gpr_log(GPR_INFO,
-            "[xds_wrr_locality_lb %p] generated child policy config: %s", this,
-            JsonDump(child_config_json, /*indent=*/1).c_str());
+  if (GRPC_TRACE_FLAG_ENABLED(xds_wrr_locality_lb)) {
+    LOG(INFO) << "[xds_wrr_locality_lb " << this
+              << "] generated child policy config: "
+              << JsonDump(child_config_json, /*indent=*/1);
   }
   // Parse config.
   auto child_config =
@@ -217,10 +215,10 @@ absl::Status XdsWrrLocalityLb::UpdateLocked(UpdateArgs args) {
   if (!child_config.ok()) {
     // This should never happen, but if it does, we basically have no
     // way to fix it, so we put the channel in TRANSIENT_FAILURE.
-    gpr_log(GPR_ERROR,
-            "[xds_wrr_locality %p] error parsing generated child policy "
-            "config -- putting channel in TRANSIENT_FAILURE: %s",
-            this, child_config.status().ToString().c_str());
+    LOG(ERROR) << "[xds_wrr_locality " << this
+               << "] error parsing generated child policy config -- putting "
+                  "channel in TRANSIENT_FAILURE: "
+               << child_config.status();
     absl::Status status = absl::InternalError(absl::StrCat(
         "xds_wrr_locality LB policy: error parsing generated child policy "
         "config: ",
@@ -241,9 +239,9 @@ absl::Status XdsWrrLocalityLb::UpdateLocked(UpdateArgs args) {
   update_args.resolution_note = std::move(args.resolution_note);
   update_args.args = std::move(args.args);
   // Update the policy.
-  if (GRPC_TRACE_FLAG_ENABLED(grpc_xds_wrr_locality_lb_trace)) {
-    gpr_log(GPR_INFO, "[xds_wrr_locality_lb %p] updating child policy %p", this,
-            child_policy_.get());
+  if (GRPC_TRACE_FLAG_ENABLED(xds_wrr_locality_lb)) {
+    LOG(INFO) << "[xds_wrr_locality_lb " << this << "] updating child policy "
+              << child_policy_.get();
   }
   return child_policy_->UpdateLocked(std::move(update_args));
 }
@@ -258,9 +256,9 @@ OrphanablePtr<LoadBalancingPolicy> XdsWrrLocalityLb::CreateChildPolicyLocked(
   auto lb_policy =
       CoreConfiguration::Get().lb_policy_registry().CreateLoadBalancingPolicy(
           "weighted_target_experimental", std::move(lb_policy_args));
-  if (GRPC_TRACE_FLAG_ENABLED(grpc_xds_wrr_locality_lb_trace)) {
-    gpr_log(GPR_INFO, "[xds_wrr_locality_lb %p] created new child policy %p",
-            this, lb_policy.get());
+  if (GRPC_TRACE_FLAG_ENABLED(xds_wrr_locality_lb)) {
+    LOG(INFO) << "[xds_wrr_locality_lb " << this
+              << "] created new child policy " << lb_policy.get();
   }
   // Add our interested_parties pollset_set to that of the newly created
   // child policy. This will make the child policy progress upon activity on

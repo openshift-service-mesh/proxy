@@ -19,6 +19,8 @@
 #include <mutex>
 #include <thread>
 
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
@@ -26,7 +28,6 @@
 
 #include <grpc/grpc.h>
 #include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
 #include <grpc/support/time.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
@@ -49,8 +50,8 @@
 #include "src/core/lib/security/credentials/credentials.h"
 #include "src/proto/grpc/testing/duplicate/echo_duplicate.grpc.pb.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/end2end/interceptors_util.h"
 #include "test/cpp/end2end/test_service_impl.h"
 #include "test/cpp/util/string_ref_helper.h"
@@ -537,7 +538,7 @@ class End2endServerTryCancelTest : public End2endTest {
       }
       num_msgs_sent++;
     }
-    gpr_log(GPR_INFO, "Sent %d messages", num_msgs_sent);
+    LOG(INFO) << "Sent " << num_msgs_sent << " messages";
 
     stream->WritesDone();
     Status s = stream->Finish();
@@ -565,8 +566,7 @@ class End2endServerTryCancelTest : public End2endTest {
         break;
 
       default:
-        gpr_log(GPR_ERROR, "Invalid server_try_cancel value: %d",
-                server_try_cancel);
+        LOG(ERROR) << "Invalid server_try_cancel value: " << server_try_cancel;
         EXPECT_TRUE(server_try_cancel > DO_NOT_CANCEL &&
                     server_try_cancel <= CANCEL_AFTER_PROCESSING);
         break;
@@ -617,7 +617,7 @@ class End2endServerTryCancelTest : public End2endTest {
                 request.message() + std::to_string(num_msgs_read));
       num_msgs_read++;
     }
-    gpr_log(GPR_INFO, "Read %d messages", num_msgs_read);
+    LOG(INFO) << "Read " << num_msgs_read << " messages";
 
     Status s = stream->Finish();
 
@@ -646,8 +646,7 @@ class End2endServerTryCancelTest : public End2endTest {
         break;
 
       default: {
-        gpr_log(GPR_ERROR, "Invalid server_try_cancel value: %d",
-                server_try_cancel);
+        LOG(ERROR) << "Invalid server_try_cancel value: " << server_try_cancel;
         EXPECT_TRUE(server_try_cancel > DO_NOT_CANCEL &&
                     server_try_cancel <= CANCEL_AFTER_PROCESSING);
         break;
@@ -704,8 +703,8 @@ class End2endServerTryCancelTest : public End2endTest {
 
       EXPECT_EQ(response.message(), request.message());
     }
-    gpr_log(GPR_INFO, "Sent %d messages", num_msgs_sent);
-    gpr_log(GPR_INFO, "Read %d messages", num_msgs_read);
+    LOG(INFO) << "Sent " << num_msgs_sent << " messages";
+    LOG(INFO) << "Read " << num_msgs_read << " messages";
 
     stream->WritesDone();
     Status s = stream->Finish();
@@ -734,8 +733,7 @@ class End2endServerTryCancelTest : public End2endTest {
         break;
 
       default:
-        gpr_log(GPR_ERROR, "Invalid server_try_cancel value: %d",
-                server_try_cancel);
+        LOG(ERROR) << "Invalid server_try_cancel value: " << server_try_cancel;
         EXPECT_TRUE(server_try_cancel > DO_NOT_CANCEL &&
                     server_try_cancel <= CANCEL_AFTER_PROCESSING);
         break;
@@ -1352,7 +1350,7 @@ void ReaderThreadFunc(ClientReaderWriter<EchoRequest, EchoResponse>* stream,
   EchoResponse resp;
   gpr_event_set(ev, reinterpret_cast<void*>(1));
   while (stream->Read(&resp)) {
-    gpr_log(GPR_INFO, "Read message");
+    LOG(INFO) << "Read message";
   }
 }
 
@@ -1746,8 +1744,8 @@ TEST_P(ProxyEnd2endTest, Peer) {
 class SecureEnd2endTest : public End2endTest {
  protected:
   SecureEnd2endTest() {
-    GPR_ASSERT(!GetParam().use_proxy());
-    GPR_ASSERT(GetParam().credentials_type() != kInsecureCredentialsType);
+    CHECK(!GetParam().use_proxy());
+    CHECK(GetParam().credentials_type() != kInsecureCredentialsType);
   }
 };
 
@@ -2279,7 +2277,7 @@ std::vector<TestScenario> CreateTestScenarios(bool use_proxy,
   }
 
   // Test callback with inproc or if the event-engine allows it
-  GPR_ASSERT(!credentials_types.empty());
+  CHECK(!credentials_types.empty());
   for (const auto& cred : credentials_types) {
     scenarios.emplace_back(false, false, false, cred, false);
     scenarios.emplace_back(true, false, false, cred, false);

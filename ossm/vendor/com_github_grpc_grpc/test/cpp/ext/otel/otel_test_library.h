@@ -33,10 +33,10 @@
 #include <grpcpp/generic/generic_stub.h>
 #include <grpcpp/grpcpp.h>
 
-#include "src/core/lib/channel/call_tracer.h"
 #include "src/core/lib/config/core_configuration.h"
+#include "src/core/telemetry/call_tracer.h"
 #include "src/cpp/ext/otel/otel_plugin.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/end2end/test_service_impl.h"
 
 namespace grpc {
@@ -86,6 +86,11 @@ class OpenTelemetryPluginEnd2EndTest : public ::testing::Test {
       return *this;
     }
 
+    Options& set_service_config(std::string svc_cfg) {
+      service_config = std::move(svc_cfg);
+      return *this;
+    }
+
     Options& set_channel_scope_filter(
         absl::AnyInvocable<bool(
             const OpenTelemetryPluginBuilder::ChannelScope& /*scope*/) const>
@@ -127,6 +132,18 @@ class OpenTelemetryPluginEnd2EndTest : public ::testing::Test {
       return *this;
     }
 
+    Options& add_per_channel_stats_plugin(
+        std::shared_ptr<grpc::experimental::OpenTelemetryPlugin> plugin) {
+      per_channel_stats_plugins.emplace_back(std::move(plugin));
+      return *this;
+    }
+
+    Options& add_per_server_stats_plugin(
+        std::shared_ptr<grpc::experimental::OpenTelemetryPlugin> plugin) {
+      per_server_stats_plugins.emplace_back(std::move(plugin));
+      return *this;
+    }
+
     std::vector<absl::string_view> metric_names;
     // TODO(yashykt): opentelemetry::sdk::resource::Resource doesn't have a copy
     // assignment operator so wrapping it in a unique_ptr till it is fixed.
@@ -138,6 +155,7 @@ class OpenTelemetryPluginEnd2EndTest : public ::testing::Test {
     std::map<grpc_core::ClientCallTracer::CallAttemptTracer::OptionalLabelKey,
              grpc_core::RefCountedStringValue>
         labels_to_inject;
+    std::string service_config;
     absl::AnyInvocable<bool(
         const OpenTelemetryPluginBuilder::ChannelScope& /*scope*/) const>
         channel_scope_filter;
@@ -152,6 +170,10 @@ class OpenTelemetryPluginEnd2EndTest : public ::testing::Test {
         std::unique_ptr<grpc::internal::InternalOpenTelemetryPluginOption>>
         plugin_options;
     absl::flat_hash_set<absl::string_view> optional_label_keys;
+    std::vector<std::shared_ptr<grpc::experimental::OpenTelemetryPlugin>>
+        per_channel_stats_plugins;
+    std::vector<std::shared_ptr<grpc::experimental::OpenTelemetryPlugin>>
+        per_server_stats_plugins;
   };
 
   class MetricsCollectorThread {
@@ -177,6 +199,11 @@ class OpenTelemetryPluginEnd2EndTest : public ::testing::Test {
     std::thread thread_;
   };
 
+  static std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>
+  ConfigureOTBuilder(
+      OpenTelemetryPluginEnd2EndTest::Options options,
+      grpc::internal::OpenTelemetryPluginBuilderImpl* ot_builder);
+
   // Note that we can't use SetUp() here since we want to send in parameters.
   void Init(Options config);
 
@@ -186,6 +213,10 @@ class OpenTelemetryPluginEnd2EndTest : public ::testing::Test {
 
   void SendRPC();
   void SendGenericRPC();
+
+  std::pair<std::shared_ptr<grpc::experimental::OpenTelemetryPlugin>,
+            std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>>
+  BuildOpenTelemetryPlugin(OpenTelemetryPluginEnd2EndTest::Options options);
 
   std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>
   BuildAndRegisterOpenTelemetryPlugin(

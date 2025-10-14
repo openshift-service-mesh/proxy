@@ -55,7 +55,8 @@ class RunProfile:
         avg = {}
         stats = [p.stats for p in profiles]
         for key in cls.STAT_KEYS:
-            avg[key] = mean([s[key] for s in stats])
+            vals = [s[key] for s in stats]
+            avg[key] = mean(vals) if len(vals) else 0.0
         return avg
 
     def __init__(self, pid: int, started_at: datetime, run_dir):
@@ -107,6 +108,37 @@ class RunProfile:
                f'stats={self.stats}]'
 
 
+class DTraceProfile:
+
+    def __init__(self, pid: int, run_dir):
+        self._pid = pid
+        self._run_dir = run_dir
+        self._proc = None
+        self._rc = 0
+        self._file = os.path.join(self._run_dir, 'curl.user_stacks')
+
+    def start(self):
+        if os.path.exists(self._file):
+            os.remove(self._file)
+        args = [
+            'sudo', 'dtrace',
+            '-x', 'ustackframes=100',
+            '-n', f'profile-97 /pid == {self._pid}/ {{ @[ustack()] = count(); }} tick-60s {{ exit(0); }}',
+            '-o', f'{self._file}'
+        ]
+        self._proc = subprocess.Popen(args, text=True, cwd=self._run_dir, shell=False)
+        assert self._proc
+
+    def finish(self):
+        if self._proc:
+            self._proc.terminate()
+            self._rc = self._proc.returncode
+
+    @property
+    def file(self):
+        return self._file
+
+
 class RunTcpDump:
 
     def __init__(self, env, run_dir):
@@ -116,30 +148,27 @@ class RunTcpDump:
         self._stdoutfile = os.path.join(self._run_dir, 'tcpdump.out')
         self._stderrfile = os.path.join(self._run_dir, 'tcpdump.err')
 
-    @property
-    def stats(self) -> Optional[List[str]]:
+    def get_rsts(self, ports: List[int]|None = None) -> Optional[List[str]]:
         if self._proc:
             raise Exception('tcpdump still running')
         lines = []
-        for l in open(self._stdoutfile).readlines():
-            if re.match(r'.* IP 127\.0\.0\.1\.\d+ [<>] 127\.0\.0\.1\.\d+:.*', l):
-                lines.append(l)
+        for line in open(self._stdoutfile):
+            m = re.match(r'.* IP 127\.0\.0\.1\.(\d+) [<>] 127\.0\.0\.1\.(\d+):.*', line)
+            if m:
+                sport = int(m.group(1))
+                dport = int(m.group(2))
+                if ports is None or sport in ports or dport in ports:
+                    lines.append(line)
         return lines
 
-    def stats_excluding(self, src_port) -> Optional[List[str]]:
-        if self._proc:
-            raise Exception('tcpdump still running')
-        lines = []
-        for l in self.stats:
-            if not re.match(r'.* IP 127\.0\.0\.1\.' + str(src_port) + ' >.*', l):
-                lines.append(l)
-        return lines
+    @property
+    def stats(self) -> Optional[List[str]]:
+        return self.get_rsts()
 
     @property
     def stderr(self) -> List[str]:
         if self._proc:
             raise Exception('tcpdump still running')
-        lines = []
         return open(self._stderrfile).readlines()
 
     def sample(self):
@@ -158,20 +187,19 @@ class RunTcpDump:
             args.extend([
                 tcpdump, '-i', local_if, '-n', 'tcp[tcpflags] & (tcp-rst)!=0'
             ])
-            with open(self._stdoutfile, 'w') as cout:
-                with open(self._stderrfile, 'w') as cerr:
-                    self._proc = subprocess.Popen(args, stdout=cout, stderr=cerr,
-                                                  text=True, cwd=self._run_dir,
-                                                  shell=False)
-                    assert self._proc
-                    assert self._proc.returncode is None
-                    while self._proc:
-                        try:
-                            self._proc.wait(timeout=1)
-                        except subprocess.TimeoutExpired:
-                            pass
-        except Exception as e:
-            log.error(f'Tcpdump: {e}')
+            with open(self._stdoutfile, 'w') as cout, open(self._stderrfile, 'w') as cerr:
+                self._proc = subprocess.Popen(args, stdout=cout, stderr=cerr,
+                                              text=True, cwd=self._run_dir,
+                                              shell=False)
+                assert self._proc
+                assert self._proc.returncode is None
+                while self._proc:
+                    try:
+                        self._proc.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        pass
+        except Exception:
+            log.exception('Tcpdump')
 
     def start(self):
         def do_sample():
@@ -217,7 +245,7 @@ class ExecResult:
             try:
                 out = ''.join(self._stdout)
                 self._json_out = json.loads(out)
-            except:
+            except:  # noqa: E722
                 pass
 
     def __repr__(self):
@@ -226,11 +254,12 @@ class ExecResult:
 
     def _parse_stats(self):
         self._stats = []
-        for l in self._stdout:
+        for line in self._stdout:
             try:
-                self._stats.append(json.loads(l))
-            except:
-                log.error(f'not a JSON stat: {l}')
+                self._stats.append(json.loads(line))
+            # TODO: specify specific exceptions here
+            except:  # noqa: E722
+                log.exception(f'not a JSON stat: {line}')
                 break
 
     @property
@@ -390,9 +419,13 @@ class ExecResult:
                 f'were made\n{self.dump_logs()}'
 
     def check_stats(self, count: int, http_status: Optional[int] = None,
-                    exitcode: Optional[int] = None):
+                    exitcode: Optional[Union[int, List[int]]] = None,
+                    remote_port: Optional[int] = None,
+                    remote_ip: Optional[str] = None):
         if exitcode is None:
             self.check_exit_code(0)
+        elif isinstance(exitcode, int):
+            exitcode = [exitcode]
         assert len(self.stats) == count, \
             f'stats count: expected {count}, got {len(self.stats)}\n{self.dump_logs()}'
         if http_status is not None:
@@ -405,9 +438,21 @@ class ExecResult:
         if exitcode is not None:
             for idx, x in enumerate(self.stats):
                 if 'exitcode' in x:
-                    assert x['exitcode'] == exitcode, \
+                    assert x['exitcode'] in exitcode, \
                         f'status #{idx} exitcode: expected {exitcode}, '\
                         f'got {x["exitcode"]}\n{self.dump_stat(x)}'
+        if remote_port is not None:
+            for idx, x in enumerate(self.stats):
+                assert 'remote_port' in x, f'remote_port missing\n{self.dump_stat(x)}'
+                assert x['remote_port'] == remote_port, \
+                        f'status #{idx} remote_port: expected {remote_port}, '\
+                        f'got {x["remote_port"]}\n{self.dump_stat(x)}'
+        if remote_ip is not None:
+            for idx, x in enumerate(self.stats):
+                assert 'remote_ip' in x, f'remote_ip missing\n{self.dump_stat(x)}'
+                assert x['remote_ip'] == remote_ip, \
+                        f'status #{idx} remote_ip: expected {remote_ip}, '\
+                        f'got {x["remote_ip"]}\n{self.dump_stat(x)}'
 
     def dump_logs(self):
         lines = ['>>--stdout ----------------------------------------------\n']
@@ -452,7 +497,11 @@ class CurlClient:
                  run_dir: Optional[str] = None,
                  timeout: Optional[float] = None,
                  silent: bool = False,
-                 run_env: Optional[Dict[str, str]] = None):
+                 run_env: Optional[Dict[str, str]] = None,
+                 server_addr: Optional[str] = None,
+                 with_dtrace: bool = False,
+                 with_flame: bool = False,
+                 socks_args: Optional[List[str]] = None):
         self.env = env
         self._timeout = timeout if timeout else env.test_timeout
         self._curl = os.environ['CURL'] if 'CURL' in os.environ else env.curl
@@ -461,8 +510,14 @@ class CurlClient:
         self._stderrfile = f'{self._run_dir}/curl.stderr'
         self._headerfile = f'{self._run_dir}/curl.headers'
         self._log_path = f'{self._run_dir}/curl.log'
+        self._with_dtrace = with_dtrace
+        self._with_flame = with_flame
+        if self._with_flame:
+            self._with_dtrace = True
+        self._socks_args = socks_args
         self._silent = silent
         self._run_env = run_env
+        self._server_addr = server_addr if server_addr else '127.0.0.1'
         self._rmrf(self._run_dir)
         self._mkpath(self._run_dir)
 
@@ -488,12 +543,12 @@ class CurlClient:
     def get_proxy_args(self, proto: str = 'http/1.1',
                        proxys: bool = True, tunnel: bool = False,
                        use_ip: bool = False):
-        proxy_name = '127.0.0.1' if use_ip else self.env.proxy_domain
+        proxy_name = self._server_addr if use_ip else self.env.proxy_domain
         if proxys:
             pport = self.env.pts_port(proto) if tunnel else self.env.proxys_port
             xargs = [
                 '--proxy', f'https://{proxy_name}:{pport}/',
-                '--resolve', f'{proxy_name}:{pport}:127.0.0.1',
+                '--resolve', f'{proxy_name}:{pport}:{self._server_addr}',
                 '--proxy-cacert', self.env.ca.cert_file,
             ]
             if proto == 'h2':
@@ -501,7 +556,7 @@ class CurlClient:
         else:
             xargs = [
                 '--proxy', f'http://{proxy_name}:{self.env.proxy_port}/',
-                '--resolve', f'{proxy_name}:{self.env.proxy_port}:127.0.0.1',
+                '--resolve', f'{proxy_name}:{self.env.proxy_port}:{self._server_addr}',
             ]
         if tunnel:
             xargs.append('--proxytunnel')
@@ -527,17 +582,16 @@ class CurlClient:
                       with_profile: bool = False,
                       with_tcpdump: bool = False,
                       no_save: bool = False,
-                      extra_args: List[str] = None):
+                      limit_rate: Optional[str] = None,
+                      extra_args: Optional[List[str]] = None):
         if extra_args is None:
             extra_args = []
         if no_save:
-            extra_args.extend([
-                '-o', '/dev/null',
-            ])
+            extra_args.extend(['--out-null'])
         else:
-            extra_args.extend([
-                '-o', 'download_#1.data',
-            ])
+            extra_args.extend(['-o', 'download_#1.data'])
+        if limit_rate:
+            extra_args.extend(['--limit-rate', limit_rate])
         # remove any existing ones
         for i in range(100):
             self._rmf(self.download_file(i))
@@ -581,7 +635,7 @@ class CurlClient:
         if extra_args is None:
             extra_args = []
         extra_args.extend([
-            '-X', 'DELETE', '-o', '/dev/null',
+            '-X', 'DELETE', '--out-null',
         ])
         if with_stats:
             extra_args.extend([
@@ -642,12 +696,12 @@ class CurlClient:
                       with_profile: bool = False,
                       with_tcpdump: bool = False,
                       no_save: bool = False,
-                      extra_args: List[str] = None):
+                      extra_args: Optional[List[str]] = None):
         if extra_args is None:
             extra_args = []
         if no_save:
             extra_args.extend([
-                '-o', '/dev/null',
+                '--out-null',
             ])
         else:
             extra_args.extend([
@@ -671,7 +725,7 @@ class CurlClient:
                       with_profile: bool = False,
                       with_tcpdump: bool = False,
                       no_save: bool = False,
-                      extra_args: List[str] = None):
+                      extra_args: Optional[List[str]] = None):
         if extra_args is None:
             extra_args = []
         extra_args.extend([
@@ -682,37 +736,49 @@ class CurlClient:
                             with_tcpdump=with_tcpdump,
                             extra_args=extra_args)
 
-    def ftp_upload(self, urls: List[str], fupload,
+    def ftp_upload(self, urls: List[str],
+                   fupload: Optional[Any] = None,
+                   updata: Optional[str] = None,
                    with_stats: bool = True,
                    with_profile: bool = False,
                    with_tcpdump: bool = False,
-                   extra_args: List[str] = None):
+                   extra_args: Optional[List[str]] = None):
         if extra_args is None:
             extra_args = []
-        extra_args.extend([
-            '--upload-file', fupload
-        ])
+        if fupload is not None:
+            extra_args.extend([
+                '--upload-file', fupload
+            ])
+        elif updata is not None:
+            extra_args.extend([
+                '--upload-file', '-'
+            ])
+        else:
+            raise Exception('need either file or data to upload')
         if with_stats:
             extra_args.extend([
                 '-w', '%{json}\\n'
             ])
         return self._raw(urls, options=extra_args,
+                         intext=updata,
                          with_stats=with_stats,
                          with_headers=False,
                          with_profile=with_profile,
                          with_tcpdump=with_tcpdump)
 
-    def ftp_ssl_upload(self, urls: List[str], fupload,
+    def ftp_ssl_upload(self, urls: List[str],
+                       fupload: Optional[Any] = None,
+                       updata: Optional[str] = None,
                        with_stats: bool = True,
                        with_profile: bool = False,
                        with_tcpdump: bool = False,
-                       extra_args: List[str] = None):
+                       extra_args: Optional[List[str]] = None):
         if extra_args is None:
             extra_args = []
         extra_args.extend([
             '--ssl-reqd',
         ])
-        return self.ftp_upload(urls=urls, fupload=fupload,
+        return self.ftp_upload(urls=urls, fupload=fupload, updata=updata,
                                with_stats=with_stats, with_profile=with_profile,
                                with_tcpdump=with_tcpdump,
                                extra_args=extra_args)
@@ -740,44 +806,47 @@ class CurlClient:
         exception = None
         profile = None
         tcpdump = None
-        started_at = datetime.now()
+        dtrace = None
         if with_tcpdump:
             tcpdump = RunTcpDump(self.env, self._run_dir)
             tcpdump.start()
+        started_at = datetime.now()
         try:
-            with open(self._stdoutfile, 'w') as cout:
-                with open(self._stderrfile, 'w') as cerr:
-                    if with_profile:
-                        end_at = started_at + timedelta(seconds=self._timeout) \
-                            if self._timeout else None
-                        log.info(f'starting: {args}')
-                        p = subprocess.Popen(args, stderr=cerr, stdout=cout,
-                                             cwd=self._run_dir, shell=False,
-                                             env=self._run_env)
-                        profile = RunProfile(p.pid, started_at, self._run_dir)
-                        if intext is not None and False:
-                            p.communicate(input=intext.encode(), timeout=1)
-                        ptimeout = 0.0
-                        while True:
-                            try:
-                                p.wait(timeout=ptimeout)
-                                break
-                            except subprocess.TimeoutExpired:
-                                if end_at and datetime.now() >= end_at:
-                                    p.kill()
-                                    raise subprocess.TimeoutExpired(cmd=args, timeout=self._timeout)
-                                profile.sample()
-                                ptimeout = 0.01
-                        exitcode = p.returncode
-                        profile.finish()
-                        log.info(f'done: exit={exitcode}, profile={profile}')
-                    else:
-                        p = subprocess.run(args, stderr=cerr, stdout=cout,
-                                           cwd=self._run_dir, shell=False,
-                                           input=intext.encode() if intext else None,
-                                           timeout=self._timeout,
-                                           env=self._run_env)
-                        exitcode = p.returncode
+            with open(self._stdoutfile, 'w') as cout, open(self._stderrfile, 'w') as cerr:
+                if with_profile:
+                    end_at = started_at + timedelta(seconds=self._timeout) \
+                        if self._timeout else None
+                    log.info(f'starting: {args}')
+                    p = subprocess.Popen(args, stderr=cerr, stdout=cout,
+                                         cwd=self._run_dir, shell=False,
+                                         env=self._run_env)
+                    profile = RunProfile(p.pid, started_at, self._run_dir)
+                    if intext is not None and False:
+                        p.communicate(input=intext.encode(), timeout=1)
+                    if self._with_dtrace:
+                        dtrace = DTraceProfile(p.pid, self._run_dir)
+                        dtrace.start()
+                    ptimeout = 0.0
+                    while True:
+                        try:
+                            p.wait(timeout=ptimeout)
+                            break
+                        except subprocess.TimeoutExpired:
+                            if end_at and datetime.now() >= end_at:
+                                p.kill()
+                                raise subprocess.TimeoutExpired(cmd=args, timeout=self._timeout)
+                            profile.sample()
+                            ptimeout = 0.01
+                    exitcode = p.returncode
+                    profile.finish()
+                    log.info(f'done: exit={exitcode}, profile={profile}')
+                else:
+                    p = subprocess.run(args, stderr=cerr, stdout=cout,
+                                       cwd=self._run_dir, shell=False,
+                                       input=intext.encode() if intext else None,
+                                       timeout=self._timeout,
+                                       env=self._run_env)
+                    exitcode = p.returncode
         except subprocess.TimeoutExpired:
             now = datetime.now()
             duration = now - started_at
@@ -785,13 +854,18 @@ class CurlClient:
                         f'(configured {self._timeout}s): {args}')
             exitcode = -1
             exception = 'TimeoutExpired'
+        ended_at = datetime.now()
         if tcpdump:
             tcpdump.finish()
+        if dtrace:
+            dtrace.finish()
+        if self._with_flame and dtrace:
+            self._generate_flame(dtrace, args)
         coutput = open(self._stdoutfile).readlines()
         cerrput = open(self._stderrfile).readlines()
         return ExecResult(args=args, exit_code=exitcode, exception=exception,
                           stdout=coutput, stderr=cerrput,
-                          duration=datetime.now() - started_at,
+                          duration=ended_at - started_at,
                           with_stats=with_stats,
                           profile=profile, tcpdump=tcpdump)
 
@@ -811,8 +885,6 @@ class CurlClient:
                       with_profile=with_profile, with_tcpdump=with_tcpdump)
         if r.exit_code == 0 and with_headers:
             self._parse_headerfile(self._headerfile, r=r)
-            if r.json:
-                r.response["json"] = r.json
         return r
 
     def _complete_args(self, urls, timeout=None, options=None,
@@ -824,13 +896,18 @@ class CurlClient:
             urls = [urls]
 
         args = [self._curl, "-s", "--path-as-is"]
+        if 'CURL_TEST_EVENT' in os.environ:
+            args.append('--test-event')
+
+        if self._socks_args:
+            args.extend(self._socks_args)
+
         if with_headers:
             args.extend(["-D", self._headerfile])
         if def_tracing is not False and not self._silent:
             args.extend(['-v', '--trace-ids', '--trace-time'])
             if self.env.verbose > 1:
                 args.extend(['--trace-config', 'http/2,http/3,h2-proxy,h1-proxy'])
-                pass
 
         active_options = options
         if options is not None and '--next' in options:
@@ -857,13 +934,15 @@ class CurlClient:
             if force_resolve and u.hostname and u.hostname != 'localhost' \
                     and not re.match(r'^(\d+|\[|:).*', u.hostname):
                 port = u.port if u.port else 443
-                args.extend(["--resolve", f"{u.hostname}:{port}:127.0.0.1"])
+                args.extend([
+                    '--resolve', f'{u.hostname}:{port}:{self._server_addr}',
+                ])
             if timeout is not None and int(timeout) > 0:
                 args.extend(["--connect-timeout", str(int(timeout))])
             args.append(url)
         return args
 
-    def _parse_headerfile(self, headerfile: str, r: ExecResult = None) -> ExecResult:
+    def _parse_headerfile(self, headerfile: str, r: Optional[ExecResult] = None) -> ExecResult:
         lines = open(headerfile).readlines()
         if r is None:
             r = ExecResult(args=[], exit_code=0, stdout=[], stderr=[])
@@ -918,3 +997,52 @@ class CurlClient:
 
         fin_response(response)
         return r
+
+    def _generate_flame(self, dtrace: DTraceProfile, curl_args: List[str]):
+        log.info('generating flame graph from dtrace for this run')
+        if not os.path.exists(dtrace.file):
+            raise Exception(f'dtrace output file does not exist: {dtrace.file}')
+        if 'FLAMEGRAPH' not in os.environ:
+            raise Exception('Env variable FLAMEGRAPH not set')
+        fg_dir = os.environ['FLAMEGRAPH']
+        if not os.path.exists(fg_dir):
+            raise Exception(f'FlameGraph directory not found: {fg_dir}')
+
+        fg_collapse = os.path.join(fg_dir, 'stackcollapse.pl')
+        if not os.path.exists(fg_collapse):
+            raise Exception(f'FlameGraph script not found: {fg_collapse}')
+
+        fg_gen_flame = os.path.join(fg_dir, 'flamegraph.pl')
+        if not os.path.exists(fg_gen_flame):
+            raise Exception(f'FlameGraph script not found: {fg_gen_flame}')
+
+        file_collapsed = f'{dtrace.file}.collapsed'
+        file_svg = os.path.join(self._run_dir, 'curl.flamegraph.svg')
+        file_err = os.path.join(self._run_dir, 'curl.flamegraph.stderr')
+        log.info('waiting a sec for dtrace to finish flusheing its buffers')
+        time.sleep(1)
+        log.info(f'collapsing stacks into {file_collapsed}')
+        with open(file_collapsed, 'w') as cout, open(file_err, 'w') as cerr:
+            p = subprocess.run([
+                fg_collapse, dtrace.file
+            ], stdout=cout, stderr=cerr, cwd=self._run_dir, shell=False)
+            rc = p.returncode
+            if rc != 0:
+                raise Exception(f'{fg_collapse} returned error {rc}')
+        log.info(f'generating graph into {file_svg}')
+        cmdline = ' '.join(curl_args)
+        if len(cmdline) > 80:
+            title = f'{cmdline[:80]}...'
+            subtitle = f'...{cmdline[-80:]}'
+        else:
+            title = cmdline
+            subtitle = ''
+        with open(file_svg, 'w') as cout, open(file_err, 'w') as cerr:
+            p = subprocess.run([
+                fg_gen_flame, '--colors', 'green',
+                '--title', title, '--subtitle', subtitle,
+                file_collapsed
+            ], stdout=cout, stderr=cerr, cwd=self._run_dir, shell=False)
+            rc = p.returncode
+            if rc != 0:
+                raise Exception(f'{fg_gen_flame} returned error {rc}')

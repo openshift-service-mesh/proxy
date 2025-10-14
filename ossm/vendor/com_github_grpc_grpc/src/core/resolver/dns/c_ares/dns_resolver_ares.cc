@@ -14,8 +14,6 @@
 // limitations under the License.
 //
 
-#include <grpc/support/port_platform.h>
-
 #include <stdint.h>
 
 #include <algorithm>
@@ -26,6 +24,7 @@
 #include <vector>
 
 #include "absl/base/thread_annotations.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
@@ -36,8 +35,8 @@
 #include <grpc/impl/channel_arg_names.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
+#include <grpc/support/port_platform.h>
 
-#include "src/core/resolver/dns/event_engine/service_config_helper.h"
 #include "src/core/lib/config/core_configuration.h"
 #include "src/core/lib/debug/trace.h"
 #include "src/core/lib/gprpp/debug_location.h"
@@ -51,10 +50,11 @@
 #include "src/core/lib/iomgr/iomgr_fwd.h"
 #include "src/core/lib/iomgr/pollset_set.h"
 #include "src/core/lib/iomgr/resolved_address.h"
+#include "src/core/lib/uri/uri_parser.h"
+#include "src/core/resolver/dns/event_engine/service_config_helper.h"
 #include "src/core/resolver/resolver.h"
 #include "src/core/resolver/resolver_factory.h"
 #include "src/core/service_config/service_config.h"
-#include "src/core/lib/uri/uri_parser.h"
 
 #if GRPC_ARES == 1
 
@@ -66,12 +66,12 @@
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/config/config_vars.h"
 #include "src/core/lib/iomgr/resolve_address.h"
-#include "src/core/resolver/endpoint_addresses.h"
-#include "src/core/service_config/service_config_impl.h"
 #include "src/core/lib/transport/error_utils.h"
 #include "src/core/load_balancing/grpclb/grpclb_balancer_addresses.h"
 #include "src/core/resolver/dns/c_ares/grpc_ares_wrapper.h"
+#include "src/core/resolver/endpoint_addresses.h"
 #include "src/core/resolver/polling_resolver.h"
+#include "src/core/service_config/service_config_impl.h"
 
 #define GRPC_DNS_INITIAL_CONNECT_BACKOFF_SECONDS 1
 #define GRPC_DNS_RECONNECT_BACKOFF_MULTIPLIER 1.6
@@ -205,7 +205,7 @@ AresClientChannelDNSResolver::AresClientChannelDNSResolver(
                           .set_jitter(GRPC_DNS_RECONNECT_JITTER)
                           .set_max_backoff(Duration::Milliseconds(
                               GRPC_DNS_RECONNECT_MAX_BACKOFF_SECONDS * 1000)),
-                      &grpc_trace_cares_resolver),
+                      &cares_resolver_trace),
       request_service_config_(
           !channel_args()
                .GetBool(GRPC_ARG_SERVICE_CONFIG_DISABLE_RESOLUTION)
@@ -349,7 +349,7 @@ class AresClientChannelDNSResolverFactory final : public ResolverFactory {
 
   bool IsValidUri(const URI& uri) const override {
     if (absl::StripPrefix(uri.path(), "/").empty()) {
-      gpr_log(GPR_ERROR, "no server name supplied in dns URI");
+      LOG(ERROR) << "no server name supplied in dns URI";
       return false;
     }
     return true;
@@ -743,6 +743,13 @@ void grpc_resolver_dns_ares_shutdown() {
   }
 }
 
+void grpc_resolver_dns_ares_reset_dns_resolver() {
+  if (grpc_core::ShouldUseAresDnsResolver(
+          grpc_core::ConfigVars::Get().DnsResolver())) {
+    grpc_core::ResetDNSResolver(std::make_unique<grpc_core::AresDNSResolver>());
+  }
+}
+
 #else  // GRPC_ARES == 1
 
 namespace grpc_core {
@@ -755,5 +762,7 @@ void RegisterAresDnsResolver(CoreConfiguration::Builder*) {}
 void grpc_resolver_dns_ares_init() {}
 
 void grpc_resolver_dns_ares_shutdown() {}
+
+void grpc_resolver_dns_ares_reset_dns_resolver() {}
 
 #endif  // GRPC_ARES == 1

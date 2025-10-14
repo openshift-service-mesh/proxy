@@ -42,7 +42,8 @@ static int curltest_tweak_handler(request_rec *r);
 static int curltest_1_1_required(request_rec *r);
 static int curltest_sslinfo_handler(request_rec *r);
 
-AP_DECLARE_MODULE(curltest) = {
+AP_DECLARE_MODULE(curltest) =
+{
   STANDARD20_MODULE_STUFF,
   NULL, /* func to create per dir config */
   NULL,  /* func to merge per dir config */
@@ -50,7 +51,7 @@ AP_DECLARE_MODULE(curltest) = {
   NULL,  /* func to merge per server config */
   NULL,              /* command handlers */
   curltest_hooks,
-#if defined(AP_MODULE_FLAG_NONE)
+#ifdef AP_MODULE_FLAG_NONE
   AP_MODULE_FLAG_ALWAYS_MERGE
 #endif
 };
@@ -95,8 +96,8 @@ static void curltest_hooks(apr_pool_t *pool)
 #define SECS_PER_HOUR      (60*60)
 #define SECS_PER_DAY       (24*SECS_PER_HOUR)
 
-static apr_status_t duration_parse(apr_interval_time_t *ptimeout, const char *value,
-                                   const char *def_unit)
+static apr_status_t duration_parse(apr_interval_time_t *ptimeout,
+                                   const char *value, const char *def_unit)
 {
   char *endp;
   apr_int64_t n;
@@ -106,7 +107,8 @@ static apr_status_t duration_parse(apr_interval_time_t *ptimeout, const char *va
     return errno;
   }
   if(!endp || !*endp) {
-    if (!def_unit) def_unit = "s";
+    if(!def_unit)
+      def_unit = "s";
   }
   else if(endp == value) {
     return APR_EINVAL;
@@ -202,7 +204,7 @@ static int curltest_echo_handler(request_rec *r)
     int i;
     args = apr_cstr_split(r->args, "&", 1, r->pool);
     for(i = 0; i < args->nelts; ++i) {
-      char *s, *val, *arg = APR_ARRAY_IDX(args, i, char*);
+      char *s, *val, *arg = APR_ARRAY_IDX(args, i, char *);
       s = strchr(arg, '=');
       if(s) {
         *s = '\0';
@@ -250,11 +252,17 @@ static int curltest_echo_handler(request_rec *r)
   apr_table_setn(r->subprocess_env, "no-gzip", "1");
 
   ct = apr_table_get(r->headers_in, "content-type");
-  ap_set_content_type(r, ct? ct : "application/octet-stream");
+  ap_set_content_type(r, ct ? ct : "application/octet-stream");
+
+  if(apr_table_get(r->headers_in, "TE"))
+    apr_table_setn(r->headers_out, "Request-TE",
+                   apr_table_get(r->headers_in, "TE"));
 
   bb = apr_brigade_create(r->pool, c->bucket_alloc);
   /* copy any request body into the response */
-  if((rv = ap_setup_client_block(r, REQUEST_CHUNKED_DECHUNK))) goto cleanup;
+  rv = ap_setup_client_block(r, REQUEST_CHUNKED_DECHUNK);
+  if(rv)
+    goto cleanup;
   if(die_after_100) {
     ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r,
                   "echo_handler: dying after 100-continue");
@@ -278,9 +286,11 @@ static int curltest_echo_handler(request_rec *r)
       ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r,
                     "echo_handler: copying %ld bytes from request body", l);
       rv = apr_brigade_write(bb, NULL, NULL, buffer, l);
-      if (APR_SUCCESS != rv) goto cleanup;
+      if(APR_SUCCESS != rv)
+        goto cleanup;
       rv = ap_pass_brigade(r->output_filters, bb);
-      if (APR_SUCCESS != rv) goto cleanup;
+      if(APR_SUCCESS != rv)
+        goto cleanup;
       ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r,
                     "echo_handler: passed %ld bytes from request body", l);
     }
@@ -329,6 +339,7 @@ static int curltest_tweak_handler(request_rec *r)
   int http_status = 200;
   apr_status_t error = APR_SUCCESS, body_error = APR_SUCCESS;
   int close_conn = 0, with_cl = 0;
+  int x_hd_len = 0, x_hd1_len = 0;
 
   if(strcmp(r->handler, "curltest-tweak")) {
     return DECLINED;
@@ -344,7 +355,7 @@ static int curltest_tweak_handler(request_rec *r)
   if(r->args) {
     args = apr_cstr_split(r->args, "&", 1, r->pool);
     for(i = 0; i < args->nelts; ++i) {
-      char *s, *val, *arg = APR_ARRAY_IDX(args, i, char*);
+      char *s, *val, *arg = APR_ARRAY_IDX(args, i, char *);
       s = strchr(arg, '=');
       if(s) {
         *s = '\0';
@@ -412,6 +423,14 @@ static int curltest_tweak_handler(request_rec *r)
             continue;
           }
         }
+        else if(!strcmp("x-hd", arg)) {
+          x_hd_len = (int)apr_atoi64(val);
+          continue;
+        }
+        else if(!strcmp("x-hd1", arg)) {
+          x_hd1_len = (int)apr_atoi64(val);
+          continue;
+        }
       }
       else if(!strcmp("close", arg)) {
         /* we are asked to close the connection */
@@ -433,8 +452,8 @@ static int curltest_tweak_handler(request_rec *r)
   ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r, "error_handler: processing "
                 "request, %s", r->args? r->args : "(no args)");
   r->status = http_status;
-  r->clength = with_cl? (chunks * chunk_size) : -1;
-  r->chunked = (r->proto_num >= HTTP_VERSION(1,1)) && !with_cl;
+  r->clength = with_cl ? (chunks * chunk_size) : -1;
+  r->chunked = (r->proto_num >= HTTP_VERSION(1, 1)) && !with_cl;
   apr_table_setn(r->headers_out, "request-id", request_id);
   if(r->clength >= 0) {
     apr_table_set(r->headers_out, "Content-Length",
@@ -444,9 +463,31 @@ static int curltest_tweak_handler(request_rec *r)
     apr_table_unset(r->headers_out, "Content-Length");
   /* Discourage content-encodings */
   apr_table_unset(r->headers_out, "Content-Encoding");
+  if(x_hd_len > 0) {
+    int i, hd_len = (16 * 1024);
+    int n = (x_hd_len / hd_len);
+    char *hd_val = apr_palloc(r->pool, x_hd_len);
+    memset(hd_val, 'X', hd_len);
+    hd_val[hd_len - 1] = 0;
+    for(i = 0; i < n; ++i) {
+      apr_table_setn(r->headers_out,
+                     apr_psprintf(r->pool, "X-Header-%d", i), hd_val);
+    }
+    if(x_hd_len % hd_len) {
+      hd_val[(x_hd_len % hd_len)] = 0;
+      apr_table_setn(r->headers_out,
+                     apr_psprintf(r->pool, "X-Header-%d", i), hd_val);
+    }
+  }
+  if(x_hd1_len > 0) {
+    char *hd_val = apr_palloc(r->pool, x_hd1_len);
+    memset(hd_val, 'Y', x_hd1_len);
+    hd_val[x_hd1_len - 1] = 0;
+    apr_table_setn(r->headers_out, "X-Mega-Header", hd_val);
+  }
+
   apr_table_setn(r->subprocess_env, "no-brotli", "1");
   apr_table_setn(r->subprocess_env, "no-gzip", "1");
-
   ap_set_content_type(r, "application/octet-stream");
   bb = apr_brigade_create(r->pool, c->bucket_alloc);
 
@@ -460,7 +501,8 @@ static int curltest_tweak_handler(request_rec *r)
   b = apr_bucket_flush_create(c->bucket_alloc);
   APR_BRIGADE_INSERT_TAIL(bb, b);
   rv = ap_pass_brigade(r->output_filters, bb);
-  if (APR_SUCCESS != rv) goto cleanup;
+  if(APR_SUCCESS != rv)
+    goto cleanup;
 
   memset(buffer, 'X', sizeof(buffer));
   for(i = 0; i < chunks; ++i) {
@@ -468,9 +510,11 @@ static int curltest_tweak_handler(request_rec *r)
       apr_sleep(chunk_delay);
     }
     rv = apr_brigade_write(bb, NULL, NULL, buffer, chunk_size);
-    if(APR_SUCCESS != rv) goto cleanup;
+    if(APR_SUCCESS != rv)
+      goto cleanup;
     rv = ap_pass_brigade(r->output_filters, bb);
-    if(APR_SUCCESS != rv) goto cleanup;
+    if(APR_SUCCESS != rv)
+      goto cleanup;
     ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r,
                   "error_handler: passed %lu bytes as response body",
                   (unsigned long)chunk_size);
@@ -525,6 +569,7 @@ static int curltest_put_handler(request_rec *r)
   char buffer[128*1024];
   const char *ct;
   apr_off_t rbody_len = 0;
+  apr_off_t rbody_max_len = -1;
   const char *s_rbody_len;
   const char *request_id = "none";
   apr_time_t read_delay = 0, chunk_delay = 0;
@@ -542,7 +587,7 @@ static int curltest_put_handler(request_rec *r)
   if(r->args) {
     args = apr_cstr_split(r->args, "&", 1, r->pool);
     for(i = 0; i < args->nelts; ++i) {
-      char *s, *val, *arg = APR_ARRAY_IDX(args, i, char*);
+      char *s, *val, *arg = APR_ARRAY_IDX(args, i, char *);
       s = strchr(arg, '=');
       if(s) {
         *s = '\0';
@@ -564,6 +609,10 @@ static int curltest_put_handler(request_rec *r)
             continue;
           }
         }
+        else if(!strcmp("max_upload", arg)) {
+          rbody_max_len = (int)apr_atoi64(val);
+          continue;
+        }
       }
       ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "query parameter not "
                     "understood: '%s' in %s",
@@ -584,14 +633,16 @@ static int curltest_put_handler(request_rec *r)
   apr_table_setn(r->subprocess_env, "no-gzip", "1");
 
   ct = apr_table_get(r->headers_in, "content-type");
-  ap_set_content_type(r, ct? ct : "text/plain");
+  ap_set_content_type(r, ct ? ct : "text/plain");
 
   if(read_delay) {
     apr_sleep(read_delay);
   }
   bb = apr_brigade_create(r->pool, c->bucket_alloc);
   /* copy any request body into the response */
-  if((rv = ap_setup_client_block(r, REQUEST_CHUNKED_DECHUNK))) goto cleanup;
+  rv = ap_setup_client_block(r, REQUEST_CHUNKED_DECHUNK);
+  if(rv)
+    goto cleanup;
   if(ap_should_client_block(r)) {
     while(0 < (l = ap_get_client_block(r, &buffer[0], sizeof(buffer)))) {
       ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r,
@@ -600,18 +651,27 @@ static int curltest_put_handler(request_rec *r)
         apr_sleep(chunk_delay);
       }
       rbody_len += l;
+      if((rbody_max_len > 0) && (rbody_len > rbody_max_len)) {
+        r->status = 413;
+        break;
+      }
     }
   }
   /* we are done */
   s_rbody_len = apr_psprintf(r->pool, "%"APR_OFF_T_FMT, rbody_len);
   apr_table_setn(r->headers_out, "Received-Length", s_rbody_len);
   rv = apr_brigade_puts(bb, NULL, NULL, s_rbody_len);
-  if(APR_SUCCESS != rv) goto cleanup;
+  if(APR_SUCCESS != rv)
+    goto cleanup;
   b = apr_bucket_eos_create(c->bucket_alloc);
   APR_BRIGADE_INSERT_TAIL(bb, b);
   ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r, "put_handler: request read");
 
   rv = ap_pass_brigade(r->output_filters, bb);
+
+  if(r->status == 413) {
+    apr_sleep(apr_time_from_sec(1));
+  }
 
 cleanup:
   if(rv == APR_SUCCESS
@@ -646,7 +706,7 @@ static int curltest_1_1_required(request_rec *r)
     return DECLINED;
   }
 
-  if (HTTP_VERSION_MAJOR(r->proto_num) > 1) {
+  if(HTTP_VERSION_MAJOR(r->proto_num) > 1) {
     apr_table_setn(r->notes, "ssl-renegotiate-forbidden", "1");
     ap_die(HTTP_FORBIDDEN, r);
     return OK;
@@ -663,18 +723,20 @@ static int curltest_1_1_required(request_rec *r)
   apr_table_setn(r->subprocess_env, "no-gzip", "1");
 
   ct = apr_table_get(r->headers_in, "content-type");
-  ap_set_content_type(r, ct? ct : "text/plain");
+  ap_set_content_type(r, ct ? ct : "text/plain");
 
   bb = apr_brigade_create(r->pool, c->bucket_alloc);
   /* flush response */
   b = apr_bucket_flush_create(c->bucket_alloc);
   APR_BRIGADE_INSERT_TAIL(bb, b);
   rv = ap_pass_brigade(r->output_filters, bb);
-  if (APR_SUCCESS != rv) goto cleanup;
+  if(APR_SUCCESS != rv)
+    goto cleanup;
 
   /* we are done */
   rv = apr_brigade_printf(bb, NULL, NULL, "well done!");
-  if(APR_SUCCESS != rv) goto cleanup;
+  if(APR_SUCCESS != rv)
+    goto cleanup;
   b = apr_bucket_eos_create(c->bucket_alloc);
   APR_BRIGADE_INSERT_TAIL(bb, b);
   ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r, "1_1_handler: request read");
@@ -728,7 +790,7 @@ static int curltest_sslinfo_handler(request_rec *r)
   if(r->args) {
     apr_array_header_t *args = apr_cstr_split(r->args, "&", 1, r->pool);
     for(i = 0; i < args->nelts; ++i) {
-      char *s, *val, *arg = APR_ARRAY_IDX(args, i, char*);
+      char *s, *val, *arg = APR_ARRAY_IDX(args, i, char *);
       s = strchr(arg, '=');
       if(s) {
         *s = '\0';
@@ -781,7 +843,8 @@ static int curltest_sslinfo_handler(request_rec *r)
   b = apr_bucket_flush_create(c->bucket_alloc);
   APR_BRIGADE_INSERT_TAIL(bb, b);
   rv = ap_pass_brigade(r->output_filters, bb);
-  if (APR_SUCCESS != rv) goto cleanup;
+  if(APR_SUCCESS != rv)
+    goto cleanup;
 
   /* we are done */
   b = apr_bucket_eos_create(c->bucket_alloc);

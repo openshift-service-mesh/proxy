@@ -22,6 +22,7 @@
 #include <tuple>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
@@ -40,8 +41,8 @@
 #include "src/core/lib/gprpp/notification.h"
 #include "src/core/lib/iomgr/sockaddr.h"
 #include "test/core/event_engine/test_suite/event_engine_test_framework.h"
-#include "test/core/util/fake_udp_and_tcp_server.h"
-#include "test/core/util/port.h"
+#include "test/core/test_util/fake_udp_and_tcp_server.h"
+#include "test/core/test_util/port.h"
 #include "test/cpp/util/get_grpc_test_runfile_dir.h"
 #include "test/cpp/util/subprocess.h"
 
@@ -110,7 +111,7 @@ MATCHER(StatusCodeEq, "") {
 class EventEngineDNSTest : public EventEngineTest {
  protected:
   static void SetUpTestSuite() {
-#ifndef GRPC_IOS_EVENT_ENGINE_CLIENT
+#if !GRPC_IOS_EVENT_ENGINE_CLIENT
     std::string test_records_path = kDNSTestRecordGroupsYamlPath;
     std::string dns_server_path = kDNSServerRelPath;
     std::string dns_resolver_path = kDNSResolverRelPath;
@@ -128,9 +129,8 @@ class EventEngineDNSTest : public EventEngineTest {
 // an indication whether the test is running on RBE or not. Find a better way of
 // doing this.
 #ifndef GRPC_PORT_ISOLATED_RUNTIME
-      gpr_log(GPR_ERROR,
-              "You are invoking the test locally with Bazel, you may need to "
-              "invoke Bazel with --enable_runfiles=yes.");
+      LOG(ERROR) << "You are invoking the test locally with Bazel, you may "
+                    "need to invoke Bazel with --enable_runfiles=yes.";
 #endif  // GRPC_PORT_ISOLATED_RUNTIME
       test_records_path = grpc::testing::NormalizeFilePath(test_records_path);
       dns_server_path =
@@ -182,7 +182,7 @@ class EventEngineDNSTest : public EventEngineTest {
   }
 
   static void TearDownTestSuite() {
-#ifndef GRPC_IOS_EVENT_ENGINE_CLIENT
+#if !GRPC_IOS_EVENT_ENGINE_CLIENT
     dns_server_.server_process->Interrupt();
     dns_server_.server_process->Join();
     delete dns_server_.server_process;
@@ -233,7 +233,7 @@ class EventEngineDNSTest : public EventEngineTest {
 EventEngineDNSTest::DNSServer EventEngineDNSTest::dns_server_;
 
 // TODO(hork): implement XFAIL for resolvers that don't support TXT or SRV
-#ifndef GRPC_IOS_EVENT_ENGINE_CLIENT
+#if !GRPC_IOS_EVENT_ENGINE_CLIENT
 
 TEST_F(EventEngineDNSTest, QueryNXHostname) {
   SKIP_TEST_FOR_NATIVE_DNS_RESOLVER();
@@ -434,7 +434,7 @@ TEST_F(EventEngineDNSTest, LocalHost) {
   auto dns_resolver = CreateDNSResolverWithoutSpecifyingServer();
   dns_resolver->LookupHostname(
       [this](auto result) {
-#ifdef GRPC_IOS_EVENT_ENGINE_CLIENT
+#if GRPC_IOS_EVENT_ENGINE_CLIENT
         EXPECT_SUCCESS();
 #else
         EXPECT_TRUE(result.ok());

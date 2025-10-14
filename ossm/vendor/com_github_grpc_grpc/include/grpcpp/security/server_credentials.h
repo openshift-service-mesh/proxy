@@ -84,6 +84,7 @@ class ServerCredentials : private grpc::internal::GrpcLibrary {
   // Needed for access to AddPortToServer.
   friend class Server;
   // Needed for access to c_creds_.
+  friend class ServerBuilder;
   friend std::shared_ptr<ServerCredentials> grpc::XdsServerCredentials(
       const std::shared_ptr<ServerCredentials>& fallback_credentials);
 
@@ -115,9 +116,6 @@ std::shared_ptr<ServerCredentials> AltsServerCredentials(
     const AltsServerCredentialsOptions& options);
 
 /// Builds Local ServerCredentials.
-std::shared_ptr<ServerCredentials> AltsServerCredentials(
-    const AltsServerCredentialsOptions& options);
-
 std::shared_ptr<ServerCredentials> LocalServerCredentials(
     grpc_local_connect_type type);
 

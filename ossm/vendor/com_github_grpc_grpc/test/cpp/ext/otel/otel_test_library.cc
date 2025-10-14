@@ -19,6 +19,7 @@
 #include "test/cpp/ext/otel/otel_test_library.h"
 
 #include <atomic>
+#include <memory>
 
 #include "absl/functional/any_invocable.h"
 #include "gmock/gmock.h"
@@ -30,12 +31,12 @@
 
 #include <grpcpp/grpcpp.h>
 
-#include "src/core/lib/channel/call_tracer.h"
 #include "src/core/lib/channel/promise_based_filter.h"
 #include "src/core/lib/config/core_configuration.h"
 #include "src/core/lib/gprpp/notification.h"
-#include "test/core/util/fake_stats_plugin.h"
-#include "test/core/util/test_config.h"
+#include "src/core/telemetry/call_tracer.h"
+#include "test/core/test_util/fake_stats_plugin.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/end2end/test_service_impl.h"
 #include "test/cpp/util/byte_buffer_proto_helper.h"
 
@@ -50,9 +51,17 @@ class AddLabelsFilter : public grpc_core::ChannelFilter {
  public:
   static const grpc_channel_filter kFilter;
 
-  static absl::StatusOr<AddLabelsFilter> Create(
+  static absl::string_view TypeName() { return "add_service_labels_filter"; }
+
+  explicit AddLabelsFilter(
+      std::map<grpc_core::ClientCallTracer::CallAttemptTracer::OptionalLabelKey,
+               grpc_core::RefCountedStringValue>
+          labels_to_inject)
+      : labels_to_inject_(std::move(labels_to_inject)) {}
+
+  static absl::StatusOr<std::unique_ptr<AddLabelsFilter>> Create(
       const grpc_core::ChannelArgs& args, ChannelFilter::Args /*filter_args*/) {
-    return AddLabelsFilter(
+    return absl::make_unique<AddLabelsFilter>(
         *args.GetPointer<std::map<
              grpc_core::ClientCallTracer::CallAttemptTracer::OptionalLabelKey,
              grpc_core::RefCountedStringValue>>(GRPC_ARG_LABELS_TO_INJECT));
@@ -62,9 +71,7 @@ class AddLabelsFilter : public grpc_core::ChannelFilter {
       grpc_core::CallArgs call_args,
       grpc_core::NextPromiseFactory next_promise_factory) override {
     using CallAttemptTracer = grpc_core::ClientCallTracer::CallAttemptTracer;
-    auto* call_context = grpc_core::GetContext<grpc_call_context_element>();
-    auto* call_tracer = static_cast<CallAttemptTracer*>(
-        call_context[GRPC_CONTEXT_CALL_TRACER].value);
+    auto* call_tracer = grpc_core::GetContext<CallAttemptTracer>();
     EXPECT_NE(call_tracer, nullptr);
     for (const auto& pair : labels_to_inject_) {
       call_tracer->SetOptionalLabel(pair.first, pair.second);
@@ -73,12 +80,6 @@ class AddLabelsFilter : public grpc_core::ChannelFilter {
   }
 
  private:
-  explicit AddLabelsFilter(
-      std::map<grpc_core::ClientCallTracer::CallAttemptTracer::OptionalLabelKey,
-               grpc_core::RefCountedStringValue>
-          labels_to_inject)
-      : labels_to_inject_(std::move(labels_to_inject)) {}
-
   const std::map<
       grpc_core::ClientCallTracer::CallAttemptTracer::OptionalLabelKey,
       grpc_core::RefCountedStringValue>
@@ -87,8 +88,7 @@ class AddLabelsFilter : public grpc_core::ChannelFilter {
 
 const grpc_channel_filter AddLabelsFilter::kFilter =
     grpc_core::MakePromiseBasedFilter<AddLabelsFilter,
-                                      grpc_core::FilterEndpoint::kClient>(
-        "add_service_labels_filter");
+                                      grpc_core::FilterEndpoint::kClient>();
 
 OpenTelemetryPluginEnd2EndTest::MetricsCollectorThread::MetricsCollectorThread(
     OpenTelemetryPluginEnd2EndTest* test, grpc_core::Duration interval,
@@ -148,7 +148,9 @@ void OpenTelemetryPluginEnd2EndTest::Init(Options config) {
         });
     channel_args.SetPointer(GRPC_ARG_LABELS_TO_INJECT, &labels_to_inject_);
   }
-  reader_ = BuildAndRegisterOpenTelemetryPlugin(std::move(config));
+  if (!config.service_config.empty()) {
+    channel_args.SetString(GRPC_ARG_SERVICE_CONFIG, config.service_config);
+  }
   grpc_init();
   grpc::ServerBuilder builder;
   int port;
@@ -156,11 +158,18 @@ void OpenTelemetryPluginEnd2EndTest::Init(Options config) {
   builder.AddListeningPort("0.0.0.0:0", grpc::InsecureServerCredentials(),
                            &port);
   builder.RegisterService(&service_);
+  for (auto& per_server_stats_plugin : config.per_server_stats_plugins) {
+    per_server_stats_plugin->AddToServerBuilder(&builder);
+  }
   server_ = builder.BuildAndStart();
   ASSERT_NE(nullptr, server_);
   ASSERT_NE(0, port);
   server_address_ = absl::StrCat("localhost:", port);
   canonical_server_address_ = absl::StrCat("dns:///", server_address_);
+  for (auto& per_channel_stats_plugin : config.per_channel_stats_plugins) {
+    per_channel_stats_plugin->AddToChannelArguments(&channel_args);
+  }
+  reader_ = BuildAndRegisterOpenTelemetryPlugin(std::move(config));
 
   auto channel = grpc::CreateCustomChannel(
       server_address_, grpc::InsecureChannelCredentials(), channel_args);
@@ -237,10 +246,35 @@ OpenTelemetryPluginEnd2EndTest::ReadCurrentMetricsData(
   return data;
 }
 
+std::pair<std::shared_ptr<grpc::experimental::OpenTelemetryPlugin>,
+          std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>>
+OpenTelemetryPluginEnd2EndTest::BuildOpenTelemetryPlugin(
+    OpenTelemetryPluginEnd2EndTest::Options options) {
+  grpc::internal::OpenTelemetryPluginBuilderImpl ot_builder;
+  auto reader = ConfigureOTBuilder(std::move(options), &ot_builder);
+  auto plugin = ot_builder.Build();
+  EXPECT_TRUE(plugin.ok());
+  return {*plugin, reader};
+}
+
 std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>
 OpenTelemetryPluginEnd2EndTest::BuildAndRegisterOpenTelemetryPlugin(
     OpenTelemetryPluginEnd2EndTest::Options options) {
   grpc::internal::OpenTelemetryPluginBuilderImpl ot_builder;
+  absl::Status expected_status;
+  if (!options.use_meter_provider) {
+    expected_status =
+        absl::InvalidArgumentError("Need to configure a valid meter provider.");
+  }
+  auto reader = ConfigureOTBuilder(std::move(options), &ot_builder);
+  EXPECT_EQ(ot_builder.BuildAndRegisterGlobal(), expected_status);
+  return reader;
+}
+
+std::shared_ptr<opentelemetry::sdk::metrics::MetricReader>
+OpenTelemetryPluginEnd2EndTest::ConfigureOTBuilder(
+    OpenTelemetryPluginEnd2EndTest::Options options,
+    grpc::internal::OpenTelemetryPluginBuilderImpl* ot_builder) {
   // We are resetting the MeterProvider and OpenTelemetry plugin at the start
   // of each test to avoid test results from one test carrying over to another
   // test. (Some measurements can get arbitrarily delayed.)
@@ -251,28 +285,27 @@ OpenTelemetryPluginEnd2EndTest::BuildAndRegisterOpenTelemetryPlugin(
   std::shared_ptr<opentelemetry::sdk::metrics::MetricReader> reader =
       std::make_shared<grpc::testing::MockMetricReader>();
   meter_provider->AddMetricReader(reader);
-  ot_builder.DisableAllMetrics();
-  ot_builder.EnableMetrics(options.metric_names);
+  ot_builder->DisableAllMetrics();
+  ot_builder->EnableMetrics(options.metric_names);
   if (options.use_meter_provider) {
     auto meter_provider =
         std::make_shared<opentelemetry::sdk::metrics::MeterProvider>();
-    reader.reset(new grpc::testing::MockMetricReader);
+    reader = std::make_shared<grpc::testing::MockMetricReader>();
     meter_provider->AddMetricReader(reader);
-    ot_builder.SetMeterProvider(std::move(meter_provider));
+    ot_builder->SetMeterProvider(std::move(meter_provider));
   }
-  ot_builder.SetChannelScopeFilter(std::move(options.channel_scope_filter));
-  ot_builder.SetServerSelector(std::move(options.server_selector));
-  ot_builder.SetTargetAttributeFilter(
+  ot_builder->SetChannelScopeFilter(std::move(options.channel_scope_filter));
+  ot_builder->SetServerSelector(std::move(options.server_selector));
+  ot_builder->SetTargetAttributeFilter(
       std::move(options.target_attribute_filter));
-  ot_builder.SetGenericMethodAttributeFilter(
+  ot_builder->SetGenericMethodAttributeFilter(
       std::move(options.generic_method_attribute_filter));
   for (auto& option : options.plugin_options) {
-    ot_builder.AddPluginOption(std::move(option));
+    ot_builder->AddPluginOption(std::move(option));
   }
   for (auto& optional_label_key : options.optional_label_keys) {
-    ot_builder.AddOptionalLabel(optional_label_key);
+    ot_builder->AddOptionalLabel(optional_label_key);
   }
-  EXPECT_EQ(ot_builder.BuildAndRegisterGlobal(), absl::OkStatus());
   return reader;
 }
 

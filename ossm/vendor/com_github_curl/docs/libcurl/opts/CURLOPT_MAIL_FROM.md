@@ -32,11 +32,17 @@ to specify the sender's email address when sending SMTP mail with libcurl.
 An originator email address should be specified with angled brackets (\<\>)
 around it, which if not specified are added automatically.
 
+In order to specify DSN parameters (as per RFC 3461), the address has to be
+written in angled brackets, followed by the parameters.
+
 If this parameter is not specified then an empty address is sent to the SMTP
 server which might cause the email to be rejected.
 
 The application does not have to keep the string around after setting this
 option.
+
+Using this option multiple times makes the last set string override the
+previous ones. Set it to NULL to disable its use again.
 
 # DEFAULT
 
@@ -64,5 +70,7 @@ int main(void)
 
 # RETURN VALUE
 
-Returns CURLE_OK if the option is supported, CURLE_UNKNOWN_OPTION if not, or
-CURLE_OUT_OF_MEMORY if there was insufficient heap space.
+curl_easy_setopt(3) returns a CURLcode indicating success or error.
+
+CURLE_OK (0) means everything was OK, non-zero means an error occurred, see
+libcurl-errors(3).

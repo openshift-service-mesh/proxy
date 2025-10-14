@@ -21,38 +21,24 @@
  * SPDX-License-Identifier: curl
  *
  ***************************************************************************/
-#include "curlcheck.h"
+#include "unitcheck.h"
 
 #include "noproxy.h"
 
-static CURLcode unit_setup(void)
+static CURLcode test_unit1614(const char *arg)
 {
-  return CURLE_OK;
-}
+  UNITTEST_BEGIN_SIMPLE
 
-static void unit_stop(void)
-{
-
-}
-
-struct check {
-  const char *a;
-  const char *n;
-  unsigned int bits;
-  bool match;
-};
-
-struct noproxy {
-  const char *a;
-  const char *n;
-  bool match;
-};
-
-UNITTEST_START
 #if defined(DEBUGBUILD) && !defined(CURL_DISABLE_PROXY)
-{
   int i;
   int err = 0;
+
+  struct check {
+  const char *a;
+    const char *n;
+    unsigned int bits;
+    bool match;
+  };
   struct check list4[]= {
     { "192.160.0.1", "192.160.0.1", 33, FALSE},
     { "192.160.0.1", "192.160.0.1", 32, TRUE},
@@ -68,6 +54,7 @@ UNITTEST_START
     { "192.160.0.1", "10.0.0.1", 0, FALSE},
     { NULL, NULL, 0, FALSE} /* end marker */
   };
+#ifdef USE_IPV6
   struct check list6[]= {
     { "::1", "::1", 0, TRUE},
     { "::1", "::1", 128, TRUE},
@@ -75,6 +62,12 @@ UNITTEST_START
     { "::1", "0:0::1", 129, FALSE},
     { "fe80::ab47:4396:55c9:8474", "fe80::ab47:4396:55c9:8474", 64, TRUE},
     { NULL, NULL, 0, FALSE} /* end marker */
+  };
+#endif
+  struct noproxy {
+    const char *a;
+    const char *n;
+    bool match;
   };
   struct noproxy list[]= {
     { "www.example.com", "localhost .example.com .example.de", FALSE},
@@ -113,6 +106,7 @@ UNITTEST_START
     { "192.168.1.1", "192.168.0.0/33", FALSE},
     { "192.168.1.1", "foo, bar, 192.168.0.0/24", FALSE},
     { "192.168.1.1", "foo, bar, 192.168.0.0/16", TRUE},
+#ifdef USE_IPV6
     { "[::1]", "foo, bar, 192.168.0.0/16", FALSE},
     { "[::1]", "foo, bar, ::1/64", TRUE},
     { "[::1]", "::1/64", TRUE},
@@ -121,6 +115,7 @@ UNITTEST_START
     { "bar", "foo, bar, ::1/64", TRUE},
     { "BAr", "foo, bar, ::1/64", TRUE},
     { "BAr", "foo,,,,,              bar, ::1/64", TRUE},
+#endif
     { "www.example.com", "foo, .example.com", TRUE},
     { "www.example.com", "www2.example.com, .example.net", FALSE},
     { "example.com", ".example.com, .example.net", TRUE},
@@ -130,31 +125,34 @@ UNITTEST_START
   for(i = 0; list4[i].a; i++) {
     bool match = Curl_cidr4_match(list4[i].a, list4[i].n, list4[i].bits);
     if(match != list4[i].match) {
-      fprintf(stderr, "%s in %s/%u should %smatch\n",
-              list4[i].a, list4[i].n, list4[i].bits,
-              list4[i].match ? "": "not ");
+      curl_mfprintf(stderr, "%s in %s/%u should %smatch\n",
+                    list4[i].a, list4[i].n, list4[i].bits,
+                    list4[i].match ? "": "not ");
       err++;
     }
   }
+#ifdef USE_IPV6
   for(i = 0; list6[i].a; i++) {
     bool match = Curl_cidr6_match(list6[i].a, list6[i].n, list6[i].bits);
     if(match != list6[i].match) {
-      fprintf(stderr, "%s in %s/%u should %smatch\n",
-              list6[i].a, list6[i].n, list6[i].bits,
-              list6[i].match ? "": "not ");
+      curl_mfprintf(stderr, "%s in %s/%u should %smatch\n",
+                    list6[i].a, list6[i].n, list6[i].bits,
+                    list6[i].match ? "": "not ");
       err++;
     }
   }
+#endif
   for(i = 0; list[i].a; i++) {
     bool match = Curl_check_noproxy(list[i].a, list[i].n);
     if(match != list[i].match) {
-      fprintf(stderr, "%s in %s should %smatch\n",
-              list[i].a, list[i].n,
-              list[i].match ? "": "not ");
+      curl_mfprintf(stderr, "%s in %s should %smatch\n",
+                    list[i].a, list[i].n,
+                    list[i].match ? "": "not ");
       err++;
     }
   }
   fail_if(err, "errors");
-}
 #endif
-UNITTEST_STOP
+
+  UNITTEST_END_SIMPLE
+}

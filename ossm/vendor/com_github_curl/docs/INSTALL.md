@@ -11,7 +11,7 @@ SPDX-License-Identifier: curl
 Lots of people download binary distributions of curl and libcurl. This
 document does not describe how to install curl or libcurl using such a binary
 package. This document describes how to compile, build and install curl and
-libcurl from source code.
+libcurl from [source code](https://curl.se/download.html).
 
 ## Building using vcpkg
 
@@ -30,7 +30,7 @@ or pull request](https://github.com/Microsoft/vcpkg) on the vcpkg repository.
 ## Building from git
 
 If you get your code off a git repository instead of a release tarball, see
-the `GIT-INFO.md` file in the root directory for specific instructions on how
+the [GIT-INFO.md](https://github.com/curl/curl/blob/master/GIT-INFO.md) file in the root directory for specific instructions on how
 to proceed.
 
 # Unix
@@ -137,13 +137,11 @@ alter it, you can select how to deal with each individual library.
 These options are provided to select the TLS backend to use.
 
  - AmiSSL: `--with-amissl`
- - BearSSL: `--with-bearssl`
  - GnuTLS: `--with-gnutls`.
  - mbedTLS: `--with-mbedtls`
  - OpenSSL: `--with-openssl` (also for BoringSSL, AWS-LC, LibreSSL, and quictls)
  - rustls: `--with-rustls`
  - Schannel: `--with-schannel`
- - Secure Transport: `--with-secure-transport`
  - wolfSSL: `--with-wolfssl`
 
 You can build curl with *multiple* TLS backends at your choice, but some TLS
@@ -153,6 +151,16 @@ conflicting identical symbol names.
 
 When you build with multiple TLS backends, you can select the active one at
 runtime when curl starts up.
+
+## MultiSSL and HTTP/3
+
+HTTP/3 needs QUIC and QUIC needs TLS. Building libcurl with HTTP/3 and QUIC
+support is not compatible with the MultiSSL feature: they are mutually
+exclusive. If you need MultiSSL in your build, you cannot have HTTP/3 support
+and vice versa.
+
+libcurl can only use a single TLS library with QUIC and that *same* TLS
+library needs to be used for the other TLS using protocols.
 
 ## Configure finding libs in wrong directory
 
@@ -169,6 +177,11 @@ library check.
 # Windows
 
 Building for Windows XP is required as a minimum.
+
+You can build curl with:
+
+- Microsoft Visual Studio 2008 v9.0 or later (`_MSC_VER >= 1500`)
+- MinGW-w64 3.0 or later (`__MINGW64_VERSION_MAJOR >= 3`)
 
 ## Building Windows DLLs and C runtime (CRT) linkage issues
 
@@ -193,25 +206,100 @@ multi-threaded dynamic C runtime.
 
 ## Cygwin
 
-Almost identical to the Unix installation. Run the configure script in the
-curl source tree root with `sh configure`. Make sure you have the `sh`
+Almost identical to the Unix installation. Essentially run the configure script in the
+curl source tree root with `sh configure`, then run `make`.
+
+To expand on building with `cygwin` first ensure it is in your path, and there are no
+conflicting tools (*i.e. Chocolatey with sed package*). If so move `cygwin` ahead of any items
+in your path that would conflict with `cygwin` commands, making sure you have the `sh`
 executable in `/bin/` or you see the configure fail toward the end.
 
-Run `make`
+Download the setup installer from
+[`cygwin`](https://cygwin.com/) to begin. Additional `cygwin`
+packages are needed for the install. For more on installing packages visit
+[`cygwin setup`](https://www.cygwin.com/faq/faq.html#faq.setup.cli).
+
+Either run setup-x86_64.exe, then search and select packages individually, or try:
+
+    setup-x86_64.exe -P binutils -P gcc-core -P libpsl-devel -P libtool -P perl -P make
+
+If the latter, matching packages should appear in the install rows (*is fickle though*) after selecting
+the download site i.e. `https://mirrors.kernel.org`. In either case, follow the GUI prompts
+until you reach the "Select Packages" window; then select packages, click next, and finish
+the `cygwin` package installation.
+
+Download the latest version of the `cygwin` packages required (*and suggested*) for a successful install:
+
+<details>
+    <summary>Package List</summary>
+
+```
+ binutil - required
+ gcc-core - required
+ libpsl-devel - required
+ libtool - required
+ perl - required
+ make - required
+ - NOTE - if there is an error regarding make, open the cygwin terminal, and run:
+   ln -s /usr/bin/make /usr/bin/gmake
+```
+
+</details>
+
+Once all the packages have been installed, begin the process of installing curl from the source code:
+
+ <details>
+     <summary>configure_options</summary>
+
+```
+    --with-gnutls
+    --with-mbedtls
+    --with-openssl (also works for OpenSSL forks)
+    --with-rustls
+    --with-wolfssl
+    --without-ssl
+```
+
+ </details>
+
+ 1. `sh configure <configure_options>`
+ 2. `make`
+
+If any error occurs during curl installation, try:
+ - reinstalling the required `cygwin` packages from the list above
+ - temporarily move `cygwin` to the top of your path
+ - install all of the suggested `cygwin` packages
 
 ## MS-DOS
 
-Requires DJGPP in the search path and pointing to the Watt-32 stack via
-`WATT_PATH=c:/djgpp/net/watt`.
+You can use either autotools or cmake:
 
-Run `make -f Makefile.dist djgpp` in the root curl dir.
+    ./configure \
+      CC=/path/to/djgpp/bin/i586-pc-msdosdjgpp-gcc \
+      AR=/path/to/djgpp/bin/i586-pc-msdosdjgpp-ar \
+      RANLIB=/path/to/djgpp/bin/i586-pc-msdosdjgpp-ranlib \
+      WATT_ROOT=/path/to/djgpp/net/watt \
+      --host=i586-pc-msdosdjgpp \
+      --with-openssl=/path/to/djgpp \
+      --with-zlib=/path/to/djgpp \
+      --without-libpsl \
+      --disable-shared
 
-For build configuration options, please see the mingw-w64 section.
+    cmake . \
+      -DCMAKE_SYSTEM_NAME=DOS \
+      -DCMAKE_C_COMPILER_TARGET=i586-pc-msdosdjgpp \
+      -DCMAKE_C_COMPILER=/path/to/djgpp/bin/i586-pc-msdosdjgpp-gcc \
+      -DWATT_ROOT=/path/to/djgpp/net/watt \
+      -DOPENSSL_INCLUDE_DIR=/path/to/djgpp/include \
+      -DOPENSSL_SSL_LIBRARY=/path/to/djgpp/lib/libssl.a \
+      -DOPENSSL_CRYPTO_LIBRARY=/path/to/djgpp/lib/libcrypto.a \
+      -DZLIB_INCLUDE_DIR=/path/to/djgpp/include \
+      -DZLIB_LIBRARY=/path/to/djgpp/lib/libz.a \
+      -DCURL_USE_LIBPSL=OFF
 
 Notes:
 
- - DJGPP 2.04 beta has a `sscanf()` bug so the URL parsing is not done
-   properly. Use DJGPP 2.03 until they fix it.
+ - Requires DJGPP 2.04 or upper.
 
  - Compile Watt-32 (and OpenSSL) with the same version of DJGPP. Otherwise
    things go wrong because things like FS-extensions and `errno` values have
@@ -219,9 +307,31 @@ Notes:
 
 ## AmigaOS
 
-Run `make -f Makefile.dist amiga` in the root curl dir.
+You can use either autotools or cmake:
 
-For build configuration options, please see the mingw-w64 section.
+    ./configure \
+      CC=/opt/amiga/bin/m68k-amigaos-gcc \
+      AR=/opt/amiga/bin/m68k-amigaos-ar \
+      RANLIB=/opt/amiga/bin/m68k-amigaos-ranlib \
+      --host=m68k-amigaos \
+      --with-amissl \
+      CFLAGS='-O0 -msoft-float -mcrt=clib2' \
+      CPPFLAGS=-I/path/to/AmiSSL/Developer/include \
+      LDFLAGS=-L/path/to/AmiSSL/Developer/lib/AmigaOS3 \
+      LIBS='-lnet -lm -latomic' \
+      --without-libpsl \
+      --disable-shared
+
+    cmake . \
+      -DAMIGA=1 \
+      -DCMAKE_SYSTEM_NAME=Generic \
+      -DCMAKE_C_COMPILER_TARGET=m68k-unknown-amigaos \
+      -DCMAKE_C_COMPILER=/opt/amiga/bin/m68k-amigaos-gcc \
+      -DCMAKE_C_FLAGS='-O0 -msoft-float -mcrt=clib2' \
+      -DAMISSL_INCLUDE_DIR=/path/to/AmiSSL/Developer/include \
+      -DAMISSL_STUBS_LIBRARY=/path/to/AmiSSL/Developer/lib/AmigaOS3/libamisslstubs.a \
+      -DAMISSL_AUTO_LIBRARY=/path/to/AmiSSL/Developer/lib/AmigaOS3/libamisslauto.a \
+      -DCURL_USE_LIBPSL=OFF
 
 ## Disabling Specific Protocols in Windows builds
 
@@ -230,7 +340,8 @@ environment, therefore, you cannot use the various disable-protocol options of
 the configure utility on this platform.
 
 You can use specific defines to disable specific protocols and features. See
-[CURL-DISABLE](CURL-DISABLE.md) for the full list.
+[CURL-DISABLE](https://github.com/curl/curl/blob/master/docs/CURL-DISABLE.md)
+for the full list.
 
 If you want to set any of these defines you have the following options:
 
@@ -243,14 +354,14 @@ Note: The pre-processor settings can be found using the Visual Studio IDE
 under "Project -> Properties -> Configuration Properties -> C/C++ ->
 Preprocessor".
 
-## Using BSD-style lwIP instead of Winsock TCP/IP stack in Win32 builds
+## Using BSD-style lwIP instead of Winsock TCP/IP stack in Windows builds
 
 In order to compile libcurl and curl using BSD-style lwIP TCP/IP stack it is
 necessary to make the definition of the preprocessor symbol `USE_LWIPSOCK`
 visible to libcurl and curl compilation processes. To set this definition you
 have the following alternatives:
 
- - Modify `lib/config-win32.h` and `src/config-win32.h`
+ - Modify `lib/config-win32.h`
  - Modify `winbuild/Makefile.vc`
  - Modify the "Preprocessor Definitions" in the libcurl project
 
@@ -284,77 +395,28 @@ support the legacy handshakes and algorithms used by those versions. If you
 are using curl in one of those earlier versions of Windows you should choose
 another SSL backend such as OpenSSL.
 
-# Apple Platforms (macOS, iOS, tvOS, watchOS, and their simulator counterparts)
-
-On modern Apple operating systems, curl can be built to use Apple's SSL/TLS
-implementation, Secure Transport, instead of OpenSSL. To build with Secure
-Transport for SSL/TLS, use the configure option `--with-secure-transport`.
-
-When Secure Transport is in use, the curl options `--cacert` and `--capath`
-and their libcurl equivalents, are ignored, because Secure Transport uses the
-certificates stored in the Keychain to evaluate whether or not to trust the
-server. This, of course, includes the root certificates that ship with the OS.
-The `--cert` and `--engine` options, and their libcurl equivalents, are
-currently unimplemented in curl with Secure Transport.
-
-In general, a curl build for an Apple `ARCH/SDK/DEPLOYMENT_TARGET` combination
-can be taken by providing appropriate values for `ARCH`, `SDK`, `DEPLOYMENT_TARGET`
-below and running the commands:
-
-```bash
-# Set these three according to your needs
-export ARCH=x86_64
-export SDK=macosx
-export DEPLOYMENT_TARGET=10.8
-
-export CFLAGS="-arch $ARCH -isysroot $(xcrun -sdk $SDK --show-sdk-path) -m$SDK-version-min=$DEPLOYMENT_TARGET"
-./configure --host=$ARCH-apple-darwin --prefix $(pwd)/artifacts --with-secure-transport
-make -j8
-make install
-```
-
-The above command lines build curl for macOS platform with `x86_64`
-architecture and `10.8` as deployment target.
-
-Here is an example for iOS device:
-
-```bash
-export ARCH=arm64
-export SDK=iphoneos
-export DEPLOYMENT_TARGET=11.0
-
-export CFLAGS="-arch $ARCH -isysroot $(xcrun -sdk $SDK --show-sdk-path) -m$SDK-version-min=$DEPLOYMENT_TARGET"
-./configure --host=$ARCH-apple-darwin --prefix $(pwd)/artifacts --with-secure-transport
-make -j8
-make install
-```
-
-Another example for watchOS simulator for macs with Apple Silicon:
-
-```bash
-export ARCH=arm64
-export SDK=watchsimulator
-export DEPLOYMENT_TARGET=5.0
-
-export CFLAGS="-arch $ARCH -isysroot $(xcrun -sdk $SDK --show-sdk-path) -m$SDK-version-min=$DEPLOYMENT_TARGET"
-./configure --host=$ARCH-apple-darwin --prefix $(pwd)/artifacts --with-secure-transport
-make -j8
-make install
-```
-
-In all above, the built libraries and executables can be found in the
-`artifacts` folder.
-
 # Android
 
-When building curl for Android it is recommended to use a Linux/macOS
-environment since using curl's `configure` script is the easiest way to build
-curl for Android. Before you can build curl for Android, you need to install
-the Android NDK first. This can be done using the SDK Manager that is part of
-Android Studio. Once you have installed the Android NDK, you need to figure
-out where it has been installed and then set up some environment variables
-before launching `configure`. On macOS, those variables could look like this
-to compile for `aarch64` and API level 29:
+When building curl for Android you can you CMake or curl's `configure` script.
+
+Before you can build curl for Android, you need to install the Android NDK
+first. This can be done using the SDK Manager that is part of Android Studio.
+Once you have installed the Android NDK, you need to figure out where it has
+been installed and then set up some environment variables before launching
+the build.
+
+Examples to compile for `aarch64` and API level 29:
+
+with CMake, where `ANDROID_NDK_HOME` points into your NDK:
+
+    cmake . \
+      -DANDROID_ABI=arm64-v8a \
+      -DANDROID_PLATFORM=android-29 \
+      -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+      -DCURL_ENABLE_SSL=OFF \
+      -DCURL_USE_LIBPSL=OFF
+
+with `configure`, on macOS:
 
 ```bash
 export ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/25.1.8937393 # Point into your NDK.
@@ -362,8 +424,8 @@ export HOST_TAG=darwin-x86_64 # Same tag for Apple Silicon. Other OS values here
 export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG
 export AR=$TOOLCHAIN/bin/llvm-ar
 export AS=$TOOLCHAIN/bin/llvm-as
-export CC=$TOOLCHAIN/bin/aarch64-linux-android21-clang
-export CXX=$TOOLCHAIN/bin/aarch64-linux-android21-clang++
+export CC=$TOOLCHAIN/bin/aarch64-linux-android29-clang
+export CXX=$TOOLCHAIN/bin/aarch64-linux-android29-clang++
 export LD=$TOOLCHAIN/bin/ld
 export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
 export STRIP=$TOOLCHAIN/bin/llvm-strip
@@ -375,7 +437,7 @@ to adjust those variables accordingly. After that you can build curl like this:
     ./configure --host aarch64-linux-android --with-pic --disable-shared
 
 Note that this does not give you SSL/TLS support. If you need SSL/TLS, you
-have to build curl with a SSL/TLS library, e.g. OpenSSL, because it is
+have to build curl with an SSL/TLS library, e.g. OpenSSL, because it is
 impossible for curl to access Android's native SSL/TLS layer. To build curl
 for Android using OpenSSL, follow the OpenSSL build instructions and then
 install `libssl.a` and `libcrypto.a` to `$TOOLCHAIN/sysroot/usr/lib` and copy
@@ -451,11 +513,8 @@ export NM=ppc_405-nm
     --exec-prefix=/usr/local
 ```
 
-You may also need to provide a parameter like `--with-random=/dev/urandom` to
-configure as it cannot detect the presence of a random number generating
-device for a target system. The `--prefix` parameter specifies where curl gets
-installed. If `configure` completes successfully, do `make` and `make install`
-as usual.
+The `--prefix` parameter specifies where curl gets installed. If `configure`
+completes successfully, do `make` and `make install` as usual.
 
 In some cases, you may be able to simplify the above commands to as little as:
 
@@ -486,17 +545,19 @@ configure command-line as you can to disable all the libcurl features that you
 know your application is not going to need. Besides specifying the
 `--disable-PROTOCOL` flags for all the types of URLs your application do not
 use, here are some other flags that can reduce the size of the library by
-disabling support for some feature (run `./configure --help` to see them all):
+disabling support for some features (run `./configure --help` to see them all):
 
- - `--disable-alt-svc` (HTTP Alt-Svc)
- - `--disable-ares` (the C-ARES DNS library)
- - `--disable-cookies` (HTTP cookies)
+ - `--disable-aws` (cryptographic authentication)
  - `--disable-basic-auth` (cryptographic authentication)
  - `--disable-bearer-auth` (cryptographic authentication)
  - `--disable-digest-auth` (cryptographic authentication)
+ - `--disable-http-auth` (all HTTP authentication)
  - `--disable-kerberos-auth` (cryptographic authentication)
  - `--disable-negotiate-auth` (cryptographic authentication)
- - `--disable-aws` (cryptographic authentication)
+ - `--disable-ntlm` (NTLM authentication)
+ - `--disable-alt-svc` (HTTP Alt-Svc)
+ - `--disable-ares` (the C-ARES DNS library)
+ - `--disable-cookies` (HTTP cookies)
  - `--disable-dateparse` (date parsing for time conditionals)
  - `--disable-dnsshuffle` (internal server load spreading)
  - `--disable-doh` (DNS-over-HTTP)
@@ -504,21 +565,17 @@ disabling support for some feature (run `./configure --help` to see them all):
  - `--disable-get-easy-options` (lookup easy options at runtime)
  - `--disable-headers-api` (API to access headers)
  - `--disable-hsts` (HTTP Strict Transport Security)
- - `--disable-http-auth` (all HTTP authentication)
  - `--disable-ipv6` (IPv6)
  - `--disable-libcurl-option` (--libcurl C code generation support)
  - `--disable-manual` (--manual built-in documentation)
  - `--disable-mime` (MIME API)
  - `--disable-netrc`  (.netrc file)
- - `--disable-ntlm` (NTLM authentication)
- - `--disable-ntlm-wb` (NTLM WinBind)
  - `--disable-progress-meter` (graphical progress meter in library)
  - `--disable-proxy` (HTTP and SOCKS proxies)
- - `--disable-pthreads` (multi-threading)
  - `--disable-socketpair` (socketpair for asynchronous name resolving)
  - `--disable-threaded-resolver`  (threaded name resolver)
  - `--disable-tls-srp` (Secure Remote Password authentication for TLS)
- - `--disable-unix-sockets` (UNIX sockets)
+ - `--disable-unix-sockets` (Unix sockets)
  - `--disable-verbose` (eliminates debugging strings and error code strings)
  - `--disable-versioned-symbols` (versioned symbols)
  - `--enable-symbol-hiding` (eliminates unneeded symbols in the shared library)
@@ -530,7 +587,7 @@ disabling support for some feature (run `./configure --help` to see them all):
  - `--without-libidn2` (internationalized domain names)
  - `--without-librtmp` (RTMP)
  - `--without-ssl` (SSL/TLS)
- - `--without-zlib` (on-the-fly decompression)
+ - `--without-zlib` (gzip/deflate on-the-fly decompression)
 
 Be sure also to strip debugging symbols from your binaries after compiling
 using 'strip' or an option like `-s`. If space is really tight, you may be able
@@ -538,8 +595,8 @@ to gain a few bytes by removing some unneeded sections of the shared library
 using the -R option to objcopy (e.g. the .comment section).
 
 Using these techniques it is possible to create a basic HTTP-only libcurl
-shared library for i386 Linux platforms that is only 130 KiB in size
-(as of libcurl version 8.6.0, using gcc 13.2.0).
+shared library for i386 Linux platforms that is only 137 KiB in size
+(as of libcurl version 8.13.0, using gcc 14.2.0).
 
 You may find that statically linking libcurl to your application results in a
 lower total size than dynamically linking.
@@ -560,22 +617,24 @@ that are not automatically detected:
 
 This is a probably incomplete list of known CPU architectures and operating
 systems that curl has been compiled for. If you know a system curl compiles
-and runs on, that is not listed, please let us know!
+and runs on, that is not listed, please let us know.
 
-## 101 Operating Systems
+## 104 Operating Systems
 
-    AIX, AmigaOS, Android, ArcoOS, Aros, Atari FreeMiNT, BeOS, Blackberry 10,
-    Blackberry Tablet OS, Cell OS, CheriBSD, Chrome OS, Cisco IOS, DG/UX,
-    Dragonfly BSD, DR DOS, eCOS, FreeBSD, FreeDOS, FreeRTOS, Fuchsia, Garmin OS,
-    Genode, Haiku, HardenedBSD, HP-UX, Hurd, Illumos, Integrity, iOS, ipadOS, IRIX,
-    Linux, Lua RTOS, Mac OS 9, macOS, Mbed, Meego, Micrium, MINIX, Moblin, MorphOS,
-    MPE/iX, MS-DOS, NCR MP-RAS, NetBSD, Netware, NextStep, Nintendo Switch,
-    NonStop OS, NuttX, OpenBSD, OpenStep, Orbis OS, OS/2, OS/400, OS21, Plan 9,
-    PlayStation Portable, QNX, Qubes OS, ReactOS, Redox, RICS OS, ROS, RTEMS,
-    Sailfish OS, SCO Unix, Serenity, SINIX-Z, SkyOS, Solaris, Sortix, SunOS,
-    Syllable OS, Symbian, Tizen, TPF, Tru64, tvOS, ucLinux, Ultrix, UNICOS,
-    UnixWare, VMS, vxWorks, watchOS, Wear OS, WebOS, Wii system software, Wii U,
-    Windows, Windows CE, Xbox System, Xenix, Zephyr, z/OS, z/TPF, z/VM, z/VSE
+    AIX, AmigaOS, Android, ArcoOS, Aros, Atari FreeMiNT, BeOS, Blackberry
+    10, Blackberry Tablet OS, Cell OS, CheriBSD, Chrome OS, Cisco IOS,
+    DG/UX, DR DOS, Dragonfly BSD, eCOS, FreeBSD, FreeDOS, FreeRTOS, Fuchsia,
+    Garmin OS, Genode, Haiku, HardenedBSD, HP-UX, Hurd, IBM I, illumos,
+    Integrity, iOS, ipadOS, IRIX, Linux, Lua RTOS, Mac OS 9, macOS, Maemo,
+    Mbed, Meego, Micrium, MINIX, Minoca, Moblin, MorphOS, MPE/iX, MS-DOS,
+    NCR MP-RAS, NetBSD, Netware, NextStep, Nintendo 3DS Nintendo Switch,
+    NonStop OS, NuttX, OpenBSD, OpenStep, Orbis OS, OS/2, OS21, Plan 9,
+    PlayStation Portable, QNX, Qubes OS, ReactOS, Redox, RISC OS, ROS,
+    RTEMS, Sailfish OS, SCO Unix, Serenity, SINIX-Z, SkyOS, software,
+    Solaris, Sortix, SunOS, Syllable OS, Symbian, Tizen, TPF, Tru64, tvOS,
+    ucLinux, Ultrix, UNICOS, UnixWare, VMS, vxWorks, watchOS, Wear OS,
+    WebOS, Wii system Wii U, Windows CE, Windows, Xbox System, Xenix, z/OS,
+    z/TPF, z/VM, z/VSE, Zephyr
 
 ## 28 CPU Architectures
 

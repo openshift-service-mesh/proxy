@@ -17,19 +17,19 @@
 #ifndef GRPC_SRC_CORE_RESOLVER_XDS_XDS_DEPENDENCY_MANAGER_H
 #define GRPC_SRC_CORE_RESOLVER_XDS_XDS_DEPENDENCY_MANAGER_H
 
-#include <grpc/support/port_platform.h>
-
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
 
-#include "src/core/ext/xds/xds_client_grpc.h"
-#include "src/core/ext/xds/xds_cluster.h"
-#include "src/core/ext/xds/xds_endpoint.h"
-#include "src/core/ext/xds/xds_listener.h"
-#include "src/core/ext/xds/xds_route_config.h"
+#include <grpc/support/port_platform.h>
+
 #include "src/core/lib/gprpp/ref_counted.h"
 #include "src/core/resolver/resolver.h"
+#include "src/core/xds/grpc/xds_client_grpc.h"
+#include "src/core/xds/grpc/xds_cluster.h"
+#include "src/core/xds/grpc/xds_endpoint.h"
+#include "src/core/xds/grpc/xds_listener.h"
+#include "src/core/xds/grpc/xds_route_config.h"
 
 namespace grpc_core {
 
@@ -148,6 +148,10 @@ class XdsDependencyManager final : public RefCounted<XdsDependencyManager>,
   // config as long as the returned object is still referenced.
   RefCountedPtr<ClusterSubscription> GetClusterSubscription(
       absl::string_view cluster_name);
+
+  void RequestReresolution();
+
+  void ResetBackoff();
 
   static absl::string_view ChannelArgName() {
     return GRPC_ARG_NO_SUBCHANNEL_PREFIX "xds_dependency_manager";

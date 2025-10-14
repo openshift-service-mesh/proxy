@@ -22,14 +22,13 @@
 #
 ###########################################################################
 
-SUBDIRS = clients
-
 TESTENV =                             \
 testenv/__init__.py                   \
 testenv/caddy.py                      \
 testenv/certs.py                      \
 testenv/client.py                     \
 testenv/curl.py                       \
+testenv/dante.py                      \
 testenv/env.py                        \
 testenv/httpd.py                      \
 testenv/mod_curltest/mod_curltest.c   \
@@ -39,7 +38,7 @@ testenv/vsftpd.py                     \
 testenv/ws_echo_server.py
 
 EXTRA_DIST =           \
-config.ini.in          \
+CMakeLists.txt         \
 conftest.py            \
 requirements.txt       \
 scorecard.py           \
@@ -58,17 +57,22 @@ test_12_reuse.py       \
 test_13_proxy_auth.py  \
 test_14_auth.py        \
 test_15_tracing.py     \
+test_16_info.py        \
+test_17_ssl_use.py     \
+test_18_methods.py     \
+test_19_shutdown.py    \
 test_20_websockets.py  \
+test_30_vsftpd.py      \
+test_31_vsftpds.py     \
+test_32_ftps_vsftpd.py \
+test_40_socks.py \
 $(TESTENV)
 
 clean-local:
 	rm -rf *.pyc __pycache__
 	rm -rf gen
 
-check: clients
+check: libtests
 
-clients:
-	@(cd clients; $(MAKE) check)
-
-checksrc:
-	cd clients && $(MAKE) checksrc
+libtests:
+	@(cd ../libtests; $(MAKE) check)

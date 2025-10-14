@@ -35,6 +35,9 @@ string to NULL to disable kerberos support for FTP.
 The application does not have to keep the string around after setting this
 option.
 
+The application does not have to keep the string around after setting this
+option.
+
 # DEFAULT
 
 NULL
@@ -65,5 +68,7 @@ This option was known as CURLOPT_KRB4LEVEL up to 7.16.3
 
 # RETURN VALUE
 
-Returns CURLE_OK if the option is supported, CURLE_UNKNOWN_OPTION if not, or
-CURLE_OUT_OF_MEMORY if there was insufficient heap space.
+curl_easy_setopt(3) returns a CURLcode indicating success or error.
+
+CURLE_OK (0) means everything was OK, non-zero means an error occurred, see
+libcurl-errors(3).

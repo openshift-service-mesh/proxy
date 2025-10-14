@@ -44,7 +44,7 @@
 #include "src/core/lib/resource_quota/resource_quota.h"
 #include "src/core/lib/slice/slice.h"
 #include "src/core/lib/transport/metadata_batch.h"
-#include "test/core/util/slice_splitter.h"
+#include "test/core/test_util/slice_splitter.h"
 
 bool squelch = true;
 bool leak_check = true;
@@ -82,9 +82,7 @@ bool IsStreamError(const absl::Status& status) {
 
 absl::StatusOr<std::string> TestVector(grpc_slice_split_mode mode,
                                        Slice input) {
-  MemoryAllocator memory_allocator = MemoryAllocator(
-      ResourceQuota::Default()->memory_quota()->CreateMemoryAllocator("test"));
-  auto arena = MakeScopedArena(1024, &memory_allocator);
+  auto arena = SimpleArenaAllocator()->MakeArena();
   ExecCtx exec_ctx;
   grpc_slice* slices;
   size_t nslices;

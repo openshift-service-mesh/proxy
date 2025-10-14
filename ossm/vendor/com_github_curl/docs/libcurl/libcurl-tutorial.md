@@ -112,7 +112,7 @@ specified are:
 ## CURL_GLOBAL_WIN32
 
 which only does anything on Windows machines. When used on a Windows machine,
-it makes libcurl initialize the win32 socket stuff. Without having that
+it makes libcurl initialize the Win32 socket stuff. Without having that
 initialized properly, your program cannot use sockets properly. You should
 only do this once for each application, so if your program already does this
 or of another library in use does it, you should not tell libcurl to do this
@@ -194,7 +194,7 @@ One of the most basic properties to set in the handle is the URL. You set your
 preferred URL to transfer with CURLOPT_URL(3) in a manner similar to:
 
 ~~~c
- curl_easy_setopt(handle, CURLOPT_URL, "http://domain.com/");
+ curl_easy_setopt(handle, CURLOPT_URL, "http://example.com/");
 ~~~
 
 Let's assume for a while that you want to receive data as the URL identifies a
@@ -235,7 +235,7 @@ to make your program run fine virtually everywhere.
 (CURLOPT_WRITEDATA(3) was formerly known as *CURLOPT_FILE*. Both names still
 work and do the same thing).
 
-If you are using libcurl as a win32 DLL, you MUST use the
+If you are using libcurl as a Windows DLL, you MUST use the
 CURLOPT_WRITEFUNCTION(3) if you set CURLOPT_WRITEDATA(3) - or experience
 crashes.
 
@@ -322,7 +322,7 @@ have a prototype similar to:
  size_t function(char *bufptr, size_t size, size_t nitems, void *userp);
 ~~~
 Where *bufptr* is the pointer to a buffer we fill in with data to upload
-and *size*nitems* is the size of the buffer and therefore also the maximum
+and *nitems* is the size of the buffer and therefore also the maximum
 amount of data we can return to libcurl in this call. The *userp* pointer
 is the custom pointer we set to point to a struct of ours to pass private data
 between the application and the callback.
@@ -1255,7 +1255,7 @@ curl_mime_subparts(3). Once it has been
 bound to its parent multi-part, a nth-level multi-part belongs to it and
 should not be freed explicitly.
 
-Email messages data is not supposed to be non-ascii and line length is
+Email messages data is not supposed to be non-ASCII and line length is
 limited: fortunately, some transfer encodings are defined by the standards to
 support the transmission of such incompatible data. Function
 curl_mime_encoder(3) tells a part that its source data must be encoded

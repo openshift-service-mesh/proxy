@@ -27,6 +27,7 @@
 #include "rb_grpc.h"
 #include "rb_grpc_imports.generated.h"
 
+#include <grpc/credentials.h>
 #include <grpc/grpc.h>
 #include <grpc/grpc_security.h>
 #include <grpc/support/alloc.h>
@@ -111,7 +112,7 @@ static VALUE grpc_rb_call_credentials_callback_rescue(VALUE args,
   VALUE rb_exception_info =
       rb_funcall(exception_object, rb_intern("inspect"), 0);
   (void)args;
-  gpr_log(GPR_INFO,
+  gpr_log(GPR_DEBUG,
           "GRPC_RUBY call credentials callback failed, exception inspect:|%s| "
           "backtrace:|%s|",
           StringValueCStr(rb_exception_info), StringValueCStr(backtrace_str));
