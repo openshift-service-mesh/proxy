@@ -107,7 +107,7 @@ redirects for security reasons: only HTTP, HTTPS, FTP and FTPS are
 enabled by default. Applications may opt to restrict that set further.
 
 A redirect to a file: URL would cause the libcurl to read (or write) arbitrary
-files from the local filesystem. If the application returns the data back to
+files from the local file system. If the application returns the data back to
 the user (as would happen in some kinds of CGI scripts), an attacker could
 leverage this to read otherwise forbidden data (e.g.
 **file://localhost/etc/passwd**).
@@ -460,7 +460,9 @@ created.
 libcurl itself uses *fork()* and *execl()* if told to use the
 **CURLAUTH_NTLM_WB** authentication method which then invokes the helper
 command in a child process with file descriptors duplicated. Make sure that
-only the trusted and reliable helper program is invoked!
+only the trusted and reliable helper program is invoked.
+
+This feature was removed from curl in 8.8.0.
 
 # Secrets in memory
 

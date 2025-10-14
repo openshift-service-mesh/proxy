@@ -30,14 +30,17 @@ CURLcode curl_easy_setopt(CURL *handle, CURLOPT_DNS_SERVERS, char *servers);
 Pass a char pointer that is the list of DNS servers to be used instead of the
 system default. The format of the dns servers option is:
 
-host[:port][,host[:port]]...
+    host[:port][,host[:port]]...
 
 For example:
 
-192.168.1.100,192.168.1.101,3.4.5.6
+    192.168.1.100,192.168.1.101,3.4.5.6
 
 The application does not have to keep the string around after setting this
 option.
+
+Using this option multiple times makes the last set string override the
+previous ones. Set it to NULL to disable its use again.
 
 # DEFAULT
 
@@ -71,7 +74,7 @@ supports this operation. The c-ares backend is the only such one.
 
 # RETURN VALUE
 
-Returns CURLE_OK if the option is supported, CURLE_UNKNOWN_OPTION if not,
-CURLE_NOT_BUILT_IN if support was disabled at compile-time,
-CURLE_BAD_FUNCTION_ARGUMENT when given an invalid server list, or
-CURLE_OUT_OF_MEMORY if there was insufficient heap space.
+curl_easy_setopt(3) returns a CURLcode indicating success or error.
+
+CURLE_OK (0) means everything was OK, non-zero means an error occurred, see
+libcurl-errors(3).

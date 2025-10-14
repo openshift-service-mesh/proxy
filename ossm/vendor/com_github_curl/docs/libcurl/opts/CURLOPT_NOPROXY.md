@@ -41,7 +41,7 @@ proxy for all hostnames, even if there is an environment variable set for it.
 Enter IPv6 numerical addresses in the list of hostnames without enclosing
 brackets:
 
- "example.com,::1,localhost"
+    "example.com,::1,localhost"
 
 Since 7.86.0, IP addresses specified to this option can be provided using CIDR
 notation: an appended slash and number specifies the number of "network bits"
@@ -50,6 +50,9 @@ would match all addresses starting with "192.168".
 
 The application does not have to keep the string around after setting this
 option.
+
+Using this option multiple times makes the last set string override the
+previous ones. Set it to NULL to disable its use again.
 
 # Environment variables
 
@@ -85,5 +88,7 @@ int main(void)
 
 # RETURN VALUE
 
-Returns CURLE_OK if the option is supported, CURLE_UNKNOWN_OPTION if not, or
-CURLE_OUT_OF_MEMORY if there was insufficient heap space.
+curl_easy_setopt(3) returns a CURLcode indicating success or error.
+
+CURLE_OK (0) means everything was OK, non-zero means an error occurred, see
+libcurl-errors(3).

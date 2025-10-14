@@ -28,9 +28,15 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#ifdef UNDER_CE
+#define strerror(e) "?"
+#else
 #include <errno.h>
+#endif
 #ifdef _WIN32
 #include <io.h>
+#undef stat
+#define stat _stat
 #else
 #include <unistd.h>
 #endif
@@ -89,8 +95,10 @@ int main(void)
 
   /* get a FILE * of the same file */
   hd_src = fopen(LOCAL_FILE, "rb");
+  if(!hd_src)
+    return 2;
 
-  /* In windows, this inits the winsock stuff */
+  /* In Windows, this inits the Winsock stuff */
   curl_global_init(CURL_GLOBAL_ALL);
 
   /* get a curl handle */

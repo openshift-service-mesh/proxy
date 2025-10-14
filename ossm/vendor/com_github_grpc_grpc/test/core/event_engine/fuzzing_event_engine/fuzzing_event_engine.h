@@ -23,11 +23,13 @@
 #include <memory>
 #include <queue>
 #include <set>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/functional/any_invocable.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/optional.h"
@@ -38,10 +40,11 @@
 #include <grpc/event_engine/slice_buffer.h>
 #include <grpc/support/time.h>
 
+#include "src/core/lib/event_engine/time_util.h"
 #include "src/core/lib/gprpp/no_destruct.h"
 #include "src/core/lib/gprpp/sync.h"
 #include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.pb.h"
-#include "test/core/util/port.h"
+#include "test/core/test_util/port.h"
 
 namespace grpc_event_engine {
 namespace experimental {
@@ -300,6 +303,34 @@ class FuzzingEventEngine : public EventEngine {
   grpc_core::Mutex run_after_duration_callback_mu_;
   absl::AnyInvocable<void(Duration)> run_after_duration_callback_
       ABSL_GUARDED_BY(run_after_duration_callback_mu_);
+};
+
+class ThreadedFuzzingEventEngine : public FuzzingEventEngine {
+ public:
+  ThreadedFuzzingEventEngine()
+      : ThreadedFuzzingEventEngine(std::chrono::milliseconds(10)) {}
+
+  explicit ThreadedFuzzingEventEngine(Duration max_time)
+      : FuzzingEventEngine(FuzzingEventEngine::Options(),
+                           fuzzing_event_engine::Actions()),
+        main_([this, max_time]() {
+          while (!done_.load()) {
+            if (max_time > Duration::zero()) {
+              absl::SleepFor(absl::Milliseconds(
+                  grpc_event_engine::experimental::Milliseconds(max_time)));
+            }
+            Tick();
+          }
+        }) {}
+
+  ~ThreadedFuzzingEventEngine() override {
+    done_.store(true);
+    main_.join();
+  }
+
+ private:
+  std::atomic<bool> done_{false};
+  std::thread main_;
 };
 
 }  // namespace experimental

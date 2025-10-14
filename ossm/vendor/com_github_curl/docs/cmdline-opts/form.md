@@ -31,7 +31,7 @@ This enables uploading of binary files etc. To force the 'content' part to be
 a file, prefix the filename with an @ sign. To just get the content part from
 a file, prefix the filename with the symbol \<. The difference between @ and
 \< is then that @ makes a file get attached in the post as a file upload,
-while the \< makes a text field and just get the contents for that text field
+while the \< makes a text field and just gets the contents for that text field
 from a file.
 
 Read content from stdin instead of a file by using a single "-" as filename.
@@ -72,11 +72,13 @@ filename=, like this:
 
 If filename/path contains ',' or ';', it must be quoted by double-quotes like:
 
-    curl -F "file=@\"local,file\";filename=\"name;in;post\"" example.com
+    curl -F "file=@\"local,file\";filename=\"name;in;post\"" \
+        https://example.com
 
 or
 
-    curl -F 'file=@"local,file";filename="name;in;post"' example.com
+    curl -F 'file=@"local,file";filename="name;in;post"' \
+        https://example.com
 
 Note that if a filename/path is quoted by double-quotes, any double-quote
 or backslash within the filename must be escaped by backslash.
@@ -84,7 +86,8 @@ or backslash within the filename must be escaped by backslash.
 Quoting must also be applied to non-file data if it contains semicolons,
 leading/trailing spaces or leading double quotes:
 
-    curl -F 'colors="red; green; blue";type=text/x-myapp' example.com
+    curl -F 'colors="red; green; blue";type=text/x-myapp' \
+       https://example.com
 
 You can add custom headers to the field by setting headers=, like
 
@@ -94,14 +97,14 @@ or
 
     curl -F "submit=OK;headers=@headerfile" example.com
 
-The headers= keyword may appear more that once and above notes about quoting
-apply. When headers are read from a file, Empty lines and lines starting
-with '#' are comments and ignored; each header can be folded by splitting
+The headers= keyword may appear more than once and above notes about quoting
+apply. When headers are read from a file, empty lines and lines starting
+with '#' are ignored; each header can be folded by splitting
 between two words and starting the continuation line with a space; embedded
 carriage-returns and trailing spaces are stripped.
 Here is an example of a header file contents:
 
-    # This file contain two headers.
+    # This file contains two headers.
     X-header-1: this is a header
 
     # The following header is folded.

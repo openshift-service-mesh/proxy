@@ -135,6 +135,15 @@ def proxy_wasm_cpp_host_repositories():
         urls = ["https://github.com/proxy-wasm/proxy-wasm-cpp-sdk/archive/95bb82ce45c41d9100fd1ec15d2ffc67f7f3ceee.tar.gz"],
     )
 
+    # Compile DB dependencies.
+    maybe(
+        http_archive,
+        name = "bazel_compdb",
+        sha256 = "acd2a9eaf49272bb1480c67d99b82662f005b596a8c11739046a4220ec73c4da",
+        strip_prefix = "bazel-compilation-database-40864791135333e1446a04553b63cbe744d358d0",
+        url = "https://github.com/grailbio/bazel-compilation-database/archive/40864791135333e1446a04553b63cbe744d358d0.tar.gz",
+    )
+
     # Test dependencies.
 
     maybe(
@@ -198,10 +207,10 @@ def proxy_wasm_cpp_host_repositories():
         http_archive,
         name = "com_github_bytecodealliance_wasm_micro_runtime",
         build_file = "@proxy_wasm_cpp_host//bazel/external:wamr.BUILD",
-        # WAMR-1.2.1
-        sha256 = "7548d4bbea8dbb9b005e83bd571f93a12fb3f0b5e87a8b0130f004dd92df4b0b",
-        strip_prefix = "wasm-micro-runtime-WAMR-1.2.1",
-        url = "https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/tags/WAMR-1.2.1.zip",
+        # WAMR-2.1.1
+        sha256 = "a0824762abbcbb3dd6b7bb07530f198ece5d792a12a879bc2a99100590fdb151",
+        strip_prefix = "wasm-micro-runtime-WAMR-2.1.1",
+        url = "https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/tags/WAMR-2.1.1.zip",
     )
 
     native.bind(
@@ -240,28 +249,19 @@ def proxy_wasm_cpp_host_repositories():
         http_archive,
         name = "com_github_bytecodealliance_wasmtime",
         build_file = "@proxy_wasm_cpp_host//bazel/external:wasmtime.BUILD",
-        sha256 = "917da461249b11a3176a39573723f78c627259576d0ca10b00d6e7f7fa047081",
-        strip_prefix = "wasmtime-9.0.3",
-        url = "https://github.com/bytecodealliance/wasmtime/archive/v9.0.3.tar.gz",
-    )
-
-    maybe(
-        http_archive,
-        name = "com_github_webassembly_wasm_c_api",
-        build_file = "@proxy_wasm_cpp_host//bazel/external:wasm-c-api.BUILD",
-        sha256 = "c774044f51431429e878bd1b9e2a4e38932f861f9211df72f75e9427eb6b8d32",
-        strip_prefix = "wasm-c-api-c9d31284651b975f05ac27cee0bab1377560b87e",
-        url = "https://github.com/WebAssembly/wasm-c-api/archive/c9d31284651b975f05ac27cee0bab1377560b87e.tar.gz",
+        sha256 = "2ccb49bb3bfa4d86907ad4c80d1147aef6156c7b6e3f7f14ed02a39de9761155",
+        strip_prefix = "wasmtime-24.0.0",
+        url = "https://github.com/bytecodealliance/wasmtime/archive/v24.0.0.tar.gz",
     )
 
     native.bind(
         name = "wasmtime",
-        actual = "@com_github_webassembly_wasm_c_api//:wasmtime_lib",
+        actual = "@com_github_bytecodealliance_wasmtime//:wasmtime_lib",
     )
 
     native.bind(
         name = "prefixed_wasmtime",
-        actual = "@com_github_webassembly_wasm_c_api//:prefixed_wasmtime_lib",
+        actual = "@com_github_bytecodealliance_wasmtime//:prefixed_wasmtime_lib",
     )
 
     # WAVM with dependencies.

@@ -31,7 +31,7 @@
 
 static const char data[]=
   "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
-  "Nam rhoncus odio id venenatis volutpat. Vestibulum dapibus "
+  "___ rhoncus odio id venenatis volutpat. Vestibulum dapibus "
   "bibendum ullamcorper. Maecenas finibus elit augue, vel "
   "condimentum odio maximus nec. In hac habitasse platea dictumst. "
   "Vestibulum vel dolor et turpis rutrum finibus ac at nulla. "
@@ -76,7 +76,7 @@ int main(void)
   upload.readptr = data;
   upload.sizeleft = strlen(data);
 
-  /* In windows, this inits the winsock stuff */
+  /* In Windows, this inits the Winsock stuff */
   res = curl_global_init(CURL_GLOBAL_DEFAULT);
   /* Check for errors */
   if(res != CURLE_OK) {

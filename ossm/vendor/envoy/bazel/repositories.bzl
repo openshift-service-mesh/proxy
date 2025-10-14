@@ -253,7 +253,6 @@ def envoy_dependencies(skip_targets = []):
 
     _com_github_wamr()
     _com_github_wasmtime()
-    _com_github_wasm_c_api()
 
     switched_rules_by_language(
         name = "com_google_googleapis_imports",
@@ -728,14 +727,6 @@ def _com_github_curl():
         build_file_content = BUILD_ALL_CONTENT + """
 cc_library(name = "curl", visibility = ["//visibility:public"], deps = ["@envoy//bazel/foreign_cc:curl"])
 """,
-        # Patch curl 7.74.0 and later due to CMake's problematic implementation of policy `CMP0091`
-        # and introduction of libidn2 dependency which is inconsistently available and must
-        # not be a dynamic dependency on linux.
-        # Upstream patches submitted: https://github.com/curl/curl/pull/6050 & 6362
-        # TODO(https://github.com/envoyproxy/envoy/issues/11816): This patch is obsoleted
-        # by elimination of the curl dependency.
-        patches = ["@envoy//bazel/foreign_cc:curl.patch"],
-        patch_args = ["-p1"],
     )
     native.bind(
         name = "curl",
@@ -960,24 +951,12 @@ def _com_github_wamr():
 def _com_github_wasmtime():
     external_http_archive(
         name = "com_github_wasmtime",
-        build_file = "@envoy//bazel/external:wasmtime.BUILD",
+        build_file = "@proxy_wasm_cpp_host//:bazel/external/wasmtime.BUILD",
     )
 
-def _com_github_wasm_c_api():
-    external_http_archive(
-        name = "com_github_wasm_c_api",
-        build_file = "@envoy//bazel/external:wasm-c-api.BUILD",
-    )
     native.bind(
         name = "wasmtime",
-        actual = "@com_github_wasm_c_api//:wasmtime_lib",
-    )
-
-    # This isn't needed in builds with a single Wasm engine, but "bazel query"
-    # complains about a missing dependency, so point it at the regular target.
-    native.bind(
-        name = "prefixed_wasmtime",
-        actual = "@com_github_wasm_c_api//:wasmtime_lib",
+        actual = "@com_github_wasmtime//:wasmtime_lib",
     )
 
 def _intel_dlb():

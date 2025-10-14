@@ -34,14 +34,18 @@ CURLcode curl_easy_setopt(CURL *handle, CURLOPT_CUSTOMREQUEST, char *method);
 
 Pass a pointer to a null-terminated string as parameter.
 
-When changing the request *method* by setting CURLOPT_CUSTOMREQUEST(3), you
-do not actually change how libcurl behaves or acts: you only change the actual
+When changing the request *method* by setting CURLOPT_CUSTOMREQUEST(3), you do
+not actually change how libcurl behaves or acts: you only change the actual
 string sent in the request.
 
 libcurl passes on the verbatim string in its request without any filter or
 other safe guards. That includes white space and control characters.
 
-Restore to the internal default by setting this to NULL.
+The application does not have to keep the string around after setting this
+option.
+
+Using this option multiple times makes the last set string override the
+previous ones. Restore to the internal default by setting this to NULL.
 
 This option can be used to specify the request:
 
@@ -62,9 +66,15 @@ Many people have wrongly used this option to replace the entire request with
 their own, including multiple headers and POST contents. While that might work
 in many cases, it might cause libcurl to send invalid requests and it could
 possibly confuse the remote server badly. Use CURLOPT_POST(3) and
-CURLOPT_POSTFIELDS(3) to set POST data. Use CURLOPT_HTTPHEADER(3)
-to replace or extend the set of headers sent by libcurl. Use
-CURLOPT_HTTP_VERSION(3) to change HTTP version.
+CURLOPT_POSTFIELDS(3) to set POST data. Use CURLOPT_HTTPHEADER(3) to replace
+or extend the set of headers sent by libcurl. Use CURLOPT_HTTP_VERSION(3) to
+change the HTTP version.
+
+When this option is used together with CURLOPT_FOLLOWLOCATION(3), the custom
+set method overrides the method libcurl could otherwise change to for the
+subsequent requests. You can fine-tune that decision by using the
+CURLFOLLOW_OBEYCODE bit to CURLOPT_FOLLOWLOCATION(3) to make redirects adhere
+to the redirect response code as the protocol instructs.
 
 ## FTP
 
@@ -126,5 +136,7 @@ int main(void)
 
 # RETURN VALUE
 
-Returns CURLE_OK if the option is supported, CURLE_UNKNOWN_OPTION if not, or
-CURLE_OUT_OF_MEMORY if there was insufficient heap space.
+curl_easy_setopt(3) returns a CURLcode indicating success or error.
+
+CURLE_OK (0) means everything was OK, non-zero means an error occurred, see
+libcurl-errors(3).

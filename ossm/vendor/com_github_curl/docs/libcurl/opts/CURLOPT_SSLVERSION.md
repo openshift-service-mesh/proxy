@@ -42,7 +42,7 @@ Use one of the available defines for this purpose. The available options are:
 ## CURL_SSLVERSION_DEFAULT
 
 The default acceptable version range. The minimum acceptable version is by
-default TLS v1.0 since 7.39.0 (unless the TLS library has a stricter rule).
+default TLS v1.2 since 8.16.0 (unless the TLS library has a stricter rule).
 
 ## CURL_SSLVERSION_TLSv1
 
@@ -77,7 +77,6 @@ TLS v1.3 or later (Added in 7.52.0)
 The maximum TLS version can be set by using *one* of the
 CURL_SSLVERSION_MAX_ macros below. It is also possible to OR *one* of the
 CURL_SSLVERSION_ macros with *one* of the CURL_SSLVERSION_MAX_ macros.
-The MAX macros are not supported for wolfSSL.
 
 ## CURL_SSLVERSION_MAX_DEFAULT
 
@@ -128,7 +127,7 @@ int main(void)
     curl_easy_setopt(curl, CURLOPT_URL, "https://example.com");
 
     /* ask libcurl to use TLS version 1.0 or later */
-    curl_easy_setopt(curl, CURLOPT_SSLVERSION, (long)CURL_SSLVERSION_TLSv1);
+    curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1);
 
     /* Perform the request */
     curl_easy_perform(curl);
@@ -138,15 +137,27 @@ int main(void)
 
 # HISTORY
 
-SSLv2 and SSLv3 are refused completely since curl 7.77.0
-
 SSLv2 is disabled by default since 7.18.1. Other SSL versions availability may
 vary depending on which backend libcurl has been built to use.
 
 SSLv3 is disabled by default since 7.39.0.
 
+SSLv2 and SSLv3 are refused completely since curl 7.77.0
+
+Since 8.10.0 wolfSSL is fully supported. Before 8.10.0 the MAX macros were not
+supported with wolfSSL and the other macros did not set a minimum, but
+restricted the TLS version to only the specified one.
+
+Rustls support added in 8.10.0.
+
+**CURL_SSLVERSION_*** macros became `long` types in 8.16.0, prior to this
+version a `long` cast was necessary when passed to curl_easy_setopt(3).
+
 # %AVAILABILITY%
 
 # RETURN VALUE
 
-Returns CURLE_OK if the option is supported, and CURLE_UNKNOWN_OPTION if not.
+curl_easy_setopt(3) returns a CURLcode indicating success or error.
+
+CURLE_OK (0) means everything was OK, non-zero means an error occurred, see
+libcurl-errors(3).

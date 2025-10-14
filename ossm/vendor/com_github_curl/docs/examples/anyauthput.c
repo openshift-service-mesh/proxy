@@ -34,9 +34,11 @@
 #include <curl/curl.h>
 
 #ifdef _WIN32
-#  define FILENO(fp) _fileno(fp)
-#else
-#  define FILENO(fp) fileno(fp)
+#undef stat
+#define stat _stat
+#undef fstat
+#define fstat _fstat
+#define fileno _fileno
 #endif
 
 #if LIBCURL_VERSION_NUM < 0x070c03
@@ -59,7 +61,7 @@ static int my_seek(void *userp, curl_off_t offset, int origin)
 {
   FILE *fp = (FILE *) userp;
 
-  if(-1 == fseek(fp, (long) offset, origin))
+  if(fseek(fp, (long) offset, origin) == -1)
     /* could not seek */
     return CURL_SEEKFUNC_CANTSEEK;
 
@@ -98,9 +100,16 @@ int main(int argc, char **argv)
 
   /* get the file size of the local file */
   fp = fopen(file, "rb");
-  fstat(FILENO(fp), &file_info);
+  if(!fp)
+    return 2;
 
-  /* In windows, this inits the winsock stuff */
+#ifdef UNDER_CE
+  stat(file, &file_info);
+#else
+  fstat(fileno(fp), &file_info);
+#endif
+
+  /* In Windows, this inits the Winsock stuff */
   curl_global_init(CURL_GLOBAL_ALL);
 
   /* get a curl handle */
@@ -133,7 +142,7 @@ int main(int argc, char **argv)
     /* tell libcurl we can use "any" auth, which lets the lib pick one, but it
        also costs one extra round-trip and possibly sending of all the PUT
        data twice!!! */
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_ANY);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
 
     /* set user name and password for the authentication */
     curl_easy_setopt(curl, CURLOPT_USERPWD, "user:password");

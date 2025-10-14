@@ -27,28 +27,36 @@ CURLcode curl_easy_setopt(CURL *handle, CURLOPT_COOKIEJAR, char *filename);
 
 # DESCRIPTION
 
-Pass a *filename* as a char *, null-terminated. This makes libcurl write
-all internally known cookies to the specified file when
-curl_easy_cleanup(3) is called. If no cookies are kept in memory at that
-time, no file is created. Specify "-" as filename to instead have the cookies
-written to stdout. Using this option also enables cookies for this session, so
-if you for example follow a redirect it makes matching cookies get sent
-accordingly.
+Pass a *filename* as a char *, null-terminated. This makes libcurl write all
+internally known cookies to the specified file when curl_easy_cleanup(3) is
+called. If no cookies are kept in memory at that time, no file is created.
+Specify "-" as filename to instead have the cookies written to stdout. Using
+this option also enables cookies for this session, so if you for example
+follow a redirect it makes matching cookies get sent accordingly.
 
 Note that libcurl does not read any cookies from the cookie jar specified with
 this option. To read cookies from a file, use CURLOPT_COOKIEFILE(3).
 
 If the cookie jar file cannot be created or written to (when the
-curl_easy_cleanup(3) is called), libcurl does not and cannot report an
-error for this. Using CURLOPT_VERBOSE(3) or
-CURLOPT_DEBUGFUNCTION(3) displays a warning, but that is the only
-visible feedback you get about this possibly lethal situation.
+curl_easy_cleanup(3) is called), libcurl does not and cannot report an error
+for this. Using CURLOPT_VERBOSE(3) or CURLOPT_DEBUGFUNCTION(3) displays a
+warning, but that is the only visible feedback you get about this possibly
+lethal situation.
 
 Cookies are imported in the Set-Cookie format without a domain name are not
 exported by this option.
 
 The application does not have to keep the string around after setting this
 option.
+
+Using this option multiple times makes the last set string override the
+previous ones. Set it to NULL to disable its use again.
+
+# SECURITY CONCERNS
+
+libcurl cannot fully protect against attacks where an attacker has write
+access to the same directory where it is directed to save files. This is
+particularly sensitive if you save files using elevated privileges.
 
 # DEFAULT
 
@@ -71,7 +79,7 @@ int main(void)
 
     res = curl_easy_perform(curl);
 
-    /* close the handle, write the cookies! */
+    /* close the handle, write the cookies */
     curl_easy_cleanup(curl);
   }
 }
@@ -81,5 +89,7 @@ int main(void)
 
 # RETURN VALUE
 
-Returns CURLE_OK if HTTP is supported, CURLE_UNKNOWN_OPTION if not, or
-CURLE_OUT_OF_MEMORY if there was insufficient heap space.
+curl_easy_setopt(3) returns a CURLcode indicating success or error.
+
+CURLE_OK (0) means everything was OK, non-zero means an error occurred, see
+libcurl-errors(3).

@@ -95,6 +95,7 @@ build:gcc --linkopt=-fuse-ld=gold --host_linkopt=-fuse-ld=gold
 build:gcc --test_env=HEAPCHECK=
 build:gcc --action_env=BAZEL_COMPILER=gcc
 build:gcc --action_env=CC=gcc --action_env=CXX=g++
+build:gcc --copt=-Wno-error=attributes
 
 # Clang-tidy
 # TODO(phlax): enable this, its throwing some errors as well as finding more issues
@@ -553,6 +554,8 @@ common:remote-envoy-engflow --config=rbe-envoy-engflow
 
 common:remote-cache-envoy-engflow --config=common-envoy-engflow
 common:remote-cache-envoy-engflow --config=cache-envoy-engflow
+
+common:cves --//tools/dependency:cve-data=//tools/dependency:cve-data-dir
 
 #############################################################################
 # debug: Various Bazel debugging flags

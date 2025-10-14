@@ -625,23 +625,7 @@ $           write tf "#endif"
 $           goto cfgh_in_loop1
 $       endif
 $!
-$       if key2 .eqs. "HAVE_DECL_STRTOLL"
-$       then
-$           write tf "#ifndef ''key2'"
-$           write tf "#define ''key2' 1"
-$           write tf "#endif"
-$           goto cfgh_in_loop1
-$       endif
-$!
 $       if key2 .eqs. "HAVE_DECL_STRTOUL"
-$       then
-$           write tf "#ifndef ''key2'"
-$           write tf "#define ''key2' 1"
-$           write tf "#endif"
-$           goto cfgh_in_loop1
-$       endif
-$!
-$       if key2 .eqs. "HAVE_DECL_STRTOULL"
 $       then
 $           write tf "#ifndef ''key2'"
 $           write tf "#define ''key2' 1"
@@ -1319,7 +1303,7 @@ $                   search/out=nl: 'tfile1' -
 $                   severity = '$severity'
 $!
 $!
-$!                  Of course the 64 bit stuff is different
+$!                  Of course the 64-bit stuff is different
 $!---------------------------------------------------------
 $                   if severity .ne. 1 .and. key64
 $                   then

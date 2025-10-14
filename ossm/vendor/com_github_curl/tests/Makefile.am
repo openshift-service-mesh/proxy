@@ -22,8 +22,6 @@
 #
 ###########################################################################
 
-MANDISTPAGES = runtests.1.dist testcurl.1.dist
-
 # scripts used in test cases
 TESTSCRIPTS = \
  test1119.pl  \
@@ -43,15 +41,15 @@ TESTSCRIPTS = \
  test1486.pl  \
  test1488.pl  \
  test1544.pl  \
+ test1707.pl  \
+ test745.pl  \
  test971.pl
 
 EXTRA_DIST =        \
  CMakeLists.txt     \
- FILEFORMAT.md      \
- README.md          \
+ allversions.pm     \
  appveyor.pm        \
  azure.pm           \
- conftest.py        \
  devtest.pl         \
  dictserver.py      \
  directories.pm     \
@@ -71,7 +69,6 @@ EXTRA_DIST =        \
  requirements.txt   \
  rtspserver.pl      \
  runner.pm          \
- runtests.1         \
  runtests.pl        \
  secureserver.pl    \
  serverhelp.pm      \
@@ -79,8 +76,6 @@ EXTRA_DIST =        \
  smbserver.py       \
  sshhelp.pm         \
  sshserver.pl       \
- stunnel.pem        \
- testcurl.1         \
  testcurl.pl        \
  testutil.pm        \
  tftpserver.pl      \
@@ -89,17 +84,15 @@ EXTRA_DIST =        \
  valgrind.supp      \
  $(TESTSCRIPTS)
 
-DISTCLEANFILES = configurehelp.pm
-
 # we have two variables here to make sure DIST_SUBDIRS won't get 'unit'
 # added twice as then targets such as 'distclean' misbehave and try to
 # do things twice in that subdir at times (and thus fails).
 if BUILD_UNITTESTS
-BUILD_UNIT = unit
+BUILD_UNIT = unit tunit
 DIST_UNIT =
 else
 BUILD_UNIT =
-DIST_UNIT = unit
+DIST_UNIT = unit tunit
 endif
 
 SUBDIRS = certs data server libtest http $(BUILD_UNIT)
@@ -107,19 +100,28 @@ DIST_SUBDIRS = $(SUBDIRS) $(DIST_UNIT)
 
 PERLFLAGS = -I$(srcdir)
 
-CLEANFILES = .http.pid .https.pid .ftp.pid .ftps.pid $(MANDISTPAGES)
+CLEANFILES = .http.pid .https.pid .ftp.pid .ftps.pid
 
 curl:
 	@cd $(top_builddir) && $(MAKE)
 
+TEST_COMMON =
+
 if CROSSCOMPILING
 TEST = @echo "NOTICE: we can't run the tests when cross-compiling!"
+PYTEST = $(TEST)
 else # if not cross-compiling:
-TEST = srcdir=$(srcdir) $(PERL) $(PERLFLAGS) $(srcdir)/runtests.pl
+
+if BUILD_DOCS
+else
+TEST_COMMON += !documentation
+endif
+
+TEST = srcdir=$(srcdir) @PERL@ $(PERLFLAGS) $(srcdir)/runtests.pl $(TEST_COMMON)
 TEST_Q = -a -s
 TEST_AM = -a -am
 TEST_F = -a -p -r
-TEST_T = -a -t
+TEST_T = -a -t -j20
 TEST_E = -a -e
 
 # ~<keyword> means that it will run all tests matching the keyword, but will
@@ -127,12 +129,20 @@ TEST_E = -a -e
 TEST_NF = -a -p ~flaky ~timing-dependent
 
 # special CI target derived from nonflaky with CI-specific flags
-TEST_CI = $(TEST_NF) -r -rm
+TEST_CI = $(TEST_NF) -r --retry=5 -j20 --buildinfo
+
+PYTEST = pytest
 endif
 
 # make sure that PERL is pointing to an executable
 perlcheck:
-	@if ! test -x "$(PERL)"; then echo "No perl!"; exit 2; fi
+	@if ! test -x "@PERL@"; then echo "No perl!"; exit 2; fi
+
+build-certs: perlcheck
+	(cd certs && $(MAKE))
+
+# alias for 'test' to match CMake, where 'test' is a reserved target
+tests: test
 
 test: perlcheck all
 	$(TEST) $(TFLAGS)
@@ -158,13 +168,20 @@ torture-test: perlcheck all
 event-test: perlcheck all
 	$(TEST) $(TEST_E) $(TFLAGS)
 
+default-pytest: ci-pytest
+
+ci-pytest: all
+	srcdir=$(srcdir) $(PYTEST) -n auto -v $(srcdir)/http
+
 checksrc:
 	(cd libtest && $(MAKE) checksrc)
 	(cd unit && $(MAKE) checksrc)
+	(cd tunit && $(MAKE) checksrc)
 	(cd server && $(MAKE) checksrc)
+	(cd client && $(MAKE) checksrc)
 	(cd http && $(MAKE) checksrc)
 
-if DEBUGBUILD
-# for debug builds, we scan the sources on all regular make invokes
-all-local: checksrc
-endif
+all-local: $(MANFILES) build-certs
+
+distclean:
+	rm -f $(MANFILES)
