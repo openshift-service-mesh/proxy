@@ -39,7 +39,6 @@ function init(){
         "local_config"
         "local_jdk"
         "bazel_gazelle_go"
-        "openssl"
         "go_sdk"
         "host_platform"
         "remotejdk"
