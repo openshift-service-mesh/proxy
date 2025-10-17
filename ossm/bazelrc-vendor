@@ -81,6 +81,7 @@ build --override_repository=io_opentelemetry_cpp=/work/ossm/vendor/io_openteleme
 build --override_repository=jq_toolchains=/work/ossm/vendor/jq_toolchains
 build --override_repository=net_zlib=/work/ossm/vendor/net_zlib
 build --override_repository=ocp=/work/ossm/vendor/ocp
+build --override_repository=openssl=/work/ossm/vendor/openssl
 build --override_repository=opentelemetry_proto=/work/ossm/vendor/opentelemetry_proto
 build --override_repository=org_brotli=/work/ossm/vendor/org_brotli
 build --override_repository=org_golang_google_protobuf=/work/ossm/vendor/org_golang_google_protobuf
