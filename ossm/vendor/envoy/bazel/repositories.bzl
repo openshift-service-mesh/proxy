@@ -286,7 +286,7 @@ def _boringssl_fips():
         name = "fips_cmake_linux_aarch64",
         build_file_content = CMAKE_BUILD_CONTENT,
     )
-    GO_BUILD_CONTENT = "%s\nexports_files([\"bin/go\"])" % BUILD_ALL_CONTENT
+    GO_BUILD_CONTENT = "%s\nexports_files([\"bin/go\"])" % _build_all_content(["test/**"])
     external_http_archive(
         name = "fips_go_linux_amd64",
         build_file_content = GO_BUILD_CONTENT,
@@ -725,6 +725,7 @@ def _v8():
         name = "v8",
         patches = [
             "@envoy//bazel:v8.patch",
+            "@envoy//bazel:v8-ppc64le.patch",
         ],
         patch_args = ["-p1"],
         patch_cmds = [
