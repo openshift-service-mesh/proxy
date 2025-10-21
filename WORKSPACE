@@ -21,6 +21,13 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 # load("//bazel:repositories.bzl", "define_envoy_implementation")
 
+# Use OpenSSL from the system rather than vendoring it
+new_local_repository(
+    name = "openssl",
+    path = "/usr/lib64/",
+    build_file = "//:openssl.BUILD"
+)
+
 # 1. Determine SHA256 `wget https://github.com/envoyproxy/envoy/archive/$COMMIT.tar.gz && sha256sum $COMMIT.tar.gz`
 # 2. Update .bazelversion, envoy.bazelrc and .bazelrc if needed.
 #
