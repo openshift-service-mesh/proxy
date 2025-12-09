@@ -32,8 +32,8 @@ ENVOY_REPO = "envoy"
 
 # Since we include envoy-openssl, and not envoy, we are only interested in OPENSSL_ENVOY_SHA(256)?.
 # and not in ENVOY_SHA(256)?. The latter may be incorrect or outdated, and that's not an issue.
-OPENSSL_ENVOY_SHA = "334cbaf17eb53293c7be9671668197b01268f19c"
-OPENSSL_ENVOY_SHA256 = "223bcdb7741eecd01c6d5bed86e3e5b449d9fc92f63f9ac70f8c9b4a19d18568"
+OPENSSL_ENVOY_SHA = "f80c2fe327667512878876a9a664c7527d664f59"
+OPENSSL_ENVOY_SHA256 = "bd614ebfc8b7d58b441e630c7c916759c89e8d03ceef05cf8768588b287060b0"
 OPENSSL_ENVOY_ORG = "envoyproxy"
 OPENSSL_ENVOY_REPO = "envoy-openssl"
 
