@@ -21,7 +21,7 @@ load("//bazel:repositories.bzl", "define_envoy_implementation")
 # 1. Determine SHA256 `wget https://github.com/envoyproxy/envoy/archive/$COMMIT.tar.gz && sha256sum $COMMIT.tar.gz`
 # 2. Update .bazelversion, envoy.bazelrc and .bazelrc if needed.
 #
-# Commit date: 12/11/25
+# Commit date: 12/19/26
 ENVOY_SHA = "93466adc53567315e3114d6d1774c56f8066d24e"
 
 ENVOY_SHA256 = "703aa4a59c2771681ab2b3ef878c2374e3a94b160b40122c03cd8d2c6debf7bd"
@@ -33,8 +33,8 @@ ENVOY_REPO = "envoy"
 
 # Since we include envoy-openssl, and not envoy, we are only interested in OPENSSL_ENVOY_SHA(256)?.
 # and not in ENVOY_SHA(256)?. The latter may be incorrect or outdated, and that's not an issue.
-OPENSSL_ENVOY_SHA = "0eb44650048f0ac1aae75fdc29358065fae1445c"
-OPENSSL_ENVOY_SHA256 = "cb17881d85a5ce2f60aa536483ebd8db9877d7231dafecbdfdb73853dd795b78"
+OPENSSL_ENVOY_SHA = "95ec4e8e203a83969f2b667377a75cb57bc427f2"
+OPENSSL_ENVOY_SHA256 = "d4f4dcdd48c3aa8d5108846d3b5d9727062f32b12dff41fd6b7d86a8912a627b"
 OPENSSL_ENVOY_ORG = "envoyproxy"
 OPENSSL_ENVOY_REPO = "envoy-openssl"
 
