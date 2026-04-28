@@ -16,15 +16,18 @@
 #
 workspace(name = "io_istio_proxy")
 
-load("//bazel:repositories.bzl", "define_envoy_implementation")
+# http_archive is not a native function since bazel 0.19
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# load("//bazel:repositories.bzl", "define_envoy_implementation")
 
 # 1. Determine SHA256 `wget https://github.com/envoyproxy/envoy/archive/$COMMIT.tar.gz && sha256sum $COMMIT.tar.gz`
 # 2. Update .bazelversion, envoy.bazelrc and .bazelrc if needed.
 #
-# Commit date: 2026-04-29
-ENVOY_SHA = "d6f5da89360f665c9e1aafef0801ad281dcc03dd"
+# Commit date: 2026-04-24
+ENVOY_SHA = "fa21ad4b3e69db0b1fef628a18964e7d26af5b31"
 
-ENVOY_SHA256 = "bfb1801b5bfcec9dcdbc2d00fe6b4c218a578094038ae2f1f79a155d1c381189"
+ENVOY_SHA256 = "7772dcebb478b0d000c4b03a767c451d9fb629a0fc71ce7714ce0e423cc1a92f"
 
 ENVOY_ORG = "envoyproxy"
 
@@ -78,16 +81,4 @@ install_deps()
 
 load("@envoy//bazel:dependency_imports.bzl", "envoy_dependency_imports")
 
-envoy_dependency_imports()
-
-load("@envoy//bazel:repo.bzl", "envoy_repo")
-
-envoy_repo()
-
-load("@envoy//bazel:toolchains.bzl", "envoy_toolchains")
-
-envoy_toolchains()
-
-load("@llvm_toolchain//:toolchains.bzl", "llvm_register_toolchains")
-
-llvm_register_toolchains()
+envoy_dependency_imports(go_version = "host")
