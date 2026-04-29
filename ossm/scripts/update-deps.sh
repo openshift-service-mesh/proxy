@@ -85,7 +85,7 @@ function copy_files() {
       fi
 
       cp_flags="-rL"
-      if [ "${repo_name}" == "emscripten_toolchain" ]; then
+      if [ "${repo_name}" == "emscripten_toolchain" ] || [ "${repo_name}" == "antlr4-cpp-runtime" ] || [ "${repo_name}" == "envoy_toolshed" ]; then
         cp_flags="-r"
       fi
       cp "${cp_flags}" "${f}" "${VENDOR_DIR}" || echo "Copy of ${f} failed. Ignoring..."
@@ -108,7 +108,7 @@ function run_bazel() {
   # Workaround to force fetch of protoc for arm
   bazel --output_base="${OUTPUT_BASE}" fetch @com_google_protobuf_protoc_linux_aarch_64//:protoc
 
-  bazel --output_base="${OUTPUT_BASE}" fetch @com_github_gperftools_gperftools//:all
+  bazel --output_base="${OUTPUT_BASE}" fetch @gperftools//:all
 
   # Fetch all the rest and check everything using "build --nobuild "option
   for config in x86_64 aarch64 s390x ppc; do

@@ -16,10 +16,7 @@
 #
 workspace(name = "io_istio_proxy")
 
-# http_archive is not a native function since bazel 0.19
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-
-# load("//bazel:repositories.bzl", "define_envoy_implementation")
+load("//bazel:repositories.bzl", "define_envoy_implementation")
 
 # Use OpenSSL from the system rather than vendoring it
 new_local_repository(
@@ -40,14 +37,27 @@ ENVOY_ORG = "envoyproxy"
 
 ENVOY_REPO = "envoy"
 
+boringssl = {                                                                
+      "sha": ENVOY_SHA,                                                        
+      "sha256": ENVOY_SHA256,                                                  
+      "org": ENVOY_ORG,                                                        
+      "repo": ENVOY_REPO,                                                      
+      }                                                                            
+                                                                          
+openssl = {                                                                  
+      "sha": ENVOY_SHA,                                                
+      "sha256": ENVOY_SHA256,                                          
+      "org": ENVOY_ORG,                                                
+      "repo": ENVOY_REPO,                                              
+      }       
+
+
 # To override with local envoy, just pass `--override_repository=envoy=/PATH/TO/ENVOY` to Bazel or
 # persist the option in `user.bazelrc`.
-http_archive(
-    name = "envoy",
-    sha256 = ENVOY_SHA256,
-    strip_prefix = ENVOY_REPO + "-" + ENVOY_SHA,
-    url = "https://github.com/" + ENVOY_ORG + "/" + ENVOY_REPO + "/archive/" + ENVOY_SHA + ".tar.gz",
-)
+
+define_envoy_implementation(name="pick_envoy", boringssl=boringssl, openssl=openssl)
+load("@pick_envoy//:load_envoy.bzl", "load_envoy")
+load_envoy()
 
 load("@envoy//bazel:api_binding.bzl", "envoy_api_binding")
 
@@ -62,6 +72,10 @@ envoy_api_binding()
 load("@envoy//bazel:api_repositories.bzl", "envoy_api_dependencies")
 
 envoy_api_dependencies()
+
+load("@envoy//bazel:repo.bzl", "envoy_repo")
+
+envoy_repo()
 
 load("@envoy//bazel:repositories.bzl", "envoy_dependencies")
 
@@ -89,3 +103,11 @@ install_deps()
 load("@envoy//bazel:dependency_imports.bzl", "envoy_dependency_imports")
 
 envoy_dependency_imports(go_version = "host")
+
+load("@envoy//bazel:toolchains.bzl", "envoy_toolchains")
+
+envoy_toolchains()
+
+load("@envoy//bazel:dependency_imports_extra.bzl", "envoy_dependency_imports_extra")
+
+envoy_dependency_imports_extra()

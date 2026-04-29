@@ -44,6 +44,8 @@ def load_envoy():
         patch_args = ["-p1"],
         patches = [
             "@io_istio_proxy//ossm/patches:use-cmake-from-host.patch",
+            "@io_istio_proxy//ossm/patches:fix-python3-genrule.patch",
+            "@io_istio_proxy//ossm/patches:fix-foreign-cc-system-compiler.patch",
             ],
     )
 ''' % (openssl_disabled_extensions, attr["sha256"], attr["repo"], attr["sha"], attr["org"], attr["repo"], attr["sha"])

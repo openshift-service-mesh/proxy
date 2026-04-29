@@ -14,3 +14,56 @@
 #
 ################################################################################
 #
+
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+
+licenses(["notice"])  # Apache 2
+
+# SSL library selection using label_flag
+label_flag(
+    name = "ssl",
+    build_setting_default = "@boringssl//:ssl",
+    visibility = ["//visibility:public"],
+)
+
+label_flag(
+    name = "crypto",
+    build_setting_default = "@boringssl//:crypto",
+    visibility = ["//visibility:public"],
+)
+
+bool_flag(
+    name = "fips",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "fips_build",
+    flag_values = {":fips": "True"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "using_boringssl",
+    flag_values = {":ssl": "@boringssl//:ssl"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "using_boringssl_fips",
+    flag_values = {":ssl": "@boringssl_fips//:ssl"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "using_aws_lc",
+    flag_values = {":ssl": "@aws_lc//:ssl"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "using_openssl",
+    flag_values = {":ssl": "@openssl//:ssl"},
+    visibility = ["//visibility:public"],
+)

@@ -22,6 +22,9 @@ build:remote --remote_timeout=7200
 
 # put /usr/local/bin before /usr/bin to avoid picking up wrong python3.6 when building envoy.tls.key_providers.cryptomb
 build:linux --action_env=PATH=/usr/local/bin:/bin:/usr/bin
+# Expose Python for genrules that use $(PYTHON3) make variable
+build --action_env=PYTHON3=python3
+build --host_action_env=PYTHON3=python3
 
 # Need for CI image to pickup docker-credential-gcloud, PATH is fixed in rbe-toolchain-* configs.
 build:remote-ci --action_env=PATH=/usr/local/google-cloud-sdk/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/llvm/bin
@@ -79,8 +82,14 @@ build:macos --cxxopt=-Wno-deprecated-declarations
 build:macos --host_cxxopt=-Wno-deprecated-declarations
 
 # OpenSSL build
-build:openssl --config=clang
+# Use system clang instead of Bazel-managed LLVM toolchain
+# Use absolute paths to prevent CMake from finding the vendored toolchain
+build:openssl --action_env=CC=/usr/bin/clang
+build:openssl --action_env=CXX=/usr/bin/clang++
 build:openssl --action_env=ENVOY_OPENSSL=1
 build:openssl --deleted_packages=@envoy//test/common/quic,@envoy//test/common/quic/platform --@envoy//bazel:http3=false
+# Use system OpenSSL instead of BoringSSL
+build:openssl --//bazel:ssl=@openssl//:ssl
+build:openssl --//bazel:crypto=@openssl//:crypto
 
 import %workspace%/ossm/bazelrc

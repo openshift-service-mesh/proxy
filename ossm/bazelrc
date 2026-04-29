@@ -14,8 +14,8 @@ build --test_output=all
 
 # Arch-specific build flags, triggered with --config=$ARCH in bazel build command
 build:x86_64 --define=DUMMY=dummy
-build:s390x --@envoy//source/extensions/filters/common/lua:luajit2=1 --cxxopt='-includeoptional' --copt=-Wno-error=type-limits --copt=-Wno-error=uninitialized --copt=-fno-builtin-strlen --action_env=BAZEL_LINKLIBS=-lstdc++
-build:ppc --@envoy//source/extensions/filters/common/lua:luajit2=1
+build:s390x --cxxopt='-includeoptional' --copt=-Wno-error=type-limits --copt=-Wno-error=uninitialized --copt=-fno-builtin-strlen --action_env=BAZEL_LINKLIBS=-lstdc++
+build:ppc --action_env=BAZEL_LINKLIBS=-lstdc++
 build:aarch64 --define=DUMMY=dummy
 
 # Colored ouput messes with some of the logging systems in CI, so we disable that.
@@ -24,6 +24,10 @@ build:ci-config --show_progress_rate_limit=10
 
 common --action_env=OPENSSL_ROOT_DIR
 common --action_env=Clang_DIR=/usr/lib64/llvm18
+# Force foreign_cc (CMake) to use system clang instead of vendored toolchain
+# The vendored LLVM toolchain is incompatible with the container's glibc
+common --action_env=CC=/usr/bin/clang
+common --action_env=CXX=/usr/bin/clang++
 
 # Import vendor flags
 import %workspace%/ossm/bazelrc-vendor
