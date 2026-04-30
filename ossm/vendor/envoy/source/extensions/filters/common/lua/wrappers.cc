@@ -57,7 +57,8 @@ int BufferWrapper::luaGetBytes(lua_State* state) {
     luaL_error(state, "index/length must be >= 0 and (index + length) must be <= buffer size");
   }
 
-  // TODO(mattklein123): Reduce copies here by using Lua direct buffer builds.
+  // Note: Lua buffer API (`luaL_prepbuffsize`) could reduce copies here, but Envoy
+  // uses luajit which does not expose this function.
   std::unique_ptr<char[]> data(new char[length]);
   data_.copyOut(index, length, data.get());
   lua_pushlstring(state, data.get(), length);
@@ -302,6 +303,18 @@ int SslConnectionWrapper::luaIssuerPeerCertificate(lua_State* state) {
   return 1;
 }
 
+int SslConnectionWrapper::luaSha256PeerCertificateIssuerDigest(lua_State* state) {
+  const std::string& hash = connection_info_.sha256PeerCertificateIssuerDigest();
+  lua_pushlstring(state, hash.data(), hash.size());
+  return 1;
+}
+
+int SslConnectionWrapper::luaSerialNumberPeerCertificateIssuer(lua_State* state) {
+  const std::string& serial = connection_info_.serialNumberPeerCertificateIssuer();
+  lua_pushlstring(state, serial.data(), serial.size());
+  return 1;
+}
+
 int SslConnectionWrapper::luaSubjectPeerCertificate(lua_State* state) {
   const std::string& peer_cert_subject = connection_info_.subjectPeerCertificate();
   lua_pushlstring(state, peer_cert_subject.data(), peer_cert_subject.size());
@@ -403,7 +416,10 @@ int SslConnectionWrapper::luaTlsVersion(lua_State* state) {
 }
 
 int ConnectionWrapper::luaSsl(lua_State* state) {
-  const auto& ssl = connection_->ssl();
+  ENVOY_LOG_MISC(warn, "connection():ssl() is deprecated and will be removed in a future release. "
+                       "Use streamInfo():downstreamSslConnection() instead.");
+
+  const auto& ssl = stream_info_.downstreamAddressProvider().sslConnection();
   if (ssl != nullptr) {
     if (ssl_connection_wrapper_.get() != nullptr) {
       ssl_connection_wrapper_.pushStack();

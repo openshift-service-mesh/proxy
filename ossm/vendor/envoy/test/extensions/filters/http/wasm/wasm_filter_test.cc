@@ -8,6 +8,8 @@
 #include "test/mocks/router/mocks.h"
 #include "test/test_common/wasm_base.h"
 
+#include "gmock/gmock.h"
+
 using testing::_;
 using testing::Eq;
 using testing::InSequence;
@@ -1892,7 +1894,7 @@ TEST_P(WasmHttpFilterTest, Property) {
   EXPECT_CALL(encoder_callbacks_, connection())
       .WillRepeatedly(Return(OptRef<const Network::Connection>{connection}));
   std::shared_ptr<Router::MockRoute> route{new NiceMock<Router::MockRoute>()};
-  EXPECT_CALL(request_stream_info_, route()).WillRepeatedly(Return(route));
+  request_stream_info_.route_ = route;
   std::shared_ptr<NiceMock<Envoy::Upstream::MockHostDescription>> host_description(
       new NiceMock<Envoy::Upstream::MockHostDescription>());
   auto metadata = std::make_shared<envoy::config::core::v3::Metadata>(
@@ -1933,7 +1935,8 @@ TEST_P(WasmHttpFilterTest, ClusterMetadata) {
   EXPECT_CALL(*cluster, metadata()).WillRepeatedly(ReturnRef(*cluster_metadata));
   EXPECT_CALL(request_stream_info_, requestComplete)
       .WillRepeatedly(Return(std::chrono::milliseconds(30)));
-  EXPECT_CALL(request_stream_info_, upstreamClusterInfo()).WillRepeatedly(Return(cluster));
+  request_stream_info_.upstream_cluster_info_ = cluster;
+  EXPECT_CALL(request_stream_info_, upstreamClusterInfo()).Times(testing::AnyNumber());
   EXPECT_CALL(filter(),
               log_(spdlog::level::warn, Eq(absl::string_view("cluster metadata: cluster"))));
   filter().log({&request_headers}, request_stream_info_);
@@ -2205,6 +2208,46 @@ TEST_P(WasmHttpFilterTest, VerifySignature) {
   EXPECT_CALL(rootContext(), log_(spdlog::level::err,
                                   Eq(absl::string_view("Failed to initialize digest verify."))))
       .Times(2);
+  rootContext().onTick(0);
+}
+
+TEST_P(WasmHttpFilterTest, Sign) {
+  if (std::get<1>(GetParam()) == "rust") {
+    // TODO(patricio78): test not yet implemented using Rust SDK.
+    return;
+  }
+  setupTest("", "sign");
+  setupFilter();
+  EXPECT_CALL(rootContext(),
+              log_(spdlog::level::info, Eq(absl::string_view("signature created successfully"))));
+
+  EXPECT_CALL(rootContext(),
+              log_(spdlog::level::err, Eq(absl::string_view("unknown is not supported."))));
+  EXPECT_CALL(
+      rootContext(),
+      log_(spdlog::level::err,
+           Eq(absl::string_view("Invalid key type: private key required for signing operation."))));
+  rootContext().onTick(0);
+}
+
+TEST_P(WasmHttpFilterTest, SignAndVerifySignature) {
+  if (std::get<1>(GetParam()) == "rust") {
+    // TODO(patricio78): test not yet implemented using Rust SDK.
+    return;
+  }
+  setupTest("", "sign_and_verify_signature");
+  setupFilter();
+  EXPECT_CALL(rootContext(),
+              log_(spdlog::level::info,
+                   Eq(absl::string_view("signature created successfully, length: 256"))));
+  EXPECT_CALL(rootContext(),
+              log_(spdlog::level::info,
+                   Eq(absl::string_view(
+                       "end-to-end test passed: signature created and verified successfully"))));
+  EXPECT_CALL(
+      rootContext(),
+      log_(spdlog::level::info,
+           Eq(absl::string_view("mutual exclusion test passed: both PEM and DER keys rejected"))));
   rootContext().onTick(0);
 }
 

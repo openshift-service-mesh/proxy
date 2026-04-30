@@ -3,7 +3,7 @@
 # - Tests: behavior only. release tools are in the integration tests
 # - Platforms: ubuntu, centos, macos, windows
 # - bzlmod enabled or not
-# - bazel: LTS-1, LTS, rolling
+# - bazel: LTS-1, LTS, latest
 #
 #
 
@@ -37,6 +37,8 @@ default_tests_with_rpm: &default_tests_with_rpm
     - "//pkg/..."
     - "//tests/..."
     - "//toolchains/..."
+    # This has started to fail, even on CentOS.
+    - "-//tests/rpm:test_golden_debuginfo_rpm_contents"
 
 win_tests: &win_tests
   test_flags:
@@ -54,8 +56,6 @@ win_tests: &win_tests
     - "-//tests/mappings:utf8_manifest_test"
     - "-//tests/mappings/filter_directory/..."
     - "-//tests/zip:unicode_test"
-    # See #387
-    - "-//tests/install/..."
     # rpmbuild(8) is not supported on Windows
     - "-//tests/rpm/..."
     - "-//pkg/legacy/tests/rpm/..."
@@ -89,13 +89,13 @@ windows: &windows
 tasks:
   ub_head_bzlmod:
     name: ub_head_bzlmod
-    bazel: rolling
+    bazel: latest
     <<: *ubuntu
     <<: *bzlmod
 
   ub_head_nobzlmod:
     name: ub_head_nobzlmod
-    bazel: rolling
+    bazel: latest
     <<: *ubuntu
     <<: *nobzlmod
 
@@ -124,7 +124,7 @@ tasks:
 
   mac_head_bzlmod:
     name: mac_head_bzlmod
-    bazel: rolling
+    bazel: latest
     <<: *macos
     <<: *bzlmod
 
@@ -142,7 +142,7 @@ tasks:
 
   win_head_bzlmod:
     name: win_head_bzlmod
-    bazel: rolling
+    bazel: latest
     <<: *windows
     <<: *bzlmod
 

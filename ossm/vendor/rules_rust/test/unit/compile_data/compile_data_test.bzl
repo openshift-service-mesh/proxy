@@ -1,6 +1,7 @@
 """Unittest to verify compile_data (attribute) propagation"""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//rust:defs.bzl", "rust_common", "rust_doc", "rust_library", "rust_test")
 load(
     "//test/unit:common.bzl",
@@ -93,6 +94,44 @@ def _define_test_targets():
     rust_doc(
         name = "compile_data_env_rust_doc",
         crate = ":compile_data_env",
+    )
+
+    write_file(
+        name = "generated_compile_data",
+        out = "generated.txt",
+        content = ["generated compile data contents", ""],
+        newline = "unix",
+    )
+
+    rust_library(
+        name = "compile_data_gen",
+        srcs = ["compile_data_gen.rs"],
+        compile_data = [":generated.txt"],
+        edition = "2021",
+    )
+
+    rust_test(
+        name = "compile_data_gen_unit_test",
+        crate = ":compile_data_gen",
+    )
+
+    write_file(
+        name = "generated_src",
+        out = "generated.rs",
+        content = ["pub const GENERATED: &str = \"generated\";", ""],
+        newline = "unix",
+    )
+
+    rust_library(
+        name = "compile_data_gen_srcs",
+        srcs = ["compile_data_gen_srcs.rs", ":generated.rs"],
+        compile_data = ["compile_data.txt"],
+        edition = "2021",
+    )
+
+    rust_test(
+        name = "compile_data_gen_srcs_unit_test",
+        crate = ":compile_data_gen_srcs",
     )
 
 def compile_data_test_suite(name):

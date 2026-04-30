@@ -27,6 +27,7 @@
 #include "source/common/common/logger.h"
 #include "source/common/config/well_known_names.h"
 #include "source/common/http/filter_chain_helper.h"
+#include "source/common/http/headers.h"
 #include "source/common/http/sidestream_watermark.h"
 #include "source/common/http/utility.h"
 #include "source/common/router/context_impl.h"
@@ -36,6 +37,7 @@
 #include "source/common/upstream/load_balancer_context_base.h"
 #include "source/common/upstream/upstream_factory_context_impl.h"
 
+#include "absl/strings/match.h"
 #include "absl/types/optional.h"
 
 namespace Envoy {
@@ -62,22 +64,8 @@ public:
       const Http::HeaderEntry* entry_;
     };
 
-    /**
-     * Determine whether a given header's value passes the strict validation
-     * defined for that header.
-     * @param headers supplies the headers from which to get the target header.
-     * @param target_header is the header to be validated.
-     * @return HeaderCheckResult containing the entry for @param target_header
-     *         and valid_ set to FALSE if @param target_header is set to an
-     *         invalid value. If @param target_header doesn't appear in
-     *         @param headers, return a result with valid_ set to TRUE.
-     */
-    static const HeaderCheckResult checkHeader(Http::RequestHeaderMap& headers,
-                                               const Http::LowerCaseString& target_header);
-
     using ParseRetryFlagsFunc = std::function<std::pair<uint32_t, bool>(absl::string_view)>;
 
-  private:
     static HeaderCheckResult hasValidRetryFields(const Http::HeaderEntry* header_entry,
                                                  const ParseRetryFlagsFunc& parse_fn) {
       HeaderCheckResult r;
@@ -199,7 +187,7 @@ public:
                ShadowWriterPtr&& shadow_writer, bool emit_dynamic_stats, bool start_child_span,
                bool suppress_envoy_headers, bool respect_expected_rq_timeout,
                bool suppress_grpc_request_failure_code_stats,
-               bool flush_upstream_log_on_upstream_stream,
+               bool flush_upstream_log_on_upstream_stream, bool reject_connect_request_early_data,
                const Protobuf::RepeatedPtrField<std::string>& strict_check_headers,
                TimeSource& time_source, Http::Context& http_context,
                Router::Context& router_context)
@@ -211,12 +199,22 @@ public:
         respect_expected_rq_timeout_(respect_expected_rq_timeout),
         suppress_grpc_request_failure_code_stats_(suppress_grpc_request_failure_code_stats),
         flush_upstream_log_on_upstream_stream_(flush_upstream_log_on_upstream_stream),
+        reject_connect_request_early_data_(reject_connect_request_early_data),
         http_context_(http_context), zone_name_(factory_context.localInfo().zoneStatName()),
         shadow_writer_(std::move(shadow_writer)), time_source_(time_source) {
-    if (!strict_check_headers.empty()) {
-      strict_check_headers_ = std::make_unique<HeaderVector>();
-      for (const auto& header : strict_check_headers) {
-        strict_check_headers_->emplace_back(Http::LowerCaseString(header));
+    for (const auto& header : strict_check_headers) {
+      if (absl::EqualsIgnoreCase(header,
+                                 Http::Headers::get().EnvoyUpstreamRequestTimeoutMs.get())) {
+        envoy_upstream_rq_timeout_ms_ = true;
+      } else if (absl::EqualsIgnoreCase(
+                     header, Http::Headers::get().EnvoyUpstreamRequestPerTryTimeoutMs.get())) {
+        envoy_upstream_rq_per_try_timeout_ms_ = true;
+      } else if (absl::EqualsIgnoreCase(header, Http::Headers::get().EnvoyMaxRetries.get())) {
+        envoy_max_retries_ = true;
+      } else if (absl::EqualsIgnoreCase(header, Http::Headers::get().EnvoyRetryOn.get())) {
+        envoy_retry_on_ = true;
+      } else if (absl::EqualsIgnoreCase(header, Http::Headers::get().EnvoyRetryGrpcOn.get())) {
+        envoy_retry_grpc_on_ = true;
       }
     }
   }
@@ -233,21 +231,19 @@ protected:
                absl::Status& creation_status);
 
 public:
-  bool createFilterChain(
-      Http::FilterChainManager& manager,
-      const Http::FilterChainOptions& options = Http::EmptyFilterChainOptions{}) const override {
+  bool createFilterChain(Http::FilterChainFactoryCallbacks& callbacks) const override {
     // Currently there is no default filter chain, so only_create_if_configured true doesn't make
     // sense.
     if (upstream_http_filter_factories_.empty()) {
       return false;
     }
-    Http::FilterChainUtility::createFilterChainForFactories(manager, options,
+    Http::FilterChainUtility::createFilterChainForFactories(callbacks,
                                                             upstream_http_filter_factories_);
     return true;
   }
 
-  bool createUpgradeFilterChain(absl::string_view, const UpgradeMap*, Http::FilterChainManager&,
-                                const Http::FilterChainOptions&) const override {
+  bool createUpgradeFilterChain(absl::string_view, const UpgradeMap*,
+                                Http::FilterChainFactoryCallbacks&) const override {
     // Upgrade filter chains not yet supported for upstream HTTP filters.
     return false;
   }
@@ -266,14 +262,18 @@ public:
   FilterStats default_stats_;
   FilterStats async_stats_;
   Random::RandomGenerator& random_;
-  const bool emit_dynamic_stats_;
-  const bool start_child_span_;
-  const bool suppress_envoy_headers_;
-  const bool respect_expected_rq_timeout_;
-  const bool suppress_grpc_request_failure_code_stats_;
-  // TODO(xyu-stripe): Make this a bitset to keep cluster memory footprint down.
-  HeaderVectorPtr strict_check_headers_;
+  const bool emit_dynamic_stats_ : 1;
+  const bool start_child_span_ : 1;
+  const bool suppress_envoy_headers_ : 1;
+  const bool respect_expected_rq_timeout_ : 1;
+  const bool suppress_grpc_request_failure_code_stats_ : 1;
+  bool envoy_upstream_rq_timeout_ms_ : 1 = false;
+  bool envoy_upstream_rq_per_try_timeout_ms_ : 1 = false;
+  bool envoy_max_retries_ : 1 = false;
+  bool envoy_retry_on_ : 1 = false;
+  bool envoy_retry_grpc_on_ : 1 = false;
   const bool flush_upstream_log_on_upstream_stream_;
+  const bool reject_connect_request_early_data_;
   absl::optional<std::chrono::milliseconds> upstream_log_flush_interval_;
   std::list<AccessLog::InstanceSharedPtr> upstream_logs_;
   Http::Context& http_context_;
@@ -301,12 +301,10 @@ class Filter : Logger::Loggable<Logger::Id::router>,
                public RouterFilterInterface {
 public:
   Filter(const FilterConfigSharedPtr& config, FilterStats& stats)
-      : config_(config), stats_(stats), grpc_request_(false), exclude_http_code_stats_(false),
-        downstream_response_started_(false), downstream_end_stream_(false), is_retry_(false),
-        request_buffer_overflowed_(false),
+      : config_(config), stats_(stats),
         allow_multiplexed_upstream_half_close_(Runtime::runtimeFeatureEnabled(
             "envoy.reloadable_features.allow_multiplexed_upstream_half_close")),
-        upstream_request_started_(false), orca_load_report_received_(false) {}
+        reject_early_connect_data_enabled_(config->reject_connect_request_early_data_) {}
 
   ~Filter() override;
 
@@ -325,10 +323,7 @@ public:
     }
 
     // Clean up the upstream_requests_.
-    if (Runtime::runtimeFeatureEnabled(
-            "envoy.reloadable_features.router_filter_resetall_on_local_reply")) {
-      resetAll();
-    }
+    resetAll();
     return Http::LocalErrorStatus::Continue;
   }
 
@@ -338,7 +333,8 @@ public:
 
   bool continueDecodeHeaders(Upstream::ThreadLocalCluster* cluster, Http::RequestHeaderMap& headers,
                              bool end_stream, Upstream::HostConstSharedPtr&& host,
-                             absl::optional<std::string> host_selection_detailsi = {});
+                             absl::string_view host_selection_details = {},
+                             absl::optional<Http::Code> failure_status = absl::nullopt);
 
   Http::FilterDataStatus decodeData(Buffer::Instance& data, bool end_stream) override;
   Http::FilterTrailersStatus decodeTrailers(Http::RequestTrailerMap& trailers) override;
@@ -348,7 +344,14 @@ public:
   // Upstream::LoadBalancerContext
   absl::optional<uint64_t> computeHashKey() override {
     if (route_entry_ && downstream_headers_) {
-      auto hash_policy = route_entry_->hashPolicy();
+      // Use cluster-level hash policy if available (most specific wins).
+      // If no cluster-level policy is configured, fall back to route-level policy.
+      const Http::HashPolicy* hash_policy =
+          cluster_ != nullptr ? cluster_->httpProtocolOptions().hashPolicy() : nullptr;
+      if (hash_policy == nullptr) {
+        hash_policy = route_entry_->hashPolicy();
+      }
+
       if (hash_policy) {
         return hash_policy->generateHash(
             *downstream_headers_, callbacks_->streamInfo(),
@@ -445,8 +448,8 @@ public:
     if (!is_retry_) {
       return original_priority_load;
     }
-    return retry_state_->priorityLoadForRetry(priority_set, original_priority_load,
-                                              priority_mapping_func);
+    return retry_state_->priorityLoadForRetry(requestStreamInfo(), priority_set,
+                                              original_priority_load, priority_mapping_func);
   }
 
   uint32_t hostSelectionRetryCount() const override {
@@ -465,7 +468,7 @@ public:
     return transport_socket_options_;
   }
 
-  absl::optional<OverrideHost> overrideHostToSelect() const override {
+  OptRef<const OverrideHost> overrideHostToSelect() const override {
     if (is_retry_) {
       return {};
     }
@@ -561,14 +564,15 @@ private:
                           Upstream::HostDescriptionOptConstRef upstream_host, bool dropped);
   void chargeUpstreamCode(Http::Code code, Upstream::HostDescriptionOptConstRef upstream_host,
                           bool dropped);
+  Http::FilterHeadersStatus checkStrictHeaders(const Http::RequestHeaderMap& headers);
   void chargeUpstreamAbort(Http::Code code, bool dropped, UpstreamRequest& upstream_request);
   void cleanup();
-  virtual RetryStatePtr
-  createRetryState(const RetryPolicy& policy, Http::RequestHeaderMap& request_headers,
-                   const Upstream::ClusterInfo& cluster, const VirtualCluster* vcluster,
-                   RouteStatsContextOptRef route_stats_context,
-                   Server::Configuration::CommonFactoryContext& context,
-                   Event::Dispatcher& dispatcher, Upstream::ResourcePriority priority) PURE;
+  virtual RetryStatePtr createRetryState(const RetryPolicy& policy,
+                                         Http::RequestHeaderMap& request_headers,
+                                         const Upstream::ClusterInfo& cluster,
+                                         Server::Configuration::CommonFactoryContext& context,
+                                         Event::Dispatcher& dispatcher,
+                                         Upstream::ResourcePriority priority) PURE;
 
   std::unique_ptr<GenericConnPool>
   createConnPool(Upstream::ThreadLocalCluster& thread_local_cluster,
@@ -593,7 +597,8 @@ private:
   // headers (e.g. due to a reset). Handles recording stats and responding
   // downstream if appropriate.
   void onUpstreamAbort(Http::Code code, StreamInfo::CoreResponseFlag response_flag,
-                       absl::string_view body, bool dropped, absl::string_view details);
+                       absl::string_view body, bool dropped, absl::string_view details,
+                       absl::optional<Grpc::Status::GrpcStatus> grpc_status = absl::nullopt);
   void onUpstreamComplete(UpstreamRequest& upstream_request);
   // Reset all in-flight upstream requests.
   void resetAll();
@@ -601,7 +606,8 @@ private:
   // if a "good" response comes back and we return downstream, so there is no point in waiting
   // for the remaining upstream requests to return.
   void resetOtherUpstreams(UpstreamRequest& upstream_request);
-  void sendNoHealthyUpstreamResponse(absl::optional<std::string> details);
+  void sendNoHealthyUpstreamResponse(absl::string_view details,
+                                     absl::optional<Http::Code> failure_status = absl::nullopt);
   bool setupRedirect(const Http::ResponseHeaderMap& headers);
   bool convertRequestHeadersForInternalRedirect(Http::RequestHeaderMap& downstream_headers,
                                                 const Http::ResponseHeaderMap& upstream_headers,
@@ -612,9 +618,15 @@ private:
   void doRetry(bool can_send_early_data, bool can_use_http3, TimeoutRetry is_timeout_retry);
   void continueDoRetry(bool can_send_early_data, bool can_use_http3, TimeoutRetry is_timeout_retry,
                        Upstream::HostConstSharedPtr&& host, Upstream::ThreadLocalCluster& cluster,
-                       absl::optional<std::string> host_selection_details);
+                       absl::string_view host_selection_details,
+                       absl::optional<Http::Code> failure_status = absl::nullopt);
+  void updateStatsOnNoRetry(RetryStatus retry_status);
+  void updateStatsOnDoRetry(RetryState::DoRetryType do_retry_type);
 
   void runRetryOptionsPredicates(UpstreamRequest& retriable_request);
+  // Returns the effective retry policy to use for this request.
+  // Cluster-level retry policy takes precedence over route-level retry policy.
+  const Router::RetryPolicy* getEffectiveRetryPolicy() const;
   // Called immediately after a non-5xx header is received from upstream, performs stats accounting
   // and handle difference between gRPC and non-gRPC requests.
   void handleNon5xxResponseHeaders(absl::optional<Grpc::Status::GrpcStatus> grpc_status,
@@ -636,7 +648,8 @@ private:
   std::unique_ptr<Stats::StatNameDynamicStorage> alt_stat_prefix_;
   const VirtualCluster* request_vcluster_{};
   RouteStatsContextOptRef route_stats_context_;
-  std::function<void(Upstream::HostConstSharedPtr&& host, std::string details)> on_host_selected_;
+  std::function<void(Upstream::HostConstSharedPtr&& host, absl::string_view details)>
+      on_host_selected_;
   std::unique_ptr<Upstream::AsyncHostSelectionHandle> host_selection_cancelable_;
   Event::TimerPtr response_timeout_;
   TimeoutData timeout_;
@@ -666,25 +679,27 @@ private:
 
   // Keep small members (bools and enums) at the end of class, to reduce alignment overhead.
   uint64_t request_body_buffer_limit_{std::numeric_limits<uint64_t>::max()};
-  uint32_t connection_buffer_limit_{0};
   uint32_t attempt_count_{0};
   uint32_t pending_retries_{0};
   Http::Code timeout_response_code_ = Http::Code::GatewayTimeout;
   FilterUtility::HedgingParams hedging_params_;
   Http::StreamFilterSidestreamWatermarkCallbacks watermark_callbacks_;
-  bool grpc_request_ : 1;
-  bool exclude_http_code_stats_ : 1;
-  bool downstream_response_started_ : 1;
-  bool downstream_end_stream_ : 1;
-  bool is_retry_ : 1;
-  bool include_attempt_count_in_request_ : 1;
-  bool include_timeout_retry_header_in_request_ : 1;
-  bool request_buffer_overflowed_ : 1;
-  const bool allow_multiplexed_upstream_half_close_ : 1;
-  bool upstream_request_started_ : 1;
+  bool grpc_request_ : 1 = false;
+  bool exclude_http_code_stats_ : 1 = false;
+  bool downstream_response_started_ : 1 = false;
+  bool downstream_end_stream_ : 1 = false;
+  bool is_retry_ : 1 = false;
+  bool include_attempt_count_in_request_ : 1 = false;
+  bool include_timeout_retry_header_in_request_ : 1 = false;
+  bool request_buffer_overflowed_ : 1 = false;
+  const bool allow_multiplexed_upstream_half_close_ : 1 = false;
+  bool upstream_request_started_ : 1 = false;
   // Indicate that ORCA report is received to process it only once in either response headers or
   // trailers.
-  bool orca_load_report_received_ : 1;
+  bool orca_load_report_received_ : 1 = false;
+  // Cached runtime flag value for reject_early_connect_data to avoid evaluating it on every data
+  // chunk.
+  bool reject_early_connect_data_enabled_ : 1 = false;
 };
 
 class ProdFilter : public Filter {
@@ -695,8 +710,6 @@ private:
   // Filter
   RetryStatePtr createRetryState(const RetryPolicy& policy, Http::RequestHeaderMap& request_headers,
                                  const Upstream::ClusterInfo& cluster,
-                                 const VirtualCluster* vcluster,
-                                 RouteStatsContextOptRef route_stats_context,
                                  Server::Configuration::CommonFactoryContext& context,
                                  Event::Dispatcher& dispatcher,
                                  Upstream::ResourcePriority priority) override;

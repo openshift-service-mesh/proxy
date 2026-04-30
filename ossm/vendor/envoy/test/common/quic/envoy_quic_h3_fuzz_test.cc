@@ -78,20 +78,14 @@ public:
   std::string name() const override { return "quic.test_crypto_server_stream"; }
 
   std::unique_ptr<quic::QuicCryptoServerStreamBase> createEnvoyQuicCryptoServerStream(
-      const quic::QuicCryptoServerConfig* crypto_config,
-      quic::QuicCompressedCertsCache* compressed_certs_cache, quic::QuicSession* session,
-      quic::QuicCryptoServerStreamBase::Helper* helper,
+      const quic::QuicCryptoServerConfig* crypto_config, quic::QuicCompressedCertsCache*,
+      quic::QuicSession* session, quic::QuicCryptoServerStreamBase::Helper*,
       OptRef<const Network::DownstreamTransportSocketFactory> /*transport_socket_factory*/,
       Event::Dispatcher& /*dispatcher*/) override {
-    switch (session->connection()->version().handshake_protocol) {
-    case quic::PROTOCOL_QUIC_CRYPTO:
-      return std::make_unique<TestQuicCryptoServerStream>(crypto_config, compressed_certs_cache,
-                                                          session, helper);
-    case quic::PROTOCOL_TLS1_3:
+    if (session->connection()->version().transport_version > quic::QUIC_VERSION_46) {
       return std::make_unique<TestEnvoyQuicTlsServerHandshaker>(session, *crypto_config);
-    case quic::PROTOCOL_UNSUPPORTED:
-      ASSERT(false, "Unknown handshake protocol");
     }
+    ASSERT(false, "Unknown QUIC version");
     return nullptr;
   }
 };
@@ -159,7 +153,7 @@ struct Harness {
         &crypto_stream_helper_, &crypto_config_, &compressed_certs_cache_, *dispatcher_.get(),
         quic::kDefaultFlowControlSendWindow * 1.5, quic_stat_names_,
         mock_listener_config_.listenerScope(), crypto_stream_factory_, std::move(stream_info),
-        connection_stats_, std::nullopt);
+        connection_stats_, std::nullopt, nullptr);
     session->Initialize();
     session->setHeadersWithUnderscoreAction(envoy::config::core::v3::HttpProtocolOptions::ALLOW);
     session->setHttp3Options(http3_options_);

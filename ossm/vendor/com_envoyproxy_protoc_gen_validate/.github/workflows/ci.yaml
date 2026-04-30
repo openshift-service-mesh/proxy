@@ -10,10 +10,10 @@ on:
 env:
   # Keep these versions in sync with the Dockerfile
   BDR_VER: '6.0.1'
-  GO_VER: '1.21.x'
+  GO_VER: '1.24.x'
   PGG_VER: 'v1.31.0'
   PROTOC_VER: '24.3'
-  PYTHON_VER: '3.8'
+  PYTHON_VER: '3.10'
   TEST_TAG: protoc-gen-validate:${{ github.sha }}
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Cache
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/bazelisk
@@ -29,12 +29,12 @@ jobs:
             ~/.cache/protoc
           key: ${{ runner.os }}-build-cache
       - name: Checkout
-        uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+        uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VER }}
           cache: true
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VER }}
           cache: 'pip'

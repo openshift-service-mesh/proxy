@@ -1454,7 +1454,9 @@ class Server(abc.ABC):
         """
         raise NotImplementedError()
 
-    def add_registered_method_handlers(self, service_name, method_handlers):
+    def add_registered_method_handlers(  # noqa: B027
+        self, service_name, method_handlers
+    ):
         """Registers GenericRpcHandlers with this Server.
 
         This method is only safe to call before the server is started.
@@ -1838,25 +1840,23 @@ def ssl_server_credentials(
       object is an argument to add_secure_port() method during server setup.
     """
     if not private_key_certificate_chain_pairs:
-        raise ValueError(
+        error_msg = (
             "At least one private key-certificate chain pair is required!"
         )
-    elif require_client_auth and root_certificates is None:
-        raise ValueError(
-            "Illegal to require client auth without providing root"
-            " certificates!"
+        raise ValueError(error_msg)
+    if require_client_auth and root_certificates is None:
+        error_msg = "Illegal to require client auth without providing root certificates!"
+        raise ValueError(error_msg)
+    return ServerCredentials(
+        _cygrpc.server_credentials_ssl(
+            root_certificates,
+            [
+                _cygrpc.SslPemKeyCertPair(key, pem)
+                for key, pem in private_key_certificate_chain_pairs
+            ],
+            require_client_auth,
         )
-    else:
-        return ServerCredentials(
-            _cygrpc.server_credentials_ssl(
-                root_certificates,
-                [
-                    _cygrpc.SslPemKeyCertPair(key, pem)
-                    for key, pem in private_key_certificate_chain_pairs
-                ],
-                require_client_auth,
-            )
-        )
+    )
 
 
 def xds_server_credentials(fallback_credentials):
@@ -1909,10 +1909,8 @@ def ssl_server_certificate_configuration(
                 ],
             )
         )
-    else:
-        raise ValueError(
-            "At least one private key-certificate chain pair is required!"
-        )
+    error_msg = "At least one private key-certificate chain pair is required!"
+    raise ValueError(error_msg)
 
 
 def dynamic_ssl_server_credentials(
@@ -2038,6 +2036,7 @@ def alts_channel_credentials(service_accounts=None):
         peer identity of the server, handshake will fail. The arg can be empty
         if the client does not have any information about trusted server
         identity.
+
     Returns:
       A ChannelCredentials for use with an ALTS-enabled Channel
     """

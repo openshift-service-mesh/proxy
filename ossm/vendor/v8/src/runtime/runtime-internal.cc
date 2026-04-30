@@ -299,15 +299,20 @@ RUNTIME_FUNCTION(Runtime_ThrowNotConstructor) {
       isolate, NewTypeError(MessageTemplate::kNotConstructor, object));
 }
 
-RUNTIME_FUNCTION(Runtime_ThrowApplyNonFunction) {
+RUNTIME_FUNCTION(Runtime_ThrowTargetNonFunction) {
   HandleScope scope(isolate);
-  DCHECK_EQ(1, args.length());
+  DCHECK_EQ(2, args.length());
   Handle<Object> object = args.at(0);
+
+  Handle<String> target = args.at<String>(1);
   Handle<String> type = Object::TypeOf(isolate, object);
   Handle<String> msg;
   if (IsNull(*object)) {
     // "which is null"
-    msg = isolate->factory()->NewStringFromAsciiChecked("null");
+    msg = isolate->factory()->null_string();
+  } else if (IsUndefined(*object)) {
+    // "which is undefined"
+    msg = isolate->factory()->undefined_string();
   } else if (isolate->factory()->object_string()->Equals(*type)) {
     // "which is an object"
     msg = isolate->factory()->NewStringFromAsciiChecked("an object");
@@ -319,7 +324,8 @@ RUNTIME_FUNCTION(Runtime_ThrowApplyNonFunction) {
               .ToHandleChecked();
   }
   THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate, NewTypeError(MessageTemplate::kApplyNonFunction, object, msg));
+      isolate,
+      NewTypeError(MessageTemplate::kTargetNonFunction, target, object, msg));
 }
 
 RUNTIME_FUNCTION(Runtime_StackGuard) {
@@ -448,11 +454,6 @@ RUNTIME_FUNCTION(Runtime_AllocateInYoungGeneration) {
   CHECK(IsAligned(size, kTaggedSize));
   CHECK_GT(size, 0);
 
-  // When this is called from WasmGC code, clear the "thread in wasm" flag,
-  // which is important in case any GC needs to happen.
-  // TODO(40192807): Find a better fix, likely by replacing the global flag.
-  SaveAndClearThreadInWasmFlag clear_wasm_flag(isolate);
-
   // TODO(v8:9472): Until double-aligned allocation is fixed for new-space
   // allocations, don't request it.
   alignment = kTaggedAligned;
@@ -468,11 +469,6 @@ RUNTIME_FUNCTION(Runtime_AllocateInOldGeneration) {
   // TODO(v8:13070): Align allocations in the builtins that call this.
   int size = ALIGN_TO_ALLOCATION_ALIGNMENT(args.smi_value_at(0));
   int flags = args.smi_value_at(1);
-
-  // When this is called from WasmGC code, clear the "thread in wasm" flag,
-  // which is important in case any GC needs to happen.
-  // TODO(40192807): Find a better fix, likely by replacing the global flag.
-  SaveAndClearThreadInWasmFlag clear_wasm_flag(isolate);
 
   AllocationAlignment alignment = static_cast<AllocationAlignment>(flags);
   CHECK(IsAligned(size, kTaggedSize));
@@ -490,14 +486,6 @@ RUNTIME_FUNCTION(Runtime_AllocateInSharedHeap) {
   AllocationAlignment alignment = static_cast<AllocationAlignment>(flags);
   CHECK(IsAligned(size, kTaggedSize));
   CHECK_GT(size, 0);
-
-#if V8_ENABLE_WEBASSEMBLY
-  // When this is called from WasmGC code, clear the "thread in wasm" flag,
-  // which is important in case any GC needs to happen.
-  // TODO(chromium:1236668): Find a better fix, likely by replacing the global
-  // flag.
-  SaveAndClearThreadInWasmFlag clear_wasm_flag(isolate);
-#endif  // V8_ENABLE_WEBASSEMBLY
 
   Tagged<HeapObject> result = *isolate->factory()->NewFillerObject(
       size, alignment, AllocationType::kSharedOld,
@@ -734,6 +722,10 @@ RUNTIME_FUNCTION(Runtime_ReportMessageFromMicrotask) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
 
+  // Valid context is required for calling Object::ToString as a part of
+  // rendering of an unhandled exception report.
+  DCHECK(!isolate->context().is_null());
+
   DirectHandle<Object> exception = args.at(0);
 
   DCHECK(!isolate->has_exception());
@@ -798,6 +790,10 @@ RUNTIME_FUNCTION(Runtime_InvalidateStringWrapperToPrimitiveProtector) {
 }
 
 RUNTIME_FUNCTION(Runtime_AddLhsIsStringConstantInternalize) {
+  UNREACHABLE();  // Lowered to a builtin call instead.
+}
+
+RUNTIME_FUNCTION(Runtime_AddRhsIsStringConstantInternalize) {
   UNREACHABLE();  // Lowered to a builtin call instead.
 }
 

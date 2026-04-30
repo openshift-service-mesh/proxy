@@ -17,7 +17,6 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//python:py_binary.bzl", "py_binary")
 load("//python:py_library.bzl", "py_library")
-load("//python/private:glob_excludes.bzl", "glob_excludes")
 load("//python/private:normalize_name.bzl", "normalize_name")
 load(":env_marker_setting.bzl", "env_marker_setting")
 load(
@@ -124,6 +123,7 @@ def whl_library_targets(
         entry_points = {},
         native = native,
         enable_implicit_namespace_pkgs = False,
+        namespace_package_files = [],
         rules = struct(
             copy_file = copy_file,
             py_binary = py_binary,
@@ -170,6 +170,8 @@ def whl_library_targets(
         enable_implicit_namespace_pkgs: {type}`boolean` generate __init__.py
             files for namespace pkgs.
         native: {type}`native` The native struct for overriding in tests.
+        namespace_package_files: {type}`list[str]` A list of labels of files whose
+            directories are namespace packages.
         rules: {type}`struct` A struct with references to rules for creating targets.
     """
     dependencies = sorted([normalize_name(d) for d in dependencies])
@@ -274,13 +276,23 @@ def whl_library_targets(
     # implementation.
     if group_name and "//:" in dep_template:
         # This is the legacy behaviour where the group library is outside the hub repo
+        #
+        # It is expected to disappear when we drop WORKSPACE or drop the vendoring of
+        # pip_parse `requirements.bzl` in WORKSPACE. The alternative would be to add
+        # another argument to the macro, but it is already full of arguments.
         label_tmpl = dep_template.format(
-            name = "_groups",
+            name = "_config",
             target = normalize_name(group_name) + "_{}",
+        ).replace(
+            "//:",
+            "//_groups:",
         )
         impl_vis = [dep_template.format(
-            name = "_groups",
+            name = "_config",
             target = "__pkg__",
+        ).replace(
+            "//:",
+            "//_groups:",
         )]
 
         native.alias(
@@ -315,13 +327,6 @@ def whl_library_targets(
                 deps_by_platform = dependencies_by_platform,
                 deps_conditional = deps_conditional,
                 tmpl = dep_template.format(name = "{}", target = WHEEL_FILE_PUBLIC_LABEL),
-                # NOTE @aignas 2024-10-28: Actually, `select` is not part of
-                # `native`, but in order to support bazel 6.4 in unit tests, I
-                # have to somehow pass the `select` implementation in the unit
-                # tests and I chose this to be routed through the `native`
-                # struct. So, tests` will be successful in `getattr` and the
-                # real code will use the fallback provided here.
-                select = getattr(native, "select", select),
             ),
             visibility = impl_vis,
         )
@@ -346,7 +351,7 @@ def whl_library_targets(
             # of generated files produced when wheels are installed. The file is ignored to avoid
             # Bazel caching issues.
             "**/*.dist-info/RECORD",
-        ] + glob_excludes.version_dependent_exclusions()
+        ]
         for item in data_exclude:
             if item not in _data_exclude:
                 _data_exclude.append(item)
@@ -354,6 +359,7 @@ def whl_library_targets(
         data = data + native.glob(
             ["site-packages/**/*"],
             exclude = _data_exclude,
+            allow_empty = True,
         )
 
         pyi_srcs = native.glob(
@@ -362,7 +368,7 @@ def whl_library_targets(
         )
 
         if not enable_implicit_namespace_pkgs:
-            srcs = srcs + getattr(native, "select", select)({
+            generated_namespace_package_files = select({
                 Label("//python/config_settings:is_venvs_site_packages"): [],
                 "//conditions:default": rules.create_inits(
                     srcs = srcs + data + pyi_srcs,
@@ -370,6 +376,8 @@ def whl_library_targets(
                     root = "site-packages",
                 ),
             })
+            namespace_package_files += generated_namespace_package_files
+            srcs = srcs + generated_namespace_package_files
 
         rules.py_library(
             name = py_library_label,
@@ -384,11 +392,11 @@ def whl_library_targets(
                 deps_by_platform = dependencies_by_platform,
                 deps_conditional = deps_conditional,
                 tmpl = dep_template.format(name = "{}", target = PY_LIBRARY_PUBLIC_LABEL),
-                select = getattr(native, "select", select),
             ),
             tags = tags,
             visibility = impl_vis,
             experimental_venvs_site_packages = Label("@rules_python//python/config_settings:venvs_site_packages"),
+            namespace_package_files = namespace_package_files,
         )
 
 def _config_settings(dependencies_by_platform, dependencies_with_markers, rules, native = native, **kwargs):
@@ -455,7 +463,7 @@ def _plat_label(plat):
     else:
         return ":is_" + plat.replace("cp3", "python_3.")
 
-def _deps(deps, deps_by_platform, deps_conditional, tmpl, select = select):
+def _deps(deps, deps_by_platform, deps_conditional, tmpl):
     deps = [tmpl.format(d) for d in sorted(deps)]
 
     for dep, setting in deps_conditional.items():

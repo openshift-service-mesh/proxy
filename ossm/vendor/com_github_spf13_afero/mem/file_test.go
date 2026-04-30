@@ -1,6 +1,7 @@
 package mem
 
 import (
+	"bytes"
 	"io"
 	"testing"
 	"time"
@@ -65,8 +66,8 @@ func TestFileDataModTimeRace(t *testing.T) {
 
 func TestFileDataModeRace(t *testing.T) {
 	t.Parallel()
-	const someMode = 0777
-	const someOtherMode = 0660
+	const someMode = 0o777
+	const someOtherMode = 0o660
 
 	d := FileData{
 		mode: someMode,
@@ -94,6 +95,57 @@ func TestFileDataModeRace(t *testing.T) {
 	}
 }
 
+// See https://github.com/spf13/afero/issues/286.
+func TestFileWriteAt(t *testing.T) {
+	t.Parallel()
+
+	data := CreateFile("abc.txt")
+	f := NewFileHandle(data)
+
+	testData := []byte{1, 2, 3, 4, 5}
+	offset := len(testData)
+
+	// 5 zeros + testdata
+	_, err := f.WriteAt(testData, int64(offset))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2 * testdata
+	_, err = f.WriteAt(testData, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3 * testdata
+	_, err = f.WriteAt(testData, int64(offset*2))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3 * testdata + 5 zeros + testdata
+	_, err = f.WriteAt(testData, int64(offset*4))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 5 * testdata
+	_, err = f.WriteAt(testData, int64(offset*3))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expected := bytes.Repeat(testData, 5)
+	if !bytes.Equal(expected, data.data) {
+		t.Fatalf("expected: %v, got: %v", expected, data.data)
+	}
+}
+
 func TestFileDataIsDirRace(t *testing.T) {
 	t.Parallel()
 
@@ -115,7 +167,7 @@ func TestFileDataIsDirRace(t *testing.T) {
 		s.Unlock()
 	}()
 
-	//just logging the value to trigger a read:
+	// just logging the value to trigger a read:
 	t.Logf("Value is %v", s.IsDir())
 }
 
@@ -144,10 +196,10 @@ func TestFileDataSizeRace(t *testing.T) {
 		s.Unlock()
 	}()
 
-	//just logging the value to trigger a read:
+	// just logging the value to trigger a read:
 	t.Logf("Value is %v", s.Size())
 
-	//Testing the Dir size case
+	// Testing the Dir size case
 	d.dir = true
 	if s.Size() != int64(42) {
 		t.Errorf("Failed to read correct value for dir, was %v", s.Size())
@@ -203,5 +255,44 @@ func TestFileReadAtSeekOffset(t *testing.T) {
 	err = f.Close()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFileWriteAndSeek(t *testing.T) {
+	fd := CreateFile("foo")
+	f := NewFileHandle(fd)
+
+	assert := func(expected bool, v ...interface{}) {
+		if !expected {
+			t.Helper()
+			t.Fatal(v...)
+		}
+	}
+
+	data4 := []byte{0, 1, 2, 3}
+	data20 := bytes.Repeat(data4, 5)
+	var off int64
+
+	for i := 0; i < 100; i++ {
+		// write 20 bytes
+		n, err := f.Write(data20)
+		assert(err == nil, err)
+		off += int64(n)
+		assert(n == len(data20), n)
+		assert(off == int64((i+1)*len(data20)), off)
+
+		// rewind to start and write 4 bytes there
+		cur, err := f.Seek(-off, io.SeekCurrent)
+		assert(err == nil, err)
+		assert(cur == 0, cur)
+
+		n, err = f.Write(data4)
+		assert(err == nil, err)
+		assert(n == len(data4), n)
+
+		// back at the end
+		cur, err = f.Seek(off-int64(n), io.SeekCurrent)
+		assert(err == nil, err)
+		assert(cur == off, cur, off)
 	}
 }

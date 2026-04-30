@@ -1,5 +1,7 @@
 """A custom rule that threats all its dependencies as direct dependencies."""
 
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+
 # buildifier: disable=bzl-visibility
 load("//rust/private:providers.bzl", "BuildInfo", "CrateInfo", "DepInfo", "DepVariantInfo")
 
@@ -53,9 +55,9 @@ def _generator_impl(ctx):
             name = crate_name,
             type = crate_type,
             root = rs_file,
-            srcs = depset([rs_file]),
-            deps = depset(deps),
-            proc_macro_deps = depset([]),
+            srcs = [rs_file],
+            deps = deps,
+            proc_macro_deps = [],
             aliases = {},
             output = rust_lib,
             owner = ctx.label,
@@ -75,9 +77,6 @@ generator = rule(
         "deps": attr.label_list(
             doc = "List of other libraries to be linked to this library target.",
             providers = [CrateInfo],
-        ),
-        "_cc_toolchain": attr.label(
-            default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
         ),
         "_error_format": attr.label(
             default = Label("//rust/settings:error_format"),

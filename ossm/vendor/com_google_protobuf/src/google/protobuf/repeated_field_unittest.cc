@@ -30,6 +30,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/base/config.h"
 #include "absl/numeric/bits.h"
 #include "absl/strings/cord.h"
 #include "absl/types/span.h"
@@ -38,6 +39,7 @@
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 #include "google/protobuf/parse_context.h"
+#include "google/protobuf/port.h"
 // TODO: Remove.
 #include "google/protobuf/repeated_ptr_field.h"
 #include "google/protobuf/unittest.pb.h"
@@ -50,8 +52,7 @@ namespace google {
 namespace protobuf {
 namespace {
 
-using ::protobuf_unittest::TestAllTypes;
-using ::testing::A;
+using ::proto2_unittest::TestAllTypes;
 using ::testing::AllOf;
 using ::testing::ElementsAre;
 using ::testing::Ge;
@@ -65,7 +66,7 @@ TEST(RepeatedFieldIterator, Traits) {
   EXPECT_TRUE((std::is_same<It::difference_type, std::ptrdiff_t>::value));
   EXPECT_TRUE((std::is_same<It::iterator_category,
                             std::random_access_iterator_tag>::value));
-#if __cplusplus >= 202002L
+#if PROTOBUF_CPLUSPLUS_MIN(202002L)
   EXPECT_TRUE((
       std::is_same<It::iterator_concept, std::contiguous_iterator_tag>::value));
 #else
@@ -82,7 +83,7 @@ TEST(ConstRepeatedFieldIterator, Traits) {
   EXPECT_TRUE((std::is_same<It::difference_type, std::ptrdiff_t>::value));
   EXPECT_TRUE((std::is_same<It::iterator_category,
                             std::random_access_iterator_tag>::value));
-#if __cplusplus >= 202002L
+#if PROTOBUF_CPLUSPLUS_MIN(202002L)
   EXPECT_TRUE((
       std::is_same<It::iterator_concept, std::contiguous_iterator_tag>::value));
 #else
@@ -173,6 +174,22 @@ TEST(RepeatedField, Large) {
 
   int expected_usage = 16 * sizeof(int);
   EXPECT_GE(field.SpaceUsedExcludingSelf(), expected_usage);
+}
+
+TEST(RepeatedField, AddRangeThatOverflowsFailsWithATermination) {
+  if (sizeof(void*) < 8) {
+    GTEST_SKIP() << "Disabled on 32-bit builds due to insufficient memory";
+  }
+  RepeatedField<bool> field;
+
+  std::vector<bool> input;
+  // Overflows into "negative" ints.
+  input.resize(size_t{std::numeric_limits<int32_t>::max()} + 1);
+  EXPECT_DEATH(field.Add(input.begin(), input.end()), "Input too large");
+
+  // Overflows the ints completely.
+  input.resize(size_t{std::numeric_limits<uint32_t>::max()} + 1);
+  EXPECT_DEATH(field.Add(input.begin(), input.end()), "Input too large");
 }
 
 template <typename Rep>
@@ -474,9 +491,9 @@ TEST(RepeatedField, ReserveLarge) {
 }
 
 TEST(RepeatedField, ReserveHuge) {
-#if defined(PROTOBUF_ASAN) || defined(PROTOBUF_MSAN)
-  GTEST_SKIP() << "Disabled because sanitizer is active";
-#endif
+  if (internal::HasAnySanitizer()) {
+    GTEST_SKIP() << "Disabled because sanitizer is active";
+  }
   // Largest value that does not clamp to the large limit:
   constexpr int non_clamping_limit =
       (std::numeric_limits<int>::max() - sizeof(Arena*)) / 2;
@@ -940,36 +957,6 @@ TEST(RepeatedField, MoveAssign) {
   }
 }
 
-TEST(Movable, Works) {
-  class NonMoveConstructible {
-   public:
-    NonMoveConstructible(NonMoveConstructible&&) = delete;
-    NonMoveConstructible& operator=(NonMoveConstructible&&) { return *this; }
-  };
-  class NonMoveAssignable {
-   public:
-    NonMoveAssignable(NonMoveAssignable&&) {}
-    NonMoveAssignable& operator=(NonMoveConstructible&&) = delete;
-  };
-  class NonMovable {
-   public:
-    NonMovable(NonMovable&&) = delete;
-    NonMovable& operator=(NonMovable&&) = delete;
-  };
-
-  EXPECT_TRUE(internal::IsMovable<std::string>::value);
-
-  EXPECT_FALSE(std::is_move_constructible<NonMoveConstructible>::value);
-  EXPECT_TRUE(std::is_move_assignable<NonMoveConstructible>::value);
-  EXPECT_FALSE(internal::IsMovable<NonMoveConstructible>::value);
-
-  EXPECT_TRUE(std::is_move_constructible<NonMoveAssignable>::value);
-  EXPECT_FALSE(std::is_move_assignable<NonMoveAssignable>::value);
-  EXPECT_FALSE(internal::IsMovable<NonMoveAssignable>::value);
-
-  EXPECT_FALSE(internal::IsMovable<NonMovable>::value);
-}
-
 TEST(RepeatedField, MutableDataIsMutable) {
   RepeatedField<int> field;
   field.Add(1);
@@ -1164,17 +1151,17 @@ TEST(RepeatedField, HardenAgainstBadTruncate) {
   }
 }
 
-#if defined(GTEST_HAS_DEATH_TEST) && \
-    (defined(PROTOBUF_ASAN) || defined(PROTOBUF_MSAN))
+#if defined(GTEST_HAS_DEATH_TEST) && (defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+                                      defined(ABSL_HAVE_MEMORY_SANITIZER))
 
 // This function verifies that the code dies under ASAN or MSAN trying to both
 // read and write the reserved element directly beyond the last element.
 void VerifyDeathOnWriteAndReadAccessBeyondEnd(RepeatedField<int64_t>& field) {
   auto* end = field.Mutable(field.size() - 1) + 1;
-#if defined(PROTOBUF_ASAN)
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER)
   EXPECT_DEATH(*end = 1, "container-overflow");
   EXPECT_DEATH(EXPECT_NE(*end, 1), "container-overflow");
-#elif defined(PROTOBUF_MSAN)
+#elif defined(ABSL_HAVE_MEMORY_SANITIZER)
   EXPECT_DEATH(EXPECT_NE(*end, 1), "use-of-uninitialized-value");
 #endif
 
@@ -1369,6 +1356,21 @@ TEST_F(RepeatedFieldInsertionIteratorsTest, Halves) {
                          protobuffer.repeated_double().begin()));
   EXPECT_TRUE(std::equal(protobuffer.repeated_double().begin(),
                          protobuffer.repeated_double().end(), halves.begin()));
+}
+
+TEST(RepeatedField, CheckedGetOrAbortTest) {
+  RepeatedField<int> field;
+
+  // Empty container tests.
+  EXPECT_DEATH(CheckedMutableOrAbort(&field, -1), "index: -1, size: 0");
+  EXPECT_DEATH(CheckedMutableOrAbort(&field, field.size()),
+               "index: 0, size: 0");
+
+  // Non-empty container tests
+  field.Add(5);
+  field.Add(4);
+  EXPECT_DEATH(CheckedMutableOrAbort(&field, 2), "index: 2, size: 2");
+  EXPECT_DEATH(CheckedMutableOrAbort(&field, -1), "index: -1, size: 2");
 }
 
 }  // namespace

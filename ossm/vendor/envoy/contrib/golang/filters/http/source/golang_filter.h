@@ -162,7 +162,12 @@ enum class DestroyReason {
   Terminate,
 };
 
+// Value returned by ciphersuiteId() when no ciphersuite is negotiated.
+// See envoy/ssl/connection.h for reference.
+constexpr uint16_t SSL_INVALID_CIPHERSUITE_ID = 0xffff;
+
 enum class EnvoyValue {
+  // Stream info values (1-99)
   RouteName = 1,
   FilterChainName,
   Protocol,
@@ -175,6 +180,28 @@ enum class EnvoyValue {
   UpstreamRemoteAddress,
   UpstreamClusterName,
   VirtualClusterName,
+
+  // SSL values (100-199)
+  SslConnectionExists = 100,
+  SslPeerCertificatePresented,
+  SslPeerCertificateValidated,
+  SslCiphersuiteId,
+  SslValidFromPeerCertificate,
+  SslExpirationPeerCertificate,
+  SslSha256PeerCertificateDigest,
+  SslSerialNumberPeerCertificate,
+  SslSubjectPeerCertificate,
+  SslIssuerPeerCertificate,
+  SslSubjectLocalCertificate,
+  SslTlsVersion,
+  SslCiphersuiteString,
+  SslSessionId,
+  SslUrlEncodedPemEncodedPeerCertificate,
+  SslUrlEncodedPemEncodedPeerCertificateChain,
+  SslUriSanPeerCertificate,
+  SslUriSanLocalCertificate,
+  SslDnsSansPeerCertificate,
+  SslDnsSansLocalCertificate,
 };
 
 class Filter;
@@ -271,8 +298,7 @@ public:
   }
 
   // AccessLog::Instance
-  void log(const Formatter::HttpFormatterContext& log_context,
-           const StreamInfo::StreamInfo& info) override;
+  void log(const Formatter::Context& log_context, const StreamInfo::StreamInfo& info) override;
 
   CAPIStatus clearRouteCache(bool refresh);
   void clearRouteCacheInternal(bool refresh);
@@ -314,6 +340,7 @@ public:
   CAPIStatus getStringProperty(absl::string_view path, uint64_t* value_data, int* value_len,
                                GoInt32* rc);
   CAPIStatus getSecret(absl::string_view key, uint64_t* value_data, int* value_len);
+  CAPIStatus setDrainConnectionUponCompletion();
 
   bool isProcessingInGo() {
     return decoding_state_.isProcessingInGo() || encoding_state_.isProcessingInGo();
@@ -321,6 +348,8 @@ public:
   void deferredDeleteRequest(HttpRequestInternal* req);
 
 private:
+  friend class TestFilter;
+
   bool hasDestroyed() {
     Thread::LockGuard lock(mutex_);
     return has_destroyed_;

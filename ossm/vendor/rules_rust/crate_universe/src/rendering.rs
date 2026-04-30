@@ -14,13 +14,14 @@ use itertools::Itertools;
 use crate::config::{AliasRule, RenderConfig, VendorMode};
 use crate::context::crate_context::{CrateContext, CrateDependency, Rule};
 use crate::context::{Context, TargetAttributes};
+use crate::metadata::SourceAnnotation;
 use crate::rendering::template_engine::TemplateEngine;
 use crate::select::Select;
 use crate::splicing::default_splicing_package_crate_id;
 use crate::utils::starlark::{
-    self, Alias, CargoBuildScript, CommonAttrs, Data, ExportsFiles, Filegroup, Glob, Label, Load,
-    Package, RustBinary, RustLibrary, RustProcMacro, SelectDict, SelectList, SelectScalar,
-    SelectSet, Starlark, TargetCompatibleWith,
+    self, Alias, CargoBuildScript, CargoTomlEnvVars, CommonAttrs, Data, ExportsFiles, Filegroup,
+    Glob, Label, Load, Package, RustBinary, RustLibrary, RustProcMacro, SelectDict, SelectList,
+    SelectScalar, SelectSet, Starlark, TargetCompatibleWith,
 };
 use crate::utils::target_triple::TargetTriple;
 use crate::utils::{self, sanitize_repository_name};
@@ -209,22 +210,66 @@ impl Renderer {
                 .unwrap_or(&self.config.default_alias_rule);
 
             if let Some(library_target_name) = &krate.library_target_name {
-                let rename = dep.alias.as_ref().unwrap_or(&krate.name);
-                dependencies.push(Alias {
-                    rule: alias_rule.rule(),
-                    // If duplicates exist, include version to disambiguate them.
-                    name: if context.has_duplicate_workspace_member_dep(&dep) {
-                        format!("{}-{}", rename, krate.version)
-                    } else {
-                        rename.clone()
-                    },
-                    actual: self.crate_label(
-                        &krate.name,
-                        &krate.version.to_string(),
-                        library_target_name,
-                    ),
-                    tags: BTreeSet::from(["manual".to_owned()]),
-                });
+                // Avoid adding the <crate_name>-<version> alias if there are
+                // more than 1 dependency referencing the same crate at the
+                // same version, but one of them is aliased.
+                //
+                // Without this check we would add duplicate aliases in
+                // scenarios like the following:
+                //
+                // itertools = "0.11.24"
+                // itertools_other = { version = "0.11.24", package = "itertools" }
+                //
+                let add_primary_alias = dep.alias.is_none()
+                    || !context.has_duplicate_workspace_member_dep_by_version(&dep);
+
+                if add_primary_alias {
+                    dependencies.push(Alias {
+                        rule: alias_rule.rule(),
+                        name: format!("{}-{}", krate.name, krate.version),
+                        actual: self.crate_label(
+                            &krate.name,
+                            &krate.version.to_string(),
+                            library_target_name,
+                        ),
+                        tags: BTreeSet::from(["manual".to_owned()]),
+                    });
+                }
+
+                let shorthand = if let Some(rename) = dep.alias.as_ref() {
+                    // when the alias is the same as the crate name, don't create the alias
+                    if krate.name != *rename {
+                        dependencies.push(Alias {
+                            rule: alias_rule.rule(),
+                            name: format!("{}-{}", rename, krate.version),
+                            actual: self.crate_label(
+                                &krate.name,
+                                &krate.version.to_string(),
+                                library_target_name,
+                            ),
+                            tags: BTreeSet::from(["manual".to_owned()]),
+                        });
+                    }
+                    rename
+                } else {
+                    &krate.name
+                };
+
+                // Add a shorthand for crate names as long as there isn't a duplicate
+                // entry. Shorthands for duplicate entries would lead to ambiguous
+                // dependencies.
+                if !context.has_duplicate_workspace_member_dep_by_alias(&dep) {
+                    dependencies.push(Alias {
+                        rule: alias_rule.rule(),
+                        name: shorthand.clone(),
+                        actual: self.crate_label(
+                            &krate.name,
+                            &krate.version.to_string(),
+                            library_target_name,
+                        ),
+                        tags: BTreeSet::from(["manual".to_owned()]),
+                    });
+                }
             }
 
             for (alias, target) in &krate.extra_aliased_targets {
@@ -314,7 +359,10 @@ impl Renderer {
                     Err(e) => bail!(e),
                 };
 
-                let filename = Renderer::label_to_path(&label);
+                let filename = match &context.crates[id].repository {
+                    Some(SourceAnnotation::Path { path }) => path.join("BUILD.bazel").into(),
+                    _ => Renderer::label_to_path(&label),
+                };
                 let content = self.render_one_build_file(engine, platforms, &context.crates[id])?;
                 Ok((filename, content))
             })
@@ -327,6 +375,23 @@ impl Renderer {
         platforms: &Platforms,
         krate: &CrateContext,
     ) -> Result<String> {
+        let mut krate = krate.clone();
+
+        if self.config.generate_cargo_toml_env_vars {
+            krate
+                .common_attrs
+                .rustc_env_files
+                .insert(":cargo_toml_env_vars".to_owned(), None);
+            if let Some(ref mut build_script_attrs) = &mut krate.build_script_attrs {
+                build_script_attrs
+                    .rustc_env_files
+                    .insert(":cargo_toml_env_vars".to_owned(), None);
+                build_script_attrs
+                    .build_script_env_files
+                    .insert(":cargo_toml_env_vars".to_owned(), None);
+            }
+        }
+
         let mut starlark = Vec::new();
 
         // Banner comment for top of the file.
@@ -400,6 +465,14 @@ impl Renderer {
             starlark.push(Starlark::Package(package));
         }
 
+        if self.config.generate_cargo_toml_env_vars {
+            load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars");
+            starlark.push(Starlark::CargoTomlEnvVars(CargoTomlEnvVars {
+                name: "cargo_toml_env_vars".to_owned(),
+                src: "Cargo.toml".to_owned(),
+            }));
+        }
+
         for rule in &krate.targets {
             if let Some(override_target) = krate.override_targets.get(rule.override_target_key()) {
                 starlark.push(Starlark::Alias(Alias {
@@ -413,7 +486,7 @@ impl Renderer {
                     Rule::BuildScript(target) => {
                         load("@rules_rust//cargo:defs.bzl", "cargo_build_script");
                         let cargo_build_script =
-                            self.make_cargo_build_script(platforms, krate, target)?;
+                            self.make_cargo_build_script(platforms, &krate, target)?;
                         starlark.push(Starlark::CargoBuildScript(cargo_build_script));
                         starlark.push(Starlark::Alias(Alias {
                             rule: AliasRule::default().rule(),
@@ -425,17 +498,17 @@ impl Renderer {
                     Rule::ProcMacro(target) => {
                         load("@rules_rust//rust:defs.bzl", "rust_proc_macro");
                         let rust_proc_macro =
-                            self.make_rust_proc_macro(platforms, krate, target)?;
+                            self.make_rust_proc_macro(platforms, &krate, target)?;
                         starlark.push(Starlark::RustProcMacro(rust_proc_macro));
                     }
                     Rule::Library(target) => {
                         load("@rules_rust//rust:defs.bzl", "rust_library");
-                        let rust_library = self.make_rust_library(platforms, krate, target)?;
+                        let rust_library = self.make_rust_library(platforms, &krate, target)?;
                         starlark.push(Starlark::RustLibrary(rust_library));
                     }
                     Rule::Binary(target) => {
                         load("@rules_rust//rust:defs.bzl", "rust_binary");
-                        let rust_binary = self.make_rust_binary(platforms, krate, target)?;
+                        let rust_binary = self.make_rust_binary(platforms, &krate, target)?;
                         starlark.push(Starlark::RustBinary(rust_binary));
                     }
                 }
@@ -466,8 +539,6 @@ impl Renderer {
     ) -> Result<CargoBuildScript> {
         let attrs = krate.build_script_attrs.as_ref();
 
-        const COMPILE_DATA_GLOB_EXCLUDES: &[&str] = &["**/*.rs"];
-
         Ok(CargoBuildScript {
             // Because `cargo_build_script` does some invisible target name
             // mutating to determine the package and crate name for a build
@@ -495,13 +566,18 @@ impl Renderer {
                 attrs
                     .map(|attrs| attrs.compile_data_glob.clone())
                     .unwrap_or_default(),
-                COMPILE_DATA_GLOB_EXCLUDES
-                    .iter()
-                    .map(|&pattern| pattern.to_owned())
-                    .collect(),
+                attrs
+                    .map(|attrs| attrs.compile_data_glob_excludes.clone())
+                    .unwrap_or_default(),
                 attrs
                     .map(|attrs| attrs.compile_data.clone())
                     .unwrap_or_default(),
+            ),
+            exec_properties: SelectDict::new(
+                attrs
+                    .map(|attrs| attrs.exec_properties.clone())
+                    .unwrap_or_default(),
+                platforms,
             ),
             crate_features: SelectSet::new(krate.common_attrs.crate_features.clone(), platforms),
             crate_name: utils::sanitize_module_name(&target.crate_name),
@@ -511,6 +587,7 @@ impl Renderer {
                 attrs
                     .map(|attrs| attrs.data_glob.clone())
                     .unwrap_or_default(),
+                Default::default(),
                 attrs.map(|attrs| attrs.data.clone()).unwrap_or_default(),
             ),
             deps: SelectSet::new(
@@ -695,6 +772,7 @@ impl Renderer {
             compile_data: make_data(
                 platforms,
                 krate.common_attrs.compile_data_glob.clone(),
+                krate.common_attrs.compile_data_glob_excludes.clone(),
                 krate.common_attrs.compile_data.clone(),
             ),
             crate_features: SelectSet::new(krate.common_attrs.crate_features.clone(), platforms),
@@ -702,6 +780,7 @@ impl Renderer {
             data: make_data(
                 platforms,
                 krate.common_attrs.data_glob.clone(),
+                Default::default(),
                 krate.common_attrs.data.clone(),
             ),
             edition: krate.common_attrs.edition.clone(),
@@ -791,7 +870,14 @@ impl Renderer {
     ) -> Select<BTreeSet<Label>> {
         Select::merge(
             deps.map(|dep| {
-                self.crate_label(&dep.id.name, &dep.id.version.to_string(), &dep.target)
+                match (dep.local_path, self.config.vendor_mode) {
+                    // In local vendor mode, we use paths within the the repo.
+                    (Some(path), Some(VendorMode::Local)) => {
+                        Label::from_str(&format!("//{}:{}", path, &dep.target)).unwrap()
+                    }
+                    // If we're not vendoring source, or don't have a path for the dep, construct the label we expect.
+                    _ => self.crate_label(&dep.id.name, &dep.id.version.to_string(), &dep.target),
+                }
             }),
             extra_deps,
         )
@@ -948,9 +1034,10 @@ fn make_data_with_exclude(
 fn make_data(
     platforms: &Platforms,
     glob: BTreeSet<String>,
+    excludes: BTreeSet<String>,
     select: Select<BTreeSet<Label>>,
 ) -> Data {
-    make_data_with_exclude(platforms, glob, BTreeSet::new(), select)
+    make_data_with_exclude(platforms, glob, excludes, select)
 }
 
 #[cfg(test)]
@@ -1162,6 +1249,10 @@ mod test {
 
         let attrs = BuildScriptAttributes {
             use_default_shell_env: Some(1),
+            exec_properties: Select::from_value(BTreeMap::from([
+                ("OSFamily".to_owned(), "Linux".to_owned()),
+                ("container-image".to_owned(), "docker://my-image".to_owned()),
+            ])),
             ..BuildScriptAttributes::default()
         };
 
@@ -1221,6 +1312,21 @@ mod test {
         );
         assert!(
             build_file_content.contains("use_default_shell_env = 1"),
+            "```\n{}```\n",
+            build_file_content
+        );
+        assert!(
+            build_file_content.contains("exec_properties = {"),
+            "```\n{}```\n",
+            build_file_content
+        );
+        assert!(
+            build_file_content.contains("\"OSFamily\": \"Linux\""),
+            "```\n{}```\n",
+            build_file_content
+        );
+        assert!(
+            build_file_content.contains("\"container-image\": \"docker://my-image\""),
             "```\n{}```\n",
             build_file_content
         );
@@ -1351,6 +1457,7 @@ mod test {
         };
         let annotations = Annotations::new(
             test::metadata::alias(),
+            &None,
             test::lockfile::alias(),
             config,
             Utf8Path::new("/tmp/bazelworkspace"),
@@ -1547,6 +1654,7 @@ mod test {
             "generate_binaries": false,
             "generate_build_scripts": false,
             "rendering": {
+                "generate_cargo_toml_env_vars": true,
                 "repository_name": "multi_cfg_dep",
                 "regen_command": "bazel test //crate_universe:unit_test",
             },
@@ -1563,6 +1671,7 @@ mod test {
 
         let annotations = Annotations::new(
             metadata,
+            &None,
             lockfile,
             config.clone(),
             Utf8Path::new("/tmp/bazelworkspace"),
@@ -1920,5 +2029,251 @@ mod test {
             assert!(!path_str.contains('+'));
         }
         assert!(found);
+    }
+
+    /// Tests a situation where we identical aliases to the crate's name on the
+    /// package's deps
+    #[test]
+    fn crate_with_ambiguous_rename() {
+        let mut context = Context::default();
+        let crate_id = CrateId::new("mock_crate".to_owned(), VERSION_ZERO_ONE_ZERO);
+        context
+            .workspace_members
+            .insert(crate_id.clone(), "mock_crate".into());
+        context.crates.insert(
+            crate_id.clone(),
+            CrateContext {
+                name: crate_id.name.clone(),
+                version: crate_id.version.clone(),
+                package_url: Some("http://www.mock_crate.com/".to_owned()),
+                license_ids: BTreeSet::from(["Apache-2.0".to_owned(), "MIT".to_owned()]),
+                license_file: None,
+                additive_build_file_content: None,
+                disable_pipelining: false,
+                extra_aliased_targets: BTreeMap::default(),
+                targets: BTreeSet::from([Rule::Library(mock_target_attributes())]),
+                library_target_name: Some("library_name".into()),
+                common_attrs: CommonAttributes {
+                    deps: Select::from_value(BTreeSet::from([CrateDependency {
+                        id: crate_id,
+                        target: "target".into(),
+                        // this is identical to what we have in the `name` attribute
+                        // which creates conflict in `render_module_build_file`
+                        alias: Some("mock_crate".into()),
+                        local_path: None,
+                    }])),
+                    ..Default::default()
+                },
+                build_script_attrs: None,
+                repository: None,
+                license: None,
+                alias_rule: None,
+                override_targets: BTreeMap::default(),
+            },
+        );
+
+        let mut render_config = mock_render_config(None);
+        Arc::get_mut(&mut render_config)
+            .unwrap()
+            .generate_rules_license_metadata = true;
+        let renderer = Renderer::new(render_config, mock_supported_platform_triples());
+        let output = renderer.render(&context, None).unwrap();
+
+        let build_file_content = output.get(&PathBuf::from("BUILD.bazel")).unwrap();
+
+        println!("{build_file_content}");
+        let expected = indoc! {r#"
+            ###############################################################################
+            # @generated
+            # DO NOT MODIFY: This file is auto-generated by a crate_universe tool. To
+            # regenerate this file, run the following:
+            #
+            #     cargo_bazel_regen_command
+            ###############################################################################
+
+            package(default_visibility = ["//visibility:public"])
+
+            exports_files(
+                [
+                    "cargo-bazel.json",
+                    "defs.bzl",
+                ] + glob(
+                    allow_empty = True,
+                    include = ["*.bazel"],
+                ),
+            )
+
+            filegroup(
+                name = "srcs",
+                srcs = glob(
+                    allow_empty = True,
+                    include = [
+                        "*.bazel",
+                        "*.bzl",
+                    ],
+                ),
+            )
+
+            # Workspace Member Dependencies
+            alias(
+                name = "mock_crate-0.1.0",
+                actual = "@test_rendering__mock_crate-0.1.0//:library_name",
+                tags = ["manual"],
+            )
+
+            alias(
+                name = "mock_crate",
+                actual = "@test_rendering__mock_crate-0.1.0//:library_name",
+                tags = ["manual"],
+            )
+        "#};
+        assert!(build_file_content
+            .replace(' ', "")
+            .contains(&expected.replace(' ', "")));
+    }
+
+    /// Tests a situation where there are two dependencies referencing the same
+    /// crate at the same version, but with different aliases.
+    #[test]
+    fn crate_with_ambiguous_alias_dependencies() {
+        let mut context = Context::default();
+        let crate_id = CrateId::new("mock_crate".to_owned(), VERSION_ZERO_ONE_ZERO);
+        context
+            .workspace_members
+            .insert(crate_id.clone(), "mock_crate".into());
+
+        let dependency_id = CrateId::new("my_dependency".to_owned(), VERSION_ZERO_ONE_ZERO);
+
+        context.crates.insert(
+            dependency_id.clone(),
+            CrateContext {
+                name: dependency_id.name.clone(),
+                version: dependency_id.version.clone(),
+                package_url: Some("http://www.my_dependency.com/".to_owned()),
+                license_ids: BTreeSet::from(["Apache-2.0".to_owned(), "MIT".to_owned()]),
+                license_file: None,
+                additive_build_file_content: None,
+                disable_pipelining: false,
+                extra_aliased_targets: BTreeMap::default(),
+                targets: BTreeSet::from([Rule::Library(mock_target_attributes())]),
+                library_target_name: Some("my_dependency".into()),
+                common_attrs: CommonAttributes::default(),
+                build_script_attrs: None,
+                repository: None,
+                license: None,
+                alias_rule: None,
+                override_targets: BTreeMap::default(),
+            },
+        );
+
+        context.crates.insert(
+            crate_id.clone(),
+            CrateContext {
+                name: crate_id.name.clone(),
+                version: crate_id.version.clone(),
+                package_url: Some("http://www.mock_crate.com/".to_owned()),
+                license_ids: BTreeSet::from(["Apache-2.0".to_owned(), "MIT".to_owned()]),
+                license_file: None,
+                additive_build_file_content: None,
+                disable_pipelining: false,
+                extra_aliased_targets: BTreeMap::default(),
+                targets: BTreeSet::from([Rule::Library(mock_target_attributes())]),
+                library_target_name: Some("library_name".into()),
+                common_attrs: CommonAttributes {
+                    deps: Select::from_value(BTreeSet::from([
+                        // These two dependencies are identical, except one is aliased.
+                        CrateDependency {
+                            id: dependency_id.clone(),
+                            target: "my_dependency".into(),
+                            alias: None,
+                            local_path: None,
+                        },
+                        CrateDependency {
+                            id: dependency_id,
+                            target: "my_dependency".into(),
+                            alias: Some("my_dependency_other".into()),
+                            local_path: None,
+                        },
+                    ])),
+                    ..Default::default()
+                },
+                build_script_attrs: None,
+                repository: None,
+                license: None,
+                alias_rule: None,
+                override_targets: BTreeMap::default(),
+            },
+        );
+
+        let mut render_config = mock_render_config(None);
+        Arc::get_mut(&mut render_config)
+            .unwrap()
+            .generate_rules_license_metadata = true;
+        let renderer = Renderer::new(render_config, mock_supported_platform_triples());
+        let output = renderer.render(&context, None).unwrap();
+
+        let build_file_content = output.get(&PathBuf::from("BUILD.bazel")).unwrap();
+
+        println!("{build_file_content}");
+        let expected = indoc! {r#"
+            ###############################################################################
+            # @generated
+            # DO NOT MODIFY: This file is auto-generated by a crate_universe tool. To
+            # regenerate this file, run the following:
+            #
+            #     cargo_bazel_regen_command
+            ###############################################################################
+
+            package(default_visibility = ["//visibility:public"])
+
+            exports_files(
+                [
+                    "cargo-bazel.json",
+                    "defs.bzl",
+                ] + glob(
+                    allow_empty = True,
+                    include = ["*.bazel"],
+                ),
+            )
+
+            filegroup(
+                name = "srcs",
+                srcs = glob(
+                    allow_empty = True,
+                    include = [
+                        "*.bazel",
+                        "*.bzl",
+                    ],
+                ),
+            )
+
+            # Workspace Member Dependencies
+            alias(
+                name = "my_dependency-0.1.0",
+                actual = "@test_rendering__my_dependency-0.1.0//:my_dependency",
+                tags = ["manual"],
+            )
+
+            alias(
+                name = "my_dependency",
+                actual = "@test_rendering__my_dependency-0.1.0//:my_dependency",
+                tags = ["manual"],
+            )
+
+            alias(
+                name = "my_dependency_other-0.1.0",
+                actual = "@test_rendering__my_dependency-0.1.0//:my_dependency",
+                tags = ["manual"],
+            )
+
+            alias(
+                name = "my_dependency_other",
+                actual = "@test_rendering__my_dependency-0.1.0//:my_dependency",
+                tags = ["manual"],
+            )
+        "#};
+        assert!(build_file_content
+            .replace(' ', "")
+            .contains(&expected.replace(' ', "")));
     }
 }

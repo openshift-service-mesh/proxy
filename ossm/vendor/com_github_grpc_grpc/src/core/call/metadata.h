@@ -32,6 +32,14 @@ using ServerMetadataHandle = Arena::PoolPtr<ServerMetadata>;
 using ClientMetadata = grpc_metadata_batch;
 using ClientMetadataHandle = Arena::PoolPtr<ClientMetadata>;
 
+// Convert absl::Status to ServerMetadata
+ServerMetadataHandle ServerMetadataFromStatus(const absl::Status& status);
+
+absl::Status ServerMetadataToStatus(ServerMetadata& md);
+
+void SetServerMetadataFromStatus(ServerMetadata& md,
+                                 const absl::Status& status);
+
 template <typename T>
 class ServerMetadataOrHandle {
  public:
@@ -62,6 +70,16 @@ class ServerMetadataOrHandle {
     return value_;
   }
 
+  ServerMetadataHandle TakeMetadata() && {
+    CHECK(!ok());
+    return std::move(server_metadata_);
+  }
+
+  ValueType TakeValue() && {
+    CHECK(ok());
+    return std::move(value_);
+  }
+
  private:
   ServerMetadataOrHandle(ServerMetadataHandle server_metadata, ValueType value)
       : server_metadata_(std::move(server_metadata)),
@@ -82,6 +100,29 @@ template <typename T>
 struct FailureStatusCastImpl<ServerMetadataOrHandle<T>, ServerMetadataHandle&> {
   static ServerMetadataOrHandle<T> Cast(ServerMetadataHandle& t) {
     return ServerMetadataOrHandle<T>::Failure(std::move(t));
+  }
+};
+
+template <>
+struct FailureStatusCastImpl<ServerMetadataOrHandle<ServerMetadata>,
+                             const absl::Status&> {
+  static ServerMetadataOrHandle<ServerMetadata> Cast(const absl::Status& t) {
+    return ServerMetadataOrHandle<ServerMetadata>::Failure(
+        ServerMetadataFromStatus(t));
+  }
+};
+
+template <>
+struct FailureStatusCastImpl<absl::Status, ServerMetadataHandle&> {
+  static absl::Status Cast(ServerMetadataHandle& t) {
+    return ServerMetadataToStatus(*t);
+  }
+};
+
+template <>
+struct FailureStatusCastImpl<ServerMetadataHandle, ServerMetadataHandle&> {
+  static ServerMetadataHandle Cast(ServerMetadataHandle& t) {
+    return std::move(t);
   }
 };
 
@@ -139,8 +180,6 @@ inline bool IsStatusOk(const ServerMetadataHandle& m) {
          GRPC_STATUS_OK;
 }
 
-// Convert absl::Status to ServerMetadata
-ServerMetadataHandle ServerMetadataFromStatus(const absl::Status& status);
 // Convert absl::Status to ServerMetadata, and set GrpcCallWasCancelled() to
 // true
 ServerMetadataHandle CancelledServerMetadataFromStatus(

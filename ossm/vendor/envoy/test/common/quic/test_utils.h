@@ -3,19 +3,22 @@
 #include "envoy/common/optref.h"
 #include "envoy/stream_info/stream_info.h"
 
+#include "source/common/quic/envoy_quic_network_observer_registry_factory.h"
+#include "source/common/stats/isolated_store_impl.h"
+
+#include "test/test_common/environment.h"
+#include "test/test_common/utility.h"
+
+#ifdef ENVOY_ENABLE_QUIC
 #include "source/common/quic/envoy_quic_client_connection.h"
 #include "source/common/quic/envoy_quic_client_session.h"
 #include "source/common/quic/envoy_quic_connection_debug_visitor_factory_interface.h"
-#include "source/common/quic/envoy_quic_network_observer_registry_factory.h"
 #include "source/common/quic/envoy_quic_proof_verifier.h"
 #include "source/common/quic/envoy_quic_server_connection.h"
 #include "source/common/quic/envoy_quic_utils.h"
 #include "source/common/quic/quic_filter_manager_connection_impl.h"
-#include "source/common/stats/isolated_store_impl.h"
 
 #include "test/common/config/dummy_config.pb.h"
-#include "test/test_common/environment.h"
-#include "test/test_common/utility.h"
 
 #include "quiche/quic/core/http/quic_spdy_session.h"
 #include "quiche/quic/core/qpack/qpack_encoder.h"
@@ -164,9 +167,9 @@ public:
   TestQuicCryptoClientStream(const quic::QuicServerId& server_id, quic::QuicSession* session,
                              std::unique_ptr<quic::ProofVerifyContext> verify_context,
                              quic::QuicCryptoClientConfig* crypto_config,
-                             ProofHandler* proof_handler, bool has_application_state)
+                             ProofHandler* proof_handler)
       : quic::QuicCryptoClientStream(server_id, session, std::move(verify_context), crypto_config,
-                                     proof_handler, has_application_state) {}
+                                     proof_handler, /*has_application_state=*/true) {}
 
   bool encryption_established() const override { return true; }
   quic::HandshakeState GetHandshakeState() const override { return quic::HANDSHAKE_CONFIRMED; }
@@ -174,16 +177,14 @@ public:
 
 class TestQuicCryptoClientStreamFactory : public EnvoyQuicCryptoClientStreamFactoryInterface {
 public:
-  std::unique_ptr<quic::QuicCryptoClientStreamBase>
-  createEnvoyQuicCryptoClientStream(const quic::QuicServerId& server_id, quic::QuicSession* session,
-                                    std::unique_ptr<quic::ProofVerifyContext> verify_context,
-                                    quic::QuicCryptoClientConfig* crypto_config,
-                                    quic::QuicCryptoClientStream::ProofHandler* proof_handler,
-                                    bool has_application_state) override {
+  std::unique_ptr<quic::QuicCryptoClientStreamBase> createEnvoyQuicCryptoClientStream(
+      const quic::QuicServerId& server_id, quic::QuicSession* session,
+      std::unique_ptr<quic::ProofVerifyContext> verify_context,
+      quic::QuicCryptoClientConfig* crypto_config,
+      quic::QuicCryptoClientStream::ProofHandler* proof_handler) override {
     last_verify_context_ = *verify_context;
-    return std::make_unique<TestQuicCryptoClientStream>(server_id, session,
-                                                        std::move(verify_context), crypto_config,
-                                                        proof_handler, has_application_state);
+    return std::make_unique<TestQuicCryptoClientStream>(
+        server_id, session, std::move(verify_context), crypto_config, proof_handler);
   }
 
   OptRef<quic::ProofVerifyContext> lastVerifyContext() const { return last_verify_context_; }
@@ -205,6 +206,8 @@ public:
                              Event::Dispatcher& dispatcher, uint32_t send_buffer_limit,
                              EnvoyQuicCryptoClientStreamFactoryInterface& crypto_stream_factory)
       : EnvoyQuicClientSession(config, supported_versions, std::move(connection),
+                               /*writer=*/nullptr, /*migration_helper=*/nullptr,
+                               quicConnectionMigrationDisableAllConfig(),
                                quic::QuicServerId("example.com", 443),
                                std::make_shared<quic::QuicCryptoClientConfig>(
                                    quic::test::crypto_test_utils::ProofVerifierForTesting()),
@@ -376,6 +379,13 @@ DECLARE_FACTORY(TestEnvoyQuicConnectionDebugVisitorFactoryFactory);
 REGISTER_FACTORY(TestEnvoyQuicConnectionDebugVisitorFactoryFactory,
                  Envoy::Quic::EnvoyQuicConnectionDebugVisitorFactoryFactoryInterface);
 
+#else
+
+namespace Envoy {
+namespace Quic {
+
+#endif
+
 class TestNetworkObserverRegistry : public Quic::EnvoyQuicNetworkObserverRegistry {
 public:
   void onNetworkMadeDefault(NetworkHandle network) {
@@ -408,7 +418,20 @@ public:
     }
   }
 
+  NetworkHandle getDefaultNetwork() override { return -1; }
+
+  NetworkHandle getAlternativeNetwork(NetworkHandle) override { return -1; }
+
   using Quic::EnvoyQuicNetworkObserverRegistry::registeredQuicObservers;
+};
+
+class TestEnvoyQuicNetworkObserverRegistryFactory
+    : public Quic::EnvoyQuicNetworkObserverRegistryFactory {
+public:
+  std::unique_ptr<Quic::EnvoyQuicNetworkObserverRegistry>
+  createQuicNetworkObserverRegistry(Event::Dispatcher&) override {
+    return std::make_unique<TestNetworkObserverRegistry>();
+  }
 };
 
 } // namespace Quic

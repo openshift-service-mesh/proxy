@@ -6,8 +6,6 @@ go_library(
         "codesize.go",
         "flag.go",
         "gc.go",
-        "go1_6.go",
-        "go1_7.go",
         "text.go",
     ],
     importpath = "golang.org/x/text/internal/testtext",

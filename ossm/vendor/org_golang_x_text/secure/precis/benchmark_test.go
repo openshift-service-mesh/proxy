@@ -3,14 +3,11 @@
 // license that can be found in the LICENSE file.
 
 //go:build go1.7
-// +build go1.7
 
 package precis
 
 import (
 	"testing"
-
-	"golang.org/x/text/internal/testtext"
 )
 
 var benchData = []struct{ name, str string }{
@@ -34,7 +31,7 @@ var benchProfiles = []struct {
 func doBench(b *testing.B, f func(b *testing.B, p *Profile, s string)) {
 	for _, bp := range benchProfiles {
 		for _, d := range benchData {
-			testtext.Bench(b, bp.name+"/"+d.name, func(b *testing.B) {
+			b.Run(bp.name+"/"+d.name, func(b *testing.B) {
 				f(b, bp.p, d.str)
 			})
 		}

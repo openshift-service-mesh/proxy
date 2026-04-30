@@ -41,16 +41,14 @@ class V8_EXPORT_PRIVATE SegmentedTable {
   static constexpr bool kUseContiguousMemory = true;
   static constexpr size_t kReservationSize = size;
   static constexpr size_t kMaxCapacity = kReservationSize / kEntrySize;
-#if defined(V8_TARGET_OS_WIN) || defined(V8_HOST_ARCH_PPC64)
+#if defined(V8_TARGET_OS_WIN)
   // On windows the allocation granularity is 64KB and thus we cannot make a
   // segment smaller than that.
-  // PPC64 can utilize a 64KB page size.
   static constexpr bool kUseSegmentPool = false;
-  static constexpr size_t kSegmentSize = 64 * KB;
 #else
-  static constexpr bool kUseSegmentPool = true;
-  static constexpr size_t kSegmentSize = 16 * KB;
+  static constexpr bool kUseSegmentPool = kMinimumOSPageSize <= 16 * KB;
 #endif
+  static constexpr size_t kSegmentSize = kUseSegmentPool ? 16 * KB : 64 * KB;
 #else
   // On 32 bit, segments are individually mapped.
   static constexpr bool kUseContiguousMemory = false;
@@ -71,13 +69,11 @@ class V8_EXPORT_PRIVATE SegmentedTable {
   // segments of this size. Segments can then be allocated and freed using the
   // AllocateAndInitializeSegment() and FreeTableSegment() routines.
   static constexpr size_t kSegmentPoolSize = 4;
+  static constexpr uint32_t kSegmentPoolFreeEntry =
+      std::numeric_limits<uint32_t>::max();
   static constexpr size_t kEntriesPerSegment = kSegmentSize / kEntrySize;
-  static constexpr size_t kAlignment =
-      kSegmentSize * (kUseSegmentPool ? kSegmentPoolSize : 1);
-  // These need to be identical such that the first normal segment starts at a
-  // normal segment pool offset.
-  static constexpr size_t kNumReadOnlySegments =
-      (kUseSegmentPool ? kSegmentPoolSize : 1);
+  static constexpr size_t kAlignment = kSegmentSize;
+  static constexpr size_t kNumReadOnlySegments = 64 * KB / kSegmentSize;
 
   // Struct representing a segment of the table.
   struct Segment {

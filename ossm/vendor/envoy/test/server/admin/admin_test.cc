@@ -146,7 +146,8 @@ TEST_P(AdminInstanceTest, Help) {
       enable: enable/disable the allocation profiler; One of (y, n)
   /certs: print certs on machine
   /clusters: upstream cluster status
-  /config_dump: dump current Envoy configs (experimental)
+      filter: Regular expression (Google re2) for filtering clusters by name
+  /config_dump: dump current Envoy configs
       resource: The resource to dump
       mask: The mask to apply. When both resource and mask are specified, the mask is applied to every element in the desired repeated field so that only a subset of fields are returned. The mask is parsed as a Protobuf::FieldMask
       name_regex: Dump only the currently loaded configurations whose names match the specified regex. Can be used with both resource and mask query parameters.
@@ -173,6 +174,7 @@ TEST_P(AdminInstanceTest, Help) {
       paths: Change multiple logging levels by setting to <logger_name1>:<desired_level1>,<logger_name2>:<desired_level2>. If fine grain logging is enabled, use __FILE__ or a glob experision as the logger name. For example, source/common*:warning
       level: desired logging level, this will change all loggers's level; One of (, trace, debug, info, warning, error, critical, off)
   /memory: print current allocation/heap usage
+  /memory/tcmalloc: print TCMalloc stats
   /quitquitquit (POST): exit the server
   /ready: print server state, return 200 if LIVE, otherwise return 503
   /reopen_logs (POST): reopen access logs

@@ -24,6 +24,9 @@ namespace internal {
 
 namespace {
 
+const v8::EmbedderDataTypeTag kInspectorIsolateDataTag = 1;
+const v8::EmbedderDataTypeTag kContextGroupIdTag = 2;
+
 const int kIsolateDataIndex = 2;
 const int kContextGroupIdIndex = 3;
 
@@ -79,7 +82,8 @@ InspectorIsolateData::InspectorIsolateData(
 InspectorIsolateData* InspectorIsolateData::FromContext(
     v8::Local<v8::Context> context) {
   return static_cast<InspectorIsolateData*>(
-      context->GetAlignedPointerFromEmbedderData(kIsolateDataIndex));
+      context->GetAlignedPointerFromEmbedderData(kIsolateDataIndex,
+                                                 kInspectorIsolateDataTag));
 }
 
 InspectorIsolateData::~InspectorIsolateData() {
@@ -131,10 +135,12 @@ bool InspectorIsolateData::CreateContext(int context_group_id,
   v8::Local<v8::Context> context =
       v8::Context::New(isolate_.get(), nullptr, global_template);
   if (context.IsEmpty()) return false;
-  context->SetAlignedPointerInEmbedderData(kIsolateDataIndex, this);
+  context->SetAlignedPointerInEmbedderData(kIsolateDataIndex, this,
+                                           kInspectorIsolateDataTag);
   // Should be 2-byte aligned.
   context->SetAlignedPointerInEmbedderData(
-      kContextGroupIdIndex, reinterpret_cast<void*>(context_group_id * 2));
+      kContextGroupIdIndex, reinterpret_cast<void*>(context_group_id * 2),
+      kContextGroupIdTag);
   contexts_[context_group_id].emplace_back(isolate_.get(), context);
   if (inspector_) FireContextCreated(context, context_group_id, name);
   return true;
@@ -152,8 +158,8 @@ void InspectorIsolateData::ResetContextGroup(int context_group_id) {
 
 int InspectorIsolateData::GetContextGroupId(v8::Local<v8::Context> context) {
   return static_cast<int>(
-      reinterpret_cast<intptr_t>(
-          context->GetAlignedPointerFromEmbedderData(kContextGroupIdIndex)) /
+      reinterpret_cast<intptr_t>(context->GetAlignedPointerFromEmbedderData(
+          kContextGroupIdIndex, kContextGroupIdTag)) /
       2);
 }
 
@@ -214,42 +220,22 @@ std::optional<int> InspectorIsolateData::ConnectSession(
   return session_id;
 }
 
-namespace {
-
-class RemoveChannelTask : public TaskRunner::Task {
- public:
-  explicit RemoveChannelTask(int session_id) : session_id_(session_id) {}
-  ~RemoveChannelTask() override = default;
-  bool is_priority_task() final { return false; }
-
- private:
-  void Run(InspectorIsolateData* data) override {
-    ChannelHolder::RemoveChannel(session_id_);
-  }
-  int session_id_;
-};
-
-}  // namespace
-
 std::vector<uint8_t> InspectorIsolateData::DisconnectSession(
     int session_id, TaskRunner* context_task_runner) {
   v8::SealHandleScope seal_handle_scope(isolate());
   auto it = sessions_.find(session_id);
-  CHECK(it != sessions_.end());
+  if (it == sessions_.end()) {
+    CHECK(v8_flags.fuzzing);
+    return {};
+  }
+
   context_group_by_session_.erase(it->second.get());
   std::vector<uint8_t> result = it->second->state();
   sessions_.erase(it);
 
-  // The InspectorSession destructor does cleanup work like disabling agents.
-  // This could send some more notifications. We'll delay removing the channel
-  // so notification tasks have time to get sent.
-  // Note: This only works for tasks scheduled immediately by the desctructor.
-  //       Any task scheduled in turn by one of the "cleanup tasks" will run
-  //       AFTER the channel was removed.
-  context_task_runner->Append(std::make_unique<RemoveChannelTask>(session_id));
-
-  // In case we shutdown the test runner before the above task can run, we
-  // let the desctructor clean up the channel.
+  // Record the session so we can cleanup the channel later.
+  // We can't delete the channel now as we might be on the nested run loop and
+  // (debugger pause) and the session could be alive for a little while longer.
   session_ids_for_cleanup_.insert(session_id);
   return result;
 }
@@ -424,7 +410,7 @@ void InspectorIsolateData::PromiseRejectHandler(v8::PromiseRejectMessage data) {
   v8::Local<v8::Value> exception = data.GetValue();
   int exception_id = HandleMessage(
       v8::Exception::CreateMessage(isolate, exception), exception);
-  if (exception_id) {
+  if (exception_id && !isolate->IsExecutionTerminating()) {
     if (promise
             ->SetPrivate(isolate->GetCurrentContext(), id_private,
                          v8::Int32::New(isolate, exception_id))
@@ -555,7 +541,7 @@ void InspectorIsolateData::installAdditionalCommandLineAPI(
 }
 
 void InspectorIsolateData::consoleAPIMessage(
-    int contextGroupId, v8::Isolate::MessageErrorLevel level,
+    int contextGroupId, int contextId, v8::Isolate::MessageErrorLevel level,
     const v8_inspector::StringView& message,
     const v8_inspector::StringView& url, unsigned lineNumber,
     unsigned columnNumber, v8_inspector::V8StackTrace* stack) {

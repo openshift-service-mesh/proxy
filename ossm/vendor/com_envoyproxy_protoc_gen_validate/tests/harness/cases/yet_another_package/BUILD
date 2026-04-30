@@ -1,8 +1,8 @@
-load("@rules_java//java:defs.bzl", "java_proto_library")
-load("@com_google_protobuf//:protobuf.bzl", "py_proto_library")
+load("@com_google_protobuf//bazel:java_proto_library.bzl", "java_proto_library")
+load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
 load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
-load("@rules_proto//proto:defs.bzl", "proto_library")
 load(
     "//bazel:pgv_proto_library.bzl",
     "pgv_cc_proto_library",
@@ -71,10 +71,6 @@ pgv_java_proto_library(
 
 py_proto_library(
     name = "embed_python_proto",
-    srcs = ["embed.proto"],
     visibility = ["//visibility:public"],
-    deps = [
-        "//validate:validate_py",
-        "@com_google_protobuf//:protobuf_python",
-    ],
+    deps = [":embed_proto"],
 )

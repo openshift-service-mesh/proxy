@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
+
+	"golang.org/x/tools/go/packages"
 
 	"github.com/bazelbuild/rules_go/go/tools/bazel_testing"
 )
@@ -21,27 +27,50 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "hello",
-    srcs = ["hello.go"],
+    srcs = ["hello.go", "hellocgo.go"],
+    cgo = True,
     importpath = "example.com/hello",
     visibility = ["//visibility:public"],
 )
 
 go_test(
-	name = "hello_test",
-	srcs = [
-		"hello_test.go",
-		"hello_external_test.go",
-	],
-	embed = [":hello"],
+    name = "hello_test",
+    srcs = [
+        "hello_test.go",
+        "hello_external_test.go",
+    ],
+    embed = [":hello"],
+)
+
+go_library(
+    name = "incompatible",
+    srcs = ["incompatible.go"],
+    importpath = "example.com/incompatible",
+    target_compatible_with = ["@platforms//:incompatible"],
 )
 
 -- hello.go --
 package hello
 
-import "os"
+import (
+	"os"
+	"fmt"
+)
 
 func main() {
 	fmt.Fprintln(os.Stderr, "Hello World!")
+}
+
+-- hellocgo.go --
+package hello
+
+/*
+int num(void) { return 42; }
+*/
+import "C"
+
+func run() {
+    println(C.num)
 }
 
 -- hello_test.go --
@@ -57,6 +86,10 @@ package hello_test
 import "testing"
 
 func TestHelloExternal(t *testing.T) {}
+
+-- incompatible.go --
+//go:build ignore
+package hello
 
 -- subhello/BUILD.bazel --
 load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
@@ -76,7 +109,7 @@ import "os"
 func main() {
 	fmt.Fprintln(os.Stderr, "Subdirectory Hello World!")
 }
-		`,
+`,
 	})
 }
 
@@ -85,35 +118,8 @@ const (
 	bzlmodOsPkgID = "@@io_bazel_rules_go//stdlib:os"
 )
 
-func TestStdlib(t *testing.T) {
-	resp := runForTest(t, DriverRequest{}, ".", "std")
-
-	if len(resp.Packages) == 0 {
-		t.Fatal("Expected stdlib packages")
-	}
-
-	for _, pkg := range resp.Packages {
-		// net, plugin and user stdlib packages seem to have compiled files only for Linux.
-		if pkg.Name != "cgo" {
-			continue
-		}
-
-		var hasCompiledFiles bool
-		for _, x := range pkg.CompiledGoFiles {
-			if filepath.Ext(x) == "" {
-				hasCompiledFiles = true
-				break
-			}
-		}
-
-		if !hasCompiledFiles {
-			t.Errorf("%q stdlib package should have compiled files", pkg.Name)
-		}
-	}
-}
-
 func TestBaseFileLookup(t *testing.T) {
-	resp := runForTest(t, DriverRequest{}, ".", "file=hello.go")
+	resp := runForTest(t, packages.DriverRequest{}, ".", "file=hello.go")
 
 	t.Run("roots", func(t *testing.T) {
 		if len(resp.Roots) != 1 {
@@ -129,36 +135,60 @@ func TestBaseFileLookup(t *testing.T) {
 
 	t.Run("package", func(t *testing.T) {
 		pkg := findPackageByID(resp.Packages, resp.Roots[0])
-
 		if pkg == nil {
 			t.Errorf("Expected to find %q in resp.Packages", resp.Roots[0])
 			return
 		}
 
-		if len(pkg.CompiledGoFiles) != 1 || len(pkg.GoFiles) != 1 ||
-			path.Base(pkg.GoFiles[0]) != "hello.go" || path.Base(pkg.CompiledGoFiles[0]) != "hello.go" {
-			t.Errorf("Expected to find 1 file (hello.go) in (Compiled)GoFiles:\n%+v", pkg)
+		wantCompiledGoFiles := map[string]struct{}{
+			"hello.go": {},
+			"_cgo_gotypes.go": {},
+			"_cgo_imports.go": {},
+			"hellocgo.cgo1.go": {},
+		}
+		for _, file := range pkg.CompiledGoFiles {
+			key := filepath.Base(file)
+			if _, ok := wantCompiledGoFiles[key]; !ok {
+				t.Errorf("Unexpected compiled file: %q", key)
+			} else {
+				delete(wantCompiledGoFiles, key)
+			}
+		}
+		if len(wantCompiledGoFiles) != 0 {
+			t.Errorf("Expected compiled files not found: %+v", slices.Sorted(maps.Keys(wantCompiledGoFiles)))
+		}
+
+		wantGoFiles := map[string]struct{}{
+			"hello.go": {},
+			"hellocgo.go": {},
+		}
+		for _, file := range pkg.GoFiles {
+			key := filepath.Base(file)
+			if _, ok := wantGoFiles[key]; !ok {
+				t.Errorf("Unexpected go file: %q", key)
+			} else {
+				delete(wantGoFiles, key)
+			}
+		}
+		if len(wantGoFiles) != 0 {
+			t.Errorf("Expected go files not found: %+v", slices.Sorted(maps.Keys(wantGoFiles)))
+		}
+		wantImports := []string{"os", "fmt", "runtime/cgo", "syscall", "unsafe"}
+		sort.Strings(wantImports)
+		gotImports := slices.Sorted(maps.Keys(pkg.Imports))
+		if !reflect.DeepEqual(gotImports, wantImports) {
+			t.Errorf("Expected imports: %+v got: %+v\n", wantImports, gotImports)
 			return
 		}
 
-		if pkg.Standard {
-			t.Errorf("Expected package to not be Standard:\n%+v", pkg)
-			return
-		}
-
-		if len(pkg.Imports) != 1 {
-			t.Errorf("Expected one import:\n%+v", pkg)
-			return
-		}
-
-		if pkg.Imports["os"] != osPkgID && pkg.Imports["os"] != bzlmodOsPkgID {
+		if pkg.Imports["os"].ID != osPkgID && pkg.Imports["os"].ID != bzlmodOsPkgID {
 			t.Errorf("Expected os import to map to %q or %q:\n%+v", osPkgID, bzlmodOsPkgID, pkg)
 			return
 		}
 	})
 
 	t.Run("dependency", func(t *testing.T) {
-		var osPkg *FlatPackage
+		var osPkg *packages.Package
 		for _, p := range resp.Packages {
 			if p.ID == osPkgID || p.ID == bzlmodOsPkgID {
 				osPkg = p
@@ -169,16 +199,11 @@ func TestBaseFileLookup(t *testing.T) {
 			t.Errorf("Expected os package to be included:\n%+v", osPkg)
 			return
 		}
-
-		if !osPkg.Standard {
-			t.Errorf("Expected os import to be standard:\n%+v", osPkg)
-			return
-		}
 	})
 }
 
 func TestRelativeFileLookup(t *testing.T) {
-	resp := runForTest(t, DriverRequest{}, "subhello", "file=./subhello.go")
+	resp := runForTest(t, packages.DriverRequest{}, "subhello", "file=./subhello.go")
 
 	t.Run("roots", func(t *testing.T) {
 		if len(resp.Roots) != 1 {
@@ -209,7 +234,7 @@ func TestRelativeFileLookup(t *testing.T) {
 }
 
 func TestRelativePatternWildcardLookup(t *testing.T) {
-	resp := runForTest(t, DriverRequest{}, "subhello", "./...")
+	resp := runForTest(t, packages.DriverRequest{}, "subhello", "./...")
 
 	t.Run("roots", func(t *testing.T) {
 		if len(resp.Roots) != 1 {
@@ -240,7 +265,7 @@ func TestRelativePatternWildcardLookup(t *testing.T) {
 }
 
 func TestExternalTests(t *testing.T) {
-	resp := runForTest(t, DriverRequest{}, ".", "file=hello_external_test.go")
+	resp := runForTest(t, packages.DriverRequest{}, ".", "file=hello_external_test.go")
 	if len(resp.Roots) != 2 {
 		t.Errorf("Expected exactly two roots for package: %+v", resp.Roots)
 	}
@@ -278,11 +303,11 @@ func TestOverlay(t *testing.T) {
 	subhelloPath := path.Join(wd, "subhello/subhello.go")
 
 	expectedImportsPerFile := map[string][]string{
-		helloPath:    []string{"fmt"},
-		subhelloPath: []string{"os", "encoding/json"},
+		helloPath:    {"fmt", "runtime/cgo", "syscall", "unsafe"},
+		subhelloPath: {"os", "encoding/json"},
 	}
 
-	overlayDriverRequest := DriverRequest{
+	overlayDriverRequest := packages.DriverRequest{
 		Overlay: map[string][]byte{
 			helloPath: []byte(`
 				package hello
@@ -324,7 +349,34 @@ func TestOverlay(t *testing.T) {
 	expectSetEquality(t, expectedImportsPerFile[subhelloPath], subhelloPkgImportPaths, "subhello imports")
 }
 
-func runForTest(t *testing.T, driverRequest DriverRequest, relativeWorkingDir string, args ...string) driverResponse {
+// TestIncompatible checks that a target that can be queried but not analyzed
+// does not appear in .Roots.
+func TestIncompatible(t *testing.T) {
+	resp := runForTest(t, packages.DriverRequest{}, ".", "./...")
+
+	rootLabels := make(map[string]bool)
+	for _, root := range resp.Roots {
+		rootLabels[root] = true
+	}
+
+	// Verify //:hello is in .Roots and check whether its label starts with
+	// "@@" (bzlmod) or "@" (not bzlmod).
+	var incompatibleLabel string
+	if rootLabels["@@//:hello"] {
+		incompatibleLabel = "@@//:incompatible"
+	} else if rootLabels["@//:hello"] {
+		incompatibleLabel = "@//:incompatible"
+	} else {
+		t.Fatalf("response does not contain //:hello; roots were %s", strings.Join(resp.Roots, ", "))
+	}
+
+	// Verify //:incompatible is NOT in .Roots.
+	if rootLabels[incompatibleLabel] {
+		t.Fatalf("response contains root %s", incompatibleLabel)
+	}
+}
+
+func runForTest(t *testing.T, driverRequest packages.DriverRequest, relativeWorkingDir string, args ...string) packages.DriverResponse {
 	t.Helper()
 
 	// Remove most environment variables, other than those on an allowlist.
@@ -392,7 +444,7 @@ func runForTest(t *testing.T, driverRequest DriverRequest, relativeWorkingDir st
 	if err := run(context.Background(), in, out, args); err != nil {
 		t.Fatalf("running gopackagesdriver: %v", err)
 	}
-	var resp driverResponse
+	var resp packages.DriverResponse
 	if err := json.Unmarshal(out.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshaling response: %v", err)
 	}

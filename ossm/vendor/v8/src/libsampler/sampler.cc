@@ -237,8 +237,7 @@ void SamplerManager::RemoveSampler(Sampler* sampler) {
   auto it = sampler_map_.find(thread_id);
   DCHECK_NE(it, sampler_map_.end());
   SamplerList& samplers = it->second;
-  samplers.erase(std::remove(samplers.begin(), samplers.end(), sampler),
-                 samplers.end());
+  std::erase(samplers, sampler);
   if (samplers.empty()) {
     sampler_map_.erase(it);
   }
@@ -648,7 +647,7 @@ void Sampler::DoSample() {
   if (profiled_thread == ZX_HANDLE_INVALID) return;
 
   zx_handle_t suspend_token = ZX_HANDLE_INVALID;
-  if (zx_task_suspend_token(profiled_thread, &suspend_token) != ZX_OK) return;
+  if (zx_task_suspend(profiled_thread, &suspend_token) != ZX_OK) return;
 
   // Wait for the target thread to become suspended, or to exit.
   // TODO(wez): There is currently no suspension count for threads, so there

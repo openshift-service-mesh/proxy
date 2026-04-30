@@ -857,11 +857,11 @@ TEST(ProfileNodeScriptId) {
 
   current = PickChild(current, "b");
   CHECK(const_cast<v8::CpuProfileNode*>(current));
-  CHECK_EQ(script_b->GetUnboundScript()->GetId(), current->GetScriptId());
+  CHECK_EQ(script_b->ScriptId(), current->GetScriptId());
 
   current = PickChild(current, "a");
   CHECK(const_cast<v8::CpuProfileNode*>(current));
-  CHECK_EQ(script_a->GetUnboundScript()->GetId(), current->GetScriptId());
+  CHECK_EQ(script_a->ScriptId(), current->GetScriptId());
 }
 
 static const char* line_number_test_source_existing_functions =
@@ -925,7 +925,6 @@ TEST(LineNumber) {
 TEST(BailoutReason) {
 #if !defined(V8_LITE_MODE) && defined(V8_ENABLE_TURBOFAN)
   i::v8_flags.allow_natives_syntax = true;
-  i::v8_flags.always_turbofan = false;
   i::v8_flags.turbofan = true;
   v8::HandleScope scope(CcTest::isolate());
   v8::Local<v8::Context> env = CcTest::NewContext({PROFILER_EXTENSION_ID});

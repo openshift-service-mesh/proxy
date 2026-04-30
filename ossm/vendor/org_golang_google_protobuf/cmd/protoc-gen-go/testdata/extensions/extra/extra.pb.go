@@ -12,23 +12,21 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
+	unsafe "unsafe"
 )
 
 type ExtraMessage struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Data          []byte                 `protobuf:"bytes,1,opt,name=data" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	Data []byte `protobuf:"bytes,1,opt,name=data" json:"data,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ExtraMessage) Reset() {
 	*x = ExtraMessage{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_msgTypes[0]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *ExtraMessage) String() string {
@@ -39,7 +37,7 @@ func (*ExtraMessage) ProtoMessage() {}
 
 func (x *ExtraMessage) ProtoReflect() protoreflect.Message {
 	mi := &file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_msgTypes[0]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -63,36 +61,26 @@ func (x *ExtraMessage) GetData() []byte {
 
 var File_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto protoreflect.FileDescriptor
 
-var file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDesc = []byte{
-	0x0a, 0x37, 0x63, 0x6d, 0x64, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2d, 0x67, 0x65, 0x6e,
-	0x2d, 0x67, 0x6f, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x64, 0x61, 0x74, 0x61, 0x2f, 0x65, 0x78, 0x74,
-	0x65, 0x6e, 0x73, 0x69, 0x6f, 0x6e, 0x73, 0x2f, 0x65, 0x78, 0x74, 0x72, 0x61, 0x2f, 0x65, 0x78,
-	0x74, 0x72, 0x61, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x12, 0x1e, 0x67, 0x6f, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2e, 0x65, 0x78, 0x74, 0x65, 0x6e, 0x73,
-	0x69, 0x6f, 0x6e, 0x2e, 0x65, 0x78, 0x74, 0x72, 0x61, 0x22, 0x22, 0x0a, 0x0c, 0x45, 0x78, 0x74,
-	0x72, 0x61, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x12, 0x12, 0x0a, 0x04, 0x64, 0x61, 0x74,
-	0x61, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x04, 0x64, 0x61, 0x74, 0x61, 0x42, 0x48, 0x5a,
-	0x46, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x67, 0x6f, 0x6c, 0x61, 0x6e, 0x67, 0x2e, 0x6f,
-	0x72, 0x67, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2f, 0x63, 0x6d, 0x64, 0x2f,
-	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2d, 0x67, 0x65, 0x6e, 0x2d, 0x67, 0x6f, 0x2f, 0x74, 0x65,
-	0x73, 0x74, 0x64, 0x61, 0x74, 0x61, 0x2f, 0x65, 0x78, 0x74, 0x65, 0x6e, 0x73, 0x69, 0x6f, 0x6e,
-	0x73, 0x2f, 0x65, 0x78, 0x74, 0x72, 0x61,
-}
+const file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDesc = "" +
+	"\n" +
+	"7cmd/protoc-gen-go/testdata/extensions/extra/extra.proto\x12\x1egoproto.protoc.extension.extra\"\"\n" +
+	"\fExtraMessage\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\fR\x04dataBHZFgoogle.golang.org/protobuf/cmd/protoc-gen-go/testdata/extensions/extra"
 
 var (
 	file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDescOnce sync.Once
-	file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDescData = file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDesc
+	file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDescData []byte
 )
 
 func file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDescGZIP() []byte {
 	file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDescOnce.Do(func() {
-		file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDescData = protoimpl.X.CompressGZIP(file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDescData)
+		file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDesc), len(file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDesc)))
 	})
 	return file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDescData
 }
 
 var file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
-var file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_goTypes = []interface{}{
+var file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_goTypes = []any{
 	(*ExtraMessage)(nil), // 0: goproto.protoc.extension.extra.ExtraMessage
 }
 var file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_depIdxs = []int32{
@@ -108,25 +96,11 @@ func file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_init() {
 	if File_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto != nil {
 		return
 	}
-	if !protoimpl.UnsafeEnabled {
-		file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ExtraMessage); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDesc,
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDesc), len(file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   1,
 			NumExtensions: 0,
@@ -137,7 +111,6 @@ func file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_init() {
 		MessageInfos:      file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_msgTypes,
 	}.Build()
 	File_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto = out.File
-	file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_rawDesc = nil
 	file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_goTypes = nil
 	file_cmd_protoc_gen_go_testdata_extensions_extra_extra_proto_depIdxs = nil
 }

@@ -4,8 +4,8 @@
 
 #include "src/objects/string.h"
 
+#include "absl/functional/overload.h"
 #include "src/base/small-vector.h"
-#include "src/base/template-utils.h"
 #include "src/common/assert-scope.h"
 #include "src/common/globals.h"
 #include "src/execution/isolate-utils.h"
@@ -15,7 +15,7 @@
 #include "src/heap/heap-layout-inl.h"
 #include "src/heap/local-factory-inl.h"
 #include "src/heap/local-heap-inl.h"
-#include "src/heap/mutable-page-metadata.h"
+#include "src/heap/mutable-page.h"
 #include "src/heap/read-only-heap.h"
 #include "src/numbers/conversions.h"
 #include "src/objects/instance-type.h"
@@ -40,7 +40,7 @@ template <template <typename> typename HandleType>
   requires(std::is_convertible_v<HandleType<String>, DirectHandle<String>>)
 HandleType<String> String::SlowShare(Isolate* isolate,
                                      HandleType<String> source) {
-  DCHECK(v8_flags.shared_string_table);
+  DCHECK(v8_flags.shared_strings);
   HandleType<String> flat =
       Flatten(isolate, source, AllocationType::kSharedOld);
 
@@ -180,13 +180,13 @@ void String::MakeThin(IsolateT* isolate, Tagged<String> internalized) {
   DCHECK_GE(old_size, sizeof(ThinString));
   int size_delta = old_size - sizeof(ThinString);
   if (size_delta != 0) {
-    if (!Heap::IsLargeObject(thin)) {
+    if (!HeapLayout::InAnyLargeSpace(thin)) {
       isolate->heap()->NotifyObjectSizeChange(
           thin, old_size, sizeof(ThinString),
           may_contain_recorded_slots ? ClearRecordedSlots::kYes
                                      : ClearRecordedSlots::kNo);
     } else {
-      // We don't need special handling for the combination IsLargeObject &&
+      // We don't need special handling for the combination InAnyLargeSpace &&
       // may_contain_recorded_slots, because indirect strings never get that
       // large.
       DCHECK(!may_contain_recorded_slots);
@@ -311,7 +311,7 @@ void String::MakeExternalDuringGC(Isolate* isolate, T* resource) {
   // Shared strings are never indirect.
   DCHECK(!StringShape(this).IsIndirect());
 
-  if (!isolate->heap()->IsLargeObject(this)) {
+  if (!HeapLayout::InAnyLargeSpace(this)) {
     isolate->heap()->NotifyObjectSizeChange(this, size, new_size,
                                             ClearRecordedSlots::kNo);
   }
@@ -323,10 +323,9 @@ void String::MakeExternalDuringGC(Isolate* isolate, T* resource) {
   static_cast<ExternalString*>(this)
       ->InitExternalPointerFieldsDuringExternalization(new_map, isolate);
 
-  // We are storing the new map using release store after creating a filler in
-  // the NotifyObjectSizeChange call for the left-over space to avoid races with
-  // the sweeper thread.
-  this->set_map(isolate, new_map, kReleaseStore);
+  // This is run during GC when no sweeping is running, so updating the map can
+  // be relaxed.
+  this->set_map_no_write_barrier(isolate, new_map, kRelaxedStore);
 
   if constexpr (is_one_byte) {
     Tagged<ExternalOneByteString> self = Cast<ExternalOneByteString>(this);
@@ -357,9 +356,10 @@ bool String::MakeExternal(Isolate* isolate,
 #ifdef ENABLE_SLOW_DCHECKS
   if (v8_flags.enable_slow_asserts) {
     // Assert that the resource and the string are equivalent.
-    DCHECK(static_cast<size_t>(this->length()) == resource->length());
-    base::ScopedVector<base::uc16> smart_chars(this->length());
-    String::WriteToFlat(this, smart_chars.begin(), 0, this->length());
+    uint32_t str_length = this->length();
+    DCHECK(static_cast<size_t>(str_length) == resource->length());
+    base::ScopedVector<base::uc16> smart_chars(str_length);
+    String::WriteToFlat(this, smart_chars.begin(), 0, str_length);
     DCHECK_EQ(0, memcmp(smart_chars.begin(), resource->data(),
                         resource->length() * sizeof(smart_chars[0])));
   }
@@ -403,12 +403,12 @@ bool String::MakeExternal(Isolate* isolate,
         InvalidateExternalPointerSlots::kNo, new_size);
   }
 
-  if (!isolate->heap()->IsLargeObject(this)) {
+  if (!HeapLayout::InAnyLargeSpace(this)) {
     isolate->heap()->NotifyObjectSizeChange(
         this, size, new_size,
         has_pointers ? ClearRecordedSlots::kYes : ClearRecordedSlots::kNo);
   } else {
-    // We don't need special handling for the combination IsLargeObject &&
+    // We don't need special handling for the combination InAnyLargeSpace &&
     // has_pointers, because indirect strings never get that large.
     DCHECK(!has_pointers);
   }
@@ -446,14 +446,15 @@ bool String::MakeExternal(Isolate* isolate,
 #ifdef ENABLE_SLOW_DCHECKS
   if (v8_flags.enable_slow_asserts) {
     // Assert that the resource and the string are equivalent.
-    DCHECK(static_cast<size_t>(this->length()) == resource->length());
+    uint32_t str_length = this->length();
+    DCHECK(static_cast<size_t>(str_length) == resource->length());
     if (this->IsTwoByteRepresentation()) {
-      base::ScopedVector<uint16_t> smart_chars(this->length());
-      String::WriteToFlat(this, smart_chars.begin(), 0, this->length());
-      DCHECK(String::IsOneByte(smart_chars.begin(), this->length()));
+      base::ScopedVector<uint16_t> smart_chars(str_length);
+      String::WriteToFlat(this, smart_chars.begin(), 0, str_length);
+      DCHECK(String::IsOneByte(smart_chars.begin(), str_length));
     }
-    base::ScopedVector<char> smart_chars(this->length());
-    String::WriteToFlat(this, smart_chars.begin(), 0, this->length());
+    base::ScopedVector<char> smart_chars(str_length);
+    String::WriteToFlat(this, smart_chars.begin(), 0, str_length);
     DCHECK_EQ(0, memcmp(smart_chars.begin(), resource->data(),
                         resource->length() * sizeof(smart_chars[0])));
   }
@@ -488,7 +489,7 @@ bool String::MakeExternal(Isolate* isolate,
   Tagged<Map> new_map =
       ComputeExternalStringMap<is_one_byte>(isolate, this, size);
 
-  if (!isolate->heap()->IsLargeObject(this)) {
+  if (!HeapLayout::InAnyLargeSpace(this)) {
     // Byte size of the external String object.
     int new_size = this->SizeFromMap(new_map);
 
@@ -502,7 +503,7 @@ bool String::MakeExternal(Isolate* isolate,
         this, size, new_size,
         has_pointers ? ClearRecordedSlots::kYes : ClearRecordedSlots::kNo);
   } else {
-    // We don't need special handling for the combination IsLargeObject &&
+    // We don't need special handling for the combination InAnyLargeSpace &&
     // has_pointers, because indirect strings never get that large.
     DCHECK(!has_pointers);
   }
@@ -556,6 +557,13 @@ bool String::SupportsExternalization(v8::String::Encoding encoding) {
 
   // Only strings in old space can be externalized.
   if (HeapLayout::InYoungGeneration(Tagged(this))) {
+    return false;
+  }
+
+  // Externalization of shared strings is only supported with shared string
+  // table.
+  if (HeapLayout::InAnySharedSpace(Tagged(this)) &&
+      !v8_flags.shared_string_table) {
     return false;
   }
 
@@ -718,14 +726,8 @@ std::unique_ptr<char[]> String::ToCString(uint32_t offset, uint32_t length,
   StringCharacterStream stream(this, offset);
 
   // First, compute the required size of the output buffer.
-  size_t utf8_bytes = 0;
-  uint32_t remaining_chars = length;
-  uint16_t last = unibrow::Utf16::kNoPreviousCharacter;
-  while (stream.HasMore() && remaining_chars-- != 0) {
-    uint16_t character = stream.GetNext();
-    utf8_bytes += unibrow::Utf8::Length(character, last);
-    last = character;
-  }
+  size_t utf8_bytes = stream.CountUtf8Bytes(length);
+
   if (length_return) {
     *length_return = utf8_bytes;
   }
@@ -736,37 +738,32 @@ std::unique_ptr<char[]> String::ToCString(uint32_t offset, uint32_t length,
 
   // Third, encode the string into the output buffer.
   stream.Reset(this, offset);
-  size_t pos = 0;
-  remaining_chars = length;
-  last = unibrow::Utf16::kNoPreviousCharacter;
-  while (stream.HasMore() && remaining_chars-- != 0) {
-    uint16_t character = stream.GetNext();
-    if (character == 0) {
-      character = ' ';
-    }
+  size_t pos = stream.WriteUtf8Bytes(length, result, utf8_bytes);
 
-    // Ensure that there's sufficient space for this character and the null
-    // terminator. This should normally always be the case, unless there is
-    // in-sandbox memory corruption.
-    // Alternatively, we could also over-allocate the output buffer by three
-    // bytes (the maximum we can write OOB) or consider allocating it inside
-    // the sandbox, but it's not clear if that would be worth the effort as the
-    // performance overhead of this check appears to be negligible in practice.
-    SBXCHECK_LE(unibrow::Utf8::Length(character, last) + 1, capacity - pos);
-
-    pos += unibrow::Utf8::Encode(result + pos, character, last);
-
-    last = character;
-  }
-
+  // Add an explicit null terminator
   DCHECK_LT(pos, capacity);
-  result[pos++] = 0;
+  result[pos] = 0;
 
   return std::unique_ptr<char[]>(result);
 }
 
 std::unique_ptr<char[]> String::ToCString(size_t* length_return) {
   return ToCString(0, length(), length_return);
+}
+
+std::string String::ToStdString() {
+  uint32_t length = this->length();
+
+  StringCharacterStream stream(this, 0);
+  size_t utf8_bytes = stream.CountUtf8Bytes(length);
+
+  std::string result;
+  result.resize(utf8_bytes);
+
+  stream.Reset(this, 0);
+  stream.WriteUtf8Bytes(length, result.data(), utf8_bytes);
+
+  return result;
 }
 
 // static
@@ -790,7 +787,7 @@ void String::WriteToFlat(Tagged<String> source, SinkCharT* sink, uint32_t start,
     DCHECK_LT(start, source->length());
     DCHECK_LE(start + length, source->length());
 
-    if (source->DispatchToSpecificType(base::overloaded{
+    if (source->DispatchToSpecificType(absl::Overload{
             [&](Tagged<SeqOneByteString> str) {
               CopyChars(sink, str->GetChars(no_gc, access_guard) + start,
                         length);
@@ -898,7 +895,7 @@ SinkCharT* WriteNonConsToFlat2(Tagged<String> src, StringShape shape,
   DCHECK(!shape.IsCons());
   DCHECK_LE(src_index + length, src->length());
   return shape.DispatchToSpecificType(
-      src, base::overloaded{
+      src, absl::Overload{
                [&](Tagged<SeqOneByteString> s) {
                  CopyChars(dst, s->GetChars(no_gc, aguard) + src_index, length);
                  return dst + length;
@@ -1273,6 +1270,25 @@ bool String::SlowEquals(
 #endif
     if (this_hash != other_hash) return false;
   }
+
+  return SlowEqualsNonThinSameLength(len, other, access_guard);
+}
+
+bool String::SlowEqualsNonThinSameLength(uint32_t len,
+                                         Tagged<String> other) const {
+  DCHECK(!SharedStringAccessGuardIfNeeded::IsNeeded(this));
+  DCHECK(!SharedStringAccessGuardIfNeeded::IsNeeded(other));
+  return SlowEqualsNonThinSameLength(
+      len, other, SharedStringAccessGuardIfNeeded::NotNeeded());
+}
+
+bool String::SlowEqualsNonThinSameLength(
+    uint32_t len, Tagged<String> other,
+    const SharedStringAccessGuardIfNeeded& access_guard) const {
+  DisallowGarbageCollection no_gc;
+  DCHECK_NE(0, len);
+  DCHECK_EQ(len, length());
+  DCHECK_EQ(len, other->length());
 
   // We know the strings are both non-empty. Compare the first chars
   // before we try to flatten the strings.
@@ -1804,7 +1820,7 @@ namespace {
 
 template <typename Char>
 uint32_t HashString(Tagged<String> string, size_t start, uint32_t length,
-                    uint64_t seed,
+                    const HashSeed seed,
                     const SharedStringAccessGuardIfNeeded& access_guard) {
   DisallowGarbageCollection no_gc;
 
@@ -1847,7 +1863,7 @@ uint32_t String::ComputeAndSetRawHash(
   DCHECK_IMPLIES(!v8_flags.shared_string_table, !HasHashCode());
 
   // Store the hash code in the object.
-  uint64_t seed = HashSeed(EarlyGetReadOnlyRoots());
+  const HashSeed seed = HashSeed(EarlyGetReadOnlyRoots());
   size_t start = 0;
   Tagged<String> string = this;
   StringShape shape(string);
@@ -1951,7 +1967,7 @@ Handle<String> SeqString::Truncate(Isolate* isolate, Handle<SeqString> string,
 #endif
 
   Heap* heap = isolate->heap();
-  if (!heap->IsLargeObject(*string)) {
+  if (!HeapLayout::InAnyLargeSpace(*string)) {
     // Sizes are pointer size aligned, so that we can use filler objects
     // that are a multiple of pointer size.
     // No slot invalidation needed since this method is only used on freshly
@@ -2253,7 +2269,7 @@ const uint8_t* String::AddressOfCharacterAt(
   CHECK_LE(start_index, subject->length());
 
   return shape.DispatchToSpecificType(
-      subject, base::overloaded{
+      subject, absl::Overload{
                    [&](Tagged<SeqOneByteString> s) {
                      return reinterpret_cast<const uint8_t*>(
                          s->GetChars(no_gc) + start_index);

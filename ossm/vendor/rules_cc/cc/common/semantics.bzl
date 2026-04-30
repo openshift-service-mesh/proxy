@@ -19,6 +19,9 @@
 # TODO: b/320980684 - Add a test that fails if this is flipped to True.
 USE_EXEC_ROOT_FOR_VIRTUAL_INCLUDES_SYMLINKS = False
 
+# TODO: b/142314377 - Cleanup this temporary flag.
+STRIP_INCLUDE_PREFIX_APPLIES_TO_TEXTUAL_HEADERS = True
+
 def _get_proto_aspects():
     return []
 
@@ -26,6 +29,10 @@ def _should_create_empty_archive():
     return False
 
 def _validate_attributes(_ctx):
+    pass
+
+# buildifier: disable=unused-variable
+def _validate_layering_check_features(ctx, cc_toolchain, unsupported_features):
     pass
 
 def _get_stl():
@@ -122,6 +129,10 @@ def _get_cc_link_memlimit(_compilation_mode, exec_info):
 def _get_nocopts_attr():
     return {}
 
+def _is_allowed_nocopts(
+        nocopts):  # @unused
+    return False
+
 def _get_experimental_link_static_libraries_once(ctx):
     return ctx.fragments.cpp.experimental_link_static_libraries_once()
 
@@ -155,6 +166,9 @@ def _validate_cc_compile_call(
         fail("The 'additional_include_scanning_roots' parameter doesn't do anything useful. " +
              "This is only used internally for a mechanism we'd like to get rid of.")
 
+def _needs_include_validation(language):
+    return language == "c++" or language == "cpp" or language == None
+
 semantics = struct(
     toolchain = "@bazel_tools//tools/cpp:toolchain_type",
     validate = _validate,
@@ -172,6 +186,7 @@ semantics = struct(
     ],
     ALLOWED_RULES_WITH_WARNINGS_IN_DEPS = [],
     validate_attributes = _validate_attributes,
+    validate_layering_check_features = _validate_layering_check_features,
     get_repo = _get_repo,
     get_platforms_root = _get_platforms_root,
     additional_fragments = _additional_fragments,
@@ -192,6 +207,7 @@ semantics = struct(
     get_coverage_env = _get_coverage_env,
     get_proto_aspects = _get_proto_aspects,
     get_nocopts_attr = _get_nocopts_attr,
+    is_allowed_nocopts = _is_allowed_nocopts,
     get_experimental_link_static_libraries_once = _get_experimental_link_static_libraries_once,
     cpp_modules_tools = _cpp_modules_tools,
     check_cc_shared_library_tags = _check_cc_shared_library_tags,
@@ -199,7 +215,9 @@ semantics = struct(
     CC_PROTO_TOOLCHAIN = "@rules_cc//cc/proto:toolchain_type",
     is_bazel = True,
     validate_cc_compile_call = _validate_cc_compile_call,
+    needs_include_validation = _needs_include_validation,
     extra_exec_groups = {},
+    dynamic_deps_extra_docs = "",
     stamp_extra_docs = "",
     malloc_docs = """
  Override the default dependency on malloc.

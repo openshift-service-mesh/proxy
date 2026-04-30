@@ -14,12 +14,14 @@
 package sftpfs
 
 import (
-	"github.com/pkg/sftp"
 	"os"
+
+	"github.com/pkg/sftp"
 )
 
 type File struct {
-	fd *sftp.File
+	client *sftp.Client
+	fd     *sftp.File
 }
 
 func FileOpen(s *sftp.Client, name string) (*File, error) {
@@ -27,7 +29,7 @@ func FileOpen(s *sftp.Client, name string) (*File, error) {
 	if err != nil {
 		return &File{}, err
 	}
-	return &File{fd: fd}, nil
+	return &File{fd: fd, client: s}, nil
 }
 
 func FileCreate(s *sftp.Client, name string) (*File, error) {
@@ -35,7 +37,7 @@ func FileCreate(s *sftp.Client, name string) (*File, error) {
 	if err != nil {
 		return &File{}, err
 	}
-	return &File{fd: fd}, nil
+	return &File{fd: fd, client: s}, nil
 }
 
 func (f *File) Close() error {
@@ -62,19 +64,32 @@ func (f *File) Read(b []byte) (n int, err error) {
 	return f.fd.Read(b)
 }
 
-// TODO
 func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
-	return 0, nil
+	return f.fd.ReadAt(b, off)
 }
 
-// TODO
 func (f *File) Readdir(count int) (res []os.FileInfo, err error) {
-	return nil, nil
+	res, err = f.client.ReadDir(f.Name())
+	if err != nil {
+		return
+	}
+	if count > 0 {
+		if len(res) > count {
+			res = res[:count]
+		}
+	}
+	return
 }
 
-// TODO
 func (f *File) Readdirnames(n int) (names []string, err error) {
-	return nil, nil
+	data, err := f.Readdir(n)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range data {
+		names = append(names, v.Name())
+	}
+	return
 }
 
 func (f *File) Seek(offset int64, whence int) (int64, error) {

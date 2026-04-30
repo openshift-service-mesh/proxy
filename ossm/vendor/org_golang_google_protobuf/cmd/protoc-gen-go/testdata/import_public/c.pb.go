@@ -13,27 +13,25 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
+	unsafe "unsafe"
 )
 
 type UsingPublicImport struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
+	state protoimpl.MessageState `protogen:"open.v1"`
 	// Local is declared in b.proto, which is a public import of a.proto.
 	Local *Local `protobuf:"bytes,1,opt,name=local" json:"local,omitempty"`
 	// Sub2Message is declared in sub2/a.proto, which is a public import of
 	// sub/a.proto, which is a public import of a.proto.
-	Sub2 *sub2.Sub2Message `protobuf:"bytes,2,opt,name=sub2" json:"sub2,omitempty"` // declared in sub2/a.proto
+	Sub2          *sub2.Sub2Message `protobuf:"bytes,2,opt,name=sub2" json:"sub2,omitempty"` // declared in sub2/a.proto
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UsingPublicImport) Reset() {
 	*x = UsingPublicImport{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_cmd_protoc_gen_go_testdata_import_public_c_proto_msgTypes[0]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_cmd_protoc_gen_go_testdata_import_public_c_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *UsingPublicImport) String() string {
@@ -44,7 +42,7 @@ func (*UsingPublicImport) ProtoMessage() {}
 
 func (x *UsingPublicImport) ProtoReflect() protoreflect.Message {
 	mi := &file_cmd_protoc_gen_go_testdata_import_public_c_proto_msgTypes[0]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -75,45 +73,27 @@ func (x *UsingPublicImport) GetSub2() *sub2.Sub2Message {
 
 var File_cmd_protoc_gen_go_testdata_import_public_c_proto protoreflect.FileDescriptor
 
-var file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDesc = []byte{
-	0x0a, 0x30, 0x63, 0x6d, 0x64, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2d, 0x67, 0x65, 0x6e,
-	0x2d, 0x67, 0x6f, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x64, 0x61, 0x74, 0x61, 0x2f, 0x69, 0x6d, 0x70,
-	0x6f, 0x72, 0x74, 0x5f, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63, 0x2f, 0x63, 0x2e, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x12, 0x1c, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x63, 0x2e, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x5f, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63,
-	0x1a, 0x30, 0x63, 0x6d, 0x64, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2d, 0x67, 0x65, 0x6e,
-	0x2d, 0x67, 0x6f, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x64, 0x61, 0x74, 0x61, 0x2f, 0x69, 0x6d, 0x70,
-	0x6f, 0x72, 0x74, 0x5f, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63, 0x2f, 0x61, 0x2e, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x22, 0x92, 0x01, 0x0a, 0x11, 0x55, 0x73, 0x69, 0x6e, 0x67, 0x50, 0x75, 0x62, 0x6c,
-	0x69, 0x63, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x12, 0x39, 0x0a, 0x05, 0x6c, 0x6f, 0x63, 0x61,
-	0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x23, 0x2e, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2e, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x5f,
-	0x70, 0x75, 0x62, 0x6c, 0x69, 0x63, 0x2e, 0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x52, 0x05, 0x6c, 0x6f,
-	0x63, 0x61, 0x6c, 0x12, 0x42, 0x0a, 0x04, 0x73, 0x75, 0x62, 0x32, 0x18, 0x02, 0x20, 0x01, 0x28,
-	0x0b, 0x32, 0x2e, 0x2e, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x63, 0x2e, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x5f, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63,
-	0x2e, 0x73, 0x75, 0x62, 0x32, 0x2e, 0x53, 0x75, 0x62, 0x32, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67,
-	0x65, 0x52, 0x04, 0x73, 0x75, 0x62, 0x32, 0x42, 0x45, 0x5a, 0x43, 0x67, 0x6f, 0x6f, 0x67, 0x6c,
-	0x65, 0x2e, 0x67, 0x6f, 0x6c, 0x61, 0x6e, 0x67, 0x2e, 0x6f, 0x72, 0x67, 0x2f, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x62, 0x75, 0x66, 0x2f, 0x63, 0x6d, 0x64, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63,
-	0x2d, 0x67, 0x65, 0x6e, 0x2d, 0x67, 0x6f, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x64, 0x61, 0x74, 0x61,
-	0x2f, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x5f, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63,
-}
+const file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDesc = "" +
+	"\n" +
+	"0cmd/protoc-gen-go/testdata/import_public/c.proto\x12\x1cgoproto.protoc.import_public\x1a0cmd/protoc-gen-go/testdata/import_public/a.proto\"\x92\x01\n" +
+	"\x11UsingPublicImport\x129\n" +
+	"\x05local\x18\x01 \x01(\v2#.goproto.protoc.import_public.LocalR\x05local\x12B\n" +
+	"\x04sub2\x18\x02 \x01(\v2..goproto.protoc.import_public.sub2.Sub2MessageR\x04sub2BEZCgoogle.golang.org/protobuf/cmd/protoc-gen-go/testdata/import_public"
 
 var (
 	file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDescOnce sync.Once
-	file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDescData = file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDesc
+	file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDescData []byte
 )
 
 func file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDescGZIP() []byte {
 	file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDescOnce.Do(func() {
-		file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDescData = protoimpl.X.CompressGZIP(file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDescData)
+		file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDesc), len(file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDesc)))
 	})
 	return file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDescData
 }
 
 var file_cmd_protoc_gen_go_testdata_import_public_c_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
-var file_cmd_protoc_gen_go_testdata_import_public_c_proto_goTypes = []interface{}{
+var file_cmd_protoc_gen_go_testdata_import_public_c_proto_goTypes = []any{
 	(*UsingPublicImport)(nil), // 0: goproto.protoc.import_public.UsingPublicImport
 	(*Local)(nil),             // 1: goproto.protoc.import_public.Local
 	(*sub2.Sub2Message)(nil),  // 2: goproto.protoc.import_public.sub2.Sub2Message
@@ -134,25 +114,11 @@ func file_cmd_protoc_gen_go_testdata_import_public_c_proto_init() {
 		return
 	}
 	file_cmd_protoc_gen_go_testdata_import_public_a_proto_init()
-	if !protoimpl.UnsafeEnabled {
-		file_cmd_protoc_gen_go_testdata_import_public_c_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*UsingPublicImport); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDesc,
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDesc), len(file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   1,
 			NumExtensions: 0,
@@ -163,7 +129,6 @@ func file_cmd_protoc_gen_go_testdata_import_public_c_proto_init() {
 		MessageInfos:      file_cmd_protoc_gen_go_testdata_import_public_c_proto_msgTypes,
 	}.Build()
 	File_cmd_protoc_gen_go_testdata_import_public_c_proto = out.File
-	file_cmd_protoc_gen_go_testdata_import_public_c_proto_rawDesc = nil
 	file_cmd_protoc_gen_go_testdata_import_public_c_proto_goTypes = nil
 	file_cmd_protoc_gen_go_testdata_import_public_c_proto_depIdxs = nil
 }

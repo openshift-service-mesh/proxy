@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@bazel_tools//tools/jdk:toolchain_utils.bzl", "find_java_runtime_toolchain", "find_java_toolchain")
-load("@rules_proto//proto:defs.bzl", "ProtoInfo")
+load("@com_google_protobuf//bazel/common:proto_info.bzl", "ProtoInfo")
 
 # Borrowed from https://github.com/grpc/grpc-java/blob/v1.28.0/java_grpc_library.bzl#L59
 # "repository" here is for Bazel builds that span multiple WORKSPACES.
@@ -96,7 +96,7 @@ def _protoc_gen_validate_impl(ctx, lang, protos, out_files, protoc_args, package
         use_default_shell_env = True,
     )
 
-    return struct(
+    return DefaultInfo(
         files = depset(out_files),
     )
 
@@ -107,16 +107,16 @@ cc_proto_gen_validate = rule(
             providers = [ProtoInfo],
         ),
         "_validate_deps": attr.label_list(
-            default = [Label("@com_googlesource_code_re2//:re2")],
+            default = [Label("@re2")],
         ),
         "_protoc": attr.label(
-            cfg = "host",
+            cfg = "exec",
             default = Label("@com_google_protobuf//:protoc"),
             executable = True,
             allow_single_file = True,
         ),
         "_plugin": attr.label(
-            cfg = "host",
+            cfg = "exec",
             default = Label("@com_envoyproxy_protoc_gen_validate//:protoc-gen-validate"),
             allow_files = True,
             executable = True,
@@ -171,13 +171,13 @@ _java_proto_gen_validate_aspect = aspect(
     attr_aspects = ["deps"],
     attrs = {
         "_protoc": attr.label(
-            cfg = "host",
+            cfg = "exec",
             default = Label("@com_google_protobuf//:protoc"),
             executable = True,
             allow_single_file = True,
         ),
         "_plugin": attr.label(
-            cfg = "host",
+            cfg = "exec",
             default = Label("@com_envoyproxy_protoc_gen_validate//:protoc-gen-validate"),
             allow_files = True,
             executable = True,
@@ -238,4 +238,5 @@ java_proto_gen_validate = rule(
         "srcjar": "lib%{name}-src.jar",
     },
     implementation = _java_proto_gen_validate_impl,
+    toolchains = ["@bazel_tools//tools/jdk:toolchain_type"],
 )

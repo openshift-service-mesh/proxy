@@ -24,10 +24,7 @@ fn match_for_io_error(err_status: &Status) -> Option<&std::io::Error> {
             }
         }
 
-        err = match err.source() {
-            Some(err) => err,
-            None => return None,
-        };
+        err = err.source()?;
     }
 }
 
@@ -120,7 +117,7 @@ impl echo_server::Echo for EchoServer {
 
                         match tx.send(Err(err)).await {
                             Ok(_) => (),
-                            Err(_err) => break, // response was droped
+                            Err(_err) => break, // response was dropped
                         }
                     }
                 }

@@ -292,6 +292,22 @@ bool Operand::IsImmediate() const {
   return reg_ == NoReg && !IsHeapNumberRequest();
 }
 
+bool Operand::IsPlainRegister() const {
+  return reg_.is_valid() &&
+         (((shift_ == NO_SHIFT) && (extend_ == NO_EXTEND)) ||
+          // No-op shifts.
+          ((shift_ != NO_SHIFT) && (shift_amount_ == 0)) ||
+          // No-op extend operations.
+          // We can't include [US]XTW here without knowing more about the
+          // context; they are only no-ops for 32-bit operations.
+          //
+          // For example, this operand could be replaced with w1:
+          //   __ Add(w0, w0, Operand(w1, UXTW));
+          // However, no plain register can replace it in this context:
+          //   __ Add(x0, x0, Operand(w1, UXTW));
+          (((extend_ == UXTX) || (extend_ == SXTX)) && (shift_amount_ == 0)));
+}
+
 bool Operand::IsShiftedRegister() const {
   return reg_.is_valid() && (shift_ != NO_SHIFT);
 }
@@ -500,7 +516,7 @@ Handle<Code> Assembler::code_target_object_handle_at(Address pc) {
   } else {
     DCHECK(instr->IsBranchAndLink() || instr->IsUnconditionalBranch());
     DCHECK_EQ(instr->ImmPCOffset() % kInstrSize, 0);
-    return Cast<Code>(
+    return TrustedCast<Code>(
         GetEmbeddedObject(instr->ImmPCOffset() >> kInstrSizeLog2));
   }
 }
@@ -680,9 +696,10 @@ void WritableRelocInfo::set_target_object(Tagged<HeapObject> target,
     // We must not compress pointers to objects outside of the main pointer
     // compression cage as we wouldn't be able to decompress them with the
     // correct cage base.
-    DCHECK_IMPLIES(V8_ENABLE_SANDBOX_BOOL, !HeapLayout::InTrustedSpace(target));
+    DCHECK_IMPLIES(V8_ENABLE_SANDBOX_BOOL,
+                   !TrustedHeapLayout::InTrustedSpace(target));
     DCHECK_IMPLIES(V8_EXTERNAL_CODE_SPACE_BOOL,
-                   !HeapLayout::InCodeSpace(target));
+                   !TrustedHeapLayout::InCodeSpace(target));
     Assembler::set_target_compressed_address_at(
         pc_, constant_pool_,
         V8HeapCompressionScheme::CompressObject(target.ptr()), &jit_allocation_,

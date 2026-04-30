@@ -23,6 +23,9 @@ import com.github.bazelbuild.rules_jvm_external.resolver.events.DownloadEvent;
 import com.github.bazelbuild.rules_jvm_external.resolver.events.EventListener;
 import com.github.bazelbuild.rules_jvm_external.resolver.events.LogEvent;
 import com.github.bazelbuild.rules_jvm_external.resolver.netrc.Netrc;
+import com.github.bazelbuild.rules_jvm_external.resolver.ui.AnsiConsoleListener;
+import com.github.bazelbuild.rules_jvm_external.resolver.ui.NullListener;
+import com.github.bazelbuild.rules_jvm_external.resolver.ui.PlainConsoleListener;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.Authenticator;
@@ -39,10 +42,11 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 import java.util.logging.Logger;
 
-public class HttpDownloader {
+public class HttpDownloader implements AutoCloseable {
 
   private static final int MAX_RETRY_COUNT = 3;
   private static final Set<Integer> RETRY_RESPONSE_CODES = Set.of(500, 502, 503, 504);
@@ -84,6 +88,21 @@ public class HttpDownloader {
         };
     builder = builder.authenticator(authenticator);
     this.client = builder.build();
+  }
+
+  public HttpDownloader(Netrc netrc) {
+    this(netrc, defaultEventListener());
+  }
+
+  public static EventListener defaultEventListener() {
+    boolean termAvailable = !Objects.equals(System.getenv().get("TERM"), "dumb");
+    boolean consoleAvailable = System.console() != null;
+    if (System.getenv("RJE_VERBOSE") != null) {
+      return new PlainConsoleListener();
+    } else if (termAvailable && consoleAvailable || System.getenv("FORCE_ANSI") != null) {
+      return new AnsiConsoleListener();
+    }
+    return new NullListener();
   }
 
   public Path get(URI uriToGet) {
@@ -140,7 +159,7 @@ public class HttpDownloader {
 
   private <X> HttpResponse<X> doRequest(
       int attemptCount, HttpRequest request, HttpResponse.BodyHandler<X> handler) {
-    listener.onEvent(new DownloadEvent(STARTING, request.uri().toString()));
+    listener.onEvent(new DownloadEvent(STARTING, request.method(), request.uri().toString()));
     LOG.fine(String.format("Downloading (attempt %d): %s", attemptCount, request.uri()));
 
     // Slight pause, in case a previous attempt overwhelmed a server. We may be about to do it
@@ -190,7 +209,7 @@ public class HttpDownloader {
       // Don't panic. Just have another go.
 
       if (attemptCount < MAX_RETRY_COUNT) {
-        listener.onEvent(new DownloadEvent(COMPLETE, request.uri().toString()));
+        listener.onEvent(new DownloadEvent(COMPLETE, request.method(), request.uri().toString()));
         return doRequest(++attemptCount, request, handler);
       }
 
@@ -202,7 +221,7 @@ public class HttpDownloader {
       throw new RuntimeException(e);
     } finally {
       LOG.fine(String.format("Downloaded (attempt %d): %s", attemptCount, request.uri()));
-      listener.onEvent(new DownloadEvent(COMPLETE, request.uri().toString()));
+      listener.onEvent(new DownloadEvent(COMPLETE, request.method(), request.uri().toString()));
     }
   }
 
@@ -221,5 +240,10 @@ public class HttpDownloader {
 
   private boolean isSuccessful(HttpResponse<?> response) {
     return response.statusCode() > 199 && response.statusCode() < 300;
+  }
+
+  @Override
+  public void close() throws Exception {
+    listener.close();
   }
 }

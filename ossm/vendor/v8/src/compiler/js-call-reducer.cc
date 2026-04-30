@@ -86,9 +86,10 @@ class JSCallReducerAssembler : public JSGraphAssembler {
       StringRef search_element_string);
   TNode<Boolean> ReduceStringPrototypeEndsWith();
   TNode<Boolean> ReduceStringPrototypeEndsWith(StringRef search_element_string);
-  TNode<String> ReduceStringPrototypeCharAt();
+  TNode<String> ReduceStringPrototypeCharAt(SpeculationMode speculation_mode);
   TNode<String> ReduceStringPrototypeCharAt(StringRef s, uint32_t index);
-  TNode<Number> ReduceStringPrototypeCharCodeAt();
+  TNode<Number> ReduceStringPrototypeCharCodeAt(
+      SpeculationMode speculation_mode);
   TNode<String> ReduceStringPrototypeSlice();
   TNode<Object> ReduceJSCallMathMinMaxWithArrayLike(Builtin builtin);
 
@@ -110,7 +111,7 @@ class JSCallReducerAssembler : public JSGraphAssembler {
   TNode<Smi> CheckSmi(TNode<Object> value);
   TNode<Number> CheckNumber(TNode<Object> value);
   TNode<String> CheckString(TNode<Object> value);
-  TNode<Number> CheckBounds(TNode<Number> value, TNode<Number> limit,
+  TNode<Number> CheckBounds(TNode<Object> value, TNode<Number> limit,
                             CheckBoundsFlags flags = {});
 
   // Common operators.
@@ -174,13 +175,13 @@ class JSCallReducerAssembler : public JSGraphAssembler {
   TNode<Object> ConvertHoleToUndefined(TNode<Object> value, ElementsKind kind) {
     DCHECK(IsHoleyElementsKind(kind));
     if (kind == HOLEY_DOUBLE_ELEMENTS) {
-#ifdef V8_ENABLE_EXPERIMENTAL_UNDEFINED_DOUBLE
+#ifdef V8_ENABLE_UNDEFINED_DOUBLE
       return AddNode<Number>(graph()->NewNode(
           simplified()->ChangeFloat64OrUndefinedOrHoleToTagged(), value));
 #else
       return AddNode<Number>(
           graph()->NewNode(simplified()->ChangeFloat64HoleToTagged(), value));
-#endif  // V8_ENABLE_EXPERIMENTAL_UNDEFINED_DOUBLE
+#endif  // V8_ENABLE_UNDEFINED_DOUBLE
     }
     return ConvertTaggedHoleToUndefined(value);
   }
@@ -457,7 +458,8 @@ class IteratingArrayBuiltinReducerAssembler : public JSCallReducerAssembler {
                                          const bool has_stability_dependency,
                                          ElementsKind kind,
                                          SharedFunctionInfoRef shared,
-                                         NativeContextRef native_context);
+                                         NativeContextRef native_context,
+                                         ObjectRef array_ctor);
   TNode<JSArray> ReduceArrayPrototypeFilter(MapInference* inference,
                                             const bool has_stability_dependency,
                                             ElementsKind kind,
@@ -808,7 +810,7 @@ TNode<String> JSCallReducerAssembler::CheckString(TNode<Object> value) {
                                           value, effect(), control()));
 }
 
-TNode<Number> JSCallReducerAssembler::CheckBounds(TNode<Number> value,
+TNode<Number> JSCallReducerAssembler::CheckBounds(TNode<Object> value,
                                                   TNode<Number> limit,
                                                   CheckBoundsFlags flags) {
   return AddNode<Number>(
@@ -891,9 +893,9 @@ TNode<Object> JSCallReducerAssembler::CopyNode() {
 
 TNode<JSArray> JSCallReducerAssembler::CreateArrayNoThrow(
     TNode<Object> ctor, TNode<Number> size, FrameState frame_state) {
-  return AddNode<JSArray>(
-      graph()->NewNode(javascript()->CreateArray(1, std::nullopt), ctor, ctor,
-                       size, ContextInput(), frame_state, effect(), control()));
+  return AddNode<JSArray>(graph()->NewNode(
+      javascript()->CreateArray(1, std::nullopt, feedback()), ctor, ctor, size,
+      ContextInput(), frame_state, effect(), control()));
 }
 
 TNode<JSArray> JSCallReducerAssembler::AllocateEmptyJSArray(
@@ -1186,63 +1188,112 @@ TNode<String> JSCallReducerAssembler::ReduceStringPrototypeCharAt(
   }
 }
 
-TNode<String> JSCallReducerAssembler::ReduceStringPrototypeCharAt() {
+TNode<String> JSCallReducerAssembler::ReduceStringPrototypeCharAt(
+    SpeculationMode speculation_mode) {
   TNode<Object> receiver = ReceiverInput();
   TNode<Object> index = ArgumentOrZero(0);
 
   TNode<String> receiver_string = CheckString(receiver);
-  TNode<Number> index_smi = CheckSmi(index);
   TNode<Number> length = StringLength(receiver_string);
 
-  // TODO(olivf): Have some feedback on the access to know if the access happens
-  // OOB or not.
-  return SelectIf<String>(NumberLessThan(index_smi, ZeroConstant()))
-      .Then(_ { return EmptyStringConstant(); })
-      .Else(_ {
-        return SelectIf<String>(NumberLessThan(index_smi, length))
-            .Then(_ {
-              return StringFromSingleCharCode(TNode<Number>::UncheckedCast(
-                  StringCharCodeAt(receiver_string,
-                                   TypeGuard(Type::Unsigned32(), index_smi))));
-            })
-            .Else(_ { return EmptyStringConstant(); })
-            .ExpectTrue()
-            .Value();
-      })
-      .ExpectFalse()
-      .Value();
+  if (speculation_mode == SpeculationMode::kDisallowBoundsCheckSpeculation) {
+    TNode<Number> index_smi = CheckSmi(index);
+    return SelectIf<String>(NumberLessThan(index_smi, ZeroConstant()))
+        .Then(_ { return EmptyStringConstant(); })
+        .Else(_ {
+          return SelectIf<String>(NumberLessThan(index_smi, length))
+              .Then(_ {
+                return StringFromSingleCharCode(
+                    TNode<Number>::UncheckedCast(StringCharCodeAt(
+                        receiver_string,
+                        TypeGuard(Type::Unsigned32(), index_smi))));
+              })
+              .Else(_ { return EmptyStringConstant(); })
+              .ExpectTrue()
+              .Value();
+        })
+        .ExpectFalse()
+        .Value();
+  }
+
+  DCHECK_EQ(speculation_mode, SpeculationMode::kAllowSpeculation);
+  TNode<Number> bounded_index = CheckBounds(index, length);
+  return StringFromSingleCharCode(TNode<Number>::UncheckedCast(
+      StringCharCodeAt(receiver_string, bounded_index)));
 }
 
-TNode<Number> JSCallReducerAssembler::ReduceStringPrototypeCharCodeAt() {
+TNode<Number> JSCallReducerAssembler::ReduceStringPrototypeCharCodeAt(
+    SpeculationMode speculation_mode) {
   TNode<Object> receiver = ReceiverInput();
   TNode<Object> index = ArgumentOrZero(0);
 
   TNode<String> receiver_string = CheckString(receiver);
-  TNode<Number> index_smi = CheckSmi(index);
   TNode<Number> length = StringLength(receiver_string);
 
-  TNode<Number> bounded_index = CheckBounds(index_smi, length);
+  if (speculation_mode == SpeculationMode::kDisallowBoundsCheckSpeculation) {
+    TNode<Number> index_smi = CheckSmi(index);
+    return SelectIf<Number>(NumberLessThan(index_smi, ZeroConstant()))
+        .Then(_ { return NaNConstant(); })
+        .Else(_ {
+          return SelectIf<Number>(NumberLessThan(index_smi, length))
+              .Then(_ {
+                return TNode<Number>::UncheckedCast(StringCharCodeAt(
+                    receiver_string, TypeGuard(Type::Unsigned32(), index_smi)));
+              })
+              .Else(_ { return NaNConstant(); })
+              .ExpectTrue()
+              .Value();
+        })
+        .ExpectFalse()
+        .Value();
+  }
+  DCHECK_EQ(speculation_mode, SpeculationMode::kAllowSpeculation);
+
+  TNode<Number> bounded_index = CheckBounds(index, length);
   return TNode<Number>::UncheckedCast(
       (StringCharCodeAt(receiver_string, bounded_index)));
 }
 
 TNode<String> JSCallReducerAssembler::ReduceStringPrototypeSlice() {
   TNode<Object> receiver = ReceiverInput();
-  TNode<Object> start = Argument(0);
-  TNode<Object> end = ArgumentOrUndefined(1);
-
   TNode<String> receiver_string = CheckString(receiver);
-  TNode<Number> start_smi = CheckSmi(start);
 
   TNode<Number> length = StringLength(receiver_string);
 
+  TNode<Object> start = Argument(0);
+  TNode<Object> end = ArgumentOrUndefined(1);
+
+  // Special case str.slice(-1) to str.charAt(str.length - 1).
+  // This will not hit if the start offset is not known to be the -1 constant
+  // during this reduction, nor if the end argument is explicitly rather than
+  // implicitly undefined; hopefully in common cases the code will explicitly
+  // use the -1 literal.
+  if (ArgumentCount() == 1) {
+    NumberMatcher m(start);
+    if (m.Is(-1)) {
+      return SelectIf<String>(
+                 ReferenceEqual(receiver_string, EmptyStringConstant()))
+          .Then(_ { return EmptyStringConstant(); })
+          .Else(_ {
+            return StringFromSingleCharCode(
+                TNode<Number>::UncheckedCast(StringCharCodeAt(
+                    receiver_string,
+                    TypeGuard(Type::Unsigned32(),
+                              NumberAdd(length, TNode<Number>::UncheckedCast(
+                                                    m.node()))))));
+          })
+          .Value();
+    }
+  }
+
+  TNode<Number> start_smi = CheckSmi(start);
   TNode<Number> end_smi = SelectIf<Number>(IsUndefined(end))
                               .Then(_ { return length; })
                               .Else(_ { return CheckSmi(end); })
                               .ExpectFalse()
                               .Value();
 
-  TNode<Number> zero = TNode<Number>::UncheckedCast(ZeroConstant());
+  TNode<Number> zero = ZeroConstant();
   TNode<Number> from_untyped =
       SelectIf<Number>(NumberLessThan(start_smi, zero))
           .Then(_ { return NumberMax(NumberAdd(length, start_smi), zero); })
@@ -1842,7 +1893,7 @@ FrameState MapLoopEagerFrameState(const MapFrameStateParams& params,
 TNode<JSArray> IteratingArrayBuiltinReducerAssembler::ReduceArrayPrototypeMap(
     MapInference* inference, const bool has_stability_dependency,
     ElementsKind kind, SharedFunctionInfoRef shared,
-    NativeContextRef native_context) {
+    NativeContextRef native_context, ObjectRef array_ctor) {
   FrameState outer_frame_state = FrameStateInput();
   TNode<Context> context = ContextInput();
   TNode<Object> target = TargetInput();
@@ -1861,16 +1912,13 @@ TNode<JSArray> IteratingArrayBuiltinReducerAssembler::ReduceArrayPrototypeMap(
   // Even though {JSCreateArray} is not marked as {kNoThrow}, we can elide the
   // exceptional projections because it cannot throw with the given
   // parameters.
-  TNode<Object> array_ctor =
-      Constant(native_context.GetInitialJSArrayMap(broker(), kind)
-                   .GetConstructor(broker()));
 
   MapFrameStateParams frame_state_params{
       jsgraph(), shared,     context,  target,       outer_frame_state,
       receiver,  fncallback, this_arg, {} /* TBD */, original_length};
 
   TNode<JSArray> a =
-      CreateArrayNoThrow(array_ctor, original_length,
+      CreateArrayNoThrow(Constant(array_ctor), original_length,
                          MapPreLoopLazyFrameState(frame_state_params));
   frame_state_params.a = a;
 
@@ -1994,7 +2042,7 @@ IteratingArrayBuiltinReducerAssembler::ReduceArrayPrototypeFilter(
 
   // The output array is packed (filter doesn't visit holes).
   ElementsKind filtered_kind = GetPackedElementsKind(kind);
-#ifdef V8_ENABLE_EXPERIMENTAL_UNDEFINED_DOUBLE
+#ifdef V8_ENABLE_UNDEFINED_DOUBLE
   if (kind == ElementsKind::HOLEY_DOUBLE_ELEMENTS) {
     // Array may contain double-encoded undefineds that may be preserved by
     // the filter operation, so the output has to be holey, too.
@@ -2003,7 +2051,7 @@ IteratingArrayBuiltinReducerAssembler::ReduceArrayPrototypeFilter(
     // encounter an undefined.
     filtered_kind = ElementsKind::HOLEY_DOUBLE_ELEMENTS;
   }
-#endif  // V8_ENABLE_EXPERIMENTAL_UNDEFINED_DOUBLE
+#endif  // V8_ENABLE_UNDEFINED_DOUBLE
   TNode<JSArray> a = AllocateEmptyJSArray(filtered_kind, native_context);
 
   TNode<Number> original_length = LoadJSArrayLength(receiver, kind);
@@ -2592,7 +2640,7 @@ Reduction JSCallReducer::ReplaceWithSubgraph(JSCallReducerAssembler* gasm,
 Reduction JSCallReducer::ReduceMathUnary(Node* node, const Operator* op) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   if (n.ArgumentCount() < 1) {
@@ -2609,7 +2657,7 @@ Reduction JSCallReducer::ReduceMathUnary(Node* node, const Operator* op) {
 Reduction JSCallReducer::ReduceMathBinary(Node* node, const Operator* op) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   if (n.ArgumentCount() < 1) {
@@ -2627,7 +2675,7 @@ Reduction JSCallReducer::ReduceMathBinary(Node* node, const Operator* op) {
 Reduction JSCallReducer::ReduceMathImul(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   if (n.ArgumentCount() < 1) {
@@ -2659,7 +2707,7 @@ Reduction JSCallReducer::ReduceMathImul(Node* node) {
 Reduction JSCallReducer::ReduceMathClz32(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   if (n.ArgumentCount() < 1) {
@@ -2687,7 +2735,7 @@ Reduction JSCallReducer::ReduceMathMinMax(Node* node, const Operator* op,
                                           Node* empty_value) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   if (n.ArgumentCount() < 1) {
@@ -2758,16 +2806,20 @@ void JSCallReducer::Finalize() {
 // ES6 section 22.1.1 The Array Constructor
 Reduction JSCallReducer::ReduceArrayConstructor(Node* node) {
   JSCallNode n(node);
-  Node* target = n.target();
   CallParameters const& p = n.Parameters();
+  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+    return NoChange();
+  }
 
   // Turn the {node} into a {JSCreateArray} call.
+  Node* target = n.target();
   size_t const arity = p.arity_without_implicit_args();
   node->RemoveInput(n.FeedbackVectorIndex());
   NodeProperties::ReplaceValueInput(node, target, 0);
   NodeProperties::ReplaceValueInput(node, target, 1);
-  NodeProperties::ChangeOp(node,
-                           javascript()->CreateArray(arity, std::nullopt));
+  NodeProperties::ChangeOp(
+      node, javascript()->CreateArray(arity, std::nullopt,
+                                      n.Parameters().feedback()));
   return Changed(node);
 }
 
@@ -2939,7 +2991,7 @@ Reduction JSCallReducer::ReduceFunctionPrototypeApply(Node* node) {
 Reduction JSCallReducer::ReduceFunctionPrototypeBind(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -3643,7 +3695,7 @@ class IteratingArrayBuiltinHelper {
 
     DCHECK_EQ(IrOpcode::kJSCall, node->opcode());
     const CallParameters& p = CallParametersOf(node->op());
-    if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+    if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
       return;
     }
 
@@ -3732,12 +3784,20 @@ Reduction JSCallReducer::ReduceArrayMap(Node* node,
     return h.inference()->NoChange();
   }
 
+  OptionalObjectRef array_ctor =
+      native_context()
+          .GetInitialJSArrayMap(broker(), h.elements_kind())
+          .GetConstructor(broker());
+  if (!array_ctor.has_value()) {
+    return h.inference()->NoChange();
+  }
+
   IteratingArrayBuiltinReducerAssembler a(this, node);
   a.InitializeEffectControl(h.effect(), h.control());
 
-  TNode<Object> subgraph =
-      a.ReduceArrayPrototypeMap(h.inference(), h.has_stability_dependency(),
-                                h.elements_kind(), shared, native_context());
+  TNode<Object> subgraph = a.ReduceArrayPrototypeMap(
+      h.inference(), h.has_stability_dependency(), h.elements_kind(), shared,
+      native_context(), array_ctor.value());
   return ReplaceWithSubgraph(&a, subgraph);
 }
 
@@ -3846,7 +3906,40 @@ Reduction JSCallReducer::ReduceArraySome(Node* node,
 
 #if V8_ENABLE_WEBASSEMBLY
 
-namespace {
+Reduction JSCallReducer::ReduceWasmMethodWrapper(Node* node,
+                                                 JSFunctionRef function,
+                                                 SharedFunctionInfoRef shared) {
+  if (!shared.HasBuiltinId() ||
+      shared.builtin_id() != Builtin::kWasmMethodWrapper) {
+    return NoChange();
+  }
+  JSCallNode n(node);
+  CallParameters const& p = n.Parameters();
+  if (p.feedback().IsValid() &&
+      p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
+    return NoChange();
+  }
+
+  // Duplicate the receiver into the first argument slot...
+  node->InsertInput(graph()->zone(), n.FirstArgumentIndex(), n.receiver());
+  NodeProperties::ChangeOp(
+      node, javascript()->Call(
+                JSCallNode::ArityForArgc(n.ArgumentCount() + 1), p.frequency(),
+                p.feedback(), ConvertReceiverMode::kAny, p.speculation_mode()));
+  // ...and call the target function directly.
+  ContextRef context = function.context(broker());
+  OptionalObjectRef target =
+      context.get(broker(), wasm::kMethodWrapperContextSlot);
+  if (!target.has_value()) {
+    // This is unexpected; if you see this happening please tell
+    // jkummerow@chromium.org how to reproduce it.
+    TRACE_BROKER_MISSING(broker(), "target value for context " << context);
+    return NoChange();
+  }
+  node->ReplaceInput(n.TargetIndex(),
+                     jsgraph()->ConstantNoHole(target.value(), broker()));
+  return Changed(node).FollowedBy(ReduceJSCall(node));
+}
 
 bool CanInlineJSToWasmCall(const wasm::CanonicalSig* wasm_signature) {
   if (wasm_signature->return_count() > 1) {
@@ -3867,8 +3960,6 @@ bool CanInlineJSToWasmCall(const wasm::CanonicalSig* wasm_signature) {
   return true;
 }
 
-}  // namespace
-
 Reduction JSCallReducer::ReduceCallWasmFunction(Node* node,
                                                 SharedFunctionInfoRef shared) {
   DCHECK(flags() & kInlineJSToWasmCalls);
@@ -3878,41 +3969,38 @@ Reduction JSCallReducer::ReduceCallWasmFunction(Node* node,
 
   // Avoid deoptimization loops if feedback says we should be conservative.
   if (p.feedback().IsValid() &&
-      p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+      p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
   // Read the trusted object only once to ensure a consistent view on it.
-  Tagged<Object> trusted_data = shared.object()->GetTrustedData();
-  if (!IsWasmExportedFunctionData(trusted_data)) return NoChange();
-  Tagged<WasmExportedFunctionData> function_data =
-      Cast<WasmExportedFunctionData>(trusted_data);
+  Tagged<Object> trusted_data = shared.object()->GetTrustedData(isolate());
+  Tagged<WasmExportedFunctionData> function_data;
+  if (!TryCast(trusted_data, &function_data)) return NoChange();
 
   if (function_data->is_promising()) return NoChange();
 
   Tagged<WasmTrustedInstanceData> instance_data =
       function_data->instance_data();
-  const wasm::CanonicalSig* wasm_signature = function_data->sig();
+  const wasm::CanonicalSig* wasm_signature = function_data->internal()->sig();
   if (!CanInlineJSToWasmCall(wasm_signature)) {
     return NoChange();
   }
 
   wasm::NativeModule* native_module = instance_data->native_module();
-  const wasm::WasmModule* wasm_module = native_module->module();
   int wasm_function_index = function_data->function_index();
   bool receiver_is_first_param = function_data->receiver_is_first_param() != 0;
 
-  if (wasm_module_for_inlining_ == nullptr) {
-    wasm_module_for_inlining_ = wasm_module;
+  if (wasm_native_module_for_inlining_ == nullptr) {
+    wasm_native_module_for_inlining_ = native_module;
   }
 
   // TODO(mliedtke): We should be able to remove module, signature, native
   // module and function index from the SharedFunctionInfoRef. However, for some
   // reason I may dereference the SharedFunctionInfoRef here but not in
   // JSInliningHeuristic later on.
-  const Operator* op =
-      javascript()->CallWasm(wasm_module, wasm_signature, wasm_function_index,
-                             shared, native_module, p.feedback());
+  const Operator* op = javascript()->CallWasm(
+      native_module, wasm_function_index, shared, p.feedback());
 
   size_t actual_arity = n.ArgumentCount();
   DCHECK(JSCallNode::kFeedbackVectorIsLastInput);
@@ -4055,7 +4143,7 @@ Reduction JSCallReducer::ReduceCallApiFunction(Node* node,
               function_template_info.accept_any_receiver());
       }
 
-      if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation &&
+      if (p.speculation_mode() != SpeculationMode::kAllowSpeculation &&
           !inference.RelyOnMapsViaStability(dependencies())) {
         // We were not able to make the receiver maps reliable without map
         // checks but doing map checks would lead to deopt loops, so give up.
@@ -4206,12 +4294,12 @@ bool IsCallWithArrayLikeOrSpread(Node* node) {
 Node* JSCallReducer::ConvertHoleToUndefined(Node* value, ElementsKind kind) {
   DCHECK(IsHoleyElementsKind(kind));
   if (kind == HOLEY_DOUBLE_ELEMENTS) {
-#ifdef V8_ENABLE_EXPERIMENTAL_UNDEFINED_DOUBLE
+#ifdef V8_ENABLE_UNDEFINED_DOUBLE
     return graph()->NewNode(
         simplified()->ChangeFloat64OrUndefinedOrHoleToTagged(), value);
 #else
     return graph()->NewNode(simplified()->ChangeFloat64HoleToTagged(), value);
-#endif  // V8_ENABLE_EXPERIMENTAL_UNDEFINED_DOUBLE
+#endif  // V8_ENABLE_UNDEFINED_DOUBLE
   }
   return graph()->NewNode(simplified()->ConvertTaggedHoleToUndefined(), value);
 }
@@ -4277,8 +4365,9 @@ bool ShouldUseCallICFeedback(Node* node) {
     // Protect against endless loops here.
     Node* control = NodeProperties::GetControlInput(node);
     if (control->opcode() == IrOpcode::kLoop ||
-        control->opcode() == IrOpcode::kDead)
-      return false;
+        control->opcode() == IrOpcode::kDead) {
+      return true;
+    }
     // Check if {node} is a Phi of nodes which shouldn't
     // use CallIC feedback (not looking through loops).
     int const value_input_count = m.node()->op()->ValueInputCount();
@@ -4494,6 +4583,17 @@ Reduction JSCallReducer::ReduceCallOrConstructWithArrayLikeOrSpread(
   DCHECK_IMPLIES(speculation_mode == SpeculationMode::kAllowSpeculation,
                  feedback_source.IsValid());
 
+  // Let's not add instructions to the graph (like e.g., CheckIfConstructor
+  // does) if the resulting call might be dead.
+  if (feedback_source.IsValid()) {
+    ProcessedFeedback const& call_feedback =
+        broker()->GetFeedbackForCall(feedback_source);
+    if (call_feedback.IsInsufficient()) {
+      return ReduceForInsufficientFeedback(
+          node, DeoptimizeReason::kInsufficientTypeFeedbackForCall);
+    }
+  }
+
   Node* arguments_list =
       NodeProperties::GetValueInput(node, arraylike_or_spread_index);
 
@@ -4641,6 +4741,18 @@ Reduction JSCallReducer::ReduceJSCall(Node* node) {
   Control control = n.control();
   int arity = p.arity_without_implicit_args();
 
+  auto NoChangeOrSoftDeopt = [&]() {
+    if (p.feedback().IsValid()) {
+      ProcessedFeedback const& feedback =
+          broker()->GetFeedbackForCall(p.feedback());
+      if (feedback.IsInsufficient()) {
+        return ReduceForInsufficientFeedback(
+            node, DeoptimizeReason::kInsufficientTypeFeedbackForCall);
+      }
+    }
+    return NoChange();
+  };
+
   // Try to specialize JSCall {node}s with constant {target}s.
   HeapObjectMatcher m(target);
   if (m.HasResolvedValue()) {
@@ -4652,8 +4764,15 @@ Reduction JSCallReducer::ReduceJSCall(Node* node) {
       if (!function.native_context(broker()).equals(native_context())) {
         return NoChange();
       }
-
-      return ReduceJSCall(node, function.shared(broker()));
+      SharedFunctionInfoRef shared = function.shared(broker());
+      Reduction res = ReduceJSCall(node, shared);
+#if V8_ENABLE_WEBASSEMBLY
+      if (!res.Changed()) {
+        res = ReduceWasmMethodWrapper(node, function, shared);
+      }
+#endif  // V8_ENABLE_WEBASSEMBLY
+      if (!res.Changed()) return NoChangeOrSoftDeopt();
+      return res;
     } else if (target_ref.IsJSBoundFunction()) {
       JSBoundFunctionRef function = target_ref.AsJSBoundFunction();
       ObjectRef bound_this = function.bound_this(broker());
@@ -4676,7 +4795,7 @@ Reduction JSCallReducer::ReduceJSCall(Node* node) {
         OptionalObjectRef maybe_arg = bound_arguments.TryGet(broker(), i);
         if (!maybe_arg.has_value()) {
           TRACE_BROKER_MISSING(broker(), "bound argument");
-          return NoChange();
+          return NoChangeOrSoftDeopt();
         }
         args.emplace_back(
             jsgraph()->ConstantNoHole(maybe_arg.value(), broker()));
@@ -4710,7 +4829,7 @@ Reduction JSCallReducer::ReduceJSCall(Node* node) {
 
     // Don't mess with other {node}s that have a constant {target}.
     // TODO(bmeurer): Also support proxies here.
-    return NoChange();
+    return NoChangeOrSoftDeopt();
   }
 
   // If {target} is the result of a JSCreateClosure operation, we can
@@ -4721,16 +4840,20 @@ Reduction JSCallReducer::ReduceJSCall(Node* node) {
   if (target->opcode() == IrOpcode::kJSCreateClosure) {
     CreateClosureParameters const& params =
         JSCreateClosureNode{target}.Parameters();
-    return ReduceJSCall(node, params.shared_info());
+    Reduction res = ReduceJSCall(node, params.shared_info());
+    if (!res.Changed()) return NoChangeOrSoftDeopt();
+    return res;
   } else if (target->opcode() == IrOpcode::kCheckClosure) {
     FeedbackCellRef cell = MakeRef(broker(), FeedbackCellOf(target->op()));
     OptionalSharedFunctionInfoRef shared = cell.shared_function_info(broker());
     if (!shared.has_value()) {
       TRACE_BROKER_MISSING(broker(), "Unable to reduce JSCall. FeedbackCell "
                                          << cell << " has no FeedbackVector");
-      return NoChange();
+      return NoChangeOrSoftDeopt();
     }
-    return ReduceJSCall(node, *shared);
+    Reduction res = ReduceJSCall(node, *shared);
+    if (!res.Changed()) return NoChangeOrSoftDeopt();
+    return res;
   }
 
   // If {target} is the result of a JSCreateBoundFunction operation,
@@ -5247,7 +5370,7 @@ Reduction JSCallReducer::ReduceJSCall(Node* node,
   if ((flags() & kInlineJSToWasmCalls) &&
       // Peek at the trusted object; ReduceCallWasmFunction will do that again
       // and crash if this is not a WasmExportedFunctionData any more then.
-      IsWasmExportedFunctionData(shared.object()->GetTrustedData())) {
+      IsWasmExportedFunctionData(shared.object()->GetTrustedData(isolate()))) {
     return ReduceCallWasmFunction(node, shared);
   }
 #endif  // V8_ENABLE_WEBASSEMBLY
@@ -5420,12 +5543,16 @@ Reduction JSCallReducer::ReduceJSConstruct(Node* node) {
 
       // Turn the {node} into a {JSCreateArray} call.
       NodeProperties::ReplaceEffectInput(node, effect);
+      // TODO(jgruber): What we really want to check here is the layout of
+      // CreateArray, not JSConstructNode. Coincidentally, the NewTargetIndex
+      // also 1 there.
       static_assert(JSConstructNode::NewTargetIndex() == 1);
       node->ReplaceInput(n.NewTargetIndex(), array_function);
       node->RemoveInput(n.FeedbackVectorIndex());
       NodeProperties::ChangeOp(
-          node, javascript()->CreateArray(arity,
-                                          feedback_target->AsAllocationSite()));
+          node,
+          javascript()->CreateArray(arity, feedback_target->AsAllocationSite(),
+                                    FeedbackSource()));
       return Changed(node);
     } else if (feedback_target.has_value() &&
                !HeapObjectMatcher(new_target).HasResolvedValue() &&
@@ -5486,13 +5613,18 @@ Reduction JSCallReducer::ReduceJSConstruct(Node* node) {
           sfi.HasBuiltinId() ? sfi.builtin_id() : Builtin::kNoBuiltinId;
       switch (builtin) {
         case Builtin::kArrayConstructor: {
-          // TODO(bmeurer): Deal with Array subclasses here.
           // Turn the {node} into a {JSCreateArray} call.
+          // TODO(bmeurer): Deal with Array subclasses here.
+          // TODO(jgruber): What we really want to check here is the layout of
+          // CreateArray, not JSConstructNode. Coincidentally, the
+          // NewTargetIndex also 1 there. Also, there's no point in the
+          // ReplaceInput call below since it replaces new_target with itself.
           static_assert(JSConstructNode::NewTargetIndex() == 1);
           node->ReplaceInput(n.NewTargetIndex(), new_target);
           node->RemoveInput(n.FeedbackVectorIndex());
           NodeProperties::ChangeOp(
-              node, javascript()->CreateArray(arity, std::nullopt));
+              node,
+              javascript()->CreateArray(arity, std::nullopt, p.feedback()));
           return Changed(node);
         }
         case Builtin::kObjectConstructor: {
@@ -5638,7 +5770,7 @@ Reduction JSCallReducer::ReduceStringPrototypeIndexOfIncludes(
     Node* node, StringIndexOfIncludesVariant variant) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -5696,7 +5828,7 @@ Reduction JSCallReducer::ReduceStringPrototypeSubstring(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
   if (n.ArgumentCount() < 1) return NoChange();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -5710,7 +5842,7 @@ Reduction JSCallReducer::ReduceStringPrototypeSlice(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
   if (n.ArgumentCount() < 1) return NoChange();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -5724,7 +5856,7 @@ Reduction JSCallReducer::ReduceStringPrototypeSubstr(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
   if (n.ArgumentCount() < 1) return NoChange();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -5887,7 +6019,11 @@ Reduction JSCallReducer::ReduceReturnReceiver(Node* node) {
 Reduction JSCallReducer::ReduceForInsufficientFeedback(
     Node* node, DeoptimizeReason reason) {
   DCHECK(node->opcode() == IrOpcode::kJSCall ||
-         node->opcode() == IrOpcode::kJSConstruct);
+         node->opcode() == IrOpcode::kJSCallWithSpread ||
+         node->opcode() == IrOpcode::kJSCallWithArrayLike ||
+         node->opcode() == IrOpcode::kJSConstruct ||
+         node->opcode() == IrOpcode::kJSConstructWithSpread ||
+         node->opcode() == IrOpcode::kJSConstructWithArrayLike);
   if (!(flags() & kBailoutOnUninitialized)) return NoChange();
 
   Node* effect = NodeProperties::GetEffectInput(node);
@@ -5958,7 +6094,7 @@ Reduction JSCallReducer::ReduceArrayPrototypeAt(Node* node) {
 
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -6005,7 +6141,7 @@ Reduction JSCallReducer::ReduceArrayPrototypeAt(Node* node) {
 Reduction JSCallReducer::ReduceArrayPrototypePush(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -6039,7 +6175,7 @@ Reduction JSCallReducer::ReduceArrayPrototypePush(Node* node) {
 Reduction JSCallReducer::ReduceArrayPrototypePop(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -6184,7 +6320,7 @@ Reduction JSCallReducer::ReduceArrayPrototypePop(Node* node) {
 Reduction JSCallReducer::ReduceArrayPrototypeShift(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -6361,8 +6497,8 @@ Reduction JSCallReducer::ReduceArrayPrototypeShift(Node* node) {
       {
         // Call the generic C++ implementation.
         const Builtin builtin = Builtin::kArrayShift;
-        auto call_descriptor = Linkage::GetCEntryStubCallDescriptor(
-            graph()->zone(), 1, BuiltinArguments::kNumExtraArgsWithReceiver,
+        auto call_descriptor = Linkage::GetCPPBuiltinCallDescriptor(
+            graph()->zone(), BuiltinArguments::kNumExtraArgsWithReceiver,
             Builtins::name(builtin), node->op()->properties(),
             CallDescriptor::kNeedsFrameState);
         const bool has_builtin_exit_frame = true;
@@ -6376,12 +6512,32 @@ Reduction JSCallReducer::ReduceArrayPrototypeShift(Node* node) {
         static_assert(BuiltinArguments::kNewTargetIndex == 0);
         static_assert(BuiltinArguments::kTargetIndex == 1);
         static_assert(BuiltinArguments::kArgcIndex == 2);
-        static_assert(BuiltinArguments::kPaddingIndex == 3);
-        if_false1 = efalse1 = vfalse1 =
-            graph()->NewNode(common()->Call(call_descriptor), stub_code,
-                             receiver, jsgraph()->PaddingConstant(), argc,
-                             target, jsgraph()->UndefinedConstant(), entry,
-                             argc, context, frame_state, efalse1, if_false1);
+#if V8_TARGET_ARCH_ARM64
+        // Make sure we insert required stack-alignment padding between extra
+        // arguments and JS arguments.
+        static_assert(BuiltinArguments::kNumExtraArgs == 4);
+        static_assert(BuiltinArguments::kOptionalPaddingIndex == 3);
+        // Just use an existing value as padding in order to avoid generation
+        // of unnecessary instructions.
+        Node* padding_value = argc;
+#else
+        // No padding required.
+        static_assert(BuiltinArguments::kNumExtraArgs == 3);
+#endif  // V8_TARGET_ARCH_ARM64
+
+        if_false1 = efalse1 = vfalse1 = graph()->NewNode(
+            common()->Call(call_descriptor), stub_code,
+            // Extra CPP builtin arguments.
+            jsgraph()->UndefinedConstant(),  // new.target
+            target,                          // target
+            argc,                            // argc
+#if V8_TARGET_ARCH_ARM64
+            padding_value,
+#endif
+            // JS arguments.
+            receiver,
+            // CEntry arguments.
+            entry, argc, context, frame_state, efalse1, if_false1);
       }
 
       if_false0 = graph()->NewNode(common()->Merge(2), if_true1, if_false1);
@@ -6432,7 +6588,7 @@ Reduction JSCallReducer::ReduceArrayPrototypeSlice(Node* node) {
   if (!v8_flags.turbo_inline_array_builtins) return NoChange();
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -6561,7 +6717,7 @@ Reduction JSCallReducer::ReduceArrayIterator(Node* node,
     // Make sure we deopt when the JSArrayBuffer is detached.
     if (!dependencies()->DependOnArrayBufferDetachingProtector()) {
       CallParameters const& p = CallParametersOf(node->op());
-      if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+      if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
         return NoChange();
       }
 
@@ -6608,7 +6764,7 @@ Reduction JSCallReducer::ReduceArrayIteratorPrototypeNext(Node* node) {
   Effect effect = n.effect();
   Control control = n.control();
 
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -6681,9 +6837,7 @@ Reduction JSCallReducer::ReduceArrayIteratorPrototypeNext(Node* node) {
   // {iterated_object} is either a JSArray or a JSTypedArray. For the
   // latter case we even know that it's a Smi in UnsignedSmall range.
   FieldAccess index_access = AccessBuilder::ForJSArrayIteratorNextIndex();
-  if (IsTypedArrayElementsKind(elements_kind)) {
-    index_access.type = TypeCache::Get()->kJSTypedArrayLengthType;
-  } else {
+  if (!IsTypedArrayElementsKind(elements_kind)) {
     index_access.type = TypeCache::Get()->kJSArrayLengthType;
   }
   Node* index = effect = graph()->NewNode(simplified()->LoadField(index_access),
@@ -6702,12 +6856,23 @@ Reduction JSCallReducer::ReduceArrayIteratorPrototypeNext(Node* node) {
   // Load the length of the {iterated_object}. Due to the map checks we
   // already know something about the length here, which we can leverage
   // to generate Word32 operations below without additional checking.
-  FieldAccess length_access =
-      IsTypedArrayElementsKind(elements_kind)
-          ? AccessBuilder::ForJSTypedArrayLength()
-          : AccessBuilder::ForJSArrayLength(elements_kind);
-  Node* length = effect = graph()->NewNode(
-      simplified()->LoadField(length_access), iterated_object, effect, control);
+  Node* length;
+  if (IsTypedArrayElementsKind(elements_kind)) {
+    Node* byte_length = effect = graph()->NewNode(
+        simplified()->LoadField(AccessBuilder::ForJSTypedArrayByteLength()),
+        iterated_object, effect, control);
+    Node* byte_length_shifted = graph()->NewNode(
+        jsgraph()->machine()->WordShr(), byte_length,
+        jsgraph()->UintPtrConstant(ElementsKindToShiftSize(elements_kind)));
+    length = graph()->NewNode(
+        common()->ExitMachineGraph(MachineType::PointerRepresentation(),
+                                   TypeCache::Get()->kJSTypedArrayLengthType),
+        byte_length_shifted);
+  } else {
+    length = effect = graph()->NewNode(
+        simplified()->LoadField(AccessBuilder::ForJSArrayLength(elements_kind)),
+        iterated_object, effect, control);
+  }
 
   // Check whether {index} is within the valid range for the {iterated_object}.
   Node* check = graph()->NewNode(simplified()->NumberLessThan(), index, length);
@@ -6723,8 +6888,11 @@ Reduction JSCallReducer::ReduceArrayIteratorPrototypeNext(Node* node) {
     // an exploitation technique that abuses typer mismatches.
     if (v8_flags.turbo_typer_hardening) {
       index = etrue = graph()->NewNode(
-          simplified()->CheckBounds(p.feedback(),
-                                    CheckBoundsFlag::kAbortOnOutOfBounds),
+          simplified()->CheckBounds(
+              p.feedback(), CheckBoundsFlag::kAbortOnOutOfBounds |
+                                (IsTypedArrayElementsKind(elements_kind)
+                                     ? CheckBoundsFlag::kAllow64BitBounds
+                                     : CheckBoundsFlag(0))),
           index, length, etrue, if_true);
     }
 
@@ -6805,21 +6973,15 @@ Reduction JSCallReducer::ReduceArrayIteratorPrototypeNext(Node* node) {
     done_false = jsgraph()->TrueConstant();
     value_false = jsgraph()->UndefinedConstant();
 
-    if (!IsTypedArrayElementsKind(elements_kind)) {
-      // Mark the {iterator} as exhausted by setting the [[NextIndex]] to a
-      // value that will never pass the length check again (aka the maximum
-      // value possible for the specific iterated object). Note that this is
-      // different from what the specification says, which is changing the
-      // [[IteratedObject]] field to undefined, but that makes it difficult
-      // to eliminate the map checks and "length" accesses in for..of loops.
-      //
-      // This is not necessary for JSTypedArray's, since the length of those
-      // cannot change later and so if we were ever out of bounds for them
-      // we will stay out-of-bounds forever.
-      Node* end_index = jsgraph()->ConstantNoHole(index_access.type.Max());
-      efalse = graph()->NewNode(simplified()->StoreField(index_access),
-                                iterator, end_index, efalse, if_false);
-    }
+    // Mark the {iterator} as exhausted by setting the [[NextIndex]] to a
+    // value that will never pass the length check again (aka the maximum
+    // value possible for the specific iterated object). Note that this is
+    // different from what the specification says, which is changing the
+    // [[IteratedObject]] field to undefined, but that makes it difficult
+    // to eliminate the map checks and "length" accesses in for..of loops.
+    Node* end_index = jsgraph()->ConstantNoHole(index_access.type.Max());
+    efalse = graph()->NewNode(simplified()->StoreField(index_access), iterator,
+                              end_index, efalse, if_false);
   }
 
   control = graph()->NewNode(common()->Merge(2), if_true, if_false);
@@ -6842,12 +7004,14 @@ Reduction JSCallReducer::ReduceArrayIteratorPrototypeNext(Node* node) {
 Reduction JSCallReducer::ReduceStringPrototypeStringCharCodeAt(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation &&
+      p.speculation_mode() !=
+          SpeculationMode::kDisallowBoundsCheckSpeculation) {
     return NoChange();
   }
 
   JSCallReducerAssembler a(this, node);
-  Node* subgraph = a.ReduceStringPrototypeCharCodeAt();
+  Node* subgraph = a.ReduceStringPrototypeCharCodeAt(p.speculation_mode());
   return ReplaceWithSubgraph(&a, subgraph);
 }
 
@@ -6855,7 +7019,7 @@ Reduction JSCallReducer::ReduceStringPrototypeStringCharCodeAt(Node* node) {
 Reduction JSCallReducer::ReduceStringPrototypeStringCodePointAt(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -6872,6 +7036,7 @@ Reduction JSCallReducer::ReduceStringPrototypeStringCodePointAt(Node* node) {
   Node* receiver_length =
       graph()->NewNode(simplified()->StringLength(), receiver);
 
+  // TODO(olivf): Support SpeculationMode::kOutOfBands.
   // Check that the {index} is within range.
   index = effect = graph()->NewNode(simplified()->CheckBounds(p.feedback()),
                                     index, receiver_length, effect, control);
@@ -6889,7 +7054,7 @@ Reduction JSCallReducer::ReduceStringPrototypeStringCodePointAt(Node* node) {
 Reduction JSCallReducer::ReduceStringPrototypeStartsWith(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -6929,7 +7094,7 @@ Reduction JSCallReducer::ReduceStringPrototypeStartsWith(Node* node) {
 Reduction JSCallReducer::ReduceStringPrototypeEndsWith(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -6968,7 +7133,9 @@ Reduction JSCallReducer::ReduceStringPrototypeEndsWith(Node* node) {
 Reduction JSCallReducer::ReduceStringPrototypeCharAt(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation &&
+      p.speculation_mode() !=
+          SpeculationMode::kDisallowBoundsCheckSpeculation) {
     return NoChange();
   }
 
@@ -6998,7 +7165,7 @@ Reduction JSCallReducer::ReduceStringPrototypeCharAt(Node* node) {
   }
 
   JSCallReducerAssembler a(this, node);
-  Node* subgraph = a.ReduceStringPrototypeCharAt();
+  Node* subgraph = a.ReduceStringPrototypeCharAt(p.speculation_mode());
   return ReplaceWithSubgraph(&a, subgraph);
 }
 
@@ -7007,43 +7174,39 @@ Reduction JSCallReducer::ReduceStringPrototypeCharAt(Node* node) {
 Reduction JSCallReducer::ReduceStringPrototypeToLowerCaseIntl(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   Effect effect = n.effect();
   Control control = n.control();
+  FrameState frame_state = n.frame_state();
 
   Node* receiver = effect = graph()->NewNode(
       simplified()->CheckString(p.feedback()), n.receiver(), effect, control);
-
-  NodeProperties::ReplaceEffectInput(node, effect);
-  RelaxEffectsAndControls(node);
-  node->ReplaceInput(0, receiver);
-  node->TrimInputCount(1);
-  NodeProperties::ChangeOp(node, simplified()->StringToLowerCaseIntl());
-  NodeProperties::SetType(node, Type::String());
-  return Changed(node);
+  Node* value = effect = control =
+      graph()->NewNode(simplified()->StringToLowerCaseIntl(), receiver,
+                       frame_state, n.context(), effect, control);
+  ReplaceWithValue(node, value, effect, control);
+  return Replace(value);
 }
 
 Reduction JSCallReducer::ReduceStringPrototypeToUpperCaseIntl(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   Effect effect = n.effect();
   Control control = n.control();
+  FrameState frame_state = n.frame_state();
 
   Node* receiver = effect = graph()->NewNode(
       simplified()->CheckString(p.feedback()), n.receiver(), effect, control);
-
-  NodeProperties::ReplaceEffectInput(node, effect);
-  RelaxEffectsAndControls(node);
-  node->ReplaceInput(0, receiver);
-  node->TrimInputCount(1);
-  NodeProperties::ChangeOp(node, simplified()->StringToUpperCaseIntl());
-  NodeProperties::SetType(node, Type::String());
-  return Changed(node);
+  Node* value = effect = control =
+      graph()->NewNode(simplified()->StringToUpperCaseIntl(), receiver,
+                       frame_state, n.context(), effect, control);
+  ReplaceWithValue(node, value, effect, control);
+  return Replace(value);
 }
 
 #endif  // V8_INTL_SUPPORT
@@ -7052,7 +7215,7 @@ Reduction JSCallReducer::ReduceStringPrototypeToUpperCaseIntl(Node* node) {
 Reduction JSCallReducer::ReduceStringFromCharCode(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   if (n.ArgumentCount() == 1) {
@@ -7077,7 +7240,7 @@ Reduction JSCallReducer::ReduceStringFromCharCode(Node* node) {
 Reduction JSCallReducer::ReduceStringFromCodePoint(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   if (n.ArgumentCount() != 1) return NoChange();
@@ -7100,7 +7263,7 @@ Reduction JSCallReducer::ReduceStringFromCodePoint(Node* node) {
 Reduction JSCallReducer::ReduceStringPrototypeIterator(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   Node* effect = NodeProperties::GetEffectInput(node);
@@ -7254,7 +7417,7 @@ Reduction JSCallReducer::ReduceStringPrototypeConcat(Node* node) {
   CallParameters const& p = n.Parameters();
   const int parameter_count = n.ArgumentCount();
   if (parameter_count > 1) return NoChange();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -7403,7 +7566,7 @@ bool JSCallReducer::DoPromiseChecks(MapInference* inference) {
 Reduction JSCallReducer::ReducePromisePrototypeCatch(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   int arity = p.arity_without_implicit_args();
@@ -7461,7 +7624,7 @@ Reduction JSCallReducer::ReducePromisePrototypeFinally(Node* node) {
   Node* on_finally = n.ArgumentOrUndefined(0, jsgraph());
   Effect effect = n.effect();
   Control control = n.control();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -7573,7 +7736,7 @@ Reduction JSCallReducer::ReducePromisePrototypeFinally(Node* node) {
 Reduction JSCallReducer::ReducePromisePrototypeThen(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -7807,7 +7970,7 @@ Reduction JSCallReducer::ReduceArrayBufferViewByteLengthAccessor(
   }
 
   const CallParameters& p = CallParametersOf(node->op());
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return inference.NoChange();
   }
   DCHECK(p.feedback().IsValid());
@@ -7898,9 +8061,9 @@ Reduction JSCallReducer::ReduceTypedArrayPrototypeLength(Node* node) {
     Reduction unused_reduction = inference.NoChange();
     USE(unused_reduction);
     // Call default implementation for non-rab/gsab TAs.
-    return ReduceArrayBufferViewAccessor(node, JS_TYPED_ARRAY_TYPE,
-                                         AccessBuilder::ForJSTypedArrayLength(),
-                                         Builtin::kTypedArrayPrototypeLength);
+    return ReduceArrayBufferViewAccessor(
+        node, JS_TYPED_ARRAY_TYPE, AccessBuilder::ForJSTypedArrayByteLength(),
+        Builtin::kTypedArrayPrototypeLength);
   }
 
   if (!inference.RelyOnMapsViaStability(dependencies())) {
@@ -8135,7 +8298,7 @@ Reduction JSCallReducer::ReduceCollectionIteratorPrototypeNext(
     InstanceType collection_iterator_instance_type_last) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -8489,6 +8652,16 @@ Reduction JSCallReducer::ReduceArrayBufferViewAccessor(
                                       BranchHint::kFalse);
   }
 
+  if (builtin == Builtin::kTypedArrayPrototypeLength) {
+    TNode<UintPtrT> byte_length = value;
+    // Divide the byte length by element size.
+    TNode<Map> map = a.LoadMap(TNode<HeapObject>::UncheckedCast(receiver));
+    TNode<Uint32T> elements_kind = a.LoadElementsKind(map);
+    TNode<Uint32T> shift = a.LookupByteShiftForElementsKind(elements_kind);
+    value = TNode<UintPtrT>::UncheckedCast(
+        a.WordShr(byte_length, a.ChangeUint32ToUintPtr(shift)));
+  }
+
   TNode<Number> result =
       a.ExitMachineGraph<Number>(value, MachineType::PointerRepresentation(),
                                  TypeCache::Get()->kJSTypedArrayLengthType);
@@ -8519,7 +8692,7 @@ Reduction JSCallReducer::ReduceDataViewAccess(Node* node, DataViewAccess access,
   Node* is_little_endian =
       n.ArgumentOr(endian_index, jsgraph()->FalseConstant());
 
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -8542,8 +8715,10 @@ Reduction JSCallReducer::ReduceDataViewAccess(Node* node, DataViewAccess access,
 
     // Check that the {offset} is within range of the {length}.
     Node* byte_length = jsgraph()->ConstantNoHole(length - (element_size - 1));
-    offset = effect = graph()->NewNode(simplified()->CheckBounds(p.feedback()),
-                                       offset, byte_length, effect, control);
+    offset = effect =
+        graph()->NewNode(simplified()->CheckBounds(
+                             p.feedback(), CheckBoundsFlag::kAllow64BitBounds),
+                         offset, byte_length, effect, control);
   } else {
     // We only deal with DataViews here that have Smi [[ByteLength]]s.
     Node* byte_length = effect =
@@ -8564,8 +8739,10 @@ Reduction JSCallReducer::ReduceDataViewAccess(Node* node, DataViewAccess access,
     }
 
     // Check that the {offset} is within range of the {byte_length}.
-    offset = effect = graph()->NewNode(simplified()->CheckBounds(p.feedback()),
-                                       offset, byte_length, effect, control);
+    offset = effect =
+        graph()->NewNode(simplified()->CheckBounds(
+                             p.feedback(), CheckBoundsFlag::kAllow64BitBounds),
+                         offset, byte_length, effect, control);
   }
 
   // Coerce {is_little_endian} to boolean.
@@ -8608,7 +8785,9 @@ Reduction JSCallReducer::ReduceDataViewAccess(Node* node, DataViewAccess access,
         simplified()->NumberEqual(),
         graph()->NewNode(
             simplified()->NumberBitwiseAnd(), buffer_bit_field,
-            jsgraph()->ConstantNoHole(JSArrayBuffer::WasDetachedBit::kMask)),
+            jsgraph()->ConstantNoHole(JSArrayBuffer::NotValidMask(
+                access == DataViewAccess::kSet ? TypedArrayAccessMode::kWrite
+                                               : TypedArrayAccessMode::kRead))),
         jsgraph()->ZeroConstant());
     effect = graph()->NewNode(
         simplified()->CheckIf(DeoptimizeReason::kArrayBufferWasDetached,
@@ -8649,7 +8828,7 @@ Reduction JSCallReducer::ReduceDataViewAccess(Node* node, DataViewAccess access,
 Reduction JSCallReducer::ReduceGlobalIsFinite(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   if (n.ArgumentCount() < 1) {
@@ -8675,7 +8854,7 @@ Reduction JSCallReducer::ReduceGlobalIsFinite(Node* node) {
 Reduction JSCallReducer::ReduceGlobalIsNaN(Node* node) {
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   if (n.ArgumentCount() < 1) {
@@ -8824,7 +9003,7 @@ Reduction JSCallReducer::ReduceRegExpPrototypeTest(Node* node) {
   if (v8_flags.force_slow_path) return NoChange();
   if (n.ArgumentCount() < 1) return NoChange();
 
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
 
@@ -8966,7 +9145,7 @@ Reduction JSCallReducer::ReduceBigIntAsN(Node* node, Builtin builtin) {
 
   JSCallNode n(node);
   CallParameters const& p = n.Parameters();
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return NoChange();
   }
   if (n.ArgumentCount() < 2) {
@@ -9004,7 +9183,7 @@ std::optional<Reduction> JSCallReducer::TryReduceJSCallMathMinMaxWithArrayLike(
   Effect effect = n.effect();
   Control control = n.control();
 
-  if (p.speculation_mode() == SpeculationMode::kDisallowSpeculation) {
+  if (p.speculation_mode() != SpeculationMode::kAllowSpeculation) {
     return std::nullopt;
   }
 

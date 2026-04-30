@@ -51,6 +51,11 @@ enum class ImportCallKind : uint8_t {
   kUseCallBuiltin
 };
 
+enum PrecreateExternal : bool {
+  kOnlyInternalFunction = false,
+  kPrecreateExternal = true,
+};
+
 constexpr ImportCallKind kDefaultImportCallKind = ImportCallKind::kJSFunction;
 
 // Resolves which import call wrapper is required for the given JS callable.
@@ -60,12 +65,10 @@ constexpr ImportCallKind kDefaultImportCallKind = ImportCallKind::kJSFunction;
 // is why the ultimate target is provided as well.
 class ResolvedWasmImport {
  public:
-  // TODO(clemensb): We should only need one of {sig} and {expected_sig_id};
-  // currently we can't efficiently translate between them.
   V8_EXPORT_PRIVATE ResolvedWasmImport(
       DirectHandle<WasmTrustedInstanceData> trusted_instance_data,
       int func_index, DirectHandle<JSReceiver> callable,
-      const wasm::CanonicalSig* sig, CanonicalTypeIndex expected_sig_id,
+      wasm::CanonicalValueType expected_type, const wasm::CanonicalSig* sig,
       WellKnownImport preknown_import);
 
   ImportCallKind kind() const { return kind_; }
@@ -85,9 +88,8 @@ class ResolvedWasmImport {
 
   ImportCallKind ComputeKind(
       DirectHandle<WasmTrustedInstanceData> trusted_instance_data,
-      int func_index, const wasm::CanonicalSig* expected_sig,
-      CanonicalTypeIndex expected_canonical_type_index,
-      WellKnownImport preknown_import);
+      int func_index, wasm::CanonicalValueType expected_type,
+      const wasm::CanonicalSig* expected_sig, WellKnownImport preknown_import);
 
   ImportCallKind kind_;
   WellKnownImport well_known_status_{WellKnownImport::kGeneric};
@@ -106,11 +108,15 @@ MaybeDirectHandle<WasmInstanceObject> InstantiateToInstanceObject(
 // {instance}. If successful, returns the empty {Optional}, otherwise an
 // {Optional} that contains the error message. Exits early if the segment is
 // already initialized.
+// {precreate_external_functions} is a non-binding hint that it would be
+// beneficial for performance to create the corresponding WasmExportedFunctions
+// along with any internal funcrefs.
 std::optional<MessageTemplate> InitializeElementSegment(
-    Zone* zone, Isolate* isolate,
+    Isolate* isolate,
     DirectHandle<WasmTrustedInstanceData> trusted_instance_data,
     DirectHandle<WasmTrustedInstanceData> shared_trusted_instance_data,
-    uint32_t segment_index);
+    uint32_t segment_index,
+    PrecreateExternal precreate_external_functions = kOnlyInternalFunction);
 
 V8_EXPORT_PRIVATE void CreateMapForType(
     Isolate* isolate, const WasmModule* module, ModuleTypeIndex type_index,

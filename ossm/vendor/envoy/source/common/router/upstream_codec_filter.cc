@@ -203,6 +203,13 @@ void UpstreamCodecFilter::CodecBridge::decodeHeaders(Http::ResponseHeaderMapPtr&
 
 // This is response data arriving from the codec. Send it through the filter manager.
 void UpstreamCodecFilter::CodecBridge::decodeData(Buffer::Instance& data, bool end_stream) {
+  // Record the time when the first byte of response body is received.
+  if (!first_body_rx_recorded_) {
+    first_body_rx_recorded_ = true;
+    filter_.upstreamTiming().onFirstUpstreamRxBodyByteReceived(
+        filter_.callbacks_->dispatcher().timeSource());
+  }
+
   maybeEndDecode(end_stream);
   filter_.callbacks_->encodeData(data, end_stream);
 }
@@ -259,14 +266,13 @@ public:
           callbacks.addStreamDecoderFilter(std::make_shared<UpstreamCodecFilter>());
         }) {}
 
-  bool createFilterChain(
-      Http::FilterChainManager& manager,
-      const Http::FilterChainOptions& = Http::EmptyFilterChainOptions{}) const override {
-    manager.applyFilterFactoryCb({"envoy.filters.http.upstream_codec"}, factory_);
+  bool createFilterChain(Http::FilterChainFactoryCallbacks& callbacks) const override {
+    callbacks.setFilterConfigName("envoy.filters.http.upstream_codec");
+    factory_(callbacks);
     return true;
   }
-  bool createUpgradeFilterChain(absl::string_view, const UpgradeMap*, Http::FilterChainManager&,
-                                const Http::FilterChainOptions&) const override {
+  bool createUpgradeFilterChain(absl::string_view, const UpgradeMap*,
+                                Http::FilterChainFactoryCallbacks&) const override {
     // Upgrade filter chains not yet supported for upstream HTTP filters.
     return false;
   }

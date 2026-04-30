@@ -20,7 +20,7 @@ def static_website(
             "pages",
             "theme/.webassets-cache",
             "theme/css/_sass",
-            "theme/css/main.scss"
+            "theme/css/main.scss",
         ],
         generator = "@envoy_toolshed//website/tools/pelican",
         extension = "tar.gz",
@@ -33,8 +33,7 @@ def static_website(
         output_path = "output",
         srcs = None,
         url = "",
-        visibility = ["//visibility:public"],
-):
+        visibility = ["//visibility:public"]):
     name_html = "%s_html" % name
     name_sources = "%s_sources" % name
     name_website = "%s_website" % name
@@ -97,7 +96,7 @@ def static_website(
             TAR_COMMAND=$$(which tar)
         fi
 
-        $$TAR_COMMAND -xf $$SOURCE "$${DECOMPRESS_ARGS}"
+        $$TAR_COMMAND -xf $$SOURCE $${DECOMPRESS_ARGS:+$$DECOMPRESS_ARGS}
 
         while IFS= read -r CMD; do
             $$CMD
@@ -105,7 +104,7 @@ def static_website(
 
         $$GENERATOR "$$CONTENT"
 
-        $$TAR_COMMAND cfh $@ $$EXCLUDES -C "$$OUTPUT" .
+        $$TAR_COMMAND cfh $@ $${EXCLUDES:+$$EXCLUDES} -C "$$OUTPUT" .
         """ % (name_sources, decompressor_args, generator, content_path, output_path, mapping_commands, exclude_args, url),
         outs = [name_website_tarball],
         srcs = extra_srcs,
@@ -138,9 +137,7 @@ def website_theme(
         js = None,
         templates = "@envoy_toolshed//website/theme/templates",
         templates_extra = None,
-        visibility = ["//visibility:public"],
-):
-
+        visibility = ["//visibility:public"]):
     name_home = "home_%s" % name
     sources = [
         css,

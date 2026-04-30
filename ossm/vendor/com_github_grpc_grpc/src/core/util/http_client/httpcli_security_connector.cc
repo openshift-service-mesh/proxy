@@ -77,7 +77,9 @@ class grpc_httpcli_ssl_channel_security_connector final
   tsi_result InitHandshakerFactory(const char* pem_root_certs,
                                    const tsi_ssl_root_certs_store* root_store) {
     tsi_ssl_client_handshaker_options options;
-    options.pem_root_certs = pem_root_certs;
+    if (pem_root_certs != nullptr) {
+      options.root_cert_info = std::make_shared<RootCertInfo>(pem_root_certs);
+    }
     options.root_store = root_store;
     return tsi_create_ssl_client_handshaker_factory_with_options(
         &options, &handshaker_factory_);
@@ -90,7 +92,8 @@ class grpc_httpcli_ssl_channel_security_connector final
     if (handshaker_factory_ != nullptr) {
       tsi_result result = tsi_ssl_client_handshaker_factory_create_handshaker(
           handshaker_factory_, secure_peer_name_, /*network_bio_buf_size=*/0,
-          /*ssl_bio_buf_size=*/0, &handshaker);
+          /*ssl_bio_buf_size=*/0,
+          args.GetOwnedString(GRPC_ARG_TRANSPORT_PROTOCOLS), &handshaker);
       if (result != TSI_OK) {
         LOG(ERROR) << "Handshaker creation failed with error "
                    << tsi_result_to_string(result);

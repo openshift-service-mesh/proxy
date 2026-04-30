@@ -10,14 +10,31 @@ filegroup(
 
 configure_make(
     name = "openssl",
-    lib_source = ":all",
-    configure_in_place = True,
+    args = select({
+        "@envoy//bazel/foreign_cc:parallel_builds_enabled": ["-j"],
+        "//conditions:default": ["-j1"],
+    }),
     configure_command = "Configure",
+    configure_in_place = True,
     configure_options = ["--libdir=lib"],
-    targets = ["build_sw", "install_sw"],
-    args = ["-j"],
+    lib_source = ":all",
     out_lib_dir = "lib",
-    out_shared_libs = ["libssl.so.3", "libcrypto.so.3"],
+    out_shared_libs = [
+        "libssl.so.3",
+        "libcrypto.so.3",
+        "ossl-modules/legacy.so",
+    ],
+    targets = [
+        "build_sw",
+        "install_sw",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "include",
+    srcs = [":openssl"],
+    output_group = "include",
     visibility = ["//visibility:public"],
 )
 
@@ -36,7 +53,18 @@ filegroup(
 )
 
 filegroup(
+    name = "legacy",
+    srcs = [":openssl"],
+    output_group = "legacy.so",
+    visibility = ["//visibility:private"],
+)
+
+filegroup(
     name = "libs",
-    srcs = [":libssl", ":libcrypto"],
+    srcs = [
+        ":legacy",
+        ":libcrypto",
+        ":libssl",
+    ],
     visibility = ["//visibility:public"],
 )

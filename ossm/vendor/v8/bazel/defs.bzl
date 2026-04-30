@@ -6,6 +6,11 @@
 This module contains helper functions to compile V8.
 """
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+
 FlagInfo = provider("The value of an option.",
 fields = ["value"])
 
@@ -120,12 +125,15 @@ def _default_args():
                 "-Wno-invalid-offsetof",
                 "-Wno-dangling-pointer",
                 "-Wno-dangling-reference",
+                "-Wno-unnecessary-virtual-specifier",
                 "-isystem .",
             ],
             "//conditions:default": [],
         }) + select({
             "@v8//bazel/config:is_clang": [
                 "-Wno-invalid-offsetof",
+                # -fconstexpr-steps is clang-only; moved here from is_posix block.
+                "-fconstexpr-steps=2000000",
                 "-Wno-deprecated-this-capture",
                 "-Wno-deprecated-declarations",
                 "-std=c++20",
@@ -144,6 +152,8 @@ def _default_args():
                 "-Wno-return-type",
                 "-Wno-stringop-overflow",
                 "-Wno-deprecated-this-capture",
+                "-Wno-error", # Envoy build should not fail for warnings in dependencies
+                "-Wno-unused-variable",
                 "-flax-vector-conversions", # for GCC builds on ARM
                 # Use GNU dialect, because GCC doesn't allow using
                 # ##__VA_ARGS__ when in standards-conforming mode.
@@ -181,7 +191,7 @@ def _default_args():
                 "Advapi32.lib",
             ],
             "@v8//bazel/config:is_macos": ["-pthread"],
-            "//conditions:default": ["-Wl,--no-as-needed -ldl -latomic -pthread"],
+            "//conditions:default": ["-Wl,--no-as-needed -ldl -pthread"],
         }) + select({
             ":should_add_rdynamic": ["-rdynamic"],
             "//conditions:default": [],
@@ -234,7 +244,7 @@ def v8_binary(
         **kwargs):
     default = _default_args()
     if _should_emit_noicu_and_icu(noicu_srcs, noicu_deps, noicu_defines, icu_srcs, icu_deps, icu_defines):
-        native.cc_binary(
+        cc_binary(
             name = "noicu/" + name,
             srcs = srcs + noicu_srcs,
             deps = deps + noicu_deps + default.deps,
@@ -244,7 +254,7 @@ def v8_binary(
             linkopts = linkopts + default.linkopts,
             **kwargs
         )
-        native.cc_binary(
+        cc_binary(
             name = "icu/" + name,
             srcs = srcs + icu_srcs,
             deps = deps + icu_deps + default.deps,
@@ -255,7 +265,7 @@ def v8_binary(
             **kwargs
         )
     else:
-        native.cc_binary(
+        cc_binary(
             name = name,
             srcs = srcs,
             deps = deps + default.deps,
@@ -283,7 +293,7 @@ def v8_library(
         **kwargs):
     default = _default_args()
     if _should_emit_noicu_and_icu(noicu_srcs, noicu_deps, noicu_defines, icu_srcs, icu_deps, icu_defines):
-        native.cc_library(
+        cc_library(
             name = name + "_noicu",
             srcs = srcs + noicu_srcs,
             deps = deps + noicu_deps + default.deps,
@@ -302,7 +312,7 @@ def v8_library(
             name = "noicu/" + name,
             actual = name + "_noicu",
         )
-        native.cc_library(
+        cc_library(
             name = name + "_icu",
             srcs = srcs + icu_srcs,
             deps = deps + icu_deps + default.deps,
@@ -322,7 +332,7 @@ def v8_library(
             actual = name + "_icu",
         )
     else:
-        native.cc_library(
+        cc_library(
             name = name,
             srcs = srcs,
             deps = deps + default.deps,
@@ -458,7 +468,6 @@ def _v8_target_cpu_transition_impl(settings,
         "armeabi-v7a": "arm32",
         "s390x": "s390x",
         "riscv64": "riscv64",
-        "ppc64": "ppc64le",
         "ppc": "ppc64le",
     }
     v8_target_cpu = mapping[settings["//command_line_option:cpu"]]
@@ -603,6 +612,7 @@ def build_config_content(cpu, icu):
         ("pointer_compression", "true"),
         ("runtime_call_stats", "false"),
         ("sandbox", "false"),
+        ("sandbox_hardware_support", "false"),
         ("shared_ro_heap", "false"),
         ("simd_mips", "false"),
         ("simulator_run", "false"),

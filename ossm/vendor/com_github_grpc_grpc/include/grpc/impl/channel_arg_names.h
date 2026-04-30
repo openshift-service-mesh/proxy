@@ -51,11 +51,13 @@
  * server will close the connection. Int valued, milliseconds. INT_MAX means
  * unlimited. Defaults to INT_MAX. */
 #define GRPC_ARG_MAX_CONNECTION_IDLE_MS "grpc.max_connection_idle_ms"
-/** Maximum time that a channel may exist. Int valued, milliseconds.
- * INT_MAX means unlimited. Defaults to INT_MAX. */
+/** Maximum amount of time in milliseconds that a connection may exist before it
+ * will be gracefully shut down. Refer
+ * https://github.com/grpc/proposal/blob/master/A9-server-side-conn-mgt.md for
+ * more details. Int valued, defaults to INT_MAX (disabled). */
 #define GRPC_ARG_MAX_CONNECTION_AGE_MS "grpc.max_connection_age_ms"
-/** Grace period after the channel reaches its max age. Int valued,
-   milliseconds. INT_MAX means unlimited. Defaults to INT_MAX. */
+/** Grace period in milliseconds after connection reaches its max age for
+ * outstanding RPCs to complete. Int valued, defaults to INT_MAX (disabled). */
 #define GRPC_ARG_MAX_CONNECTION_AGE_GRACE_MS "grpc.max_connection_age_grace_ms"
 /** Timeout after the last RPC finishes on the client channel at which the
  * channel goes back into IDLE state. Int valued, milliseconds. INT_MAX means
@@ -121,10 +123,8 @@
 /** Channel arg to override the http2 :scheme header. String valued. */
 #define GRPC_ARG_HTTP2_SCHEME "grpc.http2_scheme"
 /** How many pings can the client send before needing to send a data/header
-   frame? (0 indicates that an infinite number of pings can be sent without
-   sending a data frame or header frame).
-   If experiment "max_pings_wo_data_throttle" is enabled, instead of pings being
-   completely blocked, they are throttled.
+   frame, without being throttled? (0 indicates that an infinite number of pings
+  can be sent without sending a data frame or header frame).
   * Integer valued. Defaults to 2. */
 #define GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA \
   "grpc.http2.max_pings_without_data"
@@ -168,13 +168,19 @@
 /** Secondary user agent: goes at the end of the user-agent metadata
     sent on each request. A string. */
 #define GRPC_ARG_SECONDARY_USER_AGENT_STRING "grpc.secondary_user_agent"
-/** The minimum time between subsequent connection attempts, in ms. Defaults to
- * 20 seconds. */
+/** The minimum time between subsequent connection attempts, in ms. Refer to
+ * MIN_CONNECT_TIMEOUT from
+ * https://github.com/grpc/grpc/blob/master/doc/connection-backoff.md. Defaults
+ * to 20 seconds. */
 #define GRPC_ARG_MIN_RECONNECT_BACKOFF_MS "grpc.min_reconnect_backoff_ms"
-/** The maximum time between subsequent connection attempts, in ms. Defaults to
- * 120 seconds. */
+/** The maximum time between subsequent connection attempts, in ms. Refer to
+ * MAX_BACKOFF from
+ * https://github.com/grpc/grpc/blob/master/doc/connection-backoff.md. Defaults
+ * to 120 seconds.  */
 #define GRPC_ARG_MAX_RECONNECT_BACKOFF_MS "grpc.max_reconnect_backoff_ms"
-/** The time between the first and second connection attempts, in ms. Defaults
+/** The time between the first and second connection attempts, in ms. Refer to
+ * INITIAL_BACKOFF from
+ * https://github.com/grpc/grpc/blob/master/doc/connection-backoff.md. Defaults
  * to 1 second. */
 #define GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS \
   "grpc.initial_reconnect_backoff_ms"

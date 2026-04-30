@@ -23,10 +23,16 @@ load(
     _capture_clippy_output = "capture_clippy_output",
     _clippy_flag = "clippy_flag",
     _clippy_flags = "clippy_flags",
+    _get_clippy_ready_crate_info = "get_clippy_ready_crate_info",
     _rust_clippy = "rust_clippy",
+    _rust_clippy_action = "rust_clippy_action",
     _rust_clippy_aspect = "rust_clippy_aspect",
 )
 load("//rust/private:common.bzl", _rust_common = "rust_common")
+load(
+    "//rust/private:lints.bzl",
+    _rust_lint_config = "rust_lint_config",
+)
 load(
     "//rust/private:rust.bzl",
     _rust_binary = "rust_binary",
@@ -115,6 +121,12 @@ rust_clippy = _rust_clippy
 capture_clippy_output = _capture_clippy_output
 # See @rules_rust//rust/private:clippy.bzl for a complete description.
 
+rust_clippy_action = struct(
+    action = _rust_clippy_action,
+    get_clippy_ready_crate_info = _get_clippy_ready_crate_info,
+)
+# See @rules_rust//rust/private:clippy.bzl for a complete description.
+
 rustc_output_diagnostics = _rustc_output_diagnostics
 # See @rules_rust//rust/private:rustc.bzl for a complete description.
 
@@ -156,5 +168,8 @@ rustfmt_test = _rustfmt_test
 
 rust_stdlib_filegroup = _rust_stdlib_filegroup
 # See @rules_rust//rust:toolchain.bzl for a complete description.
+
+rust_lint_config = _rust_lint_config
+# See @rules_rust//private:lint.bzl for a complete description.
 
 no_std = _no_std

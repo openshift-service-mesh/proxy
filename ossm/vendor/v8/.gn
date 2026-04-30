@@ -28,11 +28,17 @@ default_args = {
   # Disable js dependencies like the closure compiler.
   enable_js_protobuf = false
 
-  # Disable rust dependencies.
+  # Enable rust dependencies.
   enable_rust = true
 
   # Needed only for std::atomic_ref<T> for large Ts http://crbug.com/402171653
   use_llvm_libatomic = false
+
+  # Use Siso instead of Ninja.
+  use_siso = true
+
+  # V8 should stay in C++20 for now.
+  use_cxx23 = false
 }
 
 # These are the list of GN files that run exec_script. This whitelist exists

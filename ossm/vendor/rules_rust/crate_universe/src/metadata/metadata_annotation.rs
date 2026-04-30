@@ -1,17 +1,17 @@
 //! Collect and store information from Cargo metadata specific to Bazel's needs
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use cargo_metadata::{Node, Package, PackageId};
 use hex::ToHex;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{Commitish, Config, CrateAnnotations, CrateId};
-use crate::metadata::dependency::DependencySet;
-use crate::metadata::TreeResolverMetadata;
+use crate::metadata::dependency::{build_dep_tree, DependencySet};
+use crate::select::Select;
 use crate::splicing::{SourceInfo, WorkspaceMetadata};
 
 pub(crate) type CargoMetadata = cargo_metadata::Metadata;
@@ -47,10 +47,10 @@ pub(crate) struct MetadataAnnotation {
 }
 
 impl MetadataAnnotation {
-    pub(crate) fn new(metadata: CargoMetadata) -> MetadataAnnotation {
-        // UNWRAP: The workspace metadata should be written by a controlled process. This should not return a result
-        let workspace_metadata = find_workspace_metadata(&metadata).unwrap_or_default();
-
+    pub(crate) fn new(
+        metadata: CargoMetadata,
+        workspace_metadata: WorkspaceMetadata,
+    ) -> MetadataAnnotation {
         let resolve = metadata
             .resolve
             .as_ref()
@@ -68,17 +68,15 @@ impl MetadataAnnotation {
             .map(|node| node.id.clone())
             .collect();
 
+        let dep_tree = build_dep_tree(&workspace_metadata.tree_metadata);
+
         let crates = resolve
             .nodes
-            .iter()
+            .into_iter()
             .map(|node| {
                 (
                     node.id.clone(),
-                    Self::annotate_crate(
-                        node.clone(),
-                        &metadata,
-                        &workspace_metadata.tree_metadata,
-                    ),
+                    Self::annotate_crate(node, &metadata, &dep_tree),
                 )
             })
             .collect();
@@ -101,10 +99,12 @@ impl MetadataAnnotation {
     fn annotate_crate(
         node: Node,
         metadata: &CargoMetadata,
-        resolver_data: &TreeResolverMetadata,
+        dep_tree: &BTreeMap<CrateId, Select<BTreeSet<CrateId>>>,
     ) -> CrateAnnotation {
         // Gather all dependencies
-        let deps = DependencySet::new_for_node(&node, metadata, resolver_data);
+        let tree_data = dep_tree.get(&CrateId::from(&metadata[&node.id]));
+
+        let deps = DependencySet::new_for_node(&node, metadata, tree_data);
 
         CrateAnnotation { node, deps }
     }
@@ -164,6 +164,7 @@ pub(crate) enum SourceAnnotation {
         patches: Option<BTreeSet<String>>,
     },
     Path {
+        /// Local path to crate's source, relative to Bazel workspace root.
         path: Utf8PathBuf,
     },
 }
@@ -181,11 +182,27 @@ pub(crate) struct LockfileAnnotation {
 
 impl LockfileAnnotation {
     pub(crate) fn new(
+        lockfile_path: &Option<PathBuf>,
         lockfile: CargoLockfile,
         metadata: &CargoMetadata,
+        workspace_metadata: &WorkspaceMetadata,
         nonhermetic_root_bazel_workspace_dir: &Utf8Path,
     ) -> Result<Self> {
-        let workspace_metadata = find_workspace_metadata(metadata).unwrap_or_default();
+        let workspace_members: HashSet<&PackageId> = metadata.workspace_members.iter().collect();
+
+        // Determines whether or not a package is a workspace member. This follows
+        // the Cargo definition of a workspace member with one exception where
+        // "extra workspace members" are *not* treated as workspace members
+        let is_workspace_member = |id: &PackageId| -> bool {
+            if workspace_members.contains(id) {
+                let pkg = &metadata[id];
+                !workspace_metadata
+                    .sources
+                    .contains_key(&CrateId::new(pkg.name.clone(), pkg.version.clone()))
+            } else {
+                false
+            }
+        };
 
         let nodes: Vec<&Node> = metadata
             .resolve
@@ -193,7 +210,7 @@ impl LockfileAnnotation {
             .expect("Metadata is expected to have a resolve graph")
             .nodes
             .iter()
-            .filter(|node| !is_workspace_member(&node.id, metadata))
+            .filter(|node| !is_workspace_member(&node.id))
             .collect();
 
         // Produce source annotations for each crate in the resolve graph
@@ -205,8 +222,9 @@ impl LockfileAnnotation {
                     Self::collect_source_annotations(
                         node,
                         metadata,
+                        lockfile_path,
                         &lockfile,
-                        &workspace_metadata,
+                        workspace_metadata,
                         nonhermetic_root_bazel_workspace_dir,
                     )?,
                 ))
@@ -225,6 +243,7 @@ impl LockfileAnnotation {
     fn collect_source_annotations(
         node: &Node,
         metadata: &CargoMetadata,
+        lockfile_path: &Option<PathBuf>,
         lockfile: &CargoLockfile,
         workspace_metadata: &WorkspaceMetadata,
         nonhermetic_root_bazel_workspace_dir: &Utf8Path,
@@ -265,14 +284,36 @@ impl LockfileAnnotation {
                                 .strip_prefix(&metadata.workspace_root)
                             {
                                 Ok(suffix) => {
-                                    // Replace path within our temporary cargo workspace we ran `cargo metadata`` in with path within the actual Bazel workspace.
+                                    // Replace path within our temporary cargo workspace we ran `cargo metadata` in with path within the actual Bazel workspace.
                                     // This replacement allows in-repo patches sections to work as intended using local_crate_mirror.
-                                    let mut new_path =
-                                        nonhermetic_root_bazel_workspace_dir.to_owned();
-                                    if let Some(prefix) =
-                                        workspace_metadata.workspace_prefix.as_ref()
-                                    {
-                                        new_path.push(prefix);
+                                    let mut new_path = Utf8PathBuf::new();
+                                    if let Some(path) = lockfile_path {
+                                        // If a lockfile path is provided, figure out the path of
+                                        // its parent directory (relative to Bazel workspace root),
+                                        // since `suffix` is relative to it in the actual Bazel
+                                        // workspace.
+                                        let p = Utf8Path::from_path(
+                                            path.parent()
+                                                .context("unexpected empty lockfile path")?,
+                                        )
+                                        .context("unexpected non-Unicode lockfile path")?;
+                                        if p.starts_with(nonhermetic_root_bazel_workspace_dir) {
+                                            // If path in lockfile is under Bazel root, strip Bazel
+                                            // root to get the actual path.
+                                            let relative_lockfile_path = p.strip_prefix(nonhermetic_root_bazel_workspace_dir)
+                                                .context("unexpected lockfile path not under root Bazel workspace")?;
+                                            new_path.push(relative_lockfile_path);
+                                        } else {
+                                            // If path in lockfile is not under Bazel root, we are
+                                            // likely in a temporary directory, so rebase to Bazel
+                                            // root.
+                                            new_path.push(nonhermetic_root_bazel_workspace_dir);
+                                            if let Some(prefix) =
+                                                workspace_metadata.workspace_prefix.as_ref()
+                                            {
+                                                new_path.push(prefix);
+                                            }
+                                        }
                                     }
                                     new_path.push(suffix);
                                     new_path
@@ -422,18 +463,24 @@ pub(crate) struct Annotations {
 impl Annotations {
     pub(crate) fn new(
         cargo_metadata: CargoMetadata,
+        cargo_lockfile_path: &Option<PathBuf>,
         cargo_lockfile: CargoLockfile,
         config: Config,
         nonhermetic_root_bazel_workspace_dir: &Utf8Path,
     ) -> Result<Self> {
+        // UNWRAP: The workspace metadata should be written by a controlled process. This should not return a result
+        let workspace_metadata = find_workspace_metadata(&cargo_metadata).unwrap_or_default();
+
         let lockfile_annotation = LockfileAnnotation::new(
+            cargo_lockfile_path,
             cargo_lockfile,
             &cargo_metadata,
+            &workspace_metadata,
             nonhermetic_root_bazel_workspace_dir,
         )?;
 
         // Annotate the cargo metadata
-        let metadata_annotation = MetadataAnnotation::new(cargo_metadata);
+        let metadata_annotation = MetadataAnnotation::new(cargo_metadata, workspace_metadata);
 
         let mut unused_extra_annotations = config.annotations.clone();
 
@@ -494,24 +541,6 @@ fn find_workspace_metadata(cargo_metadata: &CargoMetadata) -> Option<WorkspaceMe
     WorkspaceMetadata::try_from(cargo_metadata.workspace_metadata.clone()).ok()
 }
 
-/// Determines whether or not a package is a workspace member. This follows
-/// the Cargo definition of a workspace memeber with one exception where
-/// "extra workspace members" are *not* treated as workspace members
-fn is_workspace_member(id: &PackageId, cargo_metadata: &CargoMetadata) -> bool {
-    if cargo_metadata.workspace_members.contains(id) {
-        if let Some(data) = find_workspace_metadata(cargo_metadata) {
-            let pkg = &cargo_metadata[id];
-            let crate_id = CrateId::new(pkg.name.clone(), pkg.version.clone());
-
-            !data.sources.contains_key(&crate_id)
-        } else {
-            true
-        }
-    } else {
-        false
-    }
-}
-
 /// Match a [cargo_metadata::Package] to a [cargo_lock::Package].
 fn cargo_meta_pkg_to_locked_pkg<'a>(
     pkg: &Package,
@@ -530,7 +559,7 @@ mod test {
     use serde_json::json;
 
     use crate::config::CrateNameAndVersionReq;
-    use crate::metadata::CargoTreeEntry;
+    use crate::metadata::{CargoTreeEntry, TreeResolverMetadata};
     use crate::select::Select;
     use crate::test::*;
 
@@ -539,12 +568,14 @@ mod test {
         let pkg = mock_cargo_metadata_package();
         let lock_pkg = mock_cargo_lock_package();
 
-        assert!(cargo_meta_pkg_to_locked_pkg(&pkg, &vec![lock_pkg]).is_some())
+        assert!(cargo_meta_pkg_to_locked_pkg(&pkg, &[lock_pkg]).is_some())
     }
 
     #[test]
     fn annotate_metadata_with_aliases() {
-        let annotations = MetadataAnnotation::new(test::metadata::alias());
+        let metadata = test::metadata::alias();
+        let workspace_metadata = find_workspace_metadata(&metadata).unwrap_or_default();
+        let annotations = MetadataAnnotation::new(metadata, workspace_metadata);
         let log_crates: BTreeMap<&PackageId, &CrateAnnotation> = annotations
             .crates
             .iter()
@@ -559,9 +590,12 @@ mod test {
 
     #[test]
     fn annotate_lockfile_with_aliases() {
+        let metadata = test::metadata::alias();
         LockfileAnnotation::new(
+            &None,
             test::lockfile::alias(),
-            &test::metadata::alias(),
+            &metadata,
+            &find_workspace_metadata(&metadata).unwrap_or_default(),
             Utf8Path::new("/tmp/bazelworkspace"),
         )
         .unwrap();
@@ -569,14 +603,19 @@ mod test {
 
     #[test]
     fn annotate_metadata_with_build_scripts() {
-        MetadataAnnotation::new(test::metadata::build_scripts());
+        let metadata = test::metadata::build_scripts();
+        let workspace_metadata = find_workspace_metadata(&metadata).unwrap_or_default();
+        MetadataAnnotation::new(metadata, workspace_metadata);
     }
 
     #[test]
     fn annotate_lockfile_with_build_scripts() {
+        let metadata = &test::metadata::build_scripts();
         LockfileAnnotation::new(
+            &None,
             test::lockfile::build_scripts(),
-            &test::metadata::build_scripts(),
+            metadata,
+            &find_workspace_metadata(metadata).unwrap_or_default(),
             Utf8Path::new("/tmp/bazelworkspace"),
         )
         .unwrap();
@@ -584,9 +623,12 @@ mod test {
 
     #[test]
     fn annotate_lockfile_with_no_deps() {
+        let metadata = &test::metadata::no_deps();
         LockfileAnnotation::new(
+            &None,
             test::lockfile::no_deps(),
-            &test::metadata::no_deps(),
+            metadata,
+            &find_workspace_metadata(metadata).unwrap_or_default(),
             Utf8Path::new("/tmp/bazelworkspace"),
         )
         .unwrap();
@@ -594,9 +636,12 @@ mod test {
 
     #[test]
     fn detects_strip_prefix_for_git_repo() {
+        let metadata = &test::metadata::git_repos();
         let crates = LockfileAnnotation::new(
+            &None,
             test::lockfile::git_repos(),
-            &test::metadata::git_repos(),
+            metadata,
+            &find_workspace_metadata(metadata).unwrap_or_default(),
             Utf8Path::new("/tmp/bazelworkspace"),
         )
         .unwrap()
@@ -621,9 +666,12 @@ mod test {
 
     #[test]
     fn resolves_commit_from_branches_and_tags() {
+        let metadata = &test::metadata::git_repos();
         let crates = LockfileAnnotation::new(
+            &None,
             test::lockfile::git_repos(),
-            &test::metadata::git_repos(),
+            metadata,
+            &find_workspace_metadata(metadata).unwrap_or_default(),
             Utf8Path::new("/tmp/bazelworkspace"),
         )
         .unwrap()
@@ -646,6 +694,29 @@ mod test {
     }
 
     #[test]
+    fn detects_local_path_patching() {
+        let metadata = &test::metadata::path_patching();
+        let crates = LockfileAnnotation::new(
+            &None,
+            test::lockfile::path_patching(),
+            metadata,
+            &find_workspace_metadata(metadata).unwrap_or_default(),
+            Utf8Path::new("/tmp/bazelworkspace"),
+        )
+        .unwrap()
+        .crates;
+
+        // We can't reliably construct the PackageId because it'll contain local absolute paths,
+        // so compare the entire container, which should only have one element anyways.
+        assert_eq!(
+            crates.into_values().collect::<Vec<_>>(),
+            [SourceAnnotation::Path {
+                path: "child_a".into()
+            }]
+        );
+    }
+
+    #[test]
     fn detect_unused_annotation() {
         // Create a config with some random annotation
         let mut config = Config::default();
@@ -656,6 +727,7 @@ mod test {
 
         let result = Annotations::new(
             test::metadata::no_deps(),
+            &None,
             test::lockfile::no_deps(),
             config,
             Utf8Path::new("/tmp/bazelworkspace"),
@@ -694,6 +766,7 @@ mod test {
         // crate author in package metadata.
         let combined_annotations = Annotations::new(
             test::metadata::has_package_metadata(),
+            &None,
             test::lockfile::has_package_metadata(),
             config,
             Utf8Path::new("/tmp/bazelworkspace"),

@@ -1,4 +1,4 @@
-FROM ubuntu:focal
+FROM ubuntu:jammy
 
 ENV DEBIAN_FRONTEND=noninteractive
 # apt packages
@@ -12,13 +12,13 @@ ENV INSTALL_DEPS \
   wget \
   maven \
   patch \
-  python3 \
-  python3-distutils \
-  python3-setuptools \
+  python3.10 \
+  python3.10-venv \
+  python3-pip \
   apt-transport-https \
   curl \
-  openjdk-8-jdk \
-  gnupg 
+  openjdk-11-jdk \
+  gnupg
 
 RUN apt update \
   && apt install -y -q --no-install-recommends ${INSTALL_DEPS} \
@@ -43,7 +43,7 @@ RUN export PROTOC_REL=protoc-${PROTOC_VER}-linux-$([ $(uname -m) = "aarch64" ] &
 ENV GOROOT /usr/local/go
 ENV GOPATH /go
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
-RUN export GORELEASE=go1.21.1.linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "amd64").tar.gz \
+RUN export GORELEASE=go1.24.1.linux-$([ $(uname -m) = "aarch64" ] && echo "arm64" || echo "amd64").tar.gz \
   && wget -q https://dl.google.com/go/$GORELEASE \
   && tar -C $(dirname $GOROOT) -xzf $GORELEASE \
   && rm $GORELEASE \
@@ -63,14 +63,13 @@ RUN go install github.com/bazelbuild/buildtools/buildozer@${BDR_VER} \
 
 # python must be on PATH for the execution of py_binary bazel targets, but
 # the distribution we installed doesn't provide this alias
-RUN ln -s /usr/bin/python3.8 /usr/bin/python
+RUN ln -s /usr/bin/python3.10 /usr/bin/python
 
 WORKDIR ${GOPATH}/src/github.com/envoyproxy/protoc-gen-validate
 
 # python tooling for linting and uploading to PyPI
 COPY requirements.txt .
-RUN python3.8 -m easy_install pip \
-  && python3.8 -m pip install -r requirements.txt
+RUN python3.10 -m pip install -r requirements.txt
 
 COPY . .
 

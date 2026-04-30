@@ -101,7 +101,8 @@ func (s Fs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error
 	if err != nil {
 		return nil, err
 	}
-	return &File{fd: sshfsFile}, nil
+	err = sshfsFile.Chmod(perm)
+	return &File{fd: sshfsFile}, err
 }
 
 func (s Fs) Remove(name string) error {
@@ -128,6 +129,10 @@ func (s Fs) Lstat(p string) (os.FileInfo, error) {
 
 func (s Fs) Chmod(name string, mode os.FileMode) error {
 	return s.client.Chmod(name, mode)
+}
+
+func (s Fs) Chown(name string, uid, gid int) error {
+	return s.client.Chown(name, uid, gid)
 }
 
 func (s Fs) Chtimes(name string, atime time.Time, mtime time.Time) error {

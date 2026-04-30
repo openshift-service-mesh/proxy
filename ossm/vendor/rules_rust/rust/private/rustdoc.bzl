@@ -15,6 +15,7 @@
 """Rules for generating documentation with `rustdoc` for Bazel built crates"""
 
 load("//rust/private:common.bzl", "rust_common")
+load("//rust/private:providers.bzl", "LintsInfo")
 load("//rust/private:rustc.bzl", "collect_deps", "collect_inputs", "construct_arguments")
 load("//rust/private:utils.bzl", "dedent", "find_cc_toolchain", "find_toolchain")
 
@@ -51,6 +52,7 @@ def rustdoc_compile_action(
         ctx,
         toolchain,
         crate_info,
+        lints_info = None,
         output = None,
         rustdoc_flags = [],
         is_test = False):
@@ -60,6 +62,7 @@ def rustdoc_compile_action(
         ctx (ctx): The rule's context object.
         toolchain (rust_toolchain): The currently configured `rust_toolchain`.
         crate_info (CrateInfo): The provider of the crate passed to a rustdoc rule.
+        lints_info (LintsInfo, optional): The LintsInfo provider of the crate passed to the rustdoc rule.
         output (File, optional): An optional output a `rustdoc` action is intended to produce.
         rustdoc_flags (list, optional): A list of `rustdoc` specific flags.
         is_test (bool, optional): If True, the action will be configured for `rust_doc_test` targets
@@ -75,11 +78,28 @@ def rustdoc_compile_action(
             output.path,
         ] + rustdoc_flags
 
+    # Specify rustc flags for lints, if they were provided.
+    lint_files = []
+    if lints_info:
+        rustdoc_flags = rustdoc_flags + lints_info.rustdoc_lint_flags
+        lint_files = lint_files + lints_info.rustdoc_lint_files
+
+    # Collect HTML customization files
+    html_input_files = []
+    if hasattr(ctx.file, "html_in_header") and ctx.file.html_in_header:
+        html_input_files.append(ctx.file.html_in_header)
+    if hasattr(ctx.file, "html_before_content") and ctx.file.html_before_content:
+        html_input_files.append(ctx.file.html_before_content)
+    if hasattr(ctx.file, "html_after_content") and ctx.file.html_after_content:
+        html_input_files.append(ctx.file.html_after_content)
+    if hasattr(ctx.files, "markdown_css"):
+        html_input_files.extend(ctx.files.markdown_css)
+
     cc_toolchain, feature_configuration = find_cc_toolchain(ctx)
 
     dep_info, build_info, _ = collect_deps(
-        deps = crate_info.deps,
-        proc_macro_deps = crate_info.proc_macro_deps,
+        deps = crate_info.deps.to_list(),
+        proc_macro_deps = crate_info.proc_macro_deps.to_list(),
         aliases = crate_info.aliases,
     )
 
@@ -94,6 +114,7 @@ def rustdoc_compile_action(
         crate_info = crate_info,
         dep_info = dep_info,
         build_info = build_info,
+        lint_files = lint_files,
         # If this is a rustdoc test, we need to depend on rlibs rather than .rmeta.
         force_depend_on_objects = is_test,
         include_link_flags = False,
@@ -131,7 +152,7 @@ def rustdoc_compile_action(
     )
 
     # Because rustdoc tests compile tests outside of the sandbox, the sysroot
-    # must be updated to the `short_path` equivilant as it will now be
+    # must be updated to the `short_path` equivalent as it will now be
     # a part of runfiles.
     if is_test:
         if "SYSROOT" in env:
@@ -139,9 +160,12 @@ def rustdoc_compile_action(
         if "OUT_DIR" in env:
             env.update({"OUT_DIR": "${{pwd}}/{}".format(build_info.out_dir.short_path)})
 
+    # Create the combined inputs including HTML customization files
+    all_inputs = depset([crate_info.output], transitive = [compile_inputs, depset(html_input_files)])
+
     return struct(
         executable = ctx.executable._process_wrapper,
-        inputs = depset([crate_info.output], transitive = [compile_inputs]),
+        inputs = all_inputs,
         env = env,
         arguments = args.all,
         tools = [toolchain.rust_doc],
@@ -186,6 +210,7 @@ def _rust_doc_impl(ctx):
 
     crate = ctx.attr.crate
     crate_info = crate[rust_common.crate_info]
+    lints_info = crate[LintsInfo] if LintsInfo in crate else None
 
     output_dir = ctx.actions.declare_directory("{}.rustdoc".format(ctx.label.name))
 
@@ -195,12 +220,27 @@ def _rust_doc_impl(ctx):
         "{}={}".format(crate_info.name, crate_info.output.path),
     ]
 
+    # Add HTML customization flags if attributes are provided
+    if ctx.attr.html_in_header:
+        rustdoc_flags.extend(["--html-in-header", ctx.file.html_in_header.path])
+
+    if ctx.attr.html_before_content:
+        rustdoc_flags.extend(["--html-before-content", ctx.file.html_before_content.path])
+
+    if ctx.attr.html_after_content:
+        rustdoc_flags.extend(["--html-after-content", ctx.file.html_after_content.path])
+
+    # Add markdown CSS files if provided
+    for css_file in ctx.files.markdown_css:
+        rustdoc_flags.extend(["--markdown-css", css_file.path])
+
     rustdoc_flags.extend(ctx.attr.rustdoc_flags)
 
     action = rustdoc_compile_action(
         ctx = ctx,
         toolchain = find_toolchain(ctx),
         crate_info = crate_info,
+        lints_info = lints_info,
         output = output_dir,
         rustdoc_flags = rustdoc_flags,
     )
@@ -214,6 +254,7 @@ def _rust_doc_impl(ctx):
         env = action.env,
         arguments = action.arguments,
         tools = action.tools,
+        toolchain = Label("//rust:toolchain_type"),
     )
 
     # This rule does nothing without a single-file output, though the directory should've sufficed.
@@ -281,6 +322,11 @@ rust_doc = rule(
             providers = [rust_common.crate_info],
             mandatory = True,
         ),
+        "crate_features": attr.string_list(
+            doc = dedent("""\
+                List of features to enable for the crate being documented.
+            """),
+        ),
         "html_after_content": attr.label(
             doc = "File to add in `<body>`, after content.",
             allow_single_file = [".html", ".md"],
@@ -310,13 +356,9 @@ rust_doc = rule(
                 file of arguments to rustc: `@$(location //package:target)`.
             """),
         ),
-        "_cc_toolchain": attr.label(
-            doc = "In order to use find_cpp_toolchain, you must define the '_cc_toolchain' attribute on your rule or aspect.",
-            default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
-        ),
         "_dir_zipper": attr.label(
             doc = "A tool that orchestrates the creation of zip archives for rustdoc outputs.",
-            default = Label("//util/dir_zipper"),
+            default = Label("//rust/private/rustdoc/dir_zipper"),
             cfg = "exec",
             executable = True,
         ),
@@ -343,6 +385,6 @@ rust_doc = rule(
     },
     toolchains = [
         str(Label("//rust:toolchain_type")),
-        "@bazel_tools//tools/cpp:toolchain_type",
+        config_common.toolchain_type("@bazel_tools//tools/cpp:toolchain_type", mandatory = False),
     ],
 )

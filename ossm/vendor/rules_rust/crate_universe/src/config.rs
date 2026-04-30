@@ -22,7 +22,7 @@ use crate::utils::starlark::Label;
 use crate::utils::target_triple::TargetTriple;
 
 /// Representations of different kinds of crate vendoring into workspaces.
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum VendorMode {
     /// Crates having full source being vendored into a workspace
@@ -59,6 +59,11 @@ pub(crate) struct RenderConfig {
     /// Eg. `@{repository}__{name}-{version}//:{target}`
     #[serde(default = "default_crate_label_template")]
     pub(crate) crate_label_template: String,
+
+    /// The pattern to use for a crate alias.
+    /// Eg. `@{repository}//:{name}-{version}-{target}`
+    #[serde(default = "default_crate_alias_template")]
+    pub(crate) crate_alias_template: String,
 
     /// The pattern to use for the `defs.bzl` and `BUILD.bazel`
     /// file names used for the crates module.
@@ -98,10 +103,14 @@ pub(crate) struct RenderConfig {
     /// Whether to generate package metadata
     #[serde(default = "default_generate_rules_license_metadata")]
     pub(crate) generate_rules_license_metadata: bool,
+
+    /// Whether to generate cargo_toml_env_vars targets.
+    /// This is expected to always be true except for bootstrapping.
+    pub(crate) generate_cargo_toml_env_vars: bool,
 }
 
 // Default is manually implemented so that the default values match the default
-// values when deserializing, which involves calling the vairous `default_x()`
+// values when deserializing, which involves calling the various `default_x()`
 // functions specified in `#[serde(default = "default_x")]`.
 impl Default for RenderConfig {
     fn default() -> Self {
@@ -109,10 +118,12 @@ impl Default for RenderConfig {
             repository_name: String::default(),
             build_file_template: default_build_file_template(),
             crate_label_template: default_crate_label_template(),
+            crate_alias_template: default_crate_alias_template(),
             crates_module_template: default_crates_module_template(),
             crate_repository_template: default_crate_repository_template(),
             default_alias_rule: AliasRule::default(),
             default_package_name: Option::default(),
+            generate_cargo_toml_env_vars: default_generate_cargo_toml_env_vars(),
             generate_target_compatible_with: default_generate_target_compatible_with(),
             platforms_template: default_platforms_template(),
             regen_command: String::default(),
@@ -140,12 +151,20 @@ fn default_crate_label_template() -> String {
     "@{repository}__{name}-{version}//:{target}".to_owned()
 }
 
+fn default_crate_alias_template() -> String {
+    "//:{name}-{version}".to_owned()
+}
+
 fn default_crate_repository_template() -> String {
     "{repository}__{name}-{version}".to_owned()
 }
 
 fn default_platforms_template() -> String {
     "@rules_rust//rust/platform:{triple}".to_owned()
+}
+
+fn default_generate_cargo_toml_env_vars() -> bool {
+    true
 }
 
 fn default_generate_target_compatible_with() -> bool {
@@ -221,7 +240,7 @@ pub(crate) struct CrateAnnotations {
     /// Which subset of the crate's bins should get produced as `rust_binary` targets.
     pub(crate) gen_binaries: Option<GenBinaries>,
 
-    /// Determins whether or not Cargo build scripts should be generated for the current package
+    /// Determines whether or not Cargo build scripts should be generated for the current package
     pub(crate) gen_build_script: Option<bool>,
 
     /// Additional data to pass to
@@ -252,6 +271,10 @@ pub(crate) struct CrateAnnotations {
     /// [compile_data](https://bazelbuild.github.io/rules_rust/defs.html#rust_library-compile_data) attribute.
     pub(crate) compile_data_glob: Option<BTreeSet<String>>,
 
+    /// An optional glob pattern to set on the
+    /// [compile_data](https://bazelbuild.github.io/rules_rust/defs.html#rust_library-compile_data) excludes attribute.
+    pub(crate) compile_data_glob_excludes: Option<BTreeSet<String>>,
+
     /// If true, disables pipelining for library targets generated for this crate.
     pub(crate) disable_pipelining: bool,
 
@@ -270,6 +293,10 @@ pub(crate) struct CrateAnnotations {
     /// Additional dependencies to pass to a build script's
     /// [deps](https://bazelbuild.github.io/rules_rust/cargo.html#cargo_build_script-deps) attribute.
     pub(crate) build_script_deps: Option<Select<BTreeSet<Label>>>,
+
+    /// Additional dependencies to pass to a build script's
+    /// [link_deps](https://bazelbuild.github.io/rules_rust/cargo.html#cargo_build_script-link_deps) attribute.
+    pub(crate) build_script_link_deps: Option<Select<BTreeSet<Label>>>,
 
     /// Additional data to pass to a build script's
     /// [proc_macro_deps](https://bazelbuild.github.io/rules_rust/cargo.html#cargo_build_script-proc_macro_deps) attribute.
@@ -298,6 +325,10 @@ pub(crate) struct CrateAnnotations {
     /// Additional rustc_env flags to pass to a build script's
     /// [rustc_env](https://bazelbuild.github.io/rules_rust/cargo.html#cargo_build_script-rustc_env) attribute.
     pub(crate) build_script_rustc_env: Option<Select<BTreeMap<String, String>>>,
+
+    /// Additional execution properties to pass to a build script's
+    /// [exec_properties](https://bazel.build/reference/be/common-definitions#common.exec_properties) attribute.
+    pub(crate) build_script_exec_properties: Option<Select<BTreeMap<String, String>>>,
 
     /// Additional labels to pass to a build script's
     /// [toolchains](https://bazel.build/reference/be/common-definitions#common-attributes) attribute.
@@ -390,10 +421,12 @@ impl Add for CrateAnnotations {
             disable_pipelining: self.disable_pipelining || rhs.disable_pipelining,
             compile_data: select_merge(self.compile_data, rhs.compile_data),
             compile_data_glob: joined_extra_member!(self.compile_data_glob, rhs.compile_data_glob, BTreeSet::new, BTreeSet::extend),
+            compile_data_glob_excludes: joined_extra_member!(self.compile_data_glob_excludes, rhs.compile_data_glob_excludes, BTreeSet::new, BTreeSet::extend),
             rustc_env: select_merge(self.rustc_env, rhs.rustc_env),
             rustc_env_files: select_merge(self.rustc_env_files, rhs.rustc_env_files),
             rustc_flags: select_merge(self.rustc_flags, rhs.rustc_flags),
             build_script_deps: select_merge(self.build_script_deps, rhs.build_script_deps),
+            build_script_link_deps: select_merge(self.build_script_link_deps, rhs.build_script_link_deps),
             build_script_proc_macro_deps: select_merge(self.build_script_proc_macro_deps, rhs.build_script_proc_macro_deps),
             build_script_compile_data: select_merge(self.build_script_compile_data, rhs.build_script_compile_data),
             build_script_data: select_merge(self.build_script_data, rhs.build_script_data),
@@ -401,6 +434,7 @@ impl Add for CrateAnnotations {
             build_script_data_glob: joined_extra_member!(self.build_script_data_glob, rhs.build_script_data_glob, BTreeSet::new, BTreeSet::extend),
             build_script_env: select_merge(self.build_script_env, rhs.build_script_env),
             build_script_rustc_env: select_merge(self.build_script_rustc_env, rhs.build_script_rustc_env),
+            build_script_exec_properties: select_merge(self.build_script_exec_properties, rhs.build_script_exec_properties),
             build_script_toolchains: joined_extra_member!(self.build_script_toolchains, rhs.build_script_toolchains, BTreeSet::new, BTreeSet::extend),
             build_script_use_default_shell_env: self.build_script_use_default_shell_env.or(rhs.build_script_use_default_shell_env),
             build_script_rundir: self.build_script_rundir.or(rhs.build_script_rundir),
@@ -448,6 +482,7 @@ pub(crate) struct AnnotationsProvidedByPackage {
     pub(crate) deps: Option<Select<BTreeSet<Label>>>,
     pub(crate) compile_data: Option<Select<BTreeSet<Label>>>,
     pub(crate) compile_data_glob: Option<BTreeSet<String>>,
+    pub(crate) compile_data_glob_excludes: Option<BTreeSet<String>>,
     pub(crate) rustc_env: Option<Select<BTreeMap<String, String>>>,
     pub(crate) rustc_env_files: Option<Select<BTreeSet<String>>>,
     pub(crate) rustc_flags: Option<Select<Vec<String>>>,
@@ -471,6 +506,7 @@ impl CrateAnnotations {
             deps,
             compile_data,
             compile_data_glob,
+            compile_data_glob_excludes,
             rustc_env,
             rustc_env_files,
             rustc_flags,
@@ -502,6 +538,10 @@ impl CrateAnnotations {
         default(&mut self.deps, deps);
         default(&mut self.compile_data, compile_data);
         default(&mut self.compile_data_glob, compile_data_glob);
+        default(
+            &mut self.compile_data_glob_excludes,
+            compile_data_glob_excludes,
+        );
         default(&mut self.rustc_env, rustc_env);
         default(&mut self.rustc_env_files, rustc_env_files);
         default(&mut self.rustc_flags, rustc_flags);
@@ -671,11 +711,32 @@ pub(crate) struct Config {
     pub(crate) rendering: RenderConfig,
 
     /// The contents of a Cargo configuration file
+    #[serde(default, deserialize_with = "deserialize_cargo_config")]
     pub(crate) cargo_config: Option<toml::Value>,
 
     /// A set of platform triples to use in generated select statements
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub(crate) supported_platform_triples: BTreeSet<TargetTriple>,
+}
+
+// rules_rust/crate_universe/private/generate_utils.bzl:generate_config
+// injects the cargo_config as a literal JSON string, this causes line ending
+// instability in Unix vs Windows. Parsing it here fixes any cross platform differences.
+fn deserialize_cargo_config<'de, D>(deserializer: D) -> Result<Option<toml::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(s)) => s
+            .parse::<toml::Value>()
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        Some(other) => serde_json::from_value(other)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+    }
 }
 
 impl Config {
@@ -755,8 +816,12 @@ impl FromStr for VersionReqString {
     type Err = anyhow::Error;
 
     fn from_str(original: &str) -> Result<Self, Self::Err> {
-        let parsed = VersionReq::parse(original)
-            .context("VersionReqString must be a valid semver requirement")?;
+        let parsed = VersionReq::parse(original).with_context(|| {
+            format!(
+                "VersionReqString must be a valid semver requirement: '{}'",
+                original
+            )
+        })?;
         Ok(VersionReqString {
             original: original.to_owned(),
             parsed,

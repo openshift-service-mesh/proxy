@@ -6,6 +6,7 @@
 #include "source/common/http/header_map_impl.h"
 #include "source/common/http/headers.h"
 #include "source/common/http/utility.h"
+#include "source/common/quic/scone_state.h"
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
@@ -123,10 +124,7 @@ void Client::DirectStreamCallbacks::encodeData(Buffer::Instance& data, bool end_
     response_data_ = std::make_unique<Buffer::WatermarkBuffer>(
         [this]() -> void { onBufferedDataDrained(); }, [this]() -> void { onHasBufferedData(); },
         []() -> void {});
-    // Default to 2M per stream. This is fairly arbitrary and will result in
-    // Envoy buffering up to 1M + flow-control-window for HTTP/2 and HTTP/3,
-    // and having local data of 2M + kernel-buffer-limit for HTTP/1.1
-    response_data_->setWatermarks(2 * 1024 * 1024);
+    response_data_->setWatermarks(http_client_.highWatermark());
   }
 
   // Send data if in default flow control mode, or if resumeData has been called in explicit
@@ -411,6 +409,18 @@ void Client::DirectStream::saveLatestStreamIntel() {
   }
   stream_intel_.stream_id = static_cast<uint64_t>(stream_handle_);
   stream_intel_.attempt_count = info.attemptCount().value_or(0);
+
+  const auto* scone_state =
+      info.filterState().getDataReadOnly<Envoy::Quic::SconeState>(Envoy::Quic::SconeStateKey);
+  if (scone_state && scone_state->scone_max_kbps.has_value() &&
+      scone_state->timestamp_ms.has_value()) {
+    // Only update if the new timestamp from scone_state is greater than the last recorded
+    // timestamp.
+    if (scone_state->timestamp_ms.value() > stream_intel_.scone_timestamp_ms) {
+      stream_intel_.scone_max_kbps = scone_state->scone_max_kbps.value();
+      stream_intel_.scone_timestamp_ms = scone_state->timestamp_ms.value();
+    }
+  }
 }
 
 void Client::DirectStream::saveFinalStreamIntel() {

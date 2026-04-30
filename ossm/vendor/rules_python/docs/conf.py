@@ -102,40 +102,38 @@ if os.environ.get("READTHEDOCS") == "True":
     # to the original conf.py template comments
     extensions.insert(0, "readthedocs_ext.readthedocs")
 
-    if os.environ.get("READTHEDOCS_VERSION_TYPE") == "external":
-        # Insert after the main extension
-        extensions.insert(1, "readthedocs_ext.external_version_warning")
-        readthedocs_vcs_url = (
-            "http://github.com/bazel-contrib/rules_python/pull/{}".format(
-                os.environ.get("READTHEDOCS_VERSION", "")
-            )
-        )
-        # The build id isn't directly available, but it appears to be encoded
-        # into the host name, so we can parse it from that. The format appears
-        # to be `build-X-project-Y-Z`, where:
-        # * X is an integer build id
-        # * Y is an integer project id
-        # * Z is the project name
-        _build_id = os.environ.get("HOSTNAME", "build-0-project-0-rules-python")
-        _build_id = _build_id.split("-")[1]
-        readthedocs_build_url = (
-            f"https://readthedocs.org/projects/rules-python/builds/{_build_id}"
-        )
-
 exclude_patterns = ["_includes/*"]
 templates_path = ["_templates"]
 primary_domain = None  # The default is 'py', which we don't make much use of
 nitpicky = True
 
+# Ignore nitpicks for missing cross-references to external objects.
+# These are typically objects that aren't documented or aren't easily linked
+# via intersphinx mapping, so we suppress warnings for them to keep the build clean.
 nitpick_ignore_regex = [
-    # External xrefs aren't setup: ignore missing xref warnings
-    # External xrefs to sphinx isn't setup: ignore missing xref warnings
-    ("py:.*", "(sphinx|docutils|ast|enum|collections|typing_extensions).*"),
+    ("py:class", r"docutils\..*"),
+    ("py:obj", r"sphinx\.util\.docutils\..*"),
+    ("py:obj", r"sphinx\.util\.docfields\..*"),
+    ("py:class", r"sphinx\.util\.typing\..*"),
+    ("py:class", r"sphinx_bzl\.bzl\..*"),
+    ("py:class", r"typing_extensions\.TypeAlias"),
+    ("bzl:obj", r":current_py_cc_headers_abi3"),
+    ("bzl:obj", r":python"),
+    ("bzl:type", r"T"),
+    ("bzl:type", r"input_value"),
+    ("bzl:type", r"DepsetBuilder"),
+    ("bzl:type", r"RunfilesBuilder"),
+    ("bzl:type", r"BuiltinPyInfo"),
+    ("bzl:type", r".*SentinelInfo"),
+    ("bzl:type", r".*SphinxDocsLibraryInfo"),
+    ("bzl:type", r".*_SphinxRunInfo"),
 ]
 
 # --- Intersphinx configuration
 
 intersphinx_mapping = {
+    "python": ("https://docs.python.org/3", None),
+    "sphinx": ("https://www.sphinx-doc.org/en/master", None),
     "bazel": ("https://bazel.build/", "bazel_inventory.inv"),
 }
 
@@ -143,7 +141,7 @@ intersphinx_mapping = {
 extlinks = {
     "gh-issue": (f"https://github.com/bazel-contrib/rules_python/issues/%s", "#%s issue"),
     "gh-path": (f"https://github.com/bazel-contrib/rules_python/tree/main/%s", "%s"),
-    "gh-pr": (f"https://github.com/bazel-contrib/rules_python/pulls/%s", "#%s PR"),
+    "gh-pr": (f"https://github.com/bazel-contrib/rules_python/pull/%s", "#%s PR"),
 }
 
 # --- MyST configuration

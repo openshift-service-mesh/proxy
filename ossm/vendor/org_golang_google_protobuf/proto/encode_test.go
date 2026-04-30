@@ -6,6 +6,7 @@ package proto_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -17,8 +18,8 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/durationpb"
 
-	"google.golang.org/protobuf/internal/errors"
 	orderpb "google.golang.org/protobuf/internal/testprotos/order"
 	testpb "google.golang.org/protobuf/internal/testprotos/test"
 	test3pb "google.golang.org/protobuf/internal/testprotos/test3"
@@ -157,6 +158,9 @@ func TestEncodeOneofNilWrapper(t *testing.T) {
 }
 
 func TestMarshalAppendAllocations(t *testing.T) {
+	// This test ensures that MarshalAppend() has the same performance
+	// characteristics as the append() builtin, meaning that repeated calls do
+	// not allocate each time, but allocations are amortized.
 	m := &test3pb.TestAllTypes{SingularInt32: 1}
 	size := proto.Size(m)
 	const count = 1000
@@ -257,22 +261,80 @@ func TestEncodeLarge(t *testing.T) {
 // but exist to detect accidental changes in behavior.
 func TestEncodeEmpty(t *testing.T) {
 	for _, m := range []proto.Message{nil, (*testpb.TestAllTypes)(nil), &testpb.TestAllTypes{}} {
-		isValid := m != nil && m.ProtoReflect().IsValid()
+		t.Run(fmt.Sprintf("%T", m), func(t *testing.T) {
+			isValid := m != nil && m.ProtoReflect().IsValid()
 
-		b, err := proto.Marshal(m)
-		if err != nil {
-			t.Errorf("proto.Marshal() = %v", err)
-		}
-		if isNil := b == nil; isNil == isValid {
-			t.Errorf("proto.Marshal() == nil: %v, want %v", isNil, !isValid)
-		}
+			b, err := proto.Marshal(m)
+			if err != nil {
+				t.Errorf("proto.Marshal() = %v", err)
+			}
+			if isNil := b == nil; isNil == isValid {
+				t.Errorf("proto.Marshal() == nil: %v, want %v", isNil, !isValid)
+			}
 
-		b, err = proto.MarshalOptions{}.Marshal(m)
+			b, err = proto.MarshalOptions{}.Marshal(m)
+			if err != nil {
+				t.Errorf("proto.MarshalOptions{}.Marshal() = %v", err)
+			}
+			if isNil := b == nil; isNil == isValid {
+				t.Errorf("proto.MarshalOptions{}.Marshal() = %v, want %v", isNil, !isValid)
+			}
+		})
+	}
+}
+
+// This example illustrates how to marshal (encode) a Protobuf message struct
+// literal into wire-format encoding.
+//
+// This example hard-codes a duration of 125ns for the illustration of struct
+// fields, but note that you do not need to fill the fields of well-known types
+// like duration.proto yourself. To convert a time.Duration, use
+// [google.golang.org/protobuf/types/known/durationpb.New].
+func ExampleMarshal() {
+	b, err := proto.Marshal(&durationpb.Duration{
+		Nanos: 125,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("125ns encoded into %d bytes of Protobuf wire format:\n% x\n", len(b), b)
+
+	// You can use protoscope to explore the wire format:
+	// https://github.com/protocolbuffers/protoscope
+	//
+	// echo -n '10 7d' | xxd -r -ps | protoscope
+	// 2: 125
+
+	// Output: 125ns encoded into 2 bytes of Protobuf wire format:
+	// 10 7d
+}
+
+// This example illustrates how to marshal (encode) many Protobuf messages into
+// wire-format encoding, using the same buffer.
+//
+// MarshalAppend will grow the buffer as needed, so over time it will grow large
+// enough to not need further allocations.
+//
+// If unbounded growth of the buffer is undesirable in your application, you can
+// use [MarshalOptions.Size] to determine a buffer size that is guaranteed to be
+// large enough for marshaling without allocations.
+func ExampleMarshalOptions_MarshalAppend_sameBuffer() {
+	var m proto.Message
+
+	opts := proto.MarshalOptions{
+		// set e.g. Deterministic: true, if needed
+	}
+
+	var buf []byte
+	for i := 0; i < 100000; i++ {
+		var err error
+		buf, err = opts.MarshalAppend(buf[:0], m)
 		if err != nil {
-			t.Errorf("proto.MarshalOptions{}.Marshal() = %v", err)
+			panic(err)
 		}
-		if isNil := b == nil; isNil == isValid {
-			t.Errorf("proto.MarshalOptions{}.Marshal() = %v, want %v", isNil, !isValid)
-		}
+		// cap(buf) will grow to hold the largest m.
+
+		// write buf to disk, network, etc.
 	}
 }

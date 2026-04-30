@@ -41,11 +41,12 @@ static constexpr int kStringPrepareForGetCodeunitIndex = -2;
 static constexpr int kStringAsWtf16Index = -3;
 static constexpr int kAnyConvertExternIndex = -4;
 static constexpr int kAssertNotNullIndex = -5;
+static constexpr int kGetDescIndex = -6;
 
 // All "load-like" special cases use the same fake size and type. The specific
 // values we use don't matter; for accurate alias analysis, the type should
 // be "unrelated" to any struct type.
-static constexpr wasm::ModuleTypeIndex kLoadLikeType{wasm::HeapType::kExtern};
+static constexpr wasm::ModuleTypeIndex kLoadLikeType{wasm::kV8MaxWasmTypes + 1};
 static constexpr int kLoadLikeSize = 4;  // Chosen by fair dice roll.
 
 struct WasmMemoryAddress {
@@ -213,6 +214,10 @@ class WasmMemoryContentTable
   }
 
   OpIndex Find(const StructGetOp& get) {
+    if (get.is_get_desc()) {
+      return FindImpl(ResolveBase(get.object()), kGetDescIndex, get.type_index,
+                      kTaggedSize, false);
+    }
     int32_t offset = field_offset(get.type, get.field_index);
     uint8_t size = get.type->field(get.field_index).value_kind_size();
     bool mutability = get.type->mutability(get.field_index);
@@ -253,6 +258,11 @@ class WasmMemoryContentTable
   }
 
   void Insert(const StructGetOp& get, OpIndex get_idx) {
+    if (get.is_get_desc()) {
+      Insert(ResolveBase(get.object()), kGetDescIndex, get.type_index,
+             kTaggedSize, false, get_idx);
+      return;
+    }
     OpIndex base = ResolveBase(get.object());
     int32_t offset = field_offset(get.type, get.field_index);
     uint8_t size = get.type->field(get.field_index).value_kind_size();
@@ -608,6 +618,9 @@ void WasmLoadEliminationAnalyzer::ProcessBlock(const Block& block,
       case Opcode::kStructAtomicRMW:
         ProcessAtomicRMW(op_idx, op.Cast<StructAtomicRMWOp>());
         break;
+      case Opcode::kArrayAtomicRMW:
+        // Nothing to be done. We don't eliminate loads on wasm arrays at all.
+        break;
       case Opcode::kArrayLength:
         ProcessArrayLength(op_idx, op.Cast<ArrayLengthOp>());
         break;
@@ -663,6 +676,7 @@ void WasmLoadEliminationAnalyzer::ProcessBlock(const Block& block,
       case Opcode::kWasmStackCheck:
       case Opcode::kSimd128LaneMemory:
       case Opcode::kGlobalSet:
+      case Opcode::kWasmIncCoverageCounter:
       case Opcode::kParameter:
       case Opcode::kSetStackPointer:
         // We explicitly break for those operations that have can_write effects
@@ -755,9 +769,9 @@ void WasmLoadEliminationAnalyzer::ProcessStructGet(OpIndex op_idx,
     const Operation& replacement = graph_.Get(existing);
     DCHECK_EQ(replacement.outputs_rep().size(), 1);
     DCHECK_EQ(get.outputs_rep().size(), 1);
-    uint8_t size = get.type->field(get.field_index).value_kind_size();
-    if (RepIsCompatible(replacement.outputs_rep()[0], get.outputs_rep()[0],
-                        size)) {
+    if (get.is_get_desc() ||
+        RepIsCompatible(replacement.outputs_rep()[0], get.outputs_rep()[0],
+                        get.type->field(get.field_index).value_kind_size())) {
       replacements_[op_idx] = existing;
       return;
     }

@@ -3,6 +3,7 @@
 #include "envoy/extensions/filters/network/http_connection_manager/v3/http_connection_manager.pb.h"
 
 #include "source/common/protobuf/utility.h"
+#include "source/common/router/string_accessor_impl.h"
 
 #include "test/integration/http_integration.h"
 #include "test/integration/http_protocol_integration.h"
@@ -13,6 +14,18 @@
 
 namespace Envoy {
 namespace {
+
+// Test factory for ``filterState():set()`` integration tests.
+class LuaTestStringObjectFactory : public StreamInfo::FilterState::ObjectFactory {
+public:
+  std::string name() const override { return "lua.test.string"; }
+  std::unique_ptr<StreamInfo::FilterState::Object>
+  createFromBytes(absl::string_view data) const override {
+    return std::make_unique<Router::StringAccessorImpl>(data);
+  }
+};
+
+REGISTER_FACTORY(LuaTestStringObjectFactory, StreamInfo::FilterState::ObjectFactory);
 
 class LuaIntegrationTest : public UpstreamDownstreamIntegrationTest {
 public:
@@ -2270,6 +2283,53 @@ typed_config:
   cleanup();
 }
 
+// Test ``filterState():set()`` functionality to set filter state from Lua.
+TEST_P(LuaIntegrationTest, FilterStateSet) {
+  const std::string FILTER_AND_CODE = R"EOF(
+name: lua
+typed_config:
+  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+  default_source_code:
+    inline_string: |
+      function envoy_on_request(request_handle)
+        local stream_info = request_handle:streamInfo()
+
+        -- Set a filter state value using the factory.
+        stream_info:filterState():set("my_key", "lua.test.string", "my_value")
+
+        -- Read back the filter state value.
+        local result = stream_info:filterState():get("my_key")
+        if result then
+          request_handle:headers():add("filter_state_result", result)
+        else
+          request_handle:headers():add("filter_state_result", "not_found")
+        end
+      end
+)EOF";
+
+  initializeFilter(FILTER_AND_CODE);
+  codec_client_ = makeHttpConnection(makeClientConnection(lookupPort("http")));
+  Http::TestRequestHeaderMapImpl request_headers{
+      {":method", "GET"}, {":path", "/test/long/url"}, {":scheme", "http"}, {":authority", "host"}};
+
+  auto response = codec_client_->makeHeaderOnlyRequest(request_headers);
+  waitForNextUpstreamRequest();
+
+  // Verify the filter state was set and read back successfully.
+  EXPECT_EQ("my_value", upstream_request_->headers()
+                            .get(Http::LowerCaseString("filter_state_result"))[0]
+                            ->value()
+                            .getStringView());
+
+  upstream_request_->encodeHeaders(default_response_headers_, true);
+  ASSERT_TRUE(response->waitForEndStream());
+
+  EXPECT_TRUE(response->complete());
+  EXPECT_EQ("200", response->headers().getStatusValue());
+
+  cleanup();
+}
+
 // Test that handle:virtualHost():metadata() returns valid metadata when virtual host matches
 // but route doesn't, ensuring metadata access works correctly.
 TEST_P(LuaIntegrationTest, VirtualHostValidWhenNoRouteMatch) {
@@ -2544,6 +2604,196 @@ virtual_hosts:
   cleanup();
 }
 #endif
+
+// Test drainConnectionUponCompletion triggers connection draining for HTTP/1.1.
+TEST_P(LuaIntegrationTest, DrainConnectionUponCompletion) {
+  const std::string filter_config =
+      R"EOF(
+name: lua
+typed_config:
+  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+  default_source_code:
+    inline_string: |
+      function envoy_on_request(request_handle)
+        -- Set drain on every request to test connection closure behavior.
+        request_handle:streamInfo():drainConnectionUponCompletion()
+      end
+)EOF";
+
+  initializeFilter(filter_config);
+  codec_client_ = makeHttpConnection(lookupPort("http"));
+
+  // Make request.
+  auto response =
+      sendRequestAndWaitForResponse(default_request_headers_, 0, default_response_headers_, 0);
+
+  EXPECT_TRUE(response->complete());
+  EXPECT_EQ("200", response->headers().getStatusValue());
+
+  // For HTTP/1.1, we should see Connection: close header.
+  if (downstream_protocol_ == Http::CodecType::HTTP1) {
+    EXPECT_EQ("close", response->headers().getConnectionValue());
+  }
+
+  // Connection should be closed after request completes.
+  ASSERT_TRUE(codec_client_->waitForDisconnect());
+
+  cleanup();
+}
+
+// Test CounterStats validates that the counters statistics are accurately reported.
+TEST_P(LuaIntegrationTest, CounterStats) {
+  if (!testing_downstream_filter_) {
+    GTEST_SKIP() << "Fake upstream metrics are not checked in this test";
+  }
+
+  const std::string config1 =
+      R"EOF(
+name: lua
+typed_config:
+  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+  stat_prefix: config1
+  default_source_code:
+    inline_string: |
+      function envoy_on_request(request_handle)
+        request_handle:logInfo("hello")
+      end
+)EOF";
+  config_helper_.prependFilter(config1, testing_downstream_filter_);
+  config_helper_.prependFilter(config1, testing_downstream_filter_);
+
+  const std::string config2 =
+      R"EOF(
+name: lua
+typed_config:
+  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+  stat_prefix: config2
+  default_source_code:
+    inline_string: |
+      function envoy_on_request(request_handle)
+        request_handle:logInfo("hello")
+      end
+      function envoy_on_response(response_handle)
+        response_handle:logInfo("hello")
+      end
+)EOF";
+  config_helper_.prependFilter(config2, testing_downstream_filter_);
+
+  const std::string config3 =
+      R"EOF(
+name: lua
+typed_config:
+  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+  stat_prefix: config3
+  default_source_code:
+    inline_string: |
+      function envoy_on_request(request_handle)
+        local foo = nil
+        foo["bar"] = "baz"
+      end
+)EOF";
+  config_helper_.prependFilter(config3, testing_downstream_filter_);
+
+  const std::string config4 =
+      R"EOF(
+name: lua
+typed_config:
+  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+  stat_prefix: config4
+  default_source_code:
+    inline_string: |
+      print("hello")
+)EOF";
+  initializeFilter(config4);
+
+  codec_client_ = makeHttpConnection(lookupPort("http"));
+  auto response =
+      sendRequestAndWaitForResponse(default_request_headers_, 0, default_response_headers_, 0);
+
+  EXPECT_TRUE(response->complete());
+  EXPECT_EQ("200", response->headers().getStatusValue());
+
+  test_server_->waitForCounterEq("http.config_test.lua.config1.executions", 2);
+  test_server_->waitForCounterEq("http.config_test.lua.config1.errors", 0);
+  test_server_->waitForCounterEq("http.config_test.lua.config2.executions", 2);
+  test_server_->waitForCounterEq("http.config_test.lua.config2.errors", 0);
+  test_server_->waitForCounterEq("http.config_test.lua.config3.executions", 1);
+  test_server_->waitForCounterEq("http.config_test.lua.config3.errors", 1);
+  test_server_->waitForCounterEq("http.config_test.lua.config4.executions", 0);
+  test_server_->waitForCounterEq("http.config_test.lua.config4.errors", 0);
+
+  cleanup();
+}
+
+// Test the stats() API for creating counters, gauges, and histograms from Lua.
+TEST_P(LuaIntegrationTest, StatsApi) {
+  if (!testing_downstream_filter_) {
+    GTEST_SKIP() << "Stats API test only runs for downstream filter";
+  }
+
+  const std::string filter_config =
+      R"EOF(
+name: lua
+typed_config:
+  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+  stat_prefix: stats_test
+  default_source_code:
+    inline_string: |
+      function envoy_on_request(request_handle)
+        local stats = request_handle:stats()
+
+        -- Create and increment a counter.
+        local counter = stats:counter("requests")
+        counter:inc()
+        counter:add(2)
+
+        -- Create and set a gauge.
+        local gauge = stats:gauge("active_requests")
+        gauge:set(10)
+        gauge:inc()
+        gauge:dec()
+
+        -- Create and record histogram values.
+        local histogram = stats:histogram("request_latency", "ms")
+        histogram:recordValue(50)
+        histogram:recordValue(100)
+      end
+
+      function envoy_on_response(response_handle)
+        local stats = response_handle:stats()
+
+        -- Increment the same counter (should accumulate).
+        local counter = stats:counter("requests")
+        counter:inc()
+
+        -- Update the gauge.
+        local gauge = stats:gauge("active_requests")
+        gauge:sub(5)
+      end
+)EOF";
+
+  initializeFilter(filter_config);
+
+  codec_client_ = makeHttpConnection(lookupPort("http"));
+  auto response =
+      sendRequestAndWaitForResponse(default_request_headers_, 0, default_response_headers_, 0);
+
+  EXPECT_TRUE(response->complete());
+  EXPECT_EQ("200", response->headers().getStatusValue());
+
+  // Verify the counter was incremented correctly (inc + add(2) + inc = 4).
+  test_server_->waitForCounterEq("http.config_test.lua.stats_test.requests", 4);
+
+  // Verify the gauge value (set(10) + inc - dec - sub(5) = 5).
+  test_server_->waitForGaugeEq("http.config_test.lua.stats_test.active_requests", 5);
+
+  // Verify histogram exists (we can't easily check recorded values in integration tests,
+  // but we can verify the histogram was created by checking it appears in stats).
+  test_server_->waitForCounterEq("http.config_test.lua.stats_test.executions", 2);
+  test_server_->waitForCounterEq("http.config_test.lua.stats_test.errors", 0);
+
+  cleanup();
+}
 
 } // namespace
 } // namespace Envoy

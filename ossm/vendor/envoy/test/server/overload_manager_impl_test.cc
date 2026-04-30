@@ -299,9 +299,9 @@ constexpr char proactiveResourceConfig[] = R"YAML(
   actions:
     - name: envoy.overload_actions.shrink_heap
       triggers:
-        - name: envoy.resource_monitors.fake_resource1
+        - name: envoy.resource_monitors.global_downstream_max_connections
           threshold:
-            value: 0.9
+            value: 0.5
 )YAML";
 
 TEST_F(OverloadManagerImplTest, CallbackOnlyFiresWhenStateChanges) {
@@ -758,13 +758,69 @@ TEST_F(OverloadManagerImplTest, DuplicateOverloadAction) {
 TEST_F(OverloadManagerImplTest, ActionWithUnexpectedTypedConfig) {
   const std::string config = R"EOF(
     actions:
-      - name: "envoy.overload_actions.shrink_heap"
+      - name: "envoy.overload_actions.stop_accepting_requests"
         typed_config:
           "@type": type.googleapis.com/google.protobuf.Empty
   )EOF";
 
   EXPECT_THROW_WITH_REGEX(createOverloadManager(config), EnvoyException,
                           ".* unexpected .* typed_config .*");
+}
+
+TEST_F(OverloadManagerImplTest, ShrinkHeapWithTypedConfig) {
+  const std::string config = R"EOF(
+    resource_monitors:
+      - name: "envoy.resource_monitors.fake_resource1"
+        typed_config:
+          "@type": type.googleapis.com/google.protobuf.Struct
+    actions:
+      - name: "envoy.overload_actions.shrink_heap"
+        typed_config:
+          "@type": type.googleapis.com/envoy.config.overload.v3.ShrinkHeapConfig
+          timer_interval: 5s
+          max_unfreed_memory_bytes: 52428800
+        triggers:
+          - name: "envoy.resource_monitors.fake_resource1"
+            threshold:
+              value: 0.9
+  )EOF";
+
+  auto manager(createOverloadManager(config));
+  auto config_opt = manager->getShrinkHeapConfig();
+  ASSERT_TRUE(config_opt.has_value());
+  EXPECT_EQ(config_opt->timer_interval().seconds(), 5);
+  EXPECT_EQ(config_opt->max_unfreed_memory_bytes().value(), 52428800);
+}
+
+TEST_F(OverloadManagerImplTest, ShrinkHeapWithWrongTypedConfig) {
+  const std::string config = R"EOF(
+    actions:
+      - name: "envoy.overload_actions.shrink_heap"
+        typed_config:
+          "@type": type.googleapis.com/google.protobuf.Empty
+  )EOF";
+
+  EXPECT_THROW_WITH_REGEX(createOverloadManager(config), EnvoyException,
+                          "Unable to unpack as .*ShrinkHeapConfig");
+}
+
+TEST_F(OverloadManagerImplTest, ShrinkHeapWithoutTypedConfig) {
+  const std::string config = R"EOF(
+    resource_monitors:
+      - name: "envoy.resource_monitors.fake_resource1"
+        typed_config:
+          "@type": type.googleapis.com/google.protobuf.Struct
+    actions:
+      - name: "envoy.overload_actions.shrink_heap"
+        triggers:
+          - name: "envoy.resource_monitors.fake_resource1"
+            threshold:
+              value: 0.9
+  )EOF";
+
+  auto manager(createOverloadManager(config));
+  auto config_opt = manager->getShrinkHeapConfig();
+  EXPECT_FALSE(config_opt.has_value());
 }
 
 TEST_F(OverloadManagerImplTest, ReduceTimeoutsWithoutAction) {
@@ -930,12 +986,21 @@ TEST_F(OverloadManagerImplTest, ProactiveResourceAllocateAndDeallocateResourceTe
   Stats::Counter& failed_updates =
       stats_.counter("overload.envoy.resource_monitors.global_downstream_max_connections."
                      "failed_updates");
+  Stats::Gauge& pressure =
+      stats_.gauge("overload.envoy.resource_monitors.global_downstream_max_connections.pressure",
+                   Stats::Gauge::ImportMode::NeverImport);
+
   manager->start();
   EXPECT_TRUE(manager->getThreadLocalOverloadState().isResourceMonitorEnabled(
       OverloadProactiveResourceName::GlobalDownstreamMaxConnections));
   bool resource_allocated = manager->getThreadLocalOverloadState().tryAllocateResource(
       Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections, 1);
   EXPECT_TRUE(resource_allocated);
+
+  EXPECT_EQ(pressure.value(), 0);
+  timer_cb_();
+  EXPECT_EQ(pressure.value(), 33);
+
   auto monitor = manager->getThreadLocalOverloadState().getProactiveResourceMonitorForTest(
       Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections);
   EXPECT_NE(absl::nullopt, monitor);
@@ -951,6 +1016,34 @@ TEST_F(OverloadManagerImplTest, ProactiveResourceAllocateAndDeallocateResourceTe
   EXPECT_DEATH(manager->getThreadLocalOverloadState().tryDeallocateResource(
                    Server::OverloadProactiveResourceName::GlobalDownstreamMaxConnections, 1),
                ".*Cannot deallocate resource, current resource usage is lower than decrement.*");
+  manager->stop();
+}
+
+// Test that proactive monitors trigger the configured actions when they reach the threshold.
+TEST_F(OverloadManagerImplTest, ProactiveResourceTriggers) {
+  setDispatcherExpectation();
+
+  auto manager(createOverloadManager(proactiveResourceConfig));
+  bool is_active = false;
+  manager->registerForAction("envoy.overload_actions.shrink_heap", dispatcher_,
+                             [&](OverloadActionState state) { is_active = state.isSaturated(); });
+
+  manager->start();
+
+  // Trigger threshold is 50%, max is 3.
+
+  ASSERT_TRUE(factory5_.monitor_->tryAllocateResource(1));
+  timer_cb_();
+  EXPECT_FALSE(is_active);
+
+  ASSERT_TRUE(factory5_.monitor_->tryAllocateResource(1));
+  timer_cb_();
+  EXPECT_TRUE(is_active);
+
+  ASSERT_TRUE(factory5_.monitor_->tryDeallocateResource(1));
+  timer_cb_();
+  EXPECT_FALSE(is_active);
+
   manager->stop();
 }
 

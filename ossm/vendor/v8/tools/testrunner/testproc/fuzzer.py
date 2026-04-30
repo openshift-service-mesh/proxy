@@ -2,26 +2,31 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from itertools import chain
 
 from . import base
 
 
 # Extra flags randomly added to all fuzz tests with numfuzz. List of tuples
-# (probability, flag).
+# (probability, flag). You can space-separate multiple flags in the flag
+# string.
 EXTRA_FLAGS = [
-    (0.1, '--always-turbofan'),
+    (0.05, '--always-osr'),
+    (0.05, '--always-osr-from-maglev'),
+    (0.05, '--always-sparkplug'),
     (0.1, '--assert-types'),
     (0.1, '--cache=code'),
     (0.1, '--force-slow-path'),
     (0.2, '--future'),
     (0.5, '--harmony'),
+    (0.1, '--hashes-collide'),
+    (0.5, '--experimental-fuzzing'),
     # TODO(v8:13524): Enable when issue is fixed
     # TODO(v8:13528): Enable when issue is fixed
     # (0.1, '--harmony-struct'),
     (0.1, '--jit-fuzzing'),
     (0.5, '--js-staging'),
     (0.1, '--liftoff'),
-    (0.1, '--maglev'),
     (0.1, '--maglev-future'),
     (0.1, '--minor-ms'),
     (0.2, '--no-analyze-environment-liveness'),
@@ -30,23 +35,30 @@ EXTRA_FLAGS = [
     #(0.1, '--no-enable-sse3'),
     #(0.1, '--no-enable-ssse3'),
     #(0.1, '--no-enable-sse4_1'),
-    (0.1, '--no-enable-sse4_2'),
-    (0.1, '--no-enable-sahf'),
-    (0.1, '--no-enable-avx'),
-    (0.1, '--no-enable-fma3'),
-    (0.1, '--no-enable-bmi1'),
-    (0.1, '--no-enable-bmi2'),
-    (0.1, '--no-enable-lzcnt'),
-    (0.1, '--no-enable-popcnt'),
-    (0.3, '--no-lazy-feedback-allocation'),
+    (0.05, '--no-enable-sse4_2'),
+    (0.05, '--no-enable-sahf'),
+    (0.05, '--no-enable-avx'),
+    (0.05, '--no-enable-fma3'),
+    (0.05, '--no-enable-bmi1'),
+    (0.05, '--no-enable-bmi2'),
+    (0.05, '--no-enable-lzcnt'),
+    (0.05, '--no-enable-popcnt'),
+    (0.05, '--no-flush-bytecode'),
+    (0.05, '--no-lazy'),
+    (0.2, '--no-lazy-feedback-allocation'),
     (0.1, '--no-liftoff'),
-    (0.1, '--no-turbofan'),
+    (0.05, '--no-maglev'),
+    (0.05, '--no-sparkplug'),
+    (0.05, '--no-turbofan'),
     (0.1, '--no-wasm-tier-up'),
+    (0.2, '--optimize-maglev-optimizes-to-turbofan'),
     (0.5, '--optimize-on-next-call-optimizes-to-maglev'),
     (0.1, '--regexp-interpret-all'),
     (0.1, '--regexp-tier-up-ticks=0'),
     (0.1, '--regexp-tier-up-ticks=10'),
     (0.1, '--regexp-tier-up-ticks=100'),
+    (0.1, '--no-regexp-quick-check'),
+    (0.1, '--no-regexp-unroll'),
     (0.1, '--shared-string-table'),
     (0.1, '--shared-heap'),
     (0.1, '--stress-background-compile'),
@@ -54,10 +66,12 @@ EXTRA_FLAGS = [
     (0.1, '--stress-lazy-source-positions'),
     (0.1, '--stress-maglev'),
     (0.1, '--stress-wasm-code-gc'),
-    (0.2, '--turboshaft'),
     (0.1, '--turbolev'),
     (0.1, '--turbo-instruction-scheduling'),
     (0.1, '--turbo-stress-instruction-scheduling'),
+    (0.2, '--turboshaft-verify-load-elimination'),
+    (0.2, '--turboshaft-verify-load-store-taggedness'),
+    (0.1, '--turboshaft-verify-reductions'),
     (0.1, '--stress-wasm-memory-moving'),
     (0.1, '--stress-scavenger-conservative-object-pinning-random'),
     (0.1, '--conservative-stack-scanning'),
@@ -65,7 +79,10 @@ EXTRA_FLAGS = [
     (0.25, '--wasm-staging'),
     (0.1, '--ephemeron-fixpoint-iterations=0'),
     (0.25, '--experimental-wasm-revectorize'),
-    (0.5, '--additive-safe-int-feedback'),
+    (0.1, '--no-memory-pool'),
+    (0.1, '--wasm-assert-types'),
+    (0.5, '--proto-assign-seq-opt'),
+    (0.1, '--proto-assign-seq-opt --proto-assign-seq-opt-count=1'),
 ]
 
 MIN_DEOPT = 1
@@ -73,11 +90,13 @@ MAX_DEOPT = 10**9
 ANALYSIS_SUFFIX = 'analysis'
 
 
-def random_extra_flags(rng):
+def random_extra_flags(rng, extra_flags=EXTRA_FLAGS):
   """Returns a random list of flags chosen from the configurations in
   EXTRA_FLAGS.
   """
-  return [flag for prob, flag in EXTRA_FLAGS if rng.random() < prob]
+  return list(chain(
+      *(flags.split(' ')
+        for prob, flags in extra_flags if rng.random() < prob)))
 
 
 def _flag_prefix(flag):
@@ -302,6 +321,13 @@ class ScavengeFuzzer(Fuzzer):
       yield ['--stress-scavenge=%d' % (analysis_value or 100)]
 
 
+class ScavengerChaosFuzzer(Fuzzer):
+  def create_flags_generator(self, rng, test, analysis_value):
+    while True:
+      threshold = f'--scavenger-chaos-mode-threshold={rng.randint(0, 100)}'
+      yield ['--scavenger-chaos-mode', threshold]
+
+
 class MarkingAnalyzer(Analyzer):
   def get_analysis_flags(self):
     return ['--fuzzer-gc-analysis']
@@ -357,6 +383,21 @@ class InterruptBudgetFuzzer(Fuzzer):
           0, 8)
 
       yield [flag1, flag2, flag3, flag4]
+
+
+class BytecodeBudgetFuzzer(Fuzzer):
+  def create_flags_generator(self, rng, test, analysis_value):
+    while True:
+      max_bytecode = rng.randint(0, 920)
+      flag1 = f'--max-inlined-bytecode-size={max_bytecode}'
+      flag2 = ('--max-inlined-bytecode-size-cumulative='
+               f'{max_bytecode + rng.randint(0, 920)}')
+      flag3 = ('--max-turbolev-inlined-bytecode-size-cumulative='
+               f'{rng.randint(0, 3680)}')
+      flag4 = f'--max-inlined-bytecode-size-small={rng.randint(0, 54)}'
+      flag5 = ('--max-inlined-bytecode-size-small-with-heapnum-in-out='
+               f'{rng.randint(0, 150)}')
+      yield [flag1, flag2, flag3, flag4, flag5]
 
 
 class AllocationOffsetFuzzer(Fuzzer):
@@ -435,6 +476,7 @@ class DeoptFuzzer(Fuzzer):
 
 FUZZERS = {
     'allocation': (None, AllocationOffsetFuzzer),
+    'bytecode': (None, BytecodeBudgetFuzzer),
     'compaction': (None, CompactionFuzzer),
     'delay': (None, TaskDelayFuzzer),
     'deopt': (DeoptAnalyzer, DeoptFuzzer),
@@ -442,6 +484,7 @@ FUZZERS = {
     'interrupt': (None, InterruptBudgetFuzzer),
     'marking': (MarkingAnalyzer, MarkingFuzzer),
     'scavenge': (ScavengeAnalyzer, ScavengeFuzzer),
+    'scavenge_chaos': (None, ScavengerChaosFuzzer),
     'stack': (None, StackSizeFuzzer),
     'threads': (None, ThreadPoolSizeFuzzer),
 }

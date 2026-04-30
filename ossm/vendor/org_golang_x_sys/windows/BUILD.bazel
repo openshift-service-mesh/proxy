@@ -5,7 +5,6 @@ go_library(
     srcs = [
         "aliases.go",
         "dll_windows.go",
-        "empty.s",
         "env_windows.go",
         "eventlog.go",
         "exec_windows.go",
@@ -29,12 +28,6 @@ go_library(
     ],
     importpath = "golang.org/x/sys/windows",
     visibility = ["//visibility:public"],
-    deps = select({
-        "@io_bazel_rules_go//go/platform:windows": [
-            "//internal/unsafeheader",
-        ],
-        "//conditions:default": [],
-    }),
 )
 
 alias(
@@ -46,6 +39,7 @@ alias(
 go_test(
     name = "windows_test",
     srcs = [
+        "env_windows_test.go",
         "syscall_test.go",
         "syscall_windows_test.go",
     ],
@@ -53,7 +47,6 @@ go_test(
     deps = select({
         "@io_bazel_rules_go//go/platform:windows": [
             ":windows",
-            "//internal/unsafeheader",
         ],
         "//conditions:default": [],
     }),

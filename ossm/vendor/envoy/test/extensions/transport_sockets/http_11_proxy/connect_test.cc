@@ -1,15 +1,19 @@
 #include "envoy/config/core/v3/address.pb.h"
+#include "envoy/extensions/transport_sockets/http_11_proxy/v3/upstream_http_11_connect.pb.h"
 
 #include "source/common/buffer/buffer_impl.h"
 #include "source/common/network/address_impl.h"
 #include "source/common/network/filter_state_proxy_info.h"
 #include "source/common/network/transport_socket_options_impl.h"
+#include "source/extensions/transport_sockets/http_11_proxy/config.h"
 #include "source/extensions/transport_sockets/http_11_proxy/connect.h"
+#include "source/extensions/transport_sockets/raw_buffer/config.h"
 
 #include "test/mocks/buffer/mocks.h"
 #include "test/mocks/network/io_handle.h"
 #include "test/mocks/network/mocks.h"
 #include "test/mocks/network/transport_socket.h"
+#include "test/mocks/server/server_factory_context.h"
 #include "test/mocks/ssl/mocks.h"
 #include "test/test_common/environment.h"
 #include "test/test_common/network_utility.h"
@@ -50,6 +54,11 @@ public:
   // Initialize the test with the proxy address provided via endpoint metadata.
   void initializeWithMetadataProxyAddr(bool with_hostname = false) {
     initializeInternal(false, true, {}, with_hostname);
+  }
+
+  // Initialize the test with the proxy address provided via default proxy address.
+  void initializeWithDefaultProxy(bool with_hostname = false) {
+    initializeInternal(false, false, {}, with_hostname, true);
   }
 
   void setAddress() {
@@ -96,7 +105,8 @@ public:
 
 private:
   void initializeInternal(bool no_proxy_protocol, bool use_metadata_proxy_addr,
-                          absl::optional<uint32_t> target_port, bool with_hostname = false) {
+                          absl::optional<uint32_t> target_port, bool with_hostname = false,
+                          bool use_default_proxy_addr = false) {
     std::string address_string =
         absl::StrCat(Network::Test::getLoopbackAddressUrlString(GetParam()), ":1234");
     Network::Address::InstanceConstSharedPtr address =
@@ -106,6 +116,7 @@ private:
     const std::string proxy_info_hostname = absl::StrCat("www.foo.com", port);
     auto host = std::make_shared<NiceMock<Upstream::MockHostDescription>>();
     std::unique_ptr<Network::TransportSocketOptions::Http11ProxyInfo> info;
+    absl::optional<Network::TransportSocketOptions::Http11ProxyInfo> default_proxy_info;
 
     if (!no_proxy_protocol) {
       if (use_metadata_proxy_addr) {
@@ -142,6 +153,8 @@ private:
               Buffer::OwnedImpl{fmt::format("CONNECT {} HTTP/1.1\r\nHost: {}\r\n\r\n",
                                             address->asStringView(), address->asStringView())};
         }
+      } else if (use_default_proxy_addr) {
+        default_proxy_info.emplace(proxy_info_hostname, address);
       } else {
         info = std::make_unique<Network::TransportSocketOptions::Http11ProxyInfo>(
             proxy_info_hostname, address);
@@ -160,8 +173,8 @@ private:
 
     ON_CALL(transport_callbacks_, ioHandle()).WillByDefault(ReturnRef(io_handle_));
 
-    connect_socket_ =
-        std::make_unique<UpstreamHttp11ConnectSocket>(std::move(inner_socket), options_, host);
+    connect_socket_ = std::make_unique<UpstreamHttp11ConnectSocket>(
+        std::move(inner_socket), options_, host, default_proxy_info);
     connect_socket_->setTransportSocketCallbacks(transport_callbacks_);
     connect_socket_->onConnected();
   }
@@ -188,6 +201,12 @@ TEST_P(Http11ConnectTest, InjectsHeaderOnlyOnceEndpointMetadata) {
 // Test injects CONNECT with host header using hostname when available.
 TEST_P(Http11ConnectTest, InjectsHeaderWithHostnameFromMetadata) {
   initializeWithMetadataProxyAddr(true);
+  injectHeaderOnceTest();
+}
+
+// Test injects CONNECT only once. Configured via default proxy address.
+TEST_P(Http11ConnectTest, InjectsHeaderWithDefaultProxyAddr) {
+  initializeWithDefaultProxy();
   injectHeaderOnceTest();
 }
 
@@ -456,6 +475,26 @@ TEST_F(SocketFactoryTest, CreateSocketReturnsNullWhenInnerFactoryReturnsNull) {
   ASSERT_EQ(nullptr, factory_->createTransportSocket(nullptr, nullptr));
 }
 
+class SocketConfigFactoryTest : public testing::Test {
+public:
+  void initialize() { factory_ = std::make_unique<UpstreamHttp11ConnectSocketConfigFactory>(); }
+
+  std::unique_ptr<UpstreamHttp11ConnectSocketConfigFactory> factory_;
+};
+
+// Test createTransportSocketFactory handles absent transport_socket config.
+TEST_F(SocketConfigFactoryTest, CreateSocketFactoryWithoutTransportSocket) {
+  initialize();
+
+  // Inner transport socket is absent.
+  envoy::extensions::transport_sockets::http_11_proxy::v3::Http11ProxyUpstreamTransport config;
+
+  NiceMock<Server::Configuration::MockTransportSocketFactoryContext> context;
+  auto factory_or_error = factory_->createTransportSocketFactory(config, context);
+  EXPECT_TRUE(factory_or_error.status().ok());
+  EXPECT_NE(nullptr, factory_or_error.value());
+}
+
 TEST(ParseTest, TestValidResponse) {
   size_t bytes_processed;
   bool headers_complete;
@@ -516,9 +555,6 @@ TEST(ParseTest, TestValidResponse) {
 // The SelfContainedParser is only intended for header parsing but for coverage,
 // test a request with a body.
 TEST(ParseTest, CoverResponseBodyHttp10) {
-  TestScopedRuntime scoped_runtime;
-  scoped_runtime.mergeValues({{"envoy.reloadable_features.http1_balsa_delay_reset", "true"}});
-
   std::string headers = "HTTP/1.0 200 OK\r\ncontent-length: 2\r\n\r\n";
   std::string body = "ab";
 
@@ -536,9 +572,6 @@ TEST(ParseTest, CoverResponseBodyHttp10) {
 }
 
 TEST(ParseTest, CoverResponseBodyHttp11) {
-  TestScopedRuntime scoped_runtime;
-  scoped_runtime.mergeValues({{"envoy.reloadable_features.http1_balsa_delay_reset", "true"}});
-
   std::string headers = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n";
   std::string body = "ab";
 
@@ -557,9 +590,6 @@ TEST(ParseTest, CoverResponseBodyHttp11) {
 
 // Regression tests for #34096.
 TEST(ParseTest, ContentLengthZeroHttp10) {
-  TestScopedRuntime scoped_runtime;
-  scoped_runtime.mergeValues({{"envoy.reloadable_features.http1_balsa_delay_reset", "true"}});
-
   constexpr absl::string_view headers = "HTTP/1.0 200 OK\r\ncontent-length: 0\r\n\r\n";
 
   SelfContainedParser parser;
@@ -575,9 +605,6 @@ TEST(ParseTest, ContentLengthZeroHttp10) {
 }
 
 TEST(ParseTest, ContentLengthZeroHttp11) {
-  TestScopedRuntime scoped_runtime;
-  scoped_runtime.mergeValues({{"envoy.reloadable_features.http1_balsa_delay_reset", "true"}});
-
   constexpr absl::string_view headers = "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n";
 
   SelfContainedParser parser;
@@ -715,6 +742,118 @@ TEST_P(Http11ConnectTest, RuntimeGuardLegacyBehaviorEndpointMetadata) {
       .WillOnce(Return(Network::IoResult{Network::PostIoAction::KeepOpen, msg.length(), false}));
   Network::IoResult rc2 = connect_socket_->doWrite(msg, false);
   EXPECT_EQ(msg.length(), rc2.bytes_processed_);
+}
+
+// Test that writes are buffered until CONNECT response is received, and then flushed by
+// flushWriteBuffer().
+TEST_P(Http11ConnectTest, WriteFlushedAfterConnectRead) {
+  initialize();
+
+  // Write CONNECT header.
+  EXPECT_CALL(io_handle_, write(BufferStringEqual(connect_data_.toString())))
+      .WillOnce(Invoke([&](Buffer::Instance& buffer) {
+        auto length = buffer.length();
+        buffer.drain(length);
+        return Api::IoCallUint64Result(length, Api::IoError::none());
+      }));
+  Buffer::OwnedImpl msg("initial data");
+  Network::IoResult rc1 = connect_socket_->doWrite(msg, false);
+  EXPECT_EQ(connect_data_.length(), rc1.bytes_processed_);
+
+  // Data write should fail with EAGAIN because CONNECT response is not received. This should result
+  // in a KeepOpen action.
+  Network::IoResult rc2 = connect_socket_->doWrite(msg, false);
+  EXPECT_EQ(0, rc2.bytes_processed_);
+  EXPECT_EQ(Network::PostIoAction::KeepOpen, rc2.action_);
+
+  EXPECT_CALL(*inner_socket_, onConnected());
+  connect_socket_->onConnected();
+
+  // Read CONNECT response.
+  std::string connect_response("HTTP/1.1 200 OK\r\n\r\n");
+  EXPECT_CALL(io_handle_, recv(_, 2000, MSG_PEEK))
+      .WillOnce(Invoke([&connect_response](void* buffer, size_t, int) {
+        memcpy(buffer, connect_response.data(), connect_response.length());
+        return Api::IoCallUint64Result(connect_response.length(), Api::IoError::none());
+      }));
+  EXPECT_CALL(io_handle_, read(_, Optional(connect_response.length())))
+      .WillOnce(Invoke([&](Buffer::Instance& buffer, absl::optional<uint64_t>) {
+        buffer.add(connect_response);
+        return Api::IoCallUint64Result(connect_response.length(), Api::IoError::none());
+      }));
+
+  // doRead should result in a call to flushWriteBuffer to wake up connection. This is the purpose
+  // of the test.
+  EXPECT_CALL(transport_callbacks_, flushWriteBuffer());
+  EXPECT_CALL(*inner_socket_, doRead(_))
+      .WillOnce(Return(Network::IoResult{Network::PostIoAction::KeepOpen, 0, false}));
+  Buffer::OwnedImpl read_buffer("");
+  connect_socket_->doRead(read_buffer);
+
+  // After CONNECT response is processed, data write should succeed.
+  EXPECT_CALL(*inner_socket_, doWrite(BufferEqual(&msg), false))
+      .WillOnce(Return(Network::IoResult{Network::PostIoAction::KeepOpen, msg.length(), false}));
+  Network::IoResult rc3 = connect_socket_->doWrite(msg, false);
+  EXPECT_EQ(msg.length(), rc3.bytes_processed_);
+}
+
+// Test that flushWriteBuffer is NOT called on partial headers,
+// and IS called only when the full 200 OK is received.
+TEST_P(Http11ConnectTest, FragmentedConnectResponse) {
+  initialize();
+
+  EXPECT_CALL(io_handle_, write(BufferStringEqual(connect_data_.toString())))
+      .WillOnce(Invoke([&](Buffer::Instance& buffer) {
+        auto length = buffer.length();
+        buffer.drain(length);
+        return Api::IoCallUint64Result(length, Api::IoError::none());
+      }));
+  Buffer::OwnedImpl msg("initial data");
+  connect_socket_->doWrite(msg, false); // Writes CONNECT, blocks 'msg'
+
+  EXPECT_CALL(*inner_socket_, onConnected());
+  connect_socket_->onConnected();
+
+  // Receive partial response.
+  std::string part1("HTTP/1.1 200 OK\r\n");
+  EXPECT_CALL(io_handle_, recv(_, 2000, MSG_PEEK))
+      .WillOnce(Invoke([&part1](void* buffer, size_t, int) {
+        memcpy(buffer, part1.data(), part1.length());
+        return Api::IoCallUint64Result(part1.length(), Api::IoError::none());
+      }));
+
+  // Ensure we do not signal readiness yet.
+  EXPECT_CALL(transport_callbacks_, flushWriteBuffer()).Times(0);
+
+  Buffer::OwnedImpl buffer("");
+  auto result = connect_socket_->doRead(buffer);
+  EXPECT_EQ(Network::PostIoAction::KeepOpen, result.action_);
+
+  // Receive the rest of the response.
+  std::string part2("Server: Envoy\r\n\r\n");
+  std::string full_response = part1 + part2;
+
+  // Socket peeks again to find full buffer.
+  EXPECT_CALL(io_handle_, recv(_, 2000, MSG_PEEK))
+      .WillOnce(Invoke([&full_response](void* buffer, size_t, int) {
+        memcpy(buffer, full_response.data(), full_response.length());
+        return Api::IoCallUint64Result(full_response.length(), Api::IoError::none());
+      }));
+
+  // Socket consumes the full headers.
+  EXPECT_CALL(io_handle_, read(_, Optional(full_response.length())))
+      .WillOnce(Invoke([&](Buffer::Instance& buffer, absl::optional<uint64_t>) {
+        buffer.add(full_response);
+        return Api::IoCallUint64Result(full_response.length(), Api::IoError::none());
+      }));
+
+  // Verify the flush.
+  EXPECT_CALL(transport_callbacks_, flushWriteBuffer());
+
+  EXPECT_CALL(*inner_socket_, doRead(_))
+      .WillOnce(Return(Network::IoResult{Network::PostIoAction::KeepOpen, 0, false}));
+
+  connect_socket_->doRead(buffer);
 }
 
 } // namespace

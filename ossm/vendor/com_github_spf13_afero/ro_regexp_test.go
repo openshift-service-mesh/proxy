@@ -16,12 +16,12 @@ func TestFilterReadOnly(t *testing.T) {
 
 func TestFilterReadonlyRemoveAndRead(t *testing.T) {
 	mfs := &MemMapFs{}
-	fh, err := mfs.Create("/file.txt")
+	fh, _ := mfs.Create("/file.txt")
 	fh.Write([]byte("content here"))
 	fh.Close()
 
 	fs := NewReadOnlyFs(mfs)
-	err = fs.Remove("/file.txt")
+	err := fs.Remove("/file.txt")
 	if err == nil {
 		t.Errorf("Did not fail to remove file")
 	}
@@ -54,7 +54,6 @@ func TestFilterRegexp(t *testing.T) {
 	fs := NewRegexpFs(&MemMapFs{}, regexp.MustCompile(`\.txt$`))
 	_, err := fs.Create("/file.html")
 	if err == nil {
-
 		t.Errorf("Did not fail to create file")
 	}
 	// t.Logf("ERR=%s", err)
@@ -75,7 +74,7 @@ func TestFilterRegexReadDir(t *testing.T) {
 	fs1 := &RegexpFs{re: regexp.MustCompile(`\.txt$`), source: mfs}
 	fs := &RegexpFs{re: regexp.MustCompile(`^a`), source: fs1}
 
-	mfs.MkdirAll("/dir/sub", 0777)
+	mfs.MkdirAll("/dir/sub", 0o777)
 	for _, name := range []string{"afile.txt", "afile.html", "bfile.txt"} {
 		for _, dir := range []string{"/dir/", "/dir/sub/"} {
 			fh, _ := mfs.Create(dir + name)

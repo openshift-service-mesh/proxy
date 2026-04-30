@@ -14,6 +14,7 @@
 """Utility functions for C++ rules."""
 
 load("//cc:find_cc_toolchain.bzl", "CC_TOOLCHAIN_TYPE")
+load("//cc/private:paths.bzl", "is_path_absolute")
 load("//cc/private/rules_impl:objc_common.bzl", "objc_common")
 load(":cc_common.bzl", "cc_common")
 load(
@@ -22,24 +23,23 @@ load(
     "is_versioned_shared_library_extension_valid",
     "path_contains_up_level_references",
     "should_create_per_object_debug_info",
-    _artifact_category = "artifact_category",
+    _artifact_category = "artifact_category_names",
     _extensions = "extensions",
+    _is_stamping_enabled = "is_stamping_enabled",
     _package_source_root = "package_source_root",
     _repository_exec_path = "repository_exec_path",
+    _should_stamp = "should_stamp",
 )
 load(":cc_info.bzl", "CcInfo")
+load(":semantics.bzl", "semantics")
 load(":visibility.bzl", "INTERNAL_VISIBILITY")
 
 visibility(INTERNAL_VISIBILITY)
 
-# LINT.IfChange(linker_mode)
 linker_mode = struct(
     LINKING_DYNAMIC = "dynamic_linking_mode",
     LINKING_STATIC = "static_linking_mode",
 )
-# LINT.ThenChange(https://github.com/bazelbuild/bazel/blob/master/src/main/starlark/builtins_bzl/common/cc/cc_helper.bzl:linker_mode)
-
-# LINT.IfChange(forked_exports)
 
 cpp_file_types = struct(
     LINKER_SCRIPT = ["ld", "lds", "ldscript"],
@@ -67,6 +67,7 @@ def _is_valid_shared_library_name(shared_library_name):
     if (shared_library_name.endswith(".so") or
         shared_library_name.endswith(".dll") or
         shared_library_name.endswith(".dylib") or
+        shared_library_name.endswith(".pyd") or
         shared_library_name.endswith(".wasm")):
         return True
 
@@ -162,10 +163,22 @@ def _collect_compilation_prerequisites(ctx, compilation_context):
                         direct.append(file)
 
     transitive.append(compilation_context.headers)
-    transitive.append(compilation_context.additional_inputs())
-    transitive.append(compilation_context.transitive_modules(use_pic = True))
-    transitive.append(compilation_context.transitive_modules(use_pic = False))
-
+    if hasattr(compilation_context, "additional_inputs"):
+        transitive.append(compilation_context.additional_inputs())
+    else:
+        direct_module_maps = compilation_context._direct_module_maps
+        if type(direct_module_maps) != "depset":
+            direct_module_maps = depset(direct_module_maps)
+        transitive.append(direct_module_maps)
+        transitive.append(compilation_context._non_code_inputs)
+        if compilation_context._module_map:
+            transitive.append(depset([compilation_context._module_map.file if type(compilation_context._module_map.file) == "File" else compilation_context._module_map.file()]))
+    if hasattr(compilation_context, "transitive_modules"):
+        transitive.append(compilation_context.transitive_modules(use_pic = True))
+        transitive.append(compilation_context.transitive_modules(use_pic = False))
+    else:
+        transitive.append(compilation_context._transitive_pic_modules)
+        transitive.append(compilation_context._transitive_modules)
     return depset(direct = direct, transitive = transitive)
 
 def _build_output_groups_for_emitting_compile_providers(
@@ -498,7 +511,7 @@ def _get_toolchain_global_make_variables(cc_toolchain):
     result["CROSSTOOLTOP"] = cc_toolchain._crosstool_top_path
     return result
 
-_SHARED_LIBRARY_EXTENSIONS = ["so", "dll", "dylib", "wasm"]
+_SHARED_LIBRARY_EXTENSIONS = ["so", "dll", "dylib", "pyd", "wasm"]
 
 def _is_valid_shared_library_artifact(shared_library):
     if (shared_library.extension in _SHARED_LIBRARY_EXTENSIONS):
@@ -807,7 +820,7 @@ def _include_dirs(ctx, additional_make_variable_substitutions):
     package_source_root = _package_source_root(ctx.label.workspace_name, package, sibling_repository_layout)
     for include in ctx.attr.includes:
         includes_attr = _expand(ctx, include, additional_make_variable_substitutions)
-        if includes_attr.startswith("/"):
+        if is_path_absolute(includes_attr):
             continue
         includes_path = get_relative_path(package_exec_path, includes_attr)
         if not sibling_repository_layout and path_contains_up_level_references(includes_path):
@@ -910,6 +923,9 @@ def _copts_filter(ctx, additional_make_variable_substitutions):
     nocopts = getattr(ctx.attr, "nocopts", None)
 
     if nocopts == None or len(nocopts) == 0:
+        return nocopts
+
+    if semantics.is_allowed_nocopts(nocopts):
         return nocopts
 
     # Check if nocopts is disabled.
@@ -1059,14 +1075,6 @@ def _linker_scripts(ctx):
                 result.append(f)
     return result
 
-def _is_stamping_enabled(ctx):
-    if ctx.configuration.is_tool_configuration():
-        return 0
-    stamp = 0
-    if hasattr(ctx.attr, "stamp"):
-        stamp = ctx.attr.stamp
-    return stamp
-
 def _has_target_constraints(ctx, constraints):
     # Constraints is a label_list.
     for constraint in constraints:
@@ -1074,6 +1082,9 @@ def _has_target_constraints(ctx, constraints):
         if ctx.target_platform_has_constraint(constraint_value):
             return True
     return False
+
+def _should_create_test_dwp_for_statically_linked_test(is_test, linking_mode, cpp_config):
+    return is_test and linking_mode != linker_mode.LINKING_DYNAMIC and cpp_config.build_test_dwp()
 
 cc_helper = struct(
     rule_error = _rule_error,
@@ -1126,10 +1137,11 @@ cc_helper = struct(
     get_local_defines_for_runfiles_lookup = _get_local_defines_for_runfiles_lookup,
     linker_scripts = _linker_scripts,
     is_stamping_enabled = _is_stamping_enabled,
+    should_stamp = _should_stamp,
     is_test_target = _is_test_target,
     get_linked_artifact = _get_linked_artifact,
     should_create_per_object_debug_info = should_create_per_object_debug_info,
     has_target_constraints = _has_target_constraints,
     package_exec_path = _package_exec_path,
+    should_create_test_dwp_for_statically_linked_test = _should_create_test_dwp_for_statically_linked_test,
 )
-# LINT.ThenChange(https://github.com/bazelbuild/bazel/blob/master/src/main/starlark/builtins_bzl/common/cc/cc_helper.bzl:forked_exports)

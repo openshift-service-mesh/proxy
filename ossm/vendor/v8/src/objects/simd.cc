@@ -1,3 +1,4 @@
+#include "src/base/atomic_ref_polyfill.h"
 // Copyright 2022 the V8 project authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -477,7 +478,6 @@ void Uint8ArrayToHexSlow(const char* bytes, size_t length,
   }
 }
 
-#ifdef WANT_ATOMIC_REF
 void AtomicUint8ArrayToHexSlow(const char* bytes, size_t length,
                                DirectHandle<SeqOneByteString> string_output) {
   int index = 0;
@@ -493,7 +493,6 @@ void AtomicUint8ArrayToHexSlow(const char* bytes, size_t length,
     index += 2;
   }
 }
-#endif
 
 inline uint16_t ByteToHex(uint8_t byte) {
   const uint16_t correction = (('a' - '0' - 10) << 8) + ('a' - '0' - 10);
@@ -552,8 +551,9 @@ void Uint8ArrayToHexFastWithSSE(const char* bytes, uint8_t* output,
   for (i = 0; i + 8 <= length; i += 8) {
     index = 0;
     for (size_t j = i; j < i + 8; j++) {
-      nibbles_buffer[index++] = bytes[j] >> 4;    // High nibble
-      nibbles_buffer[index++] = bytes[j] & 0x0F;  // Low nibble
+      uint8_t byte = static_cast<uint8_t>(bytes[j]);
+      nibbles_buffer[index++] = byte >> 4;    // High nibble
+      nibbles_buffer[index++] = byte & 0x0F;  // Low nibble
     }
 
     // Load data into SSE registers
@@ -591,8 +591,9 @@ void Uint8ArrayToHexFastWithNeon(const char* bytes, uint8_t* output,
   for (i = 0; i + 8 <= length; i += 8) {
     index = 0;
     for (size_t j = i; j < i + 8; j++) {
-      nibbles_buffer[index++] = bytes[j] >> 4;    // High nibble
-      nibbles_buffer[index++] = bytes[j] & 0x0F;  // Low nibble
+      uint8_t byte = static_cast<uint8_t>(bytes[j]);
+      nibbles_buffer[index++] = byte >> 4;    // High nibble
+      nibbles_buffer[index++] = byte & 0x0F;  // Low nibble
     }
 
     // Load data into NEON registers
@@ -647,15 +648,11 @@ Tagged<Object> Uint8ArrayToHex(const char* bytes, size_t length, bool is_shared,
   }
 #endif
 
-#ifdef WANT_ATOMIC_REF
   if (is_shared) {
     AtomicUint8ArrayToHexSlow(bytes, length, string_output);
   } else {
-#endif
     Uint8ArrayToHexSlow(bytes, length, string_output);
-#ifdef WANT_ATOMIC_REF
   }
-#endif
   return *string_output;
 }
 
@@ -1088,16 +1085,12 @@ bool ArrayBufferFromHex(const base::Vector<T>& input_vector, bool is_shared,
   for (uint32_t i = 0; i < output_length * 2; i += 2) {
     result = HandleRemainingHexValues(input_vector, i);
     if (result.has_value()) {
-#ifdef WANT_ATOMIC_REF
       if (is_shared) {
         std::atomic_ref<uint8_t>(buffer[index++])
             .store(result.value(), std::memory_order_relaxed);
       } else {
-#endif
         buffer[index++] = result.value();
-#ifdef WANT_ATOMIC_REF
       }
-#endif
     } else {
       return false;
     }

@@ -37,7 +37,6 @@ static const char* const JSOBJECT_TYPE_STRING = "JSObject";
 static const char* const SMI_TYPE_STRING = "Smi";
 static const char* const TAGGED_TYPE_STRING = "Tagged";
 static const char* const STRONG_TAGGED_TYPE_STRING = "StrongTagged";
-static const char* const UNINITIALIZED_TYPE_STRING = "Uninitialized";
 static const char* const UNINITIALIZED_HEAP_OBJECT_TYPE_STRING =
     "UninitializedHeapObject";
 static const char* const RAWPTR_TYPE_STRING = "RawPtr";
@@ -96,6 +95,8 @@ static const char* const ANNOTATION_HAS_SAME_INSTANCE_TYPE_AS_PARENT =
     "@hasSameInstanceTypeAsParent";
 static const char* const ANNOTATION_DO_NOT_GENERATE_CPP_CLASS =
     "@doNotGenerateCppClass";
+static const char* const ANNOTATION_DO_NOT_GENERATE_INSTANCE_TYPE_CHECK =
+    "@doNotGenerateInstanceTypeCheck";
 static const char* const ANNOTATION_CUSTOM_MAP = "@customMap";
 static const char* const ANNOTATION_CUSTOM_CPP_CLASS = "@customCppClass";
 static const char* const ANNOTATION_HIGHEST_INSTANCE_TYPE_WITHIN_PARENT =
@@ -140,8 +141,9 @@ static const char* const ANNOTATION_CUSTOM_INTERFACE_DESCRIPTOR =
 // builtin.
 static const char* const ANNOTATION_INCREMENT_USE_COUNTER =
     "@incrementUseCounter";
+static const char* const ANNOTATION_SUPPORTS_TSA = "@supportsTSA";
 
-inline bool IsConstexprName(const std::string& name) {
+inline bool IsConstexprName(std::string_view name) {
   return name.substr(0, std::strlen(CONSTEXPR_TYPE_PREFIX)) ==
          CONSTEXPR_TYPE_PREFIX;
 }
@@ -182,6 +184,7 @@ enum class ClassFlag {
   kGenerateFactoryFunction = 1 << 13,
   kCppObjectDefinition = 1 << 14,
   kCppObjectLayoutDefinition = 1 << 15,
+  kDoNotGenerateInstanceTypeCheck = 1 << 16,
 };
 using ClassFlags = base::Flags<ClassFlag>;
 

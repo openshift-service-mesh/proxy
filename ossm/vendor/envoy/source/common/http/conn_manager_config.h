@@ -7,6 +7,7 @@
 #include "envoy/http/header_validator.h"
 #include "envoy/http/original_ip_detection.h"
 #include "envoy/http/request_id_extension.h"
+#include "envoy/matcher/matcher.h"
 #include "envoy/router/rds.h"
 #include "envoy/router/scopes.h"
 #include "envoy/stats/scope.h"
@@ -18,6 +19,9 @@
 #include "source/common/network/utility.h"
 #include "source/common/stats/symbol_table.h"
 #include "source/common/tracing/tracer_config_impl.h"
+
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 
 namespace Envoy {
 namespace Http {
@@ -163,6 +167,8 @@ enum class ForwardClientCertType {
  * information to the next hop.
  */
 enum class ClientCertDetailsType { Cert, Chain, Subject, URI, DNS };
+
+enum class ClientCertFormat { Text, Json };
 
 /**
  * Type that indicates how port should be stripped from Host header.
@@ -427,10 +433,22 @@ public:
   virtual ForwardClientCertType forwardClientCert() const PURE;
 
   /**
+   * @return ClientCertFormat the format to use for the XFCC header value (text or JSON).
+   */
+  virtual ClientCertFormat clientCertFormat() const PURE;
+
+  /**
    * @return vector of ClientCertDetailsType the configuration of the current client cert's details
    * to be forwarded.
    */
   virtual const std::vector<ClientCertDetailsType>& setCurrentClientCertDetails() const PURE;
+
+  /**
+   * @return the matcher for selecting forward client cert config per-request. Returns nullptr
+   * if no matcher is configured, in which case the static forwardClientCert() and
+   * setCurrentClientCertDetails() should be used.
+   */
+  virtual const Matcher::MatchTreePtr<HttpMatchingData>& forwardClientCertMatcher() const PURE;
 
   /**
    * @return local address.
@@ -560,6 +578,18 @@ public:
    *         Connection Lifetime.
    */
   virtual bool addProxyProtocolConnectionState() const PURE;
+
+  /**
+   * @return a set of destination ports that should be treated as HTTPS when the
+   *         local address was restored from PROXY protocol.
+   */
+  virtual const absl::flat_hash_set<uint32_t>& httpsDestinationPorts() const PURE;
+
+  /**
+   * @return a set of destination ports that should be treated as HTTP when the
+   *         local address was restored from PROXY protocol.
+   */
+  virtual const absl::flat_hash_set<uint32_t>& httpDestinationPorts() const PURE;
 };
 
 using ConnectionManagerConfigSharedPtr = std::shared_ptr<ConnectionManagerConfig>;

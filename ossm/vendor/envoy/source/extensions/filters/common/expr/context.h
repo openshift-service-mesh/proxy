@@ -32,6 +32,7 @@ constexpr absl::string_view Scheme = "scheme";
 constexpr absl::string_view Method = "method";
 constexpr absl::string_view Referer = "referer";
 constexpr absl::string_view Headers = "headers";
+constexpr absl::string_view HeadersBytes = "headers_bytes";
 constexpr absl::string_view Time = "time";
 constexpr absl::string_view ID = "id";
 constexpr absl::string_view UserAgent = "useragent";
@@ -70,6 +71,7 @@ constexpr absl::string_view URISanPeerCertificate = "uri_san_peer_certificate";
 constexpr absl::string_view DNSSanLocalCertificate = "dns_san_local_certificate";
 constexpr absl::string_view DNSSanPeerCertificate = "dns_san_peer_certificate";
 constexpr absl::string_view SHA256PeerCertificateDigest = "sha256_peer_certificate_digest";
+constexpr absl::string_view PeerCertificate = "peer_certificate";
 constexpr absl::string_view DownstreamTransportFailureReason = "transport_failure_reason";
 
 // Source properties

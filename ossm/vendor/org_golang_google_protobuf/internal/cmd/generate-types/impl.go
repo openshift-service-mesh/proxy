@@ -367,11 +367,24 @@ func consume{{.Name}}Slice(b []byte, p pointer, wtyp protowire.Type, f *coderFie
 	sp := p.{{.GoType.PointerMethod}}Slice()
 	{{- if .WireType.Packable}}
 	if wtyp == protowire.BytesType {
-		s := *sp
 		b, n := protowire.ConsumeBytes(b)
 		if n < 0 {
 			return out, errDecode
 		}
+		{{if .WireType.ConstSize -}}
+		count := len(b) / {{template "Size" .}}
+		{{- else -}}
+		count := 0
+		for _, v := range b {
+			if v < 0x80 {
+				count++
+			}
+		}
+		{{- end}}
+		if count > 0 {
+			p.grow{{.GoType.PointerMethod}}Slice(count)
+		}
+		s := *sp
 		for len(b) > 0 {
 			{{template "Consume" .}}
 			if n < 0 {
@@ -727,12 +740,13 @@ func (m *{{.}}) Interface() protoreflect.ProtoMessage {
 	return (*messageIfaceWrapper)(m)
 	{{- end -}}
 }
-func (m *{{.}}) protoUnwrap() interface{} {
+func (m *{{.}}) protoUnwrap() any {
 	return m.pointer().AsIfaceOf(m.messageInfo().GoReflectType.Elem())
 }
 func (m *{{.}}) ProtoMethods() *protoiface.Methods {
-	m.messageInfo().init()
-	return &m.messageInfo().methods
+	mi := m.messageInfo()
+	mi.init()
+	return &mi.methods
 }
 
 // ProtoMessageInfo is a pseudo-internal API for allowing the v1 code
@@ -745,8 +759,9 @@ func (m *{{.}}) ProtoMessageInfo() *MessageInfo {
 }
 
 func (m *{{.}}) Range(f func(protoreflect.FieldDescriptor, protoreflect.Value) bool) {
-	m.messageInfo().init()
-	for _, ri := range m.messageInfo().rangeInfos {
+	mi := m.messageInfo()
+	mi.init()
+	for _, ri := range mi.rangeInfos {
 		switch ri := ri.(type) {
 		case *fieldInfo:
 			if ri.has(m.pointer()) {
@@ -756,77 +771,86 @@ func (m *{{.}}) Range(f func(protoreflect.FieldDescriptor, protoreflect.Value) b
 			}
 		case *oneofInfo:
 			if n := ri.which(m.pointer()); n > 0 {
-				fi := m.messageInfo().fields[n]
+				fi := mi.fields[n]
 				if !f(fi.fieldDesc, fi.get(m.pointer())) {
 					return
 				}
 			}
 		}
 	}
-	m.messageInfo().extensionMap(m.pointer()).Range(f)
+	mi.extensionMap(m.pointer()).Range(f)
 }
 func (m *{{.}}) Has(fd protoreflect.FieldDescriptor) bool {
-	m.messageInfo().init()
-	if fi, xt := m.messageInfo().checkField(fd); fi != nil {
+	mi := m.messageInfo()
+	mi.init()
+	if fi, xd := mi.checkField(fd); fi != nil {
 		return fi.has(m.pointer())
 	} else {
-		return m.messageInfo().extensionMap(m.pointer()).Has(xt)
+		return mi.extensionMap(m.pointer()).Has(xd)
 	}
 }
 func (m *{{.}}) Clear(fd protoreflect.FieldDescriptor) {
-	m.messageInfo().init()
-	if fi, xt := m.messageInfo().checkField(fd); fi != nil {
+	mi := m.messageInfo()
+	mi.init()
+	if fi, xd := mi.checkField(fd); fi != nil {
 		fi.clear(m.pointer())
 	} else {
-		m.messageInfo().extensionMap(m.pointer()).Clear(xt)
+		mi.extensionMap(m.pointer()).Clear(xd)
 	}
 }
 func (m *{{.}}) Get(fd protoreflect.FieldDescriptor) protoreflect.Value {
-	m.messageInfo().init()
-	if fi, xt := m.messageInfo().checkField(fd); fi != nil {
+	mi := m.messageInfo()
+	mi.init()
+	if fi, xd := mi.checkField(fd); fi != nil {
 		return fi.get(m.pointer())
 	} else {
-		return m.messageInfo().extensionMap(m.pointer()).Get(xt)
+		return mi.extensionMap(m.pointer()).Get(xd)
 	}
 }
 func (m *{{.}}) Set(fd protoreflect.FieldDescriptor, v protoreflect.Value) {
-	m.messageInfo().init()
-	if fi, xt := m.messageInfo().checkField(fd); fi != nil {
+	mi := m.messageInfo()
+	mi.init()
+	if fi, xd := mi.checkField(fd); fi != nil {
 		fi.set(m.pointer(), v)
 	} else {
-		m.messageInfo().extensionMap(m.pointer()).Set(xt, v)
+		mi.extensionMap(m.pointer()).Set(xd, v)
 	}
 }
 func (m *{{.}}) Mutable(fd protoreflect.FieldDescriptor) protoreflect.Value {
-	m.messageInfo().init()
-	if fi, xt := m.messageInfo().checkField(fd); fi != nil {
+	mi := m.messageInfo()
+	mi.init()
+	if fi, xd := mi.checkField(fd); fi != nil {
 		return fi.mutable(m.pointer())
 	} else {
-		return m.messageInfo().extensionMap(m.pointer()).Mutable(xt)
+		return mi.extensionMap(m.pointer()).Mutable(xd)
 	}
 }
 func (m *{{.}}) NewField(fd protoreflect.FieldDescriptor) protoreflect.Value {
-	m.messageInfo().init()
-	if fi, xt := m.messageInfo().checkField(fd); fi != nil {
+	mi := m.messageInfo()
+	mi.init()
+	if fi, xd := mi.checkField(fd); fi != nil {
 		return fi.newField()
 	} else {
-		return xt.New()
+		return xd.Type().New()
 	}
 }
 func (m *{{.}}) WhichOneof(od protoreflect.OneofDescriptor) protoreflect.FieldDescriptor {
-	m.messageInfo().init()
-	if oi := m.messageInfo().oneofs[od.Name()]; oi != nil && oi.oneofDesc == od {
+	mi := m.messageInfo()
+	mi.init()
+	if oi := mi.oneofs[od.Name()]; oi != nil && oi.oneofDesc == od {
 		return od.Fields().ByNumber(oi.which(m.pointer()))
 	}
 	panic("invalid oneof descriptor " + string(od.FullName()) + " for message " + string(m.Descriptor().FullName()))
 }
 func (m *{{.}}) GetUnknown() protoreflect.RawFields {
-	m.messageInfo().init()
-	return m.messageInfo().getUnknown(m.pointer())
+	mi := m.messageInfo()
+	mi.init()
+	return mi.getUnknown(m.pointer())
 }
 func (m *{{.}}) SetUnknown(b protoreflect.RawFields) {
-	m.messageInfo().init()
-	m.messageInfo().setUnknown(m.pointer(), b)
+	mi := m.messageInfo()
+	mi.init()
+	mi.setUnknown(m.pointer(), b)
 }
 func (m *{{.}}) IsValid() bool {
 	return !m.pointer().IsNil()
@@ -869,4 +893,128 @@ func merge{{.PointerMethod}}Slice(dst, src pointer, _ *coderFieldInfo, _ mergeOp
 
 {{end}}
 {{end}}
+`))
+
+func generateImplField() string {
+	return mustExecute(implFieldTemplate, GoTypes)
+}
+
+var implFieldTemplate = template.Must(template.New("").Parse(`
+func getterForNullableScalar(fd protoreflect.FieldDescriptor, fs reflect.StructField, conv Converter, fieldOffset offset) func(p pointer) protoreflect.Value {
+	ft := fs.Type
+	if ft.Kind() == reflect.Ptr {
+		ft = ft.Elem()
+	}
+	if fd.Kind() == protoreflect.EnumKind {
+		elemType := fs.Type.Elem()
+		// Enums for nullable types.
+		return func(p pointer) protoreflect.Value {
+			if p.IsNil() {
+				return conv.Zero()
+			}
+			rv := p.Apply(fieldOffset).Elem().AsValueOf(elemType)
+			if rv.IsNil() {
+				return conv.Zero()
+			}
+			return conv.PBValueOf(rv.Elem())
+		}
+	}
+	switch ft.Kind() {
+{{range . }}
+{{- if eq . "string"}}	case reflect.String:
+{{- /* Handle string GoType -> bytes proto type specially */}}
+		if fd.Kind() == protoreflect.BytesKind {
+			return func(p pointer) protoreflect.Value {
+				if p.IsNil() {
+					return conv.Zero()
+				}
+				x := p.Apply(fieldOffset).StringPtr()
+				if *x == nil {
+					return conv.Zero()
+				}
+				if len(**x) == 0 {
+					return protoreflect.ValueOfBytes(nil)
+				}
+				return protoreflect.ValueOfBytes([]byte(**x))
+			}
+		}
+{{else if eq . "[]byte" }}	case reflect.Slice:
+{{- /* Handle []byte GoType -> string proto type specially */}}
+		if fd.Kind() == protoreflect.StringKind {
+			return func(p pointer) protoreflect.Value {
+				if p.IsNil() {
+					return conv.Zero()
+				}
+				x := p.Apply(fieldOffset).Bytes()
+				if len(*x) == 0 {
+					return conv.Zero()
+				}
+				return protoreflect.ValueOfString(string(*x))
+			}
+		}
+{{else}}	case {{.Kind }}:
+{{end}}		return func(p pointer) protoreflect.Value {
+			if p.IsNil() {
+				return conv.Zero()
+			}
+			x := p.Apply(fieldOffset).{{.NullablePointerMethod}}()
+			if *x == nil {
+				return conv.Zero()
+			}
+			return protoreflect.ValueOf{{.PointerMethod}}({{.NullableStar}}*x)
+		}
+{{end}}	}
+	panic("unexpected protobuf kind: "+ft.Kind().String())
+}
+
+func getterForDirectScalar(fd protoreflect.FieldDescriptor, fs reflect.StructField, conv Converter, fieldOffset offset) func(p pointer) protoreflect.Value {
+	ft := fs.Type
+	if fd.Kind() == protoreflect.EnumKind {
+		// Enums for non nullable types.
+		return func(p pointer) protoreflect.Value {
+			if p.IsNil() {
+				return conv.Zero()
+			}
+			rv := p.Apply(fieldOffset).AsValueOf(fs.Type).Elem()
+			return conv.PBValueOf(rv)
+		}
+	}
+	switch ft.Kind() {
+{{range . }}
+{{- if eq . "string"}}	case reflect.String:
+{{- /* Handle string GoType -> bytes proto type specially */}}
+		if fd.Kind() == protoreflect.BytesKind {
+			return func(p pointer) protoreflect.Value {
+				if p.IsNil() {
+					return conv.Zero()
+				}
+				x := p.Apply(fieldOffset).String()
+				if len(*x) == 0 {
+					return protoreflect.ValueOfBytes(nil)
+				}
+				return protoreflect.ValueOfBytes([]byte(*x))
+			}
+		}
+{{else if eq . "[]byte" }}	case reflect.Slice:
+{{- /* Handle []byte GoType -> string proto type specially */}}
+		if fd.Kind() == protoreflect.StringKind {
+			return func(p pointer) protoreflect.Value {
+				if p.IsNil() {
+					return conv.Zero()
+				}
+				x := p.Apply(fieldOffset).Bytes()
+				return protoreflect.ValueOfString(string(*x))
+			}
+		}
+{{else}}	case {{.Kind}}:
+{{end}}		return func(p pointer) protoreflect.Value {
+			if p.IsNil() {
+				return conv.Zero()
+			}
+			x := p.Apply(fieldOffset).{{.PointerMethod}}()
+			return protoreflect.ValueOf{{.PointerMethod}}(*x)
+		}
+{{end}}	}
+	panic("unexpected protobuf kind: "+ft.Kind().String())
+}
 `))

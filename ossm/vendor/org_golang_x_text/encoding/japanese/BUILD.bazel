@@ -34,5 +34,6 @@ go_test(
         "//encoding/internal",
         "//encoding/internal/enctest",
         "//transform",
+        "//unicode/norm",
     ],
 )

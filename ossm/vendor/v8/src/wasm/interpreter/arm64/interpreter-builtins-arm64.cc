@@ -31,17 +31,18 @@ void PrepareForJsToWasmConversionBuiltinCall(MacroAssembler* masm,
                                              Register valuetypes_array_ptr,
                                              Register wasm_instance,
                                              Register function_data) {
-  UseScratchRegisterScope temps(masm);
-  Register GCScanCount = temps.AcquireX();
-  // Pushes and puts the values in order onto the stack before builtin calls for
-  // the GenericJSToWasmInterpreterWrapper.
-  // The last two slots contain tagged objects that need to be visited during
-  // GC.
-  __ Mov(GCScanCount, 2);
-  __ Str(
-      GCScanCount,
-      MemOperand(
-          fp, BuiltinWasmInterpreterWrapperConstants::kGCScanSlotCountOffset));
+  {
+    UseScratchRegisterScope temps(masm);
+    Register GCScanCount = temps.AcquireX();
+    // Pushes and puts the values in order onto the stack before builtin calls
+    // for the GenericJSToWasmInterpreterWrapper. The last two slots contain
+    // tagged objects that need to be visited during GC.
+    __ Mov(GCScanCount, 2);
+    __ Str(GCScanCount,
+           MemOperand(
+               fp,
+               BuiltinWasmInterpreterWrapperConstants::kGCScanSlotCountOffset));
+  }
   __ Push(current_param_slot, valuetypes_array_ptr, wasm_instance,
           function_data);
   // We had to prepare the parameters for the Call: we have to put the context
@@ -75,15 +76,17 @@ void RestoreAfterJsToWasmConversionBuiltinCall(MacroAssembler* masm,
 
 void PrepareForBuiltinCall(MacroAssembler* masm, Register array_start,
                            Register return_count, Register wasm_instance) {
-  UseScratchRegisterScope temps(masm);
-  Register GCScanCount = temps.AcquireX();
-  // Pushes and puts the values in order onto the stack before builtin calls for
-  // the GenericJSToWasmInterpreterWrapper.
-  __ Mov(GCScanCount, 1);
-  __ Str(
-      GCScanCount,
-      MemOperand(
-          fp, BuiltinWasmInterpreterWrapperConstants::kGCScanSlotCountOffset));
+  {
+    UseScratchRegisterScope temps(masm);
+    Register GCScanCount = temps.AcquireX();
+    // Pushes and puts the values in order onto the stack before builtin calls
+    // for the GenericJSToWasmInterpreterWrapper.
+    __ Mov(GCScanCount, 1);
+    __ Str(GCScanCount,
+           MemOperand(
+               fp,
+               BuiltinWasmInterpreterWrapperConstants::kGCScanSlotCountOffset));
+  }
   // The last slot contains a tagged object that need to be visited during GC.
   __ Push(array_start, return_count, xzr, wasm_instance);
   // We had to prepare the parameters for the Call: we have to put the context
@@ -112,17 +115,19 @@ void PrepareForWasmToJsConversionBuiltinCall(
     Register current_return_slot, Register valuetypes_array_ptr,
     Register wasm_instance, Register fixed_array, Register jsarray,
     bool load_native_context = true) {
-  UseScratchRegisterScope temps(masm);
-  Register GCScanCount = temps.AcquireX();
-  // Pushes and puts the values in order onto the stack before builtin calls
-  // for the GenericJSToWasmInterpreterWrapper.
-  // The last three slots contain tagged objects that need to be visited during
-  // GC.
-  __ Mov(GCScanCount, 3);
-  __ Str(
-      GCScanCount,
-      MemOperand(
-          fp, BuiltinWasmInterpreterWrapperConstants::kGCScanSlotCountOffset));
+  {
+    UseScratchRegisterScope temps(masm);
+    Register GCScanCount = temps.AcquireX();
+    // Pushes and puts the values in order onto the stack before builtin calls
+    // for the GenericJSToWasmInterpreterWrapper.
+    // The last three slots contain tagged objects that need to be visited
+    // during GC.
+    __ Mov(GCScanCount, 3);
+    __ Str(GCScanCount,
+           MemOperand(
+               fp,
+               BuiltinWasmInterpreterWrapperConstants::kGCScanSlotCountOffset));
+  }
   __ Push(return_count, result_index, current_return_slot, valuetypes_array_ptr,
           xzr, wasm_instance, fixed_array, jsarray);
   if (load_native_context) {
@@ -197,8 +202,7 @@ void LoadFunctionDataAndWasmInstance(MacroAssembler* masm,
       function_data,
       FieldMemOperand(shared_function_info,
                       SharedFunctionInfo::kTrustedFunctionDataOffset),
-
-      kUnknownIndirectPointerTag);
+      kWasmExportedFunctionDataIndirectPointerTag);
   shared_function_info = no_reg;
 
   Register trusted_instance_data = wasm_instance;
@@ -242,10 +246,17 @@ void LoadValueTypesArray(MacroAssembler* masm, Register function_data,
                       WasmExportedFunctionData::kPackedArgsSizeOffset));
   __ SmiToInt32(signature_data);
 
-  Register signature = valuetypes_array_ptr;
+  Register internal_function = valuetypes_array_ptr;
+  __ LoadProtectedPointerField(
+      internal_function,
+      MemOperand(
+          function_data,
+          WasmExportedFunctionData::kProtectedInternalOffset - kHeapObjectTag));
+
+  Register signature = internal_function;
   __ Ldr(signature,
-         MemOperand(function_data,
-                    WasmExportedFunctionData::kSigOffset - kHeapObjectTag));
+         MemOperand(internal_function,
+                    WasmInternalFunction::kSigOffset - kHeapObjectTag));
   LoadFromSignature(masm, valuetypes_array_ptr, return_count, param_count);
 }
 
@@ -697,13 +708,6 @@ void Builtins::Generate_GenericJSToWasmInterpreterWrapper(
 
   __ bind(&prepare_for_wasm_call);
 
-  // Set thread_in_wasm_flag.
-  DEFINE_REG_W(scratch32);
-  __ Ldr(scratch, MemOperand(kRootRegister,
-                             Isolate::thread_in_wasm_flag_address_offset()));
-  __ Mov(scratch32, 1);  // 32 bit.
-  __ Str(scratch32, MemOperand(scratch, 0));
-
   DEFINE_PINNED(function_index, w15);
   __ Ldr(
       function_index,
@@ -735,11 +739,6 @@ void Builtins::Generate_GenericJSToWasmInterpreterWrapper(
   __ Ldr(array_start, MemOperand(fp, kArgRetsAddressOffset));
 
   __ Str(xzr, MemOperand(fp, kArgRetsIsArgsOffset));
-
-  // Unset thread_in_wasm_flag.
-  __ Ldr(scratch, MemOperand(kRootRegister,
-                             Isolate::thread_in_wasm_flag_address_offset()));
-  __ Str(wzr, MemOperand(scratch, 0));  // 32 bit.
 
   regs.ResetExcept(wasm_instance, array_start, scratch);
 
@@ -979,8 +978,10 @@ void Builtins::Generate_GenericJSToWasmInterpreterWrapper(
   //  - the receiver
   // and transfer the control to the return address (the return address is
   // expected to be on the top of the stack).
+  // Add 1 to include the receiver in the cleanup count.
   // We cannot use just the ret instruction for this, because we cannot pass the
   // number of slots to remove in a Register as an argument.
+  __ Add(param_count, param_count, Immediate(1));
   __ DropArguments(param_count);
   __ Ret(lr);
 }
@@ -1028,10 +1029,9 @@ void Builtins::Generate_WasmInterpreterCWasmEntry(MacroAssembler* masm) {
            MemOperand(fp, WasmInterpreterCWasmEntryConstants::kSPFPOffset));
   }
 
-  __ Mov(x11, ExternalReference::Create(IsolateAddressId::kCEntryFPAddress,
-                                        masm->isolate()));
+  __ Mov(x11,
+         ExternalReference::Create(IsolateFieldId::kCEntryFP, masm->isolate()));
   __ Ldr(x10, MemOperand(x11));  // x10 = C entry FP.
-
   __ Str(x10,
          MemOperand(fp, WasmInterpreterCWasmEntryConstants::kCEntryFPOffset));
 
@@ -1060,9 +1060,7 @@ void Builtins::Generate_WasmInterpreterCWasmEntry(MacroAssembler* masm) {
   __ Bind(&invoke);
 
   // Link the current handler as the next handler.
-  __ Mov(x11, ExternalReference::Create(IsolateAddressId::kHandlerAddress,
-                                        masm->isolate()));
-  __ Ldr(x10, MemOperand(x11));
+  __ Ldr(x10, __ AsMemOperand(IsolateFieldId::kHandler));
   __ Push(padreg, x10);
 
   // Set this new handler as the current one.
@@ -1081,10 +1079,8 @@ void Builtins::Generate_WasmInterpreterCWasmEntry(MacroAssembler* masm) {
   static_assert(StackHandlerConstants::kNextOffset == 0 * kSystemPointerSize,
                 "Unexpected offset for StackHandlerConstants::kNextOffset");
   __ Pop(x10, padreg);
-  __ Mov(x11, ExternalReference::Create(IsolateAddressId::kHandlerAddress,
-                                        masm->isolate()));
   __ Drop(StackHandlerConstants::kSlotCount - 2);
-  __ Str(x10, MemOperand(x11));
+  __ Str(x10, __ AsMemOperand(IsolateFieldId::kHandler));
 
   __ Bind(&exit);
 
@@ -1493,11 +1489,6 @@ void Builtins::Generate_GenericWasmToJSInterpreterWrapper(
   // -------------------------------------------
   __ bind(&prepare_for_js_call);
 
-  // Reset thread_in_wasm_flag.
-  __ Ldr(scratch, MemOperand(kRootRegister,
-                             Isolate::thread_in_wasm_flag_address_offset()));
-  __ Str(wzr, MemOperand(scratch, 0));  // 32 bit.
-
   regs.ResetExcept(param, packed_args, valuetypes_array_ptr, context,
                    return_count, valuetype, scratch);
 
@@ -1681,7 +1672,8 @@ void Builtins::Generate_GenericWasmToJSInterpreterWrapper(
           RelocInfo::CODE_TARGET);
   __ Ldr(packed_args, MemOperand(fp, kPackedArrayOffset));
   __ Ldr(current_result_offset, MemOperand(fp, kCurrentResultOffset));
-  __ Str(kFPReturnRegister0, MemOperand(packed_args, current_result_offset));
+  __ Str(kFPReturnRegister0.S(),
+         MemOperand(packed_args, current_result_offset));
   __ Add(current_result_offset, current_result_offset,
          Immediate(sizeof(float)));
   __ jmp(&return_done);
@@ -1698,10 +1690,9 @@ void Builtins::Generate_GenericWasmToJSInterpreterWrapper(
 
   __ bind(&return_kWasmRef);
   __ Ldr(packed_args, MemOperand(fp, kPackedArrayOffset));
-  __ Str(return_reg,
-         MemOperand(packed_args, result_index, LSL, kSystemPointerSizeLog2));
+  __ Str(return_reg, MemOperand(packed_args, current_result_offset));
   __ Add(current_result_offset, current_result_offset,
-         Immediate(sizeof(double)));
+         Immediate(kSystemPointerSize));
 
   // A result converted.
   __ bind(&return_done);
@@ -1799,12 +1790,6 @@ void Builtins::Generate_GenericWasmToJSInterpreterWrapper(
   // -------------------------------------------
 
   __ bind(&all_done);
-  // Set thread_in_wasm_flag.
-  DEFINE_REG_W(scratch32);
-  __ Ldr(scratch, MemOperand(kRootRegister,
-                             Isolate::thread_in_wasm_flag_address_offset()));
-  __ Mov(scratch32, Immediate(1));
-  __ Str(scratch32, MemOperand(scratch, 0));  // 32 bit.
 
   // Deconstruct the stack frame.
   __ LeaveFrame(StackFrame::WASM_TO_JS);

@@ -16,6 +16,7 @@ limitations under the License.
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -65,10 +66,19 @@ func fetchModule(dest, importpath, version, sum string) error {
 	}
 
 	if repoSum != sum {
-		if goModCache := os.Getenv("GOMODCACHE"); goModCache != "" {
-			return fmt.Errorf("resulting module with sum %s; expected sum %s, Please try clearing your module cache directory %q", repoSum, sum, goModCache)
+		errMsg := fmt.Sprintf("resulting module with sum %s; expected sum %s.", repoSum, sum)
+		// The module cache is corrupt. Remove the downloaded directory.
+		if err := os.RemoveAll(dl.Dir); err != nil {
+			errMsg += fmt.Sprintf(" Additionally, failed to remove corrupt module cache directory %q: %v. Please remove it manaully and retry.", dl.Dir, err)
+		} else {
+			errMsg += " Please retry."
 		}
-		return fmt.Errorf("resulting module with sum %s; expected sum %s", repoSum, sum)
+		if goModCache := os.Getenv("GOMODCACHE"); goModCache != "" {
+			errMsg += fmt.Sprintf(" If the problem persists, please try clearing your host module cache with `go clean -modcache`")
+		} else {
+			errMsg += fmt.Sprintf(" If the problem persists, please try clearing Bazel output directory with `bazel clean --expunge`")
+		}
+		return errors.New(errMsg)
 	}
 
 	return nil

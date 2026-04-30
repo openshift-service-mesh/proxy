@@ -32,6 +32,7 @@ envoy_extension_cc_test(
         "//test/mocks/runtime:runtime_mocks",
         "//test/mocks/server:server_factory_context_mocks",
         "//test/mocks/tracing:tracing_mocks",
+        "//test/proto:helloworld_proto_cc_proto",
         "@envoy_api//envoy/extensions/filters/network/ext_authz/v3:pkg_cc_proto",
     ],
 )
@@ -83,6 +84,7 @@ envoy_extension_cc_test(
     extension_names = ["envoy.filters.network.ext_authz"],
     rbe_pool = "6gig",
     deps = [
+        "//source/common/ssl:ssl_lib",
         "//source/common/tls:context_config_lib",
         "//source/common/tls:context_lib",
         "//source/extensions/filters/network/ext_authz",

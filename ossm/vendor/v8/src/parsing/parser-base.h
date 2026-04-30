@@ -310,7 +310,10 @@ class ParserBase {
 
   void SkipInfos(int delta) { info_id_ += delta; }
 
-  void ResetInfoId() { info_id_ = 0; }
+  void ResetInfoId(int id) {
+    DCHECK_LE(0, id);
+    info_id_ = id;
+  }
 
   // The Zone where the parsing outputs are stored.
   Zone* main_zone() const { return ast_value_factory()->single_parse_zone(); }
@@ -628,8 +631,11 @@ class ParserBase {
     DeclarationScope* EnsureStaticElementsScope(ParserBase* parser, int beg_pos,
                                                 int info_id) {
       if (!has_static_elements()) {
-        static_elements_scope = parser->NewFunctionScope(
-            FunctionKind::kClassStaticInitializerFunction);
+        FunctionKind kind =
+            has_instance_members()
+                ? FunctionKind::kClassStaticInitializerFunctionPrecededByMember
+                : FunctionKind::kClassStaticInitializerFunction;
+        static_elements_scope = parser->NewFunctionScope(kind);
         static_elements_scope->SetLanguageMode(LanguageMode::kStrict);
         static_elements_scope->set_start_position(beg_pos);
         static_elements_function_id = info_id;
@@ -643,8 +649,11 @@ class ParserBase {
     DeclarationScope* EnsureInstanceMembersScope(ParserBase* parser,
                                                  int beg_pos, int info_id) {
       if (!has_instance_members()) {
-        instance_members_scope = parser->NewFunctionScope(
-            FunctionKind::kClassMembersInitializerFunction);
+        FunctionKind kind =
+            has_static_elements()
+                ? FunctionKind::kClassMembersInitializerFunctionPrecededByStatic
+                : FunctionKind::kClassMembersInitializerFunction;
+        instance_members_scope = parser->NewFunctionScope(kind);
         instance_members_scope->SetLanguageMode(LanguageMode::kStrict);
         instance_members_scope->set_start_position(beg_pos);
         instance_members_function_id = info_id;
@@ -1178,15 +1187,16 @@ class ParserBase {
              scope()->scope_type() == REPL_MODE_SCOPE) &&
             !scope()->is_nonlinear());
   }
-  bool IsNextUsingKeyword(Token::Value token_after_using, bool is_await_using) {
+  bool IsNextUsingKeyword(bool is_await_using) {
     // using and await using declarations in for-of statements must be followed
-    // by a non-pattern ForBinding. In the case of synchronous `using`, `of` is
-    // disallowed as well with a negative lookahead.
+    // by a non-pattern ForBinding.
     //
     // `of`: for ( [lookahead ≠ using of] ForDeclaration[?Yield, ?Await, +Using]
     //       of AssignmentExpression[+In, ?Yield, ?Await] )
     //
     // If `using` is not considered a keyword, it is parsed as an identifier.
+    Token::Value token_after_using =
+        is_await_using ? PeekAheadAhead() : PeekAhead();
     if (v8_flags.js_explicit_resource_management) {
       switch (token_after_using) {
         case Token::kIdentifier:
@@ -1201,7 +1211,16 @@ class ParserBase {
         case Token::kAsync:
           return true;
         case Token::kOf:
-          return is_await_using;
+          if (is_await_using) {
+            return true;
+          } else {
+            // In the case of synchronous `using`, `of` is disallowed as well
+            // with a negative lookahead for for-of loops. But, cursedly,
+            // `using of` is allowed as the initializer of C-style for loops,
+            // e.g. `for (using of = null;;)` parses.
+            Token::Value token_after_of = PeekAheadAhead();
+            return token_after_of == Token::kAssign;
+          }
         case Token::kFutureStrictReservedWord:
         case Token::kEscapedStrictReservedWord:
           return is_sloppy(language_mode());
@@ -1220,12 +1239,12 @@ class ParserBase {
     //    LineTerminator here] ForBinding[?Yield, +Await, ~Pattern]
     return ((peek() == Token::kUsing &&
              !scanner()->HasLineTerminatorAfterNext() &&
-             IsNextUsingKeyword(PeekAhead(), /* is_await_using */ false)) ||
+             IsNextUsingKeyword(/* is_await_using */ false)) ||
             (is_await_allowed() && peek() == Token::kAwait &&
              !scanner()->HasLineTerminatorAfterNext() &&
              PeekAhead() == Token::kUsing &&
              !scanner()->HasLineTerminatorAfterNextNext() &&
-             IsNextUsingKeyword(PeekAheadAhead(), /* is_await_using */ true)));
+             IsNextUsingKeyword(/* is_await_using */ true)));
   }
   const PendingCompilationErrorHandler* pending_error_handler() const {
     return pending_error_handler_;
@@ -1280,7 +1299,7 @@ class ParserBase {
       // receiver_scope. Mark through the ExpressionScope for now.
       expression_scope()->RecordThisUse();
     } else {
-      closure_scope->set_has_this_reference();
+      closure_scope->set_has_this_reference(true);
       var->ForceContextAllocation();
     }
   }
@@ -2264,7 +2283,7 @@ ParserBase<Impl>::ParsePrimaryExpression() {
       return ParseTemplateLiteral(impl()->NullExpression(), beg_pos, false);
 
     case Token::kMod:
-      if (flags().allow_natives_syntax() || impl()->ParsingExtension()) {
+      if (flags().allow_natives_syntax()) {
         return ParseV8Intrinsic();
       }
       break;
@@ -3995,6 +4014,10 @@ ParserBase<Impl>::ParseLeftHandSideContinuation(ExpressionT result) {
         int eval_scope_info_index = 0;
         if (CheckPossibleEvalCall(result, is_optional, scope())) {
           eval_scope_info_index = GetNextInfoId();
+          if (!Call::EvalScopeInfoIndexField::is_valid(eval_scope_info_index)) {
+            ReportMessage(MessageTemplate::kTooManyEvals);
+            return impl()->FailureExpression();
+          }
         }
 
         result = factory()->NewCall(result, args, pos, has_spread,
@@ -4166,6 +4189,7 @@ ParserBase<Impl>::ParseImportExpressions() {
   // ImportCall[Yield, Await] :
   //   import ( AssignmentExpression[+In, ?Yield, ?Await] )
   //   import . source ( AssignmentExpression[+In, ?Yield, ?Await] )
+  //   import . defer ( AssignmentExpression[+In, ?Yield, ?Await] )
   //
   // ImportMeta : import . meta
 
@@ -4179,6 +4203,9 @@ ParserBase<Impl>::ParseImportExpressions() {
     if (v8_flags.js_source_phase_imports &&
         CheckContextualKeyword(ast_value_factory()->source_string())) {
       phase = ModuleImportPhase::kSource;
+    } else if (v8_flags.js_defer_import_eval &&
+               CheckContextualKeyword(ast_value_factory()->defer_string())) {
+      phase = ModuleImportPhase::kDefer;
     } else {
       ExpectContextualKeyword(ast_value_factory()->meta_string(), "import.meta",
                               pos);
@@ -4216,7 +4243,7 @@ ParserBase<Impl>::ParseImportExpressions() {
   // TODO(42204365): Enable import attributes with source phase import once
   // specified.
   if (v8_flags.harmony_import_attributes &&
-      phase == ModuleImportPhase::kEvaluation && Check(Token::kComma)) {
+      phase != ModuleImportPhase::kSource && Check(Token::kComma)) {
     if (Check(Token::kRightParen)) {
       // A trailing comma allowed after the specifier.
       return factory()->NewImportCallExpression(specifier, phase, pos);
@@ -5100,9 +5127,10 @@ ParserBase<Impl>::ParseArrowFunctionLiteral(
         int dummy_function_length = -1;
         DCHECK(IsArrowFunction(kind));
         bool did_preparse_successfully = impl()->SkipFunction(
-            nullptr, kind, FunctionSyntaxKind::kAnonymousExpression,
-            formal_parameters.scope, &dummy_num_parameters,
-            &dummy_function_length, &produced_preparse_data);
+            function_literal_id, nullptr, kind,
+            FunctionSyntaxKind::kAnonymousExpression, formal_parameters.scope,
+            &dummy_num_parameters, &dummy_function_length,
+            &produced_preparse_data);
 
         DCHECK_NULL(produced_preparse_data);
 
@@ -6246,6 +6274,7 @@ typename ParserBase<Impl>::StatementT ParserBase<Impl>::ParseWithStatement(
     ReportMessage(MessageTemplate::kStrictWith);
     return impl()->NullStatement();
   }
+  impl()->CountUsage(v8::Isolate::kWithStatement);
 
   Expect(Token::kLeftParen);
   ExpressionT expr = ParseExpression();

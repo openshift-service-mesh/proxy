@@ -95,7 +95,7 @@ type {{ multierrname . }} []error
 
 // Error returns a concatenation of all the error messages it wraps.
 func (m {{ multierrname . }}) Error() string {
-	var msgs []string
+	msgs := make([]string, 0, len(m))
 	for _, err := range m {
 		msgs = append(msgs, err.Error())
 	}
@@ -196,6 +196,34 @@ var _ interface{
 	{{ if has .Rules.Items.GetEnum "In" }} {{ if .Rules.Items.GetEnum.In }}
 		var {{ lookup .Field "InLookup" }} = map[{{ inType .Field .Rules.Items.GetEnum.In }}]struct{}{
 			{{- range .Rules.Items.GetEnum.In }}
+				{{ inKey $f . }}: {},
+			{{- end }}
+		}
+	{{ end }}{{ end }}
+	{{ if has .Rules.Items.GetInt64 "In" }} {{ if .Rules.Items.GetInt64.In }}
+		var {{ lookup .Field "InLookup" }} = map[int64]struct{}{
+			{{- range .Rules.Items.GetInt64.In }}
+				{{ inKey $f . }}: {},
+			{{- end }}
+		}
+	{{ end }}{{ end }}
+	{{ if has .Rules.Items.GetInt64 "NotIn" }} {{ if .Rules.Items.GetInt64.NotIn }}
+		var {{ lookup .Field "NotInLookup" }} = map[int64]struct{}{
+			{{- range .Rules.Items.GetInt64.NotIn }}
+				{{ inKey $f . }}: {},
+			{{- end }}
+		}
+	{{ end }}{{ end }}
+	{{ if has .Rules.Items.GetInt32 "In" }} {{ if .Rules.Items.GetInt32.In }}
+		var {{ lookup .Field "InLookup" }} = map[int32]struct{}{
+			{{- range .Rules.Items.GetInt32.In }}
+				{{ inKey $f . }}: {},
+			{{- end }}
+		}
+	{{ end }}{{ end }}
+	{{ if has .Rules.Items.GetInt32 "NotIn" }} {{ if .Rules.Items.GetInt32.NotIn }}
+		var {{ lookup .Field "NotInLookup" }} = map[int32]struct{}{
+			{{- range .Rules.Items.GetInt32.NotIn }}
 				{{ inKey $f . }}: {},
 			{{- end }}
 		}

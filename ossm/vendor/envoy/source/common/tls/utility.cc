@@ -1,13 +1,18 @@
 #include "source/common/tls/utility.h"
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
 #include <cstdint>
 #include <vector>
 
 #include "source/common/common/assert.h"
 #include "source/common/common/empty_string.h"
+#include "source/common/common/hex.h"
 #include "source/common/common/safe_memcpy.h"
 #include "source/common/network/address_impl.h"
 #include "source/common/protobuf/utility.h"
+#include "source/common/ssl/ssl.h"
 
 #include "absl/strings/str_join.h"
 #include "openssl/x509v3.h"
@@ -206,7 +211,7 @@ inline bssl::UniquePtr<ASN1_TIME> currentASN1Time(TimeSource& time_source) {
 
 std::string Utility::getSerialNumberFromCertificate(X509& cert) {
   ASN1_INTEGER* serial_number = X509_get_serialNumber(&cert);
-  bssl::UniquePtr<BIGNUM> num_bn {BN_new()};
+  bssl::UniquePtr<BIGNUM> num_bn{BN_new()};
   ASN1_INTEGER_to_BN(serial_number, num_bn.get());
   char* char_serial_number = BN_bn2hex(num_bn.get());
   if (char_serial_number != nullptr) {
@@ -215,6 +220,22 @@ std::string Utility::getSerialNumberFromCertificate(X509& cert) {
     return serial_number;
   }
   return "";
+}
+
+std::string Utility::getSha256DigestFromCertificate(X509& cert) {
+  std::vector<uint8_t> computed_hash(SHA256_DIGEST_LENGTH);
+  unsigned int n;
+  X509_digest(&cert, EVP_sha256(), computed_hash.data(), &n);
+  RELEASE_ASSERT(n == computed_hash.size(), "");
+  return Hex::encode(computed_hash);
+}
+
+std::string Utility::getSha1DigestFromCertificate(X509& cert) {
+  std::vector<uint8_t> computed_hash(SHA_DIGEST_LENGTH);
+  unsigned int n;
+  X509_digest(&cert, EVP_sha1(), computed_hash.data(), &n);
+  RELEASE_ASSERT(n == computed_hash.size(), "");
+  return Hex::encode(computed_hash);
 }
 
 std::vector<std::string> Utility::getSubjectAltNames(X509& cert, int type) {
@@ -279,9 +300,10 @@ std::string Utility::generalNameAsString(const GENERAL_NAME* general_name) {
       break;
     case V_ASN1_ENUMERATED:
     case V_ASN1_INTEGER: {
-      bssl::UniquePtr<BIGNUM> san_bn { BN_new() };
-      value->type == V_ASN1_ENUMERATED ? ASN1_ENUMERATED_to_BN(value->value.enumerated, san_bn.get())
-                                       : ASN1_INTEGER_to_BN(value->value.integer, san_bn.get());
+      bssl::UniquePtr<BIGNUM> san_bn{BN_new()};
+      value->type == V_ASN1_ENUMERATED
+          ? ASN1_ENUMERATED_to_BN(value->value.enumerated, san_bn.get())
+          : ASN1_INTEGER_to_BN(value->value.integer, san_bn.get());
       char* san_char = BN_bn2dec(san_bn.get());
       if (san_char != nullptr) {
         san.assign(san_char);
@@ -535,8 +557,27 @@ std::string Utility::getX509VerificationErrorInfo(X509_STORE_CTX* ctx) {
   const int n = X509_STORE_CTX_get_error(ctx);
   const int depth = X509_STORE_CTX_get_error_depth(ctx);
   std::string error_details =
-      absl::StrCat("X509_verify_cert: certificate verification error at depth ", depth, ": ",
-                   X509_verify_cert_error_string(n));
+      absl::StrCat("X509_verify_cert: certificate verification error at depth ", depth, ": ");
+
+  if (n == X509_V_ERR_UNABLE_TO_GET_CRL || n == X509_V_ERR_CRL_NOT_YET_VALID ||
+      n == X509_V_ERR_CRL_HAS_EXPIRED || n == X509_V_ERR_CERT_REVOKED) {
+    const std::string crl_error_msg =
+        fmt::format("certificate revocation check against provided CRLs failed: {}",
+                    X509_verify_cert_error_string(n));
+    absl::StrAppend(&error_details, crl_error_msg);
+    X509* cert = X509_STORE_CTX_get_current_cert(ctx);
+    if (cert != nullptr) {
+      std::vector<std::string> crldps = getCertificateCrlDpsForLogging(cert);
+      if (!crldps.empty()) {
+        const std::string error_msg =
+            fmt::format(", certificate CRL distribution points: [{}]", fmt::join(crldps, ", "));
+        absl::StrAppend(&error_details, error_msg);
+      }
+    }
+  } else {
+    absl::StrAppend(&error_details, X509_verify_cert_error_string(n));
+  }
+
   return error_details;
 }
 
@@ -562,6 +603,39 @@ std::vector<std::string> Utility::mapX509Stack(stack_st_X509& stack,
   }
 
   return result;
+}
+
+std::vector<std::string> Utility::getCertificateSansForLogging(X509* cert) {
+  std::vector<std::string> sans;
+  // X509_get_ext_d2i should be available in all supported BoringSSL versions.
+  bssl::UniquePtr<GENERAL_NAMES> san_names(
+      static_cast<GENERAL_NAMES*>(X509_get_ext_d2i(cert, NID_subject_alt_name, nullptr, nullptr)));
+  if (san_names != nullptr) {
+    for (const GENERAL_NAME* general_name : san_names.get()) {
+      sans.push_back(Utility::generalNameAsString(general_name));
+    }
+  }
+  return sans;
+}
+
+std::vector<std::string> Utility::getCertificateCrlDpsForLogging(X509* cert) {
+  std::vector<std::string> crldps;
+  bssl::UniquePtr<CRL_DIST_POINTS> dist_points(static_cast<CRL_DIST_POINTS*>(
+      X509_get_ext_d2i(cert, NID_crl_distribution_points, nullptr, nullptr)));
+  if (dist_points != nullptr) {
+    for (const DIST_POINT* dp : dist_points.get()) {
+      if (dp->distpoint != nullptr && dp->distpoint->type == 0) {
+        GENERAL_NAMES* names =
+            ENVOY_OPENSSL_CAST(reinterpret_cast<GENERAL_NAMES*>, dp->distpoint->name.fullname);
+        if (names != nullptr) {
+          for (const GENERAL_NAME* general_name : names) {
+            crldps.push_back(Utility::generalNameAsString(general_name));
+          }
+        }
+      }
+    }
+  }
+  return crldps;
 }
 
 } // namespace Tls

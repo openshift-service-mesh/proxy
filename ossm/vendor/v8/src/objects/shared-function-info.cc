@@ -68,16 +68,11 @@ void SharedFunctionInfo::Init(ReadOnlyRoots ro_roots, int unique_id) {
   UpdateFunctionMapIndex();
 
   set_age(0);
-
-  clear_padding();
+  set_feedback_slot(0);
 }
 
+// LINT.IfChange(GetSharedFunctionInfoCode)
 Tagged<Code> SharedFunctionInfo::GetCode(Isolate* isolate) const {
-  // ======
-  // NOTE: This chain of checks MUST be kept in sync with the equivalent CSA
-  // GetSharedFunctionInfoCode method in code-stub-assembler.cc.
-  // ======
-
   Tagged<Object> data = GetTrustedData(isolate);
   if (data != Smi::zero()) {
     DCHECK(HasTrustedData());
@@ -87,10 +82,11 @@ Tagged<Code> SharedFunctionInfo::GetCode(Isolate* isolate) const {
       DCHECK(HasBytecodeArray());
       return isolate->builtins()->code(Builtin::kInterpreterEntryTrampoline);
     }
-    if (IsCode(data)) {
+    if (Tagged<Code> code; TryCast(data, &code)) {
       // Having baseline Code means we are a compiled, baseline function.
       DCHECK(HasBaselineCode());
-      return Cast<Code>(data);
+      SBXCHECK_EQ(code->kind(), CodeKind::BASELINE);
+      return code;
     }
     if (IsInterpreterData(data)) {
       Tagged<Code> code = InterpreterTrampoline(isolate);
@@ -101,13 +97,13 @@ Tagged<Code> SharedFunctionInfo::GetCode(Isolate* isolate) const {
     if (IsUncompiledData(data)) {
       // Having uncompiled data (with or without scope) means we need to
       // compile.
-      DCHECK(HasUncompiledData());
+      DCHECK(HasUncompiledData(isolate));
       return isolate->builtins()->code(Builtin::kCompileLazy);
     }
 #if V8_ENABLE_WEBASSEMBLY
     if (IsWasmExportedFunctionData(data)) {
       // Having a WasmExportedFunctionData means the code is in there.
-      DCHECK(HasWasmExportedFunctionData());
+      DCHECK(HasWasmExportedFunctionData(isolate));
       return wasm_exported_function_data()->wrapper_code(isolate);
     }
     if (IsWasmJSFunctionData(data)) {
@@ -150,6 +146,7 @@ Tagged<Code> SharedFunctionInfo::GetCode(Isolate* isolate) const {
 
   UNREACHABLE();
 }
+// LINT.ThenChange(/src/codegen/code-stub-assembler.cc:GetSharedFunctionInfoCode)
 
 SharedFunctionInfo::ScriptIterator::ScriptIterator(Isolate* isolate,
                                                    Tagged<Script> script)
@@ -186,7 +183,8 @@ void SharedFunctionInfo::SetScript(IsolateForSandbox isolate,
 
   if (script() == script_object) return;
 
-  if (reset_preparsed_scope_data && HasUncompiledDataWithPreparseData()) {
+  if (reset_preparsed_scope_data &&
+      HasUncompiledDataWithPreparseData(isolate)) {
     ClearPreparseData(isolate);
   }
 
@@ -231,15 +229,10 @@ void SharedFunctionInfo::SetScript(IsolateForSandbox isolate,
 
 void SharedFunctionInfo::CopyFrom(Tagged<SharedFunctionInfo> other,
                                   IsolateForSandbox isolate) {
-  if (other->HasTrustedData()) {
-    SetTrustedData(Cast<ExposedTrustedObject>(other->GetTrustedData(isolate)));
-  } else {
-    SetUntrustedData(other->GetUntrustedData());
-  }
-
   PtrComprCageBase cage_base = GetPtrComprCageBase(*this);
   set_name_or_scope_info(other->name_or_scope_info(cage_base, kAcquireLoad),
                          kReleaseStore);
+
   set_outer_scope_info_or_feedback_metadata(
       other->outer_scope_info_or_feedback_metadata(cage_base));
   set_script(other->script(cage_base, kAcquireLoad), kReleaseStore);
@@ -255,6 +248,16 @@ void SharedFunctionInfo::CopyFrom(Tagged<SharedFunctionInfo> other,
   set_unique_id(other->unique_id());
   set_age(0);
 
+  // Install code last to ensure that the entire SFI is properly initialized if
+  // it's compiled.
+  if (other->HasTrustedData()) {
+    SetTrustedData(
+        TrustedCast<ExposedTrustedObject>(other->GetTrustedData(isolate)));
+  } else {
+    SetUntrustedData(other->GetUntrustedData());
+  }
+
+  set_feedback_slot(other->feedback_slot());
 #if DEBUG
   // This should now be byte-for-byte identical to the input except for the age
   // field (could be reset concurrently). Compare content before age field now:
@@ -320,9 +323,9 @@ Tagged<CoverageInfo> SharedFunctionInfo::GetCoverageInfo(
 
 std::unique_ptr<char[]> SharedFunctionInfo::DebugNameCStr() const {
 #if V8_ENABLE_WEBASSEMBLY
-  if (HasWasmExportedFunctionData()) {
+  if (HasWasmExportedFunctionData(GetCurrentIsolateForSandbox())) {
     return WasmExportedFunction::GetDebugName(
-        wasm_exported_function_data()->sig());
+        wasm_exported_function_data()->internal()->sig());
   }
 #endif  // V8_ENABLE_WEBASSEMBLY
   DisallowGarbageCollection no_gc;
@@ -335,15 +338,15 @@ std::unique_ptr<char[]> SharedFunctionInfo::DebugNameCStr() const {
 Handle<String> SharedFunctionInfo::DebugName(
     Isolate* isolate, DirectHandle<SharedFunctionInfo> shared) {
 #if V8_ENABLE_WEBASSEMBLY
-  if (shared->HasWasmExportedFunctionData()) {
+  if (shared->HasWasmExportedFunctionData(isolate)) {
     return isolate->factory()
         ->NewStringFromUtf8(base::CStrVector(shared->DebugNameCStr().get()))
         .ToHandleChecked();
   }
 #endif  // V8_ENABLE_WEBASSEMBLY
   FunctionKind function_kind = shared->kind();
-  if (IsClassMembersInitializerFunction(function_kind)) {
-    return function_kind == FunctionKind::kClassMembersInitializerFunction
+  if (IsClassInitializerFunction(function_kind)) {
+    return IsClassInstanceInitializerFunction(function_kind)
                ? isolate->factory()->instance_members_initializer_string()
                : isolate->factory()->static_initializer_string();
   }
@@ -384,22 +387,24 @@ void SharedFunctionInfo::DiscardCompiledMetadata(
       PrintF(scope.file(), "]\n");
     }
 
-    Tagged<HeapObject> outer_scope_info;
     if (scope_info()->HasOuterScopeInfo()) {
-      outer_scope_info = scope_info()->OuterScopeInfo();
-    } else {
-      outer_scope_info = ReadOnlyRoots(isolate).the_hole_value();
-    }
+      Tagged<ScopeInfo> outer_scope_info = scope_info()->OuterScopeInfo();
 
-    // Raw setter to avoid validity checks, since we're performing the unusual
-    // task of decompiling.
-    set_raw_outer_scope_info_or_feedback_metadata(outer_scope_info);
-    gc_notify_updated_slot(
-        *this,
-        RawField(SharedFunctionInfo::kOuterScopeInfoOrFeedbackMetadataOffset),
-        outer_scope_info);
+      // Raw setter to avoid validity checks, since we're performing the unusual
+      // task of decompiling.
+      set_raw_outer_scope_info_or_feedback_metadata(outer_scope_info);
+      gc_notify_updated_slot(
+          *this,
+          RawField(SharedFunctionInfo::kOuterScopeInfoOrFeedbackMetadataOffset),
+          outer_scope_info);
+    } else {
+      // Raw setter to avoid validity checks, since we're performing the unusual
+      // task of decompiling.
+      set_raw_outer_scope_info_or_feedback_metadata(
+          ReadOnlyRoots(isolate).the_hole_value());
+    }
   } else {
-    DCHECK(IsScopeInfo(outer_scope_info()) || IsTheHole(outer_scope_info()));
+    DCHECK(IsTheHole(outer_scope_info()) || IsScopeInfo(outer_scope_info()));
   }
 
   // TODO(rmcilroy): Possibly discard ScopeInfo here as well.
@@ -415,7 +420,7 @@ void SharedFunctionInfo::DiscardCompiled(
   int end_position = shared_info->EndPosition();
 
   MaybeDirectHandle<UncompiledData> data;
-  if (!shared_info->HasUncompiledDataWithPreparseData()) {
+  if (!shared_info->HasUncompiledDataWithPreparseData(isolate)) {
     // Create a new UncompiledData, without pre-parsed scope.
     data = isolate->factory()->NewUncompiledDataWithoutPreparseData(
         inferred_name_val, start_position, end_position);
@@ -428,7 +433,7 @@ void SharedFunctionInfo::DiscardCompiled(
   shared_info->DiscardCompiledMetadata(isolate);
 
   // Replace compiled data with a new UncompiledData object.
-  if (shared_info->HasUncompiledDataWithPreparseData()) {
+  if (shared_info->HasUncompiledDataWithPreparseData(isolate)) {
     // If this is uncompiled data with a pre-parsed scope data, we can just
     // clear out the scope data and keep the uncompiled data.
     shared_info->ClearPreparseData(isolate);
@@ -610,7 +615,7 @@ void SharedFunctionInfo::InitFromFunctionLiteral(IsolateT* isolate,
 template <typename IsolateT>
 void SharedFunctionInfo::CreateAndSetUncompiledData(IsolateT* isolate,
                                                     FunctionLiteral* lit) {
-  DCHECK(!lit->shared_function_info()->HasUncompiledData());
+  DCHECK(!lit->shared_function_info()->HasUncompiledData(isolate));
   DirectHandle<UncompiledData> data;
   ProducedPreparseData* scope_data = lit->produced_preparse_data();
   if (scope_data != nullptr) {
@@ -718,16 +723,17 @@ int SharedFunctionInfo::StartPosition() const {
       return info->StartPosition();
     }
   }
-  if (HasUncompiledData()) {
+  IsolateForSandbox isolate = GetCurrentIsolateForSandbox();
+  if (HasUncompiledData(isolate)) {
     // Works with or without scope.
-    return uncompiled_data(GetIsolateForSandbox(*this))->start_position();
+    return uncompiled_data(isolate)->start_position();
   }
   if (IsApiFunction() || HasBuiltinId()) {
     DCHECK_IMPLIES(HasBuiltinId(), builtin_id() != Builtin::kCompileLazy);
     return 0;
   }
 #if V8_ENABLE_WEBASSEMBLY
-  if (HasWasmExportedFunctionData()) {
+  if (HasWasmExportedFunctionData(isolate)) {
     Tagged<WasmTrustedInstanceData> instance_data =
         wasm_exported_function_data()->instance_data();
     int func_index = wasm_exported_function_data()->function_index();
@@ -746,16 +752,17 @@ int SharedFunctionInfo::EndPosition() const {
       return info->EndPosition();
     }
   }
-  if (HasUncompiledData()) {
+  IsolateForSandbox isolate = GetCurrentIsolateForSandbox();
+  if (HasUncompiledData(isolate)) {
     // Works with or without scope.
-    return uncompiled_data(GetIsolateForSandbox(*this))->end_position();
+    return uncompiled_data(isolate)->end_position();
   }
   if (IsApiFunction() || HasBuiltinId()) {
     DCHECK_IMPLIES(HasBuiltinId(), builtin_id() != Builtin::kCompileLazy);
     return 0;
   }
 #if V8_ENABLE_WEBASSEMBLY
-  if (HasWasmExportedFunctionData()) {
+  if (HasWasmExportedFunctionData(isolate)) {
     Tagged<WasmTrustedInstanceData> instance_data =
         wasm_exported_function_data()->instance_data();
     int func_index = wasm_exported_function_data()->function_index();
@@ -781,8 +788,8 @@ void SharedFunctionInfo::UpdateFromFunctionLiteralForLiveEdit(
     old_scope_info->SetPositionInfo(new_scope_info->position_info_start(),
                                     new_scope_info->position_info_end());
   } else if (!is_compiled()) {
-    CHECK(HasUncompiledData());
-    if (HasUncompiledDataWithPreparseData()) {
+    CHECK(HasUncompiledData(isolate));
+    if (HasUncompiledDataWithPreparseData(isolate)) {
       ClearPreparseData(isolate);
     }
     uncompiled_data(isolate)->set_start_position(lit->start_position());

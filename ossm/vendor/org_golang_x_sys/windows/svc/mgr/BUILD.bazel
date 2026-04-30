@@ -12,7 +12,6 @@ go_library(
     visibility = ["//visibility:public"],
     deps = select({
         "@io_bazel_rules_go//go/platform:windows": [
-            "//internal/unsafeheader",
             "//windows",
             "//windows/svc",
         ],
@@ -32,6 +31,8 @@ go_test(
     deps = select({
         "@io_bazel_rules_go//go/platform:windows": [
             ":mgr",
+            "//windows",
+            "//windows/svc",
         ],
         "//conditions:default": [],
     }),

@@ -4,7 +4,9 @@ go_library(
     name = "internal_gengo",
     srcs = [
         "init.go",
+        "init_opaque.go",
         "main.go",
+        "opaque.go",
         "reflect.go",
         "well_known_types.go",
     ],
@@ -13,7 +15,9 @@ go_library(
     deps = [
         "//compiler/protogen",
         "//encoding/protowire",
+        "//internal/editionssupport",
         "//internal/encoding/tag",
+        "//internal/filedesc",
         "//internal/genid",
         "//internal/version",
         "//proto",
@@ -22,6 +26,7 @@ go_library(
         "//reflect/protoreflect",
         "//runtime/protoimpl",
         "//types/descriptorpb",
+        "//types/gofeaturespb",
         "//types/pluginpb",
     ],
 )

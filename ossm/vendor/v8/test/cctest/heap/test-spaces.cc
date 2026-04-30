@@ -41,8 +41,8 @@
 #include "src/heap/large-spaces.h"
 #include "src/heap/main-allocator.h"
 #include "src/heap/memory-allocator.h"
-#include "src/heap/mutable-page-metadata.h"
-#include "src/heap/page-pool.h"
+#include "src/heap/memory-pool.h"
+#include "src/heap/mutable-page.h"
 #include "src/heap/spaces-inl.h"
 #include "src/heap/spaces.h"
 #include "src/objects/free-space.h"
@@ -70,7 +70,7 @@ class V8_NODISCARD TestMemoryAllocatorScope {
         isolate,
         page_allocator != nullptr ? page_allocator : isolate->page_allocator(),
         page_allocator != nullptr ? page_allocator : isolate->page_allocator(),
-        max_capacity));
+        isolate->isolate_group()->memory_pool(), max_capacity));
     if (page_allocator != nullptr) {
       isolate->heap()->memory_allocator_->data_page_allocator_ = page_allocator;
     }
@@ -134,7 +134,7 @@ static void VerifyMemoryChunk(Isolate* isolate, Heap* heap,
   size_t allocatable_memory_area_offset =
       MemoryChunkLayout::ObjectStartOffsetInMemoryChunk(space->identity());
 
-  MutablePageMetadata* memory_chunk = memory_allocator->AllocateLargePage(
+  MutablePage* memory_chunk = memory_allocator->AllocateLargePage(
       space, area_size, executable, AllocationHint());
   size_t reserved_size =
       ((executable == EXECUTABLE))
@@ -159,7 +159,7 @@ static unsigned int PseudorandomAreaSize() {
   return lo & 0xFFFFF;
 }
 
-TEST(MutablePageMetadata) {
+TEST(MutablePage) {
   Isolate* isolate = CcTest::i_isolate();
   Heap* heap = isolate->heap();
   IsolateSafepointScope safepoint(heap);
@@ -231,7 +231,7 @@ TEST(MemoryAllocator) {
   OldSpace faked_space(heap);
   CHECK(!faked_space.first_page());
   CHECK(!faked_space.last_page());
-  PageMetadata* first_page = memory_allocator->AllocatePage(
+  NormalPage* first_page = memory_allocator->AllocatePage(
       MemoryAllocator::AllocationMode::kRegular,
       static_cast<PagedSpace*>(&faked_space), NOT_EXECUTABLE);
 
@@ -239,24 +239,24 @@ TEST(MemoryAllocator) {
   CHECK(first_page->next_page() == nullptr);
   total_pages++;
 
-  for (PageMetadata* p = first_page; p != nullptr; p = p->next_page()) {
+  for (NormalPage* p = first_page; p != nullptr; p = p->next_page()) {
     CHECK(p->owner() == &faked_space);
   }
 
   // Again, we should get n or n - 1 pages.
-  PageMetadata* other = memory_allocator->AllocatePage(
+  NormalPage* other = memory_allocator->AllocatePage(
       MemoryAllocator::AllocationMode::kRegular,
       static_cast<PagedSpace*>(&faked_space), NOT_EXECUTABLE);
   total_pages++;
   faked_space.memory_chunk_list().PushBack(other);
   int page_count = 0;
-  for (PageMetadata* p = first_page; p != nullptr; p = p->next_page()) {
+  for (NormalPage* p = first_page; p != nullptr; p = p->next_page()) {
     CHECK(p->owner() == &faked_space);
     page_count++;
   }
   CHECK(total_pages == page_count);
 
-  PageMetadata* second_page = first_page->next_page();
+  NormalPage* second_page = first_page->next_page();
   CHECK_NOT_NULL(second_page);
 
   // OldSpace's destructor will tear down the space and free up all pages.
@@ -417,7 +417,7 @@ TEST(OldLargeObjectSpace) {
   Heap* heap = isolate->heap();
 
   auto lo = std::make_unique<OldLargeObjectSpace>(heap);
-  const int lo_size = PageMetadata::kPageSize;
+  const int lo_size = NormalPage::kPageSize;
 
   HandleScope handle_scope(isolate);
   Tagged<Map> map = ReadOnlyRoots(isolate).fixed_double_array_map();
@@ -457,7 +457,6 @@ TEST(OldLargeObjectSpace) {
 // process (jumbo builds).
 TEST(SizeOfInitialHeap) {
   ManualGCScope manual_gc_scope;
-  if (i::v8_flags.always_turbofan) return;
   // Bootstrapping without a snapshot causes more allocations.
   CcTest::InitializeVM();
   Isolate* isolate = CcTest::i_isolate();
@@ -600,7 +599,9 @@ HEAP_TEST(Regress791582) {
     Tagged<HeapObject> obj = result.ToObjectChecked();
     heap->CreateFillerObjectAt(obj.address(), until_page_end);
     // Simulate allocation folding moving the top pointer back.
-    *heap->NewSpaceAllocationTopAddress() = obj.address();
+    LinearAllocationArea* new_space =
+        &isolate->isolate_data()->new_allocation_info();
+    *new_space->top_address() = obj.address();
   }
 
   {
@@ -651,7 +652,7 @@ TEST(NoMemoryForNewPage) {
   TestMemoryAllocatorScope test_allocator_scope(isolate, 0, &failing_allocator);
   MemoryAllocator* memory_allocator = test_allocator_scope.allocator();
   OldSpace faked_space(heap);
-  PageMetadata* page = memory_allocator->AllocatePage(
+  NormalPage* page = memory_allocator->AllocatePage(
       MemoryAllocator::AllocationMode::kRegular,
       static_cast<PagedSpace*>(&faked_space), NOT_EXECUTABLE);
 

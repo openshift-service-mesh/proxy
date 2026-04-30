@@ -54,12 +54,12 @@ func TestUnionCreateExisting(t *testing.T) {
 	roBase := &ReadOnlyFs{source: base}
 	ufs := NewCopyOnWriteFs(roBase, &MemMapFs{})
 
-	base.MkdirAll("/home/test", 0777)
+	base.MkdirAll("/home/test", 0o777)
 	fh, _ := base.Create("/home/test/file.txt")
 	fh.WriteString("This is a test")
 	fh.Close()
 
-	fh, err := ufs.OpenFile("/home/test/file.txt", os.O_RDWR, 0666)
+	fh, err := ufs.OpenFile("/home/test/file.txt", os.O_RDWR, 0o666)
 	if err != nil {
 		t.Errorf("Failed to open file r/w: %s", err)
 	}
@@ -79,7 +79,7 @@ func TestUnionCreateExisting(t *testing.T) {
 	fh.Close()
 
 	fh, _ = base.Open("/home/test/file.txt")
-	data, err = ioutil.ReadAll(fh)
+	data, _ = ioutil.ReadAll(fh)
 	if string(data) != "This is a test" {
 		t.Errorf("Got wrong data in base file")
 	}
@@ -95,7 +95,6 @@ func TestUnionCreateExisting(t *testing.T) {
 	default:
 		t.Errorf("Create failed on existing file")
 	}
-
 }
 
 func TestUnionMergeReaddir(t *testing.T) {
@@ -104,7 +103,7 @@ func TestUnionMergeReaddir(t *testing.T) {
 
 	ufs := &CopyOnWriteFs{base: roBase, layer: &MemMapFs{}}
 
-	base.MkdirAll("/home/test", 0777)
+	base.MkdirAll("/home/test", 0o777)
 	fh, _ := base.Create("/home/test/file.txt")
 	fh.WriteString("This is a test")
 	fh.Close()
@@ -130,12 +129,12 @@ func TestExistingDirectoryCollisionReaddir(t *testing.T) {
 
 	ufs := &CopyOnWriteFs{base: roBase, layer: overlay}
 
-	base.MkdirAll("/home/test", 0777)
+	base.MkdirAll("/home/test", 0o777)
 	fh, _ := base.Create("/home/test/file.txt")
 	fh.WriteString("This is a test")
 	fh.Close()
 
-	overlay.MkdirAll("home/test", 0777)
+	overlay.MkdirAll("home/test", 0o777)
 	fh, _ = overlay.Create("/home/test/file2.txt")
 	fh.WriteString("This is a test")
 	fh.Close()
@@ -170,7 +169,7 @@ func TestNestedDirBaseReaddir(t *testing.T) {
 
 	ufs := &CopyOnWriteFs{base: roBase, layer: overlay}
 
-	base.MkdirAll("/home/test/foo/bar", 0777)
+	base.MkdirAll("/home/test/foo/bar", 0o777)
 	fh, _ := base.Create("/home/test/file.txt")
 	fh.WriteString("This is a test")
 	fh.Close()
@@ -182,7 +181,7 @@ func TestNestedDirBaseReaddir(t *testing.T) {
 	fh.WriteString("This is a test")
 	fh.Close()
 
-	overlay.MkdirAll("/", 0777)
+	overlay.MkdirAll("/", 0o777)
 
 	// Opening something only in the base
 	fh, _ = ufs.Open("/home/test/foo")
@@ -205,8 +204,8 @@ func TestNestedDirOverlayReaddir(t *testing.T) {
 
 	ufs := &CopyOnWriteFs{base: roBase, layer: overlay}
 
-	base.MkdirAll("/", 0777)
-	overlay.MkdirAll("/home/test/foo/bar", 0777)
+	base.MkdirAll("/", 0o777)
+	overlay.MkdirAll("/home/test/foo/bar", 0o777)
 	fh, _ := overlay.Create("/home/test/file.txt")
 	fh.WriteString("This is a test")
 	fh.Close()
@@ -239,8 +238,8 @@ func TestNestedDirOverlayOsFsReaddir(t *testing.T) {
 
 	ufs := &CopyOnWriteFs{base: roBase, layer: overlay}
 
-	base.MkdirAll("/", 0777)
-	overlay.MkdirAll("/home/test/foo/bar", 0777)
+	base.MkdirAll("/", 0o777)
+	overlay.MkdirAll("/home/test/foo/bar", 0o777)
 	fh, _ := overlay.Create("/home/test/file.txt")
 	fh.WriteString("This is a test")
 	fh.Close()
@@ -274,12 +273,12 @@ func TestCopyOnWriteFsWithOsFs(t *testing.T) {
 
 	ufs := &CopyOnWriteFs{base: roBase, layer: overlay}
 
-	base.MkdirAll("/home/test", 0777)
+	base.MkdirAll("/home/test", 0o777)
 	fh, _ := base.Create("/home/test/file.txt")
 	fh.WriteString("This is a test")
 	fh.Close()
 
-	overlay.MkdirAll("home/test", 0777)
+	overlay.MkdirAll("home/test", 0o777)
 	fh, _ = overlay.Create("/home/test/file2.txt")
 	fh.WriteString("This is a test")
 	fh.Close()
@@ -315,7 +314,7 @@ func TestUnionCacheWrite(t *testing.T) {
 
 	ufs := NewCacheOnReadFs(base, layer, 0)
 
-	base.Mkdir("/data", 0777)
+	base.Mkdir("/data", 0o777)
 
 	fh, err := ufs.Create("/data/file.txt")
 	if err != nil {
@@ -326,9 +325,9 @@ func TestUnionCacheWrite(t *testing.T) {
 		t.Errorf("Failed to write file")
 	}
 
-	fh.Seek(0, os.SEEK_SET)
+	fh.Seek(0, io.SeekStart)
 	buf := make([]byte, 4)
-	_, err = fh.Read(buf)
+	_, _ = fh.Read(buf)
 	fh.Write([]byte(" IS A"))
 	fh.Close()
 
@@ -344,7 +343,7 @@ func TestUnionCacheExpire(t *testing.T) {
 	layer := &MemMapFs{}
 	ufs := &CacheOnReadFs{base: base, layer: layer, cacheTime: 1 * time.Second}
 
-	base.Mkdir("/data", 0777)
+	base.Mkdir("/data", 0o777)
 
 	fh, err := ufs.Create("/data/file.txt")
 	if err != nil {
@@ -449,7 +448,7 @@ func TestUnionFileReaddirDuplicateEmpty(t *testing.T) {
 
 	// Overlay shares same empty directory as base
 	overlay := NewMemMapFs()
-	err = overlay.Mkdir(dir, 0700)
+	err = overlay.Mkdir(dir, 0o700)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,8 +476,9 @@ func TestUnionFileReaddirAskForTooMany(t *testing.T) {
 	base := &MemMapFs{}
 	overlay := &MemMapFs{}
 
-	for i := 0; i < 5; i++ {
-		WriteFile(base, fmt.Sprintf("file%d.txt", i), []byte("afero"), 0777)
+	const testFiles = 5
+	for i := 0; i < testFiles; i++ {
+		WriteFile(base, fmt.Sprintf("file%d.txt", i), []byte("afero"), 0o777)
 	}
 
 	ufs := &CopyOnWriteFs{base: base, layer: overlay}
@@ -490,13 +490,24 @@ func TestUnionFileReaddirAskForTooMany(t *testing.T) {
 
 	defer f.Close()
 
-	names, err := f.Readdirnames(6)
+	// Read part of all files
+	wantNames := 3
+	names, err := f.Readdirnames(wantNames)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(names) != wantNames {
+		t.Fatalf("got %d names %v, want %d", len(names), names, wantNames)
+	}
 
-	if len(names) != 5 {
-		t.Fatal(names)
+	// Try to read more files than remaining
+	wantNames = testFiles - len(names)
+	names, err = f.Readdirnames(wantNames + 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != wantNames {
+		t.Fatalf("got %d names %v, want %d", len(names), names, wantNames)
 	}
 
 	// End of directory

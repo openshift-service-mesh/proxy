@@ -29,6 +29,8 @@ V8_BASE_EXPORT V8_NOINLINE void V8_Dcheck(const char* file, int line,
 [[noreturn]] PRINTF_FORMAT(3, 4) V8_BASE_EXPORT V8_NOINLINE
     void V8_Fatal(const char* file, int line, const char* format, ...);
 #define FATAL(...) V8_Fatal(__FILE__, __LINE__, __VA_ARGS__)
+#define FATAL_WITH_LOC(loc, ...) \
+  V8_Fatal((loc).FileName(), static_cast<int>((loc).Line()), __VA_ARGS__)
 
 // The following can be used instead of FATAL() to prevent calling
 // IMMEDIATE_CRASH in official mode. Please only use if needed for testing.
@@ -45,6 +47,7 @@ V8_BASE_EXPORT V8_NOINLINE void V8_Dcheck(const char* file, int line,
 // numbers. It saves binary size to drop the |file| & |line| as opposed to just
 // passing in "", 0 for them.
 #define FATAL(...) V8_Fatal(__VA_ARGS__)
+#define FATAL_WITH_LOC(loc, ...) FATAL(__VA_ARGS__)
 #else
 // FATAL(msg) -> IMMEDIATE_CRASH()
 // FATAL(msg, ...) -> V8_Fatal(msg, ...)
@@ -54,6 +57,7 @@ V8_BASE_EXPORT V8_NOINLINE void V8_Dcheck(const char* file, int line,
   FATAL_HELPER(__VA_ARGS__, V8_Fatal, V8_Fatal, V8_Fatal, V8_Fatal, V8_Fatal, \
                V8_Fatal, FATAL_DISCARD_ARG)                                   \
   (__VA_ARGS__)
+#define FATAL_WITH_LOC(loc, ...) FATAL(__VA_ARGS__)
 #endif  // !defined(OFFICIAL_BUILD)
 #endif  // DEBUG
 
@@ -64,6 +68,9 @@ constexpr const char* kUnreachableCodeMessage = "unreachable code";
 }  // namespace v8::base
 
 #define UNIMPLEMENTED() FATAL(::v8::base::kUnimplementedCodeMessage)
+// UNREACHABLE is used both to mark areas of the code that should never be
+// reached, and to guard against UB issues with the sandbox given an in-sandbox
+// corruption.
 #define UNREACHABLE() FATAL(::v8::base::kUnreachableCodeMessage)
 // g++ versions <= 8 cannot use UNREACHABLE() in a constexpr function.
 // TODO(miladfarca): Remove once all compilers handle this properly.
@@ -101,6 +108,16 @@ enum class OOMType {
 // recognizes as such by fuzzers and other tooling.
 [[noreturn]] V8_BASE_EXPORT void FatalOOM(OOMType type, const char* msg);
 
+// A variant of Fatal that makes it clear that the failure does not have any
+// security impact. This is useful for automatic vulnerability discover systems
+// (e.g. fuzzers) to ignore or discard such crashes.
+//
+// USE WITH CARE! Using this function means that fuzzers will *not* report
+// situations in which the function is reached. Legitimate use cases include
+// expected crashes due to misconfigurations (e.g. invalid runtime flags) or
+// invalid use of (debug-only) runtime functions exposed to JS.
+[[noreturn]] V8_BASE_EXPORT void FatalNoSecurityImpact(const char* format, ...);
+
 // In official builds, assume all check failures can be debugged given just the
 // stack trace.
 #if !defined(DEBUG) && defined(OFFICIAL_BUILD)
@@ -123,13 +140,23 @@ enum class OOMType {
   } while (false)
 #define CHECK(condition) CHECK_WITH_MSG(condition, #condition)
 
+// Special version of CHECK that makes it clear that the CHECK's failure has no
+// security impact.
+// USE WITH CARE! See also the comments above FatalNoSecurityImpact.
+#define CHECK_NO_SECURITY_IMPACT(condition)    \
+  do {                                         \
+    if (V8_UNLIKELY(!(condition))) {           \
+      base::FatalNoSecurityImpact(#condition); \
+    }                                          \
+  } while (false)
+
 #ifdef DEBUG
 
-#define DCHECK_WITH_MSG_AND_LOC(condition, message, loc)                \
-  do {                                                                  \
-    if (V8_UNLIKELY(!(condition))) {                                    \
-      V8_Dcheck(loc.FileName(), static_cast<int>(loc.Line()), message); \
-    }                                                                   \
+#define DCHECK_WITH_MSG_AND_LOC(condition, message, loc)                    \
+  do {                                                                      \
+    if (V8_UNLIKELY(!(condition))) {                                        \
+      V8_Dcheck((loc).FileName(), static_cast<int>((loc).Line()), message); \
+    }                                                                       \
   } while (false)
 #define DCHECK_WITH_MSG(condition, message)   \
   do {                                        \
@@ -207,12 +234,6 @@ auto GetUnderlyingEnumTypeForPrinting(T val) {
 
 }  // namespace detail
 
-// Define default PrintCheckOperand<T> for non-printable types.
-template <typename T>
-std::string PrintCheckOperand(T val) {
-  return "<unprintable>";
-}
-
 // Define PrintCheckOperand<T> for each T which defines operator<< for ostream,
 // except types explicitly specialized below.
 template <typename T>
@@ -261,21 +282,25 @@ std::string PrintCheckOperand(T val) {
 template <typename T>
   requires(!has_output_operator<T, CheckMessageStream> &&
            requires(T t) {
-             { t.begin() } -> std::forward_iterator;
+             { std::begin(t) } -> std::forward_iterator;
            })
-std::string PrintCheckOperand(T container) {
+std::string PrintCheckOperand(const T& container) {
   CheckMessageStream oss;
-  oss << "{";
-  bool first = true;
-  for (const auto& val : container) {
-    if (!first) {
-      oss << ",";
-    } else {
-      first = false;
+  const size_t size = std::size(container);
+  oss << size << " element" << (size == 1 ? "" : "s");
+  if constexpr (requires(const T& t) { PrintCheckOperand(*std::begin(t)); }) {
+    oss << ": {";
+    bool first = true;
+    for (const auto& val : container) {
+      if (!first) {
+        oss << ",";
+      } else {
+        first = false;
+      }
+      oss << PrintCheckOperand(val);
     }
-    oss << PrintCheckOperand(val);
+    oss << "}";
   }
-  oss << "}";
   return oss.str();
 }
 
@@ -299,16 +324,27 @@ DEFINE_PRINT_CHECK_OPERAND_CHAR(unsigned char)
 // takes ownership of the returned string.
 template <typename Lhs, typename Rhs>
 V8_NOINLINE std::string* MakeCheckOpString(Lhs lhs, Rhs rhs, char const* msg) {
-  std::string lhs_str = PrintCheckOperand<Lhs>(lhs);
-  std::string rhs_str = PrintCheckOperand<Rhs>(rhs);
+  constexpr bool kLhsIsPrintable = requires { PrintCheckOperand(lhs); };
+  constexpr bool kRhsIsPrintable = requires { PrintCheckOperand(rhs); };
+
   CheckMessageStream ss;
   ss << msg;
-  constexpr size_t kMaxInlineLength = 50;
-  if (lhs_str.size() <= kMaxInlineLength &&
-      rhs_str.size() <= kMaxInlineLength) {
-    ss << " (" << lhs_str << " vs. " << rhs_str << ")";
-  } else {
-    ss << "\n   " << lhs_str << "\n vs.\n   " << rhs_str << "\n";
+  if constexpr (kLhsIsPrintable || kRhsIsPrintable) {
+    std::string tmp_lhs_str;
+    std::string tmp_rhs_str;
+    if constexpr (kLhsIsPrintable) tmp_lhs_str = PrintCheckOperand(lhs);
+    if constexpr (kRhsIsPrintable) tmp_rhs_str = PrintCheckOperand(rhs);
+    std::string_view lhs_str{kLhsIsPrintable ? std::string_view{tmp_lhs_str}
+                                             : "<unprintable>"};
+    std::string_view rhs_str{kRhsIsPrintable ? std::string_view{tmp_rhs_str}
+                                             : "<unprintable>"};
+
+    constexpr size_t kMaxInlineLength = 50;
+    if (std::max(lhs_str.size(), rhs_str.size()) <= kMaxInlineLength) {
+      ss << " (" << lhs_str << " vs. " << rhs_str << ")";
+    } else {
+      ss << "\n   " << lhs_str << "\n vs.\n   " << rhs_str << "\n";
+    }
   }
   return new std::string(ss.str());
 }

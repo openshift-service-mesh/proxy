@@ -32,8 +32,15 @@ static_assert(0 == ToZeroBasedIndex(NumericKind::kI32));
 
 }  // namespace value_type_impl
 
+static_assert(kWasmVoid.is_void());
 static_assert(kWasmBottom.is_bottom());
 static_assert(kWasmTop.is_top());
+// "none_or_bottom" is the set of types that are subtypes of (exact $t).
+static_assert(kWasmBottom.is_none_or_bottom());
+static_assert(kWasmNullRef.is_none_or_bottom());
+static_assert(kWasmRefNone.is_none_or_bottom());
+static_assert(ValueType::Generic(GenericKind::kNone, kNullable, true)
+                  .is_none_or_bottom());
 
 ValueTypeCode ValueTypeBase::value_type_code_numeric() const {
   switch (numeric_kind()) {
@@ -235,12 +242,20 @@ const wasm::FunctionSig* GetI32Sig(Zone* zone, const wasm::FunctionSig* sig) {
   return ReplaceTypeInSig(zone, sig, wasm::kWasmI64, wasm::kWasmI32, 2);
 }
 
-CanonicalSig* CanonicalSig::Builder::Get() const {
+CanonicalSig::CanonicalSig(size_t return_count, size_t parameter_count,
+                           const CanonicalValueType* reps,
+                           CanonicalTypeIndex index)
+    : Signature<CanonicalValueType>(return_count, parameter_count, reps),
+      signature_hash_(wasm::SignatureHasher::Hash(this)),
+      index_(index) {}
+
+const CanonicalSig* CanonicalSig::Builder::Get(CanonicalTypeIndex index) const {
   CanonicalSig* sig =
-      reinterpret_cast<
-          const SignatureBuilder<CanonicalSig, CanonicalValueType>*>(this)
+      static_cast<const SignatureBuilder<CanonicalSig, CanonicalValueType>*>(
+          this)
           ->Get();
   sig->signature_hash_ = wasm::SignatureHasher::Hash(sig);
+  sig->index_ = index;
   return sig;
 }
 

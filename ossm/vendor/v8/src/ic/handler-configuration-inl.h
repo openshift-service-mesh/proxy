@@ -37,14 +37,23 @@ Handle<Smi> LoadHandler::LoadGlobal(Isolate* isolate) {
   return handle(Smi::FromInt(config), isolate);
 }
 
-Handle<Smi> LoadHandler::LoadInterceptor(Isolate* isolate) {
-  int config = KindBits::encode(Kind::kInterceptor);
-  return handle(Smi::FromInt(config), isolate);
+Tagged<Smi> LoadHandler::LoadInterceptor(bool non_masking) {
+  int config = KindBits::encode(Kind::kInterceptor) |
+               NonMaskingInterceptorBits::encode(non_masking);
+  return Smi::FromInt(config);
 }
 
 Handle<Smi> LoadHandler::LoadSlow(Isolate* isolate) {
   int config = KindBits::encode(Kind::kSlow);
   return handle(Smi::FromInt(config), isolate);
+}
+
+Handle<Smi> LoadHandler::LoadGeneric(Isolate* isolate) {
+  return handle(LoadGeneric(), isolate);
+}
+
+Tagged<Smi> LoadHandler::LoadGeneric() {
+  return Smi::FromInt(KindBits::encode(Kind::kGeneric));
 }
 
 Handle<Smi> LoadHandler::LoadField(Isolate* isolate, FieldIndex field_index) {
@@ -151,9 +160,10 @@ Handle<Smi> StoreHandler::StoreNormal(Isolate* isolate) {
   return handle(Smi::FromInt(config), isolate);
 }
 
-Handle<Smi> StoreHandler::StoreInterceptor(Isolate* isolate) {
-  int config = KindBits::encode(Kind::kInterceptor);
-  return handle(Smi::FromInt(config), isolate);
+Tagged<Smi> StoreHandler::StoreInterceptor(bool non_masking) {
+  int config = KindBits::encode(Kind::kInterceptor) |
+               NonMaskingInterceptorBits::encode(non_masking);
+  return Smi::FromInt(config);
 }
 
 Handle<Code> StoreHandler::StoreSloppyArgumentsBuiltin(
@@ -213,11 +223,23 @@ DirectHandle<Code> StoreHandler::ElementsTransitionAndStoreBuiltin(
   }
 }
 
-Handle<Smi> StoreHandler::StoreSlow(Isolate* isolate,
-                                    KeyedAccessStoreMode store_mode) {
+Tagged<Smi> StoreHandler::StoreSlow(KeyedAccessStoreMode store_mode) {
   int config = KindBits::encode(Kind::kSlow) |
                KeyedAccessStoreModeBits::encode(store_mode);
-  return handle(Smi::FromInt(config), isolate);
+  return Smi::FromInt(config);
+}
+
+Handle<Smi> StoreHandler::StoreSlow(Isolate* isolate,
+                                    KeyedAccessStoreMode store_mode) {
+  return handle(StoreSlow(store_mode), isolate);
+}
+
+Handle<Smi> StoreHandler::StoreGeneric(Isolate* isolate) {
+  return handle(StoreGeneric(), isolate);
+}
+
+Tagged<Smi> StoreHandler::StoreGeneric() {
+  return Smi::FromInt(KindBits::encode(Kind::kGeneric));
 }
 
 Handle<Smi> StoreHandler::StoreProxy(Isolate* isolate) {

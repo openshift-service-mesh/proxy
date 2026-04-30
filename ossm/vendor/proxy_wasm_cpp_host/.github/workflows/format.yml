@@ -43,7 +43,7 @@ jobs:
   addlicense:
     name: verify licenses
 
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04-16core
 
     steps:
     - uses: actions/checkout@v2
@@ -63,7 +63,7 @@ jobs:
   buildifier:
     name: check format with buildifier
 
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04-16core
 
     steps:
     - uses: actions/checkout@v2
@@ -83,10 +83,17 @@ jobs:
   rules_rust:
     name: check format with rules_rust
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-16core
 
     steps:
     - uses: actions/checkout@v2
+
+    - uses: bazel-contrib/setup-bazel@0.16.0
+      with:
+        bazelisk-cache: true
+        disk-cache: ${{ github.job }}
+        external-cache: false
+        repository-cache: true
 
     - name: Format (bazel query)
       run: |
@@ -101,73 +108,39 @@ jobs:
   clang_format:
     name: check format with clang-format
 
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04-16core
 
     steps:
     - uses: actions/checkout@v2
 
     - name: Install dependencies (Linux)
-      run: sudo apt update -y && sudo apt install -y clang-format-12
+      run: sudo apt update -y && sudo apt install -y clang-format-18
 
     - name: Format (clang-format)
       run: |
-        find . -name "*.h" -o -name "*.cc" -o -name "*.proto" | grep -v ".pb." | xargs -n1 clang-format-12 -i
+        find . -name "*.h" -o -name "*.cc" -o -name "*.proto" | grep -v ".pb." | xargs -n1 clang-format-18 -i
         git diff --exit-code
 
   clang_tidy:
     name: check format with clang-tidy
 
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04-16core
 
     steps:
     - uses: actions/checkout@v2
 
-    - name: Install dependencies (Linux)
-      run: sudo apt update -y && sudo apt install -y clang-tidy-12 lld-12 && sudo ln -sf /usr/bin/lld-12 /usr/bin/lld
-
-    - name: Bazel cache
-      uses: PiotrSikora/cache@v2.1.7-with-skip-cache
+    - uses: bazel-contrib/setup-bazel@0.16.0
       with:
-        path: |
-          ~/.cache/bazel
-        key: clang_tidy-${{ hashFiles('WORKSPACE', '.bazelrc', '.bazelversion', 'bazel/dependencies.bzl', 'bazel/repositories.bzl', 'bazel/cargo/wasmsign/remote/crates.bzl') }}
+        bazelisk-cache: true
+        disk-cache: ${{ github.job }}
+        external-cache: false
+        repository-cache: true
 
     - name: Bazel build
       run: >
         bazel build
+        --config=hermetic-llvm
         --config clang-tidy
         --define engine=multi
-        --copt=-DPROXY_WASM_VERIFY_WITH_ED25519_PUBKEY=\"$(xxd -p -c 256 test/test_data/signature_key1.pub | cut -b9-)\"
+        --copt=-DPROXY_WASM_VERIFY_WITH_ED25519_PUBKEY=\"$(xxd -p -c 256 test/test_data/signature_key1.pub | cut -c3-)\"
         //...
-
-    - name: Skip Bazel cache update
-      if: ${{ github.ref != 'refs/heads/main' }}
-      run: echo "CACHE_SKIP_SAVE=true" >> $GITHUB_ENV
-
-    - name: Cleanup Bazel cache
-      if: ${{ github.ref == 'refs/heads/main' }}
-      run: |
-        export OUTPUT=$(${{ matrix.run_under }} bazel info output_base)
-        echo "===== BEFORE ====="
-        du -s ${OUTPUT}/external/* $(dirname ${OUTPUT})/* | sort -rn | head -20
-        # BoringSSL's test data (90 MiB).
-        rm -rf ${OUTPUT}/external/boringssl/crypto_test_data.cc
-        rm -rf ${OUTPUT}/external/boringssl/src/crypto/*/test/
-        rm -rf ${OUTPUT}/external/boringssl/src/third_party/wycheproof_testvectors/
-        # LLVM's tests (500 MiB).
-        rm -rf ${OUTPUT}/external/llvm*/test/
-        # V8's tests (100 MiB).
-        if [ -d "${OUTPUT}/external/v8/test/torque" ]; then
-          mv ${OUTPUT}/external/v8/test/torque ${OUTPUT}/external/v8/test_torque
-          rm -rf ${OUTPUT}/external/v8/test/*
-          mv ${OUTPUT}/external/v8/test_torque ${OUTPUT}/external/v8/test/torque
-        fi
-        # Unnecessary CMake tools (65 MiB).
-        rm -rf ${OUTPUT}/external/cmake-*/bin/{ccmake,cmake-gui,cpack,ctest}
-        # Distfiles for Rust toolchains (350 MiB).
-        rm -rf ${OUTPUT}/external/rust_*/*.tar.gz
-        # Bazel's repository cache (650-800 MiB) and install base (155 MiB).
-        rm -rf ${OUTPUT}/../cache
-        rm -rf ${OUTPUT}/../install
-        echo "===== AFTER ====="
-        du -s ${OUTPUT}/external/* $(dirname ${OUTPUT})/* | sort -rn | head -20

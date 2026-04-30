@@ -1,5 +1,5 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load("@io_bazel_rules_go//go:def.bzl", "GoArchive", "GoInfo", "go_context", "new_go_info")
+load("@io_bazel_rules_go//go:def.bzl", "go_context", "new_go_info")
 
 def _go_generated_library_impl(ctx):
     src = ctx.actions.declare_file("generated.go")
@@ -26,7 +26,6 @@ def _go_generated_library_impl(ctx):
             go_generated_srcs = [src],
         ),
     ]
-
 
 go_generated_library = rule(
     implementation = _go_generated_library_impl,

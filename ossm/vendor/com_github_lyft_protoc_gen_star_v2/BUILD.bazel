@@ -1,5 +1,8 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
+# gazelle:resolve go github.com/spf13/afero @com_github_spf13_afero//:afero
+# gazelle:resolve go golang.org/x/tools/imports @org_golang_x_tools//imports
+
 go_library(
     name = "protoc-gen-star",
     srcs = [
@@ -39,7 +42,7 @@ go_library(
     importpath_aliases = ["github.com/lyft/protoc-gen-star"],
     visibility = ["//visibility:public"],
     deps = [
-        "@com_github_spf13_afero//:go_default_library",
+        "@com_github_spf13_afero//:afero",
         "@org_golang_google_protobuf//proto:go_default_library",
         "@org_golang_google_protobuf//runtime/protoimpl:go_default_library",
         "@org_golang_google_protobuf//types/descriptorpb:go_default_library",
@@ -90,7 +93,7 @@ go_test(
     ],
     embed = [":protoc-gen-star"],
     deps = [
-        "@com_github_spf13_afero//:go_default_library",
+        "@com_github_spf13_afero//:afero",
         "@com_github_stretchr_testify//assert:go_default_library",
         "@com_github_stretchr_testify//require:go_default_library",
         "@org_golang_google_protobuf//proto:go_default_library",
@@ -107,7 +110,7 @@ load("@rules_license//rules:package_info.bzl", "package_info")
 
 package_metadata(
     name = "package_metadata",
-    purl = "pkg:golang/github.com/lyft/protoc-gen-star/v2@v2.0.1",
+    purl = "pkg:golang/github.com/lyft/protoc-gen-star/v2@v2.0.4-0.20230330145011-496ad1ac90a4",
     visibility = [
         "//:__subpackages__",
     ],
@@ -117,7 +120,7 @@ package_info(
     name = "gazelle_generated_package_info",
     package_name = "github.com/lyft/protoc-gen-star/v2",
     package_url = "https://github.com/lyft/protoc-gen-star/v2",
-    package_version = "2.0.1",
-    purl = "pkg:golang/github.com/lyft/protoc-gen-star/v2@v2.0.1",
+    package_version = "2.0.4-0.20230330145011-496ad1ac90a4",
+    purl = "pkg:golang/github.com/lyft/protoc-gen-star/v2@v2.0.4-0.20230330145011-496ad1ac90a4",
     visibility = ["//:__subpackages__"],
 )

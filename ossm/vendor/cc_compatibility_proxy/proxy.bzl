@@ -1,5 +1,4 @@
 
-load("@rules_cc//cc/private/rules_impl:native.bzl", "NativeCcSharedLibraryInfo")
 cc_binary = native.cc_binary
 cc_import = native.cc_import
 cc_library = native.cc_library
@@ -14,6 +13,4 @@ memprof_profile = getattr(native, "memprof_profile", None) # only in Bazel 7+
 propeller_optimize = native.propeller_optimize
 cc_toolchain = native.cc_toolchain
 cc_toolchain_alias = native.cc_toolchain_alias
-
-CcSharedLibraryInfo = NativeCcSharedLibraryInfo
             

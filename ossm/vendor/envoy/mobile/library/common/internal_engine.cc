@@ -82,13 +82,15 @@ InternalEngine::InternalEngine(std::unique_ptr<EngineCallbacks> callbacks,
                                std::unique_ptr<EnvoyLogger> logger,
                                std::unique_ptr<EnvoyEventTracker> event_tracker,
                                absl::optional<int> thread_priority,
+                               absl::optional<size_t> high_watermark,
                                bool disable_dns_refresh_on_network_change,
-                               Thread::PosixThreadFactoryPtr thread_factory)
+                               Thread::PosixThreadFactoryPtr thread_factory, bool enable_logger)
     : thread_factory_(std::move(thread_factory)), callbacks_(std::move(callbacks)),
       logger_(std::move(logger)), event_tracker_(std::move(event_tracker)),
-      thread_priority_(thread_priority),
+      thread_priority_(thread_priority), high_watermark_(high_watermark),
       dispatcher_(std::make_unique<Event::ProvisionalDispatcher>()),
-      disable_dns_refresh_on_network_change_(disable_dns_refresh_on_network_change) {
+      disable_dns_refresh_on_network_change_(disable_dns_refresh_on_network_change),
+      enable_logger_(enable_logger) {
   ExtensionRegistry::registerFactories();
 
   Api::External::registerApi(std::string(ENVOY_EVENT_TRACKER_API_NAME), &event_tracker_);
@@ -98,10 +100,11 @@ InternalEngine::InternalEngine(std::unique_ptr<EngineCallbacks> callbacks,
                                std::unique_ptr<EnvoyLogger> logger,
                                std::unique_ptr<EnvoyEventTracker> event_tracker,
                                absl::optional<int> thread_priority,
-                               bool disable_dns_refresh_on_network_change)
+                               absl::optional<size_t> high_watermark,
+                               bool disable_dns_refresh_on_network_change, bool enable_logger)
     : InternalEngine(std::move(callbacks), std::move(logger), std::move(event_tracker),
-                     thread_priority, disable_dns_refresh_on_network_change,
-                     Thread::PosixThreadFactory::create()) {}
+                     thread_priority, high_watermark, disable_dns_refresh_on_network_change,
+                     Thread::PosixThreadFactory::create(), enable_logger) {}
 
 envoy_stream_t InternalEngine::initStream() { return current_stream_handle_++; }
 
@@ -180,12 +183,14 @@ envoy_status_t InternalEngine::main(std::shared_ptr<OptionsImplBase> options) {
       }
 
       // We let the thread clean up this log delegate pointer
-      if (logger_ != nullptr) {
-        log_delegate_ptr_ = std::make_unique<Logger::LambdaDelegate>(std::move(logger_),
-                                                                     Logger::Registry::getSink());
-      } else {
-        log_delegate_ptr_ =
-            std::make_unique<Logger::DefaultDelegate>(log_mutex_, Logger::Registry::getSink());
+      if (enable_logger_) {
+        if (logger_ != nullptr) {
+          log_delegate_ptr_ = std::make_unique<Logger::LambdaDelegate>(std::move(logger_),
+                                                                       Logger::Registry::getSink());
+        } else {
+          log_delegate_ptr_ =
+              std::make_unique<Logger::DefaultDelegate>(log_mutex_, Logger::Registry::getSink());
+        }
       }
 
       main_common = std::make_unique<EngineCommon>(options);
@@ -259,9 +264,9 @@ envoy_status_t InternalEngine::main(std::shared_ptr<OptionsImplBase> options) {
           auto api_listener = server_->listenerManager().apiListener()->get().createHttpApiListener(
               server_->dispatcher());
           ASSERT(api_listener != nullptr);
-          http_client_ = std::make_unique<Http::Client>(std::move(api_listener), *dispatcher_,
-                                                        server_->serverFactoryContext().scope(),
-                                                        server_->api().randomGenerator());
+          http_client_ = std::make_unique<Http::Client>(
+              std::move(api_listener), *dispatcher_, server_->serverFactoryContext().scope(),
+              server_->api().randomGenerator(), high_watermark_);
           dispatcher_->drain(server_->dispatcher());
           engine_running_.Notify();
           callbacks_->on_engine_running_();
@@ -397,19 +402,27 @@ void InternalEngine::onDefaultNetworkChanged(int network) {
 
 void InternalEngine::onDefaultNetworkChangedAndroid(ConnectionType connection_type,
                                                     int64_t net_id) {
-  connectivity_manager_->onDefaultNetworkChangedAndroid(connection_type, net_id);
+  if (engine_running_.HasBeenNotified()) {
+    connectivity_manager_->onDefaultNetworkChangedAndroid(connection_type, net_id);
+  }
 }
 
 void InternalEngine::onNetworkDisconnectAndroid(int64_t net_id) {
-  connectivity_manager_->onNetworkDisconnectAndroid(net_id);
+  if (engine_running_.HasBeenNotified()) {
+    connectivity_manager_->onNetworkDisconnectAndroid(net_id);
+  }
 }
 
 void InternalEngine::onNetworkConnectAndroid(ConnectionType connection_type, int64_t net_id) {
-  connectivity_manager_->onNetworkConnectAndroid(connection_type, net_id);
+  if (engine_running_.HasBeenNotified()) {
+    connectivity_manager_->onNetworkConnectAndroid(connection_type, net_id);
+  }
 }
 
 void InternalEngine::purgeActiveNetworkListAndroid(const std::vector<int64_t>& active_network_ids) {
-  connectivity_manager_->purgeActiveNetworkListAndroid(active_network_ids);
+  if (engine_running_.HasBeenNotified()) {
+    connectivity_manager_->purgeActiveNetworkListAndroid(active_network_ids);
+  }
 }
 
 void InternalEngine::onDefaultNetworkUnavailable() {
@@ -430,9 +443,7 @@ void InternalEngine::handleNetworkChange(const int network_type, const bool has_
 
 void InternalEngine::resetHttpPropertiesAndDrainHosts(bool has_ipv6_connectivity) {
   if (Runtime::runtimeFeatureEnabled(
-          "envoy.reloadable_features.dns_cache_set_ip_version_to_remove") ||
-      Runtime::runtimeFeatureEnabled(
-          "envoy.reloadable_features.dns_cache_filter_unusable_ip_version")) {
+          "envoy.reloadable_features.dns_cache_set_ip_version_to_remove")) {
     // The IP version to remove flag must be set first before refreshing the DNS cache so that
     // the DNS cache will be updated with whether or not the IPv6 addresses will need to be
     // removed.
@@ -459,13 +470,11 @@ void InternalEngine::resetHttpPropertiesAndDrainHosts(bool has_ipv6_connectivity
   if (Runtime::runtimeFeatureEnabled(
           "envoy.reloadable_features.decouple_explicit_drain_pools_and_dns_refresh") ||
       disable_dns_refresh_on_network_change_) {
-    if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.drain_pools_on_network_change")) {
-      // Since DNS refreshing is disabled, explicitly drain all non-migratable connections.
-      ENVOY_LOG_EVENT(debug, "netconf_immediate_drain", "DrainAllHosts");
-      getClusterManager().drainConnections(
-          [](const Upstream::Host&) { return true; },
-          Envoy::ConnectionPool::DrainBehavior::DrainExistingNonMigratableConnections);
-    }
+    // Since DNS refreshing is disabled, explicitly drain all non-migratable connections.
+    ENVOY_LOG_EVENT(debug, "netconf_immediate_drain", "DrainAllHosts");
+    getClusterManager().drainConnections(
+        [](const Upstream::Host&) { return true; },
+        Envoy::ConnectionPool::DrainBehavior::DrainExistingNonMigratableConnections);
   }
 }
 
@@ -598,30 +607,27 @@ Network::Address::InstanceConstSharedPtr InternalEngine::probeAndGetLocalAddr(in
     return nullptr;
   }
 
+  if ((*address)->ip() == nullptr) {
+    ENVOY_LOG(trace, "Local address is not an IP address: {}.", (*address)->asString());
+    return nullptr;
+  }
+  if ((*address)->ip()->isLinkLocalAddress()) {
+    ENVOY_LOG(trace, "Ignoring link-local address: {}.", (*address)->asString());
+    return nullptr;
+  }
   if (Runtime::runtimeFeatureEnabled(
-          "envoy.reloadable_features.mobile_ipv6_probe_simple_filtering")) {
-    if ((*address)->ip() == nullptr) {
-      ENVOY_LOG(trace, "Local address is not an IP address: {}.", (*address)->asString());
+          "envoy.reloadable_features.mobile_ipv6_probe_advanced_filtering")) {
+    if ((*address)->ip()->isUniqueLocalAddress()) {
+      ENVOY_LOG(trace, "Ignoring unique-local address: {}.", (*address)->asString());
       return nullptr;
     }
-    if ((*address)->ip()->isLinkLocalAddress()) {
-      ENVOY_LOG(trace, "Ignoring link-local address: {}.", (*address)->asString());
+    if ((*address)->ip()->isSiteLocalAddress()) {
+      ENVOY_LOG(trace, "Ignoring site-local address: {}.", (*address)->asString());
       return nullptr;
     }
-    if (Runtime::runtimeFeatureEnabled(
-            "envoy.reloadable_features.mobile_ipv6_probe_advanced_filtering")) {
-      if ((*address)->ip()->isUniqueLocalAddress()) {
-        ENVOY_LOG(trace, "Ignoring unique-local address: {}.", (*address)->asString());
-        return nullptr;
-      }
-      if ((*address)->ip()->isSiteLocalAddress()) {
-        ENVOY_LOG(trace, "Ignoring site-local address: {}.", (*address)->asString());
-        return nullptr;
-      }
-      if ((*address)->ip()->isTeredoAddress()) {
-        ENVOY_LOG(trace, "Ignoring teredo address: {}.", (*address)->asString());
-        return nullptr;
-      }
+    if ((*address)->ip()->isTeredoAddress()) {
+      ENVOY_LOG(trace, "Ignoring teredo address: {}.", (*address)->asString());
+      return nullptr;
     }
   }
 

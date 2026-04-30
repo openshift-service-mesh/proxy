@@ -48,6 +48,12 @@ EXPAND_TEMPLATE_PLATFORMS = {
             "@platforms//cpu:x86_64",
         ],
     ),
+    "windows_arm64": struct(
+        compatible_with = [
+            "@platforms//os:windows",
+            "@platforms//cpu:arm64",
+        ],
+    ),
 }
 
 ExpandTemplateInfo = provider(
@@ -110,7 +116,6 @@ def _resolved_toolchain_impl(ctx):
 resolved_toolchain = rule(
     implementation = _resolved_toolchain_impl,
     toolchains = ["@aspect_bazel_lib//lib:expand_template_toolchain_type"],
-    incompatible_use_toolchain_transition = True,
 )
 """
     rctx.file("defs.bzl", starlark_content)

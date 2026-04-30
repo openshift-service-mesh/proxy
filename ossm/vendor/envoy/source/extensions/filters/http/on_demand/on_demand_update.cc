@@ -145,7 +145,7 @@ OnDemandRouteUpdate::OnDemandRouteUpdate(OnDemandFilterConfigSharedPtr config)
 }
 
 OptRef<const Router::Route> OnDemandRouteUpdate::handleMissingRoute() {
-  if (auto route = callbacks_->route(); route != nullptr) {
+  if (auto route = callbacks_->route(); route) {
     filter_iteration_state_ = Http::FilterHeadersStatus::Continue;
     return *route;
   }
@@ -158,10 +158,12 @@ OptRef<const Router::Route> OnDemandRouteUpdate::handleMissingRoute() {
   callbacks_->downstreamCallbacks()->requestRouteConfigUpdate(route_config_updated_callback_);
   // decodeHeaders() is completed.
   decode_headers_active_ = false;
-  return makeOptRefFromPtr(callbacks_->route().get());
+  return callbacks_->route();
 }
 
-Http::FilterHeadersStatus OnDemandRouteUpdate::decodeHeaders(Http::RequestHeaderMap&, bool) {
+Http::FilterHeadersStatus OnDemandRouteUpdate::decodeHeaders(Http::RequestHeaderMap&,
+                                                             bool end_stream) {
+  downstream_end_stream_ = end_stream;
   auto config = getConfig();
 
   config->decodeHeadersBehavior().decodeHeaders(*this);
@@ -172,7 +174,7 @@ Http::FilterHeadersStatus OnDemandRouteUpdate::decodeHeaders(Http::RequestHeader
 void OnDemandRouteUpdate::handleOnDemandCds(const Router::Route& route,
                                             Upstream::OdCdsApiHandle& odcds,
                                             std::chrono::milliseconds timeout) {
-  if (callbacks_->clusterInfo() != nullptr) {
+  if (callbacks_->clusterInfo().has_value()) {
     // Cluster already exists, so nothing to do here.
     filter_iteration_state_ = Http::FilterHeadersStatus::Continue;
     return;
@@ -207,13 +209,15 @@ const OnDemandFilterConfig* OnDemandRouteUpdate::getConfig() {
   return config_.get();
 }
 
-Http::FilterDataStatus OnDemandRouteUpdate::decodeData(Buffer::Instance&, bool) {
+Http::FilterDataStatus OnDemandRouteUpdate::decodeData(Buffer::Instance&, bool end_stream) {
+  downstream_end_stream_ = end_stream;
   return filter_iteration_state_ == Http::FilterHeadersStatus::StopIteration
              ? Http::FilterDataStatus::StopIterationAndWatermark
              : Http::FilterDataStatus::Continue;
 }
 
 Http::FilterTrailersStatus OnDemandRouteUpdate::decodeTrailers(Http::RequestTrailerMap&) {
+  downstream_end_stream_ = true;
   return Http::FilterTrailersStatus::Continue;
 }
 
@@ -241,9 +245,17 @@ void OnDemandRouteUpdate::onRouteConfigUpdateCompletion(bool route_exists) {
     return;
   }
 
-  if (route_exists &&                  // route can be resolved after an on-demand
-                                       // VHDS update
-      !callbacks_->decodingBuffer() && // Redirects with body not yet supported.
+  bool can_recreate_stream = false;
+  if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.on_demand_track_end_stream")) {
+    // New behavior: track end_stream state to support stream recreation with fully read bodies.
+    can_recreate_stream = downstream_end_stream_;
+  } else {
+    // Old behavior: reject all requests with bodies.
+    can_recreate_stream = !callbacks_->decodingBuffer();
+  }
+  if (route_exists &&        // route can be resolved after an on-demand
+                             // VHDS update
+      can_recreate_stream && // Redirects require fully read body.
       callbacks_->recreateStream(/*headers=*/nullptr)) {
     return;
   }
@@ -257,8 +269,26 @@ void OnDemandRouteUpdate::onClusterDiscoveryCompletion(
     Upstream::ClusterDiscoveryStatus cluster_status) {
   filter_iteration_state_ = Http::FilterHeadersStatus::Continue;
   cluster_discovery_handle_.reset();
-  if (cluster_status == Upstream::ClusterDiscoveryStatus::Available &&
-      !callbacks_->decodingBuffer()) { // Redirects with body not yet supported.
+
+  if (Runtime::runtimeFeatureEnabled(
+          "envoy.reloadable_features.on_demand_cluster_no_recreate_stream")) {
+    // Whether or not the cluster exists, we continue decoding. Filters further down the
+    // chain may want to weigh in on cluster selection, so we don't send a local reply
+    // here.
+    callbacks_->continueDecoding();
+    return;
+  }
+
+  bool can_recreate_stream = false;
+  if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.on_demand_track_end_stream")) {
+    // New behavior: track end_stream state to support stream recreation with fully read bodies.
+    can_recreate_stream = downstream_end_stream_;
+  } else {
+    // Old behavior: reject all requests with bodies.
+    can_recreate_stream = !callbacks_->decodingBuffer();
+  }
+  if (cluster_status == Upstream::ClusterDiscoveryStatus::Available && can_recreate_stream) {
+    // Redirects require fully read body.
     const Http::ResponseHeaderMap* headers = nullptr;
     if (callbacks_->recreateStream(headers)) {
       callbacks_->downstreamCallbacks()->clearRouteCache();
@@ -266,8 +296,8 @@ void OnDemandRouteUpdate::onClusterDiscoveryCompletion(
     }
   }
 
-  // Cluster still does not exist or we failed to recreate the
-  // stream. Either way, continue with the filter-chain.
+  // Cluster still does not exist or we did not recreate the stream. Either way,
+  // continue with the filter chain.
   callbacks_->continueDecoding();
 }
 

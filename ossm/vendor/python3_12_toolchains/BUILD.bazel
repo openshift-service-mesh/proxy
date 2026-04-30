@@ -9,7 +9,7 @@ load("@@rules_python//python/private:py_toolchain_suite.bzl", "py_toolchain_suit
 
 py_toolchain_suite(
     flag_values = {},
-    target_settings = [],
+    target_settings = ["@rules_python//python/config_settings:_is_py_freethreaded_no"],
     prefix = "aarch64-apple-darwin",
     python_version = "3.12.3",
     set_python_version_constraint = "False",
@@ -23,7 +23,10 @@ py_toolchain_suite(
 
 py_toolchain_suite(
     flag_values = {},
-    target_settings = [],
+    target_settings = [
+        "@rules_python//python/config_settings:_is_py_freethreaded_no",
+        "@rules_python//python/config_settings:_is_py_linux_libc_glibc",
+    ],
     prefix = "aarch64-unknown-linux-gnu",
     python_version = "3.12.3",
     set_python_version_constraint = "False",
@@ -37,7 +40,10 @@ py_toolchain_suite(
 
 py_toolchain_suite(
     flag_values = {},
-    target_settings = [],
+    target_settings = [
+        "@rules_python//python/config_settings:_is_py_freethreaded_no",
+        "@rules_python//python/config_settings:_is_py_linux_libc_glibc",
+    ],
     prefix = "ppc64le-unknown-linux-gnu",
     python_version = "3.12.3",
     set_python_version_constraint = "False",
@@ -51,7 +57,10 @@ py_toolchain_suite(
 
 py_toolchain_suite(
     flag_values = {},
-    target_settings = [],
+    target_settings = [
+        "@rules_python//python/config_settings:_is_py_freethreaded_no",
+        "@rules_python//python/config_settings:_is_py_linux_libc_glibc",
+    ],
     prefix = "s390x-unknown-linux-gnu",
     python_version = "3.12.3",
     set_python_version_constraint = "False",
@@ -65,7 +74,7 @@ py_toolchain_suite(
 
 py_toolchain_suite(
     flag_values = {},
-    target_settings = [],
+    target_settings = ["@rules_python//python/config_settings:_is_py_freethreaded_no"],
     prefix = "x86_64-apple-darwin",
     python_version = "3.12.3",
     set_python_version_constraint = "False",
@@ -79,7 +88,7 @@ py_toolchain_suite(
 
 py_toolchain_suite(
     flag_values = {},
-    target_settings = [],
+    target_settings = ["@rules_python//python/config_settings:_is_py_freethreaded_no"],
     prefix = "x86_64-pc-windows-msvc",
     python_version = "3.12.3",
     set_python_version_constraint = "False",
@@ -93,7 +102,10 @@ py_toolchain_suite(
 
 py_toolchain_suite(
     flag_values = {},
-    target_settings = [],
+    target_settings = [
+        "@rules_python//python/config_settings:_is_py_freethreaded_no",
+        "@rules_python//python/config_settings:_is_py_linux_libc_glibc",
+    ],
     prefix = "x86_64-unknown-linux-gnu",
     python_version = "3.12.3",
     set_python_version_constraint = "False",

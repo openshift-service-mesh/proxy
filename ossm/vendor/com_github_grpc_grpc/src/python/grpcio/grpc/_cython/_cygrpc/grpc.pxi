@@ -60,13 +60,13 @@ cdef extern from "<condition_variable>" namespace "std" nogil:
 # gRPC Core Declarations
 
 cdef extern from "src/core/telemetry/call_tracer.h" namespace "grpc_core":
-    cdef cppclass ClientCallTracer:
+    cdef cppclass ClientCallTracerInterface:
         pass
 
     cdef cppclass CallTracerAnnotationInterface:
         pass
 
-    cdef cppclass ServerCallTracer:
+    cdef cppclass ServerCallTracerInterface:
         string TraceId() nogil
         string SpanId() nogil
         bint IsSampled() nogil
@@ -597,7 +597,7 @@ cdef extern from "grpc/credentials.h":
     # We don't care about the internals (and in fact don't know them)
     pass
 
-  grpc_channel_credentials *grpc_google_default_credentials_create(grpc_call_credentials* call_credentials) nogil
+  grpc_channel_credentials *grpc_google_default_credentials_create(grpc_call_credentials* call_creds_for_tls, grpc_call_credentials* call_creds_for_alts) nogil
 
   grpc_channel_credentials *grpc_ssl_credentials_create(
       const char *pem_root_certs, grpc_ssl_pem_key_cert_pair *pem_key_cert_pair,

@@ -220,6 +220,7 @@ class OncePromiseFactory {
   using Arg = A;
   using Promise = decltype(PromiseFactoryImpl(OnceToken{}, std::move(f_),
                                               std::declval<A>()));
+  using UnderlyingFactory = F;
 
   explicit OncePromiseFactory(F f)
       : f_(std::move(f)) {}
@@ -237,6 +238,7 @@ class OncePromiseFactory<void, F> {
  public:
   using Arg = void;
   using Promise = decltype(PromiseFactoryImpl(OnceToken{}, std::move(f_)));
+  using UnderlyingFactory = F;
 
   explicit OncePromiseFactory(F f)
       : f_(std::move(f)) {}
@@ -268,6 +270,14 @@ class RepeatedPromiseFactory {
   }
   Promise Make(Arg&& a) {
     return PromiseFactoryImpl(RepeatableToken{}, f_, std::forward<Arg>(a));
+  }
+  template <typename U>
+  GPR_ATTRIBUTE_ALWAYS_INLINE_FUNCTION Promise Make(U&& u) const {
+    return PromiseFactoryImpl(RepeatableToken{}, f_, std::forward<U>(u));
+  }
+  template <typename U>
+  GPR_ATTRIBUTE_ALWAYS_INLINE_FUNCTION Promise Make(U&& u) {
+    return PromiseFactoryImpl(RepeatableToken{}, f_, std::forward<U>(u));
   }
 };
 

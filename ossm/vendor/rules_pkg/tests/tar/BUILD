@@ -24,6 +24,7 @@ load("//pkg:verify_archive.bzl", "verify_archive_test")
 load("//pkg/private/tar:tar.bzl", "SUPPORTED_TAR_COMPRESSIONS", "pkg_tar")
 load("//tests:my_package_name.bzl", "my_package_naming")
 load("//tests/util:defs.bzl", "directory", "fake_artifact", "link_tree")
+load(":defs.bzl", "raw_symlinks")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -473,6 +474,10 @@ py_test(
         ":test-tar-files_dict.tar",
         ":test-tar-long-filename",
         ":test-tar-mtime.tar",
+        ":test-tar-preserve_mode-False.tar",
+        ":test-tar-preserve_mode-True.tar",
+        ":test-tar-preserve_mtime-False.tar",
+        ":test-tar-preserve_mtime-True.tar",
         ":test-tar-repackaging-long-filename.tar",
         ":test-tar-strip_prefix-dot.tar",
         ":test-tar-strip_prefix-empty.tar",
@@ -481,6 +486,10 @@ py_test(
         ":test-tar-strip_prefix-substring.tar",
         ":test-tar-tree-artifact",
         ":test-tar-tree-artifact-noroot",
+        ":test-tar-xz-compression_level--1",
+        ":test-tar-xz-compression_level-3",
+        ":test-tar-xz-compression_level-6",
+        ":test-tar-xz-compression_level-9",
         ":test-tree-input-with-strip-prefix",
         ":test_tar_leading_dotslash",
         ":test_tar_package_dir_substitution.tar",
@@ -629,6 +638,38 @@ pkg_tar(
 # Test with symlinks
 #
 
+raw_symlinks(
+    name = "raw_symlinks",
+    tags = ["REQUIRES_BAZEL_8"],
+)
+
+pkg_tar(
+    name = "raw_symlinks_tar",
+    srcs = [":raw_symlinks"],
+    include_runfiles = True,
+    tags = ["REQUIRES_BAZEL_8"],
+)
+
+verify_archive_test(
+    name = "raw_symlinks_test",
+    tags = [
+        "REQUIRES_BAZEL_8",
+        "no_windows",
+    ],
+    target = ":raw_symlinks_tar",
+    # This test checks using relative symlinks, but Bazel always writes absolute
+    # symlinks on windows.
+    # See https://github.com/bazelbuild/bazel/issues/14224
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    verify_links = {
+        "raw_symlinks_link1": "link1",
+        "raw_symlinks_link1.runfiles/_main/tests/tar/raw_symlinks_runfile_link": "../runfile_link",
+    },
+)
+
 link_tree(
     name = "node_modules",
     links = {
@@ -774,4 +815,40 @@ verify_archive_test(
     3,
     6,
     9,
+]]
+
+[pkg_tar(
+    name = "test-tar-xz-compression_level-%s" % compression_level,
+    compression_level = compression_level,
+    extension = "tar.xz",
+    deps = [
+        "//tests:testdata/tar_xz_test.tar",
+    ],
+) for compression_level in [
+    -1,
+    3,
+    6,
+    9,
+]]
+
+[pkg_tar(
+    name = "test-tar-preserve_mode-%s" % state,
+    srcs = [
+        "//tests:testdata/hello.txt",  # rw- r-- r--
+    ],
+    preserve_mode = state,
+) for state in [
+    True,
+    False,
+]]
+
+[pkg_tar(
+    name = "test-tar-preserve_mtime-%s" % state,
+    srcs = [
+        "//tests:testdata/hello.txt",
+    ],
+    preserve_mtime = state,
+) for state in [
+    True,
+    False,
 ]]

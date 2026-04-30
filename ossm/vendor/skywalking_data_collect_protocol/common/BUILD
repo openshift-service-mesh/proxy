@@ -15,16 +15,16 @@
 # limitations under the License.
 #
 
-load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
 
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])  # Apache 2
 
 proto_library(
-  name = "common_protocol_proto_lib",
-  srcs = [
-      "Command.proto",
-      "Common.proto",
-  ],
+    name = "common_protocol_proto_lib",
+    srcs = [
+        "Command.proto",
+        "Common.proto",
+    ],
 )

@@ -11,7 +11,7 @@
 #include <optional>
 #include <type_traits>
 
-#include "src/base/template-utils.h"
+#include "absl/functional/overload.h"
 #include "src/common/assert-scope.h"
 #include "src/common/globals.h"
 #include "src/execution/isolate-utils.h"
@@ -84,8 +84,14 @@ class V8_NODISCARD SharedStringAccessGuardIfNeeded {
 
   static bool IsNeeded(Tagged<String> str, bool check_local_heap = true) {
     if (check_local_heap) {
-      LocalHeap* local_heap = LocalHeap::Current();
-      if (!local_heap || local_heap->is_main_thread()) {
+      LocalHeap* current = LocalHeap::TryGetCurrent();
+
+      if (!current) {
+        // GC worker threads may access the string content but do not have a
+        // LocalHeap.
+        DCHECK_EQ(Isolate::Current()->heap()->gc_state(), Heap::MARK_COMPACT);
+        return false;
+      } else if (current->is_main_thread()) {
         // Don't acquire the lock for the main thread.
         return false;
       }
@@ -117,12 +123,14 @@ class V8_NODISCARD SharedStringAccessGuardIfNeeded {
   static Isolate* GetIsolateIfNeeded(Tagged<String> str) {
     if (!IsNeeded(str)) return nullptr;
 
-    Isolate* isolate;
-    if (!GetIsolateFromHeapObject(str, &isolate)) {
-      // If we can't get the isolate from the String, it must be read-only.
-      DCHECK(ReadOnlyHeap::Contains(str));
-      return nullptr;
+    DCHECK(!ReadOnlyHeap::Contains(str));
+    Isolate* isolate = Isolate::Current();
+    // For strings in the shared space we need the shared space isolate instead
+    // of the current isolate.
+    if (HeapLayout::InWritableSharedSpace(str)) {
+      isolate = isolate->shared_space_isolate();
     }
+    DCHECK_EQ(isolate->heap(), Heap::FromWritableHeapObject(str));
     return isolate;
   }
 
@@ -558,7 +566,7 @@ Char FlatStringReader::Get(uint32_t index) const {
 template <typename Char>
 class SequentialStringKey final : public StringTableKey {
  public:
-  SequentialStringKey(base::Vector<const Char> chars, uint64_t seed,
+  SequentialStringKey(base::Vector<const Char> chars, const HashSeed seed,
                       bool convert = false)
       : SequentialStringKey(StringHasher::HashSequentialString<Char>(
                                 chars.begin(), chars.length(), seed),
@@ -608,14 +616,6 @@ template <typename SeqString>
 class SeqSubStringKey final : public StringTableKey {
  public:
   using Char = typename SeqString::Char;
-// VS 2017 on official builds gives this spurious warning:
-// warning C4789: buffer 'key' of size 16 bytes will be overrun; 4 bytes will
-// be written starting at offset 16
-// https://bugs.chromium.org/p/v8/issues/detail?id=6068
-#if defined(V8_CC_MSVC)
-#pragma warning(push)
-#pragma warning(disable : 4789)
-#endif
   SeqSubStringKey(Isolate* isolate, DirectHandle<SeqString> string, int from,
                   int len, bool convert = false)
       : StringTableKey(0, len),
@@ -633,9 +633,6 @@ class SeqSubStringKey final : public StringTableKey {
     DCHECK_EQ(IsSeqOneByteString(*string_), sizeof(Char) == 1);
     DCHECK_EQ(IsSeqTwoByteString(*string_), sizeof(Char) == 2);
   }
-#if defined(V8_CC_MSVC)
-#pragma warning(pop)
-#endif
 
   bool IsMatch(Isolate* isolate, Tagged<String> string) {
     DCHECK(!SharedStringAccessGuardIfNeeded::IsNeeded(string));
@@ -706,6 +703,12 @@ bool String::IsEqualTo(base::Vector<const Char> str, Isolate* isolate) const {
                                 SharedStringAccessGuardIfNeeded::NotNeeded());
 }
 
+template <String::EqualityType kEqType>
+bool String::IsEqualTo(std::string_view str, Isolate* isolate) const {
+  return IsEqualTo<kEqType>(base::Vector<const char>(str.data(), str.size()),
+                            isolate);
+}
+
 template <String::EqualityType kEqType, typename Char>
 bool String::IsEqualTo(base::Vector<const Char> str) const {
   DCHECK(!SharedStringAccessGuardIfNeeded::IsNeeded(this));
@@ -743,7 +746,7 @@ bool String::IsEqualToImpl(
   Tagged<String> string = this;
   const Char* data = str.data();
   while (true) {
-    auto ret = string->DispatchToSpecificType(base::overloaded{
+    auto ret = string->DispatchToSpecificType(absl::Overload{
         [&](Tagged<SeqOneByteString> s) {
           return CompareCharsEqual(
               s->GetChars(no_gc, access_guard) + slice_offset, data, len);
@@ -992,7 +995,7 @@ std::optional<String::FlatContent> String::TryGetFlatContentFromDirectString(
     const SharedStringAccessGuardIfNeeded& access_guard) {
   DCHECK_LE(offset + length, string->length());
 
-  return string->DispatchToSpecificType(base::overloaded{
+  return string->DispatchToSpecificType(absl::Overload{
       [&](Tagged<SeqOneByteString> s) {
         return FlatContent(s->GetChars(no_gc, access_guard) + offset, length,
                            no_gc);
@@ -1047,13 +1050,14 @@ String::FlatContent::~FlatContent() {
 
 #ifdef ENABLE_SLOW_DCHECKS
 uint32_t String::FlatContent::ComputeChecksum() const {
-  constexpr uint64_t hashseed = 1;
   uint32_t hash;
   if (state_ == ONE_BYTE) {
-    hash = StringHasher::HashSequentialString(onebyte_start, length_, hashseed);
+    hash = StringHasher::HashSequentialString(onebyte_start, length_,
+                                              HashSeed::Default());
   } else {
     DCHECK_EQ(TWO_BYTE, state_);
-    hash = StringHasher::HashSequentialString(twobyte_start, length_, hashseed);
+    hash = StringHasher::HashSequentialString(twobyte_start, length_,
+                                              HashSeed::Default());
   }
   DCHECK_NE(kChecksumVerificationDisabled, hash);
   return hash;
@@ -1072,7 +1076,7 @@ String::FlatContent String::GetFlatContent(
 template <typename T, template <typename> typename HandleType>
   requires(std::is_convertible_v<HandleType<T>, DirectHandle<String>>)
 HandleType<String> String::Share(Isolate* isolate, HandleType<T> string) {
-  DCHECK(v8_flags.shared_string_table);
+  DCHECK(v8_flags.shared_strings);
   MaybeDirectHandle<Map> new_map;
   switch (
       isolate->factory()->ComputeSharingStrategyForString(string, &new_map)) {
@@ -1167,7 +1171,7 @@ Tagged<ConsString> String::VisitFlat(
   DCHECK_LE(offset, length);
   while (true) {
     std::optional<Tagged<ConsString>> ret =
-        string->DispatchToSpecificType(base::overloaded{
+        string->DispatchToSpecificType(absl::Overload{
             [&](Tagged<SeqOneByteString> s) {
               visitor->VisitOneByteString(
                   s->GetChars(no_gc, access_guard) + slice_offset,
@@ -1215,6 +1219,12 @@ size_t String::Utf8Length(Isolate* isolate, DirectHandle<String> string) {
     auto vec = content.ToOneByteVector();
     return simdutf::utf8_length_from_latin1(
         reinterpret_cast<const char*>(vec.begin()), vec.size());
+  }
+
+  base::Vector<const base::uc16> vec = content.ToUC16Vector();
+  const char16_t* data = reinterpret_cast<const char16_t*>(vec.begin());
+  if (simdutf::validate_utf16(data, vec.size())) {
+    return simdutf::utf8_length_from_utf16(data, vec.size());
   }
 
   // TODO(419496232): Use simdutf once upstream bug is resolved.
@@ -1440,7 +1450,7 @@ void ExternalString::VisitExternalPointers(ObjectVisitor* visitor) {
 }
 
 Address ExternalString::resource_as_address() const {
-  IsolateForSandbox isolate = GetIsolateForSandbox(this);
+  IsolateForSandbox isolate = GetCurrentIsolateForSandbox();
   return resource_.load(isolate);
 }
 
@@ -1641,6 +1651,16 @@ class StringCharacterStream {
   inline void VisitOneByteString(const uint8_t* chars, int length);
   inline void VisitTwoByteString(const uint16_t* chars, int length);
 
+  // Counts the number of UTF-8 bytes for `length` characters,
+  // advancing the stream
+  inline size_t CountUtf8Bytes(uint32_t n_chars);
+  // Counts the number of UTF-8 bytes for `length` characters,
+  // advancing the stream
+  //
+  // Returns the number of UTF-8 bytes written
+  inline size_t WriteUtf8Bytes(uint32_t n_chars, char* output,
+                               size_t output_capacity);
+
  private:
   ConsStringIterator iter_;
   bool is_one_byte_;
@@ -1705,6 +1725,47 @@ void StringCharacterStream::VisitTwoByteString(const uint16_t* chars,
   is_one_byte_ = false;
   buffer16_ = chars;
   end_ = reinterpret_cast<const uint8_t*>(chars + length);
+}
+
+inline size_t StringCharacterStream::CountUtf8Bytes(uint32_t n_chars) {
+  size_t utf8_bytes = 0;
+  uint32_t remaining_chars = n_chars;
+  uint16_t last = unibrow::Utf16::kNoPreviousCharacter;
+  while (HasMore() && remaining_chars-- != 0) {
+    uint16_t character = GetNext();
+    utf8_bytes += unibrow::Utf8::Length(character, last);
+    last = character;
+  }
+  return utf8_bytes;
+}
+
+inline size_t StringCharacterStream::WriteUtf8Bytes(uint32_t n_chars,
+                                                    char* output,
+                                                    size_t output_capacity) {
+  size_t pos = 0;
+  uint32_t remaining_chars = n_chars;
+  uint16_t last = unibrow::Utf16::kNoPreviousCharacter;
+  while (HasMore() && remaining_chars-- != 0) {
+    uint16_t character = GetNext();
+    if (character == 0) {
+      character = ' ';
+    }
+
+    // Ensure that there's sufficient space for this character.
+    //
+    // This should normally always be the case, unless there is
+    // in-sandbox memory corruption.
+    // Alternatively, we could also over-allocate the output buffer by three
+    // bytes (the maximum we can write OOB) or consider allocating it inside
+    // the sandbox, but it's not clear if that would be worth the effort as the
+    // performance overhead of this check appears to be negligible in practice.
+    SBXCHECK_LE(unibrow::Utf8::Length(character, last), output_capacity - pos);
+
+    pos += unibrow::Utf8::Encode(output + pos, character, last);
+
+    last = character;
+  }
+  return pos;
 }
 
 bool String::AsArrayIndex(uint32_t* index) {

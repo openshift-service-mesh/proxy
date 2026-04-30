@@ -39,6 +39,17 @@ bzl_library(
   deps = [
     "@rules_cc//cc/private/rules_impl:core_rules",
     "@rules_cc//cc/private/rules_impl:toolchain_rules",
+    "@rules_cc//cc/private:cc_common",
+  ],
+  visibility = ["@rules_cc//cc:__subpackages__"],
+)
+bzl_library(
+  name = "symbols_bzl",
+  srcs = ["symbols.bzl"],
+  deps = [
+    "@rules_cc//cc/private:cc_common",
+    "@rules_cc//cc/private:cc_shared_library_info_bzl",
+    "@rules_cc//cc/private/toolchain_config:toolchain_config_bzl",
   ],
   visibility = ["@rules_cc//cc:__subpackages__"],
 )
@@ -50,15 +61,15 @@ bzl_library(
 load("@rules_cc//cc/private/rules_impl:cc_binary.bzl", _cc_binary = "cc_binary")
 load("@rules_cc//cc/private/rules_impl:cc_import.bzl", _cc_import = "cc_import")
 load("@rules_cc//cc/private/rules_impl:cc_library.bzl", _cc_library = "cc_library")
-load("@rules_cc//cc/private/rules_impl:cc_shared_library.bzl", _cc_shared_library = "cc_shared_library", _CcSharedLibraryInfo = "CcSharedLibraryInfo")
+load("@rules_cc//cc/private/rules_impl:cc_shared_library.bzl", _cc_shared_library = "cc_shared_library")
 load("@rules_cc//cc/private/rules_impl:cc_static_library.bzl", _cc_static_library = "cc_static_library")
 load("@rules_cc//cc/private/rules_impl:cc_test.bzl", _cc_test = "cc_test")
 load("@rules_cc//cc/private/rules_impl:objc_import.bzl", _objc_import = "objc_import")
 load("@rules_cc//cc/private/rules_impl:objc_library.bzl", _objc_library = "objc_library")
-load("@rules_cc//cc/private/rules_impl:fdo/fdo_prefetch_hints.bzl", _fdo_prefetch_hints = "fdo_prefetch_hints")
-load("@rules_cc//cc/private/rules_impl:fdo/fdo_profile.bzl", _fdo_profile = "fdo_profile")
-load("@rules_cc//cc/private/rules_impl:fdo/memprof_profile.bzl", _memprof_profile = "memprof_profile")
-load("@rules_cc//cc/private/rules_impl:fdo/propeller_optimize.bzl", _propeller_optimize = "propeller_optimize")
+load("@rules_cc//cc/private/rules_impl/fdo:fdo_prefetch_hints.bzl", _fdo_prefetch_hints = "fdo_prefetch_hints")
+load("@rules_cc//cc/private/rules_impl/fdo:fdo_profile.bzl", _fdo_profile = "fdo_profile")
+load("@rules_cc//cc/private/rules_impl/fdo:memprof_profile.bzl", _memprof_profile = "memprof_profile")
+load("@rules_cc//cc/private/rules_impl/fdo:propeller_optimize.bzl", _propeller_optimize = "propeller_optimize")
 load("@rules_cc//cc/private/rules_impl:cc_toolchain.bzl", _cc_toolchain = "cc_toolchain")
 load("@rules_cc//cc/private/rules_impl:cc_toolchain_alias.bzl", _cc_toolchain_alias = "cc_toolchain_alias")
 
@@ -76,7 +87,24 @@ memprof_profile = _memprof_profile
 propeller_optimize = _propeller_optimize
 cc_toolchain = _cc_toolchain
 cc_toolchain_alias = _cc_toolchain_alias
+            """,
+        )
+        rctx.file(
+            "symbols.bzl",
+            """
+load("@rules_cc//cc/private:cc_common.bzl", _cc_common = "cc_common")
+load("@rules_cc//cc/private:cc_info.bzl", _CcInfo = "CcInfo")
+load("@rules_cc//cc/private:cc_shared_library_info.bzl", _CcSharedLibraryInfo = "CcSharedLibraryInfo")
+load("@rules_cc//cc/private:debug_package_info.bzl", _DebugPackageInfo = "DebugPackageInfo")
+load("@rules_cc//cc/private:objc_info.bzl", _ObjcInfo = "ObjcInfo")
+load("@rules_cc//cc/private/toolchain_config:cc_toolchain_config_info.bzl", _CcToolchainConfigInfo = "CcToolchainConfigInfo")
 
+cc_common = _cc_common
+CcInfo = _CcInfo
+DebugPackageInfo = _DebugPackageInfo
+CcToolchainConfigInfo = _CcToolchainConfigInfo
+ObjcInfo = _ObjcInfo
+new_objc_provider = _ObjcInfo
 CcSharedLibraryInfo = _CcSharedLibraryInfo
             """,
         )
@@ -88,7 +116,15 @@ load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 bzl_library(
   name = "proxy_bzl",
   srcs = ["proxy.bzl"],
-  deps = ["@rules_cc//cc/private/rules_impl:native_bzl"],
+  visibility = ["@rules_cc//cc:__subpackages__"],
+)
+bzl_library(
+  name = "symbols_bzl",
+  srcs = ["symbols.bzl"],
+  deps = [
+      "@rules_cc//cc/private/rules_impl:native_cc_common_bzl",
+      "@rules_cc//cc/private/rules_impl:native_providers_bzl",
+  ],
   visibility = ["@rules_cc//cc:__subpackages__"],
 )
             """,
@@ -96,7 +132,6 @@ bzl_library(
         rctx.file(
             "proxy.bzl",
             """
-load("@rules_cc//cc/private/rules_impl:native.bzl", "NativeCcSharedLibraryInfo")
 cc_binary = native.cc_binary
 cc_import = native.cc_import
 cc_library = native.cc_library
@@ -111,7 +146,22 @@ memprof_profile = getattr(native, "memprof_profile", None) # only in Bazel 7+
 propeller_optimize = native.propeller_optimize
 cc_toolchain = native.cc_toolchain
 cc_toolchain_alias = native.cc_toolchain_alias
-
+            """,
+        )
+        rctx.file(
+            "symbols.bzl",
+            """
+load("@rules_cc//cc/private/rules_impl:native_cc_common.bzl", "native_cc_common")
+load("@rules_cc//cc/private/rules_impl:native_providers.bzl", "NativeCcInfo")
+load("@rules_cc//cc/private/rules_impl:native_providers.bzl", "NativeDebugPackageInfo")
+load("@rules_cc//cc/private/rules_impl:native_providers.bzl", "NativeCcToolchainConfigInfo")
+load("@rules_cc//cc/private/rules_impl:native_providers.bzl", "NativeCcSharedLibraryInfo")
+cc_common = native_cc_common
+CcInfo = NativeCcInfo
+DebugPackageInfo = NativeDebugPackageInfo
+CcToolchainConfigInfo = NativeCcToolchainConfigInfo
+ObjcInfo = apple_common.Objc
+new_objc_provider = apple_common.new_objc_provider
 CcSharedLibraryInfo = NativeCcSharedLibraryInfo
             """,
         )

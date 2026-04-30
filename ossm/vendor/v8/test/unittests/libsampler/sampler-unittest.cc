@@ -51,7 +51,7 @@ class TestSampler : public Sampler {
     isolate()->GetStackSample(regs, frames, kMaxFramesCount, &sample_info);
     if (is_counting_samples_) {
       if (sample_info.vm_state == JS) ++js_sample_count_;
-      if (sample_info.vm_state == EXTERNAL) ++external_sample_count_;
+      if (IsExternal(sample_info.vm_state)) ++external_sample_count_;
     }
   }
 };
@@ -105,6 +105,10 @@ static v8::Local<v8::Function> GetFunction(v8::Local<v8::Context> env,
       .As<v8::Function>();
 }
 
+// This tag value has been picked arbitrarily between 0 and
+// V8_EXTERNAL_POINTER_TAG_COUNT.
+constexpr v8::ExternalPointerTypeTag kTestApiCallbacksTag = 26;
+
 TEST_F(SamplerTest, LibSamplerCollectSample) {
   v8::HandleScope scope(isolate());
 
@@ -114,7 +118,8 @@ TEST_F(SamplerTest, LibSamplerCollectSample) {
       func_template->InstanceTemplate();
 
   TestApiCallbacks accessors;
-  v8::Local<v8::External> data = v8::External::New(isolate(), &accessors);
+  v8::Local<v8::External> data =
+      v8::External::New(isolate(), &accessors, kTestApiCallbacksTag);
   instance_template->SetNativeDataProperty(NewString("foo"),
                                            &TestApiCallbacks::Getter,
                                            &TestApiCallbacks::Setter, data);

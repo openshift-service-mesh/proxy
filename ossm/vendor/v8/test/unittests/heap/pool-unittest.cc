@@ -9,9 +9,10 @@
 #include "src/execution/isolate.h"
 #include "src/heap/heap-inl.h"
 #include "src/heap/memory-allocator.h"
-#include "src/heap/page-pool.h"
+#include "src/heap/memory-pool.h"
 #include "src/heap/spaces-inl.h"
 #include "src/utils/ostreams.h"
+#include "test/common/flag-utils.h"
 #include "test/unittests/test-utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -341,7 +342,7 @@ class PoolTest : public                                     //
 
   Heap* heap() { return isolate()->heap(); }
   MemoryAllocator* allocator() { return heap()->memory_allocator(); }
-  PagePool* pool() { return allocator()->pool(); }
+  MemoryPool* pool() { return isolate()->isolate_group()->memory_pool(); }
 
   TrackingPageAllocator* tracking_page_allocator() {
     return tracking_page_allocator_;
@@ -368,7 +369,10 @@ PoolTestMixin<TMixin>::~PoolTestMixin() {
 
 // See v8:5945.
 TEST_F(PoolTest, UnmapOnTeardown) {
-  PageMetadata* page =
+  // Wait for the task to finish and disable rescheduling.
+  pool()->CancelAndWaitForTaskToFinishForTesting();
+
+  NormalPage* page =
       allocator()->AllocatePage(MemoryAllocator::AllocationMode::kRegular,
                                 static_cast<PagedSpace*>(heap()->old_space()),
                                 Executability::NOT_EXECUTABLE);
@@ -391,6 +395,9 @@ TEST_F(PoolTest, UnmapOnTeardown) {
 #else
   tracking_page_allocator()->CheckIsFree(chunk_address, page_size);
 #endif  // V8_COMPRESS_POINTERS
+
+  // Wait for the task to finish and disable rescheduling.
+  pool()->ReenableTaskForTesting();
 }
 #endif  // !V8_OS_FUCHSIA && !V8_ENABLE_SANDBOX
 

@@ -101,7 +101,6 @@ def _gomock_source_impl(ctx):
             cmd = "$(pwd)/" + ctx.file.mockgen_tool.path,
             args = " ".join(args),
             out = ctx.outputs.out.path,
-            mnemonic = "GoMockSourceGen",
         ),
         env = {
             # GOCACHE is required starting in Go 1.12
@@ -109,6 +108,7 @@ def _gomock_source_impl(ctx):
             # gomock runs in the special GOPATH environment
             "GO111MODULE": "off",
         },
+        mnemonic = "GoMockSourceGen",
     )
 
 _gomock_source = rule(
@@ -241,12 +241,14 @@ def _gomock_reflect(name, library, out, mockgen_tool, **kwargs):
         library = library,
         out = prog_src_out,
         mockgen_tool = mockgen_tool,
+        tags = ["manual"],
     )
     prog_bin = name + "_gomock_prog_bin"
     go_binary(
         name = prog_bin,
         srcs = [prog_src_out],
         deps = [library, mockgen_model_lib],
+        tags = ["manual"],
     )
     _gomock_prog_exec(
         name = name,
@@ -328,6 +330,7 @@ def _gomock_prog_exec_impl(ctx):
             ctx.file.mockgen_tool,
             go.sdk.go,
         ],
+        toolchain = GO_TOOLCHAIN_LABEL,
         command = """
             export GOROOT=$(pwd)/{goroot} &&
             export PATH=$GOROOT/bin:$PATH &&

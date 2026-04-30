@@ -7,6 +7,8 @@
 #include "source/common/http/utility.h"
 #include "source/extensions/common/aws/signer_base_impl.h"
 
+#include "openssl/crypto.h"
+
 namespace Envoy {
 namespace Extensions {
 namespace Common {
@@ -28,38 +30,62 @@ constexpr char DEFAULT_AWS_CONFIG_FILE[] = "/.aws/config";
 
 std::map<std::string, std::string>
 Utility::canonicalizeHeaders(const Http::RequestHeaderMap& headers,
-                             const std::vector<Matchers::StringMatcherPtr>& excluded_headers) {
+                             const std::vector<Matchers::StringMatcherPtr>& excluded_headers,
+                             const std::vector<Matchers::StringMatcherPtr>& included_headers) {
   std::map<std::string, std::string> out;
-  headers.iterate(
-      [&out, &excluded_headers](const Http::HeaderEntry& entry) -> Http::HeaderMap::Iterate {
-        // Skip empty headers
-        if (entry.key().empty() || entry.value().empty()) {
+
+  headers.iterate([&out, &excluded_headers,
+                   &included_headers](const Http::HeaderEntry& entry) -> Http::HeaderMap::Iterate {
+    // Skip empty headers
+    if (entry.key().empty() || entry.value().empty()) {
+      return Http::HeaderMap::Iterate::Continue;
+    }
+    const auto key = entry.key().getStringView();
+
+    // Pseudo-headers should not be canonicalized
+    if (!key.empty() && key[0] == ':') {
+      return Http::HeaderMap::Iterate::Continue;
+    }
+
+    // Always include x-amz-* and content-type headers per AWS signing requirements
+    const auto key_lower = absl::AsciiStrToLower(key);
+    const bool is_required_header =
+        absl::StartsWith(key_lower, "x-amz-") || key_lower == "content-type";
+
+    if (!is_required_header) {
+      if (!included_headers.empty()) {
+        // If included_headers is set, only include headers that match
+        if (!std::any_of(included_headers.begin(), included_headers.end(),
+                         [&key](const Matchers::StringMatcherPtr& matcher) {
+                           return matcher->match(key);
+                         })) {
           return Http::HeaderMap::Iterate::Continue;
         }
-        // Pseudo-headers should not be canonicalized
-        if (!entry.key().getStringView().empty() && entry.key().getStringView()[0] == ':') {
-          return Http::HeaderMap::Iterate::Continue;
-        }
-        const auto key = entry.key().getStringView();
+      } else {
+        // Otherwise use excluded_headers
         if (std::any_of(excluded_headers.begin(), excluded_headers.end(),
                         [&key](const Matchers::StringMatcherPtr& matcher) {
                           return matcher->match(key);
                         })) {
           return Http::HeaderMap::Iterate::Continue;
         }
+      }
+    }
 
-        std::string value(entry.value().getStringView());
-        // Remove leading, trailing, and deduplicate repeated ascii spaces
-        absl::RemoveExtraAsciiWhitespace(&value);
-        const auto iter = out.find(std::string(entry.key().getStringView()));
-        // If the entry already exists, append the new value to the end
-        if (iter != out.end()) {
-          iter->second += fmt::format(",{}", value);
-        } else {
-          out.emplace(std::string(entry.key().getStringView()), value);
-        }
-        return Http::HeaderMap::Iterate::Continue;
-      });
+    std::string value(entry.value().getStringView());
+
+    // Remove leading, trailing, and deduplicate repeated ascii spaces
+    absl::RemoveExtraAsciiWhitespace(&value);
+    const std::string key_str(key);
+    const auto iter = out.find(key_str);
+    // If the entry already exists, append the new value to the end
+    if (iter != out.end()) {
+      iter->second += fmt::format(",{}", value);
+    } else {
+      out.emplace(std::move(key_str), std::move(value));
+    }
+    return Http::HeaderMap::Iterate::Continue;
+  });
   // The AWS SDK has a quirk where it removes "default ports" (80, 443) from the host headers
   // Additionally, we canonicalize the :authority header as "host"
   // TODO(suniltheta): This may need to be tweaked to canonicalize :authority for HTTP/2 requests
@@ -99,10 +125,13 @@ Utility::createCanonicalRequest(absl::string_view method, absl::string_view path
     }
     new_path = uriEncodePath(new_path);
   } else {
+    // Special case for S3 and its variants when path is not pre-encoded at all
+    auto encoded_path =
+        isUriPathEncoded(path_part) ? std::string(path_part) : uriEncodePath(path_part);
     if (should_normalize_uri_path) {
-      new_path = normalizePath(path_part);
+      new_path = normalizePath(encoded_path);
     } else {
-      new_path = path_part;
+      new_path = encoded_path;
     }
   }
 
@@ -296,6 +325,7 @@ Utility::joinCanonicalHeaderNames(const std::map<std::string, std::string>& cano
  */
 std::string Utility::getSTSEndpoint(absl::string_view region) {
   std::string single_region;
+  const bool fips_mode = FIPS_mode();
 
   // If we contain a comma or asterisk it looks like a region set.
   if (absl::StrContains(region, ",") || (absl::StrContains(region, "*"))) {
@@ -304,11 +334,11 @@ std::string Utility::getSTSEndpoint(absl::string_view region) {
     // If we still have a * in the first element, then send them to us-east-1 fips or global
     // endpoint.
     if (absl::StrContains(region_v[0], '*')) {
-#ifdef ENVOY_SSL_FIPS
-      return "sts-fips.us-east-1.amazonaws.com";
-#else
-      return "sts.amazonaws.com";
-#endif
+      if (fips_mode) {
+        return "sts-fips.us-east-1.amazonaws.com";
+      } else {
+        return "sts.amazonaws.com";
+      }
     }
     single_region = region_v[0];
   } else {
@@ -319,19 +349,21 @@ std::string Utility::getSTSEndpoint(absl::string_view region) {
   if (single_region == "cn-northwest-1" || single_region == "cn-north-1") {
     return fmt::format("sts.{}.amazonaws.com.cn", single_region);
   }
-#ifdef ENVOY_SSL_FIPS
-  // Use AWS STS FIPS endpoints in FIPS mode https://docs.aws.amazon.com/general/latest/gr/sts.html.
-  // Note: AWS GovCloud doesn't have separate fips endpoints.
-  // TODO(suniltheta): Include `ca-central-1` when sts supports a dedicated FIPS endpoint.
-  if (single_region == "us-east-1" || single_region == "us-east-2" ||
-      single_region == "us-west-1" || single_region == "us-west-2") {
-    return fmt::format("sts-fips.{}.amazonaws.com", single_region);
+  if (fips_mode) {
+    // Use AWS STS FIPS endpoints in FIPS mode
+    // https://docs.aws.amazon.com/general/latest/gr/sts.html. Note: AWS GovCloud doesn't have
+    // separate fips endpoints.
+    // TODO(suniltheta): Include `ca-central-1` when sts supports a dedicated FIPS endpoint.
+    if (single_region == "us-east-1" || single_region == "us-east-2" ||
+        single_region == "us-west-1" || single_region == "us-west-2") {
+      return fmt::format("sts-fips.{}.amazonaws.com", single_region);
+    }
+    ENVOY_LOG(
+        warn,
+        "FIPS Support is enabled, but an STS FIPS endpoint is not available in the configured "
+        "region ({})",
+        region);
   }
-  ENVOY_LOG(warn,
-            "FIPS Support is enabled, but an STS FIPS endpoint is not available in the configured "
-            "region ({})",
-            region);
-#endif
   return fmt::format("sts.{}.amazonaws.com", single_region);
 }
 
@@ -346,20 +378,22 @@ std::string Utility::getRolesAnywhereEndpoint(const std::string& trust_anchor_ar
   } else {
     region = arn_split[3];
   }
-#ifdef ENVOY_SSL_FIPS
-  if (region == "us-east-1" || region == "us-east-2" || region == "us-west-1" ||
-      region == "us-west-2" || region == "us-gov-east-1" || region == "us-gov-west-1") {
-    return fmt::format("rolesanywhere-fips.{}.amazonaws.com", region);
+
+  if (FIPS_mode() == 1) {
+    if (region == "us-east-1" || region == "us-east-2" || region == "us-west-1" ||
+        region == "us-west-2" || region == "us-gov-east-1" || region == "us-gov-west-1") {
+      return fmt::format("rolesanywhere-fips.{}.amazonaws.com", region);
+    } else {
+      ENVOY_LOG(
+          warn,
+          "FIPS Support is enabled, but a rolesanywhere FIPS endpoint is not available in the "
+          "configured region ({})",
+          region);
+      return fmt::format("rolesanywhere.{}.amazonaws.com", region);
+    }
   } else {
-    ENVOY_LOG(warn,
-              "FIPS Support is enabled, but a rolesanywhere FIPS endpoint is not available in the "
-              "configured region ({})",
-              region);
     return fmt::format("rolesanywhere.{}.amazonaws.com", region);
   }
-#else
-  return fmt::format("rolesanywhere.{}.amazonaws.com", region);
-#endif
 }
 
 envoy::config::cluster::v3::Cluster Utility::createInternalClusterStatic(
@@ -576,6 +610,15 @@ bool Utility::useDoubleUriEncode(const std::string service_name) {
 // other
 bool Utility::shouldNormalizeUriPath(const std::string service) {
   return Utility::useDoubleUriEncode(service);
+}
+
+bool Utility::isUriPathEncoded(absl::string_view path) {
+  for (char ch : path) {
+    if (!isReservedChar(ch) && ch != '%' && ch != '/') {
+      return false;
+    }
+  }
+  return true;
 }
 
 } // namespace Aws

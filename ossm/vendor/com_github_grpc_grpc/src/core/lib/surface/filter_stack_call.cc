@@ -37,9 +37,9 @@
 #include <string>
 #include <utility>
 
-#include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "src/core/call/metadata_batch.h"
@@ -66,6 +66,7 @@
 #include "src/core/util/alloc.h"
 #include "src/core/util/crash.h"
 #include "src/core/util/debug_location.h"
+#include "src/core/util/grpc_check.h"
 #include "src/core/util/ref_counted.h"
 #include "src/core/util/ref_counted_ptr.h"
 #include "src/core/util/status_helper.h"
@@ -109,8 +110,8 @@ grpc_error_handle FilterStackCall::Create(grpc_call_create_args* args,
   arena->SetContext<grpc_event_engine::experimental::EventEngine>(
       args->channel->event_engine());
   call = new (arena->Alloc(call_alloc_size)) FilterStackCall(arena, *args);
-  DCHECK(FromC(call->c_ptr()) == call);
-  DCHECK(FromCallStack(call->call_stack()) == call);
+  GRPC_DCHECK(FromC(call->c_ptr()) == call);
+  GRPC_DCHECK(FromCallStack(call->call_stack()) == call);
   *out_call = call->c_ptr();
   grpc_slice path = grpc_empty_slice();
   ScopedContext ctx(call);
@@ -147,25 +148,15 @@ grpc_error_handle FilterStackCall::Create(grpc_call_create_args* args,
     // collecting from when the call is created at the transport. The idea is
     // that the transport would create the call tracer and pass it in as part of
     // the metadata.
-    // TODO(yijiem): OpenCensus and internal Census is still using this way to
-    // set server call tracer. We need to refactor them to stats plugins
-    // (including removing the client channel filters).
+    ServerCallTracerInterface* server_call_tracer_from_factory = nullptr;
     if (args->server != nullptr &&
         args->server->server_call_tracer_factory() != nullptr) {
-      auto* server_call_tracer =
+      server_call_tracer_from_factory =
           args->server->server_call_tracer_factory()->CreateNewServerCallTracer(
               arena.get(), args->server->channel_args());
-      if (server_call_tracer != nullptr) {
-        // Note that we are setting both
-        // GRPC_CONTEXT_CALL_TRACER_ANNOTATION_INTERFACE and
-        // GRPC_CONTEXT_CALL_TRACER as a matter of convenience. In the future
-        // promise-based world, we would just a single tracer object for each
-        // stack (call, subchannel_call, server_call.)
-        arena->SetContext<CallTracerAnnotationInterface>(server_call_tracer);
-        arena->SetContext<CallTracerInterface>(server_call_tracer);
-      }
     }
-    (*channel_stack->stats_plugin_group)->AddServerCallTracers(arena.get());
+    (*channel_stack->stats_plugin_group)
+        ->AddServerCallTracers(arena.get(), {server_call_tracer_from_factory});
   }
 
   // initial refcount dropped by grpc_call_unref
@@ -184,7 +175,7 @@ grpc_error_handle FilterStackCall::Create(grpc_call_create_args* args,
     call->CancelWithError(error);
   }
   if (args->cq != nullptr) {
-    CHECK(args->pollset_set_alternative == nullptr)
+    GRPC_CHECK(args->pollset_set_alternative == nullptr)
         << "Only one of 'cq' and 'pollset_set_alternative' should be "
            "non-nullptr.";
     GRPC_CQ_INTERNAL_REF(args->cq, "bind");
@@ -223,7 +214,7 @@ grpc_error_handle FilterStackCall::Create(grpc_call_create_args* args,
 }
 
 void FilterStackCall::SetCompletionQueue(grpc_completion_queue* cq) {
-  CHECK(cq);
+  GRPC_CHECK(cq);
 
   if (grpc_polling_entity_pollset_set(&pollent_) != nullptr) {
     Crash("A pollset_set is already registered for this call.");
@@ -272,7 +263,7 @@ void FilterStackCall::ExternalUnref() {
 
   MaybeUnpublishFromParent();
 
-  CHECK(!destroy_called_);
+  GRPC_CHECK(!destroy_called_);
   destroy_called_ = true;
   bool cancel = gpr_atm_acq_load(&received_final_op_atm_) == 0;
   if (cancel) {
@@ -398,18 +389,26 @@ bool FilterStackCall::PrepareApplicationMetadata(size_t count,
       is_trailing ? &send_trailing_metadata_ : &send_initial_metadata_;
   for (size_t i = 0; i < count; i++) {
     grpc_metadata* md = &metadata[i];
-    if (!GRPC_LOG_IF_ERROR("validate_metadata",
-                           grpc_validate_header_key_is_legal(md->key))) {
+    if (auto status = grpc_validate_header_key_is_legal(md->key);
+        !status.ok()) {
+      LOG(ERROR) << "Metadata key '"
+                 << absl::CEscape(StringViewFromSlice(md->key))
+                 << "' is invalid: " << status;
       return false;
-    } else if (!grpc_is_binary_header_internal(md->key) &&
-               !GRPC_LOG_IF_ERROR(
-                   "validate_metadata",
-                   grpc_validate_header_nonbin_value_is_legal(md->value))) {
-      return false;
-    } else if (GRPC_SLICE_LENGTH(md->value) >= UINT32_MAX) {
+    }
+    if (!grpc_is_binary_header_internal(md->key)) {
+      if (auto status = grpc_validate_header_nonbin_value_is_legal(md->value);
+          !status.ok()) {
+        LOG(ERROR) << "Metadata value for key " << StringViewFromSlice(md->key)
+                   << " is invalid: " << status;
+        return false;
+      }
+    }
+    if (GRPC_SLICE_LENGTH(md->value) >= UINT32_MAX) {
       // HTTP2 hpack encoding has a maximum limit.
       return false;
-    } else if (grpc_slice_str_cmp(md->key, "content-length") == 0) {
+    }
+    if (grpc_slice_str_cmp(md->key, "content-length") == 0) {
       // Filter "content-length metadata"
       continue;
     }
@@ -533,7 +532,6 @@ FilterStackCall::BatchControl* FilterStackCall::ReuseOrAllocateBatchControl(
     *pslot = bctl;
   }
   bctl->call_ = this;
-  bctl->call_tracer_ = arena()->GetContext<CallTracerAnnotationInterface>();
   bctl->op_.payload = &stream_op_payload_;
   return bctl;
 }
@@ -684,7 +682,7 @@ void FilterStackCall::BatchControl::ReceivingInitialMetadataReady(
   while (true) {
     gpr_atm rsr_bctlp = gpr_atm_acq_load(&call->recv_state_);
     // Should only receive initial metadata once
-    CHECK_NE(rsr_bctlp, 1);
+    GRPC_CHECK_NE(rsr_bctlp, 1);
     if (rsr_bctlp == 0) {
       // We haven't seen initial metadata and messages before, thus initial
       // metadata is received first.
@@ -737,7 +735,7 @@ void FilterStackCall::BatchControl::FinishBatch(grpc_error_handle error) {
 grpc_call_error FilterStackCall::StartBatch(const grpc_op* ops, size_t nops,
                                             void* notify_tag,
                                             bool is_notify_tag_closure) {
-  GRPC_LATENT_SEE_INNER_SCOPE("FilterStackCall::StartBatch");
+  GRPC_LATENT_SEE_SCOPE("FilterStackCall::StartBatch");
 
   size_t i;
   const grpc_op* op;
@@ -1092,7 +1090,7 @@ grpc_call_error FilterStackCall::StartBatch(const grpc_op* ops, size_t nops,
 
   InternalRef("completion");
   if (!is_notify_tag_closure) {
-    CHECK(grpc_cq_begin_op(cq_, notify_tag));
+    GRPC_CHECK(grpc_cq_begin_op(cq_, notify_tag));
   }
   bctl->set_pending_ops(pending_ops);
 

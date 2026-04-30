@@ -29,7 +29,6 @@
 #include <string>
 #include <utility>
 
-#include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -47,6 +46,7 @@
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/iomgr/resolve_address.h"
 #include "src/core/util/env.h"
+#include "src/core/util/grpc_check.h"
 #include "src/core/util/host_port.h"
 #include "src/core/util/memory.h"
 #include "src/core/util/string.h"
@@ -105,7 +105,7 @@ bool AddressIncluded(const std::optional<grpc_resolved_address>& target_address,
 ///
 std::optional<std::string> GetHttpProxyServer(
     const ChannelArgs& args, std::optional<std::string>* user_cred) {
-  CHECK_NE(user_cred, nullptr);
+  GRPC_CHECK_NE(user_cred, nullptr);
   absl::StatusOr<URI> uri;
   // We check the following places to determine the HTTP proxy to use, stopping
   // at the first one that is set:
@@ -132,30 +132,15 @@ std::optional<std::string> GetHttpProxyServer(
     LOG(ERROR) << "'" << uri->scheme() << "' scheme not supported in proxy URI";
     return std::nullopt;
   }
-  // Split on '@' to separate user credentials from host
-  char** authority_strs = nullptr;
-  size_t authority_nstrs;
-  gpr_string_split(uri->authority().c_str(), "@", &authority_strs,
-                   &authority_nstrs);
-  CHECK_NE(authority_nstrs, 0u);  // should have at least 1 string
-  std::optional<std::string> proxy_name;
-  if (authority_nstrs == 1) {
-    // User cred not present in authority
-    proxy_name = authority_strs[0];
-  } else if (authority_nstrs == 2) {
-    // User cred found
-    *user_cred = authority_strs[0];
-    proxy_name = authority_strs[1];
+  if (uri->host_port().empty()) {
+    LOG(ERROR) << "host is not present in proxy URI";
+    return std::nullopt;
+  }
+  if (!uri->user_info().empty()) {
     VLOG(2) << "userinfo found in proxy URI";
-  } else {
-    // Bad authority
-    proxy_name = std::nullopt;
+    *user_cred = uri->user_info();
   }
-  for (size_t i = 0; i < authority_nstrs; i++) {
-    gpr_free(authority_strs[i]);
-  }
-  gpr_free(authority_strs);
-  return proxy_name;
+  return uri->host_port();
 }
 
 // Adds the default port if target does not contain a port.

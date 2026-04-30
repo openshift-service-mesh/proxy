@@ -6,12 +6,12 @@
 
 #include "src/execution/microtask-queue.h"
 #include "src/objects/objects-inl.h"
+#include "src/sandbox/sandboxable-thread.h"
 #include "src/wasm/function-compiler.h"
 #include "src/wasm/wasm-engine.h"
 #include "src/wasm/wasm-module-builder.h"
 #include "src/wasm/wasm-module.h"
 #include "src/wasm/wasm-objects-inl.h"
-
 #include "test/cctest/cctest.h"
 #include "test/common/wasm/test-signatures.h"
 #include "test/common/wasm/wasm-macro-gen.h"
@@ -37,7 +37,6 @@ class SharedEngineIsolate {
     v8_isolate()->Enter();
     v8::HandleScope handle_scope(v8_isolate());
     v8::Context::New(v8_isolate())->Enter();
-    testing::SetupIsolateForWasmModule(isolate());
     zone_.reset(new Zone(isolate()->allocator(), ZONE_NAME));
   }
   ~SharedEngineIsolate() {
@@ -83,11 +82,11 @@ class SharedEngineIsolate {
 
 // Helper class representing a Thread running its own instance of an Isolate
 // with a shared WebAssembly engine available at construction time.
-class SharedEngineThread : public v8::base::Thread {
+class SharedEngineThread : public v8::internal::SandboxableThread {
  public:
   explicit SharedEngineThread(
       std::function<void(SharedEngineIsolate*)> callback)
-      : Thread(Options("SharedEngineThread")), callback_(callback) {}
+      : SandboxableThread(Options("SharedEngineThread")), callback_(callback) {}
 
   void Run() override {
     SharedEngineIsolate isolate;
@@ -304,9 +303,9 @@ TEST(SharedEngineRunThreadedTierUp) {
     HandleScope scope(isolate->isolate());
     DirectHandle<WasmInstanceObject> instance = isolate->ImportInstance(module);
     WasmDetectedFeatures detected;
-    WasmCompilationUnit::CompileWasmFunction(
-        isolate->isolate()->counters(), module.get(), &detected,
-        &module->module()->functions[0], ExecutionTier::kTurbofan);
+    WasmCompilationUnit::CompileWasmFunction(module.get(), &detected,
+                                             &module->module()->functions[0],
+                                             ExecutionTier::kTurbofan);
     CHECK_EQ(23, isolate->Run(instance));
   });
   for (auto& thread : threads) CHECK(thread.Start());

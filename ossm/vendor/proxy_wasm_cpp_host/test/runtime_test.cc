@@ -53,12 +53,6 @@ TEST_P(TestVm, BadSignature) {
 }
 
 TEST_P(TestVm, StraceLogLevel) {
-  if (engine_ == "wavm") {
-    // TODO(mathetake): strace is yet to be implemented for WAVM.
-    // See https://github.com/proxy-wasm/proxy-wasm-cpp-host/issues/120.
-    return;
-  }
-
   auto source = readTestWasmFile("clock.wasm");
   ASSERT_FALSE(source.empty());
   auto wasm = TestWasm(std::move(vm_));
@@ -108,7 +102,7 @@ TEST_P(TestVm, TerminateExecution) {
   // Check integration logs.
   auto *host = dynamic_cast<TestIntegration *>(wasm.wasm_vm()->integration().get());
   EXPECT_TRUE(host->isErrorLogged("Function: infinite_loop failed"));
-  EXPECT_TRUE(host->isErrorLogged("termination_exception"));
+  EXPECT_TRUE(host->isErrorLogged("TerminationException"));
 }
 
 TEST_P(TestVm, WasmMemoryLimit) {
@@ -134,11 +128,7 @@ TEST_P(TestVm, WasmMemoryLimit) {
   auto *host = dynamic_cast<TestIntegration *>(wasm.wasm_vm()->integration().get());
   EXPECT_TRUE(host->isErrorLogged("Function: infinite_memory failed"));
   // Trap message
-  if (engine_ == "wavm") {
-    EXPECT_TRUE(host->isErrorLogged("wavm.reachedUnreachable"));
-  } else {
-    EXPECT_TRUE(host->isErrorLogged("unreachable"));
-  }
+  EXPECT_TRUE(host->isErrorLogged("unreachable"));
   // Backtrace
   if (engine_ == "v8") {
     EXPECT_TRUE(host->isErrorLogged("Proxy-Wasm plugin in-VM backtrace:"));
@@ -163,16 +153,15 @@ TEST_P(TestVm, Trap) {
   auto *host = dynamic_cast<TestIntegration *>(wasm.wasm_vm()->integration().get());
   EXPECT_TRUE(host->isErrorLogged("Function: trigger failed"));
   // Trap message
-  if (engine_ == "wavm") {
-    EXPECT_TRUE(host->isErrorLogged("wavm.reachedUnreachable"));
-  } else {
-    EXPECT_TRUE(host->isErrorLogged("unreachable"));
-  }
+  EXPECT_TRUE(host->isErrorLogged("unreachable"));
   // Backtrace
   if (engine_ == "v8") {
     EXPECT_TRUE(host->isErrorLogged("Proxy-Wasm plugin in-VM backtrace:"));
     EXPECT_TRUE(host->isErrorLogged(" - std::panicking::begin_panic"));
-    EXPECT_TRUE(host->isErrorLogged(" - trigger"));
+    // Check for the function name 'one' in the backtrace, which may appear with or without
+    // module prefix depending on Rust compiler version and symbol generation.
+    bool has_one_symbol = host->isErrorLogged("::one") || host->isErrorLogged(" - one");
+    EXPECT_TRUE(has_one_symbol) << "Expected to find '::one' or ' - one' in backtrace";
   }
 }
 
@@ -192,11 +181,7 @@ TEST_P(TestVm, Trap2) {
   auto *host = dynamic_cast<TestIntegration *>(wasm.wasm_vm()->integration().get());
   EXPECT_TRUE(host->isErrorLogged("Function: trigger2 failed"));
   // Trap message
-  if (engine_ == "wavm") {
-    EXPECT_TRUE(host->isErrorLogged("wavm.reachedUnreachable"));
-  } else {
-    EXPECT_TRUE(host->isErrorLogged("unreachable"));
-  }
+  EXPECT_TRUE(host->isErrorLogged("unreachable"));
   // Backtrace
   if (engine_ == "v8") {
     EXPECT_TRUE(host->isErrorLogged("Proxy-Wasm plugin in-VM backtrace:"));

@@ -3177,179 +3177,41 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
     () => instance.exports.main(0, 0, 0), RangeError);
 })();
 
-(function TestInvalidBlockReturnTypesWithUnreachableCode() {
-  print(arguments.callee.name);
-  var builder = new WasmModuleBuilder();
-  var kSig_r_i = makeSig([kWasmI32], [kWasmExternRef]);
-  let sig_r_i = builder.addType(kSig_r_i);
-
-  builder.addFunction("main", kSig_i_v)
-    .addLocals(kWasmI32, 1)
-   .addBody([
-     ...wasmI32Const(1),
-     kExprLoop, sig_r_i,
-       kExprLocalGet, 0,
-       kExprBrIf, 1,
-       ...wasmI32Const(1),
-       kExprLocalSet, 0,
-       kExprBr, 0,
-     kExprEnd,
-     kExprUnreachable,
-    ])
-    .exportAs("main");
-
-  var instance = builder.instantiate();
-  instance.exports.main();
-})();
-
-(function TestTrapHandlerLandingPadOverwrite() {
+(function TestMultipleRefRetValsFromCallRef() {
   print(arguments.callee.name);
 
-  let run_worker = () => {
-    function workerCode() {
-      onmessage = function () {
-        postMessage('done');
-      }
-    }
-    let worker = new Worker(workerCode, { type: 'function' });
-    worker.postMessage({});
-    worker.getMessage();
-    worker.terminate();
-  };
+  const builder = new WasmModuleBuilder();
+  var kSig_fiiiiiiiiiiiirf_i = makeSig(
+    [kWasmI32],
+    [kWasmF32, kWasmI32, kWasmI32, kWasmI32, kWasmI32, kWasmI32, kWasmI32,
+      kWasmI32, kWasmI32, kWasmI32, kWasmI32, kWasmI32, kWasmI32,
+      wasmRefType(kWasmI31Ref), kWasmF32]);
+  const sig_index = builder.addType(kSig_fiiiiiiiiiiiirf_i);
 
-  var builder = new WasmModuleBuilder();
-  var kSig_r_i = makeSig([kWasmI32], [kWasmExternRef]);
-  let sig_r_i = builder.addType(kSig_r_i);
-
-  // Function 0
-  builder.addImport("imports", "imported_func", kSig_v_v);
-
-  builder.addFunction("main", kSig_i_v)
-    .addLocals(kWasmI32, 1)
-   .addBody([
-      kExprCallFunction, 0, // call $import0
-     ...wasmI32Const(1000000),
-     kExprI32LoadMem, 0, 0, // trigger OOB
-    ])
-    .exportAs("main");
-  builder.addMemory(1, 1, false);
-
-  let instance = builder.instantiate({ imports: { imported_func: run_worker } });
-  assertThrows(() => instance.exports.main(), WebAssembly.RuntimeError);
-})();
-
-(function TestPassingAWasmExportedJSFunctionAsArgument() {
-  print(arguments.callee.name);
-  var builder = new WasmModuleBuilder();
-
-  let = f1 = builder.addImport("o", "fn", kSig_r_r);
-  builder.addExport("fn", 0);
-
-  builder.addFunction("main", kSig_r_r)
+  let f1 = builder.addFunction("f1", kSig_fiiiiiiiiiiiirf_i)
     .addBody([
+      ...wasmF32Const(5.5),
+      ...wasmI32Const(0),
+      ...wasmI32Const(0),
+      ...wasmI32Const(0),
+      ...wasmI32Const(0),
+      ...wasmI32Const(0),
+      ...wasmI32Const(0),
+      ...wasmI32Const(0),
+      ...wasmI32Const(0),
+      ...wasmI32Const(0),
+      ...wasmI32Const(0),
+      ...wasmI32Const(0),
+      ...wasmI32Const(0),
       kExprLocalGet, 0,
-      ])
-    .exportAs("main");
-
-  var instance = builder.instantiate({
-    o: {
-      fn: (ref) => { return ref; },
-    }
-  });
-
-  let func = instance.exports.fn;
-  instance.exports.main(func);
-})();
-
-(function TestImportedJSFunctionThrowsZero() {
-  print(arguments.callee.name);
-
-  const builder = new WasmModuleBuilder();
-  var kSig_r_d = makeSig([kWasmF32], [kWasmExternRef]);
-
-  // Function 0
-  builder.addImport("o", "fn", kSig_r_d);
-
-  // Function 1
-  builder.addFunction("main", kSig_r_v)
-    .addBody([
-      ...wasmF32Const(3.14),
-      kExprCallFunction, 0,  // Calls fn.
-    ])
-    .exportAs("main");
-
-  function fn(val) {
-    throw 0;
-    return fn;
-  }
-
-  let instance = builder.instantiate({
-    o: {
-      fn: fn
-    }
-  });
-  try {
-    instance.exports.main();
-  }
-  catch (e) {
-    assertEquals(e, 0);
-  }
-})();
-
-(function TestGCInRecursiveRefCall() {
-  print(arguments.callee.name);
-
-  const builder = new WasmModuleBuilder();
-  let array_type_index = builder.addArray(kWasmI32, true);
-  var kSig_irlii_iiiiiiii = makeSig(
-    [kWasmI32, kWasmI32, kWasmI32, kWasmI32, kWasmI32, kWasmI32, kWasmI32, kWasmI32],
-    [kWasmI32, wasmRefNullType(array_type_index), kWasmI64, kWasmI32, kWasmI32]);
-  const sig_index = builder.addType(kSig_irlii_iiiiiiii);
-  let sig_v_v = builder.addType(kSig_v_v);
-
-  let f2 = builder.addFunction("f2", kSig_v_v)
-    .addBody([
-    ])
-    .exportFunc();
-
-  let f1 = builder.addFunction("f1", kSig_irlii_iiiiiiii)
-    .addLocals(kWasmI31Ref, 1)
-    .addLocals(kWasmI32, 2)
-    .addLocals(kWasmAnyFunc, 1)
-    .addLocals(kWasmI32, 15)
-    .addBody([
-      ...wasmI32Const(6520383),
       kGCPrefix, kExprRefI31,
-      kExprLocalSet, 8,
-      kExprRefFunc, f2.index,
-      kExprLocalSet, 11,
-      ...wasmI32Const(5),
-      ...wasmI32Const(27725),
-      ...wasmI32Const(212471),
-      ...wasmI32Const(20),
-      kExprI32RemS,
-      kGCPrefix, kExprArrayNew, array_type_index,
-      ...wasmI64Const(-3892508980005251074),
-      ...wasmI32Const(15958772),
-      ...wasmI32Const(1707),
+      ...wasmF32Const(3.14),
     ])
     .exportAs("f1");
 
-  builder.addFunction("main", kSig_v_iii)
-    .addLocals(kWasmF32, 1)
-    .addLocals(kWasmI32, 1)
+  builder.addFunction("main", kSig_f_i)
     .addBody([
-      ...wasmI32Const(7), // Loop count
-      kExprLocalSet, 4,
-      kExprLoop, sig_v_v,
-      ...wasmI32Const(97009),
-      ...wasmI32Const(722898),
-      ...wasmI32Const(68),
-      ...wasmI32Const(71592),
-      ...wasmI32Const(658174976),
-      ...wasmI32Const(6704202),
-      ...wasmI32Const(3865333),
-      ...wasmI32Const(909),
+      kExprLocalGet, 0,
       kExprRefFunc, f1.index,
       kExprCallRef, sig_index,
       kExprDrop,
@@ -3357,22 +3219,207 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
       kExprDrop,
       kExprDrop,
       kExprDrop,
-      kExprLocalGet, 4,
-      ...wasmI32Const(1),
-      kExprI32Sub,
-      kExprLocalTee, 4,
-      kExprIf, sig_v_v,
-      kExprBr, 1,
-      kExprEnd,
-      kExprEnd,
-      ...wasmI32Const(-34),
-      ...wasmI32Const(-82),
-      ...wasmI32Const(-19385),
-      kExprCallFunction, 2,
+      kExprDrop,
+      kExprDrop,
+      kExprDrop,
+      kExprDrop,
+      kExprDrop,
+      kExprDrop,
+      kExprDrop,
+      kExprDrop,
+      kExprDrop,
     ])
     .exportAs("main");
 
   let instance = builder.instantiate({});
-  assertThrows(
-    () => instance.exports.main(0, 0, 0), RangeError);
+  assertEquals(5.5, instance.exports.main(123435));
+})();
+
+(function TestCallingInterpreterInALoop() {
+  print(arguments.callee.name);
+
+  var builder = new WasmModuleBuilder();
+
+  var kSig_r_v = makeSig([], [kWasmExternRef]);
+  builder.addImport("o", "fn1", kSig_r_v);
+  builder.addExport("fn1", 0);
+
+  var kSig_r_rrrrrr = makeSig([kWasmExternRef, kWasmExternRef, kWasmExternRef,
+    kWasmExternRef, kWasmExternRef, kWasmExternRef], [kWasmExternRef]);
+  builder.addFunction("fn2", kSig_r_rrrrrr)
+    .addBody([
+      kExprRefNull, kExternRefCode,
+    ])
+    .exportAs("fn2");
+
+  var instance = builder.instantiate({
+    o: {
+      fn1: Date,
+    }
+  });
+
+  const arr = new Uint16Array(524288);  // 512K elements
+
+  arr.forEach(instance.exports.fn1);
+})();
+
+(function TestWebAssemblyPromisingWithInterpreter() {
+  print(arguments.callee.name);
+
+  let builder = new WasmModuleBuilder();
+
+  let k_sig_r_r = builder.addType(kSig_r_r);
+
+  let imported_func = builder.addImport("mod", "func", kSig_r_v);
+
+  builder.addFunction("main", k_sig_r_r)
+    .addBody([kExprCallFunction, imported_func]).exportFunc();
+  let instance = builder.instantiate({ mod: { func: () => {} } });
+
+  // WebAssembly.promising is not available when running with the wasm-interpreter,
+  // so we need to handle the TypeError gracefully.
+  try {
+    let promise = WebAssembly.promising(instance.exports.main);
+    promise();
+
+  } catch (e) {
+
+    if (e instanceof TypeError &&
+        e.message.includes("WebAssembly.promising is not a function")) {
+    } else {
+      throw e;
+    }
+  }
+})();
+
+(function TestFloatNaNSelect() {
+  print(arguments.callee.name);
+
+  const builder = new WasmModuleBuilder();
+
+  builder.addFunction("select_nan", kSig_i_i)
+    .addBody([
+      kExprF32Const, 0x11, 0x00, 0xc0, 0xff,
+      kExprF32Const, 0x22, 0x00, 0xc0, 0xff,
+      kExprLocalGet, 0,
+      kExprSelect,
+      kExprI32ReinterpretF32,
+    ])
+    .exportFunc();
+
+  const instance = builder.instantiate();
+  assertEquals(0xffc00022, instance.exports.select_nan(0) >>> 0);
+  assertEquals(0xffc00011, instance.exports.select_nan(1) >>> 0);
+})();
+
+(function TestFloatNaNGlobalGetSet() {
+  print(arguments.callee.name);
+
+  const builder = new WasmModuleBuilder();
+
+  builder.addGlobal(kWasmF32, true);
+
+  builder.addFunction("set_get_nan", kSig_i_v)
+    .addBody([
+      kExprF32Const, 0x33, 0x00, 0xc0, 0xff,
+      kExprGlobalSet, 0,
+      kExprGlobalGet, 0,
+      kExprI32ReinterpretF32,
+    ])
+    .exportFunc();
+
+  const instance = builder.instantiate();
+  assertEquals(0xffc00033, instance.exports.set_get_nan() >>> 0);
+})();
+
+(function TestFloatNaNChainedOps() {
+  print(arguments.callee.name);
+
+  const builder = new WasmModuleBuilder();
+  builder.addMemory(1, 1);
+
+  builder.addFunction("chained_nan_ops", kSig_i_v)
+    .addLocals(kWasmF32, 1)
+    .addBody([
+      kExprF32Const, 0x44, 0x00, 0xc0, 0xff,
+      kExprLocalSet, 0,
+      kExprI32Const, 0,
+      kExprLocalGet, 0,
+      kExprF32StoreMem, 2, 0,
+      kExprI32Const, 0,
+      kExprF32LoadMem, 2, 0,
+      kExprI32ReinterpretF32,
+    ])
+    .exportFunc();
+
+  const instance = builder.instantiate();
+  assertEquals(0xffc00044, instance.exports.chained_nan_ops() >>> 0);
+})();
+
+(function TestFloatNaNFromArithmetic() {
+  print(arguments.callee.name);
+
+  const builder = new WasmModuleBuilder();
+
+  builder.addFunction("arithmetic_nan", kSig_i_v)
+    .addBody([
+      ...wasmF32Const(0),
+      ...wasmF32ConstSignalingNaN(),
+      kExprF32Div,
+      kExprI32ReinterpretF32,
+    ])
+    .exportFunc();
+
+  const instance = builder.instantiate();
+  const result = instance.exports.arithmetic_nan();
+  const ArithmeticNaNBitMask = 0x7fc00000;
+  assertTrue((result & ArithmeticNaNBitMask) === ArithmeticNaNBitMask);
+})();
+
+// Test that ref slot preservation works when a ref local is read multiple
+// times and then updated with local.tee.
+(function testRefSlotPreservationWithLocalTee() {
+  print(arguments.callee.name);
+  var builder = new WasmModuleBuilder();
+
+  // Simple struct with an i32 value field
+  let structType = builder.addStruct([makeField(kWasmI32, true)]);
+
+  // Test: push a ref local twice, update it with local.tee, verify old value preserved
+  builder.addFunction("test", kSig_i_v)
+    .addLocals(wasmRefNullType(structType), 2)
+    .addBody([
+      // Create node1 and store in local0.
+      kExprI32Const, 11,
+      kGCPrefix, kExprStructNew, structType,
+      kExprLocalSet, 0,
+      // stack: [local0:ref=node11]
+
+      // Create node2 and store in local1.
+      kExprI32Const, 22,
+      kGCPrefix, kExprStructNew, structType,
+      kExprLocalSet, 1,
+      // stack: [local0:ref=node11, local1:ref=node22]
+
+      // Push local0, this will share the slot.
+      kExprLocalGet, 0,
+      // [local0:ref=node11, local1:ref=node22, ref:node11]
+
+      // Update local0 to point to node22; the ref to node11 should be preserved on the stack.
+      kExprLocalGet, 1,
+      // [local0:ref=node11, local1:ref=node22, ref:node11, ref:node22]
+      kExprLocalTee, 0,
+      // [local0:ref=node22, local1:ref=node22, ref:node11, ref:node22]
+
+      kExprDrop,
+      // [local0:ref=node22, local1:ref=node22, ref:node11]
+
+      // Access the ref that was pushed before the local.tee. It should still be node11.
+      kGCPrefix, kExprStructGet, structType, 0,
+    ])
+    .exportAs("test");
+
+  let instance = builder.instantiate();
+  let result = instance.exports.test();
+  assertEquals(11, result);
 })();

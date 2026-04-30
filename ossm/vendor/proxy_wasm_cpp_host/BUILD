@@ -19,7 +19,6 @@ load(
     "proxy_wasm_select_engine_wamr",
     "proxy_wasm_select_engine_wasmedge",
     "proxy_wasm_select_engine_wasmtime",
-    "proxy_wasm_select_engine_wavm",
 )
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
@@ -92,7 +91,7 @@ cc_library(
         ":headers",
     ] + select({
         "//bazel:crypto_system": [],
-        "//conditions:default": ["@envoy//bazel:boringcrypto"],
+        "//conditions:default": ["@envoy//bazel:crypto"],
     }),
     alwayslink = 1,
 )
@@ -134,7 +133,7 @@ cc_library(
     ],
     deps = [
         ":wasm_vm_headers",
-        "//external:wee8",
+        "@v8//:wee8",
     ],
 )
 
@@ -150,9 +149,13 @@ cc_library(
         "PROXY_WASM_HAS_RUNTIME_WAMR",
         "PROXY_WASM_HOST_ENGINE_WAMR",
     ],
+    linkopts = select({
+        "@platforms//os:macos": ["-Wl,-all_load"],
+        "//conditions:default": [],
+    }),
     deps = [
         ":wasm_vm_headers",
-        "//external:wamr",
+        "@envoy//bazel/foreign_cc:wamr",
     ],
 )
 
@@ -179,7 +182,7 @@ cc_library(
     }),
     deps = [
         ":wasm_vm_headers",
-        "//external:wasmedge",
+        "@com_github_wasmedge_wasmedge//:wasmedge_lib",
     ],
 )
 
@@ -218,7 +221,7 @@ cc_library(
     }),
     deps = [
         ":wasm_vm_headers",
-        "//external:wasmtime",
+        "@wasmtime//:wasmtime_lib",
     ],
 )
 
@@ -277,35 +280,7 @@ cc_library(
     }),
     deps = [
         ":wasm_vm_headers",
-        "//external:prefixed_wasmtime",
-    ],
-)
-
-cc_library(
-    name = "wavm_lib",
-    srcs = [
-        "src/wavm/wavm.cc",
-    ],
-    hdrs = ["include/proxy-wasm/wavm.h"],
-    copts = [
-        "-DWAVM_API=",
-        "-Wno-non-virtual-dtor",
-        "-Wno-old-style-cast",
-    ],
-    defines = [
-        "PROXY_WASM_HAS_RUNTIME_WAVM",
-        "PROXY_WASM_HOST_ENGINE_WAVM",
-    ],
-    linkopts = select({
-        "@platforms//os:macos": [],
-        "@platforms//os:windows": [],
-        "//conditions:default": [
-            "-ldl",
-        ],
-    }),
-    deps = [
-        ":wasm_vm_headers",
-        "//external:wavm",
+        "@wasmtime//:prefixed_wasmtime_lib",
     ],
 )
 
@@ -324,7 +299,5 @@ cc_library(
     ) + proxy_wasm_select_engine_wasmtime(
         [":wasmtime_lib"],
         [":prefixed_wasmtime_lib"],
-    ) + proxy_wasm_select_engine_wavm(
-        [":wavm_lib"],
     ),
 )

@@ -30,7 +30,7 @@ namespace internal {
 class Heap;
 class LocalHandles;
 class MarkingBarrier;
-class MutablePageMetadata;
+class MutablePage;
 class Safepoint;
 
 // Do not use this variable directly, use LocalHeap::Current() instead.
@@ -60,6 +60,12 @@ class V8_EXPORT_PRIVATE LocalHeap {
   // from the main thread.
   void Safepoint() {
     DCHECK(AllowSafepoints::IsAllowed());
+
+#if V8_VERIFY_WRITE_BARRIERS
+    heap_allocator_.ResetMostRecentYoungAllocation();
+    AssertNoWriteBarrierModeScope();
+#endif  // V8_VERIFY_WRITE_BARRIERS
+
     ThreadState current = state_.load_relaxed();
 
     if (V8_UNLIKELY(current.IsRunningWithSlowPathFlag())) {
@@ -136,30 +142,42 @@ class V8_EXPORT_PRIVATE LocalHeap {
   void VerifyLinearAllocationAreas() const;
 #endif  // DEBUG
 
+#if V8_VERIFY_WRITE_BARRIERS
+  void AssertNoWriteBarrierModeScope() const {
+    CHECK_EQ(write_barrier_mode_for_object_, kNullAddress);
+  }
+  Address CurrentObjectForWriteBarrierMode() const {
+    return write_barrier_mode_for_object_;
+  }
+#endif  // V8_VERIFY_WRITE_BARRIERS
+
   // Make all LABs iterable.
   void MakeLinearAllocationAreasIterable();
 
   // Mark/Unmark all LABs except for new and shared space. Use for black
   // allocation.
   void MarkLinearAllocationAreasBlack();
-  void UnmarkLinearAllocationsArea();
 
   // Mark/Unmark linear allocation areas in shared heap black. Used for black
   // allocation.
   void MarkSharedLinearAllocationAreasBlack();
-  void UnmarkSharedLinearAllocationsArea();
 
   // Free all LABs and reset free-lists except for the new and shared space.
   // Used on black allocation.
   void FreeLinearAllocationAreasAndResetFreeLists();
   void FreeSharedLinearAllocationAreasAndResetFreeLists();
 
-  // Fetches a pointer to the local heap from the thread local storage.
-  // It is intended to be used in handle and write barrier code where it is
-  // difficult to get a pointer to the current instance of local heap otherwise.
-  // The result may be a nullptr if there is no local heap instance associated
-  // with the current thread.
-  V8_TLS_DECLARE_GETTER(Current, LocalHeap*, g_current_local_heap_)
+  // Fetches a pointer to the current LocalHeap from the TLS variable or returns
+  // nullptr if not set.
+  V8_TLS_DECLARE_GETTER(TryGetCurrent, LocalHeap*, g_current_local_heap_)
+
+  // Fetches a pointer to the current LocalHeap from the TLS variable. DHECKs
+  // that LocalHeap is non-null.
+  static LocalHeap* Current() {
+    LocalHeap* local_heap = TryGetCurrent();
+    DCHECK_NOT_NULL(local_heap);
+    return local_heap;
+  }
 
   static void SetCurrent(LocalHeap* local_heap);
 
@@ -220,6 +238,9 @@ class V8_EXPORT_PRIVATE LocalHeap {
 
   // Used to make SetupMainThread() available to unit tests.
   void SetUpMainThreadForTesting();
+
+  void BoostPriority();
+  void ResetPriority();
 
   // Execute the callback while the local heap is parked. All threads must
   // always park via these methods, not directly with `ParkedScope`.
@@ -372,8 +393,7 @@ class V8_EXPORT_PRIVATE LocalHeap {
       GCCallbacksInSafepoint::GCType gc_type);
 
   // Set up this LocalHeap as main thread.
-  void SetUpMainThread(LinearAllocationArea& new_allocation_info,
-                       LinearAllocationArea& old_allocation_info);
+  void SetUpMainThread();
 
   void SetUpMarkingBarrier();
   void SetUpSharedMarking();
@@ -391,6 +411,7 @@ class V8_EXPORT_PRIVATE LocalHeap {
   bool allocation_failed_;
   int nested_parked_scopes_;
 
+  LocalHeap* saved_current_local_heap_ = nullptr;
   Isolate* saved_current_isolate_ = nullptr;
 
   LocalHeap* prev_;
@@ -399,6 +420,7 @@ class V8_EXPORT_PRIVATE LocalHeap {
   std::unique_ptr<LocalHandles> handles_;
   std::unique_ptr<PersistentHandles> persistent_handles_;
   std::unique_ptr<MarkingBarrier> marking_barrier_;
+  std::unique_ptr<ScopedBoostablePriority> boostable_priority_;
 
   GCCallbacksInSafepoint gc_epilogue_callbacks_;
   base::SmallVector<GCRootsProvider*, 4> roots_providers_;
@@ -410,6 +432,10 @@ class V8_EXPORT_PRIVATE LocalHeap {
   // Stack information for the thread using this local heap.
   ::heap::base::Stack stack_;
 
+#if V8_VERIFY_WRITE_BARRIERS
+  Address write_barrier_mode_for_object_ = kNullAddress;
+#endif  // V8_VERIFY_WRITE_BARRIERS
+
   friend class CollectionBarrier;
   friend class GlobalSafepoint;
   friend class Heap;
@@ -419,6 +445,17 @@ class V8_EXPORT_PRIVATE LocalHeap {
   friend class ParkedScope;
   friend class UnparkedScope;
   friend class GCRootsProviderScope;
+  friend class WriteBarrierModeScope;
+};
+
+class V8_NODISCARD SetCurrentLocalHeapScope final {
+ public:
+  explicit inline SetCurrentLocalHeapScope(LocalHeap* local_heap);
+  explicit inline SetCurrentLocalHeapScope(Isolate* isolate);
+  inline ~SetCurrentLocalHeapScope();
+
+ private:
+  LocalHeap* saved_local_heap_;
 };
 
 }  // namespace internal

@@ -12,9 +12,9 @@
 #include "src/handles/handles-inl.h"
 #include "src/heap/factory.h"
 #include "src/heap/heap-inl.h"
-#include "src/heap/large-page-metadata-inl.h"
+#include "src/heap/large-page-inl.h"
 #include "src/heap/local-factory-inl.h"
-#include "src/heap/mutable-page-metadata.h"
+#include "src/heap/mutable-page.h"
 #include "src/heap/read-only-heap.h"
 #include "src/logging/local-logger.h"
 #include "src/logging/log.h"
@@ -85,10 +85,10 @@ Handle<Code> FactoryBase<Impl>::NewCode(const NewCodeOptions& options) {
   DirectHandle<CodeWrapper> wrapper = NewCodeWrapper();
   Tagged<Map> map = read_only_roots().code_map();
   int size = map->instance_size();
-  Tagged<Code> code = Cast<Code>(
+  Tagged<Code> code = TrustedCast<Code>(
       AllocateRawWithImmortalMap(size, AllocationType::kTrusted, map));
   DisallowGarbageCollection no_gc;
-  code->init_self_indirect_pointer(isolate());
+  code->InitAndPublish(isolate());
   code->initialize_flags(options.kind, options.is_context_specialized,
                          options.is_turbofanned);
   code->set_builtin_id(options.builtin);
@@ -104,9 +104,7 @@ Handle<Code> FactoryBase<Impl>::NewCode(const NewCodeOptions& options) {
   code->set_jump_table_info_offset(options.jump_table_info_offset);
   code->set_unwinding_info_offset(options.unwinding_info_offset);
   code->set_parameter_count(options.parameter_count);
-#ifdef V8_ENABLE_LEAPTIERING
   code->set_js_dispatch_handle(kNullJSDispatchHandle);
-#endif  // V8_ENABLE_LEAPTIERING
 
   // Set bytecode/interpreter data or deoptimization data.
   if (CodeKindUsesBytecodeOrInterpreterData(options.kind)) {
@@ -177,9 +175,10 @@ DirectHandle<CodeWrapper> FactoryBase<Impl>::NewCodeWrapper() {
 }
 
 template <typename Impl>
-Handle<FixedArray> FactoryBase<Impl>::NewFixedArray(int length,
-                                                    AllocationType allocation) {
-  return FixedArray::New(isolate(), length, allocation);
+Handle<FixedArray> FactoryBase<Impl>::NewFixedArray(uint32_t length,
+                                                    AllocationType allocation,
+                                                    AllocationHint hint) {
+  return FixedArray::New(isolate(), length, allocation, hint);
 }
 
 template <typename Impl>
@@ -212,8 +211,7 @@ Handle<FixedArray> FactoryBase<Impl>::NewFixedArrayWithMap(
 
 template <typename Impl>
 Handle<FixedArray> FactoryBase<Impl>::NewFixedArrayWithHoles(
-    int length, AllocationType allocation) {
-  DCHECK_LE(0, length);
+    uint32_t length, AllocationType allocation) {
   if (length == 0) return impl()->empty_fixed_array();
   return NewFixedArrayWithFiller(fixed_array_map(), length, the_hole_value(),
                                  allocation);
@@ -221,7 +219,7 @@ Handle<FixedArray> FactoryBase<Impl>::NewFixedArrayWithHoles(
 
 template <typename Impl>
 Handle<FixedArray> FactoryBase<Impl>::NewFixedArrayWithFiller(
-    DirectHandle<Map> map, int length, DirectHandle<HeapObject> filler,
+    DirectHandle<Map> map, uint32_t length, DirectHandle<HeapObject> filler,
     AllocationType allocation) {
   Tagged<HeapObject> result = AllocateRawFixedArray(length, allocation);
   DisallowGarbageCollection no_gc;
@@ -236,11 +234,10 @@ Handle<FixedArray> FactoryBase<Impl>::NewFixedArrayWithFiller(
 
 template <typename Impl>
 DirectHandle<FixedArray> FactoryBase<Impl>::NewFixedArrayWithZeroes(
-    int length, AllocationType allocation) {
-  DCHECK_LE(0, length);
+    uint32_t length, AllocationType allocation) {
   if (length == 0) return impl()->empty_fixed_array();
   if (length > FixedArray::kMaxLength) {
-    FATAL("Invalid FixedArray size %d", length);
+    base::FatalNoSecurityImpact("Invalid FixedArray size %d", length);
   }
   Tagged<HeapObject> result = AllocateRawFixedArray(length, allocation);
   DisallowGarbageCollection no_gc;
@@ -254,7 +251,7 @@ DirectHandle<FixedArray> FactoryBase<Impl>::NewFixedArrayWithZeroes(
 
 template <typename Impl>
 Handle<FixedArrayBase> FactoryBase<Impl>::NewFixedDoubleArray(
-    int length, AllocationType allocation) {
+    uint32_t length, AllocationType allocation) {
   return FixedDoubleArray::New(isolate(), length, allocation);
 }
 
@@ -317,13 +314,15 @@ Handle<TrustedByteArray> FactoryBase<Impl>::NewTrustedByteArray(
 template <typename Impl>
 DirectHandle<DeoptimizationLiteralArray>
 FactoryBase<Impl>::NewDeoptimizationLiteralArray(int length) {
-  return Cast<DeoptimizationLiteralArray>(NewTrustedWeakFixedArray(length));
+  return TrustedCast<DeoptimizationLiteralArray>(
+      NewTrustedWeakFixedArray(length));
 }
 
 template <typename Impl>
 DirectHandle<DeoptimizationFrameTranslation>
 FactoryBase<Impl>::NewDeoptimizationFrameTranslation(int length) {
-  return Cast<DeoptimizationFrameTranslation>(NewTrustedByteArray(length));
+  return TrustedCast<DeoptimizationFrameTranslation>(
+      NewTrustedByteArray(length));
 }
 
 template <typename Impl>
@@ -335,7 +334,8 @@ Handle<BytecodeArray> FactoryBase<Impl>::NewBytecodeArray(
   DCHECK(allocation == AllocationType::kTrusted ||
          allocation == AllocationType::kSharedTrusted);
   if (length < 0 || length > BytecodeArray::kMaxLength) {
-    FATAL("Fatal JavaScript invalid size error %d", length);
+    base::FatalNoSecurityImpact("Fatal JavaScript invalid size error %d",
+                                length);
     UNREACHABLE();
   }
   DirectHandle<BytecodeWrapper> wrapper = NewBytecodeWrapper();
@@ -343,8 +343,10 @@ Handle<BytecodeArray> FactoryBase<Impl>::NewBytecodeArray(
   Tagged<HeapObject> result = AllocateRawWithImmortalMap(
       size, allocation, read_only_roots().bytecode_array_map());
   DisallowGarbageCollection no_gc;
-  Tagged<BytecodeArray> instance = Cast<BytecodeArray>(result);
-  instance->init_self_indirect_pointer(isolate());
+  Tagged<BytecodeArray> instance = TrustedCast<BytecodeArray>(result);
+  // BytecodeArrays are initially unpublished and are only published to the
+  // sandbox after bytecode verification.
+  instance->InitDontPublish(isolate());
   instance->set_length(length);
   instance->set_frame_size(frame_size);
   instance->set_parameter_count(parameter_count);
@@ -358,7 +360,6 @@ Handle<BytecodeArray> FactoryBase<Impl>::NewBytecodeArray(
   CopyBytes(reinterpret_cast<uint8_t*>(instance->GetFirstBytecodeAddress()),
             raw_bytecodes, length);
   instance->clear_padding();
-  wrapper->set_bytecode(instance);
   return handle(instance, isolate());
 }
 
@@ -477,7 +478,6 @@ Handle<SharedFunctionInfo> FactoryBase<Impl>::CloneSharedFunctionInfo(
       Cast<SharedFunctionInfo>(NewWithImmortalMap(map, AllocationType::kOld));
   DisallowGarbageCollection no_gc;
 
-  shared->clear_padding();
   shared->CopyFrom(*other, isolate());
 
   return handle(shared, isolate());
@@ -488,8 +488,9 @@ DirectHandle<SharedFunctionInfoWrapper>
 FactoryBase<Impl>::NewSharedFunctionInfoWrapper(
     DirectHandle<SharedFunctionInfo> sfi) {
   Tagged<Map> map = read_only_roots().shared_function_info_wrapper_map();
-  Tagged<SharedFunctionInfoWrapper> wrapper = Cast<SharedFunctionInfoWrapper>(
-      NewWithImmortalMap(map, AllocationType::kTrusted));
+  Tagged<SharedFunctionInfoWrapper> wrapper =
+      TrustedCast<SharedFunctionInfoWrapper>(
+          NewWithImmortalMap(map, AllocationType::kTrusted));
 
   wrapper->set_shared_info(*sfi);
 
@@ -505,7 +506,7 @@ Handle<PreparseData> FactoryBase<Impl>::NewPreparseData(int data_length,
   DisallowGarbageCollection no_gc;
   result->set_data_length(data_length);
   result->set_children_length(children_length);
-  MemsetTagged(result->inner_data_start(), read_only_roots().null_value(),
+  MemsetTagged(ObjectSlot(result->children()), read_only_roots().null_value(),
                children_length);
   result->clear_padding();
   return handle(result, isolate());
@@ -514,41 +515,80 @@ Handle<PreparseData> FactoryBase<Impl>::NewPreparseData(int data_length,
 template <typename Impl>
 DirectHandle<UncompiledDataWithoutPreparseData>
 FactoryBase<Impl>::NewUncompiledDataWithoutPreparseData(
-    Handle<String> inferred_name, int32_t start_position,
+    DirectHandle<String> inferred_name, int32_t start_position,
     int32_t end_position) {
-  return TorqueGeneratedFactory<Impl>::NewUncompiledDataWithoutPreparseData(
-      inferred_name, start_position, end_position, AllocationType::kTrusted);
+  int size = sizeof(UncompiledDataWithoutPreparseData);
+  Tagged<Map> map =
+      read_only_roots().uncompiled_data_without_preparse_data_map();
+  Tagged<UncompiledDataWithoutPreparseData> result =
+      TrustedCast<UncompiledDataWithoutPreparseData>(
+          AllocateRawWithImmortalMap(size, AllocationType::kTrusted, map));
+  DisallowGarbageCollection no_gc;
+  result->InitAndPublish(isolate());
+  result->set_inferred_name(*inferred_name);
+  result->set_start_position(start_position);
+  result->set_end_position(end_position);
+  return direct_handle(result, isolate());
 }
 
 template <typename Impl>
 DirectHandle<UncompiledDataWithPreparseData>
 FactoryBase<Impl>::NewUncompiledDataWithPreparseData(
-    Handle<String> inferred_name, int32_t start_position, int32_t end_position,
-    Handle<PreparseData> preparse_data) {
-  return TorqueGeneratedFactory<Impl>::NewUncompiledDataWithPreparseData(
-      inferred_name, start_position, end_position, preparse_data,
-      AllocationType::kTrusted);
+    DirectHandle<String> inferred_name, int32_t start_position,
+    int32_t end_position, DirectHandle<PreparseData> preparse_data) {
+  int size = sizeof(UncompiledDataWithPreparseData);
+  Tagged<Map> map = read_only_roots().uncompiled_data_with_preparse_data_map();
+  Tagged<UncompiledDataWithPreparseData> result =
+      TrustedCast<UncompiledDataWithPreparseData>(
+          AllocateRawWithImmortalMap(size, AllocationType::kTrusted, map));
+  DisallowGarbageCollection no_gc;
+  result->InitAndPublish(isolate());
+  result->set_inferred_name(*inferred_name);
+  result->set_start_position(start_position);
+  result->set_end_position(end_position);
+  result->set_preparse_data(*preparse_data);
+  return direct_handle(result, isolate());
 }
 
 template <typename Impl>
 DirectHandle<UncompiledDataWithoutPreparseDataWithJob>
 FactoryBase<Impl>::NewUncompiledDataWithoutPreparseDataWithJob(
-    Handle<String> inferred_name, int32_t start_position,
+    DirectHandle<String> inferred_name, int32_t start_position,
     int32_t end_position) {
-  return TorqueGeneratedFactory<Impl>::
-      NewUncompiledDataWithoutPreparseDataWithJob(inferred_name, start_position,
-                                                  end_position, kNullAddress,
-                                                  AllocationType::kTrusted);
+  int size = sizeof(UncompiledDataWithoutPreparseDataWithJob);
+  Tagged<Map> map =
+      read_only_roots().uncompiled_data_without_preparse_data_with_job_map();
+  Tagged<UncompiledDataWithoutPreparseDataWithJob> result =
+      TrustedCast<UncompiledDataWithoutPreparseDataWithJob>(
+          AllocateRawWithImmortalMap(size, AllocationType::kTrusted, map));
+  DisallowGarbageCollection no_gc;
+  result->InitAndPublish(isolate());
+  result->set_inferred_name(*inferred_name);
+  result->set_start_position(start_position);
+  result->set_end_position(end_position);
+  result->set_job(kNullAddress);
+  return direct_handle(result, isolate());
 }
 
 template <typename Impl>
 DirectHandle<UncompiledDataWithPreparseDataAndJob>
 FactoryBase<Impl>::NewUncompiledDataWithPreparseDataAndJob(
-    Handle<String> inferred_name, int32_t start_position, int32_t end_position,
-    Handle<PreparseData> preparse_data) {
-  return TorqueGeneratedFactory<Impl>::NewUncompiledDataWithPreparseDataAndJob(
-      inferred_name, start_position, end_position, preparse_data, kNullAddress,
-      AllocationType::kTrusted);
+    DirectHandle<String> inferred_name, int32_t start_position,
+    int32_t end_position, DirectHandle<PreparseData> preparse_data) {
+  int size = sizeof(UncompiledDataWithPreparseDataAndJob);
+  Tagged<Map> map =
+      read_only_roots().uncompiled_data_with_preparse_data_and_job_map();
+  Tagged<UncompiledDataWithPreparseDataAndJob> result =
+      TrustedCast<UncompiledDataWithPreparseDataAndJob>(
+          AllocateRawWithImmortalMap(size, AllocationType::kTrusted, map));
+  DisallowGarbageCollection no_gc;
+  result->InitAndPublish(isolate());
+  result->set_inferred_name(*inferred_name);
+  result->set_start_position(start_position);
+  result->set_end_position(end_position);
+  result->set_preparse_data(*preparse_data);
+  result->set_job(kNullAddress);
+  return direct_handle(result, isolate());
 }
 
 template <typename Impl>
@@ -579,7 +619,7 @@ Handle<SharedFunctionInfo> FactoryBase<Impl>::NewSharedFunctionInfo(
     DCHECK(!IsInstructionStream(*function_data));
     DCHECK(!IsCode(*function_data));
     if (IsExposedTrustedObject(*function_data)) {
-      raw->SetTrustedData(Cast<ExposedTrustedObject>(*function_data));
+      raw->SetTrustedData(TrustedCast<ExposedTrustedObject>(*function_data));
     } else {
       raw->SetUntrustedData(*function_data);
     }
@@ -834,7 +874,7 @@ MaybeHandle<SeqStringT> FactoryBase<Impl>::NewRawStringWithMap(
 
 template <typename Impl>
 MaybeHandle<SeqOneByteString> FactoryBase<Impl>::NewRawOneByteString(
-    int length, AllocationType allocation, AllocationHint hint) {
+    uint32_t length, AllocationType allocation, AllocationHint hint) {
   Tagged<Map> map = read_only_roots().seq_one_byte_string_map();
   return NewRawStringWithMap<SeqOneByteString>(
       length, map,
@@ -844,7 +884,7 @@ MaybeHandle<SeqOneByteString> FactoryBase<Impl>::NewRawOneByteString(
 
 template <typename Impl>
 MaybeHandle<SeqTwoByteString> FactoryBase<Impl>::NewRawTwoByteString(
-    int length, AllocationType allocation, AllocationHint hint) {
+    uint32_t length, AllocationType allocation, AllocationHint hint) {
   Tagged<Map> map = read_only_roots().seq_two_byte_string_map();
   return NewRawStringWithMap<SeqTwoByteString>(
       length, map,
@@ -964,11 +1004,11 @@ Handle<String> FactoryBase<Impl>::NewConsString(DirectHandle<String> left,
                      read_only_roots().cons_two_byte_string_map(), allocation));
 
   DisallowGarbageCollection no_gc;
-  WriteBarrierMode mode = result->GetWriteBarrierMode(no_gc);
+  WriteBarrierModeScope mode = result->GetWriteBarrierMode(no_gc);
   result->set_raw_hash_field(String::kEmptyHashField);
   result->set_length(length);
-  result->set_first(*left, mode);
-  result->set_second(*right, mode);
+  result->set_first(*left, *mode);
+  result->set_second(*right, *mode);
   return handle(result, isolate());
 }
 
@@ -1144,7 +1184,8 @@ template <typename Impl>
 Handle<FreshlyAllocatedBigInt> FactoryBase<Impl>::NewBigInt(
     uint32_t length, AllocationType allocation) {
   if (length > BigInt::kMaxLength) {
-    FATAL("Fatal JavaScript invalid size error %d", length);
+    base::FatalNoSecurityImpact("Fatal JavaScript invalid size error %d",
+                                length);
     UNREACHABLE();
   }
   Tagged<HeapObject> result = AllocateRawWithImmortalMap(
@@ -1240,10 +1281,15 @@ FactoryBase<Impl>::AllocateRawOneByteInternalizedString(
 
   Tagged<Map> map = read_only_roots().internalized_one_byte_string_map();
   const int size = SeqOneByteString::SizeFor(length);
+  // TODO(jgruber): Can we promote these in ReadOnlyPromotion instead? There
+  // must've been a reason we didn't do so initially, but it may no longer
+  // apply.
+  bool can_alloc_in_ro_space =
+      impl()->CanAllocateInReadOnlySpace() && size <= kMaxRegularHeapObjectSize;
   const AllocationType allocation =
       RefineAllocationTypeForInPlaceInternalizableString(
-          impl()->CanAllocateInReadOnlySpace() ? AllocationType::kReadOnly
-                                               : AllocationType::kOld,
+          can_alloc_in_ro_space ? AllocationType::kReadOnly
+                                : AllocationType::kOld,
           map);
   Tagged<HeapObject> result = AllocateRawWithImmortalMap(size, allocation, map);
   Tagged<SeqOneByteString> answer = Cast<SeqOneByteString>(result);
@@ -1264,11 +1310,18 @@ FactoryBase<Impl>::AllocateRawTwoByteInternalizedString(
 
   Tagged<Map> map = read_only_roots().internalized_two_byte_string_map();
   int size = SeqTwoByteString::SizeFor(length);
+  // TODO(jgruber): Can we promote these in ReadOnlyPromotion instead? There
+  // must've been a reason we didn't do so initially, but it may no longer
+  // apply.
+  bool can_alloc_in_ro_space =
+      impl()->CanAllocateInReadOnlySpace() && size <= kMaxRegularHeapObjectSize;
   Tagged<SeqTwoByteString> answer =
       Cast<SeqTwoByteString>(AllocateRawWithImmortalMap(
           size,
           RefineAllocationTypeForInPlaceInternalizableString(
-              AllocationType::kOld, map),
+              can_alloc_in_ro_space ? AllocationType::kReadOnly
+                                    : AllocationType::kOld,
+              map),
           map));
   DisallowGarbageCollection no_gc;
   answer->clear_padding_destructively(length);
@@ -1280,12 +1333,13 @@ FactoryBase<Impl>::AllocateRawTwoByteInternalizedString(
 
 template <typename Impl>
 Tagged<HeapObject> FactoryBase<Impl>::AllocateRawArray(
-    int size, AllocationType allocation) {
-  Tagged<HeapObject> result = AllocateRaw(size, allocation);
+    int size, AllocationType allocation, AllocationHint hint) {
+  Tagged<HeapObject> result =
+      AllocateRaw(size, allocation, AllocationAlignment::kTaggedAligned, hint);
   if ((size >
        isolate()->heap()->AsHeap()->MaxRegularHeapObjectSize(allocation)) &&
       v8_flags.use_marking_progress_bar) {
-    LargePageMetadata::FromHeapObject(result)
+    LargePage::FromHeapObject(isolate()->GetMainThreadIsolateUnsafe(), result)
         ->marking_progress_tracker()
         .Enable(size);
   }
@@ -1296,7 +1350,8 @@ template <typename Impl>
 Tagged<HeapObject> FactoryBase<Impl>::AllocateRawFixedArray(
     int length, AllocationType allocation) {
   if (length < 0 || length > FixedArray::kMaxLength) {
-    FATAL("Fatal JavaScript invalid size error %d", length);
+    base::FatalNoSecurityImpact("Fatal JavaScript invalid size error %d",
+                                length);
     UNREACHABLE();
   }
   return AllocateRawArray(FixedArray::SizeFor(length), allocation);
@@ -1306,7 +1361,8 @@ template <typename Impl>
 Tagged<HeapObject> FactoryBase<Impl>::AllocateRawWeakArrayList(
     int capacity, AllocationType allocation) {
   if (capacity < 0 || capacity > WeakArrayList::kMaxCapacity) {
-    FATAL("Fatal JavaScript invalid size error %d", capacity);
+    base::FatalNoSecurityImpact("Fatal JavaScript invalid size error %d",
+                                capacity);
     UNREACHABLE();
   }
   return AllocateRawArray(WeakArrayList::SizeForCapacity(capacity), allocation);
@@ -1355,7 +1411,8 @@ FactoryBase<Impl>::NewSwissNameDictionaryWithCapacity(
   }
 
   if (capacity < 0 || capacity > SwissNameDictionary::MaxCapacity()) {
-    FATAL("Fatal JavaScript invalid size error %d", capacity);
+    base::FatalNoSecurityImpact("Fatal JavaScript invalid size error %d",
+                                capacity);
     UNREACHABLE();
   }
 
@@ -1436,21 +1493,27 @@ FactoryBase<Impl>::RefineAllocationTypeForInPlaceInternalizableString(
   return impl()->AllocationTypeForInPlaceInternalizableString();
 }
 
-#ifdef V8_ENABLE_LEAPTIERING
 template <typename Impl>
 JSDispatchHandle FactoryBase<Impl>::NewJSDispatchHandle(
     uint16_t parameter_count, DirectHandle<Code> code,
     JSDispatchTable::Space* space) {
-  JSDispatchTable* jdt = isolate()->isolate_group()->js_dispatch_table();
-  auto Allocate = [&](AllocationType _) {
-    return jdt->TryAllocateAndInitializeEntry(space, parameter_count, *code);
+  JSDispatchTable& jdt = isolate()->js_dispatch_table();
+  auto result =
+      jdt.TryAllocateAndInitializeEntry(space, parameter_count, *code);
+  if (result) {
+    return *result;
+  }
+  auto allocate_callback = [&]() {
+    return (result = jdt.TryAllocateAndInitializeEntry(space, parameter_count,
+                                                       *code))
+        .has_value();
   };
   // Dispatch entries are only freed on major GCs.
   AllocationType type = AllocationType::kOld;
   auto allocator = isolate()->heap()->allocator();
-  return allocator->CustomAllocateWithRetryOrFail(Allocate, type);
+  allocator->RetryCustomAllocateOrFail(allocate_callback, type);
+  return *result;
 }
-#endif  // V8_ENABLE_LEAPTIERING
 
 // Instantiate FactoryBase for the two variants we want.
 template class EXPORT_TEMPLATE_DEFINE(V8_EXPORT_PRIVATE) FactoryBase<Factory>;

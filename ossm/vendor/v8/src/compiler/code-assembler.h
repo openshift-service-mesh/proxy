@@ -119,6 +119,11 @@ struct ObjectTypeOf {};
   struct ObjectTypeOf<Name> {                                 \
     static constexpr ObjectType value = ObjectType::kOddball; \
   };
+#define OBJECT_TYPE_HOLE_CASE(Name, ...)                   \
+  template <>                                              \
+  struct ObjectTypeOf<Name> {                              \
+    static constexpr ObjectType value = ObjectType::kHole; \
+  };
 OBJECT_TYPE_CASE(Object)
 OBJECT_TYPE_CASE(Smi)
 OBJECT_TYPE_CASE(TaggedIndex)
@@ -134,6 +139,7 @@ OBJECT_TYPE_ODDBALL_CASE(Null)
 OBJECT_TYPE_ODDBALL_CASE(Undefined)
 OBJECT_TYPE_ODDBALL_CASE(True)
 OBJECT_TYPE_ODDBALL_CASE(False)
+HOLE_LIST(OBJECT_TYPE_HOLE_CASE)
 #undef OBJECT_TYPE_CASE
 #undef OBJECT_TYPE_STRUCT_CASE
 #undef OBJECT_TYPE_TEMPLATE_CASE
@@ -637,6 +643,7 @@ class V8_EXPORT_PRIVATE CodeAssembler {
   TNode<ExternalReference> IsolateField(IsolateFieldId id);
   TNode<Float32T> Float32Constant(double value);
   TNode<Float64T> Float64Constant(double value);
+  TNode<Float64T> Float64Constant(Float64 value);
   TNode<BoolT> Int32TrueConstant() {
     return ReinterpretCast<BoolT>(Int32Constant(1));
   }
@@ -696,15 +703,13 @@ class V8_EXPORT_PRIVATE CodeAssembler {
 
   template <class T>
   TNode<T> Parameter(int value,
-                     const SourceLocation& loc = SourceLocation::Current()) {
+                     SourceLocation loc = SourceLocation::Current()) {
     static_assert(
         std::is_convertible_v<TNode<T>, TNode<Object>>,
         "Parameter is only for tagged types. Use UncheckedParameter instead.");
     std::stringstream message;
     message << "Parameter " << value;
-    if (loc.FileName()) {
-      message << " at " << loc.FileName() << ":" << loc.Line();
-    }
+    if (loc) message << " at " << loc.FileName() << ":" << loc.Line();
     size_t buf_size = message.str().size() + 1;
     char* message_dup = zone()->AllocateArray<char>(buf_size);
     snprintf(message_dup, buf_size, "%s", message.str().c_str());
@@ -742,16 +747,20 @@ class V8_EXPORT_PRIVATE CodeAssembler {
   void DebugBreak();
   void Unreachable();
 
+#ifdef V8_ENABLE_SANDBOX_HARDWARE_SUPPORT
+  void ExitSandbox();
+  void EnterSandbox();
+#endif  // V8_ENABLE_SANDBOX_HARDWARE_SUPPORT
+
   // Hack for supporting SourceLocation alongside template packs.
   struct MessageWithSourceLocation {
     const char* message;
-    const SourceLocation& loc;
+    SourceLocation loc;
 
     // Allow implicit construction, necessary for the hack.
     // NOLINTNEXTLINE
-    MessageWithSourceLocation(
-        const char* message,
-        const SourceLocation& loc = SourceLocation::Current())
+    MessageWithSourceLocation(const char* message,
+                              SourceLocation loc = SourceLocation::Current())
         : message(message), loc(loc) {}
   };
   template <class... Args>
@@ -759,9 +768,7 @@ class V8_EXPORT_PRIVATE CodeAssembler {
     if (!v8_flags.code_comments) return;
     std::ostringstream s;
     USE(s << message.message, (s << std::forward<Args>(args))...);
-    if (message.loc.FileName()) {
-      s << " - " << message.loc.ToString();
-    }
+    if (message.loc) s << " - " << message.loc.ToString();
     EmitComment(std::move(s).str());
   }
 
@@ -842,6 +849,9 @@ class V8_EXPORT_PRIVATE CodeAssembler {
 
   void Switch(Node* index, Label* default_label, const int32_t* case_values,
               Label** case_labels, size_t case_count);
+  template <typename Value>
+  void Switch(Node* index, Label* default_label,
+              const std::initializer_list<std::pair<Value, Label*>>& cases);
 
   // Access to the frame pointer.
   TNode<RawPtrT> LoadFramePointer();
@@ -911,6 +921,17 @@ class V8_EXPORT_PRIVATE CodeAssembler {
     return UncheckedCast<Type>(UnalignedLoad(mt, base, offset));
   }
 
+  template <typename Type>
+  TNode<Type> UnalignedLoad(TNode<BytecodeArray> base, TNode<IntPtrT> offset) {
+    MachineType type = MachineTypeOf<Type>::value;
+    if (UnalignedLoadSupported(type.representation())) {
+      return UncheckedCast<Type>(Load(type, base, offset));
+    } else {
+      TNode<RawPtrT> base_raw = BitcastTaggedToWord(base);
+      return UncheckedCast<Type>(UnalignedLoad(type, base_raw, offset));
+    }
+  }
+
   // Store value to raw memory location.
   void Store(Node* base, Node* value);
   void Store(Node* base, Node* offset, Node* value);
@@ -918,6 +939,9 @@ class V8_EXPORT_PRIVATE CodeAssembler {
   void StoreNoWriteBarrier(MachineRepresentation rep, Node* base, Node* value);
   void StoreNoWriteBarrier(MachineRepresentation rep, Node* base, Node* offset,
                            Node* value);
+  void UnalignedStoreNoWriteBarrier(MachineRepresentation rep,
+                                    TNode<BytecodeArray> base,
+                                    TNode<IntPtrT> offset, Node* value);
   void UnsafeStoreNoWriteBarrier(MachineRepresentation rep, Node* base,
                                  Node* value);
   void UnsafeStoreNoWriteBarrier(MachineRepresentation rep, Node* base,
@@ -1481,6 +1505,7 @@ class V8_EXPORT_PRIVATE CodeAssembler {
 #endif
   }
 
+  // LINT.IfChange
   // Call the given JavaScript callable through one of the JS Call builtins.
   template <class... TArgs>
   TNode<JSAny> CallJS(Builtin builtin, TNode<Context> context,
@@ -1501,6 +1526,7 @@ class V8_EXPORT_PRIVATE CodeAssembler {
                                std::nullopt, arity, std::nullopt,
                                {receiver, args...}));
   }
+  // LINT.ThenChange(/src/codegen/turboshaft-builtins-assembler-inl.h)
 
   // Construct the given JavaScript callable through a JS Construct builtin.
   template <class... TArgs>

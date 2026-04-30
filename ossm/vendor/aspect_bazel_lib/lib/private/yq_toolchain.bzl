@@ -34,6 +34,12 @@ YQ_PLATFORMS = {
             "@platforms//cpu:s390x",
         ],
     ),
+    "linux_riscv64": struct(
+        compatible_with = [
+            "@platforms//os:linux",
+            "@platforms//cpu:riscv64",
+        ],
+    ),
     "linux_ppc64le": struct(
         compatible_with = [
             "@platforms//os:linux",
@@ -46,11 +52,17 @@ YQ_PLATFORMS = {
             "@platforms//cpu:x86_64",
         ],
     ),
+    "windows_arm64": struct(
+        compatible_with = [
+            "@platforms//os:windows",
+            "@platforms//cpu:aarch64",
+        ],
+    ),
 }
 
 # Note: this is not the latest release, because it has significant breaking changes.
 # See https://github.com/bazel-contrib/bazel-lib/pull/421
-DEFAULT_YQ_VERSION = "4.25.2"
+DEFAULT_YQ_VERSION = "4.45.2"
 
 # https://github.com/mikefarah/yq/releases
 #
@@ -61,6 +73,27 @@ DEFAULT_YQ_VERSION = "4.25.2"
 # Alternatively, you can compute them manually by running
 # `shasum -b -a 384 [downloaded file] | awk '{ print $1 }' | xxd -r -p | base64`
 YQ_VERSIONS = {
+    "4.45.2": {
+        "darwin_amd64": "sha384-TBsrUTy6n6qA2hiSlpnEN6iEDDz4Tiy++AxLOpeXU1aUaI6uIuEBx8hgPYWWuD8V",
+        "darwin_arm64": "sha384-bnZ5TqsG5pcWB6gC87QKrBrjcKYmdOcSD7TpFVeCU6Nj7z5egeZzm4BH1FHbqo0e",
+        "linux_amd64": "sha384-jEOdMXHPvRiaFXWRnSA5Mw41VCKkNPv42i35i9BiVxrAnfyl/3/Li/iyQyj16QIr",
+        "linux_arm64": "sha384-4bEWn6fDQhIomb6Smzm8yw26RvqsjHh3PH/SogwWoLC9uJRoyQagY2PJZaYWxUDY",
+        "linux_s390x": "sha384-9uU3CXqjUG/SuPiHPKIUqbOVyqx7JiVOtRzeFta9IBFkJyUB0pBBOYkoDppvrmzz",
+        "linux_riscv64": "sha384-FWM1djpKjWctmhaInat/z/CcwQuiqLTeQcb0MMU5+sNiwMTuWyjvNlbwA4rRG3ZQ",
+        "linux_ppc64le": "sha384-bB03rZ0ptRt2EuFnA9SvscPMe3gVJecBvxhzPbYe7wsfoHvzzYqWffCchZVxRg+9",
+        "windows_amd64": "sha384-vG8R2+s/sD8DbeCM9H0xCy5JgtAOII7SLRx2g+ALtQZWW/q3XjXlzN2CKW/zU+EH",
+        "windows_arm64": "sha384-XHgi894S4cQ2qgJx47cPu5vtb2MOXA2YZ7QgExODwNoIPhji5wXK2MrgMB+RI7gZ",
+    },
+    "4.45.1": {
+        "darwin_amd64": "sha384-ZoEgzfCLmDk7eoKdJSoq/nny1iX3Cq9mMJ3gnPZ2ejhKMxSgHUQIa7MREToxYl6Z",
+        "darwin_arm64": "sha384-nHYFqoarTzGba/XtpN8N3U0X9hMTg64Vn7XZ8yiF2cbJFdY3VWFVw80vsg/JXaOg",
+        "linux_amd64": "sha384-hkMtSRoq1GZKoH9C6OesKhgFLtkcm91wUD2W7L/xlAOS7jZbii23uEMHApo5r7Qs",
+        "linux_arm64": "sha384-4N6BWZ7ExxmnfqXGGTo7Szi73kJfbgMaUXW0FT10kcy2fNW0VbjBBAfClC14lES2",
+        "linux_s390x": "sha384-DRzz5Sb3JvwDVjQWGVto3Eh7a7tNQmwXZtMTQy+SidCYGQ2sLA3SQqqsQicNaD8A",
+        "linux_riscv64": "sha384-/4wDvlLP7f3lvEU/hrCa6wcGLzj8z1PYkWlULxIWHGn65Ai5xnI+Dp21VnM7iyi3",
+        "linux_ppc64le": "sha384-pnzDz7jn4b+1wOeasaEU6q5ASQhZw0Uz6sEehzpztqQglU6ynTkS8n4Nw/oqG5y9",
+        "windows_amd64": "sha384-P5c1L9KPhkLdByJ3G8IL3ouwNojoHSDDz6N851RRXxK1Y+ssYKPO/cbQzjQnpKvc",
+    },
     "4.33.3": {
         "darwin_amd64": "sha384-IJhMHD71yq+OR8AHFPfZr3XVpFlG2ZAfcexDKojtSLcCMV1pw0X2jza4qFUZiKEt",
         "darwin_arm64": "sha384-euQkz1Bu/dFuJoRgG4xIh9BhP2RvOceTDPSY8EzSIM5xykbMkwDNhr1PtCcUF5ye",
@@ -370,7 +403,6 @@ def _resolved_toolchain_impl(ctx):
 resolved_toolchain = rule(
     implementation = _resolved_toolchain_impl,
     toolchains = ["@aspect_bazel_lib//lib:yq_toolchain_type"],
-    incompatible_use_toolchain_transition = True,
 )
 """
     rctx.file("defs.bzl", starlark_content)

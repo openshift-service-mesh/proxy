@@ -6,6 +6,7 @@
 #define V8_STRINGS_STRING_HASHER_H_
 
 #include "src/common/globals.h"
+#include "src/numbers/hash-seed.h"
 
 namespace v8 {
 
@@ -15,6 +16,12 @@ class Vector;
 }  // namespace base
 
 namespace internal {
+
+namespace detail {
+// Non-inlined SIMD implementation for checking if a uint16_t string contains
+// only Latin1 characters. Used by the inline IsOnly8Bit wrapper.
+V8_EXPORT_PRIVATE bool IsOnly8BitSIMD(const uint16_t* chars, unsigned len);
+}  // namespace detail
 
 // A simple incremental string hasher. Slow but allows for special casing each
 // individual character.
@@ -36,7 +43,8 @@ class V8_EXPORT_PRIVATE StringHasher final {
   StringHasher() = delete;
   template <typename char_t>
   static inline uint32_t HashSequentialString(const char_t* chars,
-                                              uint32_t length, uint64_t seed);
+                                              uint32_t length,
+                                              const HashSeed seed);
 
   // Calculated hash value for a string consisting of 1 to
   // String::kMaxArrayIndexSize digits with no leading zeros (except "0").
@@ -53,10 +61,10 @@ class V8_EXPORT_PRIVATE StringHasher final {
 
 // Useful for std containers that require something ()'able.
 struct SeededStringHasher {
-  explicit SeededStringHasher(uint64_t hashseed) : hashseed_(hashseed) {}
+  explicit SeededStringHasher(const HashSeed hashseed) : hashseed_(hashseed) {}
   inline std::size_t operator()(const char* name) const;
 
-  uint64_t hashseed_;
+  const HashSeed hashseed_;
 };
 
 // Useful for std containers that require something ()'able.

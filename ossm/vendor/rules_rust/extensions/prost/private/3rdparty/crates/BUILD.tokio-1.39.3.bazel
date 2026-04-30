@@ -6,9 +6,15 @@
 #     bazel run @@//private/3rdparty:crates_vendor
 ###############################################################################
 
+load("@rules_rust//cargo:defs.bzl", "cargo_toml_env_vars")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
+
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
 
 rust_library(
     name = "tokio",
@@ -66,6 +72,9 @@ rust_library(
     proc_macro_deps = [
         "@rrprd__tokio-macros-2.4.0//:tokio_macros",
     ],
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
@@ -86,7 +95,9 @@ rust_library(
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [],
         "@rules_rust//rust/platform:aarch64-unknown-nixos-gnu": [],
         "@rules_rust//rust/platform:aarch64-unknown-nto-qnx710": [],
+        "@rules_rust//rust/platform:aarch64-unknown-uefi": [],
         "@rules_rust//rust/platform:arm-unknown-linux-gnueabi": [],
+        "@rules_rust//rust/platform:arm-unknown-linux-musleabi": [],
         "@rules_rust//rust/platform:armv7-linux-androideabi": [],
         "@rules_rust//rust/platform:armv7-unknown-linux-gnueabi": [],
         "@rules_rust//rust/platform:i686-apple-darwin": [],
@@ -96,12 +107,16 @@ rust_library(
         "@rules_rust//rust/platform:i686-unknown-linux-gnu": [],
         "@rules_rust//rust/platform:powerpc-unknown-linux-gnu": [],
         "@rules_rust//rust/platform:riscv32imc-unknown-none-elf": [],
+        "@rules_rust//rust/platform:riscv64gc-unknown-linux-gnu": [],
         "@rules_rust//rust/platform:riscv64gc-unknown-none-elf": [],
         "@rules_rust//rust/platform:s390x-unknown-linux-gnu": [],
         "@rules_rust//rust/platform:thumbv7em-none-eabi": [],
         "@rules_rust//rust/platform:thumbv8m.main-none-eabi": [],
+        "@rules_rust//rust/platform:wasm32-unknown-emscripten": [],
         "@rules_rust//rust/platform:wasm32-unknown-unknown": [],
         "@rules_rust//rust/platform:wasm32-wasip1": [],
+        "@rules_rust//rust/platform:wasm32-wasip1-threads": [],
+        "@rules_rust//rust/platform:wasm32-wasip2": [],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [],
         "@rules_rust//rust/platform:x86_64-apple-ios": [],
         "@rules_rust//rust/platform:x86_64-linux-android": [],
@@ -111,6 +126,7 @@ rust_library(
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [],
         "@rules_rust//rust/platform:x86_64-unknown-nixos-gnu": [],
         "@rules_rust//rust/platform:x86_64-unknown-none": [],
+        "@rules_rust//rust/platform:x86_64-unknown-uefi": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     version = "1.39.3",
@@ -164,10 +180,18 @@ rust_library(
             "@rrprd__signal-hook-registry-1.4.2//:signal_hook_registry",  # aarch64-unknown-nto-qnx710
             "@rrprd__socket2-0.5.7//:socket2",  # aarch64-unknown-nto-qnx710
         ],
+        "@rules_rust//rust/platform:aarch64-unknown-uefi": [
+            "@rrprd__socket2-0.5.7//:socket2",  # aarch64-unknown-uefi
+        ],
         "@rules_rust//rust/platform:arm-unknown-linux-gnueabi": [
             "@rrprd__libc-0.2.158//:libc",  # arm-unknown-linux-gnueabi
             "@rrprd__signal-hook-registry-1.4.2//:signal_hook_registry",  # arm-unknown-linux-gnueabi
             "@rrprd__socket2-0.5.7//:socket2",  # arm-unknown-linux-gnueabi
+        ],
+        "@rules_rust//rust/platform:arm-unknown-linux-musleabi": [
+            "@rrprd__libc-0.2.158//:libc",  # arm-unknown-linux-musleabi
+            "@rrprd__signal-hook-registry-1.4.2//:signal_hook_registry",  # arm-unknown-linux-musleabi
+            "@rrprd__socket2-0.5.7//:socket2",  # arm-unknown-linux-musleabi
         ],
         "@rules_rust//rust/platform:armv7-linux-androideabi": [
             "@rrprd__libc-0.2.158//:libc",  # armv7-linux-androideabi
@@ -211,6 +235,11 @@ rust_library(
         "@rules_rust//rust/platform:riscv32imc-unknown-none-elf": [
             "@rrprd__socket2-0.5.7//:socket2",  # riscv32imc-unknown-none-elf
         ],
+        "@rules_rust//rust/platform:riscv64gc-unknown-linux-gnu": [
+            "@rrprd__libc-0.2.158//:libc",  # riscv64gc-unknown-linux-gnu
+            "@rrprd__signal-hook-registry-1.4.2//:signal_hook_registry",  # riscv64gc-unknown-linux-gnu
+            "@rrprd__socket2-0.5.7//:socket2",  # riscv64gc-unknown-linux-gnu
+        ],
         "@rules_rust//rust/platform:riscv64gc-unknown-none-elf": [
             "@rrprd__socket2-0.5.7//:socket2",  # riscv64gc-unknown-none-elf
         ],
@@ -224,6 +253,10 @@ rust_library(
         ],
         "@rules_rust//rust/platform:thumbv8m.main-none-eabi": [
             "@rrprd__socket2-0.5.7//:socket2",  # thumbv8m.main-none-eabi
+        ],
+        "@rules_rust//rust/platform:wasm32-unknown-emscripten": [
+            "@rrprd__libc-0.2.158//:libc",  # wasm32-unknown-emscripten
+            "@rrprd__signal-hook-registry-1.4.2//:signal_hook_registry",  # wasm32-unknown-emscripten
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
             "@rrprd__libc-0.2.158//:libc",  # x86_64-apple-darwin
@@ -266,6 +299,9 @@ rust_library(
         ],
         "@rules_rust//rust/platform:x86_64-unknown-none": [
             "@rrprd__socket2-0.5.7//:socket2",  # x86_64-unknown-none
+        ],
+        "@rules_rust//rust/platform:x86_64-unknown-uefi": [
+            "@rrprd__socket2-0.5.7//:socket2",  # x86_64-unknown-uefi
         ],
         "//conditions:default": [],
     }),

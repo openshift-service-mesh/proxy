@@ -174,6 +174,7 @@ class Typer::Visitor : public Reducer {
       MACHINE_ATOMIC_OP_LIST(DECLARE_IMPOSSIBLE_CASE)
       DECLARE_IMPOSSIBLE_CASE(AbortCSADcheck)
       DECLARE_IMPOSSIBLE_CASE(DebugBreak)
+      IF_HARDWARE_SANDBOX(DECLARE_IMPOSSIBLE_CASE, SwitchSandboxMode)
       DECLARE_IMPOSSIBLE_CASE(Comment)
       DECLARE_IMPOSSIBLE_CASE(LoadImmutable)
       DECLARE_IMPOSSIBLE_CASE(StorePair)
@@ -1111,21 +1112,21 @@ bool Typer::Visitor::InductionVariablePhiTypeIsPrefixedPoint(
     // Apply ordinary typing to the "increment" operation.
     // clang-format off
     switch (arith->opcode()) {
-#define CASE(x)                             \
+#define OPCODE_CASE(x)                        \
       case IrOpcode::k##x:                    \
         type = Type##x(type, increment_type); \
         break;
-      CASE(JSAdd)
-      CASE(JSSubtract)
-      CASE(NumberAdd)
-      CASE(NumberSubtract)
-      CASE(SpeculativeNumberAdd)
-      CASE(SpeculativeNumberSubtract)
-      CASE(SpeculativeAdditiveSafeIntegerAdd)
-      CASE(SpeculativeAdditiveSafeIntegerSubtract)
-      CASE(SpeculativeSmallIntegerAdd)
-      CASE(SpeculativeSmallIntegerSubtract)
-#undef CASE
+      OPCODE_CASE(JSAdd)
+      OPCODE_CASE(JSSubtract)
+      OPCODE_CASE(NumberAdd)
+      OPCODE_CASE(NumberSubtract)
+      OPCODE_CASE(SpeculativeNumberAdd)
+      OPCODE_CASE(SpeculativeNumberSubtract)
+      OPCODE_CASE(SpeculativeAdditiveSafeIntegerAdd)
+      OPCODE_CASE(SpeculativeAdditiveSafeIntegerSubtract)
+      OPCODE_CASE(SpeculativeSmallIntegerAdd)
+      OPCODE_CASE(SpeculativeSmallIntegerSubtract)
+#undef OPCODE_CASE
       default:
         UNREACHABLE();
     }
@@ -1254,11 +1255,15 @@ Type Typer::Visitor::TypeSetContinuationPreservedEmbedderData(Node* node) {
 #if V8_ENABLE_WEBASSEMBLY
 Type Typer::Visitor::TypeJSWasmCall(Node* node) {
   const JSWasmCallParameters& op_params = JSWasmCallParametersOf(node->op());
-  const wasm::CanonicalSig* wasm_signature = op_params.signature();
-  if (wasm_signature->return_count() > 0) {
-    return JSWasmCallNode::TypeForWasmReturnType(wasm_signature->GetReturn());
-  }
-  return Type::Any();
+  const wasm::WasmModule* module = op_params.native_module()->module();
+  const wasm::WasmFunction* func =
+      &module->functions[op_params.function_index()];
+  if (func->sig->return_count() == 0) return Type::Any();
+  DCHECK_EQ(1, func->sig->return_count());
+  wasm::ValueType return_type = func->sig->GetReturn();
+  DCHECK_IMPLIES(return_type.is_ref(),
+                 return_type.is_reference_to(wasm::GenericKind::kExtern));
+  return JSWasmCallNode::TypeForWasmReturnKind(return_type.kind());
 }
 #endif  // V8_ENABLE_WEBASSEMBLY
 
@@ -1284,6 +1289,9 @@ Type Typer::Visitor::TypeDeadValue(Node* node) { return Type::None(); }
 Type Typer::Visitor::TypeUnreachable(Node* node) { return Type::None(); }
 
 Type Typer::Visitor::TypePlug(Node* node) { UNREACHABLE(); }
+Type Typer::Visitor::TypeMajorGCForCompilerTesting(Node* node) {
+  UNREACHABLE();
+}
 Type Typer::Visitor::TypeStaticAssert(Node* node) { UNREACHABLE(); }
 Type Typer::Visitor::TypeSLVerifierHint(Node* node) { UNREACHABLE(); }
 
@@ -1716,6 +1724,8 @@ Type Typer::Visitor::Weaken(Node* node, Type current_type, Type previous_type) {
                      Type::Range(new_min, new_max, typer_->zone()),
                      typer_->zone());
 }
+
+Type Typer::Visitor::TypeJSSetPrototypeProperties(Node* node) { UNREACHABLE(); }
 
 Type Typer::Visitor::TypeJSSetKeyedProperty(Node* node) { UNREACHABLE(); }
 
@@ -2190,6 +2200,10 @@ Type Typer::Visitor::TypeJSForInPrepare(Node* node) {
   return Type::Tuple(cache_type, cache_array, cache_length, zone());
 }
 
+Type Typer::Visitor::TypeJSForOfNext(Node* node) {
+  return Type::Tuple(Type::Any(), Type::Any(), zone());
+}
+
 Type Typer::Visitor::TypeJSLoadMessage(Node* node) { return Type::Any(); }
 
 Type Typer::Visitor::TypeJSStoreMessage(Node* node) { UNREACHABLE(); }
@@ -2377,6 +2391,10 @@ Type Typer::Visitor::TypeStringLessThanOrEqual(Node* node) {
   return Type::Boolean();
 }
 
+Type Typer::Visitor::TypeStringOrOddballStrictEqual(Node* node) {
+  return Type::Boolean();
+}
+
 Type Typer::Visitor::StringFromSingleCharCodeTyper(Type type, Typer* t) {
   return Type::String();
 }
@@ -2485,6 +2503,11 @@ Type Typer::Visitor::TypeCheckStringOrStringWrapper(Node* node) {
   return Type::Intersect(arg, Type::StringOrStringWrapper(), zone());
 }
 
+Type Typer::Visitor::TypeCheckStringOrOddball(Node* node) {
+  Type arg = Operand(node, 0);
+  return Type::Intersect(arg, Type::StringOrOddball(), zone());
+}
+
 Type Typer::Visitor::TypeCheckSymbol(Node* node) {
   Type arg = Operand(node, 0);
   return Type::Intersect(arg, Type::Symbol(), zone());
@@ -2499,12 +2522,12 @@ Type Typer::Visitor::TypeChangeFloat64HoleToTagged(Node* node) {
 }
 
 Type Typer::Visitor::TypeChangeFloat64OrUndefinedOrHoleToTagged(Node* node) {
-#ifdef V8_ENABLE_EXPERIMENTAL_UNDEFINED_DOUBLE
+#ifdef V8_ENABLE_UNDEFINED_DOUBLE
   Type arg = Operand(node, 0);
   return Type::Intersect(arg, Type::NumberOrUndefinedOrHole(), zone());
 #else
   UNREACHABLE();
-#endif  // V8_ENABLE_EXPERIMENTAL_UNDEFINED_DOUBLE
+#endif  // V8_ENABLE_UNDEFINED_DOUBLE
 }
 
 Type Typer::Visitor::TypeCheckNotTaggedHole(Node* node) {

@@ -25,6 +25,38 @@ def aspect_bazel_lib_dependencies():
             "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.7.1/bazel-skylib-1.7.1.tar.gz",
         ],
     )
+    http_archive(
+        name = "platforms",
+        urls = [
+            "https://mirror.bazel.build/github.com/bazelbuild/platforms/releases/download/1.0.0/platforms-1.0.0.tar.gz",
+            "https://github.com/bazelbuild/platforms/releases/download/1.0.0/platforms-1.0.0.tar.gz",
+        ],
+        sha256 = "3384eb1c30762704fbe38e440204e114154086c8fc8a8c2e3e28441028c019a8",
+    )
+    http_archive(
+        name = "tar.bzl",
+        sha256 = "b47e3c83a0c1440ce335aa1ae18753da6eb7cd551d4946fa303de2abde07e20b",
+        strip_prefix = "tar.bzl-0.5.1",
+        url = "https://github.com/bazel-contrib/tar.bzl/releases/download/v0.5.1/tar.bzl-v0.5.1.tar.gz",
+    )
+    http_archive(
+        name = "jq.bzl",
+        sha256 = "7b63435aa19cc6a0cfd1a82fbdf2c7a2f0a94db1a79ff7a4469ffa94286261ab",
+        strip_prefix = "jq.bzl-0.1.0",
+        url = "https://github.com/bazel-contrib/jq.bzl/releases/download/v0.1.0/jq.bzl-v0.1.0.tar.gz",
+    )
+    http_archive(
+        name = "yq.bzl",
+        sha256 = "b51d82b561a78ab21d265107b0edbf98d68a390b4103992d0b03258bb3819601",
+        strip_prefix = "yq.bzl-0.1.1",
+        url = "https://github.com/bazel-contrib/yq.bzl/releases/download/v0.1.1/yq.bzl-v0.1.1.tar.gz",
+    )
+    http_archive(
+        name = "rules_shell",
+        sha256 = "bc61ef94facc78e20a645726f64756e5e285a045037c7a61f65af2941f4c25e1",
+        strip_prefix = "rules_shell-0.4.1",
+        url = "https://github.com/bazelbuild/rules_shell/releases/download/v0.4.1/rules_shell-v0.4.1.tar.gz",
+    )
 
 DEFAULT_JQ_REPOSITORY = "jq"
 DEFAULT_JQ_VERSION = _DEFAULT_JQ_VERSION

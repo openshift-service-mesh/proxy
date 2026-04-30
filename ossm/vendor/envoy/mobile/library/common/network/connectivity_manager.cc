@@ -81,8 +81,13 @@ constexpr unsigned int InitialFaultThreshold = 1;
 
 ConnectivityManagerImpl::ConnectivityManagerImpl(Upstream::ClusterManager& cluster_manager,
                                                  DnsCacheManagerSharedPtr dns_cache_manager)
-    : cluster_manager_(cluster_manager), dns_cache_manager_(dns_cache_manager) {
+    : cluster_manager_(cluster_manager), quic_observer_registry_factory_(*this),
+      dns_cache_manager_(dns_cache_manager) {
   initializeNetworkStates();
+  if (Runtime::runtimeFeatureEnabled(
+          "envoy.reloadable_features.mobile_use_network_observer_registry")) {
+    cluster_manager_.createNetworkObserverRegistries(quic_observer_registry_factory_);
+  }
 }
 
 envoy_netconf_t ConnectivityManagerImpl::setPreferredNetwork(int network) {
@@ -334,8 +339,7 @@ Socket::OptionsSharedPtr ConnectivityManagerImpl::getUpstreamSocketOptions(int n
 
   auto options = std::make_shared<Socket::Options>();
   if (!Runtime::runtimeFeatureEnabled(
-          "envoy.reloadable_features.decouple_explicit_drain_pools_and_dns_refresh") ||
-      !Runtime::runtimeFeatureEnabled("envoy.reloadable_features.drain_pools_on_network_change")) {
+          "envoy.reloadable_features.decouple_explicit_drain_pools_and_dns_refresh")) {
     // Envoy uses the hash signature of overridden socket options to choose a connection pool.
     // Setting a dummy socket option is a hack that allows us to select a different
     // connection pool without materially changing the socket configuration when
@@ -529,8 +533,9 @@ void ConnectivityManagerImpl::onDefaultNetworkChangedAndroid(ConnectionType conn
     if (default_network_change_callback_ != nullptr) {
       default_network_change_callback_(current_configuration_key);
     }
-    if (observer_ != nullptr) {
-      observer_->onNetworkMadeDefault(net_id);
+    for (std::reference_wrapper<Quic::EnvoyMobileQuicNetworkObserverRegistry> registry :
+         quic_observer_registry_factory_.getCreatedObserverRegistries()) {
+      registry.get().onNetworkMadeDefault(net_id);
     }
   }
 }
@@ -545,8 +550,9 @@ void ConnectivityManagerImpl::onNetworkDisconnectAndroid(NetworkHandle net_id) {
       return;
     }
   }
-  if (observer_ != nullptr) {
-    observer_->onNetworkDisconnected(net_id);
+  for (std::reference_wrapper<Quic::EnvoyMobileQuicNetworkObserverRegistry> registry :
+       quic_observer_registry_factory_.getCreatedObserverRegistries()) {
+    registry.get().onNetworkDisconnected(net_id);
   }
 }
 
@@ -568,18 +574,20 @@ void ConnectivityManagerImpl::onNetworkConnectAndroid(ConnectionType connection_
       current_configuration_key = network_state_.configuration_key_;
     }
   }
-  // Android Lollipop would send many duplicate notifications.
-  // This was later fixed in Android Marshmallow.
-  // Deduplicate them here by avoiding sending duplicate notifications.
-  if (observer_ != nullptr) {
-    observer_->onNetworkConnected(net_id);
-  }
   if (is_default_network) {
     if (default_network_change_callback_ != nullptr) {
       default_network_change_callback_(current_configuration_key);
     }
-    if (observer_ != nullptr) {
-      observer_->onNetworkMadeDefault(net_id);
+  }
+
+  // Android Lollipop would send many duplicate notifications.
+  // This was later fixed in Android Marshmallow.
+  // Deduplicate them here by avoiding sending duplicate notifications.
+  for (std::reference_wrapper<Quic::EnvoyMobileQuicNetworkObserverRegistry> registry :
+       quic_observer_registry_factory_.getCreatedObserverRegistries()) {
+    registry.get().onNetworkConnected(net_id);
+    if (is_default_network) {
+      registry.get().onNetworkMadeDefault(net_id);
     }
   }
 }
@@ -611,6 +619,17 @@ void ConnectivityManagerImpl::initializeNetworkStates() {
   for (auto& entry : all_connected_networks) {
     connected_networks_[entry.first] = entry.second;
   }
+}
+
+NetworkHandle ConnectivityManagerImpl::getDefaultNetwork() {
+  Thread::LockGuard lock{network_mutex_};
+  return default_network_handle_;
+}
+
+absl::flat_hash_map<NetworkHandle, ConnectionType>
+ConnectivityManagerImpl::getAllConnectedNetworks() {
+  Thread::LockGuard lock{network_mutex_};
+  return connected_networks_;
 }
 
 ConnectivityManagerImplSharedPtr ConnectivityManagerFactory::get() {

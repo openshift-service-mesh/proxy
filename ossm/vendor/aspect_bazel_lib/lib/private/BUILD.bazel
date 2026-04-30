@@ -1,4 +1,4 @@
-load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("@aspect_bazel_lib//:bzl_library.bzl", "bzl_library")
 load("//lib:utils.bzl", "is_bazel_7_or_greater")
 load(":utf8_environment.bzl", "utf8_environment")
 
@@ -6,9 +6,6 @@ exports_files(
     [
         "diff_test_tmpl.sh",
         "diff_test_tmpl.bat",
-        "modify_mtree.awk",
-        "parse_status_file.jq",
-        "parse_status_file.yq",
     ],
     visibility = ["//visibility:public"],
 )
@@ -111,6 +108,8 @@ bzl_library(
         ":directory_path",
         "//lib:utils",
         "@bazel_skylib//lib:shell",
+        "@bazel_skylib//lib:types",
+        "@bazel_skylib//rules:write_file",
     ],
 )
 
@@ -159,17 +158,6 @@ bzl_library(
     deps = [
         ":repo_utils",
         "@bazel_skylib//lib:versions",
-    ],
-)
-
-bzl_library(
-    name = "jq",
-    srcs = ["jq.bzl"],
-    visibility = ["//lib:__subpackages__"],
-    deps = [
-        ":expand_variables",
-        ":strings",
-        "//lib:stamping",
     ],
 )
 
@@ -253,13 +241,6 @@ bzl_library(
 )
 
 bzl_library(
-    name = "yq",
-    srcs = ["yq.bzl"],
-    visibility = ["//lib:__subpackages__"],
-    deps = ["//lib:stamping"],
-)
-
-bzl_library(
     name = "yq_toolchain",
     srcs = ["yq_toolchain.bzl"],
     visibility = ["//lib:__subpackages__"],
@@ -271,7 +252,6 @@ bzl_library(
     srcs = [
         "platform_utils.bzl",
         "@host_platform//:constraints.bzl",  # keep
-        "@local_config_platform//:constraints.bzl",  # keep
         "@platforms//host:constraints.bzl",  # keep
     ],
     visibility = ["//lib:__subpackages__"],
@@ -285,16 +265,6 @@ bzl_library(
     deps = [
         "utf8_environment.bzl",
         ":repo_utils",
-    ],
-)
-
-bzl_library(
-    name = "tar",
-    srcs = ["tar.bzl"],
-    visibility = ["//lib:__subpackages__"],
-    deps = [
-        "@aspect_bazel_lib//lib:paths",
-        "@bazel_skylib//rules:common_settings",
     ],
 )
 

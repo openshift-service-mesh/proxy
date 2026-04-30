@@ -12,6 +12,7 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
+	unsafe "unsafe"
 )
 
 type ImportEnum int32
@@ -58,18 +59,16 @@ func (ImportEnum) EnumDescriptor() ([]byte, []int) {
 }
 
 type ImportMessage struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ImportMessage) Reset() {
 	*x = ImportMessage{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_test3_test_import_proto_msgTypes[0]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_test3_test_import_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *ImportMessage) String() string {
@@ -80,7 +79,7 @@ func (*ImportMessage) ProtoMessage() {}
 
 func (x *ImportMessage) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_test3_test_import_proto_msgTypes[0]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -97,36 +96,29 @@ func (*ImportMessage) Descriptor() ([]byte, []int) {
 
 var File_internal_testprotos_test3_test_import_proto protoreflect.FileDescriptor
 
-var file_internal_testprotos_test3_test_import_proto_rawDesc = []byte{
-	0x0a, 0x2b, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x33, 0x2f, 0x74, 0x65, 0x73, 0x74,
-	0x5f, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x12, 0x13, 0x67,
-	0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x74, 0x65, 0x73,
-	0x74, 0x33, 0x22, 0x0f, 0x0a, 0x0d, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x4d, 0x65, 0x73, 0x73,
-	0x61, 0x67, 0x65, 0x2a, 0x1d, 0x0a, 0x0a, 0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x45, 0x6e, 0x75,
-	0x6d, 0x12, 0x0f, 0x0a, 0x0b, 0x49, 0x4d, 0x50, 0x4f, 0x52, 0x54, 0x5f, 0x5a, 0x45, 0x52, 0x4f,
-	0x10, 0x00, 0x42, 0x36, 0x5a, 0x34, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x67, 0x6f, 0x6c,
-	0x61, 0x6e, 0x67, 0x2e, 0x6f, 0x72, 0x67, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66,
-	0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x73, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x33, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x33,
-}
+const file_internal_testprotos_test3_test_import_proto_rawDesc = "" +
+	"\n" +
+	"+internal/testprotos/test3/test_import.proto\x12\x13goproto.proto.test3\"\x0f\n" +
+	"\rImportMessage*\x1d\n" +
+	"\n" +
+	"ImportEnum\x12\x0f\n" +
+	"\vIMPORT_ZERO\x10\x00B6Z4google.golang.org/protobuf/internal/testprotos/test3b\x06proto3"
 
 var (
 	file_internal_testprotos_test3_test_import_proto_rawDescOnce sync.Once
-	file_internal_testprotos_test3_test_import_proto_rawDescData = file_internal_testprotos_test3_test_import_proto_rawDesc
+	file_internal_testprotos_test3_test_import_proto_rawDescData []byte
 )
 
 func file_internal_testprotos_test3_test_import_proto_rawDescGZIP() []byte {
 	file_internal_testprotos_test3_test_import_proto_rawDescOnce.Do(func() {
-		file_internal_testprotos_test3_test_import_proto_rawDescData = protoimpl.X.CompressGZIP(file_internal_testprotos_test3_test_import_proto_rawDescData)
+		file_internal_testprotos_test3_test_import_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_testprotos_test3_test_import_proto_rawDesc), len(file_internal_testprotos_test3_test_import_proto_rawDesc)))
 	})
 	return file_internal_testprotos_test3_test_import_proto_rawDescData
 }
 
 var file_internal_testprotos_test3_test_import_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_internal_testprotos_test3_test_import_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
-var file_internal_testprotos_test3_test_import_proto_goTypes = []interface{}{
+var file_internal_testprotos_test3_test_import_proto_goTypes = []any{
 	(ImportEnum)(0),       // 0: goproto.proto.test3.ImportEnum
 	(*ImportMessage)(nil), // 1: goproto.proto.test3.ImportMessage
 }
@@ -143,25 +135,11 @@ func file_internal_testprotos_test3_test_import_proto_init() {
 	if File_internal_testprotos_test3_test_import_proto != nil {
 		return
 	}
-	if !protoimpl.UnsafeEnabled {
-		file_internal_testprotos_test3_test_import_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ImportMessage); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_internal_testprotos_test3_test_import_proto_rawDesc,
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_testprotos_test3_test_import_proto_rawDesc), len(file_internal_testprotos_test3_test_import_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   1,
 			NumExtensions: 0,
@@ -173,7 +151,6 @@ func file_internal_testprotos_test3_test_import_proto_init() {
 		MessageInfos:      file_internal_testprotos_test3_test_import_proto_msgTypes,
 	}.Build()
 	File_internal_testprotos_test3_test_import_proto = out.File
-	file_internal_testprotos_test3_test_import_proto_rawDesc = nil
 	file_internal_testprotos_test3_test_import_proto_goTypes = nil
 	file_internal_testprotos_test3_test_import_proto_depIdxs = nil
 }

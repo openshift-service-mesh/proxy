@@ -167,6 +167,7 @@ class V8_EXPORT Visitor {
    */
   template <typename T>
   void Trace(const T& object) {
+    static_assert(!IsGarbageCollectedOrMixinTypeV<T>);
 #if V8_ENABLE_CHECKS
     // This object is embedded in potentially multiple nested objects. The
     // outermost object must not be in construction as such objects are (a) not
@@ -502,9 +503,9 @@ class V8_EXPORT RootVisitor {
   }
 
  protected:
-  virtual void VisitRoot(const void*, TraceDescriptor, const SourceLocation&) {}
+  virtual void VisitRoot(const void*, TraceDescriptor, SourceLocation) {}
   virtual void VisitWeakRoot(const void* self, TraceDescriptor, WeakCallback,
-                             const void* weak_root, const SourceLocation&) {}
+                             const void* weak_root, SourceLocation) {}
 
  private:
   template <typename AnyPersistentType>

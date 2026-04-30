@@ -36,6 +36,7 @@ using Http::FilterTrailersStatus;
 using Http::LowerCaseString;
 
 using testing::AnyNumber;
+using testing::AtMost;
 using testing::Invoke;
 using testing::Return;
 using testing::ReturnRef;
@@ -63,7 +64,8 @@ protected:
     EXPECT_CALL(*client_, start(_, _, _, _)).WillRepeatedly(Invoke(this, &OrderingTest::doStart));
     EXPECT_CALL(encoder_callbacks_, dispatcher()).WillRepeatedly(ReturnRef(dispatcher_));
     EXPECT_CALL(decoder_callbacks_, dispatcher()).WillRepeatedly(ReturnRef(dispatcher_));
-    EXPECT_CALL(decoder_callbacks_, route()).WillRepeatedly(Return(route_));
+    EXPECT_CALL(decoder_callbacks_, route())
+        .WillRepeatedly(Return(makeOptRefFromPtr<const Router::Route>(route_.get())));
     EXPECT_CALL(decoder_callbacks_, streamInfo()).WillRepeatedly(ReturnRef(stream_info_));
 
     ExternalProcessor proto_config;
@@ -71,9 +73,12 @@ protected:
     if (cb) {
       (*cb)(proto_config);
     }
-    config_ = std::make_shared<FilterConfig>(
-        proto_config, kMessageTimeout, kMaxMessageTimeoutMs, *stats_store_.rootScope(), "", false,
-        Envoy::Extensions::Filters::Common::Expr::createBuilder(nullptr), factory_context_);
+    auto builder_ptr = Envoy::Extensions::Filters::Common::Expr::createBuilder({});
+    auto builder = std::make_shared<Envoy::Extensions::Filters::Common::Expr::BuilderInstance>(
+        std::move(builder_ptr));
+    config_ = std::make_shared<FilterConfig>(proto_config, kMessageTimeout, kMaxMessageTimeoutMs,
+                                             *stats_store_.rootScope(), "", false, builder,
+                                             factory_context_);
     filter_ = std::make_unique<Filter>(config_, std::move(client_));
     filter_->setEncoderFilterCallbacks(encoder_callbacks_);
     filter_->setDecoderFilterCallbacks(decoder_callbacks_);
@@ -90,7 +95,8 @@ protected:
     auto stream = std::make_unique<NiceMock<MockStream>>();
     EXPECT_CALL(*stream, send(_, _)).WillRepeatedly(Invoke(this, &OrderingTest::doSend));
     EXPECT_CALL(*stream, streamInfo()).WillRepeatedly(ReturnRef(async_client_stream_info_));
-    EXPECT_CALL(*stream, close());
+    EXPECT_CALL(*stream, close()).Times(AtMost(1));
+    EXPECT_CALL(*stream, halfCloseAndDeleteOnRemoteClose()).Times(AtMost(1));
     return stream;
   }
 
@@ -908,7 +914,7 @@ TEST_F(FastFailOrderingTest, GrpcErrorOnStartRequestBodyBufferedPartial) {
     pm->set_request_header_mode(ProcessingMode::SKIP);
     pm->set_request_body_mode(ProcessingMode::BUFFERED_PARTIAL);
   });
-  EXPECT_CALL(decoder_callbacks_, decoderBufferLimit()).WillRepeatedly(Return(BufferSize));
+  EXPECT_CALL(decoder_callbacks_, bufferLimit()).WillRepeatedly(Return(BufferSize));
   sendRequestHeadersPost(false);
   Buffer::OwnedImpl req_body("Hello!");
   EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
@@ -927,8 +933,7 @@ TEST_F(FastFailOrderingTest, GrpcErrorOnTransitionAboveQueueLimitWhenSendingStre
   // Set the limit low so we transition over the queue limit and start sending
   // the stream chunk.
   Buffer::OwnedImpl req_body("Hello!");
-  EXPECT_CALL(decoder_callbacks_, decoderBufferLimit())
-      .WillRepeatedly(Return(req_body.length() / 2));
+  EXPECT_CALL(decoder_callbacks_, bufferLimit()).WillRepeatedly(Return(req_body.length() / 2));
   EXPECT_CALL(decoder_callbacks_, onDecoderFilterAboveWriteBufferHighWatermark());
   EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
 
@@ -978,7 +983,7 @@ TEST_F(FastFailOrderingTest, GrpcErrorIgnoredOnStartRequestBodyBufferedPartial) 
     pm->set_request_header_mode(ProcessingMode::SKIP);
     pm->set_request_body_mode(ProcessingMode::BUFFERED_PARTIAL);
   });
-  EXPECT_CALL(decoder_callbacks_, decoderBufferLimit()).WillRepeatedly(Return(BufferSize));
+  EXPECT_CALL(decoder_callbacks_, bufferLimit()).WillRepeatedly(Return(BufferSize));
   sendRequestHeadersPost(false);
   Buffer::OwnedImpl req_body("Hello!");
   EXPECT_EQ(FilterDataStatus::Continue, filter_->decodeData(req_body, true));

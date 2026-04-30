@@ -21,5 +21,9 @@ alias(
 go_test(
     name = "descfmt_test",
     srcs = ["desc_test.go"],
-    embed = [":descfmt"],
+    deps = [
+        ":descfmt",
+        "//internal/testprotos/test",
+        "//reflect/protoreflect",
+    ],
 )

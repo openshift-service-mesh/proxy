@@ -3,9 +3,12 @@ package afero
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -37,7 +40,9 @@ func TestPathErrors(t *testing.T) {
 	path := filepath.Join(".", "some", "path")
 	path2 := filepath.Join(".", "different", "path")
 	fs := NewMemMapFs()
-	perm := os.FileMode(0755)
+	perm := os.FileMode(0o755)
+	uid := 1000
+	gid := 1000
 
 	// relevant functions:
 	// func (m *MemMapFs) Chmod(name string, mode os.FileMode) error
@@ -53,6 +58,9 @@ func TestPathErrors(t *testing.T) {
 
 	err := fs.Chmod(path, perm)
 	checkPathError(t, err, "Chmod")
+
+	err = fs.Chown(path, uid, gid)
+	checkPathError(t, err, "Chown")
 
 	err = fs.Chtimes(path, time.Now(), time.Now())
 	checkPathError(t, err, "Chtimes")
@@ -107,7 +115,7 @@ func checkPathError(t *testing.T, err error, op string) {
 // Ensure os.O_EXCL is correctly handled.
 func TestOpenFileExcl(t *testing.T) {
 	const fileName = "/myFileTest"
-	const fileMode = os.FileMode(0765)
+	const fileMode = os.FileMode(0o765)
 
 	fs := NewMemMapFs()
 
@@ -133,7 +141,7 @@ func TestPermSet(t *testing.T) {
 	const dirPath = "/myDirTest"
 	const dirPathAll = "/my/path/to/dir"
 
-	const fileMode = os.FileMode(0765)
+	const fileMode = os.FileMode(0o765)
 	// directories will also have the directory bit set
 	const dirMode = fileMode | os.ModeDir
 
@@ -196,7 +204,7 @@ func TestMultipleOpenFiles(t *testing.T) {
 	defer removeAllTestFiles(t)
 	const fileName = "afero-demo2.txt"
 
-	var data = make([][]byte, len(Fss))
+	data := make([][]byte, len(Fss))
 
 	for i, fs := range Fss {
 		dir := testDir(fs)
@@ -209,16 +217,16 @@ func TestMultipleOpenFiles(t *testing.T) {
 		if err != nil {
 			t.Error("fh.Write failed: " + err.Error())
 		}
-		_, err = fh1.Seek(0, os.SEEK_SET)
+		_, err = fh1.Seek(0, io.SeekStart)
 		if err != nil {
 			t.Error(err)
 		}
 
-		fh2, err := fs.OpenFile(path, os.O_RDWR, 0777)
+		fh2, err := fs.OpenFile(path, os.O_RDWR, 0o777)
 		if err != nil {
 			t.Error("fs.OpenFile failed: " + err.Error())
 		}
-		_, err = fh2.Seek(0, os.SEEK_END)
+		_, err = fh2.Seek(0, io.SeekEnd)
 		if err != nil {
 			t.Error(err)
 		}
@@ -287,7 +295,7 @@ func TestReadOnly(t *testing.T) {
 		}
 		f.Close()
 
-		f, err = fs.OpenFile(path, os.O_RDONLY, 0644)
+		f, err = fs.OpenFile(path, os.O_RDONLY, 0o644)
 		if err != nil {
 			t.Error("fs.Open failed: " + err.Error())
 		}
@@ -378,7 +386,7 @@ func TestMemFsDataRace(t *testing.T) {
 	const dir = "test_dir"
 	fs := NewMemMapFs()
 
-	if err := fs.MkdirAll(dir, 0777); err != nil {
+	if err := fs.MkdirAll(dir, 0o777); err != nil {
 		t.Fatal(err)
 	}
 
@@ -389,7 +397,7 @@ func TestMemFsDataRace(t *testing.T) {
 		defer close(done)
 		for i := 0; i < n; i++ {
 			fname := filepath.Join(dir, fmt.Sprintf("%d.txt", i))
-			if err := WriteFile(fs, fname, []byte(""), 0777); err != nil {
+			if err := WriteFile(fs, fname, []byte(""), 0o777); err != nil {
 				panic(err)
 			}
 			if err := fs.Remove(fname); err != nil {
@@ -434,7 +442,7 @@ func TestMemFsMkdirAllMode(t *testing.T) {
 	t.Parallel()
 
 	fs := NewMemMapFs()
-	err := fs.MkdirAll("/a/b/c", 0755)
+	err := fs.MkdirAll("/a/b/c", 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +453,10 @@ func TestMemFsMkdirAllMode(t *testing.T) {
 	if !info.Mode().IsDir() {
 		t.Error("/a: mode is not directory")
 	}
-	if info.Mode() != os.FileMode(os.ModeDir|0755) {
+	if !info.ModTime().After(time.Now().Add(-1 * time.Hour)) {
+		t.Errorf("/a: mod time not set, got %s", info.ModTime())
+	}
+	if info.Mode() != os.FileMode(os.ModeDir|0o755) {
 		t.Errorf("/a: wrong permissions, expected drwxr-xr-x, got %s", info.Mode())
 	}
 	info, err = fs.Stat("/a/b")
@@ -455,8 +466,11 @@ func TestMemFsMkdirAllMode(t *testing.T) {
 	if !info.Mode().IsDir() {
 		t.Error("/a/b: mode is not directory")
 	}
-	if info.Mode() != os.FileMode(os.ModeDir|0755) {
+	if info.Mode() != os.FileMode(os.ModeDir|0o755) {
 		t.Errorf("/a/b: wrong permissions, expected drwxr-xr-x, got %s", info.Mode())
+	}
+	if !info.ModTime().After(time.Now().Add(-1 * time.Hour)) {
+		t.Errorf("/a/b: mod time not set, got %s", info.ModTime())
 	}
 	info, err = fs.Stat("/a/b/c")
 	if err != nil {
@@ -465,8 +479,11 @@ func TestMemFsMkdirAllMode(t *testing.T) {
 	if !info.Mode().IsDir() {
 		t.Error("/a/b/c: mode is not directory")
 	}
-	if info.Mode() != os.FileMode(os.ModeDir|0755) {
+	if info.Mode() != os.FileMode(os.ModeDir|0o755) {
 		t.Errorf("/a/b/c: wrong permissions, expected drwxr-xr-x, got %s", info.Mode())
+	}
+	if !info.ModTime().After(time.Now().Add(-1 * time.Hour)) {
+		t.Errorf("/a/b/c: mod time not set, got %s", info.ModTime())
 	}
 }
 
@@ -475,7 +492,7 @@ func TestMemFsMkdirAllNoClobber(t *testing.T) {
 	t.Parallel()
 
 	fs := NewMemMapFs()
-	err := fs.MkdirAll("/a/b/c", 0755)
+	err := fs.MkdirAll("/a/b/c", 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,10 +500,10 @@ func TestMemFsMkdirAllNoClobber(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode() != os.FileMode(os.ModeDir|0755) {
+	if info.Mode() != os.FileMode(os.ModeDir|0o755) {
 		t.Errorf("/a/b: wrong permissions, expected drwxr-xr-x, got %s", info.Mode())
 	}
-	err = fs.MkdirAll("/a/b/c/d/e/f", 0710)
+	err = fs.MkdirAll("/a/b/c/d/e/f", 0o710)
 	// '/a/b' is unchanged
 	if err != nil {
 		t.Fatal(err)
@@ -495,7 +512,7 @@ func TestMemFsMkdirAllNoClobber(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode() != os.FileMode(os.ModeDir|0755) {
+	if info.Mode() != os.FileMode(os.ModeDir|0o755) {
 		t.Errorf("/a/b: wrong permissions, expected drwxr-xr-x, got %s", info.Mode())
 	}
 	// new directories created with proper permissions
@@ -503,32 +520,32 @@ func TestMemFsMkdirAllNoClobber(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode() != os.FileMode(os.ModeDir|0710) {
+	if info.Mode() != os.FileMode(os.ModeDir|0o710) {
 		t.Errorf("/a/b/c/d: wrong permissions, expected drwx--x---, got %s", info.Mode())
 	}
 	info, err = fs.Stat("/a/b/c/d/e")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode() != os.FileMode(os.ModeDir|0710) {
+	if info.Mode() != os.FileMode(os.ModeDir|0o710) {
 		t.Errorf("/a/b/c/d/e: wrong permissions, expected drwx--x---, got %s", info.Mode())
 	}
 	info, err = fs.Stat("/a/b/c/d/e/f")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode() != os.FileMode(os.ModeDir|0710) {
+	if info.Mode() != os.FileMode(os.ModeDir|0o710) {
 		t.Errorf("/a/b/c/d/e/f: wrong permissions, expected drwx--x---, got %s", info.Mode())
 	}
 }
 
 func TestMemFsDirMode(t *testing.T) {
 	fs := NewMemMapFs()
-	err := fs.Mkdir("/testDir1", 0644)
+	err := fs.Mkdir("/testDir1", 0o644)
 	if err != nil {
 		t.Error(err)
 	}
-	err = fs.MkdirAll("/sub/testDir2", 0644)
+	err = fs.MkdirAll("/sub/testDir2", 0o644)
 	if err != nil {
 		t.Error(err)
 	}
@@ -559,7 +576,7 @@ func TestMemFsUnexpectedEOF(t *testing.T) {
 
 	fs := NewMemMapFs()
 
-	if err := WriteFile(fs, "file.txt", []byte("abc"), 0777); err != nil {
+	if err := WriteFile(fs, "file.txt", []byte("abc"), 0o777); err != nil {
 		t.Fatal(err)
 	}
 
@@ -588,7 +605,7 @@ func TestMemFsChmod(t *testing.T) {
 
 	fs := NewMemMapFs()
 	const file = "hello"
-	if err := fs.Mkdir(file, 0700); err != nil {
+	if err := fs.Mkdir(file, 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -619,7 +636,7 @@ func TestMemFsMkdirModeIllegal(t *testing.T) {
 	t.Parallel()
 
 	fs := NewMemMapFs()
-	err := fs.Mkdir("/a", os.ModeSocket|0755)
+	err := fs.Mkdir("/a", os.ModeSocket|0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +644,7 @@ func TestMemFsMkdirModeIllegal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode() != os.FileMode(os.ModeDir|0755) {
+	if info.Mode() != os.FileMode(os.ModeDir|0o755) {
 		t.Fatalf("should not be able to use Mkdir to set illegal mode: %s", info.Mode().String())
 	}
 }
@@ -637,7 +654,7 @@ func TestMemFsOpenFileModeIllegal(t *testing.T) {
 	t.Parallel()
 
 	fs := NewMemMapFs()
-	file, err := fs.OpenFile("/a", os.O_CREATE, os.ModeSymlink|0644)
+	file, err := fs.OpenFile("/a", os.O_CREATE, os.ModeSymlink|0o644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,7 +663,258 @@ func TestMemFsOpenFileModeIllegal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode() != os.FileMode(0644) {
+	if info.Mode() != os.FileMode(0o644) {
 		t.Fatalf("should not be able to use OpenFile to set illegal mode: %s", info.Mode().String())
+	}
+}
+
+// LstatIfPossible should always return false, since MemMapFs does not
+// support symlinks.
+func TestMemFsLstatIfPossible(t *testing.T) {
+	t.Parallel()
+
+	fs := NewMemMapFs()
+
+	// We assert that fs implements Lstater
+	fsAsserted, ok := fs.(Lstater)
+	if !ok {
+		t.Fatalf("The filesytem does not implement Lstater")
+	}
+
+	file, err := fs.OpenFile("/a.txt", os.O_CREATE, 0o644)
+	if err != nil {
+		t.Fatalf("Error when opening file: %v", err)
+	}
+	defer file.Close()
+
+	_, lstatCalled, err := fsAsserted.LstatIfPossible("/a.txt")
+	if err != nil {
+		t.Fatalf("Function returned err: %v", err)
+	}
+	if lstatCalled {
+		t.Fatalf("Function indicated lstat was called. This should never be true.")
+	}
+}
+
+func TestMemMapFsConfurrentMkdir(t *testing.T) {
+	const dir = "test_dir"
+	const n = 1000
+	mfs := NewMemMapFs().(*MemMapFs)
+
+	allFilePaths := make([]string, 0, n)
+
+	// run concurrency test
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		fp := filepath.Join(
+			dir,
+			fmt.Sprintf("%02d", n%10),
+			fmt.Sprintf("%d.txt", i),
+		)
+		allFilePaths = append(allFilePaths, fp)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			if err := mfs.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+				t.Error(err)
+			}
+
+			wt, err := mfs.Create(fp)
+			if err != nil {
+				t.Error(err)
+			}
+			defer func() {
+				if err := wt.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+
+			// write 30 bytes
+			for j := 0; j < 10; j++ {
+				_, err := wt.Write([]byte("000"))
+				if err != nil {
+					t.Error(err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Test1: find all files by full path access
+	for _, fp := range allFilePaths {
+		info, err := mfs.Stat(fp)
+		if err != nil {
+			t.Error(err)
+		}
+
+		if info.Size() != 30 {
+			t.Errorf("file size should be 30, but got %d", info.Size())
+		}
+
+	}
+
+	// Test2: find all files by walk
+	foundFiles := make([]string, 0, n)
+	wErr := Walk(mfs, dir, func(path string, info fs.FileInfo, err error) error {
+		if err != nil {
+			t.Error(err)
+		}
+		if info.IsDir() {
+			return nil // skip dir
+		}
+		if strings.HasSuffix(info.Name(), ".txt") {
+			foundFiles = append(foundFiles, path)
+		}
+		return nil
+	})
+	if wErr != nil {
+		t.Error(wErr)
+	}
+	if len(foundFiles) != n {
+		t.Errorf("found %d files, but expect %d", len(foundFiles), n)
+	}
+}
+
+func TestMemFsRenameDir(t *testing.T) {
+	const srcPath = "/src"
+	const dstPath = "/dst"
+	const subDir = "dir"
+	const subFile = "file.txt"
+
+	fs := NewMemMapFs()
+
+	err := fs.MkdirAll(srcPath+FilePathSeparator+subDir, 0o777)
+	if err != nil {
+		t.Fatalf("MkDirAll failed: %s", err)
+	}
+
+	f, err := fs.Create(srcPath + FilePathSeparator + subFile)
+	if err != nil {
+		t.Fatalf("Create failed: %s", err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatalf("Close failed: %s", err)
+	}
+
+	err = fs.Rename(srcPath, dstPath)
+	if err != nil {
+		t.Fatalf("Rename failed: %s", err)
+	}
+
+	_, err = fs.Stat(srcPath + FilePathSeparator + subDir)
+	if err == nil {
+		t.Fatalf("SubDir still exists in the source dir")
+	}
+
+	_, err = fs.Stat(srcPath + FilePathSeparator + subFile)
+	if err == nil {
+		t.Fatalf("SubFile still exists in the source dir")
+	}
+
+	_, err = fs.Stat(dstPath + FilePathSeparator + subDir)
+	if err != nil {
+		t.Fatalf("SubDir stat in the destination dir: %s", err)
+	}
+
+	_, err = fs.Stat(dstPath + FilePathSeparator + subFile)
+	if err != nil {
+		t.Fatalf("SubFile stat in the destination dir: %s", err)
+	}
+
+	err = fs.Mkdir(srcPath, 0o777)
+	if err != nil {
+		t.Fatalf("Cannot recreate the source dir: %s", err)
+	}
+
+	err = fs.Mkdir(srcPath+FilePathSeparator+subDir, 0o777)
+	if err != nil {
+		t.Errorf("Cannot recreate the subdir in the source dir: %s", err)
+	}
+}
+
+func TestMemMapFsRename(t *testing.T) {
+	t.Parallel()
+
+	fs := &MemMapFs{}
+	tDir := testDir(fs)
+	rFrom := "/renamefrom"
+	rTo := "/renameto"
+	rExists := "/renameexists"
+
+	type test struct {
+		dirs   []string
+		from   string
+		to     string
+		exists string
+	}
+
+	parts := strings.Split(tDir, "/")
+	root := "/"
+	if len(parts) > 1 {
+		root = filepath.Join("/", parts[1])
+	}
+
+	testData := make([]test, 0, len(parts))
+
+	i := len(parts)
+	for i > 0 {
+		prefix := strings.Join(parts[:i], "/")
+		suffix := strings.Join(parts[i:], "/")
+		testData = append(testData, test{
+			dirs: []string{
+				filepath.Join(prefix, rFrom, suffix),
+				filepath.Join(prefix, rExists, suffix),
+			},
+			from:   filepath.Join(prefix, rFrom),
+			to:     filepath.Join(prefix, rTo),
+			exists: filepath.Join(prefix, rExists),
+		})
+		i--
+	}
+
+	for _, data := range testData {
+		err := fs.RemoveAll(root)
+		if err != nil {
+			t.Fatalf("%s: RemoveAll %q failed: %v", fs.Name(), root, err)
+		}
+
+		for _, dir := range data.dirs {
+			err = fs.MkdirAll(dir, os.FileMode(0775))
+			if err != nil {
+				t.Fatalf("%s: MkdirAll %q failed: %v", fs.Name(), dir, err)
+			}
+		}
+
+		dataCnt := len(fs.getData())
+		err = fs.Rename(data.from, data.to)
+		if err != nil {
+			t.Fatalf("%s: rename %q, %q failed: %v", fs.Name(), data.from, data.to, err)
+		}
+		err = fs.Mkdir(data.from, os.FileMode(0775))
+		if err != nil {
+			t.Fatalf("%s: Mkdir %q failed: %v", fs.Name(), data.from, err)
+		}
+
+		err = fs.Rename(data.from, data.exists)
+		if err != nil {
+			t.Errorf("%s: rename %q, %q failed: %v", fs.Name(), data.from, data.exists, err)
+		}
+
+		for p := range fs.getData() {
+			if strings.Contains(p, data.from) {
+				t.Errorf("File was not renamed to renameto: %v", p)
+			}
+		}
+
+		_, err = fs.Stat(data.to)
+		if err != nil {
+			t.Errorf("%s: stat %q failed: %v", fs.Name(), data.to, err)
+		}
+
+		if dataCnt != len(fs.getData()) {
+			t.Errorf("invalid data len: expected %v, get %v", dataCnt, len(fs.getData()))
+		}
 	}
 }

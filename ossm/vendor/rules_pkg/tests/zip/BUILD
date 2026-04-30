@@ -19,6 +19,7 @@ load("//pkg:mappings.bzl", "pkg_attributes", "pkg_mkdirs", "pkg_mklink")
 load("//pkg:zip.bzl", "pkg_zip")
 load("//tests:my_package_name.bzl", "my_package_naming")
 load("//tests/util:defs.bzl", "directory")
+load("//tests/zip:symlink_util.bzl", "create_fake_symlink")
 
 package(default_applicable_licenses = ["//:license"])
 
@@ -268,6 +269,22 @@ pkg_zip(
     compression_type = "stored",
 )
 
+create_fake_symlink(
+    name = "fake_symlink",
+    link = "fake_symlink",
+    tags = ["REQUIRES_BAZEL_8"],
+    target = "../does_not_exist",
+)
+
+pkg_zip(
+    name = "test_zip_symlink",
+    srcs = [
+        ":fake_symlink",
+        "//tests:file_and_link",
+    ],
+    tags = ["REQUIRES_BAZEL_8"],
+)
+
 py_test(
     name = "zip_test",
     srcs = [
@@ -291,6 +308,21 @@ py_test(
         ":test_zip_tree.zip",
     ],
     python_version = "PY3",
+    deps = [
+        ":zip_test_lib",
+    ],
+)
+
+py_test(
+    name = "zip_symlink_test",
+    srcs = [
+        "zip_symlink_test.py",
+    ],
+    data = [
+        ":test_zip_symlink",
+    ],
+    python_version = "PY3",
+    tags = ["REQUIRES_BAZEL_8"],
     deps = [
         ":zip_test_lib",
     ],

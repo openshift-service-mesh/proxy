@@ -72,11 +72,13 @@ V8_EXPORT_PRIVATE wasm::WasmCompilationResult CompileWasmImportCallWrapper(
     wasm::ImportCallKind, const wasm::CanonicalSig*, int expected_arity,
     wasm::Suspend);
 
+V8_EXPORT_PRIVATE wasm::WasmCompilationResult CompileWasmStackEntryWrapper(
+    const wasm::CanonicalSig* sig);
+
 // Compiles a host call wrapper, which allows Wasm to call host functions.
 wasm::WasmCompilationResult CompileWasmCapiCallWrapper(
     const wasm::CanonicalSig*);
 
-bool IsFastCallSupportedSignature(const v8::CFunctionInfo*);
 // Compiles a wrapper to call a Fast API function from Wasm.
 wasm::WasmCompilationResult CompileWasmJSFastCallWrapper(
     const wasm::CanonicalSig*, DirectHandle<JSReceiver> callable);
@@ -237,10 +239,6 @@ class WasmGraphBuilder {
                                       Node** parameters, int parameter_count);
 
   TrapId GetTrapIdForTrap(wasm::TrapReason reason);
-
-  void BuildModifyThreadInWasmFlag(bool new_value);
-  void BuildModifyThreadInWasmFlagHelper(Node* thread_in_wasm_flag_address,
-                                         bool new_value);
 
   Node* BuildChangeInt64ToBigInt(Node* input, StubCallMode stub_mode);
 

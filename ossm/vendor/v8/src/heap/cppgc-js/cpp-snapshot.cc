@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "absl/container/flat_hash_set.h"
 #include "include/cppgc/heap-consistency.h"
 #include "include/cppgc/internal/name-trait.h"
 #include "include/cppgc/trace-trait.h"
@@ -313,9 +314,9 @@ class State final : public StateBase {
   bool was_visited_from_stack_ = false;
   // Ephemeron keys that will be strongified if a weak container is reachable
   // from stack.
-  std::unordered_set<const HeapObjectHeader*> ephemeron_keys_;
+  absl::flat_hash_set<const HeapObjectHeader*> ephemeron_keys_;
   // Values that are held alive through ephemerons by this particular key.
-  std::unordered_set<const HeapObjectHeader*> ephemeron_edges_;
+  absl::flat_hash_set<const HeapObjectHeader*> ephemeron_edges_;
   // Values that are eagerly traced and held alive through ephemerons by this
   // particular key.
   std::unordered_map<const void*, cppgc::TraceCallback> eager_ephemeron_edges_;
@@ -443,10 +444,7 @@ class CppGraphBuilderImpl final {
  public:
   CppGraphBuilderImpl(
       CppHeap& cpp_heap, v8::EmbedderGraph& graph,
-      UnorderedCppHeapExternalObjectSet&& cpp_heap_external_objects)
-      : cpp_heap_(cpp_heap),
-        graph_(graph),
-        cpp_heap_external_objects_(std::move(cpp_heap_external_objects)) {}
+      UnorderedCppHeapExternalObjectSet&& cpp_heap_external_objects);
 
   void Run();
 
@@ -459,7 +457,7 @@ class CppGraphBuilderImpl final {
       cppgc::TraceDescriptor value_desc);
   void VisitWeakContainerForVisibility(const HeapObjectHeader&);
   void VisitRootForGraphBuilding(RootState&, const HeapObjectHeader&,
-                                 const cppgc::SourceLocation&);
+                                 cppgc::SourceLocation);
   void ProcessPendingObjects();
 
   void RecordEphemeronKey(const HeapObjectHeader&, const HeapObjectHeader&);
@@ -742,7 +740,7 @@ class GraphBuildingRootVisitor final : public cppgc::internal::RootVisitorBase {
       : graph_builder_(graph_builder), parent_scope_(parent_scope) {}
 
   void VisitRoot(const void*, cppgc::TraceDescriptor desc,
-                 const cppgc::SourceLocation& loc) final {
+                 cppgc::SourceLocation loc) final {
     graph_builder_.VisitRootForGraphBuilding(
         parent_scope_.ParentAsRootState(),
         HeapObjectHeader::FromObject(desc.base_object_payload), loc);
@@ -807,6 +805,13 @@ class CppGraphBuilderImpl::WorkstackItemBase {
   State* parent_;
   State& current_;
 };
+
+CppGraphBuilderImpl::CppGraphBuilderImpl(
+    CppHeap& cpp_heap, v8::EmbedderGraph& graph,
+    UnorderedCppHeapExternalObjectSet&& cpp_heap_external_objects)
+    : cpp_heap_(cpp_heap),
+      graph_(graph),
+      cpp_heap_external_objects_(std::move(cpp_heap_external_objects)) {}
 
 void CppGraphBuilderImpl::ProcessPendingObjects() {
   while (!workstack_.empty()) {
@@ -944,7 +949,7 @@ void CppGraphBuilderImpl::VisitForVisibility(State& parent,
 
 void CppGraphBuilderImpl::VisitRootForGraphBuilding(
     RootState& root, const HeapObjectHeader& header,
-    const cppgc::SourceLocation& loc) {
+    cppgc::SourceLocation loc) {
   State& current = states_.GetExistingState(header);
   if (!current.IsVisibleNotDependent()) return;
 

@@ -229,7 +229,6 @@ TF_BUILTIN(FastNewClosure, ConstructorBuiltinsAssembler) {
     Goto(&cell_done);
 
     BIND(&one_closure);
-#ifdef V8_ENABLE_LEAPTIERING
     // The transition from one to many closures under leap tiering requires
     // making sure that the dispatch_handle's code isn't context specialized for
     // the single closure. This is handled in the runtime.
@@ -239,10 +238,6 @@ TF_BUILTIN(FastNewClosure, ConstructorBuiltinsAssembler) {
     // specialized.
     TailCallRuntime(Runtime::kNewClosure, context, shared_function_info,
                     feedback_cell);
-#else
-    StoreMapNoWriteBarrier(feedback_cell, RootIndex::kManyClosuresCellMap);
-    Goto(&cell_done);
-#endif  // V8_ENABLE_LEAPTIERING
 
     BIND(&cell_done);
   }
@@ -297,7 +292,6 @@ TF_BUILTIN(FastNewClosure, ConstructorBuiltinsAssembler) {
   StoreObjectFieldNoWriteBarrier(result, JSFunction::kSharedFunctionInfoOffset,
                                  shared_function_info);
   StoreObjectFieldNoWriteBarrier(result, JSFunction::kContextOffset, context);
-#ifdef V8_ENABLE_LEAPTIERING
   TNode<JSDispatchHandleT> dispatch_handle = LoadObjectField<JSDispatchHandleT>(
       feedback_cell, FeedbackCell::kDispatchHandleOffset);
   CSA_DCHECK(this,
@@ -305,11 +299,6 @@ TF_BUILTIN(FastNewClosure, ConstructorBuiltinsAssembler) {
                             Int32Constant(kNullJSDispatchHandle.value())));
   StoreObjectFieldNoWriteBarrier(result, JSFunction::kDispatchHandleOffset,
                                  dispatch_handle);
-#else
-  TNode<Code> lazy_builtin =
-      HeapConstantNoHole(BUILTIN_CODE(isolate(), CompileLazy));
-  StoreCodePointerField(result, JSFunction::kCodeOffset, lazy_builtin);
-#endif  // V8_ENABLE_LEAPTIERING
   Return(result);
 }
 
@@ -355,11 +344,9 @@ TNode<JSObject> ConstructorBuiltinsAssembler::FastNewObject(
   // Fast path.
 
   // Load the initial map and verify that it's in fact a map.
-  TNode<Object> initial_map_or_proto =
+  TNode<Union<JSReceiver, Map, TheHole>> initial_map_or_proto =
       LoadJSFunctionPrototypeOrInitialMap(new_target_func);
-  GotoIf(TaggedIsSmi(initial_map_or_proto), call_runtime);
-  GotoIf(DoesntHaveInstanceType(CAST(initial_map_or_proto), MAP_TYPE),
-         call_runtime);
+  GotoIf(DoesntHaveInstanceType(initial_map_or_proto, MAP_TYPE), call_runtime);
   TNode<Map> initial_map = CAST(initial_map_or_proto);
 
   // Fall back to runtime if the target differs from the new target's
@@ -520,16 +507,16 @@ TNode<JSRegExp> ConstructorBuiltinsAssembler::CreateRegExpLiteral(
     StoreTrustedPointerField(
         new_object, JSRegExp::kDataOffset, kRegExpDataIndirectPointerTag,
         CAST(LoadTrustedPointerFromObject(
-            boilerplate, RegExpBoilerplateDescription::kDataOffset,
+            boilerplate, offsetof(RegExpBoilerplateDescription, data_),
             kRegExpDataIndirectPointerTag)));
     StoreObjectFieldNoWriteBarrier(
         new_object, JSRegExp::kSourceOffset,
         LoadObjectField(boilerplate,
-                        RegExpBoilerplateDescription::kSourceOffset));
+                        offsetof(RegExpBoilerplateDescription, source_)));
     StoreObjectFieldNoWriteBarrier(
         new_object, JSRegExp::kFlagsOffset,
         LoadObjectField(boilerplate,
-                        RegExpBoilerplateDescription::kFlagsOffset));
+                        offsetof(RegExpBoilerplateDescription, flags_)));
     StoreObjectFieldNoWriteBarrier(
         new_object, JSRegExp::kLastIndexOffset,
         SmiConstant(JSRegExp::kInitialLastIndexValue));

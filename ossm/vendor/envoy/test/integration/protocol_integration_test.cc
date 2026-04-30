@@ -1,4 +1,3 @@
-#include "protocol_integration_test.h"
 #include "test/integration/protocol_integration_test.h"
 
 #include <functional>
@@ -155,6 +154,10 @@ TEST_P(ProtocolIntegrationTest, UpstreamRequestsPerConnectionMetricHandshakeFail
 }
 
 TEST_P(ProtocolIntegrationTest, LogicalDns) {
+  OsSysCallsWithMockedDns mock_os_sys_calls;
+  mock_os_sys_calls.setIpVersion(GetParam().version);
+  TestThreadsafeSingletonInjector<Api::OsSysCallsImpl> os_calls{&mock_os_sys_calls};
+
   if (use_universal_header_validator_) {
     // TODO(#27132): auto_host_rewrite is broken for IPv6 and is failing UHV validation
     return;
@@ -183,9 +186,15 @@ TEST_P(ProtocolIntegrationTest, LogicalDns) {
 
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("200", response->headers().getStatusValue());
+  test_server_.reset();
+  cleanupUpstreamAndDownstream();
 }
 
 TEST_P(ProtocolIntegrationTest, StrictDns) {
+  OsSysCallsWithMockedDns mock_os_sys_calls;
+  mock_os_sys_calls.setIpVersion(GetParam().version);
+  TestThreadsafeSingletonInjector<Api::OsSysCallsImpl> os_calls{&mock_os_sys_calls};
+
   config_helper_.addConfigModifier([&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) -> void {
     RELEASE_ASSERT(bootstrap.mutable_static_resources()->clusters_size() == 1, "");
     auto& cluster = *bootstrap.mutable_static_resources()->mutable_clusters(0);
@@ -204,6 +213,8 @@ TEST_P(ProtocolIntegrationTest, StrictDns) {
 
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("200", response->headers().getStatusValue());
+  test_server_.reset();
+  cleanupUpstreamAndDownstream();
 }
 
 // Change the default route to be restrictive, and send a request to an alternate route.
@@ -1731,7 +1742,6 @@ TEST_P(DownstreamProtocolIntegrationTest, EnvoyProxying102DelayBalsaReset) {
   config_helper_.addConfigModifier(
       [&](envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager&
               hcm) -> void { hcm.set_proxy_100_continue(true); });
-  config_helper_.addRuntimeOverride("envoy.reloadable_features.http1_balsa_delay_reset", "true");
   initialize();
 
   codec_client_ = makeHttpConnection(lookupPort("http"));
@@ -1760,7 +1770,6 @@ TEST_P(DownstreamProtocolIntegrationTest, EnvoyProxying102DelayBalsaResetWaitFor
   config_helper_.addConfigModifier(
       [&](envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager&
               hcm) -> void { hcm.set_proxy_100_continue(true); });
-  config_helper_.addRuntimeOverride("envoy.reloadable_features.http1_balsa_delay_reset", "true");
   initialize();
 
   codec_client_ = makeHttpConnection(lookupPort("http"));
@@ -1770,31 +1779,6 @@ TEST_P(DownstreamProtocolIntegrationTest, EnvoyProxying102DelayBalsaResetWaitFor
                                      {":scheme", "http"},
                                      {":authority", "sni.lyft.com"},
                                      {"expect", "100-contINUE"}});
-  waitForNextUpstreamRequest();
-  upstream_request_->encode1xxHeaders(Http::TestResponseHeaderMapImpl{{":status", "102"}});
-  response->waitFor1xxHeaders();
-  upstream_request_->encodeHeaders(default_response_headers_, true);
-  ASSERT_TRUE(response->waitForEndStream());
-}
-
-TEST_P(DownstreamProtocolIntegrationTest, EnvoyProxying102NoDelayBalsaReset) {
-  if (GetParam().upstream_protocol != Http::CodecType::HTTP1) {
-    GTEST_SKIP() << "This test is only relevant for HTTP1 upstream with BalsaParser";
-  }
-  config_helper_.addConfigModifier(
-      [&](envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager&
-              hcm) -> void { hcm.set_proxy_100_continue(true); });
-  config_helper_.addRuntimeOverride("envoy.reloadable_features.http1_balsa_delay_reset", "false");
-  initialize();
-
-  codec_client_ = makeHttpConnection(lookupPort("http"));
-  auto response = codec_client_->makeHeaderOnlyRequest(
-      Http::TestRequestHeaderMapImpl{{":method", "HEAD"},
-                                     {":path", "/dynamo/url"},
-                                     {":scheme", "http"},
-                                     {":authority", "sni.lyft.com"},
-                                     {"expect", "100-contINUE"}});
-
   waitForNextUpstreamRequest();
   upstream_request_->encode1xxHeaders(Http::TestResponseHeaderMapImpl{{":status", "102"}});
   response->waitFor1xxHeaders();
@@ -2100,9 +2084,11 @@ TEST_P(DownstreamProtocolIntegrationTest, HeadersWithUnderscoresCauseRequestReje
     ASSERT_TRUE(response->waitForReset());
     codec_client_->close();
     ASSERT_TRUE(response->reset());
+    // TODO(wbpcode): We should standardize the reset reason for HTTP/2 and HTTP/3.
     EXPECT_EQ((downstream_protocol_ == Http::CodecType::HTTP3
                    ? Http::StreamResetReason::ProtocolError
-                   : Http::StreamResetReason::RemoteReset),
+               : GetParam().use_universal_header_validator ? Http::StreamResetReason::ProtocolError
+                                                           : Http::StreamResetReason::RemoteReset),
               response->resetReason());
   }
   EXPECT_THAT(waitForAccessLog(access_log_name_), HasSubstr("unexpected_underscore"));
@@ -2141,9 +2127,11 @@ TEST_P(DownstreamProtocolIntegrationTest, TrailerWithUnderscoresCauseRequestReje
     ASSERT_TRUE(response->waitForReset());
     codec_client_->close();
     ASSERT_TRUE(response->reset());
+    // TODO(wbpcode): We should standardize the reset reason for HTTP/2 and HTTP/3.
     EXPECT_EQ((downstream_protocol_ == Http::CodecType::HTTP3
                    ? Http::StreamResetReason::ProtocolError
-                   : Http::StreamResetReason::RemoteReset),
+               : GetParam().use_universal_header_validator ? Http::StreamResetReason::ProtocolError
+                                                           : Http::StreamResetReason::RemoteReset),
               response->resetReason());
   }
   EXPECT_THAT(waitForAccessLog(access_log_name_), HasSubstr("unexpected_underscore"));
@@ -2482,10 +2470,7 @@ TEST_P(DownstreamProtocolIntegrationTest, InvalidContentLengthAllowed) {
     EXPECT_EQ("400", response->headers().getStatusValue());
   } else {
     ASSERT_TRUE(response->reset());
-    EXPECT_EQ((downstream_protocol_ == Http::CodecType::HTTP3
-                   ? Http::StreamResetReason::ProtocolError
-                   : Http::StreamResetReason::RemoteReset),
-              response->resetReason());
+    EXPECT_EQ(Http::StreamResetReason::ProtocolError, response->resetReason());
   }
 }
 
@@ -2538,10 +2523,7 @@ TEST_P(DownstreamProtocolIntegrationTest, MultipleContentLengthsAllowed) {
     EXPECT_EQ("400", response->headers().getStatusValue());
   } else {
     ASSERT_TRUE(response->reset());
-    EXPECT_EQ((downstream_protocol_ == Http::CodecType::HTTP3
-                   ? Http::StreamResetReason::ProtocolError
-                   : Http::StreamResetReason::RemoteReset),
-              response->resetReason());
+    EXPECT_EQ(Http::StreamResetReason::ProtocolError, response->resetReason());
   }
 }
 
@@ -2636,13 +2618,13 @@ uint32_t adjustMaxSingleHeaderSizeForCodecLimits(uint32_t size,
   if (params.http2_implementation == Http2Impl::Nghttp2 &&
       (params.downstream_protocol == Http::CodecType::HTTP2 ||
        params.upstream_protocol == Http::CodecType::HTTP2)) {
-    // nghttp2 has a hard-coded, unconfigurable limit of 64k for a header in it's header
-    // decompressor, so this test will always fail when using that codec.
-    // Reduce the size so that it can pass and receive some test coverage.
+    // nghttp2 has a default limit of 64k for a header in its HPACK decompressor.
+    // This can be increased via max_header_field_size_kb, but for these tests we
+    // reduce the size so that it can pass with the default limit.
     return 100;
   } else if (params.downstream_protocol == Http::CodecType::HTTP3 ||
              params.upstream_protocol == Http::CodecType::HTTP3) {
-    // QUICHE has a hard-coded limit of 1024KiB in it's QPACK decoder.
+    // QUICHE has a hard-coded limit of 1024 KB in its QPACK decoder.
     // Reduce the size so that it can pass and receive some test coverage.
     return 1023;
   }
@@ -2656,6 +2638,74 @@ TEST_P(ProtocolIntegrationTest, VeryLargeRequestHeadersAccepted) {
   uint32_t size = adjustMaxSingleHeaderSizeForCodecLimits(8191, GetParam());
 
   testLargeRequestHeaders(size, 1, 8192, 100, TestUtility::DefaultTimeout);
+}
+
+// Test that configuring max_header_field_size_kb allows sending a single header that exceeds
+// the default nghttp2 per-header HPACK limit.
+TEST_P(ProtocolIntegrationTest, VeryLargeRequestHeadersAcceptedWithIncreasedPerHeaderLimit) {
+  // This test only applies when both downstream and upstream are HTTP/2 with nghttp2.
+  if (GetParam().http2_implementation != Http2Impl::Nghttp2 ||
+      GetParam().downstream_protocol != Http::CodecType::HTTP2 ||
+      GetParam().upstream_protocol != Http::CodecType::HTTP2) {
+    return;
+  }
+
+  // Use a 200 KB header of 'a' characters. With Huffman encoding, 'a' is 5 bits, so the
+  // wire-encoded size is 200*1024*5/8 = 128000 bytes, which exceeds the default 64 KB
+  // wire limit but fits within a max_header_field_size_kb of 128 KB.
+  const uint32_t header_size_kb = 200;
+  const uint32_t max_header_field_size_kb = 128;
+  const uint32_t max_headers_kb = header_size_kb + 1;
+
+  // Configure downstream HTTP/2 codec with increased max_header_field_size_kb.
+  config_helper_.addConfigModifier(
+      [&](envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager&
+              hcm) -> void {
+        hcm.mutable_max_request_headers_kb()->set_value(max_headers_kb);
+        hcm.mutable_http2_protocol_options()->mutable_max_header_field_size_kb()->set_value(
+            max_header_field_size_kb);
+      });
+
+  // Configure upstream cluster HTTP/2 options with increased max_header_field_size_kb.
+  config_helper_.addConfigModifier([&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) -> void {
+    RELEASE_ASSERT(bootstrap.mutable_static_resources()->clusters_size() >= 1, "");
+    ConfigHelper::HttpProtocolOptions protocol_options;
+    protocol_options.mutable_explicit_http_config()
+        ->mutable_http2_protocol_options()
+        ->mutable_max_header_field_size_kb()
+        ->set_value(max_header_field_size_kb);
+    protocol_options.mutable_common_http_protocol_options()
+        ->mutable_max_response_headers_kb()
+        ->set_value(max_headers_kb);
+    ConfigHelper::setProtocolOptions(*bootstrap.mutable_static_resources()->mutable_clusters(0),
+                                     protocol_options);
+  });
+
+  // Configure the fake upstream to accept the larger headers.
+  setMaxRequestHeadersKb(max_headers_kb);
+  upstreamConfig().http2_options_.mutable_max_header_field_size_kb()->set_value(
+      max_header_field_size_kb);
+
+  autonomous_upstream_ = true;
+  initialize();
+
+  codec_client_ = makeHttpConnection(lookupPort("http"));
+  reinterpret_cast<AutonomousUpstream*>(fake_upstreams_.front().get())
+      ->setResponseHeaders(
+          std::make_unique<Http::TestResponseHeaderMapImpl>(default_response_headers_));
+
+  Http::TestRequestHeaderMapImpl big_headers{{":method", "GET"},
+                                             {":path", "/test/long/url"},
+                                             {":scheme", "http"},
+                                             {":authority", "sni.lyft.com"}};
+  big_headers.addCopy("big", std::string(header_size_kb * 1024, 'a'));
+
+  IntegrationStreamDecoderPtr response = codec_client_->makeHeaderOnlyRequest(big_headers);
+  RELEASE_ASSERT(response->waitForEndStream(TestUtility::DefaultTimeout),
+                 "unexpected timeout waiting for response");
+  EXPECT_TRUE(response->complete());
+  EXPECT_EQ("200", response->headers().getStatusValue());
+  codec_client_->close();
 }
 
 // Test a single header of the maximum allowed size.
@@ -4934,10 +4984,7 @@ TEST_P(DownstreamProtocolIntegrationTest, ContentLengthSmallerThanPayload) {
     // Inconsistency in content-length header and the actually body length should be treated as a
     // stream error.
     ASSERT_TRUE(response->waitForReset());
-    EXPECT_EQ((downstreamProtocol() == Http::CodecType::HTTP3
-                   ? Http::StreamResetReason::ProtocolError
-                   : Http::StreamResetReason::RemoteReset),
-              response->resetReason());
+    EXPECT_EQ(Http::StreamResetReason::ProtocolError, response->resetReason());
   }
 }
 
@@ -4966,9 +5013,7 @@ TEST_P(DownstreamProtocolIntegrationTest, ContentLengthLargerThanPayload) {
   // Inconsistency in content-length header and the actually body length should be treated as a
   // stream error.
   ASSERT_TRUE(response->waitForReset());
-  EXPECT_EQ((downstreamProtocol() == Http::CodecType::HTTP3 ? Http::StreamResetReason::ProtocolError
-                                                            : Http::StreamResetReason::RemoteReset),
-            response->resetReason());
+  EXPECT_EQ(Http::StreamResetReason::ProtocolError, response->resetReason());
 }
 
 class NoUdpGso : public Api::OsSysCallsImpl {
@@ -5069,11 +5114,11 @@ TEST_P(ProtocolIntegrationTest, HandleUpstreamSocketFail) {
 class AllowForceFail : public Api::OsSysCallsImpl {
 public:
   void startFailing() {
-    absl::MutexLock m(&mutex_);
+    absl::MutexLock m(mutex_);
     fail_ = true;
   }
   Api::SysCallSocketResult socket(int domain, int type, int protocol) override {
-    absl::MutexLock m(&mutex_);
+    absl::MutexLock m(mutex_);
     if (fail_) {
       return {-1, 1};
     }
@@ -5244,10 +5289,7 @@ TEST_P(DownstreamProtocolIntegrationTest, InvalidRequestHeaderNameStreamError) {
     test_server_->waitForCounterGe("http.config_test.downstream_rq_4xx", 1);
   } else {
     // H/2 codec does not send 400 on protocol errors
-    EXPECT_EQ((downstream_protocol_ == Http::CodecType::HTTP3
-                   ? Http::StreamResetReason::ProtocolError
-                   : Http::StreamResetReason::RemoteReset),
-              response->resetReason());
+    EXPECT_EQ(Http::StreamResetReason::ProtocolError, response->resetReason());
   }
 }
 
@@ -5518,12 +5560,12 @@ TEST_P(ProtocolIntegrationTest, ServerHalfCloseBeforeClientWithErrorAndBufferedR
       ASSERT_TRUE(response->waitForReset());
     } else if (downstreamProtocol() == Http::CodecType::HTTP3) {
       // Unlike H/2, H/3 client codec only stops sending request upon STOP_SENDING frame but still
-      // attempts to finish receiving response. So resume reading in order to fully close the
-      // stream after receiving both STOP_SENDING and end stream.
+      // attempts to finish receiving response. Resume reading so the response can complete.
+      // The stream may terminate via end_stream (response fully received) and/or via reset
+      // (STOP_SENDING). The ordering between these two events is non-deterministic, so use
+      // waitForAnyTermination() to handle either case.
       request_encoder_->getStream().readDisable(false);
-      ASSERT_TRUE(response->waitForEndStream());
-      // Following STOP_SENDING will be propagated via reset callback.
-      ASSERT_TRUE(response->waitForReset());
+      ASSERT_TRUE(response->waitForAnyTermination());
     }
   } else if (fake_upstreams_[0]->httpType() == Http::CodecType::HTTP2 ||
              fake_upstreams_[0]->httpType() == Http::CodecType::HTTP3) {
@@ -5792,9 +5834,7 @@ TEST_P(DownstreamProtocolIntegrationTest, InvalidTrailerStreamError) {
   ASSERT_TRUE(response->waitForReset());
   codec_client_->close();
   ASSERT_TRUE(response->reset());
-  EXPECT_EQ((downstreamProtocol() == Http::CodecType::HTTP3 ? Http::StreamResetReason::ProtocolError
-                                                            : Http::StreamResetReason::RemoteReset),
-            response->resetReason());
+  EXPECT_EQ(Http::StreamResetReason::ProtocolError, response->resetReason());
   if (!use_universal_header_validator_) {
     // TODO(#24620) UHV does not include the DPE prefix in the downstream protocol error reasons
     if (downstreamProtocol() != Http::CodecType::HTTP3) {
@@ -5856,20 +5896,11 @@ TEST_P(DownstreamProtocolIntegrationTest, EmptyCookieHeader) {
 
   const bool has_empty_cookie =
       !upstream_request_->headers().get(Http::LowerCaseString("cookie")).empty();
-  if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.http3_remove_empty_cookie")) {
-    if (downstreamProtocol() == Http::CodecType::HTTP1 &&
-        upstreamProtocol() == Http::CodecType::HTTP1) {
-      EXPECT_TRUE(has_empty_cookie);
-    } else {
-      EXPECT_FALSE(has_empty_cookie);
-    }
+  if (downstreamProtocol() == Http::CodecType::HTTP1 &&
+      upstreamProtocol() == Http::CodecType::HTTP1) {
+    EXPECT_TRUE(has_empty_cookie);
   } else {
-    if (downstreamProtocol() == Http::CodecType::HTTP2 ||
-        upstreamProtocol() == Http::CodecType::HTTP2) {
-      EXPECT_FALSE(has_empty_cookie);
-    } else {
-      EXPECT_TRUE(has_empty_cookie);
-    }
+    EXPECT_FALSE(has_empty_cookie);
   }
   upstream_request_->encodeHeaders(default_response_headers_, true);
   ASSERT_TRUE(response->waitForEndStream());

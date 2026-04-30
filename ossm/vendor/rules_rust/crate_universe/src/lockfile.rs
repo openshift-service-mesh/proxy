@@ -163,6 +163,8 @@ impl Digest {
             OsStr::new("HOME"),
             OsStr::new("HOMEDRIVE"),
             OsStr::new("PATHEXT"),
+            OsStr::new("NIX_LD"),
+            OsStr::new("NIX_LD_LIBRARY_PATH"),
         ];
         let env = std::env::vars_os().filter(|(var, _)| safe_vars.contains(&var.as_os_str()));
 
@@ -245,7 +247,7 @@ mod test {
         );
 
         assert_eq!(
-            Digest("a7064691f0024f1c7baa21e632e6258bfb4bf0b239333d3857462e6c87ec8e8d".to_owned()),
+            Digest("edd73970897c01af3bb0e6c9d62f572203dd38a03c189dcca555d463990aa086".to_owned()),
             digest,
         );
     }
@@ -290,7 +292,7 @@ mod test {
         );
 
         assert_eq!(
-            Digest("9e578eae3fe8a8a8211433d7c1d40bc26a1d921fba1451235b8d6fe0939ba810".to_owned()),
+            Digest("8a4c1b3bb4c2d6c36e27565e71a13d54cff9490696a492c66a3a37bdd3893edf".to_owned()),
             digest,
         );
     }
@@ -321,7 +323,7 @@ mod test {
         );
 
         assert_eq!(
-            Digest("3c7499d1b8cf0f5a0708354ec7b4e4e203cd1f43b0a9537fc332a4ad6cd67830".to_owned()),
+            Digest("1e01331686ba1f26f707dc098cd9d21c39d6ccd8e46be03329bb2470d3833e15".to_owned()),
             digest,
         );
     }
@@ -370,8 +372,61 @@ mod test {
         );
 
         assert_eq!(
-            Digest("d6b428e411f951b55c17b4a67a8fc66a4e4d549fcd8d792c5974750ab0b34900".to_owned()),
+            Digest("45ccf7109db2d274420fac521f4736a1fb55450ec60e6df698e1be4dc2c89fad".to_owned()),
             digest,
+        );
+    }
+
+    #[test]
+    fn digest_stable_with_crlf_cargo_config() {
+        let context = Context::default();
+        let splicing_metadata = SplicingMetadata::default();
+
+        let json_config = |cargo_config: &str| {
+            serde_json::to_string(&serde_json::json!({
+                "generate_binaries": false,
+                "generate_build_scripts": false,
+                "cargo_config": cargo_config,
+                "rendering": {
+                    "repository_name": "test",
+                    "regen_command": "//test",
+                    "generate_cargo_toml_env_vars": true
+                }
+            }))
+            .unwrap()
+        };
+
+        let config_crlf: Config = serde_json::from_str(&json_config(
+            "[registries.my-registry]\r\nindex = \"sparse+https://example.com/\"",
+        ))
+        .unwrap();
+
+        let config_lf: Config = serde_json::from_str(&json_config(
+            "[registries.my-registry]\nindex = \"sparse+https://example.com/\"",
+        ))
+        .unwrap();
+
+        let digest_crlf = Digest::compute(
+            &context,
+            &config_crlf,
+            &splicing_metadata,
+            "0.1.0",
+            "cargo 1.57.0 (b2e52d7ca 2021-10-21)",
+            "rustc 1.57.0 (f1edd0429 2021-11-29)",
+        );
+
+        let digest_lf = Digest::compute(
+            &context,
+            &config_lf,
+            &splicing_metadata,
+            "0.1.0",
+            "cargo 1.57.0 (b2e52d7ca 2021-10-21)",
+            "rustc 1.57.0 (f1edd0429 2021-11-29)",
+        );
+
+        assert_eq!(
+            digest_crlf, digest_lf,
+            "Digests should be identical regardless of CRLF vs LF line endings in cargo_config"
         );
     }
 }

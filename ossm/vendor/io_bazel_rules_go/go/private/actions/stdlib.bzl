@@ -25,6 +25,7 @@ load(
 load(
     "//go/private:mode.bzl",
     "LINKMODE_NORMAL",
+    "LINKMODE_PIE",
     "extldflags_from_cc_toolchain",
     "link_mode_arg",
 )
@@ -60,7 +61,7 @@ def _should_use_sdk_stdlib(go):
             not go.mode.msan and
             not go.mode.pure and
             not go.mode.gc_goopts and
-            go.mode.linkmode == LINKMODE_NORMAL)
+            go.mode.linkmode in (LINKMODE_NORMAL, LINKMODE_PIE))
 
 def _build_stdlib_list_json(go):
     sdk = go.sdk
@@ -68,9 +69,10 @@ def _build_stdlib_list_json(go):
     out = go.declare_file(go, "stdlib.pkg.json")
     cache_dir = go.declare_directory(go, "gocache")
     args = go.builder_args(go, "stdliblist")
-    args.add("-sdk", sdk.root_file.dirname)
     args.add("-out", out)
-    args.add("-cache", cache_dir.path)
+    args.add_all("-cache", [cache_dir], expand_directories = False)
+    if go.export_stdlib:
+        args.add("-export", go.export_stdlib)
 
     inputs_direct = [sdk.go]
     inputs_transitive = [sdk.headers, sdk.srcs, sdk.libs, sdk.tools]
@@ -85,8 +87,9 @@ def _build_stdlib_list_json(go):
         arguments = [args],
         env = _build_env(go),
         toolchain = GO_TOOLCHAIN_LABEL,
+        execution_requirements = SUPPORTS_PATH_MAPPING_REQUIREMENT,
     )
-    return out
+    return out, cache_dir
 
 def _build_env(go):
     env = go.env
@@ -115,8 +118,10 @@ def _build_env(go):
     return env
 
 def _sdk_stdlib(go):
+    list_json, cache_dir = _build_stdlib_list_json(go)
     return GoStdLib(
-        _list_json = _build_stdlib_list_json(go),
+        _list_json = list_json,
+        cache_dir = depset([cache_dir]),
         libs = go.sdk.libs,
         root_file = go.sdk.root_file,
     )
@@ -126,7 +131,7 @@ def _dirname(file):
 
 def _build_stdlib(go):
     pkg = go.declare_directory(go, path = "pkg")
-    args = go.builder_args(go, "stdlib", use_path_mapping = True)
+    args = go.builder_args(go, "stdlib")
 
     # Use a file rather than pkg.dirname as the latter is just a string and thus
     # not subject to path mapping.
@@ -138,6 +143,12 @@ def _build_stdlib(go):
     args.add("-package", "std")
     if not go.mode.pure:
         args.add("-package", "runtime/cgo")
+
+    version = parse_version(go.sdk.version)
+    if version and version[0] >= 1 and version[1] >= 20:
+        # For bzltestutil's coverage support - `cmd/internal/cov` only introduced in go 1.20
+        args.add("-package", "cmd/internal/cov")
+        args.add("-package", "cmd/internal/bio")
 
     link_mode_flag = link_mode_arg(go.mode)
     if link_mode_flag:
@@ -164,8 +175,10 @@ def _build_stdlib(go):
         toolchain = GO_TOOLCHAIN_LABEL,
         execution_requirements = SUPPORTS_PATH_MAPPING_REQUIREMENT,
     )
+    list_json, cache_dir = _build_stdlib_list_json(go)
     return GoStdLib(
-        _list_json = _build_stdlib_list_json(go),
+        _list_json = list_json,
         libs = depset([pkg]),
+        cache_dir = depset([cache_dir]),
         root_file = pkg,
     )

@@ -402,7 +402,7 @@ class ImmediatesPrinter {
   void HeapType(HeapTypeImmediate& imm) {
     out_ << " ";
     names()->PrintHeapType(out_, imm.type);
-    if (imm.type.is_index()) use_type(imm.type.ref_index());
+    if (imm.type.has_index()) use_type(imm.type.ref_index());
   }
 
   void ValueType(ValueType type) {
@@ -788,15 +788,24 @@ void ModuleDisassembler::PrintTypeDefinition(uint32_t type_index,
   uint32_t offset = offsets_->type_offset(type_index);
   out_.NextLine(offset);
   out_ << indentation << "(type ";
+  size_t num_closing_parens = 2;  // One for "(type", one for "(struct" etc.
   names_->PrintTypeName(out_, type_index, index_as_comment);
   const TypeDefinition& type = module_->types[type_index];
-  bool has_super = type.supertype != kNoSuperType;
-  if (has_super) {
+  if (type.supertype != kNoSuperType) {
     out_ << " (sub ";
+    num_closing_parens++;
     if (type.is_final) out_ << "final ";
-    names_->PrintHeapType(out_,
-                          HeapType::Index(type.supertype, type.is_shared,
-                                          static_cast<RefTypeKind>(type.kind)));
+    names_->PrintTypeName(out_, type.supertype);
+  }
+  if (type.is_descriptor()) {
+    out_ << " (describes ";
+    names_->PrintTypeName(out_, type.describes);
+    out_ << ")";
+  }
+  if (type.has_descriptor()) {
+    out_ << " (descriptor ";
+    names_->PrintTypeName(out_, type.descriptor);
+    out_ << ")";
   }
   if (type.kind == TypeDefinition::kArray) {
     const ArrayType* atype = type.array_type;
@@ -804,7 +813,7 @@ void ModuleDisassembler::PrintTypeDefinition(uint32_t type_index,
     if (type.is_shared) out_ << " shared";
     out_ << " (field ";
     PrintMutableType(atype->mutability(), atype->element_type());
-    out_ << ")";  // Closes "(field ...".
+    num_closing_parens++;  // Closes "(field ...".
   } else if (type.kind == TypeDefinition::kStruct) {
     const StructType* stype = type.struct_type;
     out_ << " (struct";
@@ -838,8 +847,9 @@ void ModuleDisassembler::PrintTypeDefinition(uint32_t type_index,
       out_ << ")";
     }
   }
-  // Closes "(type", "(sub", and "(array" / "(struct" / "(func".
-  out_ << (has_super ? ")))" : "))");
+  constexpr const char* parens = ")))))";
+  DCHECK_LE(num_closing_parens, strlen(parens));
+  out_.write(parens, num_closing_parens);
 }
 
 void ModuleDisassembler::PrintModule(Indentation indentation, size_t max_mb) {
@@ -922,14 +932,19 @@ void ModuleDisassembler::PrintModule(Indentation indentation, size_t max_mb) {
         PrintTable(table);
         break;
       }
-      case kExternalFunction: {
+      case kExternalFunction:
+      case kExternalExactFunction: {
         out_ << "(func ";
         names_->PrintFunctionName(out_, import.index, NamesProvider::kDevTools,
                                   kIndicesAsComments);
         const WasmFunction& func = module_->functions[import.index];
+        // Exports always use non-exact kExternalFunction, because exact
+        // exports would provide no benefit.
         if (func.exported) PrintExportName(kExternalFunction, import.index);
         PrintImportName(import);
+        if (import.kind == kExternalExactFunction) out_ << "(exact ";
         PrintSignatureOneLine(out_, func.sig, import.index, names_, false);
+        if (import.kind == kExternalExactFunction) out_ << ")";
         break;
       }
       case kExternalGlobal: {

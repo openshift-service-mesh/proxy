@@ -14,6 +14,8 @@
 
 """Common code for sh_binary and sh_test rules."""
 
+load(":providers.bzl", "ShBinaryInfo", "ShInfo")
+
 visibility(["//shell"])
 
 _SH_TOOLCHAIN_TYPE = Label("//shell:toolchain_type")
@@ -23,6 +25,9 @@ def _to_rlocation_path(ctx, file):
         return file.short_path[3:]
     else:
         return ctx.workspace_name + "/" + file.short_path
+
+# A memory optimization for an empty provider
+_SHARED_PROVIDER = ShBinaryInfo()
 
 def _sh_executable_impl(ctx):
     if len(ctx.files.srcs) != 1:
@@ -34,10 +39,19 @@ def _sh_executable_impl(ctx):
     runfiles = ctx.runfiles(collect_default = True)
 
     entrypoint = ctx.actions.declare_file(ctx.label.name)
+    targets_windows = ctx.target_platform_has_constraint(ctx.attr._windows_constraint[platform_common.ConstraintValueInfo])
     if ctx.attr.use_bash_launcher:
+        if targets_windows:
+            # Windows uses a launcher executable that invokes the correct shell.
+            # A Windows-style path in a shebang is either ignored or causes an
+            # error.
+            shebang = ""
+        else:
+            shell = ctx.toolchains[_SH_TOOLCHAIN_TYPE].path
+            shebang = "#!{}".format(shell)
         ctx.actions.write(
             entrypoint,
-            content = """#!{shell}
+            content = """{shebang}
 
 # --- begin runfiles.bash initialization v3 ---
 set -uo pipefail; set +e; f=bazel_tools/tools/bash/runfiles/runfiles.bash
@@ -54,7 +68,7 @@ runfiles_export_envvars
 
 exec "$(rlocation "{src}")" "$@"
 """.format(
-                shell = ctx.toolchains[_SH_TOOLCHAIN_TYPE].path,
+                shebang = shebang,
                 src = _to_rlocation_path(ctx, src),
             ),
             is_executable = True,
@@ -72,7 +86,7 @@ exec "$(rlocation "{src}")" "$@"
     # TODO: Consider extracting this logic into a function provided by
     # sh_toolchain to allow users to inject launcher creation logic for
     # non-Windows platforms.
-    if ctx.target_platform_has_constraint(ctx.attr._windows_constraint[platform_common.ConstraintValueInfo]):
+    if targets_windows:
         main_executable = _launcher_for_windows(ctx, entrypoint, src)
         direct_files.append(main_executable)
     else:
@@ -108,6 +122,7 @@ exec "$(rlocation "{src}")" "$@"
         default_info,
         instrumented_files_info,
         run_environment_info,
+        _SHARED_PROVIDER,
     ]
 
 _WINDOWS_EXECUTABLE_EXTENSIONS = [
@@ -191,7 +206,7 @@ The file containing the shell script.
                 flags = ["SKIP_CONSTRAINTS_OVERRIDE"],
             ),
             "deps": attr.label_list(
-                allow_rules = ["sh_library"],
+                providers = [ShInfo],
                 doc = """
 The list of "library" targets to be aggregated into this target.
 See general comments about <code>deps</code>
@@ -219,5 +234,6 @@ most build rules</a>.
         toolchains = [
             config_common.toolchain_type(_SH_TOOLCHAIN_TYPE, mandatory = False),
         ],
+        provides = [ShBinaryInfo],
         **kwargs
     )

@@ -29,7 +29,58 @@ option (udpa.annotations.file_status).package_version_status = ACTIVE;
 // TCP Proxy :ref:`configuration overview <config_network_filters_tcp_proxy>`.
 // [#extension: envoy.filters.network.tcp_proxy]
 
-// [#next-free-field: 21]
+// Specifies when the TCP proxy establishes the upstream connection.
+enum UpstreamConnectMode {
+  // Establish the upstream connection immediately when the downstream connection is accepted.
+  // This is the default behavior and provides the lowest latency.
+  IMMEDIATE = 0;
+
+  // Wait for initial data from the downstream connection before establishing the upstream connection.
+  // This allows preceding filters to inspect the initial data (e.g., extracting SNI from TLS ClientHello)
+  // before the upstream connection is established.
+  //
+  // This mode requires ``max_early_data_bytes`` to be set.
+  //
+  // .. warning::
+  //   This mode is not suitable for server-first protocols (e.g., SMTP, MySQL, POP3) where the
+  //   server sends the initial greeting. For such protocols, use ``IMMEDIATE`` mode.
+  ON_DOWNSTREAM_DATA = 1;
+
+  // Wait for the downstream TLS handshake to complete before establishing the upstream connection.
+  // This allows access to the full TLS connection information, including client certificates
+  // and negotiated parameters, which can be used for routing decisions or passed as metadata
+  // to the upstream.
+  //
+  // This mode requires ``max_early_data_bytes`` to be set (can be zero to disable buffering).
+  //
+  // .. note::
+  //   This mode is only effective when the downstream connection uses TLS. For non-TLS
+  //   connections, it behaves the same as ``IMMEDIATE``.
+  ON_DOWNSTREAM_TLS_HANDSHAKE = 2;
+}
+
+// Specifies how TLVs in ``proxy_protocol_tlvs`` are merged with existing PROXY protocol state
+// (e.g., downstream TLVs parsed by the proxy_protocol listener filter).
+enum ProxyProtocolTlvMergePolicy {
+  // Add configured TLVs only if no PROXY protocol state exists (e.g., no downstream TLVs).
+  // If state exists, ignore configured TLVs and use only the existing TLVs.
+  // This is the default for backward compatibility.
+  ADD_IF_ABSENT = 0;
+
+  // Overwrite existing TLVs (e.g., downstream TLVs) by type with configured TLVs.
+  // Non-conflicting TLVs from both sources are preserved.
+  // If no state exists, add all configured TLVs.
+  // Source/destination addresses from existing state are preserved.
+  OVERWRITE_BY_TYPE_IF_EXISTS_OR_ADD = 1;
+
+  // Append configured TLVs to existing TLVs (e.g., downstream TLVs), preserving all TLVs
+  // from both sources (PROXY protocol v2 allows duplicate types).
+  // If no state exists, add all configured TLVs.
+  // Source/destination addresses from existing state are preserved.
+  APPEND_IF_EXISTS_OR_ADD = 2;
+}
+
+// [#next-free-field: 24]
 message TcpProxy {
   option (udpa.annotations.versioning).previous_message_type =
       "envoy.config.filter.network.tcp_proxy.v2.TcpProxy";
@@ -111,7 +162,7 @@ message TcpProxy {
 
     // The path used with the POST method. The default path is ``/``. If this field is specified and
     // :ref:`use_post field <envoy_v3_api_field_extensions.filters.network.tcp_proxy.v3.TcpProxy.TunnelingConfig.use_post>`
-    // is not set to true, the configuration will be rejected.
+    // is not set to ``true``, the configuration will be rejected.
     string post_path = 5;
 
     // Save response trailers to the downstream connection's filter state for consumption
@@ -176,9 +227,12 @@ message TcpProxy {
     google.protobuf.Duration access_log_flush_interval = 1
         [(validate.rules).duration = {gte {nanos: 1000000}}];
 
-    // If set to true, the access log is flushed when the TCP proxy successfully establishes a
+    // If set to ``true``, the access log is flushed when the TCP proxy successfully establishes a
     // connection with the upstream. If the connection fails, the access log is not flushed.
     bool flush_access_log_on_connected = 2;
+
+    // If set to ``true``, the access log is flushed when the TCP proxy accepts a connection.
+    bool flush_access_log_on_start = 3;
   }
 
   reserved 6;
@@ -294,20 +348,46 @@ message TcpProxy {
   // Additional access log options for the TCP proxy.
   TcpAccessLogOptions access_log_options = 17;
 
-  // If set, the specified ``PROXY`` protocol TLVs (Type-Length-Value) are added to the ``PROXY`` protocol state
-  // created by the TCP proxy filter. These TLVs are sent in the PROXY protocol v2 header to the upstream.
-  //
-  // This field only takes effect when the TCP proxy filter is creating new ``PROXY`` protocol state and an
-  // upstream proxy protocol transport socket is configured in the cluster. If the connection already
-  // contains ``PROXY`` protocol state (including any TLVs) parsed by a downstream proxy protocol listener
-  // upstream proxy protocol transport socket is configured in the cluster. If the connection already
-  // contains PROXY protocol state (including any TLVs) parsed by a downstream proxy protocol listener
-  // filter, the TLVs specified here are ignored.
+  // TLVs to add to the PROXY protocol header sent upstream. Behavior when PROXY protocol
+  // state already exists (e.g., downstream TLVs from proxy_protocol listener filter) is
+  // controlled by ``proxy_protocol_tlv_merge_policy``.
   //
   // .. note::
-  //   To ensure the specified TLVs are allowed in the upstream ``PROXY`` protocol header, you must also
-  //   configure passthrough TLVs on the upstream proxy protocol transport. See
-  //   :ref:`core.v3.ProxyProtocolConfig.pass_through_tlvs <envoy_v3_api_field_config.core.v3.ProxyProtocolConfig.pass_through_tlvs>`
-  //   for details.
+  //   To ensure the TLVs are allowed upstream, configure passthrough TLVs on the upstream
+  //   proxy protocol transport. See :ref:`core.v3.ProxyProtocolConfig.pass_through_tlvs
+  //   <envoy_v3_api_field_config.core.v3.ProxyProtocolConfig.pass_through_tlvs>` for details.
   repeated config.core.v3.TlvEntry proxy_protocol_tlvs = 19;
+
+  // Specifies how TLVs in ``proxy_protocol_tlvs`` are merged with existing PROXY protocol state
+  // (e.g., downstream TLVs from the proxy_protocol listener filter). See
+  // :ref:`ProxyProtocolTlvMergePolicy
+  // <envoy_v3_api_enum_extensions.filters.network.tcp_proxy.v3.ProxyProtocolTlvMergePolicy>`.
+  ProxyProtocolTlvMergePolicy proxy_protocol_tlv_merge_policy = 23
+      [(validate.rules).enum = {defined_only: true}];
+
+  // Specifies when to establish the upstream connection.
+  //
+  // When not specified, defaults to ``IMMEDIATE`` for backward compatibility.
+  //
+  // .. attention::
+  //   Server-first protocols (e.g., SMTP, MySQL, POP3) require ``IMMEDIATE`` mode.
+  UpstreamConnectMode upstream_connect_mode = 21 [(validate.rules).enum = {defined_only: true}];
+
+  // Maximum bytes of early data to buffer from the downstream connection before
+  // the upstream connection is established.
+  //
+  // If not set, the TCP proxy will read-disable the downstream connection until the
+  // upstream connection is established (legacy behavior).
+  //
+  // If set, enables ``receive_before_connect`` mode where the filter allows the filter
+  // chain to read downstream data before the upstream connection exists. The data is
+  // buffered and forwarded once the upstream connection is ready. When the buffer exceeds
+  // this limit, the downstream connection is read-disabled to prevent excessive memory usage.
+  //
+  // This field is required when ``upstream_connect_mode`` is not ``IMMEDIATE``.
+  //
+  // .. note::
+  //   Use this carefully with server-first protocols. The upstream may send data before
+  //   receiving anything from downstream, which could fill the early data buffer.
+  google.protobuf.UInt32Value max_early_data_bytes = 22 [(validate.rules).uint32 = {lte: 1048576}];
 }

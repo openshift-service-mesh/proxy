@@ -11,7 +11,7 @@
 #include "src/base/sanitizer/msan.h"
 #include "src/heap/heap-layout-inl.h"
 #include "src/heap/new-spaces.h"
-#include "src/heap/page-metadata.h"
+#include "src/heap/normal-page.h"
 #include "src/heap/spaces.h"
 #include "src/objects/allocation-site-inl.h"
 #include "src/objects/allocation-site.h"
@@ -30,7 +30,7 @@ void PretenuringHandler::UpdateAllocationSite(
   DCHECK_IMPLIES(v8_flags.sticky_mark_bits || chunk->IsToPage(),
                  v8_flags.minor_ms);
   DCHECK_IMPLIES(!v8_flags.minor_ms && !HeapLayout::InYoungGeneration(object),
-                 chunk->IsFlagSet(MemoryChunk::PAGE_NEW_OLD_PROMOTION));
+                 chunk->Metadata(heap->isolate())->will_be_promoted());
 #endif
   if (V8_UNLIKELY(!v8_flags.allocation_site_pretenuring) ||
       !AllocationSite::CanTrack(map->instance_type())) {
@@ -48,6 +48,17 @@ void PretenuringHandler::UpdateAllocationSite(
   // till actually merging the data.
   Address key = memento_candidate->GetAllocationSiteUnchecked();
   (*pretenuring_feedback)[UncheckedCast<AllocationSite>(Tagged<Object>(key))]++;
+}
+
+// static
+void PretenuringHandler::UpdateAllocationSite(
+    Heap* heap, Tagged<Map> map, Tagged<HeapObject> object,
+    SafeHeapObjectSize object_size,
+    PretenuringFeedbackMap* pretenuring_feedback) {
+  // TODO(425150995): We should have uint versions for allocation to avoid
+  // introducing OOBs via sign-extended ints along the way.
+  UpdateAllocationSite(heap, map, object, object_size.value(),
+                       pretenuring_feedback);
 }
 
 // static
@@ -76,7 +87,7 @@ Tagged<AllocationMemento> PretenuringHandler::FindAllocationMemento(
       object_address + ALIGN_TO_ALLOCATION_ALIGNMENT(object_size);
   Address last_memento_word_address = memento_address + kTaggedSize;
   // If the memento would be on another page, bail out immediately.
-  if (!PageMetadata::OnSamePage(object_address, last_memento_word_address)) {
+  if (!NormalPage::OnSamePage(object_address, last_memento_word_address)) {
     return {};
   }
 
@@ -84,7 +95,7 @@ Tagged<AllocationMemento> PretenuringHandler::FindAllocationMemento(
   // and bail out.
   if constexpr (mode != FindMementoMode::kForGC) {
     MemoryChunk* object_chunk = MemoryChunk::FromAddress(object_address);
-    PageMetadata* object_page = PageMetadata::cast(object_chunk->Metadata());
+    NormalPage* object_page = SbxCast<NormalPage>(object_chunk->Metadata());
     if (!object_page->SweepingDone()) {
       return {};
     }
@@ -128,7 +139,7 @@ Tagged<AllocationMemento> PretenuringHandler::FindAllocationMemento(
              memento_address +
                      ALIGN_TO_ALLOCATION_ALIGNMENT(sizeof(AllocationMemento)) <=
                  top);
-      if ((memento_address != top) && memento_candidate->IsValid()) {
+      if (memento_address != top) {
         return memento_candidate;
       }
       return {};

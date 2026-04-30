@@ -6,9 +6,9 @@ licenses(["notice"])  # Apache 2.0
 
 filegroup(
     name = "bzl_srcs",
-    srcs = glob([
-        "**/*.bzl",
-    ]),
+    srcs = glob(["**/*.bzl"]) + [
+        "//cc/private/rules_impl/fdo:bzl_srcs",
+    ],
 )
 
 filegroup(
@@ -16,7 +16,9 @@ filegroup(
     srcs = glob([
         "**/*.bzl",
         "**/BUILD",
-    ]),
+    ]) + [
+        "//cc/private/rules_impl/fdo:srcs",
+    ],
 )
 
 bzl_library(
@@ -52,9 +54,13 @@ bzl_library(
     ],
     deps = [
         ":objc_common",
+        ":objc_compilation_support_bzl",
         "//cc:action_names_bzl",
+        "//cc:cc_postmark_bzl",
         "//cc:find_cc_toolchain_bzl",
         "//cc/common",
+        "//cc/common:cc_debug_helper_bzl",
+        "//cc/common:cc_shared_library_info_bzl",
         "@bazel_skylib//lib:paths",
         "@com_google_protobuf//bazel/common:proto_info_bzl",
     ],
@@ -67,11 +73,6 @@ bzl_library(
         "cc_toolchain_alias.bzl",
         "cc_toolchain_info.bzl",
         "cc_toolchain_provider_helper.bzl",
-        "fdo/fdo_context.bzl",
-        "fdo/fdo_prefetch_hints.bzl",
-        "fdo/fdo_profile.bzl",
-        "fdo/memprof_profile.bzl",
-        "fdo/propeller_optimize.bzl",
     ],
     visibility = [
         "//cc:__subpackages__",
@@ -79,6 +80,7 @@ bzl_library(
     ],
     deps = [
         "//cc/common",
+        "//cc/private/rules_impl/fdo:fdo_rules",
         "//cc/toolchains:cc_toolchain_config_info_bzl",
         "@bazel_skylib//lib:paths",
     ],
@@ -87,9 +89,6 @@ bzl_library(
 bzl_library(
     name = "objc_common",
     srcs = [
-        "apple_configuration.bzl",
-        "apple_env.bzl",
-        "apple_platform.bzl",
         "objc_attrs.bzl",
         "objc_common.bzl",
         "objc_compilation_artifacts_info.bzl",
@@ -98,7 +97,7 @@ bzl_library(
         "objc_intermediate_artifacts.bzl",
         "objc_semantics.bzl",
     ],
-    visibility = ["//cc:__subpackages__"],
+    visibility = ["//visibility:public"],
     deps = [
         "//cc/common",
         "@bazel_skylib//lib:paths",
@@ -106,8 +105,37 @@ bzl_library(
 )
 
 bzl_library(
-    name = "native_bzl",
-    srcs = ["native.bzl"],
+    name = "objc_compilation_support_bzl",
+    srcs = ["objc_compilation_support.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":objc_common",
+        "//cc/common:cc_helper_bzl",
+        "@bazel_skylib//lib:paths",
+    ],
+)
+
+bzl_library(
+    name = "native_cc_common_bzl",
+    srcs = ["native_cc_common.bzl"],
+    visibility = [
+        "//cc:__subpackages__",
+        "@cc_compatibility_proxy//:__pkg__",
+    ],
+)
+
+bzl_library(
+    name = "native_providers_bzl",
+    srcs = ["native_providers.bzl"],
+    visibility = [
+        "//cc:__subpackages__",
+        "@cc_compatibility_proxy//:__pkg__",
+    ],
+)
+
+bzl_library(
+    name = "cc_toolchain_info_bzl",
+    srcs = ["cc_toolchain_info.bzl"],
     visibility = [
         "//cc:__subpackages__",
         "@cc_compatibility_proxy//:__pkg__",

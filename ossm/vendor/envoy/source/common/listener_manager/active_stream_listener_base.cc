@@ -40,7 +40,6 @@ void ActiveStreamListenerBase::newConnection(Network::ConnectionSocketPtr&& sock
     return;
   }
 
-  socket->connectionInfoProvider().setListenerInfo(config_->listenerInfo());
   socket->connectionInfoProvider().setFilterChainInfo(filter_chain->filterChainInfo());
 
   auto transport_socket = filter_chain->transportSocketFactory().createDownstreamTransportSocket();
@@ -52,6 +51,10 @@ void ActiveStreamListenerBase::newConnection(Network::ConnectionSocketPtr&& sock
         timeout, stats_.downstream_cx_transport_socket_connect_timeout_);
   }
   server_conn_ptr->setBufferLimits(config_->perConnectionBufferLimitBytes());
+  const auto timeout = config_->perConnectionBufferHighWatermarkTimeout();
+  if (timeout.count() > 0) {
+    server_conn_ptr->setBufferHighWatermarkTimeout(timeout);
+  }
   RELEASE_ASSERT(server_conn_ptr->connectionInfoProvider().remoteAddress() != nullptr, "");
   const bool empty_filter_chain = !config_->filterChainFactory().createNetworkFilterChain(
       *server_conn_ptr, filter_chain->networkFilterFactories());
@@ -115,7 +118,8 @@ void ActiveTcpConnection::onEvent(Network::ConnectionEvent event) {
   // Any event leads to destruction of the connection.
   if (event == Network::ConnectionEvent::LocalClose ||
       event == Network::ConnectionEvent::RemoteClose) {
-    stream_info_->setDownstreamTransportFailureReason(connection_->transportFailureReason());
+    // NOTE: Transport failure reason is set in ConnectionImpl::closeSocket() before events
+    // are raised, so it should already be available in stream_info_ at this point.
     active_connections_.listener_.removeConnection(*this);
   }
 }

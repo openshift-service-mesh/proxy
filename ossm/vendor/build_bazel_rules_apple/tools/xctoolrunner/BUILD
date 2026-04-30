@@ -1,3 +1,4 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("//tools:binary_env.bzl", "binary_env")
 
 licenses(["notice"])

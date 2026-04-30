@@ -5,11 +5,13 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
-edition = "2023";
+edition = "2024";
 
 package pb;
 
 import "google/protobuf/descriptor.proto";
+
+option java_outer_classname = "UnittestFeatures";
 
 extend google.protobuf.FeatureSet {
   TestFeatures test = 9999;
@@ -17,11 +19,11 @@ extend google.protobuf.FeatureSet {
 
 message TestMessage {
   extend google.protobuf.FeatureSet {
-    TestFeatures test_message = 9998;
+    TestMessageFeatures test_message = 9998;
   }
   message Nested {
     extend google.protobuf.FeatureSet {
-      TestFeatures test_nested = 9997;
+      TestNestedFeatures test_nested = 9997;
     }
   }
 }
@@ -65,6 +67,31 @@ enum ValueLifetimeFeature {
     edition_deprecated: EDITION_2023
     edition_removed: EDITION_99997_TEST_ONLY
   }];
+}
+message TestMessageFeatures {
+  EnumFeature file_feature = 1 [
+    retention = RETENTION_RUNTIME,
+    targets = TARGET_TYPE_FILE,
+    feature_support.edition_introduced = EDITION_2023,
+    edition_defaults = { edition: EDITION_LEGACY, value: "VALUE1" },
+    edition_defaults = { edition: EDITION_PROTO3, value: "VALUE2" },
+    edition_defaults = { edition: EDITION_2023, value: "VALUE3" },
+    edition_defaults = { edition: EDITION_99997_TEST_ONLY, value: "VALUE4" },
+    edition_defaults = { edition: EDITION_99998_TEST_ONLY, value: "VALUE5" }
+  ];
+}
+
+message TestNestedFeatures {
+  EnumFeature file_feature = 1 [
+    retention = RETENTION_RUNTIME,
+    targets = TARGET_TYPE_FILE,
+    feature_support.edition_introduced = EDITION_2023,
+    edition_defaults = { edition: EDITION_LEGACY, value: "VALUE1" },
+    edition_defaults = { edition: EDITION_PROTO3, value: "VALUE2" },
+    edition_defaults = { edition: EDITION_2023, value: "VALUE3" },
+    edition_defaults = { edition: EDITION_99997_TEST_ONLY, value: "VALUE4" },
+    edition_defaults = { edition: EDITION_99998_TEST_ONLY, value: "VALUE5" }
+  ];
 }
 
 message TestFeatures {

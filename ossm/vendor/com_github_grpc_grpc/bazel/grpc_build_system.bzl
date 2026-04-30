@@ -32,6 +32,7 @@ load("@build_bazel_rules_apple//apple/testing/default_runner:ios_test_runner.bzl
 load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@com_google_protobuf//bazel:upb_proto_library.bzl", "upb_proto_library", "upb_proto_reflection_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@rules_python//python:defs.bzl", "py_binary")
 load("//bazel:cc_grpc_library.bzl", "cc_grpc_library")
 load("//bazel:copts.bzl", "GRPC_DEFAULT_COPTS")
 load("//bazel:experiments.bzl", "EXPERIMENTS", "EXPERIMENT_ENABLES", "EXPERIMENT_POLLERS")
@@ -193,12 +194,14 @@ def grpc_proto_plugin(name, srcs = [], deps = []):
         srcs = srcs,
         deps = deps,
     )
+
+    # In order to avoid warnings from Bazel, names of the rule and its output file must differ.
     native.genrule(
         name = name,
         srcs = select({
             "//conditions:default": [name + "_native"],
         }),
-        outs = [name],
+        outs = [name + "_binary"],
         cmd = "cp $< $@",
         executable = True,
     )
@@ -653,7 +656,7 @@ def grpc_generate_objc_one_off_targets():
 def grpc_generate_one_off_internal_targets():
     pass
 
-def grpc_sh_test(name, srcs = [], args = [], data = [], uses_polling = True, size = "medium", timeout = None, tags = [], exec_compatible_with = [], exec_properties = {}, shard_count = None, flaky = None, exclude_pollers = [], uses_event_engine = True):
+def grpc_sh_test(name, srcs = [], args = [], data = [], uses_polling = True, size = "medium", timeout = None, tags = [], env = {}, exec_compatible_with = [], exec_properties = {}, shard_count = None, flaky = None, exclude_pollers = [], uses_event_engine = True):
     """Execute an sh_test for every <poller> x <EventEngine> combination
 
     Args:
@@ -665,6 +668,7 @@ def grpc_sh_test(name, srcs = [], args = [], data = [], uses_polling = True, siz
         size: The size of the test.
         timeout: The test timeout.
         tags: The tags for the test.
+        env: Environment variables to set for the test.
         exec_compatible_with: A list of constraint values that must be
             satisfied for the platform.
         exec_properties: A dictionary of strings that will be added to the
@@ -691,7 +695,7 @@ def grpc_sh_test(name, srcs = [], args = [], data = [], uses_polling = True, siz
             deps = poller_config["deps"],
             tags = poller_config["tags"],
             args = poller_config["args"],
-            env = poller_config["env"],
+            env = poller_config["env"] | env,
             flaky = poller_config["flaky"],
             **test_args
         )
@@ -712,7 +716,7 @@ def grpc_py_binary(
         testonly = False,
         python_version = "PY2",
         **kwargs):
-    native.py_binary(
+    py_binary(
         name = name,
         srcs = srcs,
         testonly = testonly,
@@ -736,6 +740,8 @@ def grpc_package(name, visibility = "private", features = []):
         visibility = ["//visibility:public"]
     elif visibility == "private":
         visibility = []
+    elif visibility == "grpc":
+        visibility = ["//:__subpackages__"]
     else:
         fail("Unknown visibility " + visibility)
 
@@ -804,6 +810,18 @@ def grpc_upb_proto_library(name, deps):
 
 def grpc_upb_proto_reflection_library(name, deps):
     upb_proto_reflection_library(name = name, deps = deps)
+
+def grpc_add_well_known_proto_upb_targets(targets):
+    """Adds well-known proto upb targets to the given targets."""
+    for target in targets:
+        grpc_upb_proto_library(
+            name = "protobuf_" + target + "_upb",
+            deps = ["@com_google_protobuf//:" + target + "_proto"],
+        )
+        grpc_upb_proto_reflection_library(
+            name = "protobuf_" + target + "_upbdefs",
+            deps = ["@com_google_protobuf//:" + target + "_proto"],
+        )
 
 # buildifier: disable=unnamed-macro
 def python_config_settings():

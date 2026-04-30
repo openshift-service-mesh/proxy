@@ -143,12 +143,25 @@ enum class AbiVersion { ProxyWasm_0_1_0, ProxyWasm_0_2_0, ProxyWasm_0_2_1, Unkno
 
 class NullPlugin;
 
+enum class FailState : int {
+  Ok = 0,
+  UnableToCreateVm = 1,
+  UnableToCloneVm = 2,
+  MissingFunction = 3,
+  UnableToInitializeCode = 4,
+  StartFailed = 5,
+  ConfigureFailed = 6,
+  RuntimeError = 7,
+};
+
 // Integrator specific WasmVm operations.
 struct WasmVmIntegration {
   virtual ~WasmVmIntegration() {}
   virtual WasmVmIntegration *clone() = 0;
   virtual proxy_wasm::LogLevel getLogLevel() = 0;
   virtual void error(std::string_view message) = 0;
+  // Allow integrations to handle specific FailStates differently.
+  virtual void error(FailState, std::string_view message) { error(message); }
   virtual void trace(std::string_view message) = 0;
   // Get a NullVm implementation of a function.
   // @param function_name is the name of the function with the implementation specific prefix.
@@ -165,17 +178,6 @@ struct WasmVmIntegration {
                                  void *ptr_to_function_return) = 0;
 };
 
-enum class FailState : int {
-  Ok = 0,
-  UnableToCreateVm = 1,
-  UnableToCloneVm = 2,
-  MissingFunction = 3,
-  UnableToInitializeCode = 4,
-  StartFailed = 5,
-  ConfigureFailed = 6,
-  RuntimeError = 7,
-};
-
 // Wasm VM instance. Provides the low level WASM interface.
 class WasmVm {
 public:
@@ -189,10 +191,9 @@ public:
   /**
    * Whether or not the VM implementation supports cloning. Cloning is VM system dependent.
    * When a VM is configured a single VM is instantiated to check that the .wasm file is valid and
-   * to do VM system specific initialization. In the case of WAVM this is potentially ahead-of-time
-   * compilation. Then, if cloning is supported, we clone that VM for each worker, potentially
-   * copying and sharing the initialized data structures for efficiency. Otherwise we create an new
-   * VM from scratch for each worker.
+   * to do VM system specific initialization. Then, if cloning is supported, we clone that VM for
+   * each worker, potentially copying and sharing the initialized data structures for efficiency.
+   * Otherwise we create an new VM from scratch for each worker.
    * @return one of enum Cloneable with the VMs cloneability.
    */
   virtual Cloneable cloneable() = 0;
@@ -309,9 +310,11 @@ public:
    */
   virtual bool usesWasmByteOrder() = 0;
 
+  virtual void warm() {}
+
   bool isFailed() { return failed_ != FailState::Ok; }
   void fail(FailState fail_state, std::string_view message) {
-    integration()->error(message);
+    integration()->error(fail_state, message);
     failed_ = fail_state;
     for (auto &callback : fail_callbacks_) {
       callback(fail_state);

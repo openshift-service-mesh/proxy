@@ -34,6 +34,7 @@ const static bool should_log = true;
 
 // TODO: find a way for extensions to register new logger IDs
 #define ALL_LOGGER_IDS(FUNCTION)                                                                   \
+  FUNCTION(a2a)                                                                                    \
   FUNCTION(admin)                                                                                  \
   FUNCTION(alternate_protocols_cache)                                                              \
   FUNCTION(aws)                                                                                    \
@@ -68,6 +69,7 @@ const static bool should_log = true;
   FUNCTION(init)                                                                                   \
   FUNCTION(io)                                                                                     \
   FUNCTION(jwt)                                                                                    \
+  FUNCTION(json_rpc)                                                                               \
   FUNCTION(kafka)                                                                                  \
   FUNCTION(key_value_store)                                                                        \
   FUNCTION(lua)                                                                                    \
@@ -91,6 +93,7 @@ const static bool should_log = true;
   FUNCTION(runtime)                                                                                \
   FUNCTION(stats)                                                                                  \
   FUNCTION(secret)                                                                                 \
+  FUNCTION(sse)                                                                                    \
   FUNCTION(tap)                                                                                    \
   FUNCTION(testing)                                                                                \
   FUNCTION(thrift)                                                                                 \
@@ -211,7 +214,7 @@ public:
     set_formatter(spdlog::details::make_unique<spdlog::pattern_formatter>(pattern));
   }
   void set_formatter(std::unique_ptr<spdlog::formatter> formatter) override;
-  void setShouldEscape(bool should_escape) { should_escape_ = should_escape; }
+  void setShouldEscape(bool should_escape);
 
   /**
    * @return bool whether a lock has been established.
@@ -240,22 +243,17 @@ public:
    */
   static std::string escapeLogLine(absl::string_view source);
 
+  SinkDelegate* recorder_test_only_{};
+
 private:
   friend class SinkDelegate;
 
   DelegatingLogSink() = default;
 
-  void setDelegate(SinkDelegate* sink) {
-    absl::WriterMutexLock lock(&sink_mutex_);
-    sink_ = sink;
-  }
-  SinkDelegate* delegate() {
-    absl::ReaderMutexLock lock(&sink_mutex_);
-    return sink_;
-  }
+  void setDelegate(SinkDelegate* sink) { sink_ = sink; }
+  SinkDelegate* delegate() { return sink_; }
 
-  SinkDelegate* sink_ ABSL_GUARDED_BY(sink_mutex_){nullptr};
-  absl::Mutex sink_mutex_;
+  SinkDelegate* sink_;
   std::unique_ptr<StderrSinkDelegate> stderr_sink_; // Builtin sink to use as a last resort.
   std::unique_ptr<spdlog::formatter> formatter_ ABSL_GUARDED_BY(format_mutex_);
   absl::Mutex format_mutex_;

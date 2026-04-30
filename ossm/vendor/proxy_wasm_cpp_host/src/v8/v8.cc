@@ -28,9 +28,10 @@
 
 #include "include/proxy-wasm/limits.h"
 
+#include "absl/strings/str_format.h"
+#include "include/v8-initialization.h"
 #include "include/v8-version.h"
 #include "include/v8.h"
-#include "src/flags/flags.h"
 #include "src/wasm/c-api.h"
 #include "wasm-api/wasm.hh"
 
@@ -42,10 +43,13 @@ wasm::Engine *engine() {
   static wasm::own<wasm::Engine> engine;
 
   std::call_once(init, []() {
-    ::v8::internal::v8_flags.liftoff = false;
-    ::v8::internal::v8_flags.wasm_max_mem_pages =
-        PROXY_WASM_HOST_MAX_WASM_MEMORY_SIZE_BYTES / PROXY_WASM_HOST_WASM_MEMORY_PAGE_SIZE_BYTES;
+    // Disable the Liftoff compiler to force optimized JIT up-front.
+    std::string args = absl::StrFormat("--wasm_max_mem_pages=%u --no-liftoff",
+                                       PROXY_WASM_HOST_MAX_WASM_MEMORY_SIZE_BYTES /
+                                           PROXY_WASM_HOST_WASM_MEMORY_PAGE_SIZE_BYTES);
+    ::v8::V8::SetFlagsFromString(args.c_str(), args.size());
     ::v8::V8::EnableWebAssemblyTrapHandler(true);
+
     engine = wasm::Engine::make();
   });
 
@@ -103,6 +107,8 @@ public:
   void terminate() override;
   bool usesWasmByteOrder() override { return true; }
 
+  void warm() override;
+
 private:
   wasm::own<wasm::Trap> trap(std::string message);
 
@@ -123,6 +129,9 @@ private:
   template <typename R, typename... Args>
   void getModuleFunctionImpl(std::string_view function_name,
                              std::function<R(ContextBase *, Args...)> *function);
+
+  // Initialize the V8 engine and store if necessary.
+  void initStore();
 
   wasm::own<wasm::Store> store_;
   wasm::own<wasm::Module> module_;
@@ -260,9 +269,16 @@ template <typename T, typename U> constexpr T convertValTypesToArgsTuple(const U
 
 // V8 implementation.
 
+void V8::initStore() {
+  if (store_ != nullptr) {
+    return;
+  }
+  store_ = wasm::Store::make(engine());
+}
+
 bool V8::load(std::string_view bytecode, std::string_view precompiled,
               const std::unordered_map<uint32_t, std::string> &function_names) {
-  store_ = wasm::Store::make(engine());
+  initStore();
   if (store_ == nullptr) {
     return false;
   }
@@ -707,6 +723,8 @@ void V8::terminate() {
   auto *isolate = store_impl->isolate();
   isolate->TerminateExecution();
 }
+
+void V8::warm() { initStore(); }
 
 std::string V8::getFailMessage(std::string_view function_name, wasm::own<wasm::Trap> trap) {
   auto message = "Function: " + std::string(function_name) + " failed: ";

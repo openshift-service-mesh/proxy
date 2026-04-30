@@ -14,11 +14,10 @@
 
 """Dependency definitions for wasm-bindgen rules"""
 
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
-load("//3rdparty/crates:defs.bzl", "crate_repositories")
+load("//3rdparty/crates:crates.bzl", "crate_repositories")
+load("//private/webdrivers:webdriver_repositories.bzl", "webdriver_repositories")
 
-WASM_BINDGEN_VERSION = "0.2.92"
+WASM_BINDGEN_VERSION = "0.2.105"
 
 # buildifier: disable=unnamed-macro
 def rust_wasm_bindgen_dependencies():
@@ -31,22 +30,10 @@ def rust_wasm_bindgen_dependencies():
         defined by this macro.
     """
 
-    direct_deps = [
-        struct(repo = "rules_rust_wasm_bindgen_cli", is_dev_dep = False),
-    ]
-    maybe(
-        http_archive,
-        name = "rules_rust_wasm_bindgen_cli",
-        sha256 = "08f61e21873f51e3059a8c7c3eef81ede7513d161cfc60751c7b2ffa6ed28270",
-        urls = ["https://static.crates.io/crates/wasm-bindgen-cli/wasm-bindgen-cli-{}.crate".format(WASM_BINDGEN_VERSION)],
-        type = "tar.gz",
-        strip_prefix = "wasm-bindgen-cli-{}".format(WASM_BINDGEN_VERSION),
-        build_file = Label("//3rdparty:BUILD.wasm-bindgen-cli.bazel"),
-        patch_args = ["-p1"],
-        patches = [Label("//3rdparty/patches:resolver.patch")],
-    )
+    direct_deps = []
 
     direct_deps.extend(crate_repositories())
+    direct_deps.extend(webdriver_repositories())
     return direct_deps
 
 # buildifier: disable=unnamed-macro

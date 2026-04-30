@@ -10,8 +10,10 @@ exports_files([
     "constantly.BUILD",
     "cython.BUILD",
     "six.BUILD",
+    "typing_extensions.BUILD",
     "enum34.BUILD",
     "futures.BUILD",
+    "opencensus-cpp.patch",
     "protobuf.patch",
     "protoc-gen-validate.patch",
 ])
@@ -31,19 +33,19 @@ config_setting(
 
 alias(
     name = "libssl",
-    actual = "@envoy//bazel:boringssl",
+    actual = "@envoy//bazel:ssl",
     tags = ["manual"],
 )
 
 alias(
     name = "libcrypto",
-    actual = "@envoy//bazel:boringcrypto",
+    actual = "@envoy//bazel:crypto",
     tags = ["manual"],
 )
 
 alias(
     name = "madler_zlib",
-    actual = "@envoy//bazel/foreign_cc:zlib",
+    actual = "@envoy//bazel:zlib",
     tags = ["manual"],
 )
 
@@ -74,7 +76,7 @@ alias(
 
 alias(
     name = "cares",
-    actual = "@envoy//bazel/foreign_cc:ares",
+    actual = "@c-ares//:ares",
     tags = ["manual"],
 )
 

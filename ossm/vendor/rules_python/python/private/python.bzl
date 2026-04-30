@@ -29,7 +29,6 @@ load(
     "sorted_host_platform_names",
     "sorted_host_platforms",
 )
-load(":util.bzl", "IS_BAZEL_6_4_OR_HIGHER")
 load(":version.bzl", "version")
 
 def parse_modules(*, module_ctx, logger, _fail = fail):
@@ -77,55 +76,9 @@ def parse_modules(*, module_ctx, logger, _fail = fail):
     # Map of string Major.Minor or Major.Minor.Patch to the toolchain_info struct
     global_toolchain_versions = {}
 
-    ignore_root_user_error = None
-
-    # if the root module does not register any toolchain then the
-    # ignore_root_user_error takes its default value: True
-    if not module_ctx.modules[0].tags.toolchain:
-        ignore_root_user_error = True
-
     config = _get_toolchain_config(modules = module_ctx.modules, _fail = _fail)
 
-    default_python_version = None
-    for mod in module_ctx.modules:
-        defaults_attr_structs = _create_defaults_attr_structs(mod = mod)
-        default_python_version_env = None
-        default_python_version_file = None
-
-        # Only the root module and rules_python are allowed to specify the default
-        # toolchain for a couple reasons:
-        # * It prevents submodules from specifying different defaults and only
-        #   one of them winning.
-        # * rules_python needs to set a soft default in case the root module doesn't,
-        #   e.g. if the root module doesn't use Python itself.
-        # * The root module is allowed to override the rules_python default.
-        if mod.is_root or (mod.name == "rules_python" and not default_python_version):
-            for defaults_attr in defaults_attr_structs:
-                default_python_version = _one_or_the_same(
-                    default_python_version,
-                    defaults_attr.python_version,
-                    onerror = _fail_multiple_defaults_python_version,
-                )
-                default_python_version_env = _one_or_the_same(
-                    default_python_version_env,
-                    defaults_attr.python_version_env,
-                    onerror = _fail_multiple_defaults_python_version_env,
-                )
-                default_python_version_file = _one_or_the_same(
-                    default_python_version_file,
-                    defaults_attr.python_version_file,
-                    onerror = _fail_multiple_defaults_python_version_file,
-                )
-            if default_python_version_file:
-                default_python_version = _one_or_the_same(
-                    default_python_version,
-                    module_ctx.read(default_python_version_file, watch = "yes").strip(),
-                )
-            if default_python_version_env:
-                default_python_version = module_ctx.getenv(
-                    default_python_version_env,
-                    default_python_version,
-                )
+    default_python_version = _compute_default_python_version(module_ctx)
 
     seen_versions = {}
     for mod in module_ctx.modules:
@@ -153,32 +106,17 @@ def parse_modules(*, module_ctx, logger, _fail = fail):
                 # * rules_python needs to set a soft default in case the root module doesn't,
                 #   e.g. if the root module doesn't use Python itself.
                 # * The root module is allowed to override the rules_python default.
-                if default_python_version:
-                    is_default = default_python_version == toolchain_version
-                    if toolchain_attr.is_default and not is_default:
-                        fail("The 'is_default' attribute doesn't work if you set " +
-                             "the default Python version with the `defaults` tag.")
-                else:
-                    is_default = toolchain_attr.is_default
+                is_default = default_python_version == toolchain_version
 
-                # Also only the root module should be able to decide ignore_root_user_error.
-                # Modules being depended upon don't know the final environment, so they aren't
-                # in the right position to know or decide what the correct setting is.
-
-                # If an inconsistency in the ignore_root_user_error among multiple toolchains is detected, fail.
-                if ignore_root_user_error != None and toolchain_attr.ignore_root_user_error != ignore_root_user_error:
-                    fail("Toolchains in the root module must have consistent 'ignore_root_user_error' attributes")
-
-                ignore_root_user_error = toolchain_attr.ignore_root_user_error
-            elif mod.name == "rules_python" and not default_toolchain and not default_python_version:
-                # We don't do the len() check because we want the default that rules_python
-                # sets to be clearly visible.
-                is_default = toolchain_attr.is_default
+            elif mod.name == "rules_python" and not default_toolchain:
+                # This branch handles when the root module doesn't declare a
+                # Python toolchain
+                is_default = default_python_version == toolchain_version
             else:
                 is_default = False
 
             if is_default and default_toolchain != None:
-                _fail_multiple_default_toolchains(
+                _fail_multiple_default_toolchains_chosen(
                     first = default_toolchain.name,
                     second = toolchain_name,
                 )
@@ -212,7 +150,6 @@ def parse_modules(*, module_ctx, logger, _fail = fail):
                 global_toolchain_versions[toolchain_version] = toolchain_info
                 if debug_info:
                     debug_info["toolchains_registered"].append({
-                        "ignore_root_user_error": ignore_root_user_error,
                         "module": {"is_root": mod.is_root, "name": mod.name},
                         "name": toolchain_name,
                     })
@@ -230,8 +167,6 @@ def parse_modules(*, module_ctx, logger, _fail = fail):
                     default_toolchain = toolchain_info
             elif toolchain_info:
                 toolchains.append(toolchain_info)
-
-    config.default.setdefault("ignore_root_user_error", ignore_root_user_error)
 
     # A default toolchain is required so that the non-version-specific rules
     # are able to match a toolchain.
@@ -314,7 +249,18 @@ def _python_impl(module_ctx):
         full_python_version = full_version(
             version = toolchain_info.python_version,
             minor_mapping = py.config.minor_mapping,
+            fail_on_err = False,
         )
+        if not full_python_version:
+            logger.info(lambda: (
+                "The actual toolchain for python_version '{version}' " +
+                "has not been registered, but was requested, please configure a toolchain " +
+                "to be actually downloaded and setup"
+            ).format(
+                version = toolchain_info.python_version,
+            ))
+            continue
+
         kwargs = {
             "python_version": full_python_version,
             "register_coverage_tool": toolchain_info.register_coverage_tool,
@@ -578,12 +524,22 @@ def _fail_multiple_defaults_python_version_env(first, second):
         second = second,
     ))
 
-def _fail_multiple_default_toolchains(first, second):
+def _fail_multiple_default_toolchains_chosen(first, second):
     fail(("Multiple default toolchains: only one toolchain " +
-          "can have is_default=True. First default " +
+          "can be chosen as a default. First default " +
           "was toolchain '{first}'. Second was '{second}'").format(
         first = first,
         second = second,
+    ))
+
+def _fail_multiple_default_toolchains_in_module(mod, toolchain_attrs):
+    fail(("Multiple default toolchains: only one toolchain " +
+          "can have is_default=True.\n" +
+          "Module '{module}' contains {count} toolchains with " +
+          "is_default=True: {versions}").format(
+        module = mod.name,
+        count = len(toolchain_attrs),
+        versions = ", ".join(sorted([v.python_version for v in toolchain_attrs])),
     ))
 
 def _validate_version(version_str, *, _fail = fail):
@@ -747,7 +703,6 @@ def _process_global_overrides(*, tag, default, _fail = fail):
         default["minor_mapping"] = tag.minor_mapping
 
     forwarded_attrs = sorted(AUTH_ATTRS) + [
-        "ignore_root_user_error",
         "base_url",
         "register_all_versions",
     ]
@@ -881,6 +836,72 @@ def _get_toolchain_config(*, modules, _fail = fail):
         register_all_versions = register_all_versions,
     )
 
+def _compute_default_python_version(mctx):
+    default_python_version = None
+    for mod in mctx.modules:
+        # Only the root module and rules_python are allowed to specify the default
+        # toolchain for a couple reasons:
+        # * It prevents submodules from specifying different defaults and only
+        #   one of them winning.
+        # * rules_python needs to set a soft default in case the root module doesn't,
+        #   e.g. if the root module doesn't use Python itself.
+        # * The root module is allowed to override the rules_python default.
+        if not (mod.is_root or mod.name == "rules_python"):
+            continue
+
+        defaults_attr_structs = _create_defaults_attr_structs(mod = mod)
+        default_python_version_env = None
+        default_python_version_file = None
+
+        for defaults_attr in defaults_attr_structs:
+            default_python_version = _one_or_the_same(
+                default_python_version,
+                defaults_attr.python_version,
+                onerror = _fail_multiple_defaults_python_version,
+            )
+            default_python_version_env = _one_or_the_same(
+                default_python_version_env,
+                defaults_attr.python_version_env,
+                onerror = _fail_multiple_defaults_python_version_env,
+            )
+            default_python_version_file = _one_or_the_same(
+                default_python_version_file,
+                defaults_attr.python_version_file,
+                onerror = _fail_multiple_defaults_python_version_file,
+            )
+        if default_python_version_file:
+            default_python_version = _one_or_the_same(
+                default_python_version,
+                mctx.read(default_python_version_file, watch = "yes").strip(),
+            )
+        if default_python_version_env:
+            default_python_version = mctx.getenv(
+                default_python_version_env,
+                default_python_version,
+            )
+
+        if default_python_version:
+            break
+
+        # Otherwise, look at legacy python.toolchain() calls for a default
+        toolchain_attrs = mod.tags.toolchain
+
+        # Convenience: if one python.toolchain() call exists, treat it as
+        # the default.
+        if len(toolchain_attrs) == 1:
+            default_python_version = toolchain_attrs[0].python_version
+        else:
+            sets_default = [v for v in toolchain_attrs if v.is_default]
+            if len(sets_default) == 1:
+                default_python_version = sets_default[0].python_version
+            elif len(sets_default) > 1:
+                _fail_multiple_default_toolchains_in_module(mod, toolchain_attrs)
+
+        if default_python_version:
+            break
+
+    return default_python_version
+
 def _create_defaults_attr_structs(*, mod):
     arg_structs = []
 
@@ -916,7 +937,11 @@ def _create_toolchain_attr_structs(*, mod, config, seen_versions):
 
     return arg_structs
 
-def _create_toolchain_attrs_struct(*, tag = None, python_version = None, toolchain_tag_count = None):
+def _create_toolchain_attrs_struct(
+        *,
+        tag = None,
+        python_version = None,
+        toolchain_tag_count = None):
     if tag and python_version:
         fail("Only one of tag and python version can be specified")
     if tag:
@@ -929,16 +954,7 @@ def _create_toolchain_attrs_struct(*, tag = None, python_version = None, toolcha
         is_default = is_default,
         python_version = python_version if python_version else tag.python_version,
         configure_coverage_tool = getattr(tag, "configure_coverage_tool", False),
-        ignore_root_user_error = getattr(tag, "ignore_root_user_error", True),
     )
-
-def _get_bazel_version_specific_kwargs():
-    kwargs = {}
-
-    if IS_BAZEL_6_4_OR_HIGHER:
-        kwargs["environ"] = ["RULES_PYTHON_BZLMOD_DEBUG"]
-
-    return kwargs
 
 _defaults = tag_class(
     doc = """Tag class to specify the default Python version.""",
@@ -1049,16 +1065,9 @@ Then the python interpreter will be available as `my_python_name`.
         "ignore_root_user_error": attr.bool(
             default = True,
             doc = """\
-The Python runtime installation is made read only. This improves the ability for
-Bazel to cache it by preventing the interpreter from creating `.pyc` files for
-the standard library dynamically at runtime as they are loaded (this often leads
-to spurious cache misses or build failures).
-
-However, if the user is running Bazel as root, this read-onlyness is not
-respected. Bazel will print a warning message when it detects that the runtime
-installation is writable despite being made read only (i.e. it's running with
-root access) while this attribute is set `False`, however this messaging can be ignored by setting
-this to `False`.
+:::{versionchanged} 1.8.0
+Noop, will be removed in the next major release.
+:::
 """,
             mandatory = False,
         ),
@@ -1240,7 +1249,7 @@ The values should be one of the values in `@platforms//cpu`
 Docs for [Registering custom runtimes]
 :::
 
-:::{{versionadded}} 1.5.0
+:::{versionadded} 1.5.0
 :::
 """,
         ),
@@ -1265,7 +1274,7 @@ The values should be one of the values in `@platforms//os`
 Docs for [Registering custom runtimes]
 :::
 
-:::{{versionadded}} 1.5.0
+:::{versionadded} 1.5.0
 :::
 """,
         ),
@@ -1320,7 +1329,7 @@ If set, `target_settings`, `os_name`, and `arch` should also be set.
 Docs for [Registering custom runtimes]
 :::
 
-:::{{versionadded}} 1.5.0
+:::{versionadded} 1.5.0
 :::
 """,
         ),
@@ -1334,7 +1343,7 @@ If set, `target_compatible_with`, `os_name`, and `arch` should also be set.
 Docs for [Registering custom runtimes]
 :::
 
-:::{{versionadded}} 1.5.0
+:::{versionadded} 1.5.0
 :::
 """,
         ),
@@ -1356,7 +1365,7 @@ python = module_extension(
         "single_version_platform_override": _single_version_platform_override,
         "toolchain": _toolchain,
     },
-    **_get_bazel_version_specific_kwargs()
+    environ = ["RULES_PYTHON_BZLMOD_DEBUG"],
 )
 
 _DEBUG_BUILD_CONTENT = """

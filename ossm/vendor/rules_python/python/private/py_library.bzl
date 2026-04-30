@@ -28,24 +28,20 @@ load(
 load(":builders.bzl", "builders")
 load(
     ":common.bzl",
-    "PYTHON_FILE_EXTENSIONS",
     "collect_cc_info",
     "collect_imports",
     "collect_runfiles",
     "create_instrumented_files_info",
-    "create_library_semantics_struct",
     "create_output_group_info",
     "create_py_info",
     "filter_to_py_srcs",
-    "get_imports",
-    "runfiles_root_path",
 )
+load(":common_labels.bzl", "labels")
 load(":flags.bzl", "AddSrcsToRunfilesFlag", "PrecompileFlag", "VenvsSitePackages")
 load(":normalize_name.bzl", "normalize_name")
 load(":precompile.bzl", "maybe_precompile")
 load(":py_cc_link_params_info.bzl", "PyCcLinkParamsInfo")
-load(":py_info.bzl", "PyInfo", "VenvSymlinkEntry", "VenvSymlinkKind")
-load(":py_internal.bzl", "py_internal")
+load(":py_info.bzl", "PyInfo")
 load(":reexports.bzl", "BuiltinPyInfo")
 load(":rule_builders.bzl", "ruleb")
 load(
@@ -53,9 +49,8 @@ load(
     "EXEC_TOOLS_TOOLCHAIN_TYPE",
     TOOLCHAIN_TYPE = "TARGET_TOOLCHAIN_TYPE",
 )
+load(":venv_runfiles.bzl", "get_venv_symlinks")
 load(":version.bzl", "version")
-
-_py_builtins = py_internal
 
 LIBRARY_ATTRS = dicts.add(
     COMMON_ATTRS,
@@ -104,35 +99,37 @@ and that only one package version will be included.
 :::
 """,
         ),
+        "namespace_package_files": lambda: attrb.LabelList(
+            allow_empty = True,
+            allow_files = True,
+            doc = """
+Files whose directories are namespace packages.
+
+When {obj}`--venvs_site_packages=yes` is set, this helps inform which directories should be
+treated as namespace packages and expect files from other targets to be contributed.
+This allows optimizing the generation of symlinks to be cheaper at analysis time.
+:::{versionadded} 1.8.0
+:::
+""",
+        ),
         "_add_srcs_to_runfiles_flag": lambda: attrb.Label(
-            default = "//python/config_settings:add_srcs_to_runfiles",
+            default = labels.ADD_SRCS_TO_RUNFILES,
         ),
     },
 )
 
-def _py_library_impl_with_semantics(ctx):
-    return py_library_impl(
-        ctx,
-        semantics = create_library_semantics_struct(
-            get_imports = get_imports,
-            maybe_precompile = maybe_precompile,
-            get_cc_info_for_library = collect_cc_info,
-        ),
-    )
-
-def py_library_impl(ctx, *, semantics):
+def py_library_impl(ctx):
     """Abstract implementation of py_library rule.
 
     Args:
         ctx: The rule ctx
-        semantics: A `LibrarySemantics` struct; see `create_library_semantics_struct`
 
     Returns:
         A list of modern providers to propagate.
     """
     direct_sources = filter_to_py_srcs(ctx.files.srcs)
 
-    precompile_result = semantics.maybe_precompile(ctx, direct_sources)
+    precompile_result = maybe_precompile(ctx, direct_sources)
 
     required_py_files = precompile_result.keep_srcs
     required_pyc_files = []
@@ -161,10 +158,10 @@ def py_library_impl(ctx, *, semantics):
     imports = []
     venv_symlinks = []
 
-    imports, venv_symlinks = _get_imports_and_venv_symlinks(ctx, semantics)
+    imports, venv_symlinks = _get_imports_and_venv_symlinks(ctx)
 
-    cc_info = semantics.get_cc_info_for_library(ctx)
-    py_info, deps_transitive_sources, builtins_py_info = create_py_info(
+    cc_info = collect_cc_info(ctx)
+    py_info, builtins_py_info = create_py_info(
         ctx,
         original_sources = direct_sources,
         required_py_files = required_py_files,
@@ -174,14 +171,6 @@ def py_library_impl(ctx, *, semantics):
         imports = imports,
         venv_symlinks = venv_symlinks,
     )
-
-    # TODO(b/253059598): Remove support for extra actions; https://github.com/bazelbuild/bazel/issues/16455
-    listeners_enabled = _py_builtins.are_action_listeners_enabled(ctx)
-    if listeners_enabled:
-        _py_builtins.add_py_extra_pseudo_action(
-            ctx = ctx,
-            dependency_transitive_python_sources = deps_transitive_sources,
-        )
 
     providers = [
         DefaultInfo(files = default_outputs, runfiles = runfiles),
@@ -240,122 +229,45 @@ def _get_package_and_version(ctx):
         version.normalize(version_str),  # will have no dashes either
     )
 
-def _get_imports_and_venv_symlinks(ctx, semantics):
+def _get_imports_and_venv_symlinks(ctx):
     imports = depset()
     venv_symlinks = []
     if VenvsSitePackages.is_enabled(ctx):
         package, version_str = _get_package_and_version(ctx)
-        venv_symlinks = _get_venv_symlinks(ctx, package, version_str)
-    else:
-        imports = collect_imports(ctx, semantics)
-    return imports, venv_symlinks
 
-def _get_venv_symlinks(ctx, package, version_str):
-    imports = ctx.attr.imports
-    if len(imports) == 0:
-        fail("When venvs_site_packages is enabled, exactly one `imports` " +
-             "value must be specified, got 0")
-    elif len(imports) > 1:
-        fail("When venvs_site_packages is enabled, exactly one `imports` " +
-             "value must be specified, got {}".format(imports))
-    else:
-        site_packages_root = imports[0]
+        # NOTE: Already a list, but buildifier thinks its a depset and
+        # adds to_list() calls later.
+        imports = list(ctx.attr.imports)
+        if len(imports) == 0:
+            fail("When venvs_site_packages is enabled, exactly one `imports` " +
+                 "value must be specified, got 0")
+        elif len(imports) > 1:
+            fail("When venvs_site_packages is enabled, exactly one `imports` " +
+                 "value must be specified, got {}".format(imports))
 
-    if site_packages_root.endswith("/"):
-        fail("The site packages root value from `imports` cannot end in " +
-             "slash, got {}".format(site_packages_root))
-    if site_packages_root.startswith("/"):
-        fail("The site packages root value from `imports` cannot start with " +
-             "slash, got {}".format(site_packages_root))
+        site_packages_root = paths.normalize(paths.join(
+            ctx.label.package,
+            imports[0],
+        ))
 
-    # Append slash to prevent incorrectly prefix-string matches
-    site_packages_root += "/"
-
-    # We have to build a list of (runfiles path, site-packages path) pairs of the files to
-    # create in the consuming binary's venv site-packages directory. To minimize the number of
-    # files to create, we just return the paths to the directories containing the code of
-    # interest.
-    #
-    # However, namespace packages complicate matters: multiple distributions install in the
-    # same directory in site-packages. This works out because they don't overlap in their
-    # files. Typically, they install to different directories within the namespace package
-    # directory. We also need to ensure that we can handle a case where the main package (e.g.
-    # airflow) has directories only containing data files and then namespace packages coming
-    # along and being next to it.
-    #
-    # Lastly we have to assume python modules just being `.py` files (e.g. typing-extensions)
-    # is just a single Python file.
-
-    dir_symlinks = {}  # dirname -> runfile path
-    venv_symlinks = []
-    for src in ctx.files.srcs + ctx.files.data + ctx.files.pyi_srcs:
-        path = _repo_relative_short_path(src.short_path)
-        if not path.startswith(site_packages_root):
-            continue
-        path = path.removeprefix(site_packages_root)
-        dir_name, _, filename = path.rpartition("/")
-
-        if dir_name in dir_symlinks:
-            # we already have this dir, this allows us to short-circuit since most of the
-            # ctx.files.data might share the same directories as ctx.files.srcs
-            continue
-
-        runfiles_dir_name, _, _ = runfiles_root_path(ctx, src.short_path).partition("/")
-        if dir_name:
-            # This can be either:
-            # * a directory with libs (e.g. numpy.libs, created by auditwheel)
-            # * a directory with `__init__.py` file that potentially also needs to be
-            #   symlinked.
-            # * `.dist-info` directory
-            #
-            # This could be also regular files, that just need to be symlinked, so we will
-            # add the directory here.
-            dir_symlinks[dir_name] = runfiles_dir_name
-        elif src.extension in PYTHON_FILE_EXTENSIONS:
-            # This would be files that do not have directories and we just need to add
-            # direct symlinks to them as is, we only allow Python files in here
-            entry = VenvSymlinkEntry(
-                kind = VenvSymlinkKind.LIB,
-                link_to_path = paths.join(runfiles_dir_name, site_packages_root, filename),
-                package = package,
-                version = version_str,
-                venv_path = filename,
-            )
-            venv_symlinks.append(entry)
-
-    # Sort so that we encounter `foo` before `foo/bar`. This ensures we
-    # see the top-most explicit package first.
-    dirnames = sorted(dir_symlinks.keys())
-    first_level_explicit_packages = []
-    for d in dirnames:
-        is_sub_package = False
-        for existing in first_level_explicit_packages:
-            # Suffix with / to prevent foo matching foobar
-            if d.startswith(existing + "/"):
-                is_sub_package = True
-                break
-        if not is_sub_package:
-            first_level_explicit_packages.append(d)
-
-    for dirname in first_level_explicit_packages:
-        prefix = dir_symlinks[dirname]
-        entry = VenvSymlinkEntry(
-            kind = VenvSymlinkKind.LIB,
-            link_to_path = paths.join(prefix, site_packages_root, dirname),
-            package = package,
-            version = version_str,
-            venv_path = dirname,
+        # Prevent escaping out of the repo root.
+        if site_packages_root.startswith("../") or site_packages_root == "..":
+            fail(("Invalid `imports` value '{}': resolves to '{}' which is " +
+                  "above the repo root").format(
+                imports[0],
+                site_packages_root,
+            ))
+        venv_symlinks = get_venv_symlinks(
+            ctx,
+            ctx.files.srcs + ctx.files.data + ctx.files.pyi_srcs,
+            package,
+            version_str,
+            site_packages_root = site_packages_root,
+            namespace_package_files = ctx.files.namespace_package_files,
         )
-        venv_symlinks.append(entry)
-
-    return venv_symlinks
-
-def _repo_relative_short_path(short_path):
-    # Convert `../+pypi+foo/some/file.py` to `some/file.py`
-    if short_path.startswith("../"):
-        return short_path[3:].partition("/")[2]
     else:
-        return short_path
+        imports = collect_imports(ctx)
+    return imports, venv_symlinks
 
 _MaybeBuiltinPyInfo = [BuiltinPyInfo] if BuiltinPyInfo != None else []
 
@@ -370,11 +282,11 @@ def create_py_library_rule_builder():
     :::
 
     Returns:
-        {type}`ruleb.Rule` with the necessary settings
+        {obj}`ruleb.Rule` with the necessary settings
         for creating a `py_library` rule.
     """
     builder = ruleb.Rule(
-        implementation = _py_library_impl_with_semantics,
+        implementation = py_library_impl,
         doc = _DEFAULT_PY_LIBRARY_DOC,
         exec_groups = dict(REQUIRED_EXEC_GROUP_BUILDERS),
         attrs = LIBRARY_ATTRS,

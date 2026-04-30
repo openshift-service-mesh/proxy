@@ -58,10 +58,10 @@ namespace grpc_core {
 //               VerifyCsmServiceLabels());
 void RegisterFakeStatsPlugin();
 
-class FakeClientCallTracer : public ClientCallTracer {
+class FakeClientCallTracer : public ClientCallTracerInterface {
  public:
   class FakeClientCallAttemptTracer
-      : public ClientCallTracer::CallAttemptTracer,
+      : public ClientCallTracerInterface::CallAttemptTracer,
         public RefCounted<FakeClientCallAttemptTracer> {
    public:
     explicit FakeClientCallAttemptTracer(
@@ -85,7 +85,7 @@ class FakeClientCallTracer : public ClientCallTracer {
         grpc_metadata_batch* /*recv_trailing_metadata*/,
         const grpc_transport_stream_stats* /*transport_stream_stats*/)
         override {}
-    void RecordEnd(const gpr_timespec& /*latency*/) override { Unref(); }
+    void RecordEnd() override { Unref(); }
     void RecordIncomingBytes(
         const TransportByteSize& /*transport_byte_size*/) override {}
     void RecordOutgoingBytes(
@@ -162,7 +162,7 @@ class FakeClientCallTracerFactory {
   std::vector<std::unique_ptr<FakeClientCallTracer>> fake_client_call_tracers_;
 };
 
-class FakeServerCallTracer : public ServerCallTracer {
+class FakeServerCallTracer : public ServerCallTracerInterface {
  public:
   explicit FakeServerCallTracer(std::vector<std::string>* annotation_logger)
       : annotation_logger_(annotation_logger) {}
@@ -358,12 +358,12 @@ class FakeStatsPlugin : public StatsPlugin {
     callbacks_.erase(callback);
   }
 
-  ClientCallTracer* GetClientCallTracer(
+  ClientCallTracerInterface* GetClientCallTracer(
       const Slice& /*path*/, bool /*registered_method*/,
       std::shared_ptr<StatsPlugin::ScopeConfig> /*scope_config*/) override {
     return nullptr;
   }
-  ServerCallTracer* GetServerCallTracer(
+  ServerCallTracerInterface* GetServerCallTracer(
       std::shared_ptr<StatsPlugin::ScopeConfig> /*scope_config*/) override {
     return nullptr;
   }

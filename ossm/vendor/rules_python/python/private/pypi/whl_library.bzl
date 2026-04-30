@@ -24,7 +24,9 @@ load(":deps.bzl", "all_repo_names", "record_files")
 load(":generate_whl_library_build_bazel.bzl", "generate_whl_library_build_bazel")
 load(":parse_whl_name.bzl", "parse_whl_name")
 load(":patch_whl.bzl", "patch_whl")
+load(":pep508_requirement.bzl", "requirement")
 load(":pypi_repo_utils.bzl", "pypi_repo_utils")
+load(":whl_extract.bzl", "whl_extract")
 load(":whl_metadata.bzl", "whl_metadata")
 load(":whl_target_platforms.bzl", "whl_target_platforms")
 
@@ -264,6 +266,37 @@ def _create_repository_execution_environment(rctx, python_interpreter, logger = 
         env[_CPPFLAGS] = " ".join(cppflags)
     return env
 
+def _extract_whl_py(rctx, *, python_interpreter, args, whl_path, environment, logger):
+    target_platforms = rctx.attr.experimental_target_platforms or []
+    if target_platforms:
+        parsed_whl = parse_whl_name(whl_path.basename)
+
+        # NOTE @aignas 2023-12-04: if the wheel is a platform specific wheel, we
+        # only include deps for that target platform
+        if parsed_whl.platform_tag != "any":
+            target_platforms = [
+                p.target_platform
+                for p in whl_target_platforms(
+                    platform_tag = parsed_whl.platform_tag,
+                    abi_tag = parsed_whl.abi_tag.strip("tm"),
+                )
+            ]
+
+    pypi_repo_utils.execute_checked(
+        rctx,
+        op = "whl_library.ExtractWheel({}, {})".format(rctx.attr.name, whl_path),
+        python = python_interpreter,
+        arguments = args + [
+            "--whl-file",
+            whl_path,
+        ] + ["--platform={}".format(p) for p in target_platforms],
+        srcs = rctx.attr._python_srcs,
+        environment = environment,
+        quiet = rctx.attr.quiet,
+        timeout = rctx.attr.timeout,
+        logger = logger,
+    )
+
 def _whl_library_impl(rctx):
     logger = repo_utils.logger(rctx)
     python_interpreter = pypi_repo_utils.resolve_python_interpreter(
@@ -324,6 +357,10 @@ def _whl_library_impl(rctx):
 
     args = _parse_optional_attrs(rctx, args, extra_pip_args)
 
+    # also enable pipstar for any whls that are downloaded without `pip`
+    enable_pipstar = (rp_config.enable_pipstar or whl_path) and rctx.attr.config_load
+    enable_pipstar_extract = enable_pipstar and rp_config.bazel_8_or_later
+
     if not whl_path:
         if rctx.attr.urls:
             op_tmpl = "whl_library.BuildWheelFromSource({name}, {requirement})"
@@ -369,35 +406,41 @@ def _whl_library_impl(rctx):
                 timeout = rctx.attr.timeout,
             )
 
-    if rp_config.enable_pipstar:
-        pypi_repo_utils.execute_checked(
+    if enable_pipstar_extract:
+        whl_extract(rctx, whl_path = whl_path, logger = logger)
+    else:
+        _extract_whl_py(
             rctx,
-            op = "whl_library.ExtractWheel({}, {})".format(rctx.attr.name, whl_path),
-            python = python_interpreter,
-            arguments = args + [
-                "--whl-file",
-                whl_path,
-                "--enable-pipstar",
-            ],
-            srcs = rctx.attr._python_srcs,
+            python_interpreter = python_interpreter,
+            args = args,
+            whl_path = whl_path,
             environment = environment,
-            quiet = rctx.attr.quiet,
-            timeout = rctx.attr.timeout,
             logger = logger,
         )
 
-        metadata = json.decode(rctx.read("metadata.json"))
-        rctx.delete("metadata.json")
+    # NOTE @aignas 2025-09-28: if someone has an old vendored file that does not have the
+    # dep_template set or the packages is not set either, we should still not break, best to
+    # disable pipstar for that particular case.
+    #
+    # Remove non-pipstar and config_load check when we release rules_python 2.
+    if enable_pipstar:
+        install_dir_path = whl_path.dirname.get_child("site-packages")
+        metadata = whl_metadata(
+            install_dir = install_dir_path,
+            read_fn = rctx.read,
+            logger = logger,
+        )
+        namespace_package_files = pypi_repo_utils.find_namespace_package_files(rctx, install_dir_path)
 
         # NOTE @aignas 2024-06-22: this has to live on until we stop supporting
         # passing `twine` as a `:pkg` library via the `WORKSPACE` builds.
         #
         # See ../../packaging.bzl line 190
         entry_points = {}
-        for item in metadata["entry_points"]:
-            name = item["name"]
-            module = item["module"]
-            attribute = item["attribute"]
+        for item in metadata.entry_points:
+            name = item.name
+            module = item.module
+            attribute = item.attribute
 
             # There is an extreme edge-case with entry_points that end with `.py`
             # See: https://github.com/bazelbuild/bazel/blob/09c621e4cf5b968f4c6cdf905ab142d5961f9ddc/src/test/java/com/google/devtools/build/lib/rules/python/PyBinaryConfiguredTargetTest.java#L174
@@ -413,16 +456,13 @@ def _whl_library_impl(rctx):
             )
             entry_points[entry_point_without_py] = entry_point_script_name
 
-        metadata = whl_metadata(
-            install_dir = whl_path.dirname.get_child("site-packages"),
-            read_fn = rctx.read,
-            logger = logger,
-        )
-
         build_file_contents = generate_whl_library_build_bazel(
             name = whl_path.basename,
             sdist_filename = sdist_filename,
-            dep_template = rctx.attr.dep_template or "@{}{{name}}//:{{target}}".format(rctx.attr.repo_prefix),
+            dep_template = rctx.attr.dep_template or "@{}{{name}}//:{{target}}".format(
+                rctx.attr.repo_prefix,
+            ),
+            config_load = rctx.attr.config_load,
             entry_points = entry_points,
             metadata_name = metadata.name,
             metadata_version = metadata.version,
@@ -434,38 +474,10 @@ def _whl_library_impl(rctx):
             data_exclude = rctx.attr.pip_data_exclude,
             group_deps = rctx.attr.group_deps,
             group_name = rctx.attr.group_name,
+            namespace_package_files = namespace_package_files,
+            extras = requirement(rctx.attr.requirement).extras,
         )
     else:
-        target_platforms = rctx.attr.experimental_target_platforms or []
-        if target_platforms:
-            parsed_whl = parse_whl_name(whl_path.basename)
-
-            # NOTE @aignas 2023-12-04: if the wheel is a platform specific wheel, we
-            # only include deps for that target platform
-            if parsed_whl.platform_tag != "any":
-                target_platforms = [
-                    p.target_platform
-                    for p in whl_target_platforms(
-                        platform_tag = parsed_whl.platform_tag,
-                        abi_tag = parsed_whl.abi_tag.strip("tm"),
-                    )
-                ]
-
-        pypi_repo_utils.execute_checked(
-            rctx,
-            op = "whl_library.ExtractWheel({}, {})".format(rctx.attr.name, whl_path),
-            python = python_interpreter,
-            arguments = args + [
-                "--whl-file",
-                whl_path,
-            ] + ["--platform={}".format(p) for p in target_platforms],
-            srcs = rctx.attr._python_srcs,
-            environment = environment,
-            quiet = rctx.attr.quiet,
-            timeout = rctx.attr.timeout,
-            logger = logger,
-        )
-
         metadata = json.decode(rctx.read("metadata.json"))
         rctx.delete("metadata.json")
 
@@ -492,6 +504,8 @@ def _whl_library_impl(rctx):
                 _generate_entry_point_contents(module, attribute),
             )
             entry_points[entry_point_without_py] = entry_point_script_name
+
+        namespace_package_files = pypi_repo_utils.find_namespace_package_files(rctx, rctx.path("site-packages"))
 
         build_file_contents = generate_whl_library_build_bazel(
             name = whl_path.basename,
@@ -511,6 +525,7 @@ def _whl_library_impl(rctx):
                 "pypi_name={}".format(metadata["name"]),
                 "pypi_version={}".format(metadata["version"]),
             ],
+            namespace_package_files = namespace_package_files,
         )
 
     # Delete these in case the wheel had them. They generally don't cause
@@ -533,7 +548,12 @@ def _whl_library_impl(rctx):
             paths.extend(path.readdir())
 
     rctx.file("BUILD.bazel", build_file_contents)
-    return
+
+    if enable_pipstar and enable_pipstar_extract:
+        if hasattr(rctx, "repo_metadata"):
+            return rctx.repo_metadata(reproducible = True)
+
+    return None
 
 def _generate_entry_point_contents(
         module,
@@ -572,11 +592,17 @@ whl_library_attrs = dict({
         ),
         allow_files = True,
     ),
+    "config_load": attr.string(
+        doc = "The load location for configuration for pipstar.",
+    ),
     "dep_template": attr.string(
         doc = """
 The dep template to use for referencing the dependencies. It should have `{name}`
 and `{target}` tokens that will be replaced with the normalized distribution name
 and the target that we need respectively.
+
+For example if your whl depends on `numpy` and your Python package repo is named
+`pip` so that you would normally do `@pip//numpy`, then this should be: `@pip//{name}`.
 """,
     ),
     "filename": attr.string(
@@ -615,11 +641,29 @@ attr makes `extra_pip_args` and `download_only` ignored.""",
         doc = "The whl file that should be used instead of downloading or building the whl.",
     ),
     "whl_patches": attr.label_keyed_string_dict(
-        doc = """a label-keyed-string dict that has
-            json.encode(struct([whl_file], patch_strip]) as values. This
-            is to maintain flexibility and correct bzlmod extension interface
-            until we have a better way to define whl_library and move whl
-            patching to a separate place. INTERNAL USE ONLY.""",
+        doc = """
+A label-keyed-string dict with patch files as keys and json-strings as values.
+
+The keys are labels to the patch file to apply.
+
+The values describe what to apply the patch to and how to apply it.
+It is encoded as `json.encode(struct([whls], patch_strip])`,
+where `whls` is a `list[str`] of wheel filenames, and `patch_strip`
+is a number.
+
+So it will look something like this:
+```
+"//path/to/package:my.patch": json.encode(struct(
+    whls = ["something-2.7.1-py3-none-any.whl"],
+    patch_strip = 1,
+)),
+```
+The patch is applied within the scope of the .whl file.
+I.e. you should create the patch from the same place you unziped the wheel.
+
+
+This is to maintain flexibility and correct bzlmod extension interface until we have a better
+way to define whl_library and move whl patching to a separate place. INTERNAL USE ONLY.""",
     ),
     "_python_path_entries": attr.label_list(
         # Get the root directory of these rules and keep them as a default attribute
@@ -651,7 +695,13 @@ whl_library = repository_rule(
     attrs = whl_library_attrs,
     doc = """
 Download and extracts a single wheel based into a bazel repo based on the requirement string passed in.
-Instantiated from pip_repository and inherits config options from there.""",
+Instantiated from pip_repository and inherits config options from there.
+
+:::{versionchanged} 1.9.0
+The `whl_library` is marked as reproducible if using starlark to extract and parse the
+wheel contents without building an `sdist` first.
+:::
+""",
     implementation = _whl_library_impl,
     environ = [
         "RULES_PYTHON_PIP_ISOLATED",

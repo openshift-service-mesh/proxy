@@ -43,6 +43,7 @@ go_test(
         "//internal/testprotos/textpb2",
         "//proto",
         "//reflect/protoreflect",
+        "//reflect/protoregistry",
         "//testing/protopack",
         "//types/dynamicpb",
         "//types/known/anypb",

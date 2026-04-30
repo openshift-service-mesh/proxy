@@ -26,7 +26,6 @@
 #include <memory>
 #include <sstream>
 
-#include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/random/random.h"
 #include "src/core/call/metadata_batch.h"
@@ -37,6 +36,7 @@
 #include "src/core/lib/slice/slice_string_helpers.h"
 #include "src/core/lib/transport/timeout_encoding.h"
 #include "src/core/util/crash.h"
+#include "src/core/util/grpc_check.h"
 #include "src/core/util/time.h"
 #include "test/core/test_util/test_config.h"
 #include "test/cpp/microbenchmarks/helpers.h"
@@ -52,6 +52,8 @@ static grpc_slice MakeSlice(const std::vector<uint8_t>& bytes) {
 }
 
 namespace grpc_core {
+
+static Http2ZTraceCollector* ztrace_collector = new Http2ZTraceCollector();
 
 class FakeCallTracer final : public CallTracerInterface {
  public:
@@ -114,12 +116,8 @@ static void BM_HpackEncoderEncodeDeadline(benchmark::State& state) {
   while (state.KeepRunning()) {
     c.EncodeHeaders(
         grpc_core::HPackCompressor::EncodeHeaderOptions{
-            static_cast<uint32_t>(state.iterations()),
-            true,
-            false,
-            size_t{1024},
-            &call_tracer,
-        },
+            static_cast<uint32_t>(state.iterations()), true, false,
+            size_t{1024}, &call_tracer, grpc_core::ztrace_collector},
         b, &outbuf);
     grpc_slice_buffer_reset_and_unref(&outbuf);
     grpc_core::ExecCtx::Get()->Flush();
@@ -144,12 +142,10 @@ static void BM_HpackEncoderEncodeHeader(benchmark::State& state) {
     static constexpr int kEnsureMaxFrameAtLeast = 2;
     c.EncodeHeaders(
         grpc_core::HPackCompressor::EncodeHeaderOptions{
-            static_cast<uint32_t>(state.iterations()),
-            state.range(0) != 0,
+            static_cast<uint32_t>(state.iterations()), state.range(0) != 0,
             Fixture::kEnableTrueBinary,
             static_cast<size_t>(state.range(1) + kEnsureMaxFrameAtLeast),
-            &call_tracer,
-        },
+            &call_tracer, grpc_core::ztrace_collector},
         b, &outbuf);
     if (!logged_representative_output && state.iterations() > 3) {
       logged_representative_output = true;
@@ -379,7 +375,7 @@ static void BM_HpackParserParseHeader(benchmark::State& state) {
       auto error =
           p.Parse(slices[i], i == slices.size() - 1, absl::BitGenRef(bitgen),
                   /*call_tracer=*/nullptr);
-      CHECK_OK(error);
+      GRPC_CHECK_OK(error);
     }
   };
   parse_vec(init_slices);
@@ -418,12 +414,9 @@ class FromEncoderFixture {
       grpc_slice_buffer_init(&outbuf);
       c.EncodeHeaders(
           grpc_core::HPackCompressor::EncodeHeaderOptions{
-              static_cast<uint32_t>(i),
-              false,
-              EncoderFixture::kEnableTrueBinary,
-              1024 * 1024,
-              &call_tracer,
-          },
+              static_cast<uint32_t>(i), false,
+              EncoderFixture::kEnableTrueBinary, 1024 * 1024, &call_tracer,
+              grpc_core::ztrace_collector},
           b, &outbuf);
       if (i == iteration) {
         for (size_t s = 0; s < outbuf.count; s++) {
@@ -437,8 +430,8 @@ class FromEncoderFixture {
       i++;
     }
     // Remove the HTTP header.
-    CHECK(!out.empty());
-    CHECK_GT(GRPC_SLICE_LENGTH(out[0]), 9);
+    GRPC_CHECK(!out.empty());
+    GRPC_CHECK_GT(GRPC_SLICE_LENGTH(out[0]), 9);
     out[0] = grpc_slice_sub_no_ref(out[0], 9, GRPC_SLICE_LENGTH(out[0]));
     return out;
   }

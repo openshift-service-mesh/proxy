@@ -295,16 +295,54 @@ class PkgTarTest(unittest.TestCase):
     self.assertTarFileContent('test-respect-externally-defined-duplicates.tar', content)
 
   def test_compression_level(self):
-    sizes = [
+    cases = [
       ('test-tar-compression_level--1.tgz', 179),
       ('test-tar-compression_level-3.tgz', 230),
       ('test-tar-compression_level-6.tgz', 178),
       ('test-tar-compression_level-9.tgz', 167),
+      ('test-tar-xz-compression_level--1.tar.xz', 67216),
+      ('test-tar-xz-compression_level-3.tar.xz', 67264),
+      ('test-tar-xz-compression_level-6.tar.xz', 67216),
+      ('test-tar-xz-compression_level-9.tar.xz', 67156),
     ]
-    for file_name, expected_size in sizes:
+    for file_name, expected_size in cases:
       file_path = runfiles.Create().Rlocation('rules_pkg/tests/tar/' + file_name)
       file_size = os.stat(file_path).st_size
       self.assertEqual(file_size, expected_size, 'size error for ' + file_name)
+
+  def test_preserve_mode(self):
+    if os.name == 'nt':
+      expected_mode = [
+        ('test-tar-preserve_mode-False.tar', "0o555"), # chmod 555 = r-x r-x r-x
+        ('test-tar-preserve_mode-True.tar', "0o666"),  # chmod 666 = rw- rw- rw-
+      ]
+    else:
+      expected_mode = [
+        ('test-tar-preserve_mode-False.tar', "0o555"), # chmod 555 = r-x r-x r-x
+        ('test-tar-preserve_mode-True.tar', "0o644"),  # chmod 644 = rw- r-- r--
+      ]
+    for file_name, expected_mode in expected_mode:
+      file_path = runfiles.Create().Rlocation('rules_pkg/tests/tar/' + file_name)
+      with tarfile.open(file_path, 'r') as f:
+        for member in f.getmembers():
+          self.assertEqual(member.name, "hello.txt", "unexpected file name for " + file_name)
+          self.assertEqual(member.mode, int(expected_mode, 0), 'file mode not preserved for ' + file_name)
+
+  def test_preserve_mtime(self):
+    test_cases = [
+      # tar file name, mtime should be equal to PORTABLE_MTIME?
+      ('test-tar-preserve_mtime-False.tar', True),
+      ('test-tar-preserve_mtime-True.tar', False),
+    ]
+    for file_name, should_be_equal_to_portable_mtime in test_cases:
+      file_path = runfiles.Create().Rlocation('rules_pkg/tests/tar/' + file_name)
+      with tarfile.open(file_path, 'r') as f:
+        for member in f.getmembers():
+          self.assertEqual(member.name, "hello.txt", "unexpected file name for " + file_name)
+          if should_be_equal_to_portable_mtime:
+            self.assertEqual(member.mtime, PORTABLE_MTIME, "unexpected mtime for " + file_name)
+          else:
+            self.assertNotEqual(member.mtime, PORTABLE_MTIME, "file mtime not preserved for " + file_name)
 
 if __name__ == '__main__':
   unittest.main()

@@ -6,6 +6,7 @@
 
 #include <string_view>
 
+#include "absl/functional/overload.h"
 #include "hwy/highway.h"
 #include "src/base/strings.h"
 #include "src/common/assert-scope.h"
@@ -17,6 +18,7 @@
 #include "src/objects/heap-number-inl.h"
 #include "src/objects/js-array-inl.h"
 #include "src/objects/js-raw-json-inl.h"
+#include "src/objects/literal-objects-inl.h"
 #include "src/objects/lookup.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/oddball-inl.h"
@@ -557,15 +559,15 @@ bool DoNotEscape(const SrcChar* chars, size_t length,
 
 bool IsFastKey(Tagged<String> key, const DisallowGarbageCollection& no_gc) {
   return key->DispatchToSpecificType(
-      base::overloaded{[&](Tagged<SeqOneByteString> str) {
-                         const uint8_t* chars = str->GetChars(no_gc);
-                         return DoNotEscape(chars, str->length(), no_gc);
-                       },
-                       [&](Tagged<ExternalOneByteString> str) {
-                         const uint8_t* chars = str->GetChars();
-                         return DoNotEscape(chars, str->length(), no_gc);
-                       },
-                       [&](Tagged<String> str) { return false; }});
+      absl::Overload{[&](Tagged<SeqOneByteString> str) {
+                       const uint8_t* chars = str->GetChars(no_gc);
+                       return DoNotEscape(chars, str->length(), no_gc);
+                     },
+                     [&](Tagged<ExternalOneByteString> str) {
+                       const uint8_t* chars = str->GetChars();
+                       return DoNotEscape(chars, str->length(), no_gc);
+                     },
+                     [&](Tagged<String> str) { return false; }});
 }
 
 bool CanFastSerializeJSArray(Isolate* isolate, Tagged<JSArray> object) {
@@ -961,7 +963,7 @@ JsonStringifier::Result JsonStringifier::Serialize_(Handle<JSAny> object,
                                                     Handle<Object> key) {
   StackLimitCheck interrupt_check(isolate_);
   if (interrupt_check.InterruptRequested() &&
-      IsException(isolate_->stack_guard()->HandleInterrupts(), isolate_)) {
+      IsExceptionHole(isolate_->stack_guard()->HandleInterrupts(), isolate_)) {
     return EXCEPTION;
   }
 
@@ -1237,7 +1239,8 @@ JsonStringifier::Result JsonStringifier::SerializeFixedArrayWithInterruptCheck(
     DCHECK_LT(limit, kMaxAllowedFastPackedLength);
     limit = std::min(length, limit + kInterruptLength);
     if (interrupt_check.InterruptRequested() &&
-        IsException(isolate_->stack_guard()->HandleInterrupts(), isolate_)) {
+        IsExceptionHole(isolate_->stack_guard()->HandleInterrupts(),
+                        isolate_)) {
       return EXCEPTION;
     }
   }
@@ -1422,6 +1425,27 @@ JsonStringifier::Result JsonStringifier::SerializeJSObject(
           Cast<JSAny>(Object::GetPropertyOrElement(isolate_, object, key_name)),
           EXCEPTION);
     }
+
+    // Handle Lazy Closures
+    if (Handle<SharedFunctionInfo> shared;
+        TryCast<SharedFunctionInfo>(property, &shared)) {
+      if (Tagged<PrototypeSharedClosureInfo> closure_infos;
+          map->TryGetPrototypeSharedClosureInfo(&closure_infos)) {
+        DirectHandle<FeedbackCell> feedback_cell(
+            closure_infos->closure_feedback_cell_array()->get(
+                shared->feedback_slot()),
+            isolate_);
+        property =
+            Factory::JSFunctionBuilder{
+                isolate_, shared, handle(closure_infos->context(), isolate_)}
+                .set_feedback_cell(feedback_cell)
+                .set_allocation_type(AllocationType::kYoung)
+                .Build();
+      } else {
+        UNREACHABLE();
+      }
+    }
+
     Result result = SerializeProperty(property, comma, key_name);
     if (!comma && result == SUCCESS) comma = true;
     if (result == EXCEPTION || result == NEED_STACK) return result;
@@ -2117,7 +2141,7 @@ class ContinuationRecord {
     return static_cast<Type>(result - 1);
   }
 
-  static consteval Type ContinuationTypeForArray(ElementsKind kind,
+  static constexpr Type ContinuationTypeForArray(ElementsKind kind,
                                                  bool with_interrupt_check) {
     DCHECK(IsObjectElementsKind(kind));
     if (IsHoleyElementsKind(kind)) {
@@ -2682,7 +2706,7 @@ FastJsonStringifier<Char>::SerializeJSPrimitiveWrapper(
     Tagged<String> string = Cast<String>(raw);
     while (true) {
       FastJsonStringifierResult result =
-          string->DispatchToSpecificType(base::overloaded{
+          string->DispatchToSpecificType(absl::Overload{
               [&](Tagged<SeqOneByteString> str) {
                 return SerializeString<SeqOneByteString>(str, no_gc);
               },
@@ -2964,7 +2988,7 @@ FastJsonStringifier<Char>::SerializeFixedArrayWithInterruptCheck(
                                     FixedDoubleArray, FixedArray>;
 
   StackLimitCheck interrupt_check(isolate_);
-  uint32_t limit = std::min(length, kArrayInterruptLength);
+  uint32_t limit = std::min(length, start_index + kArrayInterruptLength);
   constexpr uint32_t kMaxAllowedFastPackedLength =
       std::numeric_limits<uint32_t>::max() - kArrayInterruptLength;
   static_assert(FixedArray::kMaxLength < kMaxAllowedFastPackedLength);
@@ -2991,9 +3015,9 @@ FastJsonStringifier<Char>::SerializeFixedArrayWithInterruptCheck(
       // encountered an exception, so this is fine.
       AllowGarbageCollection allow_gc;
       if (interrupt_check.InterruptRequested() &&
-          IsException(isolate_->stack_guard()->HandleInterrupts(
-                          StackGuard::InterruptLevel::kNoGC),
-                      isolate_)) {
+          IsExceptionHole(isolate_->stack_guard()->HandleInterrupts(
+                              StackGuard::InterruptLevel::kNoGC),
+                          isolate_)) {
         return EXCEPTION;
       }
     }
@@ -3270,9 +3294,9 @@ FastJsonStringifier<Char>::HandleInterruptAndCheckCycle() {
     // encountered an exception, so this is fine.
     AllowGarbageCollection allow_gc;
     if (V8_UNLIKELY(interrupt_check.InterruptRequested() &&
-                    IsException(isolate_->stack_guard()->HandleInterrupts(
-                                    StackGuard::InterruptLevel::kNoGC),
-                                isolate_))) {
+                    IsExceptionHole(isolate_->stack_guard()->HandleInterrupts(
+                                        StackGuard::InterruptLevel::kNoGC),
+                                    isolate_))) {
       return EXCEPTION;
     }
   }
@@ -3375,7 +3399,7 @@ bool FastJsonStringifier<Char>::AppendStringSIMD(
   const SrcChar* block = chars;
   const SrcChar* end = chars + length;
   hw::FixedTag<SrcChar, 16> tag;
-  static constexpr size_t stride = hw::Lanes(tag);
+  static const size_t stride = hw::Lanes(tag);
 
   const auto mask_0x20 = hw::Set(tag, 0x20);
   const auto mask_0x22 = hw::Set(tag, 0x22);
@@ -3383,9 +3407,11 @@ bool FastJsonStringifier<Char>::AppendStringSIMD(
 
   for (; block + (stride - 1) < end; block += stride) {
     const auto input = hw::LoadU(tag, block);
-    const auto has_lower_than_0x20 = input < mask_0x20;
-    const auto has_0x22 = input == mask_0x22;
-    const auto has_0x5c = input == mask_0x5c;
+    // TODO(floitsch): use operators for the comparisons when they are available
+    // on RISC-V.
+    const auto has_lower_than_0x20 = hw::Lt(input, mask_0x20);
+    const auto has_0x22 = hw::Eq(input, mask_0x22);
+    const auto has_0x5c = hw::Eq(input, mask_0x5c);
     const auto result = hw::Or(hw::Or(has_lower_than_0x20, has_0x22), has_0x5c);
 
     // No character that needs escaping found in block.

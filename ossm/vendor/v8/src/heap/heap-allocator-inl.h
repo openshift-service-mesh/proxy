@@ -81,14 +81,13 @@ HeapAllocator::AllocateRaw(int size_in_bytes, AllocationOrigin origin,
   DCHECK(local_heap_->IsRunning());
   // We need to have entered the isolate before allocating.
   DCHECK_EQ(heap_->isolate(), Isolate::TryGetCurrent());
-#if V8_ENABLE_WEBASSEMBLY
-  if (!v8_flags.wasm_jitless) {
-    trap_handler::AssertThreadNotInWasm();
-  }
-#endif
 #if DEBUG
   local_heap_->VerifyCurrent();
-#endif
+#endif  // DEBUG
+
+#if V8_VERIFY_WRITE_BARRIERS
+  local_heap_->AssertNoWriteBarrierModeScope();
+#endif  // V8_VERIFY_WRITE_BARRIERS
 
   if (v8_flags.single_generation.value() && type == AllocationType::kYoung) {
     return AllocateRaw(size_in_bytes, AllocationType::kOld, origin, alignment);
@@ -159,6 +158,14 @@ HeapAllocator::AllocateRaw(int size_in_bytes, AllocationOrigin origin,
         break;
     }
   }
+
+#if V8_VERIFY_WRITE_BARRIERS
+  if (type == AllocationType::kYoung && !allocation.IsFailure()) {
+    set_last_young_allocation(allocation.ToAddress());
+  } else {
+    set_last_young_allocation(kNullAddress);
+  }
+#endif  // V8_VERIFY_WRITE_BARRIERS
 
   if (allocation.To(&object)) {
     if (heap::ShouldZapGarbage() && AllocationType::kCode == type) {
@@ -231,62 +238,14 @@ HeapAllocator::AllocateRawWith(int size, AllocationType allocation,
     if (result.To(&object)) {
       return object;
     }
-  }
-  switch (mode) {
-    case kLightRetry:
-      result = AllocateRawWithLightRetrySlowPath(size, allocation, origin,
-                                                 alignment, hint);
-      break;
-    case kRetryOrFail:
-      result = AllocateRawWithRetryOrFailSlowPath(size, allocation, origin,
-                                                  alignment, hint);
-      break;
-  }
-  if (result.To(&object)) {
-    return object;
-  }
-  return HeapObject();
-}
-
-template <typename AllocateFunction, typename RetryFunction>
-V8_WARN_UNUSED_RESULT auto HeapAllocator::AllocateRawWithLightRetrySlowPath(
-    AllocateFunction&& Allocate, RetryFunction&& RetryAllocate,
-    AllocationType allocation) {
-  if (auto result = Allocate(allocation)) [[likely]] {
-    return result;
+  } else {
+    result = AllocateRaw(size, allocation, origin, alignment, hint);
+    if (result.To(&object)) {
+      return object;
+    }
   }
 
-  // Two GCs before returning failure.
-  CollectGarbage(allocation);
-  if (auto result = RetryAllocate(allocation)) {
-    return result;
-  }
-  CollectGarbage(allocation);
-  return RetryAllocate(allocation);
-}
-
-template <typename AllocateFunction, typename RetryFunction>
-auto HeapAllocator::AllocateRawWithRetryOrFailSlowPath(
-    AllocateFunction&& Allocate, RetryFunction&& RetryAllocate,
-    AllocationType allocation) {
-  if (auto result = AllocateRawWithLightRetrySlowPath(Allocate, RetryAllocate,
-                                                      allocation)) {
-    return result;
-  }
-
-  CollectAllAvailableGarbage(allocation);
-  if (auto result = RetryAllocate(allocation)) {
-    return result;
-  }
-
-  V8::FatalProcessOutOfMemory(heap_->isolate(), "CALL_AND_RETRY_LAST",
-                              V8::kHeapOOM);
-}
-
-template <typename Function>
-V8_WARN_UNUSED_RESULT auto HeapAllocator::CustomAllocateWithRetryOrFail(
-    Function&& Allocate, AllocationType allocation) {
-  return *AllocateRawWithRetryOrFailSlowPath(Allocate, Allocate, allocation);
+  return AllocateRawSlowPath(mode, size, allocation, origin, alignment, hint);
 }
 
 }  // namespace internal

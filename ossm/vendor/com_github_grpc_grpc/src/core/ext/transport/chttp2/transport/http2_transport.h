@@ -23,8 +23,12 @@
 #include <utility>
 
 #include "src/core/call/call_spine.h"
+#include "src/core/call/metadata_info.h"
+#include "src/core/channelz/channelz.h"
+#include "src/core/ext/transport/chttp2/transport/flow_control.h"
 #include "src/core/ext/transport/chttp2/transport/frame.h"
 #include "src/core/ext/transport/chttp2/transport/http2_settings.h"
+#include "src/core/lib/event_engine/tcp_socket_utils.h"
 #include "src/core/lib/promise/mpsc.h"
 #include "src/core/lib/promise/party.h"
 #include "src/core/lib/transport/promise_endpoint.h"
@@ -42,17 +46,15 @@ namespace http2 {
 // TODO(tjagtap) : [PH2][P3] : Update the experimental status of the code before
 // http2 rollout begins.
 
-#define HTTP2_TRANSPORT_DLOG \
+#define GRPC_HTTP2_CLIENT_DLOG \
   DLOG_IF(INFO, GRPC_TRACE_FLAG_ENABLED(http2_ph2_transport))
 
-#define HTTP2_CLIENT_DLOG \
+#define GRPC_HTTP2_COMMON_DLOG \
   DLOG_IF(INFO, GRPC_TRACE_FLAG_ENABLED(http2_ph2_transport))
 
-#define HTTP2_SERVER_DLOG \
-  DLOG_IF(INFO, GRPC_TRACE_FLAG_ENABLED(http2_ph2_transport))
-
-// TODO(akshitpatel) : [PH2][P2] : Choose appropriate size later.
-constexpr int kMpscSize = 10;
+// TODO(akshitpatel) : [PH2][P4] : Choose appropriate size later.
+constexpr uint32_t kStreamQueueSize = /*1 MB*/ 1024u * 1024u;
+constexpr uint32_t kMaxWriteSize = /*10 MB*/ 10u * 1024u * 1024u;
 
 enum class HttpStreamState : uint8_t {
   // https://www.rfc-editor.org/rfc/rfc9113.html#name-stream-states
@@ -63,7 +65,17 @@ enum class HttpStreamState : uint8_t {
   kClosed,
 };
 
-class TransportSendQeueue {};
+void InitLocalSettings(Http2Settings& settings, const bool is_client);
+
+void ReadSettingsFromChannelArgs(const ChannelArgs& channel_args,
+                                 Http2Settings& local_settings,
+                                 chttp2::TransportFlowControl& flow_control,
+                                 const bool is_client);
+
+RefCountedPtr<channelz::SocketNode> CreateChannelzSocketNode(
+    std::shared_ptr<grpc_event_engine::experimental::EventEngine::Endpoint>
+        event_engine_endpoint,
+    const ChannelArgs& args);
 
 }  // namespace http2
 }  // namespace grpc_core

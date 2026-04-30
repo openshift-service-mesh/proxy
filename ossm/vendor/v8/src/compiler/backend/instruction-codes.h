@@ -74,11 +74,13 @@ inline RecordWriteMode WriteBarrierKindToRecordWriteMode(
   V(AtomicExchangeInt16)                                   \
   V(AtomicExchangeUint16)                                  \
   V(AtomicExchangeWord32)                                  \
+  V(AtomicExchangeWithWriteBarrier)                        \
   V(AtomicCompareExchangeInt8)                             \
   V(AtomicCompareExchangeUint8)                            \
   V(AtomicCompareExchangeInt16)                            \
   V(AtomicCompareExchangeUint16)                           \
   V(AtomicCompareExchangeWord32)                           \
+  V(AtomicCompareExchangeWithWriteBarrier)                 \
   V(AtomicAddInt8)                                         \
   V(AtomicAddUint8)                                        \
   V(AtomicAddInt16)                                        \
@@ -107,6 +109,9 @@ inline RecordWriteMode WriteBarrierKindToRecordWriteMode(
   V(ArchStoreWithWriteBarrier)                             \
   V(ArchAtomicStoreWithWriteBarrier)                       \
   V(ArchStoreIndirectWithWriteBarrier)                     \
+  V(ArchStoreSkippedWriteBarrier)                          \
+  V(ArchAtomicStoreSkippedWriteBarrier)                    \
+  V(ArchStoreIndirectSkippedWriteBarrier)                  \
   V(AtomicLoadInt8)                                        \
   V(AtomicLoadUint8)                                       \
   V(AtomicLoadInt16)                                       \
@@ -144,8 +149,10 @@ inline RecordWriteMode WriteBarrierKindToRecordWriteMode(
   V(ArchBinarySearchSwitch)                                                \
   V(ArchTableSwitch)                                                       \
   V(ArchNop)                                                               \
+  V(ArchPause)                                                             \
   V(ArchAbortCSADcheck)                                                    \
   V(ArchDebugBreak)                                                        \
+  IF_HARDWARE_SANDBOX(V, ArchSwitchSandboxMode)                            \
   V(ArchComment)                                                           \
   V(ArchDeoptimize)                                                        \
   V(ArchRet)                                                               \
@@ -225,7 +232,7 @@ enum FlagsMode {
   kFlags_set = 3,
   kFlags_trap = 4,
   kFlags_select = 5,
-  kFlags_conditional_set = 6,
+  kFlags_conditional_trap = 6,
   kFlags_conditional_branch = 7,
 };
 
@@ -456,7 +463,7 @@ using BranchHintField = StackCheckField::Next<bool, 1>;
 // back fixes that add new opcodes.
 // It is OK to temporarily reduce the required slack if we have a tracking bug
 // to reduce the number of used opcodes again.
-static_assert(ArchOpcodeField::kMax - kLastArchOpcode >= 16,
+static_assert(ArchOpcodeField::kMax - kLastArchOpcode >= 15,
               "We are running close to the number of available opcodes.");
 
 }  // namespace compiler

@@ -177,14 +177,14 @@ void RouterCheckTool::assignRuntimeFraction(
 void RouterCheckTool::finalizeHeaders(ToolConfig& tool_config,
                                       Envoy::StreamInfo::StreamInfoImpl stream_info) {
   if (!headers_finalized_ && tool_config.route_ != nullptr) {
-    const Formatter::HttpFormatterContext formatter_context(tool_config.request_headers_.get(),
-                                                            tool_config.response_headers_.get(),
-                                                            nullptr, {}, {}, nullptr);
+    const Formatter::Context formatter_context(tool_config.request_headers_.get(),
+                                               tool_config.response_headers_.get(), nullptr, {}, {},
+                                               nullptr);
 
     if (tool_config.route_->directResponseEntry() != nullptr) {
       tool_config.route_->directResponseEntry()->rewritePathHeader(*tool_config.request_headers_,
                                                                    true);
-      sendLocalReply(tool_config, *tool_config.route_->directResponseEntry());
+      sendLocalReply(tool_config, *tool_config.route_->directResponseEntry(), stream_info);
       tool_config.route_->directResponseEntry()->finalizeResponseHeaders(
           *tool_config.response_headers_, formatter_context, stream_info);
     } else if (tool_config.route_->routeEntry() != nullptr) {
@@ -199,7 +199,8 @@ void RouterCheckTool::finalizeHeaders(ToolConfig& tool_config,
 }
 
 void RouterCheckTool::sendLocalReply(ToolConfig& tool_config,
-                                     const Router::DirectResponseEntry& entry) {
+                                     const Router::DirectResponseEntry& entry,
+                                     Envoy::StreamInfo::StreamInfoImpl& stream_info) {
   auto encode_functions = Envoy::Http::Utility::EncodeFunctions{
       nullptr, nullptr,
       [&](Envoy::Http::ResponseHeaderMapPtr&& headers, bool end_stream) -> void {
@@ -213,8 +214,12 @@ void RouterCheckTool::sendLocalReply(ToolConfig& tool_config,
 
   bool is_grpc = false;
   bool is_head_request = false;
+  std::string body;
+  absl::string_view direct_response_body = entry.formatBody(
+      *tool_config.request_headers_, *tool_config.response_headers_, stream_info, body);
+
   Envoy::Http::Utility::LocalReplyData local_reply_data{
-      is_grpc, entry.responseCode(), entry.responseBody(), absl::nullopt, is_head_request};
+      is_grpc, entry.responseCode(), direct_response_body, absl::nullopt, is_head_request};
 
   Envoy::Http::Utility::sendLocalReply(false, encode_functions, local_reply_data);
 }
@@ -382,12 +387,11 @@ bool RouterCheckTool::compareVirtualCluster(
       tool_config.route_ != nullptr && tool_config.route_->routeEntry() != nullptr;
   const bool has_virtual_cluster =
       has_route_entry &&
-      tool_config.route_->virtualHost()->virtualCluster(*tool_config.request_headers_) != nullptr;
+      tool_config.route_->virtualHost().virtualCluster(*tool_config.request_headers_) != nullptr;
   std::string actual = "";
   if (has_virtual_cluster) {
-    Stats::StatName stat_name = tool_config.route_->virtualHost()
-                                    ->virtualCluster(*tool_config.request_headers_)
-                                    ->statName();
+    Stats::StatName stat_name =
+        tool_config.route_->virtualHost().virtualCluster(*tool_config.request_headers_)->statName();
     actual = tool_config.symbolTable().toString(stat_name);
   }
   const bool matches =
@@ -413,7 +417,7 @@ bool RouterCheckTool::compareVirtualHost(
       tool_config.route_ != nullptr && tool_config.route_->routeEntry() != nullptr;
   std::string actual = "";
   if (has_route_entry) {
-    Stats::StatName stat_name = tool_config.route_->virtualHost()->statName();
+    Stats::StatName stat_name = tool_config.route_->virtualHost().statName();
     actual = tool_config.symbolTable().toString(stat_name);
   }
   const bool matches =

@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -23,10 +24,12 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
+#include "google/protobuf/compiler/code_generator_lite.h"
 #include "google/protobuf/compiler/java/context.h"
 #include "google/protobuf/compiler/java/doc_comment.h"
 #include "google/protobuf/compiler/java/field_common.h"
 #include "google/protobuf/compiler/java/generator_common.h"
+#include "google/protobuf/compiler/java/generator_factory.h"
 #include "google/protobuf/compiler/java/helpers.h"
 #include "google/protobuf/compiler/java/full/enum.h"
 #include "google/protobuf/compiler/java/full/extension.h"
@@ -34,6 +37,7 @@
 #include "google/protobuf/compiler/java/full/message_builder.h"
 #include "google/protobuf/compiler/java/message_serialization.h"
 #include "google/protobuf/compiler/java/name_resolver.h"
+#include "google/protobuf/compiler/java/names.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/descriptor.pb.h"
 #include "google/protobuf/io/coded_stream.h"
@@ -47,9 +51,6 @@ namespace google {
 namespace protobuf {
 namespace compiler {
 namespace java {
-
-using internal::WireFormat;
-using internal::WireFormatLite;
 
 namespace {
 std::string MapValueImmutableClassdName(const Descriptor* descriptor,
@@ -72,7 +73,7 @@ MessageGenerator::MessageGenerator(const Descriptor* descriptor)
   }
 }
 
-MessageGenerator::~MessageGenerator() {}
+MessageGenerator::~MessageGenerator() = default;
 
 // ===================================================================
 ImmutableMessageGenerator::ImmutableMessageGenerator(
@@ -86,7 +87,7 @@ ImmutableMessageGenerator::ImmutableMessageGenerator(
          "generate lite messages.";
 }
 
-ImmutableMessageGenerator::~ImmutableMessageGenerator() {}
+ImmutableMessageGenerator::~ImmutableMessageGenerator() = default;
 
 void ImmutableMessageGenerator::GenerateStaticVariables(
     io::Printer* printer, int* bytecode_estimate) {
@@ -104,12 +105,12 @@ void ImmutableMessageGenerator::GenerateStaticVariables(
   if (descriptor_->containing_type() != nullptr) {
     vars["parent"] = UniqueFileScopeIdentifier(descriptor_->containing_type());
   }
-  if (MultipleJavaFiles(descriptor_->file(), /* immutable = */ true)) {
+  if (NestedInFileClass(*descriptor_)) {
+    vars["private"] = "private ";
+  } else {
     // We can only make these package-private since the classes that use them
     // are in separate files.
     vars["private"] = "";
-  } else {
-    vars["private"] = "private ";
   }
   if (*bytecode_estimate <= kMaxStaticSize) {
     vars["final"] = "final ";
@@ -153,13 +154,12 @@ int ImmutableMessageGenerator::GenerateStaticVariableInitializers(
   if (descriptor_->containing_type() == nullptr) {
     printer->Print(vars,
                    "internal_$identifier$_descriptor =\n"
-                   "  getDescriptor().getMessageTypes().get($index$);\n");
+                   "  getDescriptor().getMessageType($index$);\n");
     bytecode_estimate += 30;
   } else {
-    printer->Print(
-        vars,
-        "internal_$identifier$_descriptor =\n"
-        "  internal_$parent$_descriptor.getNestedTypes().get($index$);\n");
+    printer->Print(vars,
+                   "internal_$identifier$_descriptor =\n"
+                   "  internal_$parent$_descriptor.getNestedType($index$);\n");
     bytecode_estimate += 30;
   }
 
@@ -180,12 +180,12 @@ void ImmutableMessageGenerator::GenerateFieldAccessorTable(
     io::Printer* printer, int* bytecode_estimate) {
   absl::flat_hash_map<absl::string_view, std::string> vars;
   vars["identifier"] = UniqueFileScopeIdentifier(descriptor_);
-  if (MultipleJavaFiles(descriptor_->file(), /* immutable = */ true)) {
+  if (NestedInFileClass(*descriptor_)) {
+    vars["private"] = "private ";
+  } else {
     // We can only make these package-private since the classes that use them
     // are in separate files.
     vars["private"] = "";
-  } else {
-    vars["private"] = "private ";
   }
   if (*bytecode_estimate <= kMaxStaticSize) {
     vars["final"] = "final ";
@@ -242,7 +242,7 @@ int ImmutableMessageGenerator::GenerateFieldAccessorTableInitializer(
 void ImmutableMessageGenerator::GenerateInterface(io::Printer* printer) {
   MaybePrintGeneratedAnnotation(context_, printer, descriptor_,
                                 /* immutable = */ true, "OrBuilder");
-  if (!context_->options().opensource_runtime) {
+  if (!google::protobuf::internal::IsOss()) {
     printer->Print("@com.google.protobuf.Internal.ProtoNonnullApi\n");
   }
   if (descriptor_->extension_range_count() > 0) {
@@ -273,7 +273,7 @@ void ImmutableMessageGenerator::GenerateInterface(io::Printer* printer) {
     field_generators_.get(descriptor_->field(i))
         .GenerateInterfaceMembers(printer);
   }
-  for (auto& kv : oneofs_) {
+  for (const auto& kv : oneofs_) {
     printer->Print(
         "\n"
         "$classname$.$oneof_capitalized_name$Case "
@@ -295,7 +295,7 @@ void ImmutableMessageGenerator::Generate(io::Printer* printer) {
 
   absl::flat_hash_map<absl::string_view, std::string> variables;
   variables["static"] = is_own_file ? "" : "static ";
-  variables["classname"] = descriptor_->name();
+  variables["classname"] = std::string(descriptor_->name());
   variables["extra_interfaces"] = ExtraMessageInterfaces(descriptor_);
   variables["deprecation"] =
       descriptor_->options().deprecated() ? "@java.lang.Deprecated " : "";
@@ -303,7 +303,7 @@ void ImmutableMessageGenerator::Generate(io::Printer* printer) {
   WriteMessageDocComment(printer, descriptor_, context_->options());
   MaybePrintGeneratedAnnotation(context_, printer, descriptor_,
                                 /* immutable = */ true);
-  if (!context_->options().opensource_runtime) {
+  if (!google::protobuf::internal::IsOss()) {
     printer->Print("@com.google.protobuf.Internal.ProtoNonnullApi\n");
   }
 
@@ -340,7 +340,7 @@ void ImmutableMessageGenerator::Generate(io::Printer* printer) {
 
   printer->Print("static {\n");
   printer->Indent();
-  PrintGencodeVersionValidator(printer, context_->options().opensource_runtime,
+  PrintGencodeVersionValidator(printer, google::protobuf::internal::IsOss(),
                                descriptor_->name());
   printer->Outdent();
   printer->Print("}\n");
@@ -394,7 +394,7 @@ void ImmutableMessageGenerator::Generate(io::Printer* printer) {
 
   // oneof
   absl::flat_hash_map<absl::string_view, std::string> vars;
-  for (auto& kv : oneofs_) {
+  for (const auto& kv : oneofs_) {
     const OneofDescriptor* oneof = kv.second;
     vars["oneof_name"] = context_->GetOneofGeneratorInfo(oneof)->name;
     vars["oneof_capitalized_name"] =
@@ -433,7 +433,7 @@ void ImmutableMessageGenerator::Generate(io::Printer* printer) {
                    "private $oneof_capitalized_name$Case(int value) {\n"
                    "  this.value = value;\n"
                    "}\n");
-    if (context_->options().opensource_runtime) {
+    if (google::protobuf::internal::IsOss()) {
       printer->Print(
           vars,
           "/**\n"
@@ -447,7 +447,7 @@ void ImmutableMessageGenerator::Generate(io::Printer* printer) {
           "}\n"
           "\n");
     }
-    if (!context_->options().opensource_runtime) {
+    if (!google::protobuf::internal::IsOss()) {
       printer->Print(
           "@com.google.protobuf.Internal.ProtoMethodMayReturnNull\n");
     }
@@ -734,7 +734,7 @@ void ImmutableMessageGenerator::GenerateParseFromMethods(io::Printer* printer) {
       "\n",
       "classname", name_resolver_->GetImmutableClassName(descriptor_),
       "parsedelimitedreturnannotation",
-      context_->options().opensource_runtime
+      google::protobuf::internal::IsOss()
           ? ""
           : "@com.google.protobuf.Internal.ProtoMethodMayReturnNull");
 }
@@ -804,8 +804,7 @@ void ImmutableMessageGenerator::GenerateDescriptorMethods(
         "  switch (number) {\n");
     printer->Indent();
     printer->Indent();
-    for (int i = 0; i < map_fields.size(); ++i) {
-      const FieldDescriptor* field = map_fields[i];
+    for (const FieldDescriptor* field : map_fields) {
       const FieldGeneratorInfo* info = context_->GetFieldGeneratorInfo(field);
       printer->Print(
           "case $number$:\n"
@@ -879,53 +878,49 @@ void ImmutableMessageGenerator::GenerateIsInitialized(io::Printer* printer) {
     const FieldGeneratorInfo* info = context_->GetFieldGeneratorInfo(field);
     if (GetJavaType(field) == JAVATYPE_MESSAGE &&
         HasRequiredFields(field->message_type())) {
-      switch (field->label()) {
-        case FieldDescriptor::LABEL_REQUIRED:
+      if (field->is_required()) {
+        printer->Print(
+            "if (!get$name$().isInitialized()) {\n"
+            "  memoizedIsInitialized = 0;\n"
+            "  return false;\n"
+            "}\n",
+            "type",
+            name_resolver_->GetImmutableClassName(field->message_type()),
+            "name", info->capitalized_name);
+      } else if (field->is_repeated()) {
+        if (IsMapEntry(field->message_type())) {
           printer->Print(
-              "if (!get$name$().isInitialized()) {\n"
-              "  memoizedIsInitialized = 0;\n"
-              "  return false;\n"
-              "}\n",
-              "type",
-              name_resolver_->GetImmutableClassName(field->message_type()),
-              "name", info->capitalized_name);
-          break;
-        case FieldDescriptor::LABEL_OPTIONAL:
-          printer->Print(
-              "if (has$name$()) {\n"
-              "  if (!get$name$().isInitialized()) {\n"
+              "for ($type$ item : get$name$Map().values()) {\n"
+              "  if (!item.isInitialized()) {\n"
               "    memoizedIsInitialized = 0;\n"
               "    return false;\n"
               "  }\n"
               "}\n",
+              "type",
+              MapValueImmutableClassdName(field->message_type(),
+                                          name_resolver_),
               "name", info->capitalized_name);
-          break;
-        case FieldDescriptor::LABEL_REPEATED:
-          if (IsMapEntry(field->message_type())) {
-            printer->Print(
-                "for ($type$ item : get$name$Map().values()) {\n"
-                "  if (!item.isInitialized()) {\n"
-                "    memoizedIsInitialized = 0;\n"
-                "    return false;\n"
-                "  }\n"
-                "}\n",
-                "type",
-                MapValueImmutableClassdName(field->message_type(),
-                                            name_resolver_),
-                "name", info->capitalized_name);
-          } else {
-            printer->Print(
-                "for (int i = 0; i < get$name$Count(); i++) {\n"
-                "  if (!get$name$(i).isInitialized()) {\n"
-                "    memoizedIsInitialized = 0;\n"
-                "    return false;\n"
-                "  }\n"
-                "}\n",
-                "type",
-                name_resolver_->GetImmutableClassName(field->message_type()),
-                "name", info->capitalized_name);
-          }
-          break;
+        } else {
+          printer->Print(
+              "for (int i = 0; i < get$name$Count(); i++) {\n"
+              "  if (!get$name$(i).isInitialized()) {\n"
+              "    memoizedIsInitialized = 0;\n"
+              "    return false;\n"
+              "  }\n"
+              "}\n",
+              "type",
+              name_resolver_->GetImmutableClassName(field->message_type()),
+              "name", info->capitalized_name);
+        }
+      } else {
+        printer->Print(
+            "if (has$name$()) {\n"
+            "  if (!get$name$().isInitialized()) {\n"
+            "    memoizedIsInitialized = 0;\n"
+            "    return false;\n"
+            "  }\n"
+            "}\n",
+            "name", info->capitalized_name);
       }
     }
   }
@@ -955,7 +950,7 @@ void ImmutableMessageGenerator::GenerateEqualsAndHashCode(
   printer->Print(
       "@java.lang.Override\n"
       "public boolean equals(");
-  if (!context_->options().opensource_runtime) {
+  if (!google::protobuf::internal::IsOss()) {
     printer->Print(
         "@com.google.protobuf.Internal.ProtoMethodAcceptsNullParameter\n");
   }
@@ -994,7 +989,7 @@ void ImmutableMessageGenerator::GenerateEqualsAndHashCode(
   }
 
   // Compare oneofs.
-  for (auto& kv : oneofs_) {
+  for (const auto& kv : oneofs_) {
     const OneofDescriptor* oneof = kv.second;
     printer->Print(
         "if (!get$oneof_capitalized_name$Case().equals("
@@ -1074,7 +1069,7 @@ void ImmutableMessageGenerator::GenerateEqualsAndHashCode(
   }
 
   // hashCode oneofs.
-  for (auto& kv : oneofs_) {
+  for (const auto& kv : oneofs_) {
     const OneofDescriptor* oneof = kv.second;
     printer->Print("switch ($oneof_name$Case_) {\n", "oneof_name",
                    context_->GetOneofGeneratorInfo(oneof)->name);
@@ -1173,40 +1168,6 @@ void ImmutableMessageGenerator::GenerateInitializers(io::Printer* printer) {
   }
 }
 
-// ===================================================================
-void ImmutableMessageGenerator::GenerateMutableCopy(io::Printer* printer) {
-  printer->Print(
-      "protected com.google.protobuf.MutableMessage\n"
-      "    internalMutableDefault() {\n"
-      "  return MutableDefaultLoader.get();\n"
-      "}\n"
-      "\n"
-      "private static final class MutableDefaultLoader {\n"
-      "  private static final java.lang.Object defaultOrRuntimeException;\n"
-      "  static {\n"
-      "    java.lang.Object local;\n"
-      "    try {\n"
-      "      local = internalMutableDefault(\"$mutable_name$\");\n"
-      "    } catch (java.lang.RuntimeException e) {\n"
-      "      local = e;\n"
-      "    }\n"
-      "    defaultOrRuntimeException = local;\n"
-      "  }\n"
-      "\n"
-      "  private MutableDefaultLoader() {}\n"
-      "\n"
-      "  public static com.google.protobuf.MutableMessage get() {\n"
-      "    if (defaultOrRuntimeException\n"
-      "         instanceof java.lang.RuntimeException) {\n"
-      "      throw (java.lang.RuntimeException) defaultOrRuntimeException;\n"
-      "    }\n"
-      "    return\n"
-      "        (com.google.protobuf.MutableMessage) "
-      "defaultOrRuntimeException;\n"
-      "  }\n"
-      "}\n",
-      "mutable_name", name_resolver_->GetJavaMutableClassName(descriptor_));
-}
 
 void ImmutableMessageGenerator::GenerateAnyMethods(io::Printer* printer) {
   printer->Print(

@@ -637,7 +637,7 @@ TEST(ComputeIntegerHash) {
     Handle<Smi> key(Smi::FromInt(k), isolate);
     DirectHandle<Object> result = ft.Call(key).ToHandleChecked();
 
-    uint32_t hash = ComputeSeededHash(k, HashSeed(isolate));
+    uint32_t hash = ComputeSeededHash(k, HashSeed(isolate).seed());
     Tagged<Smi> expected = Smi::FromInt(hash);
     CHECK_EQ(expected, Cast<Smi>(*result));
   }
@@ -1021,7 +1021,8 @@ void TestNameDictionaryLookup() {
     DirectHandle<Object> value =
         factory->NewPropertyCell(keys[i], fake_details, keys[i]);
     dictionary =
-        Dictionary::Add(isolate, dictionary, keys[i], value, fake_details);
+        Dictionary::Add(isolate, dictionary, keys[i], value, fake_details)
+            .ToHandleChecked();
   }
 
   for (size_t i = 0; i < arraysize(keys); i++) {
@@ -1218,7 +1219,7 @@ TEST(TransitionLookup) {
     }
     keys[i] = name;
 
-    bool is_private = name->IsPrivate();
+    bool is_private = name->IsAnyPrivate();
     PropertyAttributes base_attributes = is_private ? DONT_ENUM : NONE;
 
     // Ensure that all the combinations of cases are covered:
@@ -1508,7 +1509,7 @@ TEST(TryHasOwnProperty) {
   {
     DirectHandle<JSFunction> function =
         factory->NewFunctionForTesting(factory->empty_string());
-    Handle<JSProxy> object = factory->NewJSProxy(function, objects[0]);
+    Handle<JSProxy> object = factory->NewJSProxy(function, objects[0], false);
     CHECK_EQ(JS_PROXY_TYPE, object->map()->instance_type());
     ft.CheckTrue(object, names[0], expect_bailout);
   }
@@ -1717,7 +1718,7 @@ TEST(TryGetOwnProperty) {
   {
     DirectHandle<JSFunction> function =
         factory->NewFunctionForTesting(factory->empty_string());
-    Handle<JSProxy> object = factory->NewJSProxy(function, objects[0]);
+    Handle<JSProxy> object = factory->NewJSProxy(function, objects[0], false);
     CHECK_EQ(JS_PROXY_TYPE, object->map()->instance_type());
     DirectHandle<Object> value = ft.Call(object, names[0]).ToHandleChecked();
     // Proxies are not supported yet.
@@ -1954,7 +1955,7 @@ TEST(TryLookupElement) {
     DirectHandle<JSArray> handler = factory->NewJSArray(0);
     DirectHandle<JSFunction> function =
         factory->NewFunctionForTesting(factory->empty_string());
-    Handle<JSProxy> object = factory->NewJSProxy(function, handler);
+    Handle<JSProxy> object = factory->NewJSProxy(function, handler, false);
     CHECK_EQ(JS_PROXY_TYPE, object->map()->instance_type());
     ft.CheckTrue(object, smi0, expect_bailout);
   }
@@ -2058,8 +2059,7 @@ TEST(AllocationFoldingCSA) {
 
   const int kNumParams = 1;
   const int kNumArrays = 7;
-  CodeAssemblerTester asm_tester(isolate, JSParameterCount(kNumParams),
-                                 CodeKind::FOR_TESTING);
+  CodeAssemblerTester asm_tester(isolate, JSParameterCount(kNumParams));
   CodeStubAssembler m(asm_tester.state());
 
   {
@@ -2673,22 +2673,21 @@ TEST(ShortBuiltinCallsThreshold) {
 
   const uint64_t kPhysicalMemoryThreshold = size_t{4} * GB;
 
-  size_t heap_size, old, young;
+  size_t old;
 
   // If the physical memory is < kPhysicalMemoryThreshold then the old space
   // size must be below the kShortBuiltinCallsOldSpaceThreshold.
-  heap_size = Heap::HeapSizeFromPhysicalMemory(kPhysicalMemoryThreshold - MB);
-  i::Heap::GenerationSizesFromHeapSize(heap_size, &young, &old);
+  const uint64_t physical_memory = kPhysicalMemoryThreshold - MB;
+  old = Heap::OldGenerationSizeFromPhysicalMemory(physical_memory);
   CHECK_LT(old, kShortBuiltinCallsOldSpaceSizeThreshold);
 
   // If the physical memory is >= kPhysicalMemoryThreshold then the old space
   // size must be below the kShortBuiltinCallsOldSpaceThreshold.
-  heap_size = Heap::HeapSizeFromPhysicalMemory(kPhysicalMemoryThreshold);
-  i::Heap::GenerationSizesFromHeapSize(heap_size, &young, &old);
+  old = Heap::OldGenerationSizeFromPhysicalMemory(kPhysicalMemoryThreshold);
   CHECK_GE(old, kShortBuiltinCallsOldSpaceSizeThreshold);
 
-  heap_size = Heap::HeapSizeFromPhysicalMemory(kPhysicalMemoryThreshold + MB);
-  i::Heap::GenerationSizesFromHeapSize(heap_size, &young, &old);
+  old =
+      Heap::OldGenerationSizeFromPhysicalMemory(kPhysicalMemoryThreshold + MB);
   CHECK_GE(old, kShortBuiltinCallsOldSpaceSizeThreshold);
 }
 #endif  // !defined(V8_OS_ANDROID)

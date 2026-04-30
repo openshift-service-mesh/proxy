@@ -8,6 +8,8 @@
 #include "source/common/config/api_version.h"
 #include "source/common/network/raw_buffer_socket.h"
 #include "source/common/network/utility.h"
+#include "source/common/runtime/runtime_features.h"
+#include "source/common/ssl/ssl.h"
 #include "source/common/tls/client_ssl_socket.h"
 #include "source/common/tls/context_manager_impl.h"
 #include "source/extensions/filters/listener/tls_inspector/tls_inspector.h"
@@ -24,7 +26,9 @@ namespace {
 
 class LargeBufferListenerFilter : public Network::ListenerFilter {
 public:
-  static constexpr int BUFFER_SIZE = 256;
+  // These differences in BUFFER_SIZE are required because BoringSSL and OpenSSL
+  // produce different sized client hello messages (514 and 394 respectively).
+  static constexpr int BUFFER_SIZE = SSL_SELECT(512, 392);
   // Network::ListenerFilter
   Network::FilterStatus onAccept(Network::ListenerFilterCallbacks&) override {
     ENVOY_LOG_MISC(debug, "LargeBufferListenerFilter::onAccept");
@@ -294,9 +298,11 @@ TEST_P(TlsInspectorIntegrationTest, TlsInspectorMetadataPopulatedInAccessLog) {
 TEST_P(TlsInspectorIntegrationTest, JA3FingerprintIsSet) {
   // These TLS options will create a client hello message with
   // `JA3` fingerprint:
-  //   `771,49199-255,11-10-35-16-22-23-13,23,0-1-2`
+  //   `771,49199,23-65281-10-11-35-16-13,23,0` (BoringSSL)
+  //   `771,49199-255,11-10-35-16-22-23-13,23,0-1-2` (OpenSSL)
   // MD5 hash:
-  //   `54619c7296adab310ed514d06812d95f`
+  //   `c68cd85633d6847f599328eb2df750b7` (BoringSSL)
+  //   `bcab080434778b813a3903a51fdc90fc` (OpenSSL)
   Ssl::ClientSslTransportOptions ssl_options;
   ssl_options.setCipherSuites({"ECDHE-RSA-AES128-GCM-SHA256"});
   ssl_options.setTlsVersion(envoy::extensions::transport_sockets::tls::v3::TlsParameters::TLSv1_2);
@@ -307,7 +313,8 @@ TEST_P(TlsInspectorIntegrationTest, JA3FingerprintIsSet) {
   client_->close(Network::ConnectionCloseType::NoFlush);
 
   EXPECT_THAT(waitForAccessLog(listener_access_log_name_),
-              testing::Eq("54619c7296adab310ed514d06812d95f"));
+              testing::Eq(SSL_SELECT("c68cd85633d6847f599328eb2df750b7",
+                                     "bcab080434778b813a3903a51fdc90fc")));
 
   test_server_->waitUntilHistogramHasSamples("tls_inspector.bytes_processed");
   auto bytes_processed_histogram = test_server_->histogram("tls_inspector.bytes_processed");
@@ -316,14 +323,15 @@ TEST_P(TlsInspectorIntegrationTest, JA3FingerprintIsSet) {
       1);
   EXPECT_EQ(static_cast<int>(TestUtility::readSampleSum(test_server_->server().dispatcher(),
                                                         *bytes_processed_histogram)),
-            145);
+            SSL_SELECT(124, 154));
 }
 
 // The `JA4` fingerprint is correct in the access log.
 TEST_P(TlsInspectorIntegrationTest, JA4FingerprintIsSet) {
   // These TLS options will create a client hello message with
   // `JA4` fingerprint:
-  //   `t12i0207en_b06afd972a5c_e7e480e5a997`
+  //   `t12i0108en_f06271c2b022_91d8455748bc` (BoringSSL)
+  //   `t12i0108en_f06271c2b022_322a62d02564` (OpenSSL)
   Ssl::ClientSslTransportOptions ssl_options;
   ssl_options.setCipherSuites({"ECDHE-RSA-AES128-GCM-SHA256"});
   ssl_options.setTlsVersion(envoy::extensions::transport_sockets::tls::v3::TlsParameters::TLSv1_2);
@@ -334,7 +342,8 @@ TEST_P(TlsInspectorIntegrationTest, JA4FingerprintIsSet) {
   client_->close(Network::ConnectionCloseType::NoFlush);
 
   EXPECT_THAT(waitForAccessLog(listener_access_log_name_),
-              testing::Eq("t12i0207en_b06afd972a5c_e7e480e5a997"));
+              testing::Eq(SSL_SELECT("t12i0108en_f06271c2b022_91d8455748bc",
+                                     "t12i0108en_f06271c2b022_322a62d02564")));
 
   test_server_->waitUntilHistogramHasSamples("tls_inspector.bytes_processed");
   auto bytes_processed_histogram = test_server_->histogram("tls_inspector.bytes_processed");
@@ -343,7 +352,7 @@ TEST_P(TlsInspectorIntegrationTest, JA4FingerprintIsSet) {
       1);
   EXPECT_EQ(static_cast<int>(TestUtility::readSampleSum(test_server_->server().dispatcher(),
                                                         *bytes_processed_histogram)),
-            145);
+            SSL_SELECT(124, 154));
 }
 
 TEST_P(TlsInspectorIntegrationTest, RequestedBufferSizeCanGrow) {
@@ -389,7 +398,7 @@ TEST_P(TlsInspectorIntegrationTest, RequestedBufferSizeCanGrow) {
       1);
   EXPECT_EQ(static_cast<int>(TestUtility::readSampleSum(test_server_->server().dispatcher(),
                                                         *bytes_processed_histogram)),
-            405);
+            SSL_SELECT(514, 414));
 }
 
 TEST_P(TlsInspectorIntegrationTest, RequestedBufferSizeCanStartBig) {
@@ -427,7 +436,7 @@ TEST_P(TlsInspectorIntegrationTest, RequestedBufferSizeCanStartBig) {
       1);
   auto bytes_processed = static_cast<int>(
       TestUtility::readSampleSum(test_server_->server().dispatcher(), *bytes_processed_histogram));
-  EXPECT_EQ(bytes_processed, 385);
+  EXPECT_EQ(bytes_processed, SSL_SELECT(514, 394));
   // Double check that the test is effective by ensuring that the
   // LargeBufferListenerFilter::BUFFER_SIZE is smaller than the client hello.
   EXPECT_GT(bytes_processed, LargeBufferListenerFilter::BUFFER_SIZE);
@@ -602,6 +611,48 @@ TEST_P(TlsInspectorIntegrationTest, JA4FingerprintWithMinimalExtensions) {
   // no SNI (i character) in the logs
   std::string log_content = waitForAccessLog(listener_access_log_name_);
   EXPECT_THAT(log_content, testing::HasSubstr("i"));
+}
+
+// Test that SNI is captured and available in access logs even when the TLS connection
+// fails.
+TEST_P(TlsInspectorIntegrationTest, SniCapturedOnFilterChainNotFound) {
+  const std::string test_sni = "test.example.com";
+  initializeWithTlsInspector(/*ssl_client=*/true,
+                             /*log_format=*/"%REQUESTED_SERVER_NAME%|%RESPONSE_CODE_DETAILS%",
+                             /*listener_filter_disabled=*/absl::nullopt);
+
+  // Set up the SSL client with an SNI that won't match any filter chain.
+  Network::Address::InstanceConstSharedPtr address =
+      Ssl::getSslAddress(version_, lookupPort("echo"));
+
+  Ssl::ClientSslTransportOptions ssl_options;
+  ssl_options.setSni(test_sni);
+  context_ = Ssl::createClientSslTransportSocketFactory(ssl_options, *context_manager_, *api_);
+
+  // Use ALPN that doesn't match the filter chain.
+  Network::TransportSocketPtr transport_socket = context_->createTransportSocket(
+      std::make_shared<Network::TransportSocketOptionsImpl>(
+          absl::string_view(""), std::vector<std::string>(), std::vector<std::string>{"nomatch"}),
+      nullptr);
+
+  client_ = dispatcher_->createClientConnection(address, Network::Address::InstanceConstSharedPtr(),
+                                                std::move(transport_socket), nullptr, nullptr);
+  client_->addConnectionCallbacks(connect_callbacks_);
+  client_->connect();
+
+  while (!connect_callbacks_.connected() && !connect_callbacks_.closed()) {
+    dispatcher_->run(Event::Dispatcher::RunType::NonBlock);
+  }
+
+  // Connection should fail due to filter chain not found.
+  ASSERT_FALSE(connect_callbacks_.connected());
+  ASSERT(connect_callbacks_.closed());
+
+  // Verify that even though the connection failed, the SNI was captured and is in the access log.
+  std::string log_content = waitForAccessLog(listener_access_log_name_);
+  EXPECT_THAT(log_content, testing::HasSubstr(test_sni));
+  EXPECT_THAT(log_content,
+              testing::HasSubstr(StreamInfo::ResponseCodeDetails::get().FilterChainNotFound));
 }
 
 INSTANTIATE_TEST_SUITE_P(IpVersions, TlsInspectorIntegrationTest,

@@ -46,6 +46,7 @@ bool OperatorProperties::NeedsExactContext(const Operator* op) {
     case IrOpcode::kJSForInEnumerate:
     case IrOpcode::kJSForInNext:
     case IrOpcode::kJSForInPrepare:
+    case IrOpcode::kJSForOfNext:
     case IrOpcode::kJSGeneratorRestoreContextNoCell:
     case IrOpcode::kJSGeneratorRestoreContinuation:
     case IrOpcode::kJSGeneratorRestoreInputOrDebugPos:
@@ -95,6 +96,7 @@ bool OperatorProperties::NeedsExactContext(const Operator* op) {
     case IrOpcode::kJSDefineNamedOwnProperty:
     case IrOpcode::kJSSetKeyedProperty:
     case IrOpcode::kJSFindNonDefaultConstructorOrConstruct:
+    case IrOpcode::kJSSetPrototypeProperties:
       return true;
 
     case IrOpcode::kJSAsyncFunctionEnter:
@@ -142,6 +144,8 @@ bool OperatorProperties::NeedsExactContext(const Operator* op) {
 // static
 bool OperatorProperties::HasFrameStateInput(const Operator* op) {
   switch (op->opcode()) {
+    case IrOpcode::kJSSetPrototypeProperties:
+      return true;
     case IrOpcode::kCheckpoint:
     case IrOpcode::kFrameState:
       return true;
@@ -265,6 +269,7 @@ bool OperatorProperties::HasFrameStateInput(const Operator* op) {
 
     // Iterator protocol operations
     case IrOpcode::kJSGetIterator:
+    case IrOpcode::kJSForOfNext:
       return true;
 
     default:

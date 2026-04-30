@@ -1,7 +1,13 @@
 #pragma once
 
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "envoy/http/filter.h"
 #include "envoy/server/factory_context.h"
+
+#include "source/common/common/utility.h"
 
 namespace Envoy {
 namespace Http {
@@ -63,8 +69,6 @@ private:
   const RequestTrailerMap* request_trailers_{};
   const ResponseTrailerMap* response_trailers_{};
 };
-
-using HttpMatchingDataImplSharedPtr = std::shared_ptr<HttpMatchingDataImpl>;
 
 struct HttpFilterActionContext {
   // Identify whether the filter is in downstream filter chain or upstream filter chain.

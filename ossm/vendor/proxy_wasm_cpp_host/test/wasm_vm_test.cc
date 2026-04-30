@@ -30,13 +30,44 @@ INSTANTIATE_TEST_SUITE_P(WasmEngines, TestVm, testing::ValuesIn(getWasmEngines()
                            return info.param;
                          });
 
+TEST_P(TestVm, Init) {
+  auto time1 = std::chrono::steady_clock::now();
+  vm_->warm();
+  auto time2 = std::chrono::steady_clock::now();
+  vm_->warm();
+  auto time3 = std::chrono::steady_clock::now();
+
+  auto cold = std::chrono::duration_cast<std::chrono::nanoseconds>(time2 - time1).count();
+  auto warm = std::chrono::duration_cast<std::chrono::nanoseconds>(time3 - time2).count();
+
+  std::cout << "[" << engine_ << "] \"cold\" engine time: " << cold << "ns" << std::endl;
+  std::cout << "[" << engine_ << "] \"warm\" engine time: " << warm << "ns" << std::endl;
+
+  // Default warm time in nanoseconds.
+  int warm_time_ns_limit = 10000;
+
+#if defined(__linux__) && defined(__s390x__)
+  // Linux 390x is significantly slower, so we use a more lenient limit.
+  warm_time_ns_limit = 75000;
+#endif
+
+  // Verify that getting a "warm" engine takes less than 10us.
+  EXPECT_LE(warm, warm_time_ns_limit);
+
+  // Verify that getting a "warm" engine takes at least 50x less time than getting a "cold" one.
+  // We skip NullVM because warm() is a noop.
+  if (engine_ == "null") {
+    std::cout << "Skipping warm() performance assertions for NullVM." << std::endl;
+    return;
+  }
+  EXPECT_LE(warm * 50, cold);
+}
+
 TEST_P(TestVm, Basic) {
   if (engine_ == "wasmedge") {
     EXPECT_EQ(vm_->cloneable(), proxy_wasm::Cloneable::NotCloneable);
   } else if (engine_ == "wasmtime" || engine_ == "v8" || engine_ == "wamr") {
     EXPECT_EQ(vm_->cloneable(), proxy_wasm::Cloneable::CompiledBytecode);
-  } else if (engine_ == "wavm") {
-    EXPECT_EQ(vm_->cloneable(), proxy_wasm::Cloneable::InstantiatedModule);
   } else {
     FAIL();
   }
@@ -91,12 +122,8 @@ TEST_P(TestVm, Clone) {
 
 #if defined(__linux__) && defined(__x86_64__)
 
-TEST_P(TestVm, CloneUntilOutOfMemory) {
+TEST_P(TestVm, DISABLED_CloneUntilOutOfMemory) {
   if (vm_->cloneable() == proxy_wasm::Cloneable::NotCloneable) {
-    return;
-  }
-  if (engine_ == "wavm") {
-    // TODO(PiotrSikora): Figure out why this fails on the CI.
     return;
   }
 

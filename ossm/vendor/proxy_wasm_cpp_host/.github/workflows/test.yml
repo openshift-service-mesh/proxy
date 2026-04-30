@@ -43,17 +43,17 @@ jobs:
   test_data:
     name: build test data
 
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04-16core
 
     steps:
     - uses: actions/checkout@v2
 
-    - name: Bazel cache
-      uses: PiotrSikora/cache@v2.1.7-with-skip-cache
+    - uses: bazel-contrib/setup-bazel@0.16.0
       with:
-        path: |
-          ~/.cache/bazel
-        key: test_data-${{ hashFiles('WORKSPACE', '.bazelrc', '.bazelversion', 'bazel/dependencies.bzl', 'bazel/repositories.bzl', 'bazel/cargo/wasmsign/crates.bzl') }}
+        bazelisk-cache: true
+        disk-cache: ${{ github.job }}
+        external-cache: true
+        repository-cache: true
 
     - name: Bazel build
       run: >
@@ -61,6 +61,7 @@ jobs:
         --verbose_failures
         --test_output=errors
         --config=clang
+        --config=hermetic-llvm
         -c opt
         $(bazel query 'kind(was.*_rust_binary, //test/test_data/...)')
         $(bazel query 'kind(_optimized_wasm_cc_binary, //test/test_data/...)')
@@ -84,20 +85,6 @@ jobs:
         if-no-files-found: error
         retention-days: 3
 
-    - name: Skip Bazel cache update
-      if: ${{ github.ref != 'refs/heads/main' }}
-      run: echo "CACHE_SKIP_SAVE=true" >> $GITHUB_ENV
-
-    - name: Cleanup Bazel cache
-      if: ${{ github.ref == 'refs/heads/main' }}
-      run: |
-        export OUTPUT=$(bazel info output_base)
-        # Distfiles for Rust toolchains (350 MiB).
-        rm -rf ${OUTPUT}/external/rust_*/*.tar.gz
-        # Bazel's repository cache (650-800 MiB) and install base (155 MiB).
-        rm -rf $(bazel info repository_cache)
-        rm -rf $(bazel info install_base)
-
   build:
     name: ${{ matrix.action }} with ${{ matrix.name }}
 
@@ -111,22 +98,22 @@ jobs:
         include:
         - name: 'NullVM on Linux/x86_64'
           engine: 'null'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: x86_64
           action: test
           flags: --config=gcc
         - name: 'NullVM on Linux/x86_64 with ASan'
           engine: 'null'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: x86_64
           action: test
-          flags: --config=clang-asan-strict --define=crypto=system
+          flags: --config=hermetic-llvm --config=clang-asan --define=crypto=system
         - name: 'NullVM on Linux/x86_64 with TSan'
           engine: 'null'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: x86_64
           action: test
-          flags: --config=clang-tsan
+          flags: --config=hermetic-llvm --config=clang-tsan
         - name: 'NullVM on Windows/x86_64'
           engine: 'null'
           os: windows-2022
@@ -136,31 +123,31 @@ jobs:
         - name: 'V8 on Linux/x86_64'
           engine: 'v8'
           repo: 'v8'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: x86_64
           action: test
-          flags: --config=clang --define=crypto=system
+          flags: --config=hermetic-llvm --define=crypto=system
           cache: true
         - name: 'V8 on Linux/x86_64 with ASan'
           engine: 'v8'
           repo: 'v8'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: x86_64
           action: test
-          flags: --config=clang-asan
+          flags: --config=hermetic-llvm --config=clang-asan
           cache: true
         - name: 'V8 on Linux/x86_64 with TSan'
           engine: 'v8'
           repo: 'v8'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: x86_64
           action: test
-          flags: --config=clang-tsan
+          flags: --config=hermetic-llvm --config=clang-tsan
           cache: true
         - name: 'V8 on Linux/x86_64 with GCC'
           engine: 'v8'
           repo: 'v8'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: x86_64
           action: test
           flags: --config=gcc
@@ -168,111 +155,112 @@ jobs:
         - name: 'V8 on Linux/aarch64'
           engine: 'v8'
           repo: 'v8'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-arm
           arch: aarch64
           action: test
           targets: -//test/fuzz/...
-          flags: --config=zig-cc-linux-aarch64 --@v8//bazel/config:v8_target_cpu=arm64
-          deps: qemu-user-static libc6-arm64-cross
+          flags: --config=hermetic-llvm --@v8//bazel/config:v8_target_cpu=arm64
           cache: true
         - name: 'V8 on macOS/x86_64'
           engine: 'v8'
           repo: 'v8'
-          os: macos-13
+          os: macos-15
           arch: x86_64
           action: test
+          flags: --config=hermetic-llvm
           cache: true
         - name: 'WAMR interp on Linux/x86_64'
           engine: 'wamr-interp'
           repo: 'com_github_bytecodealliance_wasm_micro_runtime'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: x86_64
           action: test
-          flags: --config=clang
+          flags: --config=hermetic-llvm
         - name: 'WAMR interp on macOS/x86_64'
           engine: 'wamr-interp'
           repo: 'com_github_bytecodealliance_wasm_micro_runtime'
-          os: macos-13
+          os: macos-15
           arch: x86_64
           action: test
+          flags: --config=hermetic-llvm
         - name: 'WAMR jit on Linux/x86_64'
           engine: 'wamr-jit'
           repo: 'com_github_bytecodealliance_wasm_micro_runtime'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: x86_64
           action: test
-          flags: --config=clang
-          deps: lld-12
+          flags: --config=hermetic-llvm
+          deps: lld-18
           cache: true
         - name: 'WAMR jit on macOS/x86_64'
           engine: 'wamr-jit'
           repo: 'com_github_bytecodealliance_wasm_micro_runtime'
-          os: macos-13
+          os: macos-15
           arch: x86_64
           action: test
           cache: true
+          flags: --config=hermetic-llvm
         - name: 'WasmEdge on Linux/x86_64'
           engine: 'wasmedge'
           repo: 'com_github_wasmedge_wasmedge'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: x86_64
           action: test
-          flags: --config=clang
+          flags: --config=hermetic-llvm
         - name: 'WasmEdge on macOS/x86_64'
           engine: 'wasmedge'
           repo: 'com_github_wasmedge_wasmedge'
-          os: macos-13
+          os: macos-15
           arch: x86_64
           action: test
+          flags: --config=hermetic-llvm
         - name: 'Wasmtime on Linux/x86_64'
           engine: 'wasmtime'
           repo: 'com_github_bytecodealliance_wasmtime'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: x86_64
           action: test
-          flags: --config=clang -c opt
+          flags: --config=hermetic-llvm -c opt
         - name: 'Wasmtime on Linux/x86_64 with ASan'
           engine: 'wasmtime'
           repo: 'com_github_bytecodealliance_wasmtime'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: x86_64
           action: test
-          flags: --config=clang-asan-strict --define=crypto=system
+          flags: --config=hermetic-llvm --config=clang-asan --define=crypto=system
         - name: 'Wasmtime on Linux/aarch64'
           engine: 'wasmtime'
           repo: 'com_github_bytecodealliance_wasmtime'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-arm
           arch: aarch64
           action: build
-          flags: --config=zig-cc-linux-aarch64
-          deps: qemu-user-static libc6-arm64-cross
+          flags: --config=hermetic-llvm
         - name: 'Wasmtime on Linux/s390x'
           engine: 'wasmtime'
           repo: 'com_github_bytecodealliance_wasmtime'
-          os: ubuntu-22.04
+          os: ubuntu-24.04-16core
           arch: s390x
+          platform: linux/s390x
           action: test
           flags: --config=clang --test_timeout=1800
           # s390x build-tools image built from bazel/external/Dockerfile.bazel
-          run_under: docker run --rm --env HOME=$HOME --env USER=$(id -un) --volume "$HOME:$HOME" --workdir $(pwd) --user $(id -u):$(id -g) --platform linux/s390x ghcr.io/proxy-wasm/build-tools:ubuntu-22.04-bazel-6.5.0
+          run_under: docker run --rm --env HOME=$HOME --env USER=$(id -un) --volume "$HOME:$HOME" --workdir $(pwd) --user $(id -u):$(id -g) --platform linux/s390x proxy-wasm/build-tools:local-ci
           cache: true
         - name: 'Wasmtime on macOS/x86_64'
           engine: 'wasmtime'
           repo: 'com_github_bytecodealliance_wasmtime'
-          os: macos-13
+          os: macos-15
           arch: x86_64
           action: test
-        - name: 'WAVM on Linux/x86_64'
-          engine: 'wavm'
-          repo: 'com_github_wavm_wavm'
-          os: ubuntu-22.04
-          arch: x86_64
-          action: test
-          flags: --config=clang
-          cache: true
+          flags: --config=hermetic-llvm
 
     steps:
     - uses: actions/checkout@v2
+
+    - name: Compute job hash
+      id: job-hash
+      run: echo "hash=$(echo -n '${{ matrix.engine }}-${{ matrix.flags }}-${{ matrix.os }}-${{ matrix.arch }}' | sha1sum | cut -c1-10)" >> $GITHUB_OUTPUT
+      shell: bash
 
     - name: Install dependencies (Linux)
       if: ${{ matrix.deps != '' && startsWith(matrix.os, 'ubuntu') }}
@@ -291,21 +279,16 @@ jobs:
       if: startsWith(matrix.run_under, 'docker')
       run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
-    - name: Set cache key
-      if: ${{ matrix.cache }}
-      run: echo "::set-output name=uniq::$(bazel query --output build //external:${{ matrix.repo }} | grep -E 'sha256|commit' | cut -d\" -f2)-$(echo ${{ matrix.flags }} | sha256sum)"
-      id: cache-key
+    - name: Set up Docker Buildx
+      if: startsWith(matrix.run_under, 'docker')
+      uses: docker/setup-buildx-action@v3
 
-    - name: Bazel cache
-      if: ${{ matrix.cache }}
-      uses: PiotrSikora/cache@v2.1.7-with-skip-cache
+    - uses: bazel-contrib/setup-bazel@0.16.0
       with:
-        path: |
-          ~/.cache/bazel
-          /private/var/tmp/_bazel_runner/
-        key: ${{ matrix.arch }}-${{ matrix.os }}-${{ matrix.engine }}-${{ steps.cache-key.outputs.uniq }}-${{ hashFiles('WORKSPACE', '.bazelrc', '.bazelversion', 'bazel/dependencies.bzl', 'bazel/repositories.bzl') }}
-        restore-keys: |
-          ${{ matrix.arch }}-${{ matrix.os }}-${{ matrix.engine }}-${{ steps.cache-key.outputs.uniq }}-
+        bazelisk-cache: true
+        disk-cache: ${{ github.job }}-${{ steps.job-hash.outputs.hash }}
+        external-cache: true
+        repository-cache: true
 
     - name: Download test data
       uses: actions/download-artifact@v4
@@ -321,6 +304,18 @@ jobs:
         for i in $(cd test/test_data && ls -1 *.wasm | sed 's/\.wasm$//g'); do \
           echo "filegroup(name = \"$i\", srcs = [\"$i.wasm\"])" >> test/test_data/BUILD; \
         done
+
+    - name: Build local Docker image
+      if: ${{ startsWith(matrix.run_under, 'docker') }}
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: bazel/external/Dockerfile.bazel
+        platforms: ${{ matrix.platform }}
+        tags: proxy-wasm/build-tools:local-ci
+        load: true
+        cache-from: type=gha,scope=build-tools-${{ matrix.platform }}
+        cache-to: type=gha,mode=max,scope=build-tools-${{ matrix.platform }}
 
     - name: Bazel build/test
       shell: bash
@@ -342,37 +337,6 @@ jobs:
         --test_output=errors
         --define engine=${{ matrix.engine }}
         ${{ matrix.flags }}
-        --per_file_copt=src/signature_util.cc,test/signature_util_test.cc@-DPROXY_WASM_VERIFY_WITH_ED25519_PUBKEY=\"$(xxd -p -c 256 test/test_data/signature_key1.pub | cut -b9-)\"
+        --per_file_copt=src/signature_util.cc,test/signature_util_test.cc@-DPROXY_WASM_VERIFY_WITH_ED25519_PUBKEY=\"$(xxd -p -c 256 test/test_data/signature_key1.pub | cut -c3- | tr -d '\n')\"
         //test:signature_util_test
 
-    - name: Skip Bazel cache update
-      if: ${{ matrix.cache && github.ref != 'refs/heads/main' }}
-      run: echo "CACHE_SKIP_SAVE=true" >> $GITHUB_ENV
-
-    - name: Cleanup Bazel cache
-      if: ${{ matrix.cache && github.ref == 'refs/heads/main' }}
-      run: |
-        export OUTPUT=$(${{ matrix.run_under }} bazel info output_base)
-        echo "===== BEFORE ====="
-        du -s ${OUTPUT}/external/* $(dirname ${OUTPUT})/* | sort -rn | head -20
-        # BoringSSL's test data (90 MiB).
-        rm -rf ${OUTPUT}/external/boringssl/crypto_test_data.cc
-        rm -rf ${OUTPUT}/external/boringssl/src/crypto/*/test/
-        rm -rf ${OUTPUT}/external/boringssl/src/third_party/wycheproof_testvectors/
-        # LLVM's tests (500 MiB).
-        rm -rf ${OUTPUT}/external/llvm*/test/
-        # V8's tests (100 MiB).
-        if [ -d "${OUTPUT}/external/v8/test/torque" ]; then
-          mv ${OUTPUT}/external/v8/test/torque ${OUTPUT}/external/v8/test_torque
-          rm -rf ${OUTPUT}/external/v8/test/*
-          mv ${OUTPUT}/external/v8/test_torque ${OUTPUT}/external/v8/test/torque
-        fi
-        # Unnecessary CMake tools (65 MiB).
-        rm -rf ${OUTPUT}/external/cmake-*/bin/{ccmake,cmake-gui,cpack,ctest}
-        # Distfiles for Rust toolchains (350 MiB).
-        rm -rf ${OUTPUT}/external/rust_*/*.tar.gz
-        # Bazel's repository cache (650-800 MiB) and install base (155 MiB).
-        rm -rf ${OUTPUT}/../cache
-        rm -rf ${OUTPUT}/../install
-        echo "===== AFTER ====="
-        du -s ${OUTPUT}/external/* $(dirname ${OUTPUT})/* | sort -rn | head -20

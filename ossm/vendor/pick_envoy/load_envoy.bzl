@@ -12,11 +12,14 @@ OPENSSL_DISABLED_EXTENSIONS = [
 def load_envoy():
     http_archive(
         name = "envoy",
-        sha256 = "b2ec3fbaec889e5ad13b6f2fda309b14df5c45bf4f55ea5a1fdfbe57f1d96a6b",
-        strip_prefix = "envoy-openssl-9b4094fc871ede4d2f0f0bf5303841cab78f689e",
-        url = "https://github.com/envoyproxy/envoy-openssl/archive/9b4094fc871ede4d2f0f0bf5303841cab78f689e.tar.gz",
+        sha256 = "7772dcebb478b0d000c4b03a767c451d9fb629a0fc71ce7714ce0e423cc1a92f",
+        strip_prefix = "envoy-fa21ad4b3e69db0b1fef628a18964e7d26af5b31",
+        url = "https://github.com/envoyproxy/envoy/archive/fa21ad4b3e69db0b1fef628a18964e7d26af5b31.tar.gz",
         patch_args = ["-p1"],
         patches = [
             "@io_istio_proxy//ossm/patches:use-cmake-from-host.patch",
+            "@io_istio_proxy//ossm/patches:fix-python3-genrule.patch",
+            "@io_istio_proxy//ossm/patches:add-luajit2-build-setting.patch",
+            "@io_istio_proxy//ossm/patches:add-luajit2-target.patch",
             ],
     )

@@ -130,7 +130,7 @@ TEST_F(HttpFilterTest, DuplexStreamedBodyProcessingTestNormal) {
     // 7 request chunks are sent to the ext_proc server.
     Buffer::OwnedImpl resp_chunk;
     TestUtility::feedBufferWithRandomCharacters(resp_chunk, 100);
-    EXPECT_EQ(FilterDataStatus::Continue, filter_->encodeData(resp_chunk, false));
+    EXPECT_EQ(FilterDataStatus::StopIterationNoBuffer, filter_->encodeData(resp_chunk, false));
   }
 
   processResponseBodyHelper(" AAAAA ", want_response_body);
@@ -145,7 +145,7 @@ TEST_F(HttpFilterTest, DuplexStreamedBodyProcessingTestNormal) {
   for (int i = 0; i < 3; i++) {
     Buffer::OwnedImpl resp_chunk;
     TestUtility::feedBufferWithRandomCharacters(resp_chunk, 100);
-    EXPECT_EQ(FilterDataStatus::Continue, filter_->encodeData(resp_chunk, false));
+    EXPECT_EQ(FilterDataStatus::StopIterationNoBuffer, filter_->encodeData(resp_chunk, false));
     processResponseBodyHelper(std::to_string(i), want_response_body);
   }
 
@@ -157,7 +157,7 @@ TEST_F(HttpFilterTest, DuplexStreamedBodyProcessingTestNormal) {
   for (int i = 0; i < 10; i++) {
     Buffer::OwnedImpl resp_chunk;
     TestUtility::feedBufferWithRandomCharacters(resp_chunk, 10);
-    EXPECT_EQ(FilterDataStatus::Continue, filter_->encodeData(resp_chunk, false));
+    EXPECT_EQ(FilterDataStatus::StopIterationNoBuffer, filter_->encodeData(resp_chunk, false));
   }
   // Send the last chunk.
   Buffer::OwnedImpl last_resp_chunk;
@@ -167,13 +167,22 @@ TEST_F(HttpFilterTest, DuplexStreamedBodyProcessingTestNormal) {
   processResponseBodyHelper(" EEEEEEE ", want_response_body);
   processResponseBodyHelper(" F ", want_response_body);
   processResponseBodyHelper(" GGGGGGGGG ", want_response_body);
+  EXPECT_EQ(0, config_->stats().streams_closed_.value());
   processResponseBodyHelper(" HH ", want_response_body, true, true);
+  EXPECT_EQ(1, config_->stats().streams_closed_.value());
 
   // The two buffers should match.
   EXPECT_EQ(want_response_body.toString(), got_response_body.toString());
   EXPECT_FALSE(encoding_watermarked);
   EXPECT_EQ(config_->stats().spurious_msgs_received_.value(), 0);
+
+  auto& grpc_calls = getGrpcCalls(envoy::config::core::v3::TrafficDirection::OUTBOUND);
+  checkGrpcCall(*grpc_calls.header_stats_, std::chrono::microseconds(10), Grpc::Status::Ok);
+  checkGrpcCallBody(*grpc_calls.body_stats_, 10, Grpc::Status::Ok, std::chrono::microseconds(190),
+                    std::chrono::microseconds(40), std::chrono::microseconds(10));
+
   filter_->onDestroy();
+  EXPECT_EQ(1, config_->stats().streams_closed_.value());
 }
 
 TEST_F(HttpFilterTest, DuplexStreamedBodyProcessingTestWithTrailer) {
@@ -213,21 +222,29 @@ TEST_F(HttpFilterTest, DuplexStreamedBodyProcessingTestWithTrailer) {
     // 7 request chunks are sent to the ext_proc server.
     Buffer::OwnedImpl resp_chunk;
     TestUtility::feedBufferWithRandomCharacters(resp_chunk, 100);
-    EXPECT_EQ(FilterDataStatus::Continue, filter_->encodeData(resp_chunk, false));
+    EXPECT_EQ(FilterDataStatus::StopIterationNoBuffer, filter_->encodeData(resp_chunk, false));
   }
 
   EXPECT_EQ(FilterTrailersStatus::StopIteration, filter_->encodeTrailers(response_trailers_));
 
   processResponseBodyStreamedAfterTrailer(" AAAAA ", want_response_body);
   processResponseBodyStreamedAfterTrailer(" BBBB ", want_response_body);
+  EXPECT_EQ(0, config_->stats().streams_closed_.value());
   processResponseTrailers(absl::nullopt, true);
-
+  EXPECT_EQ(1, config_->stats().streams_closed_.value());
   // The two buffers should match.
   EXPECT_EQ(want_response_body.toString(), got_response_body.toString());
   EXPECT_FALSE(encoding_watermarked);
 
   EXPECT_EQ(config_->stats().spurious_msgs_received_.value(), 0);
+
+  auto& grpc_calls = getGrpcCalls(envoy::config::core::v3::TrafficDirection::OUTBOUND);
+  checkGrpcCall(*grpc_calls.header_stats_, std::chrono::microseconds(10), Grpc::Status::Ok);
+  checkGrpcCallBody(*grpc_calls.body_stats_, 2, Grpc::Status::Ok, std::chrono::microseconds(30),
+                    std::chrono::microseconds(20), std::chrono::microseconds(10));
+  checkGrpcCall(*grpc_calls.trailer_stats_, std::chrono::microseconds(30), Grpc::Status::Ok);
   filter_->onDestroy();
+  EXPECT_EQ(1, config_->stats().streams_closed_.value());
 }
 
 TEST_F(HttpFilterTest, DuplexStreamedBodyProcessingTestWithHeaderAndTrailer) {
@@ -285,6 +302,10 @@ TEST_F(HttpFilterTest, DuplexStreamedBodyProcessingTestWithHeaderAndTrailer) {
   EXPECT_FALSE(encoding_watermarked);
 
   EXPECT_EQ(config_->stats().spurious_msgs_received_.value(), 0);
+  auto& grpc_calls = getGrpcCalls(envoy::config::core::v3::TrafficDirection::OUTBOUND);
+  checkGrpcCall(*grpc_calls.header_stats_, std::chrono::microseconds(10), Grpc::Status::Ok);
+  checkGrpcCallBody(*grpc_calls.body_stats_, 2, Grpc::Status::Ok, std::chrono::microseconds(50),
+                    std::chrono::microseconds(30), std::chrono::microseconds(20));
   filter_->onDestroy();
 }
 
@@ -353,7 +374,7 @@ TEST_F(HttpFilterTest, DuplexStreamedBodyProcessingTestWithFilterConfigMissing) 
     // 4 request chunks are sent to the ext_proc server.
     Buffer::OwnedImpl resp_chunk;
     TestUtility::feedBufferWithRandomCharacters(resp_chunk, 100);
-    EXPECT_EQ(FilterDataStatus::Continue, filter_->encodeData(resp_chunk, false));
+    EXPECT_EQ(FilterDataStatus::StopIterationNoBuffer, filter_->encodeData(resp_chunk, false));
   }
 
   processResponseBody(
@@ -468,7 +489,7 @@ TEST_F(HttpFilterTest, FullDuplexFailCloseWithDataInbound) {
   EXPECT_EQ(FilterHeadersStatus::StopIteration, filter_->decodeHeaders(request_headers_, false));
   processRequestHeaders(false, absl::nullopt);
   Buffer::OwnedImpl req_data("foo");
-  EXPECT_EQ(FilterDataStatus::Continue, filter_->decodeData(req_data, false));
+  EXPECT_EQ(FilterDataStatus::StopIterationNoBuffer, filter_->decodeData(req_data, false));
 
   // Fail close with gRPC error messages received.
   stream_callbacks_->onGrpcError(Grpc::Status::Internal, "error_message");

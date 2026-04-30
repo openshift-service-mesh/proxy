@@ -13,15 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from subprocess import check_output, call
-from sys import exit
 from os import path
+from subprocess import check_output
 
 POPULAR_REPOS = [
     dict(
         name = "org_golang_x_crypto",
         importpath = "golang.org/x/crypto",
-        commit = "0d375be9b61cb69eb94173d0375a05e90875bbf6",
+        commit = "e47973b1c1089f6c67ab89261f7aa067b3d611d2",
         excludes = [
             "internal/wycheproof:wycheproof_test", # requires build cache
             "nacl/secretbox:secretbox_test", # panics in salsa2020_amd64.s
@@ -89,7 +88,6 @@ POPULAR_REPOS = [
             "cmd/deadcode:deadcode_test", # Needs GOROOT
             "cmd/godoc:godoc_test", # TODO(#417)
             "cmd/gonew:gonew_test", # requires build cache
-            "cmd/gorename:gorename_test", # TODO(#417)
             "cmd/guru/testdata/src/referrers:referrers_test", # Not a real test
             # "cmd/guru:guru_test", # Needs testdata directory
             "cmd/signature-fuzzer/fuzz-driver:fuzz-driver_test", # requires working GOROOT
@@ -99,6 +97,7 @@ POPULAR_REPOS = [
             "container/intsets:intsets_test", # TODO(#413): External test depends on symbols defined in internal test.
             "copyright:copyright_test", # # requires runfiles
             "go/analysis/analysistest:analysistest_test", # requires build cache
+            "go/analysis/checker:checker_test", # Needs go tool
             "go/analysis/internal/analysisflags:analysisflags_test", # calls os.Exit(0) in a test
             "go/analysis/internal/checker:checker_test", # loads test package with go/packages, which probably needs go list
             "go/analysis/internal/versiontest:versiontest_test", # Needs GOROOT
@@ -155,11 +154,13 @@ POPULAR_REPOS = [
             "go/analysis/passes/unusedwrite:unusedwrite_test", # Needs testdata directory
             "go/analysis/passes/timeformat:timeformat_test", # Needs go tool
             "go/analysis/passes/usesgenerics:usesgenerics_test", # Needs go tool
+            "go/analysis/passes/waitgroup:waitgroup_test", # Needs go tool
             "go/analysis/unitchecker:unitchecker_test", # requires go vet
             "go/ast/inspector:inspector_test", # requires GOROOT and GOPATH
             "go/buildutil:buildutil_test", # Needs testdata directory
             "go/callgraph/cha:cha_test", # Needs testdata directory
             "go/callgraph/rta:rta_test", # Needs testdata directory
+            "go/callgraph/static:static_test", # Needs go tool
             "go/callgraph/vta:vta_test", # Needs testdata directory
             "go/cfg:cfg_test", # Needs GOROOT
             "go/expect:expect_test", # Needs testdata directory
@@ -180,13 +181,19 @@ POPULAR_REPOS = [
             "godoc/static:static_test", # requires data files
             "godoc/vfs/zipfs:zipfs_test", # requires GOROOT
             "godoc:godoc_test", # requires GOROOT and GOPATH
+            "internal/analysisinternal:analysisinternal_test", # requires GOROOT and GOPATH
             "internal/apidiff:apidiff_test", # Needs testdata directory
+            "internal/astutil/cursor:cursor_test", # requires GOROOT
             "internal/diff/difftest:difftest_test", # Needs diff tool
             "internal/diffp:diffp_test", # Needs testdata directory
+            "internal/drivertest:drivertest_test", # Needs go tool
+            "internal/expect:expect_test", # Needs testdata directory
             "internal/facts:facts_test", # loads test package with go/packages, which probably needs go list
             "internal/gcimporter:gcimporter_test", # Needs testdata directory
             "internal/gocommand:gocommand_test", # Needs go tool
             "internal/imports:imports_test", # Needs testdata directory
+            "internal/packagestest:packagestest_test", # Needs go tool
+            "internal/packagestest/testdata/groups/two/primarymod/expect:expect_test",
             "internal/pprof:pprof_test", # Needs testdata directory
             "internal/refactor/inline:inline_test", # Needs GOROOT
             "internal/refactor/inline/analyzer:analyzer_test", # Needs GOROOT

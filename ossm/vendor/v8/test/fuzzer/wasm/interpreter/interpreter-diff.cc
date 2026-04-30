@@ -15,12 +15,17 @@
 #include "src/wasm/wasm-engine.h"
 #include "src/wasm/wasm-feature-flags.h"
 #include "src/wasm/wasm-module.h"
+#include "test/common/wasm/fuzzer-common.h"
 #include "test/common/wasm/wasm-module-runner.h"
 #include "test/fuzzer/fuzzer-support.h"
-#include "test/fuzzer/wasm/fuzzer-common.h"
 #include "test/fuzzer/wasm/interpreter/interpreter-fuzzer-common.h"
 
 namespace v8::internal::wasm::fuzzing {
+
+V8_SYMBOL_USED extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv) {
+  v8_fuzzer::FuzzerSupport::InitializeFuzzerSupport(argc, argv);
+  return 0;
+}
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   v8_fuzzer::FuzzerSupport* support = v8_fuzzer::FuzzerSupport::Get();
@@ -54,7 +59,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // EnableExperimentalWasmFeatures(isolate);
 
   v8::TryCatch try_catch(isolate);
-  testing::SetupIsolateForWasmModule(i_isolate);
   ModuleWireBytes wire_bytes(data, data + size);
 
   HandleScope scope(i_isolate);

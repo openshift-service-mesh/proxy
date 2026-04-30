@@ -65,6 +65,7 @@ ChannelStackBuilderImpl::Build() {
   // allocate memory
   auto* channel_stack =
       static_cast<grpc_channel_stack*>(gpr_zalloc(channel_stack_size));
+  channel_stack->type = this->channel_stack_type();
 
   // and initialize it
   grpc_error_handle error = grpc_channel_stack_init(
@@ -75,7 +76,7 @@ ChannelStackBuilderImpl::Build() {
         gpr_free(stk);
       },
       channel_stack, stack.data(), stack.size(), channel_args(), name(),
-      channel_stack, old_blackboard_, new_blackboard_);
+      channel_stack, blackboard_);
 
   if (!error.ok()) {
     grpc_channel_stack_destroy(channel_stack);

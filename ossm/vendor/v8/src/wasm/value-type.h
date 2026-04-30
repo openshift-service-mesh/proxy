@@ -174,19 +174,22 @@ using HasIndexOrSentinelField = IsRefField::Next<bool, 1>;
   V(NoFunc, NoFunc, REF | FUNC, "nofunc")                                      \
   V(None, None, REF, "none")
 
-#define FOREACH_ABSTRACT_TYPE(V) /*                           force 80 cols */ \
-  FOREACH_NONE_TYPE(V)                                                         \
-  /* Established (non-proposal) types. */                                      \
+#define FOREACH_TOP_TYPE(V) /*                                force 80 cols */ \
   V(Func, FuncRef, REF | FUNC, "func")                                         \
   V(Any, AnyRef, REF, "any")                                                   \
+  V(Extern, ExternRef, REF, "extern")                                          \
+  V(Exn, ExnRef, REF, "exn")                                                   \
+  /* WasmFX aka Core Stack Switching. */                                       \
+  V(Cont, ContRef, REF | CONT, "cont")
+
+#define FOREACH_ABSTRACT_TYPE(V) /*                           force 80 cols */ \
+  FOREACH_NONE_TYPE(V)                                                         \
+  FOREACH_TOP_TYPE(V)                                                          \
+  /* Established (non-proposal) types. */                                      \
   V(Eq, EqRef, REF, "eq")                                                      \
   V(I31, I31Ref, REF, "i31")                                                   \
   V(Struct, StructRef, REF | STRUCT, "struct")                                 \
   V(Array, ArrayRef, REF | ARRAY, "array")                                     \
-  V(Extern, ExternRef, REF, "extern")                                          \
-  V(Exn, ExnRef, REF, "exn")                                                   \
-  /* WasmFX aka Core Stack Switching. */                                       \
-  V(Cont, ContRef, REF | CONT, "cont")                                         \
   /* Stringref proposal. */                                                    \
   V(String, StringRef, REF, "string")                                          \
   V(StringViewWtf8, StringViewWtf8, REF, "stringview_wtf8")                    \
@@ -237,10 +240,10 @@ using RefTypeKindField = IsSharedField::Next<RefTypeKind, 3>;
 static_assert(RefTypeKindField::is_valid(RefTypeKind::kLastValue));
 
 // Stores the index if {has_index()}, or the {StandardType} otherwise.
-using PayloadField = RefTypeKindField::Next<uint32_t, 20>;
+using PayloadField = RefTypeKindField::Next<uint32_t, 21>;
 
 // Reserved for future use.
-using ReservedField = PayloadField::Next<uint32_t, 4>;
+using ReservedField = PayloadField::Next<uint32_t, 3>;
 static_assert(ReservedField::kShift + ReservedField::kSize == 32);
 
 // Useful for HeapTypes, whose "shared" bit is orthogonal to their kind.
@@ -436,6 +439,11 @@ class ValueTypeBase {
     uint32_t bits = bit_field_ & value_type_impl::kGenericKindMask;
     return bits == static_cast<uint32_t>(GenericKind::kVoid);
   }
+  constexpr bool is_none_or_bottom() const {
+    uint32_t bits = bit_field_ & value_type_impl::kGenericKindMask;
+    return bits == static_cast<uint32_t>(GenericKind::kNone) ||
+           bits == static_cast<uint32_t>(GenericKind::kBottom);
+  }
   constexpr bool is_string_view() const {
     uint32_t bits = bit_field_ & value_type_impl::kGenericKindMask;
     return bits == static_cast<uint32_t>(GenericKind::kStringViewWtf8) ||
@@ -469,6 +477,12 @@ class ValueTypeBase {
     if (ref == GenericKind::kExternString) return false;
     if (ref == GenericKind::kNoExtern) return false;
     return true;
+  }
+
+  constexpr bool is_none_type() const {
+    DCHECK(!is_numeric());
+    if (!is_abstract_ref()) return false;
+    return IsNullKind(generic_kind());
   }
 
   constexpr int value_kind_size_log2() const {
@@ -553,9 +567,14 @@ class ValueTypeBase {
 
   /****************************** Pretty-printing *****************************/
   constexpr char short_name() const {
-    DCHECK(!is_sentinel());  // Caller's responsibility.
     if (is_ref()) {
       return is_nullable() ? 'n' : 'r';
+    }
+    if (is_sentinel()) {
+      if (is_void()) return 'v';
+      if (is_top()) return '\\';
+      if (is_bottom()) return '*';
+      // Otherwise fall through to the DCHECK in {numeric_kind()}.
     }
     constexpr const char kNumericShortName[] = {
 #define SHORT_NAME(kind, log2, code, mtype, shortName, ...) shortName,
@@ -598,9 +617,6 @@ class ValueTypeBase {
 
   /************************* Incremental transition ***************************/
   // The following methods are deprecated. Their usage should be replaced.
-  constexpr bool is_reference() const { return is_ref(); }
-  constexpr bool is_object_reference() const { return is_ref(); }
-
   static constexpr ValueTypeBase Primitive(ValueKind kind) {
     switch (kind) {
       case kI32:
@@ -627,6 +643,10 @@ class ValueTypeBase {
       case kBottom:
         UNREACHABLE();
     }
+    // The input value of the switch is untrusted, so even if it's exhaustive,
+    // it can skip all cases and end up here, triggering UB since there's no
+    // return.
+    UNREACHABLE();
   }
 
   constexpr ValueKind kind() const {
@@ -656,8 +676,6 @@ class ValueTypeBase {
     if (is_void()) return kVoid;
     return is_nullable() ? kRefNull : kRef;
   }
-
-  constexpr uint32_t raw_heap_representation(bool distinguish_shared) const;
 
  protected:
   friend class CanonicalValueType;
@@ -780,99 +798,12 @@ class HeapType : public ValueTypeBase {
     return generic_heaptype_name();
   }
 
-  /************************* Incremental transition ***************************/
-  // The following methods are deprecated. Their usage should be replaced.
-  enum Representation : uint32_t {
-    kFunc = kV8MaxWasmTypes,  // shorthand: c
-    kEq,                      // shorthand: q
-    kI31,                     // shorthand: j
-    kStruct,                  // shorthand: o
-    kArray,                   // shorthand: g
-    kAny,                     //
-    kExtern,                  // shorthand: a.
-    kExternString,            // Internal type for optimization purposes.
-                              // Subtype of extern.
-                              // Used by the js-builtin-strings proposal.
-    kExn,                     //
-    kString,                  // shorthand: w.
-    kStringViewWtf8,          // shorthand: x.
-    kStringViewWtf16,         // shorthand: y.
-    kStringViewIter,          // shorthand: z.
-    kNone,                    //
-    kNoFunc,                  //
-    kNoExtern,                //
-    kNoExn,                   //
-    kCont,                    // shorthand: k.
-    kContShared,
-    kNoCont,  // bottom continuation type
-    kFuncShared,
-    kEqShared,
-    kI31Shared,
-    kStructShared,
-    kArrayShared,
-    kAnyShared,
-    kExternShared,
-    kExternStringShared,
-    kExnShared,
-    kStringShared,
-    kStringViewWtf8Shared,
-    kStringViewWtf16Shared,
-    kStringViewIterShared,
-    kNoneShared,
-    kNoFuncShared,
-    kNoExternShared,
-    kNoExnShared,
-    kNoContShared,
-    // This value is an internal type (not part of the Wasm spec) that
-    // is the common supertype across all type hierarchies.  It should never
-    // appear in validated Wasm programs, but is used to signify that we don't
-    // have any information about a particular value and to prevent bugs in our
-    // typed optimizations, see crbug.com/361652141. Note: kTop is the neutral
-    // element wrt. to intersection (whereas kBottom is for union), and kBottom
-    // is indicating unreachable code, which might be used for subsequent
-    // optimizations, e.g., DCE.
-    kTop,
-    // This value is used to represent failures in the parsing of heap types and
-    // does not correspond to a Wasm heap type. It has to be last in this list.
-    kBottom
-  };
-  constexpr Representation representation() const {
-    return static_cast<Representation>(raw_heap_representation(true));
-  }
-  constexpr bool is_index() const { return has_index(); }
-
  private:
   // Hide inherited methods that don't make sense for HeapTypes.
   constexpr bool is_nullable() const;
   constexpr bool is_non_nullable() const;
   constexpr Nullability nullability() const;
 };
-
-// Deprecated.
-constexpr uint32_t ValueTypeBase::raw_heap_representation(
-    bool distinguish_shared) const {
-  DCHECK(!is_numeric());
-  if (has_index()) return raw_index().index;
-  switch (generic_kind()) {
-    case GenericKind::kTop:
-      return HeapType::kTop;
-    case GenericKind::kBottom:
-      return HeapType::kBottom;
-
-#define CASE(name, ...)                                                  \
-  case GenericKind::k##name:                                             \
-    return distinguish_shared && is_shared() ? HeapType::k##name##Shared \
-                                             : HeapType::k##name;
-      FOREACH_ABSTRACT_TYPE(CASE)
-#undef CASE
-
-    case GenericKind::kExternString:
-      return distinguish_shared && is_shared() ? HeapType::kExternStringShared
-                                               : HeapType::kExternString;
-    case GenericKind::kVoid:
-      UNREACHABLE();
-  }
-}
 
 class CanonicalValueType;
 
@@ -966,20 +897,6 @@ class ValueType : public ValueTypeBase {
     return ValueType{ValueTypeBase::Primitive(kind)};
   }
 
-  // For incremental transition:
-  constexpr HeapType::Representation heap_representation() const {
-    return static_cast<HeapType::Representation>(raw_heap_representation(true));
-  }
-
-  // For incremental transition:
-  constexpr bool is_reference_to(HeapType::Representation repr) const {
-    return is_ref() && heap_representation() == repr;
-  }
-  // Un-hide the superclass method (which is here to stay):
-  constexpr bool is_reference_to(GenericKind kind) const {
-    return ValueTypeBase::is_reference_to(kind);
-  }
-
   static ValueType For(MachineType type) {
     switch (type.representation()) {
       case MachineRepresentation::kWord8:
@@ -1068,28 +985,19 @@ class CanonicalValueType : public ValueTypeBase {
     return bit_field_ == other.bit_field_;
   }
 
+  // For hashing everything except the index.
+  constexpr uint32_t all_bits_without_index() const {
+    static_assert(std::is_same_v<uint32_t, decltype(bit_field_)>);
+    return bit_field_ & ~kIndexBits;
+  }
+
+  // For checking equality of everything except the index.
   constexpr bool is_equal_except_index(CanonicalValueType other) const {
-    return (bit_field_ & ~kIndexBits) == (other.bit_field_ & ~kIndexBits);
+    return all_bits_without_index() == other.all_bits_without_index();
   }
 
   constexpr bool IsFunctionType() const {
     return ref_type_kind() == RefTypeKind::kFunction;
-  }
-
-  // For incremental transition.
-  constexpr HeapType::Representation heap_representation() const {
-    return static_cast<HeapType::Representation>(raw_heap_representation(true));
-  }
-
-  // For incremental transition.
-  constexpr HeapType::Representation heap_representation_non_shared() const {
-    return static_cast<HeapType::Representation>(
-        raw_heap_representation(false));
-  }
-
-  // For incremental transition:
-  constexpr bool is_reference_to(HeapType::Representation repr) const {
-    return is_ref() && heap_representation() == repr;
   }
 };
 ASSERT_TRIVIALLY_COPYABLE(CanonicalValueType);
@@ -1147,10 +1055,6 @@ class IndependentHeapType : public IndependentValueType {
 // replace with ValueType methods.
 
 constexpr bool is_reference(ValueKind kind) {
-  return kind == kRef || kind == kRefNull;
-}
-
-constexpr bool is_object_reference(ValueKind kind) {
   return kind == kRef || kind == kRefNull;
 }
 
@@ -1255,7 +1159,11 @@ constexpr IndependentHeapType kWasmSharedAnyRef{GenericKind::kAny, kNullable,
 constexpr IndependentHeapType kWasmExternRef{GenericKind::kExtern};
 constexpr IndependentHeapType kWasmRefExtern{GenericKind::kExtern,
                                              kNonNullable};
+constexpr IndependentHeapType kWasmSharedExternRef{GenericKind::kExtern,
+                                                   kNullable, true};
 constexpr IndependentHeapType kWasmExnRef{GenericKind::kExn};
+constexpr IndependentHeapType kWasmSharedExnRef{GenericKind::kExn, kNullable,
+                                                true};
 constexpr IndependentHeapType kWasmEqRef{GenericKind::kEq};
 constexpr IndependentHeapType kWasmI31Ref{GenericKind::kI31};
 constexpr IndependentHeapType kWasmRefI31{GenericKind::kI31, kNonNullable};
@@ -1275,6 +1183,7 @@ constexpr IndependentHeapType kWasmStringViewWtf16{
 constexpr IndependentHeapType kWasmStringViewIter{GenericKind::kStringViewIter,
                                                   kNonNullable};
 constexpr IndependentHeapType kWasmNullRef{GenericKind::kNone};
+constexpr IndependentHeapType kWasmRefNone{GenericKind::kNone, kNonNullable};
 constexpr IndependentHeapType kWasmNullExternRef{GenericKind::kNoExtern};
 constexpr IndependentHeapType kWasmNullExnRef{GenericKind::kNoExn};
 constexpr IndependentHeapType kWasmNullFuncRef{GenericKind::kNoFunc};
@@ -1296,18 +1205,29 @@ class CanonicalSig : public Signature<CanonicalValueType> {
                const CanonicalValueType* reps)
       : Signature<CanonicalValueType>(return_count, parameter_count, reps) {}
 
+  // For predefined signatures, where we know what we're doing.
+  CanonicalSig(size_t return_count, size_t parameter_count,
+               const CanonicalValueType* reps, CanonicalTypeIndex index);
+
   class Builder : public SignatureBuilder<CanonicalSig, CanonicalValueType> {
    public:
     Builder(Zone* zone, size_t return_count, size_t parameter_count)
         : SignatureBuilder<CanonicalSig, CanonicalValueType>(zone, return_count,
                                                              parameter_count) {}
-    CanonicalSig* Get() const;
+    const CanonicalSig* Get(CanonicalTypeIndex index) const;
   };
 
   uint64_t signature_hash() const { return signature_hash_; }
 
+  CanonicalTypeIndex index() const { return index_; }
+
  private:
+  // These fields are initialized by `Builder::Get()` and never modified
+  // afterwards. We cannot make them `const` for technical reasons (this would
+  // require a `const_cast` which would be UB).
   uint64_t signature_hash_;
+
+  CanonicalTypeIndex index_;
 };
 
 // This is the special case where comparing module-specific to canonical

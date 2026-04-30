@@ -1,3 +1,5 @@
+#include "envoy/config/core/v3/extension.pb.h"
+
 #include "source/common/quic/quic_server_transport_socket_factory.h"
 #include "source/common/quic/server_codec_impl.h"
 #include "source/common/tls/cert_validator/default_validator.h"
@@ -11,10 +13,13 @@
 #include "test/common/http/common.h"
 #include "test/common/integration/base_client_integration_test.h"
 #include "test/common/mocks/common/mocks.h"
+#include "test/common/mocks/dns/mock_dns_resolver.h"
+#include "test/common/mocks/dns/mock_dns_resolver.pb.h"
 #include "test/extensions/filters/http/dynamic_forward_proxy/test_resolver.h"
 #include "test/integration/autonomous_upstream.h"
 #include "test/test_common/registry.h"
 #include "test/test_common/test_random_generator.h"
+#include "test/test_common/threadsafe_singleton_injector.h"
 
 #include "absl/synchronization/notification.h"
 #include "extension_registry.h"
@@ -24,6 +29,7 @@
 #include "library/common/network/network_types.h"
 #include "library/common/network/proxy_settings.h"
 #include "library/common/types/c_types.h"
+#include "quiche/quic/test_tools/quic_test_utils.h"
 
 using testing::_;
 using testing::AnyNumber;
@@ -80,13 +86,17 @@ public:
   }
 
   void initialize() override {
+    // Integration test starts upstreams before Envoy which can cause a data race.
+    builder_.enableLogger(false);
     builder_.setLogLevel(Logger::Logger::trace);
     builder_.addRuntimeGuard("dns_cache_set_ip_version_to_remove", true);
     builder_.addRuntimeGuard("quic_no_tcp_delay", true);
+    builder_.addRuntimeGuard("mobile_use_network_observer_registry", true);
 
     if (getCodecType() == Http::CodecType::HTTP3) {
       setUpstreamProtocol(Http::CodecType::HTTP3);
       builder_.enablePlatformCertificatesValidation(true);
+      builder_.setUseQuicPlatformPacketWriter(true);
       // Create a k-v store for DNS lookup which createEnvoy() will use to point
       // www.lyft.com -> fake H3 backend.
       add_fake_dns_ = true;
@@ -110,6 +120,8 @@ public:
     EXPECT_CALL(helper_handle_->mock_helper(), getDefaultNetworkHandle()).WillOnce(Return(1));
     EXPECT_CALL(helper_handle_->mock_helper(), getAllConnectedNetworks())
         .WillOnce(Return(connected_networks));
+    // Mock socket binding to network 1 as binding to the default loopback address.
+    EXPECT_CALL(helper_handle_->mock_helper(), bindSocketToNetwork(_, 1)).Times(AnyNumber());
 
     BaseClientIntegrationTest::initialize();
 
@@ -246,7 +258,7 @@ void ClientIntegrationTest::basicTest() {
     ASSERT_EQ(2, last_stream_final_intel_.upstream_protocol);
   } else {
     // This verifies the H3 attempt was made due to the quic hints.
-    absl::MutexLock l(&engine_lock_);
+    absl::MutexLock l(engine_lock_);
     std::string stats = engine_->dumpStats();
     EXPECT_TRUE((absl::StrContains(stats, "cluster.base.upstream_cx_http3_total: 1"))) << stats;
     // Make sure the client reported protocol was also HTTP/3.
@@ -267,14 +279,22 @@ TEST_P(ClientIntegrationTest, Basic) {
 #if not defined(__APPLE__)
 TEST_P(ClientIntegrationTest, DisableDnsRefreshOnFailure) {
   std::atomic<bool> found_cache_miss{false};
-  auto logger = std::make_unique<EnvoyLogger>();
-  logger->on_log_ = [&](Logger::Logger::Levels, const std::string& msg) {
-    if (msg.find("ignoring failed address cache hit for miss for host 'doesnotexist") !=
-        std::string::npos) {
-      found_cache_miss = true;
-    }
-  };
-  builder_.setLogger(std::move(logger));
+  LogExpectation log_expect(
+      Envoy::GetLogSink(), [&](Logger::Logger::Levels, const std::string& msg) {
+        if (msg.find("ignoring failed address cache hit for miss for host 'doesnotexist") !=
+            std::string::npos) {
+          found_cache_miss = true;
+        }
+      });
+
+  // Configure MockDnsResolver with "doesnotexist" as a non-existent domain
+  envoy::config::core::v3::TypedExtensionConfig dns_resolver_config;
+  dns_resolver_config.set_name("envoy.test.mock_dns_resolver");
+  envoy::test::mock_dns_resolver::v3::MockDnsResolverConfig config;
+  config.add_non_existent_domains("doesnotexist");
+  dns_resolver_config.mutable_typed_config()->PackFrom(config);
+  builder_.setDnsResolver(dns_resolver_config);
+
   builder_.setDisableDnsRefreshOnFailure(true);
   initialize();
 
@@ -295,13 +315,12 @@ TEST_P(ClientIntegrationTest, DisableDnsRefreshOnFailure) {
 
 TEST_P(ClientIntegrationTest, DisableDnsRefreshOnNetworkChange) {
   std::atomic<bool> found_force_dns_refresh{false};
-  auto logger = std::make_unique<EnvoyLogger>();
-  logger->on_log_ = [&](Logger::Logger::Levels, const std::string& msg) {
-    if (msg.find("beginning DNS cache force refresh") != std::string::npos) {
-      found_force_dns_refresh = true;
-    }
-  };
-  builder_.setLogger(std::move(logger));
+  LogExpectation log_expect(
+      Envoy::GetLogSink(), [&](Logger::Logger::Levels, const std::string& msg) {
+        if (msg.find("beginning DNS cache force refresh") != std::string::npos) {
+          found_force_dns_refresh = true;
+        }
+      });
   builder_.setDisableDnsRefreshOnNetworkChange(true);
   initialize();
 
@@ -314,15 +333,14 @@ TEST_P(ClientIntegrationTest, HandleNetworkChangeEvents) {
   std::atomic<bool> found_force_dns_refresh{false};
   std::vector<absl::Notification> handled_network_changes(5);
   std::atomic<int> current_change_event{0};
-  auto logger = std::make_unique<EnvoyLogger>();
-  logger->on_log_ = [&](Logger::Logger::Levels, const std::string& msg) {
-    if (msg.find("beginning DNS cache force refresh") != std::string::npos) {
-      found_force_dns_refresh = true;
-    } else if (msg.find("Finished the network changed callback") != std::string::npos) {
-      handled_network_changes[current_change_event].Notify();
-    }
-  };
-  builder_.setLogger(std::move(logger));
+  LogExpectation log_expect(
+      Envoy::GetLogSink(), [&](Logger::Logger::Levels, const std::string& msg) {
+        if (msg.find("beginning DNS cache force refresh") != std::string::npos) {
+          found_force_dns_refresh = true;
+        } else if (msg.find("Finished the network changed callback") != std::string::npos) {
+          handled_network_changes[current_change_event].Notify();
+        }
+      });
   builder_.setDisableDnsRefreshOnNetworkChange(false);
   initialize();
 
@@ -373,17 +391,16 @@ TEST_P(ClientIntegrationTest, HandleNetworkChangeEvents) {
 TEST_P(ClientIntegrationTest, HandleNetworkChangeEventsAndroid) {
   absl::Notification found_force_dns_refresh;
   std::atomic<bool> handled_network_change{false};
-  auto logger = std::make_unique<EnvoyLogger>();
-  logger->on_log_ = [&](Logger::Logger::Levels, const std::string& msg) {
-    if (msg.find("Default network state has been changed. Current net configuration key") !=
-        std::string::npos) {
-      handled_network_change = true;
-    }
-    if (msg.find("beginning DNS cache force refresh") != std::string::npos) {
-      found_force_dns_refresh.Notify();
-    }
-  };
-  builder_.setLogger(std::move(logger));
+  LogExpectation log_expect(
+      Envoy::GetLogSink(), [&](Logger::Logger::Levels, const std::string& msg) {
+        if (msg.find("Default network state has been changed. Current net configuration key") !=
+            std::string::npos) {
+          handled_network_change = true;
+        }
+        if (msg.find("beginning DNS cache force refresh") != std::string::npos) {
+          found_force_dns_refresh.Notify();
+        }
+      });
   builder_.setDisableDnsRefreshOnNetworkChange(false);
 
   initialize();
@@ -397,6 +414,252 @@ TEST_P(ClientIntegrationTest, HandleNetworkChangeEventsAndroid) {
   // handled there.
   found_force_dns_refresh.WaitForNotification();
   EXPECT_TRUE(handled_network_change);
+}
+
+TEST_P(ClientIntegrationTest, Http3IdleConnectionClosedUponNetworkChangeEventsAndroid) {
+  builder_.enableQuicConnectionMigration(true);
+  builder_.addRuntimeGuard("decouple_explicit_drain_pools_and_dns_refresh", true);
+  builder_.addRuntimeGuard("mobile_use_network_observer_registry", true);
+  // Refreshing DNS cache will revert the overridden lyft.com entry with actual
+  // internet accessible address which is not intended.
+  builder_.setDisableDnsRefreshOnNetworkChange(true);
+
+  initialize();
+
+  if (getCodecType() != Http::CodecType::HTTP3 || version_ != Network::Address::IpVersion::v4) {
+    // This test relies on a 2nd v4 loopback address.
+    return;
+  }
+  Buffer::OwnedImpl request_data = Buffer::OwnedImpl("request body");
+  default_request_headers_.addCopy(AutonomousStream::EXPECT_REQUEST_SIZE_BYTES,
+                                   std::to_string(request_data.length()));
+
+  EnvoyStreamCallbacks stream_callbacks1 = createDefaultStreamCallbacks();
+  stream_callbacks1.on_data_ = [this](const Buffer::Instance&, uint64_t, bool, envoy_stream_intel) {
+    cc_.on_data_calls_++;
+  };
+
+  stream_ = createNewStream(std::move(stream_callbacks1));
+  stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       false);
+  stream_->sendData(std::make_unique<Buffer::OwnedImpl>(std::move(request_data)));
+  stream_->close(Http::Utility::createRequestTrailerMapPtr());
+
+  terminal_callback_.waitReady();
+
+  ASSERT_EQ(cc_.on_headers_calls_, 1);
+  ASSERT_EQ(cc_.status_, "200");
+  ASSERT_GE(cc_.on_data_calls_, 1);
+  ASSERT_EQ(cc_.on_complete_calls_, 1);
+  ASSERT_EQ(3, last_stream_final_intel_.upstream_protocol);
+  ASSERT_EQ(0, last_stream_final_intel_.socket_reused);
+
+  // An h3 upstream connection should have been established.
+  ASSERT_TRUE(waitForCounterGe("cluster.base.upstream_cx_http3_total", 1));
+  ASSERT_TRUE(waitForCounterGe("cluster.base.upstream_rq_total", 1));
+
+  EXPECT_CALL(helper_handle_->mock_helper(), bindSocketToNetwork(_, 123)).Times(0u);
+  // A new cellular network appears and becomes the default network. The idle connection should be
+  // closed.
+  internalEngine()->onNetworkConnectAndroid(ConnectionType::CONNECTION_4G, 123);
+  internalEngine()->onDefaultNetworkChangedAndroid(ConnectionType::CONNECTION_4G, 123);
+  ASSERT_TRUE(waitForCounterGe("http3.upstream.tx.quic_connection_close_error_code_QUIC_CONNECTION_"
+                               "MIGRATION_NO_MIGRATABLE_STREAMS",
+                               1));
+
+  // A new connection will be created on the new default network to serve new requests.
+  EXPECT_CALL(helper_handle_->mock_helper(), bindSocketToNetwork(_, 123))
+      .WillOnce(Invoke([&](Network::ConnectionSocket& socket, int64_t) {
+        // Mock binding to the new cellular network with a new address.
+        socket.ioHandle().bind(
+            std::make_shared<const Network::Address::Ipv4Instance>("127.0.0.2", 0, nullptr));
+      }));
+  default_request_headers_.setCopy(
+      Envoy::Http::LowerCaseString(AutonomousStream::EXPECT_REQUEST_SIZE_BYTES), "0");
+  memset(&last_stream_final_intel_, 0, sizeof(envoy_final_stream_intel));
+  ConditionalInitializer terminal_callback;
+  cc_.terminal_callback_ = &terminal_callback;
+  EnvoyStreamCallbacks stream_callbacks2 = createDefaultStreamCallbacks();
+
+  stream_ = createNewStream(std::move(stream_callbacks2));
+  stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       true);
+
+  terminal_callback.waitReady();
+
+  ASSERT_EQ(cc_.on_headers_calls_, 2);
+  ASSERT_EQ(cc_.status_, "200");
+  ASSERT_EQ(cc_.on_complete_calls_, 2);
+  ASSERT_EQ(3, last_stream_final_intel_.upstream_protocol);
+  ASSERT_EQ(0, last_stream_final_intel_.socket_reused);
+
+  ASSERT_TRUE(waitForCounterGe("cluster.base.upstream_rq_total", 2));
+  // The total h3 connection count should have increased.
+  EXPECT_EQ(2, getCounterValue("cluster.base.upstream_cx_http3_total"));
+}
+
+TEST_P(ClientIntegrationTest, Http3ConnectionMigrationUponNetworkChangeEventsAndroid) {
+  builder_.enableQuicConnectionMigration(true);
+  builder_.addRuntimeGuard("decouple_explicit_drain_pools_and_dns_refresh", true);
+  builder_.addRuntimeGuard("mobile_use_network_observer_registry", true);
+  initialize();
+
+  if (getCodecType() != Http::CodecType::HTTP3 || version_ != Network::Address::IpVersion::v4) {
+    // This test relies on a 2nd v4 loopback address.
+    return;
+  }
+  Buffer::OwnedImpl request_data = Buffer::OwnedImpl("request body");
+  default_request_headers_.addCopy(AutonomousStream::EXPECT_REQUEST_SIZE_BYTES,
+                                   std::to_string(request_data.length()));
+
+  EnvoyStreamCallbacks stream_callbacks1 = createDefaultStreamCallbacks();
+  stream_callbacks1.on_data_ = [this](const Buffer::Instance&, uint64_t, bool, envoy_stream_intel) {
+    cc_.on_data_calls_++;
+  };
+
+  stream_ = createNewStream(std::move(stream_callbacks1));
+  stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       false);
+  // Wait for the upstream connection to be established.
+  ASSERT_TRUE(waitForCounterGe("cluster.base.upstream_cx_http3_total", 1));
+  ASSERT_TRUE(waitForCounterGe("cluster.base.upstream_rq_total", 1));
+
+  absl::Notification probing_socket_created;
+  EXPECT_CALL(helper_handle_->mock_helper(), bindSocketToNetwork(_, 123))
+      .WillOnce(Invoke([&](Network::ConnectionSocket& socket, int64_t) {
+        // Mock binding to the new cellular network with a new address.
+        socket.ioHandle().bind(
+            std::make_shared<const Network::Address::Ipv4Instance>("127.0.0.2", 0, nullptr));
+        probing_socket_created.Notify();
+      }));
+  // A new cellular network appears and becomes the default network. The connection should migrate
+  // to it.
+  internalEngine()->onNetworkConnectAndroid(ConnectionType::CONNECTION_4G, 123);
+  internalEngine()->onDefaultNetworkChangedAndroid(ConnectionType::CONNECTION_4G, 123);
+  // Wait for the device to start probing the new network.
+  probing_socket_created.WaitForNotificationWithTimeout(absl::Seconds(10));
+
+  // Continue sending more request body.
+  stream_->sendData(std::make_unique<Buffer::OwnedImpl>(std::move(request_data)));
+
+  stream_->close(Http::Utility::createRequestTrailerMapPtr());
+
+  terminal_callback_.waitReady();
+
+  ASSERT_EQ(cc_.on_headers_calls_, 1);
+  ASSERT_EQ(cc_.status_, "200");
+  ASSERT_GE(cc_.on_data_calls_, 1);
+  ASSERT_EQ(cc_.on_complete_calls_, 1);
+  ASSERT_EQ(3, last_stream_final_intel_.upstream_protocol);
+  ASSERT_EQ(0, last_stream_final_intel_.socket_reused);
+
+  // New request will reuse this connection as it was not drained.
+  default_request_headers_.setCopy(
+      Envoy::Http::LowerCaseString(AutonomousStream::EXPECT_REQUEST_SIZE_BYTES), "0");
+  memset(&last_stream_final_intel_, 0, sizeof(envoy_final_stream_intel));
+  ConditionalInitializer terminal_callback;
+  cc_.terminal_callback_ = &terminal_callback;
+  EnvoyStreamCallbacks stream_callbacks2 = createDefaultStreamCallbacks();
+
+  stream_ = createNewStream(std::move(stream_callbacks2));
+  stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       true);
+
+  terminal_callback.waitReady();
+
+  ASSERT_EQ(cc_.on_headers_calls_, 2);
+  ASSERT_EQ(cc_.status_, "200");
+  ASSERT_EQ(cc_.on_complete_calls_, 2);
+  ASSERT_EQ(3, last_stream_final_intel_.upstream_protocol);
+  ASSERT_EQ(1, last_stream_final_intel_.socket_reused);
+
+  ASSERT_TRUE(waitForCounterGe("cluster.base.upstream_rq_total", 2));
+  // The total h3 connection count shouldn't have increased.
+  EXPECT_EQ(1, getCounterValue("cluster.base.upstream_cx_http3_total"));
+}
+
+// Tests that when the current network is disconnected, the connection migrates to another available
+// network. And idle connections are closed when the old network connects again and became the
+// default.
+TEST_P(ClientIntegrationTest, Http3ConnectionMigrationUponNetworkDisconnectedAndroid) {
+  builder_.enableQuicConnectionMigration(true);
+  builder_.addRuntimeGuard("decouple_explicit_drain_pools_and_dns_refresh", true);
+  builder_.addRuntimeGuard("mobile_use_network_observer_registry", true);
+  initialize();
+
+  if (getCodecType() != Http::CodecType::HTTP3 || version_ != Network::Address::IpVersion::v4) {
+    // This test relies on a 2nd v4 loopback address.
+    return;
+  }
+  default_request_headers_.addCopy(AutonomousStream::EXPECT_REQUEST_SIZE_BYTES, "0");
+  EnvoyStreamCallbacks stream_callbacks1 = createDefaultStreamCallbacks();
+  stream_callbacks1.on_data_ = [this](const Buffer::Instance&, uint64_t, bool, envoy_stream_intel) {
+    cc_.on_data_calls_++;
+  };
+  stream_ = createNewStream(std::move(stream_callbacks1));
+  stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       true);
+  terminal_callback_.waitReady();
+
+  ASSERT_EQ(cc_.on_headers_calls_, 1);
+  ASSERT_EQ(cc_.status_, "200");
+  ASSERT_GE(cc_.on_data_calls_, 1);
+  ASSERT_EQ(cc_.on_complete_calls_, 1);
+  ASSERT_EQ(3, last_stream_final_intel_.upstream_protocol);
+  ASSERT_EQ(0, last_stream_final_intel_.socket_reused);
+
+  // Wait for the upstream connection to be established.
+  ASSERT_TRUE(waitForCounterGe("cluster.base.upstream_cx_http3_total", 1));
+  ASSERT_TRUE(waitForCounterGe("cluster.base.upstream_rq_total", 1));
+
+  // Send a new request with body during which network gets disconnected.
+  Buffer::OwnedImpl request_data = Buffer::OwnedImpl("request body");
+  default_request_headers_.setCopy(
+      Envoy::Http::LowerCaseString(AutonomousStream::EXPECT_REQUEST_SIZE_BYTES),
+      std::to_string(request_data.length()));
+  memset(&last_stream_final_intel_, 0, sizeof(envoy_final_stream_intel));
+  ConditionalInitializer terminal_callback;
+  cc_.terminal_callback_ = &terminal_callback;
+  EnvoyStreamCallbacks stream_callbacks2 = createDefaultStreamCallbacks();
+  stream_ = createNewStream(std::move(stream_callbacks2));
+  stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       false);
+
+  absl::Notification new_socket_created;
+  EXPECT_CALL(helper_handle_->mock_helper(), bindSocketToNetwork(_, 2))
+      .WillOnce(Invoke([&](Network::ConnectionSocket& socket, int64_t) {
+        // Mock binding to the unknown network with a new address.
+        socket.ioHandle().bind(
+            std::make_shared<const Network::Address::Ipv4Instance>("127.0.0.2", 0, nullptr));
+        new_socket_created.Notify();
+      }));
+  // The current WIFI network is disconnected, and the connection should migrate to the unknown
+  // network.
+  internalEngine()->onNetworkDisconnectAndroid(1);
+  // Wait for the device to migrate to the 2nd network.
+  new_socket_created.WaitForNotificationWithTimeout(absl::Seconds(10));
+
+  // Continue sending more request body.
+  stream_->sendData(std::make_unique<Buffer::OwnedImpl>(std::move(request_data)));
+
+  stream_->close(Http::Utility::createRequestTrailerMapPtr());
+
+  terminal_callback.waitReady();
+
+  ASSERT_EQ(cc_.on_headers_calls_, 2);
+  ASSERT_EQ(cc_.status_, "200");
+  ASSERT_EQ(cc_.on_complete_calls_, 2);
+  ASSERT_EQ(3, last_stream_final_intel_.upstream_protocol);
+  ASSERT_EQ(1, last_stream_final_intel_.socket_reused);
+
+  // The old WIFI network appears again and becomes the default network. The idle connection on the
+  // unknown network should be closed.
+  internalEngine()->onNetworkConnectAndroid(ConnectionType::CONNECTION_WIFI, 1);
+  internalEngine()->onDefaultNetworkChangedAndroid(ConnectionType::CONNECTION_WIFI, 1);
+
+  ASSERT_TRUE(waitForCounterGe("http3.upstream.tx.quic_connection_close_error_code_QUIC_CONNECTION_"
+                               "MIGRATION_NO_MIGRATABLE_STREAMS",
+                               1));
 }
 
 TEST_P(ClientIntegrationTest, LargeResponse) {
@@ -531,7 +794,7 @@ TEST_P(ClientIntegrationTest, ManyStreamExplicitFlowControl) {
   for (uint32_t i = 0; i < num_requests; ++i) {
     Platform::StreamPrototypeSharedPtr stream_prototype;
     {
-      absl::MutexLock l(&engine_lock_);
+      absl::MutexLock l(engine_lock_);
       stream_prototype = engine_->streamClient()->newStreamPrototype();
     }
 
@@ -583,7 +846,7 @@ void ClientIntegrationTest::explicitFlowControlWithCancels(const uint32_t body_s
   for (uint32_t i = 0; i < num_requests; ++i) {
     Platform::StreamPrototypeSharedPtr stream_prototype;
     {
-      absl::MutexLock l(&engine_lock_);
+      absl::MutexLock l(engine_lock_);
       stream_prototype = engine_->streamClient()->newStreamPrototype();
     }
 
@@ -622,7 +885,7 @@ void ClientIntegrationTest::explicitFlowControlWithCancels(const uint32_t body_s
     }
 
     if (terminate_engine && request_for_engine_termination == i) {
-      absl::MutexLock l(&engine_lock_);
+      absl::MutexLock l(engine_lock_);
       ASSERT_EQ(engine_->terminate(), ENVOY_SUCCESS);
       engine_.reset();
       break;
@@ -763,6 +1026,14 @@ TEST_P(ClientIntegrationTest, BasicNon2xx) {
 }
 
 TEST_P(ClientIntegrationTest, InvalidDomain) {
+  // Configure MockDnsResolver with "www.doesnotexist.com" as a non-existent domain
+  envoy::config::core::v3::TypedExtensionConfig dns_resolver_config;
+  dns_resolver_config.set_name("envoy.test.mock_dns_resolver");
+  envoy::test::mock_dns_resolver::v3::MockDnsResolverConfig config;
+  config.add_non_existent_domains("www.doesnotexist.com");
+  dns_resolver_config.mutable_typed_config()->PackFrom(config);
+  builder_.setDnsResolver(dns_resolver_config);
+
   initialize();
 
   default_request_headers_.setHost("www.doesnotexist.com");
@@ -810,9 +1081,14 @@ TEST_P(ClientIntegrationTest, InvalidDomainFakeResolver) {
 
 TEST_P(ClientIntegrationTest, InvalidDomainReresolveWithNoAddresses) {
   builder_.addRuntimeGuard("reresolve_null_addresses", true);
-  Network::OverrideAddrInfoDnsResolverFactory factory;
-  Registry::InjectFactory<Network::DnsResolverFactory> inject_factory(factory);
-  Registry::InjectFactory<Network::DnsResolverFactory>::forceAllowDuplicates();
+
+  // Configure MockDnsResolver with "www.doesnotexist.com" as a non-existent domain
+  envoy::config::core::v3::TypedExtensionConfig dns_resolver_config;
+  dns_resolver_config.set_name("envoy.test.mock_dns_resolver");
+  envoy::test::mock_dns_resolver::v3::MockDnsResolverConfig config;
+  config.add_non_existent_domains("www.doesnotexist.com");
+  dns_resolver_config.mutable_typed_config()->PackFrom(config);
+  builder_.setDnsResolver(dns_resolver_config);
 
   initialize();
   default_request_headers_.setHost(
@@ -820,9 +1096,6 @@ TEST_P(ClientIntegrationTest, InvalidDomainReresolveWithNoAddresses) {
   stream_ = stream_prototype_->start(createDefaultStreamCallbacks(), explicit_flow_control_);
   stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
                        true);
-  // Unblock resolve, but resolve to the bad domain.
-  ASSERT_TRUE(waitForCounterGe("dns_cache.base_dns_cache.dns_query_attempt", 1));
-  Network::TestResolver::unblockResolve();
   terminal_callback_.waitReady();
 
   // The stream should fail.
@@ -832,13 +1105,13 @@ TEST_P(ClientIntegrationTest, InvalidDomainReresolveWithNoAddresses) {
   stream_ = createNewStream(createDefaultStreamCallbacks());
   stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
                        true);
-  Network::TestResolver::unblockResolve();
   terminal_callback_.waitReady();
-  EXPECT_LE(2, getCounterValue("dns_cache.base_dns_cache.dns_query_attempt"));
 }
 
 TEST_P(ClientIntegrationTest, ReresolveAndDrain) {
   builder_.enableDrainPostDnsRefresh(true);
+  // 0-RTT requests will not populate some of the final stream intel fields, so skip the validation.
+  expect_data_streams_ = false;
   add_fake_dns_ = true;
   Network::OverrideAddrInfoDnsResolverFactory factory;
   Registry::InjectFactory<Network::DnsResolverFactory> inject_factory(factory);
@@ -879,7 +1152,7 @@ TEST_P(ClientIntegrationTest, ReresolveAndDrain) {
   // Reset connectivity state. This should force a resolve but we will not
   // unblock it.
   {
-    absl::MutexLock l(&engine_lock_);
+    absl::MutexLock l(engine_lock_);
     engine_->engine()->resetConnectivityState();
   }
 
@@ -1416,7 +1689,7 @@ TEST_P(ClientIntegrationTest, Proxying) {
   }
   initialize();
   {
-    absl::MutexLock l(&engine_lock_);
+    absl::MutexLock l(engine_lock_);
     engine_->engine()->setProxySettings(fake_upstreams_[0]->localAddress()->asString().c_str(),
                                         fake_upstreams_[0]->localAddress()->ip()->port());
   }
@@ -1453,7 +1726,7 @@ TEST_P(ClientIntegrationTest, TestStats) {
   initialize();
 
   {
-    absl::MutexLock l(&engine_lock_);
+    absl::MutexLock l(engine_lock_);
     std::string stats = engine_->dumpStats();
     EXPECT_TRUE((absl::StrContains(stats, "runtime.load_success: 1"))) << stats;
   }
@@ -1480,21 +1753,6 @@ TEST_P(ClientIntegrationTest, OnNetworkChanged) {
 }
 
 // This test is simply to test the IPv6 connectivity check and DNS refresh and make sure the code
-// doesn't crash. It doesn't really test the actual network change event, but it does ensure that
-// requests/responses still work in the presence of IP version filtering.
-TEST_P(ClientIntegrationTest, OnNetworkChangedFilterUnsableIps) {
-  builder_.addRuntimeGuard("dns_cache_set_ip_version_to_remove", false);
-  builder_.addRuntimeGuard("dns_cache_filter_unusable_ip_version", true);
-  builder_.setDisableDnsRefreshOnNetworkChange(true);
-  initialize();
-  internalEngine()->onDefaultNetworkChanged(1);
-  basicTest();
-  if (upstreamProtocol() == Http::CodecType::HTTP1) {
-    ASSERT_EQ(cc_.on_complete_received_byte_count_, 67);
-  }
-}
-
-// This test is simply to test the IPv6 connectivity check and DNS refresh and make sure the code
 // doesn't crash. It doesn't really test the actual network change event.
 TEST_P(ClientIntegrationTest, OnNetworkChangeEvent) {
   builder_.addRuntimeGuard("dns_cache_set_ip_version_to_remove", true);
@@ -1509,5 +1767,364 @@ TEST_P(ClientIntegrationTest, OnNetworkChangeEvent) {
   }
 }
 
+class MockSendOsSysCalls : public Api::OsSysCallsImpl {
+public:
+  MOCK_METHOD(Api::SysCallSizeResult, send,
+              (os_fd_t socket, void* buffer, size_t length, int flags), (override));
+};
+
+// Tests that a transient write error due to no space available on the socket
+// does not cause the stream to error out when using HTTP/3.
+TEST_P(ClientIntegrationTest, NoSpaceAvailableWriteErrorSwallowed) {
+  initialize();
+  if (upstreamProtocol() != Http::CodecType::HTTP3) {
+    return;
+  }
+  // Create a stream with a write buffer limit of 1 byte to trigger the error.
+  EnvoyStreamCallbacks stream_callbacks = createDefaultStreamCallbacks();
+  stream_ = createNewStream(std::move(stream_callbacks));
+
+  int fd = -1;
+  EXPECT_CALL(helper_handle_->mock_helper(), bindSocketToNetwork(_, 1))
+      .WillOnce(Invoke([&](Network::ConnectionSocket& socket, int /* network */) {
+        fd = socket.ioHandle().fdDoNotUse();
+      }));
+  // Sending headers should be fine.
+  stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       false);
+
+  // Sending data should trigger the write error but not crash.
+  stream_->sendData(std::make_unique<Buffer::OwnedImpl>("request body"));
+
+  // Wait for the upstream connection to be created and introduce a transient SOCKET_ERROR_NOBUFS
+  // write error.
+  ASSERT_TRUE(waitForCounterGe("cluster.base.upstream_cx_http3_total", 1));
+  MockSendOsSysCalls sys_calls;
+  TestThreadsafeSingletonInjector<Api::OsSysCallsImpl> injector(&sys_calls);
+  EXPECT_CALL(sys_calls, send(fd, _, _, _))
+      .WillOnce(Return(Api::SysCallSizeResult{-1, SOCKET_ERROR_NOBUFS}))
+      .WillRepeatedly(Invoke([&](os_fd_t socket, void* buffer, size_t length, int flags) {
+        return injector.latched().send(socket, buffer, length, flags);
+      }));
+
+  // Complete the request.
+  stream_->close(Http::Utility::createRequestTrailerMapPtr());
+  terminal_callback_.waitReady();
+
+  // The write error shouldn't have caused a stream error.
+  ASSERT_EQ(cc_.on_error_calls_, 0);
+  ASSERT_EQ(cc_.on_complete_calls_, 1);
+  EXPECT_EQ(cc_.status_, "200");
+}
+
+TEST_P(ClientIntegrationTest, HttpsWithEarlyData) {
+  // Dummy comment to invalidate cache
+  if (getCodecType() != Http::CodecType::HTTP3 ||
+      !Runtime::runtimeFeatureEnabled("envoy.reloadable_features.fix_http3_early_data_timing")) {
+    return;
+  }
+  EXPECT_CALL(helper_handle_->mock_helper(), isCleartextPermitted(_)).Times(0);
+  EXPECT_CALL(helper_handle_->mock_helper(), validateCertificateChain(_, _)).Times(AnyNumber());
+  EXPECT_CALL(helper_handle_->mock_helper(), cleanupAfterCertificateValidation())
+      .Times(AnyNumber());
+
+  autonomous_upstream_ = false;
+
+  initialize();
+  default_request_headers_.setScheme("https");
+  stream_ = createNewStream(createDefaultStreamCallbacks());
+  stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       true);
+
+  ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*BaseIntegrationTest::dispatcher_,
+                                                        upstream_connection_));
+  ASSERT_TRUE(
+      upstream_connection_->waitForNewStream(*BaseIntegrationTest::dispatcher_, upstream_request_));
+  ASSERT_TRUE(upstream_request_->waitForEndStream(*BaseIntegrationTest::dispatcher_));
+  upstream_request_->encodeHeaders(Http::TestResponseHeaderMapImpl{{":status", "200"}}, false);
+  upstream_request_->encodeData(10, true);
+
+  terminal_callback_.waitReady();
+
+  ASSERT_EQ(cc_.on_headers_calls_, 1);
+  ASSERT_EQ(cc_.status_, "200");
+  ASSERT_GE(cc_.on_data_calls_, 1);
+  ASSERT_EQ(cc_.on_complete_calls_, 1);
+  EXPECT_EQ(0, getCounterValue("cluster.base.upstream_cx_connect_with_0_rtt"));
+
+  // Wait for session ticket to be received (QUIC sends it after handshake)
+  timeSystem().realSleepDoNotUseWithoutScrutiny(std::chrono::milliseconds(500));
+
+  // Close connection to force reconnect and use session ticket
+  ASSERT_TRUE(upstream_connection_->close());
+  ASSERT_TRUE(upstream_connection_->waitForDisconnect());
+  upstream_connection_.reset();
+  ASSERT_TRUE(waitForCounterGe("cluster.base.upstream_cx_destroy", 1));
+
+  // Reset terminal callback for the second request.
+  ConditionalInitializer terminal_callback;
+  cc_.terminal_callback_ = &terminal_callback;
+  // Skip validating final stream intel for the second request.
+  expect_data_streams_ = false;
+
+  default_request_headers_.addCopy("second_request", "1");
+  stream_ = createNewStream(createDefaultStreamCallbacks());
+  stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       true);
+
+  // Handle second request on upstream
+  ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*BaseIntegrationTest::dispatcher_,
+                                                        upstream_connection_));
+  ASSERT_TRUE(
+      upstream_connection_->waitForNewStream(*BaseIntegrationTest::dispatcher_, upstream_request_));
+  ASSERT_TRUE(upstream_request_->waitForEndStream(*BaseIntegrationTest::dispatcher_));
+  upstream_request_->encodeHeaders(Http::TestResponseHeaderMapImpl{{":status", "200"}}, false);
+  upstream_request_->encodeData(10, true);
+
+  terminal_callback.waitReady();
+
+  ASSERT_EQ(cc_.on_headers_calls_, 2);
+  ASSERT_EQ(cc_.status_, "200");
+
+  EXPECT_EQ(1, getCounterValue("cluster.base.upstream_cx_connect_with_0_rtt"));
+  if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.fix_http3_early_data_timing")) {
+    EXPECT_EQ(1, getCounterValue("cluster.base.upstream_rq_0rtt"));
+  }
+}
+
+class MockRecvMsgOsSysCalls : public Api::OsSysCallsImpl {
+public:
+  MockRecvMsgOsSysCalls() {
+    ON_CALL(*this, recvmsg(_, _, _))
+        .WillByDefault(Invoke([this](os_fd_t sockfd, msghdr* msg, int flags) {
+          auto result = Api::OsSysCallsImpl::recvmsg(sockfd, msg, flags);
+          int16_t bandwidth = scone_bandwidth_.exchange(-1);
+          if (result.return_value_ <= 0 || bandwidth == -1) {
+            return result;
+          }
+
+          std::vector<char> new_buffer(result.return_value_);
+          if (quic::test::MaybeUpdateSconePacket(
+                  reinterpret_cast<const char*>(msg->msg_iov[0].iov_base), new_buffer.data(),
+                  result.return_value_, static_cast<uint8_t>(bandwidth))) {
+            memcpy(msg->msg_iov[0].iov_base, new_buffer.data(), result.return_value_);
+          }
+          return result;
+        }));
+  }
+
+  MOCK_METHOD(Api::SysCallSizeResult, recvmsg, (os_fd_t sockfd, msghdr* msg, int flags),
+              (override));
+
+  std::atomic<int16_t> scone_bandwidth_{-1};
+};
+
+TEST_P(ClientIntegrationTest, SconeValuePropagation) {
+  if (upstreamProtocol() != Http::CodecType::HTTP3) {
+    return;
+  }
+
+  const int16_t expected_bandwidth = 127;
+
+  MockRecvMsgOsSysCalls sys_calls;
+  TestThreadsafeSingletonInjector<Api::OsSysCallsImpl> injector(&sys_calls);
+
+  builder_.enableScone(true);
+  initialize();
+
+  int64_t captured_scone_max_kbps = -1;
+  int64_t captured_scone_timestamp_ms = -1;
+
+  EnvoyStreamCallbacks stream_callbacks = createDefaultStreamCallbacks();
+  stream_callbacks.on_headers_ = [&](const Http::ResponseHeaderMap& headers, bool,
+                                     envoy_stream_intel intel) {
+    cc_.on_headers_calls_++;
+    cc_.status_ = absl::StrCat(headers.getStatusValue());
+    captured_scone_max_kbps = intel.scone_max_kbps;
+    captured_scone_timestamp_ms = intel.scone_timestamp_ms;
+  };
+
+  stream_ = createNewStream(std::move(stream_callbacks));
+  sys_calls.scone_bandwidth_.store(expected_bandwidth);
+  stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       true);
+
+  cc_.terminal_callback_->waitReady();
+
+  EXPECT_EQ(captured_scone_max_kbps, expected_bandwidth);
+  EXPECT_GT(captured_scone_timestamp_ms, 0);
+
+  int64_t captured_scone_max_kbps2 = -1;
+  int64_t captured_scone_timestamp_ms2 = -1;
+  EnvoyStreamCallbacks stream_callbacks2 = createDefaultStreamCallbacks();
+  stream_callbacks2.on_headers_ = [&](const Http::ResponseHeaderMap& headers, bool,
+                                      envoy_stream_intel intel) {
+    cc_.on_headers_calls_++;
+    cc_.status_ = absl::StrCat(headers.getStatusValue());
+    captured_scone_max_kbps2 = intel.scone_max_kbps;
+    captured_scone_timestamp_ms2 = intel.scone_timestamp_ms;
+  };
+
+  ConditionalInitializer terminal_callback2;
+  cc_.terminal_callback_ = &terminal_callback2;
+
+  auto stream2 = createNewStream(std::move(stream_callbacks2));
+  stream2->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       true);
+
+  terminal_callback2.waitReady();
+
+  EXPECT_EQ(captured_scone_max_kbps2, expected_bandwidth);
+  EXPECT_GT(captured_scone_timestamp_ms2, 0);
+}
+
+TEST_P(ClientIntegrationTest, SconeValuePropagationDelayed) {
+  if (upstreamProtocol() != Http::CodecType::HTTP3) {
+    return;
+  }
+
+  const int16_t expected_bandwidth = 50;
+
+  MockRecvMsgOsSysCalls sys_calls;
+  TestThreadsafeSingletonInjector<Api::OsSysCallsImpl> injector(&sys_calls);
+
+  builder_.enableScone(true);
+  initialize();
+
+  int64_t captured_scone_max_kbps_headers = -1;
+  int64_t captured_scone_max_kbps_data = -1;
+  int64_t captured_scone_timestamp_ms_headers = -1;
+  int64_t captured_scone_timestamp_ms_data = -1;
+
+  absl::Notification headers_received;
+  absl::Notification data_received;
+
+  EnvoyStreamCallbacks stream_callbacks = createDefaultStreamCallbacks();
+  stream_callbacks.on_headers_ = [&](const Http::ResponseHeaderMap& headers, bool,
+                                     envoy_stream_intel intel) {
+    cc_.on_headers_calls_++;
+    cc_.status_ = absl::StrCat(headers.getStatusValue());
+    captured_scone_max_kbps_headers = intel.scone_max_kbps;
+    captured_scone_timestamp_ms_headers = intel.scone_timestamp_ms;
+    if (!headers_received.HasBeenNotified()) {
+      headers_received.Notify();
+    }
+  };
+  stream_callbacks.on_data_ = [&](const Buffer::Instance&, uint64_t, bool,
+                                  envoy_stream_intel intel) {
+    cc_.on_data_calls_++;
+    captured_scone_max_kbps_data = intel.scone_max_kbps;
+    captured_scone_timestamp_ms_data = intel.scone_timestamp_ms;
+    if (!data_received.HasBeenNotified()) {
+      data_received.Notify();
+    }
+  };
+
+  stream_ = createNewStream(std::move(stream_callbacks));
+  stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       true);
+
+  ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*BaseIntegrationTest::dispatcher_,
+                                                        upstream_connection_));
+  ASSERT_TRUE(
+      upstream_connection_->waitForNewStream(*BaseIntegrationTest::dispatcher_, upstream_request_));
+  ASSERT_TRUE(upstream_request_->waitForEndStream(*BaseIntegrationTest::dispatcher_));
+
+  upstream_request_->encodeHeaders(Http::TestResponseHeaderMapImpl{{":status", "200"}}, false);
+
+  headers_received.WaitForNotification();
+
+  EXPECT_EQ(captured_scone_max_kbps_headers, -1);
+  EXPECT_EQ(captured_scone_timestamp_ms_headers, -1);
+
+  sys_calls.scone_bandwidth_.store(expected_bandwidth);
+
+  upstream_request_->encodeData(10, false);
+
+  data_received.WaitForNotification();
+
+  EXPECT_EQ(captured_scone_max_kbps_data, expected_bandwidth);
+  EXPECT_GT(captured_scone_timestamp_ms_data, 0);
+
+  upstream_request_->encodeData(0, true);
+
+  terminal_callback_.waitReady();
+}
+
+TEST_P(ClientIntegrationTest, SconeValuePropagationMultipleUpdates) {
+  if (upstreamProtocol() != Http::CodecType::HTTP3) {
+    return;
+  }
+
+  const int16_t expected_bandwidth_1 = 10;
+  const int16_t expected_bandwidth_2 = 20;
+
+  MockRecvMsgOsSysCalls sys_calls;
+  TestThreadsafeSingletonInjector<Api::OsSysCallsImpl> injector(&sys_calls);
+
+  builder_.enableScone(true);
+  initialize();
+
+  int64_t captured_scone_max_kbps_headers = -1;
+  int64_t captured_scone_max_kbps_data = -1;
+  int64_t captured_scone_timestamp_ms_headers = -1;
+  int64_t captured_scone_timestamp_ms_data = -1;
+
+  absl::Notification headers_received;
+  absl::Notification data_received;
+
+  EnvoyStreamCallbacks stream_callbacks = createDefaultStreamCallbacks();
+  stream_callbacks.on_headers_ = [&](const Http::ResponseHeaderMap& headers, bool,
+                                     envoy_stream_intel intel) {
+    cc_.on_headers_calls_++;
+    cc_.status_ = absl::StrCat(headers.getStatusValue());
+    captured_scone_max_kbps_headers = intel.scone_max_kbps;
+    captured_scone_timestamp_ms_headers = intel.scone_timestamp_ms;
+    if (!headers_received.HasBeenNotified()) {
+      headers_received.Notify();
+    }
+  };
+  stream_callbacks.on_data_ = [&](const Buffer::Instance&, uint64_t, bool,
+                                  envoy_stream_intel intel) {
+    cc_.on_data_calls_++;
+    captured_scone_max_kbps_data = intel.scone_max_kbps;
+    captured_scone_timestamp_ms_data = intel.scone_timestamp_ms;
+    if (!data_received.HasBeenNotified()) {
+      data_received.Notify();
+    }
+  };
+
+  stream_ = createNewStream(std::move(stream_callbacks));
+  sys_calls.scone_bandwidth_.store(expected_bandwidth_1);
+  stream_->sendHeaders(std::make_unique<Http::TestRequestHeaderMapImpl>(default_request_headers_),
+                       true);
+
+  ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*BaseIntegrationTest::dispatcher_,
+                                                        upstream_connection_));
+  ASSERT_TRUE(
+      upstream_connection_->waitForNewStream(*BaseIntegrationTest::dispatcher_, upstream_request_));
+  ASSERT_TRUE(upstream_request_->waitForEndStream(*BaseIntegrationTest::dispatcher_));
+
+  upstream_request_->encodeHeaders(Http::TestResponseHeaderMapImpl{{":status", "200"}}, false);
+
+  headers_received.WaitForNotification();
+
+  EXPECT_EQ(captured_scone_max_kbps_headers, expected_bandwidth_1);
+  EXPECT_GT(captured_scone_timestamp_ms_headers, 0);
+
+  sys_calls.scone_bandwidth_.store(expected_bandwidth_2);
+
+  upstream_request_->encodeData(10, false);
+
+  data_received.WaitForNotification();
+
+  EXPECT_EQ(captured_scone_max_kbps_data, expected_bandwidth_2);
+  EXPECT_GT(captured_scone_timestamp_ms_data, 0);
+  EXPECT_GE(captured_scone_timestamp_ms_data, captured_scone_timestamp_ms_headers);
+
+  upstream_request_->encodeData(0, true);
+
+  terminal_callback_.waitReady();
+}
 } // namespace
 } // namespace Envoy

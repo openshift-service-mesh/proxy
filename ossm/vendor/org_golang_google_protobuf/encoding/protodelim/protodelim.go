@@ -6,6 +6,7 @@
 package protodelim
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -41,7 +42,7 @@ func (o MarshalOptions) MarshalTo(w io.Writer, m proto.Message) (int, error) {
 // MarshalTo writes a varint size-delimited wire-format message to w
 // with the default options.
 //
-// See the documentation for MarshalOptions.MarshalTo.
+// See the documentation for [MarshalOptions.MarshalTo].
 func MarshalTo(w io.Writer, m proto.Message) (int, error) {
 	return MarshalOptions{}.MarshalTo(w, m)
 }
@@ -60,7 +61,7 @@ type UnmarshalOptions struct {
 const defaultMaxSize = 4 << 20 // 4 MiB, corresponds to the default gRPC max request/response size
 
 // SizeTooLargeError is an error that is returned when the unmarshaler encounters a message size
-// that is larger than its configured MaxSize.
+// that is larger than its configured [UnmarshalOptions.MaxSize].
 type SizeTooLargeError struct {
 	// Size is the varint size of the message encountered
 	// that was larger than the provided MaxSize.
@@ -74,8 +75,8 @@ func (e *SizeTooLargeError) Error() string {
 	return fmt.Sprintf("message size %d exceeded unmarshaler's maximum configured size %d", e.Size, e.MaxSize)
 }
 
-// Reader is the interface expected by UnmarshalFrom.
-// It is implemented by *bufio.Reader.
+// Reader is the interface expected by [UnmarshalFrom].
+// It is implemented by *[bufio.Reader].
 type Reader interface {
 	io.Reader
 	io.ByteReader
@@ -85,17 +86,21 @@ type Reader interface {
 // from r.
 // The provided message must be mutable (e.g., a non-nil pointer to a message).
 //
-// The error is io.EOF error only if no bytes are read.
+// The error is [io.EOF] error only if no bytes are read.
 // If an EOF happens after reading some but not all the bytes,
 // UnmarshalFrom returns a non-io.EOF error.
 // In particular if r returns a non-io.EOF error, UnmarshalFrom returns it unchanged,
-// and if only a size is read with no subsequent message, io.ErrUnexpectedEOF is returned.
+// and if only a size is read with no subsequent message, [io.ErrUnexpectedEOF] is returned.
 func (o UnmarshalOptions) UnmarshalFrom(r Reader, m proto.Message) error {
 	var sizeArr [binary.MaxVarintLen64]byte
 	sizeBuf := sizeArr[:0]
 	for i := range sizeArr {
 		b, err := r.ReadByte()
-		if err != nil && (err != io.EOF || i == 0) {
+		if err != nil {
+			// Immediate EOF is unexpected.
+			if err == io.EOF && i != 0 {
+				break
+			}
 			return err
 		}
 		sizeBuf = append(sizeBuf, b)
@@ -116,8 +121,23 @@ func (o UnmarshalOptions) UnmarshalFrom(r Reader, m proto.Message) error {
 		return errors.Wrap(&SizeTooLargeError{Size: size, MaxSize: uint64(maxSize)}, "")
 	}
 
-	b := make([]byte, size)
-	_, err := io.ReadFull(r, b)
+	var b []byte
+	var err error
+	if br, ok := r.(*bufio.Reader); ok {
+		// Use the []byte from the bufio.Reader instead of having to allocate one.
+		// This reduces CPU usage and allocated bytes.
+		b, err = br.Peek(int(size))
+		if err == nil {
+			defer br.Discard(int(size))
+		} else {
+			b = nil
+		}
+	}
+	if b == nil {
+		b = make([]byte, size)
+		_, err = io.ReadFull(r, b)
+	}
+
 	if err == io.EOF {
 		return io.ErrUnexpectedEOF
 	}
@@ -134,7 +154,7 @@ func (o UnmarshalOptions) UnmarshalFrom(r Reader, m proto.Message) error {
 // from r with the default options.
 // The provided message must be mutable (e.g., a non-nil pointer to a message).
 //
-// See the documentation for UnmarshalOptions.UnmarshalFrom.
+// See the documentation for [UnmarshalOptions.UnmarshalFrom].
 func UnmarshalFrom(r Reader, m proto.Message) error {
 	return UnmarshalOptions{}.UnmarshalFrom(r, m)
 }

@@ -74,9 +74,9 @@ filegroup(
         "CODEOWNERS",
         "CONTRIBUTING.md",
         "CONTRIBUTORS",
-        "Design.rst",
+        "Design.md",
         "LICENSE",
-        "README.rst",
+        "README.md",
         "WORKSPACE",
         "def.bzl",
         "deps.bzl",
@@ -135,4 +135,11 @@ bzl_library(
     srcs = ["extensions.bzl"],
     visibility = ["//visibility:public"],
     deps = ["//internal/bzlmod:go_deps"],
+)
+
+bzl_library(
+    name = "go_tools",
+    srcs = ["go_tools.bzl"],
+    visibility = ["//visibility:public"],
+    deps = ["@bazel_gazelle_go_repository_config//:go_tools.bzl"],
 )

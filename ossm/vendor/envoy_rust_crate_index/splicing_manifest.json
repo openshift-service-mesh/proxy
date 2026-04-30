@@ -1,0 +1,8 @@
+{
+    "cargo_config": null,
+    "direct_packages": {},
+    "manifests": {
+        "/tmp/tmp.2AR1749u6S/external/envoy/Cargo.toml": "@envoy//:Cargo.toml"
+    },
+    "resolver_version": "2"
+}

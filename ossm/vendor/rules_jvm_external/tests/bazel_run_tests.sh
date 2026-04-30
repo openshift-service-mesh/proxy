@@ -183,6 +183,18 @@ function test_m2local_testing_found_local_artifact_after_build_copy() {
   expect_log "Assuming maven local for artifact: com.example:kt:1.0.0"
 }
 
+function test_publish_java_binary_jar_with_maven_export {
+  m2local_dir="${HOME}/.m2/repository"
+  jar_dir="${m2local_dir}/com/example_binary/exe/1.0.0"
+  rm -rf ${jar_dir}
+  mkdir -p ${m2local_dir}
+
+  # should run successfully
+  bazel run --define maven_repo="file://${m2local_dir}" //tests/integration/java_export:some-java-binary-export.publish >> "$TEST_LOG" 2>&1
+
+  rm -rf ${jar_dir}
+}
+
 function test_found_artifact_with_plus_through_pin_and_build() {
   bazel clean --expunge >> "$TEST_LOG" 2>&1 # for https://github.com/bazelbuild/rules_jvm_external/issues/800
   bazel run @artifact_with_plus//:pin >> "$TEST_LOG" 2>&1
@@ -251,7 +263,14 @@ function test_coursier_resolution_with_boms() {
     fi
 
     # should run successfully
-    bazel run @coursier_resolved_with_boms//:pin >> "$TEST_LOG" 2>&1
+    REPIN=1 bazel run @coursier_resolved_with_boms//:pin >> "$TEST_LOG" 2>&1
+
+    expect_log "Successfully pinned resolved artifacts"
+
+    expect_file_is_not_empty "tests/custom_maven_install/coursier_resolved_install.json"
+
+    # TODO: Add back in once coursier supports index files
+    # expect_file_is_not_empty "tests/custom_maven_install/coursier_resolved_index.json"
 }
 
 function test_v1_lock_file_format() {
@@ -281,6 +300,9 @@ function test_maven_resolution() {
 
     # should run successfully
     bazel run @maven_resolved_with_boms//:pin >> "$TEST_LOG" 2>&1
+
+    expect_file_is_not_empty "tests/custom_maven_install/maven_resolved_install.json"
+    expect_file_is_not_empty "tests/custom_maven_install/maven_resolved_index.json"
 }
 
 function test_transitive_dependency_with_type_of_pom {
@@ -315,6 +337,9 @@ function test_when_both_pom_and_jar_artifact_are_dependencies_jar_artifact_is_pr
     bazel query @regression_testing_gradle//:androidx_compose_foundation_foundation_layout_android >> "$TEST_LOG" 2>&1
 
     expect_log "@regression_testing_gradle//:androidx_compose_foundation_foundation_layout_android"
+
+    expect_file_is_not_empty "tests/custom_maven_install/regression_testing_gradle_install.json"
+    expect_file_is_not_empty "tests/custom_maven_install/regression_testing_gradle_index.json"
  }
 
 function test_gradle_metadata_is_resolved_correctly_for_jvm_artifact {
@@ -323,8 +348,26 @@ function test_gradle_metadata_is_resolved_correctly_for_jvm_artifact {
   bazel query @regression_testing_gradle//:androidx_annotation_annotation_jvm >> "$TEST_LOG" 2>&1
 
   expect_log "@regression_testing_gradle//:androidx_annotation_annotation_jvm"
+
+  # This is KMP artifact which is a transitive dependency
+  # and the JAR for this coordinate will just be a dummy jar/placeholder (in some cases a klib file)
+  # as gradle will use metadata to resolve the right one.
+  # Regardless we'll want to pull this in because the actual artifacts will be its children
+  # in the resolved graph with gradle
+  bazel query @regression_testing_gradle//:com_squareup_okio_okio >> "$TEST_LOG" 2>&1
+
+  expect_log "@regression_testing_gradle//:com_squareup_okio_okio"
+
+  # This is the actual JVM artifact which will have the jar for the KMP artifact
+  bazel query @regression_testing_gradle//:com_squareup_okio_okio_jvm >> "$TEST_LOG" 2>&1
+
+  expect_log "@regression_testing_gradle//:com_squareup_okio_okio_jvm"
 }
 
+function test_gradle_versions_catalog {
+  # When source files are requested and we have a bug, this will fail
+  bazel build @from_files//:all
+}
 
 TESTS=(
   "test_coursier_resolution_with_boms"
@@ -349,8 +392,10 @@ TESTS=(
   "test_transitive_dependency_with_type_of_pom"
   "test_when_both_pom_and_jar_artifact_are_available_jar_artifact_is_present"
   "test_when_both_pom_and_jar_artifact_are_dependencies_jar_artifact_is_present"
+  "test_publish_java_binary_jar_with_maven_export"
   # "test_gradle_metadata_is_resolved_correctly_for_aar_artifact"
   "test_gradle_metadata_is_resolved_correctly_for_jvm_artifact"
+  "test_gradle_versions_catalog"
 )
 
 function run_tests() {
@@ -381,6 +426,18 @@ function expect_not_in_file() {
   cat $file
   printf "FAILURE: $message\n"
   return 1
+}
+
+function expect_file_is_not_empty() {
+  local file=$1
+  if [ ! -f $file ]; then
+    printf "NOT FOUND: $file (most probably wrong test configuration)\n"
+    return 1
+  fi
+  if [ ! -s $file ]; then
+    printf "FAILED: $file is empty\n"
+    return 1
+  fi
 }
 
 function expect_log() {

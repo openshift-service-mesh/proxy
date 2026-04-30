@@ -52,7 +52,12 @@ grpc_cc_library(
 grpc_cc_test(
     name = "memory_quota_test",
     srcs = ["memory_quota_test.cc"],
-    external_deps = ["gtest"],
+    external_deps = [
+        "absl/status",
+        "absl/status:statusor",
+        "absl/time",
+        "gtest",
+    ],
     tags = [
         "cpu:10",
         "resource_quota_test",
@@ -61,8 +66,11 @@ grpc_cc_test(
     uses_polling = False,
     deps = [
         "call_checker",
+        "//:config_vars",
         "//:exec_ctx",
+        "//:gpr",
         "//src/core:memory_quota",
+        "//src/core:resource_tracker",
         "//src/core:slice_refcount",
         "//test/core/test_util:grpc_test_util_unsecure",
     ],
@@ -129,6 +137,7 @@ grpc_cc_test(
         "//:gpr",
         "//src/core:event_engine_memory_allocator",
         "//src/core:memory_quota",
+        "//src/core:sync",
         "//test/core/test_util:grpc_test_util_unsecure",
     ],
 )

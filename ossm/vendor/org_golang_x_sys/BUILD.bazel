@@ -4,7 +4,7 @@ load("@rules_license//rules:package_info.bzl", "package_info")
 
 package_metadata(
     name = "package_metadata",
-    purl = "pkg:golang/golang.org/x/sys@v0.7.0",
+    purl = "pkg:golang/golang.org/x/sys@v0.38.0",
     visibility = [
         "//:__subpackages__",
     ],
@@ -14,7 +14,7 @@ package_info(
     name = "gazelle_generated_package_info",
     package_name = "golang.org/x/sys",
     package_url = "https://golang.org/x/sys",
-    package_version = "0.7.0",
-    purl = "pkg:golang/golang.org/x/sys@v0.7.0",
+    package_version = "0.38.0",
+    purl = "pkg:golang/golang.org/x/sys@v0.38.0",
     visibility = ["//:__subpackages__"],
 )

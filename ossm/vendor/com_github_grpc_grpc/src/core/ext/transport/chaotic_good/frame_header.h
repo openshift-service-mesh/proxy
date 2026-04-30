@@ -21,6 +21,7 @@
 #include <cstdint>
 
 #include "absl/status/statusor.h"
+#include "src/core/channelz/property_list.h"
 #include "src/core/util/bitset.h"
 
 namespace grpc_core {
@@ -29,6 +30,7 @@ namespace chaotic_good {
 // Remember to add new frame types to frame_fuzzer.cc
 enum class FrameType : uint8_t {
   kSettings = 0x00,
+  kTcpSecurityFrame = 0x01,  // For TcpFrameTransport
   kClientInitialMetadata = 0x80,
   kClientEndOfStream = 0x81,
   kServerInitialMetadata = 0x91,
@@ -61,6 +63,13 @@ struct FrameHeader {
   bool operator==(const FrameHeader& h) const {
     return type == h.type && stream_id == h.stream_id &&
            payload_length == h.payload_length;
+  }
+
+  channelz::PropertyList ChannelzProperties() const {
+    return channelz::PropertyList()
+        .Set("type", FrameTypeString(type))
+        .Set("stream_id", stream_id)
+        .Set("payload_length", payload_length);
   }
 };
 

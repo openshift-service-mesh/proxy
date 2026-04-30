@@ -87,6 +87,9 @@ struct WasmFunction {
   bool imported = false;
   bool exported = false;
   bool declared = false;
+  // TODO(jkummerow): Should we merge {sig_index} and {exact} into a
+  // {ValueType} field?
+  bool exact = false;  // Only meaningful for imported functions.
 };
 
 // Static representation of a wasm global variable.
@@ -270,26 +273,6 @@ struct WasmExport {
   WireBytesRef name;          // exported name.
   ImportExportKindCode kind;  // kind of the export.
   uint32_t index = 0;         // index into the respective space.
-};
-
-enum class WasmCompilationHintStrategy : uint8_t {
-  kDefault = 0,
-  kLazy = 1,
-  kEager = 2,
-  kLazyBaselineEagerTopTier = 3,
-};
-
-enum class WasmCompilationHintTier : uint8_t {
-  kDefault = 0,
-  kBaseline = 1,
-  kOptimized = 2,
-};
-
-// Static representation of a wasm compilation hint
-struct WasmCompilationHint {
-  WasmCompilationHintStrategy strategy;
-  WasmCompilationHintTier baseline_tier;
-  WasmCompilationHintTier top_tier;
 };
 
 #define SELECT_WASM_COUNTER(counters, origin, prefix, suffix)     \
@@ -559,12 +542,19 @@ class CallSiteFeedback {
   }
   int function_index(int i) const {
     DCHECK(!is_invalid() && !is_megamorphic());
-    if (is_monomorphic()) return index_or_count_;
+    if (is_monomorphic()) {
+      DCHECK_EQ(i, 0);
+      return index_or_count_;
+    }
     return polymorphic_storage()[i].function_index;
   }
+  // The call count of the function at this particular call site.
   int call_count(int i) const {
     DCHECK(!is_invalid() && !is_megamorphic());
-    if (is_monomorphic()) return static_cast<int>(frequency_or_ool_);
+    if (is_monomorphic()) {
+      DCHECK_EQ(i, 0);
+      return static_cast<int>(frequency_or_ool_);
+    }
     return polymorphic_storage()[i].absolute_call_frequency;
   }
   bool has_non_inlineable_targets() const {
@@ -601,6 +591,9 @@ struct FunctionTypeFeedback {
   // For "call", it holds the index of the called function, for "call_indirect"
   // and "call_ref" the value will be a sentinel {kCallIndirect} / {kCallRef}.
   base::OwnedVector<uint32_t> call_targets;
+
+  // The number of times this function was invoked.
+  int num_invocations = 0;
 
   // {tierup_priority} is updated and used when triggering tier-up.
   // TODO(clemensb): This does not belong here; find a better place.
@@ -662,14 +655,116 @@ struct WasmTable {
   bool is_table64() const { return address_type == AddressType::kI64; }
 };
 
+struct CompilationPriority {
+  uint32_t compilation_priority;
+  int optimization_priority;
+};
+using CompilationPriorities = std::map<uint32_t, CompilationPriority>;
+// Maps from function index to a vector of byte offset in the function and
+// frequency.
+using InstructionFrequencies =
+    std::map<uint32_t, std::vector<std::pair<uint32_t, uint8_t>>>;
+struct CallTarget {
+  uint32_t function_index;
+  uint32_t call_frequency_percent;
+
+  bool operator==(const CallTarget& other) const {
+    return function_index == other.function_index &&
+           call_frequency_percent == other.call_frequency_percent;
+  }
+};
+using CallTargetVector = base::SmallVector<CallTarget, 4>;
+// Maps from function index to a vector of byte offset and a SmallVector of call
+// targets.
+using CallTargets =
+    std::map<uint32_t, std::vector<std::pair<uint32_t, CallTargetVector>>>;
+
+// WasmModuleSignatureStorage provides a minimal allocator interface.
+// Allocations never move, i.e. pointers stay stable.
+// This is similar to a Zone, but tuned for long-time storage (less memory
+// overhead).
+class WasmModuleSignatureStorage {
+ public:
+  WasmModuleSignatureStorage() = default;
+
+  // Disallow copy assignment and copy construction.
+  WasmModuleSignatureStorage(const WasmModuleSignatureStorage&) = delete;
+  WasmModuleSignatureStorage& operator=(const WasmModuleSignatureStorage&) =
+      delete;
+
+  // Move assignment / construction is needed for tests which internally
+  // construct a WasmModule and then pass out e.g. a signature pointer plus the
+  // storage.
+  WasmModuleSignatureStorage(WasmModuleSignatureStorage&&)
+      V8_NOEXCEPT = default;
+  WasmModuleSignatureStorage& operator=(WasmModuleSignatureStorage&&)
+      V8_NOEXCEPT = default;
+
+  uint8_t* Allocate(size_t length, size_t align = 1) {
+    DCHECK(base::bits::IsPowerOfTwo(align));
+    if (V8_UNLIKELY(storage_.empty())) {
+      Allocate_more_storage(length + align - 1);
+    }
+
+    std::vector<uint8_t>* last = &storage_.back();
+    size_t last_size = last->size();
+    uint8_t* ptr = last->data() + last_size;
+    size_t padding = (-reinterpret_cast<intptr_t>(ptr)) & (align - 1);
+    if (V8_UNLIKELY(last->capacity() - last_size < length + padding)) {
+      Allocate_more_storage(length + align - 1);
+      // Redo calculations from before:
+      last = &storage_.back();
+      last_size = last->size();
+      ptr = last->data() + last_size;
+      padding = (-reinterpret_cast<intptr_t>(ptr)) & (align - 1);
+    }
+    DCHECK_LE(last_size + length + padding, last->capacity());
+    last->resize(last_size + length + padding);
+    DCHECK_EQ(0, reinterpret_cast<intptr_t>(ptr + padding) & (align - 1));
+    return ptr + padding;
+  }
+
+  template <typename T>
+  T* AllocateArray(size_t count) {
+    CHECK_LE(count, std::numeric_limits<size_t>::max() / sizeof(T));
+    return reinterpret_cast<T*>(Allocate(count * sizeof(T), alignof(T)));
+  }
+
+  template <typename T, typename... Args>
+  T* New(Args&&... args) {
+    T* memory = AllocateArray<T>(1);
+    return new (memory) T(std::forward<Args>(args)...);
+  }
+
+  size_t TotalReservedSize() const {
+    size_t size = 0;
+    for (const std::vector<uint8_t>& vec : storage_) {
+      size += sizeof(vec) + vec.capacity();
+    }
+    return size;
+  }
+
+ private:
+  V8_NOINLINE V8_PRESERVE_MOST void Allocate_more_storage(size_t min_length) {
+    size_t new_length =
+        std::max(min_length, storage_.empty() ? 4 * (sizeof(FunctionSig) + 4)
+                                              : storage_.back().capacity());
+    std::vector<uint8_t> new_storage;
+    new_storage.reserve(new_length);
+    storage_.push_back(std::move(new_storage));
+  }
+
+  std::vector<std::vector<uint8_t>> storage_;
+};
+
 // Static representation of a module.
 struct V8_EXPORT_PRIVATE WasmModule {
   // ================ Fields ===================================================
-  // The signature zone is also used to store the signatures of C++ functions
+  // The signature storage is also used to store the signatures of C++ functions
   // called with the V8 fast API. These signatures are added during
-  // instantiation, so the `signature_zone` may be changed even when the
+  // instantiation, so the `signature_storage` may be changed even when the
   // `WasmModule` is already `const`.
-  mutable Zone signature_zone;
+  mutable WasmModuleSignatureStorage signature_storage;
   int start_function_index = -1;   // start function, >= 0 if any
 
   // Size of the buffer required for all globals that are not imported and
@@ -721,13 +816,25 @@ struct V8_EXPORT_PRIVATE WasmModule {
   std::vector<WasmTag> tags;
   std::vector<WasmStringRefLiteral> stringref_literals;
   std::vector<WasmElemSegment> elem_segments;
-  std::vector<WasmCompilationHint> compilation_hints;
   BranchHintInfo branch_hints;
+  CompilationPriorities compilation_priorities;
+  InstructionFrequencies instruction_frequencies;
+  CallTargets call_targets;
+  // When --wasm-generate-compilation-hints, we do not trigger tierup, so we
+  // need to know which functions would have been tiered up to mark them for
+  // optimization in the generated compilation hints.
+  mutable base::Mutex marked_for_tierup_mutex;
+  mutable std::unordered_set<uint32_t> marked_for_tierup;
+  // When --wasm-generate-compilation-hints, we need to map feedback slots to
+  // offsets in the wire bytes to generate compilation hints. The key in the map
+  // is the function index. The index into the vector is the feedback slot
+  // index.
+  mutable std::unordered_map<uint32_t, std::vector<uint32_t>>
+      feedback_slots_to_wire_byte_offsets;
+
   // Pairs of module offsets and mark id.
   std::vector<std::pair<uint32_t, uint32_t>> inst_traces;
 
-  // This is the only member of {WasmModule} where we store dynamic information
-  // that's not a decoded representation of the wire bytes.
   // TODO(jkummerow): Rename.
   mutable TypeFeedbackStorage type_feedback;
 
@@ -849,9 +956,7 @@ struct V8_EXPORT_PRIVATE WasmModule {
 
   CanonicalTypeIndex canonical_sig_id(ModuleTypeIndex index) const {
     DCHECK(has_signature(index));
-    size_t num_types = isorecursive_canonical_type_ids.size();
-    V8_ASSUME(index.index < num_types);
-    return isorecursive_canonical_type_ids[index.index];
+    return canonical_type_id(index);
   }
 
   uint64_t signature_hash(const TypeCanonicalizer*,
@@ -942,6 +1047,13 @@ struct V8_EXPORT_PRIVATE WasmModule {
 
   base::Vector<const WasmFunction> declared_functions() const {
     return base::VectorOf(functions) + num_imported_functions;
+  }
+
+  std::optional<CompilationPriority> GetCompilationPriority(
+      uint32_t func_index) const {
+    auto iterator = compilation_priorities.find(func_index);
+    if (iterator == compilation_priorities.end()) return {};
+    return iterator->second;
   }
 
 #if V8_ENABLE_DRUMBRAKE
@@ -1095,7 +1207,7 @@ class TruncatedUserString {
  public:
   template <typename T>
   explicit TruncatedUserString(base::Vector<T> name)
-      : TruncatedUserString(name.begin(), name.length()) {}
+      : TruncatedUserString(name.begin(), name.size()) {}
 
   TruncatedUserString(const uint8_t* start, size_t len)
       : TruncatedUserString(reinterpret_cast<const char*>(start), len) {}

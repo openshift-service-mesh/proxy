@@ -44,12 +44,13 @@ namespace internal {
 namespace {
 
 #ifdef USE_SIMULATOR
-unsigned SimulatorFeaturesFromCommandLine() {
+CpuFeatureSet SimulatorFeaturesFromCommandLine() {
   if (strcmp(v8_flags.sim_arm64_optional_features, "none") == 0) {
-    return 0;
+    return {};
   }
   if (strcmp(v8_flags.sim_arm64_optional_features, "all") == 0) {
-    return (1u << NUMBER_OF_CPU_FEATURES) - 1;
+    static_assert(std::is_same_v<unsigned, CpuFeatureSet::StorageType>);
+    return CpuFeatureSet::FromIntegral((1u << NUMBER_OF_CPU_FEATURES) - 1);
   }
   fprintf(
       stderr,
@@ -62,40 +63,43 @@ unsigned SimulatorFeaturesFromCommandLine() {
 }
 #endif  // USE_SIMULATOR
 
-constexpr unsigned CpuFeaturesFromCompiler() {
-  unsigned features = 0;
+constexpr CpuFeatureSet CpuFeaturesFromCompiler() {
+  CpuFeatureSet features;
 #if defined(__ARM_FEATURE_JCVT) && !defined(V8_TARGET_OS_IOS)
-  features |= 1u << JSCVT;
+  features.Add(JSCVT);
 #endif
 #if defined(__ARM_FEATURE_DOTPROD)
-  features |= 1u << DOTPROD;
+  features.Add(DOTPROD);
 #endif
 #if defined(__ARM_FEATURE_SHA3)
-  features |= 1u << SHA3;
+  features.Add(SHA3);
 #endif
 #if defined(__ARM_FEATURE_ATOMICS)
-  features |= 1u << LSE;
+  features.Add(LSE);
 #endif
 // There is no __ARM_FEATURE_PMULL macro; instead, __ARM_FEATURE_AES
 // covers the FEAT_PMULL feature too.
 #if defined(__ARM_FEATURE_AES)
-  features |= 1u << PMULL1Q;
+  features.Add(PMULL1Q);
 #endif
 #if defined(__ARM_FEATURE_HBC)
-  features |= 1u << HBC;
+  features.Add(HBC);
+#endif
+#if defined(__ARM_FEATURE_MOPS)
+  features.Add(MOPS);
 #endif
   return features;
 }
 
-constexpr unsigned CpuFeaturesFromTargetOS() {
-  unsigned features = 0;
+constexpr CpuFeatureSet CpuFeaturesFromTargetOS() {
+  CpuFeatureSet features;
 #if defined(V8_TARGET_OS_MACOS) && !defined(V8_TARGET_OS_IOS)
   // TODO(v8:13004): Detect if an iPhone is new enough to support jscvt, dotprot
   // and lse.
-  features |= 1u << JSCVT;
-  features |= 1u << DOTPROD;
-  features |= 1u << LSE;
-  features |= 1u << PMULL1Q;
+  features.Add(JSCVT);
+  features.Add(DOTPROD);
+  features.Add(LSE);
+  features.Add(PMULL1Q);
 #endif
   return features;
 }
@@ -123,30 +127,33 @@ void CpuFeatures::ProbeImpl(bool cross_compile) {
 #else
   // Probe for additional features at runtime.
   base::CPU cpu;
-  unsigned runtime = 0;
+  CpuFeatureSet runtime;
   if (cpu.has_jscvt()) {
-    runtime |= 1u << JSCVT;
+    runtime.Add(JSCVT);
   }
   if (cpu.has_dot_prod()) {
-    runtime |= 1u << DOTPROD;
+    runtime.Add(DOTPROD);
   }
   if (cpu.has_sha3()) {
-    runtime |= 1u << SHA3;
+    runtime.Add(SHA3);
   }
   if (cpu.has_lse()) {
-    runtime |= 1u << LSE;
+    runtime.Add(LSE);
   }
   if (cpu.has_pmull1q()) {
-    runtime |= 1u << PMULL1Q;
+    runtime.Add(PMULL1Q);
   }
   if (cpu.has_fp16()) {
-    runtime |= 1u << FP16;
+    runtime.Add(FP16);
   }
   if (cpu.has_hbc()) {
-    runtime |= 1u << HBC;
+    runtime.Add(HBC);
   }
   if (cpu.has_cssc()) {
-    runtime |= 1u << CSSC;
+    runtime.Add(CSSC);
+  }
+  if (cpu.has_mops()) {
+    runtime.Add(MOPS);
   }
 
   // Use the best of the features found by CPU detection and those inferred from
@@ -247,9 +254,14 @@ bool RelocInfo::IsCodedSpecially() {
 
 bool RelocInfo::IsInConstantPool() {
   Instruction* instr = reinterpret_cast<Instruction*>(pc_);
-  DCHECK_IMPLIES(instr->IsLdrLiteralW(), COMPRESS_POINTERS_BOOL);
-  return instr->IsLdrLiteralX() ||
-         (COMPRESS_POINTERS_BOOL && instr->IsLdrLiteralW());
+  if (instr->IsLdrLiteralX()) return true;
+  if (!instr->IsLdrLiteralW()) return false;
+#ifdef DEBUG
+  uint32_t value = *reinterpret_cast<uint32_t*>(instr->ImmPCOffsetTarget());
+  DCHECK(COMPRESS_POINTERS_BOOL ||
+         JSDispatchTable::MaybeValidJSDispatchHandle(value));
+#endif  // DEBUG
+  return true;
 }
 
 uint32_t RelocInfo::wasm_call_tag() const {
@@ -431,16 +443,10 @@ win64_unwindinfo::BuiltinUnwindInfo Assembler::GetUnwindInfo() const {
 }
 #endif
 
-void Assembler::AllocateAndInstallRequestedHeapNumbers(LocalIsolate* isolate) {
-  DCHECK_IMPLIES(isolate == nullptr, heap_number_requests_.empty());
-  for (auto& request : heap_number_requests_) {
-    Address pc = reinterpret_cast<Address>(buffer_start_) + request.offset();
-    Handle<HeapObject> object =
-        isolate->factory()->NewHeapNumber<AllocationType::kOld>(
-            request.heap_number());
-    EmbeddedObjectIndex index = AddEmbeddedObject(object);
-    set_embedded_object_index_referenced_from(pc, index);
-  }
+void Assembler::PatchInHeapNumberRequest(Address pc,
+                                         Handle<HeapNumber> object) {
+  EmbeddedObjectIndex index = AddEmbeddedObject(object);
+  set_embedded_object_index_referenced_from(pc, index);
 }
 
 void Assembler::GetCode(Isolate* isolate, CodeDesc* desc) {
@@ -506,6 +512,12 @@ void Assembler::CodeTargetAlign() {
   Align(8);
 #endif
 }
+
+void Assembler::SwitchTargetAlign() { CodeTargetAlign(); }
+
+void Assembler::BranchTargetAlign() { CodeTargetAlign(); }
+
+void Assembler::LoopHeaderAlign() { CodeTargetAlign(); }
 
 void Assembler::CheckLabelLinkChain(Label const* label) {
 #ifdef DEBUG
@@ -585,7 +597,8 @@ void Assembler::RemoveBranchFromLabelLinkChain(Instruction* branch,
           static_cast<int>(InstructionOffset(branch)));
     }
 
-    if (prev_link->IsTargetInImmPCOffsetRange(next_link)) {
+    if (prev_link->IsUnresolvedInternalReference() ||
+        prev_link->IsTargetInImmPCOffsetRange(next_link)) {
       prev_link->SetImmPCOffsetTarget(zone(), options(), next_link);
     } else if (label_veneer != nullptr) {
       // Use the veneer for all previous links in the chain.
@@ -615,7 +628,8 @@ void Assembler::RemoveBranchFromLabelLinkChain(Instruction* branch,
                                  1;
           unresolved_branches_.erase(max_reachable_pc);
         } else {
-          // Other branch types are not handled by veneers.
+          // Other branch types and internal references are not handled by
+          // veneers.
         }
         link = next_link;
       }
@@ -1340,6 +1354,32 @@ void Assembler::ctz(const Register& rd, const Register& rn) {
 
   Emit(0x5ac01800 | SF(rd) | Rd(rd) | Rn(rn));
 }
+
+#define MINMAX(V)                        \
+  V(smax, 0x11c00000, 0x1ac06000, true)  \
+  V(smin, 0x11c80000, 0x1ac06800, true)  \
+  V(umax, 0x11c40000, 0x1ac06400, false) \
+  V(umin, 0x11cc0000, 0x1ac06c00, false)
+
+#define DEFINE_ASM_FUNC(FN, IMMOP, REGOP, SIGNED)                          \
+  void Assembler::FN(const Register& rd, const Register& rn,               \
+                     const Operand& op) {                                  \
+    DCHECK(IsEnabled(CSSC));                                               \
+    DCHECK(rd.IsSameSizeAndType(rn));                                      \
+    Instr i = SF(rd) | Rd(rd) | Rn(rn);                                    \
+    if (op.IsImmediate()) {                                                \
+      int64_t imm = op.ImmediateValue();                                   \
+      i |= SIGNED ? ImmField<17, 10>(imm) : ImmUnsignedField<17, 10>(imm); \
+      Emit(IMMOP | i);                                                     \
+    } else {                                                               \
+      DCHECK(op.IsPlainRegister());                                        \
+      DCHECK(op.reg().IsSameSizeAndType(rd));                              \
+      Emit(REGOP | i | Rm(op.reg()));                                      \
+    }                                                                      \
+  }
+MINMAX(DEFINE_ASM_FUNC)
+#undef DEFINE_ASM_FUNC
+#undef MINMAX
 
 void Assembler::pacib1716() { Emit(PACIB1716); }
 void Assembler::autib1716() { Emit(AUTIB1716); }
@@ -2498,6 +2538,52 @@ void Assembler::mov(const VRegister& vd, int vd_index, const VRegister& vn,
 
 void Assembler::mvn(const Register& rd, const Operand& operand) {
   orn(rd, AppropriateZeroRegFor(rd), operand);
+}
+
+void Assembler::cpy(MemCpyOp op, const Register& rd, const Register& rs,
+                    const Register& rn) {
+  Emit(op | Rd(rd) | Rs(rs) | Rn(rn));
+}
+
+// Copy prologue
+void Assembler::cpyp(const Register& rd, const Register& rs,
+                     const Register& rn) {
+  cpy(CPYP, rd, rs, rn);
+}
+
+// Copy main
+void Assembler::cpym(const Register& rd, const Register& rs,
+                     const Register& rn) {
+  cpy(CPYM, rd, rs, rn);
+}
+
+// Copy epilogue
+void Assembler::cpye(const Register& rd, const Register& rs,
+                     const Register& rn) {
+  cpy(CPYE, rd, rs, rn);
+}
+
+void Assembler::set(MemSetOp op, const Register& rd, const Register& rn,
+                    const Register& rs) {
+  Emit(op | Rd(rd) | Rn(rn) | Rs(rs));
+}
+
+// Set prologue
+void Assembler::setp(const Register& rd, const Register& rn,
+                     const Register& rs) {
+  set(SETP, rd, rn, rs);
+}
+
+// Set main
+void Assembler::setm(const Register& rd, const Register& rn,
+                     const Register& rs) {
+  set(SETM, rd, rn, rs);
+}
+
+// Set epilogue
+void Assembler::sete(const Register& rd, const Register& rn,
+                     const Register& rs) {
+  set(SETE, rd, rn, rs);
 }
 
 void Assembler::mrs(const Register& rt, SystemRegister sysreg) {
@@ -3828,30 +3914,13 @@ void Assembler::dcptr(Label* label) {
     internal_reference_positions_.push_back(pc_offset());
     dc64(reinterpret_cast<uintptr_t>(buffer_start_ + label->pos()));
   } else {
-    int32_t offset;
-    if (label->is_linked()) {
-      // The label is linked, so the internal reference should be added
-      // onto the end of the label's link chain.
-      //
-      // In this case, label->pos() returns the offset of the last linked
-      // instruction from the start of the buffer.
-      offset = label->pos() - pc_offset();
-      DCHECK_NE(offset, kStartOfLabelLinkChain);
-    } else {
-      // The label is unused, so it now becomes linked and the internal
-      // reference is at the start of the new link chain.
-      offset = kStartOfLabelLinkChain;
-    }
-    // The instruction at pc is now the last link in the label's chain.
-    label->link_to(pc_offset());
+    int offset = LinkAndGetBranchInstructionOffsetTo(label);
 
     // Traditionally the offset to the previous instruction in the chain is
     // encoded in the instruction payload (e.g. branch range) but internal
     // references are not instructions so while unbound they are encoded as
     // two consecutive brk instructions. The two 16-bit immediates are used
     // to encode the offset.
-    offset >>= kInstrSizeLog2;
-    DCHECK(is_int32(offset));
     uint32_t high16 = unsigned_bitextract_32(31, 16, offset);
     uint32_t low16 = unsigned_bitextract_32(15, 0, offset);
 

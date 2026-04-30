@@ -334,7 +334,8 @@ public:
   Tracing::Span& activeSpan() override;
   void resetStream(Http::StreamResetReason reset_reason,
                    absl::string_view transport_failure_reason) override;
-  Upstream::ClusterInfoConstSharedPtr clusterInfo() override;
+  OptRef<const Upstream::ClusterInfo> clusterInfo() override;
+  Upstream::ClusterInfoConstSharedPtr clusterInfoSharedPtr() override;
   Http::Http1StreamEncoderOptionsOptRef http1StreamEncoderOptions() override;
 
   // Intentional no-op functions.
@@ -344,7 +345,7 @@ public:
   void disarmRequestTimeout() override {}
   void resetIdleTimer() override {}
   void onLocalReply(Http::Code) override {}
-  void sendGoAwayAndClose() override {}
+  void sendGoAwayAndClose(bool graceful [[maybe_unused]] = false) override {}
   // Upgrade filter chains not supported.
   const Router::RouteEntry::UpgradeMap* upgradeMap() override { return nullptr; }
 

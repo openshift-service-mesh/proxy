@@ -154,18 +154,9 @@ TEST(FeatureResolverTest, DefaultsTestMessageExtension) {
   EXPECT_EQ(merged->message_encoding(), FeatureSet::LENGTH_PREFIXED);
   EXPECT_FALSE(merged->HasExtension(pb::test));
 
-  const pb::TestFeatures& ext =
+  const pb::TestMessageFeatures& ext =
       merged->GetExtension(pb::TestMessage::test_message);
   EXPECT_EQ(ext.file_feature(), pb::VALUE3);
-  EXPECT_EQ(ext.extension_range_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.message_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.field_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.oneof_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.enum_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.enum_entry_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.service_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.method_feature(), pb::VALUE1);
-  EXPECT_FALSE(ext.bool_field_feature());
 }
 
 TEST(FeatureResolverTest, DefaultsTestNestedExtension) {
@@ -179,18 +170,9 @@ TEST(FeatureResolverTest, DefaultsTestNestedExtension) {
   EXPECT_EQ(merged->message_encoding(), FeatureSet::LENGTH_PREFIXED);
   EXPECT_FALSE(merged->HasExtension(pb::test));
 
-  const pb::TestFeatures& ext =
+  const pb::TestNestedFeatures& ext =
       merged->GetExtension(pb::TestMessage::Nested::test_nested);
   EXPECT_EQ(ext.file_feature(), pb::VALUE3);
-  EXPECT_EQ(ext.extension_range_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.message_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.field_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.oneof_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.enum_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.enum_entry_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.service_feature(), pb::VALUE1);
-  EXPECT_EQ(ext.method_feature(), pb::VALUE1);
-  EXPECT_FALSE(ext.bool_field_feature());
 }
 
 TEST(FeatureResolverTest, DefaultsGeneratedPoolCustom) {
@@ -425,7 +407,7 @@ TEST(FeatureResolverTest, CompileDefaultsInvalidExtension) {
   EXPECT_THAT(
       FeatureResolver::CompileDefaults(
           FeatureSet::descriptor(),
-          {GetExtension(protobuf_unittest::file_opt1, FileOptions::descriptor())},
+          {GetExtension(proto2_unittest::file_opt1, FileOptions::descriptor())},
           EDITION_2023, EDITION_2023),
       HasError(HasSubstr("is not an extension of")));
 }
@@ -560,6 +542,46 @@ TEST(FeatureResolverTest, MergeFeaturesDistantFuture) {
       SetupFeatureResolver(EDITION_99998_TEST_ONLY),
       HasError(AllOf(HasSubstr("Edition 99998_TEST_ONLY"),
                      HasSubstr("maximum supported edition 99997_TEST_ONLY"))));
+}
+
+TEST(FeatureResolverTest, GetEditionFeatureSetDefaults) {
+  absl::StatusOr<FeatureSetDefaults> defaults =
+      FeatureResolver::CompileDefaults(FeatureSet::descriptor(),
+                                       {GetExtension(pb::test)}, EDITION_LEGACY,
+                                       EDITION_99997_TEST_ONLY);
+
+  absl::StatusOr<FeatureSet> edition_2023_feature =
+      internal::GetEditionFeatureSetDefaults(EDITION_2023, *defaults);
+  absl::StatusOr<FeatureSet> edition_proto3_feature =
+      internal::GetEditionFeatureSetDefaults(EDITION_PROTO3, *defaults);
+  absl::StatusOr<FeatureSet> edition_proto2_feature =
+      internal::GetEditionFeatureSetDefaults(EDITION_LEGACY, *defaults);
+  absl::StatusOr<FeatureSet> edition_test_feature =
+      internal::GetEditionFeatureSetDefaults(EDITION_99998_TEST_ONLY,
+                                             *defaults);
+  EXPECT_OK(edition_2023_feature);
+  EXPECT_EQ(edition_2023_feature->GetExtension(pb::test).file_feature(),
+            pb::VALUE3);
+  EXPECT_OK(edition_proto3_feature);
+  EXPECT_EQ(edition_proto3_feature->GetExtension(pb::test).file_feature(),
+            pb::VALUE2);
+  EXPECT_OK(edition_proto2_feature);
+  EXPECT_EQ(edition_proto2_feature->GetExtension(pb::test).file_feature(),
+            pb::VALUE1);
+  EXPECT_OK(edition_test_feature);
+  EXPECT_EQ(edition_test_feature->GetExtension(pb::test).file_feature(),
+            pb::VALUE4);
+}
+
+TEST(FeatureResolverTest, GetEditionFeatureSetDefaultsNotFound) {
+  absl::StatusOr<FeatureSetDefaults> defaults =
+      FeatureResolver::CompileDefaults(FeatureSet::descriptor(),
+                                       {GetExtension(pb::test)}, EDITION_2023,
+                                       EDITION_2023);
+
+  absl::StatusOr<FeatureSet> edition_2023_feature =
+      internal::GetEditionFeatureSetDefaults(EDITION_1_TEST_ONLY, *defaults);
+  EXPECT_THAT(edition_2023_feature, HasError(HasSubstr("No valid default")));
 }
 
 TEST(FeatureResolverLifetimesTest, Valid) {
@@ -1846,6 +1868,8 @@ TEST_F(FeatureResolverPoolTest, CompileDefaultsMinimumCovered) {
         utf8_validation: NONE
         message_encoding: LENGTH_PREFIXED
         json_format: LEGACY_BEST_EFFORT
+        enforce_naming_style: STYLE_LEGACY
+        default_symbol_visibility: EXPORT_ALL
         [pb.test] { file_feature: VALUE1 }
       }
     }
@@ -1861,6 +1885,8 @@ TEST_F(FeatureResolverPoolTest, CompileDefaultsMinimumCovered) {
         utf8_validation: VERIFY
         message_encoding: LENGTH_PREFIXED
         json_format: ALLOW
+        enforce_naming_style: STYLE_LEGACY
+        default_symbol_visibility: EXPORT_ALL
         [pb.test] { file_feature: VALUE1 }
       }
     }
@@ -1876,6 +1902,25 @@ TEST_F(FeatureResolverPoolTest, CompileDefaultsMinimumCovered) {
         [pb.test] { file_feature: VALUE2 }
       }
       fixed_features {
+        enforce_naming_style: STYLE_LEGACY
+        default_symbol_visibility: EXPORT_ALL
+        [pb.test] {}
+      }
+    }
+    defaults {
+      edition: EDITION_2024
+      overridable_features {
+        field_presence: EXPLICIT
+        enum_type: OPEN
+        repeated_field_encoding: PACKED
+        utf8_validation: VERIFY
+        message_encoding: LENGTH_PREFIXED
+        json_format: ALLOW
+        enforce_naming_style: STYLE2024
+        default_symbol_visibility: EXPORT_TOP_LEVEL
+        [pb.test] { file_feature: VALUE2 }
+      }
+      fixed_features {
         [pb.test] {}
       }
     }
@@ -1888,6 +1933,8 @@ TEST_F(FeatureResolverPoolTest, CompileDefaultsMinimumCovered) {
         utf8_validation: VERIFY
         message_encoding: LENGTH_PREFIXED
         json_format: ALLOW
+        enforce_naming_style: STYLE2024
+        default_symbol_visibility: EXPORT_TOP_LEVEL
         [pb.test] { file_feature: VALUE3 }
       }
       fixed_features {

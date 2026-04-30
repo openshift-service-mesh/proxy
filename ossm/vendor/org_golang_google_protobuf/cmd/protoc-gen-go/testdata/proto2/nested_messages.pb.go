@@ -12,24 +12,22 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
+	unsafe "unsafe"
 )
 
 type Layer1 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	L2            *Layer1_Layer2         `protobuf:"bytes,1,opt,name=l2" json:"l2,omitempty"`
+	L3            *Layer1_Layer2_Layer3  `protobuf:"bytes,2,opt,name=l3" json:"l3,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	L2 *Layer1_Layer2        `protobuf:"bytes,1,opt,name=l2" json:"l2,omitempty"`
-	L3 *Layer1_Layer2_Layer3 `protobuf:"bytes,2,opt,name=l3" json:"l3,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Layer1) Reset() {
 	*x = Layer1{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes[0]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Layer1) String() string {
@@ -40,7 +38,7 @@ func (*Layer1) ProtoMessage() {}
 
 func (x *Layer1) ProtoReflect() protoreflect.Message {
 	mi := &file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes[0]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -70,20 +68,17 @@ func (x *Layer1) GetL3() *Layer1_Layer2_Layer3 {
 }
 
 type Layer1_Layer2 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	L3            *Layer1_Layer2_Layer3  `protobuf:"bytes,1,opt,name=l3" json:"l3,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	L3 *Layer1_Layer2_Layer3 `protobuf:"bytes,1,opt,name=l3" json:"l3,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Layer1_Layer2) Reset() {
 	*x = Layer1_Layer2{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes[1]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Layer1_Layer2) String() string {
@@ -94,7 +89,7 @@ func (*Layer1_Layer2) ProtoMessage() {}
 
 func (x *Layer1_Layer2) ProtoReflect() protoreflect.Message {
 	mi := &file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes[1]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -117,18 +112,16 @@ func (x *Layer1_Layer2) GetL3() *Layer1_Layer2_Layer3 {
 }
 
 type Layer1_Layer2_Layer3 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Layer1_Layer2_Layer3) Reset() {
 	*x = Layer1_Layer2_Layer3{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes[2]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Layer1_Layer2_Layer3) String() string {
@@ -139,7 +132,7 @@ func (*Layer1_Layer2_Layer3) ProtoMessage() {}
 
 func (x *Layer1_Layer2_Layer3) ProtoReflect() protoreflect.Message {
 	mi := &file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes[2]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -156,45 +149,30 @@ func (*Layer1_Layer2_Layer3) Descriptor() ([]byte, []int) {
 
 var File_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto protoreflect.FileDescriptor
 
-var file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDesc = []byte{
-	0x0a, 0x37, 0x63, 0x6d, 0x64, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2d, 0x67, 0x65, 0x6e,
-	0x2d, 0x67, 0x6f, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x64, 0x61, 0x74, 0x61, 0x2f, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x32, 0x2f, 0x6e, 0x65, 0x73, 0x74, 0x65, 0x64, 0x5f, 0x6d, 0x65, 0x73, 0x73, 0x61,
-	0x67, 0x65, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x12, 0x15, 0x67, 0x6f, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x32,
-	0x22, 0xcc, 0x01, 0x0a, 0x06, 0x4c, 0x61, 0x79, 0x65, 0x72, 0x31, 0x12, 0x34, 0x0a, 0x02, 0x6c,
-	0x32, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x24, 0x2e, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x32, 0x2e,
-	0x4c, 0x61, 0x79, 0x65, 0x72, 0x31, 0x2e, 0x4c, 0x61, 0x79, 0x65, 0x72, 0x32, 0x52, 0x02, 0x6c,
-	0x32, 0x12, 0x3b, 0x0a, 0x02, 0x6c, 0x33, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x2b, 0x2e,
-	0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2e, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x32, 0x2e, 0x4c, 0x61, 0x79, 0x65, 0x72, 0x31, 0x2e, 0x4c, 0x61, 0x79,
-	0x65, 0x72, 0x32, 0x2e, 0x4c, 0x61, 0x79, 0x65, 0x72, 0x33, 0x52, 0x02, 0x6c, 0x33, 0x1a, 0x4f,
-	0x0a, 0x06, 0x4c, 0x61, 0x79, 0x65, 0x72, 0x32, 0x12, 0x3b, 0x0a, 0x02, 0x6c, 0x33, 0x18, 0x01,
-	0x20, 0x01, 0x28, 0x0b, 0x32, 0x2b, 0x2e, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x32, 0x2e, 0x4c, 0x61, 0x79,
-	0x65, 0x72, 0x31, 0x2e, 0x4c, 0x61, 0x79, 0x65, 0x72, 0x32, 0x2e, 0x4c, 0x61, 0x79, 0x65, 0x72,
-	0x33, 0x52, 0x02, 0x6c, 0x33, 0x1a, 0x08, 0x0a, 0x06, 0x4c, 0x61, 0x79, 0x65, 0x72, 0x33, 0x42,
-	0x3e, 0x5a, 0x3c, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x67, 0x6f, 0x6c, 0x61, 0x6e, 0x67,
-	0x2e, 0x6f, 0x72, 0x67, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2f, 0x63, 0x6d,
-	0x64, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2d, 0x67, 0x65, 0x6e, 0x2d, 0x67, 0x6f, 0x2f,
-	0x74, 0x65, 0x73, 0x74, 0x64, 0x61, 0x74, 0x61, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x32,
-}
+const file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDesc = "" +
+	"\n" +
+	"7cmd/protoc-gen-go/testdata/proto2/nested_messages.proto\x12\x15goproto.protoc.proto2\"\xcc\x01\n" +
+	"\x06Layer1\x124\n" +
+	"\x02l2\x18\x01 \x01(\v2$.goproto.protoc.proto2.Layer1.Layer2R\x02l2\x12;\n" +
+	"\x02l3\x18\x02 \x01(\v2+.goproto.protoc.proto2.Layer1.Layer2.Layer3R\x02l3\x1aO\n" +
+	"\x06Layer2\x12;\n" +
+	"\x02l3\x18\x01 \x01(\v2+.goproto.protoc.proto2.Layer1.Layer2.Layer3R\x02l3\x1a\b\n" +
+	"\x06Layer3B>Z<google.golang.org/protobuf/cmd/protoc-gen-go/testdata/proto2"
 
 var (
 	file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDescOnce sync.Once
-	file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDescData = file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDesc
+	file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDescData []byte
 )
 
 func file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDescGZIP() []byte {
 	file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDescOnce.Do(func() {
-		file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDescData = protoimpl.X.CompressGZIP(file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDescData)
+		file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDesc), len(file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDesc)))
 	})
 	return file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDescData
 }
 
 var file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
-var file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_goTypes = []interface{}{
+var file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_goTypes = []any{
 	(*Layer1)(nil),               // 0: goproto.protoc.proto2.Layer1
 	(*Layer1_Layer2)(nil),        // 1: goproto.protoc.proto2.Layer1.Layer2
 	(*Layer1_Layer2_Layer3)(nil), // 2: goproto.protoc.proto2.Layer1.Layer2.Layer3
@@ -215,49 +193,11 @@ func file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_init() {
 	if File_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto != nil {
 		return
 	}
-	if !protoimpl.UnsafeEnabled {
-		file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Layer1); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Layer1_Layer2); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Layer1_Layer2_Layer3); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDesc,
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDesc), len(file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   3,
 			NumExtensions: 0,
@@ -268,7 +208,6 @@ func file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_init() {
 		MessageInfos:      file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_msgTypes,
 	}.Build()
 	File_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto = out.File
-	file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_rawDesc = nil
 	file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_goTypes = nil
 	file_cmd_protoc_gen_go_testdata_proto2_nested_messages_proto_depIdxs = nil
 }

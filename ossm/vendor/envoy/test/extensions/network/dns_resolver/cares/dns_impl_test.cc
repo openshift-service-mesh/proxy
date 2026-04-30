@@ -390,10 +390,12 @@ private:
   bool refused_{};
   bool error_on_a_{};
   bool error_on_aaaa_{};
+  // The `queries_`'s destruction depends on `stream_info_` so we put it before `queries_`
+  // as class members.
+  StreamInfo::StreamInfoImpl stream_info_;
   // All queries are tracked so we can do resource reclamation when the test is
   // over.
   std::vector<std::unique_ptr<TestDnsServerQuery>> queries_;
-  StreamInfo::StreamInfoImpl stream_info_;
   const bool no_response_{false};
 };
 
@@ -638,6 +640,9 @@ public:
   socklen_t sockAddrLen() const override { return instance_.sockAddrLen(); }
   absl::string_view addressType() const override { PANIC("not implemented"); }
   absl::optional<std::string> networkNamespace() const override { return absl::nullopt; }
+  Address::InstanceConstSharedPtr withNetworkNamespace(absl::string_view) const override {
+    return nullptr;
+  }
 
   Address::Type type() const override { return instance_.type(); }
   const SocketInterface& socketInterface() const override {
@@ -733,6 +738,9 @@ public:
       cares.mutable_edns0_max_payload_size()->set_value(getEdns0MaxPayloadSize());
     }
 
+    // Enable `reinit_channel_on_timeout` if requested by the test case.
+    cares.set_reinit_channel_on_timeout(reinitOnTimeout());
+
     // Copy over the dns_resolver_options_.
     cares.mutable_dns_resolver_options()->MergeFrom(dns_resolver_options);
     // setup the typed config
@@ -741,6 +749,8 @@ public:
 
     return typed_dns_resolver_config;
   }
+  // Whether to enable `reinit_channel_on_timeout` in the resolver config for this test.
+  virtual bool reinitOnTimeout() const { return false; }
 
   void SetUp() override {
     // Instantiate TestDnsServer and listen on a random port on the loopback address.
@@ -908,21 +918,26 @@ public:
     TestThreadsafeSingletonInjector<Api::OsSysCallsImpl> os_calls(&os_sys_calls);
 
     EXPECT_CALL(os_sys_calls, supportsGetifaddrs()).WillOnce(Return(getifaddrs_supported));
-    if (getifaddrs_supported) {
-      if (getifaddrs_success) {
-        EXPECT_CALL(os_sys_calls, getifaddrs(_))
-            .WillOnce(Invoke([&](Api::InterfaceAddressVector& vector) -> Api::SysCallIntResult {
-              for (uint32_t i = 0; i < ifaddrs.size(); i++) {
-                auto addr = Network::Utility::parseInternetAddressAndPortNoThrow(ifaddrs[i]);
-                vector.emplace_back(fmt::format("interface_{}", i), 0, addr);
-              }
-              return {0, 0};
-            }));
-      } else {
-        EXPECT_CALL(os_sys_calls, getifaddrs(_))
-            .WillOnce(Invoke(
-                [&](Api::InterfaceAddressVector&) -> Api::SysCallIntResult { return {-1, 1}; }));
+    if (filterUnroutableFamilies()) {
+      if (getifaddrs_supported) {
+        if (getifaddrs_success) {
+          EXPECT_CALL(os_sys_calls, getifaddrs(_))
+              .WillOnce(Invoke([&](Api::InterfaceAddressVector& vector) -> Api::SysCallIntResult {
+                for (uint32_t i = 0; i < ifaddrs.size(); i++) {
+                  auto addr = Network::Utility::parseInternetAddressAndPortNoThrow(ifaddrs[i]);
+                  vector.emplace_back(fmt::format("interface_{}", i), 0, addr);
+                }
+                return {0, 0};
+              }));
+        } else {
+          EXPECT_CALL(os_sys_calls, getifaddrs(_))
+              .WillOnce(Invoke(
+                  [&](Api::InterfaceAddressVector&) -> Api::SysCallIntResult { return {-1, 1}; }));
+        }
       }
+    } else {
+      // When filter_unroutable_families is false, getifaddrs should NOT be called
+      EXPECT_CALL(os_sys_calls, getifaddrs(_)).Times(0);
     }
 
     // These passthrough calls are needed to let the resolver communicate with the DNS server
@@ -1958,6 +1973,7 @@ TEST_P(DnsImplFilterUnroutableFamiliesDontFilterTest, DontFilterAllV6) {
 class DnsImplZeroTimeoutTest : public DnsImplTest {
 protected:
   bool queryTimeout() const override { return true; }
+  bool reinitOnTimeout() const override { return true; }
 };
 
 // Parameterize the DNS test server socket address.
@@ -1965,7 +1981,7 @@ INSTANTIATE_TEST_SUITE_P(IpVersions, DnsImplZeroTimeoutTest,
                          testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
                          TestUtility::ipTestParamsToString);
 
-// Validate that timeouts result in an empty callback.
+// Validate that timeouts result in an empty callback and trigger channel reinitialization.
 TEST_P(DnsImplZeroTimeoutTest, Timeout) {
   server_->addHosts("some.good.domain", {"201.134.56.7"}, RecordType::A);
 
@@ -1973,8 +1989,9 @@ TEST_P(DnsImplZeroTimeoutTest, Timeout) {
             resolveWithExpectations("some.good.domain", DnsLookupFamily::V4Only,
                                     DnsResolver::ResolutionStatus::Failure, {}, {}, absl::nullopt));
   dispatcher_->run(Event::Dispatcher::RunType::Block);
+  // After `ARES_ETIMEOUT`, the channel should reinitialize.
   checkStats(1 /*resolve_total*/, 0 /*pending_resolutions*/, 0 /*not_found*/,
-             0 /*get_addr_failure*/, 3 /*timeouts*/, 0 /*reinitializations*/);
+             0 /*get_addr_failure*/, 3 /*timeouts*/, 1 /*reinitializations*/);
 }
 
 // Validate that c-ares query cache is disabled by default.

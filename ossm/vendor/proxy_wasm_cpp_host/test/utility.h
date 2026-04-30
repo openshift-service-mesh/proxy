@@ -27,9 +27,6 @@
 #if defined(PROXY_WASM_HOST_ENGINE_V8)
 #include "include/proxy-wasm/v8.h"
 #endif
-#if defined(PROXY_WASM_HOST_ENGINE_WAVM)
-#include "include/proxy-wasm/wavm.h"
-#endif
 #if defined(PROXY_WASM_HOST_ENGINE_WASMTIME)
 #include "include/proxy-wasm/wasmtime.h"
 #endif
@@ -172,10 +169,6 @@ public:
     } else if (engine == "v8") {
       vm = proxy_wasm::createV8Vm();
 #endif
-#if defined(PROXY_WASM_HOST_ENGINE_WAVM)
-    } else if (engine == "wavm") {
-      vm = proxy_wasm::createWavmVm();
-#endif
 #if defined(PROXY_WASM_HOST_ENGINE_WASMTIME)
     } else if (engine == "wasmtime") {
       vm = proxy_wasm::createWasmtimeVm();
@@ -198,5 +191,8 @@ public:
   std::unique_ptr<proxy_wasm::WasmVm> vm_;
   std::string engine_;
 };
+
+// TODO: remove when #412 is fixed.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(TestVm);
 
 } // namespace proxy_wasm

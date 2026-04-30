@@ -12,6 +12,7 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
+	unsafe "unsafe"
 )
 
 // Deprecated: The entire proto file cmd/protoc-gen-go/testdata/comments/deprecated.proto is marked as deprecated.
@@ -61,21 +62,18 @@ func (DeprecatedEnum) EnumDescriptor() ([]byte, []int) {
 
 // Deprecated: The entire proto file cmd/protoc-gen-go/testdata/comments/deprecated.proto is marked as deprecated.
 type DeprecatedMessage struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
+	state protoimpl.MessageState `protogen:"open.v1"`
 	// Deprecated: The entire proto file cmd/protoc-gen-go/testdata/comments/deprecated.proto is marked as deprecated.
 	DeprecatedField string `protobuf:"bytes,1,opt,name=deprecated_field,json=deprecatedField,proto3" json:"deprecated_field,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *DeprecatedMessage) Reset() {
 	*x = DeprecatedMessage{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_msgTypes[0]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *DeprecatedMessage) String() string {
@@ -86,7 +84,7 @@ func (*DeprecatedMessage) ProtoMessage() {}
 
 func (x *DeprecatedMessage) ProtoReflect() protoreflect.Message {
 	mi := &file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_msgTypes[0]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -111,41 +109,30 @@ func (x *DeprecatedMessage) GetDeprecatedField() string {
 
 var File_cmd_protoc_gen_go_testdata_comments_deprecated_proto protoreflect.FileDescriptor
 
-var file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDesc = []byte{
-	0x0a, 0x34, 0x63, 0x6d, 0x64, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2d, 0x67, 0x65, 0x6e,
-	0x2d, 0x67, 0x6f, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x64, 0x61, 0x74, 0x61, 0x2f, 0x63, 0x6f, 0x6d,
-	0x6d, 0x65, 0x6e, 0x74, 0x73, 0x2f, 0x64, 0x65, 0x70, 0x72, 0x65, 0x63, 0x61, 0x74, 0x65, 0x64,
-	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x12, 0x17, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
-	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x22,
-	0x46, 0x0a, 0x11, 0x44, 0x65, 0x70, 0x72, 0x65, 0x63, 0x61, 0x74, 0x65, 0x64, 0x4d, 0x65, 0x73,
-	0x73, 0x61, 0x67, 0x65, 0x12, 0x2d, 0x0a, 0x10, 0x64, 0x65, 0x70, 0x72, 0x65, 0x63, 0x61, 0x74,
-	0x65, 0x64, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x42, 0x02,
-	0x18, 0x01, 0x52, 0x0f, 0x64, 0x65, 0x70, 0x72, 0x65, 0x63, 0x61, 0x74, 0x65, 0x64, 0x46, 0x69,
-	0x65, 0x6c, 0x64, 0x3a, 0x02, 0x18, 0x01, 0x2a, 0x28, 0x0a, 0x0e, 0x44, 0x65, 0x70, 0x72, 0x65,
-	0x63, 0x61, 0x74, 0x65, 0x64, 0x45, 0x6e, 0x75, 0x6d, 0x12, 0x12, 0x0a, 0x0a, 0x44, 0x45, 0x50,
-	0x52, 0x45, 0x43, 0x41, 0x54, 0x45, 0x44, 0x10, 0x00, 0x1a, 0x02, 0x08, 0x01, 0x1a, 0x02, 0x18,
-	0x01, 0x42, 0x43, 0x5a, 0x3e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x67, 0x6f, 0x6c, 0x61,
-	0x6e, 0x67, 0x2e, 0x6f, 0x72, 0x67, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2f,
-	0x63, 0x6d, 0x64, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x2d, 0x67, 0x65, 0x6e, 0x2d, 0x67,
-	0x6f, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x64, 0x61, 0x74, 0x61, 0x2f, 0x63, 0x6f, 0x6d, 0x6d, 0x65,
-	0x6e, 0x74, 0x73, 0xb8, 0x01, 0x01, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
-}
+const file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDesc = "" +
+	"\n" +
+	"4cmd/protoc-gen-go/testdata/comments/deprecated.proto\x12\x17goproto.protoc.comments\"F\n" +
+	"\x11DeprecatedMessage\x12-\n" +
+	"\x10deprecated_field\x18\x01 \x01(\tB\x02\x18\x01R\x0fdeprecatedField:\x02\x18\x01*(\n" +
+	"\x0eDeprecatedEnum\x12\x12\n" +
+	"\n" +
+	"DEPRECATED\x10\x00\x1a\x02\b\x01\x1a\x02\x18\x01BCZ>google.golang.org/protobuf/cmd/protoc-gen-go/testdata/comments\xb8\x01\x01b\x06proto3"
 
 var (
 	file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDescOnce sync.Once
-	file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDescData = file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDesc
+	file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDescData []byte
 )
 
 func file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDescGZIP() []byte {
 	file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDescOnce.Do(func() {
-		file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDescData = protoimpl.X.CompressGZIP(file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDescData)
+		file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDesc), len(file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDesc)))
 	})
 	return file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDescData
 }
 
 var file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
-var file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_goTypes = []interface{}{
+var file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_goTypes = []any{
 	(DeprecatedEnum)(0),       // 0: goproto.protoc.comments.DeprecatedEnum
 	(*DeprecatedMessage)(nil), // 1: goproto.protoc.comments.DeprecatedMessage
 }
@@ -162,25 +149,11 @@ func file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_init() {
 	if File_cmd_protoc_gen_go_testdata_comments_deprecated_proto != nil {
 		return
 	}
-	if !protoimpl.UnsafeEnabled {
-		file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*DeprecatedMessage); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDesc,
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDesc), len(file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   1,
 			NumExtensions: 0,
@@ -192,7 +165,6 @@ func file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_init() {
 		MessageInfos:      file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_msgTypes,
 	}.Build()
 	File_cmd_protoc_gen_go_testdata_comments_deprecated_proto = out.File
-	file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_rawDesc = nil
 	file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_goTypes = nil
 	file_cmd_protoc_gen_go_testdata_comments_deprecated_proto_depIdxs = nil
 }

@@ -31,7 +31,6 @@
 #include <thread>
 #include <vector>
 
-#include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -44,6 +43,7 @@
 #include "src/core/credentials/transport/fake/fake_credentials.h"
 #include "src/core/credentials/transport/tls/ssl_utils.h"
 #include "src/core/lib/event_engine/default_event_engine.h"
+#include "src/core/util/grpc_check.h"
 #include "src/cpp/server/secure_server_credentials.h"
 #include "src/proto/grpc/testing/echo.pb.h"
 #include "test/core/test_util/port.h"
@@ -203,6 +203,9 @@ class XdsEnd2endTest : public ::testing::TestWithParam<XdsTestType>,
   static const char kCaCertPath[];
   static const char kServerCertPath[];
   static const char kServerKeyPath[];
+  static const char kSpiffeCaCertPath[];
+  static const char kSpiffeServerCertPath[];
+  static const char kSpiffeServerKeyPath[];
 
   // Message used in EchoRequest to the backend.
   static const char kRequestMessage[];
@@ -248,7 +251,7 @@ class XdsEnd2endTest : public ::testing::TestWithParam<XdsTestType>,
     virtual ~ServerThread() {
       // Shutdown should be called manually. Shutdown calls virtual methods and
       // can't be called from the base class destructor.
-      CHECK(!running_);
+      GRPC_CHECK(!running_);
     }
 
     void Start();
@@ -795,10 +798,7 @@ class XdsEnd2endTest : public ::testing::TestWithParam<XdsTestType>,
       StatusCode expected_status, absl::string_view expected_message_prefix,
       const RpcOptions& rpc_options = RpcOptions());
 
-  // A class for running a long-running RPC in its own thread.
-  // TODO(roth): Maybe consolidate this and SendConcurrentRpcs()
-  // somehow?  LongRunningRpc has a cleaner API, but SendConcurrentRpcs()
-  // uses the callback API, which is probably better.
+  // A class for running a long-running RPC using the callback API.
   class LongRunningRpc {
    public:
     // Starts the RPC.
@@ -814,12 +814,16 @@ class XdsEnd2endTest : public ::testing::TestWithParam<XdsTestType>,
     Status GetStatus();
 
    private:
-    std::thread sender_thread_;
+    EchoRequest request_;
+    EchoResponse response_;
     ClientContext context_;
-    Status status_;
+    grpc_core::Mutex mu_;
+    grpc_core::CondVar cv_;
+    std::optional<Status> status_ ABSL_GUARDED_BY(&mu_);
   };
 
   // Starts a set of concurrent RPCs.
+  // TODO(roth): Change this to use LongRunningRpc.
   struct ConcurrentRpc {
     ClientContext context;
     Status status;
@@ -999,8 +1003,8 @@ class XdsEnd2endTest : public ::testing::TestWithParam<XdsTestType>,
   // use a uniform distribution instead. We need a better estimate of how many
   // RPCs are needed with what error tolerance.
   static size_t ComputeIdealNumRpcs(double p, double error_tolerance) {
-    CHECK_GE(p, 0);
-    CHECK_LE(p, 1);
+    GRPC_CHECK_GE(p, 0);
+    GRPC_CHECK_LE(p, 1);
     size_t num_rpcs =
         ceil(p * (1 - p) * 5.00 * 5.00 / error_tolerance / error_tolerance);
     num_rpcs += 1000;  // Add 1K as a buffer to avoid flakiness.
@@ -1012,7 +1016,8 @@ class XdsEnd2endTest : public ::testing::TestWithParam<XdsTestType>,
   // Returns a regex that can be matched against an RPC failure status
   // message for a connection failure.
   static std::string MakeConnectionFailureRegex(
-      absl::string_view prefix, bool has_resolution_note = true);
+      absl::string_view prefix,
+      absl::string_view resolution_note = "xDS node ID:xds_end2end_test");
 
   // Returns a regex that can be matched against an RPC failure status
   // message for a Tls handshake failure.
@@ -1027,14 +1032,24 @@ class XdsEnd2endTest : public ::testing::TestWithParam<XdsTestType>,
   static std::vector<experimental::IdentityKeyCertPair>
   MakeIdentityKeyCertPairForTlsCreds();
 
+  // Internal helper function for creating TLS and mTLS creds.
+  // Not intended to be used by tests.
+  static std::vector<experimental::IdentityKeyCertPair>
+  MakeIdentityKeyCertPairForSpiffeMtlsCreds();
+
   // Returns XdsCredentials with mTLS fallback creds.
   static std::shared_ptr<ChannelCredentials> CreateXdsChannelCredentials();
   static std::shared_ptr<ChannelCredentials> CreateTlsChannelCredentials();
+  static std::shared_ptr<ChannelCredentials>
+  CreateSpiffeXdsChannelCredentials();
+  static std::shared_ptr<ChannelCredentials>
+  CreateSpiffeTlsChannelCredentials();
 
   // Creates various types of server credentials.
   static std::shared_ptr<ServerCredentials> CreateFakeServerCredentials();
   static std::shared_ptr<ServerCredentials> CreateMtlsServerCredentials();
   static std::shared_ptr<ServerCredentials> CreateTlsServerCredentials();
+  static std::shared_ptr<ServerCredentials> CreateMtlsSpiffeServerCredentials();
 
   // event_engine_scope_ always has to be at the top of the list to make sure
   // that all other objects are destroyed before this and other event engine

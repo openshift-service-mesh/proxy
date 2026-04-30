@@ -25,6 +25,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
+#include "google/protobuf/compiler/code_generator_lite.h"
 #include "google/protobuf/compiler/java/context.h"
 #include "google/protobuf/compiler/java/doc_comment.h"
 #include "google/protobuf/compiler/java/field_common.h"
@@ -49,9 +50,6 @@ namespace protobuf {
 namespace compiler {
 namespace java {
 
-using internal::WireFormat;
-using internal::WireFormatLite;
-
 // ===================================================================
 ImmutableMessageLiteGenerator::ImmutableMessageLiteGenerator(
     const Descriptor* descriptor, Context* context)
@@ -70,7 +68,7 @@ ImmutableMessageLiteGenerator::ImmutableMessageLiteGenerator(
   }
 }
 
-ImmutableMessageLiteGenerator::~ImmutableMessageLiteGenerator() {}
+ImmutableMessageLiteGenerator::~ImmutableMessageLiteGenerator() = default;
 
 void ImmutableMessageLiteGenerator::GenerateStaticVariables(
     io::Printer* printer, int* bytecode_estimate) {
@@ -98,7 +96,7 @@ void ImmutableMessageLiteGenerator::GenerateInterface(io::Printer* printer) {
       {"classname", std::string(descriptor_->name())},
   };
 
-  if (!context_->options().opensource_runtime) {
+  if (!google::protobuf::internal::IsOss()) {
     printer->Print("@com.google.protobuf.Internal.ProtoNonnullApi\n");
   }
   if (descriptor_->extension_range_count() > 0) {
@@ -149,7 +147,7 @@ void ImmutableMessageLiteGenerator::Generate(io::Printer* printer) {
   absl::flat_hash_map<absl::string_view, std::string> variables = {{"{", ""},
                                                                    {"}", ""}};
   variables["static"] = is_own_file ? " " : " static ";
-  variables["classname"] = descriptor_->name();
+  variables["classname"] = std::string(descriptor_->name());
   variables["extra_interfaces"] = ExtraMessageInterfaces(descriptor_);
   variables["deprecation"] =
       descriptor_->options().deprecated() ? "@java.lang.Deprecated " : "";
@@ -224,14 +222,18 @@ void ImmutableMessageLiteGenerator::Generate(io::Printer* printer) {
     vars["oneof_capitalized_name"] =
         context_->GetOneofGeneratorInfo(oneof)->capitalized_name;
     vars["oneof_index"] = absl::StrCat((oneof)->index());
-    if (context_->options().opensource_runtime) {
+    if (google::protobuf::internal::IsOss()) {
       // oneofCase_ and oneof_
       printer->Print(vars,
                      "private int $oneof_name$Case_ = 0;\n"
                      "private java.lang.Object $oneof_name$_;\n");
     }
     // OneofCase enum
-    printer->Print(vars, "public enum ${$$oneof_capitalized_name$Case$}$ {\n");
+    printer->Print(
+        vars,
+        "public enum ${$$oneof_capitalized_name$Case$}$\n"
+        "    implements "
+        "com.google.protobuf.AbstractMessageLite.InternalOneOfEnum {\n");
     printer->Annotate("{", "}", oneof);
     printer->Indent();
     for (int j = 0; j < (oneof)->field_count(); j++) {
@@ -248,7 +250,7 @@ void ImmutableMessageLiteGenerator::Generate(io::Printer* printer) {
                    "private $oneof_capitalized_name$Case(int value) {\n"
                    "  this.value = value;\n"
                    "}\n");
-    if (context_->options().opensource_runtime) {
+    if (google::protobuf::internal::IsOss()) {
       printer->Print(
           vars,
           "/**\n"
@@ -260,7 +262,7 @@ void ImmutableMessageLiteGenerator::Generate(io::Printer* printer) {
           "}\n"
           "\n");
     }
-    if (!context_->options().opensource_runtime) {
+    if (!google::protobuf::internal::IsOss()) {
       printer->Print(
           "@com.google.protobuf.Internal.ProtoMethodMayReturnNull\n");
     }
@@ -281,7 +283,7 @@ void ImmutableMessageLiteGenerator::Generate(io::Printer* printer) {
         "}\n"
         // TODO: Rename this to "getFieldNumber" or something to
         // disambiguate it from actual proto enums.
-        "public int getNumber() {\n"
+        "@java.lang.Override public int getNumber() {\n"
         "  return this.value;\n"
         "}\n",
         "cap_oneof_name", absl::AsciiStrToUpper(vars["oneof_name"]));
@@ -328,7 +330,7 @@ void ImmutableMessageLiteGenerator::Generate(io::Printer* printer) {
 
   printer->Print(
       "@java.lang.Override\n"
-      "@java.lang.SuppressWarnings({\"unchecked\", \"fallthrough\"})\n"
+      "@java.lang.SuppressWarnings({\"ThrowNull\"})\n"
       "protected final java.lang.Object dynamicMethod(\n"
       "    com.google.protobuf.GeneratedMessageLite.MethodToInvoke method,\n"
       "    java.lang.Object arg0, java.lang.Object arg1) {\n"
@@ -357,7 +359,6 @@ void ImmutableMessageLiteGenerator::Generate(io::Printer* printer) {
 
   printer->Print(
       "}\n"
-      "// fall through\n"
       "case GET_DEFAULT_INSTANCE: {\n"
       "  return DEFAULT_INSTANCE;\n"
       "}\n"
@@ -384,8 +385,6 @@ void ImmutableMessageLiteGenerator::Generate(io::Printer* printer) {
       "  return parser;\n",
       "classname", name_resolver_->GetImmutableClassName(descriptor_));
 
-  printer->Outdent();
-
   if (HasRequiredFields(descriptor_)) {
     printer->Print(
         "}\n"
@@ -402,18 +401,21 @@ void ImmutableMessageLiteGenerator::Generate(io::Printer* printer) {
         "case GET_MEMOIZED_IS_INITIALIZED: {\n"
         "  return (byte) 1;\n"
         "}\n"
-        "case SET_MEMOIZED_IS_INITIALIZED: {\n"
-        "  return null;\n"
-        "}\n");
+        "// SET_MEMOIZED_IS_INITIALIZED is never called for this message.\n"
+        "// So it can do anything. Combine with default case for smaller "
+        "codegen.\n"
+        "case SET_MEMOIZED_IS_INITIALIZED:\n");
   }
 
   printer->Outdent();
   printer->Print(
-      "  }\n"
-      "  throw new UnsupportedOperationException();\n"
       "}\n"
-      "\n",
-      "classname", name_resolver_->GetImmutableClassName(descriptor_));
+      "// Should never happen. Generates tight code to throw an exception.\n"
+      "throw null;\n");
+  printer->Outdent();
+  printer->Print(
+      "}\n"
+      "\n");
 
   printer->Print(
       "\n"
@@ -499,7 +501,7 @@ void ImmutableMessageLiteGenerator::GenerateDynamicMethodNewBuildMessageInfo(
   WriteIntToUtf16CharSequence(descriptor_->field_count(), &chars);
 
   if (descriptor_->field_count() == 0) {
-    printer->Print("java.lang.Object[] objects = null;");
+    printer->Print("java.lang.Object[] objects = null;\n");
   } else {
     // A single array of all fields (including oneof, oneofCase, hasBits).
     printer->Print("java.lang.Object[] objects = new java.lang.Object[] {\n");
@@ -666,7 +668,7 @@ void ImmutableMessageLiteGenerator::GenerateParseFromMethods(
       "\n",
       "classname", name_resolver_->GetImmutableClassName(descriptor_),
       "parsedelimitedreturnannotation",
-      context_->options().opensource_runtime
+      google::protobuf::internal::IsOss()
           ? ""
           : "@com.google.protobuf.Internal.ProtoMethodMayReturnNull");
 }

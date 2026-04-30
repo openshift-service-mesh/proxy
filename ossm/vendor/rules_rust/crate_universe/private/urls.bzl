@@ -11,14 +11,16 @@ the binaries produced for it.
 #     "x86_64-pc-windows-msvc": "https://domain.com/downloads/cargo-bazel-x86_64-pc-windows-msvc",
 # }
 CARGO_BAZEL_URLS = {
-  "aarch64-apple-darwin": "https://github.com/bazelbuild/rules_rust/releases/download/0.56.0/cargo-bazel-aarch64-apple-darwin",
-  "aarch64-pc-windows-msvc": "https://github.com/bazelbuild/rules_rust/releases/download/0.56.0/cargo-bazel-aarch64-pc-windows-msvc.exe",
-  "aarch64-unknown-linux-gnu": "https://github.com/bazelbuild/rules_rust/releases/download/0.56.0/cargo-bazel-aarch64-unknown-linux-gnu",
-  "x86_64-apple-darwin": "https://github.com/bazelbuild/rules_rust/releases/download/0.56.0/cargo-bazel-x86_64-apple-darwin",
-  "x86_64-pc-windows-gnu": "https://github.com/bazelbuild/rules_rust/releases/download/0.56.0/cargo-bazel-x86_64-pc-windows-gnu.exe",
-  "x86_64-pc-windows-msvc": "https://github.com/bazelbuild/rules_rust/releases/download/0.56.0/cargo-bazel-x86_64-pc-windows-msvc.exe",
-  "x86_64-unknown-linux-gnu": "https://github.com/bazelbuild/rules_rust/releases/download/0.56.0/cargo-bazel-x86_64-unknown-linux-gnu",
-  "x86_64-unknown-linux-musl": "https://github.com/bazelbuild/rules_rust/releases/download/0.56.0/cargo-bazel-x86_64-unknown-linux-musl"
+  "aarch64-apple-darwin": "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-aarch64-apple-darwin",
+  "aarch64-pc-windows-msvc": "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-aarch64-pc-windows-msvc.exe",
+  "aarch64-unknown-linux-gnu": "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-aarch64-unknown-linux-gnu",
+  "aarch64-unknown-linux-musl": "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-aarch64-unknown-linux-musl",
+  "s390x-unknown-linux-gnu": "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-s390x-unknown-linux-gnu",
+  "x86_64-apple-darwin": "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-x86_64-apple-darwin",
+  "x86_64-pc-windows-gnu": "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-x86_64-pc-windows-gnu.exe",
+  "x86_64-pc-windows-msvc": "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-x86_64-pc-windows-msvc.exe",
+  "x86_64-unknown-linux-gnu": "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-x86_64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl": "https://github.com/bazelbuild/rules_rust/releases/download/0.69.0/cargo-bazel-x86_64-unknown-linux-musl"
 }
 
 # Example:
@@ -28,14 +30,16 @@ CARGO_BAZEL_URLS = {
 #     "x86_64-pc-windows-msvc": "f5647261d989f63dafb2c3cb8e131b225338a790386c06cf7112e43dd9805882",
 # }
 CARGO_BAZEL_SHA256S = {
-  "aarch64-apple-darwin": "5143e347ec45e0fcc249f1de44f0dce227062579ad364a0b269b39f0ce49f1d8",
-  "aarch64-pc-windows-msvc": "ac9ee9982f3083687e3647f7dd0a01b7ef128151511e333ad2d7ae37199071ec",
-  "aarch64-unknown-linux-gnu": "f3a35b137221d4627ba0ed62f775c4d3cbb45b6db839ae47f2ebfd48abe44a91",
-  "x86_64-apple-darwin": "9e8a92674771982f68031d0cc516ba08b34dd736c4f818d51349547f2136d012",
-  "x86_64-pc-windows-gnu": "9bb64533156419e7c551f20f7cd316d031b6869f72b735e89d150430de9982ea",
-  "x86_64-pc-windows-msvc": "5c62a1c42b71af6c2765dc5f9518eba22ed28276a65f7accf5a2bca0c5cfaf74",
-  "x86_64-unknown-linux-gnu": "53418ae5457040e84009f7c69b070e1f12f10a9a3a3ef4f5d0829c66e5438ba1",
-  "x86_64-unknown-linux-musl": "a84ecc2d0b4365e5a43c0a257b1be1a35ffa62bbcdb5d680741b142922654643"
+  "aarch64-apple-darwin": "9b41cac2040b3f4a1fdad34cb1e9a31afccaa56c60d156c163ded56eb23c0579",
+  "aarch64-pc-windows-msvc": "f2de01d1f9f0532122eff62918fbd4b6cf8b827759edc6c52f9b5b4b745de80f",
+  "aarch64-unknown-linux-gnu": "2a293b1fbffff0e56780f9cabbc32cb6b2519d036ead614d3251e4c79135df7e",
+  "aarch64-unknown-linux-musl": "14cf89e3e92d227352c7d174599f649029a4dd686aa00d017ecd486431832882",
+  "s390x-unknown-linux-gnu": "89f4aea3ce5e8086d9845af07b5925228110b00a748ad0ef465f0eca3463237a",
+  "x86_64-apple-darwin": "56b2f7306e2c5c3c3dca5579cb0a97e360fe0c6731f1698dc9a41864a3dc1842",
+  "x86_64-pc-windows-gnu": "be646c8a9d2ae4205659773a797b1650386bf39eb0917a2644322b1afe3f70d4",
+  "x86_64-pc-windows-msvc": "1695baf5ac5d9f4c5328455e1e7e70c17745466e5f7b4ecdea7510d82d525865",
+  "x86_64-unknown-linux-gnu": "2727d6a1be44b6bf4935f09bc54ba3fd04ed602e012c51aafd1ba036580b229e",
+  "x86_64-unknown-linux-musl": "a705d760e6da6c2d76300312d21d65ec59adf0eb5d220224befd76df68339ebe"
 }
 
 # Example:

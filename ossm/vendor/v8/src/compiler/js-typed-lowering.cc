@@ -79,6 +79,7 @@ class JSBinopReduction final {
       case CompareOperationHint::kBigInt64:
       case CompareOperationHint::kReceiver:
       case CompareOperationHint::kReceiverOrNullOrUndefined:
+      case CompareOperationHint::kStringOrOddball:
       case CompareOperationHint::kInternalizedString:
         break;
     }
@@ -98,6 +99,7 @@ class JSBinopReduction final {
       case CompareOperationHint::kSymbol:
       case CompareOperationHint::kReceiver:
       case CompareOperationHint::kReceiverOrNullOrUndefined:
+      case CompareOperationHint::kStringOrOddball:
       case CompareOperationHint::kInternalizedString:
         return false;
       case CompareOperationHint::kBigInt:
@@ -137,6 +139,13 @@ class JSBinopReduction final {
            BothInputsMaybe(Type::String());
   }
 
+  bool IsStringOrOddballCompareOperation() {
+    DCHECK_EQ(1, node_->op()->EffectOutputCount());
+    return (GetCompareOperationHint(node_) ==
+            CompareOperationHint::kStringOrOddball) &&
+           BothInputsMaybe(Type::StringOrOddball());
+  }
+
   bool IsSymbolCompareOperation() {
     DCHECK_EQ(1, node_->op()->EffectOutputCount());
     return (GetCompareOperationHint(node_) == CompareOperationHint::kSymbol) &&
@@ -148,7 +157,7 @@ class JSBinopReduction final {
   // minimum length.
   bool ShouldCreateConsString() {
     DCHECK_EQ(IrOpcode::kJSAdd, node_->opcode());
-    DCHECK(OneInputIs(Type::String()));
+    DCHECK(OneInputIs(Type::StringOrStringWrapper()));
     if (node_->InputAt(1)->opcode() == IrOpcode::kNewConsString) {
       // If the right hand side is a ConsString, then we can create a
       // ConsString. This doesn't work with the left hand side, since the right
@@ -157,13 +166,21 @@ class JSBinopReduction final {
       // that here.
       return true;
     }
-    if (BothInputsAre(Type::String()) ||
+    // We don't look inside JSStringWrappers, but if the other side is a long
+    // enough string, that's enough to trigger cons string creation.
+    if (BothInputsAre(Type::StringOrStringWrapper()) ||
         GetBinaryOperationHint(node_) == BinaryOperationHint::kString) {
       HeapObjectBinopMatcher m(node_);
       JSHeapBroker* broker = lowering_->broker();
       if (m.right().HasResolvedValue() && m.right().Ref(broker).IsString()) {
         StringRef right_string = m.right().Ref(broker).AsString();
         if (right_string.length() >= ConsString::kMinLength) return true;
+        if (right_string.length() > 0 &&
+            m.left().opcode() == IrOpcode::kNewConsString) {
+          // Left is a ConsString and right is not the empty string, so we can
+          // create a ConsString.
+          return true;
+        }
       }
       if (m.left().HasResolvedValue() && m.left().Ref(broker).IsString()) {
         StringRef left_string = m.left().Ref(broker).AsString();
@@ -266,6 +283,23 @@ class JSBinopReduction final {
       Node* right_input =
           graph()->NewNode(simplified()->CheckString(FeedbackSource()), right(),
                            effect(), control());
+      node_->ReplaceInput(1, right_input);
+      update_effect(right_input);
+    }
+  }
+
+  void CheckInputsToStringOrOddball() {
+    if (!left_type().Is(Type::StringOrOddball())) {
+      Node* left_input =
+          graph()->NewNode(simplified()->CheckStringOrOddball(FeedbackSource()),
+                           left(), effect(), control());
+      node_->ReplaceInput(0, left_input);
+      update_effect(left_input);
+    }
+    if (!right_type().Is(Type::StringOrOddball())) {
+      Node* right_input =
+          graph()->NewNode(simplified()->CheckStringOrOddball(FeedbackSource()),
+                           right(), effect(), control());
       node_->ReplaceInput(1, right_input);
       update_effect(right_input);
     }
@@ -503,8 +537,13 @@ class JSBinopReduction final {
   }
 
   CompareOperationHint GetCompareOperationHint(Node* node) const {
-    const FeedbackParameter& p = FeedbackParameterOf(node->op());
-    return lowering_->broker()->GetFeedbackForCompareOperation(p.feedback());
+    if (JSOperator::IsBinaryWithEmbeddedFeedback(node->opcode())) {
+      const EmbeddedHintParameter& p = EmbeddedHintParameterOf(node->op());
+      return std::get<CompareOperationHint>(p.hint());
+    } else {
+      const FeedbackParameter& p = FeedbackParameterOf(node->op());
+      return lowering_->broker()->GetFeedbackForCompareOperation(p.feedback());
+    }
   }
 
   void update_effect(Node* effect) {
@@ -684,7 +723,7 @@ Node* JSTypedLowering::UnwrapStringWrapper(Node* string_or_wrapper,
 
   Node* vfalse = efalse = graph()->NewNode(
       simplified()->LoadField(AccessBuilder::ForJSPrimitiveWrapperValue()),
-      string_or_wrapper, *effect, *control);
+      string_or_wrapper, *effect, if_false);
 
   // The value read from a string wrapper is a string.
   vfalse = efalse = graph()->NewNode(common()->TypeGuard(Type::String()),
@@ -783,7 +822,8 @@ Reduction JSTypedLowering::ReduceJSAdd(Node* node) {
 
     // Generate the string addition.
     return GenerateStringAddition(node, left_string, right_string, context,
-                                  frame_state, &effect, &control, false);
+                                  frame_state, &effect, &control,
+                                  r.ShouldCreateConsString());
   }
 
   // We never get here when we had String feedback.
@@ -1041,7 +1081,10 @@ Reduction JSTypedLowering::ReduceJSStrictEqual(Node* node) {
   if (r.BothInputsAre(Type::String())) {
     return r.ChangeToPureOperator(simplified()->StringEqual());
   }
-
+  if (r.IsStringOrOddballCompareOperation()) {
+    r.CheckInputsToStringOrOddball();
+    return r.ChangeToPureOperator(simplified()->StringOrOddballStrictEqual());
+  }
   NumberOperationHint hint;
   BigIntOperationHint hint_bigint;
   if (r.BothInputsAre(Type::Signed32()) ||
@@ -1632,14 +1675,14 @@ Reduction JSTypedLowering::ReduceJSLoadContext(Node* node) {
                             .MachineSelectIf<Object>(gasm.Word32Equal(
                                 state, gasm.Int32Constant(ContextCell::kInt32)))
                             .Then([&] {
-                              return gasm.AllocateHeapNumber(gasm.LoadField(
+                              return gasm.LoadField<Number>(
                                   AccessBuilder::ForContextCellInt32Value(),
-                                  value));
+                                  heap_value);
                             })
                             .Else([&] {
-                              return gasm.AllocateHeapNumber(gasm.LoadField(
+                              return gasm.LoadField<Number>(
                                   AccessBuilder::ForContextCellFloat64Value(),
-                                  value));
+                                  heap_value);
                             })
                             .Value();
                       })
@@ -1818,7 +1861,8 @@ void ReduceBuiltin(JSGraph* jsgraph, Node* node, Builtin builtin, int arity,
 
   // These SBXCHECKs are a defense-in-depth measure to ensure that we always
   // generate valid calls here (with matching signatures).
-  SBXCHECK(Builtins::IsCpp(builtin));
+  SBXCHECK(Builtins::IsCpp(builtin) &&
+           Builtins::IsEnabledAndNotJSTrampoline(builtin));
   SBXCHECK_GE(arity + kJSArgcReceiverSlots,
               Builtins::GetFormalParameterCount(builtin));
 
@@ -1859,11 +1903,24 @@ void ReduceBuiltin(JSGraph* jsgraph, Node* node, Builtin builtin, int arity,
   static_assert(BuiltinArguments::kNewTargetIndex == 0);
   static_assert(BuiltinArguments::kTargetIndex == 1);
   static_assert(BuiltinArguments::kArgcIndex == 2);
-  static_assert(BuiltinArguments::kPaddingIndex == 3);
+
   node->InsertInput(zone, 1, new_target);
   node->InsertInput(zone, 2, target);
   node->InsertInput(zone, 3, argc_node);
-  node->InsertInput(zone, 4, jsgraph->PaddingConstant());
+
+#if V8_TARGET_ARCH_ARM64
+  // Make sure we insert required stack-alignment padding between extra
+  // arguments and JS arguments.
+  static_assert(BuiltinArguments::kOptionalPaddingIndex == 3);
+  static_assert(BuiltinArguments::kNumExtraArgs == 4);
+  // Just use an existing value as padding in order to avoid generation
+  // of unnecessary instructions.
+  node->InsertInput(zone, 4, argc_node);
+#else
+  // No padding required.
+  static_assert(BuiltinArguments::kNumExtraArgs == 3);
+#endif  // V8_TARGET_ARCH_ARM64
+
   int cursor = arity + kStub + BuiltinArguments::kNumExtraArgsWithReceiver;
 
   Address entry = Builtins::CppEntryOf(builtin);
@@ -1873,12 +1930,10 @@ void ReduceBuiltin(JSGraph* jsgraph, Node* node, Builtin builtin, int arity,
   node->InsertInput(zone, cursor++, entry_node);
   node->InsertInput(zone, cursor++, argc_node);
 
-  static const int kReturnCount = 1;
   const char* debug_name = Builtins::name(builtin);
   Operator::Properties properties = node->op()->properties();
-  auto call_descriptor = Linkage::GetCEntryStubCallDescriptor(
-      zone, kReturnCount, argc, debug_name, properties, flags,
-      StackArgumentOrder::kJS);
+  auto call_descriptor = Linkage::GetCPPBuiltinCallDescriptor(
+      zone, argc, debug_name, properties, flags);
 
   NodeProperties::ChangeOp(node, jsgraph->common()->Call(call_descriptor));
 }
@@ -2055,10 +2110,16 @@ Reduction JSTypedLowering::ReduceJSCall(Node* node) {
     }
 
     // Load the context from the {target}.
-    Node* context = effect = graph()->NewNode(
-        simplified()->LoadField(AccessBuilder::ForJSFunctionContext()), target,
-        effect, control);
-    NodeProperties::ReplaceContextInput(node, context);
+    if (function) {
+      NodeProperties::ReplaceContextInput(
+          node,
+          jsgraph()->ConstantNoHole(function->context(broker()), broker()));
+    } else {
+      Node* context = effect = graph()->NewNode(
+          simplified()->LoadField(AccessBuilder::ForJSFunctionContext()),
+          target, effect, control);
+      NodeProperties::ReplaceContextInput(node, context);
+    }
 
     // Update the effect dependency for the {node}.
     NodeProperties::ReplaceEffectInput(node, effect);

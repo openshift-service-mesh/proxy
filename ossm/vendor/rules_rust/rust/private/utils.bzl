@@ -15,9 +15,20 @@
 """Utility functions not specific to the rust toolchain."""
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load("@bazel_tools//tools/cpp:toolchain_utils.bzl", find_rules_cc_toolchain = "find_cpp_toolchain")
+load("@rules_cc//cc:find_cc_toolchain.bzl", find_rules_cc_toolchain = "find_cc_toolchain")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(":compat.bzl", "abs")
-load(":providers.bzl", "BuildInfo", "CrateGroupInfo", "CrateInfo", "DepInfo", "DepVariantInfo", "RustcOutputDiagnosticsInfo")
+load(
+    ":providers.bzl",
+    "AlwaysEnableMetadataOutputGroupsInfo",
+    "BuildInfo",
+    "CrateGroupInfo",
+    "CrateInfo",
+    "DepInfo",
+    "DepVariantInfo",
+    "RustcOutputDiagnosticsInfo",
+)
 
 UNSUPPORTED_FEATURES = [
     "thin_lto",
@@ -31,6 +42,23 @@ UNSUPPORTED_FEATURES = [
     "rules_rust_unsupported_feature",
 ]
 
+def parse_env_strings(entries):
+    """Parses a list of environment variable entries in the form 'KEY=value'.
+
+    Args:
+        entries(list): A list of strings, each of the form 'KEY=value'.
+
+    Returns:
+        A dict mapping environment variable names to their values.
+    """
+    env_vars = {}
+    for entry in entries:
+        if "=" not in entry:
+            fail("Invalid format for env var: '{}'. Expected 'KEY=value'".format(entry))
+        key, val = entry.split("=", 1)
+        env_vars[key] = val
+    return env_vars
+
 def find_toolchain(ctx):
     """Finds the first rust toolchain that is configured.
 
@@ -42,17 +70,25 @@ def find_toolchain(ctx):
     """
     return ctx.toolchains[Label("//rust:toolchain_type")]
 
+# A global kill switch to test without a cc toolchain present.
+_FORCE_DISABLE_CC_TOOLCHAIN = False
+
 def find_cc_toolchain(ctx, extra_unsupported_features = tuple()):
     """Extracts a CcToolchain from the current target's context
 
     Args:
         ctx (ctx): The current target's rule context object
-        extra_unsupported_features (sequence of str): Extra featrures to disable
+        extra_unsupported_features (sequence of str): Extra features to disable
 
     Returns:
         tuple: A tuple of (CcToolchain, FeatureConfiguration)
     """
-    cc_toolchain = find_rules_cc_toolchain(ctx)
+    if _FORCE_DISABLE_CC_TOOLCHAIN:
+        return None, None
+
+    cc_toolchain = find_rules_cc_toolchain(ctx, mandatory = False)
+    if not cc_toolchain:
+        return None, None
 
     feature_configuration = cc_common.configure_features(
         ctx = ctx,
@@ -222,33 +258,38 @@ def get_preferred_artifact(library_to_link, use_pic):
 # We do this to work around a potential crash, see
 # https://github.com/bazelbuild/bazel/issues/16664
 def dedup_expand_location(ctx, input, targets = []):
-    return ctx.expand_location(input, _deduplicate(targets))
+    return ctx.expand_location(input, deduplicate(targets))
 
-def _deduplicate(xs):
+def deduplicate(xs):
     return {x: True for x in xs}.keys()
 
 def concat(xss):
     return [x for xs in xss for x in xs]
 
-def _expand_location_for_build_script_runner(ctx, env, data, known_variables):
+def _expand_location_for_build_script_runner(ctx, v, data, known_variables):
     """A trivial helper for `expand_dict_value_locations` and `expand_list_element_locations`
 
     Args:
         ctx (ctx): The rule's context object
-        env (str): The value possibly containing location macros to expand.
+        v (str): The value possibly containing location macros to expand.
         data (sequence of Targets): See one of the parent functions.
         known_variables (dict): Make variables (probably from toolchains) to substitute in when doing make variable expansion.
 
     Returns:
         string: The location-macro expanded version of the string.
     """
+
+    # Fast-path - both location expansions and make vars have a `$` so we can short-circuit everything.
+    if "$" not in v:
+        return v
+
     for directive in ("$(execpath ", "$(location "):
-        if directive in env:
+        if directive in v:
             # build script runner will expand pwd to execroot for us
-            env = env.replace(directive, "$${pwd}/" + directive)
+            v = v.replace(directive, "$${pwd}/" + directive)
     return ctx.expand_make_variables(
-        env,
-        dedup_expand_location(ctx, env, data),
+        v,
+        ctx.expand_location(v, data),
         known_variables,
     )
 
@@ -282,7 +323,7 @@ def expand_dict_value_locations(ctx, env, data, known_variables):
     Returns:
         dict: A dict of environment variables with expanded location macros
     """
-    return dict([(k, _expand_location_for_build_script_runner(ctx, v, data, known_variables)) for (k, v) in env.items()])
+    return {k: _expand_location_for_build_script_runner(ctx, v, data, known_variables) for (k, v) in env.items()}
 
 def expand_list_element_locations(ctx, args, data, known_variables):
     """Performs location-macro expansion on a list of string values.
@@ -677,26 +718,50 @@ def _replace_all(string, substitutions):
 
     return string
 
-def can_build_metadata(toolchain, ctx, crate_type):
-    """Can we build metadata for this rust_library?
+def can_build_metadata(toolchain, ctx, crate_type, *, disable_pipelining = False):
+    """Can we build metadata for the target built using this context?
 
     Args:
         toolchain (toolchain): The rust toolchain
         ctx (ctx): The rule's context object
-        crate_type (String): one of lib|rlib|dylib|staticlib|cdylib|proc-macro
+        crate_type (String): The rule's crate type
+        disable_pipelining: Does the rule have pipelining explicitly disabled?
 
     Returns:
         bool: whether we can build metadata for this rule.
     """
 
+    # Building metadata requires that:
+    # 1) process_wrapper is enabled (this is disabled when compiling process_wrapper itself)
+    # 2) either:
+    #   * always_enable_metadata_output_groups is set
+    #   * this target can use metadata for pipelined compilation
+    return bool(ctx.attr._process_wrapper) and (
+        ctx.attr._always_enable_metadata_output_groups[AlwaysEnableMetadataOutputGroupsInfo].always_enable_metadata_output_groups or
+        (not disable_pipelining and
+         can_use_metadata_for_pipelining(toolchain, crate_type))
+    )
+
+def can_use_metadata_for_pipelining(toolchain, crate_type):
+    """Can we use metadata from this rust_library for pipelined compilation?
+
+    This does not include whether or not metadata itself can be generated, which
+    is covered instead by can_build_metadata.
+
+    Args:
+        toolchain (toolchain): The rust toolchain
+        crate_type (String): one of lib|rlib|dylib|staticlib|cdylib|proc-macro
+
+    Returns:
+        bool: whether we can use the metadata for pipelined compilation.
+    """
+
     # In order to enable pipelined compilation we require that:
     # 1) The _pipelined_compilation flag is enabled,
-    # 2) the OS running the rule is something other than windows as we require sandboxing (for now),
-    # 3) process_wrapper is enabled (this is disabled when compiling process_wrapper itself),
-    # 4) the crate_type is rlib or lib.
+    # 2) the crate_type is rlib or lib.
+    # This is *in addition* to the checks in can_build_metadata (i.e. that
+    # process_wrapper is enabled).
     return toolchain._pipelined_compilation and \
-           toolchain.exec_triple.system != "windows" and \
-           ctx.attr._process_wrapper and \
            crate_type in ("rlib", "lib")
 
 def crate_root_src(name, crate_name, srcs, crate_type):
@@ -773,7 +838,7 @@ def determine_lib_name(name, crate_type, toolchain, lib_hash = None):
              "this crate as a rust_binary instead.")
 
     if not extension:
-        fail(("Unknown crate_type: {}. If this is a cargo-supported crate type, " +
+        fail(("Unknown crate_type: `{}`. If this is a cargo-supported crate type, " +
               "please file an issue!").format(crate_type))
 
     prefix = "lib"
@@ -789,7 +854,7 @@ def determine_lib_name(name, crate_type, toolchain, lib_hash = None):
         extension = extension,
     )
 
-def transform_sources(ctx, srcs, crate_root):
+def transform_sources(ctx, srcs, compile_data, crate_root):
     """Creates symlinks of the source files if needed.
 
     Rustc assumes that the source files are located next to the crate root.
@@ -802,25 +867,33 @@ def transform_sources(ctx, srcs, crate_root):
     Args:
         ctx (struct): The current rule's context.
         srcs (List[File]): The sources listed in the `srcs` attribute
+        compile_data (List[File]): The sources listed in the `compile_data`
+                                   attribute
         crate_root (File): The file specified in the `crate_root` attribute,
                            if it exists, otherwise None
 
     Returns:
-        Tuple(List[File], File): The transformed srcs and crate_root
+        Tuple(List[File], List[File], File): The transformed srcs, compile_data
+                                             and crate_root
     """
-    has_generated_sources = len([src for src in srcs if not src.is_source]) > 0
+    has_generated_sources = (
+        len([src for src in srcs if not src.is_source]) +
+        len([src for src in compile_data if not src.is_source]) >
+        0
+    )
 
     if not has_generated_sources:
-        return srcs, crate_root
+        return srcs, compile_data, crate_root
 
     package_root = paths.join(ctx.label.workspace_root, ctx.label.package)
     generated_sources = [_symlink_for_non_generated_source(ctx, src, package_root) for src in srcs if src != crate_root]
+    generated_compile_data = [_symlink_for_non_generated_source(ctx, src, package_root) for src in compile_data]
     generated_root = crate_root
     if crate_root:
         generated_root = _symlink_for_non_generated_source(ctx, crate_root, package_root)
         generated_sources.append(generated_root)
 
-    return generated_sources, generated_root
+    return generated_sources, generated_compile_data, generated_root
 
 def get_edition(attr, toolchain, label):
     """Returns the Rust edition from either the current rule's attributes or the current `rust_toolchain`
@@ -857,7 +930,8 @@ def _symlink_for_non_generated_source(ctx, src_file, package_root):
         File: The created symlink if a non-generated file, or the file itself.
     """
 
-    if src_file.is_source or src_file.root.path != ctx.bin_dir.path:
+    src_short_path = paths.relativize(src_file.path, src_file.root.path)
+    if (src_file.is_source or src_file.root.path != ctx.bin_dir.path) and paths.starts_with(src_short_path, package_root):
         src_short_path = paths.relativize(src_file.path, src_file.root.path)
         src_symlink = ctx.actions.declare_file(paths.relativize(src_short_path, package_root))
         ctx.actions.symlink(

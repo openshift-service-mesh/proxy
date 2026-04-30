@@ -16,7 +16,7 @@
 #include "src/heap/heap.h"
 #include "src/heap/incremental-marking-job.h"
 #include "src/heap/mark-compact.h"
-#include "src/heap/mutable-page-metadata.h"
+#include "src/heap/mutable-page.h"
 #include "src/tasks/cancelable-task.h"
 
 namespace v8 {
@@ -81,7 +81,7 @@ class V8_EXPORT_PRIVATE IncrementalMarking final {
   // should be started.
   bool CanAndShouldBeStarted() const;
   void Start(GarbageCollector garbage_collector,
-             GarbageCollectionReason gc_reason);
+             GarbageCollectionReason gc_reason, const char* reason);
   // Returns true if incremental marking was running and false otherwise.
   bool Stop();
 
@@ -142,7 +142,6 @@ class V8_EXPORT_PRIVATE IncrementalMarking final {
   bool CanBeStarted() const;
 
   void StartBlackAllocation();
-  void PauseBlackAllocation();
   void FinishBlackAllocation();
 
   void StartPointerTableBlackAllocation();
@@ -163,7 +162,8 @@ class V8_EXPORT_PRIVATE IncrementalMarking final {
 
   // Returns the actual used time and actually marked bytes.
   std::pair<v8::base::TimeDelta, size_t> CppHeapStep(
-      v8::base::TimeDelta max_duration, size_t marked_bytes_limit);
+      v8::base::TimeDelta max_duration,
+      std::optional<size_t> marked_bytes_limit, StepOrigin step_origin);
 
   void Step(v8::base::TimeDelta max_duration, size_t max_bytes_to_process,
             StepOrigin step_origin);
@@ -197,8 +197,7 @@ class V8_EXPORT_PRIVATE IncrementalMarking final {
   Observer new_generation_observer_;
   Observer old_generation_observer_;
   base::Mutex background_live_bytes_mutex_;
-  std::unordered_map<MutablePageMetadata*, intptr_t,
-                     base::hash<MutablePageMetadata*>>
+  std::unordered_map<MutablePage*, intptr_t, base::hash<MutablePage*>>
       background_live_bytes_;
   std::shared_ptr<::heap::base::IncrementalMarkingSchedule> schedule_;
   std::optional<uint64_t> current_trace_id_;

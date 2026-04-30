@@ -3,17 +3,14 @@
 // license that can be found in the LICENSE file.
 
 //go:build darwin || dragonfly || freebsd || openbsd || netbsd || zos
-// +build darwin dragonfly freebsd openbsd netbsd zos
 
 package unix_test
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
+	"slices"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -30,11 +27,8 @@ func testGetdirentries(t *testing.T, count int) {
 	if count > 100 && testing.Short() && os.Getenv("GO_BUILDER_NAME") == "" {
 		t.Skip("skipping in -short mode")
 	}
-	d, err := ioutil.TempDir("", "getdirentries-test")
-	if err != nil {
-		t.Fatalf("Tempdir: %v", err)
-	}
-	defer os.RemoveAll(d)
+	d := t.TempDir()
+
 	var names []string
 	for i := 0; i < count; i++ {
 		names = append(names, fmt.Sprintf("file%03d", i))
@@ -42,9 +36,9 @@ func testGetdirentries(t *testing.T, count int) {
 
 	// Make files in the temp directory
 	for _, name := range names {
-		err := ioutil.WriteFile(filepath.Join(d, name), []byte("data"), 0)
+		err := os.WriteFile(filepath.Join(d, name), []byte("data"), 0)
 		if err != nil {
-			t.Fatalf("WriteFile: %v", err)
+			t.Fatal(err)
 		}
 	}
 
@@ -76,9 +70,9 @@ func testGetdirentries(t *testing.T, count int) {
 		}
 	}
 
-	sort.Strings(names)
-	sort.Strings(names2)
-	if strings.Join(names, ":") != strings.Join(names2, ":") {
+	slices.Sort(names)
+	slices.Sort(names2)
+	if !slices.Equal(names, names2) {
 		t.Errorf("names don't match\n names: %q\nnames2: %q", names, names2)
 	}
 }

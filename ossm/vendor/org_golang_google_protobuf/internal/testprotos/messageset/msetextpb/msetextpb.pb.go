@@ -13,24 +13,22 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
+	unsafe "unsafe"
 )
 
 type Ext1 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ext1Field1    *int32                 `protobuf:"varint,1,opt,name=ext1_field1,json=ext1Field1" json:"ext1_field1,omitempty"`
+	Ext1Field2    *int32                 `protobuf:"varint,2,opt,name=ext1_field2,json=ext1Field2" json:"ext1_field2,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	Ext1Field1 *int32 `protobuf:"varint,1,opt,name=ext1_field1,json=ext1Field1" json:"ext1_field1,omitempty"`
-	Ext1Field2 *int32 `protobuf:"varint,2,opt,name=ext1_field2,json=ext1Field2" json:"ext1_field2,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Ext1) Reset() {
 	*x = Ext1{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[0]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Ext1) String() string {
@@ -41,7 +39,7 @@ func (*Ext1) ProtoMessage() {}
 
 func (x *Ext1) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[0]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -71,20 +69,17 @@ func (x *Ext1) GetExt1Field2() int32 {
 }
 
 type Ext2 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ext2Field1    *int32                 `protobuf:"varint,1,opt,name=ext2_field1,json=ext2Field1" json:"ext2_field1,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	Ext2Field1 *int32 `protobuf:"varint,1,opt,name=ext2_field1,json=ext2Field1" json:"ext2_field1,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Ext2) Reset() {
 	*x = Ext2{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[1]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Ext2) String() string {
@@ -95,7 +90,7 @@ func (*Ext2) ProtoMessage() {}
 
 func (x *Ext2) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[1]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -118,20 +113,17 @@ func (x *Ext2) GetExt2Field1() int32 {
 }
 
 type ExtRequired struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	RequiredField1 *int32 `protobuf:"varint,1,req,name=required_field1,json=requiredField1" json:"required_field1,omitempty"`
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	RequiredField1 *int32                 `protobuf:"varint,1,req,name=required_field1,json=requiredField1" json:"required_field1,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ExtRequired) Reset() {
 	*x = ExtRequired{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[2]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *ExtRequired) String() string {
@@ -142,7 +134,7 @@ func (*ExtRequired) ProtoMessage() {}
 
 func (x *ExtRequired) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[2]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -165,18 +157,16 @@ func (x *ExtRequired) GetRequiredField1() int32 {
 }
 
 type ExtLargeNumber struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ExtLargeNumber) Reset() {
 	*x = ExtLargeNumber{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[3]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *ExtLargeNumber) String() string {
@@ -187,7 +177,7 @@ func (*ExtLargeNumber) ProtoMessage() {}
 
 func (x *ExtLargeNumber) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[3]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -207,125 +197,83 @@ var file_internal_testprotos_messageset_msetextpb_msetextpb_proto_extTypes = []p
 		ExtendedType:  (*messagesetpb.MessageSet)(nil),
 		ExtensionType: (*Ext1)(nil),
 		Field:         1000,
-		Name:          "goproto.proto.messageset.Ext1.message_set_extension",
-		Tag:           "bytes,1000,opt,name=message_set_extension",
+		Name:          "goproto.proto.messageset.Ext1.message_set_ext1",
+		Tag:           "bytes,1000,opt,name=message_set_ext1",
 		Filename:      "internal/testprotos/messageset/msetextpb/msetextpb.proto",
 	},
 	{
 		ExtendedType:  (*messagesetpb.MessageSet)(nil),
 		ExtensionType: (*Ext2)(nil),
 		Field:         1001,
-		Name:          "goproto.proto.messageset.Ext2.message_set_extension",
-		Tag:           "bytes,1001,opt,name=message_set_extension",
+		Name:          "goproto.proto.messageset.Ext2.message_set_ext2",
+		Tag:           "bytes,1001,opt,name=message_set_ext2",
 		Filename:      "internal/testprotos/messageset/msetextpb/msetextpb.proto",
 	},
 	{
 		ExtendedType:  (*messagesetpb.MessageSet)(nil),
 		ExtensionType: (*ExtRequired)(nil),
 		Field:         1002,
-		Name:          "goproto.proto.messageset.ExtRequired.message_set_extension",
-		Tag:           "bytes,1002,opt,name=message_set_extension",
+		Name:          "goproto.proto.messageset.ExtRequired.message_set_extrequired",
+		Tag:           "bytes,1002,opt,name=message_set_extrequired",
 		Filename:      "internal/testprotos/messageset/msetextpb/msetextpb.proto",
 	},
 	{
 		ExtendedType:  (*messagesetpb.MessageSet)(nil),
 		ExtensionType: (*ExtLargeNumber)(nil),
 		Field:         536870912,
-		Name:          "goproto.proto.messageset.ExtLargeNumber.message_set_extension",
-		Tag:           "bytes,536870912,opt,name=message_set_extension",
+		Name:          "goproto.proto.messageset.ExtLargeNumber.message_set_extlarge",
+		Tag:           "bytes,536870912,opt,name=message_set_extlarge",
 		Filename:      "internal/testprotos/messageset/msetextpb/msetextpb.proto",
 	},
 }
 
 // Extension fields to messagesetpb.MessageSet.
 var (
-	// optional goproto.proto.messageset.Ext1 message_set_extension = 1000;
-	E_Ext1_MessageSetExtension = &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_extTypes[0]
-	// optional goproto.proto.messageset.Ext2 message_set_extension = 1001;
-	E_Ext2_MessageSetExtension = &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_extTypes[1]
-	// optional goproto.proto.messageset.ExtRequired message_set_extension = 1002;
-	E_ExtRequired_MessageSetExtension = &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_extTypes[2]
-	// optional goproto.proto.messageset.ExtLargeNumber message_set_extension = 536870912;
-	E_ExtLargeNumber_MessageSetExtension = &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_extTypes[3] // 1<<29
+	// optional goproto.proto.messageset.Ext1 message_set_ext1 = 1000;
+	E_Ext1_MessageSetExt1 = &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_extTypes[0]
+	// optional goproto.proto.messageset.Ext2 message_set_ext2 = 1001;
+	E_Ext2_MessageSetExt2 = &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_extTypes[1]
+	// optional goproto.proto.messageset.ExtRequired message_set_extrequired = 1002;
+	E_ExtRequired_MessageSetExtrequired = &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_extTypes[2]
+	// optional goproto.proto.messageset.ExtLargeNumber message_set_extlarge = 536870912;
+	E_ExtLargeNumber_MessageSetExtlarge = &file_internal_testprotos_messageset_msetextpb_msetextpb_proto_extTypes[3] // 1<<29
 )
 
 var File_internal_testprotos_messageset_msetextpb_msetextpb_proto protoreflect.FileDescriptor
 
-var file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDesc = []byte{
-	0x0a, 0x38, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2f, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x65, 0x74,
-	0x2f, 0x6d, 0x73, 0x65, 0x74, 0x65, 0x78, 0x74, 0x70, 0x62, 0x2f, 0x6d, 0x73, 0x65, 0x74, 0x65,
-	0x78, 0x74, 0x70, 0x62, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x12, 0x18, 0x67, 0x6f, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67,
-	0x65, 0x73, 0x65, 0x74, 0x1a, 0x3d, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x74,
-	0x65, 0x73, 0x74, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2f, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67,
-	0x65, 0x73, 0x65, 0x74, 0x2f, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x65, 0x74, 0x70,
-	0x62, 0x2f, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x5f, 0x73, 0x65, 0x74, 0x2e, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x22, 0xc3, 0x01, 0x0a, 0x04, 0x45, 0x78, 0x74, 0x31, 0x12, 0x1f, 0x0a, 0x0b,
-	0x65, 0x78, 0x74, 0x31, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x31, 0x18, 0x01, 0x20, 0x01, 0x28,
-	0x05, 0x52, 0x0a, 0x65, 0x78, 0x74, 0x31, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x31, 0x12, 0x1f, 0x0a,
-	0x0b, 0x65, 0x78, 0x74, 0x31, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x32, 0x18, 0x02, 0x20, 0x01,
-	0x28, 0x05, 0x52, 0x0a, 0x65, 0x78, 0x74, 0x31, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x32, 0x32, 0x79,
-	0x0a, 0x15, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x5f, 0x73, 0x65, 0x74, 0x5f, 0x65, 0x78,
-	0x74, 0x65, 0x6e, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x24, 0x2e, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73,
-	0x65, 0x74, 0x2e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x53, 0x65, 0x74, 0x18, 0xe8, 0x07,
-	0x20, 0x01, 0x28, 0x0b, 0x32, 0x1e, 0x2e, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x65, 0x74, 0x2e,
-	0x45, 0x78, 0x74, 0x31, 0x52, 0x13, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x53, 0x65, 0x74,
-	0x45, 0x78, 0x74, 0x65, 0x6e, 0x73, 0x69, 0x6f, 0x6e, 0x22, 0xa2, 0x01, 0x0a, 0x04, 0x45, 0x78,
-	0x74, 0x32, 0x12, 0x1f, 0x0a, 0x0b, 0x65, 0x78, 0x74, 0x32, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64,
-	0x31, 0x18, 0x01, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0a, 0x65, 0x78, 0x74, 0x32, 0x46, 0x69, 0x65,
-	0x6c, 0x64, 0x31, 0x32, 0x79, 0x0a, 0x15, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x5f, 0x73,
-	0x65, 0x74, 0x5f, 0x65, 0x78, 0x74, 0x65, 0x6e, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x24, 0x2e, 0x67,
-	0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73,
-	0x73, 0x61, 0x67, 0x65, 0x73, 0x65, 0x74, 0x2e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x53,
-	0x65, 0x74, 0x18, 0xe9, 0x07, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1e, 0x2e, 0x67, 0x6f, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67,
-	0x65, 0x73, 0x65, 0x74, 0x2e, 0x45, 0x78, 0x74, 0x32, 0x52, 0x13, 0x6d, 0x65, 0x73, 0x73, 0x61,
-	0x67, 0x65, 0x53, 0x65, 0x74, 0x45, 0x78, 0x74, 0x65, 0x6e, 0x73, 0x69, 0x6f, 0x6e, 0x22, 0xb9,
-	0x01, 0x0a, 0x0b, 0x45, 0x78, 0x74, 0x52, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x12, 0x27,
-	0x0a, 0x0f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64,
-	0x31, 0x18, 0x01, 0x20, 0x02, 0x28, 0x05, 0x52, 0x0e, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65,
-	0x64, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x31, 0x32, 0x80, 0x01, 0x0a, 0x15, 0x6d, 0x65, 0x73, 0x73,
-	0x61, 0x67, 0x65, 0x5f, 0x73, 0x65, 0x74, 0x5f, 0x65, 0x78, 0x74, 0x65, 0x6e, 0x73, 0x69, 0x6f,
-	0x6e, 0x12, 0x24, 0x2e, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x65, 0x74, 0x2e, 0x4d, 0x65, 0x73,
-	0x73, 0x61, 0x67, 0x65, 0x53, 0x65, 0x74, 0x18, 0xea, 0x07, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x25,
-	0x2e, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d,
-	0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73, 0x65, 0x74, 0x2e, 0x45, 0x78, 0x74, 0x52, 0x65, 0x71,
-	0x75, 0x69, 0x72, 0x65, 0x64, 0x52, 0x13, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x53, 0x65,
-	0x74, 0x45, 0x78, 0x74, 0x65, 0x6e, 0x73, 0x69, 0x6f, 0x6e, 0x22, 0x99, 0x01, 0x0a, 0x0e, 0x45,
-	0x78, 0x74, 0x4c, 0x61, 0x72, 0x67, 0x65, 0x4e, 0x75, 0x6d, 0x62, 0x65, 0x72, 0x32, 0x86, 0x01,
-	0x0a, 0x15, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x5f, 0x73, 0x65, 0x74, 0x5f, 0x65, 0x78,
-	0x74, 0x65, 0x6e, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x24, 0x2e, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73,
-	0x65, 0x74, 0x2e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x53, 0x65, 0x74, 0x18, 0x80, 0x80,
-	0x80, 0x80, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x28, 0x2e, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x73,
-	0x65, 0x74, 0x2e, 0x45, 0x78, 0x74, 0x4c, 0x61, 0x72, 0x67, 0x65, 0x4e, 0x75, 0x6d, 0x62, 0x65,
-	0x72, 0x52, 0x13, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x53, 0x65, 0x74, 0x45, 0x78, 0x74,
-	0x65, 0x6e, 0x73, 0x69, 0x6f, 0x6e, 0x42, 0x45, 0x5a, 0x43, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65,
-	0x2e, 0x67, 0x6f, 0x6c, 0x61, 0x6e, 0x67, 0x2e, 0x6f, 0x72, 0x67, 0x2f, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x62, 0x75, 0x66, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x74, 0x65,
-	0x73, 0x74, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2f, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65,
-	0x73, 0x65, 0x74, 0x2f, 0x6d, 0x73, 0x65, 0x74, 0x65, 0x78, 0x74, 0x70, 0x62,
-}
+const file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDesc = "" +
+	"\n" +
+	"8internal/testprotos/messageset/msetextpb/msetextpb.proto\x12\x18goproto.proto.messageset\x1a=internal/testprotos/messageset/messagesetpb/message_set.proto\"\xb9\x01\n" +
+	"\x04Ext1\x12\x1f\n" +
+	"\vext1_field1\x18\x01 \x01(\x05R\n" +
+	"ext1Field1\x12\x1f\n" +
+	"\vext1_field2\x18\x02 \x01(\x05R\n" +
+	"ext1Field22o\n" +
+	"\x10message_set_ext1\x12$.goproto.proto.messageset.MessageSet\x18\xe8\a \x01(\v2\x1e.goproto.proto.messageset.Ext1R\x0emessageSetExt1\"\x98\x01\n" +
+	"\x04Ext2\x12\x1f\n" +
+	"\vext2_field1\x18\x01 \x01(\x05R\n" +
+	"ext2Field12o\n" +
+	"\x10message_set_ext2\x12$.goproto.proto.messageset.MessageSet\x18\xe9\a \x01(\v2\x1e.goproto.proto.messageset.Ext2R\x0emessageSetExt2\"\xc4\x01\n" +
+	"\vExtRequired\x12.\n" +
+	"\x0frequired_field1\x18\x01 \x01(\x05B\x05\xaa\x01\x02\b\x03R\x0erequiredField12\x84\x01\n" +
+	"\x17message_set_extrequired\x12$.goproto.proto.messageset.MessageSet\x18\xea\a \x01(\v2%.goproto.proto.messageset.ExtRequiredR\x15messageSetExtrequired\"\x97\x01\n" +
+	"\x0eExtLargeNumber2\x84\x01\n" +
+	"\x14message_set_extlarge\x12$.goproto.proto.messageset.MessageSet\x18\x80\x80\x80\x80\x02 \x01(\v2(.goproto.proto.messageset.ExtLargeNumberR\x12messageSetExtlargeBEZCgoogle.golang.org/protobuf/internal/testprotos/messageset/msetextpbb\beditionsp\xe8\a"
 
 var (
 	file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDescOnce sync.Once
-	file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDescData = file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDesc
+	file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDescData []byte
 )
 
 func file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDescGZIP() []byte {
 	file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDescOnce.Do(func() {
-		file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDescData = protoimpl.X.CompressGZIP(file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDescData)
+		file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDesc), len(file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDesc)))
 	})
 	return file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDescData
 }
 
 var file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
-var file_internal_testprotos_messageset_msetextpb_msetextpb_proto_goTypes = []interface{}{
+var file_internal_testprotos_messageset_msetextpb_msetextpb_proto_goTypes = []any{
 	(*Ext1)(nil),                    // 0: goproto.proto.messageset.Ext1
 	(*Ext2)(nil),                    // 1: goproto.proto.messageset.Ext2
 	(*ExtRequired)(nil),             // 2: goproto.proto.messageset.ExtRequired
@@ -333,14 +281,14 @@ var file_internal_testprotos_messageset_msetextpb_msetextpb_proto_goTypes = []in
 	(*messagesetpb.MessageSet)(nil), // 4: goproto.proto.messageset.MessageSet
 }
 var file_internal_testprotos_messageset_msetextpb_msetextpb_proto_depIdxs = []int32{
-	4, // 0: goproto.proto.messageset.Ext1.message_set_extension:extendee -> goproto.proto.messageset.MessageSet
-	4, // 1: goproto.proto.messageset.Ext2.message_set_extension:extendee -> goproto.proto.messageset.MessageSet
-	4, // 2: goproto.proto.messageset.ExtRequired.message_set_extension:extendee -> goproto.proto.messageset.MessageSet
-	4, // 3: goproto.proto.messageset.ExtLargeNumber.message_set_extension:extendee -> goproto.proto.messageset.MessageSet
-	0, // 4: goproto.proto.messageset.Ext1.message_set_extension:type_name -> goproto.proto.messageset.Ext1
-	1, // 5: goproto.proto.messageset.Ext2.message_set_extension:type_name -> goproto.proto.messageset.Ext2
-	2, // 6: goproto.proto.messageset.ExtRequired.message_set_extension:type_name -> goproto.proto.messageset.ExtRequired
-	3, // 7: goproto.proto.messageset.ExtLargeNumber.message_set_extension:type_name -> goproto.proto.messageset.ExtLargeNumber
+	4, // 0: goproto.proto.messageset.Ext1.message_set_ext1:extendee -> goproto.proto.messageset.MessageSet
+	4, // 1: goproto.proto.messageset.Ext2.message_set_ext2:extendee -> goproto.proto.messageset.MessageSet
+	4, // 2: goproto.proto.messageset.ExtRequired.message_set_extrequired:extendee -> goproto.proto.messageset.MessageSet
+	4, // 3: goproto.proto.messageset.ExtLargeNumber.message_set_extlarge:extendee -> goproto.proto.messageset.MessageSet
+	0, // 4: goproto.proto.messageset.Ext1.message_set_ext1:type_name -> goproto.proto.messageset.Ext1
+	1, // 5: goproto.proto.messageset.Ext2.message_set_ext2:type_name -> goproto.proto.messageset.Ext2
+	2, // 6: goproto.proto.messageset.ExtRequired.message_set_extrequired:type_name -> goproto.proto.messageset.ExtRequired
+	3, // 7: goproto.proto.messageset.ExtLargeNumber.message_set_extlarge:type_name -> goproto.proto.messageset.ExtLargeNumber
 	8, // [8:8] is the sub-list for method output_type
 	8, // [8:8] is the sub-list for method input_type
 	4, // [4:8] is the sub-list for extension type_name
@@ -353,61 +301,11 @@ func file_internal_testprotos_messageset_msetextpb_msetextpb_proto_init() {
 	if File_internal_testprotos_messageset_msetextpb_msetextpb_proto != nil {
 		return
 	}
-	if !protoimpl.UnsafeEnabled {
-		file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Ext1); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Ext2); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ExtRequired); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_messageset_msetextpb_msetextpb_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ExtLargeNumber); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDesc,
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDesc), len(file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   4,
 			NumExtensions: 4,
@@ -419,7 +317,6 @@ func file_internal_testprotos_messageset_msetextpb_msetextpb_proto_init() {
 		ExtensionInfos:    file_internal_testprotos_messageset_msetextpb_msetextpb_proto_extTypes,
 	}.Build()
 	File_internal_testprotos_messageset_msetextpb_msetextpb_proto = out.File
-	file_internal_testprotos_messageset_msetextpb_msetextpb_proto_rawDesc = nil
 	file_internal_testprotos_messageset_msetextpb_msetextpb_proto_goTypes = nil
 	file_internal_testprotos_messageset_msetextpb_msetextpb_proto_depIdxs = nil
 }

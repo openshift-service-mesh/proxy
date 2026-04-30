@@ -14,6 +14,7 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
+	unsafe "unsafe"
 )
 
 type Enum1 int32
@@ -176,19 +177,17 @@ func (Enum3) EnumDescriptor() ([]byte, []int) {
 }
 
 type Message1 struct {
-	state           protoimpl.MessageState
-	sizeCache       protoimpl.SizeCache
-	unknownFields   protoimpl.UnknownFields
+	state           protoimpl.MessageState `protogen:"open.v1"`
 	extensionFields protoimpl.ExtensionFields
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Message1) Reset() {
 	*x = Message1{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_registry_test_proto_msgTypes[0]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_registry_test_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Message1) String() string {
@@ -199,7 +198,7 @@ func (*Message1) ProtoMessage() {}
 
 func (x *Message1) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_registry_test_proto_msgTypes[0]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -215,18 +214,16 @@ func (*Message1) Descriptor() ([]byte, []int) {
 }
 
 type Message2 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Message2) Reset() {
 	*x = Message2{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_registry_test_proto_msgTypes[1]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_registry_test_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Message2) String() string {
@@ -237,7 +234,7 @@ func (*Message2) ProtoMessage() {}
 
 func (x *Message2) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_registry_test_proto_msgTypes[1]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -253,18 +250,16 @@ func (*Message2) Descriptor() ([]byte, []int) {
 }
 
 type Message3 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Message3) Reset() {
 	*x = Message3{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_registry_test_proto_msgTypes[2]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_registry_test_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Message3) String() string {
@@ -275,7 +270,7 @@ func (*Message3) ProtoMessage() {}
 
 func (x *Message3) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_registry_test_proto_msgTypes[2]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -291,20 +286,17 @@ func (*Message3) Descriptor() ([]byte, []int) {
 }
 
 type Message4 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BoolField     *bool                  `protobuf:"varint,30,opt,name=bool_field,json=boolField" json:"bool_field,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	BoolField *bool `protobuf:"varint,30,opt,name=bool_field,json=boolField" json:"bool_field,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Message4) Reset() {
 	*x = Message4{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_registry_test_proto_msgTypes[3]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_registry_test_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Message4) String() string {
@@ -315,7 +307,7 @@ func (*Message4) ProtoMessage() {}
 
 func (x *Message4) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_registry_test_proto_msgTypes[3]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -406,67 +398,49 @@ var (
 
 var File_internal_testprotos_registry_test_proto protoreflect.FileDescriptor
 
-var file_internal_testprotos_registry_test_proto_rawDesc = []byte{
-	0x0a, 0x27, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2f, 0x72, 0x65, 0x67, 0x69, 0x73, 0x74, 0x72, 0x79, 0x2f, 0x74,
-	0x65, 0x73, 0x74, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x12, 0x0a, 0x74, 0x65, 0x73, 0x74, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x73, 0x22, 0x14, 0x0a, 0x08, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65,
-	0x31, 0x2a, 0x08, 0x08, 0x0a, 0x10, 0x80, 0x80, 0x80, 0x80, 0x02, 0x22, 0x0a, 0x0a, 0x08, 0x4d,
-	0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x32, 0x22, 0x0a, 0x0a, 0x08, 0x4d, 0x65, 0x73, 0x73, 0x61,
-	0x67, 0x65, 0x33, 0x22, 0xfb, 0x01, 0x0a, 0x08, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x34,
-	0x12, 0x1d, 0x0a, 0x0a, 0x62, 0x6f, 0x6f, 0x6c, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x18, 0x1e,
-	0x20, 0x01, 0x28, 0x08, 0x52, 0x09, 0x62, 0x6f, 0x6f, 0x6c, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x32,
-	0x4f, 0x0a, 0x0d, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64,
-	0x12, 0x14, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2e, 0x4d, 0x65,
-	0x73, 0x73, 0x61, 0x67, 0x65, 0x31, 0x18, 0x15, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x14, 0x2e, 0x74,
-	0x65, 0x73, 0x74, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67,
-	0x65, 0x32, 0x52, 0x0c, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x46, 0x69, 0x65, 0x6c, 0x64,
-	0x32, 0x46, 0x0a, 0x0a, 0x65, 0x6e, 0x75, 0x6d, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x12, 0x14,
-	0x2e, 0x74, 0x65, 0x73, 0x74, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2e, 0x4d, 0x65, 0x73, 0x73,
-	0x61, 0x67, 0x65, 0x31, 0x18, 0x16, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x11, 0x2e, 0x74, 0x65, 0x73,
-	0x74, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2e, 0x45, 0x6e, 0x75, 0x6d, 0x31, 0x52, 0x09, 0x65,
-	0x6e, 0x75, 0x6d, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x32, 0x37, 0x0a, 0x0c, 0x73, 0x74, 0x72, 0x69,
-	0x6e, 0x67, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x12, 0x14, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x31, 0x18, 0x17,
-	0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x46, 0x69, 0x65, 0x6c,
-	0x64, 0x2a, 0x10, 0x0a, 0x05, 0x45, 0x6e, 0x75, 0x6d, 0x31, 0x12, 0x07, 0x0a, 0x03, 0x4f, 0x4e,
-	0x45, 0x10, 0x01, 0x2a, 0x10, 0x0a, 0x05, 0x45, 0x6e, 0x75, 0x6d, 0x32, 0x12, 0x07, 0x0a, 0x03,
-	0x55, 0x4e, 0x4f, 0x10, 0x01, 0x2a, 0x0f, 0x0a, 0x05, 0x45, 0x6e, 0x75, 0x6d, 0x33, 0x12, 0x06,
-	0x0a, 0x02, 0x59, 0x49, 0x10, 0x01, 0x3a, 0x37, 0x0a, 0x0c, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67,
-	0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x12, 0x14, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x73, 0x2e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x31, 0x18, 0x0b, 0x20, 0x01,
-	0x28, 0x09, 0x52, 0x0b, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x3a,
-	0x46, 0x0a, 0x0a, 0x65, 0x6e, 0x75, 0x6d, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x12, 0x14, 0x2e,
-	0x74, 0x65, 0x73, 0x74, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2e, 0x4d, 0x65, 0x73, 0x73, 0x61,
-	0x67, 0x65, 0x31, 0x18, 0x0c, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x11, 0x2e, 0x74, 0x65, 0x73, 0x74,
-	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2e, 0x45, 0x6e, 0x75, 0x6d, 0x31, 0x52, 0x09, 0x65, 0x6e,
-	0x75, 0x6d, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x3a, 0x4f, 0x0a, 0x0d, 0x6d, 0x65, 0x73, 0x73, 0x61,
-	0x67, 0x65, 0x5f, 0x66, 0x69, 0x65, 0x6c, 0x64, 0x12, 0x14, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x31, 0x18, 0x0d,
-	0x20, 0x01, 0x28, 0x0b, 0x32, 0x14, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x73, 0x2e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x32, 0x52, 0x0c, 0x6d, 0x65, 0x73, 0x73,
-	0x61, 0x67, 0x65, 0x46, 0x69, 0x65, 0x6c, 0x64, 0x42, 0x39, 0x5a, 0x37, 0x67, 0x6f, 0x6f, 0x67,
-	0x6c, 0x65, 0x2e, 0x67, 0x6f, 0x6c, 0x61, 0x6e, 0x67, 0x2e, 0x6f, 0x72, 0x67, 0x2f, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f,
-	0x74, 0x65, 0x73, 0x74, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2f, 0x72, 0x65, 0x67, 0x69, 0x73,
-	0x74, 0x72, 0x79,
-}
+const file_internal_testprotos_registry_test_proto_rawDesc = "" +
+	"\n" +
+	"'internal/testprotos/registry/test.proto\x12\n" +
+	"testprotos\"\x14\n" +
+	"\bMessage1*\b\b\n" +
+	"\x10\x80\x80\x80\x80\x02\"\n" +
+	"\n" +
+	"\bMessage2\"\n" +
+	"\n" +
+	"\bMessage3\"\xfb\x01\n" +
+	"\bMessage4\x12\x1d\n" +
+	"\n" +
+	"bool_field\x18\x1e \x01(\bR\tboolField2O\n" +
+	"\rmessage_field\x12\x14.testprotos.Message1\x18\x15 \x01(\v2\x14.testprotos.Message2R\fmessageField2F\n" +
+	"\n" +
+	"enum_field\x12\x14.testprotos.Message1\x18\x16 \x01(\x0e2\x11.testprotos.Enum1R\tenumField27\n" +
+	"\fstring_field\x12\x14.testprotos.Message1\x18\x17 \x01(\tR\vstringField*\x10\n" +
+	"\x05Enum1\x12\a\n" +
+	"\x03ONE\x10\x01*\x10\n" +
+	"\x05Enum2\x12\a\n" +
+	"\x03UNO\x10\x01*\x0f\n" +
+	"\x05Enum3\x12\x06\n" +
+	"\x02YI\x10\x01:7\n" +
+	"\fstring_field\x12\x14.testprotos.Message1\x18\v \x01(\tR\vstringField:F\n" +
+	"\n" +
+	"enum_field\x12\x14.testprotos.Message1\x18\f \x01(\x0e2\x11.testprotos.Enum1R\tenumField:O\n" +
+	"\rmessage_field\x12\x14.testprotos.Message1\x18\r \x01(\v2\x14.testprotos.Message2R\fmessageFieldB9Z7google.golang.org/protobuf/internal/testprotos/registry"
 
 var (
 	file_internal_testprotos_registry_test_proto_rawDescOnce sync.Once
-	file_internal_testprotos_registry_test_proto_rawDescData = file_internal_testprotos_registry_test_proto_rawDesc
+	file_internal_testprotos_registry_test_proto_rawDescData []byte
 )
 
 func file_internal_testprotos_registry_test_proto_rawDescGZIP() []byte {
 	file_internal_testprotos_registry_test_proto_rawDescOnce.Do(func() {
-		file_internal_testprotos_registry_test_proto_rawDescData = protoimpl.X.CompressGZIP(file_internal_testprotos_registry_test_proto_rawDescData)
+		file_internal_testprotos_registry_test_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_testprotos_registry_test_proto_rawDesc), len(file_internal_testprotos_registry_test_proto_rawDesc)))
 	})
 	return file_internal_testprotos_registry_test_proto_rawDescData
 }
 
 var file_internal_testprotos_registry_test_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_internal_testprotos_registry_test_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
-var file_internal_testprotos_registry_test_proto_goTypes = []interface{}{
+var file_internal_testprotos_registry_test_proto_goTypes = []any{
 	(Enum1)(0),       // 0: testprotos.Enum1
 	(Enum2)(0),       // 1: testprotos.Enum2
 	(Enum3)(0),       // 2: testprotos.Enum3
@@ -498,63 +472,11 @@ func file_internal_testprotos_registry_test_proto_init() {
 	if File_internal_testprotos_registry_test_proto != nil {
 		return
 	}
-	if !protoimpl.UnsafeEnabled {
-		file_internal_testprotos_registry_test_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Message1); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			case 3:
-				return &v.extensionFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_registry_test_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Message2); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_registry_test_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Message3); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_registry_test_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Message4); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_internal_testprotos_registry_test_proto_rawDesc,
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_testprotos_registry_test_proto_rawDesc), len(file_internal_testprotos_registry_test_proto_rawDesc)),
 			NumEnums:      3,
 			NumMessages:   4,
 			NumExtensions: 6,
@@ -567,7 +489,6 @@ func file_internal_testprotos_registry_test_proto_init() {
 		ExtensionInfos:    file_internal_testprotos_registry_test_proto_extTypes,
 	}.Build()
 	File_internal_testprotos_registry_test_proto = out.File
-	file_internal_testprotos_registry_test_proto_rawDesc = nil
 	file_internal_testprotos_registry_test_proto_goTypes = nil
 	file_internal_testprotos_registry_test_proto_depIdxs = nil
 }

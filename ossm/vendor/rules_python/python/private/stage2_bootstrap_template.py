@@ -20,17 +20,22 @@ import contextlib
 import os
 import re
 import runpy
+import types
 import uuid
+from functools import cache
 
 # ===== Template substitutions start =====
 # We just put them in one place so its easy to tell which are used.
 
-# Runfiles-relative path to the main Python source file.
+# Runfiles-root-relative path to the main Python source file.
 # Empty if MAIN_MODULE is used
 MAIN_PATH = "%main%"
 
 # Module name to execute. Empty if MAIN is used.
 MAIN_MODULE = "%main_module%"
+
+# runfiles-root relative path to the root of the venv
+VENV_ROOT = "%venv_root%"
 
 # venv-relative path to the expected location of the binary's site-packages
 # directory.
@@ -38,7 +43,46 @@ MAIN_MODULE = "%main_module%"
 # string otherwise.
 VENV_SITE_PACKAGES = "%venv_rel_site_packages%"
 
+# Whether we should generate coverage data.
+# string, 1 or 0
+COVERAGE_INSTRUMENTED = "%coverage_instrumented%" == "1"
+
+# runfiles-root-relative path to a file with binary-specific build information
+# It uses forward slashes, so must be converted for proper usage on Windows.
+BUILD_DATA_FILE = "%build_data_file%"
+
 # ===== Template substitutions end =====
+
+
+class BazelBinaryInfoModule(types.ModuleType):
+    BUILD_DATA_FILE = BUILD_DATA_FILE
+
+    @cache
+    def get_build_data(self):
+        """Returns a string of the raw build data."""
+        try:
+            # Prefer dep via pypi
+            import runfiles
+        except ImportError:
+            from python.runfiles import runfiles
+        rlocation_path = self.BUILD_DATA_FILE
+        path = runfiles.Create().Rlocation(rlocation_path)
+        if is_windows():
+            path = os.path.normpath(path)
+        try:
+            # Use utf-8-sig to handle Windows BOM
+            with open(path, encoding="utf-8-sig") as fp:
+                return fp.read()
+        except Exception as exc:
+            if hasattr(exc, "add_note"):
+                exc.add_note(f"runfiles lookup path: {rlocation_path}")
+                exc.add_note(f"exists: {os.path.exists(path)}")
+                can_read = os.access(path, os.R_OK)
+                exc.add_note(f"readable: {can_read}")
+            raise
+
+
+sys.modules["bazel_binary_info"] = BazelBinaryInfoModule("bazel_binary_info")
 
 
 # Return True if running on Windows
@@ -66,7 +110,7 @@ def get_windows_path_with_unc_prefix(path):
             break
         except (ValueError, KeyError):
             pass
-    if win32_version and win32_version >= '10.0.14393':
+    if win32_version and win32_version >= "10.0.14393":
         return path
 
     # import sysconfig only now to maintain python 2.6 compatibility
@@ -81,17 +125,6 @@ def get_windows_path_with_unc_prefix(path):
 
     # os.path.abspath returns a normalized absolute path
     return unicode_prefix + os.path.abspath(path)
-
-
-def search_path(name):
-    """Finds a file in a given search path."""
-    search_path = os.getenv("PATH", os.defpath).split(os.pathsep)
-    for directory in search_path:
-        if directory:
-            path = os.path.join(directory, name)
-            if os.path.isfile(path) and os.access(path, os.X_OK):
-                return path
-    return None
 
 
 def is_verbose():
@@ -174,6 +207,8 @@ def find_runfiles_root(main_rel_path):
         else:
             stub_filename = os.path.join(os.path.dirname(stub_filename), target)
 
+    # The `--enable_runfiles=false` flag is likely set, which isn't fully
+    # supported.
     raise AssertionError("Cannot find .runfiles directory for %s" % sys.argv[0])
 
 
@@ -316,11 +351,17 @@ def _maybe_collect_coverage(enable):
     # We need for coveragepy to use relative paths.  This can only be configured
     # using an rc file.
     rcfile_name = os.path.join(coverage_dir, ".coveragerc_{}".format(unique_id))
+    disable_warnings = (
+        "disable_warnings = module-not-imported, no-data-collected"
+        if COVERAGE_INSTRUMENTED
+        else ""
+    )
     print_verbose_coverage("coveragerc file:", rcfile_name)
     with open(rcfile_name, "w") as rcfile:
         rcfile.write(
             f"""[run]
 relative_files = True
+{disable_warnings}
 source =
 \t{source}
 """
@@ -373,27 +414,32 @@ source =
             print_verbose_coverage("Error removing temporary coverage rc file:", err)
 
 
+def _add_site_packages(site_packages):
+    first_global_offset = len(sys.path)
+    for i, p in enumerate(sys.path):
+        # We assume the first *-packages is the runtime's.
+        # *-packages is matched because Debian may use dist-packages
+        # instead of site-packages.
+        if p.endswith("-packages"):
+            first_global_offset = i
+            break
+    prev_len = len(sys.path)
+    import site
+
+    site.addsitedir(site_packages)
+    added_dirs = sys.path[prev_len:]
+    del sys.path[prev_len:]
+    # Re-insert the binary specific paths so the order is
+    # (stdlib, binary specific, runtime site)
+    # This matches what a venv's ordering is like.
+    sys.path[first_global_offset:0] = added_dirs
+
+
 def main():
     print_verbose("initial argv:", values=sys.argv)
     print_verbose("initial cwd:", os.getcwd())
     print_verbose("initial environ:", mapping=os.environ)
     print_verbose("initial sys.path:", values=sys.path)
-
-    if VENV_SITE_PACKAGES:
-        site_packages = os.path.join(sys.prefix, VENV_SITE_PACKAGES)
-        if site_packages not in sys.path and os.path.exists(site_packages):
-            # NOTE: if this happens, it likely means we're running with a different
-            # Python version than was built with. Things may or may not work.
-            # Such a situation is likely due to the runtime_env toolchain, or some
-            # toolchain configuration. In any case, this better matches how the
-            # previous bootstrap=system_python bootstrap worked (using PYTHONPATH,
-            # which isn't version-specific).
-            print_verbose(
-                f"sys.path missing expected site-packages: adding {site_packages}"
-            )
-            import site
-
-            site.addsitedir(site_packages)
 
     main_rel_path = None
     # todo: things happen to work because find_runfiles_root
@@ -407,6 +453,23 @@ def main():
         runfiles_root = find_runfiles_root(main_rel_path)
     else:
         runfiles_root = find_runfiles_root("")
+
+    site_packages = os.path.join(runfiles_root, VENV_ROOT, VENV_SITE_PACKAGES)
+    if site_packages not in sys.path and os.path.exists(site_packages):
+        # This can happen in a few situations:
+        # 1. We're running with a different Python version than was built with.
+        #    Things may or may not work. Such a situation is likely due to the
+        #    runtime_env toolchain, or some toolchain configuration. In any
+        #    case, this better matches how the previous bootstrap=system_python
+        #    bootstrap worked (using PYTHONPATH, which isn't version-specific).
+        # 2. If site is disabled (`-S` interpreter arg). Some users do this to
+        #    prevent interference from the system.
+        # 3. If running without a venv configured. This occurs with the
+        #    system_python bootstrap.
+        print_verbose(
+            f"sys.path missing expected site-packages: adding {site_packages}"
+        )
+        _add_site_packages(site_packages)
 
     print_verbose("runfiles root:", runfiles_root)
 

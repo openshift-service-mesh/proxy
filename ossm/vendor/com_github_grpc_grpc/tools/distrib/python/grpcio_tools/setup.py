@@ -159,9 +159,13 @@ class BuildExt(build_ext.build_ext):
 if sys.platform == "darwin":
     if "MACOSX_DEPLOYMENT_TARGET" not in os.environ:
         target_ver = sysconfig.get_config_var("MACOSX_DEPLOYMENT_TARGET")
-        if target_ver == "" or tuple(int(p) for p in target_ver.split(".")) < (
-            10,
-            14,
+        if target_ver is not None and (
+            target_ver == ""
+            or tuple(int(p) for p in target_ver.split("."))
+            < (
+                10,
+                14,
+            )
         ):
             os.environ["MACOSX_DEPLOYMENT_TARGET"] = "11.0"
 
@@ -343,12 +347,17 @@ setuptools.setup(
     packages=setuptools.find_packages("."),
     python_requires=f">={python_version.MIN_PYTHON_VERSION}",
     install_requires=[
-        "protobuf>=6.30.0,<7.0dev",
+        "protobuf>=6.31.1,<7.0.0",
         "grpcio>={version}".format(version=grpc_version.VERSION),
         "setuptools",
     ],
     package_data=package_data(),
     cmdclass={
         "build_ext": BuildExt,
+    },
+    entry_points={
+        "console_scripts": [
+            "python-grpc-tools-protoc = grpc_tools.protoc:entrypoint",
+        ],
     },
 )

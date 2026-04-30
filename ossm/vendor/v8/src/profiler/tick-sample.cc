@@ -180,7 +180,7 @@ DISABLE_ASAN void TickSample::Init(Isolate* v8_isolate,
     return;
   }
 
-  if (state != StateTag::EXTERNAL) {
+  if (!IsExternal(state)) {
     state = info.vm_state;
   }
   pc = regs.pc;
@@ -336,16 +336,8 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
   if (record_c_entry_frame == kIncludeCEntryFrame &&
       (it.top_frame_type() == internal::StackFrame::EXIT ||
        it.top_frame_type() == internal::StackFrame::BUILTIN_EXIT)) {
-    // While BUILTIN_EXIT definitely represents a call to CEntry the EXIT frame
-    // might represent either a call to CEntry or an optimized call to
-    // Api callback. In the latter case the ExternalCallbackScope points to
-    // the same function, so skip adding a frame in that case in order to avoid
-    // double-reporting.
     void* c_function = reinterpret_cast<void*>(isolate->c_function());
-    if (sample_info->external_callback_entry != c_function) {
-      frames[i] = c_function;
-      i++;
-    }
+    frames[i++] = c_function;
   }
 #ifdef V8_RUNTIME_CALL_STATS
   i::RuntimeCallTimer* timer =
@@ -394,7 +386,7 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
 
 void TickSample::print() const {
   PrintF("TickSample: at %p\n", this);
-  PrintF(" - state: %s\n", StateToString(state));
+  PrintF(" - state: %s\n", ToString(state));
   PrintF(" - pc: %p\n", pc);
   PrintF(" - stack: (%u frames)\n", frames_count);
   for (unsigned i = 0; i < frames_count; i++) {

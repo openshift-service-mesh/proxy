@@ -14,6 +14,7 @@
 
 """Rules for performing `rustdoc --test` on Bazel built crates"""
 
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//rust/private:common.bzl", "rust_common")
 load("//rust/private:providers.bzl", "CrateInfo")
 load("//rust/private:rustdoc.bzl", "rustdoc_compile_action")
@@ -149,6 +150,8 @@ def _rust_doc_test_impl(ctx):
         "--test",
     ]
 
+    rustdoc_flags.extend(ctx.attr.rustdoc_flags)
+
     action = rustdoc_compile_action(
         ctx = ctx,
         toolchain = toolchain,
@@ -199,6 +202,11 @@ rust_doc_test = rule(
             providers = [rust_common.crate_info],
             mandatory = True,
         ),
+        "crate_features": attr.string_list(
+            doc = dedent("""\
+                List of features to enable for the crate being documented.
+            """),
+        ),
         "deps": attr.label_list(
             doc = dedent("""\
                 List of other libraries to be linked to this library target.
@@ -215,13 +223,15 @@ rust_doc_test = rule(
             cfg = "exec",
             providers = [rust_common.crate_info],
         ),
-        "_cc_toolchain": attr.label(
-            doc = (
-                "In order to use find_cc_toolchain, your rule has to depend " +
-                "on C++ toolchain. See @rules_cc//cc:find_cc_toolchain.bzl " +
-                "docs for details."
-            ),
-            default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
+        "rustdoc_flags": attr.string_list(
+            doc = dedent("""\
+                List of flags passed to `rustdoc`.
+
+                These strings are subject to Make variable expansion for predefined
+                source/output path variables like `$location`, `$execpath`, and
+                `$rootpath`. This expansion is useful if you wish to pass a generated
+                file of arguments to rustc: `@$(location //package:target)`.
+            """),
         ),
         "_process_wrapper": attr.label(
             doc = "A process wrapper for running rustdoc on all platforms",
@@ -232,7 +242,7 @@ rust_doc_test = rule(
         "_test_writer": attr.label(
             doc = "A binary used for writing script for use as the test executable.",
             cfg = "exec",
-            default = Label("//tools/rustdoc:rustdoc_test_writer"),
+            default = Label("//rust/private/rustdoc:rustdoc_test_writer"),
             executable = True,
         ),
     },
@@ -240,7 +250,7 @@ rust_doc_test = rule(
     fragments = ["cpp"],
     toolchains = [
         str(Label("//rust:toolchain_type")),
-        "@bazel_tools//tools/cpp:toolchain_type",
+        config_common.toolchain_type("@bazel_tools//tools/cpp:toolchain_type", mandatory = False),
     ],
     doc = dedent("""\
         Runs Rust documentation tests.

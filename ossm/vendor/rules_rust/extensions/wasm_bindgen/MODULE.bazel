@@ -2,54 +2,54 @@
 
 module(
     name = "rules_rust_wasm_bindgen",
-    version = "0.56.0",
+    version = "0.69.0",
 )
 
-bazel_dep(
-    name = "rules_rust",
-    version = "0.56.0",
-)
-bazel_dep(
-    name = "bazel_skylib",
-    version = "1.7.1",
-)
-bazel_dep(
-    name = "platforms",
-    version = "0.0.10",
-)
-bazel_dep(
-    name = "rules_cc",
-    version = "0.0.17",
-)
-bazel_dep(
-    name = "aspect_rules_js",
-    version = "2.1.1",
-)
+bazel_dep(name = "rules_rust", version = "0.69.0")
+bazel_dep(name = "bazel_features", version = "1.32.0")
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "rules_cc", version = "0.2.4")
+bazel_dep(name = "apple_support", version = "1.24.1")
 
 rust_ext = use_extension("//:extensions.bzl", "rust_ext")
 use_repo(
     rust_ext,
-    "rrwbd__anyhow-1.0.71",
-    "rrwbd__assert_cmd-1.0.8",
-    "rrwbd__diff-0.1.13",
-    "rrwbd__docopt-1.1.1",
-    "rrwbd__env_logger-0.8.4",
-    "rrwbd__log-0.4.19",
-    "rrwbd__predicates-1.0.8",
-    "rrwbd__rayon-1.7.0",
-    "rrwbd__rouille-3.6.2",
-    "rrwbd__serde-1.0.171",
-    "rrwbd__serde_derive-1.0.171",
-    "rrwbd__serde_json-1.0.102",
-    "rrwbd__tempfile-3.6.0",
-    "rrwbd__ureq-2.8.0",
-    "rrwbd__walrus-0.20.3",
-    "rrwbd__wasm-bindgen-0.2.92",
-    "rrwbd__wasm-bindgen-cli-support-0.2.92",
-    "rrwbd__wasm-bindgen-shared-0.2.92",
-    "rrwbd__wasmparser-0.102.0",
-    "rrwbd__wasmprinter-0.2.60",
-    "rules_rust_wasm_bindgen_cli",
+    "chrome",
+    "chrome_headless_shell",
+    "chrome_headless_shell_linux64",
+    "chrome_headless_shell_mac_arm64",
+    "chrome_headless_shell_mac_x64",
+    "chrome_headless_shell_win32",
+    "chrome_headless_shell_win64",
+    "chrome_linux64",
+    "chrome_mac_arm64",
+    "chrome_mac_x64",
+    "chrome_win32",
+    "chrome_win64",
+    "chromedriver",
+    "chromedriver_linux64",
+    "chromedriver_mac_arm64",
+    "chromedriver_mac_x64",
+    "chromedriver_win32",
+    "chromedriver_win64",
+    "firefox",
+    "firefox_linux_aarch64",
+    "firefox_linux_x86_64",
+    "firefox_local",
+    "firefox_mac",
+    "geckodriver",
+    "geckodriver_linux64",
+    "geckodriver_linux_aarch64",
+    "geckodriver_macos",
+    "geckodriver_macos_aarch64",
+    "geckodriver_win64",
+    "rrwbd",
+    "rrwbd__serde_json-1.0.145",
+    "rrwbd__wasm-bindgen-0.2.105",
+    "rrwbd__wasm-bindgen-cli-0.2.105",
+    "rrwbd__wasm-bindgen-test-0.3.55",
+    "safaridriver",
 )
 
 register_toolchains(
@@ -58,11 +58,7 @@ register_toolchains(
     "@rules_rust//rust/private/dummy_cc_toolchain:dummy_cc_wasm64_toolchain",
 )
 
-bazel_dep(
-    name = "bazel_ci_rules",
-    version = "1.0.0",
-    dev_dependency = True,
-)
+bazel_dep(name = "bazel_ci_rules", version = "1.0.0", dev_dependency = True)
 
 rust_ext_dev = use_extension(
     "//private:internal_extensions.bzl",

@@ -94,6 +94,13 @@ impl TemplateEngine {
             ),
         );
         tera.register_function(
+            "crate_alias",
+            crate_alias_fn_generator(
+                render_config.crate_alias_template.clone(),
+                render_config.repository_name.clone(),
+            ),
+        );
+        tera.register_function(
             "crate_repository",
             crate_repository_fn_generator(
                 render_config.crate_repository_template.clone(),
@@ -173,7 +180,7 @@ impl TemplateEngine {
     }
 }
 
-/// A convienience wrapper for parsing parameters to tera functions
+/// A convenience wrapper for parsing parameters to tera functions
 macro_rules! parse_tera_param {
     ($param:literal, $param_type:ty, $args:ident) => {
         match $args.get($param) {
@@ -181,7 +188,7 @@ macro_rules! parse_tera_param {
                 Ok(v) => v,
                 Err(_) => {
                     return Err(tera::Error::msg(format!(
-                        "The `{}` paramater could not be parsed as a String.",
+                        "The `{}` parameter could not be parsed as a String.",
                         $param
                     )))
                 }
@@ -245,6 +252,28 @@ fn crate_label_fn_generator(template: String, repository_name: String) -> impl t
                 &version,
                 &target,
             ))) {
+                Ok(v) => Ok(v),
+                Err(_) => Err(tera::Error::msg("Failed to generate crate's label")),
+            }
+        },
+    )
+}
+
+/// Convert a crate name into an alias name by applying transforms to invalid characters.
+fn crate_alias_fn_generator(template: String, repository_name: String) -> impl tera::Function {
+    Box::new(
+        move |args: &HashMap<String, Value>| -> tera::Result<Value> {
+            let name = parse_tera_param!("name", String, args);
+            let version = parse_tera_param!("version", String, args);
+            let target = parse_tera_param!("target", String, args);
+
+            match to_value(render_crate_bazel_label(
+                &template,
+                &repository_name,
+                &name,
+                &version,
+                &target,
+            )) {
                 Ok(v) => Ok(v),
                 Err(_) => Err(tera::Error::msg("Failed to generate crate's label")),
             }

@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -154,6 +155,10 @@ class V8_EXPORT ResourceConstraints {
     initial_young_generation_size_ = initial_size;
   }
 
+  uint64_t physical_memory_size_in_bytes() const {
+    return physical_memory_size_;
+  }
+
  private:
   static constexpr size_t kMB = 1048576u;
   size_t code_range_size_ = 0;
@@ -161,6 +166,7 @@ class V8_EXPORT ResourceConstraints {
   size_t max_young_generation_size_ = 0;
   size_t initial_old_generation_size_ = 0;
   size_t initial_young_generation_size_ = 0;
+  uint64_t physical_memory_size_ = 0;
   uint32_t* stack_limit_ = nullptr;
 };
 
@@ -350,14 +356,6 @@ class V8_EXPORT Isolate {
      * this isolate. This can also be configured via SetAllowAtomicsWait.
      */
     bool allow_atomics_wait = true;
-
-    /**
-     * The following parameters describe the offsets for addressing type info
-     * for wrapped API objects and are used by the fast C API
-     * (for details see v8-fast-api-calls.h).
-     */
-    int embedder_wrapper_type_index = -1;
-    int embedder_wrapper_object_index = -1;
 
     /**
      * Callbacks to invoke in case of fatal or OOM errors.
@@ -568,7 +566,8 @@ class V8_EXPORT Isolate {
     kBreakIteratorTypeWord = 88,
     kBreakIteratorTypeLine = 89,
     kInvalidatedArrayBufferDetachingProtector = 90,
-    kInvalidatedArrayConstructorProtector = 91,
+    kInvalidatedArrayConstructorProtector V8_DEPRECATE_SOON(
+        "The ArrayConstructorProtector has been removed") = 91,
     kInvalidatedArrayIteratorLookupChainProtector = 92,
     kInvalidatedArraySpeciesLookupChainProtector = 93,
     kInvalidatedIsConcatSpreadableLookupChainProtector = 94,
@@ -586,8 +585,8 @@ class V8_EXPORT Isolate {
     kWasmSimdOpcodes = 106,
     kVarRedeclaredCatchBinding = 107,
     kWasmRefTypes = 108,
-    kOBSOLETE_WasmBulkMemory = 109,
-    kOBSOLETE_WasmMultiValue = 110,
+    kWasmBulkMemory = 109,
+    kWasmMultiValue = 110,
     kWasmExceptionHandling = 111,
     kInvalidatedMegaDOMProtector = 112,
     kFunctionPrototypeArguments = 113,
@@ -645,13 +644,22 @@ class V8_EXPORT Isolate {
     kFloat16Array = 165,
     kExplicitResourceManagement = 166,
     kWasmBranchHinting = 167,
-    kWasmMultiValue = 168,
+    kWasmMutableGlobals = 168,
     kUint8ArrayToFromBase64AndHex = 169,
     kAtomicsPause = 170,
     kTopLevelAwait = 171,
     kLogicalAssignment = 172,
     kNullishCoalescing = 173,
     kInvalidatedNoDateTimeConfigurationChangeProtector = 174,
+    kWasmNonTrappingFloatToInt = 175,
+    kWasmSignExtensionOps = 176,
+    kRegExpCompile = 177,
+    kRegExpStaticProperties = 178,
+    kRegExpStaticPropertiesWithLastMatch = 179,
+    kWithStatement = 180,
+    kHtmlWrapperMethods = 181,
+    kWasmCustomDescriptors = 182,
+    kWasmResizableBuffers = 183,
 
     // If you add new values here, you'll also need to update Chromium's:
     // web_feature.mojom, use_counter_callback.cc, and enums.xml. V8 changes to
@@ -846,6 +854,12 @@ class V8_EXPORT Isolate {
   void MemoryPressureNotification(MemoryPressureLevel level);
 
   /**
+   * This triggers garbage collections until either `allocate` succeeds, or
+   * until v8 gives up and triggers an OOM error.
+   */
+  bool RetryCustomAllocate(std::function<bool()> allocate);
+
+  /**
    * Optional request from the embedder to tune v8 towards energy efficiency
    * rather than speed if `battery_saver_mode_enabled` is true, because the
    * embedder is in battery saver mode. If false, the correct tuning is left
@@ -955,14 +969,14 @@ class V8_EXPORT Isolate {
    * Returns the value that was set or restored by
    * SetContinuationPreservedEmbedderData(), if any.
    */
-  V8_DEPRECATE_SOON("Use GetContinuationPreservedEmbedderDataV2 instead")
+  V8_DEPRECATED("Use GetContinuationPreservedEmbedderDataV2 instead")
   Local<Value> GetContinuationPreservedEmbedderData();
 
   /**
    * Sets a value that will be stored on continuations and reset while the
    * continuation runs.
    */
-  V8_DEPRECATE_SOON("Use SetContinuationPreservedEmbedderDataV2 instead")
+  V8_DEPRECATED("Use SetContinuationPreservedEmbedderDataV2 instead")
   void SetContinuationPreservedEmbedderData(Local<Value> data);
 
   /**
@@ -1467,6 +1481,13 @@ class V8_EXPORT Isolate {
   void SetAddCrashKeyCallback(AddCrashKeyCallback);
 
   /**
+   * Enables the host application to provide a mechanism for allocating a new
+   * crash key and setting/updating values for them.
+   */
+  void SetCrashKeyStringCallbacks(AllocateCrashKeyStringCallback,
+                                  SetCrashKeyStringCallback);
+
+  /**
    * Optional notification that the system is running low on memory.
    * V8 uses these notifications to attempt to free memory.
    */
@@ -1526,6 +1547,19 @@ class V8_EXPORT Isolate {
    * may change frequently.
    */
   void SetIsLoading(bool is_loading);
+
+  /**
+   * Optional notification to tell V8 whether the embedder is currently
+   * handling user input. If the embedder uses this notification, it should
+   * call SetIsInputHandling(true) when input handling starts, and
+   * SetIsInputHandling(false) when it ends.
+   * Calling SetIsInputHandling(true) while handling input, or calling
+   * SetIsInputHandling(false) while not handling input, both have no effect.
+   * V8 uses these notifications to guide heuristics.
+   * This is an unfinished experimental feature. Semantics and implementation
+   * may change frequently.
+   */
+  void SetIsInputHandling(bool is_input_handling);
 
   /**
    * Optional notification to tell V8 whether the embedder is currently frozen.
@@ -1640,6 +1674,13 @@ class V8_EXPORT Isolate {
   void SetOOMErrorHandler(OOMErrorCallback that);
 
   /**
+   * \copydoc SetOOMErrorHandler(OOMErrorCallback)
+   *
+   * \param data Additional data that should be passed to the callback.
+   */
+  void SetOOMErrorHandler(OOMErrorCallbackWithData that, void* data);
+
+  /**
    * Add a callback to invoke in case the heap size is close to the heap limit.
    * If multiple callbacks are added, only the most recently added callback is
    * invoked.
@@ -1692,13 +1733,11 @@ class V8_EXPORT Isolate {
 
   void SetWasmLoadSourceMapCallback(WasmLoadSourceMapCallback callback);
 
-  void SetWasmImportedStringsEnabledCallback(
-      WasmImportedStringsEnabledCallback callback);
+  void SetWasmCustomDescriptorsEnabledCallback(
+      WasmCustomDescriptorsEnabledCallback callback);
 
   void SetSharedArrayBufferConstructorEnabledCallback(
       SharedArrayBufferConstructorEnabledCallback callback);
-
-  void SetWasmJSPIEnabledCallback(WasmJSPIEnabledCallback callback);
 
   /**
    * This function can be called by the embedder to signal V8 that the dynamic

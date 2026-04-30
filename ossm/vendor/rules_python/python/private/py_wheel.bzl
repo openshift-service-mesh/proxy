@@ -14,9 +14,12 @@
 
 "Implementation of py_wheel rule"
 
+load(":attributes.bzl", "CONFIG_SETTINGS_ATTR", "apply_config_settings_attr")
 load(":py_info.bzl", "PyInfo")
 load(":py_package.bzl", "py_package_lib")
+load(":rule_builders.bzl", "ruleb")
 load(":stamp.bzl", "is_stamping_enabled")
+load(":transition_labels.bzl", "TRANSITION_LABELS")
 load(":version.bzl", "version")
 
 PyWheelInfo = provider(
@@ -341,12 +344,13 @@ def _py_wheel_impl(ctx):
     # Currently this is only the description file (if used).
     other_inputs = []
 
-    # Wrap the inputs into a file to reduce command line length.
+    # Wrap the inputs into a file to reduce command line length, deferring
+    # depset expansion to execution time via Args.add_all with map_each.
     packageinputfile = ctx.actions.declare_file(ctx.attr.name + "_target_wrapped_inputs.txt")
-    content = ""
-    for input_file in inputs_to_package.to_list():
-        content += _input_file_to_arg(input_file) + "\n"
-    ctx.actions.write(output = packageinputfile, content = content)
+    package_args = ctx.actions.args()
+    package_args.set_param_file_format("multiline")
+    package_args.add_all(inputs_to_package, map_each = _input_file_to_arg)
+    ctx.actions.write(output = packageinputfile, content = package_args)
     other_inputs.append(packageinputfile)
 
     args = ctx.actions.args()
@@ -577,10 +581,15 @@ tries to locate `.runfiles` directory which is not packaged in the wheel.
         _requirement_attrs,
         _entrypoint_attrs,
         _other_attrs,
+        CONFIG_SETTINGS_ATTR,
     ),
 )
 
-py_wheel = rule(
+def _transition_wheel_impl(settings, attr):
+    """Transition for py_wheel."""
+    return apply_config_settings_attr(dict(settings), attr)
+
+py_wheel = ruleb.Rule(
     implementation = py_wheel_lib.implementation,
     doc = """\
 Internal rule used by the [py_wheel macro](#py_wheel).
@@ -590,4 +599,9 @@ For example, a `bazel query` for a user's `py_wheel` macro expands to `py_wheel`
 in the way they expect.
 """,
     attrs = py_wheel_lib.attrs,
-)
+    cfg = transition(
+        implementation = _transition_wheel_impl,
+        inputs = TRANSITION_LABELS,
+        outputs = TRANSITION_LABELS,
+    ),
+).build()

@@ -5,6 +5,8 @@
 package prototext_test
 
 import (
+	"bytes"
+	"fmt"
 	"math"
 	"testing"
 
@@ -13,12 +15,14 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/internal/detrand"
 	"google.golang.org/protobuf/internal/flags"
+	"google.golang.org/protobuf/internal/protobuild"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/testing/protopack"
 
 	pb2 "google.golang.org/protobuf/internal/testprotos/textpb2"
 	pb3 "google.golang.org/protobuf/internal/testprotos/textpb3"
+	pbeditions "google.golang.org/protobuf/internal/testprotos/textpbeditions"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -28,141 +32,24 @@ func init() {
 }
 
 func TestMarshal(t *testing.T) {
-	tests := []struct {
+	type test struct {
 		desc    string
 		mo      prototext.MarshalOptions
 		input   proto.Message
 		want    string
 		wantErr bool // TODO: Verify error message content.
 		skip    bool
-	}{{
-		desc:  "proto2 optional scalars not set",
-		input: &pb2.Scalars{},
-		want:  "",
-	}, {
-		desc:  "proto3 scalars not set",
-		input: &pb3.Scalars{},
-		want:  "",
-	}, {
-		desc:  "proto3 optional not set",
-		input: &pb3.Proto3Optional{},
-		want:  "",
-	}, {
-		desc: "proto2 optional scalars set to zero values",
-		input: &pb2.Scalars{
-			OptBool:     proto.Bool(false),
-			OptInt32:    proto.Int32(0),
-			OptInt64:    proto.Int64(0),
-			OptUint32:   proto.Uint32(0),
-			OptUint64:   proto.Uint64(0),
-			OptSint32:   proto.Int32(0),
-			OptSint64:   proto.Int64(0),
-			OptFixed32:  proto.Uint32(0),
-			OptFixed64:  proto.Uint64(0),
-			OptSfixed32: proto.Int32(0),
-			OptSfixed64: proto.Int64(0),
-			OptFloat:    proto.Float32(0),
-			OptDouble:   proto.Float64(0),
-			OptBytes:    []byte{},
-			OptString:   proto.String(""),
-		},
-		want: `opt_bool: false
-opt_int32: 0
-opt_int64: 0
-opt_uint32: 0
-opt_uint64: 0
-opt_sint32: 0
-opt_sint64: 0
-opt_fixed32: 0
-opt_fixed64: 0
-opt_sfixed32: 0
-opt_sfixed64: 0
-opt_float: 0
-opt_double: 0
-opt_bytes: ""
-opt_string: ""
-`,
-	}, {
-		desc: "proto3 optional set to zero values",
-		input: &pb3.Proto3Optional{
-			OptBool:    proto.Bool(false),
-			OptInt32:   proto.Int32(0),
-			OptInt64:   proto.Int64(0),
-			OptUint32:  proto.Uint32(0),
-			OptUint64:  proto.Uint64(0),
-			OptFloat:   proto.Float32(0),
-			OptDouble:  proto.Float64(0),
-			OptString:  proto.String(""),
-			OptBytes:   []byte{},
-			OptEnum:    pb3.Enum_ZERO.Enum(),
-			OptMessage: &pb3.Nested{},
-		},
-		want: `opt_bool: false
-opt_int32: 0
-opt_int64: 0
-opt_uint32: 0
-opt_uint64: 0
-opt_float: 0
-opt_double: 0
-opt_string: ""
-opt_bytes: ""
-opt_enum: ZERO
-opt_message: {}
-`,
-	}, {
-		desc: "proto3 scalars set to zero values",
-		input: &pb3.Scalars{
-			SBool:     false,
-			SInt32:    0,
-			SInt64:    0,
-			SUint32:   0,
-			SUint64:   0,
-			SSint32:   0,
-			SSint64:   0,
-			SFixed32:  0,
-			SFixed64:  0,
-			SSfixed32: 0,
-			SSfixed64: 0,
-			SFloat:    0,
-			SDouble:   0,
-			SBytes:    []byte{},
-			SString:   "",
-		},
-		want: "",
-	}, {
-		desc: "proto2 optional scalars set to some values",
-		input: &pb2.Scalars{
-			OptBool:     proto.Bool(true),
-			OptInt32:    proto.Int32(0xff),
-			OptInt64:    proto.Int64(0xdeadbeef),
-			OptUint32:   proto.Uint32(47),
-			OptUint64:   proto.Uint64(0xdeadbeef),
-			OptSint32:   proto.Int32(-1001),
-			OptSint64:   proto.Int64(-0xffff),
-			OptFixed64:  proto.Uint64(64),
-			OptSfixed32: proto.Int32(-32),
-			OptFloat:    proto.Float32(1.02),
-			OptDouble:   proto.Float64(1.0199999809265137),
-			OptBytes:    []byte("\xe8\xb0\xb7\xe6\xad\x8c"),
-			OptString:   proto.String("谷歌"),
-		},
-		want: `opt_bool: true
-opt_int32: 255
-opt_int64: 3735928559
-opt_uint32: 47
-opt_uint64: 3735928559
-opt_sint32: -1001
-opt_sint64: -65535
-opt_fixed64: 64
-opt_sfixed32: -32
-opt_float: 1.02
-opt_double: 1.0199999809265137
-opt_bytes: "谷歌"
-opt_string: "谷歌"
-`,
-	}, {
+	}
+	tests := []test{{
 		desc: "proto2 string with invalid UTF-8",
 		input: &pb2.Scalars{
+			OptString: proto.String("abc\xff"),
+		},
+		want: `opt_string: "abc\xff"
+`,
+	}, {
+		desc: "protoeditions string with invalid UTF-8",
+		input: &pbeditions.Scalars{
 			OptString: proto.String("abc\xff"),
 		},
 		want: `opt_string: "abc\xff"
@@ -171,6 +58,12 @@ opt_string: "谷歌"
 		desc: "proto3 string with invalid UTF-8",
 		input: &pb3.Scalars{
 			SString: "abc\xff",
+		},
+		wantErr: true,
+	}, {
+		desc: "protoeditions utf8 validated string with invalid UTF-8",
+		input: &pbeditions.UTF8Validated{
+			ValidatedString: "abc\xff",
 		},
 		wantErr: true,
 	}, {
@@ -223,10 +116,28 @@ opt_string: "谷歌"
 opt_nested_enum: 0
 `,
 	}, {
+		desc: "protoeditions enum set to zero value",
+		input: &pbeditions.Enums{
+			OptEnum:       pbeditions.Enum(0).Enum(),
+			OptNestedEnum: pbeditions.Enums_NestedEnum(0).Enum(),
+		},
+		want: `opt_enum: 0
+opt_nested_enum: 0
+`,
+	}, {
 		desc: "proto2 enum",
 		input: &pb2.Enums{
 			OptEnum:       pb2.Enum_ONE.Enum(),
 			OptNestedEnum: pb2.Enums_UNO.Enum(),
+		},
+		want: `opt_enum: ONE
+opt_nested_enum: UNO
+`,
+	}, {
+		desc: "protoeditions enum",
+		input: &pbeditions.Enums{
+			OptEnum:       pbeditions.Enum_ONE.Enum(),
+			OptNestedEnum: pbeditions.Enums_UNO.Enum(),
 		},
 		want: `opt_enum: ONE
 opt_nested_enum: UNO
@@ -250,6 +161,15 @@ opt_nested_enum: DOS
 opt_nested_enum: -101
 `,
 	}, {
+		desc: "protoeditions enum set to unnamed numeric values",
+		input: &pbeditions.Enums{
+			OptEnum:       pbeditions.Enum(101).Enum(),
+			OptNestedEnum: pbeditions.Enums_NestedEnum(-101).Enum(),
+		},
+		want: `opt_enum: 101
+opt_nested_enum: -101
+`,
+	}, {
 		desc:  "proto3 enum not set",
 		input: &pb3.Enums{},
 		want:  "",
@@ -260,6 +180,21 @@ opt_nested_enum: -101
 			SNestedEnum: pb3.Enums_CERO,
 		},
 		want: "",
+	}, {
+		desc: "protoeditions implicit enum field set to default value",
+		input: &pbeditions.Enums{
+			ImplicitEnum: pbeditions.OpenEnum_UNKNOWN,
+		},
+		want: "",
+	}, {
+		desc: "protoeditions implicit enum field",
+		input: &pbeditions.Enums{
+			ImplicitEnum:       pbeditions.OpenEnum_EINS,
+			ImplicitNestedEnum: pbeditions.Enums_ZEHN,
+		},
+		want: `implicit_enum: EINS
+implicit_nested_enum: ZEHN
+`,
 	}, {
 		desc: "proto3 enum",
 		input: &pb3.Enums{
@@ -277,6 +212,15 @@ s_nested_enum: UNO
 		},
 		want: `s_enum: TWO
 s_nested_enum: DOS
+`,
+	}, {
+		desc: "protoeditions implicit enum set to unnamed numeric values",
+		input: &pbeditions.Enums{
+			ImplicitEnum:       -47,
+			ImplicitNestedEnum: 47,
+		},
+		want: `implicit_enum: -47
+implicit_nested_enum: 47
 `,
 	}, {
 		desc: "proto3 enum set to unnamed numeric values",
@@ -301,11 +245,37 @@ s_nested_enum: 47
 OptGroup: {}
 `,
 	}, {
+		desc: "protoeditions nested message set to empty",
+		input: &pbeditions.Nests{
+			OptNested: &pbeditions.Nested{},
+			Optgroup:  &pbeditions.Nests_OptGroup{},
+		},
+		want: `opt_nested: {}
+OptGroup: {}
+`,
+	}, {
 		desc: "proto2 nested messages",
 		input: &pb2.Nests{
 			OptNested: &pb2.Nested{
 				OptString: proto.String("nested message"),
 				OptNested: &pb2.Nested{
+					OptString: proto.String("another nested message"),
+				},
+			},
+		},
+		want: `opt_nested: {
+  opt_string: "nested message"
+  opt_nested: {
+    opt_string: "another nested message"
+  }
+}
+`,
+	}, {
+		desc: "protoeditions nested messages",
+		input: &pbeditions.Nests{
+			OptNested: &pbeditions.Nested{
+				OptString: proto.String("nested message"),
+				OptNested: &pbeditions.Nested{
 					OptString: proto.String("another nested message"),
 				},
 			},
@@ -336,6 +306,52 @@ OptGroup: {}
     opt_string: "nested message inside a group"
   }
   OptNestedGroup: {
+    opt_fixed32: 47
+  }
+}
+`,
+	}, {
+		desc: "protoeditions group-like delimited encoded message field",
+		input: &pbeditions.Nests{
+			Optgroup: &pbeditions.Nests_OptGroup{
+				OptString: proto.String("inside a group"),
+				OptNested: &pbeditions.Nested{
+					OptString: proto.String("nested message inside a group"),
+				},
+				Optnestedgroup: &pbeditions.Nests_OptGroup_OptNestedGroup{
+					OptFixed32: proto.Uint32(47),
+				},
+			},
+		},
+		want: `OptGroup: {
+  opt_string: "inside a group"
+  opt_nested: {
+    opt_string: "nested message inside a group"
+  }
+  OptNestedGroup: {
+    opt_fixed32: 47
+  }
+}
+`,
+	}, {
+		desc: "protoeditions delimited encoded message field",
+		input: &pbeditions.Nests{
+			DelimitedField: &pbeditions.Nests_OptGroup{
+				OptString: proto.String("second group"),
+				OptNested: &pbeditions.Nested{
+					OptString: proto.String("second nested message inside a group"),
+				},
+				NestedDelimitedField: &pbeditions.Nests_OptGroup_OptNestedGroup{
+					OptFixed32: proto.Uint32(47),
+				},
+			},
+		},
+		want: `delimited_field: {
+  opt_string: "second group"
+  opt_nested: {
+    opt_string: "second nested message inside a group"
+  }
+  nested_delimited_field: {
     opt_fixed32: 47
   }
 }
@@ -372,6 +388,14 @@ OptGroup: {}
 		input: &pb3.Nests{
 			SNested: &pb3.Nested{
 				SString: "abc\xff",
+			},
+		},
+		wantErr: true,
+	}, {
+		desc: "protoeditions nested message contains invalid UTF-8",
+		input: &pbeditions.NestsUTF8Validated{
+			ValidatedMessage: &pbeditions.UTF8Validated{
+				ValidatedString: "abc\xff",
 			},
 		},
 		wantErr: true,
@@ -1410,6 +1434,128 @@ value: "\x80"
 `,
 	}}
 
+	for _, msg := range makeMessages(protobuild.Message{},
+		&pb2.Scalars{},
+		&pb3.Scalars{},
+		&pb3.Proto3Optional{},
+		&pbeditions.Scalars{},
+		&pbeditions.ImplicitScalars{},
+	) {
+		tests = append(tests, test{
+			desc:  fmt.Sprintf("optional scalars not set (%T)", msg),
+			input: msg,
+			want:  "",
+		})
+	}
+
+	for _, msg := range makeMessages(protobuild.Message{
+		"opt_bool":     false,
+		"opt_int32":    0,
+		"opt_int64":    0,
+		"opt_uint32":   0,
+		"opt_uint64":   0,
+		"opt_sint32":   0,
+		"opt_sint64":   0,
+		"opt_fixed32":  0,
+		"opt_fixed64":  0,
+		"opt_sfixed32": 0,
+		"opt_sfixed64": 0,
+		"opt_float":    0,
+		"opt_double":   0,
+		"opt_bytes":    []byte{},
+		"opt_string":   "",
+	},
+		&pb2.Scalars{},
+		&pb3.Proto3Optional{},
+		&pbeditions.Scalars{},
+	) {
+		tests = append(tests, test{
+			desc:  fmt.Sprintf("optional scalars set to zero values (%T)", msg),
+			input: msg,
+			want: `opt_bool: false
+opt_int32: 0
+opt_int64: 0
+opt_uint32: 0
+opt_uint64: 0
+opt_sint32: 0
+opt_sint64: 0
+opt_fixed32: 0
+opt_fixed64: 0
+opt_sfixed32: 0
+opt_sfixed64: 0
+opt_float: 0
+opt_double: 0
+opt_bytes: ""
+opt_string: ""
+`,
+		})
+	}
+
+	for _, msg := range makeMessages(protobuild.Message{
+		"s_bool":     false,
+		"s_int32":    0,
+		"s_int64":    0,
+		"s_uint32":   0,
+		"s_uint64":   0,
+		"s_sint32":   0,
+		"s_sint64":   0,
+		"s_fixed32":  0,
+		"s_fixed64":  0,
+		"s_sfixed32": 0,
+		"s_sfixed64": 0,
+		"s_float":    0,
+		"s_double":   0,
+		"s_bytes":    []byte{},
+		"s_string":   "",
+	},
+		&pb3.Scalars{},
+		&pbeditions.ImplicitScalars{},
+	) {
+		tests = append(tests, test{
+			desc:  fmt.Sprintf("implicit scalars set to zero values (%T)", msg),
+			input: msg,
+			want:  "",
+		})
+	}
+
+	for _, msg := range makeMessages(protobuild.Message{
+		"opt_bool":     true,
+		"opt_int32":    0xff,
+		"opt_int64":    int64(0xdeadbeef),
+		"opt_uint32":   47,
+		"opt_uint64":   uint64(0xdeadbeef),
+		"opt_sint32":   -1001,
+		"opt_sint64":   -0xffff,
+		"opt_fixed64":  64,
+		"opt_sfixed32": -32,
+		"opt_float":    1.02,
+		"opt_double":   1.0199999809265137,
+		"opt_bytes":    []byte("\xe8\xb0\xb7\xe6\xad\x8c"),
+		"opt_string":   "谷歌",
+	},
+		&pb2.Scalars{},
+		&pbeditions.Scalars{},
+	) {
+		tests = append(tests, test{
+			desc:  fmt.Sprintf("optional scalars set to some values (%T)", msg),
+			input: msg,
+			want: `opt_bool: true
+opt_int32: 255
+opt_int64: 3735928559
+opt_uint32: 47
+opt_uint64: 3735928559
+opt_sint32: -1001
+opt_sint64: -65535
+opt_fixed64: 64
+opt_sfixed32: -32
+opt_float: 1.02
+opt_double: 1.0199999809265137
+opt_bytes: "谷歌"
+opt_string: "谷歌"
+`,
+		})
+	}
+
 	for _, tt := range tests {
 		tt := tt
 		if tt.skip {
@@ -1426,12 +1572,53 @@ value: "\x80"
 				t.Error("Marshal() got nil error, want error\n")
 			}
 			got := string(b)
-			if tt.want != "" && got != tt.want {
+			if got != tt.want {
 				t.Errorf("Marshal()\n<got>\n%v\n<want>\n%v\n", got, tt.want)
 				if diff := cmp.Diff(tt.want, got); diff != "" {
 					t.Errorf("Marshal() diff -want +got\n%v\n", diff)
 				}
 			}
 		})
+	}
+}
+
+func TestEncodeAppend(t *testing.T) {
+	want := []byte("prefix")
+	got := append([]byte(nil), want...)
+	got, err := prototext.MarshalOptions{}.MarshalAppend(got, &pb3.Scalars{
+		SString: "value",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(got, want) {
+		t.Fatalf("MarshalAppend modified prefix: got %v, want prefix %v", got, want)
+	}
+}
+
+func TestMarshalAppendAllocations(t *testing.T) {
+	m := &pb3.Scalars{SInt32: 1}
+	const count = 1000
+	size := 9
+	b := make([]byte, size)
+	// AllocsPerRun returns an integral value.
+	marshalAllocs := testing.AllocsPerRun(count, func() {
+		_, err := prototext.MarshalOptions{}.MarshalAppend(b[:0], m)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	b = nil
+	marshalAppendAllocs := testing.AllocsPerRun(count, func() {
+		var err error
+		b, err = prototext.MarshalOptions{}.MarshalAppend(b, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	if marshalAllocs != marshalAppendAllocs {
+		t.Errorf("%v allocs/op when writing to a preallocated buffer", marshalAllocs)
+		t.Errorf("%v allocs/op when repeatedly appending to a slice", marshalAppendAllocs)
+		t.Errorf("expect amortized allocs/op to be identical")
 	}
 }

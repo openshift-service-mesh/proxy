@@ -173,12 +173,12 @@ protected:
   }
 
   std::string virtualHostName(const Route* route) {
-    Stats::StatName name = route->virtualHost()->statName();
+    Stats::StatName name = route->virtualHost().statName();
     return factory_context_.scope().symbolTable().toString(name);
   }
 
   std::string virtualClusterName(const Route* route, Http::TestRequestHeaderMapImpl& headers) {
-    Stats::StatName name = route->virtualHost()->virtualCluster(headers)->statName();
+    Stats::StatName name = route->virtualHost().virtualCluster(headers)->statName();
     return factory_context_.scope().symbolTable().toString(name);
   }
 
@@ -446,8 +446,8 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("bat3.com", "/api/locations?works=true", "CONNECT");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ("/rewrote?works=true", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/rewrote?works=true", headers.get_(Http::Headers::get().Path));
     EXPECT_EQ("bat3.com", headers.get_(Http::Headers::get().Host));
@@ -469,7 +469,7 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("bat3.com", "/api/locations?works=true", "CONNECT");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("bat3.com:10", headers.get_(Http::Headers::get().Host));
   }
@@ -478,7 +478,7 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("bat3.com:20", "/api/locations?works=true", "CONNECT");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("bat3.com:20", headers.get_(Http::Headers::get().Host));
   }
@@ -540,6 +540,12 @@ virtual_hosts:
         pattern:
           regex: "[aeioe]"
         substitution: "V"
+  - match:
+      path: "/exact/path/for/formatter"
+      case_sensitive: true
+    route:
+      cluster: www2
+      path_rewrite: "%PATH(NQ:PATH)%/something"
   - match:
       path: "/"
     route:
@@ -701,6 +707,12 @@ virtual_hosts:
         substitution: \1
       append_x_forwarded_host: true
   - match:
+      path: "/rewrite-host-with-formatter/envoyproxy.io"
+    route:
+      cluster: ats
+      host_rewrite: "%REQ(host-from-header):8%"
+      append_x_forwarded_host: true
+  - match:
       prefix: "/"
       filter_state:
       - key: envoy.address
@@ -780,6 +792,10 @@ virtual_hosts:
       {});
   TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
                         creation_status_);
+
+  if (!creation_status_.ok()) {
+    FAIL() << "Unexpected failure creating route config: " << creation_status_.ToString();
+  }
 
   // No host header, no scheme and no path header testing.
   EXPECT_EQ(
@@ -886,8 +902,8 @@ virtual_hosts:
     const RouteEntry* route_entry = route->routeEntry();
     EXPECT_EQ("www2", route_entry->clusterName());
     EXPECT_EQ("www2", virtualHostName(route.get()));
-    EXPECT_EQ("/api/new_endpoint/foo", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/api/new_endpoint/foo", headers.get_(Http::Headers::get().Path));
     EXPECT_EQ("/new_endpoint/foo", headers.get_(Http::Headers::get().EnvoyOriginalPath));
@@ -900,8 +916,8 @@ virtual_hosts:
     const RouteEntry* route_entry = route->routeEntry();
     EXPECT_EQ("www2", route_entry->clusterName());
     EXPECT_EQ("www2", virtualHostName(route.get()));
-    EXPECT_EQ("/api/new_endpoint/foo", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, false);
     EXPECT_EQ("/api/new_endpoint/foo", headers.get_(Http::Headers::get().Path));
     EXPECT_FALSE(headers.has(Http::Headers::get().EnvoyOriginalPath));
@@ -912,8 +928,8 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("api.lyft.com", "/api/locations?works=true", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ("/rewrote?works=true", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/rewrote?works=true", headers.get_(Http::Headers::get().Path));
   }
@@ -921,8 +937,8 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("api.lyft.com", "/foo", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ("/bar", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/bar", headers.get_(Http::Headers::get().Path));
   }
@@ -935,8 +951,8 @@ virtual_hosts:
     const RouteEntry* route_entry = route->routeEntry();
     EXPECT_EQ("www2", route_entry->clusterName());
     EXPECT_EQ("www2", virtualHostName(route.get()));
-    EXPECT_EQ("/forreg1_rewritten_endpoint/foo", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/forreg1_rewritten_endpoint/foo", headers.get_(Http::Headers::get().Path));
     EXPECT_EQ("/newforreg1_endpoint/foo", headers.get_(Http::Headers::get().EnvoyOriginalPath));
@@ -951,8 +967,8 @@ virtual_hosts:
     const RouteEntry* route_entry = route->routeEntry();
     EXPECT_EQ("www2", route_entry->clusterName());
     EXPECT_EQ("www2", virtualHostName(route.get()));
-    EXPECT_EQ("/nXwforrXg2_Xndpoint/tXX?test=me", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/nXwforrXg2_Xndpoint/tXX?test=me", headers.get_(Http::Headers::get().Path));
     EXPECT_EQ("/newforreg2_endpoint/tee?test=me",
@@ -967,8 +983,8 @@ virtual_hosts:
     const RouteEntry* route_entry = route->routeEntry();
     EXPECT_EQ("www2", route_entry->clusterName());
     EXPECT_EQ("www2", virtualHostName(route.get()));
-    EXPECT_EQ("/VxVct/pVth/fVr/rVgVx1", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/VxVct/pVth/fVr/rVgVx1", headers.get_(Http::Headers::get().Path));
     EXPECT_EQ("/exact/path/for/regex1", headers.get_(Http::Headers::get().EnvoyOriginalPath));
@@ -983,12 +999,43 @@ virtual_hosts:
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
     EXPECT_EQ("www2", route_entry->clusterName());
     EXPECT_EQ("www2", virtualHostName(route.get()));
-    EXPECT_EQ("/VxVct/pVth/fVr/rVgVx1?test=aeiou",
-              route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/VxVct/pVth/fVr/rVgVx1?test=aeiou", headers.get_(Http::Headers::get().Path));
     EXPECT_EQ("/exact/path/for/regex1?test=aeiou",
+              headers.get_(Http::Headers::get().EnvoyOriginalPath));
+  }
+
+  // Formatter path rewrite after exact path match testing.
+  {
+    Http::TestRequestHeaderMapImpl headers =
+        genHeaders("www.lyft.com", "/exact/path/for/formatter", "GET");
+    const RouteConstSharedPtr route = config.route(headers, 0);
+    const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
+    EXPECT_EQ("www2", route_entry->clusterName());
+    EXPECT_EQ("www2", virtualHostName(route.get()));
+
+    const Formatter::Context formatter_context(&headers);
+    route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
+    EXPECT_EQ("/exact/path/for/formatter/something", headers.get_(Http::Headers::get().Path));
+    EXPECT_EQ("/exact/path/for/formatter", headers.get_(Http::Headers::get().EnvoyOriginalPath));
+  }
+
+  // Formatter path rewrite after exact path match testing, with query parameters.
+  {
+    Http::TestRequestHeaderMapImpl headers =
+        genHeaders("www.lyft.com", "/exact/path/for/formatter?test=aeiou", "GET");
+    const RouteConstSharedPtr route = config.route(headers, 0);
+    const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
+    EXPECT_EQ("www2", route_entry->clusterName());
+    EXPECT_EQ("www2", virtualHostName(route.get()));
+
+    const Formatter::Context formatter_context(&headers);
+    route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
+    EXPECT_EQ("/exact/path/for/formatter/something?test=aeiou",
+              headers.get_(Http::Headers::get().Path));
+    EXPECT_EQ("/exact/path/for/formatter?test=aeiou",
               headers.get_(Http::Headers::get().EnvoyOriginalPath));
   }
 
@@ -997,9 +1044,8 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers = genHeaders("api.lyft.com", "/host/rewrite/me", "GET");
 
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ(absl::optional<std::string>(), route_entry->currentUrlPathAfterRewrite(headers));
-    EXPECT_FALSE(route_entry->currentUrlPathAfterRewrite(headers).has_value());
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("new_host", headers.get_(Http::Headers::get().Host));
     EXPECT_EQ("api.lyft.com", headers.getEnvoyOriginalHostValue());
@@ -1008,7 +1054,7 @@ virtual_hosts:
     EXPECT_EQ("", headers.get_(Http::Headers::get().ForwardedHost));
 
     Http::TestRequestHeaderMapImpl headers2 = genHeaders("api.lyft.com", "/host/rewrite/me", "GET");
-    const Formatter::HttpFormatterContext formatter_context2(&headers2);
+    const Formatter::Context formatter_context2(&headers2);
     // Host rewrite testing with x-envoy-* headers suppressed.
     route_entry->finalizeRequestHeaders(headers2, formatter_context2, stream_info, false);
     EXPECT_EQ("new_host", headers2.get_(Http::Headers::get().Host));
@@ -1020,8 +1066,8 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("api.lyft.com", "/rewrite-host-with-header-value", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_FALSE(route_entry->currentUrlPathAfterRewrite(headers).has_value());
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("rewrote", headers.get_(Http::Headers::get().Host));
     EXPECT_EQ("api.lyft.com", headers.getEnvoyOriginalHostValue());
@@ -1033,8 +1079,8 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("api.lyft.com", "/do-not-rewrite-host-with-header-value", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_FALSE(route_entry->currentUrlPathAfterRewrite(headers).has_value());
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("api.lyft.com", headers.get_(Http::Headers::get().Host));
     EXPECT_EQ("", headers.getEnvoyOriginalHostValue());
@@ -1046,8 +1092,8 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("api.lyft.com", "/rewrite-host-with-path-regex/envoyproxy.io", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_FALSE(route_entry->currentUrlPathAfterRewrite(headers).has_value());
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("envoyproxy.io", headers.get_(Http::Headers::get().Host));
     EXPECT_EQ("api.lyft.com", headers.getEnvoyOriginalHostValue());
@@ -1059,10 +1105,25 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers = genHeaders(
         "api.lyft.com", "/rewrite-host-with-path-regex/envoyproxy.io?query=query", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_FALSE(route_entry->currentUrlPathAfterRewrite(headers).has_value());
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("envoyproxy.io", headers.get_(Http::Headers::get().Host));
+    EXPECT_EQ("api.lyft.com", headers.getEnvoyOriginalHostValue());
+    EXPECT_EQ("api.lyft.com", headers.get_(Http::Headers::get().ForwardedHost));
+  }
+
+  // Rewrites host using formatter.
+  {
+    Http::TestRequestHeaderMapImpl headers =
+        genHeaders("api.lyft.com", "/rewrite-host-with-formatter/envoyproxy.io", "GET");
+    const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
+
+    headers.setCopy(Http::LowerCaseString("host-from-header"), "test.com-xxx");
+
+    const Formatter::Context formatter_context(&headers);
+    route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
+    EXPECT_EQ("test.com", headers.get_(Http::Headers::get().Host));
     EXPECT_EQ("api.lyft.com", headers.getEnvoyOriginalHostValue());
     EXPECT_EQ("api.lyft.com", headers.get_(Http::Headers::get().ForwardedHost));
   }
@@ -1072,8 +1133,8 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("api.lyft.com", "/API/locations?works=true", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ("/rewrote?works=true", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/rewrote?works=true", headers.get_(Http::Headers::get().Path));
   }
@@ -1081,8 +1142,8 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("api.lyft.com", "/fooD", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ("/cAndy", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/cAndy", headers.get_(Http::Headers::get().Path));
   }
@@ -1091,8 +1152,8 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("api.lyft.com", "/FOO", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_FALSE(route_entry->currentUrlPathAfterRewrite(headers).has_value());
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/FOO", headers.get_(Http::Headers::get().Path));
   }
@@ -1100,8 +1161,8 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("api.lyft.com", "/ApPles", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_FALSE(route_entry->currentUrlPathAfterRewrite(headers).has_value());
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/ApPles", headers.get_(Http::Headers::get().Path));
   }
@@ -1111,7 +1172,7 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("api.lyft.com", "/oLDhost/rewrite/me", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("api.lyft.com", headers.get_(Http::Headers::get().Host));
   }
@@ -1120,8 +1181,8 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("api.lyft.com", "/Tart", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_FALSE(route_entry->currentUrlPathAfterRewrite(headers).has_value());
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/Tart", headers.get_(Http::Headers::get().Path));
   }
@@ -1131,7 +1192,7 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("api.lyft.com", "/newhost/rewrite/me", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("new_host", headers.get_(Http::Headers::get().Host));
   }
@@ -1140,8 +1201,8 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("bat.com", "/647", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ("/rewrote", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/rewrote", headers.get_(Http::Headers::get().Path));
   }
@@ -1150,16 +1211,16 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("bat.com", "/970?foo=true", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ("/rewrote?foo=true", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/rewrote?foo=true", headers.get_(Http::Headers::get().Path));
   }
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("bat.com", "/foo/bar/238?bar=true", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ("/rewrote?bar=true", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/rewrote?bar=true", headers.get_(Http::Headers::get().Path));
   }
@@ -1168,8 +1229,8 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("bat.com", "/xx/yy/6472", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ("/four/6472/endpoint/xx/yy", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/four/6472/endpoint/xx/yy", headers.get_(Http::Headers::get().Path));
     EXPECT_EQ("/xx/yy/6472", headers.get_(Http::Headers::get().EnvoyOriginalPath));
@@ -1179,9 +1240,8 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("bat.com", "/xx/yy/6472?test=foo", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ("/four/6472/endpoint/xx/yy?test=foo",
-              route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("/four/6472/endpoint/xx/yy?test=foo", headers.get_(Http::Headers::get().Path));
     EXPECT_EQ("/xx/yy/6472?test=foo", headers.get_(Http::Headers::get().EnvoyOriginalPath));
@@ -1309,6 +1369,50 @@ virtual_hosts:
                           EnvoyException, "no argument for repetition operator");
 }
 
+TEST_F(RouteMatcherTest, TestRoutesWithInvalidPathRewriteFormatter) {
+  std::string invalid_route = R"EOF(
+virtual_hosts:
+  - name: test
+    domains: ["*"]
+    routes:
+      - match:
+          path: "/test"
+        route:
+          cluster: "www2"
+          path_rewrite: "%XXXXX(X-TEST)%"
+  )EOF";
+
+  NiceMock<Envoy::StreamInfo::MockStreamInfo> stream_info;
+  factory_context_.cluster_manager_.initializeClusters({"www2"}, {});
+  TestConfigImpl config(parseRouteConfigurationFromYaml(invalid_route), factory_context_, true,
+                        creation_status_);
+  EXPECT_FALSE(creation_status_.ok());
+  EXPECT_TRUE(
+      absl::StrContains(creation_status_.message(), "Failed to create path rewrite formatter: "));
+}
+
+TEST_F(RouteMatcherTest, TestRoutesWithInvalidHostRewriteFormatter) {
+  std::string invalid_route = R"EOF(
+virtual_hosts:
+  - name: test
+    domains: ["*"]
+    routes:
+      - match:
+          path: "/test"
+        route:
+          cluster: "www2"
+          host_rewrite: "%XXXXX(X-TEST)%"
+  )EOF";
+
+  NiceMock<Envoy::StreamInfo::MockStreamInfo> stream_info;
+  factory_context_.cluster_manager_.initializeClusters({"www2"}, {});
+  TestConfigImpl config(parseRouteConfigurationFromYaml(invalid_route), factory_context_, true,
+                        creation_status_);
+  EXPECT_FALSE(creation_status_.ok());
+  EXPECT_TRUE(
+      absl::StrContains(creation_status_.message(), "Failed to create host rewrite formatter: "));
+}
+
 // Virtual cluster that contains neither pattern nor regex. This must be checked while pattern is
 // deprecated.
 TEST_F(RouteMatcherTest, TestRoutesWithInvalidVirtualCluster) {
@@ -1395,7 +1499,7 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("lyft.com", "/new_endpoint/foo", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("match_tree", headers.get_("x-route-header"));
   }
@@ -1403,7 +1507,7 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("lyft.com", "/new_endpoint/bar", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("match_tree_2", headers.get_("x-route-header"));
   }
@@ -1615,7 +1719,7 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("lyft.com", "/new_endpoint/foo/1", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("match_tree_1_1", headers.get_("x-route-header"));
   }
@@ -1624,7 +1728,7 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("lyft.com", "/new_endpoint/foo/2/bar", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("match_tree_1_2", headers.get_("x-route-header"));
   }
@@ -1634,7 +1738,7 @@ virtual_hosts:
         genHeaders("lyft.com", "/new_endpoint/foo/match_header", "GET");
     headers.setCopy(Http::LowerCaseString("x-match-header"), "matched");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("match_tree_1_3", headers.get_("x-route-header"));
   }
@@ -1647,7 +1751,7 @@ virtual_hosts:
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("lyft.com", "/new_endpoint/bar", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("match_tree_2", headers.get_("x-route-header"));
   }
@@ -1803,7 +1907,7 @@ request_headers_to_remove:
       Http::TestRequestHeaderMapImpl headers =
           genHeaders("www.lyft.com", "/new_endpoint/foo", "GET");
       const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-      const Formatter::HttpFormatterContext formatter_context(&headers);
+      const Formatter::Context formatter_context(&headers);
       route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
       EXPECT_EQ("route-override", headers.get_("x-global-header1"));
       EXPECT_EQ("route-override", headers.get_("x-vhost-header1"));
@@ -1827,7 +1931,7 @@ request_headers_to_remove:
     {
       Http::TestRequestHeaderMapImpl headers = genHeaders("www.lyft.com", "/", "GET");
       const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-      const Formatter::HttpFormatterContext formatter_context(&headers);
+      const Formatter::Context formatter_context(&headers);
       route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
       EXPECT_EQ("vhost-override", headers.get_("x-global-header1"));
       EXPECT_EQ("vhost1-www2", headers.get_("x-vhost-header1"));
@@ -1849,7 +1953,7 @@ request_headers_to_remove:
     {
       Http::TestRequestHeaderMapImpl headers = genHeaders("www-staging.lyft.net", "/foo", "GET");
       const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-      const Formatter::HttpFormatterContext formatter_context(&headers);
+      const Formatter::Context formatter_context(&headers);
       route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
       EXPECT_EQ("global1", headers.get_("x-global-header1"));
       EXPECT_EQ("vhost1-www2_staging", headers.get_("x-vhost-header1"));
@@ -1870,7 +1974,7 @@ request_headers_to_remove:
     {
       Http::TestRequestHeaderMapImpl headers = genHeaders("api.lyft.com", "/", "GET");
       const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-      const Formatter::HttpFormatterContext formatter_context(&headers);
+      const Formatter::Context formatter_context(&headers);
       route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
       EXPECT_EQ("global1", headers.get_("x-global-header1"));
       auto transforms = route_entry->requestHeaderTransforms(stream_info);
@@ -1899,7 +2003,7 @@ TEST_F(RouteMatcherTest, TestRequestHeadersToAddWithAppendFalse) {
     {
       Http::TestRequestHeaderMapImpl headers = genHeaders("www.lyft.com", "/endpoint", "GET");
       const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-      const Formatter::HttpFormatterContext formatter_context(&headers);
+      const Formatter::Context formatter_context(&headers);
       route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info,
                                           true); // Added headers.
       EXPECT_EQ("global", headers.get_("x-global-header"));
@@ -1928,7 +2032,7 @@ TEST_F(RouteMatcherTest, TestRequestHeadersToAddWithAppendFalse) {
     {
       Http::TestRequestHeaderMapImpl headers = genHeaders("www.lyft.com", "/", "GET");
       const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-      const Formatter::HttpFormatterContext formatter_context(&headers);
+      const Formatter::Context formatter_context(&headers);
       route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info,
                                           true); // Added headers.
       EXPECT_EQ("global", headers.get_("x-global-header"));
@@ -1953,7 +2057,7 @@ TEST_F(RouteMatcherTest, TestRequestHeadersToAddWithAppendFalse) {
     {
       Http::TestRequestHeaderMapImpl headers = genHeaders("www.example.com", "/", "GET");
       const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-      const Formatter::HttpFormatterContext formatter_context(&headers);
+      const Formatter::Context formatter_context(&headers);
       route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info,
                                           true); // Added headers.
       EXPECT_EQ("global", headers.get_("x-global-header"));
@@ -1984,7 +2088,7 @@ TEST_F(RouteMatcherTest, TestRequestHeadersToAddWithAppendFalseMostSpecificWins)
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("www.lyft.com", "/endpoint", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info,
                                         true); // Added headers.
     EXPECT_EQ("route-endpoint", headers.get_("x-global-header"));
@@ -2012,7 +2116,7 @@ TEST_F(RouteMatcherTest, TestRequestHeadersToAddWithAppendFalseMostSpecificWins)
   {
     Http::TestRequestHeaderMapImpl headers = genHeaders("www.lyft.com", "/", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info,
                                         true); // Added headers.
     EXPECT_EQ("vhost-www2", headers.get_("x-global-header"));
@@ -2050,7 +2154,7 @@ TEST_F(RouteMatcherTest, TestAddRemoveResponseHeaders) {
           genHeaders("www.lyft.com", "/new_endpoint/foo", "GET");
       const RouteEntry* route_entry = config.route(req_headers, 0)->routeEntry();
       Http::TestResponseHeaderMapImpl headers;
-      const Formatter::HttpFormatterContext formatter_context(&req_headers, &headers);
+      const Formatter::Context formatter_context(&req_headers, &headers);
       route_entry->finalizeResponseHeaders(headers, formatter_context, stream_info);
       EXPECT_EQ("route-override", headers.get_("x-global-header1"));
       EXPECT_EQ("route-override", headers.get_("x-vhost-header1"));
@@ -2074,7 +2178,7 @@ TEST_F(RouteMatcherTest, TestAddRemoveResponseHeaders) {
       Http::TestRequestHeaderMapImpl req_headers = genHeaders("www.lyft.com", "/", "GET");
       const RouteEntry* route_entry = config.route(req_headers, 0)->routeEntry();
       Http::TestResponseHeaderMapImpl headers;
-      const Formatter::HttpFormatterContext formatter_context(&req_headers, &headers);
+      const Formatter::Context formatter_context(&req_headers, &headers);
       route_entry->finalizeResponseHeaders(headers, formatter_context, stream_info);
       EXPECT_EQ("vhost-override", headers.get_("x-global-header1"));
       EXPECT_EQ("vhost1-www2", headers.get_("x-vhost-header1"));
@@ -2098,7 +2202,7 @@ TEST_F(RouteMatcherTest, TestAddRemoveResponseHeaders) {
           genHeaders("www-staging.lyft.net", "/foo", "GET");
       const RouteEntry* route_entry = config.route(req_headers, 0)->routeEntry();
       Http::TestResponseHeaderMapImpl headers;
-      const Formatter::HttpFormatterContext formatter_context(&req_headers, &headers);
+      const Formatter::Context formatter_context(&req_headers, &headers);
       route_entry->finalizeResponseHeaders(headers, formatter_context, stream_info);
       EXPECT_EQ("global1", headers.get_("x-global-header1"));
       EXPECT_EQ("vhost1-www2_staging", headers.get_("x-vhost-header1"));
@@ -2118,7 +2222,7 @@ TEST_F(RouteMatcherTest, TestAddRemoveResponseHeaders) {
       Http::TestRequestHeaderMapImpl req_headers = genHeaders("api.lyft.com", "/", "GET");
       const RouteEntry* route_entry = config.route(req_headers, 0)->routeEntry();
       Http::TestResponseHeaderMapImpl headers;
-      const Formatter::HttpFormatterContext formatter_context(&req_headers, &headers);
+      const Formatter::Context formatter_context(&req_headers, &headers);
       route_entry->finalizeResponseHeaders(headers, formatter_context, stream_info);
       EXPECT_EQ("global1", headers.get_("x-global-header1"));
       auto transforms = route_entry->responseHeaderTransforms(stream_info);
@@ -2146,7 +2250,7 @@ TEST_F(RouteMatcherTest, TestAddRemoveResponseHeadersOverwriteIfExistOrAdd) {
       genHeaders("www.lyft.com", "/new_endpoint/foo", "GET");
   const RouteEntry* route_entry = config.route(req_headers, 0)->routeEntry();
   Http::TestResponseHeaderMapImpl headers;
-  const Formatter::HttpFormatterContext formatter_context(&req_headers, &headers);
+  const Formatter::Context formatter_context(&req_headers, &headers);
   route_entry->finalizeResponseHeaders(headers, formatter_context, stream_info);
   EXPECT_EQ("global1", headers.get_("x-global-header1"));
   EXPECT_EQ("vhost1-www2", headers.get_("x-vhost-header1"));
@@ -2177,7 +2281,7 @@ TEST_F(RouteMatcherTest, TestAddRemoveResponseHeadersAddIfAbsent) {
       genHeaders("www.lyft.com", "/new_endpoint/foo", "GET");
   const RouteEntry* route_entry = config.route(req_headers, 0)->routeEntry();
   Http::TestResponseHeaderMapImpl headers{{":status", "200"}, {"x-route-header", "exist-value"}};
-  const Formatter::HttpFormatterContext formatter_context(&req_headers, &headers);
+  const Formatter::Context formatter_context(&req_headers, &headers);
   route_entry->finalizeResponseHeaders(headers, formatter_context, stream_info);
   EXPECT_EQ("route-override", headers.get_("x-global-header1"));
   EXPECT_EQ("route-override", headers.get_("x-vhost-header1"));
@@ -2210,7 +2314,7 @@ TEST_F(RouteMatcherTest, TestAddRemoveResponseHeadersAppendMostSpecificWins) {
       genHeaders("www.lyft.com", "/new_endpoint/foo", "GET");
   const RouteEntry* route_entry = config.route(req_headers, 0)->routeEntry();
   Http::TestResponseHeaderMapImpl headers;
-  const Formatter::HttpFormatterContext formatter_context(&req_headers, &headers);
+  const Formatter::Context formatter_context(&req_headers, &headers);
   route_entry->finalizeResponseHeaders(headers, formatter_context, stream_info);
   EXPECT_EQ("route-override", headers.get_("x-global-header1"));
   EXPECT_EQ("route-override", headers.get_("x-vhost-header1"));
@@ -2269,7 +2373,7 @@ protected:
         genHeaders("www.lyft.com", "/new_endpoint/foo", "GET");
     const RouteEntry* route_entry = config.route(req_headers, 0)->routeEntry();
     Http::TestResponseHeaderMapImpl headers;
-    const Formatter::HttpFormatterContext formatter_context(&req_headers, &headers);
+    const Formatter::Context formatter_context(&req_headers, &headers);
     route_entry->finalizeResponseHeaders(headers, formatter_context, stream_info);
     auto transforms =
         run_request_header_test
@@ -2325,7 +2429,7 @@ most_specific_header_mutations_wins: true
     Http::TestRequestHeaderMapImpl req_headers = genHeaders("www.lyft.com", "/cacheable", "GET");
     const RouteEntry* route_entry = config.route(req_headers, 0)->routeEntry();
     Http::TestResponseHeaderMapImpl headers;
-    const Formatter::HttpFormatterContext formatter_context(&req_headers, &headers);
+    const Formatter::Context formatter_context(&req_headers, &headers);
     route_entry->finalizeResponseHeaders(headers, formatter_context, stream_info);
     EXPECT_FALSE(headers.has("cache-control"));
   }
@@ -2334,7 +2438,7 @@ most_specific_header_mutations_wins: true
     Http::TestRequestHeaderMapImpl req_headers = genHeaders("www.lyft.com", "/foo", "GET");
     const RouteEntry* route_entry = config.route(req_headers, 0)->routeEntry();
     Http::TestResponseHeaderMapImpl headers;
-    const Formatter::HttpFormatterContext formatter_context(&req_headers, &headers);
+    const Formatter::Context formatter_context(&req_headers, &headers);
     route_entry->finalizeResponseHeaders(headers, formatter_context, stream_info);
     EXPECT_EQ("private", headers.get_("cache-control"));
   }
@@ -2875,6 +2979,40 @@ virtual_hosts:
     EXPECT_EQ("local_service_with_multiple_query_parameters",
               config.route(headers, 0)->routeEntry()->clusterName());
   }
+}
+
+TEST_F(RouteMatcherTest, AlternateHostHeaderMatching) {
+  const std::string yaml = R"EOF(
+vhost_header: "alternate"
+virtual_hosts:
+- name: default_service
+  domains:
+  - "*"
+  routes:
+  - match:
+      prefix: "/"
+    route:
+      cluster: default_service
+- name: local_service
+  domains:
+  - "foo.example.org"
+  routes:
+  - match:
+      prefix: "/"
+    route:
+      cluster: local_service
+  )EOF";
+
+  factory_context_.cluster_manager_.initializeClusters({"local_service", "default_service"}, {});
+  TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
+                        creation_status_);
+
+  std::pair<std::string, std::string> alternate_host = {"alternate", "foo.example.org"};
+  OptionalGenHeadersArg optional_arg;
+  optional_arg.random_value_pair = alternate_host;
+
+  Http::TestRequestHeaderMapImpl headers = genHeaders("example.com", "/", "GET", optional_arg);
+  EXPECT_EQ("local_service", config.route(headers, 0)->routeEntry()->clusterName());
 }
 
 TEST_F(RouteMatcherTest, DynamicMetadataMatchedRouting) {
@@ -3636,15 +3774,15 @@ virtual_hosts:
     // Make sure things forward and don't crash.
     // TODO(mattklein123): Make this a real test of behavior.
     EXPECT_EQ(std::chrono::milliseconds(0), route->routeEntry()->timeout());
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     route->routeEntry()->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     route->routeEntry()->priority();
     route->routeEntry()->rateLimitPolicy();
     route->routeEntry()->retryPolicy();
     route->routeEntry()->shadowPolicies();
-    route->virtualHost()->virtualCluster(headers);
+    route->virtualHost().virtualCluster(headers);
     route->virtualHost();
-    route->virtualHost()->rateLimitPolicy();
+    route->virtualHost().rateLimitPolicy();
     route->routeEntry()->pathMatchCriterion();
     route->routeEntry()->hedgePolicy();
     route->routeEntry()->maxGrpcTimeout();
@@ -3677,8 +3815,8 @@ TEST_F(RouteMatcherTest, WeightedClusterHeader) {
                         creation_status_);
 
   Http::TestRequestHeaderMapImpl headers = genHeaders("www1.lyft.com", "/foo", "GET");
-  // The configured cluster header isn't present in the request headers, therefore cluster selection
-  // fails and we get the empty string
+  // The configured cluster header isn't present in the request headers, therefore cluster
+  // selection fails and we get the empty string
   EXPECT_EQ("", config.route(headers, 115)->routeEntry()->clusterName());
   // Modify the header mapping.
   headers.addCopy("some_header", "some_cluster");
@@ -3714,8 +3852,8 @@ TEST_F(RouteMatcherTest, WeightedClusterWithProvidedRandomValue) {
   OptionalGenHeadersArg optional_arg;
   optional_arg.random_value_pair = random_value_pair;
   Http::TestRequestHeaderMapImpl headers = genHeaders("www1.lyft.com", "/foo", "GET", optional_arg);
-  // Here we expect `cluster1` is selected even though random value passed to `route()` function is
-  // 60 because the overridden weight specified in `random_value_pair` is 10.
+  // Here we expect `cluster1` is selected even though random value passed to `route()` function
+  // is 60 because the overridden weight specified in `random_value_pair` is 10.
   EXPECT_EQ("cluster1", config.route(headers, 60)->routeEntry()->clusterName());
 
   headers = genHeaders("www1.lyft.com", "/foo", "GET");
@@ -4284,7 +4422,7 @@ virtual_hosts:
 
   EXPECT_TRUE(config.route(genHeaders("www.example.com", "/foo", "GET"), 0)
                   ->virtualHost()
-                  ->includeIsTimeoutRetryHeader());
+                  .includeIsTimeoutRetryHeader());
 }
 
 TEST_F(RouteMatcherTest, NoIsTimeoutRetryHeader) {
@@ -4304,7 +4442,7 @@ virtual_hosts:
 
   EXPECT_FALSE(config.route(genHeaders("www.example.com", "/foo", "GET"), 0)
                    ->virtualHost()
-                   ->includeIsTimeoutRetryHeader());
+                   .includeIsTimeoutRetryHeader());
 }
 
 TEST_F(RouteMatcherTest, ClusterNotFoundResponseCode) {
@@ -4642,7 +4780,7 @@ virtual_hosts:
                                          {"x-existing-header", "existing-value"}};
 
   NiceMock<Envoy::StreamInfo::MockStreamInfo> stream_info;
-  const Envoy::Formatter::HttpFormatterContext formatter_context{&headers};
+  const Envoy::Formatter::Context formatter_context{&headers};
 
   // Apply the shadow policy header transformations
   foo_shadow_policies[0]->headerEvaluator().evaluateHeaders(headers, formatter_context,
@@ -5556,10 +5694,9 @@ virtual_hosts:
   factory_context_.cluster_manager_.initializeClusters({"www2", "www2_staging"}, {});
   TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
                         creation_status_);
-  EXPECT_EQ(
-      creation_status_.message(),
-      "Only unique values for domains are permitted. Duplicate entry of domain *.lyft.com in route "
-      "foo");
+  EXPECT_EQ(creation_status_.message(), "Only unique values for domains are permitted. Duplicate "
+                                        "entry of domain *.lyft.com in route "
+                                        "foo");
 }
 
 TEST_F(RouteMatcherTest, TestDuplicatePrefixWildcardDomainConfig) {
@@ -5581,9 +5718,8 @@ virtual_hosts:
   factory_context_.cluster_manager_.initializeClusters({"www2", "www2_staging"}, {});
   TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
                         creation_status_);
-  EXPECT_EQ(
-      creation_status_.message(),
-      "Only unique values for domains are permitted. Duplicate entry of domain bar.* in route foo");
+  EXPECT_EQ(creation_status_.message(), "Only unique values for domains are permitted. Duplicate "
+                                        "entry of domain bar.* in route foo");
 }
 
 TEST_F(RouteMatcherTest, TestInvalidCharactersInPrefixRewrites) {
@@ -5998,6 +6134,9 @@ virtual_hosts:
   factory_context_.cluster_manager_.initializeClusters({"www2"}, {});
   TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
                         creation_status_);
+  Http::TestResponseHeaderMapImpl response_headers;
+  NiceMock<Envoy::StreamInfo::MockStreamInfo> stream_info;
+
   EXPECT_EQ(nullptr, config.route(genRedirectHeaders("www.foo.com", "/foo", true, true), 0).route);
   {
     Http::TestRequestHeaderMapImpl headers = genRedirectHeaders("www.lyft.com", "/foo", true, true);
@@ -6052,29 +6191,42 @@ virtual_hosts:
               config.route(headers, 0)->directResponseEntry()->newUri(headers));
   }
   {
+    std::string body;
     Http::TestRequestHeaderMapImpl headers =
         genRedirectHeaders("direct.example.com", "/gone", true, false);
     EXPECT_EQ(Http::Code::Gone, config.route(headers, 0)->directResponseEntry()->responseCode());
-    EXPECT_EQ("Example text 1", config.route(headers, 0)->directResponseEntry()->responseBody());
+    EXPECT_EQ("Example text 1", config.route(headers, 0)
+                                    ->directResponseEntry()
+                                    ->formatBody(headers, response_headers, stream_info, body));
   }
   {
+    std::string body;
     Http::TestRequestHeaderMapImpl headers =
         genRedirectHeaders("direct.example.com", "/error", true, false);
     EXPECT_EQ(Http::Code::InternalServerError,
               config.route(headers, 0)->directResponseEntry()->responseCode());
-    EXPECT_EQ("Example text 2", config.route(headers, 0)->directResponseEntry()->responseBody());
+    EXPECT_EQ("Example text 2", config.route(headers, 0)
+                                    ->directResponseEntry()
+                                    ->formatBody(headers, response_headers, stream_info, body));
   }
   {
+    std::string body;
     Http::TestRequestHeaderMapImpl headers =
         genRedirectHeaders("direct.example.com", "/no_body", true, false);
     EXPECT_EQ(Http::Code::OK, config.route(headers, 0)->directResponseEntry()->responseCode());
-    EXPECT_TRUE(config.route(headers, 0)->directResponseEntry()->responseBody().empty());
+    EXPECT_TRUE(config.route(headers, 0)
+                    ->directResponseEntry()
+                    ->formatBody(headers, response_headers, stream_info, body)
+                    .empty());
   }
   {
+    std::string body;
     Http::TestRequestHeaderMapImpl headers =
         genRedirectHeaders("direct.example.com", "/static", true, false);
     EXPECT_EQ(Http::Code::OK, config.route(headers, 0)->directResponseEntry()->responseCode());
-    EXPECT_EQ("Example text 3", config.route(headers, 0)->directResponseEntry()->responseBody());
+    EXPECT_EQ("Example text 3", config.route(headers, 0)
+                                    ->directResponseEntry()
+                                    ->formatBody(headers, response_headers, stream_info, body));
   }
   {
     Http::TestRequestHeaderMapImpl headers =
@@ -6500,7 +6652,7 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl request_headers;
     Http::TestResponseHeaderMapImpl response_headers;
     StreamInfo::MockStreamInfo stream_info;
-    const Formatter::HttpFormatterContext formatter_context(&request_headers, &response_headers);
+    const Formatter::Context formatter_context(&request_headers, &response_headers);
     route_entry->finalizeResponseHeaders(response_headers, formatter_context, stream_info);
     EXPECT_EQ(response_headers, Http::TestResponseHeaderMapImpl{});
   }
@@ -6928,7 +7080,7 @@ virtual_hosts:
     const RouteEntry* route_entry = cached_route->routeEntry();
     EXPECT_EQ("cluster1", route_entry->clusterName());
 
-    const Formatter::HttpFormatterContext formatter_context(&headers, &resp_headers);
+    const Formatter::Context formatter_context(&headers, &resp_headers);
 
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("cluster1", headers.get_("x-req-cluster"));
@@ -6946,7 +7098,7 @@ virtual_hosts:
     const RouteEntry* route_entry = cached_route->routeEntry();
     EXPECT_EQ("cluster2", route_entry->clusterName());
 
-    const Formatter::HttpFormatterContext formatter_context(&headers, &resp_headers);
+    const Formatter::Context formatter_context(&headers, &resp_headers);
 
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("cluster2", headers.get_("x-req-cluster"));
@@ -6994,7 +7146,7 @@ virtual_hosts:
     const RouteEntry* route_entry = dynamic_route->routeEntry();
     EXPECT_EQ("cluster1", route_entry->clusterName());
 
-    const Formatter::HttpFormatterContext formatter_context(&headers, &resp_headers);
+    const Formatter::Context formatter_context(&headers, &resp_headers);
 
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("cluster-adding-this-value", headers.get_("x-req-cluster"));
@@ -7395,7 +7547,7 @@ virtual_hosts:
                         creation_status_);
 
   const Router::CorsPolicy* cors_policy =
-      config.route(genHeaders("api.lyft.com", "/api", "GET"), 0)->virtualHost()->corsPolicy();
+      config.route(genHeaders("api.lyft.com", "/api", "GET"), 0)->virtualHost().corsPolicy();
 
   EXPECT_EQ(cors_policy->enabled(), false);
   EXPECT_EQ(cors_policy->shadowEnabled(), true);
@@ -7635,7 +7787,7 @@ request_headers_to_add:
   EXPECT_CALL(active_span, getTraceId()).WillRepeatedly(Return("trace-id"));
 
   auto formatter_context =
-      Formatter::HttpFormatterContext().setRequestHeaders(headers).setActiveSpan(active_span);
+      Formatter::Context().setRequestHeaders(headers).setActiveSpan(active_span);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("127.0.0.1", headers.get_("x-client-ip"));
   EXPECT_EQ("trace-id", headers.get_("trace-id-from-formatter"));
@@ -7674,6 +7826,48 @@ request_headers_to_add:
   EXPECT_THROW(TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
                                      creation_status_),
                EnvoyException);
+}
+
+// Validate that request_headers_to_add can reference router-set headers like
+// x-envoy-expected-rq-timeout-ms and x-envoy-attempt-count on the initial request.
+TEST_F(CustomRequestHeadersTest, RequestHeadersCanReferenceRouterSetHeaders) {
+  const std::string yaml = R"EOF(
+virtual_hosts:
+- name: www2
+  domains:
+  - www.lyft.com
+  routes:
+  - match:
+      prefix: "/endpoint"
+    route:
+      cluster: www2
+      timeout: 5s
+    request_headers_to_add:
+    - header:
+        key: x-timeout-copy
+        value: "%REQ(x-envoy-expected-rq-timeout-ms)%"
+    - header:
+        key: x-attempt-copy
+        value: "%REQ(x-envoy-attempt-count)%"
+  )EOF";
+  NiceMock<Envoy::StreamInfo::MockStreamInfo> stream_info;
+  factory_context_.cluster_manager_.initializeClusters({"www2"}, {});
+  TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
+                        creation_status_);
+  Http::TestRequestHeaderMapImpl headers = genHeaders("www.lyft.com", "/endpoint", "GET");
+  const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
+
+  // Simulate router filter setting these headers before calling finalizeRequestHeaders.
+  // This mimics the fix where router-set headers are added before finalizeRequestHeaders.
+  headers.addCopy(Http::LowerCaseString("x-envoy-expected-rq-timeout-ms"), "5000");
+  headers.addCopy(Http::LowerCaseString("x-envoy-attempt-count"), "1");
+
+  auto formatter_context = Formatter::Context().setRequestHeaders(headers);
+  route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
+
+  // Verify that request_headers_to_add was able to reference router-set headers.
+  EXPECT_EQ("5000", headers.get_("x-timeout-copy"));
+  EXPECT_EQ("1", headers.get_("x-attempt-copy"));
 }
 
 TEST(MetadataMatchCriteriaImpl, Create) {
@@ -7927,10 +8121,15 @@ virtual_hosts:
 
   TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
                         creation_status_);
+  std::string body;
   Http::TestRequestHeaderMapImpl headers =
       genRedirectHeaders("direct.example.com", "/", true, false);
+  Http::TestResponseHeaderMapImpl response_headers;
+  NiceMock<Envoy::StreamInfo::MockStreamInfo> stream_info;
   EXPECT_EQ(Http::Code::OK, config.route(headers, 0)->directResponseEntry()->responseCode());
-  EXPECT_EQ(response_body, config.route(headers, 0)->directResponseEntry()->responseBody());
+  EXPECT_EQ(response_body, config.route(headers, 0)
+                               ->directResponseEntry()
+                               ->formatBody(headers, response_headers, stream_info, body));
 }
 
 TEST_F(RouteConfigurationDirectResponseBodyTest, DirectResponseBodySizeTooLarge) {
@@ -8015,9 +8214,14 @@ virtual_hosts:
 
   const auto* direct_response =
       config.route(genHeaders("example.com", "/", "GET"), 0)->directResponseEntry();
+  Http::TestRequestHeaderMapImpl request_headers;
+  Http::TestResponseHeaderMapImpl response_headers;
+  NiceMock<Envoy::StreamInfo::MockStreamInfo> stream_info;
+  std::string body;
   EXPECT_NE(nullptr, direct_response);
   EXPECT_EQ(Http::Code::OK, direct_response->responseCode());
-  EXPECT_STREQ("content", direct_response->responseBody().c_str());
+  EXPECT_EQ("content",
+            direct_response->formatBody(request_headers, response_headers, stream_info, body));
 }
 
 // Test the parsing of a direct response configuration where the response body is too large.
@@ -8038,6 +8242,73 @@ virtual_hosts:
   TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
                         creation_status_);
   EXPECT_EQ(creation_status_.message(), "response body size is 4097 bytes; maximum is 4096");
+}
+
+// Test that responseContentType() returns the correct content type based on body_format config.
+TEST_F(RouteConfigurationV2, DirectResponseBodyFormatContentType) {
+  const std::string yaml = R"EOF(
+virtual_hosts:
+  - name: direct
+    domains: [example.com]
+    routes:
+      - match: { prefix: "/html" }
+        direct_response:
+          status: 200
+          body_format:
+            text_format_source:
+              inline_string: "Hello"
+            content_type: "text/html"
+      - match: { prefix: "/json" }
+        direct_response:
+          status: 200
+          body_format:
+            json_format:
+              key: "value"
+      - match: { prefix: "/text" }
+        direct_response:
+          status: 200
+          body_format:
+            text_format_source:
+              inline_string: "Hello"
+      - match: { prefix: "/nobody" }
+        direct_response:
+          status: 200
+  )EOF";
+
+  TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
+                        creation_status_);
+
+  // Explicit content_type in body_format should be returned.
+  {
+    const auto* direct_response =
+        config.route(genHeaders("example.com", "/html", "GET"), 0)->directResponseEntry();
+    ASSERT_NE(nullptr, direct_response);
+    EXPECT_EQ("text/html", direct_response->responseContentType());
+  }
+
+  // json_format without explicit content_type should return "application/json".
+  {
+    const auto* direct_response =
+        config.route(genHeaders("example.com", "/json", "GET"), 0)->directResponseEntry();
+    ASSERT_NE(nullptr, direct_response);
+    EXPECT_EQ("application/json", direct_response->responseContentType());
+  }
+
+  // text_format without explicit content_type should return empty string.
+  {
+    const auto* direct_response =
+        config.route(genHeaders("example.com", "/text", "GET"), 0)->directResponseEntry();
+    ASSERT_NE(nullptr, direct_response);
+    EXPECT_EQ("", direct_response->responseContentType());
+  }
+
+  // No body_format at all should return empty string.
+  {
+    const auto* direct_response =
+        config.route(genHeaders("example.com", "/nobody", "GET"), 0)->directResponseEntry();
+    ASSERT_NE(nullptr, direct_response);
+    EXPECT_EQ("", direct_response->responseContentType());
+  }
 }
 
 // Test loading broken config throws EnvoyException.
@@ -8105,12 +8376,12 @@ virtual_hosts:
   EXPECT_NE(nullptr, typed_metadata.get<Baz>(baz_factory.name()));
   EXPECT_EQ("bluh", typed_metadata.get<Baz>(baz_factory.name())->name);
 
-  EXPECT_EQ("bar", symbol_table_->toString(route->virtualHost()->statName()));
-  EXPECT_EQ("foo", route->virtualHost()->routeConfig().name());
+  EXPECT_EQ("bar", symbol_table_->toString(route->virtualHost().statName()));
+  EXPECT_EQ("foo", route->virtualHost().routeConfig().name());
 
   // Get metadata of virtual host.
-  const auto& vh_metadata = route->virtualHost()->metadata();
-  const auto& vh_typed_metadata = route->virtualHost()->typedMetadata();
+  const auto& vh_metadata = route->virtualHost().metadata();
+  const auto& vh_typed_metadata = route->virtualHost().typedMetadata();
 
   EXPECT_EQ(
       "test_vh_value",
@@ -8119,8 +8390,8 @@ virtual_hosts:
   EXPECT_EQ("vh_bluh", vh_typed_metadata.get<Baz>(baz_factory.name())->name);
 
   // Get metadata of route configuration.
-  const auto& config_metadata = route->virtualHost()->routeConfig().metadata();
-  const auto& config_typed_metadata = route->virtualHost()->routeConfig().typedMetadata();
+  const auto& config_metadata = route->virtualHost().routeConfig().metadata();
+  const auto& config_typed_metadata = route->virtualHost().routeConfig().typedMetadata();
 
   EXPECT_EQ("test_config_value",
             Envoy::Config::Metadata::metadataValue(&config_metadata, "com.bar.foo", "baz")
@@ -8174,6 +8445,8 @@ virtual_hosts:
               metadata_key:
                 key: com.bar.foo
                 path: [ { key: xx }, { key: yy } ]
+          operation: "%REQ(my-custom-downstream-operation)%"
+          upstream_operation: "my-custom-fixed-upstream-operation"
         route: { cluster: ww2 }
   )EOF";
   BazFactory baz_factory;
@@ -8191,10 +8464,14 @@ virtual_hosts:
   EXPECT_EQ(0, route1->tracingConfig()->getRandomSampling().denominator());
   EXPECT_EQ(100, route1->tracingConfig()->getOverallSampling().numerator());
   EXPECT_EQ(0, route1->tracingConfig()->getOverallSampling().denominator());
+  EXPECT_FALSE(route1->tracingConfig()->operation().has_value());
+  EXPECT_FALSE(route1->tracingConfig()->upstreamOperation().has_value());
 
   // Check default values for client sampling
   EXPECT_EQ(100, route2->tracingConfig()->getClientSampling().numerator());
   EXPECT_EQ(0, route2->tracingConfig()->getClientSampling().denominator());
+  EXPECT_FALSE(route2->tracingConfig()->operation().has_value());
+  EXPECT_FALSE(route2->tracingConfig()->upstreamOperation().has_value());
 
   EXPECT_EQ(1, route3->tracingConfig()->getClientSampling().numerator());
   EXPECT_EQ(0, route3->tracingConfig()->getClientSampling().denominator());
@@ -8202,12 +8479,23 @@ virtual_hosts:
   EXPECT_EQ(1, route3->tracingConfig()->getRandomSampling().denominator());
   EXPECT_EQ(3, route3->tracingConfig()->getOverallSampling().numerator());
   EXPECT_EQ(0, route3->tracingConfig()->getOverallSampling().denominator());
+  EXPECT_TRUE(route3->tracingConfig()->operation().has_value());
+  EXPECT_TRUE(route3->tracingConfig()->upstreamOperation().has_value());
 
   std::vector<std::string> custom_tags{"ltag", "etag", "rtag", "mtag"};
   const Tracing::CustomTagMap& map = route3->tracingConfig()->getCustomTags();
   for (const std::string& custom_tag : custom_tags) {
     EXPECT_NE(map.find(custom_tag), map.end());
   }
+
+  NiceMock<Envoy::StreamInfo::MockStreamInfo> stream_info;
+  Http::TestRequestHeaderMapImpl headers{{"my-custom-downstream-operation", "downstream_op"}};
+  Formatter::Context formatter_context;
+  formatter_context.setRequestHeaders(headers);
+  EXPECT_EQ("downstream_op",
+            route3->tracingConfig()->operation()->format(formatter_context, stream_info));
+  EXPECT_EQ("my-custom-fixed-upstream-operation",
+            route3->tracingConfig()->upstreamOperation()->format(formatter_context, stream_info));
 }
 
 // Test to check Prefix Rewrite for redirects
@@ -9113,8 +9401,8 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("path.prefix.com", "/rewrite?param=true#fragment", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ("/new/api?param=true#fragment", route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("rewrite-cluster", route_entry->clusterName());
     EXPECT_EQ("/new/api?param=true#fragment", headers.get_(Http::Headers::get().Path));
@@ -9126,9 +9414,8 @@ virtual_hosts:
     Http::TestRequestHeaderMapImpl headers =
         genHeaders("path.prefix.com", "/rewrite/this?param=true#fragment", "GET");
     const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-    EXPECT_EQ("/new/api/this?param=true#fragment",
-              route_entry->currentUrlPathAfterRewrite(headers));
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+
+    const Formatter::Context formatter_context(&headers);
     route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
     EXPECT_EQ("rewrite-cluster", route_entry->clusterName());
     EXPECT_EQ("/new/api/this?param=true#fragment", headers.get_(Http::Headers::get().Path));
@@ -9289,6 +9576,106 @@ virtual_hosts:
   }
 }
 
+TEST_F(RouteMatcherTest, CookieMatch) {
+
+  const std::string yaml = R"EOF(
+virtual_hosts:
+  - name: cookie
+    domains: ["*"]
+    routes:
+      - match:
+          prefix: "/"
+          cookies:
+            - name: session
+              string_match:
+                exact: foo
+            - name: build
+              string_match:
+                prefix: "1"
+        route: { cluster: cookie-cluster }
+      - match:
+          prefix: "/"
+        route: { cluster: default }
+  )EOF";
+
+  factory_context_.cluster_manager_.initializeClusters({"cookie-cluster", "default"}, {});
+  TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
+                        creation_status_);
+
+  {
+    auto headers = genHeaders("cookie.example.com", "/foo", "GET");
+    headers.addCopy("cookie", "session=foo; build=123");
+
+    EXPECT_EQ("cookie-cluster", config.route(headers, 0)->routeEntry()->clusterName());
+  }
+
+  {
+    auto headers = genHeaders("cookie.example.com", "/foo", "GET");
+    headers.addCopy("cookie", "session=foo; build=999");
+
+    EXPECT_EQ("default", config.route(headers, 0)->routeEntry()->clusterName());
+  }
+
+  {
+    auto headers = genHeaders("cookie.example.com", "/foo", "GET");
+    headers.addCopy("cookie", "session=bar; build=123");
+
+    EXPECT_EQ("default", config.route(headers, 0)->routeEntry()->clusterName());
+  }
+
+  {
+    auto headers = genHeaders("cookie.example.com", "/foo", "GET");
+    headers.addCopy("cookie", "session=foo");
+
+    EXPECT_EQ("default", config.route(headers, 0)->routeEntry()->clusterName());
+  }
+}
+
+TEST_F(RouteMatcherTest, CookieMatchInvert) {
+
+  const std::string yaml = R"EOF(
+virtual_hosts:
+  - name: cookie-invert
+    domains: ["*"]
+    routes:
+      - match:
+          prefix: "/"
+          cookies:
+            - name: blocked
+              string_match:
+                exact: nope
+              invert_match: true
+        route: { cluster: cookie-cluster }
+      - match:
+          prefix: "/"
+        route: { cluster: default }
+  )EOF";
+
+  factory_context_.cluster_manager_.initializeClusters({"cookie-cluster", "default"}, {});
+  TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
+                        creation_status_);
+
+  {
+    auto headers = genHeaders("cookie.example.com", "/foo", "GET");
+
+    EXPECT_EQ("cookie-cluster", config.route(headers, 0)->routeEntry()->clusterName());
+  }
+
+  {
+    auto headers = genHeaders("cookie.example.com", "/foo", "GET");
+    headers.addCopy("cookie", "blocked=nope");
+
+    EXPECT_EQ("default", config.route(headers, 0)->routeEntry()->clusterName());
+  }
+
+  {
+    auto headers = genHeaders("cookie.example.com", "/foo", "GET");
+    headers.addCopy("cookie", "blocked=maybe");
+
+    EXPECT_EQ("cookie-cluster", config.route(headers, 0)->routeEntry()->clusterName());
+  }
+}
+
 TEST_F(RouteConfigurationV2, RegexPrefixWithNoRewriteWorksWhenPathChanged) {
 
   // Setup regex route entry. the regex is trivial, that's ok as we only want to test that
@@ -9320,7 +9707,7 @@ virtual_hosts:
 
     // no re-write was specified; so this should not throw
     NiceMock<Envoy::StreamInfo::MockStreamInfo> stream_info;
-    const Formatter::HttpFormatterContext formatter_context(&headers);
+    const Formatter::Context formatter_context(&headers);
     EXPECT_NO_THROW(
         route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, false));
   }
@@ -9878,8 +10265,8 @@ virtual_hosts:
 
   Http::TestRequestHeaderMapImpl headers = genHeaders("path.prefix.com", "/rest/one/two", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/rest/two/one", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/rest/two/one", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -9914,10 +10301,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers =
       genHeaders("path.prefix.com", "/one/two/en/gb/ilp==/dGasdA/?key1=test1&key2=test2", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/en/gb/ilp==/dGasdA/?key1=test1&key2=test2",
-            route_entry->currentUrlPathAfterRewrite(headers));
 
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/en/gb/ilp==/dGasdA/?key1=test1&key2=test2", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -9952,8 +10337,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers =
       genHeaders("path.prefix.com", "/one/two/==na/three", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/==na/three/two", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/==na/three/two", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -9988,8 +10373,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers =
       genHeaders("path.prefix.com", "/one/two/=na/three", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/=na/three/two", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/=na/three/two", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10025,9 +10410,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers =
       genHeaders("path.prefix.com", "/one/two/en/gb/ilp/dGasdA==/?key1=test1&key2=test2", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/en/gb/ilp/dGasdA==/?key1=test1&key2=test2",
-            route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/en/gb/ilp/dGasdA==/?key1=test1&key2=test2", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10063,8 +10447,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers =
       genHeaders("path.prefix.com", "/rest/one/two/song.m3u8", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/rest/one/two", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/rest/one/two", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10072,8 +10456,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers_multi =
       genHeaders("path.prefix.com", "/rest/one/two/item/another/song.m3u8", "GET");
   const RouteEntry* route_entry_multi = config.route(headers_multi, 0)->routeEntry();
-  EXPECT_EQ("/rest/one/two", route_entry_multi->currentUrlPathAfterRewrite(headers_multi));
-  const Formatter::HttpFormatterContext formatter_context_multi(&headers_multi);
+
+  const Formatter::Context formatter_context_multi(&headers_multi);
   route_entry_multi->finalizeRequestHeaders(headers_multi, formatter_context_multi, stream_info,
                                             true);
   EXPECT_EQ("/rest/one/two", headers_multi.get_(Http::Headers::get().Path));
@@ -10110,9 +10494,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers = genHeaders(
       "path.prefix.com", "/api/cart/item/one/song.m3u8?one=0&two=1&three=2&four=3&go=ls", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/one?one=0&two=1&three=2&four=3&go=ls",
-            route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/one?one=0&two=1&three=2&four=3&go=ls", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10148,8 +10531,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers =
       genHeaders("path.prefix.com", "/rest/one/two/song.m3u8", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/rest/one/two", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/rest/one/two", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10188,9 +10571,8 @@ virtual_hosts:
                  "entries?fields=FULL&client_type=WEB",
                  "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/abc@xyz.com-FL0001090004/entries?fields=FULL&client_type=WEB",
-            route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/abc@xyz.com-FL0001090004/entries?fields=FULL&client_type=WEB",
             headers.get_(Http::Headers::get().Path));
@@ -10227,8 +10609,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers =
       genHeaders("path.prefix.com", "/rest/one/two/root/sub/song.mp4", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/root/sub", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/root/sub", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10263,8 +10645,8 @@ virtual_hosts:
 
   Http::TestRequestHeaderMapImpl headers = genHeaders("path.prefix.com", "/rest/one/two", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/two/one", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/two/one", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10313,15 +10695,15 @@ virtual_hosts:
 
   Http::TestRequestHeaderMapImpl headers = genHeaders("path.prefix.com", "/rest/one/two", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/two/one", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/two/one", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
 
   headers = genHeaders("path.prefix.com", "/REST/one/two", "GET");
   route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/TEST/one", route_entry->currentUrlPathAfterRewrite(headers));
+
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/TEST/one", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10421,8 +10803,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers =
       genHeaders("path.prefix.com", "/rest/one/previous/videos/three/end", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/previous/videos/three", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/previous/videos/three", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10489,8 +10871,8 @@ virtual_hosts:
 
   Http::TestRequestHeaderMapImpl headers = genHeaders("path.prefix.com", "/rest/one/two", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/two", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/two", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10526,8 +10908,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers =
       genHeaders("path.prefix.com", "/rest/one/two/three/four", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/one", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/one", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10563,8 +10945,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers =
       genHeaders("path.prefix.com", "/rest/one/two/three/four", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/two/three/four", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/two/three/four", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10600,8 +10982,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers =
       genHeaders("path.prefix.com", "/rest/one/videos/three/end", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/videos/three", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/videos/three", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -10637,8 +11019,8 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers =
       genHeaders("path.prefix.com", "/rest/lower/upper/end", "GET");
   const RouteEntry* route_entry = config.route(headers, 0)->routeEntry();
-  EXPECT_EQ("/upper/lower", route_entry->currentUrlPathAfterRewrite(headers));
-  const Formatter::HttpFormatterContext formatter_context(&headers);
+
+  const Formatter::Context formatter_context(&headers);
   route_entry->finalizeRequestHeaders(headers, formatter_context, stream_info, true);
   EXPECT_EQ("/upper/lower", headers.get_(Http::Headers::get().Path));
   EXPECT_EQ("path.prefix.com", headers.get_(Http::Headers::get().Host));
@@ -11807,7 +12189,7 @@ virtual_hosts:
                         creation_status_);
 
   const auto& shared_config = dynamic_cast<const CommonConfigImpl&>(
-      config.route(genHeaders("bat.com", "/", "GET"), 0)->virtualHost()->routeConfig());
+      config.route(genHeaders("bat.com", "/", "GET"), 0)->virtualHost().routeConfig());
 
   EXPECT_EQ(config.mostSpecificHeaderMutationsWins(),
             shared_config.mostSpecificHeaderMutationsWins());
@@ -11887,6 +12269,32 @@ virtual_hosts:
   Http::TestRequestHeaderMapImpl headers = genHeaders("test.example.com", "/test", "GET");
   const RouteEntry* route = config.route(headers, 0)->routeEntry();
   EXPECT_EQ(4194304U, route->requestBodyBufferLimit());
+}
+
+// Test that route-level request_body_buffer_limit takes precedence over virtual_host
+// request_body_buffer_limit
+TEST_F(RouteConfigurationV2,
+       DEPRECATED_FEATURE_TEST(LegacyRequestBodyBufferLimitPrecedenceRouteOverridesVirtualHost)) {
+  const std::string yaml = R"EOF(
+virtual_hosts:
+- domains: [test.example.com]
+  name: test_host
+  per_request_buffer_limit_bytes: 223
+  routes:
+  - match: {prefix: /test}
+    route:
+      cluster: backend
+    per_request_buffer_limit_bytes: 334
+)EOF";
+
+  factory_context_.cluster_manager_.initializeClusters({"backend"}, {});
+  TestConfigImpl config(parseRouteConfigurationFromYaml(yaml), factory_context_, true,
+                        creation_status_);
+  EXPECT_TRUE(creation_status_.ok());
+
+  Http::TestRequestHeaderMapImpl headers = genHeaders("test.example.com", "/test", "GET");
+  const RouteEntry* route = config.route(headers, 0)->routeEntry();
+  EXPECT_EQ(334U, route->requestBodyBufferLimit());
 }
 
 } // namespace

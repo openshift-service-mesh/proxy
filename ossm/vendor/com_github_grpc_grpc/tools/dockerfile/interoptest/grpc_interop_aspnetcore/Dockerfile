@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM debian:12
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
 
 # needed by get-dotnet.sh script
-RUN apt-get update && apt-get install -y curl git jq libicu-dev && apt-get clean
+RUN apt-get update && apt-get install -y curl git jq && apt-get clean
 
 RUN git config --global --add safe.directory '*'
 RUN git config --global protocol.file.allow always

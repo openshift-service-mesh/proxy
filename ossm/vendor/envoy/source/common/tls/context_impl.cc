@@ -26,6 +26,8 @@
 #include "source/common/protobuf/utility.h"
 #include "source/common/runtime/runtime_features.h"
 #include "source/common/stats/utility.h"
+#include "source/common/tls/aws_lc_compat.h"
+#include "source/common/tls/cert_compression.h"
 #include "source/common/tls/cert_validator/factory.h"
 #include "source/common/tls/stats.h"
 #include "source/common/tls/utility.h"
@@ -66,10 +68,11 @@ int ContextImpl::sslExtendedSocketInfoIndex() {
   }());
 }
 
-ContextImpl::ContextImpl(Stats::Scope& scope, const Envoy::Ssl::ContextConfig& config,
-                         Server::Configuration::CommonFactoryContext& factory_context,
-                         Ssl::ContextAdditionalInitFunc additional_init,
-                         absl::Status& creation_status)
+ContextImpl::ContextImpl(
+    Stats::Scope& scope, const Envoy::Ssl::ContextConfig& config,
+    const std::vector<std::reference_wrapper<const Ssl::TlsCertificateConfig>>& tls_certificates,
+    Server::Configuration::CommonFactoryContext& factory_context,
+    Ssl::ContextAdditionalInitFunc additional_init, absl::Status& creation_status)
     : scope_(scope), stats_(generateSslStats(scope)), factory_context_(factory_context),
       tls_max_version_(config.maxProtocolVersion()),
       stat_name_set_(scope.symbolTable().makeSet("TransportSockets::Tls")),
@@ -98,7 +101,6 @@ ContextImpl::ContextImpl(Stats::Scope& scope, const Envoy::Ssl::ContextConfig& c
   SET_AND_RETURN_IF_NOT_OK(validator_or_error.status(), creation_status);
   cert_validator_ = std::move(*validator_or_error);
 
-  const auto tls_certificates = config.tlsCertificates();
   tls_contexts_.resize(std::max(static_cast<size_t>(1), tls_certificates.size()));
 
   std::vector<SSL_CTX*> ssl_contexts(tls_contexts_.size());
@@ -162,6 +164,14 @@ ContextImpl::ContextImpl(Stats::Scope& scope, const Envoy::Ssl::ContextConfig& c
         return;
       }
     }
+
+    // Register certificate compression algorithms to reduce TLS handshake size (RFC 8879).
+    // Priority: brotli > zlib (brotli generally provides best compression for certs).
+    if (Runtime::runtimeFeatureEnabled(
+            "envoy.reloadable_features.tls_certificate_compression_brotli")) {
+      CertCompression::registerBrotli(ctx.ssl_ctx_.get());
+      CertCompression::registerZlib(ctx.ssl_ctx_.get());
+    }
   }
 
   auto verify_mode_or_error = cert_validator_->initializeSslContexts(
@@ -182,9 +192,7 @@ ContextImpl::ContextImpl(Stats::Scope& scope, const Envoy::Ssl::ContextConfig& c
         // even request client certs. So, instead, we should configure a callback to skip
         // validation and always supply the callback to boring SSL.
         SSL_CTX_set_custom_verify(ctx, verify_mode, customVerifyCallback);
-#if 0  // Disabled as not implememnted in the bSSL layer
         SSL_CTX_set_reverify_on_resume(ctx, /*reverify_on_resume_enabled)=*/1);
-#endif
       }
     }
   }
@@ -326,7 +334,6 @@ ContextImpl::ContextImpl(Stats::Scope& scope, const Envoy::Ssl::ContextConfig& c
   parsed_alpn_protocols_ = parseAlpnProtocols(config.alpnProtocols(), creation_status);
   SET_AND_RETURN_IF_NOT_OK(creation_status, creation_status);
 
-  
   // Register stat names based on lists reported by BoringSSL.
   std::vector<const char*> list(SSL_get_all_cipher_names(nullptr, 0));
   SSL_get_all_cipher_names(list.data(), list.size());
@@ -336,7 +343,6 @@ ContextImpl::ContextImpl(Stats::Scope& scope, const Envoy::Ssl::ContextConfig& c
   SSL_get_all_curve_names(list.data(), list.size());
   stat_name_set_->rememberBuiltins(list);
 
-  
   list.resize(SSL_get_all_signature_algorithm_names(nullptr, 0));
   SSL_get_all_signature_algorithm_names(list.data(), list.size());
   stat_name_set_->rememberBuiltins(list);
@@ -366,7 +372,6 @@ ContextImpl::ContextImpl(Stats::Scope& scope, const Envoy::Ssl::ContextConfig& c
     }
   }
 
-         
   // Compliance policy must be applied last to have a defined behavior.
   if (const auto policy = config.compliancePolicy(); policy.has_value()) {
     switch (policy.value()) {
@@ -492,6 +497,10 @@ enum ssl_verify_result_t ContextImpl::customVerifyCallback(SSL* ssl, uint8_t* ou
     if (result.tls_alert.has_value() && out_alert) {
       *out_alert = result.tls_alert.value();
     }
+    // Store detailed error information for access log reporting.
+    if (result.error_details.has_value()) {
+      extended_socket_info->setCertificateValidationError(result.error_details.value());
+    }
     return ssl_verify_invalid;
   }
   }
@@ -523,6 +532,7 @@ ValidationResults ContextImpl::customVerifyCertChain(
       absl::NullSafeStringView(host_name));
   if (result.status != ValidationResults::ValidationStatus::Pending) {
     extended_socket_info->setCertificateValidationStatus(result.detailed_status);
+    extended_socket_info->setValidatedCertChain(std::move(result.validated_chain));
     extended_socket_info->onCertificateValidationCompleted(
         result.status == ValidationResults::ValidationStatus::Successful, false);
   }
@@ -566,11 +576,9 @@ void ContextImpl::logHandshake(SSL* ssl) const {
   // Increment the `was_key_usage_invalid_` stats to indicate the given cert would have triggered an
   // error but is allowed because the enforcement that rsa key usage and tls usage need to be
   // matched has been disabled.
-#if 0  // Disabled as SSL_was_key_usage_invalid() is not implememnted in the bSSL layer
   if (SSL_was_key_usage_invalid(ssl)) {
     stats_.was_key_usage_invalid_.inc();
   }
-#endif
 }
 
 std::vector<Ssl::PrivateKeyMethodProviderSharedPtr> ContextImpl::getPrivateKeyMethodProviders() {

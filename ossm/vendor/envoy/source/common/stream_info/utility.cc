@@ -5,8 +5,10 @@
 #include "envoy/extensions/filters/network/http_connection_manager/v3/http_connection_manager.pb.h"
 
 #include "source/common/http/default_server_string.h"
+#include "source/common/network/cidr_range.h"
 #include "source/common/runtime/runtime_features.h"
 
+#include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
 
 namespace Envoy {
@@ -176,6 +178,14 @@ absl::optional<std::chrono::nanoseconds> TimingUtility::lastUpstreamRxByteReceiv
   return duration(timing.value().get().last_upstream_rx_byte_received_, stream_info_);
 }
 
+absl::optional<std::chrono::nanoseconds> TimingUtility::firstUpstreamRxBodyByteReceived() {
+  OptRef<const UpstreamTiming> timing = getUpstreamTiming(stream_info_);
+  if (!timing) {
+    return absl::nullopt;
+  }
+  return duration(timing.value().get().first_upstream_rx_body_byte_received_, stream_info_);
+}
+
 absl::optional<std::chrono::nanoseconds> TimingUtility::upstreamHandshakeComplete() {
   OptRef<const UpstreamTiming> timing = getUpstreamTiming(stream_info_);
   if (!timing) {
@@ -232,13 +242,37 @@ absl::optional<std::chrono::nanoseconds> TimingUtility::lastDownstreamAckReceive
   return duration(timing.value().get().lastDownstreamAckReceived(), stream_info_);
 }
 
-const std::string&
-Utility::formatDownstreamAddressNoPort(const Network::Address::Instance& address) {
-  if (address.type() == Network::Address::Type::Ip) {
-    return address.ip()->addressAsString();
-  } else {
-    return address.asString();
+const std::string Utility::formatDownstreamAddressNoPort(const Network::Address::Instance& address,
+                                                         absl::optional<int> mask_prefix_len) {
+  // No masking - return address without port
+  if (!mask_prefix_len.has_value()) {
+    if (address.type() == Network::Address::Type::Ip) {
+      return address.ip()->addressAsString();
+    } else {
+      return address.asString();
+    }
   }
+
+  std::string masked_address;
+  if (address.type() != Network::Address::Type::Ip) {
+    return masked_address;
+  }
+
+  int length = mask_prefix_len.value_or(
+      address.ip()->version() == Network::Address::IpVersion::v4 ? 32 : 128);
+
+  // CidrRange::create() requires a shared_ptr. We create one with a no-op deleter since we don't
+  // own the address and shouldn't delete it.
+  Network::Address::InstanceConstSharedPtr address_ptr(&address,
+                                                       [](const Network::Address::Instance*) {});
+
+  auto cidr_range_or_error =
+      Network::Address::CidrRange::create(address_ptr, length, absl::nullopt);
+
+  if (cidr_range_or_error.ok()) {
+    masked_address = cidr_range_or_error.value().asString();
+  }
+  return masked_address;
 }
 
 const std::string
@@ -256,6 +290,15 @@ Utility::extractDownstreamAddressJustPort(const Network::Address::Instance& addr
     return address.ip()->port();
   }
   return {};
+}
+
+const std::string
+Utility::formatDownstreamAddressJustEndpointId(const Network::Address::Instance& address) {
+  std::string endpoint_id;
+  if (address.type() == Network::Address::Type::EnvoyInternal) {
+    endpoint_id = address.envoyInternalAddress()->endpointId();
+  }
+  return endpoint_id;
 }
 
 const absl::optional<Http::Code>

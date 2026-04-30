@@ -1,3 +1,17 @@
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 [package]
 edition = "2018"
 name = "wasmsign-bazel"
@@ -7,8 +21,4 @@ version = "0.1.2"
 path = "fake_lib.rs"
 
 [dependencies]
-wasmsign = {git = "https://github.com/jedisct1/wasmsign", revision = "fa4d5598f778390df09be94232972b5b865a56b8"}
-
-# Ready to upgrade to wasmsign2:
-# Which generates: //bazel/cargo/wasmsign/remote:wasmsign2-cli__wasmsign2
-#wasmsign2-cli = {git = "https://github.com/wasm-signatures/wasmsign2", revision = "07c60eee7f4c655d5a91404f5a9ffd97316d01f1"}
+wasmsign2-cli = "0.2.6"

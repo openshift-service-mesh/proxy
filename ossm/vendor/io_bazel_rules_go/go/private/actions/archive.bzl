@@ -14,7 +14,7 @@
 
 load(
     "//go/private:context.bzl",
-    "get_nogo",
+    "validate_nogo",
 )
 load(
     "//go/private:mode.bzl",
@@ -59,17 +59,21 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
     out_export = go.declare_file(go, name = source.name, ext = pre_ext + ".x")
     out_cgo_export_h = None  # set if cgo used in c-shared or c-archive mode
 
-    nogo = get_nogo(go)
-    if nogo:
+    nogo = go.nogo
+
+    # nogo is a FilesToRunProvider and some targets don't have it, some have it but no executable.
+    if nogo != None and nogo.executable != None and not "no-nogo" in go._ctx.attr.tags:
         out_facts = go.declare_file(go, name = source.name, ext = pre_ext + ".facts")
-        out_nogo_log = go.declare_file(go, name = source.name, ext = pre_ext + ".nogo.log")
-        out_nogo_validation = go.declare_file(go, name = source.name, ext = pre_ext + ".nogo")
-        out_nogo_fix = go.declare_file(go, name = source.name, ext = pre_ext + ".nogo.patch")
+        out_diagnostics = go.declare_directory(go, name = source.name, ext = pre_ext + "_nogo")
+        if validate_nogo(go):
+            out_nogo_validation = go.declare_file(go, name = source.name, ext = pre_ext + ".nogo")
+        else:
+            out_nogo_validation = None
     else:
+        nogo = None
         out_facts = None
-        out_nogo_log = None
+        out_diagnostics = None
         out_nogo_validation = None
-        out_nogo_fix = None
 
     direct = source.deps
 
@@ -83,7 +87,15 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
     importmap = "main" if source.is_main else source.importmap
     importpath, _ = effective_importpath_pkgpath(source)
 
+    cgo_out_dir = None
+    headers = depset(
+        direct = [f for f in source.srcs if f.path.split(".")[-1].lower().startswith("h")],
+        transitive = [a._headers for a in direct],
+    )
+
     if source.cgo and not go.mode.pure:
+        cgo_out_dir = go.declare_directory(go, path = out_lib.basename + ".cgo")
+
         # TODO(jayconrod): do we need to do full Bourne tokenization here?
         cppopts = [f for fs in source.cppopts for f in fs.split(" ")]
         copts = [f for fs in source.copts for f in fs.split(" ")]
@@ -110,17 +122,18 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
             importpath = importpath,
             importmap = importmap,
             archives = direct,
+            headers = headers,
             out_lib = out_lib,
             out_export = out_export,
             out_facts = out_facts,
-            out_nogo_log = out_nogo_log,
+            out_diagnostics = out_diagnostics,
             out_nogo_validation = out_nogo_validation,
-            out_nogo_fix = out_nogo_fix,
             nogo = nogo,
             out_cgo_export_h = out_cgo_export_h,
             gc_goopts = source.gc_goopts,
             cgo = True,
             cgo_inputs = cgo.inputs,
+            cgo_out_dir = cgo_out_dir,
             cppopts = cgo.cppopts,
             copts = cgo.copts,
             cxxopts = cgo.cxxopts,
@@ -140,12 +153,12 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
             importpath = importpath,
             importmap = importmap,
             archives = direct,
+            headers = headers,
             out_lib = out_lib,
             out_export = out_export,
             out_facts = out_facts,
-            out_nogo_log = out_nogo_log,
+            out_diagnostics = out_diagnostics,
             out_nogo_validation = out_nogo_validation,
-            out_nogo_fix = out_nogo_fix,
             nogo = nogo,
             gc_goopts = source.gc_goopts,
             cgo = False,
@@ -169,6 +182,7 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
         importpath_aliases = source.importpath_aliases,
         pathtype = source.pathtype,
         srcs = tuple(source.srcs),
+        cgo_out_dir = cgo_out_dir,
         _cover = source.cover,
         _embedsrcs = tuple(source.embedsrcs),
         _x_defs = tuple(source.x_defs.items()),
@@ -189,7 +203,7 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
         facts_file = out_facts,
         runfiles = source.runfiles,
         _validation_output = out_nogo_validation,
-        _nogo_fix_output = out_nogo_fix,
+        _nogo_diagnostics = out_diagnostics,
         _cgo_deps = cgo_deps,
     )
     x_defs = dict(source.x_defs)
@@ -211,4 +225,5 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
         cgo_deps = depset(transitive = [cgo_deps] + [a.cgo_deps for a in direct]),
         cgo_exports = cgo_exports,
         runfiles = runfiles,
+        _headers = headers,
     )

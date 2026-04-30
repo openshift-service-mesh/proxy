@@ -7,6 +7,8 @@ go_test(
         "//encoding/protojson",
         "//encoding/prototext",
         "//internal/testprotos/conformance",
+        "//internal/testprotos/conformance/editions",
+        "//internal/testprotos/conformance/editionsmigration",
         "//proto",
     ],
 )

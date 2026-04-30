@@ -43,7 +43,7 @@ def _perform_error_checks(
 
     if (shared_library_artifact != None and
         not cc_helper.is_valid_shared_library_artifact(shared_library_artifact)):
-        fail("'shared_library' does not produce any cc_import shared_library files (expected .so, .dylib or .dll)")
+        fail("'shared_library' does not produce any cc_import shared_library files (expected .so, .dylib, .dll or .pyd)")
 
 def _create_archive_action(
         ctx,
@@ -144,9 +144,16 @@ def _cc_import_impl(ctx):
             alwayslink = ctx.attr.alwayslink,
         )
 
+        link_flags = []
+        if static_library and cc_common.is_enabled(feature_configuration = feature_configuration, feature_name = "warn_backrefs_defined"):
+            link_flags.append(
+                "-Wl,--warn-backrefs-exclude=*{}*".format(static_library.short_path),
+            )
+        link_flags.extend(ctx.attr.linkopts)
+
         linker_input = cc_common.create_linker_input(
             libraries = depset([library_to_link]),
-            user_link_flags = depset(ctx.attr.linkopts),
+            user_link_flags = depset(link_flags),
             owner = ctx.label,
         )
 
@@ -170,6 +177,7 @@ def _cc_import_impl(ctx):
         includes = cc_helper.system_include_dirs(ctx, additional_make_variable_substitutions),
         name = ctx.label.name,
         strip_include_prefix = ctx.attr.strip_include_prefix,
+        defines = cc_helper.defines(ctx, {}),
     )
 
     this_cc_info = CcInfo(compilation_context = compilation_context, linking_context = linking_context)
@@ -341,7 +349,8 @@ binary that depends on it during runtime.
 <p> Permitted file types:
   <code>.so</code>,
   <code>.dll</code>
-  or <code>.dylib</code>
+  <code>.dylib</code>,
+  or <code>.pyd</code>
 </p>"""),
         "interface_library": attr.label(
             allow_single_file = [".ifso", ".tbd", ".lib", ".so", ".dylib"],
@@ -364,18 +373,18 @@ A single interface library for linking the shared library.
             allow_files = [".o", ".nopic.o"],
         ),
         "system_provided": attr.bool(default = False, doc = """
-If 1, it indicates the shared library required at runtime is provided by the system. In
+If enabled, it indicates the shared library required at runtime is provided by the system. In
 this case, <code>interface_library</code> should be specified and
 <code>shared_library</code> should be empty."""),
         "alwayslink": attr.bool(default = False, doc = """
-If 1, any binary that depends (directly or indirectly) on this C++
+If enabled, any binary that depends (directly or indirectly) on this C++
 precompiled library will link in all the object files archived in the static library,
 even if some contain no symbols referenced by the binary.
 This is useful if your code isn't explicitly called by code in
 the binary, e.g., if your code registers to receive some callback
 provided by some service.
 
-<p>If alwayslink doesn't work with VS 2017 on Windows, that is due to a
+<p>If <code>alwayslink</code> doesn't work with VS 2017 on Windows, that is due to a
 <a href="https://github.com/bazelbuild/bazel/issues/3949">known issue</a>,
 please upgrade your VS 2017 to the latest version.</p>"""),
         "linkopts": attr.string_list(doc = """
@@ -435,6 +444,16 @@ most build rules</a>."""),
             allow_files = True,
             flags = ["SKIP_CONSTRAINTS_OVERRIDE"],
         ),
+        "defines": attr.string_list(doc = """
+List of defines to add to the compile line of this and all dependent targets.
+Subject to <a href="${link make-variables}">"Make" variable</a> substitution and
+<a href="${link common-definitions#sh-tokenization}">Bourne shell tokenization</a>.
+Each string, which must consist of a single Bourne shell token,
+is prepended with <code>-D</code> and added to the compile command line to this target,
+as well as to every rule that depends on it. Be very careful, since this may have
+far-reaching effects -- the defines are added to every target that depends on
+this target.
+"""),
         "_use_auto_exec_groups": attr.bool(default = True),
     },  # buildifier: disable=unsorted-dict-items
     provides = [CcInfo],

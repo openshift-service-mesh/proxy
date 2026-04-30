@@ -10,6 +10,7 @@
 
 #include "include/v8-profiler.h"
 #include "src/api/api-inl.h"
+#include "src/base/platform/platform.h"
 #include "src/debug/debug.h"
 #include "src/heap/combined-heap.h"
 #include "src/heap/heap-inl.h"
@@ -59,7 +60,7 @@ std::vector<v8::Local<v8::Value>> HeapProfiler::GetDetachedJSWrapperObjects() {
   HeapObjectIterator iterator(heap());
   for (Tagged<HeapObject> obj = iterator.Next(); !obj.is_null();
        obj = iterator.Next()) {
-    if (HeapLayout::InCodeSpace(obj)) continue;
+    if (TrustedHeapLayout::InCodeSpace(obj)) continue;
     if (!IsJSApiWrapperObject(obj)) continue;
     // Ensure object is wrappable, otherwise GetDetachedness() can crash
     CppHeapObjectWrapper wrapper = CppHeapObjectWrapper(Cast<JSObject>(obj));
@@ -145,9 +146,13 @@ HeapSnapshot* HeapProfiler::TakeSnapshot(
       use_cpp_class_name.emplace(heap()->cpp_heap());
     }
 
-    HeapSnapshotGenerator generator(result, options.control,
-                                    options.global_object_name_resolver, heap(),
-                                    options.stack_state);
+    // Allow usages of v8::HeapProfiler::ObjectNameResolver for now.
+    // TODO(https://crbug.com/333672197): remove.
+    START_ALLOW_USE_DEPRECATED()
+    HeapSnapshotGenerator generator(
+        result, options.control, options.global_object_name_resolver,
+        options.context_name_resolver, heap(), options.stack_state);
+    END_ALLOW_USE_DEPRECATED()
     if (!generator.GenerateSnapshot()) {
       delete result;
       result = nullptr;
@@ -172,27 +177,46 @@ void HeapProfiler::WriteSnapshotToDiskAfterGC(HeapSnapshotMode snapshot_mode) {
   // snapshot generator to work.
   heap()->stack().SetMarkerIfNeededAndCallback([this, snapshot_mode]() {
     int64_t time = V8::GetCurrentPlatform()->CurrentClockTimeMilliseconds();
-    std::string filename = "v8-heap-" + std::to_string(time) + ".heapsnapshot";
+    int pid = base::OS::GetCurrentProcessId();
+    std::string filename = "v8-heap-" + std::to_string(time) + "-" +
+                           std::to_string(pid) + ".heapsnapshot";
+    if (v8_flags.heap_snapshot_path.value()) {
+      filename = v8_flags.heap_snapshot_path.value();
+    }
     v8::HeapProfiler::HeapSnapshotOptions options;
     std::unique_ptr<HeapSnapshot> result(
         new HeapSnapshot(this, snapshot_mode, options.numerics_mode));
-    HeapSnapshotGenerator generator(result.get(), options.control,
-                                    options.global_object_name_resolver, heap(),
-                                    options.stack_state);
+    // Allow usages of v8::HeapProfiler::ObjectNameResolver for now.
+    // TODO(https://crbug.com/333672197): remove.
+    START_ALLOW_USE_DEPRECATED()
+    HeapSnapshotGenerator generator(
+        result.get(), options.control, options.global_object_name_resolver,
+        options.context_name_resolver, heap(), options.stack_state);
+    END_ALLOW_USE_DEPRECATED()
     if (!generator.GenerateSnapshotAfterGC()) return;
     i::FileOutputStream stream(filename.c_str());
-    HeapSnapshotJSONSerializer serializer(result.get());
-    serializer.Serialize(&stream);
-    PrintF("Wrote heap snapshot to %s.\n", filename.c_str());
+    if (stream.IsOpen()) {
+      HeapSnapshotJSONSerializer serializer(result.get());
+      serializer.Serialize(&stream);
+      PrintF("Wrote heap snapshot to %s.\n", filename.c_str());
+    } else {
+      PrintF("Failed to open heap snapshot file '%s' for writing.\n",
+             filename.c_str());
+    }
   });
 }
 
 void HeapProfiler::TakeSnapshotToFile(
     const v8::HeapProfiler::HeapSnapshotOptions options, std::string filename) {
   HeapSnapshot* snapshot = TakeSnapshot(options);
+  if (!snapshot) return;
   FileOutputStream stream(filename.c_str());
-  HeapSnapshotJSONSerializer serializer(snapshot);
-  serializer.Serialize(&stream);
+  if (stream.IsOpen()) {
+    HeapSnapshotJSONSerializer serializer(snapshot);
+    serializer.Serialize(&stream);
+  } else {
+    RemoveSnapshot(snapshot);
+  }
 }
 
 std::string HeapProfiler::TakeSnapshotToString(

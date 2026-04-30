@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Flags: --allow-natives-syntax --maglev --no-always-turbofan
+// Flags: --allow-natives-syntax --maglev
 // Flags: --typed-array-length-loading
 
 const ta = new Uint8Array(128);
@@ -18,6 +18,6 @@ assertEquals(128, foo(ta));
 assertTrue(isMaglevved(foo));
 
 ta.buffer.transfer();
-assertFalse(isMaglevved(foo));
 
 assertEquals(0, foo(ta));
+assertFalse(isMaglevved(foo));

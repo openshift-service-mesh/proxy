@@ -34,26 +34,32 @@ func copyTree(destRoot, srcRoot string) error {
 			return nil
 		}
 		dest := filepath.Join(destRoot, rel)
-
-		if info.IsDir() {
-			return os.Mkdir(dest, 0o777)
-		}
-
-		r, err := os.Open(src)
-		if err != nil {
-			return err
-		}
-		defer r.Close()
-		w, err := os.Create(dest)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if cerr := w.Close(); err == nil && cerr != nil {
-				err = cerr
+		switch {
+		case info.Mode().IsDir():
+			err = os.Mkdir(dest, 0o777)
+		case info.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(src)
+			if err != nil {
+				return err
 			}
-		}()
-		_, err = io.Copy(w, r)
+			err = os.Symlink(target, dest)
+		case info.Mode().IsRegular():
+			r, err := os.Open(src)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			w, err := os.Create(dest)
+			if err != nil {
+				return err
+			}
+			defer func() {
+				if cerr := w.Close(); err == nil && cerr != nil {
+					err = cerr
+				}
+			}()
+			_, err = io.Copy(w, r)
+		}
 		return err
 	})
 }

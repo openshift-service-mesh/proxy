@@ -6,6 +6,7 @@
 #include "source/common/protobuf/utility.h"
 
 #include "test/integration/base_overload_integration_test.h"
+#include "test/integration/filters/block_filter.pb.h"
 #include "test/integration/http_protocol_integration.h"
 #include "test/integration/ssl_utility.h"
 #include "test/test_common/test_runtime.h"
@@ -295,6 +296,63 @@ TEST_P(OverloadIntegrationTest, BypassOverloadManagerTest) {
   EXPECT_EQ(true, response->headers().get(Http::Headers::get().EnvoyLocalOverloaded).empty());
   EXPECT_EQ("envoy overloaded", response->body());
   codec_client_->close();
+}
+
+// TODO: add another test for HTTP2
+TEST_P(OverloadIntegrationTest, CloseIdleQuicConnectionsWhenOverloaded) {
+  if (downstreamProtocol() != Http::CodecType::HTTP3) {
+    return; // only relevant for HTTP/3
+  }
+
+  initializeOverloadManager(
+      TestUtility::parseYaml<envoy::config::overload::v3::OverloadAction>(R"EOF(
+      name: "envoy.overload_actions.close_idle_http_connections"
+      triggers:
+        - name: "envoy.resource_monitors.testonly.fake_resource_monitor"
+          scaled:
+            scaling_threshold: 0.8
+            saturation_threshold: 0.9
+    )EOF"));
+
+  // 1. Establish a QUIC connection
+  codec_client_ = makeHttpConnection(makeClientConnection((lookupPort("http"))));
+  // Wait for the connection to be fully established.
+  test_server_->waitForCounterGe("http.config_test.downstream_cx_http3_total", 1);
+
+  // 2. Send a request and wait for the response to complete.
+  Http::TestRequestHeaderMapImpl request_headers{{":method", "GET"},
+                                                 {":path", "/test/long/url"},
+                                                 {":scheme", "http"},
+                                                 {":authority", "sni.lyft.com"}};
+  auto response = sendRequestAndWaitForResponse(request_headers, 0, default_response_headers_, 0);
+  EXPECT_TRUE(upstream_request_->complete());
+  EXPECT_TRUE(response->complete());
+  EXPECT_EQ("200", response->headers().getStatusValue());
+
+  // At this point, the EnvoyQuicServerSession should have added itself to the
+  // EnvoyQuicDispatcher's idle list.
+
+  // 2. Trigger the overload state
+  updateResource(0.95); // Set pressure to 0.95, above the 0.9 saturation threshold
+  test_server_->waitForGaugeEq("overload.envoy.overload_actions.close_idle_http_connections.active",
+                               1);
+
+  // 3. Advance time to trigger the check_idle_connection_timer (which runs every 100ms).
+  timeSystem().advanceTimeWait(std::chrono::milliseconds(100));
+
+  // 4. Wait for the connection to be closed by the server.
+  ASSERT_TRUE(codec_client_->waitForDisconnect());
+
+  // Check that the close reason was correct (this stat is incremented in
+  // EnvoyQuicDispatcher)
+  test_server_->waitForCounterGe("http.config_test.downstream_cx_destroy", 1);
+
+  codec_client_->close();
+
+  // Deactivate overload state
+  updateResource(0.7);
+  test_server_->waitForGaugeEq("overload.envoy.overload_actions.close_idle_http_connections.active",
+                               0);
 }
 
 class Http2RawFrameOverloadIntegrationTest : public BaseOverloadIntegrationTest,
@@ -1398,6 +1456,167 @@ TEST_P(LoadShedPointIntegrationTest, ListenerAcceptDoesNotShedLoadWhenBypassed) 
     test_server_->waitForCounterEq("listener.[__1]_0.downstream_cx_overload_reject", 1);
   }
   ASSERT_TRUE(codec_client_->waitForDisconnect());
+}
+
+TEST_P(LoadShedPointIntegrationTest, Http3ServerDispatchSendsGoAwayAndClosesConnection) {
+  // Test only applies to HTTP3.
+  if (downstreamProtocol() != Http::CodecClient::Type::HTTP3) {
+    return;
+  }
+  autonomous_upstream_ = true;
+  autonomous_allow_incomplete_streams_ = true;
+  initializeOverloadManager(
+      TestUtility::parseYaml<envoy::config::overload::v3::LoadShedPoint>(R"EOF(
+      name: "envoy.load_shed_points.http3_server_go_away_and_close_on_dispatch"
+      triggers:
+        - name: "envoy.resource_monitors.testonly.fake_resource_monitor"
+          threshold:
+            value: 0.90
+    )EOF"));
+
+  codec_client_ = makeHttpConnection(makeClientConnection((lookupPort("http"))));
+  auto [first_request_encoder, first_request_decoder] =
+      codec_client_->startRequest(default_request_headers_);
+  test_server_->waitForCounterEq("http.config_test.downstream_rq_http3_total", 1);
+
+  // Put envoy in overloaded state to send GOAWAY frames and close the
+  // connection.
+  updateResource(0.95);
+  test_server_->waitForGaugeEq("overload.envoy.load_shed_points.http3_server_go_away_and_close_on_"
+                               "dispatch.scale_percent",
+                               100);
+
+  auto second_request_decoder = codec_client_->makeHeaderOnlyRequest(default_request_headers_);
+
+  // The downstream should receive the GOAWAY and the connection should be
+  // closed.
+  ASSERT_TRUE(codec_client_->waitForDisconnect());
+  EXPECT_TRUE(codec_client_->sawGoAway());
+
+  // The second request will not complete.
+  EXPECT_FALSE(second_request_decoder->complete());
+}
+
+TEST_P(LoadShedPointIntegrationTest, Http3ServerDispatchSendsGoAwayCompletingPendingRequests) {
+  // Test only applies to HTTP3.
+  if (downstreamProtocol() != Http::CodecClient::Type::HTTP3) {
+    return;
+  }
+  autonomous_upstream_ = true;
+  initializeOverloadManager(
+      TestUtility::parseYaml<envoy::config::overload::v3::LoadShedPoint>(R"EOF(
+      name: "envoy.load_shed_points.http3_server_go_away_on_dispatch"
+      triggers:
+        - name: "envoy.resource_monitors.testonly.fake_resource_monitor"
+          threshold:
+            value: 0.90
+    )EOF"));
+
+  codec_client_ = makeHttpConnection(makeClientConnection((lookupPort("http"))));
+  auto [first_request_encoder, first_request_decoder] =
+      codec_client_->startRequest(default_request_headers_);
+  test_server_->waitForCounterEq("http.config_test.downstream_rq_http3_total", 1);
+
+  // Put envoy in overloaded state to send GOAWAY frames.
+  updateResource(0.95);
+  test_server_->waitForGaugeEq(
+      "overload.envoy.load_shed_points.http3_server_go_away_on_dispatch.scale_"
+      "percent",
+      100);
+
+  auto second_request_decoder = codec_client_->makeHeaderOnlyRequest(default_request_headers_);
+
+  // Wait for reply of the first request which should be allowed to complete.
+  // The downstream should also receive the GOAWAY.
+  Buffer::OwnedImpl first_request_body{"foo"};
+  first_request_encoder.encodeData(first_request_body, true);
+  ASSERT_TRUE(first_request_decoder->waitForEndStream());
+
+  EXPECT_TRUE(codec_client_->sawGoAway());
+
+  // SendH3GoAway will process pending streams up to maximum possible,
+  // so the second request should also complete.
+  EXPECT_TRUE(second_request_decoder->waitForEndStream());
+  EXPECT_TRUE(second_request_decoder->complete());
+
+  codec_client_->close();
+  ASSERT_TRUE(codec_client_->waitForDisconnect());
+
+  updateResource(0.80);
+  test_server_->waitForGaugeEq(
+      "overload.envoy.load_shed_points.http3_server_go_away_on_dispatch.scale_"
+      "percent",
+      0);
+}
+
+// Verifies that worker thread watchdog configuration is correctly applied and triggers megamiss
+// events when a worker thread is non-responsive.
+TEST_P(OverloadIntegrationTest, WorkerWatchdogMegaMiss) {
+  config_helper_.addConfigModifier([](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
+    auto* watchdogs = bootstrap.mutable_watchdogs();
+    // Configure a short megamiss timeout for workers.
+    watchdogs->mutable_worker_watchdog()->mutable_megamiss_timeout()->set_nanos(100 * 1000 * 1000);
+    // Configure a long megamiss timeout for the main thread to avoid accidental triggers.
+    watchdogs->mutable_main_thread_watchdog()->mutable_megamiss_timeout()->set_seconds(60);
+  });
+
+  // Use BlockFilter to block the worker thread for 400ms, which is longer than the megamiss
+  // timeout.
+  config_helper_.prependFilter(
+      absl::StrCat("name: block-filter\ntyped_config: \n",
+                   "  \"@type\": type.googleapis.com/test.integration.filters.BlockFilterConfig\n",
+                   "  block_duration: 0.4s\n"));
+
+  initialize();
+
+  codec_client_ = makeHttpConnection(makeClientConnection((lookupPort("http"))));
+  auto response = codec_client_->makeHeaderOnlyRequest(default_request_headers_);
+
+  // Verify that the worker-specific megamiss counter is incremented.
+  test_server_->waitForCounterGe("server.worker_0.watchdog_mega_miss", 1);
+  // Verify that the global workers megamiss counter is incremented.
+  test_server_->waitForCounterGe("workers.watchdog_mega_miss", 1);
+
+  EXPECT_TRUE(response->waitForEndStream(std::chrono::seconds(20)));
+  EXPECT_TRUE(response->complete());
+}
+
+// Verifies that when the runtime guard is disabled, worker threads fallback to the main thread
+// watchdog configuration.
+TEST_P(OverloadIntegrationTest, WorkerWatchdogMegaMissDisabled) {
+  TestScopedRuntime scoped_runtime;
+  scoped_runtime.mergeValues({{"envoy.restart_features.worker_threads_watchdog_fix", "false"}});
+
+  config_helper_.addConfigModifier([](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
+    auto* watchdogs = bootstrap.mutable_watchdogs();
+    // Configure a short megamiss timeout for workers.
+    watchdogs->mutable_worker_watchdog()->mutable_megamiss_timeout()->set_nanos(100 * 1000 * 1000);
+    // Configure a long megamiss timeout for the main thread.
+    // Since the fix is disabled, workers should use this long timeout.
+    watchdogs->mutable_main_thread_watchdog()->mutable_megamiss_timeout()->set_seconds(60);
+  });
+
+  // Use BlockFilter to block the worker thread for 400ms.
+  config_helper_.prependFilter(
+      absl::StrCat("name: block-filter\ntyped_config: \n",
+                   "  \"@type\": type.googleapis.com/test.integration.filters.BlockFilterConfig\n",
+                   "  block_duration: 0.4s\n"));
+
+  initialize();
+
+  codec_client_ = makeHttpConnection(makeClientConnection((lookupPort("http"))));
+  auto response = codec_client_->makeHeaderOnlyRequest(default_request_headers_);
+
+  // Since workers are using the main thread watchdog config (60s timeout),
+  // a 400ms block should NOT trigger a megamiss.
+  // We wait a bit to be sure, then check the counter is still 0.
+  absl::SleepFor(absl::Milliseconds(600));
+
+  EXPECT_EQ(test_server_->counter("server.worker_0.watchdog_mega_miss")->value(), 0);
+  EXPECT_EQ(test_server_->counter("workers.watchdog_mega_miss")->value(), 0);
+
+  EXPECT_TRUE(response->waitForEndStream(std::chrono::seconds(20)));
+  EXPECT_TRUE(response->complete());
 }
 
 } // namespace Envoy

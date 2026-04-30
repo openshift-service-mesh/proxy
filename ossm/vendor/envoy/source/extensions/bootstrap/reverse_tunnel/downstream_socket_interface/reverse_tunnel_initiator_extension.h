@@ -9,6 +9,8 @@
 #include "envoy/stats/scope.h"
 #include "envoy/thread_local/thread_local.h"
 
+#include "source/extensions/bootstrap/reverse_tunnel/common/reverse_connection_utility.h"
+
 #include "absl/container/flat_hash_map.h"
 
 namespace Envoy {
@@ -36,13 +38,23 @@ public:
     stat_prefix_ = PROTOBUF_GET_STRING_OR_DEFAULT(config, stat_prefix, "reverse_tunnel_initiator");
     // Configure detailed stats flag (defaults to false).
     enable_detailed_stats_ = config.enable_detailed_stats();
+    if (config.has_http_handshake() && !config.http_handshake().request_path().empty()) {
+      handshake_request_path_ = config.http_handshake().request_path();
+    } else {
+      handshake_request_path_ =
+          std::string(ReverseConnectionUtility::DEFAULT_REVERSE_TUNNEL_REQUEST_PATH);
+    }
+    if (config.has_http_handshake()) {
+      additional_headers_ = {config.http_handshake().additional_headers().begin(),
+                             config.http_handshake().additional_headers().end()};
+    }
     ENVOY_LOG(debug,
               "ReverseTunnelInitiatorExtension: creating downstream reverse connection "
               "socket interface with stat_prefix: {}",
               stat_prefix_);
   }
 
-  void onServerInitialized() override;
+  void onServerInitialized(Server::Instance&) override;
   void onWorkerThreadInitialized() override;
 
   /**
@@ -93,6 +105,29 @@ public:
   Stats::Scope& getStatsScope() const { return context_.scope(); }
 
   /**
+   * @return reference to the configured HTTP handshake request path.
+   */
+  const std::string& handshakeRequestPath() const { return handshake_request_path_; }
+
+  /**
+   * @return reference to the additional headers to include in the handshake request.
+   */
+  const std::vector<envoy::config::core::v3::HeaderValueOption>&
+  handshakeAdditionalHeaders() const {
+    return additional_headers_;
+  }
+
+  /**
+   * Increment handshake stats for reverse tunnel connections (per-worker only).
+   * Only tracks stats if enable_detailed_stats flag is true.
+   * @param cluster_id the cluster identifier for the connection
+   * @param success true for successful handshake, false for failure
+   * @param failure_reason optional failure reason (e.g., "encode_error", "http.401", "http.500")
+   */
+  void incrementHandshakeStats(const std::string& cluster_id, bool success,
+                               const std::string& failure_reason = "");
+
+  /**
    * Test-only method to set the thread local slot for testing purposes.
    * This allows tests to inject a custom thread local registry and is used
    * in unit tests to simulate different worker threads.
@@ -110,6 +145,8 @@ private:
   ThreadLocal::TypedSlotPtr<DownstreamSocketThreadLocal> tls_slot_;
   std::string stat_prefix_; // Reverse connection stats prefix
   bool enable_detailed_stats_{false};
+  std::string handshake_request_path_;
+  std::vector<envoy::config::core::v3::HeaderValueOption> additional_headers_;
 
   /**
    * Update per-worker connection stats for debugging purposes.

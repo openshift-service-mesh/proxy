@@ -13,8 +13,8 @@ import (
 
 	testpb "google.golang.org/protobuf/internal/testprotos/test"
 	textpb "google.golang.org/protobuf/internal/testprotos/textpb2"
-	anypb "google.golang.org/protobuf/types/known/anypb"
-	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 func TestReflect(t *testing.T) {
@@ -151,7 +151,7 @@ func TestReflect(t *testing.T) {
 
 	for _, src := range tests {
 		dst := src.ProtoReflect().Type().New().Interface()
-		proto.Merge(dst, transformMessage(src.ProtoReflect()))
+		proto.Merge(dst, newTransformer().transformMessage(src.ProtoReflect()))
 		if diff := cmp.Diff(src, dst, Transform()); diff != "" {
 			t.Errorf("Merge mismatch (-want +got):\n%s", diff)
 		}

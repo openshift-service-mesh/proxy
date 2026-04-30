@@ -172,7 +172,7 @@ RequestStreamTranslator* RequestStreamTranslator::RenderUint32(
 }
 
 RequestStreamTranslator* RequestStreamTranslator::RenderInt64(
-    absl::string_view name, pb::int64 value) {
+    absl::string_view name, int64_t value) {
   RenderData(name, [this, name, value]() {
     translator_->Input().RenderInt64(name, value);
   });

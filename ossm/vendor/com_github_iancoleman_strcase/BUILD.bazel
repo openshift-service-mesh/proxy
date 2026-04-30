@@ -22,6 +22,7 @@ go_test(
     name = "strcase_test",
     srcs = [
         "camel_test.go",
+        "concurrency_test.go",
         "snake_test.go",
     ],
     embed = [":strcase"],
@@ -32,7 +33,7 @@ load("@rules_license//rules:package_info.bzl", "package_info")
 
 package_metadata(
     name = "package_metadata",
-    purl = "pkg:golang/github.com/iancoleman/strcase@v0.2.0",
+    purl = "pkg:golang/github.com/iancoleman/strcase@v0.3.0",
     visibility = [
         "//:__subpackages__",
     ],
@@ -42,7 +43,7 @@ package_info(
     name = "gazelle_generated_package_info",
     package_name = "github.com/iancoleman/strcase",
     package_url = "https://github.com/iancoleman/strcase",
-    package_version = "0.2.0",
-    purl = "pkg:golang/github.com/iancoleman/strcase@v0.2.0",
+    package_version = "0.3.0",
+    purl = "pkg:golang/github.com/iancoleman/strcase@v0.3.0",
     visibility = ["//:__subpackages__"],
 )

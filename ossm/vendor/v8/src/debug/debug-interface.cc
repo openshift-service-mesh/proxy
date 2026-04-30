@@ -146,7 +146,7 @@ Local<String> GetFunctionDescription(Local<Function> function) {
   if (IsJSFunction(*receiver)) {
     auto js_function = i::Cast<i::JSFunction>(receiver);
 #if V8_ENABLE_WEBASSEMBLY
-    if (js_function->shared()->HasWasmExportedFunctionData()) {
+    if (js_function->shared()->HasWasmExportedFunctionData(i_isolate)) {
       i::DirectHandle<i::WasmExportedFunctionData> function_data(
           js_function->shared()->wasm_exported_function_data(), i_isolate);
       int func_index = function_data->function_index();
@@ -335,7 +335,7 @@ bool GetPrivateMembers(Local<Context> context, Local<Object> object, int filter,
   for (int i = 0; i < keys->length(); ++i) {
     i::DirectHandle<i::Object> obj_key(keys->get(i), isolate);
     i::DirectHandle<i::Symbol> key(i::Cast<i::Symbol>(*obj_key), isolate);
-    CHECK(key->is_private_name());
+    CHECK(key->is_any_private_name());
     i::DirectHandle<i::Object> value;
     ASSIGN_RETURN_ON_EXCEPTION_VALUE(
         isolate, value, i::Object::GetProperty(isolate, receiver, key), false);
@@ -926,7 +926,8 @@ uint32_t WasmScript::GetFunctionHash(int function_index) {
       wire_bytes.GetFunctionBytes(&func);
   // TODO(herhut): Maybe also take module, name and signature into account.
   return i::StringHasher::HashSequentialString(function_bytes.begin(),
-                                               function_bytes.length(), 0);
+                                               function_bytes.length(),
+                                               internal::HashSeed::Default());
 }
 
 Maybe<v8::MemorySpan<const uint8_t>> WasmScript::GetModuleBuildId() const {
@@ -1170,7 +1171,7 @@ void SetConsoleDelegate(Isolate* v8_isolate, ConsoleDelegate* delegate) {
 ConsoleCallArguments::ConsoleCallArguments(
     const v8::FunctionCallbackInfo<v8::Value>& info)
     : isolate_(info.GetIsolate()),
-      values_(info.values_),
+      values_(info.address_of_first_argument()),
       length_(info.Length()) {}
 
 ConsoleCallArguments::ConsoleCallArguments(
@@ -1387,6 +1388,13 @@ Coverage Coverage::CollectBestEffort(Isolate* isolate) {
       i::Coverage::CollectBestEffort(reinterpret_cast<i::Isolate*>(isolate)));
 }
 
+#if V8_ENABLE_WEBASSEMBLY
+Coverage Coverage::CollectWasmData(Isolate* isolate) {
+  return Coverage(
+      i::Coverage::CollectWasmData(reinterpret_cast<i::Isolate*>(isolate)));
+}
+#endif  // V8_ENABLE_WEBASSEMBLY
+
 void Coverage::SelectMode(Isolate* isolate, CoverageMode mode) {
   i::Coverage::SelectMode(reinterpret_cast<i::Isolate*>(isolate), mode);
 }
@@ -1413,7 +1421,8 @@ Local<EphemeronTable> EphemeronTable::Set(v8::Isolate* isolate,
   DCHECK(IsJSReceiver(*internal_key));
 
   i::DirectHandle<i::EphemeronHashTable> result(
-      i::EphemeronHashTable::Put(self, internal_key, internal_value));
+      i::EphemeronHashTable::Put(reinterpret_cast<i::Isolate*>(isolate), self,
+                                 internal_key, internal_value));
 
   return ToApiHandle<EphemeronTable>(result);
 }
@@ -1460,11 +1469,6 @@ MaybeLocal<Message> GetMessageFromPromise(Local<Promise> p) {
 void RecordAsyncStackTaggingCreateTaskCall(v8::Isolate* v8_isolate) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(v8_isolate);
   isolate->CountUsage(v8::Isolate::kAsyncStackTaggingCreateTaskCall);
-}
-
-void NotifyDebuggerPausedEventSent(v8::Isolate* v8_isolate) {
-  i::Isolate* isolate = reinterpret_cast<i::Isolate*>(v8_isolate);
-  isolate->debug()->NotifyDebuggerPausedEventSent();
 }
 
 uint64_t GetIsolateId(v8::Isolate* v8_isolate) {

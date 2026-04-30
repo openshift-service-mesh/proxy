@@ -52,6 +52,7 @@ using ::envoy::service::ext_proc::v3::HttpTrailers;
 using ::envoy::service::ext_proc::v3::TrailersResponse;
 using ::testing::_;
 using ::testing::AnyNumber;
+using ::testing::AtMost;
 using ::testing::Invoke;
 using ::testing::NiceMock;
 using ::testing::Return;
@@ -64,12 +65,19 @@ static constexpr absl::string_view filter_config_name = "envoy.filters.http.ext_
 static constexpr uint32_t BufferSize = 100000;
 
 void HttpFilterTest::initialize(std::string&& yaml, bool is_upstream_filter) {
+  scoped_runtime_.mergeValues(
+      {{"envoy.reloadable_features.ext_proc_stream_close_optimization", "true"}});
+  scoped_runtime_.mergeValues(
+      {{"envoy.reloadable_features.ext_proc_inject_data_with_state_update", "true"}});
+  scoped_runtime_.mergeValues(
+      {{"envoy.reloadable_features.ext_proc_return_stop_iteration", "true"}});
   client_ = std::make_unique<MockClient>();
   route_ = std::make_shared<NiceMock<Router::MockRoute>>();
   EXPECT_CALL(*client_, start(_, _, _, _)).WillOnce(Invoke(this, &HttpFilterTest::doStart));
   EXPECT_CALL(encoder_callbacks_, dispatcher()).WillRepeatedly(ReturnRef(dispatcher_));
   EXPECT_CALL(decoder_callbacks_, dispatcher()).WillRepeatedly(ReturnRef(dispatcher_));
-  EXPECT_CALL(decoder_callbacks_, route()).WillRepeatedly(Return(route_));
+  EXPECT_CALL(decoder_callbacks_, route())
+      .WillRepeatedly(Return(makeOptRefFromPtr<const Router::Route>(route_.get())));
   EXPECT_CALL(decoder_callbacks_, streamInfo()).WillRepeatedly(ReturnRef(stream_info_));
   EXPECT_CALL(encoder_callbacks_, streamInfo()).WillRepeatedly(ReturnRef(stream_info_));
   EXPECT_CALL(stream_info_, dynamicMetadata()).WillRepeatedly(ReturnRef(dynamic_metadata_));
@@ -105,14 +113,16 @@ void HttpFilterTest::initialize(std::string&& yaml, bool is_upstream_filter) {
   if (!yaml.empty()) {
     TestUtility::loadFromYaml(yaml, proto_config);
   }
-  builder_ = Envoy::Extensions::Filters::Common::Expr::createBuilder(nullptr);
+  auto builder_ptr = Envoy::Extensions::Filters::Common::Expr::createBuilder({});
+  builder_ = std::make_shared<Envoy::Extensions::Filters::Common::Expr::BuilderInstance>(
+      std::move(builder_ptr));
   config_ = std::make_shared<FilterConfig>(proto_config, 200ms, 10000, *stats_store_.rootScope(),
                                            "", is_upstream_filter, builder_, factory_context_);
   filter_ = std::make_unique<Filter>(config_, std::move(client_));
   filter_->setEncoderFilterCallbacks(encoder_callbacks_);
-  EXPECT_CALL(encoder_callbacks_, encoderBufferLimit()).WillRepeatedly(Return(BufferSize));
+  EXPECT_CALL(encoder_callbacks_, bufferLimit()).WillRepeatedly(Return(BufferSize));
   filter_->setDecoderFilterCallbacks(decoder_callbacks_);
-  EXPECT_CALL(decoder_callbacks_, decoderBufferLimit()).WillRepeatedly(Return(BufferSize));
+  EXPECT_CALL(decoder_callbacks_, bufferLimit()).WillRepeatedly(Return(BufferSize));
   HttpTestUtility::addDefaultHeaders(request_headers_);
   request_headers_.setMethod("POST");
 }
@@ -166,8 +176,13 @@ HttpFilterTest::doStart(ExternalProcessorCallbacks& callbacks,
 
   EXPECT_CALL(*stream, streamInfo()).WillRepeatedly(ReturnRef(async_client_stream_info_));
 
-  // close is idempotent and only called once per filter
-  EXPECT_CALL(*stream, close()).WillOnce(Invoke(this, &HttpFilterTest::doSendClose));
+  // Either close or graceful close will be called.
+  EXPECT_CALL(*stream, close())
+      .Times(AtMost(1))
+      .WillRepeatedly(Invoke(this, &HttpFilterTest::doSendClose));
+  EXPECT_CALL(*stream, halfCloseAndDeleteOnRemoteClose())
+      .Times(AtMost(1))
+      .WillRepeatedly(Invoke(this, &HttpFilterTest::doSendClose));
 
   return stream;
 }

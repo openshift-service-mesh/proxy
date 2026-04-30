@@ -11,7 +11,7 @@ go_library(
         "filelock_windows.go",
     ],
     importpath = "golang.org/x/tools/internal/lockedfile/internal/filelock",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/lockedfile:__subpackages__"],
     deps = select({
         "@io_bazel_rules_go//go/platform:windows": [
             "@org_golang_x_sys//windows:go_default_library",
@@ -23,7 +23,7 @@ go_library(
 alias(
     name = "go_default_library",
     actual = ":filelock",
-    visibility = ["//:__subpackages__"],
+    visibility = ["//internal/lockedfile:__subpackages__"],
 )
 
 go_test(

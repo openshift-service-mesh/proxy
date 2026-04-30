@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"io"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -29,7 +30,7 @@ type (
 	}
 
 	// appendOp represents an Append operation.
-	appendOp  = interface{}
+	appendOp  = any
 	appendTag struct {
 		inNum  Number
 		inType Type
@@ -53,7 +54,7 @@ type (
 	appendRaw []byte
 
 	// consumeOp represents an Consume operation.
-	consumeOp    = interface{}
+	consumeOp    = any
 	consumeField struct {
 		wantNum  Number
 		wantType Type
@@ -99,7 +100,7 @@ type (
 		wantErr error
 	}
 
-	ops []interface{}
+	ops []any
 )
 
 // dhex decodes a hex-string and returns the bytes and panics if s is invalid.
@@ -677,4 +678,23 @@ func TestZigZag(t *testing.T) {
 			t.Errorf("DecodeZigZag(%d) = %d, want %d", tt.enc, dec, tt.dec)
 		}
 	}
+}
+
+// These values are representative for the values that we observe when
+// running benchmarks extracted from Google production workloads.
+var testvals = slices.Repeat([]uint64{
+	1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+	55, 66, 77, 88, 99, 100,
+	123456789, 98765432,
+}, 100)
+
+func BenchmarkSizeVarint(b *testing.B) {
+	var total int
+	for range b.N {
+		for _, val := range testvals {
+			total += SizeVarint(val)
+		}
+	}
+	// Prevent the Go compiler from optimizing out the SizeVarint call:
+	b.Logf("total: %d", total)
 }

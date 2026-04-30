@@ -22,16 +22,13 @@
 - [HTTP Response body](./examples/http_body/)
 - [HTTP Configuration](./examples/http_config/)
 - [gRPC Auth (random)](./examples/grpc_auth_random/)
+- [Envoy filter metadata](./examples/envoy_filter_metadata/)
 
 ## Articles & blog posts from the community
 
 - [Extending Envoy with WASM and Rust](https://antweiss.com/blog/extending-envoy-with-wasm-and-rust/)
 - [Writing Envoy filters in Rust with WebAssembly](https://content.red-badger.com/resources/extending-istio-with-rust-and-webassembly)
 
-## Updating dependencies
+## Contributing changes
 
-When updating dependencies, you need to regenerate Bazel `BUILD` files to match updated `Cargo.toml`:
-
-```sh
-bazel run //bazel/cargo:crates_vendor -- --repin all
-```
+See [CONTRIBUTING.md](./CONTRIBUTING.md) and [DEVELOPMENT.md](./DEVELOPMENT.md) files.

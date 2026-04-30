@@ -65,9 +65,9 @@ func TestFieldOrder(t *testing.T) {
 			// Non-extension fields that are not within a oneof
 			// sorted next by field number.
 			{number: 1},
-			{number: 5, oneofIndex: -9}, // synthetic oneof
+			{number: 5, oneofIndex: -10}, // synthetic oneof
 			{number: 10},
-			{number: 11, oneofIndex: -10}, // synthetic oneof
+			{number: 11, oneofIndex: -9}, // synthetic oneof
 			{number: 12},
 
 			// Non-synthetic oneofs sorted last by index.
@@ -126,31 +126,31 @@ func TestKeyOrder(t *testing.T) {
 	tests := []struct {
 		label string
 		order KeyOrder
-		keys  []interface{}
+		keys  []any
 	}{{
 		label: "GenericKeyOrder",
 		order: GenericKeyOrder,
-		keys:  []interface{}{false, true},
+		keys:  []any{false, true},
 	}, {
 		label: "GenericKeyOrder",
 		order: GenericKeyOrder,
-		keys:  []interface{}{int32(-100), int32(-99), int32(-10), int32(-9), int32(-1), int32(0), int32(+1), int32(+9), int32(+10), int32(+99), int32(+100)},
+		keys:  []any{int32(-100), int32(-99), int32(-10), int32(-9), int32(-1), int32(0), int32(+1), int32(+9), int32(+10), int32(+99), int32(+100)},
 	}, {
 		label: "GenericKeyOrder",
 		order: GenericKeyOrder,
-		keys:  []interface{}{int64(-100), int64(-99), int64(-10), int64(-9), int64(-1), int64(0), int64(+1), int64(+9), int64(+10), int64(+99), int64(+100)},
+		keys:  []any{int64(-100), int64(-99), int64(-10), int64(-9), int64(-1), int64(0), int64(+1), int64(+9), int64(+10), int64(+99), int64(+100)},
 	}, {
 		label: "GenericKeyOrder",
 		order: GenericKeyOrder,
-		keys:  []interface{}{uint32(0), uint32(1), uint32(9), uint32(10), uint32(99), uint32(100)},
+		keys:  []any{uint32(0), uint32(1), uint32(9), uint32(10), uint32(99), uint32(100)},
 	}, {
 		label: "GenericKeyOrder",
 		order: GenericKeyOrder,
-		keys:  []interface{}{uint64(0), uint64(1), uint64(9), uint64(10), uint64(99), uint64(100)},
+		keys:  []any{uint64(0), uint64(1), uint64(9), uint64(10), uint64(99), uint64(100)},
 	}, {
 		label: "GenericKeyOrder",
 		order: GenericKeyOrder,
-		keys:  []interface{}{"", "a", "aa", "ab", "ba", "bb", "\u0080", "\u0080\u0081", "\u0082\u0080"},
+		keys:  []any{"", "a", "aa", "ab", "ba", "bb", "\u0080", "\u0080\u0081", "\u0082\u0080"},
 	}}
 
 	for _, tt := range tests {

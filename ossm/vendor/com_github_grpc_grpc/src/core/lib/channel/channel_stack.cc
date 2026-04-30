@@ -24,12 +24,14 @@
 #include <memory>
 #include <utility>
 
-#include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "src/core/channelz/property_list.h"
+#include "src/core/config/core_configuration.h"
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/channel/channel_fwd.h"
 #include "src/core/lib/surface/channel_init.h"
 #include "src/core/util/alloc.h"
+#include "src/core/util/grpc_check.h"
 
 using grpc_event_engine::experimental::EventEngine;
 
@@ -64,7 +66,7 @@ size_t grpc_channel_stack_size(const grpc_channel_filter** filters,
                                                sizeof(grpc_channel_element));
   size_t i;
 
-  CHECK((GPR_MAX_ALIGNMENT & (GPR_MAX_ALIGNMENT - 1)) == 0)
+  GRPC_CHECK((GPR_MAX_ALIGNMENT & (GPR_MAX_ALIGNMENT - 1)) == 0)
       << "GPR_MAX_ALIGNMENT must be a power of two";
 
   // add the size for each filter
@@ -114,8 +116,7 @@ grpc_error_handle grpc_channel_stack_init(
     int initial_refs, grpc_iomgr_cb_func destroy, void* destroy_arg,
     const grpc_channel_filter** filters, size_t filter_count,
     const grpc_core::ChannelArgs& channel_args, const char* name,
-    grpc_channel_stack* stack, const grpc_core::Blackboard* old_blackboard,
-    grpc_core::Blackboard* new_blackboard) {
+    grpc_channel_stack* stack, const grpc_core::Blackboard* blackboard) {
   if (GRPC_TRACE_FLAG_ENABLED(channel_stack)) {
     LOG(INFO) << "CHANNEL_STACK: init " << name;
     for (size_t i = 0; i < filter_count; i++) {
@@ -144,8 +145,7 @@ grpc_error_handle grpc_channel_stack_init(
                                              sizeof(grpc_channel_element));
 
   // init per-filter data
-  args.old_blackboard = old_blackboard;
-  args.new_blackboard = new_blackboard;
+  args.blackboard = blackboard;
   grpc_error_handle first_error;
   for (i = 0; i < filter_count; i++) {
     args.channel_stack = stack;
@@ -166,18 +166,49 @@ grpc_error_handle grpc_channel_stack_init(
     call_size += GPR_ROUND_UP_TO_ALIGNMENT_SIZE(filters[i]->sizeof_call_data);
   }
 
-  CHECK(user_data > (char*)stack);
-  CHECK((uintptr_t)(user_data - (char*)stack) ==
-        grpc_channel_stack_size(filters, filter_count));
+  GRPC_CHECK(user_data > (char*)stack);
+  GRPC_CHECK((uintptr_t)(user_data - (char*)stack) ==
+             grpc_channel_stack_size(filters, filter_count));
 
   stack->call_stack_size = call_size;
+  stack->channelz_data_source.Init(
+      channel_args.GetObjectRef<grpc_core::channelz::BaseNode>());
   return first_error;
+}
+
+void grpc_channel_stack::ChannelStackDataSource::AddData(
+    grpc_core::channelz::DataSink sink) {
+  grpc_channel_stack* channel_stack = reinterpret_cast<grpc_channel_stack*>(
+      reinterpret_cast<char*>(this) -
+      offsetof(grpc_channel_stack, channelz_data_source));
+  grpc_core::CoreConfiguration::Get().channel_init().AddData(
+      sink, channel_stack->type);
+  sink.AddData(
+      "channel_stack",
+      grpc_core::channelz::PropertyList()
+          .Set("type", "v1")
+          .Set("elements", [channel_stack]() {
+            grpc_core::channelz::PropertyTable elements;
+            grpc_channel_element* elems =
+                CHANNEL_ELEMS_FROM_STACK(channel_stack);
+            for (size_t i = 0; i < channel_stack->count; i++) {
+              grpc_channel_element& e = elems[i];
+              elements.AppendRow(
+                  grpc_core::channelz::PropertyList()
+                      .Set("type", e.filter->name.name())
+                      .Set("call_data_size", e.filter->sizeof_call_data)
+                      .Set("channel_data_size", e.filter->sizeof_channel_data));
+            }
+            return elements;
+          }()));
 }
 
 void grpc_channel_stack_destroy(grpc_channel_stack* stack) {
   grpc_channel_element* channel_elems = CHANNEL_ELEMS_FROM_STACK(stack);
   size_t count = stack->count;
   size_t i;
+
+  stack->channelz_data_source.Destroy();
 
   // destroy per-filter data
   for (i = 0; i < count; i++) {

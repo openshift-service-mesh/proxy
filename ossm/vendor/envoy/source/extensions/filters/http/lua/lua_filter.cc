@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 
 #include "envoy/http/codes.h"
@@ -106,7 +107,7 @@ void parseOptionsFromTable(lua_State* state, int index,
 }
 
 const Protobuf::Struct& getMetadata(Http::StreamFilterCallbacks* callbacks) {
-  if (callbacks->route() == nullptr) {
+  if (!callbacks->route()) {
     return Protobuf::Struct::default_instance();
   }
   const auto& metadata = callbacks->route()->metadata();
@@ -139,18 +140,19 @@ void buildHeadersFromTable(Http::HeaderMap& headers, lua_State* state, int table
   while (lua_next(state, table_index) != 0) {
     // Uses 'key' (at index -2) and 'value' (at index -1).
     const char* key = luaL_checkstring(state, -2);
+    const Http::LowerCaseString lower_key(key);
     // Check if the current value is a table, we iterate through the table and add each element of
     // it as a header entry value for the current key.
     if (lua_istable(state, -1)) {
       lua_pushnil(state);
       while (lua_next(state, -2) != 0) {
         const char* value = luaL_checkstring(state, -1);
-        headers.addCopy(Http::LowerCaseString(key), value);
+        headers.addCopy(lower_key, value);
         lua_pop(state, 1);
       }
     } else {
       const char* value = luaL_checkstring(state, -1);
-      headers.addCopy(Http::LowerCaseString(key), value);
+      headers.addCopy(lower_key, value);
     }
     // Removes 'value'; keeps 'key' for next iteration. This is the input for lua_next() so that
     // it can push the next key/value pair onto the stack.
@@ -214,6 +216,10 @@ PerLuaCodeSetup::PerLuaCodeSetup(const std::string& lua_code, ThreadLocal::SlotA
   lua_state_.registerType<ConnectionDynamicMetadataMapIterator>();
   lua_state_.registerType<VirtualHostWrapper>();
   lua_state_.registerType<RouteWrapper>();
+  lua_state_.registerType<CounterWrapper>();
+  lua_state_.registerType<GaugeWrapper>();
+  lua_state_.registerType<HistogramWrapper>();
+  lua_state_.registerType<StatsScopeWrapper>();
 
   const Filters::Common::Lua::InitializerList initializers(
       // EnvoyTimestampResolution "enum".
@@ -461,10 +467,16 @@ void StreamHandleWrapper::onSuccess(const Http::AsyncClient::Request&,
     });
   }
 
-  // TODO(mattklein123): Avoid double copy here.
   if (response->body().length() > 0) {
-    lua_pushlstring(coroutine_.luaState(), response->bodyAsString().data(),
-                    response->body().length());
+    const uint64_t body_length = response->body().length();
+    if (body_length <= std::numeric_limits<uint32_t>::max()) {
+      // Use linearize(uint32_t size) to get contiguous data, avoiding extra copy.
+      void* data = response->body().linearize(static_cast<uint32_t>(body_length));
+      lua_pushlstring(coroutine_.luaState(), static_cast<const char*>(data), body_length);
+    } else {
+      // Body exceeds linearize() limit, fall back to bodyAsString().
+      lua_pushlstring(coroutine_.luaState(), response->bodyAsString().data(), body_length);
+    }
   } else {
     lua_pushnil(coroutine_.luaState());
   }
@@ -680,7 +692,7 @@ int StreamHandleWrapper::luaConnection(lua_State* state) {
     connection_wrapper_.pushStack();
   } else {
     connection_wrapper_.reset(
-        Filters::Common::Lua::ConnectionWrapper::create(state, callbacks_.connection()), true);
+        Filters::Common::Lua::ConnectionWrapper::create(state, callbacks_.streamInfo()), true);
   }
   return 1;
 }
@@ -710,11 +722,12 @@ int StreamHandleWrapper::luaVerifySignature(lua_State* state) {
   // Step 5: Verify signature.
   auto& crypto_util = Envoy::Common::Crypto::UtilitySingleton::get();
   auto output = crypto_util.verifySignature(hash, *ptr->second, sig_vec, text_vec);
-  lua_pushboolean(state, output.result_);
-  if (output.result_) {
+  if (output.ok()) {
+    lua_pushboolean(state, true);
     lua_pushnil(state);
   } else {
-    lua_pushlstring(state, output.error_message_.data(), output.error_message_.size());
+    lua_pushboolean(state, false);
+    lua_pushlstring(state, output.message().data(), output.message().size());
   }
   return 2;
 }
@@ -728,15 +741,19 @@ int StreamHandleWrapper::luaImportPublicKey(lua_State* state) {
     public_key_wrapper_.pushStack();
   } else {
     auto& crypto_util = Envoy::Common::Crypto::UtilitySingleton::get();
-    Envoy::Common::Crypto::CryptoObjectPtr crypto_ptr = crypto_util.importPublicKey(key);
-    auto wrapper = Envoy::Common::Crypto::Access::getTyped<Envoy::Common::Crypto::PublicKeyObject>(
-        *crypto_ptr);
-    EVP_PKEY* pkey = wrapper->getEVP_PKEY();
+    Envoy::Common::Crypto::PKeyObjectPtr crypto_ptr = crypto_util.importPublicKeyDER(key);
+    if (crypto_ptr == nullptr) {
+      // Failed to import key, create empty wrapper
+      public_key_wrapper_.reset(PublicKeyWrapper::create(state, EMPTY_STRING), true);
+      return 1;
+    }
+    EVP_PKEY* pkey = crypto_ptr->getEVP_PKEY();
     if (pkey == nullptr) {
       // TODO(dio): Call luaL_error here instead of failing silently. However, the current behavior
       // is to return nil (when calling get() to the wrapped object, hence we create a wrapper
       // initialized by an empty string here) when importing a public key is failed.
       public_key_wrapper_.reset(PublicKeyWrapper::create(state, EMPTY_STRING), true);
+      return 1;
     }
 
     public_key_storage_.insert({std::string(str).substr(0, n), std::move(crypto_ptr)});
@@ -820,7 +837,11 @@ FilterConfig::FilterConfig(const envoy::extensions::filters::http::lua::v3::Lua&
     : cluster_manager_(cluster_manager),
       clear_route_cache_(
           proto_config.has_clear_route_cache() ? proto_config.clear_route_cache().value() : true),
-      stats_(generateStats(stats_prefix, proto_config.stat_prefix(), scope)) {
+      stats_(generateStats(stats_prefix, proto_config.stat_prefix(), scope)),
+      lua_stats_scope_(
+          scope.createScope(proto_config.stat_prefix().empty()
+                                ? absl::StrCat(stats_prefix, "lua")
+                                : absl::StrCat(stats_prefix, "lua.", proto_config.stat_prefix()))) {
   if (proto_config.has_default_source_code()) {
     if (!proto_config.inline_code().empty()) {
       throw EnvoyException("Error: Only one of `inline_code` or `default_source_code` can be set "
@@ -886,6 +907,10 @@ Filter::doHeaders(StreamHandleRef& handle, Filters::Common::Lua::CoroutinePtr& c
 
   Http::FilterHeadersStatus status = Http::FilterHeadersStatus::Continue;
   TRY_NEEDS_AUDIT {
+    // The counter will increment twice if the supplied script has both request and response
+    // handles. This is intentionally kept so as to provide consistency with the way the 'errors'
+    // counter is incremented.
+    stats_.executions_.inc();
     status = handle.get()->start(function_ref);
     handle.markDead();
   }
@@ -950,8 +975,8 @@ int StreamHandleWrapper::luaSetUpstreamOverrideHost(lua_State* state) {
     strict = lua_toboolean(state, 3);
   }
 
-  // Set the upstream override host
-  callbacks_.setUpstreamOverrideHost(std::make_pair(std::string(host, len), strict));
+  callbacks_.setUpstreamOverrideHost(
+      Upstream::LoadBalancerContext::OverrideHost{std::string(host, len), strict});
 
   return 0;
 }
@@ -968,6 +993,16 @@ int StreamHandleWrapper::luaFilterContext(lua_State* state) {
   } else {
     filter_context_wrapper_.reset(
         Filters::Common::Lua::MetadataMapWrapper::create(state, callbacks_.filterContext()), true);
+  }
+  return 1;
+}
+
+int StreamHandleWrapper::luaStats(lua_State* state) {
+  ASSERT(state_ == State::Running);
+  if (stats_scope_wrapper_.get() != nullptr) {
+    stats_scope_wrapper_.pushStack();
+  } else {
+    stats_scope_wrapper_.reset(StatsScopeWrapper::create(state, callbacks_.statsScope()), true);
   }
   return 1;
 }

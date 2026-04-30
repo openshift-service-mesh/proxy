@@ -1,23 +1,45 @@
-<!-- Generated with Stardoc: http://skydoc.bazel.build -->
 # Rust Analyzer
 
-* [rust_analyzer_aspect](#rust_analyzer_aspect)
-* [rust_analyzer_toolchain](#rust_analyzer_toolchain)
-
-
-## Overview
-
 For [non-Cargo projects](https://rust-analyzer.github.io/manual.html#non-cargo-based-projects),
-[rust-analyzer](https://rust-analyzer.github.io/) depends on a `rust-project.json` file at the
-root of the project that describes its structure. The `rust_analyzer` rule facilitates generating
-such a file.
+[rust-analyzer](https://rust-analyzer.github.io/) depends on either a `rust-project.json` file
+at the root of the project that describes its structure or on build system specific
+[project auto-discovery](https://rust-analyzer.github.io/manual.html#rust-analyzer.workspace.discoverConfig).
+The `rust_analyzer` rules facilitate both approaches.
+
+## rust-project.json approach
 
 ### Setup
 
-First, ensure `rules_rust` is setup in your workspace. By default, `rust_register_toolchains` will
-ensure a [rust_analyzer_toolchain](#rust_analyzer_toolchain) is registered within the WORKSPACE.
+#### Bzlmod
 
-Next, load the dependencies for the `rust-project.json` generator tool:
+First, ensure `rules_rust` is setup in your workspace:
+
+```python
+# MODULE.bazel
+
+# See releases page for available versions:
+# https://github.com/bazelbuild/rules_rust/releases
+bazel_dep(name = "rules_rust", version = "{SEE_RELEASES}")
+```
+
+Bazel will create the target `@rules_rust//tools/rust_analyzer:gen_rust_project`, which you can build
+with
+
+```
+bazel run @rules_rust//tools/rust_analyzer:gen_rust_project
+```
+
+whenever dependencies change to regenerate the `rust-project.json` file. It
+should be added to `.gitignore` because it is effectively a build artifact.
+Once the `rust-project.json` has been generated in the project root,
+rust-analyzer can pick it up upon restart.
+
+#### WORKSPACE
+
+Alternatively, you can use the legacy WORKSPACE approach. As with Bzlmod, ensure `rules_rust` is
+setup in your workspace.
+
+Moreover, when loading the dependencies for the tool, you should call the function `rust_analyzer_dependencies()`:
 
 ```python
 load("@rules_rust//tools/rust_analyzer:deps.bzl", "rust_analyzer_dependencies")
@@ -25,11 +47,8 @@ load("@rules_rust//tools/rust_analyzer:deps.bzl", "rust_analyzer_dependencies")
 rust_analyzer_dependencies()
 ```
 
-Finally, run `bazel run @rules_rust//tools/rust_analyzer:gen_rust_project`
-whenever dependencies change to regenerate the `rust-project.json` file. It
-should be added to `.gitignore` because it is effectively a build artifact.
-Once the `rust-project.json` has been generated in the project root,
-rust-analyzer can pick it up upon restart.
+Again, you can now run `bazel run @rules_rust//tools/rust_analyzer:gen_rust_project`
+whenever dependencies change to regenerate the `rust-project.json` file.
 
 For users who do not use `rust_register_toolchains` to register toolchains, the following can be added
 to their WORKSPACE to register a `rust_analyzer_toolchain`. Please make sure the Rust version used in
@@ -62,7 +81,7 @@ to ensure a `rust-project.json` file is created and up to date when the editor i
             "command": "bazel",
             "args": [
                 "run",
-                "//tools/rust_analyzer:gen_rust_project"
+                "@rules_rust//tools/rust_analyzer:gen_rust_project"
             ],
             "options": {
                 "cwd": "${workspaceFolder}"
@@ -71,12 +90,12 @@ to ensure a `rust-project.json` file is created and up to date when the editor i
             "problemMatcher": [],
             "presentation": {
                 "reveal": "never",
-                "panel": "dedicated",
+                "panel": "dedicated"
             },
             "runOptions": {
                 "runOn": "folderOpen"
             }
-        },
+        }
     ]
 }
 ```
@@ -84,62 +103,77 @@ to ensure a `rust-project.json` file is created and up to date when the editor i
 #### Alternative vscode option (prototype)
 
 Add the following to your bazelrc:
+
 ```
 build --@rules_rust//rust/settings:rustc_output_diagnostics=true --output_groups=+rust_lib_rustc_output,+rust_metadata_rustc_output
 ```
 
 Then you can use a prototype [rust-analyzer plugin](https://marketplace.visualstudio.com/items?itemName=MattStark.bazel-rust-analyzer) that automatically collects the outputs whenever you recompile.
 
+## Project auto-discovery
 
+### Setup
 
-<a id="rust_analyzer_toolchain"></a>
+Auto-discovery makes `rust-analyzer` behave in a Bazel project in a similar fashion to how it does
+in a Cargo project. This is achieved by generating a structure similar to what `rust-project.json`
+contains but, instead of writing that to a file, the data gets piped to `rust-analyzer` directly
+through `stdout`. To use auto-discovery the `rust-analyzer` IDE settings must be configured similar to:
 
-## rust_analyzer_toolchain
+```json
+"rust-analyzer": {
+    "workspace": {
+        "discoverConfig": {
+            "command": ["discover_bazel_rust_project.sh"],
+            "progressLabel": "rust_analyzer",
+            "filesToWatch": ["BUILD", "BUILD.bazel", "MODULE.bazel"]
+        }
+    }
+}
+```
 
-<pre>
-rust_analyzer_toolchain(<a href="#rust_analyzer_toolchain-name">name</a>, <a href="#rust_analyzer_toolchain-proc_macro_srv">proc_macro_srv</a>, <a href="#rust_analyzer_toolchain-rustc">rustc</a>, <a href="#rust_analyzer_toolchain-rustc_srcs">rustc_srcs</a>)
-</pre>
+The shell script passed to `discoverConfig.command` is typically meant to wrap the bazel rule invocation,
+primarily for muting `stderr` (because `rust-analyzer` will consider that an error has occurred if anything
+is passed through `stderr`) and, additionally, for specifying rule arguments. E.g:
 
-A toolchain for [rust-analyzer](https://rust-analyzer.github.io/).
+```shell
+#!/usr/bin/bash
 
-**ATTRIBUTES**
+bazel \
+    run \
+    @rules_rust//tools/rust_analyzer:discover_bazel_rust_project -- \
+    --bazel_startup_option=--output_base=~/ide_bazel \
+    --bazel_arg=--watchfs \
+    ${1:+"$1"} 2>/dev/null
+```
 
+The script above also handles an optional CLI argument which gets passed when workspace splitting is
+enabled. The script path should be either absolute or relative to the project root.
 
-| Name  | Description | Type | Mandatory | Default |
-| :------------- | :------------- | :------------- | :------------- | :------------- |
-| <a id="rust_analyzer_toolchain-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
-| <a id="rust_analyzer_toolchain-proc_macro_srv"></a>proc_macro_srv |  The path to a `rust_analyzer_proc_macro_srv` binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | optional |  `None`  |
-| <a id="rust_analyzer_toolchain-rustc"></a>rustc |  The path to a `rustc` binary.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
-| <a id="rust_analyzer_toolchain-rustc_srcs"></a>rustc_srcs |  The source code of rustc.   | <a href="https://bazel.build/concepts/labels">Label</a> | required |  |
+### Workspace splitting
 
+The above configuration treats the entire project as a single workspace. However, large codebases might be
+too much to handle for `rust-analyzer` all at once. This can be addressed by splitting the codebase in
+multiple workspaces by extending the `discoverConfig.command` setting:
 
-<a id="rust_analyzer_aspect"></a>
+```json
+"rust-analyzer": {
+    "workspace": {
+        "discoverConfig": {
+            "command": ["discover_bazel_rust_project.sh", "{arg}"],
+            "progressLabel": "rust_analyzer",
+            "filesToWatch": ["BUILD", "BUILD.bazel", "MODULE.bazel"]
+        }
+    }
+}
+```
 
-## rust_analyzer_aspect
+`{arg}` acts as a placeholder that `rust-analyzer` replaces with the path of the source / build file
+that gets opened.
 
-<pre>
-rust_analyzer_aspect(<a href="#rust_analyzer_aspect-name">name</a>)
-</pre>
+The root of the workspace will, in this configuration, be the package the crate currently being worked on
+belongs to. This means that only that package and its dependencies get built and indexed by `rust-analyzer`,
+thus allowing for a smaller footprint.
 
-Annotates rust rules with RustAnalyzerInfo later used to build a rust-project.json
-
-**ASPECT ATTRIBUTES**
-
-
-| Name | Type |
-| :------------- | :------------- |
-| deps| String |
-| proc_macro_deps| String |
-| crate| String |
-| actual| String |
-| proto| String |
-
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :------------- | :------------- | :------------- | :------------- | :------------- |
-| <a id="rust_analyzer_aspect-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/concepts/labels#target-names">Name</a> | required |  |
-
-
+`rust-analyzer` will switch workspaces whenever an out-of-tree file gets opened, essentially indexing that
+crate and its dependencies separately. A caveat of this is that _dependents_ of the crate currently being
+worked on are not indexed and won't be tracked by `rust-analyzer`.

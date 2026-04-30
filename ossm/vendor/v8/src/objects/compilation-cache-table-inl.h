@@ -31,15 +31,15 @@ void CompilationCacheTable::SetPrimaryValueAt(InternalIndex entry,
   set(EntryToIndex(entry) + 1, value, mode);
 }
 
-Tagged<Object> CompilationCacheTable::EvalJSFunctionsValueAt(
-    InternalIndex entry) {
+Tagged<UnionOf<TheHole, WeakFixedArray>>
+CompilationCacheTable::EvalJSFunctionsValueAt(InternalIndex entry) {
   static_assert(CompilationCacheShape::kEntrySize == 3);
-  return get(EntryToIndex(entry) + 2);
+  return Cast<UnionOf<TheHole, WeakFixedArray>>(get(EntryToIndex(entry) + 2));
 }
 
-void CompilationCacheTable::SetEvalJSFunctionsValueAt(InternalIndex entry,
-                                                      Tagged<Object> value,
-                                                      WriteBarrierMode mode) {
+void CompilationCacheTable::SetEvalJSFunctionsValueAt(
+    InternalIndex entry, Tagged<UnionOf<TheHole, WeakFixedArray>> value,
+    WriteBarrierMode mode) {
   set(EntryToIndex(entry) + 2, value, mode);
 }
 
@@ -149,7 +149,7 @@ uint32_t CompilationCacheShape::HashForObject(ReadOnlyRoots roots,
   // object.
   if (IsRegExpDataWrapper(object)) {
     Tagged<RegExpDataWrapper> re_wrapper = Cast<RegExpDataWrapper>(object);
-    Isolate* isolate = GetIsolateFromWritableObject(re_wrapper);
+    Isolate* isolate = Isolate::Current();
     Tagged<RegExpData> data = re_wrapper->data(isolate);
     return RegExpHash(data->source(), Smi::FromInt(data->flags()));
   }

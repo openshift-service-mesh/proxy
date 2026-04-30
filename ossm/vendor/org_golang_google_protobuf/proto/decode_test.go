@@ -6,6 +6,7 @@ package proto_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -14,8 +15,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/testing/protopack"
+	"google.golang.org/protobuf/types/known/durationpb"
 
-	"google.golang.org/protobuf/internal/errors"
 	testpb "google.golang.org/protobuf/internal/testprotos/test"
 	test3pb "google.golang.org/protobuf/internal/testprotos/test3"
 )
@@ -150,8 +151,25 @@ func unknown(raw protoreflect.RawFields) buildOpt {
 	}
 }
 
-func extend(desc protoreflect.ExtensionType, value interface{}) buildOpt {
+func extend(desc protoreflect.ExtensionType, value any) buildOpt {
 	return func(m proto.Message) {
 		proto.SetExtension(m, desc, value)
 	}
+}
+
+// This example illustrates how to unmarshal (decode) wire format encoding into
+// a Protobuf message.
+func ExampleUnmarshal() {
+	// This is the wire format encoding produced by the Marshal example.
+	// Typically you would read from the network, from disk, etc.
+	b := []byte{0x10, 0x7d}
+
+	var dur durationpb.Duration
+	if err := proto.Unmarshal(b, &dur); err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Protobuf wire format decoded to duration %v\n", dur.AsDuration())
+
+	// Output: Protobuf wire format decoded to duration 125ns
 }

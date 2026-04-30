@@ -61,7 +61,7 @@
 namespace grpc {
 namespace internal {
 
-class OpenCensusCallTracer : public grpc_core::ClientCallTracer {
+class OpenCensusCallTracer : public grpc_core::ClientCallTracerInterface {
  public:
   class OpenCensusCallAttemptTracer : public CallAttemptTracer {
    public:
@@ -99,7 +99,7 @@ class OpenCensusCallTracer : public grpc_core::ClientCallTracer {
     void RecordOutgoingBytes(
         const TransportByteSize& transport_byte_size) override;
     void RecordCancel(grpc_error_handle cancel_error) override;
-    void RecordEnd(const gpr_timespec& /*latency*/) override;
+    void RecordEnd() override;
     void RecordAnnotation(absl::string_view annotation) override;
     void RecordAnnotation(const Annotation& annotation) override;
     std::shared_ptr<grpc_core::TcpCallTracer> StartNewTcpTrace() override;

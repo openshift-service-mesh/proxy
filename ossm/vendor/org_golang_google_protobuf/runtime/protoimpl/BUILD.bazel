@@ -12,6 +12,7 @@ go_library(
         "//internal/filedesc",
         "//internal/filetype",
         "//internal/impl",
+        "//internal/protolazy",
         "//internal/version",
     ],
 )

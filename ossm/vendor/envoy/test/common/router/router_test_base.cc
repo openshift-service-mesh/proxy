@@ -12,6 +12,7 @@ namespace Router {
 
 using ::testing::AnyNumber;
 using ::testing::Eq;
+using ::testing::Return;
 using ::testing::ReturnRef;
 
 RouterTestBase::RouterTestBase(bool start_child_span, bool suppress_envoy_headers,
@@ -24,8 +25,8 @@ RouterTestBase::RouterTestBase(bool start_child_span, bool suppress_envoy_header
           factory_context_, pool_.add("test"), *stats_store_.rootScope(), cm_, runtime_, random_,
           ShadowWriterPtr{shadow_writer_}, true, start_child_span, suppress_envoy_headers, false,
           suppress_grpc_request_failure_code_stats, flush_upstream_log_on_upstream_stream,
-          std::move(strict_headers_to_check), test_time_.timeSystem(), http_context_,
-          router_context_)),
+          false /* reject_connect_request_early_data */, std::move(strict_headers_to_check),
+          test_time_.timeSystem(), http_context_, router_context_)),
       router_(std::make_unique<RouterTestFilter>(config_, config_->default_stats_)) {
   router_->setDecoderFilterCallbacks(callbacks_);
   upstream_locality_.set_zone("to_az");
@@ -52,6 +53,14 @@ RouterTestBase::RouterTestBase(bool start_child_span, bool suppress_envoy_header
   ON_CALL(cm_.thread_local_cluster_, chooseHost(_)).WillByDefault(Invoke([this] {
     return Upstream::HostSelectionResponse{cm_.thread_local_cluster_.lb_.host_};
   }));
+
+  // Wire up a real RouteStatsContextImpl so that route-level retry stats are populated.
+  route_stat_names_ = std::make_unique<RouteStatNames>(stats_store_.symbolTable());
+  Stats::StatNameManagedStorage vhost_stat_name("fake_vhost", stats_store_.symbolTable());
+  route_stats_context_impl_ = std::make_unique<RouteStatsContextImpl>(
+      *stats_store_.rootScope(), *route_stat_names_, vhost_stat_name.statName(), "fake_route");
+  ON_CALL(callbacks_.route_->route_entry_, routeStatsContext())
+      .WillByDefault(Return(RouteStatsContextOptRef(*route_stats_context_impl_)));
 }
 
 void RouterTestBase::expectResponseTimerCreate() {
@@ -198,8 +207,8 @@ void RouterTestBase::setIncludeAttemptCountInResponse(bool include) {
 void RouterTestBase::setUpstreamMaxStreamDuration(uint32_t seconds) {
   common_http_protocol_options_.mutable_max_stream_duration()->MergeFrom(
       ProtobufUtil::TimeUtil::MillisecondsToDuration(seconds));
-  ON_CALL(cm_.thread_local_cluster_.conn_pool_.host_->cluster_, commonHttpProtocolOptions())
-      .WillByDefault(ReturnRef(common_http_protocol_options_));
+  cm_.thread_local_cluster_.conn_pool_.host_->cluster_.common_http_protocol_options_ =
+      common_http_protocol_options_;
 }
 
 void RouterTestBase::enableHedgeOnPerTryTimeout() {

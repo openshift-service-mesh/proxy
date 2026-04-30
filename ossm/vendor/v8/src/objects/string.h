@@ -32,6 +32,8 @@ namespace maglev {
 class CheckedInternalizedString;
 class BuiltinStringFromCharCode;
 class MaglevGraphBuilder;
+class VirtualObject;
+struct VirtualStringShape;
 }  // namespace maglev
 
 namespace wasm {
@@ -75,7 +77,6 @@ class StringShape {
   V8_INLINE bool IsSequentialTwoByte() const;
   V8_INLINE bool IsInternalized() const;
   V8_INLINE bool IsShared() const;
-  V8_INLINE uint32_t encoding_tag() const;
 #ifdef DEBUG
   inline void invalidate() { valid_ = false; }
   inline bool valid() const { return valid_; }
@@ -404,6 +405,10 @@ V8_OBJECT class String : public Name {
   template <EqualityType kEqType = EqualityType::kWholeString, typename Char>
   inline bool IsEqualTo(base::Vector<const Char> str, Isolate* isolate) const;
 
+  // Convenience method for the above using std::string_view instead
+  template <EqualityType kEqType = EqualityType::kWholeString>
+  inline bool IsEqualTo(std::string_view str, Isolate* isolate) const;
+
   // Check if this string matches the given vector of characters, either as a
   // whole string or just a prefix.
   //
@@ -440,6 +445,9 @@ V8_OBJECT class String : public Name {
   V8_EXPORT_PRIVATE std::unique_ptr<char[]> ToCString(
       size_t* length_output = nullptr);
 
+  // Return a UTF8 representation of this string as a std::string
+  V8_EXPORT_PRIVATE std::string ToStdString();
+
   // Externalization.
   template <typename T>
   bool MarkForExternalizationDuringGC(Isolate* isolate, T* resource);
@@ -450,7 +458,7 @@ V8_OBJECT class String : public Name {
       Isolate* isolate, v8::String::ExternalStringResource* resource);
   V8_EXPORT_PRIVATE bool MakeExternal(
       Isolate* isolate, v8::String::ExternalOneByteStringResource* resource);
-  bool SupportsExternalization(v8::String::Encoding);
+  V8_EXPORT_PRIVATE bool SupportsExternalization(v8::String::Encoding);
 
   // Conversion.
   // "array index": an index allowed by the ES spec for JSArrays.
@@ -514,6 +522,7 @@ V8_OBJECT class String : public Name {
   // ~536.8M chars.
   // See include/v8.h for the definition.
   static const uint32_t kMaxLength = v8::String::kMaxLength;
+  static_assert(kMaxLength <= kMaxInt);
 
   // Max length for computing hash. For strings longer than this limit the
   // string length is used as the hash value.
@@ -698,6 +707,7 @@ V8_OBJECT class String : public Name {
   friend class StringBuiltinsAssembler;
   friend class maglev::MaglevAssembler;
   friend class maglev::MaglevGraphBuilder;
+  friend struct maglev::VirtualStringShape;
   friend class compiler::AccessBuilder;
   friend class wasm::baseline::LiftoffCompiler;
   friend class TorqueGeneratedStringAsserts;
@@ -745,6 +755,14 @@ V8_OBJECT class String : public Name {
   V8_EXPORT_PRIVATE bool SlowEquals(Tagged<String> other) const;
   V8_EXPORT_PRIVATE bool SlowEquals(
       Tagged<String> other, const SharedStringAccessGuardIfNeeded&) const;
+
+  // The part of SlowEquals that only checks the contents of strings of equal
+  // size. Should not be used for 0-length strings.
+  V8_EXPORT_PRIVATE bool SlowEqualsNonThinSameLength(
+      uint32_t len, Tagged<String> other) const;
+  V8_EXPORT_PRIVATE bool SlowEqualsNonThinSameLength(
+      uint32_t len, Tagged<String> other,
+      const SharedStringAccessGuardIfNeeded&) const;
 
   V8_EXPORT_PRIVATE static bool SlowEquals(Isolate* isolate,
                                            DirectHandle<String> one,
@@ -1035,6 +1053,11 @@ V8_OBJECT class ConsString : public String {
   // Minimum length for a cons string.
   static const uint32_t kMinLength = 13;
 
+  // Expose these for convenience since not all classes can be friends (classes
+  // in anonymous namespaces).
+  static const int kFirstOffset;
+  static const int kSecondOffset;
+
   DECL_VERIFIER(ConsString)
 
  private:
@@ -1047,6 +1070,7 @@ V8_OBJECT class ConsString : public String {
   friend class SandboxTesting;
   friend class maglev::MaglevAssembler;
   friend class maglev::MaglevGraphBuilder;
+  friend class maglev::VirtualObject;
   friend class compiler::AccessBuilder;
   friend class TorqueGeneratedConsStringAsserts;
 
@@ -1055,6 +1079,9 @@ V8_OBJECT class ConsString : public String {
   TaggedMember<String> first_;
   TaggedMember<String> second_;
 } V8_OBJECT_END;
+
+constexpr int ConsString::kFirstOffset = offsetof(ConsString, first_);
+constexpr int ConsString::kSecondOffset = offsetof(ConsString, second_);
 
 template <>
 struct ObjectTraits<ConsString> {
@@ -1090,6 +1117,7 @@ V8_OBJECT class ThinString : public String {
   friend class V8HeapExplorer;
   friend class CodeStubAssembler;
   friend class ToDirectStringAssembler;
+  friend class CollectionsBuiltinsAssembler;
   friend class StringBuiltinsAssembler;
   friend class maglev::MaglevAssembler;
   friend class maglev::CheckedInternalizedString;

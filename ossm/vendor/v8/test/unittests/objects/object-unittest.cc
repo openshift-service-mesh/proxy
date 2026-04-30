@@ -173,6 +173,66 @@ TEST_F(TestWithNativeContext, EmptyFunctionScopeInfo) {
             empty_function_scope_info->ContextLocalCount());
 }
 
+TEST_F(TestWithNativeContext, CanOnlyAccessFixedFormalParameters) {
+  auto run = [this](const char* f, bool allocates, bool only_fixed) {
+    DirectHandle<JSFunction> function = RunJS<JSFunction>(f);
+    DirectHandle<ScopeInfo> scope_info(function->shared()->scope_info(),
+                                       i_isolate());
+    auto flags = scope_info->Flags();
+    EXPECT_EQ(allocates, ScopeInfo::AllocatesArgumentsBit::decode(flags));
+    EXPECT_EQ(only_fixed, scope_info->CanOnlyAccessFixedFormalParameters());
+  };
+  run("(function(){})", false, false);
+  run("(() => {})", false, true);
+  run("((...a) => {})", false, false);
+  run("'use strict'; (function(){})", false, true);
+  run("'use strict'; (function(...a) {})", false, false);
+  run("'use strict'; (function() { return arguments; })", true, false);
+  run("'use strict'; (function() { return eval(''); })", true, false);
+  run("'use strict'; (function() { () => { return arguments; }})", true, false);
+  run("'use strict'; (function() { () => { return eval(''); }})", true, false);
+}
+
+TEST_F(TestWithNativeContext, UnusedParameters) {
+  auto run = [this](const char* f, std::initializer_list<bool> used_bits) {
+    DirectHandle<JSFunction> function = RunJS<JSFunction>(f);
+    DirectHandle<ScopeInfo> scope_info(function->shared()->scope_info(),
+                                       i_isolate());
+    CHECK_EQ(scope_info->ParameterCount(), used_bits.size());
+    uint32_t bits = scope_info->unused_parameter_bits();
+    for (uint32_t i = 0; i < 32; i++) {
+      bool unused = (bits >> i) & 0x1;
+      if (i < used_bits.size()) {
+        CHECK_EQ(used_bits.begin()[i], !unused);
+      } else {
+        CHECK(!unused);
+      }
+    }
+  };
+  run("'use strict'; (function(){})", {});
+  run("'use strict'; (function(a) { a })", {true});
+  run("'use strict'; (function(a) { })", {false});
+  run("'use strict'; (function(a, b){})", {false, false});
+  run("'use strict'; (function(a, b){ a })", {true, false});
+  run("'use strict'; (function(a, b){ b })", {false, true});
+  run("'use strict'; (function(a, b){ a; b })", {true, true});
+  // initializers are non-simple
+  run("'use strict'; (function(a, b = a) {})", {true, true});
+  run("'use strict'; (function(a = b, b) {})", {true, true});
+  run("(() => {})", {});
+  run("((a) => { a })", {true});
+  run("((a) => { })", {false});
+  run("((a, b) => {})", {false, false});
+  run("((a, b) => { a })", {true, false});
+  run("((a, b) => { b })", {false, true});
+  run("((a, b) => { a; b })", {true, true});
+  // initializers, rest params are non-simple
+  run("((a, b = a) => {})", {true, true});
+  run("((a = b, b) => {})", {true, true});
+  run("((...a) => { })", {});
+  run("((...a) => { a })", {});
+}
+
 using ObjectTest = TestWithContext;
 
 static void CheckObject(Isolate* isolate, DirectHandle<Object> obj,
@@ -236,11 +296,11 @@ TEST_F(ObjectTest, NoSideEffectsToString) {
       "Error: fisk hest");
   CheckObject(i_isolate(), factory->NewJSObject(i_isolate()->object_function()),
               "#<Object>");
-  CheckObject(
-      i_isolate(),
-      factory->NewJSProxy(factory->NewJSObject(i_isolate()->object_function()),
-                          factory->NewJSObject(i_isolate()->object_function())),
-      "#<Object>");
+  CheckObject(i_isolate(),
+              factory->NewJSProxy(
+                  factory->NewJSObject(i_isolate()->object_function()),
+                  factory->NewJSObject(i_isolate()->object_function()), false),
+              "#<Object>");
 }
 
 TEST_F(ObjectTest, EnumCache) {
@@ -515,6 +575,9 @@ bool FunctionKindIsConciseMethod(FunctionKind kind) {
     case FunctionKind::kAsyncConciseGeneratorMethod:
     case FunctionKind::kStaticAsyncConciseGeneratorMethod:
     case FunctionKind::kClassMembersInitializerFunction:
+    case FunctionKind::kClassMembersInitializerFunctionPrecededByStatic:
+    case FunctionKind::kClassStaticInitializerFunction:
+    case FunctionKind::kClassStaticInitializerFunctionPrecededByMember:
       return true;
     default:
       return false;
@@ -601,6 +664,9 @@ bool FunctionKindIsConstructable(FunctionKind kind) {
     case FunctionKind::kConciseMethod:
     case FunctionKind::kStaticConciseMethod:
     case FunctionKind::kClassMembersInitializerFunction:
+    case FunctionKind::kClassMembersInitializerFunctionPrecededByStatic:
+    case FunctionKind::kClassStaticInitializerFunction:
+    case FunctionKind::kClassStaticInitializerFunctionPrecededByMember:
       return false;
     default:
       return true;
@@ -722,6 +788,105 @@ TEST_F(ObjectTest, AddDataPropertyNameCollisionDeprecatedMap) {
                               StoreOrigin::kNamed)
           .IsJust(),
       "");
+}
+
+namespace {
+
+i::DirectHandle<i::String> v8_str(i::Isolate* isolate, const char* str) {
+  return isolate->factory()->NewStringFromAsciiChecked(str);
+}
+
+}  // namespace
+
+TEST_F(ObjectTest, LookupIteratorWithStringLookupStartObject) {
+  v8::HandleScope scope(isolate());
+  // Factory* factory = i_isolate()->factory();
+  i::Isolate* ii = i_isolate();
+
+  i::DirectHandle<String> str = v8_str(ii, "some boom");
+  i::DirectHandle<String> length_str = v8_str(ii, "length");
+
+  // Various "abc".blah like lookups.
+  CHECK(!LookupIterator(ii, str, v8_str(ii, "abc")).IsFound());
+  CHECK(!LookupIterator(ii, str, v8_str(ii, "-10")).IsFound());
+
+  {
+    // Various operations with "abc".length.
+    LookupIterator it(ii, str, length_str);
+    CHECK(it.IsFound());
+
+    CHECK_EQ(9, Smi::ToInt(*Object::GetProperty(&it).ToHandleChecked()));
+
+    // Try to set property using both throwing and non-throwing modes.
+    CHECK_EQ(false,
+             Object::SetProperty(&it, v8_str(ii, "15"),
+                                 StoreOrigin::kMaybeKeyed, Just(kDontThrow))
+                 .FromJust());
+
+    CHECK(Object::SetProperty(&it, v8_str(ii, "15"), StoreOrigin::kMaybeKeyed,
+                              Just(kThrowOnError))
+              .IsNothing());
+    ii->clear_exception();
+  }
+
+  {
+    // Various operations with other named properties.
+    LookupIterator it(ii, str, v8_str(ii, "blah"));
+    CHECK(!it.IsFound());
+
+    CHECK(IsUndefined(*Object::GetProperty(&it).ToHandleChecked()));
+
+    // Try to set property using both throwing and non-throwing modes.
+    CHECK_EQ(false,
+             Object::SetProperty(&it, v8_str(ii, "15"),
+                                 StoreOrigin::kMaybeKeyed, Just(kDontThrow))
+                 .FromJust());
+
+    CHECK(Object::SetProperty(&it, v8_str(ii, "15"), StoreOrigin::kMaybeKeyed,
+                              Just(kThrowOnError))
+              .IsNothing());
+    ii->clear_exception();
+  }
+
+  {
+    // Various operations with indexed properties.
+    LookupIterator it(ii, str, 1);
+    CHECK(it.IsFound());
+
+    CHECK(v8_str(ii, "o")->Equals(
+        Cast<String>(*Object::GetProperty(&it).ToHandleChecked())));
+
+    // Try to set property using both throwing and non-throwing modes.
+    CHECK_EQ(false,
+             Object::SetProperty(&it, v8_str(ii, "15"),
+                                 StoreOrigin::kMaybeKeyed, Just(kDontThrow))
+                 .FromJust());
+
+    CHECK(Object::SetProperty(&it, v8_str(ii, "15"), StoreOrigin::kMaybeKeyed,
+                              Just(kThrowOnError))
+              .IsNothing());
+    ii->clear_exception();
+  }
+
+  const int non_existent_indices[] = {153, String::kMaxLength + 1};
+  for (size_t i = 0; i < arraysize(non_existent_indices); i++) {
+    // Various operations with indexed properties.
+    LookupIterator it(ii, str, non_existent_indices[i]);
+    CHECK(!it.IsFound());
+
+    CHECK(IsUndefined(*Object::GetProperty(&it).ToHandleChecked()));
+
+    // Try to set property using both throwing and non-throwing modes.
+    CHECK_EQ(false,
+             Object::SetProperty(&it, v8_str(ii, "15"),
+                                 StoreOrigin::kMaybeKeyed, Just(kDontThrow))
+                 .FromJust());
+
+    CHECK(Object::SetProperty(&it, v8_str(ii, "15"), StoreOrigin::kMaybeKeyed,
+                              Just(kThrowOnError))
+              .IsNothing());
+    ii->clear_exception();
+  }
 }
 
 }  // namespace internal

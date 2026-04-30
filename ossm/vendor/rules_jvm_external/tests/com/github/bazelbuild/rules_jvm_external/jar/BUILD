@@ -1,3 +1,4 @@
+load("@rules_java//java:java_test.bzl", "java_test")
 load("//:defs.bzl", "artifact")
 
 java_test(
@@ -48,6 +49,22 @@ java_test(
     deps = [
         "//private/tools/java/com/github/bazelbuild/rules_jvm_external",
         "//private/tools/java/com/github/bazelbuild/rules_jvm_external/jar:MergeJars",
+        "//tests/com/github/bazelbuild/rules_jvm_external:zip_utils",
+        artifact("com.google.guava:guava"),
+        artifact(
+            "junit:junit",
+            repository_name = "regression_testing_coursier",
+        ),
+    ],
+)
+
+java_test(
+    name = "CreateJarTest",
+    srcs = ["CreateJarTest.java"],
+    test_class = "com.github.bazelbuild.rules_jvm_external.jar.CreateJarTest",
+    deps = [
+        "//private/tools/java/com/github/bazelbuild/rules_jvm_external",
+        "//private/tools/java/com/github/bazelbuild/rules_jvm_external/jar:create_jar_lib",
         "//tests/com/github/bazelbuild/rules_jvm_external:zip_utils",
         artifact("com.google.guava:guava"),
         artifact(

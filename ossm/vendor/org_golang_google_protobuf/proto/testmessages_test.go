@@ -17,6 +17,7 @@ import (
 	requiredpb "google.golang.org/protobuf/internal/testprotos/required"
 	testpb "google.golang.org/protobuf/internal/testprotos/test"
 	test3pb "google.golang.org/protobuf/internal/testprotos/test3"
+	testeditionspb "google.golang.org/protobuf/internal/testprotos/testeditions"
 )
 
 type testProto struct {
@@ -37,8 +38,16 @@ func makeMessages(in protobuild.Message, messages ...proto.Message) []proto.Mess
 			&testpb.TestAllTypes{},
 			&test3pb.TestAllTypes{},
 			&testpb.TestAllExtensions{},
+			&testeditionspb.TestAllTypes{},
 		}
 	}
+
+	for _, m := range messages {
+		for _, mt := range relatedMessages[m.ProtoReflect().Type()] {
+			messages = append(messages, mt.New().Interface())
+		}
+	}
+
 	for _, m := range messages {
 		in.Build(m.ProtoReflect())
 	}
@@ -51,8 +60,16 @@ func templateMessages(messages ...proto.Message) []protoreflect.MessageType {
 			(*testpb.TestAllTypes)(nil),
 			(*test3pb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 		}
 	}
+
+	for _, m := range messages {
+		for _, mt := range relatedMessages[m.ProtoReflect().Type()] {
+			messages = append(messages, mt.New().Interface())
+		}
+	}
+
 	var out []protoreflect.MessageType
 	for _, m := range messages {
 		out = append(out, m.ProtoReflect().Type())
@@ -102,6 +119,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{21, protopack.VarintType}, protopack.Varint(int(testpb.TestAllTypes_BAR)),
 		}.Marshal(),
 	},
+
 	{
 		desc: "zero values",
 		decodeTo: makeMessages(protobuild.Message{
@@ -139,8 +157,9 @@ var testValidMessages = []testProto{
 			protopack.Tag{15, protopack.BytesType}, protopack.Bytes(nil),
 		}.Marshal(),
 	},
+
 	{
-		desc: "proto3 zero values",
+		desc: "editions zero values on implicit fields",
 		decodeTo: makeMessages(protobuild.Message{
 			"singular_int32":    0,
 			"singular_int64":    0,
@@ -157,25 +176,26 @@ var testValidMessages = []testProto{
 			"singular_bool":     false,
 			"singular_string":   "",
 			"singular_bytes":    []byte{},
-		}, &test3pb.TestAllTypes{}),
+		}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
-			protopack.Tag{81, protopack.VarintType}, protopack.Varint(0),
-			protopack.Tag{82, protopack.VarintType}, protopack.Varint(0),
-			protopack.Tag{83, protopack.VarintType}, protopack.Uvarint(0),
-			protopack.Tag{84, protopack.VarintType}, protopack.Uvarint(0),
-			protopack.Tag{85, protopack.VarintType}, protopack.Svarint(0),
-			protopack.Tag{86, protopack.VarintType}, protopack.Svarint(0),
-			protopack.Tag{87, protopack.Fixed32Type}, protopack.Uint32(0),
-			protopack.Tag{88, protopack.Fixed64Type}, protopack.Uint64(0),
-			protopack.Tag{89, protopack.Fixed32Type}, protopack.Int32(0),
-			protopack.Tag{90, protopack.Fixed64Type}, protopack.Int64(0),
-			protopack.Tag{91, protopack.Fixed32Type}, protopack.Float32(0),
-			protopack.Tag{92, protopack.Fixed64Type}, protopack.Float64(0),
-			protopack.Tag{93, protopack.VarintType}, protopack.Bool(false),
-			protopack.Tag{94, protopack.BytesType}, protopack.String(""),
-			protopack.Tag{95, protopack.BytesType}, protopack.Bytes(nil),
+			protopack.Tag{124, protopack.VarintType}, protopack.Varint(0),
+			protopack.Tag{125, protopack.VarintType}, protopack.Varint(0),
+			protopack.Tag{126, protopack.VarintType}, protopack.Uvarint(0),
+			protopack.Tag{127, protopack.VarintType}, protopack.Uvarint(0),
+			protopack.Tag{128, protopack.VarintType}, protopack.Svarint(0),
+			protopack.Tag{129, protopack.VarintType}, protopack.Svarint(0),
+			protopack.Tag{130, protopack.Fixed32Type}, protopack.Uint32(0),
+			protopack.Tag{131, protopack.Fixed64Type}, protopack.Uint64(0),
+			protopack.Tag{132, protopack.Fixed32Type}, protopack.Int32(0),
+			protopack.Tag{133, protopack.Fixed64Type}, protopack.Int64(0),
+			protopack.Tag{134, protopack.Fixed32Type}, protopack.Float32(0),
+			protopack.Tag{135, protopack.Fixed64Type}, protopack.Float64(0),
+			protopack.Tag{136, protopack.VarintType}, protopack.Bool(false),
+			protopack.Tag{137, protopack.BytesType}, protopack.String(""),
+			protopack.Tag{138, protopack.BytesType}, protopack.Bytes(nil),
 		}.Marshal(),
 	},
+
 	{
 		desc: "groups",
 		decodeTo: makeMessages(protobuild.Message{
@@ -183,7 +203,7 @@ var testValidMessages = []testProto{
 				"a":                 1017,
 				"same_field_number": 1016,
 			},
-		}, &testpb.TestAllTypes{}, &testpb.TestAllExtensions{}),
+		}, &testpb.TestAllTypes{}, &testpb.TestAllExtensions{}, &testeditionspb.TestAllTypes{}, &testeditionspb.TestAllExtensions{}),
 		wire: protopack.Message{
 			protopack.Tag{16, protopack.StartGroupType},
 			protopack.Tag{17, protopack.VarintType}, protopack.Varint(1017),
@@ -191,13 +211,14 @@ var testValidMessages = []testProto{
 			protopack.Tag{16, protopack.EndGroupType},
 		}.Marshal(),
 	},
+
 	{
 		desc: "groups (field overridden)",
 		decodeTo: makeMessages(protobuild.Message{
 			"optionalgroup": protobuild.Message{
 				"a": 2,
 			},
-		}, &testpb.TestAllTypes{}, &testpb.TestAllExtensions{}),
+		}, &testpb.TestAllTypes{}, &testpb.TestAllExtensions{}, &testeditionspb.TestAllTypes{}, &testeditionspb.TestAllExtensions{}),
 		wire: protopack.Message{
 			protopack.Tag{16, protopack.StartGroupType},
 			protopack.Tag{17, protopack.VarintType}, protopack.Varint(1),
@@ -207,6 +228,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{16, protopack.EndGroupType},
 		}.Marshal(),
 	},
+
 	{
 		desc: "messages",
 		decodeTo: makeMessages(protobuild.Message{
@@ -226,6 +248,7 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc: "messages (split across multiple tags)",
 		decodeTo: makeMessages(protobuild.Message{
@@ -247,6 +270,7 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc: "messages (field overridden)",
 		decodeTo: makeMessages(protobuild.Message{
@@ -263,6 +287,7 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc: "basic repeated types",
 		decodeTo: makeMessages(protobuild.Message{
@@ -318,6 +343,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{51, protopack.VarintType}, protopack.Varint(int(testpb.TestAllTypes_BAR)),
 		}.Marshal(),
 	},
+
 	{
 		desc: "basic repeated types (packed encoding)",
 		decodeTo: makeMessages(protobuild.Message{
@@ -382,6 +408,7 @@ var testValidMessages = []testProto{
 			},
 		}.Marshal(),
 	},
+
 	{
 		desc: "basic repeated types (zero-length packed encoding)",
 		decodeTo: makeMessages(protobuild.Message{
@@ -417,6 +444,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{51, protopack.BytesType}, protopack.LengthPrefix{},
 		}.Marshal(),
 	},
+
 	{
 		desc: "packed repeated types",
 		decodeTo: makeMessages(protobuild.Message{
@@ -481,6 +509,7 @@ var testValidMessages = []testProto{
 			},
 		}.Marshal(),
 	},
+
 	{
 		desc: "packed repeated types (zero length)",
 		decodeTo: makeMessages(protobuild.Message{
@@ -498,7 +527,7 @@ var testValidMessages = []testProto{
 			"packed_double":   []float64{},
 			"packed_bool":     []bool{},
 			"packed_enum":     []string{},
-		}, &testpb.TestPackedTypes{}, &testpb.TestPackedExtensions{}),
+		}, &testpb.TestPackedTypes{}, &testpb.TestPackedExtensions{}, &testeditionspb.TestPackedTypes{}, &testeditionspb.TestPackedExtensions{}),
 		wire: protopack.Message{
 			protopack.Tag{90, protopack.BytesType}, protopack.LengthPrefix{},
 			protopack.Tag{91, protopack.BytesType}, protopack.LengthPrefix{},
@@ -516,6 +545,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{103, protopack.BytesType}, protopack.LengthPrefix{},
 		}.Marshal(),
 	},
+
 	{
 		desc: "repeated messages",
 		decodeTo: makeMessages(protobuild.Message{
@@ -535,10 +565,17 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc: "repeated nil messages",
 		decodeTo: []proto.Message{&testpb.TestAllTypes{
 			RepeatedNestedMessage: []*testpb.TestAllTypes_NestedMessage{
+				{A: proto.Int32(1)},
+				nil,
+				{A: proto.Int32(2)},
+			},
+		}, &testeditionspb.TestAllTypes{
+			RepeatedNestedMessage: []*testeditionspb.TestAllTypes_NestedMessage{
 				{A: proto.Int32(1)},
 				nil,
 				{A: proto.Int32(2)},
@@ -556,6 +593,13 @@ var testValidMessages = []testProto{
 				nil,
 				{A: proto.Int32(2)},
 			}),
+		), build(
+			&testeditionspb.TestAllExtensions{},
+			extend(testeditionspb.E_RepeatedNestedMessage, []*testeditionspb.TestAllExtensions_NestedMessage{
+				{A: proto.Int32(1)},
+				nil,
+				{A: proto.Int32(2)},
+			}),
 		)},
 		wire: protopack.Message{
 			protopack.Tag{48, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
@@ -567,6 +611,7 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc: "repeated groups",
 		decodeTo: makeMessages(protobuild.Message{
@@ -575,7 +620,7 @@ var testValidMessages = []testProto{
 				{},
 				{"a": 2017},
 			},
-		}, &testpb.TestAllTypes{}, &testpb.TestAllExtensions{}),
+		}, &testpb.TestAllTypes{}, &testpb.TestAllExtensions{}, &testeditionspb.TestAllTypes{}, &testeditionspb.TestAllExtensions{}),
 		wire: protopack.Message{
 			protopack.Tag{46, protopack.StartGroupType},
 			protopack.Tag{47, protopack.VarintType}, protopack.Varint(1017),
@@ -587,6 +632,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{46, protopack.EndGroupType},
 		}.Marshal(),
 	},
+
 	{
 		desc: "repeated nil groups",
 		decodeTo: []proto.Message{&testpb.TestAllTypes{
@@ -595,9 +641,22 @@ var testValidMessages = []testProto{
 				nil,
 				{A: proto.Int32(2017)},
 			},
+		}, &testeditionspb.TestAllTypes{
+			Repeatedgroup: []*testeditionspb.TestAllTypes_RepeatedGroup{
+				{A: proto.Int32(1017)},
+				nil,
+				{A: proto.Int32(2017)},
+			},
 		}, build(
 			&testpb.TestAllExtensions{},
 			extend(testpb.E_Repeatedgroup, []*testpb.RepeatedGroup{
+				{A: proto.Int32(1017)},
+				nil,
+				{A: proto.Int32(2017)},
+			}),
+		), build(
+			&testeditionspb.TestAllExtensions{},
+			extend(testeditionspb.E_Repeatedgroup, []*testeditionspb.RepeatedGroup{
 				{A: proto.Int32(1017)},
 				nil,
 				{A: proto.Int32(2017)},
@@ -614,6 +673,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{46, protopack.EndGroupType},
 		}.Marshal(),
 	},
+
 	{
 		desc: "maps",
 		decodeTo: makeMessages(protobuild.Message{
@@ -637,7 +697,7 @@ var testValidMessages = []testProto{
 				"71.2.key": {"a": 2171},
 			},
 			"map_string_nested_enum": map[string]string{"73.1.key": "FOO", "73.2.key": "BAR"},
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{56, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(1056),
@@ -781,6 +841,7 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc: "map with value before key",
 		decodeTo: makeMessages(protobuild.Message{
@@ -788,7 +849,7 @@ var testValidMessages = []testProto{
 			"map_string_nested_message": map[string]protobuild.Message{
 				"71.1.key": {"a": 1171},
 			},
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{56, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{2, protopack.VarintType}, protopack.Varint(1156),
@@ -802,6 +863,7 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc: "map with repeated key and value",
 		decodeTo: makeMessages(protobuild.Message{
@@ -809,7 +871,7 @@ var testValidMessages = []testProto{
 			"map_string_nested_message": map[string]protobuild.Message{
 				"71.1.key": {"a": 1171},
 			},
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{56, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(0),
@@ -827,31 +889,43 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc: "oneof (uint32)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_uint32": 1111,
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{protopack.Tag{111, protopack.VarintType}, protopack.Varint(1111)}.Marshal(),
 	},
+
+	{
+		desc: "oneof with required message and uint32",
+		decodeTo: makeMessages(protobuild.Message{
+			"oneof_uint32": 1111,
+		}, &testpb.TestOneofWithRequired{}),
+		wire: protopack.Message{protopack.Tag{1, protopack.VarintType}, protopack.Varint(1111)}.Marshal(),
+	},
+
 	{
 		desc: "oneof (message)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_nested_message": protobuild.Message{
 				"a": 1112,
 			},
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{protopack.Tag{112, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 			protopack.Message{protopack.Tag{1, protopack.VarintType}, protopack.Varint(1112)},
 		})}.Marshal(),
 	},
+
 	{
 		desc: "oneof (empty message)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_nested_message": protobuild.Message{},
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{protopack.Tag{112, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{})}.Marshal(),
 	},
+
 	{
 		desc: "oneof (merged message)",
 		decodeTo: makeMessages(protobuild.Message{
@@ -861,7 +935,7 @@ var testValidMessages = []testProto{
 					"optional_int32": 43,
 				},
 			},
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{112, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Message{protopack.Tag{1, protopack.VarintType}, protopack.Varint(1)},
@@ -873,29 +947,32 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc: "oneof (group)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneofgroup": protobuild.Message{
 				"a": 1,
 			},
-		}, &testpb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{121, protopack.StartGroupType},
 			protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
 			protopack.Tag{121, protopack.EndGroupType},
 		}.Marshal(),
 	},
+
 	{
 		desc: "oneof (empty group)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneofgroup": protobuild.Message{},
-		}, &testpb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{121, protopack.StartGroupType},
 			protopack.Tag{121, protopack.EndGroupType},
 		}.Marshal(),
 	},
+
 	{
 		desc: "oneof (merged group)",
 		decodeTo: makeMessages(protobuild.Message{
@@ -903,7 +980,7 @@ var testValidMessages = []testProto{
 				"a": 1,
 				"b": 2,
 			},
-		}, &testpb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{121, protopack.StartGroupType},
 			protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
@@ -913,77 +990,88 @@ var testValidMessages = []testProto{
 			protopack.Tag{121, protopack.EndGroupType},
 		}.Marshal(),
 	},
+
 	{
 		desc: "oneof (string)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_string": "1113",
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{protopack.Tag{113, protopack.BytesType}, protopack.String("1113")}.Marshal(),
 	},
+
 	{
 		desc: "oneof (bytes)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_bytes": "1114",
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{protopack.Tag{114, protopack.BytesType}, protopack.String("1114")}.Marshal(),
 	},
+
 	{
 		desc: "oneof (bool)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_bool": true,
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{protopack.Tag{115, protopack.VarintType}, protopack.Bool(true)}.Marshal(),
 	},
+
 	{
 		desc: "oneof (uint64)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_uint64": 116,
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{protopack.Tag{116, protopack.VarintType}, protopack.Varint(116)}.Marshal(),
 	},
+
 	{
 		desc: "oneof (float)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_float": 117.5,
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{protopack.Tag{117, protopack.Fixed32Type}, protopack.Float32(117.5)}.Marshal(),
 	},
+
 	{
 		desc: "oneof (double)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_double": 118.5,
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{protopack.Tag{118, protopack.Fixed64Type}, protopack.Float64(118.5)}.Marshal(),
 	},
+
 	{
 		desc: "oneof (enum)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_enum": "BAR",
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{protopack.Tag{119, protopack.VarintType}, protopack.Varint(int(testpb.TestAllTypes_BAR))}.Marshal(),
 	},
+
 	{
 		desc: "oneof (zero)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_uint64": 0,
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{protopack.Tag{116, protopack.VarintType}, protopack.Varint(0)}.Marshal(),
 	},
+
 	{
 		desc: "oneof (overridden value)",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_uint64": 2,
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{111, protopack.VarintType}, protopack.Varint(1),
 			protopack.Tag{116, protopack.VarintType}, protopack.Varint(2),
 		}.Marshal(),
 	},
+
 	// TODO: More unknown field tests for ordering, repeated fields, etc.
 	//
 	// It is currently impossible to produce results that the v1 Equal
 	// considers equivalent to those of the v1 decoder. Figure out if
 	// that's a problem or not.
+
 	{
 		desc:          "unknown fields",
 		checkFastInit: true,
@@ -996,6 +1084,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{100000, protopack.VarintType}, protopack.Varint(1),
 		}.Marshal(),
 	},
+
 	{
 		desc: "discarded unknown fields",
 		unmarshalOptions: proto.UnmarshalOptions{
@@ -1006,6 +1095,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{100000, protopack.VarintType}, protopack.Varint(1),
 		}.Marshal(),
 	},
+
 	{
 		desc: "field type mismatch",
 		decodeTo: makeMessages(protobuild.Message{
@@ -1017,11 +1107,12 @@ var testValidMessages = []testProto{
 			protopack.Tag{1, protopack.BytesType}, protopack.String("string"),
 		}.Marshal(),
 	},
+
 	{
 		desc: "map field element mismatch",
 		decodeTo: makeMessages(protobuild.Message{
 			"map_int32_int32": map[int32]int32{1: 0},
-		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}),
+		}, &testpb.TestAllTypes{}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{56, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
@@ -1029,18 +1120,21 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in nil message unset",
 		checkFastInit: true,
 		partial:       true,
 		decodeTo:      []proto.Message{(*testpb.TestRequired)(nil)},
 	},
+
 	{
 		desc:          "required int32 unset",
 		checkFastInit: true,
 		partial:       true,
 		decodeTo:      makeMessages(protobuild.Message{}, &requiredpb.Int32{}),
 	},
+
 	{
 		desc:          "required int32 set",
 		checkFastInit: true,
@@ -1051,12 +1145,14 @@ var testValidMessages = []testProto{
 			protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required fixed32 unset",
 		checkFastInit: true,
 		partial:       true,
 		decodeTo:      makeMessages(protobuild.Message{}, &requiredpb.Fixed32{}),
 	},
+
 	{
 		desc:          "required fixed32 set",
 		checkFastInit: true,
@@ -1067,12 +1163,14 @@ var testValidMessages = []testProto{
 			protopack.Tag{1, protopack.Fixed32Type}, protopack.Int32(1),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required fixed64 unset",
 		checkFastInit: true,
 		partial:       true,
 		decodeTo:      makeMessages(protobuild.Message{}, &requiredpb.Fixed64{}),
 	},
+
 	{
 		desc:          "required fixed64 set",
 		checkFastInit: true,
@@ -1083,12 +1181,14 @@ var testValidMessages = []testProto{
 			protopack.Tag{1, protopack.Fixed64Type}, protopack.Int64(1),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required bytes unset",
 		checkFastInit: true,
 		partial:       true,
 		decodeTo:      makeMessages(protobuild.Message{}, &requiredpb.Bytes{}),
 	},
+
 	{
 		desc:          "required bytes set",
 		checkFastInit: true,
@@ -1099,12 +1199,14 @@ var testValidMessages = []testProto{
 			protopack.Tag{1, protopack.BytesType}, protopack.Bytes(nil),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required message unset",
 		checkFastInit: true,
 		partial:       true,
 		decodeTo:      makeMessages(protobuild.Message{}, &requiredpb.Message{}),
 	},
+
 	{
 		desc:          "required message set",
 		checkFastInit: true,
@@ -1115,12 +1217,14 @@ var testValidMessages = []testProto{
 			protopack.Tag{1, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{}),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required group unset",
 		checkFastInit: true,
 		partial:       true,
 		decodeTo:      makeMessages(protobuild.Message{}, &requiredpb.Group{}),
 	},
+
 	{
 		desc:          "required group set",
 		checkFastInit: true,
@@ -1132,6 +1236,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{1, protopack.EndGroupType},
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field with incompatible wire type",
 		checkFastInit: true,
@@ -1141,22 +1246,29 @@ var testValidMessages = []testProto{
 			unknown(protopack.Message{
 				protopack.Tag{1, protopack.Fixed32Type}, protopack.Int32(2),
 			}.Marshal()),
+		), build(
+			&testeditionspb.TestRequired{},
+			unknown(protopack.Message{
+				protopack.Tag{1, protopack.Fixed32Type}, protopack.Int32(2),
+			}.Marshal()),
 		)},
 		wire: protopack.Message{
 			protopack.Tag{1, protopack.Fixed32Type}, protopack.Int32(2),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in optional message unset",
 		checkFastInit: true,
 		partial:       true,
 		decodeTo: makeMessages(protobuild.Message{
 			"optional_message": protobuild.Message{},
-		}, &testpb.TestRequiredForeign{}),
+		}, &testpb.TestRequiredForeign{}, &testeditionspb.TestRequiredForeign{}),
 		wire: protopack.Message{
 			protopack.Tag{1, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{}),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in optional message set",
 		checkFastInit: true,
@@ -1164,13 +1276,14 @@ var testValidMessages = []testProto{
 			"optional_message": protobuild.Message{
 				"required_field": 1,
 			},
-		}, &testpb.TestRequiredForeign{}),
+		}, &testpb.TestRequiredForeign{}, &testeditionspb.TestRequiredForeign{}),
 		wire: protopack.Message{
 			protopack.Tag{1, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc:             "required field in optional message set (split across multiple tags)",
 		checkFastInit:    false, // fast init checks don't handle split messages
@@ -1179,7 +1292,7 @@ var testValidMessages = []testProto{
 			"optional_message": protobuild.Message{
 				"required_field": 1,
 			},
-		}, &testpb.TestRequiredForeign{}),
+		}, &testpb.TestRequiredForeign{}, &testeditionspb.TestRequiredForeign{}),
 		wire: protopack.Message{
 			protopack.Tag{1, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{}),
 			protopack.Tag{1, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
@@ -1187,6 +1300,7 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in repeated message unset",
 		checkFastInit: true,
@@ -1196,7 +1310,7 @@ var testValidMessages = []testProto{
 				{"required_field": 1},
 				{},
 			},
-		}, &testpb.TestRequiredForeign{}),
+		}, &testpb.TestRequiredForeign{}, &testeditionspb.TestRequiredForeign{}),
 		wire: protopack.Message{
 			protopack.Tag{2, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
@@ -1204,6 +1318,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{2, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{}),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in repeated message set",
 		checkFastInit: true,
@@ -1212,7 +1327,7 @@ var testValidMessages = []testProto{
 				{"required_field": 1},
 				{"required_field": 2},
 			},
-		}, &testpb.TestRequiredForeign{}),
+		}, &testpb.TestRequiredForeign{}, &testeditionspb.TestRequiredForeign{}),
 		wire: protopack.Message{
 			protopack.Tag{2, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
@@ -1222,6 +1337,7 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in map message unset",
 		checkFastInit: true,
@@ -1231,7 +1347,7 @@ var testValidMessages = []testProto{
 				1: {"required_field": 1},
 				2: {},
 			},
-		}, &testpb.TestRequiredForeign{}),
+		}, &testpb.TestRequiredForeign{}, &testeditionspb.TestRequiredForeign{}),
 		wire: protopack.Message{
 			protopack.Tag{3, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
@@ -1245,6 +1361,7 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in absent map message value",
 		checkFastInit: true,
@@ -1253,13 +1370,14 @@ var testValidMessages = []testProto{
 			"map_message": map[int32]protobuild.Message{
 				2: {},
 			},
-		}, &testpb.TestRequiredForeign{}),
+		}, &testpb.TestRequiredForeign{}, &testeditionspb.TestRequiredForeign{}),
 		wire: protopack.Message{
 			protopack.Tag{3, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(2),
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in map message set",
 		checkFastInit: true,
@@ -1268,7 +1386,7 @@ var testValidMessages = []testProto{
 				1: {"required_field": 1},
 				2: {"required_field": 2},
 			},
-		}, &testpb.TestRequiredForeign{}),
+		}, &testpb.TestRequiredForeign{}, &testeditionspb.TestRequiredForeign{}),
 		wire: protopack.Message{
 			protopack.Tag{3, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
@@ -1284,18 +1402,20 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in optional group unset",
 		checkFastInit: true,
 		partial:       true,
 		decodeTo: makeMessages(protobuild.Message{
 			"optionalgroup": protobuild.Message{},
-		}, &testpb.TestRequiredGroupFields{}),
+		}, &testpb.TestRequiredGroupFields{}, &testeditionspb.TestRequiredGroupFields{}),
 		wire: protopack.Message{
 			protopack.Tag{1, protopack.StartGroupType},
 			protopack.Tag{1, protopack.EndGroupType},
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in optional group set",
 		checkFastInit: true,
@@ -1303,13 +1423,14 @@ var testValidMessages = []testProto{
 			"optionalgroup": protobuild.Message{
 				"a": 1,
 			},
-		}, &testpb.TestRequiredGroupFields{}),
+		}, &testpb.TestRequiredGroupFields{}, &testeditionspb.TestRequiredGroupFields{}),
 		wire: protopack.Message{
 			protopack.Tag{1, protopack.StartGroupType},
 			protopack.Tag{2, protopack.VarintType}, protopack.Varint(1),
 			protopack.Tag{1, protopack.EndGroupType},
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in repeated group unset",
 		checkFastInit: true,
@@ -1319,7 +1440,7 @@ var testValidMessages = []testProto{
 				{"a": 1},
 				{},
 			},
-		}, &testpb.TestRequiredGroupFields{}),
+		}, &testpb.TestRequiredGroupFields{}, &testeditionspb.TestRequiredGroupFields{}),
 		wire: protopack.Message{
 			protopack.Tag{3, protopack.StartGroupType},
 			protopack.Tag{4, protopack.VarintType}, protopack.Varint(1),
@@ -1328,6 +1449,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{3, protopack.EndGroupType},
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in repeated group set",
 		checkFastInit: true,
@@ -1336,7 +1458,7 @@ var testValidMessages = []testProto{
 				{"a": 1},
 				{"a": 2},
 			},
-		}, &testpb.TestRequiredGroupFields{}),
+		}, &testpb.TestRequiredGroupFields{}, &testeditionspb.TestRequiredGroupFields{}),
 		wire: protopack.Message{
 			protopack.Tag{3, protopack.StartGroupType},
 			protopack.Tag{4, protopack.VarintType}, protopack.Varint(1),
@@ -1346,15 +1468,17 @@ var testValidMessages = []testProto{
 			protopack.Tag{3, protopack.EndGroupType},
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in oneof message unset",
 		checkFastInit: true,
 		partial:       true,
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_message": protobuild.Message{},
-		}, &testpb.TestRequiredForeign{}),
+		}, &testpb.TestRequiredForeign{}, &testeditionspb.TestRequiredForeign{}),
 		wire: protopack.Message{protopack.Tag{4, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{})}.Marshal(),
 	},
+
 	{
 		desc:          "required field in oneof message set",
 		checkFastInit: true,
@@ -1362,22 +1486,24 @@ var testValidMessages = []testProto{
 			"oneof_message": protobuild.Message{
 				"required_field": 1,
 			},
-		}, &testpb.TestRequiredForeign{}),
+		}, &testpb.TestRequiredForeign{}, &testeditionspb.TestRequiredForeign{}),
 		wire: protopack.Message{protopack.Tag{4, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 			protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
 		})}.Marshal(),
 	},
+
 	{
 		desc:          "required field in extension message unset",
 		checkFastInit: true,
 		partial:       true,
 		decodeTo: makeMessages(protobuild.Message{
 			"single": protobuild.Message{},
-		}, &testpb.TestAllExtensions{}),
+		}, &testpb.TestAllExtensions{}, &testeditionspb.TestAllExtensions{}),
 		wire: protopack.Message{
 			protopack.Tag{1000, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{}),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in extension message set",
 		checkFastInit: true,
@@ -1385,13 +1511,14 @@ var testValidMessages = []testProto{
 			"single": protobuild.Message{
 				"required_field": 1,
 			},
-		}, &testpb.TestAllExtensions{}),
+		}, &testpb.TestAllExtensions{}, &testeditionspb.TestAllExtensions{}),
 		wire: protopack.Message{
 			protopack.Tag{1000, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in repeated extension message unset",
 		checkFastInit: true,
@@ -1401,7 +1528,7 @@ var testValidMessages = []testProto{
 				{"required_field": 1},
 				{},
 			},
-		}, &testpb.TestAllExtensions{}),
+		}, &testpb.TestAllExtensions{}, &testeditionspb.TestAllExtensions{}),
 		wire: protopack.Message{
 			protopack.Tag{1001, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
@@ -1409,6 +1536,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{1001, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{}),
 		}.Marshal(),
 	},
+
 	{
 		desc:          "required field in repeated extension message set",
 		checkFastInit: true,
@@ -1417,7 +1545,7 @@ var testValidMessages = []testProto{
 				{"required_field": 1},
 				{"required_field": 2},
 			},
-		}, &testpb.TestAllExtensions{}),
+		}, &testpb.TestAllExtensions{}, &testeditionspb.TestAllExtensions{}),
 		wire: protopack.Message{
 			protopack.Tag{1001, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(1),
@@ -1427,14 +1555,17 @@ var testValidMessages = []testProto{
 			}),
 		}.Marshal(),
 	},
+
 	{
 		desc: "nil messages",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
 			(*test3pb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
 		},
 	},
+
 	{
 		desc:    "legacy",
 		partial: true,
@@ -1491,6 +1622,7 @@ var testValidMessages = []testProto{
 		}.Marshal(),
 		validationStatus: impl.ValidationUnknown,
 	},
+
 	{
 		desc: "first reserved field number",
 		decodeTo: makeMessages(protobuild.Message{
@@ -1502,6 +1634,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{protopack.FirstReservedNumber, protopack.VarintType}, protopack.Varint(1004),
 		}.Marshal(),
 	},
+
 	{
 		desc: "last reserved field number",
 		decodeTo: makeMessages(protobuild.Message{
@@ -1513,6 +1646,7 @@ var testValidMessages = []testProto{
 			protopack.Tag{protopack.LastReservedNumber, protopack.VarintType}, protopack.Varint(1005),
 		}.Marshal(),
 	},
+
 	{
 		desc: "nested unknown extension",
 		unmarshalOptions: proto.UnmarshalOptions{
@@ -1539,7 +1673,7 @@ var testValidMessages = []testProto{
 					},
 				},
 			},
-		}, &testpb.TestAllExtensions{}),
+		}, &testpb.TestAllExtensions{}, &testeditionspb.TestAllExtensions{}),
 		wire: protopack.Message{
 			protopack.Tag{18, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{2, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
@@ -1560,7 +1694,7 @@ var testInvalidMessages = []testProto{
 		desc: "invalid UTF-8 in optional string field",
 		decodeTo: makeMessages(protobuild.Message{
 			"optional_string": "abc\xff",
-		}, &test3pb.TestAllTypes{}),
+		}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{14, protopack.BytesType}, protopack.String("abc\xff"),
 		}.Marshal(),
@@ -1569,7 +1703,7 @@ var testInvalidMessages = []testProto{
 		desc: "invalid UTF-8 in singular string field",
 		decodeTo: makeMessages(protobuild.Message{
 			"singular_string": "abc\xff",
-		}, &test3pb.TestAllTypes{}),
+		}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{94, protopack.BytesType}, protopack.String("abc\xff"),
 		}.Marshal(),
@@ -1578,7 +1712,7 @@ var testInvalidMessages = []testProto{
 		desc: "invalid UTF-8 in repeated string field",
 		decodeTo: makeMessages(protobuild.Message{
 			"repeated_string": []string{"foo", "abc\xff"},
-		}, &test3pb.TestAllTypes{}),
+		}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{44, protopack.BytesType}, protopack.String("foo"),
 			protopack.Tag{44, protopack.BytesType}, protopack.String("abc\xff"),
@@ -1592,7 +1726,7 @@ var testInvalidMessages = []testProto{
 					"singular_string": "abc\xff",
 				},
 			},
-		}, &test3pb.TestAllTypes{}),
+		}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{18, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{2, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
@@ -1605,14 +1739,14 @@ var testInvalidMessages = []testProto{
 		desc: "invalid UTF-8 in oneof field",
 		decodeTo: makeMessages(protobuild.Message{
 			"oneof_string": "abc\xff",
-		}, &test3pb.TestAllTypes{}),
+		}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{protopack.Tag{113, protopack.BytesType}, protopack.String("abc\xff")}.Marshal(),
 	},
 	{
 		desc: "invalid UTF-8 in map key",
 		decodeTo: makeMessages(protobuild.Message{
 			"map_string_string": map[string]string{"key\xff": "val"},
-		}, &test3pb.TestAllTypes{}),
+		}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{69, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.BytesType}, protopack.String("key\xff"),
@@ -1624,7 +1758,7 @@ var testInvalidMessages = []testProto{
 		desc: "invalid UTF-8 in map value",
 		decodeTo: makeMessages(protobuild.Message{
 			"map_string_string": map[string]string{"key": "val\xff"},
-		}, &test3pb.TestAllTypes{}),
+		}, &test3pb.TestAllTypes{}, &testeditionspb.TestAllTypes{}),
 		wire: protopack.Message{
 			protopack.Tag{69, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.BytesType}, protopack.String("key"),
@@ -1636,7 +1770,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid field number zero",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{protopack.MinValidNumber - 1, protopack.VarintType}, protopack.Varint(1001),
@@ -1646,7 +1782,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid field numbers zero and one",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{protopack.MinValidNumber - 1, protopack.VarintType}, protopack.Varint(1002),
@@ -1657,7 +1795,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid field numbers max and max+1",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{protopack.MaxValidNumber, protopack.VarintType}, protopack.Varint(1006),
@@ -1668,7 +1808,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid field number max+1",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{protopack.MaxValidNumber + 1, protopack.VarintType}, protopack.Varint(1008),
@@ -1678,7 +1820,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid field number wraps int32",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Varint(2234993595104), protopack.Varint(0),
@@ -1686,7 +1830,7 @@ var testInvalidMessages = []testProto{
 	},
 	{
 		desc:     "invalid field number in map",
-		decodeTo: []proto.Message{(*testpb.TestAllTypes)(nil)},
+		decodeTo: []proto.Message{(*testpb.TestAllTypes)(nil), (*testeditionspb.TestAllTypes)(nil)},
 		wire: protopack.Message{
 			protopack.Tag{56, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
 				protopack.Tag{1, protopack.VarintType}, protopack.Varint(1056),
@@ -1699,7 +1843,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid tag varint",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: []byte{0xff},
 	},
@@ -1707,7 +1853,9 @@ var testInvalidMessages = []testProto{
 		desc: "field number too small",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{0, protopack.VarintType}, protopack.Varint(0),
@@ -1717,7 +1865,9 @@ var testInvalidMessages = []testProto{
 		desc: "field number too large",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{protowire.MaxValidNumber + 1, protopack.VarintType}, protopack.Varint(0),
@@ -1727,7 +1877,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid tag varint in message field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{18, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
@@ -1739,7 +1891,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid tag varint in repeated message field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{48, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
@@ -1751,7 +1905,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid varint in group field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{16, protopack.StartGroupType},
@@ -1765,7 +1921,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid varint in repeated group field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{46, protopack.StartGroupType},
@@ -1779,16 +1937,46 @@ var testInvalidMessages = []testProto{
 		desc: "unterminated repeated group field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{46, protopack.StartGroupType},
 		}.Marshal(),
 	},
 	{
+		desc: "incorrectly terminated repeated group field",
+		decodeTo: []proto.Message{
+			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
+			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
+		},
+		wire: protopack.Message{
+			protopack.Tag{46, protopack.StartGroupType},
+			protopack.Tag{45, protopack.EndGroupType}, // should be 46
+		}.Marshal(),
+	},
+	{
+		desc: "incorrectly double-terminated repeated group field",
+		decodeTo: []proto.Message{
+			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
+			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
+		},
+		wire: protopack.Message{
+			protopack.Tag{46, protopack.StartGroupType},
+			protopack.Tag{46, protopack.EndGroupType},
+			protopack.Tag{46, protopack.EndGroupType}, // extra
+		}.Marshal(),
+	},
+	{
 		desc: "invalid tag varint in map item",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{56, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
@@ -1802,6 +1990,7 @@ var testInvalidMessages = []testProto{
 		desc: "invalid tag varint in map message value",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{71, protopack.BytesType}, protopack.LengthPrefix(protopack.Message{
@@ -1816,7 +2005,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed int32 field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{31, protopack.BytesType}, protopack.Bytes{0xff},
@@ -1826,7 +2017,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed int64 field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{32, protopack.BytesType}, protopack.Bytes{0xff},
@@ -1836,7 +2029,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed uint32 field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{33, protopack.BytesType}, protopack.Bytes{0xff},
@@ -1846,7 +2041,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed uint64 field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{34, protopack.BytesType}, protopack.Bytes{0xff},
@@ -1856,7 +2053,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed sint32 field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{35, protopack.BytesType}, protopack.Bytes{0xff},
@@ -1866,7 +2065,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed sint64 field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{36, protopack.BytesType}, protopack.Bytes{0xff},
@@ -1876,7 +2077,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed fixed32 field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{37, protopack.BytesType}, protopack.Bytes{0x00},
@@ -1886,7 +2089,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed fixed64 field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{38, protopack.BytesType}, protopack.Bytes{0x00},
@@ -1896,7 +2101,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed sfixed32 field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{39, protopack.BytesType}, protopack.Bytes{0x00},
@@ -1906,7 +2113,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed sfixed64 field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{40, protopack.BytesType}, protopack.Bytes{0x00},
@@ -1916,7 +2125,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed float field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{41, protopack.BytesType}, protopack.Bytes{0x00},
@@ -1926,7 +2137,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed double field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{42, protopack.BytesType}, protopack.Bytes{0x00},
@@ -1936,7 +2149,9 @@ var testInvalidMessages = []testProto{
 		desc: "invalid packed bool field",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{43, protopack.BytesType}, protopack.Bytes{0xff},
@@ -1946,7 +2161,9 @@ var testInvalidMessages = []testProto{
 		desc: "bytes field overruns message",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{18, protopack.BytesType}, protopack.LengthPrefix{protopack.Message{
@@ -1961,6 +2178,8 @@ var testInvalidMessages = []testProto{
 		desc: "varint field overruns message",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 			(*testpb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
@@ -1971,7 +2190,9 @@ var testInvalidMessages = []testProto{
 		desc: "bytes field lacks size",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{18, protopack.BytesType},
@@ -1981,7 +2202,9 @@ var testInvalidMessages = []testProto{
 		desc: "varint overflow",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{1, protopack.VarintType},
@@ -1992,7 +2215,9 @@ var testInvalidMessages = []testProto{
 		desc: "varint length overrun",
 		decodeTo: []proto.Message{
 			(*testpb.TestAllTypes)(nil),
+			(*testeditionspb.TestAllTypes)(nil),
 			(*testpb.TestAllExtensions)(nil),
+			(*testeditionspb.TestAllExtensions)(nil),
 		},
 		wire: protopack.Message{
 			protopack.Tag{1, protopack.VarintType},
@@ -2022,4 +2247,12 @@ func (f filterResolver) FindExtensionByNumber(message protoreflect.FullName, fie
 		return nil, protoregistry.NotFound
 	}
 	return xt, nil
+}
+
+func roundTripMessage(dst, src proto.Message) error {
+	b, err := proto.Marshal(src)
+	if err != nil {
+		return err
+	}
+	return proto.Unmarshal(b, dst)
 }

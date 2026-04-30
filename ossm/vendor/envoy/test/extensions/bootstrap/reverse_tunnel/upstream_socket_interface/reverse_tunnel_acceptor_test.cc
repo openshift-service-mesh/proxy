@@ -51,7 +51,7 @@ protected:
   }
 
   void setupThreadLocalSlot() {
-    extension_->onServerInitialized();
+    extension_->onServerInitialized(server_);
     thread_local_registry_ =
         std::make_shared<UpstreamSocketThreadLocal>(dispatcher_, extension_.get());
     tls_slot_ = ThreadLocal::TypedSlot<UpstreamSocketThreadLocal>::makeUnique(thread_local_);
@@ -111,6 +111,10 @@ protected:
       socklen_t sockAddrLen() const override { return 0; }
       absl::string_view addressType() const override { return "test"; }
       absl::optional<std::string> networkNamespace() const override { return absl::nullopt; }
+      Network::Address::InstanceConstSharedPtr
+      withNetworkNamespace(absl::string_view) const override {
+        return nullptr;
+      }
       const Network::SocketInterface& socketInterface() const override {
         return Network::SocketInterfaceSingleton::get();
       }
@@ -125,6 +129,7 @@ protected:
 
   NiceMock<Server::Configuration::MockServerFactoryContext> context_;
   NiceMock<ThreadLocal::MockInstance> thread_local_;
+  NiceMock<Server::MockInstance> server_;
   Stats::IsolatedStoreImpl stats_store_;
   Stats::ScopeSharedPtr stats_scope_;
   NiceMock<Event::MockDispatcher> dispatcher_;

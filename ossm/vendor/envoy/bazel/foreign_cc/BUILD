@@ -28,15 +28,19 @@ config_setting(
 configure_make(
     name = "liburing",
     configure_in_place = True,
-    lib_source = "@com_github_axboe_liburing//:all",
+    env = {"ENABLE_SHARED": "0"} | select({
+        "//bazel:clang_build": {
+            "AR": "$(AR)",
+            "RANLIB": "$(AR) -s",
+        },
+        "//conditions:default": {},
+    }),
+    lib_source = "@liburing//:all",
     tags = [
         "nocompdb",
         "skip_on_windows",
     ],
-    targets = [
-        "library",
-        "install",
-    ],
+    targets = ["install"],
 )
 
 envoy_cc_library(
@@ -48,47 +52,13 @@ envoy_cc_library(
     }),
 )
 
-# autotools packages are unusable on Windows as-is
-# TODO: Consider our own gperftools.BUILD file as we do with many other packages
-configure_make(
-    name = "gperftools_build",
-    configure_options = [
-        "--enable-shared=no",
-        "--enable-frame-pointers",
-        "--disable-libunwind",
-    ] + select({
-        "//bazel:apple": ["AR=/usr/bin/ar"],
-        "//conditions:default": [],
-    }),
-    lib_source = "@com_github_gperftools_gperftools//:all",
-    linkopts = ["-lpthread"],
-    out_static_libs = select({
-        "//bazel:debug_tcmalloc": ["libtcmalloc_debug.a"],
-        "//conditions:default": ["libtcmalloc_and_profiler.a"],
-    }),
-    tags = ["skip_on_windows"],
-    targets = [
-        "install-libLTLIBRARIES install-perftoolsincludeHEADERS",
-    ],
-    alwayslink = True,
-)
-
-# Workaround for https://github.com/bazelbuild/rules_foreign_cc/issues/227
-cc_library(
-    name = "gperftools",
-    tags = ["skip_on_windows"],
-    deps = [
-        "gperftools_build",
-    ],
-)
-
 make(
     name = "lz4",
     args = [
         "MOREFLAGS='-fPIC'",
         "BUILD_SHARED=no",
     ],
-    lib_source = "@com_github_lz4_lz4//:all",
+    lib_source = "@lz4//:all",
     out_static_libs = [
         "liblz4.a",
     ],
@@ -107,6 +77,9 @@ configure_make(
     name = "librdkafka_build",
     configure_in_place = True,
     configure_options = ["--disable-ssl --disable-gssapi --disable-zstd --disable-curl && cp Makefile.config src/.. && cp config.h src/.."],
+    env = {
+        "AR": "$(AR)",
+    },
     lib_source = "@confluentinc_librdkafka//:all",
     out_static_libs = [
         "librdkafka.a",
@@ -130,7 +103,7 @@ cc_library(
 
 configure_make(
     name = "luajit",
-    configure_command = "build.py",
+    configure_command = "luajit_build.sh",
     env = select({
         # This shouldn't be needed! See
         # https://github.com/envoyproxy/envoy/issues/6084
@@ -140,7 +113,7 @@ configure_make(
         "//bazel:windows_dbg_build": {"WINDOWS_DBG_BUILD": "debug"},
         "//conditions:default": {},
     }),
-    lib_source = "@com_github_luajit_luajit//:all",
+    lib_source = "@luajit",
     out_include_dir = "include/luajit-2.1",
     out_static_libs = select({
         "//bazel:windows_x86_64": ["lua51.lib"],
@@ -149,6 +122,27 @@ configure_make(
     targets = [],
 )
 
+# OpenResty's luajit2 with better support for s390x and ppc architectures
+configure_make(
+    name = "luajit2",
+    configure_command = "luajit_build.sh",
+    env = select({
+        # This shouldn't be needed! See
+        # https://github.com/envoyproxy/envoy/issues/6084
+        # TODO(htuch): Remove when #6084 is fixed
+        "//bazel:asan_build": {"ENVOY_CONFIG_ASAN": "1"},
+        "//bazel:msan_build": {"ENVOY_CONFIG_MSAN": "1"},
+        "//bazel:windows_dbg_build": {"WINDOWS_DBG_BUILD": "debug"},
+        "//conditions:default": {},
+    }),
+    lib_source = "@com_github_luajit2_luajit2//:all",
+    out_include_dir = "include/luajit-2.1",
+    out_static_libs = select({
+        "//bazel:windows_x86_64": ["lua51.lib"],
+        "//conditions:default": ["libluajit-5.1.a"],
+    }),
+    targets = [],
+)
 configure_make(
     name = "colm",
     autogen = True,
@@ -159,12 +153,7 @@ configure_make(
         "--disable-shared",
         "--enable-static",
     ],
-    # Workaround for the issue with statically linked libstdc++
-    # using -l:libstdc++.a.
-    env = {
-        "CXXFLAGS": "--static -lstdc++ -Wno-unused-command-line-argument",
-    },
-    lib_source = "@net_colm_open_source_colm//:all",
+    lib_source = "@colm//:all",
     out_binaries = ["colm"],
     tags = ["skip_on_windows"],
 )
@@ -181,12 +170,7 @@ configure_make(
         "--enable-static",
         "--with-colm=$$EXT_BUILD_DEPS/colm",
     ],
-    # Workaround for the issue with statically linked libstdc++
-    # using -l:libstdc++.a.
-    env = {
-        "CXXFLAGS": "--static -lstdc++ -Wno-unused-command-line-argument",
-    },
-    lib_source = "@net_colm_open_source_ragel//:all",
+    lib_source = "@ragel//:all",
     out_binaries = ["ragel"],
     tags = ["skip_on_windows"],
     deps = [":colm"],
@@ -198,7 +182,7 @@ configure_make(
 configure_make(
     name = "unicode_icu_build",
     build_data = ["//bazel/foreign_cc:icu_data_filter.json"],
-    configure_command = "icu4c/source/configure",
+    configure_command = "source/configure",
     configure_options = [
         "--enable-option-checking",
         "--enable-static",
@@ -213,21 +197,16 @@ configure_make(
         "--disable-tests",
         "--with-data-packaging=static",
     ],
-    data = ["@com_github_unicode_org_icu//:all"],
+    data = ["@icu//:all"],
     env = {
         "CXXFLAGS": "-fPIC -DU_CHARSET_IS_UTF8=1 -DU_USING_ICU_NAMESPACE=0 -DUCONFIG_ONLY_HTML_CONVERSION=1 -DUCONFIG_NO_LEGACY_CONVERSION=1 -DUCONFIG_NO_BREAK_ITERATION=1 -DUCONFIG_NO_COLLATION=1 -DUCONFIG_NO_FORMATTING=1 -DUCONFIG_NO_TRANSLITERATION=1 -DUCONFIG_NO_REGULAR_EXPRESSIONS=1",
         "CFLAGS": "-fPIC",
         "LIBS": "-l:libstdc++.a",
         "ICU_DATA_FILTER_FILE": "$(execpath //bazel/foreign_cc:icu_data_filter.json)",
         "ARFLAGS": "r",
+        "PYTHON": "$$EXT_BUILD_ROOT/$(PYTHON3)",
     } | select({
         "//bazel/foreign_cc:parallel_builds_enabled": {
-            "MAKEFLAGS": "-j ARFLAGS=r",
-        },
-        "//bazel:engflow_rbe_x86_64": {
-            "MAKEFLAGS": "-j ARFLAGS=r",
-        },
-        "//bazel:engflow_rbe_aarch64": {
             "MAKEFLAGS": "-j ARFLAGS=r",
         },
         "//conditions:default": {
@@ -243,12 +222,13 @@ configure_make(
         },
         "//conditions:default": {},
     }),
-    lib_source = "@com_github_unicode_org_icu//:all",
+    lib_source = "@icu//:all",
     out_static_libs = [
         "libicuuc.a",
         "libicudata.a",
     ],
     tags = ["skip_on_windows"],
+    toolchains = ["@rules_python//python:current_py_toolchain"],
     alwayslink = True,
 )
 
@@ -264,8 +244,6 @@ envoy_cmake(
     name = "libsxg",
     build_args = select({
         "//bazel/foreign_cc:parallel_builds_enabled": ["-j"],
-        "//bazel:engflow_rbe_x86_64": ["-j"],
-        "//bazel:engflow_rbe_aarch64": ["-j"],
         "//conditions:default": ["-j1"],
     }),
     cache_entries = {
@@ -276,6 +254,17 @@ envoy_cmake(
         "SXG_WITH_CERT_CHAIN": "off",
         "RUN_TEST": "off",
         "CMAKE_INSTALL_LIBDIR": "lib",
+        "OPENSSL_ROOT_DIR": "$$EXT_BUILD_DEPS",
+        "OPENSSL_INCLUDE_DIR": "$$EXT_BUILD_DEPS/include",
+        "OPENSSL_CRYPTO_LIBRARY": "$$EXT_BUILD_DEPS/lib/libcrypto_internal.a",
+        "OPENSSL_SSL_LIBRARY": "$$EXT_BUILD_DEPS/lib/libssl_internal.a",
+        # Force use of system compiler and sysroot instead of vendored LLVM toolchain
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_C_FLAGS": "--sysroot=/",
+        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
+
     },
     exec_properties = select({
         "//bazel:engflow_rbe_x86_64": {
@@ -290,81 +279,17 @@ envoy_cmake(
         "-G",
         "Ninja",
     ],
-    lib_source = "@com_github_google_libsxg//:all",
+    lib_source = "@libsxg//:all",
     out_static_libs = ["libsxg.a"],
     tags = ["skip_on_windows"],
     # Use boringssl alias to select fips vs non-fips version.
-    deps = ["//bazel:boringssl"],
-)
-
-configure_make(
-    name = "luajit2",
-    configure_command = "build.py",
-    env = select({
-        # This shouldn't be needed! See
-        # https://github.com/envoyproxy/envoy/issues/6084
-        # TODO(htuch): Remove when #6084 is fixed
-        "//bazel:asan_build": {"ENVOY_CONFIG_ASAN": "1"},
-        "//bazel:msan_build": {"ENVOY_CONFIG_MSAN": "1"},
-        "//conditions:default": {},
-    }),
-    lib_source = "@com_github_luajit2_luajit2//:all",
-    out_include_dir = "include/luajit-2.1",
-    out_static_libs = ["libluajit-5.1.a"],
-    tags = ["skip_on_windows"],
-    targets = [],
-)
-
-envoy_cmake(
-    name = "ares",
-    build_args = select({
-        "//bazel/foreign_cc:parallel_builds_enabled": ["-j"],
-        "//bazel:engflow_rbe_x86_64": ["-j"],
-        "//bazel:engflow_rbe_aarch64": ["-j"],
-        "//conditions:default": ["-j1"],
-    }),
-    cache_entries = {
-        "CARES_BUILD_TOOLS": "no",
-        "CARES_SHARED": "no",
-        "CARES_STATIC": "on",
-        "CMAKE_CXX_COMPILER_FORCED": "on",
-        "CMAKE_INSTALL_LIBDIR": "lib",
-    },
-    defines = ["CARES_STATICLIB"],
-    exec_properties = select({
-        "//bazel:engflow_rbe_x86_64": {
-            "Pool": "linux_x64_large",
-        },
-        "//bazel:engflow_rbe_aarch64": {
-            "Pool": "linux_arm64_small",
-        },
-        "//conditions:default": {},
-    }),
-    generate_args = [
-        "-G",
-        "Ninja",
-    ],
-    lib_source = "@com_github_c_ares_c_ares//:all",
-    linkopts = select({
-        "//bazel:apple": ["-lresolv"],
-        "//conditions:default": [],
-    }),
-    out_static_libs = select({
-        "//bazel:windows_x86_64": ["cares.lib"],
-        "//conditions:default": ["libcares.a"],
-    }),
-    postfix_script = select({
-        "//bazel:windows_x86_64": "cp -L $$EXT_BUILD_ROOT/external/com_github_c_ares_c_ares/src/lib/ares_nameser.h $$INSTALLDIR/include/ares_nameser.h && cp -L $$EXT_BUILD_ROOT/external/com_github_c_ares_c_ares/include/ares_dns.h $$INSTALLDIR/include/ares_dns.h",
-        "//conditions:default": "rm -f $$INSTALLDIR/include/ares_dns.h && cp -L $$EXT_BUILD_ROOT/external/com_github_c_ares_c_ares/include/ares_dns.h $$INSTALLDIR/include/ares_dns.h",
-    }),
+    deps = ["//bazel:ssl"],
 )
 
 envoy_cmake(
     name = "event",
     build_args = select({
         "//bazel/foreign_cc:parallel_builds_enabled": ["-j"],
-        "//bazel:engflow_rbe_x86_64": ["-j"],
-        "//bazel:engflow_rbe_aarch64": ["-j"],
         "//conditions:default": ["-j1"],
     }),
     cache_entries = {
@@ -380,6 +305,13 @@ envoy_cmake(
         # this can be removed.
         # More details https://github.com/envoyproxy/envoy-mobile/issues/116
         "_GNU_SOURCE": "on",
+        # Force use of system compiler and sysroot instead of vendored LLVM toolchain
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_C_FLAGS": "--sysroot=/",
+        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
+
     },
     exec_properties = select({
         "//bazel:engflow_rbe_x86_64": {
@@ -394,7 +326,7 @@ envoy_cmake(
         "-G",
         "Ninja",
     ],
-    lib_source = "@com_github_libevent_libevent//:all",
+    lib_source = "@libevent",
     out_static_libs = select({
         # macOS organization of libevent is different from Windows/Linux.
         # Including libevent_core is a requirement on those platforms, but
@@ -420,8 +352,6 @@ envoy_cmake(
     name = "nghttp2",
     build_args = select({
         "//bazel/foreign_cc:parallel_builds_enabled": ["-j"],
-        "//bazel:engflow_rbe_x86_64": ["-j"],
-        "//bazel:engflow_rbe_aarch64": ["-j"],
         "//conditions:default": ["-j1"],
     }),
     cache_entries = {
@@ -430,6 +360,13 @@ envoy_cmake(
         "BUILD_STATIC_LIBS": "on",
         "CMAKE_INSTALL_LIBDIR": "lib",
         "CMAKE_CXX_COMPILER_FORCED": "on",
+        # Force use of system compiler and sysroot instead of vendored LLVM toolchain
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_C_FLAGS": "--sysroot=/",
+        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
+
     },
     cmake_files_dir = "$BUILD_TMPDIR/lib/CMakeFiles",
     debug_cache_entries = {"ENABLE_DEBUG": "on"},
@@ -447,7 +384,7 @@ envoy_cmake(
         "-G",
         "Ninja",
     ],
-    lib_source = "@com_github_nghttp2_nghttp2//:all",
+    lib_source = "@nghttp2//:all",
     out_static_libs = select({
         "//bazel:windows_x86_64": ["nghttp2.lib"],
         "//conditions:default": ["libnghttp2.a"],
@@ -458,8 +395,6 @@ envoy_cmake(
     name = "wamr",
     build_args = select({
         "//bazel/foreign_cc:parallel_builds_enabled": ["-j"],
-        "//bazel:engflow_rbe_x86_64": ["-j"],
-        "//bazel:engflow_rbe_aarch64": ["-j"],
         "//conditions:default": ["-j1"],
     }),
     cache_entries = {
@@ -492,6 +427,13 @@ envoy_cmake(
         "WAMR_BUILD_DUMP_CALL_STACK": "0",
         # linux perf. only for jit and aot
         "WAMR_BUILD_LINUX_PERF": "0",
+        # Force use of system compiler and sysroot instead of vendored LLVM toolchain
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_C_FLAGS": "--sysroot=/",
+        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
+
     },
     exec_properties = select({
         "//bazel:engflow_rbe_x86_64": {
@@ -506,104 +448,15 @@ envoy_cmake(
         "-G",
         "Ninja",
     ],
-    lib_source = "@com_github_wamr//:all",
-    out_static_libs = ["libvmlib.a"],
+    lib_source = "@wamr//:all",
+    out_static_libs = ["libiwasm.a"],
     tags = ["skip_on_windows"],
-)
-
-envoy_cmake(
-    name = "zlib",
-    cache_entries = {
-        "CMAKE_CXX_COMPILER_FORCED": "on",
-        "CMAKE_C_COMPILER_FORCED": "on",
-        "SKIP_BUILD_EXAMPLES": "on",
-        "BUILD_SHARED_LIBS": "off",
-
-        # The following entries are for zlib-ng. Since zlib and zlib-ng are compatible source
-        # codes and CMake ignores unknown cache entries, it is fine to combine it into one
-        # dictionary.
-        #
-        # Reference: https://github.com/zlib-ng/zlib-ng#build-options.
-        "ZLIB_COMPAT": "on",
-        "ZLIB_ENABLE_TESTS": "off",
-
-        # Warning: Turning WITH_OPTIM to "on" doesn't pass ZlibCompressorImplTest.CallingChecksum.
-        "WITH_OPTIM": "on",
-        # However turning off SSE4 fixes it.
-        "WITH_SSE4": "off",
-
-        # Warning: Turning WITH_NEW_STRATEGIES to "on" doesn't pass gzip compressor fuzz test.
-        # Turning this off means falling into NO_QUICK_STRATEGY route.
-        "WITH_NEW_STRATEGIES": "off",
-
-        # Only allow aligned address.
-        # Reference: https://github.com/zlib-ng/zlib-ng#advanced-build-options.
-        "UNALIGNED_OK": "off",
-    },
-    generate_args = [
-        "-G",
-        "Ninja",
-    ],
-    lib_source = select({
-        "//bazel:zlib_ng": "@com_github_zlib_ng_zlib_ng//:all",
-        "//conditions:default": "@net_zlib//:all",
-    }),
-    out_static_libs = select({
-        "//bazel:windows_x86_64": ["zlib.lib"],
-        "//conditions:default": ["libz.a"],
-    }),
-    postfix_script = select({
-        "@platforms//cpu:wasm32": """
-            if [[ -f libzlib.a ]]; then
-                cp libzlib.a $$INSTALLDIR/lib/libz.a
-            fi
-        """,
-        "//conditions:default": "",
-    }),
-)
-
-envoy_cmake(
-    name = "zstd",
-    build_args = select({
-        "//bazel/foreign_cc:parallel_builds_enabled": ["-j"],
-        "//bazel:engflow_rbe_x86_64": ["-j"],
-        "//bazel:engflow_rbe_aarch64": ["-j"],
-        "//conditions:default": ["-j1"],
-    }),
-    build_data = ["@com_github_facebook_zstd//:all"],
-    cache_entries = {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_INSTALL_LIBDIR": "lib",
-        "ZSTD_BUILD_SHARED": "off",
-        "ZSTD_BUILD_STATIC": "on",
-    },
-    exec_properties = select({
-        "//bazel:engflow_rbe_x86_64": {
-            "Pool": "linux_x64_large",
-        },
-        "//bazel:engflow_rbe_aarch64": {
-            "Pool": "linux_arm64_small",
-        },
-        "//conditions:default": {},
-    }),
-    generate_args = [
-        "-G",
-        "Ninja",
-    ],
-    lib_source = "@com_github_facebook_zstd//:all",
-    out_static_libs = select({
-        "//bazel:windows_x86_64": ["zstd_static.lib"],
-        "//conditions:default": ["libzstd.a"],
-    }),
-    working_directory = "build/cmake",
 )
 
 envoy_cmake(
     name = "maxmind",
     build_args = select({
         "//bazel/foreign_cc:parallel_builds_enabled": ["-j"],
-        "//bazel:engflow_rbe_x86_64": ["-j"],
-        "//bazel:engflow_rbe_aarch64": ["-j"],
         "//conditions:default": ["-j1"],
     }),
     cache_entries = {
@@ -612,6 +465,13 @@ envoy_cmake(
         "CMAKE_CXX_COMPILER_FORCED": "on",
         "BUILD_SHARED_LIBS": "off",
         "BUILD_TESTING": "off",
+        # Force use of system compiler and sysroot instead of vendored LLVM toolchain
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_C_FLAGS": "--sysroot=/",
+        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
+
     },
     defines = ["MAXMIND_STATICLIB"],
     exec_properties = select({
@@ -627,19 +487,35 @@ envoy_cmake(
         "-G",
         "Ninja",
     ],
-    lib_source = "@com_github_maxmind_libmaxminddb//:all",
+    lib_source = "@libmaxminddb//:all",
     out_static_libs = ["libmaxminddb.a"],
     tags = ["skip_on_windows"],
 )
 
-
 envoy_cc_library(
-    name = "maxmind_linux",
+    name = "maxmind_linux_darwin",
     srcs = [],
     deps = select({
         "//bazel:linux": [":maxmind"],
+        "//bazel:darwin_any": [":maxmind"],
         "//conditions:default": [],
     }),
+)
+
+configure_make(
+    name = "jemalloc",
+    configure_options = [
+        "--with-jemalloc-prefix=",
+        "--disable-shared",
+        "--enable-static",
+        "--disable-doc",
+        "--disable-cxx",
+        "--disable-prof",
+    ],
+    lib_source = "@jemalloc//:all",
+    out_static_libs = ["libjemalloc.a"],
+    tags = ["skip_on_windows"],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(

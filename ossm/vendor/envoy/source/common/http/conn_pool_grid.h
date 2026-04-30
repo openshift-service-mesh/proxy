@@ -30,6 +30,7 @@ namespace Http {
 // the host's address list.
 class ConnectivityGrid : public ConnectionPool::Instance,
                          public Http3::PoolConnectResultCallback,
+                         public ConnectionPool::ConnectionLifetimeCallbacks,
                          protected Logger::Loggable<Logger::Id::pool> {
 public:
   struct ConnectivityOptions {
@@ -178,6 +179,7 @@ public:
     const Instance::StreamOptions stream_options_{};
     absl::optional<ConnectionPool::PoolFailureReason> prev_pool_failure_reason_;
     std::string prev_pool_transport_failure_reason_;
+    bool delete_started_ = false;
   };
   using WrapperCallbacksPtr = std::unique_ptr<WrapperCallbacks>;
 
@@ -226,6 +228,15 @@ public:
   // Http3::PoolConnectResultCallback
   void onHandshakeComplete() override;
   void onZeroRttHandshakeFailed() override;
+
+  // ConnectionPool::ConnectionLifetimeCallbacks
+  void onConnectionOpen(ConnectionPool::Instance& pool, std::vector<uint8_t>& hash_key,
+                        const Network::Connection& connection) override;
+  void onConnectionDraining(ConnectionPool::Instance& pool, std::vector<uint8_t>& hash_key,
+                            const Network::Connection& connection) override;
+
+  void setLifetimeCallbacks(OptRef<ConnectionPool::ConnectionLifetimeCallbacks> callbacks,
+                            std::vector<uint8_t> hash_key) override;
 
 protected:
   // Set the required idle callback on the pool.
@@ -307,6 +318,9 @@ private:
   bool deferred_deleting_{};
 
   OptRef<Quic::EnvoyQuicNetworkObserverRegistry> network_observer_registry_;
+
+  OptRef<ConnectionPool::ConnectionLifetimeCallbacks> callbacks_;
+  std::vector<uint8_t> hash_key_;
 };
 
 } // namespace Http

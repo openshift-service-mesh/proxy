@@ -95,6 +95,17 @@ def rules_jvm_external_deps(
 
     maybe(
         http_archive,
+        name = "package_metadata",
+        urls = [
+            "https://mirror.bazel.build/github.com/bazel-contrib/supply-chain/releases/download/v0.0.3/supply-chain-v0.0.3.tar.gz",
+            "https://github.com/bazel-contrib/supply-chain/releases/download/v0.0.3/supply-chain-v0.0.3.tar.gz",
+        ],
+        sha256 = "0e89367f1cb6d93a5a1afea4b55b11ea6b28f63f653b47154153677ca7d4afea",
+        strip_prefix = "supply-chain-0.0.3/metadata",
+    )
+
+    maybe(
+        http_archive,
         name = "rules_license",
         urls = [
             "https://mirror.bazel.build/github.com/bazelbuild/rules_license/releases/download/1.0.0/rules_license-1.0.0.tar.gz",
@@ -114,10 +125,13 @@ def rules_jvm_external_deps(
     maven_install(
         name = "rules_jvm_external_deps",
         artifacts = [
+            "ch.qos.logback:logback-classic:1.5.23",
+            "com.github.jknack:handlebars:4.3.1",
             "com.google.auth:google-auth-library-credentials:1.23.0",
             "com.google.auth:google-auth-library-oauth2-http:1.23.0",
             "com.google.cloud:google-cloud-core:2.40.0",
             "com.google.cloud:google-cloud-storage:2.40.1",
+            "com.google.code.findbugs:jsr305:3.0.2",
             "com.google.code.gson:gson:2.11.0",
             "com.google.googlejavaformat:google-java-format:1.22.0",
             "com.google.guava:guava:33.2.1-jre",
@@ -125,6 +139,7 @@ def rules_jvm_external_deps(
             "org.apache.maven:maven-core:%s" % _MAVEN_VERSION,
             "org.apache.maven:maven-model:%s" % _MAVEN_VERSION,
             "org.apache.maven:maven-model-builder:%s" % _MAVEN_VERSION,
+            "org.apache.maven:maven-repository-metadata:%s" % _MAVEN_VERSION,
             "org.apache.maven:maven-settings:%s" % _MAVEN_VERSION,
             "org.apache.maven:maven-settings-builder:%s" % _MAVEN_VERSION,
             "org.apache.maven:maven-resolver-provider:%s" % _MAVEN_VERSION,
@@ -135,18 +150,18 @@ def rules_jvm_external_deps(
             "org.apache.maven.resolver:maven-resolver-transport-file:%s" % _MAVEN_RESOLVER_VERSION,
             "org.apache.maven.resolver:maven-resolver-transport-http:%s" % _MAVEN_RESOLVER_VERSION,
             "org.apache.maven.resolver:maven-resolver-util:%s" % _MAVEN_RESOLVER_VERSION,
+            "org.bouncycastle:bcprov-jdk15on:1.68",
+            "org.bouncycastle:bcpg-jdk15on:1.68",
             "org.codehaus.plexus:plexus-cipher:2.1.0",
             "org.codehaus.plexus:plexus-sec-dispatcher:2.0",
             "org.codehaus.plexus:plexus-utils:3.5.1",
             "org.fusesource.jansi:jansi:2.4.1",
-            "org.slf4j:jul-to-slf4j:2.0.12",
-            "org.slf4j:log4j-over-slf4j:2.0.12",
-            "org.slf4j:slf4j-simple:2.0.12",
-            "software.amazon.awssdk:s3:2.26.12",
-            "org.bouncycastle:bcprov-jdk15on:1.68",
-            "org.bouncycastle:bcpg-jdk15on:1.68",
             "org.gradle:gradle-tooling-api:%s" % _GRADLE_VERSION,
-            "com.github.jknack:handlebars:4.3.1",
+            "org.slf4j:jul-to-slf4j:2.0.17",
+            "org.slf4j:log4j-over-slf4j:2.0.17",
+            "org.slf4j:slf4j-simple:2.0.17",
+            "software.amazon.awssdk:s3:2.26.12",
+            "software.amazon.awssdk:sdk-core:2.26.12",
         ],
         maven_install_json = deps_lock_file,
         strict_visibility = True,

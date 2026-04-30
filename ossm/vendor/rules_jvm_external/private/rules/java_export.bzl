@@ -1,4 +1,5 @@
-load("@rules_java//java:defs.bzl", "java_library")
+load("@rules_java//java:java_library.bzl", "java_library")
+load("//:specs.bzl", "parse", _json = "json")
 load(":javadoc.bzl", "javadoc")
 load(":maven_bom_fragment.bzl", "maven_bom_fragment")
 load(":maven_project_jar.bzl", "DEFAULT_EXCLUDED_WORKSPACES", "maven_project_jar")
@@ -11,12 +12,14 @@ def java_export(
         manifest_entries = {},
         deploy_env = [],
         excluded_workspaces = {name: None for name in DEFAULT_EXCLUDED_WORKSPACES},
+        exclusions = {},
         pom_template = None,
         allowed_duplicate_names = None,
         visibility = None,
         tags = [],
         testonly = None,
         classifier_artifacts = {},
+        publish_maven_metadata = False,
         **kwargs):
     """Extends `java_library` to allow maven artifacts to be uploaded.
 
@@ -74,6 +77,9 @@ def java_export(
         that should not be included in the maven jar to a `Label` pointing to the dependency
         that workspace should be replaced by, or `None` if the exclusion shouldn't be replaced
         with an extra dependency.
+      exclusions: Mapping of target labels to a list of exclusions to be added to the POM file.
+        Each label must correspond to a direct maven dependency of this target.
+        Each exclusion is represented as a `group:artifact` string.
       classifier_artifacts: A dict of classifier -> artifact of additional artifacts to publish to Maven.
       doc_deps: Other `javadoc` targets that are referenced by the generated `javadoc` target
         (if not using `tags = ["no-javadocs"]`)
@@ -87,6 +93,8 @@ def java_export(
         end of the package name. For example, `com.example.*` will include all the subpackages of `com.example`, while
         `com.example` will include only the files directly in `com.example`
       visibility: The visibility of the target
+      publish_maven_metadata: Whether to publish a maven-metadata.xml to remote repository. Some repositories
+            (like AWS CodeArtifact) require the client to publish this file. It is disabled by default.
       kwargs: These are passed to [`java_library`](https://bazel.build/reference/be/java#java_library),
         and so may contain any valid parameter for that rule.
     """
@@ -124,6 +132,7 @@ def java_export(
         manifest_entries = manifest_entries,
         deploy_env = deploy_env,
         excluded_workspaces = excluded_workspaces,
+        exclusions = exclusions,
         pom_template = pom_template,
         allowed_duplicate_names = allowed_duplicate_names,
         visibility = visibility,
@@ -131,6 +140,7 @@ def java_export(
         testonly = testonly,
         javadocopts = javadocopts,
         classifier_artifacts = classifier_artifacts,
+        publish_maven_metadata = publish_maven_metadata,
         doc_deps = doc_deps,
         doc_url = doc_url,
         doc_resources = doc_resources,
@@ -147,6 +157,7 @@ def maven_export(
         manifest_entries = {},
         deploy_env = [],
         excluded_workspaces = {},
+        exclusions = {},
         pom_template = None,
         allowed_duplicate_names = None,
         visibility = None,
@@ -160,6 +171,7 @@ def maven_export(
         doc_resources = [],
         doc_excluded_packages = [],
         doc_included_packages = [],
+        publish_maven_metadata = False,
         toolchains = None):
     """
     All arguments are the same as java_export with the addition of:
@@ -215,6 +227,9 @@ def maven_export(
         that should not be included in the maven jar to a `Label` pointing to the dependency
         that workspace should be replaced by, or `None` if the exclusion shouldn't be replaced
         with an extra dependency.
+      exclusions: Mapping of target labels to a list of exclusions to be added to the POM file.
+        Each label must correspond to a direct maven dependency of this target.
+        Each exclusion is represented as a `group:artifact` string.
       doc_deps: Other `javadoc` targets that are referenced by the generated `javadoc` target
         (if not using `tags = ["no-javadoc"]`)
       doc_url: The URL at which the generated `javadoc` will be hosted (if not using
@@ -227,6 +242,8 @@ def maven_export(
         end of the package name. For example, `com.example.*` will include all the subpackages of `com.example`, while
         `com.example` will include only the files directly in `com.example`
       visibility: The visibility of the target
+      publish_maven_metadata: Whether to publish a maven-metadata.xml to remote repository. Some repositories
+            (like AWS CodeArtifact) require the client to publish this file. It is disabled by default.
       kwargs: These are passed to [`java_library`](https://bazel.build/reference/be/java#java_library),
         and so may contain any valid parameter for that rule.
     """
@@ -310,6 +327,13 @@ def maven_export(
         )
         classifier_artifacts.setdefault("javadoc", docs_jar)
 
+    exclusions_dict_json_strings = {
+        target: _json.write_exclusion_spec_list(
+            parse.parse_exclusion_spec_list(targetExclusions),
+        )
+        for target, targetExclusions in exclusions.items()
+    }
+
     pom_file(
         name = "%s-pom" % name,
         target = ":%s" % lib_name if lib_name else None,
@@ -320,6 +344,7 @@ def maven_export(
         tags = tags,
         testonly = testonly,
         toolchains = toolchains,
+        exclusions = exclusions_dict_json_strings,
     )
 
     maven_publish(
@@ -332,6 +357,7 @@ def maven_export(
         tags = tags,
         testonly = testonly,
         toolchains = toolchains,
+        publish_maven_metadata = publish_maven_metadata,
     )
 
     # We may want to aggregate several `java_export` targets into a single Maven BOM POM
@@ -344,6 +370,7 @@ def maven_export(
             src_artifact = ":%s-maven-source" % name,
             javadoc_artifact = None if "no-javadocs" in tags else ":%s-docs" % name,
             pom = ":%s-pom" % name,
+            exclusions = exclusions_dict_json_strings,
             testonly = testonly,
             tags = tags,
             visibility = visibility,

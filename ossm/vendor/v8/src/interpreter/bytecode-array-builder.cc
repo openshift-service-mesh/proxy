@@ -115,7 +115,7 @@ template EXPORT_TEMPLATE_DEFINE(V8_EXPORT_PRIVATE)
         LocalIsolate* isolate);
 
 #ifdef DEBUG
-int BytecodeArrayBuilder::CheckBytecodeMatches(Tagged<BytecodeArray> bytecode) {
+int BytecodeArrayBuilder::CheckBytecodeMatches(Handle<BytecodeArray> bytecode) {
   DisallowGarbageCollection no_gc;
   return bytecode_array_writer_.CheckBytecodeMatches(bytecode);
 }
@@ -453,10 +453,17 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::BinaryOperation(Token::Value op,
   return *this;
 }
 
-BytecodeArrayBuilder& BytecodeArrayBuilder::Add_LhsIsStringConstant_Internalize(
-    Token::Value op, Register reg, int feedback_slot) {
+BytecodeArrayBuilder& BytecodeArrayBuilder::Add_StringConstant_Internalize(
+    Token::Value op, Register reg, int feedback_slot,
+    AddStringConstantAndInternalizeVariant as_variant) {
   DCHECK_EQ(op, Token::kAdd);
-  OutputAdd_LhsIsStringConstant_Internalize(reg, feedback_slot);
+#ifdef DEBUG
+  using ASVariant = AddStringConstantAndInternalizeVariant;
+  DCHECK(as_variant == ASVariant::kLhsIsStringConstant ||
+         as_variant == ASVariant::kRhsIsStringConstant);
+#endif  // DEBUG
+  OutputAdd_StringConstant_Internalize(reg, feedback_slot,
+                                       static_cast<uint8_t>(as_variant));
   return *this;
 }
 
@@ -560,22 +567,29 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::CompareOperation(
     Token::Value op, Register reg, int feedback_slot) {
   switch (op) {
     case Token::kEq:
-      OutputTestEqual(reg, feedback_slot);
+      DCHECK_EQ(feedback_slot, kFeedbackIsEmbedded);
+      OutputTestEqual(reg, kUninitializedEmbeddedFeedback);
       break;
     case Token::kEqStrict:
-      OutputTestEqualStrict(reg, feedback_slot);
+      // feedback is embedded into bytecode array for strict equal
+      DCHECK_EQ(feedback_slot, kFeedbackIsEmbedded);
+      OutputTestEqualStrict(reg, kUninitializedEmbeddedFeedback);
       break;
     case Token::kLessThan:
-      OutputTestLessThan(reg, feedback_slot);
+      DCHECK_EQ(feedback_slot, kFeedbackIsEmbedded);
+      OutputTestLessThan(reg, kUninitializedEmbeddedFeedback);
       break;
     case Token::kGreaterThan:
-      OutputTestGreaterThan(reg, feedback_slot);
+      DCHECK_EQ(feedback_slot, kFeedbackIsEmbedded);
+      OutputTestGreaterThan(reg, kUninitializedEmbeddedFeedback);
       break;
     case Token::kLessThanEq:
-      OutputTestLessThanOrEqual(reg, feedback_slot);
+      DCHECK_EQ(feedback_slot, kFeedbackIsEmbedded);
+      OutputTestLessThanOrEqual(reg, kUninitializedEmbeddedFeedback);
       break;
     case Token::kGreaterThanEq:
-      OutputTestGreaterThanOrEqual(reg, feedback_slot);
+      DCHECK_EQ(feedback_slot, kFeedbackIsEmbedded);
+      OutputTestGreaterThanOrEqual(reg, kUninitializedEmbeddedFeedback);
       break;
     case Token::kInstanceOf:
       OutputTestInstanceOf(reg, feedback_slot);
@@ -751,6 +765,12 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::MoveRegister(Register from,
   } else {
     OutputMov(from, to);
   }
+  return *this;
+}
+
+BytecodeArrayBuilder& BytecodeArrayBuilder::SetPrototypeProperties(
+    size_t index_obj, size_t slot) {
+  OutputSetPrototypeProperties(index_obj, slot);
   return *this;
 }
 
@@ -931,6 +951,15 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::LoadIteratorProperty(
 BytecodeArrayBuilder& BytecodeArrayBuilder::GetIterator(
     Register object, int load_feedback_slot, int call_feedback_slot) {
   OutputGetIterator(object, load_feedback_slot, call_feedback_slot);
+  return *this;
+}
+
+BytecodeArrayBuilder& BytecodeArrayBuilder::ForOfNext(Register object,
+                                                      Register next,
+                                                      RegisterList value_done,
+                                                      int call_slot) {
+  DCHECK_EQ(2, value_done.register_count());
+  OutputForOfNext(object, next, value_done, call_slot);
   return *this;
 }
 
@@ -1669,6 +1698,13 @@ BytecodeJumpTable* BytecodeArrayBuilder::AllocateJumpTable(
 
   return zone()->New<BytecodeJumpTable>(constant_pool_index, size,
                                         case_value_base, zone());
+}
+
+void BytecodeArrayBuilder::TrimJumpTable(BytecodeJumpTable* jump_table,
+                                         int size) {
+  if (size == jump_table->size()) return;
+
+  bytecode_array_writer_.PatchJumpTableSize(jump_table, size);
 }
 
 size_t BytecodeArrayBuilder::AllocateDeferredConstantPoolEntry() {

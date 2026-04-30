@@ -15,6 +15,7 @@
 """Attributes for cc_binary.
 """
 
+load("//cc:cc_postmark.bzl", "postmark")
 load("//cc/common:cc_info.bzl", "CcInfo")
 load("//cc/common:semantics.bzl", "semantics")
 load(":cc_shared_library.bzl", "dynamic_deps_attrs")
@@ -211,6 +212,15 @@ Dependencies that are only made available to the C++ linker command.
 </p>
 """,
     ),
+    "additional_compiler_inputs": attr.label_list(
+        allow_files = True,
+        flags = ["ORDER_INDEPENDENT", "DIRECT_COMPILE_TIME_INPUT"],
+        doc = """
+Any additional files you might want to pass to the compiler command line, such as sanitizer
+ignorelists, for example. Files specified here can then be used in copts with the
+$(location) function.
+""",
+    ),
     "win_def_file": attr.label(
         allow_single_file = [".def"],
         doc = """
@@ -293,7 +303,7 @@ Whether to encode build information into the binary. Possible values:
 """ + semantics.stamp_extra_docs
 
 # buildifier: disable=attr-licenses
-cc_binary_attrs = common_attrs | {
+cc_binary_attrs = common_attrs | postmark.get_attrs() | {
     "deps": attr.label_list(
         allow_files = semantics.ALLOWED_FILES_IN_DEPS,
         allow_rules = semantics.ALLOWED_RULES_IN_DEPS + semantics.ALLOWED_RULES_WITH_WARNINGS_IN_DEPS,

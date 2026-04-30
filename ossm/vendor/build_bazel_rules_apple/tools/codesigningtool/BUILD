@@ -1,4 +1,5 @@
 load("@build_bazel_apple_support//rules:toolchain_substitution.bzl", "toolchain_substitution")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 
 licenses(["notice"])
 

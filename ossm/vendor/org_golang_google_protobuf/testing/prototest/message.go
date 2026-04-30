@@ -33,9 +33,13 @@ type Message struct {
 		FindExtensionByNumber(message protoreflect.FullName, field protoreflect.FieldNumber) (protoreflect.ExtensionType, error)
 		RangeExtensionsByMessage(message protoreflect.FullName, f func(protoreflect.ExtensionType) bool)
 	}
+
+	// UnmarshalOptions are respected for every Unmarshal call this package
+	// does. The Resolver and AllowPartial fields are overridden.
+	UnmarshalOptions proto.UnmarshalOptions
 }
 
-// Test performs tests on a MessageType implementation.
+// Test performs tests on a [protoreflect.MessageType] implementation.
 func (test Message) Test(t testing.TB, mt protoreflect.MessageType) {
 	testType(t, mt)
 
@@ -74,10 +78,10 @@ func (test Message) Test(t testing.TB, mt protoreflect.MessageType) {
 		t.Errorf("Marshal() = %v, want nil\n%v", err, prototext.Format(m2))
 	}
 	m3 := mt.New().Interface()
-	if err := (proto.UnmarshalOptions{
-		AllowPartial: true,
-		Resolver:     test.Resolver,
-	}.Unmarshal(b, m3)); err != nil {
+	unmarshalOpts := test.UnmarshalOptions
+	unmarshalOpts.AllowPartial = true
+	unmarshalOpts.Resolver = test.Resolver
+	if err := unmarshalOpts.Unmarshal(b, m3); err != nil {
 		t.Errorf("Unmarshal() = %v, want nil\n%v", err, prototext.Format(m2))
 	}
 	if !proto.Equal(m2, m3) {
@@ -231,7 +235,7 @@ func testField(t testing.TB, m protoreflect.Message, fd protoreflect.FieldDescri
 		m.Set(fd, v)
 		wantHas := true
 		if n == 0 {
-			if fd.Syntax() == protoreflect.Proto3 && fd.Message() == nil {
+			if !fd.HasPresence() {
 				wantHas = false
 			}
 			if fd.IsExtension() {
@@ -244,7 +248,7 @@ func testField(t testing.TB, m protoreflect.Message, fd protoreflect.FieldDescri
 				wantHas = true
 			}
 		}
-		if fd.Syntax() == protoreflect.Proto3 && fd.Cardinality() != protoreflect.Repeated && fd.ContainingOneof() == nil && fd.Kind() == protoreflect.EnumKind && v.Enum() == 0 {
+		if !fd.HasPresence() && fd.Cardinality() != protoreflect.Repeated && fd.ContainingOneof() == nil && fd.Kind() == protoreflect.EnumKind && v.Enum() == 0 {
 			wantHas = false
 		}
 		if got, want := m.Has(fd), wantHas; got != want {
@@ -421,7 +425,7 @@ func testFieldMap(t testing.TB, m protoreflect.Message, fd protoreflect.FieldDes
 	}
 }
 
-type testMap map[interface{}]protoreflect.Value
+type testMap map[any]protoreflect.Value
 
 func (m testMap) Get(k protoreflect.MapKey) protoreflect.Value     { return m[k.Interface()] }
 func (m testMap) Set(k protoreflect.MapKey, v protoreflect.Value)  { m[k.Interface()] = v }
@@ -874,9 +878,6 @@ func populateMessage(m protoreflect.Message, n seed, stack []protoreflect.Messag
 	stack = append(stack, md)
 	for i := 0; i < md.Fields().Len(); i++ {
 		fd := md.Fields().Get(i)
-		if fd.IsWeak() {
-			continue
-		}
 		m.Set(fd, newValue(m, fd, newSeed(n, i), stack))
 	}
 	return protoreflect.ValueOfMessage(m)

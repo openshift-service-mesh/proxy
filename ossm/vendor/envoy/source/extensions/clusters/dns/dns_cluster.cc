@@ -2,9 +2,6 @@
 
 // The purpose of these two headers is purely for backward compatibility.
 // Never create new dependencies to symbols declared in these headers!
-#include "source/extensions/clusters/logical_dns/logical_dns_cluster.h"
-#include "source/extensions/clusters/strict_dns/strict_dns_cluster.h"
-
 #include <chrono>
 
 #include "envoy/common/exception.h"
@@ -17,6 +14,8 @@
 #include "source/common/network/dns_resolver/dns_factory_util.h"
 #include "source/extensions/clusters/common/dns_cluster_backcompat.h"
 #include "source/extensions/clusters/common/logical_host.h"
+#include "source/extensions/clusters/logical_dns/logical_dns_cluster.h"
+#include "source/extensions/clusters/strict_dns/strict_dns_cluster.h"
 
 namespace Envoy {
 namespace Upstream {
@@ -321,7 +320,8 @@ DnsClusterImpl::ResolveTarget::createStrictDnsHosts(
         std::make_shared<const envoy::config::core::v3::Metadata>(lb_endpoint_.metadata()),
         std::make_shared<const envoy::config::core::v3::Metadata>(
             locality_lb_endpoints_.metadata()),
-        lb_endpoint_.load_balancing_weight().value(), locality_lb_endpoints_.locality(),
+        lb_endpoint_.load_balancing_weight().value(),
+        parent_.constLocalitySharedPool()->getObject(locality_lb_endpoints_.locality()),
         lb_endpoint_.endpoint().health_check_config(), locality_lb_endpoints_.priority(),
         lb_endpoint_.health_status());
 

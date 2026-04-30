@@ -4,6 +4,7 @@ go_library(
     name = "generate-types_lib",
     srcs = [
         "impl.go",
+        "impl_opaque.go",
         "main.go",
         "proto.go",
     ],

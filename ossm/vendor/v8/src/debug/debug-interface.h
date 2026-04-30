@@ -166,6 +166,7 @@ struct LiveEditResult {
     BLOCKED_BY_RUNNING_GENERATOR,
     BLOCKED_BY_ACTIVE_FUNCTION,
     BLOCKED_BY_TOP_LEVEL_ES_MODULE_CHANGE,
+    FEATURE_DISABLED,
   };
   Status status = OK;
   bool stack_changed = false;
@@ -460,6 +461,10 @@ class V8_EXPORT_PRIVATE Coverage {
   static Coverage CollectPrecise(Isolate* isolate);
   static Coverage CollectBestEffort(Isolate* isolate);
 
+#if V8_ENABLE_WEBASSEMBLY
+  static Coverage CollectWasmData(Isolate* isolate);
+#endif  // V8_ENABLE_WEBASSEMBLY
+
   static void SelectMode(Isolate* isolate, CoverageMode mode);
 
   size_t ScriptCount() const;
@@ -698,8 +703,6 @@ AccessorPair* AccessorPair::Cast(v8::Value* value) {
 MaybeLocal<Message> GetMessageFromPromise(Local<Promise> promise);
 
 void RecordAsyncStackTaggingCreateTaskCall(v8::Isolate* isolate);
-
-void NotifyDebuggerPausedEventSent(v8::Isolate* isolate);
 
 uint64_t GetIsolateId(v8::Isolate* isolate);
 void SetIsolateId(v8::Isolate* isolate, uint64_t id);

@@ -4,85 +4,19 @@ mod cargo_bin;
 mod cargo_tree_resolver;
 mod dependency;
 mod metadata_annotation;
-mod workspace_discoverer;
 
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{bail, Context, Result};
 use camino::Utf8Path;
-use cargo_lock::Lockfile as CargoLockfile;
-use cargo_metadata::Metadata as CargoMetadata;
 use tracing::debug;
 
 pub(crate) use self::cargo_bin::*;
 pub(crate) use self::cargo_tree_resolver::*;
 pub(crate) use self::dependency::*;
 pub(crate) use self::metadata_annotation::*;
-pub(crate) use self::workspace_discoverer::*;
-
-// TODO: This should also return a set of [crate-index::IndexConfig]s for packages in metadata.packages
-/// A Trait for generating metadata (`cargo metadata` output and a lock file) from a Cargo manifest.
-pub(crate) trait MetadataGenerator {
-    fn generate<T: AsRef<Path>>(&self, manifest_path: T) -> Result<(CargoMetadata, CargoLockfile)>;
-}
-
-/// Generates Cargo metadata and a lockfile from a provided manifest.
-pub(crate) struct Generator {
-    /// The path to a `cargo` binary
-    cargo_bin: Cargo,
-
-    /// The path to a `rustc` binary
-    rustc_bin: PathBuf,
-}
-
-impl Generator {
-    pub(crate) fn new() -> Self {
-        let rustc_bin = PathBuf::from(env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string()));
-        Generator {
-            cargo_bin: Cargo::new(
-                PathBuf::from(env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())),
-                rustc_bin.clone(),
-            ),
-            rustc_bin,
-        }
-    }
-
-    pub(crate) fn with_cargo(mut self, cargo_bin: Cargo) -> Self {
-        self.cargo_bin = cargo_bin;
-        self
-    }
-
-    pub(crate) fn with_rustc(mut self, rustc_bin: PathBuf) -> Self {
-        self.rustc_bin = rustc_bin;
-        self
-    }
-}
-
-impl MetadataGenerator for Generator {
-    fn generate<T: AsRef<Path>>(&self, manifest_path: T) -> Result<(CargoMetadata, CargoLockfile)> {
-        let manifest_dir = manifest_path
-            .as_ref()
-            .parent()
-            .expect("The manifest should have a parent directory");
-        let lockfile = {
-            let lock_path = manifest_dir.join("Cargo.lock");
-            if !lock_path.exists() {
-                bail!("No `Cargo.lock` file was found with the given manifest")
-            }
-            cargo_lock::Lockfile::load(lock_path)?
-        };
-
-        let metadata = self
-            .cargo_bin
-            .metadata_command_with_options(manifest_path.as_ref(), vec!["--locked".to_owned()])?
-            .exec()?;
-
-        Ok((metadata, lockfile))
-    }
-}
 
 /// A configuration describing how to invoke [cargo update](https://doc.rust-lang.org/cargo/commands/cargo-update.html).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,6 +154,7 @@ impl LockGenerator {
 
             // Ensure the Cargo cache is up to date to simulate the behavior
             // of having just generated a new one
+            tracing::debug!("Fetching crates for {}", manifest_path);
             let output = self
                 .cargo_bin
                 .command()?
@@ -230,6 +165,7 @@ impl LockGenerator {
                 .arg("fetch")
                 .arg("--manifest-path")
                 .arg(manifest_path.as_std_path())
+                .arg("--verbose")
                 .output()
                 .context(format!(
                     "Error running cargo to fetch crates '{}'",
@@ -244,6 +180,14 @@ impl LockGenerator {
                     output.status
                 ))
             }
+            tracing::trace!(
+                "Cargo fetch stderr:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            tracing::trace!(
+                "Cargo fetch stdout:\n{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
         } else {
             debug!("Generating new lockfile");
             // Simply invoke `cargo generate-lockfile`
@@ -332,37 +276,18 @@ impl VendorGenerator {
     }
 }
 
-/// A helper function for writing Cargo metadata to a file.
-pub(crate) fn write_metadata(path: &Path, metadata: &cargo_metadata::Metadata) -> Result<()> {
-    let content =
-        serde_json::to_string_pretty(metadata).context("Failed to serialize Cargo Metadata")?;
-
-    fs::write(path, content).context("Failed to write metadata to disk")
-}
-
 /// A helper function for deserializing Cargo metadata and lockfiles
 pub(crate) fn load_metadata(
     metadata_path: &Path,
+    lockfile_path: &Path,
 ) -> Result<(cargo_metadata::Metadata, cargo_lock::Lockfile)> {
-    // Locate the Cargo.lock file related to the metadata file.
-    let lockfile_path = metadata_path
-        .parent()
-        .expect("metadata files should always have parents")
-        .join("Cargo.lock");
-    if !lockfile_path.exists() {
-        bail!(
-            "The metadata file at {} is not next to a `Cargo.lock` file.",
-            metadata_path.display()
-        )
-    }
-
     let content = fs::read_to_string(metadata_path)
         .with_context(|| format!("Failed to load Cargo Metadata: {}", metadata_path.display()))?;
 
     let metadata =
         serde_json::from_str(&content).context("Unable to deserialize Cargo metadata")?;
 
-    let lockfile = cargo_lock::Lockfile::load(&lockfile_path)
+    let lockfile = cargo_lock::Lockfile::load(lockfile_path)
         .with_context(|| format!("Failed to load lockfile: {}", lockfile_path.display()))?;
 
     Ok((metadata, lockfile))

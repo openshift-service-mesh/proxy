@@ -39,14 +39,14 @@
 #include "google/protobuf/stubs/callback.h"
 #include "google/protobuf/stubs/common.h"
 #include "google/protobuf/compiler/cpp/helpers.h"
-#include "google/protobuf/unittest_no_generic_services.pb.h"
 #include "google/protobuf/descriptor.pb.h"
-#include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include "absl/base/casts.h"
 #include "absl/strings/substitute.h"
 #include "google/protobuf/arena.h"
-#include "google/protobuf/compiler/cpp/test_bad_identifiers.pb.h"
+#include "google/protobuf/compiler/cpp/test_bad_identifiers_editions.pb.h"
+#include "google/protobuf/compiler/cpp/test_bad_identifiers_proto2.pb.h"
 #include "google/protobuf/compiler/importer.h"
 #include "google/protobuf/compiler/retention.h"
 #include "google/protobuf/compiler/scc.h"
@@ -55,6 +55,7 @@
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/test_util2.h"
+#include "google/protobuf/unittest_no_generic_services.pb.h"
 
 // Must be included last.
 #include "google/protobuf/port_def.inc"
@@ -74,8 +75,8 @@ void DoNothing() {}
 
 class MockErrorCollector : public MultiFileErrorCollector {
  public:
-  MockErrorCollector() {}
-  ~MockErrorCollector() override {}
+  MockErrorCollector() = default;
+  ~MockErrorCollector() override = default;
 
   std::string text_;
 
@@ -126,7 +127,7 @@ TEST(GENERATED_DESCRIPTOR_TEST_NAME, IdenticalDescriptors) {
 // limit for string literal size
 TEST(GENERATED_DESCRIPTOR_TEST_NAME, EnormousDescriptor) {
   const Descriptor* generated_descriptor =
-    ::protobuf_unittest::TestEnormousDescriptor::descriptor();
+    ::proto2_unittest::TestEnormousDescriptor::descriptor();
 
   EXPECT_TRUE(generated_descriptor != nullptr);
 }
@@ -1114,7 +1115,7 @@ class GENERATED_SERVICE_TEST_NAME : public testing::Test {
           response_(nullptr),
           done_(nullptr) {}
 
-    ~MockTestService() override {}
+    ~MockTestService() override = default;
 
     void Reset() { called_ = false; }
 
@@ -1360,7 +1361,7 @@ TEST_F(GENERATED_SERVICE_TEST_NAME, NotImplemented) {
   // A service which doesn't implement any methods.
   class UnimplementedService : public UNITTEST::TestService {
    public:
-    UnimplementedService() {}
+    UnimplementedService() = default;
   };
 
   UnimplementedService unimplemented_service;
@@ -2119,7 +2120,7 @@ TEST(HELPERS_TEST_NAME, TestSCCAnalysis) {
     MessageSCCAnalyzer scc_analyzer((Options()));
     const SCC* scc = scc_analyzer.GetSCC(msg.GetDescriptor());
     MessageAnalysis result = scc_analyzer.GetSCCAnalysis(scc);
-    EXPECT_EQ(result.is_recursive, false);
+    EXPECT_EQ(result.is_recursive, true);
     EXPECT_EQ(result.contains_required, true);
     EXPECT_EQ(result.contains_cord, false);
     EXPECT_EQ(result.contains_extension, false);
@@ -2146,12 +2147,12 @@ namespace cpp_unittest {
 TEST_F(GENERATED_SERVICE_TEST_NAME, NoGenericServices) {
   // Verify that non-services in unittest_no_generic_services.proto were
   // generated.
-  ::protobuf_unittest::no_generic_services_test::TestMessage message;
+  ::proto2_unittest::no_generic_services_test::TestMessage message;
   message.set_a(1);
   message.SetExtension(
-      ::protobuf_unittest::no_generic_services_test::test_extension, 123);
-  ::protobuf_unittest::no_generic_services_test::TestEnum e =
-      ::protobuf_unittest::no_generic_services_test::FOO;
+      ::proto2_unittest::no_generic_services_test::test_extension, 123);
+  ::proto2_unittest::no_generic_services_test::TestEnum e =
+      ::proto2_unittest::no_generic_services_test::FOO;
   EXPECT_EQ(e, 1);
 
   // Verify that a ServiceDescriptor is generated for the service even if the

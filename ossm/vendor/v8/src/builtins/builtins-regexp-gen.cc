@@ -851,10 +851,8 @@ TNode<UintPtrT> RegExpBuiltinsAssembler::RegExpExecInternal(
   {
 // A stack overflow was detected in RegExp code.
 #ifdef DEBUG
-    TNode<ExternalReference> exception_address =
-        ExternalConstant(ExternalReference::Create(
-            IsolateAddressId::kExceptionAddress, isolate()));
-    TNode<Object> exception = LoadFullTagged(exception_address);
+    TNode<Object> exception =
+        LoadFullTagged(IsolateField(IsolateFieldId::kException));
     CSA_DCHECK(this, IsTheHole(exception));
 #endif  // DEBUG
     CallRuntime(Runtime::kThrowStackOverflow, context);
@@ -1044,7 +1042,8 @@ void RegExpBuiltinsAssembler::BranchIfRegExpResult(const TNode<Context> context,
                                                    Label* if_isunmodified,
                                                    Label* if_ismodified) {
   // Could be a Smi.
-  const TNode<Map> map = LoadReceiverMap(object);
+  GotoIf(TaggedIsSmi(object), if_ismodified);
+  const TNode<Map> map = LoadMap(CAST(object));
 
   const TNode<NativeContext> native_context = LoadNativeContext(context);
   const TNode<Object> initial_regexp_result_map = LoadContextElementNoCell(
@@ -1141,9 +1140,8 @@ TF_BUILTIN(RegExpExecAtom, RegExpBuiltinsAssembler) {
                      subject_string);
     StoreObjectField(match_info, offsetof(RegExpMatchInfo, last_input_),
                      subject_string);
-    UnsafeStoreArrayElement(match_info, 0, match_from,
-                            UNSAFE_SKIP_WRITE_BARRIER);
-    UnsafeStoreArrayElement(match_info, 1, match_to, UNSAFE_SKIP_WRITE_BARRIER);
+    UnsafeStoreArrayElement(match_info, 0, match_from, SKIP_WRITE_BARRIER);
+    UnsafeStoreArrayElement(match_info, 1, match_to, SKIP_WRITE_BARRIER);
 
     Return(match_info);
   }
@@ -1442,6 +1440,13 @@ TF_BUILTIN(RegExpPrototypeCompile, RegExpBuiltinsAssembler) {
   auto maybe_pattern = Parameter<Object>(Descriptor::kPattern);
   auto maybe_flags = Parameter<Object>(Descriptor::kFlags);
   auto context = Parameter<Context>(Descriptor::kContext);
+
+  // TODO(olivf): Since this is a legacy feature the hope is it is not heavily
+  // relied upon. In case it turns out to be too performance critical we might
+  // need to do something more clever here (e.g., a self-patching builtin) to
+  // avoid the cost of a runtime call.
+  CallRuntime(Runtime::kIncrementUseCounter, context,
+              SmiConstant(v8::Isolate::UseCounterFeature::kRegExpCompile));
 
   ThrowIfNotInstanceType(context, maybe_receiver, JS_REG_EXP_TYPE,
                          "RegExp.prototype.compile");

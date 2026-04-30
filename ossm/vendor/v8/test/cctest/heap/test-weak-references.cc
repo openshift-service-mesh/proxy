@@ -98,7 +98,7 @@ TEST(WeakReferencesOldToOld) {
   CHECK(heap->InOldSpace(*fixed_array));
   lh->set_data1(MakeWeak(*fixed_array));
 
-  PageMetadata* page_before_gc = PageMetadata::FromHeapObject(*fixed_array);
+  NormalPage* page_before_gc = NormalPage::FromHeapObject(*fixed_array);
   heap::ForceEvacuationCandidate(page_before_gc);
   heap::InvokeMajorGC(heap);
   CHECK(heap->InOldSpace(*fixed_array));
@@ -177,7 +177,7 @@ TEST(WeakReferencesOldToCleared) {
   DirectHandle<LoadHandler> lh =
       CreateLoadHandlerForTest(factory, AllocationType::kOld);
   CHECK(heap->InOldSpace(*lh));
-  lh->set_data1(ClearedValue(isolate));
+  lh->set_data1(kClearedWeakValue);
 
   heap::InvokeMajorGC(heap);
   CHECK(lh->data1().IsCleared());
@@ -257,7 +257,7 @@ TEST(ObjectWithClearedWeakReferencePromoted) {
   DirectHandle<LoadHandler> lh = CreateLoadHandlerForTest(factory);
   CHECK(HeapLayout::InYoungGeneration(*lh));
 
-  lh->set_data1(ClearedValue(isolate));
+  lh->set_data1(kClearedWeakValue);
 
   heap::EmptyNewSpaceUsingGC(heap);
   CHECK(heap->InOldSpace(*lh));

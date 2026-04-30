@@ -8,6 +8,7 @@
 #include "src/execution/frames.h"
 #include "src/execution/simulator.h"
 #include "src/wasm/wasm-engine.h"
+#include "src/wasm/wasm-objects.h"
 
 namespace v8::internal::wasm {
 
@@ -31,7 +32,8 @@ StackMemory::~StackMemory() {
 
 void* StackMemory::jslimit() const {
   return (active_segment_ ? active_segment_->limit_ : limit_) +
-         SimulatorStack::JSStackLimitMargin();
+         (owned_ ? StackMemory::JSGrowableStackLimitMarginKB() * KB
+                 : StackMemory::JSCentralStackLimitMarginKB() * KB);
 }
 
 StackMemory::StackMemory() : owned_(true) {
@@ -43,9 +45,11 @@ StackMemory::StackMemory() : owned_(true) {
   const size_t size_limit = v8_flags.stack_size;
   PageAllocator* allocator = GetPlatformPageAllocator();
   auto page_size = allocator->AllocatePageSize();
-  size_t initial_size = std::min<size_t>(
-      size_limit * KB,
-      kJsStackSizeKB * KB + SimulatorStack::JSStackLimitMargin());
+  size_t initial_size =
+      std::min<size_t>(
+          size_limit,
+          kJsStackSizeKB + StackMemory::JSGrowableStackLimitMarginKB()) *
+      KB;
   first_segment_ =
       new StackSegment(RoundUp(initial_size, page_size) / page_size);
   active_segment_ = first_segment_;
@@ -78,6 +82,14 @@ StackMemory::StackSegment::StackSegment(size_t pages) {
                                 "StackMemory::StackSegment::StackSegment");
   }
   limit_ += page_size;
+#ifdef V8_ENABLE_SANDBOX_HARDWARE_SUPPORT
+  // The actual stack memory must be accessible to sandboxed code, so we need
+  // to register it as sandbox extension memory here.
+  // TODO(saelo): this is probably actually the right thing to do and not
+  // unsafe. Consider creating a non-unsafe version of this method.
+  SandboxHardwareSupport::RegisterUnsafeSandboxExtensionMemory(
+      reinterpret_cast<Address>(limit_), size_);
+#endif  // V8_ENABLE_SANDBOX_HARDWARE_SUPPORT
 }
 
 StackMemory::StackSegment::~StackSegment() {
@@ -88,13 +100,32 @@ StackMemory::StackSegment::~StackSegment() {
   }
 }
 
-void StackMemory::Iterate(v8::internal::RootVisitor* v, Isolate* isolate) {
-  for (StackFrameIterator it(isolate, this); !it.done(); it.Advance()) {
-    it.frame()->Iterate(v);
+void StackMemory::Iterate(v8::internal::RootVisitor* v, Isolate* isolate,
+                          ThreadLocalTop* thread) {
+  if (has_frames()) {
+    StackFrameIterator it =
+        IsActive() ? StackFrameIterator(isolate, thread,
+                                        StackFrameIterator::FirstStackOnly{})
+                   : StackFrameIterator(isolate, this);
+    for (; !it.done(); it.Advance()) {
+      it.frame()->Iterate(v);
+    }
   }
-  v->VisitRootPointer(
-      Root::kStackRoots, nullptr,
-      FullObjectSlot(reinterpret_cast<Address>(&this->current_cont_)));
+  if (v8_flags.experimental_wasm_wasmfx) {
+    v->VisitRootPointer(
+        Root::kStackRoots, nullptr,
+        FullObjectSlot(reinterpret_cast<Address>(&current_cont_)));
+    v->VisitRootPointer(Root::kStackRoots, nullptr,
+                        FullObjectSlot(reinterpret_cast<Address>(&func_ref_)));
+    IterateWasmFXArgBuffer(param_types_, [this, v](size_t index, int offset) {
+      if (static_cast<int>(index) < num_bound_args_ &&
+          param_types_[index].is_ref()) {
+        v->VisitRootPointer(Root::kStackRoots, "wasm cont ref bound argument",
+                            FullObjectSlot(reinterpret_cast<Address>(
+                                this->arg_buffer_ + offset)));
+      }
+    });
+  }
 }
 
 bool StackMemory::Grow(Address current_fp, size_t min_size) {
@@ -175,6 +206,10 @@ void StackMemory::Reset() {
   size_ = active_segment_->size_;
   clear_stack_switch_info();
   current_cont_ = {};
+  func_ref_ = {};
+  arg_buffer_ = kNullAddress;
+  num_bound_args_ = 0;
+  param_types_ = {};
 }
 
 bool StackMemory::IsValidContinuation(Tagged<WasmContinuationObject> cont) {

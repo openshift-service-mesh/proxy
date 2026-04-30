@@ -86,7 +86,7 @@ const char* StringsStorage::GetSymbol(Tagged<Symbol> sym) {
                              description->length());
   size_t data_length = 0;
   auto data = description->ToCString(0, length, &data_length);
-  if (sym->is_private_name()) {
+  if (sym->is_any_private_name()) {
     return AddOrDisposeString(data.release(), data_length);
   }
   auto str_length = 8 + data_length + 1 + 1;
@@ -137,7 +137,7 @@ namespace {
 inline uint32_t ComputeStringHash(const char* str, size_t len) {
   uint32_t raw_hash_field = base::bits::RotateLeft32(
       StringHasher::HashSequentialString(str, base::checked_cast<uint32_t>(len),
-                                         kZeroHashSeed),
+                                         HashSeed::Default()),
       2);
   return Name::HashBits::decode(raw_hash_field);
 }

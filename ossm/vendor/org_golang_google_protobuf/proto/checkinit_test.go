@@ -10,11 +10,10 @@ import (
 	"testing"
 
 	"google.golang.org/protobuf/encoding/prototext"
-	"google.golang.org/protobuf/internal/flags"
 	"google.golang.org/protobuf/proto"
 
 	testpb "google.golang.org/protobuf/internal/testprotos/test"
-	weakpb "google.golang.org/protobuf/internal/testprotos/test/weak1"
+	testeditionspb "google.golang.org/protobuf/internal/testprotos/testeditions"
 )
 
 func TestCheckInitializedErrors(t *testing.T) {
@@ -47,27 +46,28 @@ func TestCheckInitializedErrors(t *testing.T) {
 		},
 		want: `goproto.proto.test.TestRequired.required_field`,
 	}, {
-		m:    &testpb.TestWeak{},
-		want: `<nil>`,
-		skip: !flags.ProtoLegacy,
+		m:    &testeditionspb.TestRequired{},
+		want: `goproto.proto.testeditions.TestRequired.required_field`,
 	}, {
-		m: func() proto.Message {
-			m := &testpb.TestWeak{}
-			m.SetWeakMessage1(&weakpb.WeakImportMessage1{})
-			return m
-		}(),
-		want: `goproto.proto.test.weak.WeakImportMessage1.a`,
-		skip: !flags.ProtoLegacy,
+		m: &testeditionspb.TestRequiredForeign{
+			OptionalMessage: &testeditionspb.TestRequired{},
+		},
+		want: `goproto.proto.testeditions.TestRequired.required_field`,
 	}, {
-		m: func() proto.Message {
-			m := &testpb.TestWeak{}
-			m.SetWeakMessage1(&weakpb.WeakImportMessage1{
-				A: proto.Int32(1),
-			})
-			return m
-		}(),
-		want: `<nil>`,
-		skip: !flags.ProtoLegacy,
+		m: &testeditionspb.TestRequiredForeign{
+			RepeatedMessage: []*testeditionspb.TestRequired{
+				{RequiredField: proto.Int32(1)},
+				{},
+			},
+		},
+		want: `goproto.proto.testeditions.TestRequired.required_field`,
+	}, {
+		m: &testeditionspb.TestRequiredForeign{
+			MapMessage: map[int32]*testeditionspb.TestRequired{
+				1: {},
+			},
+		},
+		want: `goproto.proto.testeditions.TestRequired.required_field`,
 	}}
 
 	for _, tt := range tests {

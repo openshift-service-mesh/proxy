@@ -312,10 +312,7 @@ namespace internal {
      V8.CompileFunctionMicroSeconds.BackgroundThread, 1000000, MICROSECOND)    \
   HT(deserialize_script_on_background,                                         \
      V8.CompileScriptMicroSeconds.ConsumeCache.BackgroundThread, 1000000,      \
-     MICROSECOND)                                                              \
-  /* Debugger timers. */                                                       \
-  HT(debug_pause_to_paused_event, V8.DebugPauseToPausedEventMilliSeconds,      \
-     1000000, MILLISECOND)
+     MICROSECOND)
 
 #define AGGREGATABLE_HISTOGRAM_TIMER_LIST(AHT) \
   AHT(compile_lazy, V8.CompileLazyMicroSeconds)
@@ -346,6 +343,7 @@ namespace internal {
   /* Number of times the cache contained a reusable Script but not */          \
   /* the root SharedFunctionInfo. */                                           \
   SC(compilation_cache_partial_hits, V8.CompilationCachePartialHits)           \
+  SC(deopts, V8.Deopts)                                                        \
   SC(objs_since_last_young, V8.ObjsSinceLastYoung)                             \
   SC(objs_since_last_full, V8.ObjsSinceLastFull)                               \
   SC(gc_compactor_caused_by_request, V8.GCCompactorCausedByRequest)            \

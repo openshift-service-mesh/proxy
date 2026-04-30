@@ -1,10 +1,15 @@
 """A custom rule that wraps a crate called to_wrap."""
 
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+
 # buildifier: disable=bzl-visibility
 load("//rust/private:providers.bzl", "BuildInfo", "CrateInfo", "DepInfo", "DepVariantInfo")
 
 # buildifier: disable=bzl-visibility
 load("//rust/private:rustc.bzl", "rustc_compile_action")
+
+# buildifier: disable=bzl-visibility
+load("//rust/private:utils.bzl", "can_use_metadata_for_pipelining")
 
 _CONTENT = """\
 // crate_name: {}
@@ -62,12 +67,14 @@ def _wrap_impl(ctx):
             name = crate_name,
             type = crate_type,
             root = rs_file,
-            srcs = depset([rs_file]),
-            deps = depset(deps),
-            proc_macro_deps = depset([]),
+            srcs = [rs_file],
+            deps = deps,
+            proc_macro_deps = [],
             aliases = {},
             output = rust_lib,
             metadata = rust_metadata,
+            metadata_supports_pipelining = can_use_metadata_for_pipelining(toolchain, crate_type) and
+                                           ctx.attr.generate_metadata,
             owner = ctx.label,
             edition = "2018",
             compile_data = depset([]),
@@ -84,8 +91,8 @@ wrap = rule(
         "crate_name": attr.string(),
         "generate_metadata": attr.bool(default = False),
         "target": attr.label(),
-        "_cc_toolchain": attr.label(
-            default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
+        "_always_enable_metadata_output_groups": attr.label(
+            default = Label("//rust/settings:always_enable_metadata_output_groups"),
         ),
         "_error_format": attr.label(
             default = Label("//rust/settings:error_format"),
@@ -97,6 +104,9 @@ wrap = rule(
             cfg = "exec",
         ),
     },
-    toolchains = ["@rules_rust//rust:toolchain", "@bazel_tools//tools/cpp:toolchain_type"],
+    toolchains = [
+        "@rules_rust//rust:toolchain",
+        config_common.toolchain_type("@bazel_tools//tools/cpp:toolchain_type", mandatory = False),
+    ],
     fragments = ["cpp"],
 )

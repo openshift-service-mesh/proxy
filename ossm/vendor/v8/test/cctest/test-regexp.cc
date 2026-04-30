@@ -26,6 +26,8 @@ const int kSubjectStringLength = arraysize(kOneByteSubjectString) - 1;
 static_assert(arraysize(kOneByteSubjectString) ==
               arraysize(kTwoByteSubjectString));
 
+namespace base = v8::base;
+
 class OneByteVectorResource : public String::ExternalOneByteStringResource {
  public:
   explicit OneByteVectorResource(base::Vector<const char> vector)
@@ -111,7 +113,7 @@ class InterruptTest {
     // We executed on a two-byte subject so far, so we expect only bytecode for
     // two-byte to be present.
     i::Tagged<i::IrRegExpData> re_data =
-        Cast<i::IrRegExpData>(regexp->data(i_isolate));
+        CheckedCast<i::IrRegExpData>(regexp->data(i_isolate));
     CHECK(!re_data->has_latin1_bytecode());
     CHECK(re_data->has_uc16_bytecode());
 
@@ -343,6 +345,6 @@ TEST(InterruptAndTransitionSubjectFromTwoByteToOneByte) {
   i::DirectHandle<i::JSRegExp> regexp =
       Utils::OpenDirectHandle(*test.GetRegExp());
   i::Tagged<i::IrRegExpData> data =
-      Cast<i::IrRegExpData>(regexp->data(i_isolate));
+      CheckedCast<i::IrRegExpData>(regexp->data(i_isolate));
   CHECK(data->has_latin1_bytecode());
 }

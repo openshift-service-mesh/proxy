@@ -9,6 +9,7 @@ go_library(
         "//cmd/protoc-gen-go/internal_gengo",
         "//compiler/protogen",
         "//internal/detrand",
+        "//internal/editionssupport",
     ],
 )
 

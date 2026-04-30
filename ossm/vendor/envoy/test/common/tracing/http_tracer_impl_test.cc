@@ -45,9 +45,7 @@ protected:
   HttpConnManFinalizerImplTest() {
     Upstream::HostDescriptionConstSharedPtr shared_host(host_);
     stream_info.upstreamInfo()->setUpstreamHost(shared_host);
-    ON_CALL(stream_info, upstreamClusterInfo())
-        .WillByDefault(
-            Return(absl::make_optional<Upstream::ClusterInfoConstSharedPtr>(cluster_info_)));
+    stream_info.upstream_cluster_info_ = cluster_info_;
   }
   struct CustomTagCase {
     std::string custom_tag;
@@ -59,7 +57,8 @@ protected:
     for (const CustomTagCase& cas : cases) {
       envoy::type::tracing::v3::CustomTag custom_tag;
       TestUtility::loadFromYaml(cas.custom_tag, custom_tag);
-      custom_tags_.emplace(custom_tag.tag(), CustomTagUtility::createCustomTag(custom_tag));
+      auto custom_tag_ptr = CustomTagUtility::createCustomTag(custom_tag);
+      custom_tags_.emplace(custom_tag_ptr->tag(), custom_tag_ptr);
       if (cas.set) {
         EXPECT_CALL(span, setTag(Eq(custom_tag.tag()), Eq(cas.value)));
       } else {
@@ -67,9 +66,9 @@ protected:
       }
     }
 
-    EXPECT_CALL(config, modifySpan(_)).WillOnce(Invoke([this](Span& span) {
+    EXPECT_CALL(config, modifySpan).WillOnce(Invoke([this](Span& span, bool) {
       HttpTraceContext trace_context{request_headers_};
-      const CustomTagContext ctx{trace_context, stream_info};
+      const CustomTagContext ctx{trace_context, stream_info, {&request_headers_}};
       for (const auto& [_, custom_tag] : custom_tags_) {
         custom_tag->applySpan(span, ctx);
       }
@@ -195,9 +194,9 @@ TEST_F(HttpConnManFinalizerImplTest, NullRequestHeadersAndNullRouteEntry) {
   EXPECT_CALL(stream_info, responseCode()).WillRepeatedly(ReturnPointee(&response_code));
   // No upstream info.
   stream_info.upstreamInfo()->setUpstreamHost(nullptr);
-  EXPECT_CALL(stream_info, route()).WillRepeatedly(Return(nullptr));
   // No cluster info.
-  EXPECT_CALL(stream_info, upstreamClusterInfo()).WillOnce(Return(absl::nullopt));
+  EXPECT_CALL(stream_info, upstreamClusterInfo())
+      .WillOnce(Return(OptRef<const Upstream::ClusterInfo>{}));
 
   EXPECT_CALL(span, setTag(Eq(Tracing::Tags::get().HttpStatusCode), Eq("0")));
   EXPECT_CALL(span, setTag(Eq(Tracing::Tags::get().Error), Eq(Tracing::Tags::get().True)));
@@ -300,7 +299,8 @@ TEST_F(HttpConnManFinalizerImplTest, UpstreamClusterTagSetAlthoughNoUpstreamInfo
 
 TEST_F(HttpConnManFinalizerImplTest, NoUpstreamClusterTagSetWhenNoClusterInfo) {
   // No cluster info.
-  EXPECT_CALL(stream_info, upstreamClusterInfo()).WillOnce(Return(absl::nullopt));
+  EXPECT_CALL(stream_info, upstreamClusterInfo())
+      .WillOnce(Return(OptRef<const Upstream::ClusterInfo>{}));
 
   EXPECT_CALL(stream_info, bytesReceived()).WillOnce(Return(10));
   EXPECT_CALL(stream_info, bytesSent()).WillOnce(Return(11));
@@ -402,7 +402,7 @@ ree:
   TestUtility::loadFromYaml(yaml, fake_struct);
   (*stream_info.metadata_.mutable_filter_metadata())["m.req"].MergeFrom(fake_struct);
   std::shared_ptr<Router::MockRoute> route{new NiceMock<Router::MockRoute>()};
-  EXPECT_CALL(stream_info, route()).WillRepeatedly(Return(route));
+  stream_info.route_ = route;
   (*route->metadata_.mutable_filter_metadata())["m.rot"].MergeFrom(fake_struct);
   std::shared_ptr<envoy::config::core::v3::Metadata> host_metadata =
       std::make_shared<envoy::config::core::v3::Metadata>();
@@ -419,79 +419,83 @@ ree:
 
   EXPECT_CALL(span, setTag(_, _)).Times(testing::AnyNumber());
 
-  expectSetCustomTags(
-      {{"{ tag: aa, literal: { value: a } }", true, "a"},
-       {"{ tag: bb-1, request_header: { name: X-Bb, default_value: _b } }", true, "b"},
-       {"{ tag: bb-2, request_header: { name: X-Bb-Not-Found, default_value: b2 } }", true, "b2"},
-       {"{ tag: bb-3, request_header: { name: X-Bb-Not-Found } }", false, ""},
-       {"{ tag: cc-1, environment: { name: E_CC } }", true, "c"},
-       {"{ tag: cc-1-a, environment: { name: E_CC, default_value: _c } }", true, "c"},
-       {"{ tag: cc-2, environment: { name: E_CC_NOT_FOUND, default_value: c2 } }", true, "c2"},
-       {"{ tag: cc-3, environment: { name: E_CC_NOT_FOUND} }", false, ""},
-       {R"EOF(
+  expectSetCustomTags({
+      {"{ tag: aa, literal: { value: a } }", true, "a"},
+      {"{ tag: bb-1, request_header: { name: X-Bb, default_value: _b } }", true, "b"},
+      {"{ tag: bb-2, request_header: { name: X-Bb-Not-Found, default_value: b2 } }", true, "b2"},
+      {"{ tag: bb-3, request_header: { name: X-Bb-Not-Found } }", false, ""},
+      {"{ tag: cc-1, environment: { name: E_CC } }", true, "c"},
+      {"{ tag: cc-1-a, environment: { name: E_CC, default_value: _c } }", true, "c"},
+      {"{ tag: cc-2, environment: { name: E_CC_NOT_FOUND, default_value: c2 } }", true, "c2"},
+      {"{ tag: cc-3, environment: { name: E_CC_NOT_FOUND} }", false, ""},
+      {R"EOF(
 tag: dd-1,
 metadata:
   kind: { request: {} }
   metadata_key: { key: m.req, path: [ { key: ree }, { key: foo } ] })EOF",
-        true, "bar"},
-       {R"EOF(
+       true, "bar"},
+      {R"EOF(
 tag: dd-2,
 metadata:
   kind: { request: {} }
   metadata_key: { key: m.req, path: [ { key: not-found } ] }
   default_value: d2)EOF",
-        true, "d2"},
-       {R"EOF(
+       true, "d2"},
+      {R"EOF(
 tag: dd-3,
 metadata:
   kind: { request: {} }
   metadata_key: { key: m.req, path: [ { key: not-found } ] })EOF",
-        false, ""},
-       {R"EOF(
+       false, ""},
+      {R"EOF(
 tag: dd-4,
 metadata:
   kind: { request: {} }
   metadata_key: { key: m.req, path: [ { key: ree }, { key: nuu } ] }
   default_value: _d)EOF",
-        true, "1"},
-       {R"EOF(
+       true, "1"},
+      {R"EOF(
 tag: dd-5,
 metadata:
   kind: { route: {} }
   metadata_key: { key: m.rot, path: [ { key: ree }, { key: boo } ] })EOF",
-        true, "true"},
-       {R"EOF(
+       true, "true"},
+      {R"EOF(
 tag: dd-6,
 metadata:
   kind: { route: {} }
   metadata_key: { key: m.rot, path: [ { key: ree }, { key: poo } ] })EOF",
-        true, "false"},
-       {R"EOF(
+       true, "false"},
+      {R"EOF(
 tag: dd-7,
 metadata:
   kind: { cluster: {} }
   metadata_key: { key: m.cluster, path: [ { key: ree }, { key: emp } ] }
   default_value: _d)EOF",
-        true, ""},
-       {R"EOF(
+       true, ""},
+      {R"EOF(
 tag: dd-8,
 metadata:
   kind: { cluster: {} }
   metadata_key: { key: m.cluster, path: [ { key: ree }, { key: lii } ] }
   default_value: _d)EOF",
-        true, "[\"something\"]"},
-       {R"EOF(
+       true, "[\"something\"]"},
+      {R"EOF(
 tag: dd-9,
 metadata:
   kind: { host: {} }
   metadata_key: { key: m.host, path: [ { key: ree }, { key: stt } ] })EOF",
-        true, R"({"some":"thing"})"},
-       {R"EOF(
+       true, R"({"some":"thing"})"},
+      {R"EOF(
 tag: dd-10,
 metadata:
   kind: { host: {} }
   metadata_key: { key: m.host, path: [ { key: not-found } ] })EOF",
-        false, ""}});
+       false, ""},
+      {"{ tag: ee-1, value: '%REQ(x-bb)%' }", true, "b"},
+      {"{ tag: ee-2, value: '%REQ(x-bb-not-found)%_ee' }", true, "_ee"},
+      {"{ tag: ee-3, value: '%REQ(x-bb-not-found)%' }", false, ""},
+  });
 
   ON_CALL(stream_info, getRequestHeaders()).WillByDefault(Return(&request_headers_));
 

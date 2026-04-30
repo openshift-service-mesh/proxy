@@ -244,6 +244,7 @@ public:
     const TcpProxyStats& stats() { return stats_; }
     const absl::optional<std::chrono::milliseconds>& idleTimeout() { return idle_timeout_; }
     bool flushAccessLogOnConnected() const { return flush_access_log_on_connected_; }
+    bool flushAccessLogOnStart() const { return flush_access_log_on_start_; }
     const absl::optional<std::chrono::milliseconds>& maxDownstreamConnectionDuration() const {
       return max_downstream_connection_duration_;
     }
@@ -262,6 +263,10 @@ public:
     const BackOffStrategyPtr& backoffStrategy() const { return backoff_strategy_; };
     const Network::ProxyProtocolTLVVector& proxyProtocolTLVs() const {
       return proxy_protocol_tlvs_;
+    }
+    envoy::extensions::filters::network::tcp_proxy::v3::ProxyProtocolTlvMergePolicy
+    proxyProtocolTlvMergePolicy() const {
+      return proxy_protocol_tlv_merge_policy_;
     }
 
     // Evaluate dynamic TLV formatters and combine with static TLVs.
@@ -287,7 +292,8 @@ public:
     const Stats::ScopeSharedPtr stats_scope_;
 
     const TcpProxyStats stats_;
-    bool flush_access_log_on_connected_;
+    bool flush_access_log_on_connected_ : 1;
+    const bool flush_access_log_on_start_ : 1;
     absl::optional<std::chrono::milliseconds> idle_timeout_;
     absl::optional<std::chrono::milliseconds> max_downstream_connection_duration_;
     absl::optional<double> max_downstream_connection_duration_jitter_percentage_;
@@ -297,6 +303,9 @@ public:
     BackOffStrategyPtr backoff_strategy_;
     Network::ProxyProtocolTLVVector proxy_protocol_tlvs_;
     std::vector<TlvFormatter> dynamic_tlv_formatters_;
+    envoy::extensions::filters::network::tcp_proxy::v3::ProxyProtocolTlvMergePolicy
+        proxy_protocol_tlv_merge_policy_{
+            envoy::extensions::filters::network::tcp_proxy::v3::ADD_IF_ABSENT};
   };
 
   using SharedConfigSharedPtr = std::shared_ptr<SharedConfig>;
@@ -355,11 +364,19 @@ public:
   const OnDemandStats& onDemandStats() const { return shared_config_->onDemandConfig()->stats(); }
   Random::RandomGenerator& randomGenerator() { return random_generator_; }
   bool flushAccessLogOnConnected() const { return shared_config_->flushAccessLogOnConnected(); }
+  bool flushAccessLogOnStart() const { return shared_config_->flushAccessLogOnStart(); }
   Regex::Engine& regexEngine() const { return regex_engine_; }
   const BackOffStrategyPtr& backoffStrategy() const { return shared_config_->backoffStrategy(); };
   const Network::ProxyProtocolTLVVector& proxyProtocolTLVs() const {
     return shared_config_->proxyProtocolTLVs();
   }
+
+  envoy::extensions::filters::network::tcp_proxy::v3::UpstreamConnectMode
+  upstreamConnectMode() const {
+    return upstream_connect_mode_;
+  }
+
+  const absl::optional<uint32_t>& maxEarlyDataBytes() const { return max_early_data_bytes_; }
 
 private:
   struct SimpleRouteImpl : public Route {
@@ -413,6 +430,9 @@ private:
   Random::RandomGenerator& random_generator_;
   std::unique_ptr<const Network::HashPolicyImpl> hash_policy_;
   Regex::Engine& regex_engine_; // Static lifetime object, safe to store as a reference
+  envoy::extensions::filters::network::tcp_proxy::v3::UpstreamConnectMode upstream_connect_mode_{
+      envoy::extensions::filters::network::tcp_proxy::v3::IMMEDIATE};
+  absl::optional<uint32_t> max_early_data_bytes_;
 };
 
 using ConfigSharedPtr = std::shared_ptr<Config>;
@@ -533,8 +553,14 @@ public:
     void resetStream(Http::StreamResetReason, absl::string_view) override {
       IS_ENVOY_BUG("Not implemented. Unexpected call to resetStream()");
     };
-    Router::RouteConstSharedPtr route() override { return route_; }
-    Upstream::ClusterInfoConstSharedPtr clusterInfo() override {
+    OptRef<const Router::Route> route() override { return makeOptRefFromPtr(route_.get()); }
+    Router::RouteConstSharedPtr routeSharedPtr() override { return route_; }
+    OptRef<const Upstream::ClusterInfo> clusterInfo() override {
+      const auto info =
+          parent_->cluster_manager_.getThreadLocalCluster(parent_->route_->clusterName())->info();
+      return makeOptRefFromPtr<const Upstream::ClusterInfo>(info.get());
+    }
+    Upstream::ClusterInfoConstSharedPtr clusterInfoSharedPtr() override {
       return parent_->cluster_manager_.getThreadLocalCluster(parent_->route_->clusterName())
           ->info();
     }
@@ -563,7 +589,7 @@ public:
                         std::function<void(Http::ResponseHeaderMap& headers)>,
                         const absl::optional<Grpc::Status::GrpcStatus>,
                         absl::string_view) override {}
-    void sendGoAwayAndClose() override {}
+    void sendGoAwayAndClose(bool graceful [[maybe_unused]] = false) override {}
     void encode1xxHeaders(Http::ResponseHeaderMapPtr&&) override {}
     Http::ResponseHeaderMapOptRef informationalHeaders() override { return {}; }
     void encodeHeaders(Http::ResponseHeaderMapPtr&&, bool, absl::string_view) override {}
@@ -582,8 +608,8 @@ public:
     }
     void addDownstreamWatermarkCallbacks(Http::DownstreamWatermarkCallbacks&) override {}
     void removeDownstreamWatermarkCallbacks(Http::DownstreamWatermarkCallbacks&) override {}
-    void setDecoderBufferLimit(uint64_t) override {}
-    uint64_t decoderBufferLimit() override { return 0; }
+    void setBufferLimit(uint64_t) override {}
+    uint64_t bufferLimit() override { return 0; }
     bool recreateStream(const Http::ResponseHeaderMap*) override { return false; }
     void addUpstreamSocketOptions(const Network::Socket::OptionsSharedPtr&) override {}
     Network::Socket::OptionsSharedPtr getUpstreamSocketOptions() const override { return nullptr; }
@@ -593,9 +619,9 @@ public:
     Router::RouteSpecificFilterConfigs perFilterConfigs() const override { return {}; }
     Buffer::BufferMemoryAccountSharedPtr account() const override { return nullptr; }
     void setUpstreamOverrideHost(Upstream::LoadBalancerContext::OverrideHost) override {}
-    absl::optional<Upstream::LoadBalancerContext::OverrideHost>
+    OptRef<const Upstream::LoadBalancerContext::OverrideHost>
     upstreamOverrideHost() const override {
-      return absl::nullopt;
+      return {};
     }
     bool shouldLoadShed() const override { return false; }
     void restoreContextOnContinue(ScopeTrackedObjectStack& tracked_object_stack) override {
@@ -677,6 +703,11 @@ protected:
   void enableRetryTimer();
   void disableRetryTimer();
 
+public:
+  // Public for testing purposes
+  void onDownstreamTlsHandshakeComplete();
+
+protected:
   const ConfigSharedPtr config_;
   Upstream::ClusterManager& cluster_manager_;
   Network::ReadFilterCallbacks* read_callbacks_{};
@@ -720,6 +751,15 @@ protected:
   bool early_data_end_stream_{false};
   Buffer::OwnedImpl early_data_buffer_{};
   HttpStreamDecoderFilterCallbacks upstream_decoder_filter_callbacks_;
+
+  // Connection establishment mode configuration.
+  envoy::extensions::filters::network::tcp_proxy::v3::UpstreamConnectMode connect_mode_{
+      envoy::extensions::filters::network::tcp_proxy::v3::IMMEDIATE};
+  bool waiting_for_tls_handshake_{false};
+  bool tls_handshake_complete_{false};
+  bool initial_data_received_{false};
+  bool read_disabled_due_to_buffer_{false}; // Track if we disabled reading due to buffer overflow.
+  uint32_t max_buffered_bytes_{65536};      // Default 64KB.
 };
 
 // This class deals with an upstream connection that needs to finish flushing, when the downstream

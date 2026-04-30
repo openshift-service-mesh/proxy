@@ -21,27 +21,29 @@ import argparse
 import logging
 import os
 import pathlib
+import posixpath
 import shutil
 import sys
 import tempfile
 
 from pkg.private import manifest
+from python.runfiles import runfiles
 
 # Globals used for runfile path manipulation.
 #
 # These are necessary because runfiles are different when used as a part of
 # `bazel build` and `bazel run`. # See also
 # https://docs.bazel.build/versions/4.1.0/skylark/rules.html#tools-with-runfiles
+# https://rules-python.readthedocs.io/en/latest/api/py/runfiles/runfiles.runfiles.html
+RUNFILES = runfiles.Create()
+REPOSITORY = RUNFILES.CurrentRepository() or "{WORKSPACE_NAME}"  # the empty string denotes the "_main" repository
 
-# Bazel's documentation claims these are set when calling `bazel run`, but not other
-# modes, like in `build` or `test`.  We'll see.
-CALLED_FROM_BAZEL_RUN = bool(os.getenv("BUILD_WORKSPACE_DIRECTORY") and
-                             os.getenv("BUILD_WORKING_DIRECTORY"))
+def locate(short_path):
+    """Resolve a path relative to the current repository and return its "runfile" location.
 
-WORKSPACE_NAME = "{WORKSPACE_NAME}"
-# This seems to be set when running in `bazel build` or `bazel test`
-# TODO(#382): This may not be the case in Windows.
-RUNFILE_PREFIX = os.path.join(os.getenv("RUNFILES_DIR"), WORKSPACE_NAME) if os.getenv("RUNFILES_DIR") else None
+    Uses `posixpath` because runfile lookups always use forward slashes, even on Windows.
+    """
+    return RUNFILES.Rlocation(posixpath.normpath(posixpath.join(REPOSITORY, short_path)))
 
 
 # This is named "NativeInstaller" because it makes use of "native" python
@@ -80,26 +82,38 @@ class NativeInstaller(object):
 
     def _do_file_copy(self, src, dest):
         logging.debug("COPY %s <- %s", dest, src)
-        # Copy to a temporary file and then move it to the destination.
+        # Copy to a temporary directory and then move it to the destination.
         # This ensures code-signed executables on certain platforms
         # behave correctly.
         # See: https://developer.apple.com/documentation/security/updating-mac-software
+        # Use `TemporaryDirectory` instead of `NamedTemporaryFile` to avoid Windows file locking issues.
         # Use `dir` to ensure the temporary file is created on the same file system as the destination,
         # to avoid cross-filesystem replace which is an error on some platforms.
-        with tempfile.NamedTemporaryFile(delete=False, dir=os.path.dirname(dest)) as tmp_file:
-            try:
-                shutil.copyfile(src, tmp_file.name)
-                os.replace(tmp_file.name, dest)
-            except:
-                pathlib.Path(tmp_file.name).unlink(missing_ok=True)
-                raise
+        with tempfile.TemporaryDirectory(dir=os.path.dirname(dest)) as tmp_dir:
+            tmp_file = os.path.join(tmp_dir, os.path.basename(dest))
+            shutil.copyfile(src, tmp_file)
+            os.replace(tmp_file, dest)
 
     def _do_mkdir(self, dirname, mode):
         logging.debug("MKDIR %s %s", mode, dirname)
         os.makedirs(dirname, int(mode, 8), exist_ok=True)
 
     def _do_symlink(self, target, link_name, mode, user, group):
-        raise NotImplementedError("symlinking not yet supported")
+        logging.debug("SYMLINK %s <- %s", link_name, target)
+        os.symlink(target, link_name)
+        if mode:
+            if hasattr(os, "lchmod"):
+                 logging.debug("CHMOD %s %s", mode, link_name)
+                 os.lchmod(link_name, int(mode, 8))
+            else:
+                 logging.debug("CHMOD-NOT AVAILABLE %s %s", mode, link_name)
+        if user or group:
+            # Ownership can only be changed by sufficiently
+            # privileged users.
+            # TODO(nacl): This does not support windows
+            if hasattr(os, "lchown") and os.getuid() == 0:
+                logging.debug("CHOWN %s:%s %s", user, group, link_name)
+                os.lchown(link_name, user, group)
 
     def _maybe_make_unowned_dir(self, path):
         logging.debug("MKDIR (unowned) %s", path)
@@ -161,10 +175,8 @@ class NativeInstaller(object):
         self._chown_chmod(entry.dest, top_dir_mode, entry.user, entry.group)
 
     def _install_symlink(self, entry):
-        raise NotImplementedError("symlinking not yet supported")
-        logging.debug("SYMLINK %s <- %s", entry.dest, entry.link_to)
-        logging.debug("CHMOD %s %s", entry.dest, entry.mode)
-        logging.debug("CHOWN %s.%s %s", entry.dest, entry.user, entry.group)
+        self._maybe_make_unowned_dir(os.path.dirname(entry.dest))
+        self._do_symlink(entry.src, entry.dest, entry.mode, entry.user, entry.group)
 
     def include_manifest_path(self, path):
         with open(path, 'r') as fh:
@@ -174,10 +186,10 @@ class NativeInstaller(object):
         manifest_entries = manifest.read_entries_from(manifest_fh)
 
         for entry in manifest_entries:
-            # Swap out the source with the actual "runfile" location if we're
-            # called as a part of the build rather than "bazel run"
-            if not CALLED_FROM_BAZEL_RUN and entry.src is not None:
-                entry.src = os.path.join(RUNFILE_PREFIX, entry.src)
+            # Swap out the source with the actual "runfile" location, except for
+            # symbolic links as their targets denote installation paths
+            if entry.type != manifest.ENTRY_IS_LINK and entry.src is not None:
+                entry.src = locate(entry.src)
             # Prepend the destdir path to all installation paths, if one is
             # specified.
             if self.destdir is not None:
@@ -277,17 +289,7 @@ def main(args):
         wipe_destdir=args.wipe_destdir,
     )
 
-    if not CALLED_FROM_BAZEL_RUN and RUNFILE_PREFIX is None:
-        logging.critical("RUNFILES_DIR must be set in your environment when this is run as a bazel build tool.")
-        logging.critical("This is most likely an issue on Windows.  See https://github.com/bazelbuild/rules_pkg/issues/387.")
-        return 1
-
-    for f in ["{MANIFEST_INCLUSION}"]:
-        if CALLED_FROM_BAZEL_RUN:
-            installer.include_manifest_path(f)
-        else:
-            installer.include_manifest_path(os.path.join(RUNFILE_PREFIX, f))
-
+    installer.include_manifest_path(locate("{MANIFEST_INCLUSION}"))
     installer.do_the_thing()
 
 

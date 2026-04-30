@@ -12,23 +12,21 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
+	unsafe "unsafe"
 )
 
 type Int32 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *int32                 `protobuf:"varint,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *int32 `protobuf:"varint,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Int32) Reset() {
 	*x = Int32{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[0]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Int32) String() string {
@@ -39,7 +37,7 @@ func (*Int32) ProtoMessage() {}
 
 func (x *Int32) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[0]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -62,20 +60,17 @@ func (x *Int32) GetV() int32 {
 }
 
 type Int64 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *int64                 `protobuf:"varint,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *int64 `protobuf:"varint,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Int64) Reset() {
 	*x = Int64{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[1]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Int64) String() string {
@@ -86,7 +81,7 @@ func (*Int64) ProtoMessage() {}
 
 func (x *Int64) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[1]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -109,20 +104,17 @@ func (x *Int64) GetV() int64 {
 }
 
 type Uint32 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *uint32                `protobuf:"varint,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *uint32 `protobuf:"varint,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Uint32) Reset() {
 	*x = Uint32{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[2]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Uint32) String() string {
@@ -133,7 +125,7 @@ func (*Uint32) ProtoMessage() {}
 
 func (x *Uint32) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[2]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -156,20 +148,17 @@ func (x *Uint32) GetV() uint32 {
 }
 
 type Uint64 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *uint64                `protobuf:"varint,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *uint64 `protobuf:"varint,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Uint64) Reset() {
 	*x = Uint64{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[3]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Uint64) String() string {
@@ -180,7 +169,7 @@ func (*Uint64) ProtoMessage() {}
 
 func (x *Uint64) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[3]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -203,20 +192,17 @@ func (x *Uint64) GetV() uint64 {
 }
 
 type Sint32 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *int32                 `protobuf:"zigzag32,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *int32 `protobuf:"zigzag32,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Sint32) Reset() {
 	*x = Sint32{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[4]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Sint32) String() string {
@@ -227,7 +213,7 @@ func (*Sint32) ProtoMessage() {}
 
 func (x *Sint32) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[4]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -250,20 +236,17 @@ func (x *Sint32) GetV() int32 {
 }
 
 type Sint64 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *int64                 `protobuf:"zigzag64,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *int64 `protobuf:"zigzag64,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Sint64) Reset() {
 	*x = Sint64{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[5]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Sint64) String() string {
@@ -274,7 +257,7 @@ func (*Sint64) ProtoMessage() {}
 
 func (x *Sint64) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[5]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -297,20 +280,17 @@ func (x *Sint64) GetV() int64 {
 }
 
 type Fixed32 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *uint32                `protobuf:"fixed32,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *uint32 `protobuf:"fixed32,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Fixed32) Reset() {
 	*x = Fixed32{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[6]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Fixed32) String() string {
@@ -321,7 +301,7 @@ func (*Fixed32) ProtoMessage() {}
 
 func (x *Fixed32) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[6]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -344,20 +324,17 @@ func (x *Fixed32) GetV() uint32 {
 }
 
 type Fixed64 struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *uint64                `protobuf:"fixed64,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *uint64 `protobuf:"fixed64,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Fixed64) Reset() {
 	*x = Fixed64{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[7]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Fixed64) String() string {
@@ -368,7 +345,7 @@ func (*Fixed64) ProtoMessage() {}
 
 func (x *Fixed64) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[7]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -391,20 +368,17 @@ func (x *Fixed64) GetV() uint64 {
 }
 
 type Float struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *float32               `protobuf:"fixed32,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *float32 `protobuf:"fixed32,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Float) Reset() {
 	*x = Float{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[8]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Float) String() string {
@@ -415,7 +389,7 @@ func (*Float) ProtoMessage() {}
 
 func (x *Float) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[8]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -438,20 +412,17 @@ func (x *Float) GetV() float32 {
 }
 
 type Double struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *float64               `protobuf:"fixed64,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *float64 `protobuf:"fixed64,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Double) Reset() {
 	*x = Double{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[9]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Double) String() string {
@@ -462,7 +433,7 @@ func (*Double) ProtoMessage() {}
 
 func (x *Double) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[9]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -485,20 +456,17 @@ func (x *Double) GetV() float64 {
 }
 
 type Bool struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *bool                  `protobuf:"varint,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *bool `protobuf:"varint,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Bool) Reset() {
 	*x = Bool{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[10]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Bool) String() string {
@@ -509,7 +477,7 @@ func (*Bool) ProtoMessage() {}
 
 func (x *Bool) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[10]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -532,20 +500,17 @@ func (x *Bool) GetV() bool {
 }
 
 type String struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *string                `protobuf:"bytes,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *string `protobuf:"bytes,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *String) Reset() {
 	*x = String{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[11]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *String) String() string {
@@ -556,7 +521,7 @@ func (*String) ProtoMessage() {}
 
 func (x *String) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[11]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -579,20 +544,17 @@ func (x *String) GetV() string {
 }
 
 type Bytes struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             []byte                 `protobuf:"bytes,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V []byte `protobuf:"bytes,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Bytes) Reset() {
 	*x = Bytes{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[12]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Bytes) String() string {
@@ -603,7 +565,7 @@ func (*Bytes) ProtoMessage() {}
 
 func (x *Bytes) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[12]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -626,20 +588,17 @@ func (x *Bytes) GetV() []byte {
 }
 
 type Message struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *Message_M             `protobuf:"bytes,1,req,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *Message_M `protobuf:"bytes,1,req,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Message) Reset() {
 	*x = Message{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[13]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Message) String() string {
@@ -650,7 +609,7 @@ func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[13]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -673,20 +632,17 @@ func (x *Message) GetV() *Message_M {
 }
 
 type Group struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Group         *Group_Group           `protobuf:"group,1,req,name=Group,json=group" json:"group,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	Group *Group_Group `protobuf:"group,1,req,name=Group,json=group" json:"group,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Group) Reset() {
 	*x = Group{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[14]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Group) String() string {
@@ -697,7 +653,7 @@ func (*Group) ProtoMessage() {}
 
 func (x *Group) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[14]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -720,18 +676,16 @@ func (x *Group) GetGroup() *Group_Group {
 }
 
 type Message_M struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Message_M) Reset() {
 	*x = Message_M{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[15]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Message_M) String() string {
@@ -742,7 +696,7 @@ func (*Message_M) ProtoMessage() {}
 
 func (x *Message_M) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[15]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -758,20 +712,17 @@ func (*Message_M) Descriptor() ([]byte, []int) {
 }
 
 type Group_Group struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	V             *int32                 `protobuf:"varint,1,opt,name=v" json:"v,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	V *int32 `protobuf:"varint,1,opt,name=v" json:"v,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Group_Group) Reset() {
 	*x = Group_Group{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_required_required_proto_msgTypes[16]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_required_required_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *Group_Group) String() string {
@@ -782,7 +733,7 @@ func (*Group_Group) ProtoMessage() {}
 
 func (x *Group_Group) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_required_required_proto_msgTypes[16]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -806,61 +757,57 @@ func (x *Group_Group) GetV() int32 {
 
 var File_internal_testprotos_required_required_proto protoreflect.FileDescriptor
 
-var file_internal_testprotos_required_required_proto_rawDesc = []byte{
-	0x0a, 0x2b, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x2f, 0x72,
-	0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x12, 0x1a, 0x67,
-	0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x74, 0x65, 0x73,
-	0x74, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x22, 0x15, 0x0a, 0x05, 0x49, 0x6e, 0x74,
-	0x33, 0x32, 0x12, 0x0c, 0x0a, 0x01, 0x76, 0x18, 0x01, 0x20, 0x02, 0x28, 0x05, 0x52, 0x01, 0x76,
-	0x22, 0x15, 0x0a, 0x05, 0x49, 0x6e, 0x74, 0x36, 0x34, 0x12, 0x0c, 0x0a, 0x01, 0x76, 0x18, 0x01,
-	0x20, 0x02, 0x28, 0x03, 0x52, 0x01, 0x76, 0x22, 0x16, 0x0a, 0x06, 0x55, 0x69, 0x6e, 0x74, 0x33,
-	0x32, 0x12, 0x0c, 0x0a, 0x01, 0x76, 0x18, 0x01, 0x20, 0x02, 0x28, 0x0d, 0x52, 0x01, 0x76, 0x22,
-	0x16, 0x0a, 0x06, 0x55, 0x69, 0x6e, 0x74, 0x36, 0x34, 0x12, 0x0c, 0x0a, 0x01, 0x76, 0x18, 0x01,
-	0x20, 0x02, 0x28, 0x04, 0x52, 0x01, 0x76, 0x22, 0x16, 0x0a, 0x06, 0x53, 0x69, 0x6e, 0x74, 0x33,
-	0x32, 0x12, 0x0c, 0x0a, 0x01, 0x76, 0x18, 0x01, 0x20, 0x02, 0x28, 0x11, 0x52, 0x01, 0x76, 0x22,
-	0x16, 0x0a, 0x06, 0x53, 0x69, 0x6e, 0x74, 0x36, 0x34, 0x12, 0x0c, 0x0a, 0x01, 0x76, 0x18, 0x01,
-	0x20, 0x02, 0x28, 0x12, 0x52, 0x01, 0x76, 0x22, 0x17, 0x0a, 0x07, 0x46, 0x69, 0x78, 0x65, 0x64,
-	0x33, 0x32, 0x12, 0x0c, 0x0a, 0x01, 0x76, 0x18, 0x01, 0x20, 0x02, 0x28, 0x07, 0x52, 0x01, 0x76,
-	0x22, 0x17, 0x0a, 0x07, 0x46, 0x69, 0x78, 0x65, 0x64, 0x36, 0x34, 0x12, 0x0c, 0x0a, 0x01, 0x76,
-	0x18, 0x01, 0x20, 0x02, 0x28, 0x06, 0x52, 0x01, 0x76, 0x22, 0x15, 0x0a, 0x05, 0x46, 0x6c, 0x6f,
-	0x61, 0x74, 0x12, 0x0c, 0x0a, 0x01, 0x76, 0x18, 0x01, 0x20, 0x02, 0x28, 0x02, 0x52, 0x01, 0x76,
-	0x22, 0x16, 0x0a, 0x06, 0x44, 0x6f, 0x75, 0x62, 0x6c, 0x65, 0x12, 0x0c, 0x0a, 0x01, 0x76, 0x18,
-	0x01, 0x20, 0x02, 0x28, 0x01, 0x52, 0x01, 0x76, 0x22, 0x14, 0x0a, 0x04, 0x42, 0x6f, 0x6f, 0x6c,
-	0x12, 0x0c, 0x0a, 0x01, 0x76, 0x18, 0x01, 0x20, 0x02, 0x28, 0x08, 0x52, 0x01, 0x76, 0x22, 0x16,
-	0x0a, 0x06, 0x53, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x12, 0x0c, 0x0a, 0x01, 0x76, 0x18, 0x01, 0x20,
-	0x02, 0x28, 0x09, 0x52, 0x01, 0x76, 0x22, 0x15, 0x0a, 0x05, 0x42, 0x79, 0x74, 0x65, 0x73, 0x12,
-	0x0c, 0x0a, 0x01, 0x76, 0x18, 0x01, 0x20, 0x02, 0x28, 0x0c, 0x52, 0x01, 0x76, 0x22, 0x43, 0x0a,
-	0x07, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x12, 0x33, 0x0a, 0x01, 0x76, 0x18, 0x01, 0x20,
-	0x02, 0x28, 0x0b, 0x32, 0x25, 0x2e, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64,
-	0x2e, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x2e, 0x4d, 0x52, 0x01, 0x76, 0x1a, 0x03, 0x0a,
-	0x01, 0x4d, 0x22, 0x5d, 0x0a, 0x05, 0x47, 0x72, 0x6f, 0x75, 0x70, 0x12, 0x3d, 0x0a, 0x05, 0x67,
-	0x72, 0x6f, 0x75, 0x70, 0x18, 0x01, 0x20, 0x02, 0x28, 0x0a, 0x32, 0x27, 0x2e, 0x67, 0x6f, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x72,
-	0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x2e, 0x47, 0x72, 0x6f, 0x75, 0x70, 0x2e, 0x47, 0x72,
-	0x6f, 0x75, 0x70, 0x52, 0x05, 0x67, 0x72, 0x6f, 0x75, 0x70, 0x1a, 0x15, 0x0a, 0x05, 0x47, 0x72,
-	0x6f, 0x75, 0x70, 0x12, 0x0c, 0x0a, 0x01, 0x76, 0x18, 0x01, 0x20, 0x01, 0x28, 0x05, 0x52, 0x01,
-	0x76, 0x42, 0x39, 0x5a, 0x37, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x67, 0x6f, 0x6c, 0x61,
-	0x6e, 0x67, 0x2e, 0x6f, 0x72, 0x67, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2f,
-	0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x73, 0x2f, 0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64,
-}
+const file_internal_testprotos_required_required_proto_rawDesc = "" +
+	"\n" +
+	"+internal/testprotos/required/required.proto\x12\x1agoproto.proto.testrequired\"\x1c\n" +
+	"\x05Int32\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\x05B\x05\xaa\x01\x02\b\x03R\x01v\"\x1c\n" +
+	"\x05Int64\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\x03B\x05\xaa\x01\x02\b\x03R\x01v\"\x1d\n" +
+	"\x06Uint32\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\rB\x05\xaa\x01\x02\b\x03R\x01v\"\x1d\n" +
+	"\x06Uint64\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\x04B\x05\xaa\x01\x02\b\x03R\x01v\"\x1d\n" +
+	"\x06Sint32\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\x11B\x05\xaa\x01\x02\b\x03R\x01v\"\x1d\n" +
+	"\x06Sint64\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\x12B\x05\xaa\x01\x02\b\x03R\x01v\"\x1e\n" +
+	"\aFixed32\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\aB\x05\xaa\x01\x02\b\x03R\x01v\"\x1e\n" +
+	"\aFixed64\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\x06B\x05\xaa\x01\x02\b\x03R\x01v\"\x1c\n" +
+	"\x05Float\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\x02B\x05\xaa\x01\x02\b\x03R\x01v\"\x1d\n" +
+	"\x06Double\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\x01B\x05\xaa\x01\x02\b\x03R\x01v\"\x1b\n" +
+	"\x04Bool\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\bB\x05\xaa\x01\x02\b\x03R\x01v\"\x1d\n" +
+	"\x06String\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\tB\x05\xaa\x01\x02\b\x03R\x01v\"\x1c\n" +
+	"\x05Bytes\x12\x13\n" +
+	"\x01v\x18\x01 \x01(\fB\x05\xaa\x01\x02\b\x03R\x01v\"J\n" +
+	"\aMessage\x12:\n" +
+	"\x01v\x18\x01 \x01(\v2%.goproto.proto.testrequired.Message.MB\x05\xaa\x01\x02\b\x03R\x01v\x1a\x03\n" +
+	"\x01M\"f\n" +
+	"\x05Group\x12F\n" +
+	"\x05group\x18\x01 \x01(\v2'.goproto.proto.testrequired.Group.GroupB\a\xaa\x01\x04\b\x03(\x02R\x05group\x1a\x15\n" +
+	"\x05Group\x12\f\n" +
+	"\x01v\x18\x01 \x01(\x05R\x01vB9Z7google.golang.org/protobuf/internal/testprotos/requiredb\beditionsp\xe8\a"
 
 var (
 	file_internal_testprotos_required_required_proto_rawDescOnce sync.Once
-	file_internal_testprotos_required_required_proto_rawDescData = file_internal_testprotos_required_required_proto_rawDesc
+	file_internal_testprotos_required_required_proto_rawDescData []byte
 )
 
 func file_internal_testprotos_required_required_proto_rawDescGZIP() []byte {
 	file_internal_testprotos_required_required_proto_rawDescOnce.Do(func() {
-		file_internal_testprotos_required_required_proto_rawDescData = protoimpl.X.CompressGZIP(file_internal_testprotos_required_required_proto_rawDescData)
+		file_internal_testprotos_required_required_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_testprotos_required_required_proto_rawDesc), len(file_internal_testprotos_required_required_proto_rawDesc)))
 	})
 	return file_internal_testprotos_required_required_proto_rawDescData
 }
 
 var file_internal_testprotos_required_required_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
-var file_internal_testprotos_required_required_proto_goTypes = []interface{}{
+var file_internal_testprotos_required_required_proto_goTypes = []any{
 	(*Int32)(nil),       // 0: goproto.proto.testrequired.Int32
 	(*Int64)(nil),       // 1: goproto.proto.testrequired.Int64
 	(*Uint32)(nil),      // 2: goproto.proto.testrequired.Uint32
@@ -894,217 +841,11 @@ func file_internal_testprotos_required_required_proto_init() {
 	if File_internal_testprotos_required_required_proto != nil {
 		return
 	}
-	if !protoimpl.UnsafeEnabled {
-		file_internal_testprotos_required_required_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Int32); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Int64); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Uint32); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Uint64); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Sint32); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Sint64); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Fixed32); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Fixed64); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Float); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Double); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Bool); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*String); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Bytes); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[13].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Message); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Group); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Message_M); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_internal_testprotos_required_required_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Group_Group); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_internal_testprotos_required_required_proto_rawDesc,
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_testprotos_required_required_proto_rawDesc), len(file_internal_testprotos_required_required_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   17,
 			NumExtensions: 0,
@@ -1115,7 +856,6 @@ func file_internal_testprotos_required_required_proto_init() {
 		MessageInfos:      file_internal_testprotos_required_required_proto_msgTypes,
 	}.Build()
 	File_internal_testprotos_required_required_proto = out.File
-	file_internal_testprotos_required_required_proto_rawDesc = nil
 	file_internal_testprotos_required_required_proto_goTypes = nil
 	file_internal_testprotos_required_required_proto_depIdxs = nil
 }

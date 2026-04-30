@@ -89,11 +89,15 @@ Tracing::OperationName ActiveStream::operationName() const {
   return conn_manager_tracing_config_->operationName();
 }
 
-void ActiveStream::modifySpan(Tracing::Span& span) const {
+void ActiveStream::modifySpan(Tracing::Span& span, bool) const {
   ASSERT(conn_manager_tracing_config_.has_value());
 
   const TraceContextBridge trace_context{*request_header_frame_};
-  const Tracing::CustomTagContext ctx{trace_context, stream_info_};
+  const FormatterContextExtension context_extension(request_header_frame_.get(),
+                                                    response_header_frame_.get());
+  Formatter::Context context;
+  context.setExtension(context_extension);
+  const Tracing::CustomTagContext ctx{trace_context, stream_info_, context};
 
   for (const auto& it : conn_manager_tracing_config_->getCustomTags()) {
     it.second->applySpan(span, ctx);
@@ -113,6 +117,11 @@ uint32_t ActiveStream::maxPathTagLength() const {
 bool ActiveStream::spawnUpstreamSpan() const {
   ASSERT(conn_manager_tracing_config_.has_value());
   return conn_manager_tracing_config_->spawnUpstreamSpan();
+}
+
+bool ActiveStream::noContextPropagation() const {
+  ASSERT(conn_manager_tracing_config_.has_value());
+  return conn_manager_tracing_config_->noContextPropagation();
 }
 
 Envoy::Event::Dispatcher& ActiveStream::dispatcher() {
@@ -573,7 +582,9 @@ void ActiveStream::continueEncoding() {
 }
 
 bool ActiveStream::initializeFilterChain(FilterChainFactory& factory) {
-  factory.createFilterChain(*this);
+  FilterChainFactoryCallbacksHelper callbacks(*this);
+
+  factory.createFilterChain(callbacks);
   // Reverse the encoder filter chain so that the first encoder filter is the last filter in the
   // chain.
   std::reverse(encoder_filters_.begin(), encoder_filters_.end());

@@ -96,9 +96,11 @@ namespace internal {
   V(WeakFixedArray)                           \
   IF_WASM(V, WasmArray)                       \
   IF_WASM(V, WasmDispatchTable)               \
+  IF_WASM(V, WasmDispatchTableForImports)     \
   IF_WASM(V, WasmStruct)
 
 // TODO(jgruber): Move more types to SIMPLE_HEAP_OBJECT_LIST_GENERATOR.
+// LINT.IfChange
 #define HEAP_OBJECT_ORDINARY_TYPE_LIST_BASE(V)  \
   V(AbstractCode)                               \
   V(AccessorInfo)                               \
@@ -165,15 +167,18 @@ namespace internal {
   V(JSGlobalObject)                             \
   V(JSGlobalProxy)                              \
   V(JSIteratorHelper)                           \
+  V(JSIteratorHelperSimple)                     \
   V(JSIteratorFilterHelper)                     \
   V(JSIteratorMapHelper)                        \
   V(JSIteratorTakeHelper)                       \
   V(JSIteratorDropHelper)                       \
   V(JSIteratorFlatMapHelper)                    \
+  V(JSIteratorConcatHelper)                     \
   V(JSMap)                                      \
   V(JSMapIterator)                              \
   V(JSMessageObject)                            \
   V(JSModuleNamespace)                          \
+  V(JSDeferredModuleNamespace)                  \
   V(JSObject)                                   \
   V(JSAPIObjectWithEmbedderSlots)               \
   V(JSObjectWithEmbedderSlots)                  \
@@ -193,6 +198,7 @@ namespace internal {
   V(JSSpecialObject)                            \
   V(JSStringIterator)                           \
   V(JSSynchronizationPrimitive)                 \
+  V(JSDetachedTypedArray)                       \
   V(JSTypedArray)                               \
   V(JSValidIteratorWrapper)                     \
   V(JSWeakCollection)                           \
@@ -273,8 +279,6 @@ namespace internal {
   IF_WASM(V, WasmObject)                        \
   IF_WASM(V, WasmResumeData)                    \
   IF_WASM(V, WasmStruct)                        \
-  IF_WASM(V, WasmDescriptorOptions)             \
-  IF_WASM(V, WasmSuspenderObject)               \
   IF_WASM(V, WasmSuspendingObject)              \
   IF_WASM(V, WasmContinuationObject)            \
   IF_WASM(V, WasmTableObject)                   \
@@ -285,6 +289,9 @@ namespace internal {
   V(WeakCell)                                   \
   TORQUE_DEFINED_CLASS_LIST(V)                  \
   SIMPLE_HEAP_OBJECT_LIST1(V)
+// clang-format off
+// LINT.ThenChange(/src/objects/map.cc:get_visitor_id, /src/objects/js-objects.cc:get_header_size, /src/compiler/turbofan-types.cc:bitset_type_lub)
+// clang-format on
 
 // These are artificial object types which don't have properly defined classes
 // but exist for the sake of type checking, for example IsCallable().
@@ -342,7 +349,6 @@ namespace internal {
   V(JSTemporalPlainDateTime)                      \
   V(JSTemporalPlainMonthDay)                      \
   V(JSTemporalPlainYearMonth)                     \
-  V(JSTemporalTimeZone)                           \
   V(JSTemporalZonedDateTime)
 #else
 #define HEAP_OBJECT_ORDINARY_TYPE_LIST(V) \
@@ -391,10 +397,13 @@ namespace internal {
   IF_WASM(APPLY, V, WasmImportData, WASM_IMPORT_DATA)                          \
   IF_WASM(APPLY, V, WasmCapiFunctionData, WASM_CAPI_FUNCTION_DATA)             \
   IF_WASM(APPLY, V, WasmDispatchTable, WASM_DISPATCH_TABLE)                    \
+  IF_WASM(APPLY, V, WasmDispatchTableForImports,                               \
+          WASM_DISPATCH_TABLE_FOR_IMPORTS)                                     \
   IF_WASM(APPLY, V, WasmExportedFunctionData, WASM_EXPORTED_FUNCTION_DATA)     \
   IF_WASM(APPLY, V, WasmJSFunctionData, WASM_JS_FUNCTION_DATA)                 \
   IF_WASM(APPLY, V, WasmInternalFunction, WASM_INTERNAL_FUNCTION)              \
-  IF_WASM(APPLY, V, WasmTrustedInstanceData, WASM_TRUSTED_INSTANCE_DATA)
+  IF_WASM(APPLY, V, WasmTrustedInstanceData, WASM_TRUSTED_INSTANCE_DATA)       \
+  IF_WASM(APPLY, V, WasmSuspenderObject, WASM_SUSPENDER_OBJECT)
 
 #define TRUSTED_OBJECT_LIST1_ADAPTER(V, Name, NAME) V(Name)
 #define TRUSTED_OBJECT_LIST2_ADAPTER(V, Name, NAME) V(Name, NAME)
@@ -491,16 +500,15 @@ namespace internal {
   V(PropertyCellHole, property_cell_hole_value, PropertyCellHoleValue) \
   V(HashTableHole, hash_table_hole_value, HashTableHoleValue)          \
   V(PromiseHole, promise_hole_value, PromiseHoleValue)                 \
-  V(Exception, exception, Exception)                                   \
+  V(ExceptionHole, exception, Exception)                               \
   V(TerminationException, termination_exception, TerminationException) \
-  V(Uninitialized, uninitialized_value, UninitializedValue)            \
+  V(UninitializedHole, uninitialized_value, UninitializedValue)        \
   V(ArgumentsMarker, arguments_marker, ArgumentsMarker)                \
   V(OptimizedOut, optimized_out, OptimizedOut)                         \
   V(StaleRegister, stale_register, StaleRegister)                      \
   V(SelfReferenceMarker, self_reference_marker, SelfReferenceMarker)   \
   V(BasicBlockCountersMarker, basic_block_counters_marker,             \
-    BasicBlockCountersMarker)                                          \
-  V(UndefinedContextCell, undefined_context_cell, UndefinedContextCell)
+    BasicBlockCountersMarker)
 
 #define OBJECT_TYPE_LIST(V) \
   V(Primitive)              \

@@ -1194,6 +1194,14 @@ func TestDecoder(t *testing.T) {
 			},
 		},
 		{
+			in: `{"":`,
+			want: []R{
+				{V: ObjectOpen},
+				{V: Name{""}},
+				{E: errEOF},
+			},
+		},
+		{
 			in: `{"34":"89",}`,
 			want: []R{
 				{V: ObjectOpen},
@@ -1370,9 +1378,9 @@ func checkToken(t *testing.T, tok json.Token, idx int, r R, in string) {
 	return
 }
 
-func errorf(t *testing.T, in string, fmtStr string, args ...interface{}) {
+func errorf(t *testing.T, in string, fmtStr string, args ...any) {
 	t.Helper()
-	vargs := []interface{}{in}
+	vargs := []any{in}
 	for _, arg := range args {
 		vargs = append(vargs, arg)
 	}

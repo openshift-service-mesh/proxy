@@ -248,20 +248,23 @@ V8_EXPORT_PRIVATE bool IsJSCompatibleSignature(const CanonicalSig* sig);
   V(I32ReinterpretF32, 0xbc, i_f, "i32.reinterpret_f32") \
   V(I64ReinterpretF64, 0xbd, l_d, "i64.reinterpret_f64") \
   V(F32ReinterpretI32, 0xbe, f_i, "f32.reinterpret_i32") \
-  V(F64ReinterpretI64, 0xbf, d_l, "f64.reinterpret_i64") \
-  V(I32SExtendI8, 0xc0, i_i, "i32.extend8_s")            \
-  V(I32SExtendI16, 0xc1, i_i, "i32.extend16_s")          \
-  V(I64SExtendI8, 0xc2, l_l, "i64.extend8_s")            \
-  V(I64SExtendI16, 0xc3, l_l, "i64.extend16_s")          \
+  V(F64ReinterpretI64, 0xbf, d_l, "f64.reinterpret_i64")
+
+#define FOREACH_SIGN_EXTENSION_OPCODE(V)        \
+  V(I32SExtendI8, 0xc0, i_i, "i32.extend8_s")   \
+  V(I32SExtendI16, 0xc1, i_i, "i32.extend16_s") \
+  V(I64SExtendI8, 0xc2, l_l, "i64.extend8_s")   \
+  V(I64SExtendI16, 0xc3, l_l, "i64.extend16_s") \
   V(I64SExtendI32, 0xc4, l_l, "i64.extend32_s")
 
-#define FOREACH_WASMFX_OPCODE(V)          \
-  V(ContNew, 0xe0, _, "cont.new")         \
-  V(ContBind, 0xe1, _, "cont.bind")       \
-  V(Suspend, 0xe2, _, "suspend")          \
-  V(Resume, 0xe3, _, "resume")            \
-  V(ResumeThrow, 0xe4, _, "resume_throw") \
-  V(Switch, 0xe5, _, "switch")
+#define FOREACH_WASMFX_OPCODE(V)                 \
+  V(ContNew, 0xe0, _, "cont.new")                \
+  V(ContBind, 0xe1, _, "cont.bind")              \
+  V(Suspend, 0xe2, _, "suspend")                 \
+  V(Resume, 0xe3, _, "resume")                   \
+  V(ResumeThrow, 0xe4, _, "resume_throw")        \
+  V(ResumeThrowRef, 0xe5, _, "resume_throw_ref") \
+  V(Switch, 0xe6, _, "switch")
 
 #define FOREACH_SIMPLE_OPCODE(V)          \
   FOREACH_SIMPLE_EXTENDED_CONST_OPCODE(V) \
@@ -768,11 +771,13 @@ V8_EXPORT_PRIVATE bool IsJSCompatibleSignature(const CanonicalSig* sig);
   V(I31GetU, 0xfb1e, _, "i31.get_u")                                           \
   V(RefI31Shared, 0xfb1f, _, "ref.i31_shared")                                 \
   /* Custom Descriptors proposal */                                            \
+  V(StructNewDesc, 0xfb20, _, "struct.new_desc")                               \
+  V(StructNewDefaultDesc, 0xfb21, _, "struct.new_default_desc")                \
   V(RefGetDesc, 0xfb22, _, "ref.get_desc")                                     \
-  V(RefCastDesc, 0xfb23, _, "ref.cast_desc")                                   \
-  V(RefCastDescNull, 0xfb24, _, "ref.cast_desc null")                          \
-  V(BrOnCastDesc, 0xfb25, _, "br_on_cast_desc")                                \
-  V(BrOnCastDescFail, 0xfb26, _, "br_on_cast_desc_fail")                       \
+  V(RefCastDescEq, 0xfb23, _, "ref.cast_desc_eq")                              \
+  V(RefCastDescEqNull, 0xfb24, _, "ref.cast_desc_eq null")                     \
+  V(BrOnCastDescEq, 0xfb25, _, "br_on_cast_desc_eq")                           \
+  V(BrOnCastDescEqFail, 0xfb26, _, "br_on_cast_desc_eq_fail")                  \
   V(RefCastNop, 0xfb4c, _, "ref.cast_nop")                                     \
   /* Stringref proposal. */                                                    \
   V(StringNewUtf8, 0xfb80, _, "string.new_utf8")                               \
@@ -822,6 +827,7 @@ V8_EXPORT_PRIVATE bool IsJSCompatibleSignature(const CanonicalSig* sig);
   V(StringNewUtf8ArrayTry, 0xfbb8, _, "string.new_utf8_array_try")
 
 #define FOREACH_ATOMIC_GC_OPCODE(V) /*          Force 80 columns            */ \
+  V(Pause, 0xfe04, _, "pause")                                                 \
   V(StructAtomicGet, 0xfe5c, _, "struct.atomic.get")                           \
   V(StructAtomicGetS, 0xfe5d, _, "struct.atomic.get_s")                        \
   V(StructAtomicGetU, 0xfe5e, _, "struct.atomic.get_u")                        \
@@ -831,6 +837,8 @@ V8_EXPORT_PRIVATE bool IsJSCompatibleSignature(const CanonicalSig* sig);
   V(StructAtomicAnd, 0xfe62, _, "struct.atomic.rmw.and")                       \
   V(StructAtomicOr, 0xfe63, _, "struct.atomic.rmw.or")                         \
   V(StructAtomicXor, 0xfe64, _, "struct.atomic.rmw.xor")                       \
+  V(StructAtomicExchange, 0xfe65, _, "struct.atomic.rmw.xchg")                 \
+  V(StructAtomicCompareExchange, 0xfe66, _, "struct.atomic.rmw.cmpxchg")       \
   V(ArrayAtomicGet, 0xfe67, _, "array.atomic.get")                             \
   V(ArrayAtomicGetS, 0xfe68, _, "array.atomic.get_s")                          \
   V(ArrayAtomicGetU, 0xfe69, _, "array.atomic.get_u")                          \
@@ -839,7 +847,9 @@ V8_EXPORT_PRIVATE bool IsJSCompatibleSignature(const CanonicalSig* sig);
   V(ArrayAtomicSub, 0xfe6c, _, "array.atomic.rmw.sub")                         \
   V(ArrayAtomicAnd, 0xfe6d, _, "array.atomic.rmw.and")                         \
   V(ArrayAtomicOr, 0xfe6e, _, "array.atomic.rmw.or")                           \
-  V(ArrayAtomicXor, 0xfe6f, _, "array.atomic.rmw.xor")
+  V(ArrayAtomicXor, 0xfe6f, _, "array.atomic.rmw.xor")                         \
+  V(ArrayAtomicExchange, 0xfe70, _, "array.atomic.rmw.xchg")                   \
+  V(ArrayAtomicCompareExchange, 0xfe71, _, "array.atomic.rmw.cmpxchg")
 
 // All opcodes.
 #define FOREACH_OPCODE(V)            \
@@ -857,6 +867,7 @@ V8_EXPORT_PRIVATE bool IsJSCompatibleSignature(const CanonicalSig* sig);
   FOREACH_NUMERIC_OPCODE(V)          \
   FOREACH_GC_OPCODE(V)               \
   FOREACH_ATOMIC_GC_OPCODE(V)        \
+  FOREACH_SIGN_EXTENSION_OPCODE(V)   \
   FOREACH_WASMFX_OPCODE(V)
 
 // All signatures.

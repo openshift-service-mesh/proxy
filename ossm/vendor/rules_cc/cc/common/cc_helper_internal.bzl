@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """
 Utility functions for C++ rules that don't depend on cc_common.
 
@@ -19,8 +18,77 @@ Only use those within C++ implementation. The others need to go through cc_commo
 """
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("//cc/private:cc_internal.bzl", _cc_internal = "cc_internal")
+load("//cc/private:paths.bzl", "is_path_absolute")
+
+def check_private_api():
+    _cc_internal.check_private_api(allowlist = PRIVATE_STARLARKIFICATION_ALLOWLIST, depth = 2)
+
+def wrap_with_check_private_api(symbol):
+    """
+    Protects the symbol so it can only be used internally.
+
+    Returns:
+      A function. When the function is invoked (without any params), the check
+      is done and if it passes the symbol is returned.
+    """
+
+    def callback():
+        _cc_internal.check_private_api(allowlist = PRIVATE_STARLARKIFICATION_ALLOWLIST)
+        return symbol
+
+    return callback
+
+CPP_SOURCE_TYPE_HEADER = "HEADER"
+CPP_SOURCE_TYPE_SOURCE = "SOURCE"
+CPP_SOURCE_TYPE_CLIF_INPUT_PROTO = "CLIF_INPUT_PROTO"
 
 # LINT.IfChange(forked_exports)
+
+CREATE_COMPILE_ACTION_API_ALLOWLISTED_PACKAGES = [("", "devtools/rust/cc_interop"), ("", "third_party/crubit"), ("", "tools/build_defs/clif")]
+
+PRIVATE_STARLARKIFICATION_ALLOWLIST = [
+    ("_builtins", ""),
+    # Android rules
+    ("", "tools/build_defs/android"),
+    ("", "third_party/bazel_rules/rules_android"),
+    ("build_bazel_rules_android", ""),
+    ("rules_android", ""),
+    # Apple rules
+    ("", "third_party/bazel_rules/rules_apple"),
+    ("apple_support", ""),
+    ("build_bazel_apple_support", ""),
+    ("rules_apple", ""),
+    ("build_bazel_rules_apple", ""),
+    # C++ rules
+    ("", "bazel_internal/test_rules/cc"),
+    ("", "third_party/bazel_rules/rules_cc"),
+    ("", "tools/build_defs/cc"),
+    ("rules_cc", ""),
+    # CUDA rules
+    ("", "third_party/gpus/cuda"),
+    # Go rules
+    ("", "tools/build_defs/go"),
+    # Java rules
+    ("", "third_party/bazel_rules/rules_java"),
+    ("rules_java", ""),
+    # Objc rules
+    ("", "tools/build_defs/objc"),
+    # Protobuf rules
+    ("", "third_party/protobuf"),
+    ("protobuf", ""),
+    ("com_google_protobuf", ""),
+    # Rust rules
+    ("", "third_party/bazel_rules/rules_rust/rust/private"),
+    ("rules_rust", "rust/private"),
+    # Python rules
+    ("", "third_party/bazel_rules/rules_python"),
+    # Various
+    ("", "research/colab"),
+    ("", "javatests/com/google/devtools/grok/kythe"),
+] + CREATE_COMPILE_ACTION_API_ALLOWLISTED_PACKAGES
+
+# LINT.ThenChange(https://github.com/bazelbuild/bazel/blob/master/src/main/starlark/builtins_bzl/common/cc/cc_helper_internal.bzl:forked_exports)
 
 _CC_SOURCE = [".cc", ".cpp", ".cxx", ".c++", ".C", ".cu", ".cl"]
 _C_SOURCE = [".c"]
@@ -36,7 +104,7 @@ _ARCHIVE = [".a", ".lib"]
 _PIC_ARCHIVE = [".pic.a"]
 _ALWAYSLINK_LIBRARY = [".lo"]
 _ALWAYSLINK_PIC_LIBRARY = [".pic.lo"]
-_SHARED_LIBRARY = [".so", ".dylib", ".dll", ".wasm"]
+_SHARED_LIBRARY = [".so", ".dylib", ".dll", ".pyd", ".wasm"]
 _INTERFACE_SHARED_LIBRARY = [".ifso", ".tbd", ".lib", ".dll.a"]
 _OBJECT_FILE = [".o", ".obj"]
 _PIC_OBJECT_FILE = [".pic.o"]
@@ -90,36 +158,55 @@ extensions = struct(
     LTO_INDEXING_OBJECT_FILE = _LTO_INDEXING_OBJECT_FILE,
 )
 
-artifact_category = struct(
-    STATIC_LIBRARY = "STATIC_LIBRARY",
-    ALWAYSLINK_STATIC_LIBRARY = "ALWAYSLINK_STATIC_LIBRARY",
-    DYNAMIC_LIBRARY = "DYNAMIC_LIBRARY",
-    EXECUTABLE = "EXECUTABLE",
-    INTERFACE_LIBRARY = "INTERFACE_LIBRARY",
-    PIC_FILE = "PIC_FILE",
-    INCLUDED_FILE_LIST = "INCLUDED_FILE_LIST",
-    SERIALIZED_DIAGNOSTICS_FILE = "SERIALIZED_DIAGNOSTICS_FILE",
-    OBJECT_FILE = "OBJECT_FILE",
-    PIC_OBJECT_FILE = "PIC_OBJECT_FILE",
-    CPP_MODULE = "CPP_MODULE",
-    CPP_MODULE_GCM = "CPP_MODULE_GCM",
-    CPP_MODULE_IFC = "CPP_MODULE_IFC",
-    CPP_MODULES_INFO = "CPP_MODULES_INFO",
-    CPP_MODULES_DDI = "CPP_MODULES_DDI",
-    CPP_MODULES_MODMAP = "CPP_MODULES_MODMAP",
-    CPP_MODULES_MODMAP_INPUT = "CPP_MODULES_MODMAP_INPUT",
-    GENERATED_ASSEMBLY = "GENERATED_ASSEMBLY",
-    PROCESSED_HEADER = "PROCESSED_HEADER",
-    GENERATED_HEADER = "GENERATED_HEADER",
-    PREPROCESSED_C_SOURCE = "PREPROCESSED_C_SOURCE",
-    PREPROCESSED_CPP_SOURCE = "PREPROCESSED_CPP_SOURCE",
-    COVERAGE_DATA_FILE = "COVERAGE_DATA_FILE",
-    CLIF_OUTPUT_PROTO = "CLIF_OUTPUT_PROTO",
+def _artifact_category_info_init(name, default_prefix, *extensions):
+    return {
+        "allowed_extensions": extensions,
+        "default_extension": extensions[0],
+        "default_prefix": default_prefix,
+        "name": name,
+    }
+
+# buildifier: disable=unused-variable
+_ArtifactCategoryInfo, _unused_new_aci = provider(
+    """A category of artifacts that are candidate input/output to an action, for
+     which the toolchain can select a single artifact.""",
+    fields = ["name", "default_prefix", "default_extension", "allowed_extensions"],
+    init = _artifact_category_info_init,
 )
+
+# TODO: b/433485282 - remove duplicated extensions lists with above constants
+_artifact_categories = [
+    _ArtifactCategoryInfo("STATIC_LIBRARY", "lib", ".a", ".lib"),
+    _ArtifactCategoryInfo("ALWAYSLINK_STATIC_LIBRARY", "lib", ".lo", ".lo.lib"),
+    _ArtifactCategoryInfo("DYNAMIC_LIBRARY", "lib", ".so", ".dylib", ".dll", ".pyd", ".wasm"),
+    _ArtifactCategoryInfo("EXECUTABLE", "", "", ".exe", ".wasm"),
+    _ArtifactCategoryInfo("INTERFACE_LIBRARY", "lib", ".ifso", ".tbd", ".if.lib", ".lib"),
+    _ArtifactCategoryInfo("PIC_FILE", "", ".pic"),
+    _ArtifactCategoryInfo("INCLUDED_FILE_LIST", "", ".d"),
+    _ArtifactCategoryInfo("SERIALIZED_DIAGNOSTICS_FILE", "", ".dia"),
+    _ArtifactCategoryInfo("OBJECT_FILE", "", ".o", ".obj"),
+    _ArtifactCategoryInfo("PIC_OBJECT_FILE", "", ".pic.o"),
+    _ArtifactCategoryInfo("CPP_MODULE", "", ".pcm", ".gcm", ".ifc"),
+    _ArtifactCategoryInfo("CPP_MODULES_INFO", "", ".CXXModules.json"),
+    _ArtifactCategoryInfo("CPP_MODULES_DDI", "", ".ddi"),
+    _ArtifactCategoryInfo("CPP_MODULES_MODMAP", "", ".modmap"),
+    _ArtifactCategoryInfo("CPP_MODULES_MODMAP_INPUT", "", ".modmap.input"),
+    _ArtifactCategoryInfo("GENERATED_ASSEMBLY", "", ".s", ".asm"),
+    _ArtifactCategoryInfo("PROCESSED_HEADER", "", ".processed"),
+    _ArtifactCategoryInfo("GENERATED_HEADER", "", ".h"),
+    _ArtifactCategoryInfo("PREPROCESSED_C_SOURCE", "", ".i"),
+    _ArtifactCategoryInfo("PREPROCESSED_CPP_SOURCE", "", ".ii"),
+    _ArtifactCategoryInfo("COVERAGE_DATA_FILE", "", ".gcno"),
+    # A matched-clif protobuf. Typically in binary format, but could be text
+    # depending on the options passed to the clif_matcher.
+    _ArtifactCategoryInfo("CLIF_OUTPUT_PROTO", "", ".opb"),
+]
+
+artifact_category_names = struct(**{ac.name: ac.name for ac in _artifact_categories})
 
 output_subdirectories = struct(
     OBJS = "_objs",
-    PIB_OBJS = "_pic_objs",
+    PIC_OBJS = "_pic_objs",
     DOTD_FILES = "_dotd",
     PIC_DOTD_FILES = "_pic_dotd",
     DIA_FILES = "_dia",
@@ -195,12 +282,102 @@ def repository_exec_path(repository, sibling_repository_layout):
         repository = repository[1:]
     return get_relative_path(prefix, repository)
 
-# LINT.ThenChange(https://github.com/bazelbuild/bazel/blob/master/src/main/starlark/builtins_bzl/common/cc/cc_helper_internal.bzl:forked_exports)
+def is_stamping_enabled(ctx):
+    """Returns the tri-state of whether to encode build information into the binary.
+
+    Args:
+        ctx: The rule context.
+
+    Returns:
+        (int) Possible values are:
+        1: Always stamp the build information into the binary, even in [--nostamp][stamp] builds.
+        This setting should be avoided, since it potentially kills remote caching for the binary and
+        any downstream actions that depend on it.
+        0: Always replace build information by constant values. This gives good build result caching.
+        -1: Embedding of build information is controlled by the [--[no]stamp][stamp] flag.
+    """
+    if ctx.configuration.is_tool_configuration():
+        return 0
+    stamp = 0
+    if hasattr(ctx.attr, "stamp"):
+        stamp = ctx.attr.stamp
+    return stamp
+
+def should_stamp(ctx):
+    """Returns whether stamping should actually be performed based on stamp attribute and config.
+
+    Unlike is_stamping_enabled, this takes into account the --[no]stamp Blaze flag, so the return value is a boolean, not a tri-state.
+
+    Args:
+        ctx: The rule context.
+
+    Returns:
+        true if stamping should be performed, false otherwise.
+    """
+    stamping_tri_state = is_stamping_enabled(ctx)
+    return False if ctx.configuration.is_tool_configuration() else (
+        stamping_tri_state == 1 or (stamping_tri_state == -1 and ctx.configuration.stamp_binaries())
+    )
+
+def is_shared_library(file):
+    return file.extension in ["so", "dylib", "dll", "pyd", "wasm", "tgt", "vpi"]
+
+def is_versioned_shared_library(file):
+    # Because regex matching can be slow, we first do a quick check for ".so." and ".dylib."
+    # substring before risking the full-on regex match. This should eliminate the performance
+    # hit on practically every non-qualifying file type.
+    if ".so." not in file.basename and ".dylib." not in file.basename:
+        return False
+    return is_versioned_shared_library_extension_valid(file.basename)
+
+def use_pic_for_binaries(cpp_config, feature_configuration):
+    """
+    Returns whether binaries must be compiled with position independent code.
+    """
+    return cpp_config.force_pic() or (
+        feature_configuration.is_enabled("supports_pic") and
+        (cpp_config.compilation_mode() != "opt" or feature_configuration.is_enabled("prefer_pic_for_opt_binaries"))
+    )
+
+def use_pic_for_dynamic_libs(cpp_config, feature_configuration):
+    """Determines if we should apply -fPIC for this rule's C++ compilations.
+
+    This determination is
+    generally made by the global C++ configuration settings "needsPic" and "usePicForBinaries".
+    However, an individual rule may override these settings by applying -fPIC" to its "nocopts"
+    attribute. This allows incompatible rules to "opt out" of global PIC settings (see bug:
+    "Provide a way to turn off -fPIC for targets that can't be built that way").
+
+    Returns:
+       true if this rule's compilations should apply -fPIC, false otherwise
+    """
+    return (cpp_config.force_pic() or
+            feature_configuration.is_enabled("supports_pic"))
 
 def get_relative_path(path_a, path_b):
-    if paths.is_absolute(path_b):
+    if is_path_absolute(path_b):
         return path_b
     return paths.normalize(paths.join(path_a, path_b))
 
 def path_contains_up_level_references(path):
     return path.startswith("..") and (len(path) == 2 or path[2] == "/")
+
+def root_relative_path(file):
+    """Returns the path of `file` relative to its root.
+
+    A Starlark implementation of `Artifact.getRootRelativePath()`.
+
+    Args:
+        file: (File) The file to get the root-relative path for.
+
+    Returns:
+        (str) The root-relative path of the file.
+    """
+    if not file.is_source:
+        return file.path[len(file.root.path) + 1:]
+    short_path = file.short_path
+    if not short_path.startswith("../"):
+        return short_path
+
+    # This is a file in an external repo, skip over the repo name.
+    return short_path[short_path.index("/", 3) + 1:]

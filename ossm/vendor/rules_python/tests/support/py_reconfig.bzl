@@ -17,50 +17,63 @@ This facilitates verify running binaries with different configuration settings
 without the overhead of a bazel-in-bazel integration test.
 """
 
+load("@rules_python_internal//:rules_python_config.bzl", "config")
 load("//python/private:attr_builders.bzl", "attrb")  # buildifier: disable=bzl-visibility
+load("//python/private:common_labels.bzl", "labels")  # buildifier: disable=bzl-visibility
 load("//python/private:py_binary_macro.bzl", "py_binary_macro")  # buildifier: disable=bzl-visibility
 load("//python/private:py_binary_rule.bzl", "create_py_binary_rule_builder")  # buildifier: disable=bzl-visibility
 load("//python/private:py_test_macro.bzl", "py_test_macro")  # buildifier: disable=bzl-visibility
 load("//python/private:py_test_rule.bzl", "create_py_test_rule_builder")  # buildifier: disable=bzl-visibility
-load("//tests/support:support.bzl", "VISIBLE_FOR_TESTING")
+load("//tests/support:support.bzl", "CUSTOM_RUNTIME")
 
 def _perform_transition_impl(input_settings, attr, base_impl):
     settings = {k: input_settings[k] for k in _RECONFIG_INHERITED_OUTPUTS if k in input_settings}
     settings.update(base_impl(input_settings, attr))
 
-    settings[VISIBLE_FOR_TESTING] = True
-    settings["//command_line_option:build_python_zip"] = attr.build_python_zip
+    settings[labels.VISIBLE_FOR_TESTING] = True
+
+    if _BUILTIN_BUILD_PYTHON_ZIP:
+        settings["//command_line_option:build_python_zip"] = str(attr.build_python_zip)
+    settings[labels.BUILD_PYTHON_ZIP] = attr.build_python_zip
     if attr.bootstrap_impl:
-        settings["//python/config_settings:bootstrap_impl"] = attr.bootstrap_impl
+        settings[labels.BOOTSTRAP_IMPL] = attr.bootstrap_impl
     if attr.extra_toolchains:
         settings["//command_line_option:extra_toolchains"] = attr.extra_toolchains
     if attr.python_src:
-        settings["//python/bin:python_src"] = attr.python_src
+        settings[labels.PYTHON_SRC] = attr.python_src
     if attr.repl_dep:
-        settings["//python/bin:repl_dep"] = attr.repl_dep
+        settings[labels.REPL_DEP] = attr.repl_dep
     if attr.venvs_use_declare_symlink:
-        settings["//python/config_settings:venvs_use_declare_symlink"] = attr.venvs_use_declare_symlink
+        settings[labels.VENVS_USE_DECLARE_SYMLINK] = attr.venvs_use_declare_symlink
     if attr.venvs_site_packages:
-        settings["//python/config_settings:venvs_site_packages"] = attr.venvs_site_packages
+        settings[labels.VENVS_SITE_PACKAGES] = attr.venvs_site_packages
     return settings
 
+_BUILTIN_BUILD_PYTHON_ZIP = [] if config.bazel_10_or_later else [
+    "//command_line_option:build_python_zip",
+]
+
 _RECONFIG_INPUTS = [
-    "//python/config_settings:bootstrap_impl",
-    "//python/bin:python_src",
-    "//python/bin:repl_dep",
+    "//command_line_option:build_runfile_links",
     "//command_line_option:extra_toolchains",
-    "//python/config_settings:venvs_use_declare_symlink",
-    "//python/config_settings:venvs_site_packages",
+    "//command_line_option:stamp",
+    CUSTOM_RUNTIME,
+    labels.BOOTSTRAP_IMPL,
+    labels.PYTHON_SRC,
+    labels.REPL_DEP,
+    labels.VENVS_SITE_PACKAGES,
+    labels.VENVS_USE_DECLARE_SYMLINK,
 ]
 _RECONFIG_OUTPUTS = _RECONFIG_INPUTS + [
-    "//command_line_option:build_python_zip",
-    VISIBLE_FOR_TESTING,
-]
+    labels.BUILD_PYTHON_ZIP,
+    labels.VISIBLE_FOR_TESTING,
+] + _BUILTIN_BUILD_PYTHON_ZIP
 _RECONFIG_INHERITED_OUTPUTS = [v for v in _RECONFIG_OUTPUTS if v in _RECONFIG_INPUTS]
 
 _RECONFIG_ATTRS = {
     "bootstrap_impl": attrb.String(),
-    "build_python_zip": attrb.String(default = "auto"),
+    "build_python_zip": attrb.Bool(default = config.build_python_zip_default),
+    "config_settings": attrb.LabelKeyedStringDict(),
     "extra_toolchains": attrb.StringList(
         doc = """
 Value for the --extra_toolchains flag.

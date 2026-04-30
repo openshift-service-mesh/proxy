@@ -1,0 +1,39 @@
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "sysroot",
+    srcs = glob(
+        ["**"],
+        exclude = [
+            "**/*:*",
+            "**/*.pl",
+        ],
+    ),
+)
+
+filegroup(
+    name = "headers",
+    srcs = glob(
+        ["usr/include/**"],
+        exclude = ["**/*:*"],
+    ),
+)
+
+filegroup(
+    name = "libs",
+    srcs = glob(
+        [
+            "usr/lib/**/*.a",
+            "usr/lib/**/*.so*",
+            "lib/**/*.a",
+            "lib/**/*.so*",
+        ],
+        exclude = ["**/*:*"],
+    ),
+)
+
+filegroup(
+    name = "toolchain_sysroot",
+    srcs = [":sysroot"],
+)

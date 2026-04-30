@@ -68,9 +68,10 @@ envoy_extension_cc_test_library(
         "//test/mocks/stats:stats_mocks",
         "//test/mocks/stream_info:stream_info_mocks",
         "//test/test_common:simulated_time_system_lib",
+        "//test/test_common:test_runtime_lib",
         "//test/test_common:utility_lib",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:optional",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/types:optional",
         "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_proto",
     ],
 )
@@ -116,6 +117,7 @@ envoy_extension_cc_test(
         "//test/mocks/server:server_factory_context_mocks",
         "//test/proto:helloworld_proto_cc_proto",
         "//test/test_common:registry_lib",
+        "//test/test_common:test_runtime_lib",
         "//test/test_common:utility_lib",
         "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
         "@envoy_api//envoy/extensions/http/ext_proc/response_processors/save_processing_response/v3:pkg_cc_proto",
@@ -152,6 +154,39 @@ envoy_extension_cc_test(
 )
 
 envoy_extension_cc_test(
+    name = "filter_local_reply_streaming_test",
+    size = "small",
+    srcs = ["filter_local_reply_streaming_test.cc"],
+    copts = select({
+        "//bazel:windows_x86_64": [],
+        "//conditions:default": [
+            "-DUSE_CEL_PARSER",
+        ],
+    }),
+    extension_names = ["envoy.filters.http.ext_proc"],
+    tags = ["skip_on_windows"],
+    deps = [
+        ":filter_test_common_lib",
+        ":utils_lib",
+        "//envoy/http:codes_interface",
+        "//envoy/http:filter_factory_interface",
+        "//envoy/http:filter_interface",
+        "//envoy/http:header_map_interface",
+        "//source/common/buffer:buffer_lib",
+        "//source/extensions/filters/http/ext_proc",
+        "//source/extensions/filters/http/ext_proc:on_processing_response_interface",
+        "//source/extensions/http/ext_proc/response_processors/save_processing_response:save_processing_response_lib",
+        "//test/mocks/http:http_mocks",
+        "//test/test_common:registry_lib",
+        "//test/test_common:test_runtime_lib",
+        "//test/test_common:utility_lib",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/types:optional",
+        "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_proto",
+    ],
+)
+
+envoy_extension_cc_test(
     name = "filter_observability_test",
     size = "small",
     srcs = ["filter_observability_test.cc"],
@@ -173,7 +208,7 @@ envoy_extension_cc_test(
         "//test/common/http:common_lib",
         "//test/mocks/event:event_mocks",
         "//test/test_common:utility_lib",
-        "@com_google_absl//absl/types:optional",
+        "@abseil-cpp//absl/types:optional",
         "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_proto",
     ],
 )
@@ -189,6 +224,7 @@ envoy_extension_cc_test(
         ],
     }),
     extension_names = ["envoy.filters.http.ext_proc"],
+    rbe_pool = "6gig",
     tags = ["skip_on_windows"],
     deps = [
         ":filter_test_common_lib",
@@ -201,7 +237,7 @@ envoy_extension_cc_test(
         "//source/extensions/filters/http/ext_proc",
         "//test/common/http:common_lib",
         "//test/test_common:utility_lib",
-        "@com_google_absl//absl/types:optional",
+        "@abseil-cpp//absl/types:optional",
         "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_proto",
     ],
 )
@@ -210,6 +246,12 @@ envoy_extension_cc_test(
     name = "mapped_attribute_builder_test",
     size = "small",
     srcs = ["mapped_attribute_builder_test.cc"],
+    copts = select({
+        "//bazel:windows_x86_64": [],
+        "//conditions:default": [
+            "-DUSE_CEL_PARSER",
+        ],
+    }),
     extension_names = ["envoy.filters.http.ext_proc"],
     rbe_pool = "6gig",
     tags = ["skip_on_windows"],
@@ -316,9 +358,11 @@ envoy_extension_cc_test(
     deps = [
         ":utils_lib",
         "//source/extensions/filters/common/mutation_rules:mutation_rules_lib",
+        "//source/extensions/filters/common/processing_effect:processing_effect_lib",
         "//source/extensions/filters/http/ext_proc:mutation_utils_lib",
         "//test/mocks/server:server_factory_context_mocks",
         "//test/mocks/stats:stats_mocks",
+        "//test/test_common:status_utility_lib",
         "//test/test_common:utility_lib",
         "@envoy_api//envoy/config/common/mutation_rules/v3:pkg_cc_proto",
     ],
@@ -343,12 +387,17 @@ envoy_extension_cc_test_library(
         "//test/test_common:registry_lib",
         "//test/test_common:test_runtime_lib",
         "//test/test_common:utility_lib",
-        "@com_google_absl//absl/strings",
+        "@abseil-cpp//absl/strings",
+        "@envoy_api//envoy/config/common/matcher/v3:pkg_cc_proto",
         "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/access_loggers/file/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/common/matching/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/composite/v3:pkg_cc_proto",
         "@envoy_api//envoy/extensions/filters/http/ext_proc/v3:pkg_cc_proto",
         "@envoy_api//envoy/extensions/filters/http/set_metadata/v3:pkg_cc_proto",
         "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg_cc_proto",
         "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_proto",
+        "@envoy_api//envoy/type/matcher/v3:pkg_cc_proto",
     ],
 )
 
@@ -403,7 +452,7 @@ envoy_extension_cc_test(
         "@envoy_api//envoy/extensions/http/ext_proc/processing_request_modifiers/mapped_attribute_builder/v3:pkg_cc_proto",
         "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_proto",
         "@envoy_api//envoy/type/v3:pkg_cc_proto",
-        "@ocp//ocpdiag/core/testing:status_matchers",
+        "@ocp-diag-core//ocpdiag/core/testing:status_matchers",
     ],
 )
 
@@ -423,7 +472,7 @@ envoy_extension_cc_test(
         "envoy.filters.http.set_metadata",
     ],
     rbe_pool = "4core",
-    shard_count = 8,
+    shard_count = 4,
     tags = [
         "cpu:3",
         "skip_on_windows",
@@ -453,7 +502,7 @@ envoy_extension_cc_test(
         "@envoy_api//envoy/extensions/filters/http/upstream_codec/v3:pkg_cc_proto",
         "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_proto",
         "@envoy_api//envoy/type/v3:pkg_cc_proto",
-        "@ocp//ocpdiag/core/testing:status_matchers",
+        "@ocp-diag-core//ocpdiag/core/testing:status_matchers",
     ],
 )
 
@@ -503,7 +552,42 @@ envoy_extension_cc_test(
         "@envoy_api//envoy/extensions/filters/http/upstream_codec/v3:pkg_cc_proto",
         "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_proto",
         "@envoy_api//envoy/type/v3:pkg_cc_proto",
-        "@ocp//ocpdiag/core/testing:status_matchers",
+        "@ocp-diag-core//ocpdiag/core/testing:status_matchers",
+    ],
+)
+
+envoy_extension_cc_test(
+    name = "ext_proc_local_reply_streaming_integration_test",
+    size = "large",  # This test can take a while under tsan.
+    srcs = ["ext_proc_local_reply_streaming_integration_test.cc"],
+    copts = select({
+        "//bazel:windows_x86_64": [],
+        "//conditions:default": [
+            "-DUSE_CEL_PARSER",
+        ],
+    }),
+    extension_names = [
+        "envoy.filters.http.ext_proc",
+        # TODO(jbohanon) use a test filter here instead of production filter
+        "envoy.filters.http.set_metadata",
+    ],
+    shard_count = 8,
+    tags = [
+        "cpu:3",
+        "skip_on_windows",
+    ],
+    deps = [
+        ":ext_proc_integration_common_lib",
+        "//envoy/http:header_map_interface",
+        "//source/extensions/filters/http/ext_proc:config",
+        "//test/common/grpc:grpc_client_integration_lib",
+        "//test/common/http:common_lib",
+        "//test/integration:http_integration_lib",
+        "//test/mocks/http:http_mocks",
+        "//test/test_common:utility_lib",
+        "@abseil-cpp//absl/strings",
+        "@envoy_api//envoy/extensions/filters/http/ext_proc/v3:pkg_cc_proto",
+        "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_proto",
     ],
 )
 
@@ -584,7 +668,7 @@ envoy_extension_cc_test(
         "//test/common/http:common_lib",
         "//test/integration:http_integration_lib",
         "//test/test_common:utility_lib",
-        "@com_google_absl//absl/strings:str_format",
+        "@abseil-cpp//absl/strings:str_format",
         "@envoy_api//envoy/extensions/filters/http/ext_proc/v3:pkg_cc_proto",
         "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_proto",
     ],
@@ -599,8 +683,8 @@ envoy_extension_cc_test_library(
     deps = [
         "//envoy/network:address_interface",
         "//test/test_common:network_utility_lib",
+        "@abseil-cpp//absl/strings:str_format",
         "@com_github_grpc_grpc//:grpc++",
-        "@com_google_absl//absl/strings:str_format",
         "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_grpc",
         "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_proto",
     ],
@@ -631,9 +715,9 @@ envoy_extension_cc_test_library(
         "//source/common/protobuf",
         "//source/extensions/filters/http/ext_proc:on_processing_response_interface",
         "//test/test_common:utility_lib",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings:str_format",
+        "@abseil-cpp//absl/container:flat_hash_set",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/strings:str_format",
         "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
     ],
 )
@@ -717,7 +801,7 @@ envoy_extension_cc_test(
         "//test/integration:http_integration_lib",
         "//test/test_common:environment_lib",
         "//test/test_common:utility_lib",
-        "@com_google_absl//absl/strings",
+        "@abseil-cpp//absl/strings",
         "@envoy_api//envoy/extensions/filters/http/ext_proc/v3:pkg_cc_proto",
         "@envoy_api//envoy/service/ext_proc/v3:pkg_cc_proto",
     ],
@@ -764,5 +848,15 @@ envoy_extension_cc_test_library(
         "//source/common/tracing:http_tracer_lib",
         "//source/common/tracing:trace_context_lib",
         "//source/extensions/tracers/common:factory_base_lib",
+    ],
+)
+
+envoy_extension_cc_test(
+    name = "allowed_override_modes_set_test",
+    size = "small",
+    srcs = ["allowed_override_modes_set_test.cc"],
+    extension_names = ["envoy.filters.http.ext_proc"],
+    deps = [
+        "//source/extensions/filters/http/ext_proc:allowed_override_modes_set_lib",
     ],
 )

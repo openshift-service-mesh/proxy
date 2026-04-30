@@ -1,3 +1,4 @@
+
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 
 package(
@@ -12,7 +13,6 @@ bzl_library(
 )
 
 bzl_library(
-    name = "py_internal_bzl",
-    srcs = ["py_internal.bzl"],
-    deps = ["@rules_python//tools/build_defs/python/private:py_internal_renamed_bzl"],
+    name = "extra_transition_settings_bzl",
+    srcs = ["extra_transition_settings.bzl"],
 )

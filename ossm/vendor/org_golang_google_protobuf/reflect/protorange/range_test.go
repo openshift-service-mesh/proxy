@@ -17,8 +17,8 @@ import (
 	"google.golang.org/protobuf/testing/protocmp"
 
 	newspb "google.golang.org/protobuf/internal/testprotos/news"
-	anypb "google.golang.org/protobuf/types/known/anypb"
-	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func mustMarshal(m proto.Message) []byte {
@@ -29,12 +29,12 @@ func mustMarshal(m proto.Message) []byte {
 	return b
 }
 
-var transformReflectValue = cmp.Transformer("", func(v protoreflect.Value) interface{} {
+var transformReflectValue = cmp.Transformer("", func(v protoreflect.Value) any {
 	switch v := v.Interface().(type) {
 	case protoreflect.Message:
 		return v.Interface()
 	case protoreflect.Map:
-		ms := map[interface{}]protoreflect.Value{}
+		ms := map[any]protoreflect.Value{}
 		v.Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
 			ms[k.Interface()] = v
 			return true

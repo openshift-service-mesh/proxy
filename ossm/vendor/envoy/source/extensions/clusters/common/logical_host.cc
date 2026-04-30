@@ -32,8 +32,11 @@ LogicalHost::LogicalHost(
           std::make_shared<const envoy::config::core::v3::Metadata>(lb_endpoint.metadata()),
           std::make_shared<const envoy::config::core::v3::Metadata>(
               locality_lb_endpoint.metadata()),
-          locality_lb_endpoint.locality(), lb_endpoint.endpoint().health_check_config(),
-          locality_lb_endpoint.priority(), creation_status),
+          // TODO(adisuissa): Create through localities shared pool.
+          std::make_shared<const envoy::config::core::v3::Locality>(
+              locality_lb_endpoint.locality()),
+          lb_endpoint.endpoint().health_check_config(), locality_lb_endpoint.priority(),
+          creation_status),
       override_transport_socket_options_(override_transport_socket_options), address_(address),
       address_list_or_null_(makeAddressListOrNull(address, address_list)) {
   health_check_address_ =
@@ -84,10 +87,24 @@ Upstream::Host::CreateConnectionData LogicalHost::createConnection(
     address = address_;
     address_list_or_null = address_list_or_null_;
   }
+
+  // Use override_transport_socket_options if set, otherwise use the passed options.
+  const auto& effective_options = override_transport_socket_options_ != nullptr
+                                      ? override_transport_socket_options_
+                                      : transport_socket_options;
+
+  // Per-connection resolution for filter state-based transport socket matching.
+  const bool needs_per_connection_resolution =
+      cluster().transportSocketMatcher().usesFilterState() && effective_options &&
+      !effective_options->downstreamSharedFilterStateObjects().empty();
+
+  Network::UpstreamTransportSocketFactory& factory =
+      needs_per_connection_resolution
+          ? resolveTransportSocketFactory(address, metadata().get(), effective_options)
+          : transportSocketFactory();
+
   return HostImplBase::createConnection(
-      dispatcher, cluster(), address, address_list_or_null, transportSocketFactory(), options,
-      override_transport_socket_options_ != nullptr ? override_transport_socket_options_
-                                                    : transport_socket_options,
+      dispatcher, cluster(), address, address_list_or_null, factory, options, effective_options,
       std::make_shared<RealHostDescription>(address, shared_from_this()));
 }
 

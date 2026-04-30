@@ -131,6 +131,9 @@ TEST_F(DisasmArm64Test, bootstrap) {
   COMPARE(dci(0x93407c00), "sxtw x0, w0");
   COMPARE(dci(0x2a000020), "orr w0, w1, w0");
   COMPARE(dci(0xa8c67bfd), "ldp fp, lr, [sp], #96");
+  COMPARE(dci(0xf9800800), "prfm pldl1keep, [x0, #16]");
+  COMPARE(dci(0xf8b7c973), "prfm pstl2strm, [x11, w23, sxtw]");
+  COMPARE(dci(0xf98003e4), "prfm pldl3keep, [sp]");
 
   CLEANUP();
 }
@@ -5140,6 +5143,21 @@ TEST_F(DisasmArm64Test, neon_shift_immediate) {
   CLEANUP();
 }
 
+TEST_F(DisasmArm64Test, mops) {
+  SET_UP_MASM();
+  CpuFeatureScope feature_scope(assm, MOPS,
+                                CpuFeatureScope::kDontCheckSupported);
+
+  COMPARE(cpyp(x0, x30, x28), "cpyp [x0]!, [lr]!, x28!");
+  COMPARE(cpym(x1, x10, x23), "cpym [x1]!, [x10]!, x23!");
+  COMPARE(cpye(x14, x15, x19), "cpye [x14]!, [x15]!, x19!");
+
+  COMPARE(setp(x7, x17, x11), "setp [x7]!, x17!, x11");
+  COMPARE(setm(x8, x7, x9), "setm [x8]!, x7!, x9");
+  COMPARE(sete(x3, x23, x1), "sete [x3]!, x23!, x1");
+  CLEANUP();
+}
+
 TEST_F(DisasmArm64Test, cssc) {
   SET_UP_MASM();
 
@@ -5153,6 +5171,23 @@ TEST_F(DisasmArm64Test, cssc) {
   COMPARE(Ctz(w3, w5), "ctz w3, w5");
   COMPARE(Ctz(x3, x28), "ctz x3, x28");
   COMPARE(Ctz(w0, wzr), "ctz w0, wzr");
+
+  COMPARE(Smax(w5, w9, w10), "smax w5, w9, w10");
+  COMPARE(Smax(x6, x8, x9), "smax x6, x8, x9");
+  COMPARE(Smin(w11, w8, w17), "smin w11, w8, w17");
+  COMPARE(Smin(x12, x10, x20), "smin x12, x10, x20");
+  COMPARE(Umax(w5, w9, w10), "umax w5, w9, w10");
+  COMPARE(Umax(x6, x8, x9), "umax x6, x8, x9");
+  COMPARE(Umin(w11, w8, w17), "umin w11, w8, w17");
+  COMPARE(Umin(x12, x10, x20), "umin x12, x10, x20");
+
+  COMPARE(Smax(w5, w9, 127), "smax w5, w9, #127");
+  COMPARE(Smax(x6, x8, -128), "smax x6, x8, #-128");
+  COMPARE(Smin(w19, w20, -1), "smin w19, w20, #-1");
+  COMPARE(Smin(x30, xzr, 0), "smin lr, xzr, #0");
+  COMPARE(Umax(w5, w9, 255), "umax w5, w9, #255");
+  COMPARE(Umax(x6, x8, 128), "umax x6, x8, #128");
+  COMPARE(Umin(x30, xzr, 0), "umin lr, xzr, #0");
 
   CLEANUP();
 }

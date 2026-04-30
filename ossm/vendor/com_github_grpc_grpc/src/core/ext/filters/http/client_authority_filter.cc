@@ -51,8 +51,7 @@ ClientAuthorityFilter::Create(const ChannelArgs& args, ChannelFilter::Args) {
 
 void ClientAuthorityFilter::Call::OnClientInitialMetadata(
     ClientMetadata& md, ClientAuthorityFilter* filter) {
-  GRPC_LATENT_SEE_INNER_SCOPE(
-      "ClientAuthorityFilter::Call::OnClientInitialMetadata");
+  GRPC_LATENT_SEE_SCOPE("ClientAuthorityFilter::Call::OnClientInitialMetadata");
   // If no authority is set, set the default authority.
   if (md.get_pointer(HttpAuthorityMetadata()) == nullptr) {
     md.Set(HttpAuthorityMetadata(), filter->default_authority_.Ref());
@@ -73,13 +72,11 @@ void RegisterClientAuthorityFilter(CoreConfiguration::Builder* builder) {
   builder->channel_init()
       ->RegisterFilter<ClientAuthorityFilter>(GRPC_CLIENT_SUBCHANNEL)
       .If(NeedsClientAuthorityFilter)
-      .Before<ClientAuthFilter>()
-      .Before<LegacyClientAuthFilter>();
+      .Before<ClientAuthFilter>();
   builder->channel_init()
       ->RegisterFilter<ClientAuthorityFilter>(GRPC_CLIENT_DIRECT_CHANNEL)
       .If(NeedsClientAuthorityFilter)
-      .Before<ClientAuthFilter>()
-      .Before<LegacyClientAuthFilter>();
+      .Before<ClientAuthFilter>();
 }
 
 }  // namespace grpc_core

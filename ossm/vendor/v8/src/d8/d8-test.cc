@@ -38,6 +38,8 @@ namespace {
     return;                                                                 \
   }
 
+constexpr v8::EmbedderDataTypeTag kFastCApiTag = 1;
+
 class FastCApiObject {
  public:
   static FastCApiObject& instance();
@@ -230,6 +232,12 @@ class FastCApiObject {
 
   static Type AddAllSequenceJSArrayHelper(v8::Isolate* isolate,
                                           Local<Array> seq_arg) {
+    if (i::v8_flags.fuzzing) {
+      // TODO(418936518): The code below may trigger deopt. Once deopt support
+      // for fast API calls with return values is supported, remove this early
+      // return here again.
+      return 0;
+    }
     Type sum = 0;
     uint32_t length = seq_arg->Length();
     if (length > 1024) {
@@ -1049,7 +1057,8 @@ class FastCApiObject {
       info.GetReturnValue().Set(v8::Null(isolate));
       return;
     }
-    info.GetReturnValue().Set(External::New(isolate, static_cast<void*>(self)));
+    info.GetReturnValue().Set(External::New(isolate, static_cast<void*>(self),
+                                            v8::kFastAPIPointerTag));
   }
 
   static void* GetNullPointerFastCallback(Local<Object> receiver,
@@ -1139,7 +1148,7 @@ class FastCApiObject {
     if (value_a->IsNull()) {
       pointer_a = nullptr;
     } else if (value_a->IsExternal()) {
-      pointer_a = value_a.As<External>()->Value();
+      pointer_a = value_a.As<External>()->Value(v8::kFastAPIPointerTag);
     } else {
       info.GetIsolate()->ThrowError(
           "Did not get an external as first parameter.");
@@ -1150,7 +1159,7 @@ class FastCApiObject {
     if (value_b->IsNull()) {
       pointer_b = nullptr;
     } else if (value_b->IsExternal()) {
-      pointer_b = value_b.As<External>()->Value();
+      pointer_b = value_b.As<External>()->Value(v8::kFastAPIPointerTag);
     } else {
       info.GetIsolate()->ThrowError(
           "Did not get an external as second parameter.");
@@ -1457,7 +1466,8 @@ class FastCApiObject {
       return nullptr;
     }
     FastCApiObject* wrapped = reinterpret_cast<FastCApiObject*>(
-        object->GetAlignedPointerFromInternalField(kV8WrapperObjectIndex));
+        object->GetAlignedPointerFromInternalField(kV8WrapperObjectIndex,
+                                                   kFastCApiTag));
     CHECK_NOT_NULL(wrapped);
     return wrapped;
   }
@@ -1493,7 +1503,7 @@ void CreateFastCAPIObject(const FunctionCallbackInfo<Value>& info) {
   Local<Object> api_object = info.This();
   api_object->SetAlignedPointerInInternalField(
       FastCApiObject::kV8WrapperObjectIndex,
-      reinterpret_cast<void*>(&kFastCApiObject));
+      reinterpret_cast<void*>(&kFastCApiObject), kFastCApiTag);
   api_object->SetAccessorProperty(
       String::NewFromUtf8Literal(info.GetIsolate(), "supports_fp_params"),
       FunctionTemplate::New(info.GetIsolate(), FastCApiObject::SupportsFPParams)

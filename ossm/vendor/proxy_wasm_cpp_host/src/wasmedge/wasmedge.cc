@@ -19,6 +19,7 @@
 
 #include "wasmedge/wasmedge.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstring>
@@ -224,9 +225,6 @@ using HostModuleDataPtr = std::unique_ptr<HostModuleData>;
 class WasmEdge : public WasmVm {
 public:
   WasmEdge() {
-    loader_ = WasmEdge_LoaderCreate(nullptr);
-    validator_ = WasmEdge_ValidatorCreate(nullptr);
-    executor_ = WasmEdge_ExecutorCreate(nullptr, nullptr);
     store_ = nullptr;
     ast_module_ = nullptr;
     module_ = nullptr;
@@ -263,6 +261,9 @@ public:
   };
   FOR_ALL_WASM_VM_EXPORTS(_GET_MODULE_FUNCTION)
 #undef _GET_MODULE_FUNCTION
+
+  void warm() override;
+
 private:
   template <typename... Args>
   void registerHostFunctionImpl(std::string_view module_name, std::string_view function_name,
@@ -283,6 +284,9 @@ private:
   void terminate() override {}
   bool usesWasmByteOrder() override { return true; }
 
+  // Initialize the WasmEdge store if necessary.
+  void initStore();
+
   WasmEdgeLoaderPtr loader_;
   WasmEdgeValidatorPtr validator_;
   WasmEdgeExecutorPtr executor_;
@@ -298,6 +302,7 @@ private:
 
 bool WasmEdge::load(std::string_view bytecode, std::string_view /*precompiled*/,
                     const std::unordered_map<uint32_t, std::string> & /*function_names*/) {
+  initStore();
   WasmEdge_ASTModuleContext *mod = nullptr;
   WasmEdge_Result res = WasmEdge_LoaderParseFromBuffer(
       loader_.get(), &mod, reinterpret_cast<const uint8_t *>(bytecode.data()), bytecode.size());
@@ -313,13 +318,21 @@ bool WasmEdge::load(std::string_view bytecode, std::string_view /*precompiled*/,
   return true;
 }
 
+void WasmEdge::initStore() {
+  if (store_ != nullptr) {
+    return;
+  }
+  loader_ = WasmEdge_LoaderCreate(nullptr);
+  validator_ = WasmEdge_ValidatorCreate(nullptr);
+  executor_ = WasmEdge_ExecutorCreate(nullptr, nullptr);
+  store_ = WasmEdge_StoreCreate();
+}
+
 bool WasmEdge::link(std::string_view /*debug_name*/) {
   assert(ast_module_ != nullptr);
 
   // Create store and register imports.
-  if (store_ == nullptr) {
-    store_ = WasmEdge_StoreCreate();
-  }
+  initStore();
   if (store_ == nullptr) {
     return false;
   }
@@ -607,6 +620,8 @@ void WasmEdge::getModuleFunctionImpl(std::string_view function_name,
     return ret;
   };
 }
+
+void WasmEdge::warm() { initStore(); }
 
 } // namespace WasmEdge
 

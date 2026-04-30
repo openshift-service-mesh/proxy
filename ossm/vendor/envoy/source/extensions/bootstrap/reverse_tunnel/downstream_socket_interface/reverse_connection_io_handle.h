@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "envoy/config/core/v3/base.pb.h"
 #include "envoy/network/io_handle.h"
 #include "envoy/network/socket.h"
 #include "envoy/stats/scope.h"
@@ -16,6 +17,7 @@
 #include "source/common/network/io_socket_handle_impl.h"
 #include "source/common/network/socket_interface.h"
 #include "source/common/upstream/load_balancer_context_base.h"
+#include "source/extensions/bootstrap/reverse_tunnel/common/reverse_connection_utility.h"
 #include "source/extensions/bootstrap/reverse_tunnel/downstream_socket_interface/downstream_reverse_connection_io_handle.h"
 #include "source/extensions/bootstrap/reverse_tunnel/downstream_socket_interface/rc_connection_wrapper.h"
 #include "source/extensions/bootstrap/reverse_tunnel/downstream_socket_interface/reverse_connection_load_balancer_context.h"
@@ -80,6 +82,10 @@ struct ReverseConnectionSocketConfig {
   std::string src_cluster_id; // Cluster identifier of local envoy instance.
   std::string src_node_id;    // Node identifier of local envoy instance.
   std::string src_tenant_id;  // Tenant identifier of local envoy instance.
+  std::string request_path{
+      std::string(ReverseConnectionUtility::DEFAULT_REVERSE_TUNNEL_REQUEST_PATH)};
+  std::vector<envoy::config::core::v3::HeaderValueOption>
+      additional_headers; // Additional headers for the handshake request.
   // TODO(basundhara-c): Add support for multiple remote clusters using the same
   // ReverseConnectionIOHandle. Currently, each ReverseConnectionIOHandle handles
   // reverse connections for a single upstream cluster since a different ReverseConnectionAddress
@@ -202,6 +208,14 @@ public:
   void onBelowWriteBufferLowWatermark() override {}
 
   /**
+   * No-op for reverse connections
+   */
+  Api::SysCallIntResult bind(Network::Address::InstanceConstSharedPtr address) override {
+    ENVOY_LOG(info, "Bind called on rc socket handle: {}", address->logicalName());
+    return Api::SysCallIntResult{0, 0};
+  }
+
+  /**
    * Get the file descriptor for the pipe monitor used to wake up accept().
    * @return the file descriptor for the pipe monitor
    */
@@ -288,6 +302,18 @@ public:
    * @return pointer to the extension, nullptr if not available
    */
   ReverseTunnelInitiatorExtension* getDownstreamExtension() const;
+
+  /**
+   * @return reference to the configured HTTP handshake request path.
+   */
+  const std::string& requestPath() const { return config_.request_path; }
+
+  /**
+   * @return reference to the additional headers for the handshake request.
+   */
+  const std::vector<envoy::config::core::v3::HeaderValueOption>& additionalHeaders() const {
+    return config_.additional_headers;
+  }
 
 private:
   /**
@@ -385,7 +411,8 @@ private:
     std::chrono::steady_clock::time_point last_failure_time; // NO_CHECK_FORMAT(real_time)
     std::chrono::steady_clock::time_point backoff_until;     // NO_CHECK_FORMAT(real_time)
     absl::flat_hash_map<std::string, ReverseConnectionState>
-        connection_states; // State tracking per connection
+        connection_states;        // State tracking per connection
+    uint32_t connecting_count{0}; // Number of pending connections.
   };
 
   // Map from host address to connection info.
@@ -409,7 +436,7 @@ private:
   int trigger_pipe_read_fd_{-1};
   int trigger_pipe_write_fd_{-1};
 
-  // Connection management : We store the established connections in a queue
+  // Connection management : We store the established connections in a queue.
   // and pop the last established connection when data is read on trigger_pipe_read_fd_
   // to determine the connection that got established last.
   std::queue<Envoy::Network::ClientConnectionPtr> established_connections_;

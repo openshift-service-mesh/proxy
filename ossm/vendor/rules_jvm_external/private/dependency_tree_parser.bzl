@@ -29,7 +29,8 @@ load(
     "strip_packaging_and_classifier_and_version",
     "to_repository_name",
 )
-load("//private/lib:coordinates.bzl", "unpack_coordinates")
+load("//private/lib:coordinates.bzl", "to_purl", "unpack_coordinates")
+load("//private/lib:urls.bzl", "scheme_and_host")
 
 def _genrule_copy_artifact_from_http_file(artifact, visibilities):
     http_file_repository = to_repository_name(artifact["coordinates"])
@@ -93,6 +94,7 @@ def _generate_target(
         repository_urls,
         neverlink_artifacts,
         testonly_artifacts,
+        exclusions,
         default_visibilities,
         artifact):
     to_return = []
@@ -238,18 +240,35 @@ copy_file(
         target_import_string.append("\t\t\"maven:compile-only\",")
     if artifact.get("sha256"):
         target_import_string.append("\t\t\"maven_sha256=%s\"," % artifact["sha256"])
+    if simple_coord in exclusions:
+        for exclusion in exclusions[simple_coord]:
+            target_import_string.append("\t\t\"maven_exclusion=%s\"," % exclusion)
     target_import_string.append("\t],")
 
     if packaging == "jar":
         target_import_string.append("\tmaven_coordinates = \"%s\"," % coordinates)
         if len(artifact["urls"]):
             target_import_string.append("\tmaven_url = \"%s\"," % maven_url)
+
+        package_metadata_name = "%s_package_metadata" % target_label
+        target_import_string.append("\tapplicable_licenses = [\":{}\"],".format(package_metadata_name))
+        to_return.append("""
+package_metadata(
+    name = {package_metadata_name},
+    purl = {purl},
+    visibility = ["//visibility:public"],
+)
+""".format(
+            package_metadata_name = repr(package_metadata_name),
+            purl = repr(to_purl(coordinates, scheme_and_host(maven_url))),
+        ))
     else:
         unpacked = unpack_coordinates(coordinates)
         url = maven_url if len(artifact["urls"]) else None
 
         package_info_name = "%s_package_info" % target_label
-        target_import_string.append("\tapplicable_licenses = [\":%s\"]," % package_info_name)
+        package_metadata_name = "%s_package_metadata" % target_label
+        target_import_string.append("\tapplicable_licenses = [\n\t\t\":{}\",\n\t\t\":{}\",\n\t],".format(package_info_name, package_metadata_name))
         to_return.append("""
 package_info(
     name = {name},
@@ -257,9 +276,17 @@ package_info(
     package_url = {url},
     package_version = {version},
 )
+
+package_metadata(
+    name = {package_metadata_name},
+    purl = {purl},
+    visibility = ["//visibility:public"],
+)
 """.format(
             coordinates = repr(coordinates),
             name = repr(package_info_name),
+            package_metadata_name = repr(package_metadata_name),
+            purl = repr(to_purl(coordinates, scheme_and_host(url))),
             url = repr(url),
             version = repr(unpacked.version),
         ))
@@ -398,7 +425,7 @@ processor_class = "{processor_class}",
 # tree.
 #
 # Made function public for testing.
-def _generate_imports(repository_ctx, dependencies, explicit_artifacts, neverlink_artifacts, testonly_artifacts, override_targets, skip_maven_local_dependencies):
+def _generate_imports(repository_ctx, dependencies, explicit_artifacts, neverlink_artifacts, testonly_artifacts, exclusions, override_targets, override_target_visibilities, skip_maven_local_dependencies):
     repository_urls = [json.decode(repository)["repo_url"] for repository in repository_ctx.attr.repositories]
 
     # The list of java_import/aar_import declaration strings to be joined at the end
@@ -418,6 +445,10 @@ def _generate_imports(repository_ctx, dependencies, explicit_artifacts, neverlin
     labels_to_override = {}
     for coord in override_targets:
         labels_to_override.update({escape(coord): override_targets.get(coord)})
+
+    visibilities_to_override = {}
+    for coord in override_target_visibilities:
+        visibilities_to_override.update({escape(coord): override_target_visibilities.get(coord)})
 
     default_visibilities = repository_ctx.attr.strict_visibility_value if repository_ctx.attr.strict_visibility else ["//visibility:public"]
 
@@ -450,7 +481,11 @@ def _generate_imports(repository_ctx, dependencies, explicit_artifacts, neverlin
         simple_coord = strip_packaging_and_classifier_and_version(artifact["coordinates"])
         packaging = get_packaging(artifact["coordinates"])
         target_label = escape(simple_coord)
-        alias_visibility = ""
+        visibility = ""
+        if repository_ctx.attr.strict_visibility and explicit_artifacts.get(simple_coord):
+            visibility = "[\"//visibility:public\"]"
+        else:
+            visibility = "[%s]" % (",".join(["\"%s\"" % v for v in default_visibilities]))
 
         if target_label in seen_imports:
             # Skip if we've seen this target label before. Every versioned artifact is uniquely mapped to a target label.
@@ -461,13 +496,13 @@ def _generate_imports(repository_ctx, dependencies, explicit_artifacts, neverlin
         elif repository_ctx.attr.fetch_javadoc and get_classifier(artifact["coordinates"]) == "javadoc":
             seen_imports[target_label] = True
             all_imports.append(
-                "filegroup(\n\tname = \"%s\",\n\tsrcs = [\"%s\"],\n\ttags = [\"javadoc\"],\n\tvisibility = [\"//visibility:public\"],\n)" % (target_label, artifact_path),
+                "filegroup(\n\tname = \"%s\",\n\tsrcs = [\"%s\"],\n\ttags = [\"javadoc\"],\n\tvisibility = %s,\n)" % (target_label, artifact_path, visibility),
             )
         elif packaging in ("exe", "json"):
             seen_imports[target_label] = True
             versioned_target_alias_label = "%s_extension" % to_repository_name(artifact["coordinates"])
             all_imports.append(
-                "alias(\n\tname = \"%s\",\n\tactual = \"%s\",\n\tvisibility = [\"//visibility:public\"],\n)" % (target_label, versioned_target_alias_label),
+                "alias(\n\tname = \"%s\",\n\tactual = \"%s\",\n\tvisibility = %s,\n)" % (target_label, versioned_target_alias_label, visibility),
             )
             if repository_ctx.attr.maven_install_json:
                 all_imports.append(_genrule_copy_artifact_from_http_file(artifact, default_visibilities))
@@ -475,8 +510,10 @@ def _generate_imports(repository_ctx, dependencies, explicit_artifacts, neverlin
             # Override target labels with the user provided mapping, instead of generating
             # a jvm_import/aar_import based on information in dep_tree.
             seen_imports[target_label] = True
+            if visibilities_to_override.get(target_label):
+                visibility = "[%s]" % (",".join(["\"%s\"" % v for v in visibilities_to_override.get(target_label)]))
             all_imports.append(
-                "alias(\n\tname = \"%s\",\n\tactual = \"%s\",\n\tvisibility = [\"//visibility:public\"],)" % (target_label, labels_to_override.get(target_label)),
+                "alias(\n\tname = \"%s\",\n\tactual = \"%s\",\n\tvisibility = %s,)" % (target_label, labels_to_override.get(target_label), visibility),
             )
             if repository_ctx.attr.maven_install_json:
                 # Provide the downloaded artifact as a file target.
@@ -495,6 +532,7 @@ def _generate_imports(repository_ctx, dependencies, explicit_artifacts, neverlin
                 repository_urls,
                 neverlink_artifacts,
                 testonly_artifacts,
+                exclusions,
                 default_visibilities,
                 raw_artifact,
             ))
@@ -510,6 +548,7 @@ def _generate_imports(repository_ctx, dependencies, explicit_artifacts, neverlin
                 repository_urls,
                 neverlink_artifacts,
                 testonly_artifacts,
+                exclusions,
                 default_visibilities,
                 artifact,
             ))
@@ -550,12 +589,8 @@ def _generate_imports(repository_ctx, dependencies, explicit_artifacts, neverlin
             coordinates = artifact.get("maven_coordinates", artifact["coordinates"])
             target_import_string.append("\ttags = [\"maven_coordinates=%s\"]," % coordinates)
 
-            if repository_ctx.attr.strict_visibility and explicit_artifacts.get(simple_coord):
-                target_import_string.append("\tvisibility = [\"//visibility:public\"],")
-                alias_visibility = "\tvisibility = [\"//visibility:public\"],\n"
-            else:
-                target_import_string.append("\tvisibility = [%s]," % (",".join(["\"%s\"" % v for v in default_visibilities])))
-                alias_visibility = "\tvisibility = [%s],\n" % (",".join(["\"%s\"" % v for v in default_visibilities]))
+            alias_visibility = "\tvisibility = %s,\n" % visibility
+            target_import_string.append("\tvisibility = %s," % visibility)
 
             target_import_string.append(")")
 

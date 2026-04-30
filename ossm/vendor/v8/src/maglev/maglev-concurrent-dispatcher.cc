@@ -288,6 +288,9 @@ class MaglevConcurrentDispatcher::JobTask final : public v8::JobTask {
         if (status == CompilationJob::SUCCEEDED) {
           outgoing_queue()->Enqueue(std::move(job));
           isolate()->stack_guard()->RequestInstallMaglevCode();
+        } else {
+          UnparkedScope unparked_scope(&local_isolate);
+          job.reset();
         }
       } else if (destruction_queue()->Dequeue(&job)) {
         // Maglev jobs aren't cheap to destruct, so destroy them here in the
@@ -327,13 +330,7 @@ MaglevConcurrentDispatcher::MaglevConcurrentDispatcher(Isolate* isolate)
     : isolate_(isolate) {
   bool enable = v8_flags.concurrent_recompilation && maglev::IsMaglevEnabled();
   if (enable) {
-    bool is_tracing =
-        v8_flags.print_maglev_code || v8_flags.trace_maglev_graph_building ||
-        v8_flags.trace_maglev_inlining || v8_flags.print_maglev_deopt_verbose ||
-        v8_flags.print_maglev_graph || v8_flags.print_maglev_graphs ||
-        v8_flags.trace_maglev_phi_untagging || v8_flags.trace_maglev_regalloc;
-
-    if (is_tracing) {
+    if (FlagsMightEnableMaglevTracing()) {
       PrintF("Concurrent maglev has been disabled for tracing.\n");
       enable = false;
     }

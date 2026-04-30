@@ -29,7 +29,6 @@ build --override_repository=com_github_chrusty_protoc_gen_jsonschema=/work/ossm/
 build --override_repository=com_github_golang_protobuf=/work/ossm/vendor/com_github_golang_protobuf
 build --override_repository=com_github_grpc_grpc=/work/ossm/vendor/com_github_grpc_grpc
 build --override_repository=com_github_iancoleman_strcase=/work/ossm/vendor/com_github_iancoleman_strcase
-build --override_repository=com_github_luajit2_luajit2=/work/ossm/vendor/com_github_luajit2_luajit2
 build --override_repository=com_github_lyft_protoc_gen_star_v2=/work/ossm/vendor/com_github_lyft_protoc_gen_star_v2
 build --override_repository=com_github_spf13_afero=/work/ossm/vendor/com_github_spf13_afero
 build --override_repository=com_google_googleapis=/work/ossm/vendor/com_google_googleapis
@@ -68,8 +67,6 @@ build --override_repository=jq_toolchains=/work/ossm/vendor/jq_toolchains
 build --override_repository=libcircllhist=/work/ossm/vendor/libcircllhist
 build --override_repository=libevent=/work/ossm/vendor/libevent
 build --override_repository=liburing=/work/ossm/vendor/liburing
-build --override_repository=llvm_toolchain=/work/ossm/vendor/llvm_toolchain
-build --override_repository=llvm_toolchain_llvm=/work/ossm/vendor/llvm_toolchain_llvm
 build --override_repository=luajit=/work/ossm/vendor/luajit
 build --override_repository=msgpack-cxx=/work/ossm/vendor/msgpack-cxx
 build --override_repository=nghttp2=/work/ossm/vendor/nghttp2

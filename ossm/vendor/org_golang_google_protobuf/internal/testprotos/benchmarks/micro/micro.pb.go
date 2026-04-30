@@ -12,38 +12,36 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
+	unsafe "unsafe"
 )
 
 type SixteenRequired struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	F1            *int32                 `protobuf:"varint,1,req,name=f1" json:"f1,omitempty"`
+	F2            *int32                 `protobuf:"varint,2,req,name=f2" json:"f2,omitempty"`
+	F3            *int32                 `protobuf:"varint,3,req,name=f3" json:"f3,omitempty"`
+	F4            *int32                 `protobuf:"varint,4,req,name=f4" json:"f4,omitempty"`
+	F5            *int32                 `protobuf:"varint,5,req,name=f5" json:"f5,omitempty"`
+	F6            *int32                 `protobuf:"varint,6,req,name=f6" json:"f6,omitempty"`
+	F7            *int32                 `protobuf:"varint,7,req,name=f7" json:"f7,omitempty"`
+	F8            *int32                 `protobuf:"varint,8,req,name=f8" json:"f8,omitempty"`
+	F9            *int32                 `protobuf:"varint,9,req,name=f9" json:"f9,omitempty"`
+	F10           *int32                 `protobuf:"varint,10,req,name=f10" json:"f10,omitempty"`
+	F11           *int32                 `protobuf:"varint,11,req,name=f11" json:"f11,omitempty"`
+	F12           *int32                 `protobuf:"varint,12,req,name=f12" json:"f12,omitempty"`
+	F13           *int32                 `protobuf:"varint,13,req,name=f13" json:"f13,omitempty"`
+	F14           *int32                 `protobuf:"varint,14,req,name=f14" json:"f14,omitempty"`
+	F15           *int32                 `protobuf:"varint,15,req,name=f15" json:"f15,omitempty"`
+	F16           *int32                 `protobuf:"varint,16,req,name=f16" json:"f16,omitempty"`
 	unknownFields protoimpl.UnknownFields
-
-	F1  *int32 `protobuf:"varint,1,req,name=f1" json:"f1,omitempty"`
-	F2  *int32 `protobuf:"varint,2,req,name=f2" json:"f2,omitempty"`
-	F3  *int32 `protobuf:"varint,3,req,name=f3" json:"f3,omitempty"`
-	F4  *int32 `protobuf:"varint,4,req,name=f4" json:"f4,omitempty"`
-	F5  *int32 `protobuf:"varint,5,req,name=f5" json:"f5,omitempty"`
-	F6  *int32 `protobuf:"varint,6,req,name=f6" json:"f6,omitempty"`
-	F7  *int32 `protobuf:"varint,7,req,name=f7" json:"f7,omitempty"`
-	F8  *int32 `protobuf:"varint,8,req,name=f8" json:"f8,omitempty"`
-	F9  *int32 `protobuf:"varint,9,req,name=f9" json:"f9,omitempty"`
-	F10 *int32 `protobuf:"varint,10,req,name=f10" json:"f10,omitempty"`
-	F11 *int32 `protobuf:"varint,11,req,name=f11" json:"f11,omitempty"`
-	F12 *int32 `protobuf:"varint,12,req,name=f12" json:"f12,omitempty"`
-	F13 *int32 `protobuf:"varint,13,req,name=f13" json:"f13,omitempty"`
-	F14 *int32 `protobuf:"varint,14,req,name=f14" json:"f14,omitempty"`
-	F15 *int32 `protobuf:"varint,15,req,name=f15" json:"f15,omitempty"`
-	F16 *int32 `protobuf:"varint,16,req,name=f16" json:"f16,omitempty"`
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SixteenRequired) Reset() {
 	*x = SixteenRequired{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_testprotos_benchmarks_micro_micro_proto_msgTypes[0]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
+	mi := &file_internal_testprotos_benchmarks_micro_micro_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *SixteenRequired) String() string {
@@ -54,7 +52,7 @@ func (*SixteenRequired) ProtoMessage() {}
 
 func (x *SixteenRequired) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_testprotos_benchmarks_micro_micro_proto_msgTypes[0]
-	if protoimpl.UnsafeEnabled && x != nil {
+	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
 			ms.StoreMessageInfo(mi)
@@ -183,51 +181,42 @@ func (x *SixteenRequired) GetF16() int32 {
 
 var File_internal_testprotos_benchmarks_micro_micro_proto protoreflect.FileDescriptor
 
-var file_internal_testprotos_benchmarks_micro_micro_proto_rawDesc = []byte{
-	0x0a, 0x30, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2f, 0x62, 0x65, 0x6e, 0x63, 0x68, 0x6d, 0x61, 0x72, 0x6b, 0x73,
-	0x2f, 0x6d, 0x69, 0x63, 0x72, 0x6f, 0x2f, 0x6d, 0x69, 0x63, 0x72, 0x6f, 0x2e, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x12, 0x1f, 0x67, 0x6f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x2e, 0x62, 0x65, 0x6e, 0x63, 0x68, 0x6d, 0x61, 0x72, 0x6b, 0x73, 0x2e, 0x6d, 0x69, 0x63,
-	0x72, 0x6f, 0x74, 0x22, 0x9f, 0x02, 0x0a, 0x0f, 0x53, 0x69, 0x78, 0x74, 0x65, 0x65, 0x6e, 0x52,
-	0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x64, 0x12, 0x0e, 0x0a, 0x02, 0x66, 0x31, 0x18, 0x01, 0x20,
-	0x02, 0x28, 0x05, 0x52, 0x02, 0x66, 0x31, 0x12, 0x0e, 0x0a, 0x02, 0x66, 0x32, 0x18, 0x02, 0x20,
-	0x02, 0x28, 0x05, 0x52, 0x02, 0x66, 0x32, 0x12, 0x0e, 0x0a, 0x02, 0x66, 0x33, 0x18, 0x03, 0x20,
-	0x02, 0x28, 0x05, 0x52, 0x02, 0x66, 0x33, 0x12, 0x0e, 0x0a, 0x02, 0x66, 0x34, 0x18, 0x04, 0x20,
-	0x02, 0x28, 0x05, 0x52, 0x02, 0x66, 0x34, 0x12, 0x0e, 0x0a, 0x02, 0x66, 0x35, 0x18, 0x05, 0x20,
-	0x02, 0x28, 0x05, 0x52, 0x02, 0x66, 0x35, 0x12, 0x0e, 0x0a, 0x02, 0x66, 0x36, 0x18, 0x06, 0x20,
-	0x02, 0x28, 0x05, 0x52, 0x02, 0x66, 0x36, 0x12, 0x0e, 0x0a, 0x02, 0x66, 0x37, 0x18, 0x07, 0x20,
-	0x02, 0x28, 0x05, 0x52, 0x02, 0x66, 0x37, 0x12, 0x0e, 0x0a, 0x02, 0x66, 0x38, 0x18, 0x08, 0x20,
-	0x02, 0x28, 0x05, 0x52, 0x02, 0x66, 0x38, 0x12, 0x0e, 0x0a, 0x02, 0x66, 0x39, 0x18, 0x09, 0x20,
-	0x02, 0x28, 0x05, 0x52, 0x02, 0x66, 0x39, 0x12, 0x10, 0x0a, 0x03, 0x66, 0x31, 0x30, 0x18, 0x0a,
-	0x20, 0x02, 0x28, 0x05, 0x52, 0x03, 0x66, 0x31, 0x30, 0x12, 0x10, 0x0a, 0x03, 0x66, 0x31, 0x31,
-	0x18, 0x0b, 0x20, 0x02, 0x28, 0x05, 0x52, 0x03, 0x66, 0x31, 0x31, 0x12, 0x10, 0x0a, 0x03, 0x66,
-	0x31, 0x32, 0x18, 0x0c, 0x20, 0x02, 0x28, 0x05, 0x52, 0x03, 0x66, 0x31, 0x32, 0x12, 0x10, 0x0a,
-	0x03, 0x66, 0x31, 0x33, 0x18, 0x0d, 0x20, 0x02, 0x28, 0x05, 0x52, 0x03, 0x66, 0x31, 0x33, 0x12,
-	0x10, 0x0a, 0x03, 0x66, 0x31, 0x34, 0x18, 0x0e, 0x20, 0x02, 0x28, 0x05, 0x52, 0x03, 0x66, 0x31,
-	0x34, 0x12, 0x10, 0x0a, 0x03, 0x66, 0x31, 0x35, 0x18, 0x0f, 0x20, 0x02, 0x28, 0x05, 0x52, 0x03,
-	0x66, 0x31, 0x35, 0x12, 0x10, 0x0a, 0x03, 0x66, 0x31, 0x36, 0x18, 0x10, 0x20, 0x02, 0x28, 0x05,
-	0x52, 0x03, 0x66, 0x31, 0x36, 0x42, 0x41, 0x5a, 0x3f, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e,
-	0x67, 0x6f, 0x6c, 0x61, 0x6e, 0x67, 0x2e, 0x6f, 0x72, 0x67, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x62, 0x75, 0x66, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x74, 0x65, 0x73,
-	0x74, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x73, 0x2f, 0x62, 0x65, 0x6e, 0x63, 0x68, 0x6d, 0x61, 0x72,
-	0x6b, 0x73, 0x2f, 0x6d, 0x69, 0x63, 0x72, 0x6f,
-}
+const file_internal_testprotos_benchmarks_micro_micro_proto_rawDesc = "" +
+	"\n" +
+	"0internal/testprotos/benchmarks/micro/micro.proto\x12\x1fgoproto.proto.benchmarks.microt\"\x9f\x02\n" +
+	"\x0fSixteenRequired\x12\x0e\n" +
+	"\x02f1\x18\x01 \x02(\x05R\x02f1\x12\x0e\n" +
+	"\x02f2\x18\x02 \x02(\x05R\x02f2\x12\x0e\n" +
+	"\x02f3\x18\x03 \x02(\x05R\x02f3\x12\x0e\n" +
+	"\x02f4\x18\x04 \x02(\x05R\x02f4\x12\x0e\n" +
+	"\x02f5\x18\x05 \x02(\x05R\x02f5\x12\x0e\n" +
+	"\x02f6\x18\x06 \x02(\x05R\x02f6\x12\x0e\n" +
+	"\x02f7\x18\a \x02(\x05R\x02f7\x12\x0e\n" +
+	"\x02f8\x18\b \x02(\x05R\x02f8\x12\x0e\n" +
+	"\x02f9\x18\t \x02(\x05R\x02f9\x12\x10\n" +
+	"\x03f10\x18\n" +
+	" \x02(\x05R\x03f10\x12\x10\n" +
+	"\x03f11\x18\v \x02(\x05R\x03f11\x12\x10\n" +
+	"\x03f12\x18\f \x02(\x05R\x03f12\x12\x10\n" +
+	"\x03f13\x18\r \x02(\x05R\x03f13\x12\x10\n" +
+	"\x03f14\x18\x0e \x02(\x05R\x03f14\x12\x10\n" +
+	"\x03f15\x18\x0f \x02(\x05R\x03f15\x12\x10\n" +
+	"\x03f16\x18\x10 \x02(\x05R\x03f16BAZ?google.golang.org/protobuf/internal/testprotos/benchmarks/micro"
 
 var (
 	file_internal_testprotos_benchmarks_micro_micro_proto_rawDescOnce sync.Once
-	file_internal_testprotos_benchmarks_micro_micro_proto_rawDescData = file_internal_testprotos_benchmarks_micro_micro_proto_rawDesc
+	file_internal_testprotos_benchmarks_micro_micro_proto_rawDescData []byte
 )
 
 func file_internal_testprotos_benchmarks_micro_micro_proto_rawDescGZIP() []byte {
 	file_internal_testprotos_benchmarks_micro_micro_proto_rawDescOnce.Do(func() {
-		file_internal_testprotos_benchmarks_micro_micro_proto_rawDescData = protoimpl.X.CompressGZIP(file_internal_testprotos_benchmarks_micro_micro_proto_rawDescData)
+		file_internal_testprotos_benchmarks_micro_micro_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_testprotos_benchmarks_micro_micro_proto_rawDesc), len(file_internal_testprotos_benchmarks_micro_micro_proto_rawDesc)))
 	})
 	return file_internal_testprotos_benchmarks_micro_micro_proto_rawDescData
 }
 
 var file_internal_testprotos_benchmarks_micro_micro_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
-var file_internal_testprotos_benchmarks_micro_micro_proto_goTypes = []interface{}{
+var file_internal_testprotos_benchmarks_micro_micro_proto_goTypes = []any{
 	(*SixteenRequired)(nil), // 0: goproto.proto.benchmarks.microt.SixteenRequired
 }
 var file_internal_testprotos_benchmarks_micro_micro_proto_depIdxs = []int32{
@@ -243,25 +232,11 @@ func file_internal_testprotos_benchmarks_micro_micro_proto_init() {
 	if File_internal_testprotos_benchmarks_micro_micro_proto != nil {
 		return
 	}
-	if !protoimpl.UnsafeEnabled {
-		file_internal_testprotos_benchmarks_micro_micro_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SixteenRequired); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: file_internal_testprotos_benchmarks_micro_micro_proto_rawDesc,
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_testprotos_benchmarks_micro_micro_proto_rawDesc), len(file_internal_testprotos_benchmarks_micro_micro_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   1,
 			NumExtensions: 0,
@@ -272,7 +247,6 @@ func file_internal_testprotos_benchmarks_micro_micro_proto_init() {
 		MessageInfos:      file_internal_testprotos_benchmarks_micro_micro_proto_msgTypes,
 	}.Build()
 	File_internal_testprotos_benchmarks_micro_micro_proto = out.File
-	file_internal_testprotos_benchmarks_micro_micro_proto_rawDesc = nil
 	file_internal_testprotos_benchmarks_micro_micro_proto_goTypes = nil
 	file_internal_testprotos_benchmarks_micro_micro_proto_depIdxs = nil
 }

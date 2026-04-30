@@ -371,6 +371,53 @@ TEST_P(ConnectTerminationIntegrationTest, UpstreamCloseWithHalfCloseEnabled) {
   cleanupUpstreamAndDownstream();
 }
 
+// Verify that upstream RST through tunneled CONNECT propagates as downstream RST
+// (default behavior with both guards enabled).
+TEST_P(ConnectTerminationIntegrationTest, UpstreamRstPropagationThroughTunnel) {
+  enableHalfClose(false);
+  initialize();
+
+  setUpConnection();
+  sendBidirectionalData();
+
+  // Upstream sends RST (AbortReset).
+  ASSERT_TRUE(fake_raw_upstream_connection_->close(Network::ConnectionCloseType::AbortReset));
+  ASSERT_TRUE(fake_raw_upstream_connection_->waitForDisconnect());
+
+  // Downstream should be disconnected (stream reset or connection close).
+  if (downstream_protocol_ == Http::CodecType::HTTP1) {
+    ASSERT_TRUE(codec_client_->waitForDisconnect());
+  } else {
+    ASSERT_TRUE(response_->waitForAnyTermination());
+  }
+}
+
+// Verify that upstream RST through tunneled CONNECT does NOT propagate as downstream RST
+// when the HTTP guard is explicitly disabled.
+TEST_P(ConnectTerminationIntegrationTest, UpstreamRstNotPropagatedWithoutHttpGuard) {
+  config_helper_.addRuntimeOverride("envoy.reloadable_features.map_http_stream_reset_to_tcp_rst",
+                                    "false");
+  useAccessLog("%UPSTREAM_DETECTED_CLOSE_TYPE%");
+  initialize();
+
+  setUpConnection();
+  sendBidirectionalData();
+
+  // Upstream sends RST.
+  ASSERT_TRUE(fake_raw_upstream_connection_->close(Network::ConnectionCloseType::AbortReset));
+  ASSERT_TRUE(fake_raw_upstream_connection_->waitForDisconnect());
+
+  if (downstream_protocol_ == Http::CodecType::HTTP1) {
+    ASSERT_TRUE(codec_client_->waitForDisconnect());
+  } else {
+    ASSERT_TRUE(response_->waitForAnyTermination());
+  }
+
+  // With HTTP guard disabled, close type should not be RemoteReset.
+  auto log_result = waitForAccessLog(access_log_name_);
+  EXPECT_THAT(log_result, testing::Ne("RemoteReset"));
+}
+
 TEST_P(ConnectTerminationIntegrationTest, TestTimeout) {
   enable_timeout_ = true;
   initialize();
@@ -450,7 +497,24 @@ TEST_P(ConnectTerminationIntegrationTest, IgnoreH11HostField) {
 }
 
 TEST_P(ConnectTerminationIntegrationTest, EarlyConnectDataRejectedWithOverride) {
-  config_helper_.addRuntimeOverride("envoy.reloadable_features.reject_early_connect_data", "true");
+  // TODO(yanavlasov): fix the test
+  GTEST_SKIP() << "Test is too flaky for CI. "
+                  "https://github.com/envoyproxy/envoy/issues/39856#issuecomment-3637976574";
+  config_helper_.addConfigModifier(
+      [](envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager&
+             hcm) {
+        for (auto& filter : *hcm.mutable_http_filters()) {
+          if (filter.name() == "envoy.filters.http.router") {
+            envoy::extensions::filters::http::router::v3::Router router_config;
+            if (filter.has_typed_config()) {
+              filter.typed_config().UnpackTo(&router_config);
+            }
+            router_config.mutable_reject_connect_request_early_data()->set_value(true);
+            filter.mutable_typed_config()->PackFrom(router_config);
+            break;
+          }
+        }
+      });
   initialize();
 
   codec_client_ = makeHttpConnection(lookupPort("http"));
@@ -1953,52 +2017,6 @@ TEST_P(TcpTunnelingIntegrationTest, UpstreamConnectingDownstreamDisconnect) {
   ASSERT_TRUE(fake_upstream_connection_->close());
 }
 
-// Test idle timeout when connection establishment is prevented by not sending upstream response
-TEST_P(TcpTunnelingIntegrationTest,
-       IdleTimeoutNoUpstreamConnectionNoIdleTimeoutSetOnNewConnection) {
-  config_helper_.addRuntimeOverride(
-      "envoy.reloadable_features.tcp_proxy_set_idle_timer_immediately_on_new_connection", "false");
-  config_helper_.addConfigModifier([&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) -> void {
-    auto* listener = bootstrap.mutable_static_resources()->mutable_listeners(1);
-    auto* filter_chain = listener->mutable_filter_chains(0);
-    auto* config_blob = filter_chain->mutable_filters(0)->mutable_typed_config();
-
-    ASSERT_TRUE(config_blob->Is<envoy::extensions::filters::network::tcp_proxy::v3::TcpProxy>());
-    auto tcp_proxy_config =
-        MessageUtil::anyConvert<envoy::extensions::filters::network::tcp_proxy::v3::TcpProxy>(
-            *config_blob);
-
-    tcp_proxy_config.mutable_tunneling_config()->set_hostname("foo.lyft.com:80");
-    tcp_proxy_config.mutable_idle_timeout()->CopyFrom(
-        ProtobufUtil::TimeUtil::MillisecondsToDuration(1));
-
-    config_blob->PackFrom(tcp_proxy_config);
-  });
-
-  initialize();
-
-  // Start downstream TCP connection (CONNECT will be sent upstream).
-  tcp_client_ = makeTcpConnection(lookupPort("tcp_proxy"));
-  ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*dispatcher_, fake_upstream_connection_));
-  ASSERT_TRUE(fake_upstream_connection_->waitForNewStream(*dispatcher_, upstream_request_));
-  ASSERT_TRUE(upstream_request_->waitForHeadersComplete());
-  EXPECT_EQ(upstream_request_->headers().getMethodValue(), "CONNECT");
-
-  // Don't send response headers - this prevents the tunnel from being fully established.
-  // The TCP proxy will wait for the response, and the idle timeout will not trigger as
-  // the idle timeout is not set immediately on new connection.
-
-  // Verify the stream wasn't reset due to timeout
-  if (upstreamProtocol() == Http::CodecType::HTTP1) {
-    ASSERT_FALSE(fake_upstream_connection_->waitForDisconnect(std::chrono::milliseconds(10)));
-  } else {
-    ASSERT_FALSE(upstream_request_->waitForReset(std::chrono::milliseconds(10)));
-  }
-
-  // Clean up the TCP client
-  tcp_client_->close();
-}
-
 // Test that a downstream flush works correctly (all data is flushed)
 TEST_P(TcpTunnelingIntegrationTest, TcpProxyDownstreamFlush) {
   // Use a very large size to make sure it is larger than the kernel socket read buffer.
@@ -2406,85 +2424,6 @@ TEST_P(
   // Close the upstream connection before sending response headers.
   ASSERT_TRUE(fake_upstream_connection_->close());
   ASSERT_TRUE(fake_upstream_connection_->waitForDisconnect());
-
-  // Retry to create a new stream on new connection and not the closed one.
-  ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*dispatcher_, fake_upstream_connection_));
-  ASSERT_TRUE(fake_upstream_connection_->waitForNewStream(*dispatcher_, upstream_request_));
-  ASSERT_TRUE(upstream_request_->waitForHeadersComplete());
-
-  upstream_request_->encodeHeaders(default_response_headers_, false);
-  ASSERT_TRUE(upstream_request_->waitForData(*dispatcher_, 5));
-
-  tcp_client_->close();
-  if (upstreamProtocol() == Http::CodecType::HTTP1) {
-    ASSERT_TRUE(fake_upstream_connection_->waitForDisconnect());
-  } else {
-    ASSERT_TRUE(upstream_request_->waitForEndStream(*dispatcher_));
-    // If the upstream now sends 'end stream' the connection is fully closed.
-    upstream_request_->encodeData(0, true);
-  }
-
-  const std::string expected_log =
-      "2 " + std::string(StreamInfo::ResponseFlagUtils::UPSTREAM_CONNECTION_FAILURE);
-  EXPECT_THAT(waitForAccessLog(access_log_filename), testing::HasSubstr(expected_log));
-}
-
-TEST_P(
-    TcpTunnelingIntegrationTest,
-    ConnectionAttemptRetryOnUpstreamConnectionCloseBeforeResponseHeadersNoBackoffOptionsRetryOnSameEventLoop) {
-  const std::string access_log_filename =
-      TestEnvironment::temporaryPath(TestUtility::uniqueFilename());
-  config_helper_.addRuntimeOverride(
-      "envoy.reloadable_features.tcp_proxy_retry_on_different_event_loop", "false");
-  config_helper_.addConfigModifier([&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) -> void {
-    envoy::extensions::filters::network::tcp_proxy::v3::TcpProxy proxy_config;
-    proxy_config.set_stat_prefix("tcp_stats");
-    proxy_config.set_cluster("cluster_0");
-    proxy_config.mutable_tunneling_config()->set_hostname("foo.lyft.com:80");
-    proxy_config.mutable_max_connect_attempts()->set_value(2);
-
-    envoy::extensions::access_loggers::file::v3::FileAccessLog access_log_config;
-    access_log_config.mutable_log_format()->mutable_text_format_source()->set_inline_string(
-        "%UPSTREAM_REQUEST_ATTEMPT_COUNT% %RESPONSE_FLAGS%\n");
-    access_log_config.set_path(access_log_filename);
-    proxy_config.add_access_log()->mutable_typed_config()->PackFrom(access_log_config);
-
-    auto* listeners = bootstrap.mutable_static_resources()->mutable_listeners();
-    for (auto& listener : *listeners) {
-      if (listener.name() != "tcp_proxy") {
-        continue;
-      }
-      auto* filter_chain = listener.mutable_filter_chains(0);
-      auto* filter = filter_chain->mutable_filters(0);
-      filter->mutable_typed_config()->PackFrom(proxy_config);
-      break;
-    }
-  });
-  initialize();
-
-  // Start a connection, and verify the upgrade headers are received upstream.
-  tcp_client_ = makeTcpConnection(lookupPort("tcp_proxy"));
-
-  // Send some data straight away.
-  ASSERT_TRUE(tcp_client_->write("hello", false));
-
-  ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*dispatcher_, fake_upstream_connection_));
-  ASSERT_TRUE(fake_upstream_connection_->waitForNewStream(*dispatcher_, upstream_request_));
-  ASSERT_TRUE(upstream_request_->waitForHeadersComplete());
-
-  // Close the upstream connection before sending response headers.
-  ASSERT_TRUE(fake_upstream_connection_->close());
-  ASSERT_TRUE(fake_upstream_connection_->waitForDisconnect());
-
-  if (upstreamProtocol() == Http::CodecType::HTTP2) {
-    // The connection is not fully closed yet, so the retry will be on the same connection.
-    tcp_client_->close();
-    const std::string expected_log =
-        "2 " + std::string(StreamInfo::ResponseFlagUtils::UPSTREAM_CONNECTION_FAILURE) + "," +
-        std::string(StreamInfo::ResponseFlagUtils::UPSTREAM_RETRY_LIMIT_EXCEEDED);
-    EXPECT_THAT(waitForAccessLog(access_log_filename), testing::HasSubstr(expected_log));
-    return;
-  }
 
   // Retry to create a new stream on new connection and not the closed one.
   ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*dispatcher_, fake_upstream_connection_));

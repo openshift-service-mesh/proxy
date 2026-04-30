@@ -84,7 +84,7 @@ public:
   MOCK_METHOD(ResponseHeaderMapOptRef, responseHeaders, ());
   MOCK_METHOD(ResponseTrailerMapOptRef, responseTrailers, ());
   MOCK_METHOD(void, endStream, ());
-  MOCK_METHOD(void, sendGoAwayAndClose, ());
+  MOCK_METHOD(void, sendGoAwayAndClose, (bool graceful));
   MOCK_METHOD(void, onDecoderFilterBelowWriteBufferLowWatermark, ());
   MOCK_METHOD(void, onDecoderFilterAboveWriteBufferHighWatermark, ());
   MOCK_METHOD(void, disarmRequestTimeout, ());
@@ -93,8 +93,10 @@ public:
   MOCK_METHOD(void, resetStream,
               (Http::StreamResetReason reset_reason, absl::string_view transport_failure_reason));
   MOCK_METHOD(const Router::RouteEntry::UpgradeMap*, upgradeMap, ());
-  MOCK_METHOD(Upstream::ClusterInfoConstSharedPtr, clusterInfo, ());
-  MOCK_METHOD(Router::RouteConstSharedPtr, route, (const Router::RouteCallback& cb));
+  MOCK_METHOD(OptRef<const Upstream::ClusterInfo>, clusterInfo, ());
+  MOCK_METHOD(Upstream::ClusterInfoConstSharedPtr, clusterInfoSharedPtr, ());
+  MOCK_METHOD(OptRef<const Router::Route>, route, (const Router::RouteCallback& cb));
+  MOCK_METHOD(Router::RouteConstSharedPtr, routeSharedPtr, (const Router::RouteCallback& cb));
   MOCK_METHOD(void, setRoute, (Router::RouteConstSharedPtr));
   MOCK_METHOD(void, clearRouteCache, ());
   MOCK_METHOD(absl::optional<Router::ConfigConstSharedPtr>, routeConfig, ());
@@ -192,17 +194,12 @@ public:
   MOCK_METHOD(void, addStreamFilter, (Http::StreamFilterSharedPtr filter));
   MOCK_METHOD(void, addAccessLogHandler, (AccessLog::InstanceSharedPtr handler));
   MOCK_METHOD(Event::Dispatcher&, dispatcher, ());
-};
-
-class MockFilterChainManager : public FilterChainManager {
-public:
-  MockFilterChainManager();
-  ~MockFilterChainManager() override;
-
-  // Http::FilterChainManager
-  MOCK_METHOD(void, applyFilterFactoryCb, (FilterContext context, FilterFactoryCb& factory));
-
-  NiceMock<MockFilterChainFactoryCallbacks> callbacks_;
+  MOCK_METHOD(absl::string_view, filterConfigName, (), (const));
+  MOCK_METHOD(void, setFilterConfigName, (absl::string_view name));
+  MOCK_METHOD(OptRef<const Router::Route>, route, (), (const));
+  MOCK_METHOD(absl::optional<bool>, filterDisabled, (absl::string_view filter_name), (const));
+  MOCK_METHOD(const StreamInfo::StreamInfo&, streamInfo, (), (const));
+  MOCK_METHOD(RequestHeaderMapOptRef, requestHeaders, (), (const));
 };
 
 class MockFilterChainFactory : public FilterChainFactory {
@@ -211,13 +208,10 @@ public:
   ~MockFilterChainFactory() override;
 
   // Http::FilterChainFactory
-  bool createFilterChain(FilterChainManager& manager, const FilterChainOptions&) const override {
-    return createFilterChain(manager);
-  }
-  MOCK_METHOD(bool, createFilterChain, (FilterChainManager & manager), (const));
+  MOCK_METHOD(bool, createFilterChain, (FilterChainFactoryCallbacks & callbacks), (const));
   MOCK_METHOD(bool, createUpgradeFilterChain,
               (absl::string_view upgrade_type, const FilterChainFactory::UpgradeMap* upgrade_map,
-               FilterChainManager& manager, const FilterChainOptions&),
+               FilterChainFactoryCallbacks& callbacks),
               (const));
 };
 
@@ -233,7 +227,8 @@ class MockDownstreamStreamFilterCallbacks : public DownstreamStreamFilterCallbac
 public:
   ~MockDownstreamStreamFilterCallbacks() override = default;
 
-  MOCK_METHOD(Router::RouteConstSharedPtr, route, (const Router::RouteCallback&));
+  MOCK_METHOD(OptRef<const Router::Route>, route, (const Router::RouteCallback&));
+  MOCK_METHOD(Router::RouteConstSharedPtr, routeSharedPtr, (const Router::RouteCallback&));
   MOCK_METHOD(void, setRoute, (Router::RouteConstSharedPtr));
   MOCK_METHOD(void, requestRouteConfigUpdate, (Http::RouteConfigUpdatedCallbackSharedPtr));
   MOCK_METHOD(void, clearRouteCache, ());
@@ -264,8 +259,10 @@ public:
   MOCK_METHOD(void, resetStream,
               (Http::StreamResetReason reset_reason, absl::string_view transport_failure_reason));
   MOCK_METHOD(void, resetIdleTimer, ());
-  MOCK_METHOD(Upstream::ClusterInfoConstSharedPtr, clusterInfo, ());
-  MOCK_METHOD(Router::RouteConstSharedPtr, route, ());
+  MOCK_METHOD(OptRef<const Upstream::ClusterInfo>, clusterInfo, ());
+  MOCK_METHOD(Upstream::ClusterInfoConstSharedPtr, clusterInfoSharedPtr, ());
+  MOCK_METHOD(OptRef<const Router::Route>, route, ());
+  MOCK_METHOD(Router::RouteConstSharedPtr, routeSharedPtr, ());
   MOCK_METHOD(absl::optional<Router::ConfigConstSharedPtr>, routeConfig, ());
   MOCK_METHOD(uint64_t, streamId, (), (const));
   MOCK_METHOD(StreamInfo::StreamInfo&, streamInfo, ());
@@ -277,10 +274,10 @@ public:
   MOCK_METHOD(void, onDecoderFilterBelowWriteBufferLowWatermark, ());
   MOCK_METHOD(void, addDownstreamWatermarkCallbacks, (DownstreamWatermarkCallbacks&));
   MOCK_METHOD(void, removeDownstreamWatermarkCallbacks, (DownstreamWatermarkCallbacks&));
-  MOCK_METHOD(void, setDecoderBufferLimit, (uint64_t));
-  MOCK_METHOD(uint64_t, decoderBufferLimit, ());
+  MOCK_METHOD(void, setBufferLimit, (uint64_t));
+  MOCK_METHOD(uint64_t, bufferLimit, ());
   MOCK_METHOD(bool, recreateStream, (const ResponseHeaderMap* headers));
-  MOCK_METHOD(void, sendGoAwayAndClose, ());
+  MOCK_METHOD(void, sendGoAwayAndClose, (bool graceful));
   MOCK_METHOD(void, addUpstreamSocketOptions, (const Network::Socket::OptionsSharedPtr& options));
   MOCK_METHOD(Network::Socket::OptionsSharedPtr, getUpstreamSocketOptions, (), (const));
   MOCK_METHOD(const Router::RouteSpecificFilterConfig*, mostSpecificPerFilterConfig, (), (const));
@@ -338,7 +335,7 @@ public:
                absl::string_view details));
   MOCK_METHOD(Buffer::BufferMemoryAccountSharedPtr, account, (), (const));
   MOCK_METHOD(void, setUpstreamOverrideHost, (Upstream::LoadBalancerContext::OverrideHost));
-  MOCK_METHOD(absl::optional<Upstream::LoadBalancerContext::OverrideHost>, upstreamOverrideHost, (),
+  MOCK_METHOD(OptRef<const Upstream::LoadBalancerContext::OverrideHost>, upstreamOverrideHost, (),
               (const));
   MOCK_METHOD(bool, shouldLoadShed, (), (const));
 
@@ -366,8 +363,10 @@ public:
   MOCK_METHOD(void, resetStream,
               (Http::StreamResetReason reset_reason, absl::string_view transport_failure_reason));
   MOCK_METHOD(void, resetIdleTimer, ());
-  MOCK_METHOD(Upstream::ClusterInfoConstSharedPtr, clusterInfo, ());
-  MOCK_METHOD(Router::RouteConstSharedPtr, route, ());
+  MOCK_METHOD(OptRef<const Upstream::ClusterInfo>, clusterInfo, ());
+  MOCK_METHOD(Upstream::ClusterInfoConstSharedPtr, clusterInfoSharedPtr, ());
+  MOCK_METHOD(OptRef<const Router::Route>, route, ());
+  MOCK_METHOD(Router::RouteConstSharedPtr, routeSharedPtr, ());
   MOCK_METHOD(bool, canRequestRouteConfigUpdate, ());
   MOCK_METHOD(uint64_t, streamId, (), (const));
   MOCK_METHOD(StreamInfo::StreamInfo&, streamInfo, ());
@@ -376,8 +375,8 @@ public:
   MOCK_METHOD(const ScopeTrackedObject&, scope, ());
   MOCK_METHOD(void, onEncoderFilterAboveWriteBufferHighWatermark, ());
   MOCK_METHOD(void, onEncoderFilterBelowWriteBufferLowWatermark, ());
-  MOCK_METHOD(void, setEncoderBufferLimit, (uint32_t));
-  MOCK_METHOD(uint32_t, encoderBufferLimit, ());
+  MOCK_METHOD(void, setBufferLimit, (uint64_t));
+  MOCK_METHOD(uint64_t, bufferLimit, ());
   MOCK_METHOD(void, restoreContextOnContinue, (ScopeTrackedObjectStack&));
   MOCK_METHOD(const Router::RouteSpecificFilterConfig*, mostSpecificPerFilterConfig, (), (const));
   MOCK_METHOD(Router::RouteSpecificFilterConfigs, perFilterConfigs, (), (const));
@@ -621,6 +620,10 @@ public:
     ON_CALL(*this, shouldSchemeMatchUpstream())
         .WillByDefault(testing::ReturnPointee(&scheme_match_upstream_));
     ON_CALL(*this, addProxyProtocolConnectionState()).WillByDefault(testing::Return(true));
+    ON_CALL(*this, httpsDestinationPorts())
+        .WillByDefault(testing::ReturnRef(https_destination_ports_));
+    ON_CALL(*this, httpDestinationPorts())
+        .WillByDefault(testing::ReturnRef(http_destination_ports_));
   }
 
   // Http::ConnectionManagerConfig
@@ -678,6 +681,9 @@ public:
   MOCK_METHOD(Http::ForwardClientCertType, forwardClientCert, (), (const));
   MOCK_METHOD(const std::vector<Http::ClientCertDetailsType>&, setCurrentClientCertDetails, (),
               (const));
+  MOCK_METHOD(Http::ClientCertFormat, clientCertFormat, (), (const));
+  MOCK_METHOD(const Matcher::MatchTreePtr<HttpMatchingData>&, forwardClientCertMatcher, (),
+              (const));
   MOCK_METHOD(const Network::Address::Instance&, localAddress, ());
   MOCK_METHOD(const absl::optional<std::string>&, userAgent, ());
   MOCK_METHOD(const Http::TracingConnectionManagerConfig*, tracingConfig, ());
@@ -707,6 +713,8 @@ public:
   MOCK_METHOD(bool, appendLocalOverload, (), (const));
   MOCK_METHOD(bool, appendXForwardedPort, (), (const));
   MOCK_METHOD(bool, addProxyProtocolConnectionState, (), (const));
+  MOCK_METHOD((const absl::flat_hash_set<uint32_t>&), httpsDestinationPorts, (), (const));
+  MOCK_METHOD((const absl::flat_hash_set<uint32_t>&), httpDestinationPorts, (), (const));
 
   class AllowInternalAddressConfig : public Http::InternalAddressConfig {
   public:
@@ -720,6 +728,8 @@ public:
   std::vector<Http::EarlyHeaderMutationPtr> early_header_mutation_extensions_;
   absl::optional<std::string> scheme_;
   bool scheme_match_upstream_;
+  absl::flat_hash_set<uint32_t> https_destination_ports_;
+  absl::flat_hash_set<uint32_t> http_destination_ports_;
 };
 
 class MockReceivedSettings : public ReceivedSettings {

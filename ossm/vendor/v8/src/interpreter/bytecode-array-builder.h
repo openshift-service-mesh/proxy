@@ -5,6 +5,7 @@
 #ifndef V8_INTERPRETER_BYTECODE_ARRAY_BUILDER_H_
 #define V8_INTERPRETER_BYTECODE_ARRAY_BUILDER_H_
 
+#include <cstddef>
 #include <optional>
 
 #include "src/ast/ast.h"
@@ -54,7 +55,7 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   DirectHandle<TrustedByteArray> ToSourcePositionTable(IsolateT* isolate);
 
 #ifdef DEBUG
-  int CheckBytecodeMatches(Tagged<BytecodeArray> bytecode);
+  int CheckBytecodeMatches(Handle<BytecodeArray> bytecode);
 #endif
 
   // Get the number of parameters expected by function.
@@ -99,6 +100,10 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   BytecodeArrayBuilder& LoadTrue();
   BytecodeArrayBuilder& LoadFalse();
   BytecodeArrayBuilder& LoadBoolean(bool value);
+
+  // Merges the boilerplate definition at index_obj into the prototype of the
+  // function object in accumulator
+  BytecodeArrayBuilder& SetPrototypeProperties(size_t index_obj, size_t slot);
 
   // Global loads to the accumulator and stores from the accumulator.
   BytecodeArrayBuilder& LoadGlobal(const AstRawString* name, int feedback_slot,
@@ -376,9 +381,9 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   // Type feedback will be recorded in the |feedback_slot|
   BytecodeArrayBuilder& BinaryOperation(Token::Value binop, Register reg,
                                         int feedback_slot);
-  BytecodeArrayBuilder& Add_LhsIsStringConstant_Internalize(Token::Value binop,
-                                                            Register reg,
-                                                            int feedback_slot);
+  BytecodeArrayBuilder& Add_StringConstant_Internalize(
+      Token::Value binop, Register reg, int feedback_slot,
+      AddStringConstantAndInternalizeVariant as_variant);
   // Same as above, but lhs in the accumulator and rhs in |literal|.
   BytecodeArrayBuilder& BinaryOperationSmiLiteral(Token::Value binop,
                                                   Tagged<Smi> literal,
@@ -494,6 +499,9 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
                                   int feedback_slot);
   BytecodeArrayBuilder& ForInStep(Register index);
 
+  BytecodeArrayBuilder& ForOfNext(Register object, Register next,
+                                  RegisterList value_done, int call_slot);
+
   // Generators.
   BytecodeArrayBuilder& SuspendGenerator(Register generator,
                                          RegisterList registers,
@@ -510,6 +518,7 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   // Allocates a new jump table of given |size| and |case_value_base| in the
   // constant pool.
   BytecodeJumpTable* AllocateJumpTable(int size, int case_value_base);
+  void TrimJumpTable(BytecodeJumpTable* jump_table, int size);
 
   BytecodeRegisterOptimizer* GetRegisterOptimizer() {
     return register_optimizer_;
@@ -592,6 +601,10 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   void OutputMovRaw(Register src, Register dest);
 
   void EmitFunctionStartSourcePosition(int position);
+
+  size_t current_bytecode_size() const {
+    return bytecode_array_writer_.current_bytecode_size();
+  }
 
   // Accessors
   BytecodeRegisterAllocator* register_allocator() {

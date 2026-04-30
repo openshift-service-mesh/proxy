@@ -58,6 +58,9 @@ class PROTOC_EXPORT ExtensionGenerator {
   // Source file stuff.
   void GenerateDefinition(io::Printer* p);
 
+  // Feature-specific defaults.
+  void GenerateFeatureDefaults(io::Printer* p) const;
+
   // Extension registration can happen at different priority levels depending on
   // the features used.
   //
@@ -91,4 +94,4 @@ class PROTOC_EXPORT ExtensionGenerator {
 
 #include "google/protobuf/port_undef.inc"
 
-#endif  // GOOGLE_PROTOBUF_COMPILER_CPP_MESSAGE_H__
+#endif  // GOOGLE_PROTOBUF_COMPILER_CPP_EXTENSION_H__

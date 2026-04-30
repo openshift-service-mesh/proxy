@@ -183,8 +183,6 @@ bool SetupIsolateDelegate::SetupHeapInternal(Isolate* isolate) {
     isolate->VerifyStaticRoots();
     isolate->read_only_heap()->OnCreateRootsComplete(isolate);
   }
-  // We prefer to fit all of read-only space in one page.
-  CHECK_EQ(heap->read_only_space()->pages().size(), 1);
   auto ro_size = heap->read_only_space()->Size();
   DCHECK_EQ(heap->old_space()->Size(), 0);
   DCHECK_IMPLIES(heap->new_space(), heap->new_space()->Size() == 0);
@@ -242,7 +240,7 @@ bool Heap::CreateMutableHeapObjects() {
   // Create initial objects
   CreateInitialMutableObjects();
   CreateInternalAccessorInfoObjects();
-  CHECK_EQ(0u, gc_count_);
+  CHECK_EQ(kInitialGCEpoch, gc_count_);
 
   set_native_contexts_list(roots.undefined_value());
   set_allocation_sites_list(roots.undefined_value());
@@ -286,7 +284,7 @@ void InitializePartialMap(Isolate* isolate, Tagged<Map> map,
   map->set_visitor_id(Map::GetVisitorId(map));
   map->set_inobject_properties_start_or_constructor_function_index(0);
   DCHECK(!IsJSObjectMap(map));
-  map->set_prototype_validity_cell(Map::kPrototypeChainValidSmi, kRelaxedStore);
+  map->set_prototype_validity_cell(Map::kNoValidityCellSentinel, kRelaxedStore);
   map->SetInObjectUnusedPropertyFields(0);
   map->set_bit_field(0);
   map->set_bit_field2(0);
@@ -517,7 +515,7 @@ bool Heap::CreateEarlyReadOnlyMapsAndObjects() {
     ALLOCATE_PARTIAL_MAP(DESCRIPTOR_ARRAY_TYPE, kVariableSizeSentinel,
                          descriptor_array)
 
-    ALLOCATE_PARTIAL_MAP(HOLE_TYPE, Hole::kSize, hole);
+    ALLOCATE_PARTIAL_MAP(HOLE_TYPE, kVariableSizeSentinel, hole);
 
     // Some struct maps which we need for later dependencies
     for (const StructInit& entry : kStructTable) {
@@ -561,15 +559,6 @@ bool Heap::CreateEarlyReadOnlyMapsAndObjects() {
   set_empty_weak_array_list(Cast<WeakArrayList>(obj));
 
   DCHECK(!HeapLayout::InYoungGeneration(roots.undefined_value()));
-  {
-    AllocationResult allocation =
-        Allocate(roots_table().hole_map(), AllocationType::kReadOnly);
-    if (!allocation.To(&obj)) return false;
-  }
-  set_the_hole_value(Cast<Hole>(obj));
-
-  // Set preliminary exception sentinel value before actually initializing it.
-  set_exception(Cast<Hole>(obj));
 
   // Allocate the empty enum cache.
   {
@@ -674,13 +663,13 @@ bool Heap::CreateEarlyReadOnlyMapsAndObjects() {
     ALLOCATE_MAP(CELL_TYPE, Cell::kSize, cell);
     {
       // The invalid_prototype_validity_cell is needed for JSObject maps.
-      Tagged<Smi> value = Smi::FromInt(Map::kPrototypeChainInvalid);
       AllocationResult alloc =
           AllocateRaw(Cell::kSize, AllocationType::kReadOnly);
       if (!alloc.To(&obj)) return false;
       obj->set_map_after_allocation(isolate(), roots.cell_map(),
                                     SKIP_WRITE_BARRIER);
-      Cast<Cell>(obj)->set_value(value);
+      Cast<Cell>(obj)->set_maybe_value(Map::kPrototypeChainInvalid,
+                                       SKIP_WRITE_BARRIER);
       set_invalid_prototype_validity_cell(Cast<Cell>(obj));
     }
 
@@ -806,10 +795,26 @@ bool Heap::CreateLateReadOnlyNonJSReceiverMaps() {
             WasmTrustedInstanceData::kSize, wasm_trusted_instance_data);
     IF_WASM(ALLOCATE_VARSIZE_MAP, WASM_DISPATCH_TABLE_TYPE,
             wasm_dispatch_table);
+    IF_WASM(ALLOCATE_VARSIZE_MAP, WASM_DISPATCH_TABLE_FOR_IMPORTS_TYPE,
+            wasm_dispatch_table_for_imports);
 
-    ALLOCATE_MAP(WEAK_CELL_TYPE, WeakCell::kSize, weak_cell)
-    ALLOCATE_MAP(INTERPRETER_DATA_TYPE, InterpreterData::kSize,
+    ALLOCATE_MAP(WEAK_CELL_TYPE, sizeof(WeakCell), weak_cell)
+    ALLOCATE_MAP(INTERPRETER_DATA_TYPE, sizeof(InterpreterData),
                  interpreter_data)
+
+    ALLOCATE_MAP(UNCOMPILED_DATA_WITHOUT_PREPARSE_DATA_TYPE,
+                 sizeof(UncompiledDataWithoutPreparseData),
+                 uncompiled_data_without_preparse_data)
+    ALLOCATE_MAP(UNCOMPILED_DATA_WITH_PREPARSE_DATA_TYPE,
+                 sizeof(UncompiledDataWithPreparseData),
+                 uncompiled_data_with_preparse_data)
+    ALLOCATE_MAP(UNCOMPILED_DATA_WITHOUT_PREPARSE_DATA_WITH_JOB_TYPE,
+                 sizeof(UncompiledDataWithoutPreparseDataWithJob),
+                 uncompiled_data_without_preparse_data_with_job)
+    ALLOCATE_MAP(UNCOMPILED_DATA_WITH_PREPARSE_DATA_AND_JOB_TYPE,
+                 sizeof(UncompiledDataWithPreparseDataAndJob),
+                 uncompiled_data_with_preparse_data_and_job)
+
     ALLOCATE_MAP(SHARED_FUNCTION_INFO_WRAPPER_TYPE,
                  SharedFunctionInfoWrapper::kSize, shared_function_info_wrapper)
 
@@ -924,7 +929,8 @@ bool Heap::CreateImportantReadOnlyObjects() {
   // Hash seed for strings
 
   Factory* factory = isolate()->factory();
-  set_hash_seed(*factory->NewByteArray(kInt64Size, AllocationType::kReadOnly));
+  set_hash_seed(
+      *factory->NewByteArray(kInt64Size * 4, AllocationType::kReadOnly));
   InitializeHashSeed();
 
   // Important strings and symbols
@@ -1015,6 +1021,14 @@ bool Heap::CreateImportantReadOnlyObjects() {
 
   set_nan_value(*factory->NewHeapNumber<AllocationType::kReadOnly>(
       std::numeric_limits<double>::quiet_NaN()));
+#ifdef V8_ENABLE_UNDEFINED_DOUBLE
+  set_undefined_nan_value(
+      *factory->NewHeapNumberFromBits<AllocationType::kReadOnly>(
+          kUndefinedNanInt64));
+#else
+  set_undefined_nan_value(*factory->NewHeapNumber<AllocationType::kReadOnly>(
+      std::numeric_limits<double>::quiet_NaN()));
+#endif  // V8_ENABLE_UNDEFINED_DOUBLE
   set_hole_nan_value(*factory->NewHeapNumberFromBits<AllocationType::kReadOnly>(
       kHoleNanInt64));
   set_infinity_value(
@@ -1120,7 +1134,8 @@ bool Heap::CreateReadOnlyObjects() {
 
   // Finish initializing oddballs after creating the string table.
   Oddball::Initialize(isolate(), factory->undefined_value(), "undefined",
-                      factory->nan_value(), "undefined", Oddball::kUndefined);
+                      factory->undefined_nan_value(), "undefined",
+                      Oddball::kUndefined);
 
   // Initialize the null_value.
   Oddball::Initialize(isolate(), factory->null_value(), "null",
@@ -1136,24 +1151,6 @@ bool Heap::CreateReadOnlyObjects() {
   Oddball::Initialize(isolate(), factory->false_value(), "false",
                       direct_handle(Smi::zero(), isolate()), "boolean",
                       Oddball::kFalse);
-
-  // Initialize the_hole_value.
-  Hole::Initialize(isolate(), factory->the_hole_value(),
-                   factory->hole_nan_value());
-
-  set_property_cell_hole_value(*factory->NewHole());
-  set_hash_table_hole_value(*factory->NewHole());
-  set_promise_hole_value(*factory->NewHole());
-  set_uninitialized_value(*factory->NewHole());
-  set_arguments_marker(*factory->NewHole());
-  set_termination_exception(*factory->NewHole());
-  set_exception(*factory->NewHole());
-  set_optimized_out(*factory->NewHole());
-  set_stale_register(*factory->NewHole());
-
-  // Initialize marker objects used during compilation.
-  set_self_reference_marker(*factory->NewHole());
-  set_basic_block_counters_marker(*factory->NewHole());
 
   {
     HandleScope handle_scope(isolate());
@@ -1313,6 +1310,7 @@ bool Heap::CreateReadOnlyObjects() {
     }
     set_preallocated_number_string_table(*preallocated_number_string_table);
   }
+
   // Initialize the wasm null_value.
 
 #ifdef V8_ENABLE_WEBASSEMBLY
@@ -1325,53 +1323,69 @@ bool Heap::CreateReadOnlyObjects() {
   // contained on a separate OS page which can be protected.
   // In non-static-roots builds, it is a regular object of size {kTaggedSize}
   // and does not need padding.
+#define V8_UNMAP_WASM_NULL_PAYLOAD \
+  (V8_STATIC_ROOTS_BOOL || V8_STATIC_ROOTS_GENERATION_BOOL)
 
-  constexpr size_t kLargestPossibleOSPageSize = 64 * KB;
-  static_assert(kLargestPossibleOSPageSize >= kMinimumOSPageSize);
-
-  if (V8_STATIC_ROOTS_BOOL || V8_STATIC_ROOTS_GENERATION_BOOL) {
-    // Ensure all of the following lands on the same V8 page.
-    constexpr int kOffsetAfterMapWord = HeapObject::kMapOffset + kTaggedSize;
-    static_assert(kOffsetAfterMapWord % kObjectAlignment == 0);
-    read_only_space_->EnsureSpaceForAllocation(
-        kLargestPossibleOSPageSize + WasmNull::kSize - kOffsetAfterMapWord);
-    Address next_page = RoundUp(read_only_space_->top() + kOffsetAfterMapWord,
-                                kLargestPossibleOSPageSize);
-
-    // Add some filler to end up right before an OS page boundary.
-    int filler_size = static_cast<int>(next_page - read_only_space_->top() -
-                                       kOffsetAfterMapWord);
-    // TODO(v8:7748) Depending on where we end up this might actually not hold,
-    // in which case we would need to use a one or two-word filler.
-    CHECK(filler_size > 2 * kTaggedSize);
-    Tagged<HeapObject> filler =
-        allocator()->AllocateRawWith<HeapAllocator::kRetryOrFail>(
-            filler_size, AllocationType::kReadOnly, AllocationOrigin::kRuntime,
-            AllocationAlignment::kTaggedAligned);
-    CreateFillerObjectAt(filler.address(), filler_size,
-                         ClearFreedMemoryMode::kClearFreedMemory);
-    set_wasm_null_padding(filler);
-    CHECK_EQ(read_only_space_->top() + kOffsetAfterMapWord, next_page);
-  } else {
-    set_wasm_null_padding(roots.undefined_value());
+#if V8_UNMAP_WASM_NULL_PAYLOAD
+  // Allocate an unmappable WasmNull.
+  {
+    static_assert(WasmNull::kSize ==
+                  WasmNull::kHeaderSize + WasmNull::kPayloadSize);
+    Tagged<HeapObject> wasm_null_obj =
+        read_only_space_
+            ->AllocateRawUnmappableAllocation(WasmNull::kHeaderSize,
+                                              WasmNull::kPayloadSize)
+            .ToObjectChecked();
+    wasm_null_obj->set_map_after_allocation(isolate(), roots.wasm_null_map(),
+                                            SKIP_WRITE_BARRIER);
+    // No need to initialize the payload since it's either empty or unmapped.
+    set_wasm_null(Cast<WasmNull>(wasm_null_obj));
   }
-
-  // Finally, allocate the wasm-null object.
+#else
+  // Allocate the WasmNull.
   {
     Tagged<HeapObject> wasm_null_obj;
     CHECK(AllocateRaw(WasmNull::kSize, AllocationType::kReadOnly)
               .To(&wasm_null_obj));
-    // No need to initialize the payload since it's either empty or unmapped.
-    CHECK_IMPLIES(!(V8_STATIC_ROOTS_BOOL || V8_STATIC_ROOTS_GENERATION_BOOL),
-                  WasmNull::kSize == sizeof(Tagged_t));
     wasm_null_obj->set_map_after_allocation(isolate(), roots.wasm_null_map(),
                                             SKIP_WRITE_BARRIER);
     set_wasm_null(Cast<WasmNull>(wasm_null_obj));
-    if (V8_STATIC_ROOTS_BOOL || V8_STATIC_ROOTS_GENERATION_BOOL) {
-      CHECK_EQ(read_only_space_->top() % kLargestPossibleOSPageSize, 0);
-    }
   }
-#endif
+#endif  // V8_UNMAP_WASM_NULL_PAYLOAD
+#endif  // V8_ENABLE_WEBASSEMBLY
+
+  auto make_hole = [this, roots, factory]() {
+    USE(factory);
+
+    static_assert(sizeof(Hole) == sizeof(Hole::map_) + Hole::kPayloadSize);
+    Tagged<HeapObject> hole_obj =
+        read_only_space_
+            ->AllocateRawUnmappableAllocation(sizeof(Hole::map_),
+                                              Hole::kPayloadSize)
+            .ToObjectChecked();
+    hole_obj->set_map_after_allocation(isolate(), roots.hole_map(),
+                                       SKIP_WRITE_BARRIER);
+    // No need to initialize the payload since it's either empty or unmapped.
+    return Cast<Hole>(hole_obj);
+  };
+
+  // Set up the hole values in one range
+  set_the_hole_value(UncheckedCast<TheHole>(make_hole()));
+
+  set_property_cell_hole_value(UncheckedCast<PropertyCellHole>(make_hole()));
+  set_hash_table_hole_value(UncheckedCast<HashTableHole>(make_hole()));
+  set_promise_hole_value(UncheckedCast<PromiseHole>(make_hole()));
+  set_uninitialized_value(UncheckedCast<UninitializedHole>(make_hole()));
+  set_arguments_marker(UncheckedCast<ArgumentsMarker>(make_hole()));
+  set_termination_exception(UncheckedCast<TerminationException>(make_hole()));
+  set_exception(UncheckedCast<ExceptionHole>(make_hole()));
+  set_optimized_out(UncheckedCast<OptimizedOut>(make_hole()));
+  set_stale_register(UncheckedCast<StaleRegister>(make_hole()));
+
+  // Initialize marker objects used during compilation.
+  set_self_reference_marker(UncheckedCast<SelfReferenceMarker>(make_hole()));
+  set_basic_block_counters_marker(
+      UncheckedCast<BasicBlockCountersMarker>(make_hole()));
 
   return true;
 }
@@ -1429,7 +1443,6 @@ void Heap::CreateInitialMutableObjects() {
   set_shared_wasm_memories(roots.empty_weak_array_list());
   set_locals_block_list_cache(roots.undefined_value());
 #ifdef V8_ENABLE_WEBASSEMBLY
-  set_active_suspender(roots.undefined_value());
   set_js_to_wasm_wrappers(roots.empty_weak_fixed_array());
   set_wasm_canonical_rtts(roots.empty_weak_fixed_array());
 #endif  // V8_ENABLE_WEBASSEMBLY
@@ -1455,7 +1468,6 @@ void Heap::CreateInitialMutableObjects() {
 
   // Protectors
   set_array_buffer_detaching_protector(*factory->NewProtector());
-  set_array_constructor_protector(*factory->NewProtector());
   set_array_iterator_protector(*factory->NewProtector());
   set_array_species_protector(*factory->NewProtector());
   set_no_date_time_configuration_change_protector(*factory->NewProtector());
@@ -1675,23 +1687,6 @@ void Heap::CreateInitialMutableObjects() {
     info = CreateSharedFunctionInfo(
         isolate_, Builtin::kArrayFromAsyncArrayLikeOnRejected, 1);
     set_array_from_async_array_like_on_rejected_shared_fun(*info);
-  }
-
-  // Atomics.Mutex
-  {
-    DirectHandle<SharedFunctionInfo> info = CreateSharedFunctionInfo(
-        isolate_, Builtin::kAtomicsMutexAsyncUnlockResolveHandler, 1);
-    set_atomics_mutex_async_unlock_resolve_handler_sfi(*info);
-    info = CreateSharedFunctionInfo(
-        isolate_, Builtin::kAtomicsMutexAsyncUnlockRejectHandler, 1);
-    set_atomics_mutex_async_unlock_reject_handler_sfi(*info);
-  }
-
-  // Atomics.Condition
-  {
-    DirectHandle<SharedFunctionInfo> info = CreateSharedFunctionInfo(
-        isolate_, Builtin::kAtomicsConditionAcquireLock, 0);
-    set_atomics_condition_acquire_lock_sfi(*info);
   }
 
   // Async Disposable Stack
