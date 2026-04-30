@@ -1,0 +1,76 @@
+--- a/bazel/foreign_cc/BUILD
++++ b/bazel/foreign_cc/BUILD
+@@ -131,7 +131,7 @@ cc_library(
+
+ configure_make(
+     name = "luajit",
+-    configure_command = "build.py",
++    configure_command = "luajit_build.sh",
+     env = select({
+         # This shouldn't be needed! See
+         # https://github.com/envoyproxy/envoy/issues/6084
+@@ -277,6 +277,12 @@ envoy_cmake(
+         "RUN_TEST": "off",
+         "CMAKE_INSTALL_LIBDIR": "lib",
+         "OPENSSL_ROOT_DIR": "$$EXT_BUILD_DEPS",
++        # Force use of system compiler and sysroot instead of vendored LLVM toolchain
++        "CMAKE_C_COMPILER": "/usr/bin/clang",
++        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
++        "CMAKE_C_FLAGS": "--sysroot=/",
++        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
++        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
+     },
+     exec_properties = select({
+         "//bazel:engflow_rbe_x86_64": {
+@@ -304,6 +310,12 @@ envoy_cmake(
+         # this can be removed.
+         # More details https://github.com/envoyproxy/envoy-mobile/issues/116
+         "_GNU_SOURCE": "on",
++        # Force use of system compiler and sysroot instead of vendored LLVM toolchain
++        "CMAKE_C_COMPILER": "/usr/bin/clang",
++        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
++        "CMAKE_C_FLAGS": "--sysroot=/",
++        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
++        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
+     },
+     exec_properties = select({
+         "//bazel:engflow_rbe_x86_64": {
+@@ -335,6 +347,12 @@ envoy_cmake(
+         "BUILD_STATIC_LIBS": "on",
+         "CMAKE_INSTALL_LIBDIR": "lib",
+         "CMAKE_CXX_COMPILER_FORCED": "on",
++        # Force use of system compiler and sysroot instead of vendored LLVM toolchain
++        "CMAKE_C_COMPILER": "/usr/bin/clang",
++        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
++        "CMAKE_C_FLAGS": "--sysroot=/",
++        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
++        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
+     },
+     cmake_files_dir = "$BUILD_TMPDIR/lib/CMakeFiles",
+     debug_cache_entries = {"ENABLE_DEBUG": "on"},
+@@ -385,6 +403,12 @@ envoy_cmake(
+         "WAMR_BUILD_DUMP_CALL_STACK": "0",
+         # linux perf. only for jit and aot
+         "WAMR_BUILD_LINUX_PERF": "0",
++        # Force use of system compiler and sysroot instead of vendored LLVM toolchain
++        "CMAKE_C_COMPILER": "/usr/bin/clang",
++        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
++        "CMAKE_C_FLAGS": "--sysroot=/",
++        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
++        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
+     },
+     exec_properties = select({
+         "//bazel:engflow_rbe_x86_64": {
+@@ -416,6 +440,12 @@ envoy_cmake(
+         "CMAKE_CXX_COMPILER_FORCED": "on",
+         "BUILD_SHARED_LIBS": "off",
+         "BUILD_TESTING": "off",
++        # Force use of system compiler and sysroot instead of vendored LLVM toolchain
++        "CMAKE_C_COMPILER": "/usr/bin/clang",
++        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
++        "CMAKE_C_FLAGS": "--sysroot=/",
++        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
++        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
+     },
+     defines = ["MAXMIND_STATICLIB"],
+     exec_properties = select({

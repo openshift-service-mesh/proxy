@@ -85,7 +85,7 @@ function copy_files() {
       fi
 
       cp_flags="-rL"
-      if [ "${repo_name}" == "emscripten_toolchain" ] || [ "${repo_name}" == "antlr4-cpp-runtime" ] || [ "${repo_name}" == "envoy_toolshed" ]; then
+      if [ "${repo_name}" == "emscripten_toolchain" ] || [ "${repo_name}" == "antlr4-cpp-runtime" ] || [ "${repo_name}" == "envoy_toolshed" ] || [[ "${repo_name}" == *"luajit2"* ]]; then
         cp_flags="-r"
       fi
       cp "${cp_flags}" "${f}" "${VENDOR_DIR}" || echo "Copy of ${f} failed. Ignoring..."
@@ -112,7 +112,7 @@ function run_bazel() {
 
   # Fetch all the rest and check everything using "build --nobuild "option
   for config in x86_64 aarch64 s390x ppc; do
-    bazel --output_base="${OUTPUT_BASE}" build --nobuild --config="${config}" //...
+    bazel --output_base="${OUTPUT_BASE}" build --nobuild --keep_going --config="${config}" //...
   done
 }
 
@@ -137,6 +137,13 @@ function main() {
   run_bazel
   copy_files
   patch_python
+
+  echo
+  echo "Dependencies vendored successfully. Applying build fixes..."
+  echo
+
+  # Apply build fixes automatically
+  "${ROOT_DIR}/ossm/scripts/apply-build-fixes.sh"
 
   echo
   echo "Done. Inspect the result with git status"

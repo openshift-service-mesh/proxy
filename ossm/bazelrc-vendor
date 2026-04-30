@@ -29,6 +29,7 @@ build --override_repository=com_github_chrusty_protoc_gen_jsonschema=/work/ossm/
 build --override_repository=com_github_golang_protobuf=/work/ossm/vendor/com_github_golang_protobuf
 build --override_repository=com_github_grpc_grpc=/work/ossm/vendor/com_github_grpc_grpc
 build --override_repository=com_github_iancoleman_strcase=/work/ossm/vendor/com_github_iancoleman_strcase
+build --override_repository=com_github_luajit2_luajit2=/work/ossm/vendor/com_github_luajit2_luajit2
 build --override_repository=com_github_lyft_protoc_gen_star_v2=/work/ossm/vendor/com_github_lyft_protoc_gen_star_v2
 build --override_repository=com_github_spf13_afero=/work/ossm/vendor/com_github_spf13_afero
 build --override_repository=com_google_googleapis=/work/ossm/vendor/com_google_googleapis

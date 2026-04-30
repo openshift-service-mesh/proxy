@@ -25,6 +25,25 @@ new_local_repository(
     build_file = "//:openssl.BUILD"
 )
 
+# Add luajit2 for s390x and ppc architecture support
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "com_github_luajit2_luajit2",
+    build_file_content = """
+filegroup(
+    name = "all",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "1e2374ac75618862d8c81bd5fc496fa7428c278164ad375a3e6b746e8833c0d2",
+    strip_prefix = "luajit2-dcc9c9ee67e1a5d3d636bd7745e95ddb4a1c70bc",
+    urls = ["https://github.com/openresty/luajit2/archive/dcc9c9ee67e1a5d3d636bd7745e95ddb4a1c70bc.tar.gz"],
+    patches = ["@envoy//bazel/foreign_cc:luajit.patch"],
+    patch_args = ["-p1"],
+)
+
 # 1. Determine SHA256 `wget https://github.com/envoyproxy/envoy/archive/$COMMIT.tar.gz && sha256sum $COMMIT.tar.gz`
 # 2. Update .bazelversion, envoy.bazelrc and .bazelrc if needed.
 #
