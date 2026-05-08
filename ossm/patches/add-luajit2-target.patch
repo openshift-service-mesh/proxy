@@ -1,0 +1,30 @@
+--- a/bazel/foreign_cc/BUILD	2026-04-29 18:00:57.649798904 +0200
++++ b/bazel/foreign_cc/BUILD	2026-04-29 18:01:44.364452689 +0200
+@@ -122,6 +122,27 @@
+     targets = [],
+ )
+ 
++# OpenResty's luajit2 with better support for s390x and ppc architectures
++configure_make(
++    name = "luajit2",
++    configure_command = "luajit_build.sh",
++    env = select({
++        # This shouldn't be needed! See
++        # https://github.com/envoyproxy/envoy/issues/6084
++        # TODO(htuch): Remove when #6084 is fixed
++        "//bazel:asan_build": {"ENVOY_CONFIG_ASAN": "1"},
++        "//bazel:msan_build": {"ENVOY_CONFIG_MSAN": "1"},
++        "//bazel:windows_dbg_build": {"WINDOWS_DBG_BUILD": "debug"},
++        "//conditions:default": {},
++    }),
++    lib_source = "@com_github_luajit2_luajit2//:all",
++    out_include_dir = "include/luajit-2.1",
++    out_static_libs = select({
++        "//bazel:windows_x86_64": ["lua51.lib"],
++        "//conditions:default": ["libluajit-5.1.a"],
++    }),
++    targets = [],
++)
+ configure_make(
+     name = "colm",
+     autogen = True,

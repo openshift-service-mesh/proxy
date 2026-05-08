@@ -48,6 +48,13 @@ local_repository(
     path = "bazel/extension_config",
 )
 
+# Use OpenSSL from the system rather than vendoring it
+new_local_repository(
+    name = "openssl",
+    path = "/usr/lib64/",
+    build_file = "//:openssl.BUILD",
+)
+
 envoy_api_binding()
 
 load("@envoy//bazel:api_repositories.bzl", "envoy_api_dependencies")
