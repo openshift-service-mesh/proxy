@@ -55,6 +55,14 @@ new_local_repository(
     build_file = "//:openssl.BUILD",
 )
 
+# Use LLVM from the system, not the one bundled in Envoy 
+# avoids vendoring 9.6GB of LLVM toolchain
+new_local_repository(
+    name = "llvm_toolchain_llvm",
+    path = "/usr",  # Use /usr so bin/clang resolves to /usr/bin/clang
+    build_file = "//:llvm.BUILD",
+)
+
 envoy_api_binding()
 
 load("@envoy//bazel:api_repositories.bzl", "envoy_api_dependencies")
@@ -86,7 +94,8 @@ install_deps()
 
 load("@envoy//bazel:dependency_imports.bzl", "envoy_dependency_imports")
 
-envoy_dependency_imports()
+# Use host Go instead of downloading to enable offline builds
+envoy_dependency_imports(go_version = "host")
 
 load("@envoy//bazel:repo.bzl", "envoy_repo")
 

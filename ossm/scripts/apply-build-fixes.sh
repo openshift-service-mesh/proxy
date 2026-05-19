@@ -94,7 +94,7 @@ compiler_flags = '''        # Force use of system compiler and sysroot instead o
         "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
         "CMAKE_C_FLAGS": "--sysroot=/",
         "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
-        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
+        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-21",
 '''
 
 # Define target patterns and their markers
@@ -130,6 +130,113 @@ with open(BUILD_FILE, "w") as f:
 print("    Patching complete")
 EOFPYTHON
 fi
+
+
+# Fix 8: Configure WORKSPACE to use system LLVM (like OpenSSL)
+echo "  - Configuring WORKSPACE to use system LLVM..."
+WORKSPACE_FILE="WORKSPACE"
+
+# Check if llvm_toolchain_llvm local repository is already configured
+if ! grep -q 'name = "llvm_toolchain_llvm"' "$WORKSPACE_FILE"; then
+    # Find the line with openssl new_local_repository and add LLVM after it
+    # Insert after the openssl repository definition
+    sed -i '/^new_local_repository(/,/^)/ {
+        /^)/ a\
+\
+# Use LLVM from the system, not the one bundled in Envoy \
+# Avoids vendoring 9.6GB of LLVM toolchain\
+new_local_repository(\
+    name = "llvm_toolchain_llvm",\
+    path = "/usr",  # Use /usr so bin/clang resolves to /usr/bin/clang\
+    build_file = "//:llvm.BUILD",\
+)
+    }' "$WORKSPACE_FILE"
+    echo "    Added llvm_toolchain_llvm local repository to WORKSPACE"
+else
+    echo "    llvm_toolchain_llvm already configured in WORKSPACE"
+fi
+
+# Fix 9: Create symlinks in llvm_toolchain/bin to system LLVM tools
+# The vendored llvm_toolchain is just config/wrappers, but needs access to system binaries
+echo "  - Creating symlinks to system LLVM tools in llvm_toolchain/bin..."
+LLVM_TOOLCHAIN_BIN="ossm/vendor/llvm_toolchain/bin"
+
+if [ -d "$LLVM_TOOLCHAIN_BIN" ]; then
+    # Create symlinks to system LLVM tools (with -21 suffix from Fedora packages)
+    cd "$LLVM_TOOLCHAIN_BIN"
+
+    # Core compiler tools (required for CGO and general compilation)
+    ln -sf /usr/bin/clang-21 clang || true
+    ln -sf /usr/bin/clang++-21 clang++ || true
+
+    # Tools that may or may not exist - create if available
+    [ -f /usr/bin/clang-cpp-21 ] && ln -sf /usr/bin/clang-cpp-21 clang-cpp
+    [ -f /usr/bin/clang-format-21 ] && ln -sf /usr/bin/clang-format-21 clang-format
+    [ -f /usr/bin/clang-tidy-21 ] && ln -sf /usr/bin/clang-tidy-21 clang-tidy
+    [ -f /usr/bin/clangd-21 ] && ln -sf /usr/bin/clangd-21 clangd
+
+    # Required tools (should always exist from clang21-devel/llvm21-devel)
+    ln -sf /usr/bin/llvm-dwp-21 llvm-dwp || true
+    ln -sf /usr/bin/llvm-profdata-21 llvm-profdata || true
+    ln -sf /usr/bin/llvm-cov-21 llvm-cov || true
+    ln -sf /usr/bin/llvm-objcopy-21 llvm-objcopy || true
+    ln -sf /usr/bin/llvm-objdump-21 llvm-objdump || true
+
+    cd "$ROOT_DIR"
+    echo "    Created symlinks to system LLVM tools"
+else
+    echo "    Warning: llvm_toolchain/bin not found - may need to run update-deps.sh first"
+fi
+
+# Fix 10: Update llvm_toolchain to use Clang 21 paths
+echo "  - Updating llvm_toolchain to use Clang 21 paths..."
+LLVM_TOOLCHAIN_BUILD="ossm/vendor/llvm_toolchain/BUILD.bazel"
+if [ -f "$LLVM_TOOLCHAIN_BUILD" ]; then
+    # First, replace any old Clang 18 paths with Clang 21
+    if grep -q 'lib/clang/18/include' "$LLVM_TOOLCHAIN_BUILD"; then
+        sed -i 's|lib/clang/18/include|lib/clang/21/include|g' "$LLVM_TOOLCHAIN_BUILD"
+        echo "    Updated Clang 18 paths to Clang 21"
+    fi
+
+    # Then, check if /usr/lib/clang/21/include is already added as absolute path
+    if ! grep -q '"/usr/lib/clang/21/include", "/usr/include"' "$LLVM_TOOLCHAIN_BUILD"; then
+        # Add /usr/lib/clang/21/include before /usr/include in all cxx_builtin_include_directories
+        sed -i 's|"/usr/include", "/usr/local/include"|"/usr/lib/clang/21/include", "/usr/include", "/usr/local/include"|g' "$LLVM_TOOLCHAIN_BUILD"
+        echo "    Added /usr/lib/clang/21/include to cxx_builtin_include_directories"
+    else
+        echo "    /usr/lib/clang/21/include already in cxx_builtin_include_directories"
+    fi
+else
+    echo "    Warning: llvm_toolchain/BUILD.bazel not found - may need to run update-deps.sh first"
+fi
+
+# Fix 11: Configure rules_foreign_cc to use preinstalled tools instead of bootstrapping
+# Bootstrapping GNU Make fails with custom compiler flags (-idirafter)
+# Use system make (/usr/bin/make) which is already installed in the container
+echo "  - Configuring rules_foreign_cc to use preinstalled tools..."
+DEPENDENCY_IMPORTS="ossm/vendor/envoy/bazel/dependency_imports.bzl"
+if [ -f "$DEPENDENCY_IMPORTS" ]; then
+    if ! grep -q "register_built_tools = False" "$DEPENDENCY_IMPORTS"; then
+        # Use perl for proper multiline replacement
+        perl -i -pe 's/rules_foreign_cc_dependencies\(\)/rules_foreign_cc_dependencies(\n        register_built_tools = False,\n        register_preinstalled_tools = True,\n    )/g' "$DEPENDENCY_IMPORTS"
+        echo "    Configured rules_foreign_cc to use preinstalled tools"
+    else
+        echo "    rules_foreign_cc already configured for preinstalled tools"
+    fi
+else
+    echo "    Warning: dependency_imports.bzl not found"
+fi
+
+# Fix 12: Create llvm_toolchain_llvm directory for Go CGO
+# Go's runtime/cgo looks for clang in toolchain_path_prefix which points to this vendored location
+echo "  - Creating llvm_toolchain_llvm directory for Go CGO..."
+LLVM_TOOLCHAIN_LLVM_BIN="ossm/vendor/llvm_toolchain_llvm/bin"
+mkdir -p "$LLVM_TOOLCHAIN_LLVM_BIN"
+cd "$LLVM_TOOLCHAIN_LLVM_BIN"
+ln -sf /usr/bin/clang-21 clang || true
+ln -sf /usr/bin/clang++-21 clang++ || true
+cd "$ROOT_DIR"
+echo "    Created llvm_toolchain_llvm directory with clang symlinks"
 
 echo ""
 echo "Build fixes applied successfully!"
