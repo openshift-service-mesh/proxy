@@ -1,6 +1,23 @@
 # Common build flags
 # build --cxxopt -w
 
+# With BAZEL_USE_HOST_SYSROOT=True, clang finds headers at system locations:
+#   - Clang builtins at /usr/lib/clang/21/include (Clang's default: FIRST in search path)
+#   - libc++ at /usr/include/c++/v1/
+#   - system headers at /usr/include/
+# Solution:
+#   - C++ files: Use -idirafter to move builtins AFTER libc++ (correct for #include_next)
+#   - C files: Explicitly set resource-dir because cc_wrapper.sh doesn't preserve defaults
+# Absolute path /usr/lib/clang/21/include is declared in llvm_toolchain/BUILD.bazel
+build --cxxopt=-idirafter/usr/lib/clang/21/include
+build --host_cxxopt=-idirafter/usr/lib/clang/21/include
+build --conlyopt=-resource-dir=/usr/lib/clang/21
+build --host_conlyopt=-resource-dir=/usr/lib/clang/21
+
+# Clang 21 added stricter nullability checking - disable for external dependencies
+build --cxxopt=-Wno-nullability-completeness
+build --host_cxxopt=-Wno-nullability-completeness
+
 build --host_force_python=PY3
 build --extra_toolchains=@local_jdk//:all
 build --tool_java_runtime_version=local_jdk
@@ -23,11 +40,24 @@ build:ci-config --color=no
 build:ci-config --show_progress_rate_limit=10
 
 common --action_env=OPENSSL_ROOT_DIR
-common --action_env=Clang_DIR=/usr/lib64/llvm18
+common --action_env=Clang_DIR=/usr/lib64/llvm21
 # Force foreign_cc (CMake) to use system clang instead of vendored toolchain
 # The vendored LLVM toolchain is incompatible with the container's glibc
 common --action_env=CC=/usr/bin/clang
 common --action_env=CXX=/usr/bin/clang++
+# Use system make to avoid bootstrapping GNU Make with custom header flags
+common --action_env=MAKE=/usr/bin/make
+# Ensure CGO can find Clang's builtin headers (stddef.h, stdatomic.h, etc.)
+# CGO uses cc_wrapper.sh which doesn't preserve Clang's default resource directory
+common --action_env=CGO_CFLAGS=-resource-dir=/usr/lib/clang/21
+
+# Use host sysroot to avoid vendored sysroot header path issues
+common --repo_env=BAZEL_USE_HOST_SYSROOT=True
+
+# Force Go CGO to use system clang (Fix for Go stdlib compilation)
+# Go's runtime/cgo looks for clang but can't find it in toolchain_path_prefix
+build --action_env=CC=clang
+build --host_action_env=CC=clang
 
 # Import vendor flags
 import %workspace%/ossm/bazelrc-vendor

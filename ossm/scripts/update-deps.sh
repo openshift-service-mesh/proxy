@@ -54,11 +54,9 @@ function init(){
         "python3_12_ppc"
         "python3_12_s390x"
         "python3_12_aarch64"
-        "toolchains_llvm"
-        "llvm_toolchain_llvm"                                                                                  
-        "llvm_toolchain"                                                                                       
-        "sysroot_linux_amd64"                                                                                  
-        "boringssl"        
+        # LLVM toolchain - use container-installed version at /usr/ (saves ~9.6GB)
+        # Note: llvm_toolchain (config/wrappers) IS vendored, only llvm_toolchain_llvm (binaries) is excluded
+        "llvm_toolchain_llvm"
   )
 }
 
