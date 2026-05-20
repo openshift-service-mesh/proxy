@@ -1,0 +1,3 @@
+
+LLVM_PATH = ''
+USE_LOCAL_SYSROOT = True

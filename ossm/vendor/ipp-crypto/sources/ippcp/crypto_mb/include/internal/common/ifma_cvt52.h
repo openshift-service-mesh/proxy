@@ -1,0 +1,93 @@
+/*************************************************************************
+* Copyright (C) 2019 Intel Corporation
+*
+* Licensed under the Apache License,  Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+* 	http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law  or agreed  to  in  writing,  software
+* distributed under  the License  is  distributed  on  an  "AS IS"  BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the  specific  language  governing  permissions  and
+* limitations under the License.
+*************************************************************************/
+
+#ifndef IFMA_CVT52_H
+#define IFMA_CVT52_H
+
+#include <internal/common/ifma_defs.h>
+
+#ifndef BN_OPENSSL_DISABLE
+#include <openssl/bn.h>
+#endif
+
+#include <crypto_mb/defs.h>
+
+#if (_MBX >= _MBX_K1)
+/* clang-format off */
+    #define ifma_BNU_to_mb    ifma_BNU_to_mb8
+    #define ifma_HexStr_to_mb ifma_HexStr8_to_mb8
+    #define ifma_mb_to_HexStr ifma_mb8_to_HexStr8
+    #define ifma_mb_to_BNU    ifma_mb8_to_BNU
+
+    #ifndef BN_OPENSSL_DISABLE
+    #define ifma_BN_to_mb ifma_BN_to_mb8
+    #endif /* BN_OPENSSL_DISABLE */
+
+    // from 8 buffers regular (radix2^64) to mb8 redundant (radix 2^52) representation
+    EXTERN_C int8u ifma_BNU_to_mb8(int64u out_mb8[][8], const int64u* const bn[8], int bitLen);
+    EXTERN_C int8u ifma_HexStr8_to_mb8(int64u out_mb8[][8], const int8u* const pStr[8], int bitLen);
+    #ifndef BN_OPENSSL_DISABLE
+    EXTERN_C int8u ifma_BN_to_mb8(int64u res[][8], const BIGNUM* const bn[8], int bitLen);
+    #endif /* BN_OPENSSL_DISABLE */
+
+    // from 8 buffers mb8 redundant (radix 2^52) to regular (radix2^64) representation
+    EXTERN_C int8u ifma_mb8_to_BNU(int64u* const out_bn[8],
+                                   const int64u inp_mb8[][8],
+                                   const int bitLen);
+    EXTERN_C int8u ifma_mb8_to_HexStr8(int8u* const pStr[8], const int64u inp_mb8[][8], int bitLen);
+
+    EXTERN_C int8u ifma_BNU_transpose_copy(int64u out_mb8[][8], const int64u* const inp[8], int bitLen);
+    #ifndef BN_OPENSSL_DISABLE
+    EXTERN_C int8u ifma_BN_transpose_copy(int64u out_mb8[][8], const BIGNUM* const inp[8], int bitLen);
+    #endif /* BN_OPENSSL_DISABLE */
+
+#elif ((_MBX >= _MBX_L9) && _MBX_AVX_IFMA_SUPPORTED)
+    #define ifma_BNU_to_mb          ifma_BNU_to_mb4
+    #define ifma_BNU_transpose_copy ifma_BNU_transpose_copy_mb4
+    #define ifma_HexStr_to_mb       ifma_HexStr4_to_mb4
+    #define ifma_mb_to_HexStr       ifma_mb4_to_HexStr4
+    #define ifma_mb_to_BNU          ifma_mb4_to_BNU
+
+    #ifndef BN_OPENSSL_DISABLE
+    #define ifma_BN_to_mb ifma_BN_to_mb4
+    #define ifma_BN_transpose_copy ifma_BN_transpose_copy_mb4
+    #endif /* BN_OPENSSL_DISABLE */
+
+    // from 4 buffers regular (radix2^64) to mb4 redundant (radix 2^52) representation
+    EXTERN_C int8u ifma_BNU_to_mb4(int64u out_mb4[][4], const int64u* const bn[4], int bitLen);
+    EXTERN_C int8u ifma_HexStr4_to_mb4(int64u out_mb4[][4], const int8u* const pStr[4], int bitLen);
+    #ifndef BN_OPENSSL_DISABLE
+    EXTERN_C int8u ifma_BN_to_mb4(int64u res[][4], const BIGNUM* const bn[4], int bitLen);
+    #endif /* BN_OPENSSL_DISABLE */
+
+    // from 4 buffers mb8 redundant (radix 2^52) to regular (radix2^64) representation
+    EXTERN_C int8u ifma_mb4_to_BNU(int64u* const out_bn[4],
+                                   const int64u inp_mb4[][4],
+                                   const int bitLen);
+    EXTERN_C int8u ifma_mb4_to_HexStr4(int8u* const pStr[4], const int64u inp_mb4[][4], int bitLen);
+
+    EXTERN_C int8u ifma_BNU_transpose_copy_mb4(int64u out_mb4[][4],
+                                               const int64u* const inp[4],
+                                               int bitLen);
+    #ifndef BN_OPENSSL_DISABLE
+    EXTERN_C int8u ifma_BN_transpose_copy_mb4(int64u out_mb4[][4],
+                                              const BIGNUM* const inp[4],
+                                              int bitLen);
+    #endif /* BN_OPENSSL_DISABLE */
+/* clang-format on */
+#endif /* #if (_MBX >= _MBX_K1) */
+
+#endif /* IFMA_CVT52_H */
