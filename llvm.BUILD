@@ -87,6 +87,12 @@ filegroup(name = "llvm-dwp", srcs = ["bin/llvm-dwp"])
 filegroup(name = "llvm-profdata", srcs = ["bin/llvm-profdata"])
 filegroup(name = "llvm-cov", srcs = ["bin/llvm-cov"])
 
+# Additional tools for code quality (clang-tidy, clang-format, etc.)
+# These may be in clang-tools-extra package
+filegroup(name = "clang-cpp", srcs = ["bin/clang-cpp"])
+filegroup(name = "clang-format", srcs = ["bin/clang-format"])
+filegroup(name = "clang-tidy", srcs = ["bin/clang-tidy"])
+
 # Linker
 filegroup(name = "lld", srcs = ["bin/lld"])
 filegroup(name = "ld.lld", srcs = ["bin/ld.lld"])
@@ -137,6 +143,12 @@ filegroup(
         "bin/llvm-ranlib-21",
         "bin/lld-link",
         "bin/lld-link-21",
+        "bin/clang-cpp",
+        "bin/clang-cpp-21",
+        "bin/clang-format",
+        "bin/clang-format-21",
+        "bin/clang-tidy",
+        "bin/clang-tidy-21",
     ],
 )
 

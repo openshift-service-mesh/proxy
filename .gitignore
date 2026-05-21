@@ -14,14 +14,3 @@ test/envoye2e/http_metadata_exchange/testoutput
 .vscode
 out/
 .cache
-
-# Symlinks to system LLVM tools in llvm_toolchain/bin
-ossm/vendor/llvm_toolchain/bin/clang-cpp
-ossm/vendor/llvm_toolchain/bin/clang-format
-ossm/vendor/llvm_toolchain/bin/clang-tidy
-ossm/vendor/llvm_toolchain/bin/clangd
-ossm/vendor/llvm_toolchain/bin/llvm-dwp
-ossm/vendor/llvm_toolchain/bin/llvm-profdata
-ossm/vendor/llvm_toolchain/bin/llvm-cov
-ossm/vendor/llvm_toolchain/bin/llvm-objcopy
-ossm/vendor/llvm_toolchain/bin/llvm-objdump

@@ -6,6 +6,11 @@ ARCH=$(uname -m)
 if [ "${ARCH}" = "ppc64le" ]; then
   ARCH="ppc"
 fi
+# For native aarch64 builds, use aarch64-native config to set host_platform
+# For cross-compilation, use plain aarch64 config
+if [ "${ARCH}" = "aarch64" ]; then
+  ARCH="aarch64-native"
+fi
 export ARCH
 
 OUTPUT_TO_IGNORE="\

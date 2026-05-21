@@ -33,7 +33,15 @@ build --test_output=all
 build:x86_64 --define=DUMMY=dummy
 build:s390x --cxxopt='-includeoptional' --copt=-Wno-error=type-limits --copt=-Wno-error=uninitialized --copt=-fno-builtin-strlen --action_env=BAZEL_LINKLIBS=-lstdc++
 build:ppc --action_env=BAZEL_LINKLIBS=-lstdc++
-build:aarch64 --define=DUMMY=dummy
+# aarch64 config: for cross-compilation from x86_64 (used during update-deps.sh)
+# Only sets compiler target, does NOT set platforms (no cross-compilation toolchain available)
+build:aarch64 --copt=--target=aarch64-unknown-linux-gnu --linkopt=--target=aarch64-unknown-linux-gnu
+# aarch64-native config: for native ARM64 builds (CI on ARM64 hardware)
+# Sets both target and host platforms so Bazel fetches ARM64 build tools (protoc, etc.)
+build:aarch64-native --config=aarch64
+build:aarch64-native --host_copt=--target=aarch64-unknown-linux-gnu --host_linkopt=--target=aarch64-unknown-linux-gnu
+build:aarch64-native --platforms=@envoy//bazel/platforms:linux_arm64
+build:aarch64-native --host_platform=@envoy//bazel/platforms:linux_arm64
 
 # Colored ouput messes with some of the logging systems in CI, so we disable that.
 build:ci-config --color=no
