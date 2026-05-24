@@ -1,0 +1,6 @@
+
+alias(
+    name = "clang_platform",
+    actual = "@envoy//bazel/platforms/rbe:linux_x64",
+    visibility = ["//visibility:public"],
+)

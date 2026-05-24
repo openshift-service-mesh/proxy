@@ -1,0 +1,139 @@
+# Deprecated API in Intel® Cryptography Primitives Library
+
+This document describes deprecated API in different Intel® Cryptography Primitives Library versions and recommendations for transition.
+
+The deprecated API means it is obsolete and will be removed in one of future Intel® Cryptography Primitives Library releases. If you have any concerns, please use the following link for opening a ticket and providing feedback:  <https://supporttickets.intel.com.>
+
+## Intel® Cryptography Primitives Library v1.3.0
+
+### Deprecation related to preview features:
+
+| Deprecated            | Recommended replacement       | Context                                          |
+| :-------------------- | :---------------------------: | :----------------------------------------------: |
+| ippsLMSBufferGetSize  | ippsLMSVerifyBufferGetSize    | Function has been renamed to less ambiguous name |
+
+### Deprecated Optimizations
+
+The code paths m7 (Intel® SSE3) and w7 (Intel® SSE2) are deprecated and will be removed from the merged build of Intel® Cryptography Primitives Library in the future releases. 1cpu headers are still available for all code paths. These branches can also be built as 1cpu libraries if specified in the platform list, e.g. `-DMERGED_BLD:BOOL=off -DPLATFORM_LIST=s8;e9`.
+
+### Installation Path Regression 
+
+Due to a bug in the CMake configuration, libraries built with `MB_STANDALONE=true` are incorrectly installed to `lib/intel64/` instead of the correct `lib/` directory. Users should be aware that the installation path may not match the expected location for standalone builds. This issue will be fixed in the next major release.
+
+## Intel® Cryptography Primitives Library v1.2.0
+
+Deprecation related to preview features:
+
+| Deprecated            | Recommended replacement       | Context                                          |
+| :-------------------- | :---------------------------: | :----------------------------------------------: |
+| ippsXMSSBufferGetSize | ippsXMSSVerifyBufferGetSize   | Function has been renamed to less ambiguous name |
+
+## Intel® Cryptography Primitives Library v1.1.0
+
+### FIPS self-tests
+
+The common `fips_selftest_ippsRSASignVerify_PKCS1v15_rmf_get_size*` functions have been specialized for signing and signature verification.
+The memory footprint of the corresponding FIPS self-tests was reduced.
+
+| Deprecated                                                 | Recommended replacement                                | Context                                                                |
+| :--------------------------------------------------------- | :----------------------------------------------------: | :--------------------------------------------------------------------: |
+| fips_selftest_ippsRSASignVerify_PKCS1v15_rmf_get_size_keys | fips_selftest_ippsRSASign_PKCS1v15_rmf_get_size_keys   | Understand memory requirements of RSA PKCS1 v1.5 signature generation  |
+| fips_selftest_ippsRSASignVerify_PKCS1v15_rmf_get_size      | fips_selftest_ippsRSASign_PKCS1v15_rmf_get_size        | Understand memory requirements of RSA PKCS1 v1.5 signature generation  |
+| fips_selftest_ippsRSASignVerify_PKCS1v15_rmf_get_size_keys | fips_selftest_ippsRSAVerify_PKCS1v15_rmf_get_size_keys | Understand memory requirements of RSA PKCS1 v1.5 signature verification |
+| fips_selftest_ippsRSASignVerify_PKCS1v15_rmf_get_size      | fips_selftest_ippsRSAVerify_PKCS1v15_rmf_get_size      | Understand memory requirements of RSA PKCS1 v1.5 signature verification |
+
+## Intel® Cryptography Primitives Library v1.0.0
+
+### Service Functions
+
+| Deprecated                                        |                    Recommended replacement                     |
+| :------------------------------------------------ | :------------------------------------------------------------: |
+| ippcpGetNumThreads                                |                      N/A                                       |
+| ippcpGetEnabledNumThreads                         |                      N/A                                       |
+| ippcpSetNumThreads                                |                      N/A                                       |
+| ippcpGetLibVersion                                |                      cryptoGetLibVersion                       |
+
+### Deprecated Optimizations
+
+The code paths n8/s8 (Intel® SSSE3) and g9/e9 (Intel® AVX) are deprecated and removed from the merged build of Intel® Cryptography Primitives Library, lower optimizations are used instead. 1cpu headers are still available for all code paths. These branches can also be built as 1cpu libraries if specified in the platform list, e.g. `-DMERGED_BLD:BOOL=off -DPLATFORM_LIST=s8;e9`.
+
+## Intel® Integrated Performance Primitives Cryptography (Intel® IPP Cryptography) 2020 Update1 (branch [ipp-crypto_2020_update1](https://github.com/intel/cryptography-primitives/tree/ipp-crypto_2020_update1))
+
+### Hash Functionality
+
+| Deprecated                                                                                                                                                                                                                                                                                                                                                             |                     Recommended replacement                     |
+| :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------: |
+| ippsSHA1GetSize<br>ippsSHA224GetSize<br>ippsSHA256GetSize<br>ippsSHA384GetSize<br>ippsSHA512GetSize<br>ippsSM3GetSize<br>ippsMD5GetSize                                                                                                                                                                                                                                |                       ippsHashGetSize_rmf                       |
+| ippsSHA1Init<br>ippsSHA224Init<br>ippsSHA256Init<br>ippsSHA384Init<br>ippsSHA512Init<br>ippsSM3Init<br>ippsMD5Init                                                                                                                                                                                                                                                     |                       ippsHashInit_rmf \*                       |
+| ippsSHA1Duplicate<br>ippsSHA224Duplicate<br>ippsSHA256Duplicate<br>ippsSHA384Duplicate<br>ippsSHA512Duplicate<br>ippsSM3Duplicate<br>ippsMD5Duplicate                                                                                                                                                                                                                  |                      ippsHashDuplicate_rmf                      |
+| ippsSHA1Pack, ippsSHA1Unpack<br>ippsSHA224Pack, ippsSHA224Unpack<br>ippsSHA256Pack, ippsSHA256Unpack<br>ippsSHA384Pack, ippsSHA384Unpack<br>ippsSHA512Pack, ippsSHA512Unpack<br>ippsSM3Pack, ippsSM3Unpack<br>ippsMD5Pack, ippsMD5Unpack                                                                                                                               |             ippsHashPack_rmf,<br>ippsHashUnpack_rmf             |
+| ippsSHA1Update, ippsSHA1GetTag, ippsSHA1Final<br>ippsSHA224Update, ippsSHA224GetTag, ippsSHA224Final<br>ippsSHA256Update, ippsSHA256GetTag, ippsSHA256Final<br>ippsSHA384Update, ippsSHA384GetTag, ippsSHA384Final<br>ippsSHA512Update, ippsSHA512GetTag, ippsSHA512Final<br>ippsSM3Update, ippsSM3GetTag, ippsSM3Final<br>ippsMD5Update, ippsMD5GetTag, ippsMD5Final | ippsHashUpdate_rmf,<br>ippsHashGetTag_rmf,<br>ippsHashFinal_rmf |
+| ippsSHA1MessageDigest<br>ippsSHA224MessageDigest<br>ippsSHA256MessageDigest<br>ippsSHA384MessageDigest<br>ippsSHA512MessageDigest<br>ippsSM3MessageDigest<br>ippsMD5MessageDigest                                                                                                                                                                                      |                     ippsHashMessage_rmf \*                      |
+| ippsHashGetSize                                                                                                                                                                                                                                                                                                                                                        |                       ippsHashGetSize_rmf                       |
+| ippsHashInit \*\*                                                                                                                                                                                                                                                                                                                                                      |                       ippsHashInit_rmf \*                       |
+| ippsHashDuplicate                                                                                                                                                                                                                                                                                                                                                      |                      ippsHashDuplicate_rmf                      |
+| ippsHashPack, ippsHashUnpack                                                                                                                                                                                                                                                                                                                                           |              ippsHashPack_rmf, ippsHashUnpack_rmf               |
+| ippsHashUpdate, ippsHashGetTag,ippsHashFinal                                                                                                                                                                                                                                                                                                                           |     ippsHashUpdate_rmf,ippsHashGetTag_rmf,ippsHashFinal_rmf     |
+| ippsHashMessage \*\*                                                                                                                                                                                                                                                                                                                                                   |                     ippsHashMessage_rmf \*                      |
+
+>\* To choose hash algorithm, specify [IppsHashMethod parameter](#ippshashalgid-to-ippshashmethod-parameter-map)
+>\*\* IppsHashAlgId parameter used in ippsHMAC_Init and in ippsHMAC_Message for choosing hash algorithm is deprecated (see Recommended replacement column for alternative in [IppsHashAlgId to IppsHashMethod Parameter Map](#ippshashalgid-to-ippshashmethod-parameter-map)
+
+### Keyed HMAC Functionality
+
+| Deprecated                                        |                    Recommended replacement                     |
+| :------------------------------------------------ | :------------------------------------------------------------: |
+| ippsHMAC_GetSize                                  |                      ippsHMAC_GetSize_rmf                      |
+| ippsHMAC_Init \*\*                                |                      ippsHMAC_Init_rmf \*                      |
+| ippsHMAC_Pack, ippsHMAC_Unack, ippsHMAC_Duplicate | ippsHMAC_Pack_rmf, ippsHMAC_Unpack_rmf, ippsHMAC_Duplicate_rmf |
+| ippsHMAC_Update, ippsHMAC_Final, ippsHMAC_GetTag  |  ippsHMAC_Update_rmf, ippsHMAC_Final_rmf, ippsHMAC_GetTag_rmf  |
+| ippsHMAC_Message \*\*                             |                    ippsHMAC_Message_rmf \*                     |
+
+>\* To choose hash algorithm, specify [IppsHashMethod parameter](#ippshashalgid-to-ippshashmethod-parameter-map)
+>\*\* IppsHashAlgId parameter used in 'ippsHMAC_Init' and in ippsHMAC_Message for choosing hash algorithm is deprecated (see Recommended replacement column for alternative in [IppsHashAlgId to IppsHashMethod Parameter Map](#ippshashalgid-to-ippshashmethod-parameter-map)
+
+
+### MGF Functionality
+
+| Deprecated       | Recommended replacement |
+| :--------------- | :---------------------: |
+| ippsHMAC_GetSize |  ippsHMAC_GetSize_rmf   |
+
+### RSA Encryption and Signature Schemes
+
+| Deprecated                                   |               Recommended replacement                |
+| :------------------------------------------- | :--------------------------------------------------: |
+| ippsRSAEncrypt_OAEP,  ippsRSADecrypt_OAEP    |   ippsRSAEncrypt_OAEP_rmf, ippsRSADecrypt_OAEP_rmf   |
+| ippsRSASign_PSS, ippsRSAVerify_PSS           |      ippsRSASign_PSS_rmf, ippsRSAVerify_PSS_rmf      |
+| ippsRSASign_PKCS1v15, ippsRSAVerify_PKCS1v15 | ippsRSASign_PKCS1v15_rmf, ippsRSAVerify_PKCS1v15_rmf |
+
+
+
+### Elliptic Curve Cryptography (ECC)
+
+| Deprecated                                                                                                                                                                                                                                                                                    |                                                                                                                                      Recommended replacement                                                                                                                                      |
+| :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
+| ippsECCPGetSize<br>ippsECCPGetSizeStd128r1<br>ippsECCPGetSizeStd128r2<br>ippsECCPGetSizeStd192r1<br>ippsECCPGetSizeStd224r1<br>ippsECCPGetSizeStd256r1<br>ippsECCPGetSizeStd384r1<br>ippsECCPGetSizeStd521r1<br>ippsECCPGetSizeStdSM2                                                         |                                                                                                                                         ippsGFpECGetSize                                                                                                                                          |
+| ippsECCPInit<br>ippsECCPInitStd128r1<br>ippsECCPInitStd128r2<br>ippsECCPInitStd192r1<br>ippsECCPInitStd224r1<br>ippsECCPInitStd256r1<br>ippsECCPInitStd384r1<br>ippsECCPInitStd521r1<br>ippsECCPInitStdSM2                                                                                    |                                                                                   ippsGFpECInitStd \*<br>* ippsGFpECInitStd functions provides both initialization<br>and set up standard EC set of parameters                                                                                    |
+| ippsECCPSet                                                                                                                                                                                                                                                                                   |                                                                                                                                           ippsGFpECSet                                                                                                                                            |
+| ippsECCPSetStd                                                                                                                                                                                                                                                                                |                                                                                   ippsGFpECInitStd \*<br>* ippsGFpECInitStd functions provides both initialization<br>and set up standard EC set of parameters                                                                                    |
+| ippsECCPSetStd128r1<br>ippsECCPSetStd128r2<br>ippsECCPSetStd192r1<br>ippsECCPSetStd224r1<br>ippsECCPSetStd256r1<br>ippsECCPSetStd384r1<br>ippsECCPSetStd521r1<br>ippsECCPSetStdSM2                                                                                                            |                                                ippsGFpECInitStd128r1<br>ippsGFpECInitStd128r2<br>ippsGFpECInitStd192r1<br>ippsGFpECInitStd224r1<br>ippsGFpECInitStd256r1<br>ippsGFpECInitStd384r1<br>ippsGFpECInitStd521r1<br>ippsGFpECInitStdSM2                                                 |
+| ippsECCPBindGxyTblStd192r1<br>ippsECCPBindGxyTblStd224r1<br>ippsECCPBindGxyTblStd256r1<br>ippsECCPBindGxyTblStd384r1<br>ippsECCPBindGxyTblStd521r1<br>ippsECCPBindGxyTblStdSM2                                                                                                                |                                                       ippsGFpECBindGxyTblStd192r1<br>ippsGFpECBindGxyTblStd224r1<br>ippsGFpECBindGxyTblStd256r1<br>ippsGFpECBindGxyTblStd384r1<br>ippsGFpECBindGxyTblStd521r1<br>ippsGFpECBindGxyTblStdSM2                                                        |
+| ippsECCPGet<br>ippsECCPGetOrderBitSize<br>ippsECCPValidate<br>ippsECCPPointGetSize, ippsECCPPointInit<br>ippsECCPSetPointAtInfinity<br>ippsECCPSetPoint,ippsECCPGetPoint<br>ippsECCPCheckPoint<br>ippsECCPComparePoint<br>ippsECCPNegativePoint<br>ippsECCPAddPoint<br>ippsECCPMulPointScalar | ippsGFpECGet<br>ippsGFpECGetSubgroup<br>ippsGFpECVerify<br>ippsGFpECPointGetSize, ippsGFpECPointInit<br>ippsGFpECSetPointAtInfinity<br>ippsGFpECSetPointRegular,ippsGFpECGetPointRegular<br>ippsGFpECTstPoint<br>ippsGFpECCmpPoint<br>ippsGFpECNegPoint<br>ippsGFpECAddPoint<br>ippsGFpECMulPoint |
+| ippsECCPGenKeyPair<br>ippsECCPPublicKey<br>ippsECCPValidateKeyPair<br>ippsECCPSetKeyPair                                                                                                                                                                                                      |                                                                                                              ippsGFpECPrivateKey<br>ippsGFpECPublicKey<br>ippsGFpECTstKeyPair<br>n/a                                                                                                              |
+| ippsECCPSharedSecretDH<br>ippsECCPSharedSecretDHC                                                                                                                                                                                                                                             |                                                                                                                        ippsGFpECSharedSecretDH<br>ippsGFpECSharedSecretDHC                                                                                                                        |
+| ippsECCPSignDSA<br>ippsECCPVerifyDSA<br>ippsECCPSignNR<br>ippsECCPVerifyNR<br>ippsECCPSignSM2<br>ippsECCPVerifySM2                                                                                                                                                                            |                                                                                     ippsGFpECSignDSA<br>ippsGFpECVerifyDSA<br>ippsGFpECSignNR<br>ippsGFpECVerifyNR<br>ippsGFpECSignSM2<br>ippsGFpECVerifySM2                                                                                      |
+
+### IppsHashAlgId to IppsHashMethod Parameter Map
+
+| Algorithm  | IppsHashAlgId (deprecated) |                          IppsHashMethod (recommended)                                     |                                                Notes                                                                                                                        |
+| :--------: | :------------------------: | :---------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
+|    SHA1    |      ippsHashAlg_SHA1      | ippsHashMethod_SHA1<br>ippsHashMethod_SHA1_NI<br>ippsHashMethod_SHA1_TT                   | Intel® Secure Hash Algorithm - New Instructions (Intel® SHA-NI) not supported<br>Intel® SHA-NI only supported<br>Automatic switch on Intel® SHA-NI, if possible (tick-tock) |
+|   SHA224   |     ippsHashAlg_SHA224     | ippsHashMethod_SHA224<br>ippsHashMethod_SHA224_NI<br>ippsHashMethod_SHA224_TT             | Intel® SHA-NI not supported<br>Intel® SHA-NI only supported<br>Automatic switch on Intel® SHA-NI, if possible supported                                                     |
+|   SHA256   |     ippsHashAlg_SHA256     | ippsHashMethod_SHA256<br>ippsHashMethod_SHA256_NI<br>ippsHashMethod_SHA256_TT             | Intel® SHA-NI not supported<br>Intel® SHA-NI only supported<br>Automatic switch on Intel® SHA-NI, if possible supported                                                     |
+|   SHA384   |     ippsHashAlg_SHA384     | ippsHashMethod_SHA384<br>ippsHashMethod_SHA384_NI<br>ippsHashMethod_SHA384_TT             | Intel® SHA512 not supported<br>Intel® SHA512 only supported<br>Automatic switch on Intel® SHA512, if possible supported                                                     |
+|   SHA512   |     ippsHashAgl_SHA512     | ippsHashMethod_SHA512<br>ippsHashMethod_SHA512_NI<br>ippsHashMethod_SHA512_TT             | Intel® SHA512 not supported<br>Intel® SHA512 only supported<br>Automatic switch on Intel® SHA512, if possible supported                                                     |
+|    SM3     |      ippsHashAlg_SM3       | ippsHashMethod_SM3<br>ippsHashMethod_SM3_NI<br>ippsHashMethod_SM3_TT             | Intel® SM3 not supported<br>Intel® SM3 only supported<br>Automatic switch on Intel® SM3, if possible supported                                                     |
+|    MD5     |      ippsHashAlg_MD5       |                              ippsHashMethod_MD5                                           |                                                  -                                                                                                                          |
+| SHA512-224 |   ippsHashAlg_SHA512_224   | ippsHashMethod_SHA512_224<br>ippsHashMethod_SHA512_224_NI<br>ippsHashMethod_SHA512_224_TT | Intel® SHA512 not supported<br>Intel® SHA512 only supported<br>Automatic switch on Intel® SHA512, if possible supported                                                     |
+| SHA512-256 |   ippsHashAlg_SHA512_256   | ippsHashMethod_SHA512_256<br>ippsHashMethod_SHA512_256_NI<br>ippsHashMethod_SHA512_256_TT | Intel® SHA512 not supported<br>Intel® SHA512 only supported<br>Automatic switch on Intel® SHA512, if possible supported                                                     |

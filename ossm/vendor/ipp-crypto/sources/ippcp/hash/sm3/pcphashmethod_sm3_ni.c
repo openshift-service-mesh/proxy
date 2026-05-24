@@ -1,0 +1,68 @@
+/*************************************************************************
+* Copyright (C) 2025 Intel Corporation
+*
+* Licensed under the Apache License,  Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+* 	http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law  or agreed  to  in  writing,  software
+* distributed under  the License  is  distributed  on  an  "AS IS"  BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the  specific  language  governing  permissions  and
+* limitations under the License.
+*************************************************************************/
+
+/*
+//
+//  Purpose:
+//     Cryptography Primitive.
+//     Digesting message according to SM3
+//
+//  Contents:
+//        ippsHashMethod_SM3_NI()
+//
+*/
+
+#include "owndefs.h"
+#include "owncp.h"
+#include "hash/pcphash.h"
+#include "hash/pcphash_rmf.h"
+#include "pcptool.h"
+#include "hash/sm3/pcpsm3stuff.h"
+
+/*F*
+//    Name: ippsHashMethod_SM3_NI
+//
+// Purpose: Return SM3 method optimized with SM3 instructions.
+//
+// Returns:
+//          Pointer to SM3 hash-method.
+//
+*F*/
+IPPFUN(const IppsHashMethod*, ippsHashMethod_SM3_NI, (void))
+{
+#if (_SM3_ENABLING_ == _FEATURE_TICKTOCK_ || _SM3_ENABLING_ == _FEATURE_ON_)
+    static IppsHashMethod method = { ippHashAlg_SM3,
+                                     IPP_SM3_DIGEST_BITSIZE / 8,
+                                     MBS_SM3,
+                                     MLR_SM3,
+                                     IPP_SM3_STATE_BYTESIZE,
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL };
+
+    // don't merge `method` initialization with function pointers assignment
+    // to prevent relocations (indirect calls) to be generated in the binary
+    method.hashInit   = sm3_hashInit;
+    method.hashUpdate = sm3_hashUpdate_ni; // SM3 instructions are used
+    method.hashOctStr = sm3_hashOctString;
+    method.msgLenRep  = sm3_msgRep;
+
+    return &method;
+#else
+    return NULL;
+#endif
+}
