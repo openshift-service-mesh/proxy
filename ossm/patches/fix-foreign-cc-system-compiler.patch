@@ -18,7 +18,7 @@
 +        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
 +        "CMAKE_C_FLAGS": "--sysroot=/",
 +        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
-+        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
++        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld",
      },
      exec_properties = select({
          "//bazel:engflow_rbe_x86_64": {
@@ -31,7 +31,7 @@
 +        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
 +        "CMAKE_C_FLAGS": "--sysroot=/",
 +        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
-+        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
++        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld",
      },
      exec_properties = select({
          "//bazel:engflow_rbe_x86_64": {
@@ -44,7 +44,7 @@
 +        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
 +        "CMAKE_C_FLAGS": "--sysroot=/",
 +        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
-+        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
++        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld",
      },
      cmake_files_dir = "$BUILD_TMPDIR/lib/CMakeFiles",
      debug_cache_entries = {"ENABLE_DEBUG": "on"},
@@ -57,7 +57,7 @@
 +        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
 +        "CMAKE_C_FLAGS": "--sysroot=/",
 +        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
-+        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
++        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld",
      },
      exec_properties = select({
          "//bazel:engflow_rbe_x86_64": {
@@ -70,7 +70,7 @@
 +        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
 +        "CMAKE_C_FLAGS": "--sysroot=/",
 +        "CMAKE_CXX_FLAGS": "--sysroot=/ -stdlib=libc++",
-+        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld-18",
++        "CMAKE_EXE_LINKER_FLAGS": "--sysroot=/ -fuse-ld=/usr/bin/ld.lld",
      },
      defines = ["MAXMIND_STATICLIB"],
      exec_properties = select({

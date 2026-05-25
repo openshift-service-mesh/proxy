@@ -1,5 +1,17 @@
 # Common build flags
-# build --cxxopt -w
+
+# Header search order: libc++ wrappers must be found before clang builtins so
+# #include_next chains work (e.g. libc++ <cstddef> -> <stddef.h> -> clang builtin).
+# -idirafter moves builtins AFTER standard paths; -resource-dir tells C files
+# where to find builtins like stdatomic.h.
+build --cxxopt=-idirafter/usr/lib/clang/21/include
+build --host_cxxopt=-idirafter/usr/lib/clang/21/include
+build --conlyopt=-resource-dir=/usr/lib/clang/21
+build --host_conlyopt=-resource-dir=/usr/lib/clang/21
+
+# Clang 21 added stricter nullability checking - disable for external dependencies
+build --cxxopt=-Wno-nullability-completeness
+build --host_cxxopt=-Wno-nullability-completeness
 
 build --host_force_python=PY3
 build --extra_toolchains=@local_jdk//:all
@@ -16,18 +28,30 @@ build --test_output=all
 build:x86_64 --define=DUMMY=dummy
 build:s390x --cxxopt='-includeoptional' --copt=-Wno-error=type-limits --copt=-Wno-error=uninitialized --copt=-fno-builtin-strlen --action_env=BAZEL_LINKLIBS=-lstdc++
 build:ppc --action_env=BAZEL_LINKLIBS=-lstdc++
-build:aarch64 --define=DUMMY=dummy
+# aarch64 config: for cross-compilation from x86_64 (used during update-deps.sh)
+# Only sets compiler target, does NOT set platforms (no cross-compilation toolchain available)
+build:aarch64 --copt=--target=aarch64-unknown-linux-gnu --linkopt=--target=aarch64-unknown-linux-gnu
+# aarch64-native config: for native ARM64 builds (CI on ARM64 hardware)
+# Sets both target and host platforms so Bazel fetches ARM64 build tools (protoc, etc.)
+build:aarch64-native --config=aarch64
+build:aarch64-native --host_copt=--target=aarch64-unknown-linux-gnu --host_linkopt=--target=aarch64-unknown-linux-gnu
+build:aarch64-native --platforms=@envoy//bazel/platforms:linux_arm64
+build:aarch64-native --host_platform=@envoy//bazel/platforms:linux_arm64
 
 # Colored ouput messes with some of the logging systems in CI, so we disable that.
 build:ci-config --color=no
 build:ci-config --show_progress_rate_limit=10
 
 common --action_env=OPENSSL_ROOT_DIR
-common --action_env=Clang_DIR=/usr/lib64/llvm18
+common --action_env=Clang_DIR=/usr/lib64/llvm21
 # Force foreign_cc (CMake) to use system clang instead of vendored toolchain
-# The vendored LLVM toolchain is incompatible with the container's glibc
 common --action_env=CC=/usr/bin/clang
 common --action_env=CXX=/usr/bin/clang++
+# Use system make to avoid bootstrapping GNU Make with custom header flags
+common --action_env=MAKE=/usr/bin/make
+
+# Use host sysroot — toolchains_llvm uses this to skip vendored sysroot
+common --repo_env=BAZEL_USE_HOST_SYSROOT=True
 
 # Import vendor flags
 import %workspace%/ossm/bazelrc-vendor

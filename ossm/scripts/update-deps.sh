@@ -17,6 +17,12 @@ set -eo pipefail
 
 export CC=clang CXX=clang++ ENVOY_OPENSSL=1
 
+# Use system LLVM instead of downloading 9.6GB toolchain
+# This tells envoy's toolchains_llvm to generate @llvm_toolchain with absolute
+# paths to /usr/bin/clang, /usr/bin/llvm-ar, etc. — no symlinks or wrapper repos needed
+export BAZEL_LLVM_PATH=/usr
+export BAZEL_USE_HOST_SYSROOT=True
+
 function init(){
   ROOT_DIR="$(pwd)"
 
@@ -54,11 +60,8 @@ function init(){
         "python3_12_ppc"
         "python3_12_s390x"
         "python3_12_aarch64"
-        "toolchains_llvm"
-        "llvm_toolchain_llvm"                                                                                  
-        "llvm_toolchain"                                                                                       
-        "sysroot_linux_amd64"                                                                                  
-        "boringssl"        
+        # llvm_toolchain_llvm is no longer generated when BAZEL_LLVM_PATH=/usr is set
+        # (toolchains_llvm uses absolute paths to system LLVM instead of downloading binaries)
   )
 }
 
@@ -94,7 +97,7 @@ function copy_files() {
         cp_flags="-r"
       fi
       cp "${cp_flags}" "${f}" "${VENDOR_DIR}" || echo "Copy of ${f} failed. Ignoring..."
-      echo "build --override_repository=${repo_name}=/work/ossm/vendor/${repo_name}" >> "${BAZELRC}"
+      echo "build --override_repository=${repo_name}=%workspace%/ossm/vendor/${repo_name}" >> "${BAZELRC}"
     fi
   done
 
@@ -106,9 +109,35 @@ function copy_files() {
   find "${VENDOR_DIR}" -name '*.pyc' -delete
 }
 
+function patch_java_tools() {
+  # Patch remote_java_tools to add missing prebuilt_one_version target
+  # Newer rules_java expects this but older vendored java_tools don't provide it
+  for java_tools_dir in "${OUTPUT_BASE}"/external/remote_java_tools*; do
+    if [ -d "${java_tools_dir}" ]; then
+      local java_tools_build="${java_tools_dir}/BUILD"
+      if [ -f "${java_tools_build}" ] && ! grep -q "prebuilt_one_version" "${java_tools_build}"; then
+        echo "Patching $(basename ${java_tools_dir}) to add missing prebuilt_one_version target..."
+        # Make file writable (Bazel output base files are read-only)
+        chmod +w "${java_tools_build}"
+        cat >> "${java_tools_build}" << 'EOF'
+
+# Added by update-deps.sh to satisfy rules_java toolchain requirements
+filegroup(
+    name = "prebuilt_one_version",
+    srcs = [],
+)
+EOF
+      fi
+    fi
+  done
+}
+
 function run_bazel() {
   # Workaround to force fetch of rules_license
   bazel --output_base="${OUTPUT_BASE}" fetch @remote_java_tools//java_tools/zlib:zlib || true
+
+  # Patch Java tools after initial fetch but before full build analysis
+  patch_java_tools
 
   # Workaround to force fetch of protoc for arm
   bazel --output_base="${OUTPUT_BASE}" fetch @com_google_protobuf_protoc_linux_aarch_64//:protoc
@@ -131,7 +160,7 @@ function patch_python() {
     mkdir -p "${dir}"
     cp "${ROOT_DIR}/ossm/scripts/BUILD.bazel.python" "${dir}/BUILD.bazel"
 
-    echo "build --override_repository=${repo_name}=/work/ossm/vendor/${repo_name}" >> "${BAZELRC}"
+    echo "build --override_repository=${repo_name}=%workspace%/ossm/vendor/${repo_name}" >> "${BAZELRC}"
     echo "workspace(name = \"${repo_name}\")" > "${dir}/WORKSPACE"
   done
 }

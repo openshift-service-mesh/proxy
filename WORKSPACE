@@ -55,6 +55,63 @@ new_local_repository(
     build_file = "//:openssl.BUILD",
 )
 
+# Use system JDK for Java runtime (needed by ANTLR4 and other Java tools)
+new_local_repository(
+    name = "local_jdk",
+    path = "/usr/lib/jvm/java-21-openjdk",
+    build_file_content = """
+java_runtime(
+    name = "jdk",
+    java_home = "/usr/lib/jvm/java-21-openjdk",
+    visibility = ["//visibility:public"],
+)
+
+# Main runtime toolchain
+toolchain(
+    name = "runtime_toolchain",
+    exec_compatible_with = [],
+    target_compatible_with = [],
+    toolchain = ":jdk",
+    toolchain_type = "@bazel_tools//tools/jdk:runtime_toolchain_type",
+)
+
+# Bootstrap runtime toolchain (same as main for system JDK)
+toolchain(
+    name = "bootstrap_runtime_toolchain",
+    exec_compatible_with = [],
+    target_compatible_with = [],
+    toolchain = ":jdk",
+    toolchain_type = "@bazel_tools//tools/jdk:bootstrap_runtime_toolchain_type",
+)
+
+# Aliases for compatibility with Bazel's expectations
+alias(
+    name = "runtime_toolchain_definition",
+    actual = ":runtime_toolchain",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "bootstrap_runtime_toolchain_definition",
+    actual = ":bootstrap_runtime_toolchain",
+    visibility = ["//visibility:public"],
+)
+
+# Additional standard targets that Bazel might expect
+alias(
+    name = "jre",
+    actual = ":jdk",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "java",
+    actual = ":jdk",
+    visibility = ["//visibility:public"],
+)
+""",
+)
+
 envoy_api_binding()
 
 load("@envoy//bazel:api_repositories.bzl", "envoy_api_dependencies")
@@ -86,7 +143,40 @@ install_deps()
 
 load("@envoy//bazel:dependency_imports.bzl", "envoy_dependency_imports")
 
-envoy_dependency_imports()
+# Use host Go instead of downloading to enable offline builds
+envoy_dependency_imports(go_version = "host")
+
+# Register Go toolchains for cross-compilation (aarch64, s390x, ppc64le)
+# These are needed when building for non-host architectures
+load("@io_bazel_rules_go//go:deps.bzl", "go_download_sdk")
+
+go_download_sdk(
+    name = "go_linux_amd64",
+    goos = "linux",
+    goarch = "amd64",
+    version = "1.24.6",
+)
+
+go_download_sdk(
+    name = "go_linux_arm64",
+    goos = "linux",
+    goarch = "arm64",
+    version = "1.24.6",
+)
+
+go_download_sdk(
+    name = "go_linux_s390x",
+    goos = "linux",
+    goarch = "s390x",
+    version = "1.24.6",
+)
+
+go_download_sdk(
+    name = "go_linux_ppc64le",
+    goos = "linux",
+    goarch = "ppc64le",
+    version = "1.24.6",
+)
 
 load("@envoy//bazel:repo.bzl", "envoy_repo")
 
@@ -99,3 +189,9 @@ envoy_toolchains()
 load("@llvm_toolchain//:toolchains.bzl", "llvm_register_toolchains")
 
 llvm_register_toolchains()
+
+# Register system Java runtime toolchains (both regular and bootstrap)
+register_toolchains(
+    "@local_jdk//:runtime_toolchain",
+    "@local_jdk//:bootstrap_runtime_toolchain",
+)
