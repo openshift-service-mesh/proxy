@@ -46,6 +46,7 @@ function init(){
         "local_jdk"
         "bazel_gazelle_go"
         "openssl"
+        "llvm_toolchain_llvm"
         "go_sdk"
         "host_platform"
         "remotejdk"
@@ -60,8 +61,6 @@ function init(){
         "python3_12_ppc"
         "python3_12_s390x"
         "python3_12_aarch64"
-        # llvm_toolchain_llvm is no longer generated when BAZEL_LLVM_PATH=/usr is set
-        # (toolchains_llvm uses absolute paths to system LLVM instead of downloading binaries)
   )
 }
 
@@ -93,7 +92,7 @@ function copy_files() {
       fi
 
       cp_flags="-rL"
-      if [ "${repo_name}" == "emscripten_toolchain" ] || [ "${repo_name}" == "antlr4-cpp-runtime" ] || [ "${repo_name}" == "envoy_toolshed" ] || [[ "${repo_name}" == *"luajit2"* ]]; then
+      if [ "${repo_name}" == "emscripten_toolchain" ] || [ "${repo_name}" == "antlr4-cpp-runtime" ] || [ "${repo_name}" == "envoy_toolshed" ] || [[ "${repo_name}" == *"luajit2"* ]] || [ "${repo_name}" == "llvm_toolchain" ]; then
         cp_flags="-r"
       fi
       cp "${cp_flags}" "${f}" "${VENDOR_DIR}" || echo "Copy of ${f} failed. Ignoring..."
@@ -132,6 +131,48 @@ EOF
   done
 }
 
+function patch_openssl_compat() {
+  # Patch Envoy's compat/openssl/BUILD to fix OPENSSL_INCLUDE_DIR extraction
+  # The upstream BUILD uses $(location) which fails when @openssl//:include
+  # expands to multiple files. We need $(locations) and directory extraction.
+  local envoy_compat_build="${OUTPUT_BASE}/external/envoy/compat/openssl/BUILD"
+
+  if [ ! -f "${envoy_compat_build}" ]; then
+    echo "WARNING: envoy/compat/openssl/BUILD not found at ${envoy_compat_build}"
+    return
+  fi
+
+  echo "Patching envoy/compat/openssl/BUILD..."
+  chmod +w "${envoy_compat_build}"
+
+  # Remove @llvm_toolchain_llvm//:include from srcs (not needed)
+  if grep -q '@llvm_toolchain_llvm//:include' "${envoy_compat_build}"; then
+    echo "  - Removing unused @llvm_toolchain_llvm//:include"
+    sed -i '/@llvm_toolchain_llvm\/\/:include/d' "${envoy_compat_build}"
+  fi
+
+  # Fix OPENSSL_INCLUDE_DIR extraction to handle multiple files
+  # Use awk for more reliable multi-line replacement
+  if grep -q 'OPENSSL_INCLUDE_DIR=$(location' "${envoy_compat_build}"; then
+    echo "  - Fixing OPENSSL_INCLUDE_DIR extraction (changing location to locations)"
+    awk '
+    /OPENSSL_INCLUDE_DIR=\$\(location .*openssl.*:include\)/ {
+        print "        # Extract the include directory from the list of OpenSSL headers"
+        print "        # $(locations) returns space-separated list like \"/usr/include/openssl/ssl.h ...\""
+        print "        # We take the first file and go up two directories: ssl.h -> openssl/ -> include/"
+        print "        FIRST_HEADER=($(locations @@openssl//:include))"
+        print "        OPENSSL_INCLUDE_DIR=$$(dirname $$(dirname $${FIRST_HEADER[0]}))"
+        next
+    }
+    { print }
+    ' "${envoy_compat_build}" > "${envoy_compat_build}.tmp"
+    mv "${envoy_compat_build}.tmp" "${envoy_compat_build}"
+    echo "  - Patch applied successfully"
+  else
+    echo "  - Pattern not found or already patched"
+  fi
+}
+
 function run_bazel() {
   # Workaround to force fetch of rules_license
   bazel --output_base="${OUTPUT_BASE}" fetch @remote_java_tools//java_tools/zlib:zlib || true
@@ -145,6 +186,7 @@ function run_bazel() {
   bazel --output_base="${OUTPUT_BASE}" fetch @gperftools//:all
 
   # Fetch all the rest and check everything using "build --nobuild "option
+  # Note: The envoy repository is automatically patched via patches = [...] in WORKSPACE
   for config in x86_64 aarch64 s390x ppc; do
     bazel --output_base="${OUTPUT_BASE}" build --nobuild --keep_going --config="${config}" //...
   done

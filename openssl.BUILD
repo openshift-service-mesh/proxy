@@ -1,16 +1,17 @@
 licenses(["notice"])  # Apache 2
 
-# Expose OpenSSL include directory for the prefixer tool
+# Export all OpenSSL headers - the genrule will extract directory from the first one
+# The BoringSSL compat layer's genrule uses $(location @@openssl//:include)
 filegroup(
-    name = "include_headers",
-    srcs = glob(["include/openssl/**/*.h"]),
+    name = "include",
+    srcs = glob(["include/openssl/*.h"]),
     visibility = ["//visibility:public"],
 )
 
-# Alias for compatibility
-alias(
-    name = "include",
-    actual = ":include_headers",
+# All OpenSSL headers for cc_library targets
+filegroup(
+    name = "include_headers",
+    srcs = glob(["include/openssl/**/*.h"]),
     visibility = ["//visibility:public"],
 )
 

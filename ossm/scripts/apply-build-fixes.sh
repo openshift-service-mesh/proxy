@@ -2,9 +2,11 @@
 # Apply necessary fixes to vendored dependencies for Fedora 43 build compatibility
 # Run this script after ossm/vendor is regenerated
 #
-# Note: LLVM toolchain configuration is handled by setting BAZEL_LLVM_PATH=/usr
-# in update-deps.sh, which tells toolchains_llvm to use system LLVM with absolute
-# paths. This eliminates the need for symlinks, exports_files, and path patches.
+# Note: LLVM toolchain CONFIGURATION (BUILD.bazel, cc_toolchain_config.bzl, toolchains.bzl)
+# is vendored in ossm/vendor/llvm_toolchain/, but LLVM BINARIES are not. Instead:
+# - Setting BAZEL_LLVM_PATH=/usr in update-deps.sh tells toolchains_llvm to use system LLVM
+# - llvm.BUILD wraps system LLVM installation at /usr (similar to openssl.BUILD)
+# - ossm/vendor/llvm_toolchain/bin/ contains symlinks to system tools (not binaries)
 
 set -e
 
@@ -206,40 +208,6 @@ EOF
     fi
 done
 
-# Fix 11: Conditionally register system JDK as Java runtime toolchain
-echo "  - Checking Java runtime toolchain configuration..."
-WORKSPACE_FILE="WORKSPACE"
-if [ -d "/usr/lib/jvm/java-21-openjdk" ]; then
-    if ! grep -q 'name = "local_jdk"' "$WORKSPACE_FILE"; then
-        cat >> "$WORKSPACE_FILE" << 'JDKEOF'
-
-# System JDK for Java-based build tools (ANTLR4 in cel-cpp, etc.)
-# Added conditionally by apply-build-fixes.sh when building in container
-new_local_repository(
-    name = "local_jdk",
-    path = "/usr/lib/jvm/java-21-openjdk",
-    build_file_content = """
-package(default_visibility = ["//visibility:public"])
-java_runtime(
-    name = "jdk",
-    srcs = glob(["**"]),
-    java_home = ".",
-)
-toolchain(
-    name = "runtime_toolchain",
-    toolchain = ":jdk",
-    toolchain_type = "@bazel_tools//tools/jdk:runtime_toolchain_type",
-)
-""",
-)
-JDKEOF
-        echo "    Added local_jdk repository to WORKSPACE"
-    else
-        echo "    local_jdk already configured"
-    fi
-else
-    echo "    Skipping (no Java 21 found - expected during vendoring on host)"
-fi
 
 # Fix 12: Add aarch64-linux CC toolchain for native ARM64 builds
 # The vendored llvm_toolchain only defines x86_64 toolchains, so ARM64 CI fails
@@ -385,6 +353,133 @@ if [ -f "$LLVM_TOOLCHAIN_BZL" ]; then
     fi
 else
     echo "    Warning: llvm_toolchain/toolchains.bzl not found"
+fi
+
+# Fix 13: Update Envoy's BoringSSL compat prefixer to use LLVM 21 instead of 18.1
+echo "  - Updating prefixer BUILD to use LLVM 21..."
+PREFIXER_BUILD="ossm/vendor/envoy/compat/openssl/prefixer/BUILD"
+if [ -f "$PREFIXER_BUILD" ]; then
+    if grep -q 'lib/libclang-cpp.so.18.1' "$PREFIXER_BUILD"; then
+        sed -i 's|lib/libclang-cpp\.so\.18\.1|lib/libclang-cpp.so.21.1|g' "$PREFIXER_BUILD"
+        echo "    Updated libclang-cpp version from 18.1 to 21.1"
+    else
+        echo "    libclang-cpp version already updated or not found"
+    fi
+else
+    echo "    Warning: prefixer/BUILD not found (will be created during vendoring)"
+fi
+
+# Fix 14: Add LLVM library to prefixer deps for linking
+echo "  - Adding LLVM library to prefixer deps..."
+PREFIXER_BUILD="ossm/vendor/envoy/compat/openssl/prefixer/BUILD"
+if [ -f "$PREFIXER_BUILD" ]; then
+    if ! grep -q '"@llvm_toolchain_llvm//:llvm"' "$PREFIXER_BUILD"; then
+        # Add LLVM to the deps list (after :llvm_headers)
+        sed -i 's/deps = \[":llvm_headers"\]/deps = [":llvm_headers", "@llvm_toolchain_llvm\/\/:llvm"]/' "$PREFIXER_BUILD"
+        echo "    Added @llvm_toolchain_llvm//:llvm to prefixer deps"
+    else
+        echo "    LLVM library already in prefixer deps"
+    fi
+else
+    echo "    Warning: prefixer/BUILD not found (will be created during vendoring)"
+fi
+
+# Fix 15: Remove engine.h and engineerr.h from compat/openssl BUILD outs
+# ENGINE API is deprecated in OpenSSL 3.x and these headers are skipped by prefixer
+echo "  - Removing deprecated ENGINE headers from compat/openssl BUILD outputs..."
+COMPAT_OPENSSL_BUILD="ossm/vendor/envoy/compat/openssl/BUILD"
+if [ -f "$COMPAT_OPENSSL_BUILD" ]; then
+    if grep -q 'include/ossl/openssl/engine.h' "$COMPAT_OPENSSL_BUILD"; then
+        sed -i '/include\/ossl\/openssl\/engine\.h/d' "$COMPAT_OPENSSL_BUILD"
+        sed -i '/include\/ossl\/openssl\/engineerr\.h/d' "$COMPAT_OPENSSL_BUILD"
+        echo "    Removed engine.h and engineerr.h from outs list"
+    else
+        echo "    ENGINE headers already removed from outs"
+    fi
+else
+    echo "    Warning: compat/openssl/BUILD not found"
+fi
+
+# Fix 16: Add architecture-specific configuration headers to BUILD and create symlinks
+# The prefixer generates configuration.h which tries to #include architecture-specific headers.
+# We need to ensure all declared outputs exist by copying configuration.h to the native arch
+# and symlinking the others.
+echo "  - Configuring architecture-specific OpenSSL headers in compat/openssl BUILD..."
+COMPAT_OPENSSL_BUILD="ossm/vendor/envoy/compat/openssl/BUILD"
+
+if [ -f "$COMPAT_OPENSSL_BUILD" ]; then
+    # First, ensure architecture-specific headers are in the outs list
+    if ! grep -q 'include/ossl/openssl/configuration-x86_64.h' "$COMPAT_OPENSSL_BUILD"; then
+        # Find the configuration.h line and add arch-specific headers after it
+        sed -i '/include\/ossl\/openssl\/configuration\.h/a\        "include/ossl/openssl/configuration-x86_64.h",\n        "include/ossl/openssl/configuration-aarch64.h",\n        "include/ossl/openssl/configuration-s390x.h",\n        "include/ossl/openssl/configuration-ppc64le.h",' "$COMPAT_OPENSSL_BUILD"
+        echo "    Added architecture-specific configuration headers to outs"
+    else
+        echo "    Architecture-specific configuration headers already in outs"
+    fi
+
+    # Patch the genrule cmd to create architecture-specific headers after prefixer runs
+    # We detect the native architecture and copy configuration.h to that arch-specific name,
+    # then symlink the others to it (all outputs must exist per Bazel requirements)
+
+    # First, clean up any previously inserted script that might be in the wrong location
+    if grep -q 'NATIVE_ARCH=' "$COMPAT_OPENSSL_BUILD"; then
+        # Remove lines from "# Create architecture-specific" to "done" after the closing """
+        sed -i '/""",$/{n; /^$/,/^        done$/ {/# Create architecture-specific/,/done/d}}' "$COMPAT_OPENSSL_BUILD"
+    fi
+
+    if ! grep -q 'NATIVE_ARCH=' "$COMPAT_OPENSSL_BUILD"; then
+        # Insert script before the closing """ in prefixed_ossl_source genrule
+        # We use awk to find the line and sed to insert
+        LINE_NUM=$(awk '/name = "prefixed_ossl_source"/,/""",$/ {if (/""",$/) {print NR; exit}}' "$COMPAT_OPENSSL_BUILD")
+
+        if [ -n "$LINE_NUM" ]; then
+            # Create temp file with the script to insert
+            cat > /tmp/arch_script.txt << 'ARCHEOF'
+
+        # Create architecture-specific configuration headers (added by apply-build-fixes.sh)
+        # OpenSSL packaging varies by architecture:
+        # - x86_64: Ships configuration.h (dispatcher) + configuration-x86_64.h (actual config)
+        # - aarch64/s390x/ppc64le: Ships only configuration.h (actual config, no dispatcher)
+        # The prefixer processes whatever exists and creates ossl/openssl/configuration*.h
+        # We need to ensure all 4 arch-specific headers exist (required by BUILD outputs)
+        NATIVE_ARCH=$$(uname -m)
+
+        # Check if the native arch-specific header was created by prefixer
+        case "$$NATIVE_ARCH" in
+            x86_64) NATIVE_CONFIG="configuration-x86_64.h" ;;
+            aarch64) NATIVE_CONFIG="configuration-aarch64.h" ;;
+            s390x) NATIVE_CONFIG="configuration-s390x.h" ;;
+            ppc64le) NATIVE_CONFIG="configuration-ppc64le.h" ;;
+            *) echo "Unknown architecture: $$NATIVE_ARCH"; exit 1 ;;
+        esac
+
+        # If native arch-specific header doesn't exist, copy from configuration.h
+        if [ ! -f "$(RULEDIR)/include/ossl/openssl/$$NATIVE_CONFIG" ]; then
+            cp $(RULEDIR)/include/ossl/openssl/configuration.h $(RULEDIR)/include/ossl/openssl/$$NATIVE_CONFIG
+        fi
+
+        # Symlink all other architectures to the native one
+        for ARCH_CONFIG in configuration-x86_64.h configuration-aarch64.h configuration-s390x.h configuration-ppc64le.h; do
+            if [ "$$ARCH_CONFIG" != "$$NATIVE_CONFIG" ]; then
+                ln -sf $$NATIVE_CONFIG $(RULEDIR)/include/ossl/openssl/$$ARCH_CONFIG
+            fi
+        done
+ARCHEOF
+
+            # Insert before the line with """ (using i\ to insert BEFORE, not r to insert AFTER)
+            # First decrement LINE_NUM to insert before it
+            LINE_NUM=$((LINE_NUM - 1))
+            sed -i "${LINE_NUM}r /tmp/arch_script.txt" "$COMPAT_OPENSSL_BUILD"
+            rm /tmp/arch_script.txt
+            echo "    Patched genrule to create architecture-specific headers"
+        else
+            echo "    Warning: Could not find closing \"\"\" in prefixed_ossl_source genrule"
+        fi
+    else
+        echo "    Genrule already patched for architecture-specific headers"
+    fi
+else
+    echo "    Warning: compat/openssl/BUILD not found"
 fi
 
 echo ""

@@ -31,6 +31,14 @@ ENVOY_ORG = "envoyproxy"
 
 ENVOY_REPO = "envoy"
 
+# Use OpenSSL from the system rather than vendoring it
+# IMPORTANT: Must be defined BEFORE @envoy because the Envoy patch references @@openssl
+new_local_repository(
+    name = "openssl",
+    path = "/usr/",
+    build_file = "//:openssl.BUILD",
+)
+
 # To override with local envoy, just pass `--override_repository=envoy=/PATH/TO/ENVOY` to Bazel or
 # persist the option in `user.bazelrc`.
 http_archive(
@@ -38,6 +46,10 @@ http_archive(
     sha256 = ENVOY_SHA256,
     strip_prefix = ENVOY_REPO + "-" + ENVOY_SHA,
     url = "https://github.com/" + ENVOY_ORG + "/" + ENVOY_REPO + "/archive/" + ENVOY_SHA + ".tar.gz",
+    patches = [
+        "//ossm/patches:envoy-compat-openssl.patch",
+    ],
+    patch_args = ["-p1"],
 )
 
 load("@envoy//bazel:api_binding.bzl", "envoy_api_binding")
@@ -48,11 +60,11 @@ local_repository(
     path = "bazel/extension_config",
 )
 
-# Use OpenSSL from the system rather than vendoring it
+# Use system LLVM from the host (for BoringSSL compat layer prefixer tool)
 new_local_repository(
-    name = "openssl",
-    path = "/usr/lib64/",
-    build_file = "//:openssl.BUILD",
+    name = "llvm_toolchain_llvm",
+    path = "/usr/",
+    build_file = "//:llvm.BUILD",
 )
 
 # Use system JDK for Java runtime (needed by ANTLR4 and other Java tools)
@@ -145,38 +157,6 @@ load("@envoy//bazel:dependency_imports.bzl", "envoy_dependency_imports")
 
 # Use host Go instead of downloading to enable offline builds
 envoy_dependency_imports(go_version = "host")
-
-# Register Go toolchains for cross-compilation (aarch64, s390x, ppc64le)
-# These are needed when building for non-host architectures
-load("@io_bazel_rules_go//go:deps.bzl", "go_download_sdk")
-
-go_download_sdk(
-    name = "go_linux_amd64",
-    goos = "linux",
-    goarch = "amd64",
-    version = "1.24.6",
-)
-
-go_download_sdk(
-    name = "go_linux_arm64",
-    goos = "linux",
-    goarch = "arm64",
-    version = "1.24.6",
-)
-
-go_download_sdk(
-    name = "go_linux_s390x",
-    goos = "linux",
-    goarch = "s390x",
-    version = "1.24.6",
-)
-
-go_download_sdk(
-    name = "go_linux_ppc64le",
-    goos = "linux",
-    goarch = "ppc64le",
-    version = "1.24.6",
-)
 
 load("@envoy//bazel:repo.bzl", "envoy_repo")
 

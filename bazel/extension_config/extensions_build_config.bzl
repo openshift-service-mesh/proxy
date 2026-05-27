@@ -360,9 +360,9 @@ ENVOY_EXTENSIONS = {
     # QUIC extensions
     #
 
-    "envoy.quic.deterministic_connection_id_generator": "//source/extensions/quic/connection_id_generator/deterministic:envoy_deterministic_connection_id_generator_config",
-    "envoy.quic.crypto_stream.server.quiche":           "//source/extensions/quic/crypto_stream:envoy_quic_default_crypto_server_stream",
-    "envoy.quic.proof_source.filter_chain":             "//source/extensions/quic/proof_source:envoy_quic_default_proof_source",
+    #"envoy.quic.deterministic_connection_id_generator": "//source/extensions/quic/connection_id_generator/deterministic:envoy_deterministic_connection_id_generator_config",
+    #"envoy.quic.crypto_stream.server.quiche":           "//source/extensions/quic/crypto_stream:envoy_quic_default_crypto_server_stream",
+    #"envoy.quic.proof_source.filter_chain":             "//source/extensions/quic/proof_source:envoy_quic_default_proof_source",
 
     #
     # UDP packet writers
@@ -489,8 +489,8 @@ ENVOY_CONTRIB_EXTENSIONS = {
     # Private key providers
     #
 
-    "envoy.tls.key_providers.cryptomb":                         "//contrib/cryptomb/private_key_providers/source:config",
-    "envoy.tls.key_providers.qat":                              "//contrib/qat/private_key_providers/source:config",
+   "envoy.tls.key_providers.cryptomb":                         "//contrib/cryptomb/private_key_providers/source:config",
+   "envoy.tls.key_providers.qat":                              "//contrib/qat/private_key_providers/source:config",
 
     #
     # Socket interface extensions

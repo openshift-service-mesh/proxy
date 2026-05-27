@@ -17,7 +17,14 @@ build --host_force_python=PY3
 build --extra_toolchains=@local_jdk//:all
 build --tool_java_runtime_version=local_jdk
 build --verbose_failures
-build --config=openssl
+
+# OpenSSL configuration
+# Uses BoringSSL compatibility layer (@envoy//compat/openssl) which provides
+# BoringSSL APIs (bssl::UniquePtr, etc.) implemented using OpenSSL underneath
+common --config=openssl
+common --@envoy//bazel:openssl=True
+common --@envoy//bazel:ssl=@envoy//compat/openssl:ssl
+common --@envoy//bazel:crypto=@envoy//compat/openssl:crypto
 
 # Test flags
 build --test_env=ENVOY_IP_TEST_VERSIONS=v4only

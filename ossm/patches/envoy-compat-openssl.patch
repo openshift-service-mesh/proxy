@@ -1,0 +1,25 @@
+--- a/compat/openssl/BUILD
++++ b/compat/openssl/BUILD
+@@ -173,13 +173,10 @@
+             fi
+         done
+ 
+-        # Set up LD_LIBRARY_PATH for libclang-cpp.so
+-        LLVM_LIB_DIR=$$(dirname $(location @llvm_toolchain_llvm//:lib/libclang-cpp.so.18.1))
+-        export LD_LIBRARY_PATH="$$LLVM_LIB_DIR$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}"
+ 
+         # Run the prefixer with absolute source path and relative output path
+         $(location //compat/openssl/prefixer:prefixer) \
+-            --src-path "$(location @openssl//:include)" \
++            --src-path "$$(FIRST=($(locations @openssl//:include)); dirname $$(dirname $${FIRST[0]}))" \
+             --src-incl "openssl/*.h" \
+             --src-skip "openssl/asn1_mac.h" \
+             --src-skip "openssl/opensslconf-*.h" \
+@@ -189,7 +186,6 @@
+     """,
+     tools = [
+         "//compat/openssl/prefixer",
+-        "@llvm_toolchain_llvm//:lib/libclang-cpp.so.18.1",
+     ],
+     visibility = ["//visibility:private"],
+ )

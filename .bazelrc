@@ -82,7 +82,7 @@ build:macos --cxxopt=-Wno-deprecated-declarations
 build:macos --host_cxxopt=-Wno-deprecated-declarations
 
 # Use system OpenSSL instead of BoringSSL
-build:openssl --//bazel:ssl=@openssl//:ssl
-build:openssl --//bazel:crypto=@openssl//:crypto
+# build:openssl --//bazel:ssl=@openssl//:ssl
+# build:openssl --//bazel:crypto=@openssl//:crypto
 
 import %workspace%/ossm/bazelrc

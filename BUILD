@@ -21,7 +21,11 @@ load(
 #
 load("@rules_pkg//:pkg.bzl", "pkg_tar")
 
-exports_files(["LICENSE"])
+exports_files([
+    "LICENSE",
+    "openssl.BUILD",
+    "llvm.BUILD",
+])
 
 config_setting(
     name = "darwin",
