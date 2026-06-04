@@ -1,0 +1,3 @@
+
+LLVM_PATH = '/usr'
+USE_LOCAL_SYSROOT = True
