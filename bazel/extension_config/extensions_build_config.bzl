@@ -512,6 +512,13 @@ ISTIO_ENABLED_CONTRIB_EXTENSIONS = [
     "envoy.filters.network.postgres_proxy",
     "envoy.filters.network.sip_proxy",
     "envoy.filters.sip.router",
+    # FIXME: https://github.com/istio/istio/issues/60485
+    # "envoy.network.connection_balance.dlb",
+    "envoy.load_balancing_policies.peak_ewma",
+    "envoy.filters.http.peak_ewma",
+]
+
+OPENSSL_INCOMPATIBLE_CONTRIB_EXTENSIONS = [
     "envoy.tls.key_providers.cryptomb",
     "envoy.tls.key_providers.qat",
     "envoy.network.connection_balance.dlb",
