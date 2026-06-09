@@ -31,6 +31,7 @@ function init(){
 
 
   IGNORE_LIST=(
+        "antlr4-cpp-runtime"
         "bazel_tools"
         "cmake"
         "envoy_api"
@@ -39,7 +40,7 @@ function init(){
         "local_jdk"
         "bazel_gazelle_go"
         "openssl"
-        "llvm_toolchain_llvm"
+        "llvm_toolchain"
         "go_sdk"
         "host_platform"
         "remotejdk"
@@ -85,14 +86,13 @@ function copy_files() {
       fi
 
       cp_flags="-rL"
-      if [ "${repo_name}" == "emscripten_toolchain" ] || [ "${repo_name}" == "antlr4-cpp-runtime" ] || [ "${repo_name}" == "envoy_toolshed" ] || [[ "${repo_name}" == *"luajit2"* ]] || [ "${repo_name}" == "llvm_toolchain" ]; then
+      if [ "${repo_name}" == "envoy_toolshed" ] || [[ "${repo_name}" == *"luajit2"* ]]; then
         cp_flags="-r"
       fi
       cp "${cp_flags}" "${f}" "${VENDOR_DIR}" || echo "Copy of ${f} failed. Ignoring..."
       echo "build --override_repository=${repo_name}=%workspace%/ossm/vendor/${repo_name}" >> "${BAZELRC}"
     fi
   done
-
 
   # Remove non-needed files and directories
   chmod -R +w "${VENDOR_DIR}"

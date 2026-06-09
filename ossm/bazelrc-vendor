@@ -1,5 +1,4 @@
 build --override_repository=abseil-cpp=%workspace%/ossm/vendor/abseil-cpp
-build --override_repository=antlr4-cpp-runtime=%workspace%/ossm/vendor/antlr4-cpp-runtime
 build --override_repository=antlr4_jar=%workspace%/ossm/vendor/antlr4_jar
 build --override_repository=antlr4_runtimes=%workspace%/ossm/vendor/antlr4_runtimes
 build --override_repository=aspect_bazel_lib=%workspace%/ossm/vendor/aspect_bazel_lib
@@ -65,7 +64,6 @@ build --override_repository=jq_toolchains=%workspace%/ossm/vendor/jq_toolchains
 build --override_repository=libcircllhist=%workspace%/ossm/vendor/libcircllhist
 build --override_repository=libevent=%workspace%/ossm/vendor/libevent
 build --override_repository=liburing=%workspace%/ossm/vendor/liburing
-build --override_repository=llvm_toolchain=%workspace%/ossm/vendor/llvm_toolchain
 build --override_repository=luajit=%workspace%/ossm/vendor/luajit
 build --override_repository=msgpack-cxx=%workspace%/ossm/vendor/msgpack-cxx
 build --override_repository=nghttp2=%workspace%/ossm/vendor/nghttp2

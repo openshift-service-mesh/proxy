@@ -1,6 +1,6 @@
 module(
     name = "envoy_toolshed",
-    version = "0.3.33",
+    version = "0.3.35",
     bazel_compatibility = [">=7.2.1"],
 )
 
@@ -34,6 +34,8 @@ python = use_extension("@rules_python//python/extensions:python.bzl", "python")
     )
     for python_version in PYTHON_VERSIONS
 ]
+
+use_repo(python, "python_3_11_host", "python_3_12_host")
 
 pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
 

@@ -18,7 +18,7 @@ load("@rules_fuzzing//fuzzing/private:instrum_opts.bzl", "instrum_opts")
 
 oss_fuzz_opts = instrum_opts.make(
     conlyopts = [""],
-    cxxopts = ["-stdlib=libc++"],
+    cxxopts = [""],
 )
 
 native_library_sanitizer = "none"

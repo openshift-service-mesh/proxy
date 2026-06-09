@@ -1,7 +1,5 @@
 #!/bin/bash
 
-export CC=clang CXX=clang++ ENVOY_OPENSSL=1
-
 ARCH=$(uname -m)
 if [ "${ARCH}" = "ppc64le" ]; then
   ARCH="ppc"

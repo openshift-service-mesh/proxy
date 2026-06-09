@@ -29,7 +29,7 @@ cc_fuzzing_engine(
 cc_library(
     name = "oss_fuzz_stub",
     srcs = [],
-    linkopts = ["", "-stdlib=libc++"],
+    linkopts = [""],
 )
 
 java_fuzzing_engine(
