@@ -69,7 +69,6 @@ build --override_repository=envoy_toolshed=/work/ossm/vendor/envoy_toolshed
 build --override_repository=fp16=/work/ossm/vendor/fp16
 build --override_repository=fuzzing_pip3=/work/ossm/vendor/fuzzing_pip3
 build --override_repository=grpc_httpjson_transcoding=/work/ossm/vendor/grpc_httpjson_transcoding
-build --override_repository=intel_dlb=/work/ossm/vendor/intel_dlb
 build --override_repository=io_bazel_rules_go=/work/ossm/vendor/io_bazel_rules_go
 build --override_repository=io_bazel_rules_go_bazel_features=/work/ossm/vendor/io_bazel_rules_go_bazel_features
 build --override_repository=io_bazel_rules_nogo=/work/ossm/vendor/io_bazel_rules_nogo

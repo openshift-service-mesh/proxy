@@ -245,7 +245,7 @@ public:
     server_ = std::make_unique<TestServerConnectionImpl>(
         server_connection_, server_callbacks_, *server_stats_store_.rootScope(),
         server_http2_options_, random_, max_request_headers_kb_, max_request_headers_count_,
-        headers_with_underscores_action_);
+        headers_with_underscores_action_, runtime_);
     server_wrapper_ = std::make_unique<ConnectionWrapper>(server_.get());
     createHeaderValidator();
     request_encoder_ = &client_->newStream(response_decoder_);
@@ -256,11 +256,14 @@ public:
         .WillRepeatedly(Invoke([&](ResponseEncoder& encoder, bool) -> RequestDecoder& {
           response_encoder_ = &encoder;
           encoder.getStream().addCallbacks(server_stream_callbacks_);
+          encoder.getStream().registerCodecEventCallbacks(&server_codec_event_callbacks_);
           encoder.getStream().setFlushTimeout(std::chrono::milliseconds(30000));
           request_decoder_.setResponseEncoder(response_encoder_);
           return request_decoder_;
         }));
-
+    EXPECT_CALL(server_codec_event_callbacks_, onCodecEncodeComplete())
+        .Times(::testing::AnyNumber());
+        
     ON_CALL(server_connection_.dispatcher_, trackedObjectStackIsEmpty())
         .WillByDefault(Return(true));
   }
@@ -413,6 +416,7 @@ public:
 #endif
   }
 
+  NiceMock<Runtime::MockLoader> runtime_;
   TestScopedRuntime scoped_runtime_;
   absl::optional<const Http2SettingsTuple> client_settings_;
   absl::optional<const Http2SettingsTuple> server_settings_;
@@ -438,6 +442,7 @@ public:
   MockRequestDecoderShimWithUhv request_decoder_;
   ResponseEncoder* response_encoder_{};
   MockStreamCallbacks server_stream_callbacks_;
+  MockCodecEventCallbacks server_codec_event_callbacks_;
   // Corrupt a metadata frame payload.
   bool corrupt_metadata_frame_ = false;
   bool expect_buffered_data_on_teardown_ = false;
@@ -1009,6 +1014,7 @@ TEST_P(Http2CodecImplTest, RefusedStreamReset) {
   request_encoder_->getStream().addCallbacks(callbacks);
   EXPECT_CALL(server_stream_callbacks_,
               onResetStream(StreamResetReason::LocalRefusedStreamReset, _));
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
   EXPECT_CALL(callbacks, onResetStream(StreamResetReason::RemoteRefusedStreamReset, _));
   response_encoder_->getStream().resetStream(StreamResetReason::LocalRefusedStreamReset);
   driveToCompletion();
@@ -1764,6 +1770,7 @@ TEST_P(Http2CodecImplDeferredResetTest, DeferredResetServerIfLocalEndStreamBefor
     EXPECT_CALL(*flush_timer, enableTimer(std::chrono::milliseconds(30000), _));
     response_encoder_->encodeData(body, true);
     EXPECT_CALL(server_stream_callbacks_, onResetStream(StreamResetReason::LocalReset, _));
+    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
     EXPECT_CALL(*flush_timer, disableTimer());
     response_encoder_->getStream().resetStream(StreamResetReason::LocalReset);
   }));
@@ -1803,6 +1810,7 @@ TEST_P(Http2CodecImplDeferredResetTest, LargeDataDeferredResetServerIfLocalEndSt
     EXPECT_CALL(*flush_timer, enableTimer(std::chrono::milliseconds(30000), _));
     response_encoder_->encodeData(body, true);
     EXPECT_CALL(server_stream_callbacks_, onResetStream(StreamResetReason::LocalReset, _));
+    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
     EXPECT_CALL(*flush_timer, disableTimer());
     response_encoder_->getStream().resetStream(StreamResetReason::LocalReset);
   }));
@@ -1839,6 +1847,7 @@ TEST_P(Http2CodecImplDeferredResetTest, NoDeferredResetServerIfResetBeforeLocalE
     EXPECT_CALL(server_stream_callbacks_, onAboveWriteBufferHighWatermark()).Times(AnyNumber());
     response_encoder_->encodeData(body, false);
     EXPECT_CALL(server_stream_callbacks_, onResetStream(StreamResetReason::LocalReset, _));
+    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
     response_encoder_->getStream().resetStream(StreamResetReason::LocalReset);
   }));
   EXPECT_TRUE(request_encoder_->encodeHeaders(request_headers, false).ok());
@@ -2037,6 +2046,7 @@ TEST_P(Http2CodecImplFlowControlTest, EarlyResetRestoresWindow) {
 
   EXPECT_CALL(server_stream_callbacks_,
               onResetStream(StreamResetReason::LocalRefusedStreamReset, _));
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
   EXPECT_CALL(callbacks, onAboveWriteBufferHighWatermark()).Times(0);
   EXPECT_CALL(callbacks, onBelowWriteBufferLowWatermark()).Times(0);
   EXPECT_CALL(server_stream_callbacks_, onAboveWriteBufferHighWatermark()).Times(0);
@@ -2260,6 +2270,7 @@ TEST_P(Http2CodecImplFlowControlTest, TrailingHeadersLargeServerBodyFlushTimeout
   // Invoke a stream flush timeout. Make sure we don't get a reset locally for higher layers but
   // we do get a reset on the client.
   EXPECT_CALL(server_stream_callbacks_, onResetStream(_, _)).Times(0);
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
   EXPECT_CALL(client_stream_callbacks, onResetStream(StreamResetReason::RemoteReset, _));
   flush_timer->invokeCallback();
   driveToCompletion();
@@ -2300,6 +2311,7 @@ TEST_P(Http2CodecImplFlowControlTest, LargeServerBodyFlushTimeout) {
   // Invoke a stream flush timeout. Make sure we don't get a reset locally for higher layers but
   // we do get a reset on the client.
   EXPECT_CALL(server_stream_callbacks_, onResetStream(_, _)).Times(0);
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
   EXPECT_CALL(client_stream_callbacks, onResetStream(StreamResetReason::RemoteReset, _));
   flush_timer->invokeCallback();
   driveToCompletion();
@@ -2472,6 +2484,7 @@ TEST_P(Http2CodecImplFlowControlTest, RstStreamOnPendingFlushTimeoutFlood) {
 
   EXPECT_FALSE(violation_callback->enabled_);
   EXPECT_CALL(server_stream_callbacks_, onResetStream(_, _));
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
 
   // Pending flush timeout causes RST_STREAM to be sent and overflow the outbound frame queue.
   flush_timer->invokeCallback();
@@ -2929,6 +2942,54 @@ TEST_P(Http2CodecImplTest, ManyRequestHeadersInvokeResetStream) {
   EXPECT_CALL(server_stream_callbacks_, onResetStream(_, _));
   EXPECT_TRUE(request_encoder_->encodeHeaders(request_headers, false).ok());
   driveToCompletion();
+}
+
+// Tests stream reset when the size of request headers (including cookies)
+// exceeds the limit.
+TEST_P(Http2CodecImplTest, HeaderListSizeTooLargeWithCookies) {
+  max_request_headers_kb_ = 5;
+  initialize();
+
+  TestRequestHeaderMapImpl request_headers;
+  HttpTestUtility::addDefaultHeaders(request_headers);
+  // Add many small cookies that exceed the limit in total
+  for (int i = 0; i < 60; i++) {
+    request_headers.addCopy("cookie", std::string(100, 'a'));
+  }
+
+  EXPECT_CALL(server_stream_callbacks_, onResetStream(_, _));
+
+  EXPECT_TRUE(request_encoder_->encodeHeaders(request_headers, false).ok());
+  driveToCompletion();
+
+  if (http2_implementation_ != Http2Impl::Oghttp2) {
+    // oghttp2 resets the stream from within the codec
+    EXPECT_EQ(1, server_stats_store_.counter("http2.header_list_size_too_large").value());
+  }
+}
+
+// Tests stream reset when the size of request headers (excluding cookies)
+// exceeds the limit.
+TEST_P(Http2CodecImplTest, HeaderListSizeTooLargeWithoutCookies) {
+  max_request_headers_kb_ = 5;
+  initialize();
+
+  TestRequestHeaderMapImpl request_headers;
+  HttpTestUtility::addDefaultHeaders(request_headers);
+  // Add many small headers that exceed the limit in total
+  for (int i = 0; i < 60; i++) {
+    request_headers.addCopy(std::to_string(i), std::string(100, 'a'));
+  }
+
+  EXPECT_CALL(server_stream_callbacks_, onResetStream(_, _));
+
+  EXPECT_TRUE(request_encoder_->encodeHeaders(request_headers, false).ok());
+  driveToCompletion();
+
+  if (http2_implementation_ != Http2Impl::Oghttp2) {
+    // oghttp2 resets the stream from within the codec
+    EXPECT_EQ(1, server_stats_store_.counter("http2.header_list_size_too_large").value());
+  }
 }
 
 // Tests that max number of request headers is configurable.
@@ -3743,6 +3804,7 @@ TEST_P(Http2CodecImplTest, ResetStreamCausesOutboundFlood) {
 
   EXPECT_FALSE(violation_callback->enabled_);
   EXPECT_CALL(server_stream_callbacks_, onResetStream(StreamResetReason::RemoteReset, _));
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
 
   server_->getStream(1)->resetStream(StreamResetReason::RemoteReset);
 
@@ -3779,6 +3841,7 @@ TEST_P(Http2CodecImplTest, ConnectTest) {
 
   EXPECT_CALL(callbacks, onResetStream(StreamResetReason::ConnectError, _));
   EXPECT_CALL(server_stream_callbacks_, onResetStream(StreamResetReason::ConnectError, _));
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
   response_encoder_->getStream().resetStream(StreamResetReason::ConnectError);
   driveToCompletion();
 }
@@ -4773,6 +4836,26 @@ TEST(CodecChoiceTest, ProtocolOptionNotSpecified) {
       max_request_headers_kb, max_response_headers_count, ProdNghttp2SessionFactory::get());
 
   EXPECT_FALSE(client2->useOghttp2Library());
+}
+
+TEST_P(Http2CodecImplTest, DownstreamRequestCookieSizeLimit) {
+  EXPECT_CALL(runtime_.snapshot_,
+              getInteger("envoy.reloadable_features.http2_max_cookies_size_in_kb", 0))
+      .WillRepeatedly(Return(1)); // 1 KB limit
+  initialize();
+
+  TestRequestHeaderMapImpl request_headers;
+  HttpTestUtility::addDefaultHeaders(request_headers);
+  request_headers.addCopy("cookie", std::string(1025, 'a')); // Exceeds 1KB
+
+  EXPECT_CALL(server_stream_callbacks_, onResetStream(_, _));
+
+  EXPECT_TRUE(request_encoder_->encodeHeaders(request_headers, false).ok());
+  driveToCompletion();
+
+  if (http2_implementation_ != Http2Impl::Oghttp2) {
+    EXPECT_EQ(1, server_stats_store_.counter("http2.cookies_total_bytes_too_large").value());
+  }
 }
 
 #ifdef NDEBUG
