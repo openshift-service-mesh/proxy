@@ -112,6 +112,9 @@ function run_bazel() {
 
   bazel --output_base="${OUTPUT_BASE}" fetch @gperftools//:all
 
+  # Fetch luajit2 explicitly - needed for s390x/ppc64le builds
+  bazel --output_base="${OUTPUT_BASE}" fetch @luajit2//:all || true
+
   # Fetch all the rest and check everything using "build --nobuild "option
   # Note: The envoy repository is automatically patched via patches = [...] in WORKSPACE
   for config in x86_64 aarch64 s390x ppc; do
@@ -134,12 +137,21 @@ function patch_python() {
   done
 }
 
+function patch_s390x() {
+  echo "Applying s390x build patches"
+  for patch in "${ROOT_DIR}/ossm/patches/s390x/"*.patch; do
+    echo "Applying ${patch}..."
+    git apply --ignore-whitespace "${patch}"
+  done
+}
+
 function main() {
   validate
   init
   run_bazel
   copy_files
   patch_python
+  patch_s390x
 
   echo
   echo "Done. Inspect the result with git status"

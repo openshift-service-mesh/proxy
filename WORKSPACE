@@ -45,7 +45,10 @@ http_archive(
     sha256 = ENVOY_SHA256,
     strip_prefix = ENVOY_REPO + "-" + ENVOY_SHA,
     url = "https://github.com/" + ENVOY_ORG + "/" + ENVOY_REPO + "/archive/" + ENVOY_SHA + ".tar.gz",
-    patches = ["//ossm/patches:use-cmake-from-host.patch"],
+    patches = [
+        "//ossm/patches:use-cmake-from-host.patch",
+        "//ossm/patches:enable-luajit2-repo.patch",
+    ],
     patch_args = ["-p1"],
 )
 
