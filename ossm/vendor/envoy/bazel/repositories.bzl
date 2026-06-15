@@ -197,6 +197,7 @@ def envoy_dependencies(skip_targets = []):
     _yaml_cpp()
     _libevent()
     _luajit()
+    _luajit2()
     _nghttp2()
     _msgpack_cxx()
     _cpp2sky()
@@ -921,6 +922,15 @@ def _luajit():
         name = "luajit",
         build_file_content = LUAJIT_BUILD_CONTENT,
         patches = ["@envoy//bazel/foreign_cc:luajit.patch"],
+        patch_args = ["-p1"],
+    )
+
+def _luajit2():
+    LUAJIT2_BUILD_CONTENT = """%s\nalias(name = "luajit2", actual = ":all", visibility = ["//visibility:public"])""" % BUILD_ALL_CONTENT
+    external_http_archive(
+        name = "luajit2",
+        build_file_content = LUAJIT2_BUILD_CONTENT,
+        patches = ["@envoy//bazel/foreign_cc:luajit2.patch"],
         patch_args = ["-p1"],
     )
 

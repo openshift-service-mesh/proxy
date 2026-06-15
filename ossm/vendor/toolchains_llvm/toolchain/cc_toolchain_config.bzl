@@ -108,6 +108,14 @@ def cc_toolchain_config(
             "clang",
             "glibc_unknown",
         ),
+        "linux-s390x": (
+            "clang-s390x-linux",
+            "s390x",
+            "glibc_unknown",
+            "clang",
+            "clang",
+            "glibc_unknown",
+        ),
         "none-riscv32": (
             "clang-riscv32-none",
             "riscv32",

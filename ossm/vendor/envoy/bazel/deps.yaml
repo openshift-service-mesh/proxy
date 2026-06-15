@@ -389,6 +389,21 @@ libevent:
   license: "BSD-3-Clause"
   license_url: "https://github.com/libevent/libevent/blob/{version}/LICENSE"
 
+luajit2:
+  project_name: "LuaJIT2"
+  project_desc: "OpenResty maintained branch of LuaJIT with s390x/ppc64le support"
+  project_url: "https://github.com/openresty/luajit2"
+  release_date: "2025-08-26"
+  use_category:
+  - dataplane_ext
+  extensions:
+  - envoy.filters.http.lua
+  - envoy.router.cluster_specifier_plugin.lua
+  - envoy.string_matcher.lua
+  cpe: "N/A"
+  license: "MIT"
+  license_url: "https://github.com/openresty/luajit2/blob/{version}/COPYRIGHT"
+
 luajit:
   project_name: "LuaJIT"
   project_desc: "Just-In-Time compiler for Lua"

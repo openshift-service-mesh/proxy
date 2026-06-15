@@ -123,6 +123,21 @@ configure_make(
 )
 
 configure_make(
+    name = "luajit2",
+    configure_command = "luajit2_build.sh",
+    env = select({
+        "//bazel:asan_build": {"ENVOY_CONFIG_ASAN": "1"},
+        "//bazel:msan_build": {"ENVOY_CONFIG_MSAN": "1"},
+        "//conditions:default": {},
+    }),
+    lib_source = "@luajit2",
+    out_include_dir = "include/luajit-2.1",
+    out_static_libs = ["libluajit-5.1.a"],
+    tags = ["skip_on_windows"],
+    targets = [],
+)
+
+configure_make(
     name = "colm",
     autogen = True,
     configure_in_place = True,

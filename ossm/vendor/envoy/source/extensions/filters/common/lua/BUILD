@@ -1,3 +1,4 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load(
     "//bazel:envoy_build_system.bzl",
     "envoy_cc_library",
@@ -8,19 +9,31 @@ licenses(["notice"])  # Apache 2
 
 envoy_extension_package()
 
+bool_flag(
+    name = "luajit2",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "luajit2_enabled",
+    flag_values = {":luajit2": "True"},
+)
+
 envoy_cc_library(
     name = "lua_lib",
     srcs = ["lua.cc"],
     hdrs = ["lua.h"],
     deps = [
-        "//bazel/foreign_cc:luajit",
         "//envoy/thread_local:thread_local_interface",
         "//source/common/common:assert_lib",
         "//source/common/common:c_smart_ptr_lib",
         "//source/common/common:lock_guard_lib",
         "//source/common/common:thread_lib",
         "//source/common/protobuf",
-    ],
+    ] + select({
+        ":luajit2_enabled": ["//bazel/foreign_cc:luajit2"],
+        "//conditions:default": ["//bazel/foreign_cc:luajit"],
+    }),
 )
 
 envoy_cc_library(
@@ -41,10 +54,12 @@ envoy_cc_library(
     hdrs = ["protobuf_converter.h"],
     deps = [
         ":lua_lib",
-        "//bazel/foreign_cc:luajit",
         "//source/common/protobuf",
         "//source/common/protobuf:create_reflectable_message_lib",
         "//source/common/protobuf:utility_lib",
         "@abseil-cpp//absl/strings",
-    ],
+    ] + select({
+        ":luajit2_enabled": ["//bazel/foreign_cc:luajit2"],
+        "//conditions:default": ["//bazel/foreign_cc:luajit"],
+    }),
 )

@@ -1,0 +1,121 @@
+diff --git a/src/Makefile b/src/Makefile
+index acbe0ca7..cc1f2a43 100644
+--- a/src/Makefile
++++ b/src/Makefile
+@@ -27,7 +27,7 @@ NODOTABIVER= 51
+ DEFAULT_CC = gcc
+ #
+ # LuaJIT builds as a native 32 or 64 bit binary by default.
+-CC= $(DEFAULT_CC)
++CC ?= $(DEFAULT_CC)
+ #
+ # Use this if you want to force a 32 bit build on a 64 bit multilib OS.
+ #CC= $(DEFAULT_CC) -m32
+@@ -70,10 +70,10 @@ NODOTABIVER= 51
+ # as dynamic mode.
+ #
+ # Mixed mode creates a static + dynamic library and a statically linked luajit.
+-BUILDMODE= mixed
++#BUILDMODE= mixed
+ #
+ # Static mode creates a static library and a statically linked luajit.
+-#BUILDMODE= static
++BUILDMODE= static
+ #
+ # Dynamic mode creates a dynamic library and a dynamically linked luajit.
+ # Note: this executable will only run when the library is installed!
+diff --git a/luajit2_build.sh b/luajit2_build.sh
+new file mode 100755
+index 00000000..00000000
+--- /dev/null
++++ b/luajit2_build.sh
+@@ -0,0 +1,89 @@
++#!/bin/bash
++
++set -e
++
++PREFIX=""
++while [[ $# -gt 0 ]]; do
++    case $1 in
++        --prefix=*)
++            PREFIX="${1#*=}"
++            shift
++            ;;
++        --prefix)
++            PREFIX="$2"
++            shift 2
++            ;;
++        *)
++            shift
++            ;;
++    esac
++done
++
++# Copy source tree to a build directory
++SRC_DIR="$(dirname "$(realpath "$0")")"
++BUILD_DIR="$(basename "$SRC_DIR")_build"
++cp -r "$SRC_DIR" "$BUILD_DIR"
++cd "$BUILD_DIR"
++
++# Set environment variables
++export MACOSX_DEPLOYMENT_TARGET="10.8"
++export DEFAULT_CC="${CC:-}"
++export TARGET_CFLAGS="${CFLAGS:-} -fno-function-sections -fno-data-sections"
++EXTRA_MAKE_ARGS=()
++FUSE_LD_FLAG=$(echo "$LDFLAGS" | grep -o -- '-fuse-ld=[^ ]*' | tail -1 || :)
++SYSROOT_FLAG=$(echo "$LDFLAGS" | grep -o -- '--sysroot=[^ ]*' || :)
++TARGET_TRIPLE=$(echo "$LDFLAGS" | grep -o -- '--target=[^ ]*' | sed 's/--target=//' | tail -1 || :)
++if [[ "$(uname -s)" == "Linux" ]]; then
++    SAN_LDFLAGS="${FUSE_LD_FLAG} ${SYSROOT_FLAG}"
++    EXTRA_MAKE_ARGS+=("TARGET_AR=${AR} ${ARFLAGS:-rcus}")
++    if [[ -n "${TARGET_TRIPLE}" && "${TARGET_TRIPLE}" != *"$(uname -m)"* ]]; then
++        EXTRA_MAKE_ARGS+=("HOSTCC=gcc")
++    elif [[ -n "${FUSE_LD_FLAG}" ]]; then
++        EXTRA_MAKE_ARGS+=("HOST_LDFLAGS=${FUSE_LD_FLAG} ${SYSROOT_FLAG}")
++    fi
++    export TARGET_LDFLAGS="${LDFLAGS:-} -fno-function-sections -fno-data-sections"
++    export CFLAGS=""
++    export LDFLAGS=""
++else
++    SYSROOT_FLAG=$(echo "$CFLAGS" | grep -o -- '--sysroot=[^ ]*' || :)
++    if [[ -n "${SYSROOT_FLAG}" ]]; then
++        export HOST_CFLAGS="${SYSROOT_FLAG}"
++        export HOST_LDFLAGS="${SYSROOT_FLAG}"
++        EXTRA_MAKE_ARGS+=("HOST_CFLAGS=${HOST_CFLAGS}" "HOST_LDFLAGS=${HOST_LDFLAGS}")
++    fi
++    export TARGET_LDFLAGS="${CFLAGS:-} -fno-function-sections -fno-data-sections"
++    export CFLAGS=""
++    export LDFLAGS=""
++fi
++
++# s390x and ppc64le require -fno-integrated-as with clang
++ARCH=$(uname -m)
++if [[ "$ARCH" == "s390x" || "$ARCH" == "ppc64le" ]]; then
++    ASM_FLAGS="-fno-integrated-as -fgnuc-version=10 -Wno-implicit-function-declaration -D_Float32=float -D_Float64=double -D_Float128=double -D_Float32x=double -D_Float64x=double"
++    export TARGET_CFLAGS="${TARGET_CFLAGS} ${ASM_FLAGS}"
++    export HOST_CFLAGS="${HOST_CFLAGS:-} ${ASM_FLAGS}"
++fi
++
++export TARGET_STRIP="@echo"
++
++if [[ -n "${ENVOY_CONFIG_ASAN}" ]] || [[ -n "${ENVOY_CONFIG_MSAN}" ]]; then
++    export LDFLAGS="$SAN_LDFLAGS"
++    BLOCK_PATH=$(realpath clang-asan-blocklist.txt)
++    export TARGET_CFLAGS="${TARGET_CFLAGS} -fsanitize-blacklist=${BLOCK_PATH}"
++    echo "fun:*" > clang-asan-blocklist.txt
++fi
++
++"${MAKE:-make}" -j$(nproc) V=1 PREFIX="$PREFIX" \
++    BUILDMODE=static \
++    "XCFLAGS=-DLUAJIT_ENABLE_LUA52COMPAT" \
++    "${EXTRA_MAKE_ARGS[@]}"
++
++# Bypass the top-level `make install` target: under this sandboxed,
++# cross-compiling, parallel-make invocation its install: recipe does not
++# execute (no "Installing LuaJIT" banner is ever emitted), leaving lib/
++# empty even though src/libluajit.a was built successfully. Install the
++# static archive and public headers ourselves to match
++# out_static_libs=["libluajit-5.1.a"] and out_include_dir="include/luajit-2.1".
++mkdir -p "$PREFIX/lib" "$PREFIX/include/luajit-2.1"
++cp src/libluajit.a "$PREFIX/lib/libluajit-5.1.a"
++cp src/lua.h src/lualib.h src/lauxlib.h src/luaconf.h src/lua.hpp src/luajit.h "$PREFIX/include/luajit-2.1/"
