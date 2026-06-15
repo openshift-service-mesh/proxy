@@ -32,6 +32,12 @@ jobs:
         git fetch upstream ${{ matrix.branch }}
         git merge upstream/${{ matrix.branch }}
 
+    - name: Update deps
+      run: |
+        ./ossm/scripts/update-deps.sh
+        git add -A
+        git commit -m "Update deps" || true
+
     - name: Create the PR
       uses: peter-evans/create-pull-request@v8
       with:
