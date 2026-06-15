@@ -1,0 +1,45 @@
+name: Merge upstream
+
+on:
+  schedule:
+    - cron: "10 */12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge-upstream:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: [release-1.30]
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ matrix.branch }}
+
+    - name: Merge upstream
+      run: |
+        git remote add upstream https://github.com/istio/proxy.git
+        git fetch upstream ${{ matrix.branch }}
+        git merge upstream/${{ matrix.branch }}
+
+    - name: Create the PR
+      uses: peter-evans/create-pull-request@v8
+      with:
+        token: ${{ secrets.GIT_TOKEN }}
+        branch: merge-upstream-${{ matrix.branch }}
+        base: ${{ matrix.branch }}
+        title: "[${{ matrix.branch }}] Merge upstream"
+        body: "[${{ matrix.branch }}] Merge upstream - Automated"
+        commit-message: "[${{ matrix.branch }}] Merge upstream"
+        committer: openshift-service-mesh-bot <openshiftservicemeshbot@gmail.com>
+        author: openshift-service-mesh-bot <openshiftservicemeshbot@gmail.com>
+        labels: |
+          auto-merge
+          tide/merge-method-merge
