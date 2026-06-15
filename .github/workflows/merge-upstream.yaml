@@ -26,6 +26,8 @@ jobs:
 
     - name: Merge upstream
       run: |
+        git config user.name "openshift-service-mesh-bot"
+        git config user.email "openshiftservicemeshbot@gmail.com"
         git remote add upstream https://github.com/istio/proxy.git
         git fetch upstream ${{ matrix.branch }}
         git merge upstream/${{ matrix.branch }}
