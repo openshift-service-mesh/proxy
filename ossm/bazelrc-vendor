@@ -34,6 +34,7 @@ build --override_repository=com_google_googleapis=%workspace%/ossm/vendor/com_go
 build --override_repository=com_google_googleapis_imports=%workspace%/ossm/vendor/com_google_googleapis_imports
 build --override_repository=com_google_protobuf=%workspace%/ossm/vendor/com_google_protobuf
 build --override_repository=com_google_protobuf_protoc_linux_aarch_64=%workspace%/ossm/vendor/com_google_protobuf_protoc_linux_aarch_64
+build --override_repository=com_google_protobuf_protoc_linux_ppcle_64=%workspace%/ossm/vendor/com_google_protobuf_protoc_linux_ppcle_64
 build --override_repository=com_google_protobuf_protoc_linux_x86_64=%workspace%/ossm/vendor/com_google_protobuf_protoc_linux_x86_64
 build --override_repository=cpp2sky=%workspace%/ossm/vendor/cpp2sky
 build --override_repository=dd-trace-cpp=%workspace%/ossm/vendor/dd-trace-cpp
@@ -72,17 +73,15 @@ build --override_repository=nlohmann_json=%workspace%/ossm/vendor/nlohmann_json
 build --override_repository=ocp-diag-core=%workspace%/ossm/vendor/ocp-diag-core
 build --override_repository=opentelemetry-cpp=%workspace%/ossm/vendor/opentelemetry-cpp
 build --override_repository=opentelemetry-proto=%workspace%/ossm/vendor/opentelemetry-proto
-build --override_repository=org_golang_google_protobuf=%workspace%/ossm/vendor/org_golang_google_protobuf
 build --override_repository=org_golang_x_mod=%workspace%/ossm/vendor/org_golang_x_mod
-build --override_repository=org_golang_x_sys=%workspace%/ossm/vendor/org_golang_x_sys
 build --override_repository=org_golang_x_text=%workspace%/ossm/vendor/org_golang_x_text
 build --override_repository=org_golang_x_tools=%workspace%/ossm/vendor/org_golang_x_tools
 build --override_repository=package_metadata=%workspace%/ossm/vendor/package_metadata
 build --override_repository=platforms=%workspace%/ossm/vendor/platforms
 build --override_repository=prometheus_metrics_model=%workspace%/ossm/vendor/prometheus_metrics_model
-build --override_repository=proto_bazel_features=%workspace%/ossm/vendor/proto_bazel_features
 build --override_repository=proto-converter=%workspace%/ossm/vendor/proto-converter
 build --override_repository=proto-field-extraction=%workspace%/ossm/vendor/proto-field-extraction
+build --override_repository=proto_bazel_features=%workspace%/ossm/vendor/proto_bazel_features
 build --override_repository=proxy_wasm_cpp_host=%workspace%/ossm/vendor/proxy_wasm_cpp_host
 build --override_repository=proxy_wasm_cpp_sdk=%workspace%/ossm/vendor/proxy_wasm_cpp_sdk
 build --override_repository=proxy_wasm_rust_sdk=%workspace%/ossm/vendor/proxy_wasm_rust_sdk
@@ -167,3 +166,5 @@ build --override_repository=python3_12_x86_64-unknown-linux-gnu=%workspace%/ossm
 build --override_repository=python3_12_s390x-unknown-linux-gnu=%workspace%/ossm/vendor/python3_12_s390x-unknown-linux-gnu
 build --override_repository=python3_12_ppc64le-unknown-linux-gnu=%workspace%/ossm/vendor/python3_12_ppc64le-unknown-linux-gnu
 build --override_repository=python3_12_aarch64-unknown-linux-gnu=%workspace%/ossm/vendor/python3_12_aarch64-unknown-linux-gnu
+build --override_repository=org_golang_google_protobuf=%workspace%/ossm/vendor/org_golang_google_protobuf
+build --override_repository=org_golang_x_sys=%workspace%/ossm/vendor/org_golang_x_sys

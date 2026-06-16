@@ -92,6 +92,14 @@ def cc_toolchain_config(
             "clang",
             "glibc_unknown",
         ),
+        "linux-ppc64le": (
+            "clang-ppc64le-linux",
+            "ppc64le",
+            "glibc_unknown",
+            "clang",
+            "clang",
+            "glibc_unknown",
+        ),
         "linux-riscv64": (
             "clang-riscv64-linux",
             "riscv64",

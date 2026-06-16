@@ -1,0 +1,11 @@
+diff --git a/python/private/pypi/pip_repository.bzl b/python/private/pypi/pip_repository.bzl
+--- a/python/private/pypi/pip_repository.bzl
++++ b/python/private/pypi/pip_repository.bzl
+@@ -97,6 +97,7 @@
+                 "linux_aarch64",
+                 "linux_arm",
+                 "linux_ppc",
++                "linux_ppc64le",
+                 "linux_riscv64",
+                 "linux_s390x",
+                 "linux_x86_64",

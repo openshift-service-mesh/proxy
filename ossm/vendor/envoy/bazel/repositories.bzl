@@ -3,7 +3,7 @@ load("@envoy_api//bazel:envoy_http_archive.bzl", "envoy_http_archive")
 load("@envoy_api//bazel:external_deps.bzl", "load_repository_locations")
 load(":repository_locations.bzl", "PROTOC_VERSIONS", "REPOSITORY_LOCATIONS_SPEC")
 
-PPC_SKIP_TARGETS = ["envoy.string_matcher.lua", "envoy.filters.http.lua", "envoy.router.cluster_specifier_plugin.lua"]
+PPC_SKIP_TARGETS = []
 
 WINDOWS_SKIP_TARGETS = [
     "envoy.extensions.http.cache.file_system_http_cache",
@@ -725,6 +725,8 @@ def _abseil_cpp():
 def _com_google_protobuf():
     external_http_archive(
         name = "rules_python",
+        patch_args = ["-p1"],
+        patches = ["@envoy//bazel:rules_python_ppc64le.patch"],
     )
     external_http_archive(
         name = "rules_java",

@@ -68,6 +68,15 @@ def envoy_dependency_imports(
         ],
         versions = [rust_common.default_version],
     )
+    rust_repository_set(
+        name = "rust_linux_ppc64le",
+        exec_triple = "powerpc64le-unknown-linux-gnu",
+        extra_target_triples = [
+            "wasm32-unknown-unknown",
+            "wasm32-wasi",
+        ],
+        versions = [rust_common.default_version],
+    )
     rules_rust_dependencies()
     rust_register_toolchains(
         versions = ["1.88.0"],
