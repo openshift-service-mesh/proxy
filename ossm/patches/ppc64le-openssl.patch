@@ -37,22 +37,6 @@ diff --git a/bazel/repositories.bzl b/bazel/repositories.bzl
      )
      external_http_archive(
          name = "rules_java",
-@@ -758,6 +760,7 @@
-             "@envoy//bazel:v8.patch",
-             "@envoy//bazel:v8_atomic_ref.patch",
-             "@envoy//bazel:v8_novtune.patch",
-             "@envoy//bazel:v8_ppc64le.patch",
-+            "@envoy//bazel:v8_maglev.patch",
-             # https://issues.chromium.org/issues/423403090
-             "@envoy//bazel:v8_python.patch",
-@@ -956,6 +959,7 @@ def _toolchains_llvm():
-         patches = [
-             "@envoy_toolshed//:patches/toolchains_llvm.patch",
-             "@envoy//bazel/foreign_cc:toolchains_llvm_stdc++.patch",
-+            "@envoy//bazel:toolchains_llvm_ppc64le.patch",
-         ],
-     )
-
 diff --git a/bazel/rules_python_ppc64le.patch b/bazel/rules_python_ppc64le.patch
 new file mode 100644
 --- /dev/null
@@ -69,62 +53,6 @@ new file mode 100644
 +                 "linux_riscv64",
 +                 "linux_s390x",
 +                 "linux_x86_64",
-diff --git a/bazel/toolchains_llvm_ppc64le.patch b/bazel/toolchains_llvm_ppc64le.patch
-new file mode 100644
---- /dev/null
-+++ b/bazel/toolchains_llvm_ppc64le.patch
-@@ -0,0 +1,36 @@
-+diff --git a/toolchain/internal/common.bzl b/toolchain/internal/common.bzl
-+--- a/toolchain/internal/common.bzl
-++++ b/toolchain/internal/common.bzl
-+@@ -16,6 +16,7 @@
-+     ("linux", "x86_64"),
-+     ("linux", "aarch64"),
-+     ("linux", "armv7"),
-++    ("linux", "ppc64le"),
-+     ("linux", "riscv64"),
-+     ("darwin", "x86_64"),
-+     ("darwin", "aarch64"),
-+diff --git a/toolchain/cc_toolchain_config.bzl b/toolchain/cc_toolchain_config.bzl
-+--- a/toolchain/cc_toolchain_config.bzl
-++++ b/toolchain/cc_toolchain_config.bzl
-+@@ -92,6 +92,14 @@
-+             "clang",
-+             "glibc_unknown",
-+         ),
-++        "linux-ppc64le": (
-++            "clang-ppc64le-linux",
-++            "ppc64le",
-++            "glibc_unknown",
-++            "clang",
-++            "clang",
-++            "glibc_unknown",
-++        ),
-+         "linux-riscv64": (
-+             "clang-riscv64-linux",
-+             "riscv64",
-+diff --git a/toolchain/internal/configure.bzl b/toolchain/internal/configure.bzl
-+--- a/toolchain/internal/configure.bzl
-++++ b/toolchain/internal/configure.bzl
-+@@ -403,2 +403,3 @@
-+         "linux-armv7": "armv7-unknown-linux-gnueabihf",
-++        "linux-ppc64le": "powerpc64le-unknown-linux-gnu",
-+         "linux-x86_64": "x86_64-unknown-linux-gnu",
-diff --git a/bazel/v8_maglev.patch b/bazel/v8_maglev.patch
-new file mode 100644
---- /dev/null
-+++ b/bazel/v8_maglev.patch
-@@ -0,0 +1,10 @@
-+diff --git a/BUILD.bazel b/BUILD.bazel
-+--- a/BUILD.bazel
-++++ b/BUILD.bazel
-+@@ -3823,5 +3823,6 @@
-+             "src/maglev/maglev-post-hoc-optimizations-processors.h",
-+             "src/maglev/maglev-pre-regalloc-codegen-processors.h",
-++            "src/maglev/maglev-regalloc-node-info.h",
-+         ],
-+     }),
-+ )
 diff --git a/compat/openssl/patch/include/openssl/target.h.sh b/compat/openssl/patch/include/openssl/target.h.sh
 --- a/compat/openssl/patch/include/openssl/target.h.sh
 +++ b/compat/openssl/patch/include/openssl/target.h.sh
