@@ -145,6 +145,14 @@ function patch_s390x() {
   done
 }
 
+function patch_ppc64le() {
+  echo "Applying ppc64le build patches"
+  for patch in "${ROOT_DIR}/ossm/patches/ppc64le/"*.patch; do
+    echo "Applying ${patch}..."
+    git apply --ignore-whitespace "${patch}"
+  done
+}
+
 function main() {
   validate
   init
@@ -152,6 +160,7 @@ function main() {
   copy_files
   patch_python
   patch_s390x
+  patch_ppc64le
 
   echo
   echo "Done. Inspect the result with git status"
