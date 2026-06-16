@@ -30,6 +30,10 @@ build --test_output=all
 build:x86_64 --define=DUMMY=dummy
 build:s390x --@envoy//source/extensions/filters/common/lua:luajit2=1
 build:ppc --action_env=BAZEL_LINKLIBS=-lstdc++
+build:ppc --@envoy//source/extensions/filters/common/lua:luajit2=1
+build:ppc --platforms=//ppc64le_platform:host
+build:ppc --extra_execution_platforms=//ppc64le_platform:host
+build:ppc --extra_toolchains=//ppc64le_platform:jdk_runtime
 build:aarch64 --define=DUMMY=dummy
 
 # Colored ouput messes with some of the logging systems in CI, so we disable that.

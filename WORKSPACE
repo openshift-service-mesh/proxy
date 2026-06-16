@@ -48,6 +48,7 @@ http_archive(
     patches = [
         "//ossm/patches:use-cmake-from-host.patch",
         "//ossm/patches:enable-luajit2-repo.patch",
+        "//ossm/patches:ppc64le-openssl.patch",
     ],
     patch_args = ["-p1"],
 )
