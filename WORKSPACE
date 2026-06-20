@@ -28,7 +28,7 @@ new_local_repository(
 # 1. Determine SHA256 `wget https://github.com/envoyproxy/envoy/archive/$COMMIT.tar.gz && sha256sum $COMMIT.tar.gz`
 # 2. Update .bazelversion, envoy.bazelrc and .bazelrc if needed.
 #
-# Commit date: 06/15/26
+# Commit date: 06/20/26
 ENVOY_SHA = "80ca1d92145aa946d9f5c36fe830fc1182e13c85"
 
 ENVOY_SHA256 = "cd8a729545688c8da20a89579eb5b6be91038f695f12b39674a5959a0239f1bc"
@@ -39,8 +39,8 @@ ENVOY_REPO = "envoy"
 
 # Since we include envoy-openssl, and not envoy, we are only interested in OPENSSL_ENVOY_SHA(256)?.
 # and not in ENVOY_SHA(256)?. The latter may be incorrect or outdated, and that's not an issue.
-OPENSSL_ENVOY_SHA = "6ae7dfda12aa49e63feba5f7b50b2fd670965e7d"
-OPENSSL_ENVOY_SHA256 = "8095506e6163d283c2fa282b9f8306aa41bed29ef2ea861145714d5ff86b5e94"
+OPENSSL_ENVOY_SHA = "0b4b21fd873260f2f1897df44d8fd60e305fb84a"
+OPENSSL_ENVOY_SHA256 = "c9016ba3ee2b711e1fdb1fc98506b6c73dbe98f25e7072622b78c2ba9b9b0fc3"
 OPENSSL_ENVOY_ORG = "envoyproxy"
 OPENSSL_ENVOY_REPO = "envoy-openssl"
 
