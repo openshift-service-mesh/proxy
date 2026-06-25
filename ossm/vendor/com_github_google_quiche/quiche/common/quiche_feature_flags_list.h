@@ -39,6 +39,7 @@ QUICHE_FLAG(bool, quiche_reloadable_flag_quic_enable_disable_resumption, true, t
 QUICHE_FLAG(bool, quiche_reloadable_flag_quic_enable_mtu_discovery_at_server, false, false, "If true, QUIC will default enable MTU discovery at server, with a target of 1450 bytes.")
 QUICHE_FLAG(bool, quiche_reloadable_flag_quic_enable_server_on_wire_ping, true, true, "If true, enable server retransmittable on wire PING.")
 QUICHE_FLAG(bool, quiche_reloadable_flag_quic_enable_version_rfcv2, false, false, "When true, support RFC9369.")
+QUICHE_FLAG(bool, quiche_reloadable_flag_quic_enforce_qpack_buffer_limit, true, true, "If true, the QPACK decoder will restrict the amount of buffered data.")
 QUICHE_FLAG(bool, quiche_reloadable_flag_quic_enobufs_blocked, true, true, "If true, ENOBUFS socket errors are reported as socket blocked instead of socket failure.")
 QUICHE_FLAG(bool, quiche_reloadable_flag_quic_fail_on_empty_ack, false, false, "If true, closes the connection if there are no packets in the ack frame. This is always the result of a protocol violation by the peer.")
 QUICHE_FLAG(bool, quiche_reloadable_flag_quic_fin_before_completed_http_headers, false, true, "If true, close the connection with error if FIN is received before finish receiving the whole HTTP headers.")
