@@ -99,6 +99,7 @@ function copy_files() {
   find "${VENDOR_DIR}" -name .gitignore -type f -delete
   find "${VENDOR_DIR}" -name __pycache__ -type d -print0 | xargs -0 -r rm -rf
   find "${VENDOR_DIR}" -name '*.pyc' -delete
+  find "${VENDOR_DIR}/v8" -name '*.bak' -delete
 }
 
 function run_bazel() {
