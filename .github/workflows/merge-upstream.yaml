@@ -30,7 +30,12 @@ jobs:
         git config user.email "openshiftservicemeshbot@gmail.com"
         git remote add upstream https://github.com/istio/proxy.git
         git fetch upstream ${{ matrix.branch }}
-        if git merge upstream/${{ matrix.branch }} | grep -q "Already up to date"; then
+        merge_output=$(git merge upstream/${{ matrix.branch }} 2>&1) || {
+          echo "::error::Merge failed:"
+          echo "$merge_output"
+          exit 1
+        }
+        if echo "$merge_output" | grep -q "Already up to date"; then
           echo "already-synced=true" >> "$GITHUB_OUTPUT"
         fi
       id: merge
