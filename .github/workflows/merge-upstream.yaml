@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        branch: [release-1.30]
+        branch: [release-1.24, release-1.26, release-1.27, release-1.28, release-1.30]
 
     steps:
     - uses: actions/checkout@v5
@@ -40,7 +40,7 @@ jobs:
       run: |
         ./ossm/scripts/update-deps.sh
         # Reset the changes to compiler.bzl since we don't want to update it
-        git checkout ossm/vendor/envoy_repo/compiler.bzl
+        git checkout ossm/vendor/envoy_repo/compiler.bzl || true
         git add -A
         git commit -m "Update deps" || true
 
