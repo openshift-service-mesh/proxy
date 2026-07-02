@@ -16,6 +16,7 @@ if [[ "${DRY_RUN:-false}" == "true" ]]; then
 fi
 
 echo "${GCS_SERVICE_ACCOUNT_KEY}" > /tmp/gcs-key.json
+trap 'rm -f /tmp/gcs-key.json' EXIT
 pip install --quiet google-cloud-storage
 python3 - <<'EOF'
 import os
