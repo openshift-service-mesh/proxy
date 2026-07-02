@@ -93,6 +93,13 @@ jobs:
             echo "Trusted author ($ASSOCIATION)"
             exit 0
           fi
+          # ok-to-test label means a maintainer explicitly authorized this PR.
+          # Only people with write access can add labels, so this is safe.
+          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'ok-to-test') }}" == "true" ]]; then
+            echo "ok-to-test label present - authorized by maintainer"
+            exit 0
+          fi
+
           echo "::error::External contributor. A maintainer must add the 'ok-to-test' label to run CI."
           exit 1
 
