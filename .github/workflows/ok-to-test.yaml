@@ -8,31 +8,15 @@ on:
       - release-1.30
 
 jobs:
-  label-management:
+  handle-ok-to-test:
     runs-on: ubuntu-latest
     if: github.event.label.name == 'ok-to-test'
     permissions:
       pull-requests: write
-    steps:
-      - name: Remove needs-ok-to-test when maintainer authorizes CI
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.removeLabel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              name: 'needs-ok-to-test'
-            }).catch(() => {})
-
-  trigger-build:
-    runs-on: ubuntu-latest
-    if: github.event.label.name == 'ok-to-test'
-    permissions:
       actions: write
     steps:
-      - name: Trigger build.yaml for this PR
-        uses: actions/github-script@v7
+      - name: Dispatch build
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7
         with:
           script: |
             await github.rest.actions.createWorkflowDispatch({
@@ -44,6 +28,17 @@ jobs:
                 pr_number: String(context.payload.pull_request.number),
                 head_sha: context.payload.pull_request.head.sha,
                 base_ref: context.payload.pull_request.base.ref,
-                source_repo: context.payload.pull_request.head.repo.clone_url
+                source_repo: context.payload.pull_request.head.repo?.clone_url ?? ''
               }
-            })
+            });
+
+      - name: Remove needs-ok-to-test
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7
+        with:
+          script: |
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              name: 'needs-ok-to-test'
+            }).catch(() => {});
