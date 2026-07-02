@@ -1,0 +1,93 @@
+---
+name: CI Authorization
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches:
+      - release-1.30
+
+concurrency:
+  group: ci-auth-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Check authorization and manage CI
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7
+        with:
+          script: |
+            const login = context.payload.pull_request.user.login;
+            const assoc = context.payload.pull_request.author_association;
+            const prNumber = context.payload.pull_request.number;
+            const action = context.payload.action;
+
+            const dispatchBuild = async () => {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'build.yaml',
+                ref: context.payload.pull_request.base.ref,
+                inputs: {
+                  pr_number: String(prNumber),
+                  head_sha: context.payload.pull_request.head.sha,
+                  base_ref: context.payload.pull_request.base.ref,
+                  source_repo: context.payload.pull_request.head.repo?.clone_url ?? ''
+                }
+              });
+            };
+
+            // Trusted: public org membership visible via author_association
+            if (['OWNER', 'MEMBER', 'COLLABORATOR'].includes(assoc)) {
+              core.info(`Trusted: ${login} (${assoc})`);
+              await dispatchBuild();
+              return;
+            }
+
+            // Not trusted via author_association (private member or external contributor)
+            core.info(`Not trusted via association: ${login} (${assoc})`);
+
+            // On synchronize/reopened: remove ok-to-test to invalidate previous authorization
+            if (action === 'synchronize' || action === 'reopened') {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                name: 'ok-to-test'
+              }).catch(() => {});
+            }
+
+            // Add needs-ok-to-test
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: ['needs-ok-to-test']
+            }).catch(() => {});
+
+            // Live API check: if ok-to-test already on the PR at open time
+            // (e.g. bot PRs created by merge-upstream.yaml with ok-to-test in labels),
+            // dispatch the build and clean up needs-ok-to-test.
+            // This is a fresh API call, NOT the frozen event snapshot.
+            if (action === 'opened') {
+              const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber
+              });
+              if (currentLabels.some(l => l.name === 'ok-to-test')) {
+                core.info(`ok-to-test already present. Dispatching build and removing needs-ok-to-test.`);
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  name: 'needs-ok-to-test'
+                }).catch(() => {});
+                await dispatchBuild();
+              }
+            }
