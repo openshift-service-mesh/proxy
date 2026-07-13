@@ -1,0 +1,18 @@
+globals = struct(
+    cc_proto_aspect = getattr(getattr(native, 'legacy_globals', None), 'cc_proto_aspect', None),
+    CcSharedLibraryInfo = getattr(getattr(native, 'legacy_globals', None), 'CcSharedLibraryInfo', CcSharedLibraryInfo),
+    CcSharedLibraryHintInfo = getattr(getattr(native, 'legacy_globals', None), 'CcSharedLibraryHintInfo', CcSharedLibraryHintInfo),
+    JavaInfo = getattr(getattr(native, 'legacy_globals', None), 'JavaInfo', None),
+    JavaPluginInfo = getattr(getattr(native, 'legacy_globals', None), 'JavaPluginInfo', None),
+    macro = getattr(getattr(native, 'legacy_globals', None), 'macro', macro),
+    PackageSpecificationInfo = getattr(getattr(native, 'legacy_globals', None), 'PackageSpecificationInfo', PackageSpecificationInfo),
+    ProtoInfo = getattr(getattr(native, 'legacy_globals', None), 'ProtoInfo', None),
+    PyCcLinkParamsProvider = getattr(getattr(native, 'legacy_globals', None), 'PyCcLinkParamsProvider', None),
+    PyInfo = getattr(getattr(native, 'legacy_globals', None), 'PyInfo', None),
+    PyRuntimeInfo = getattr(getattr(native, 'legacy_globals', None), 'PyRuntimeInfo', None),
+    RunEnvironmentInfo = getattr(getattr(native, 'legacy_globals', None), 'RunEnvironmentInfo', RunEnvironmentInfo),
+    set = getattr(getattr(native, 'legacy_globals', None), 'set', set),
+    subrule = getattr(getattr(native, 'legacy_globals', None), 'subrule', subrule),
+    DefaultInfo = getattr(getattr(native, 'legacy_globals', None), 'DefaultInfo', DefaultInfo),
+    __TestingOnly_NeverAvailable = getattr(getattr(native, 'legacy_globals', None), '__TestingOnly_NeverAvailable', None),
+)
