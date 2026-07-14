@@ -104,7 +104,6 @@ build --override_repository=pypi__setuptools=%workspace%/ossm/vendor/pypi__setup
 build --override_repository=pypi__tomli=%workspace%/ossm/vendor/pypi__tomli
 build --override_repository=pypi__wheel=%workspace%/ossm/vendor/pypi__wheel
 build --override_repository=pypi__zipp=%workspace%/ossm/vendor/pypi__zipp
-build --override_repository=python3_12_toolchains=%workspace%/ossm/vendor/python3_12_toolchains
 build --override_repository=pythons_hub=%workspace%/ossm/vendor/pythons_hub
 build --override_repository=quiche=%workspace%/ossm/vendor/quiche
 build --override_repository=re2=%workspace%/ossm/vendor/re2

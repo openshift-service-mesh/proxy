@@ -1,16 +1,7 @@
 diff --git a/bazel/repositories_extra.bzl b/bazel/repositories_extra.bzl
-index 1234567890..abcdef1234 100644
 --- a/bazel/repositories_extra.bzl
 +++ b/bazel/repositories_extra.bzl
-@@ -35,10 +35,12 @@ def envoy_dependencies_extra(
-     raze_fetch_remote_crates()
-     crate_repositories()
-     py_repositories()
-
--    # Registers underscored Python minor version - eg `python3_10`
-+    # Registers underscored Python minor version - eg `python3_10`.
-+    # Toolchain registration is disabled so that the host Python is used instead
-+    # of the hermetic one (via --extra_toolchains in ossm/bazelrc).
+@@ -38,5 +38,6 @@ def envoy_dependencies_extra(
      python_register_toolchains(
          name = "python%s" % _python_minor_version(python_version),
          python_version = python_version,
