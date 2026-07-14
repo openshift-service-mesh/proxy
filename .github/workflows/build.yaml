@@ -23,7 +23,7 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened]
     branches:
-      - release-1.30
+      - release-1.30-DISABLED
 
 jobs:
   manage-labels:

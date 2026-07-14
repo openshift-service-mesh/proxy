@@ -5,7 +5,7 @@ on:
   pull_request_target:
     types: [labeled]
     branches:
-      - release-1.30
+      - release-1.30-DISABLED
 
 jobs:
   label-management:
