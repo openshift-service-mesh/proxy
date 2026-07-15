@@ -34,9 +34,7 @@ def envoy_dependencies_extra(
     crate_repositories()
     py_repositories()
 
-    # Registers underscored Python minor version - eg `python3_10`.
-    # Toolchain registration is disabled so that the host Python is used instead
-    # of the hermetic one (via --extra_toolchains in ossm/bazelrc).
+    # Registers underscored Python minor version - eg `python3_10`
     python_register_toolchains(
         name = "python%s" % _python_minor_version(python_version),
         python_version = python_version,
