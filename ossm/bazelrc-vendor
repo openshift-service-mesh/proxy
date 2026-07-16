@@ -118,6 +118,7 @@ build --override_repository=rules_fuzzing=/work/ossm/vendor/rules_fuzzing
 build --override_repository=rules_fuzzing_oss_fuzz=/work/ossm/vendor/rules_fuzzing_oss_fuzz
 build --override_repository=rules_java=/work/ossm/vendor/rules_java
 build --override_repository=rules_jvm_external=/work/ossm/vendor/rules_jvm_external
+build --override_repository=rules_license=/work/ossm/vendor/rules_license
 build --override_repository=rules_pkg=/work/ossm/vendor/rules_pkg
 build --override_repository=rules_proto=/work/ossm/vendor/rules_proto
 build --override_repository=rules_proto_grpc=/work/ossm/vendor/rules_proto_grpc
