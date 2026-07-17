@@ -24,6 +24,13 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "event2/event-config.h"
+#include "evconfig-private.h"
+
+#ifdef _WIN32
+#  include <winsock2.h>
+#endif
+
 #include <string.h>
 
 #include <openssl/ssl.h>
@@ -136,7 +143,7 @@ bio_bufferevent_write(BIO *b, const char *in, int inlen)
 
 	BIO_clear_retry_flags(b);
 
-	if (!BIO_get_data(b))
+	if (!bufev)
 		return -1;
 
 	output = bufferevent_get_output(bufev);
@@ -259,7 +266,9 @@ conn_closed(struct bufferevent_ssl *bev_ssl, int when, int errcode, int ret)
 		bufferevent_ssl_put_error(bev_ssl, errcode);
 		break;
 	case SSL_ERROR_SSL:
-		/* Protocol error. */
+		/* Protocol error; possibly a dirty shutdown. */
+		if (ret == 0 && SSL_is_init_finished(bev_ssl->ssl) == 0)
+			dirty_shutdown = 1;
 		bufferevent_ssl_put_error(bev_ssl, errcode);
 		break;
 	case SSL_ERROR_WANT_X509_LOOKUP:
@@ -281,7 +290,7 @@ conn_closed(struct bufferevent_ssl *bev_ssl, int when, int errcode, int ret)
 		bufferevent_ssl_put_error(bev_ssl, err);
 	}
 
-	if (dirty_shutdown && bev_ssl->allow_dirty_shutdown)
+	if (dirty_shutdown && bev_ssl->flags & BUFFEREVENT_SSL_DIRTY_SHUTDOWN)
 		event = BEV_EVENT_EOF;
 
 	bufferevent_ssl_stop_reading(bev_ssl);
@@ -337,8 +346,9 @@ SSL_context_free(void *ssl, int flags)
 }
 
 static int
-SSL_is_ok(int err)
+SSL_handshake_is_ok(int err)
 {
+	/* What SSL_do_handshake() return on success */
 	return err == 1;
 }
 
@@ -392,6 +402,11 @@ be_openssl_bio_set_fd(struct bufferevent_ssl *bev_ssl, evutil_socket_t fd)
 	return 0;
 }
 
+static size_t SSL_pending_wrap(void *ssl)
+{
+	return SSL_pending(ssl);
+}
+
 static struct le_ssl_ops le_openssl_ops = {
 	SSL_init,
 	SSL_context_free,
@@ -399,17 +414,17 @@ static struct le_ssl_ops le_openssl_ops = {
 	(int (*)(void *))SSL_renegotiate,
 	openssl_write,
 	openssl_read,
-	(size_t(*)(void *))SSL_pending,
+	SSL_pending_wrap,
 	(int (*)(void *))SSL_do_handshake,
 	(int (*)(void *, int))SSL_get_error,
 	ERR_clear_error,
 	(int (*)(void *))SSL_clear,
 	(void (*)(void *))SSL_set_connect_state,
 	(void (*)(void *))SSL_set_accept_state,
-	SSL_is_ok,
+	SSL_handshake_is_ok,
 	SSL_is_want_read,
 	SSL_is_want_write,
-	(int (*)(void *))be_openssl_get_fd,
+	(evutil_socket_t (*)(void *))be_openssl_get_fd,
 	be_openssl_bio_set_fd,
 	init_bio_counts,
 	decrement_buckets,
@@ -470,7 +485,7 @@ bufferevent_openssl_socket_new(struct event_base *base,
 			   This is probably an error on our part.  Fail. */
 			goto err;
 		}
-		BIO_set_close(bio, 0);
+		(void)BIO_set_close(bio, 0);
 	} else {
 		/* The SSL isn't configured with a BIO with an fd. */
 		if (fd >= 0) {

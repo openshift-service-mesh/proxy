@@ -51,7 +51,6 @@ struct evhttp_connection {
 	 * server */
 	TAILQ_ENTRY(evhttp_connection) next;
 
-	evutil_socket_t fd;
 	struct bufferevent *bufev;
 
 	struct event retry_ev;		/* for retrying connects */
@@ -62,6 +61,9 @@ struct evhttp_connection {
 	char *address;			/* address to connect to */
 	ev_uint16_t port;
 
+#ifndef _WIN32
+	char *unixsocket;
+#endif
 	size_t max_headers_size;
 	ev_uint64_t max_body_size;
 
@@ -122,9 +124,16 @@ struct evhttp_cb {
 /* both the http server as well as the rpc system need to queue connections */
 TAILQ_HEAD(evconq, evhttp_connection);
 
+/* WebSockets connections */
+TAILQ_HEAD(evwsq, evws_connection);
+
 /* each bound socket is stored in one of these */
 struct evhttp_bound_socket {
 	TAILQ_ENTRY(evhttp_bound_socket) next;
+
+	struct evhttp *http;
+	struct bufferevent* (*bevcb)(struct event_base *, void *);
+	void *bevcbarg;
 
 	struct evconnlistener *listener;
 };
@@ -145,8 +154,10 @@ struct evhttp {
 
 	TAILQ_HEAD(httpcbq, evhttp_cb) callbacks;
 
-	/* All live connections on this host. */
+	/* All live HTTP connections on this host. */
 	struct evconq connections;
+	/* All live WebSockets sessions on this host. */
+	struct evwsq ws_sessions;
 	int connection_max;
 	int connection_cnt;
 
@@ -190,7 +201,7 @@ struct evhttp {
 /* XXX most of these functions could be static. */
 
 /* resets the connection; can be reused for more requests */
-void evhttp_connection_reset_(struct evhttp_connection *);
+void evhttp_connection_reset_(struct evhttp_connection *, int);
 
 /* connects if necessary */
 int evhttp_connection_connect_(struct evhttp_connection *);
@@ -200,6 +211,22 @@ enum evhttp_request_error;
 EVENT2_EXPORT_SYMBOL
 void evhttp_connection_fail_(struct evhttp_connection *,
     enum evhttp_request_error error);
+
+enum evhttp_transfer_encoding_header_status {
+	/* This Transfer-Encoding line was invalid.
+	 * (We consider all "chunked" encodings invalid except those at the end
+	 * of the sequence.) */
+	TE_INVALID,
+	/* This Transfer-Encoding line ended with the "chunked" encoding. */
+	TE_ENDS_IN_CHUNKED,
+	/* This Transfer-Encoding line was valid and did not contain "chunked" */
+	TE_NO_CHUNKED,
+};
+EVENT2_EXPORT_SYMBOL
+int evhttp_str_is_chunked_(const char *value, const char *eos);
+EVENT2_EXPORT_SYMBOL
+enum evhttp_transfer_encoding_header_status
+evhttp_check_transfer_encoding_(const char *value);
 
 enum message_read_status;
 
@@ -214,6 +241,11 @@ void evhttp_start_write_(struct evhttp_connection *);
 /* response sending HTML the data in the buffer */
 void evhttp_response_code_(struct evhttp_request *, int, const char *);
 void evhttp_send_page_(struct evhttp_request *, struct evbuffer *);
+
+struct bufferevent * evhttp_start_ws_(struct evhttp_request *req);
+
+/* [] has been stripped */
+#define _EVHTTP_URI_HOST_HAS_BRACKETS 0x02
 
 EVENT2_EXPORT_SYMBOL
 int evhttp_decode_uri_internal(const char *uri, size_t length,

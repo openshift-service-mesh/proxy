@@ -116,13 +116,17 @@ bufferevent_socket_set_conn_address_fd_(struct bufferevent *bev,
 		getpeername(fd, addr, &len);
 }
 
-void
+int
 bufferevent_socket_set_conn_address_(struct bufferevent *bev,
 	struct sockaddr *addr, size_t addrlen)
 {
 	struct bufferevent_private *bev_p = BEV_UPCAST(bev);
-	EVUTIL_ASSERT(addrlen <= sizeof(bev_p->conn_address));
-	memcpy(&bev_p->conn_address, addr, addrlen);
+	if (addrlen <= sizeof(bev_p->conn_address)) {
+		memcpy(&bev_p->conn_address, addr, addrlen);
+		return 0;
+	} else {
+		return EVUTIL_EAI_FAIL;
+	}
 }
 
 static void
@@ -194,6 +198,8 @@ bufferevent_readcb(evutil_socket_t fd, short event, void *arg)
 		int err = evutil_socket_geterror(fd);
 		if (EVUTIL_ERR_RW_RETRIABLE(err))
 			goto reschedule;
+		/* NOTE: sometimes on FreeBSD 9.2 the connect() does not returns an
+		 * error, and instead, first readv() will */
 		if (EVUTIL_ERR_CONNECT_REFUSED(err)) {
 			bufev_p->connection_refused = 1;
 			goto done;
@@ -396,7 +402,7 @@ bufferevent_socket_connect(struct bufferevent *bev,
 		fd = evutil_socket_(sa->sa_family,
 		    SOCK_STREAM|EVUTIL_SOCK_NONBLOCK, 0);
 		if (fd < 0)
-			goto freesock;
+			goto done;
 		ownfd = 1;
 	}
 	if (sa) {
@@ -409,11 +415,14 @@ bufferevent_socket_connect(struct bufferevent *bev,
 			bufev_p->connecting = 1;
 			result = 0;
 			goto done;
-		} else
+		} else {
 #endif
 		r = evutil_socket_connect_(&fd, sa, socklen);
 		if (r < 0)
 			goto freesock;
+#ifdef _WIN32
+		}
+#endif
 	}
 #ifdef _WIN32
 	/* ConnectEx() isn't always around, even when IOCP is enabled.
@@ -437,7 +446,7 @@ bufferevent_socket_connect(struct bufferevent *bev,
 		bufev_p->connecting = 1;
 		bufferevent_trigger_nolock_(bev, EV_WRITE, BEV_OPT_DEFER_CALLBACKS);
 	} else {
-		/* The connect failed already.  How very BSD of it. */
+		/* The connect failed already (only ECONNREFUSED case). How very BSD of it. */
 		result = 0;
 		bufferevent_run_eventcb_(bev, BEV_EVENT_ERROR, BEV_OPT_DEFER_CALLBACKS);
 		bufferevent_disable(bev, EV_WRITE|EV_READ);
@@ -472,6 +481,11 @@ bufferevent_connect_getaddrinfo_cb(int result, struct evutil_addrinfo *ai,
 		bufferevent_decref_and_unlock_(bev);
 		return;
 	}
+	if (result == 0) {
+		/* XXX use the other addrinfos? */
+		result = bufferevent_socket_set_conn_address_(
+			bev, ai->ai_addr, (int)ai->ai_addrlen);
+	}
 	if (result != 0) {
 		bev_p->dns_error = result;
 		bufferevent_run_eventcb_(bev, BEV_EVENT_ERROR, 0);
@@ -481,8 +495,6 @@ bufferevent_connect_getaddrinfo_cb(int result, struct evutil_addrinfo *ai,
 		return;
 	}
 
-	/* XXX use the other addrinfos? */
-	bufferevent_socket_set_conn_address_(bev, ai->ai_addr, (int)ai->ai_addrlen);
 	r = bufferevent_socket_connect(bev, ai->ai_addr, (int)ai->ai_addrlen);
 	if (r < 0)
 		bufferevent_run_eventcb_(bev, BEV_EVENT_ERROR, 0);

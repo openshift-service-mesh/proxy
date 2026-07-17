@@ -34,11 +34,13 @@ extern "C" {
 #include "event2/event_struct.h"
 #include "evconfig-private.h"
 #include "event2/util.h"
+#include "util-internal.h"
 #include "defer-internal.h"
 #include "evthread-internal.h"
 #include "event2/thread.h"
 #include "ratelim-internal.h"
 #include "event2/bufferevent_struct.h"
+#include "event2/event.h"
 
 #include "ipv6-internal.h"
 #ifdef _WIN32
@@ -224,10 +226,10 @@ struct bufferevent_private {
 	 * So we need to save it, just after we connected to remote server, or
 	 * after resolving (to avoid extra dns requests during retrying, since UDP
 	 * is slow) */
-	union {
-		struct sockaddr_in6 in6;
-		struct sockaddr_in in;
-	} conn_address;
+	/* NOTE: it might be nice to use fewer bytes here, but we need to store
+	 * sockaddr_un sometimes in order to make AF_UNIX sockets work as expected
+	 * with http.c. */
+	struct sockaddr_storage conn_address;
 
 	struct evdns_getaddrinfo_request *dns_request;
 };
@@ -277,7 +279,7 @@ struct bufferevent_ops {
 	 */
 	int (*disable)(struct bufferevent *, short);
 
-	/** Detatches the bufferevent from related data structures. Called as
+	/** Detaches the bufferevent from related data structures. Called as
 	 * soon as its reference count reaches 0. */
 	void (*unlink)(struct bufferevent *);
 
@@ -306,18 +308,18 @@ extern const struct bufferevent_ops bufferevent_ops_pair;
 #define BEV_IS_FILTER(bevp) ((bevp)->be_ops == &bufferevent_ops_filter)
 #define BEV_IS_PAIR(bevp) ((bevp)->be_ops == &bufferevent_ops_pair)
 
-#if defined(EVENT__HAVE_OPENSSL) | defined(EVENT__HAVE_MBEDTLS)
-extern const struct bufferevent_ops bufferevent_ops_ssl;
-#define BEV_IS_SSL(bevp) ((bevp)->be_ops == &bufferevent_ops_ssl)
+#if defined(EVENT__HAVE_OPENSSL) || defined(EVENT__HAVE_MBEDTLS)
+/* We cannot use the same trick with external declaration,
+ * since there are copy of bufferevent_ops_ssl in each library:
+ * - openssl
+ * - mbedlts
+ *
+ * However we can just compare the name of the bufferevent type for now.
+ * (It is totally fine to use memcmp() here since it will be optimized by the compiler).
+ */
+#define BEV_IS_SSL(bevp) (!memcmp((bevp)->be_ops->type, "ssl", 3))
 #else
 #define BEV_IS_SSL(bevp) 0
-#endif
-
-#if defined(EVENT__HAVE_MBEDTLS)
-extern const struct bufferevent_ops bufferevent_ops_mbedtls;
-#define BEV_IS_MBEDTLS(bevp) ((bevp)->be_ops == &bufferevent_ops_mbedtls)
-#else
-#define BEV_IS_MBEDTLS(bevp) 0
 #endif
 
 #ifdef _WIN32
@@ -456,7 +458,7 @@ void
 bufferevent_socket_set_conn_address_fd_(struct bufferevent *bev, evutil_socket_t fd);
 
 EVENT2_EXPORT_SYMBOL
-void
+int
 bufferevent_socket_set_conn_address_(struct bufferevent *bev, struct sockaddr *addr, size_t addrlen);
 
 
@@ -485,8 +487,8 @@ bufferevent_socket_set_conn_address_(struct bufferevent *bev, struct sockaddr *a
 #define BEV_UPCAST(b) EVUTIL_UPCAST((b), struct bufferevent_private, bev)
 
 #ifdef EVENT__DISABLE_THREAD_SUPPORT
-#define BEV_LOCK(b) EVUTIL_NIL_STMT_
-#define BEV_UNLOCK(b) EVUTIL_NIL_STMT_
+#define BEV_LOCK(b) (void)(b)
+#define BEV_UNLOCK(b) (void)(b)
 #else
 /** Internal: Grab the lock (if any) on a bufferevent */
 #define BEV_LOCK(b) do {						\

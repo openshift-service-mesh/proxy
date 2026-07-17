@@ -53,18 +53,29 @@ struct evhttp_connection;
  */
 
 /* Response codes */
+#define HTTP_CONTINUE		100	/**< client should proceed to send */
+#define HTTP_SWITCH_PROTOCOLS	101	/**< switching to another protocol */
+#define HTTP_PROCESSING		102	/**< processing the request, but no response is available yet */
+#define HTTP_EARLYHINTS		103	/**< return some response headers */
 #define HTTP_OK			200	/**< request completed ok */
+#define HTTP_CREATED		201	/**< new resource is created */
+#define HTTP_ACCEPTED		202	/**< accepted for processing */
+#define HTTP_NONAUTHORITATIVE	203	/**< returning a modified version of the origin's response */
 #define HTTP_NOCONTENT		204	/**< request does not have content */
 #define HTTP_MOVEPERM		301	/**< the uri moved permanently */
 #define HTTP_MOVETEMP		302	/**< the uri moved temporarily */
 #define HTTP_NOTMODIFIED	304	/**< page was not modified from last */
 #define HTTP_BADREQUEST		400	/**< invalid http request was made */
+#define HTTP_UNAUTHORIZED	401	/**< authentication is required */
+#define HTTP_PAYMENTREQUIRED	402	/**< user exceeded limit on requests */
+#define HTTP_FORBIDDEN		403	/**< user not having the necessary permissions */
 #define HTTP_NOTFOUND		404	/**< could not find content for uri */
 #define HTTP_BADMETHOD		405 	/**< method not allowed for this uri */
-#define HTTP_ENTITYTOOLARGE	413	/**<  */
+#define HTTP_ENTITYTOOLARGE	413	/**< request is larger than the server is able to process */
 #define HTTP_EXPECTATIONFAILED	417	/**< we can't handle this expectation */
 #define HTTP_INTERNAL           500     /**< internal error */
 #define HTTP_NOTIMPLEMENTED     501     /**< not implemented */
+#define HTTP_BADGATEWAY		502	/**< received an invalid response from the upstream */
 #define HTTP_SERVUNAVAIL	503	/**< the server is not available */
 
 struct evhttp;
@@ -161,6 +172,14 @@ struct evhttp_bound_socket *evhttp_bind_listener(struct evhttp *http, struct evc
 EVENT2_EXPORT_SYMBOL
 struct evconnlistener *evhttp_bound_socket_get_listener(struct evhttp_bound_socket *bound);
 
+/*
+ * Like evhttp_set_bevcb.
+ * If cb returns a non-NULL bufferevent, * the callback supplied through
+ * evhttp_set_bevcb isn't used.
+ */
+EVENT2_EXPORT_SYMBOL
+void evhttp_bound_set_bevcb(struct evhttp_bound_socket *bound, struct bufferevent* (*cb)(struct event_base *, void *), void *cbarg);
+
 typedef void evhttp_bound_socket_foreach_fn(struct evhttp_bound_socket *, void *);
 /**
  * Applies the function specified in the first argument to all
@@ -210,7 +229,7 @@ evutil_socket_t evhttp_bound_socket_get_fd(struct evhttp_bound_socket *bound_soc
  *
  * Works only if no requests are currently being served.
  *
- * @param http the evhttp server object to be freed
+ * @param http the evhttp server object to be freed. http must not be NULL.
  * @see evhttp_start()
  */
 EVENT2_EXPORT_SYMBOL
@@ -313,7 +332,7 @@ int evhttp_del_cb(struct evhttp *, const char *);
 
     @param http the evhttp server object for which to set the callback
     @param cb the callback to invoke for any unmatched requests
-    @param arg an context argument for the callback
+    @param arg an additional context argument for the callback
 */
 EVENT2_EXPORT_SYMBOL
 void evhttp_set_gencb(struct evhttp *http,
@@ -322,6 +341,8 @@ void evhttp_set_gencb(struct evhttp *http,
 /**
    Set a callback used to create new bufferevents for connections
    to a given evhttp object.
+   cb is not called if a non-NULL bufferevent was supplied by
+   evhttp_bound_set_bevcb.
 
    You can use this to override the default bufferevent type -- for example,
    to make this evhttp object use SSL bufferevents rather than unencrypted
@@ -331,7 +352,7 @@ void evhttp_set_gencb(struct evhttp *http,
 
    @param http the evhttp server object for which to set the callback
    @param cb the callback to invoke for incoming connections
-   @param arg an context argument for the callback
+   @param arg an additional context argument for the callback
  */
 EVENT2_EXPORT_SYMBOL
 void evhttp_set_bevcb(struct evhttp *http,
@@ -349,7 +370,7 @@ void evhttp_set_bevcb(struct evhttp *http,
 
    @param http the evhttp server object for which to set the callback
    @param cb the callback to invoke for incoming connections
-   @param arg an context argument for the callback
+   @param arg an additional context argument for the callback
  */
 EVENT2_EXPORT_SYMBOL
 void evhttp_set_newreqcb(struct evhttp *http,
@@ -375,7 +396,7 @@ void evhttp_set_newreqcb(struct evhttp *http,
 
    @param http the evhttp server object for which to set the callback
    @param cb the callback to invoke to format error pages
-   @param arg an context argument for the callback
+   @param arg an additional context argument for the callback
  */
 EVENT2_EXPORT_SYMBOL
 void evhttp_set_errorcb(struct evhttp *http,
@@ -621,7 +642,7 @@ enum evhttp_cmd_type {
 #define EVHTTP_REQ_MAX EVHTTP_REQ_MOVE
 
 /**
- * @brief stucture that is passed to (and modified by) the
+ * @brief structure that is passed to (and modified by) the
  * extended method callback function
  *
  * @see evhttp_set_ext_method_cmp
@@ -652,7 +673,7 @@ enum evhttp_request_kind { EVHTTP_REQUEST, EVHTTP_RESPONSE };
  * @param dnsbase the dns_base to use for resolving host names; if not
  *     specified host name resolution will block.
  * @param bev a bufferevent to use for connecting to the server; if NULL, a
- *     socket-based bufferevent will be created.  This buffrevent will be freed
+ *     socket-based bufferevent will be created.  This bufferevent will be freed
  *     when the connection closes.  It must have no fd set on it.
  * @param address the address to which to connect
  * @param port the port to connect to
@@ -662,6 +683,39 @@ enum evhttp_request_kind { EVHTTP_REQUEST, EVHTTP_RESPONSE };
 EVENT2_EXPORT_SYMBOL
 struct evhttp_connection *evhttp_connection_base_bufferevent_new(
 	struct event_base *base, struct evdns_base *dnsbase, struct bufferevent* bev, const char *address, ev_uint16_t port);
+
+/**
+ * Create and return a connection object that can be used to for making HTTP
+ * requests over an unix domain socket.
+ *
+ * @param base the event_base to use for handling the connection
+ * @param bev a bufferevent to use for connecting to the server; if NULL, a
+ *     socket-based bufferevent will be created.  This bufferevent will be freed
+ *     when the connection closes.  It must have no fd set on it.
+ * @param path path of unix domain socket
+ * @return an evhttp_connection object that can be used for making requests
+ */
+EVENT2_EXPORT_SYMBOL
+struct evhttp_connection *evhttp_connection_base_bufferevent_unix_new(
+	struct event_base *base, struct bufferevent* bev, const char *path);
+
+/**
+ * Create and return a connection object that can be used to for making HTTP
+ * requests. The connection attempts to reuse an existing connection that was
+ * already established with bufferevent.
+ *
+ * @param base the event_base to use for handling the connection
+ * @param dnsbase the dns_base to use for resolving host names; if not
+ *     specified host name resolution will block.
+ * @param bev a bufferevent to use for connecting to the server. A fd
+ *     is already set on the bufferevent, it will be assumed that this
+ *     connection is already open and ready to send requests.
+ * @return an evhttp_connection object that can be used for making requests or
+ *   NULL on error
+ */
+EVENT2_EXPORT_SYMBOL
+struct evhttp_connection *
+evhttp_connection_base_bufferevent_reuse_new(struct event_base *base, struct evdns_base *dnsbase, struct bufferevent* bev);
 
 /**
  * Return the bufferevent that an evhttp_connection is using.
@@ -835,7 +889,7 @@ void evhttp_connection_set_ext_method_cmp(struct evhttp_connection *evcon,
 	evhttp_ext_method_cb cmp);
 
 /**
- * Returns the connection object associated with the request or NULL
+ * Returns the connection object associated with the request or NULL. req must not be NULL.
  *
  * The user needs to either free the request explicitly or call
  * evhttp_send_reply_end().
@@ -869,7 +923,11 @@ void evhttp_connection_free(struct evhttp_connection *evcon);
 EVENT2_EXPORT_SYMBOL
 void evhttp_connection_free_on_completion(struct evhttp_connection *evcon);
 
-/** sets the ip address from which http connections are made */
+/** Sets the IP address from which http connections are made
+ *
+ * Note this resets internal bufferevent fd, so any options that had been
+ * installed will be flushed.
+ */
 EVENT2_EXPORT_SYMBOL
 void evhttp_connection_set_local_address(struct evhttp_connection *evcon,
     const char *address);
@@ -880,7 +938,7 @@ void evhttp_connection_set_local_port(struct evhttp_connection *evcon,
     ev_uint16_t port);
 
 /**
- * Sets the timeout for this connection.
+ * Sets the timeout for this connection. evcon must not be NULL.
  *
  * @see evhttp_connection_set_timeout_tv()
  */
@@ -959,7 +1017,7 @@ void evhttp_connection_set_closecb(struct evhttp_connection *evcon,
 /** Get the remote address and port associated with this connection. */
 EVENT2_EXPORT_SYMBOL
 void evhttp_connection_get_peer(struct evhttp_connection *evcon,
-    char **address, ev_uint16_t *port);
+    const char **address, ev_uint16_t *port);
 
 /** Get the remote address associated with this connection.
  * extracted from getpeername() OR from nameserver.
@@ -1073,7 +1131,7 @@ int evhttp_remove_header(struct evkeyvalq *headers, const char *key);
 /**
    Adds a header to a list of existing headers.
 
-   @param headers the evkeyvalq object to which to add a header
+   @param headers the evkeyvalq object to which to add a header. headers must not be NULL.
    @param key the name of the header
    @param value the value belonging to the header
    @returns 0 on success, -1  otherwise.
@@ -1281,6 +1339,10 @@ const char *evhttp_uri_get_userinfo(const struct evhttp_uri *uri);
  */
 EVENT2_EXPORT_SYMBOL
 const char *evhttp_uri_get_host(const struct evhttp_uri *uri);
+/** Return the unix socket part of an evhttp_uri, or NULL if there is no unix
+ * socket set */
+EVENT2_EXPORT_SYMBOL
+const char *evhttp_uri_get_unixsocket(const struct evhttp_uri *uri);
 /** Return the port part of an evhttp_uri, or -1 if there is no port set. */
 EVENT2_EXPORT_SYMBOL
 int evhttp_uri_get_port(const struct evhttp_uri *uri);
@@ -1308,6 +1370,11 @@ int evhttp_uri_set_userinfo(struct evhttp_uri *uri, const char *userinfo);
  * Returns 0 on success, -1 if host is not well-formed. */
 EVENT2_EXPORT_SYMBOL
 int evhttp_uri_set_host(struct evhttp_uri *uri, const char *host);
+/** Set the unix socket of an evhttp_uri, or clear the unix socket if unixsocket==NULL.
+ * Returns 0 on success, -1 if unixsocket is not well-formed */
+EVENT2_EXPORT_SYMBOL
+int evhttp_uri_set_unixsocket(struct evhttp_uri *uri, const char *unixsocket);
+
 /** Set the port of an evhttp_uri, or clear the port if port==-1.
  * Returns 0 on success, -1 if port is not well-formed. */
 EVENT2_EXPORT_SYMBOL
@@ -1379,6 +1446,23 @@ struct evhttp_uri *evhttp_uri_parse_with_flags(const char *source_uri,
  */
 #define EVHTTP_URI_NONCONFORMANT 0x01
 
+/**
+ * Strip brackets from the IPv6 address and only for evhttp_uri_get_host(),
+ * evhttp_uri_join() returns the host with brackets.
+ *
+ * Thus you can use host part of the evhttp_uri for getaddrinfo().
+ *
+ * @see also _EVHTTP_URI_HOST_HAS_BRACKETS
+ */
+#define EVHTTP_URI_HOST_STRIP_BRACKETS 0x04
+
+/**
+ * Parse unix domain socket URIs, for example:
+ *
+ * http://unix:/run/control.sock:/controller
+ */
+#define EVHTTP_URI_UNIX_SOCKET 0x08
+
 /** Alias for evhttp_uri_parse_with_flags(source_uri, 0) */
 EVENT2_EXPORT_SYMBOL
 struct evhttp_uri *evhttp_uri_parse(const char *source_uri);
@@ -1387,7 +1471,7 @@ struct evhttp_uri *evhttp_uri_parse(const char *source_uri);
  * Free all memory allocated for a parsed uri.  Only use this for URIs
  * generated by evhttp_uri_parse.
  *
- * @param uri container with parsed data
+ * @param uri container with parsed data. uri must not be NULL.
  * @see evhttp_uri_parse()
  */
 EVENT2_EXPORT_SYMBOL
@@ -1407,7 +1491,7 @@ void evhttp_uri_free(struct evhttp_uri *uri);
  * @see evhttp_uri_parse()
  */
 EVENT2_EXPORT_SYMBOL
-char *evhttp_uri_join(struct evhttp_uri *uri, char *buf, size_t limit);
+char *evhttp_uri_join(const struct evhttp_uri *uri, char *buf, size_t limit);
 
 #ifdef __cplusplus
 }
