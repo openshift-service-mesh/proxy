@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from typing import Iterable
+import operator
+from collections.abc import Iterable
 
 from pip._internal.index.package_finder import PackageFinder
 from pip._internal.models.candidate import InstallationCandidate
 from pip._internal.req import InstallRequirement
 from pip._internal.utils.misc import redact_auth_from_url
+
+from ._internal import _pip_api
 
 
 class PipToolsError(Exception):
@@ -27,7 +30,9 @@ class NoCandidateFound(PipToolsError):
         versions = []
         pre_versions = []
 
-        for candidate in sorted(self.candidates_tried):
+        for candidate in sorted(
+            self.candidates_tried, key=operator.attrgetter("version")
+        ):
             version = str(candidate.version)
             if candidate.version.is_prerelease:
                 pre_versions.append(version)
@@ -40,7 +45,7 @@ class NoCandidateFound(PipToolsError):
             lines.append(f"Tried: {', '.join(versions)}")
 
         if pre_versions:
-            if self.finder.allow_all_prereleases:
+            if _pip_api.finder_allows_prereleases_of_req(self.finder, self.ireq):
                 line = "Tried"
             else:
                 line = "Skipped"

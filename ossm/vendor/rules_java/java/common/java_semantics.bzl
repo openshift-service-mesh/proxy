@@ -13,6 +13,8 @@
 # limitations under the License.
 """Bazel Java Semantics"""
 
+load("@bazel_features//private:util.bzl", _bazel_version_ge = "ge")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_helper.bzl", "cc_helper")
 
 # copybara: default visibility
@@ -22,6 +24,9 @@ def _find_java_toolchain(ctx):
 
 def _find_java_runtime_toolchain(ctx):
     return ctx.toolchains["@bazel_tools//tools/jdk:runtime_toolchain_type"].java_runtime
+
+def _update_args_for_import_deps(*_args):
+    pass
 
 def _get_default_resource_path(path, segment_extractor):
     # Look for src/.../resources to match Maven repository structure.
@@ -40,6 +45,10 @@ def _check_java_info_opens_exports():
 
 def _minimize_cc_info(cc_info):
     return cc_info
+
+def _merge_cc_infos(*args, **kwargs):
+    # TODO: b/483025864 - use https://github.com/bazelbuild/rules_cc/commit/011d6d9e7fae71d43df2d4d83c577f2cef2aa52e
+    return cc_common.merge_cc_infos(*args, **kwargs)
 
 _DOCS = struct(
     ATTRS = {
@@ -105,13 +114,19 @@ semantics = struct(
     compatible_javac_options = _compatible_javac_options,
     LAUNCHER_FLAG_LABEL = Label("@bazel_tools//tools/jdk:launcher_flag_alias"),
     PROGUARD_ALLOWLISTER_LABEL = "@bazel_tools//tools/jdk:proguard_whitelister",
+    TOOLS_TEST_DEFAULT_TEST_TOOLCHAIN_TYPE = "@bazel_tools//tools/test:default_test_toolchain_type",
+    TOOLS_TEST_EMPTY_TOOLCHAIN = "@bazel_tools//tools/test:empty_toolchain",
     check_java_info_opens_exports = _check_java_info_opens_exports,
     DOCS = struct(
         for_attribute = lambda name: _DOCS.ATTRS.get(name, ""),
     ),
     minimize_cc_info = _minimize_cc_info,
+    merge_cc_infos = _merge_cc_infos,
     tokenize_javacopts = _tokenize_javacopts,
     PLATFORMS_ROOT = "@platforms//",
     INCOMPATIBLE_DISABLE_NON_EXECUTABLE_JAVA_BINARY = False,  # Flip when java_single_jar is feature complete
+    update_args_for_import_deps = _update_args_for_import_deps,
     expand_javacopts_make_variables = True,
+    java_toolchain_supports_one_version = _bazel_version_ge("8.0.0"),  # can be dropped once we no longer support Bazel 7
+    TEST_SUITE_PROPERTY_NAME = "bazel.test_suite",
 )

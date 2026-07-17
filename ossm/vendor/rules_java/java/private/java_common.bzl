@@ -22,6 +22,7 @@ load("//java/common/rules:java_toolchain.bzl", "JavaToolchainInfo")
 load(":boot_class_path_info.bzl", "BootClassPathInfo")
 load(
     ":java_common_internal.bzl",
+    _compile_header_internal = "compile_header",
     _compile_internal = "compile",
     _run_ijar_internal = "run_ijar",
 )
@@ -29,7 +30,6 @@ load(
     ":java_info.bzl",
     "JavaInfo",
     "JavaPluginInfo",
-    _java_info_add_constraints = "add_constraints",
     _java_info_make_non_strict = "make_non_strict",
     _java_info_merge = "merge",
     _java_info_set_annotation_processing = "set_annotation_processing",
@@ -87,6 +87,32 @@ def _compile(
         sourcepath = sourcepath,
         resources = resources,
         neverlink = neverlink,
+        enable_annotation_processing = enable_annotation_processing,
+    )
+
+def _compile_header(
+        ctx,
+        output,
+        java_toolchain,
+        source_jars = [],
+        source_files = [],
+        javac_opts = [],
+        deps = [],
+        plugins = [],
+        strict_deps = "ERROR",
+        bootclasspath = None,
+        enable_annotation_processing = True):
+    return _compile_header_internal(
+        ctx,
+        output = output,
+        java_toolchain = java_toolchain,
+        source_jars = source_jars,
+        source_files = source_files,
+        javac_opts = javac_opts,
+        deps = deps,
+        plugins = plugins,
+        strict_deps = strict_deps,
+        bootclasspath = bootclasspath,
         enable_annotation_processing = enable_annotation_processing,
     )
 
@@ -215,21 +241,6 @@ def _make_non_strict(java_info):
 def _get_message_bundle_info():
     return None if semantics.IS_BAZEL else MessageBundleInfo
 
-def _add_constraints(java_info, constraints = []):
-    """Returns a copy of the given JavaInfo with the given constraints added.
-
-    Args:
-        java_info: (JavaInfo) The JavaInfo to enhance
-        constraints: ([str]) Constraints to add
-
-    Returns:
-        (JavaInfo)
-    """
-    if semantics.IS_BAZEL:
-        return java_info
-
-    return _java_info_add_constraints(java_info, constraints = constraints)
-
 def _get_constraints(java_info):
     """Returns a set of constraints added.
 
@@ -293,6 +304,7 @@ def _make_java_common():
     methods = {
         "provider": JavaInfo,
         "compile": _compile,
+        "compile_header": _compile_header,
         "run_ijar": _run_ijar,
         "stamp_jar": _stamp_jar,
         "pack_sources": _pack_sources,
@@ -308,7 +320,6 @@ def _make_java_common():
     if get_internal_java_common().google_legacy_api_enabled():
         methods.update(
             MessageBundleInfo = _get_message_bundle_info(),  # struct field that is None in bazel
-            add_constraints = _add_constraints,
             get_constraints = _get_constraints,
             set_annotation_processing = _set_annotation_processing,
             java_toolchain_label = _java_toolchain_label,

@@ -13,7 +13,9 @@
 # limitations under the License.
 
 load("@rules_bazel_integration_test//bazel_integration_test:defs.bzl", "default_test_runner")
+load("//python:py_binary.bzl", "py_binary")
 load("//python:py_library.bzl", "py_library")
+load("//tests/support:support.bzl", "NOT_WINDOWS")
 load(":integration_test.bzl", "rules_python_integration_test")
 
 licenses(["notice"])
@@ -35,6 +37,21 @@ default_test_runner(
 default_test_runner(
     name = "test_runner",
     visibility = ["//visibility:public"],
+)
+
+rules_python_integration_test(
+    name = "bzlmod_lockfile_test",
+    bazel_versions = ["9.1.0"],
+)
+
+test_suite(
+    name = "subset",
+    tags = ["manual"],
+    tests = [
+        "bzlmod_lockfile_test_bazel_9.1.0",
+        "local_toolchains_test_bazel_self",
+        "uv_lock_test_bazel_self",
+    ],
 )
 
 rules_python_integration_test(
@@ -68,6 +85,10 @@ rules_python_integration_test(
 )
 
 rules_python_integration_test(
+    name = "pip_parse_isolated_test",
+)
+
+rules_python_integration_test(
     name = "pip_parse_workspace_test",
     bzlmod = False,
     workspace_path = "pip_parse",
@@ -84,12 +105,59 @@ rules_python_integration_test(
 )
 
 rules_python_integration_test(
+    name = "runtime_manifests_test",
+)
+
+rules_python_integration_test(
     name = "custom_commands_test",
     py_main = "custom_commands_test.py",
+)
+
+rules_python_integration_test(
+    name = "toolchain_target_settings_test",
+    py_main = "toolchain_target_settings_test.py",
+)
+
+rules_python_integration_test(
+    name = "unified_pypi_test",
+    py_main = "unified_pypi_test.py",
+)
+
+rules_python_integration_test(
+    name = "uv_lock_test",
+    py_deps = [
+        "@pypiserver//pypiserver",
+        ":uv_lock_pypi_server_lib",
+    ],
+    py_main = "uv_lock_test.py",
 )
 
 py_library(
     name = "runner_lib",
     srcs = ["runner.py"],
     imports = ["../../"],
+)
+
+py_library(
+    name = "uv_lock_pypi_server_lib",
+    srcs = ["uv_lock_pypi_server.py"],
+    imports = ["../../"],
+    # currently windows is not working due to
+    # https://github.com/pypiserver/pypiserver/blob/main/pypiserver/config.py#L123
+    #
+    # class DEFAULTS:
+    #     ....
+    #     PACKAGE_DIRECTORIES = [pathlib.Path("~/packages").expanduser().resolve()]
+    #     ....
+    #
+    # which is loaded through `__init__.py` even though it is not used and breaks because
+    # in a Windows sandbox one cannot resolve the home directory.
+    target_compatible_with = NOT_WINDOWS,
+    deps = ["@pypiserver//pypiserver"],
+)
+
+py_binary(
+    name = "uv_lock_pypi_server",
+    srcs = ["uv_lock_pypi_server.py"],
+    deps = [":uv_lock_pypi_server_lib"],
 )

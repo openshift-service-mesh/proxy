@@ -18,9 +18,10 @@ load("@bazel_skylib//lib:sets.bzl", "sets")
 load("//python/private:normalize_name.bzl", "normalize_name")
 load("//python/private:repo_utils.bzl", "REPO_DEBUG_ENV_VAR", "repo_utils")
 load("//python/private:text_util.bzl", "render")
-load(":evaluate_markers.bzl", "evaluate_markers_py", EVALUATE_MARKERS_SRCS = "SRCS")
 load(":parse_requirements.bzl", "host_platform", "parse_requirements", "select_requirement")
+load(":pep508_env.bzl", "env")
 load(":pip_repository_attrs.bzl", "ATTRS")
+load(":pypi_repo_utils.bzl", "pypi_repo_utils")
 load(":render_pkg_aliases.bzl", "render_pkg_aliases")
 load(":requirements_files_by_platform.bzl", "requirements_files_by_platform")
 
@@ -65,7 +66,7 @@ def use_isolated(ctx, attr):
     use_isolated = attr.isolated
 
     # The environment variable will take precedence over the attribute
-    isolated_env = ctx.os.environ.get("RULES_PYTHON_PIP_ISOLATED", None)
+    isolated_env = ctx.getenv("RULES_PYTHON_PIP_ISOLATED", None)
     if isolated_env != None:
         if isolated_env.lower() in ("0", "false"):
             use_isolated = False
@@ -83,6 +84,32 @@ exports_files(["requirements.bzl"])
 
 def _pip_repository_impl(rctx):
     logger = repo_utils.logger(rctx)
+    python_interpreter = pypi_repo_utils.resolve_python_interpreter(
+        rctx,
+        python_interpreter = rctx.attr.python_interpreter,
+        python_interpreter_target = rctx.attr.python_interpreter_target,
+    )
+    result = pypi_repo_utils.execute_checked(
+        rctx,
+        python = python_interpreter,
+        srcs = [],
+        op = "GetPythonVersion",
+        arguments = ["-c", "import sys; print(sys.version.split()[0])"],
+    )
+    python_version = result.stdout.strip().splitlines()[-1]
+    platforms = [
+        "linux_aarch64",
+        "linux_arm",
+        "linux_ppc",
+        "linux_riscv64",
+        "linux_s390x",
+        "linux_x86_64",
+        "osx_aarch64",
+        "osx_x86_64",
+        "windows_x86_64",
+    ]
+
+    marker_env = env(os = rctx.os.name, arch = rctx.os.arch, python_version = python_version)
     requirements_by_platform = parse_requirements(
         rctx,
         requirements_by_platform = requirements_files_by_platform(
@@ -92,31 +119,17 @@ def _pip_repository_impl(rctx):
             requirements_osx = rctx.attr.requirements_darwin,
             requirements_windows = rctx.attr.requirements_windows,
             extra_pip_args = rctx.attr.extra_pip_args,
-            platforms = [
-                "linux_aarch64",
-                "linux_arm",
-                "linux_ppc",
-                "linux_riscv64",
-                "linux_s390x",
-                "linux_x86_64",
-                "osx_aarch64",
-                "osx_x86_64",
-                "windows_x86_64",
-            ],
+            platforms = platforms,
         ),
         extra_pip_args = rctx.attr.extra_pip_args,
-        evaluate_markers = lambda rctx, requirements: evaluate_markers_py(
-            rctx,
-            requirements = {
-                # NOTE @aignas 2025-07-07: because we don't distinguish between
-                # freethreaded and non-freethreaded, it is a 1:1 mapping.
-                req: {p: p for p in plats}
-                for req, plats in requirements.items()
-            },
-            python_interpreter = rctx.attr.python_interpreter,
-            python_interpreter_target = rctx.attr.python_interpreter_target,
-            srcs = rctx.attr._evaluate_markers_srcs,
-        ),
+        platforms = {
+            p: struct(
+                env = marker_env,
+                whl_abi_tags = [],
+                whl_platform_tags = [],
+            )
+            for p in platforms
+        },
         extract_url_srcs = False,
         logger = logger,
     )
@@ -197,8 +210,6 @@ def _pip_repository_impl(rctx):
 
     if rctx.attr.python_interpreter_target:
         config["python_interpreter_target"] = str(rctx.attr.python_interpreter_target)
-    if rctx.attr.experimental_target_platforms:
-        config["experimental_target_platforms"] = rctx.attr.experimental_target_platforms
 
     macro_tmpl = "@%s//{}:{}" % rctx.attr.name
 
@@ -266,8 +277,7 @@ pip_repository = repository_rule(
             doc = """\
 Optional annotations to apply to packages. Keys should be package names, with
 capitalization matching the input requirements file, and values should be
-generated using the `package_name` macro. For example usage, see [this WORKSPACE
-file](https://github.com/bazel-contrib/rules_python/blob/main/examples/pip_repository_annotations/WORKSPACE).
+generated using the `package_name` macro.
 """,
         ),
         _config_template = attr.label(
@@ -275,13 +285,6 @@ file](https://github.com/bazel-contrib/rules_python/blob/main/examples/pip_repos
         ),
         _template = attr.label(
             default = ":requirements.bzl.tmpl.workspace",
-        ),
-        _evaluate_markers_srcs = attr.label_list(
-            default = EVALUATE_MARKERS_SRCS,
-            doc = """\
-The list of labels to use as SRCS for the marker evaluation code. This ensures that the
-code will be re-evaluated when any of files in the default changes.
-""",
         ),
         **ATTRS
     ),
@@ -348,30 +351,6 @@ target generated from a package's wheel, The generated `requirements.bzl` file c
 functionality for exposing [entry points][whl_ep] as `py_binary` targets as well.
 
 [whl_ep]: https://packaging.python.org/specifications/entry-points/
-
-```starlark
-load("@pypi//:requirements.bzl", "entry_point")
-
-alias(
-    name = "pip-compile",
-    actual = entry_point(
-        pkg = "pip-tools",
-        script = "pip-compile",
-    ),
-)
-```
-
-Note that for packages whose name and script are the same, only the name of the package
-is needed when calling the `entry_point` macro.
-
-```starlark
-load("@pip//:requirements.bzl", "entry_point")
-
-alias(
-    name = "flake8",
-    actual = entry_point("flake8"),
-)
-```
 
 :::{rubric} Vendoring the requirements.bzl file
 :heading-level: 3

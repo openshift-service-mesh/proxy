@@ -56,7 +56,10 @@ cc_nested_args(
 
 cc_nested_args(
     name = "start_lib_arg",
-    args = ["-Wl,--start-lib"],
+    args = select({
+        "@platforms//os:windows": ["-Wl,/start-lib"],
+        "//conditions:default": ["-Wl,--start-lib"],
+    }),
     requires_false = "//cc/toolchains/variables:libraries_to_link.is_whole_archive",
 )
 
@@ -69,14 +72,17 @@ cc_nested_args(
 
 cc_nested_args(
     name = "end_lib_arg",
-    args = ["-Wl,--end-lib"],
+    args = select({
+        "@platforms//os:windows": ["-Wl,/end-lib"],
+        "//conditions:default": ["-Wl,--end-lib"],
+    }),
     requires_false = "//cc/toolchains/variables:libraries_to_link.is_whole_archive",
 )
 
 cc_nested_args(
     name = "single_library_args",
     nested = select({
-        "@platforms//os:macos": [],
+        "//cc/settings:apple_constraint": [],
         "//conditions:default": [":optional_whole_archive_start"],
     }) + [
         ":optional_object_file_group",
@@ -85,11 +91,11 @@ cc_nested_args(
         ":optional_static_library",
         ":optional_dynamic_library",
     ] + select({
-        # maOS has a minor nuance where it uses the path to the library instead of `-l:{library_name}`.
-        "@platforms//os:macos": [":macos_optional_versioned_dynamic_library"],
+        # Apple platforms have a minor nuance where they use the path to the library instead of `-l:{library_name}`.
+        "//cc/settings:apple_constraint": [":apple_optional_versioned_dynamic_library"],
         "//conditions:default": [":generic_optional_versioned_dynamic_library"],
     }) + select({
-        "@platforms//os:macos": [],
+        "//cc/settings:apple_constraint": [],
         "//conditions:default": [":optional_whole_archive_end"],
     }),
 )
@@ -166,7 +172,7 @@ cc_nested_args(
 )
 
 cc_nested_args(
-    name = "macos_optional_versioned_dynamic_library",
+    name = "apple_optional_versioned_dynamic_library",
     args = ["{library_path}"],
     format = {
         "library_path": "//cc/toolchains/variables:libraries_to_link.path",

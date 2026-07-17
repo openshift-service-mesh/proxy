@@ -4,7 +4,6 @@ _NAME = "Name: "
 _PROVIDES_EXTRA = "Provides-Extra: "
 _REQUIRES_DIST = "Requires-Dist: "
 _VERSION = "Version: "
-_CONSOLE_SCRIPTS = "[console_scripts]"
 
 def whl_metadata(*, install_dir, read_fn, logger):
     """Find and parse the METADATA file in the extracted whl contents dir.
@@ -24,13 +23,8 @@ def whl_metadata(*, install_dir, read_fn, logger):
     """
     metadata_file = find_whl_metadata(install_dir = install_dir, logger = logger)
     contents = read_fn(metadata_file)
-    entry_points_file = metadata_file.dirname.get_child("entry_points.txt")
-    if entry_points_file.exists:
-        entry_points_contents = read_fn(entry_points_file)
-    else:
-        entry_points_contents = ""
 
-    result = parse_whl_metadata(contents, entry_points_contents)
+    result = parse_whl_metadata(contents)
 
     if not (result.name and result.version):
         logger.fail("Failed to parse the wheel METADATA file:\n{}\n{}\n{}".format(
@@ -42,12 +36,11 @@ def whl_metadata(*, install_dir, read_fn, logger):
 
     return result
 
-def parse_whl_metadata(contents, entry_points_contents = ""):
+def parse_whl_metadata(contents):
     """Parse .whl METADATA file
 
     Args:
         contents: {type}`str` the contents of the file.
-        entry_points_contents: {type}`str` the contents of the `entry_points.txt` file if it exists.
 
     Returns:
         A struct with parsed values:
@@ -56,8 +49,6 @@ def parse_whl_metadata(contents, entry_points_contents = ""):
         * `requires_dist`: {type}`list[str]` the list of requirements.
         * `provides_extra`: {type}`list[str]` the list of extras that this package
           provides.
-        * `entry_points`: {type}`list[struct]` the list of
-            entry_point metadata.
     """
     parsed = {
         "name": "",
@@ -89,7 +80,6 @@ def parse_whl_metadata(contents, entry_points_contents = ""):
         provides_extra = parsed["provides_extra"],
         requires_dist = parsed["requires_dist"],
         version = parsed["version"],
-        entry_points = _parse_entry_points(entry_points_contents),
     )
 
 def find_whl_metadata(*, install_dir, logger):
@@ -122,46 +112,57 @@ def find_whl_metadata(*, install_dir, logger):
         logger.fail("The '*.dist-info' directory could not be found in '{}'".format(install_dir.basename))
     return None
 
-def _parse_entry_points(contents):
-    """parse the entry_points.txt file.
+def parse_entry_points(contents):
+    """Parses entry_points.txt contents and returns console_scripts and gui_scripts entries.
 
     Args:
-        contents: {type}`str` The contents of the file
+        contents: {type}`str` The contents of the entry_points.txt file.
 
     Returns:
-        A list of console_script entry point metadata.
+        {type}`dict[str, dict]` A dict keyed by the original entry point name.
     """
-    start = False
-    ret = []
-    for line in contents.split("\n"):
-        line = line.rstrip()
-
-        if line == _CONSOLE_SCRIPTS:
-            start = True
-            continue
-
-        if not start:
-            continue
-
-        if start and line.startswith("["):
-            break
-
-        line, _, _comment = line.partition("#")
+    entries = {}
+    seen_lower_names = {}
+    current_group = None
+    current_group_lower = None
+    for line in contents.splitlines():
         line = line.strip()
-        if not line:
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current_group = line[1:-1].strip()
+            current_group_lower = current_group.lower()
             continue
 
-        name, _, tail = line.partition("=")
+        if current_group_lower in ("console_scripts", "gui_scripts"):
+            name, _, ref = line.partition("=")
+            name = name.strip()
 
-        # importable.module:object.attr
-        py_import, _, extras = tail.strip().partition(" ")
-        module, _, attribute = py_import.partition(":")
+            # Names are case-insensitive.
+            # See https://packaging.python.org/en/latest/specifications/entry-points/#data-model
+            # Entry points must be unique for a given name because they turn
+            # into files and may be on a case-insensitive file system.
+            lower_name = name.lower()
+            if lower_name in seen_lower_names:
+                continue
+            seen_lower_names[lower_name] = True
 
-        ret.append(struct(
-            name = name.strip(),
-            module = module.strip(),
-            attribute = attribute.strip(),
-            extras = extras.replace(" ", ""),
-        ))
+            # remove inline comments
+            ref, _, _ = ref.partition("#")
+            ref = ref.strip()
 
-    return ret
+            extras = ""
+            if "[" in ref and ref.endswith("]"):
+                ref, _, extras_part = ref.partition("[")
+                extras = extras_part[:-1].strip()
+                ref = ref.strip()
+
+            module, _, attribute = ref.partition(":")
+            entries[name] = {
+                "attribute": attribute.strip(),
+                "extras": extras,
+                "group": current_group,
+                "module": module.strip(),
+                "name": name,
+            }
+    return entries

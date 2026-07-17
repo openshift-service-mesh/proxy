@@ -2,12 +2,11 @@
 
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test")
 load("@rules_testing//lib:test_suite.bzl", "test_suite")
-load("//python:py_info.bzl", "PyInfo")
+load("//python:py_info.bzl", "PyInfo", "VenvSymlinkEntry", "VenvSymlinkKind")
 load("//python:py_library.bzl", "py_library")
 load("//python/private:common_labels.bzl", "labels")  # buildifier: disable=bzl-visibility
-load("//python/private:py_info.bzl", "VenvSymlinkEntry", "VenvSymlinkKind")  # buildifier: disable=bzl-visibility
 load("//python/private:venv_runfiles.bzl", "build_link_map", "get_venv_symlinks")  # buildifier: disable=bzl-visibility
-load("//tests/support:support.bzl", "SUPPORTS_BZLMOD_UNIXY")
+load("//tests/support:support.bzl", "SUPPORTS_BZLMOD")
 
 def _empty_files_impl(ctx):
     files = []
@@ -425,7 +424,7 @@ def _test_optimized_grouping_pkgutil_whls(name):
             "@pkgutil_nspkg1//:pkg",
             "@pkgutil_nspkg2//:pkg",
         ],
-        target_compatible_with = SUPPORTS_BZLMOD_UNIXY,
+        target_compatible_with = SUPPORTS_BZLMOD,
     )
     analysis_test(
         name = name,
@@ -435,7 +434,7 @@ def _test_optimized_grouping_pkgutil_whls(name):
             labels.VENVS_SITE_PACKAGES: "yes",
         },
         attr_values = dict(
-            target_compatible_with = SUPPORTS_BZLMOD_UNIXY,
+            target_compatible_with = SUPPORTS_BZLMOD,
         ),
     )
 
@@ -471,6 +470,7 @@ def _test_optimized_grouping_pkgutil_whls_impl(env, target):
             files = [
                 "../+internal_dev_deps+pkgutil_nspkg1/site-packages/pkgutil_nspkg1-1.0.dist-info/INSTALLER",
                 "../+internal_dev_deps+pkgutil_nspkg1/site-packages/pkgutil_nspkg1-1.0.dist-info/METADATA",
+                "../+internal_dev_deps+pkgutil_nspkg1/site-packages/pkgutil_nspkg1-1.0.dist-info/RECORD",
                 "../+internal_dev_deps+pkgutil_nspkg1/site-packages/pkgutil_nspkg1-1.0.dist-info/WHEEL",
             ],
         ),
@@ -495,6 +495,7 @@ def _test_optimized_grouping_pkgutil_whls_impl(env, target):
             files = [
                 "../+internal_dev_deps+pkgutil_nspkg2/site-packages/pkgutil_nspkg2-1.0.dist-info/INSTALLER",
                 "../+internal_dev_deps+pkgutil_nspkg2/site-packages/pkgutil_nspkg2-1.0.dist-info/METADATA",
+                "../+internal_dev_deps+pkgutil_nspkg2/site-packages/pkgutil_nspkg2-1.0.dist-info/RECORD",
                 "../+internal_dev_deps+pkgutil_nspkg2/site-packages/pkgutil_nspkg2-1.0.dist-info/WHEEL",
             ],
         ),

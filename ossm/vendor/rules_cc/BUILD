@@ -6,6 +6,8 @@ licenses(["notice"])
 
 exports_files(["LICENSE"])
 
+exports_files(["copy.bara.sky"])
+
 cc_library(
     name = "empty_lib",
     # compatible_with = [...]
@@ -39,6 +41,17 @@ filegroup(
     testonly = 1,
     srcs = [
         "BUILD",
+    ],
+    visibility = ["//:__subpackages__"],
+)
+
+filegroup(
+    name = "srcs",
+    testonly = 1,
+    srcs = [
+        "BUILD",
+        "MODULE.bazel",
+        "//cc:srcs",
     ],
     visibility = ["//:__subpackages__"],
 )

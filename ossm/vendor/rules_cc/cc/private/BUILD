@@ -35,6 +35,7 @@ filegroup(
         "*.bzl",
     ]) + [
         "//cc/private/compile:srcs",
+        "//cc/private/coverage:srcs",
         "//cc/private/link:srcs",
         "//cc/private/rules_impl:srcs",
         "//cc/private/toolchain:srcs",
@@ -62,6 +63,7 @@ bzl_library(
         ":cc_launcher_info_bzl",
         ":cc_shared_library_hint_info_bzl",
         ":debug_package_info_bzl",
+        ":graph_node_info_bzl",
         ":objc_info_bzl",
         "//cc/private/compile:compile_bzl",
         "//cc/private/link:link_bzl",
@@ -109,6 +111,12 @@ bzl_library(
     srcs = ["cc_launcher_info.bzl"],
     visibility = ["//cc:__subpackages__"],
     deps = ["//cc/common:cc_helper_internal_bzl"],
+)
+
+bzl_library(
+    name = "graph_node_info_bzl",
+    srcs = ["graph_node_info.bzl"],
+    visibility = ["//cc:__subpackages__"],
 )
 
 bzl_library(

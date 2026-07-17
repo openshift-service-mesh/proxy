@@ -29,9 +29,9 @@ def _is_repo_debug_enabled(mrctx):
     Returns:
         True if enabled, False if not.
     """
-    return _getenv(mrctx, REPO_DEBUG_ENV_VAR) == "1"
+    return mrctx.getenv(REPO_DEBUG_ENV_VAR) == "1"
 
-def _logger(mrctx = None, name = None, verbosity_level = None, printer = None):
+def _logger(mrctx = None, name = None, verbosity_level = None, printer = None, mod = None):
     """Creates a logger instance for printing messages.
 
     Args:
@@ -42,6 +42,7 @@ def _logger(mrctx = None, name = None, verbosity_level = None, printer = None):
             taken from `mrctx`.
         printer: a function to use for printing. Defaults to `print` or `fail` depending
             on the logging method.
+        mod: {type}`module_ctx.module`. The module for which the logger is created.
 
     Returns:
         A struct with attributes logging: trace, debug, info, warn, fail.
@@ -50,20 +51,30 @@ def _logger(mrctx = None, name = None, verbosity_level = None, printer = None):
         the logger injected into the function work as expected by terminating
         on the given line.
     """
+    default_verbosity_level = "WARN"
+    if mod:
+        if name:
+            name = "{}:{}".format(mod.name, name)
+        else:
+            name = mod.name
+
+        if not mod.is_root:
+            default_verbosity_level = "ERROR"  # the warnings are non actionable anyway, but we should keep them.
+
     if verbosity_level == None:
         if _is_repo_debug_enabled(mrctx):
-            verbosity_level = "DEBUG"
-        else:
-            verbosity_level = "WARN"
+            default_verbosity_level = "DEBUG"
 
-        env_var_verbosity = _getenv(mrctx, REPO_VERBOSITY_ENV_VAR)
-        verbosity_level = env_var_verbosity or verbosity_level
+        env_var_verbosity = mrctx.getenv(REPO_VERBOSITY_ENV_VAR)
+        verbosity_level = env_var_verbosity or default_verbosity_level
 
     verbosity = {
         "DEBUG": 2,
+        "ERROR": -1,
         "FAIL": -1,
         "INFO": 1,
         "TRACE": 3,
+        "WARN": 0,
     }.get(verbosity_level, 0)
 
     if hasattr(mrctx, "attr"):
@@ -191,7 +202,7 @@ def _execute_internal(
             output = _outputs_to_str(result, log_stdout = log_stdout, log_stderr = log_stderr),
         ))
 
-    result_kwargs = {k: getattr(result, k) for k in dir(result)}
+    result_kwargs = {k: getattr(result, k) for k in dir(result) if k not in ["to_json", "to_proto"]}
     return struct(
         describe_failure = lambda: _execute_describe_failure(
             op = op,
@@ -302,7 +313,7 @@ def _which_unchecked(mrctx, binary_name):
         mrctx.watch(binary)
         describe_failure = None
     else:
-        path = _getenv(mrctx, "PATH", "")
+        path = mrctx.getenv("PATH", "")
         describe_failure = lambda: _which_describe_failure(binary_name, path)
 
     return struct(
@@ -311,17 +322,80 @@ def _which_unchecked(mrctx, binary_name):
     )
 
 def _which_describe_failure(binary_name, path):
+    if "\\" in path or ";" in path:
+        path_parts = path.split(";")
+    else:
+        path_parts = path.split(":")
+    for i, v in enumerate(path_parts):
+        path_parts[i] = "  [{}]: {}".format(i, v)
     return (
         "Unable to find the binary '{binary_name}' on PATH.\n" +
-        "  PATH = {path}"
+        "  PATH entries:\n" +
+        "{path_str}"
     ).format(
         binary_name = binary_name,
-        path = path,
+        path_str = "\n".join(path_parts),
     )
 
-def _getenv(mrctx, name, default = None):
-    # Bazel 7+ API has (repository|module)_ctx.getenv
-    return getattr(mrctx, "getenv", mrctx.os.environ.get)(name, default)
+def _mkdir(mrctx, path):
+    path = mrctx.path(path)
+    if path.exists:
+        return path
+
+    repo_root = str(mrctx.path("."))
+    path_str = str(path)
+
+    if not _is_relative_to(mrctx, path_str, repo_root):
+        mkdir_bin = mrctx.which("mkdir")
+        if not mkdir_bin:
+            return None
+        res = mrctx.execute([mkdir_bin, "-p", path_str])
+        if res.return_code != 0:
+            return None
+        return path
+    else:
+        placeholder = path.get_child(".placeholder")
+        mrctx.file(placeholder)
+        mrctx.delete(placeholder)
+        return path
+
+def _norm_path(mrctx, p):
+    p = str(p)
+
+    # Windows is case-insensitive
+    if _get_platforms_os_name(mrctx) == "windows":
+        return p.lower()
+    return p
+
+def _relative_to(mrctx, path, parent, fail = fail):
+    path_str = str(path)
+    parent_str = str(parent)
+    path_d = _norm_path(mrctx, path_str) + "/"
+    parent_d = _norm_path(mrctx, parent_str) + "/"
+    if path_d.startswith(parent_d):
+        return path_str[len(parent_str):].removeprefix("/")
+    else:
+        fail("{} is not relative to {}".format(path, parent))
+
+def _is_relative_to(mrctx, path, parent):
+    """Tell if `path` is equal to or beneath `parent`."""
+    path_d = _norm_path(mrctx, path) + "/"
+    parent_d = _norm_path(mrctx, parent) + "/"
+    return path_d.startswith(parent_d)
+
+def _repo_root_relative_path(mrctx, path):
+    """Takes a path object and returns a repo-relative path string.
+
+    Args:
+        mrctx: module_ctx or repository_ctx
+        path: {type}`path` a path within `mrctx`
+
+    Returns:
+        {type}`str` a repo-root-relative path string.
+    """
+    repo_root = str(mrctx.path("."))
+    path_str = str(path)
+    return _relative_to(mrctx, path_str, repo_root)
 
 def _args_to_str(arguments):
     return " ".join([_arg_repr(a) for a in arguments])
@@ -437,7 +511,7 @@ def _get_platforms_cpu_name(mrctx):
         return "riscv64"
     return arch
 
-def _extract(mrctx, *, archive, supports_whl_extraction = False, **kwargs):
+def _extract(mrctx, *, archive, supports_whl_extraction = False, extract_needs_chmod = False, **kwargs):
     """Extract an archive
 
     TODO: remove when the earliest supported bazel version is at least 8.3.
@@ -459,6 +533,58 @@ def _extract(mrctx, *, archive, supports_whl_extraction = False, **kwargs):
         if not mrctx.delete(archive):
             fail("Failed to remove the symlink after extracting")
 
+    if extract_needs_chmod:
+        _maybe_fix_permissions(mrctx, whl_path = archive)
+
+def _maybe_fix_permissions(mrctx, *, whl_path, logger = None):
+    if not logger and hasattr(mrctx, "attr"):
+        logger = _logger(mrctx)
+    elif not logger:
+        fail("logger must be specified when using 'module_ctx'")
+
+    os_name = _get_platforms_os_name(mrctx)
+    if os_name != "windows":
+        result = _execute_unchecked(
+            mrctx,
+            op = "Fixing wheel permissions {}".format(whl_path),
+            arguments = ["chmod", "-R", "a+rX", "."],
+            logger = logger,
+        )
+        if result.return_code != 0:
+            logger.warn(lambda: "Failed to fix file permissions: {}".format(result.stderr))
+
+def _rename(mrctx, src, dest):
+    """Rename a file or directory.
+
+    TODO: remove when the earliest supported bazel version is at least 8.0.
+
+    Args:
+        mrctx: module_ctx or repository_ctx object
+        src: {type}`path` the source path
+        dest: {type}`path` the destination path
+    """
+    if hasattr(mrctx, "rename"):
+        mrctx.rename(src, dest)
+        return
+
+    # Fallback for Bazel < 8.0
+    os_name = _get_platforms_os_name(mrctx)
+    if os_name == "windows":
+        # On Windows, we use `cmd.exe /c move` to rename files/directories.
+        # We need to use backslashes for the paths.
+        res = mrctx.execute([
+            "cmd.exe",
+            "/c",
+            "move",
+            str(src).replace("/", "\\"),
+            str(dest).replace("/", "\\"),
+        ])
+    else:
+        res = mrctx.execute(["mv", str(src), str(dest)])
+
+    if res.return_code != 0:
+        fail("Failed to rename {} to {}: {}".format(src, dest, res.stderr))
+
 repo_utils = struct(
     # keep sorted
     execute_checked = _execute_checked,
@@ -467,9 +593,15 @@ repo_utils = struct(
     extract = _extract,
     get_platforms_cpu_name = _get_platforms_cpu_name,
     get_platforms_os_name = _get_platforms_os_name,
-    getenv = _getenv,
     is_repo_debug_enabled = _is_repo_debug_enabled,
     logger = _logger,
+    maybe_fix_permissions = _maybe_fix_permissions,
+    mkdir = _mkdir,
+    norm_path = _norm_path,
+    relative_to = _relative_to,
+    is_relative_to = _is_relative_to,
+    rename = _rename,
+    repo_root_relative_path = _repo_root_relative_path,
     which_checked = _which_checked,
     which_unchecked = _which_unchecked,
 )

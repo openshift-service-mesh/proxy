@@ -4,8 +4,8 @@ import collections
 import os
 import sys
 import tempfile
+from collections.abc import Iterable, Mapping, ValuesView
 from subprocess import run  # nosec
-from typing import Deque, Iterable, Mapping, ValuesView
 
 import click
 from pip._internal.models.direct_url import ArchiveInfo
@@ -15,9 +15,8 @@ from pip._internal.utils.direct_url_helpers import (
     direct_url_as_pep440_direct_reference,
     direct_url_from_link,
 )
-from pip._vendor.packaging.utils import canonicalize_name
 
-from ._compat import Distribution, get_dev_pkgs
+from ._compat import Distribution, canonicalize_name, get_dev_pkgs
 from .exceptions import IncompatibleRequirements
 from .logging import log
 from .utils import (
@@ -43,16 +42,18 @@ PACKAGES_TO_IGNORE = [
 def dependency_tree(
     installed_keys: Mapping[str, Distribution], root_key: str
 ) -> set[str]:
-    """
-    Calculate the dependency tree for the package `root_key` and return
-    a collection of all its dependencies.  Uses a DFS traversal algorithm.
+    """Calculate the dependency tree for a package.
 
-    `installed_keys` should be a {key: requirement} mapping, e.g.
-        {'django': from_line('django==1.8')}
-    `root_key` should be the key to return the dependency tree for.
+    Return a collection of all of the package's dependencies.
+    Uses a DFS traversal algorithm.
+
+    ``installed_keys`` should be a {key: requirement} mapping, e.g.
+    {'django': from_line('django==1.8')}
+    :param root_key: the key to return the dependency tree for
+    :type root_key: str
     """
     dependencies = set()
-    queue: Deque[Distribution] = collections.deque()
+    queue: collections.deque[Distribution] = collections.deque()
 
     if root_key in installed_keys:
         dep = installed_keys[root_key]
@@ -60,7 +61,7 @@ def dependency_tree(
 
     while queue:
         v = queue.popleft()
-        key = str(canonicalize_name(v.key))
+        key = canonicalize_name(v.key)
         if key in dependencies:
             continue
 
@@ -78,15 +79,15 @@ def dependency_tree(
 
 
 def get_dists_to_ignore(installed: Iterable[Distribution]) -> list[str]:
-    """
-    Returns a collection of package names to ignore when performing pip-sync,
-    based on the currently installed environment.  For example, when pip-tools
+    """Return a collection of package names to ignore by ``pip-sync``.
+
+    Based on the currently installed environment.  For example, when pip-tools
     is installed in the local environment, it should be ignored, including all
     of its dependencies (e.g. click).  When pip-tools is not installed
     locally, click should also be installed/uninstalled depending on the given
     requirements.
     """
-    installed_keys = {str(canonicalize_name(r.key)): r for r in installed}
+    installed_keys = {canonicalize_name(r.key): r for r in installed}
     return list(
         flat_map(lambda req: dependency_tree(installed_keys, req), PACKAGES_TO_IGNORE)
     )
@@ -122,11 +123,11 @@ def merge(
 
 
 def diff_key_from_ireq(ireq: InstallRequirement) -> str:
-    """
-    Calculate a key for comparing a compiled requirement with installed modules.
+    """Calculate key for comparing a compiled requirement with installed modules.
+
     For URL requirements, only provide a useful key if the url includes
     a hash, e.g. #sha1=..., in any of the supported hash algorithms.
-    Otherwise return ireq.link so the key will not match and the package will
+    Otherwise return ``ireq.link`` so the key will not match and the package will
     reinstall. Reinstall is necessary to ensure that packages will reinstall
     if the contents at the URL have changed but the version has not.
     """
@@ -144,7 +145,7 @@ def diff_key_from_ireq(ireq: InstallRequirement) -> str:
 
 def diff_key_from_req(req: Distribution) -> str:
     """Get a unique key for the requirement."""
-    key = str(canonicalize_name(req.key))
+    key = canonicalize_name(req.key)
     if (
         req.direct_url
         and isinstance(req.direct_url.info, ArchiveInfo)
@@ -159,9 +160,10 @@ def diff(
     compiled_requirements: Iterable[InstallRequirement],
     installed_dists: Iterable[Distribution],
 ) -> tuple[set[InstallRequirement], set[str]]:
-    """
-    Calculate which packages should be installed or uninstalled, given a set
-    of compiled requirements and a list of currently installed modules.
+    """Calculate which packages should be installed or uninstalled.
+
+    Compared are the compiled requirements and a list of currently
+    installed modules.
     """
     requirements_lut = {diff_key_from_ireq(r): r for r in compiled_requirements}
 
@@ -195,9 +197,7 @@ def sync(
     ask: bool = False,
     python_executable: str | None = None,
 ) -> int:
-    """
-    Install and uninstalls the given sets of modules.
-    """
+    """Install and uninstall the given sets of modules."""
     exit_code = 0
 
     python_executable = python_executable or sys.executable

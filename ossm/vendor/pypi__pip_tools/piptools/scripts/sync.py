@@ -5,8 +5,8 @@ import os
 import shlex
 import shutil
 import sys
+import typing as _t
 from pathlib import Path
-from typing import cast
 
 import click
 from pip._internal.commands import create_command
@@ -16,16 +16,17 @@ from pip._internal.metadata import get_environment
 
 from .. import sync
 from .._compat import Distribution, parse_requirements
+from .._internal import _pip_api
 from ..exceptions import PipToolsError
 from ..logging import log
 from ..repositories import PyPIRepository
 from ..utils import (
     flat_map,
-    get_pip_version_for_python_executable,
     get_required_pip_specification,
     get_sys_path_for_python_executable,
 )
 from . import options
+from ._deprecations import filter_deprecated_pip_args
 
 DEFAULT_REQUIREMENTS_FILE = "requirements.txt"
 
@@ -101,7 +102,7 @@ def cli(
     if python_executable:
         _validate_python_executable(python_executable)
 
-    install_command = cast(InstallCommand, create_command("install"))
+    install_command = _t.cast(InstallCommand, create_command("install"))
     options, _ = install_command.parse_args([])
     session = install_command._build_session(options)
     finder = install_command._build_package_finder(options=options, session=session)
@@ -141,6 +142,8 @@ def cli(
         cert=cert,
         client_cert=client_cert,
     ) + shlex.split(pip_args_str or "")
+    install_flags = filter_deprecated_pip_args(install_flags)
+
     sys.exit(
         sync.sync(
             to_install,
@@ -164,7 +167,7 @@ def _validate_python_executable(python_executable: str) -> None:
         sys.exit(2)
 
     # Ensure that target python executable has the right version of pip installed
-    pip_version = get_pip_version_for_python_executable(python_executable)
+    pip_version = _pip_api.get_pip_version_for_python_executable(python_executable)
     required_pip_specification = get_required_pip_specification()
     if not required_pip_specification.contains(pip_version, prereleases=True):
         msg = (

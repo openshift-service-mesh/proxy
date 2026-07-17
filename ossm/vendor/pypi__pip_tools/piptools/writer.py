@@ -4,16 +4,17 @@ import io
 import os
 import re
 import sys
+import typing as _t
+from collections.abc import Iterable, Iterator
 from itertools import chain
-from typing import BinaryIO, Iterable, Iterator, cast
 
 from click import unstyle
 from click.core import Context
 from pip._internal.models.format_control import FormatControl
 from pip._internal.req.req_install import InstallRequirement
 from pip._vendor.packaging.markers import Marker
-from pip._vendor.packaging.utils import canonicalize_name
 
+from ._compat import canonicalize_name
 from .logging import log
 from .utils import (
     comment,
@@ -53,7 +54,7 @@ strip_comes_from_line_re = re.compile(r" \(line \d+\)$")
 def _comes_from_as_string(comes_from: str | InstallRequirement) -> str:
     if isinstance(comes_from, str):
         return strip_comes_from_line_re.sub("", comes_from)
-    return cast(str, canonicalize_name(key_from_ireq(comes_from)))
+    return canonicalize_name(key_from_ireq(comes_from))
 
 
 def annotation_style_split(required_by: set[str]) -> str:
@@ -76,7 +77,7 @@ def annotation_style_line(required_by: set[str]) -> str:
 class OutputWriter:
     def __init__(
         self,
-        dst_file: BinaryIO,
+        dst_file: _t.BinaryIO,
         click_ctx: Context,
         dry_run: bool,
         emit_header: bool,
@@ -148,9 +149,27 @@ class OutputWriter:
                 yield f"--trusted-host {trusted_host}"
 
     def write_format_controls(self) -> Iterator[str]:
-        for nb in dedup(sorted(self.format_control.no_binary)):
+        # The ordering of output needs to preserve the behavior of pip's
+        # FormatControl.get_allowed_formats(). The behavior is the following:
+        #
+        #   * Parsing of CLI options happens first to last.
+        #   * --only-binary takes precedence over --no-binary
+        #   * Package names take precedence over :all:
+        #   * We'll never see :all: in both due to mutual exclusion.
+        #
+        # So in summary, we want to emit :all: first and then package names later.
+        no_binary = self.format_control.no_binary.copy()
+        only_binary = self.format_control.only_binary.copy()
+
+        if ":all:" in no_binary:
+            yield "--no-binary :all:"
+            no_binary.remove(":all:")
+        if ":all:" in only_binary:
+            yield "--only-binary :all:"
+            only_binary.remove(":all:")
+        for nb in dedup(sorted(no_binary)):
             yield f"--no-binary {nb}"
-        for ob in dedup(sorted(self.format_control.only_binary)):
+        for ob in dedup(sorted(only_binary)):
             yield f"--only-binary {ob}"
 
     def write_find_links(self) -> Iterator[str]:

@@ -6,6 +6,7 @@ load("@rules_cc//cc/private/rules_impl:native_providers.bzl", "NativeCcToolchain
 load("@rules_cc//cc/private/rules_impl:native_providers.bzl", "NativeCcSharedLibraryInfo")
 cc_common = native_cc_common
 CcInfo = NativeCcInfo
+merge_cc_infos = cc_common.merge_cc_infos
 DebugPackageInfo = NativeDebugPackageInfo
 CcToolchainConfigInfo = NativeCcToolchainConfigInfo
 ObjcInfo = apple_common.Objc

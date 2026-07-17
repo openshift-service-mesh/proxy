@@ -18,24 +18,9 @@ def whl_extract(rctx, *, whl_path, logger):
         archive = whl_path,
         output = install_dir_path,
         supports_whl_extraction = rp_config.supports_whl_extraction,
+        extract_needs_chmod = rp_config.extract_needs_chmod,
     )
 
-    # Fix permissions on extracted files. Some wheels have files without read permissions set,
-    # which causes errors when trying to read them later.
-    os_name = repo_utils.get_platforms_os_name(rctx)
-    if os_name != "windows":
-        # On Unix-like systems, recursively add read permissions to all files
-        # and ensure directories are traversable (need execute permission)
-        result = repo_utils.execute_unchecked(
-            rctx,
-            op = "Fixing wheel permissions {}".format(whl_path),
-            arguments = ["chmod", "-R", "a+rX", str(install_dir_path)],
-            logger = logger,
-        )
-        if result.return_code != 0:
-            # It's possible chmod is not available or the filesystem doesn't support it.
-            # This is fine, we just want to try to fix permissions if possible.
-            logger.warn(lambda: "Failed to fix file permissions: {}".format(result.stderr))
     metadata_file = find_whl_metadata(
         install_dir = install_dir_path,
         logger = logger,
@@ -70,13 +55,11 @@ def whl_extract(rctx, *, whl_path, logger):
                 # The prefix does not exist in the wheel, we can continue
                 continue
 
-            for (src, dest) in merge_trees(src, rctx.path(dest_prefix)):
+            dest_dir = rctx.path(dest_prefix)
+            repo_utils.mkdir(rctx, dest_dir)
+            for (src, dest) in merge_trees(src, dest_dir):
                 logger.debug(lambda: "Renaming: {} -> {}".format(src, dest))
-                rctx.rename(src, dest)
-
-            # TODO @aignas 2025-12-16: when moving scripts to `bin`, rewrite the #!python
-            # shebang to be something else, for inspiration look at the hermetic
-            # toolchain wrappers
+                repo_utils.rename(rctx, src, dest)
 
         # Ensure that there is no data dir left
         rctx.delete(data_dir)

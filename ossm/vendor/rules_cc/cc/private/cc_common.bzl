@@ -44,7 +44,7 @@ load("//cc/private/toolchain_config:configure_features.bzl", "configure_features
 _UnboundValueProviderDoNotUse = provider("This provider is used as an unique symbol to distinguish between bound and unbound Starlark values, to avoid using kwargs.", fields = [])
 _UNBOUND = _UnboundValueProviderDoNotUse()
 
-_OLD_STARLARK_API_ALLOWLISTED_PACKAGES = [("", "tools/build_defs/cc"), ("_builtins", "")]
+_OLD_STARLARK_API_ALLOWLISTED_PACKAGES = [("", "tools/build_defs/cc"), ("_builtins", ""), ("", "third_party/gloop/tools/build_defs/cc")]
 
 def _check_all_sources_contain_tuples_or_none_of_them(files):
     no_tuple = False
@@ -84,17 +84,13 @@ def _link(
         whole_archive = _UNBOUND,
         additional_linkstamp_defines = _UNBOUND,
         always_link = _UNBOUND,
-        link_artifact_name_suffix = _UNBOUND,
-        main_output = _UNBOUND,
+        main_output = None,
         use_shareable_artifact_factory = _UNBOUND,
         build_config = _UNBOUND,
         emit_interface_shared_library = _UNBOUND):
     if output_type == "archive":
         _cc_internal.check_private_api(allowlist = _PRIVATE_STARLARKIFICATION_ALLOWLIST)
 
-    # TODO(b/205690414): Keep linkedArtifactNameSuffixObject protected. Use cases that are
-    #  passing the suffix should be migrated to using mainOutput instead where the suffix is
-    #  taken into account. Then this parameter should be removed.
     if use_test_only_flags != _UNBOUND or \
        never_link != _UNBOUND or \
        test_only_target != _UNBOUND or \
@@ -102,8 +98,6 @@ def _link(
        whole_archive != _UNBOUND or \
        additional_linkstamp_defines != _UNBOUND or \
        always_link != _UNBOUND or \
-       link_artifact_name_suffix != _UNBOUND or \
-       main_output != _UNBOUND or \
        use_shareable_artifact_factory != _UNBOUND or \
        build_config != _UNBOUND or \
        emit_interface_shared_library != _UNBOUND:
@@ -123,10 +117,6 @@ def _link(
         additional_linkstamp_defines = []
     if always_link == _UNBOUND:
         always_link = False
-    if link_artifact_name_suffix == _UNBOUND:
-        link_artifact_name_suffix = ""
-    if main_output == _UNBOUND:
-        main_output = None
     if use_shareable_artifact_factory == _UNBOUND:
         use_shareable_artifact_factory = False
     if build_config == _UNBOUND:
@@ -156,7 +146,6 @@ def _link(
         whole_archive = whole_archive,
         additional_linkstamp_defines = additional_linkstamp_defines,
         always_link = always_link,
-        link_artifact_name_suffix = link_artifact_name_suffix,
         main_output = main_output,
         use_shareable_artifact_factory = use_shareable_artifact_factory,
         build_config = build_config,
@@ -433,9 +422,20 @@ def _register_linkstamp_compile_action(
         output_file,
         compilation_inputs,
         inputs_for_validation,
-        label_replacement,
-        output_replacement):
+        target_name = None,
+        build_target = None,
+        label_replacement = None,  # deprecated, use target_name
+        output_replacement = None):  # deprecated, use build_target
     _cc_internal.check_private_api(allowlist = _PRIVATE_STARLARKIFICATION_ALLOWLIST)
+
+    resolved_target_name = target_name if target_name != None else label_replacement
+    if resolved_target_name == None:
+        fail("target_name must be specified.")
+
+    resolved_build_target = build_target if build_target != None else output_replacement
+    if resolved_build_target == None:
+        fail("build_target must be specified.")
+
     return register_linkstamp_compile_action(
         actions = actions,
         cc_toolchain = cc_toolchain,
@@ -444,8 +444,8 @@ def _register_linkstamp_compile_action(
         output_file = output_file,
         compilation_inputs = compilation_inputs,
         inputs_for_validation = inputs_for_validation,
-        label_replacement = label_replacement,
-        output_replacement = output_replacement,
+        target_name = resolved_target_name,
+        build_target = resolved_build_target,
     )
 
 def _compile(
@@ -460,6 +460,7 @@ def _compile(
         textual_hdrs = [],
         additional_exported_hdrs = _UNBOUND,  # TODO(ilist@): remove, there are no uses
         includes = [],
+        local_includes = [],
         quote_includes = [],
         system_includes = [],
         framework_includes = [],
@@ -470,6 +471,7 @@ def _compile(
         user_compile_flags = [],
         conly_flags = [],
         cxx_flags = [],
+        progress_message_prefix = None,
         compilation_contexts = [],
         implementation_compilation_contexts = _UNBOUND,
         disallow_pic_outputs = False,
@@ -485,7 +487,6 @@ def _compile(
         variables_extension = {},
         language = None,
         purpose = _UNBOUND,
-        copts_filter = _UNBOUND,
         separate_module_headers = _UNBOUND,
         module_interfaces = _UNBOUND,
         non_compilation_additional_inputs = _UNBOUND):
@@ -498,7 +499,6 @@ def _compile(
        purpose != _UNBOUND or \
        hdrs_checking_mode != _UNBOUND or \
        implementation_compilation_contexts != _UNBOUND or \
-       copts_filter != _UNBOUND or \
        separate_module_headers != _UNBOUND or \
        module_interfaces != _UNBOUND or \
        non_compilation_additional_inputs != _UNBOUND:
@@ -520,8 +520,6 @@ def _compile(
         hdrs_checking_mode = None
     if implementation_compilation_contexts == _UNBOUND:
         implementation_compilation_contexts = []
-    if copts_filter == _UNBOUND:
-        copts_filter = None
     if separate_module_headers == _UNBOUND:
         separate_module_headers = []
     if module_interfaces == _UNBOUND:
@@ -545,6 +543,7 @@ def _compile(
         textual_hdrs = textual_hdrs,
         additional_exported_hdrs = additional_exported_hdrs,
         includes = includes,
+        local_includes = local_includes,
         quote_includes = quote_includes,
         system_includes = system_includes,
         framework_includes = framework_includes,
@@ -569,9 +568,9 @@ def _compile(
         variables_extension = variables_extension,
         language = language,
         purpose = purpose,
-        copts_filter = copts_filter,
         separate_module_headers = separate_module_headers,
         non_compilation_additional_inputs = non_compilation_additional_inputs,
+        progress_message_prefix = progress_message_prefix,
     )
 
 def _create_lto_backend_artifacts(

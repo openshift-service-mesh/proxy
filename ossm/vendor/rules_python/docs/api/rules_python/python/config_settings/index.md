@@ -274,48 +274,6 @@ the values used when environment markers are resolved at build time.
 :::
 ::::
 
-::::{bzl:flag} pip_whl
-Set what distributions are used in the `pip` integration.
-
-Values:
-* `auto`: Prefer `whl` distributions if they are compatible with a target
-  platform, but fallback to `sdist`. This is the default.
-* `only`: Only use `whl` distributions and error out if it is not available.
-* `no`: Only use `sdist` distributions. The wheels will be built non-hermetically in the `whl_library` repository rule.
-:::{versionadded} 0.33.0
-:::
-::::
-
-::::{bzl:flag} pip_whl_osx_arch
-Set what wheel types we should prefer when building on the OSX platform.
-
-Values:
-* `arch`: Prefer architecture specific wheels.
-* `universal`: Prefer universal wheels that usually are bigger and contain binaries for both, Intel and ARM architectures in the same wheel.
-:::{versionadded} 0.33.0
-:::
-::::
-
-::::{bzl:flag} pip_whl_glibc_version
-Set the minimum `glibc` version that the `py_binary` using `whl` distributions from a PyPI index should support.
-
-Values:
-* `""`: Select the lowest available version of each wheel giving you the maximum compatibility. This is the default.
-* `X.Y`: The string representation of a `glibc` version. The allowed values depend on the `requirements.txt` lock file contents.
-:::{versionadded} 0.33.0
-:::
-::::
-
-::::{bzl:flag} pip_whl_muslc_version
-Set the minimum `muslc` version that the `py_binary` using `whl` distributions from a PyPI index should support.
-
-Values:
-* `""`: Select the lowest available version of each wheel giving you the maximum compatibility. This is the default.
-* `X.Y`: The string representation of a `muslc` version. The allowed values depend on the `requirements.txt` lock file contents.
-:::{versionadded} 0.33.0
-:::
-::::
-
 ::::{bzl:flag} pip_whl_osx_version
 Set the minimum `osx` version that the `py_binary` using `whl` distributions from a PyPI index should support.
 
@@ -392,6 +350,22 @@ Values:
 
 ::::
 
+::::{bzl:flag} venv
+Determines which PyPI repository hub is used when resolving package dependencies.
+
+This flag is transitioned on automatically by executable targets (`py_binary`, `py_test`)
+to select the appropriate concrete PyPI hub (e.g., when fallback or disjoint packages exist across multiple hubs).
+
+Values:
+* `auto`: (default) Resolves dependencies using the fallback or first available hub.
+* `<hub_name>`: Explicitly forces resolution of packages from the
+  specified concrete PyPI hub (corresponding to a
+  {obj}`pip.parse.hub_name` value).
+
+:::{versionadded} 2.2.0
+:::
+::::
+
 ::::{bzl:flag} venvs_use_declare_symlink
 
 Determines if relative symlinks are created using `declare_symlink()` at build
@@ -414,3 +388,16 @@ is created.
 :::{versionadded} 1.2.0
 :::
 ::::
+
+
+## Removed Flags
+
+:::{versionremoved} 2.1.0
+The following flags were removed:
+
+* `pip_whl`
+* `pip_whl_osx_arch`
+* `pip_whl_glibc_version`
+* `pip_whl_muslc_version`
+:::
+

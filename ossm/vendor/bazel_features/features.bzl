@@ -57,6 +57,13 @@ _cc = struct(
     # The compatibility proxy in rules_cc/cc/extensions.bzl:31 switches from native to
     # rules_cc at Bazel version 9.0.0-pre.20250911.
     cc_common_is_in_rules_cc = ge("9.0.0-pre.20250911"),
+    # Whether toolchain features can mark paths for path mapping via ${path:...} patterns.
+    # https://github.com/bazelbuild/bazel/commit/41a36ff029340823700e2f4dec0c7cf71fcbdb31
+    # https://github.com/bazelbuild/bazel/commit/39386503ad55cfad38290f45a8d3732d5b2cd9ac
+    supports_path_variable_patterns = ge_same_major("9.1.0") or ge("10.0.0-pre.20260408.3"),
+    # Internal only, don't use outside rules_cc.
+    # https://github.com/bazelbuild/bazel/commit/d788aa269a3300771696a0f9e00868a43cadf7d3
+    _get_link_args_has_param_file_name = ge("10.0.0-pre.20260608.1"),
 )
 
 _docs = struct(
@@ -108,6 +115,12 @@ _external_deps = struct(
     # https://github.com/bazelbuild/bazel/commit/2ce32e70485ab807e5188efcb696927ec6606a3e
     # https://github.com/bazelbuild/bazel/commit/4edfe3276c127f73145018f4973cc422da61f05d
     repo_rules_relativize_symlinks = ge_same_major("9.0.1") or ge("10.0.0-pre.20260322.2"),
+    # Whether facts are supported
+    #
+    # Only use this when a module_ctx is not available.
+    # Otherwise use `hasattr(module_ctx, "facts")`
+    # https://github.com/bazelbuild/bazel/commit/0b3c45f46d144d07fd4d562f55069bba0cd49a09
+    has_facts = ge("8.5.0"),
 )
 
 _flags = struct(
@@ -173,7 +186,19 @@ _rules = struct(
     # https://github.com/bazel-io/bazel/commit/825369f7231b11f2d966bf8f3ef2d4905eae1344
     write_action_has_execution_requirements = ge_same_major("9.1.0") or gt("10.0.0-pre.20260120.1"),
 
-    # Internal only, don't use outside rules_java, rules_python & rules_shell.
+    # Whether ctx.configuration.is_tool_configuration is public API
+    # https://github.com/bazelbuild/bazel/commit/84c0253add3784b75ff08b6d049a7f152c7b7532
+    is_tool_configuration_public = ge_same_major("8.7.0") or ge_same_major("9.1.0") or ge_same_major("10.0.0-pre.20260329.2"),
+    # Whether constraint_setting has the refines_constraint_value attribute.
+    # https://github.com/bazelbuild/bazel/commit/a59ad366453bb731b255916277d34d5d536ca696
+    constraint_setting_has_refines_constraint_value = gt("10.0.0-pre.20260524.1"),
+
+    # Whether toolchains_aspects accept "*" to propagate to all toolchains
+    # 8.8.0 : https://github.com/bazelbuild/bazel/commit/dd6a292e2b160bbd35b9d9b67d21971f4efeb94c
+    # 9.2.0+ : https://github.com/bazelbuild/bazel/commit/584eeed4de4e0c76e451d0212ab582e2109ceacb
+    supports_toolchains_aspects_star = ge_same_major("8.8.0") or ge("9.2.0rc1"),
+
+    # Internal only and keep last, don't use outside rules_java, rules_python & rules_shell.
     # TODO: Use a larger version range after cherry-picking
     # https://github.com/bazelbuild/bazel/commit/e81949554f3ecab5e2c4afd79031f498f36427fe
     _has_launcher_maker_toolchain = ge_same_major("8.3.0") or ge("9.0.0-pre.20250516.1"),

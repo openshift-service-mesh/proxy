@@ -14,6 +14,13 @@
 
 """Semantics for Bazel cc rules"""
 
+load(
+    ":cc_helper_internal.bzl",
+    "CC_RUNTIMES_TOOLCHAIN_TYPE",
+    _get_cc_runtimes = "get_cc_runtimes",
+    _get_cc_runtimes_copts = "get_cc_runtimes_copts",
+)
+
 # Point virtual includes symlinks to the source root for better IDE integration.
 # See https://github.com/bazelbuild/bazel/pull/20540.
 # TODO: b/320980684 - Add a test that fails if this is flipped to True.
@@ -24,9 +31,6 @@ STRIP_INCLUDE_PREFIX_APPLIES_TO_TEXTUAL_HEADERS = True
 
 def _get_proto_aspects():
     return []
-
-def _should_create_empty_archive():
-    return False
 
 def _validate_attributes(_ctx):
     pass
@@ -69,7 +73,12 @@ def _get_grep_includes():
     return attr.label()
 
 def _get_runtimes_toolchain():
-    return []
+    return [
+        config_common.toolchain_type(
+            CC_RUNTIMES_TOOLCHAIN_TYPE,
+            mandatory = False,
+        ),
+    ]
 
 def _get_test_malloc_attr():
     return {}
@@ -82,7 +91,7 @@ def _get_coverage_attrs():
             cfg = config.exec(exec_group = "test"),
         ),
         "_collect_cc_coverage": attr.label(
-            default = "@bazel_tools//tools/test:collect_cc_coverage",
+            default = Label("//cc/private/coverage:collect_cc_coverage"),
             executable = True,
             cfg = config.exec(exec_group = "test"),
         ),
@@ -90,22 +99,6 @@ def _get_coverage_attrs():
 
 def _get_coverage_env(ctx):
     return ctx.runfiles(), {}
-
-def _get_cc_runtimes(ctx, is_library):
-    if is_library:
-        return []
-
-    runtimes = [ctx.attr.link_extra_lib]
-
-    if ctx.fragments.cpp.custom_malloc != None:
-        runtimes.append(ctx.attr._default_malloc)
-    else:
-        runtimes.append(ctx.attr.malloc)
-
-    return runtimes
-
-def _get_cc_runtimes_copts(_ctx):
-    return []
 
 def _get_implementation_deps_allowed_attr():
     return {}
@@ -128,10 +121,6 @@ def _get_cc_link_memlimit(_compilation_mode, exec_info):
 
 def _get_nocopts_attr():
     return {}
-
-def _is_allowed_nocopts(
-        nocopts):  # @unused
-    return False
 
 def _get_experimental_link_static_libraries_once(ctx):
     return ctx.fragments.cpp.experimental_link_static_libraries_once()
@@ -193,7 +182,6 @@ semantics = struct(
     get_licenses_attr = _get_licenses_attr,
     get_def_parser = _get_def_parser,
     get_stl = _get_stl,
-    should_create_empty_archive = _should_create_empty_archive,
     get_grep_includes = _get_grep_includes,
     get_implementation_deps_allowed_attr = _get_implementation_deps_allowed_attr,
     check_can_use_implementation_deps = _check_can_use_implementation_deps,
@@ -207,7 +195,6 @@ semantics = struct(
     get_coverage_env = _get_coverage_env,
     get_proto_aspects = _get_proto_aspects,
     get_nocopts_attr = _get_nocopts_attr,
-    is_allowed_nocopts = _is_allowed_nocopts,
     get_experimental_link_static_libraries_once = _get_experimental_link_static_libraries_once,
     cpp_modules_tools = _cpp_modules_tools,
     check_cc_shared_library_tags = _check_cc_shared_library_tags,

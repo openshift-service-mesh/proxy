@@ -133,19 +133,12 @@ java_runtime_files(
 #
 # See test_jni in third_party/bazel/src/test/shell/bazel/bazel_java_test.sh for
 # an example of using Bazel to build a Java program that calls a C function.
-#
-# TODO(ilist): use //src:condition:linux when released in Bazel
 cc_library(
     name = "jni",
     hdrs = [":jni_header"] + select({
         "@bazel_tools//src/conditions:darwin": [":jni_md_header-darwin"],
         "@bazel_tools//src/conditions:freebsd": [":jni_md_header-freebsd"],
-        "@bazel_tools//src/conditions:linux_aarch64": [":jni_md_header-linux"],
-        "@bazel_tools//src/conditions:linux_mips64": [":jni_md_header-linux"],
-        "@bazel_tools//src/conditions:linux_ppc64le": [":jni_md_header-linux"],
-        "@bazel_tools//src/conditions:linux_riscv64": [":jni_md_header-linux"],
-        "@bazel_tools//src/conditions:linux_s390x": [":jni_md_header-linux"],
-        "@bazel_tools//src/conditions:linux_x86_64": [":jni_md_header-linux"],
+        "@bazel_tools//src/conditions:linux": [":jni_md_header-linux"],
         "@bazel_tools//src/conditions:openbsd": [":jni_md_header-openbsd"],
         "@bazel_tools//src/conditions:windows": [":jni_md_header-windows"],
         "//conditions:default": [],
@@ -153,12 +146,7 @@ cc_library(
     includes = ["include"] + select({
         "@bazel_tools//src/conditions:darwin": ["include/darwin"],
         "@bazel_tools//src/conditions:freebsd": ["include/freebsd"],
-        "@bazel_tools//src/conditions:linux_aarch64": ["include/linux"],
-        "@bazel_tools//src/conditions:linux_mips64": ["include/linux"],
-        "@bazel_tools//src/conditions:linux_ppc64le": ["include/linux"],
-        "@bazel_tools//src/conditions:linux_riscv64": ["include/linux"],
-        "@bazel_tools//src/conditions:linux_s390x": ["include/linux"],
-        "@bazel_tools//src/conditions:linux_x86_64": ["include/linux"],
+        "@bazel_tools//src/conditions:linux": ["include/linux"],
         "@bazel_tools//src/conditions:openbsd": ["include/openbsd"],
         "@bazel_tools//src/conditions:windows": ["include/win32"],
         "//conditions:default": [],

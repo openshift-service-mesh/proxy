@@ -5,6 +5,7 @@ load("@rules_testing//lib:truth.bzl", "subjects")
 load(
     "//python/private/pypi:whl_metadata.bzl",
     "find_whl_metadata",
+    "parse_entry_points",
     "parse_whl_metadata",
 )  # buildifier: disable=bzl-visibility
 
@@ -81,14 +82,12 @@ def _parse_whl_metadata(env, **kwargs):
             version = result.version,
             requires_dist = result.requires_dist,
             provides_extra = result.provides_extra,
-            entry_points = result.entry_points,
         ),
         attrs = dict(
             name = subjects.str,
             version = subjects.str,
             requires_dist = subjects.collection,
             provides_extra = subjects.collection,
-            entry_points = subjects.collection,
         ),
     )
 
@@ -173,14 +172,8 @@ Requires-Dist: this will be ignored
 
 _tests.append(_test_parse_metadata_multiline_license)
 
-def _test_parse_entry_points_txt(env):
-    got = _parse_whl_metadata(
-        env,
-        contents = """\
-Name: foo
-Version: 0.0.1
-""",
-        entry_points_contents = """\
+def _test_parse_entry_points(env):
+    got = parse_entry_points("""\
 [something]
 interesting # with comments
 
@@ -192,33 +185,66 @@ foobar = importable.foomod:main_bar [bar, baz]
   # With a comment at the end
 foobarbaz = foomod:main.attr # comment
 
+# With extra and comment
+foo_extra_comment = foomod:main [extra] # comment
+
 [something else]
 not very much interesting
+""")
+    env.expect.that_dict(got).contains_exactly({
+        "foo": {
+            "attribute": "main",
+            "extras": "",
+            "group": "console_scripts",
+            "module": "foomod",
+            "name": "foo",
+        },
+        "foo_extra_comment": {
+            "attribute": "main",
+            "extras": "extra",
+            "group": "console_scripts",
+            "module": "foomod",
+            "name": "foo_extra_comment",
+        },
+        "foobar": {
+            "attribute": "main_bar",
+            "extras": "bar, baz",
+            "group": "console_scripts",
+            "module": "importable.foomod",
+            "name": "foobar",
+        },
+        "foobarbaz": {
+            "attribute": "main.attr",
+            "extras": "",
+            "group": "console_scripts",
+            "module": "foomod",
+            "name": "foobarbaz",
+        },
+    })
 
-""",
-    )
-    got.entry_points().contains_exactly([
-        struct(
-            attribute = "main",
-            extras = "",
-            module = "foomod",
-            name = "foo",
-        ),
-        struct(
-            attribute = "main_bar",
-            extras = "[bar,baz]",
-            module = "importable.foomod",
-            name = "foobar",
-        ),
-        struct(
-            attribute = "main.attr",
-            extras = "",
-            module = "foomod",
-            name = "foobarbaz",
-        ),
-    ])
+_tests.append(_test_parse_entry_points)
 
-_tests.append(_test_parse_entry_points_txt)
+def _test_parse_entry_points_deduplicate(env):
+    got = parse_entry_points("""\
+[console_scripts]
+FooBar = foomod:main
+foobar = othermod:main
+fooBAR = another:main
+
+[gui_scripts]
+FOOBAR = guimod:main
+""")
+    env.expect.that_dict(got).contains_exactly({
+        "FooBar": {
+            "attribute": "main",
+            "extras": "",
+            "group": "console_scripts",
+            "module": "foomod",
+            "name": "FooBar",
+        },
+    })
+
+_tests.append(_test_parse_entry_points_deduplicate)
 
 def whl_metadata_test_suite(name):  # buildifier: disable=function-docstring
     test_suite(

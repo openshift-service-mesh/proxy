@@ -15,6 +15,7 @@
 """A helper for creating CcToolchainProvider."""
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("//cc:action_names.bzl", "ACTION_NAMES")
 load("//cc/common:cc_common.bzl", "cc_common")
 load("//cc/common:cc_helper.bzl", "cc_helper")
 load("//cc/common:cc_helper_internal.bzl", "get_relative_path")
@@ -23,23 +24,6 @@ load("//cc/private/rules_impl/fdo:fdo_context.bzl", "create_fdo_context")
 load(":cc_toolchain_info.bzl", "CcToolchainInfo")
 
 visibility("private")
-
-_TOOL_PATH_ONLY_TOOLS = [
-    "gcov-tool",
-    "gcov",
-    "llvm-profdata",
-    "llvm-cov",
-]
-
-_REQUIRED_TOOLS = [
-    "ar",
-    "cpp",
-    "gcc",
-    "ld",
-    "nm",
-    "objdump",
-    "strip",
-]
 
 _SYSROOT_START = "%sysroot%/"
 _WORKSPACE_START = "%workspace%/"
@@ -82,22 +66,6 @@ def _compute_tool_paths(toolchain_config_info, crosstool_top_path):
             fail("The include path '" + path_str + "' is not normalized.")
         tool_paths_collector[tool.name] = get_relative_path(crosstool_top_path, path_str)
 
-    # These tools can only be declared using tool paths, so action-only toolchains should still
-    # be allowed to declared them while still being treated as an action-only toolchain. If a tool
-    # that can be specified with actions is declared using paths, the toolchain will be treated as
-    # a tool-path toolchain to enforce users to migrate their toolchain fully.
-    contains_all = True
-    for key in tool_paths_collector.keys():
-        if key not in _TOOL_PATH_ONLY_TOOLS:
-            contains_all = False
-            break
-    if contains_all:
-        for tool in _REQUIRED_TOOLS:
-            tool_paths_collector[tool] = get_relative_path(crosstool_top_path, tool)
-    else:
-        for tool in _REQUIRED_TOOLS:
-            if tool not in tool_paths_collector.keys():
-                fail("Tool path for '" + tool + "' is missing")
     return tool_paths_collector
 
 def _resolve_include_dir(target_label, s, sysroot, crosstool_path):
@@ -184,12 +152,16 @@ def get_cc_toolchain_provider(ctx, attributes):
     )
     tool_paths = _compute_tool_paths(toolchain_config_info, tools_directory)
     toolchain_features = cc_common.cc_toolchain_features(toolchain_config_info = toolchain_config_info, tools_directory = tools_directory)
+    feature_configuration = toolchain_features.configure_features(
+        requested_features = toolchain_features.default_features_and_action_configs() + [ACTION_NAMES.llvm_profdata],
+    )
     fdo_context = create_fdo_context(
         llvm_profdata = tool_paths.get("llvm-profdata"),
         all_files = attributes.all_files,
         zipper = attributes.zipper,
         cc_toolchain_config_info = toolchain_config_info,
         coverage_enabled = ctx.configuration.coverage_enabled,
+        feature_configuration = feature_configuration,
     )
     if fdo_context == None:
         return None

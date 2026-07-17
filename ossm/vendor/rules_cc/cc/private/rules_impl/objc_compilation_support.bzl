@@ -14,9 +14,9 @@
 """Utility methods used for creating objc_* rules actions"""
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("//cc:build_settings.bzl", "cc")
 load("//cc/common:cc_common.bzl", "cc_common")
 load("//cc/common:cc_helper.bzl", "cc_helper")
-load("//cc/common:semantics.bzl", cc_semantics = "semantics")
 load(":objc_common.bzl", "objc_common")
 load(":objc_compilation_artifacts_info.bzl", "CompilationArtifactsInfo")
 load(":objc_intermediate_artifacts.bzl", "create_intermediate_artifacts")
@@ -38,7 +38,7 @@ def _build_variable_extensions(ctx, arc_enabled):
     return extensions
 
 def _create_compilation_attributes(ctx):
-    disallow_sdk_frameworks = ctx.fragments.objc.disallow_sdk_frameworks_attributes
+    disallow_sdk_frameworks = cc.read_possibly_native_flag(ctx, "incompatible_disallow_sdk_frameworks_attributes")
     sdk_frameworks = getattr(ctx.attr, "sdk_frameworks", [])
     weak_sdk_frameworks = getattr(ctx.attr, "weak_sdk_frameworks", [])
     if disallow_sdk_frameworks:
@@ -61,6 +61,7 @@ def _create_compilation_attributes(ctx):
         cxxopts = cc_common.objc_expand_and_tokenize(ctx = ctx, attr = "cxxopts", flags = getattr(ctx.attr, "cxxopts", [])),
         additional_linker_inputs = getattr(ctx.files, "additional_linker_inputs", []),
         defines = cc_common.objc_expand_and_tokenize(ctx = ctx, attr = "defines", flags = getattr(ctx.attr, "defines", [])),
+        local_defines = cc_common.objc_expand_and_tokenize(ctx = ctx, attr = "local_defines", flags = getattr(ctx.attr, "local_defines", [])),
         enable_modules = getattr(ctx.attr, "enable_modules", False),
     )
 
@@ -75,7 +76,6 @@ def _build_common_variables(
         extra_enabled_features = [],
         attr_linkopts = [],
         alwayslink = False,
-        has_module_map = False,
         direct_cc_compilation_contexts = []):
     compilation_attributes = _create_compilation_attributes(ctx = ctx)
     intermediate_artifacts = create_intermediate_artifacts(ctx = ctx)
@@ -97,8 +97,6 @@ def _build_common_variables(
         compilation_artifacts = compilation_artifacts,
         deps = deps,
         implementation_deps = implementation_deps,
-        intermediate_artifacts = intermediate_artifacts,
-        has_module_map = has_module_map,
         attr_linkopts = attr_linkopts,
         direct_cc_compilation_contexts = direct_cc_compilation_contexts,
         includes = cc_helper.include_dirs(ctx, {}) if hasattr(ctx.attr, "includes") else [],
@@ -120,7 +118,7 @@ def _build_common_variables(
         objc_provider = objc_provider,
     )
 
-def _build_feature_configuration(common_variables, for_swift_module_map, support_parse_headers):
+def _build_feature_configuration(common_variables, support_parse_headers):
     ctx = common_variables.ctx
 
     enabled_features = []
@@ -133,14 +131,6 @@ def _build_feature_configuration(common_variables, for_swift_module_map, support
 
     if not support_parse_headers:
         disabled_features.append("parse_headers")
-
-    if for_swift_module_map:
-        enabled_features.append("module_maps")
-        enabled_features.append("compile_all_modules")
-        enabled_features.append("only_doth_headers_in_module_maps")
-        enabled_features.append("exclude_private_headers_in_module_maps")
-        enabled_features.append("module_map_without_extern_module")
-        disabled_features.append("generate_submodules")
 
     return cc_common.configure_features(
         ctx = common_variables.ctx,
@@ -181,10 +171,10 @@ def _compile(
     compilation_contexts = (
         objc_compilation_context.cc_compilation_contexts +
         cc_helper.get_compilation_contexts_from_deps(
-            cc_semantics.get_cc_runtimes(common_variables.ctx, True),
+            cc_helper.get_cc_runtimes(common_variables.ctx, True),
         )
     )
-    runtimes_copts = cc_semantics.get_cc_runtimes_copts(common_variables.ctx)
+    runtimes_copts = cc_helper.get_cc_runtimes_copts(common_variables.ctx)
 
     return cc_common.compile(
         actions = common_variables.ctx.actions,
@@ -196,6 +186,7 @@ def _compile(
         private_hdrs = private_hdrs,
         textual_hdrs = textual_hdrs,
         defines = objc_compilation_context.defines,
+        local_defines = common_variables.compilation_attributes.local_defines,
         includes = objc_compilation_context.includes,
         system_includes = objc_compilation_context.system_includes,
         quote_includes = objc_compilation_context.quote_includes,
@@ -262,8 +253,7 @@ def _paths_to_include_args(paths):
 def _register_compile_and_archive_actions(
         common_variables,
         extra_compile_args = [],
-        priority_headers = [],
-        generate_module_map_for_swift = False):
+        priority_headers = []):
     ctx = common_variables.ctx
     return _cc_compile_and_link(
         cc_helper.get_srcs(ctx),
@@ -273,7 +263,6 @@ def _register_compile_and_archive_actions(
         common_variables,
         extra_compile_args,
         priority_headers,
-        generate_module_map_for_swift = generate_module_map_for_swift,
     )
 
 # Returns a list of (Artifact, Label) tuples. Each tuple represents an input source
@@ -302,8 +291,7 @@ def _cc_compile_and_link(
         public_hdrs,
         common_variables,
         extra_compile_args,
-        priority_headers,
-        generate_module_map_for_swift):
+        priority_headers):
     intermediate_artifacts = common_variables.intermediate_artifacts
     compilation_attributes = common_variables.compilation_attributes  # buildifier: disable=unused-variable
     ctx = common_variables.ctx
@@ -312,7 +300,6 @@ def _cc_compile_and_link(
     pch_header = _get_pch_file(common_variables)
     feature_configuration = _build_feature_configuration(
         common_variables,
-        for_swift_module_map = False,
         support_parse_headers = True,
     )
 
@@ -345,7 +332,6 @@ def _cc_compile_and_link(
     purpose = "{}_non_objc_arc".format(_get_purpose(common_variables))
     non_arc_primary_module_map_fc = _build_feature_configuration(
         common_variables,
-        for_swift_module_map = False,
         support_parse_headers = False,
     )
     non_arc_extensions = _build_variable_extensions(ctx, arc_enabled = False)
@@ -363,24 +349,6 @@ def _cc_compile_and_link(
         purpose,
         generate_module_map = False,
     )
-
-    objc_compilation_context = common_variables.objc_compilation_context
-
-    if generate_module_map_for_swift:
-        _generate_extra_module_map(
-            common_variables,
-            intermediate_artifacts.swift_module_map(),
-            public_hdrs,
-            private_hdrs,
-            objc_compilation_context.public_textual_hdrs,
-            pch_header,
-            objc_compilation_context.cc_compilation_contexts,
-            _build_feature_configuration(
-                common_variables,
-                for_swift_module_map = True,
-                support_parse_headers = False,
-            ),
-        )
 
     compilation_context = cc_common.merge_compilation_contexts(
         compilation_contexts = [arc_compilation_context, non_arc_compilation_context],
@@ -483,33 +451,6 @@ def _get_purpose(common_variables):
     suffix = common_variables.intermediate_artifacts.archive_file_name_suffix
     config = common_variables.ctx.bin_dir.path.split("/")[1]
     return "Objc_build_arch_" + config + "_with_suffix_" + suffix
-
-def _generate_extra_module_map(
-        common_variables,
-        module_map,
-        public_hdrs,
-        private_hdrs,
-        textual_hdrs,
-        pch_header,
-        compilation_contexts,
-        feature_configuration):
-    purpose = "{}_extra_module_map".format(_get_purpose(common_variables))
-    all_textual_hdrs = []
-    all_textual_hdrs.extend(textual_hdrs)
-    if pch_header != None:
-        all_textual_hdrs.append(pch_header)
-    cc_common.compile(
-        actions = common_variables.ctx.actions,
-        feature_configuration = feature_configuration,
-        cc_toolchain = common_variables.toolchain,
-        public_hdrs = public_hdrs,
-        textual_hdrs = textual_hdrs,
-        private_hdrs = private_hdrs,
-        compilation_contexts = compilation_contexts,
-        module_map = module_map,
-        purpose = purpose,
-        name = common_variables.ctx.label.name,
-    )
 
 compilation_support = struct(
     register_compile_and_archive_actions = _register_compile_and_archive_actions,

@@ -4,7 +4,8 @@ import json
 import os
 import platform
 import sys
-from typing import Dict, Iterable, List, Tuple, cast
+import typing as _t
+from collections.abc import Iterable
 
 from pip._internal.req import InstallRequirement
 from pip._vendor.packaging.requirements import Requirement
@@ -12,15 +13,17 @@ from pip._vendor.packaging.requirements import Requirement
 from .exceptions import PipToolsError
 from .utils import as_tuple, key_from_req, lookup_table_from_tuples
 
-CacheKey = Tuple[str, str]
-CacheLookup = Dict[str, List[str]]
-CacheDict = Dict[str, CacheLookup]
+CacheKey = tuple[str, str]
+CacheLookup = dict[str, list[str]]
+CacheDict = dict[str, CacheLookup]
 
 _PEP425_PY_TAGS = {"cpython": "cp", "pypy": "pp", "ironpython": "ip", "jython": "jy"}
 
 
 def _implementation_name() -> str:
     """
+    Get Python implementation and version.
+
     Similar to PEP 425, however the minor version is separated from the major to
     differentiate "3.10" and "31.0".
     """
@@ -52,12 +55,13 @@ def read_cache_file(cache_file_path: str) -> CacheDict:
         # Check version and load the contents
         if doc["__format__"] != 1:
             raise ValueError("Unknown cache file format")
-        return cast(CacheDict, doc["dependencies"])
+        return _t.cast(CacheDict, doc["dependencies"])
 
 
 class DependencyCache:
     """
-    Creates a new persistent dependency cache for the current Python version.
+    Create new persistent dependency cache for the current Python version.
+
     The cache file is written to the appropriate user cache dir for the
     current platform, i.e.
 
@@ -89,7 +93,9 @@ class DependencyCache:
 
     def as_cache_key(self, ireq: InstallRequirement) -> CacheKey:
         """
-        Given a requirement, return its cache key. This behavior is a little weird
+        Given a requirement, return its cache key.
+
+        This behavior is a little weird
         in order to allow backwards compatibility with cache files. For a requirement
         without extras, this will return, for example:
 
@@ -108,7 +114,7 @@ class DependencyCache:
         return name, f"{version}{extras_string}"
 
     def write_cache(self) -> None:
-        """Writes the cache to disk as JSON."""
+        """Write the cache to disk as JSON."""
         doc = {"__format__": 1, "dependencies": self._cache}
         with open(self._cache_file, "w", encoding="utf-8") as f:
             json.dump(doc, f, sort_keys=True)
@@ -135,7 +141,7 @@ class DependencyCache:
         self, ireqs: Iterable[InstallRequirement]
     ) -> dict[str, set[str]]:
         """
-        Returns a lookup table of reverse dependencies for all the given ireqs.
+        Return a lookup table of reverse dependencies for all the given ireqs.
 
         Since this is all static, it only works if the dependency cache
         contains the complete data, otherwise you end up with a partial view.
@@ -149,7 +155,7 @@ class DependencyCache:
         self, cache_keys: Iterable[tuple[str, str]]
     ) -> dict[str, set[str]]:
         """
-        Returns a lookup table of reverse dependencies for all the given cache keys.
+        Return a lookup table of reverse dependencies for all the given cache keys.
 
         Example input:
 

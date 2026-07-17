@@ -52,6 +52,12 @@ PREPROCESS_ASSEMBLE_ACTION_NAME = "preprocess-assemble"
 # Name of the coverage action.
 LLVM_COV = "llvm-cov"
 
+# Name of the profile data merging action.
+LLVM_PROFDATA = "llvm-profdata"
+
+# Name of the coverage action when using gcov.
+GCOV = "gcov"
+
 # Name of the action producing ThinLto index.
 LTO_INDEXING_ACTION_NAME = "lto-indexing"
 
@@ -112,6 +118,9 @@ VALIDATE_STATIC_LIBRARY = "validate-static-library"
 # Name of the DWARF packaging utility action.
 DWP = "dwp"
 
+# Name of the action that generates a Windows DEF file from object files.
+GENERATE_DEF_FILE_ACTION_NAME = "generate-def-file"
+
 ACTION_NAMES = struct(
     c_compile = C_COMPILE_ACTION_NAME,
     cpp_compile = CPP_COMPILE_ACTION_NAME,
@@ -126,6 +135,8 @@ ACTION_NAMES = struct(
     assemble = ASSEMBLE_ACTION_NAME,
     preprocess_assemble = PREPROCESS_ASSEMBLE_ACTION_NAME,
     llvm_cov = LLVM_COV,
+    llvm_profdata = LLVM_PROFDATA,
+    gcov = GCOV,
     lto_indexing = LTO_INDEXING_ACTION_NAME,
     lto_backend = LTO_BACKEND_ACTION_NAME,
     cpp_header_analysis = CPP_HEADER_ANALYSIS_ACTION_NAME,
@@ -146,6 +157,7 @@ ACTION_NAMES = struct(
     objcopy_embed_data = OBJ_COPY_ACTION_NAME,
     validate_static_library = VALIDATE_STATIC_LIBRARY,
     dwp = DWP,
+    generate_def_file = GENERATE_DEF_FILE_ACTION_NAME,
 )
 
 # Names of actions that parse or compile C++ code.
