@@ -18,6 +18,7 @@ Only use those within C++ implementation. The others need to go through cc_commo
 """
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("//cc/common:visibility.bzl", "PRIVATE_RULES_ALLOWLIST")
 load("//cc/private:cc_internal.bzl", _cc_internal = "cc_internal")
 load("//cc/private:paths.bzl", "is_path_absolute")
 
@@ -42,6 +43,143 @@ def wrap_with_check_private_api(symbol):
 CPP_SOURCE_TYPE_HEADER = "HEADER"
 CPP_SOURCE_TYPE_SOURCE = "SOURCE"
 CPP_SOURCE_TYPE_CLIF_INPUT_PROTO = "CLIF_INPUT_PROTO"
+CC_RUNTIMES_TOOLCHAIN_TYPE = Label("@bazel_tools//tools/cpp:cc_runtimes_toolchain_type")
+
+def get_cc_runtimes(ctx, is_library):
+    """Returns the list of C++ runtime dependency targets for the rule.
+
+    Args:
+      ctx: The rule context.
+      is_library: True if the target being evaluated is a library rule (which
+        excludes malloc and link_extra_lib), False otherwise.
+
+    Returns:
+      A list of Target objects representing the required runtime libraries.
+    """
+    runtimes = []
+
+    # Executable builds also include the "malloc" and "link_extra_lib" libraries.
+    if not is_library:
+        runtimes.append(ctx.attr.link_extra_lib)
+
+        if ctx.fragments.cpp.custom_malloc != None:
+            # ctx.attr._default_malloc is set via ctx.fragments.cpp.custom_malloc.
+            runtimes.append(ctx.attr._default_malloc)
+        else:
+            runtimes.append(ctx.attr.malloc)
+
+    cc_runtimes_toolchain = ctx.toolchains[CC_RUNTIMES_TOOLCHAIN_TYPE]
+
+    # All builds include the runtimes from the cc_runtimes_toolchain.
+    if cc_runtimes_toolchain:
+        runtimes += cc_runtimes_toolchain.cc_runtimes_info.runtimes
+    elif hasattr(ctx.attr, "tags") and "__CC_STL__" in ctx.attr.tags:
+        # TODO(b/141613846): Remove this workaround.
+        pass
+    elif getattr(ctx.attr, "_stl", None) != None:
+        runtimes.append(ctx.attr._stl)
+
+    return runtimes
+
+def get_cc_runtimes_copts(ctx):
+    """Returns the C++ compiler flags required by the C++ runtimes toolchain.
+
+    Args:
+      ctx: The rule context.
+
+    Returns:
+      A list of command-line compiler option strings from the runtimes toolchain.
+    """
+    cc_runtimes_toolchain = ctx.toolchains[CC_RUNTIMES_TOOLCHAIN_TYPE]
+    return cc_runtimes_toolchain.cc_runtimes_info.copts if cc_runtimes_toolchain else []
+
+def get_fdo_build_stamp(cpp_configuration, fdo_context, feature_configuration):
+    """Returns the FDO build stamp.
+
+    Args:
+      cpp_configuration: The C++ configuration.
+      fdo_context: The FDO context.
+      feature_configuration: The feature configuration.
+
+    Returns:
+      The FDO build stamp string, or None if FDO is not enabled.
+    """
+    branch_fdo_profile = getattr(fdo_context, "branch_fdo_profile", None)
+    if branch_fdo_profile:
+        branch_fdo_mode = branch_fdo_profile.branch_fdo_mode
+        if branch_fdo_mode == "auto_fdo":
+            return "AFDO" if feature_configuration.is_enabled("autofdo") else None
+        if branch_fdo_mode == "xbinary_fdo":
+            return "XFDO" if feature_configuration.is_enabled("xbinaryfdo") else None
+        if branch_fdo_mode == "llvm_cs_fdo" or cpp_configuration.cs_fdo_instrument():
+            return "CSFDO"
+    if branch_fdo_profile or cpp_configuration.fdo_instrument():
+        return "FDO"
+    return None
+
+def get_linkstamp_stamps(
+        cc_toolchain,
+        feature_configuration,
+        target_name,
+        build_target,
+        additional_linkstamp_defines):
+    """Returns a dict of stamps for linkstamp compilation/PostMark.
+
+    Args:
+      cc_toolchain: The C++ toolchain provider.
+      feature_configuration: The feature configuration.
+      target_name: Value for the G3_TARGET_NAME linkstamp define.
+      build_target: Value for the G3_BUILD_TARGET linkstamp define.
+      additional_linkstamp_defines: A list of additional defines for linkstamp compilation.
+
+    Returns:
+      A dictionary of linkstamp defines.
+    """
+    fdo_build_stamp = get_fdo_build_stamp(
+        cc_toolchain._cpp_configuration,
+        cc_toolchain._fdo_context,
+        feature_configuration,
+    )
+    stamps = {
+        "GPLATFORM": cc_toolchain.toolchain_id,
+        "BUILD_COVERAGE_ENABLED": "1" if feature_configuration.is_enabled("coverage") else "0",
+        # G3_TARGET_NAME is a C string literal that normally contain the label of the target
+        # being linked.  However, they are set differently when using shared native deps. In
+        # that case, a single .so file is shared by multiple targets, and its contents cannot
+        # depend on which target(s) were specified on the command line.  So in that case we
+        # have to use the (obscure) name of the .so file instead, or more precisely the path of
+        # the .so file relative to the workspace root.
+        "G3_TARGET_NAME": target_name,
+        # G3_BUILD_TARGET is a C string literal containing the output of this
+        # link.  (An undocumented and untested invariant is that G3_BUILD_TARGET is the
+        # location of the executable, either absolutely, or relative to the directory part of
+        # BUILD_INFO.)
+        "G3_BUILD_TARGET": build_target,
+    }
+    if fdo_build_stamp:
+        stamps["BUILD_FDO_TYPE"] = fdo_build_stamp
+
+    fdo_context = getattr(cc_toolchain, "_fdo_context", None)
+    if fdo_context:
+        fdo_profile_changelist = getattr(fdo_context, "fdo_profile_changelist", None)
+        if fdo_profile_changelist:
+            stamps["BUILD_FDO_PROFILE_CHANGELIST"] = fdo_profile_changelist
+        memprof_profile_changelist = getattr(fdo_context, "memprof_profile_changelist", None)
+        if memprof_profile_changelist:
+            stamps["BUILD_MEMPROF_PROFILE_CHANGELIST"] = memprof_profile_changelist
+
+    if feature_configuration.is_enabled("thin_lto"):
+        stamps["BUILD_LTO_TYPE"] = "thin"
+
+    if additional_linkstamp_defines:
+        for d in additional_linkstamp_defines:
+            if "=" in d:
+                k, v = d.split("=", 1)
+                stamps[k] = v
+            else:
+                stamps[d] = "1"
+
+    return stamps
 
 # LINT.IfChange(forked_exports)
 
@@ -78,15 +216,17 @@ PRIVATE_STARLARKIFICATION_ALLOWLIST = [
     ("", "third_party/protobuf"),
     ("protobuf", ""),
     ("com_google_protobuf", ""),
+    ("", "third_party/upb"),
     # Rust rules
     ("", "third_party/bazel_rules/rules_rust/rust/private"),
     ("rules_rust", "rust/private"),
+    ("rules_rs", "rust/private"),
     # Python rules
     ("", "third_party/bazel_rules/rules_python"),
     # Various
     ("", "research/colab"),
     ("", "javatests/com/google/devtools/grok/kythe"),
-] + CREATE_COMPILE_ACTION_API_ALLOWLISTED_PACKAGES
+] + CREATE_COMPILE_ACTION_API_ALLOWLISTED_PACKAGES + PRIVATE_RULES_ALLOWLIST
 
 # LINT.ThenChange(https://github.com/bazelbuild/bazel/blob/master/src/main/starlark/builtins_bzl/common/cc/cc_helper_internal.bzl:forked_exports)
 
@@ -104,7 +244,7 @@ _ARCHIVE = [".a", ".lib"]
 _PIC_ARCHIVE = [".pic.a"]
 _ALWAYSLINK_LIBRARY = [".lo"]
 _ALWAYSLINK_PIC_LIBRARY = [".pic.lo"]
-_SHARED_LIBRARY = [".so", ".dylib", ".dll", ".pyd", ".wasm"]
+_SHARED_LIBRARY = [".so", ".dylib", ".dll", ".pyd", ".wasm", ".xll"]
 _INTERFACE_SHARED_LIBRARY = [".ifso", ".tbd", ".lib", ".dll.a"]
 _OBJECT_FILE = [".o", ".obj"]
 _PIC_OBJECT_FILE = [".pic.o"]
@@ -139,8 +279,6 @@ extensions = struct(
     CC_HEADER = _CC_HEADER,
     CC_TEXTUAL_INCLUDE = _CC_TEXTUAL_INCLUDE,
     ASSEMBLER_WITH_C_PREPROCESSOR = _ASSEMBLER_WITH_C_PREPROCESSOR,
-    # TODO(b/345158656): Remove ASSESMBLER_WITH_C_PREPROCESSOR after next blaze release
-    ASSESMBLER_WITH_C_PREPROCESSOR = _ASSEMBLER_WITH_C_PREPROCESSOR,
     ASSEMBLER = _ASSEMBLER,
     CLIF_INPUT_PROTO = _CLIF_INPUT_PROTO,
     CLIF_OUTPUT_PROTO = _CLIF_OUTPUT_PROTO,
@@ -178,7 +316,7 @@ _ArtifactCategoryInfo, _unused_new_aci = provider(
 _artifact_categories = [
     _ArtifactCategoryInfo("STATIC_LIBRARY", "lib", ".a", ".lib"),
     _ArtifactCategoryInfo("ALWAYSLINK_STATIC_LIBRARY", "lib", ".lo", ".lo.lib"),
-    _ArtifactCategoryInfo("DYNAMIC_LIBRARY", "lib", ".so", ".dylib", ".dll", ".pyd", ".wasm"),
+    _ArtifactCategoryInfo("DYNAMIC_LIBRARY", "lib", ".so", ".dylib", ".dll", ".pyd", ".wasm", ".xll"),
     _ArtifactCategoryInfo("EXECUTABLE", "", "", ".exe", ".wasm"),
     _ArtifactCategoryInfo("INTERFACE_LIBRARY", "lib", ".ifso", ".tbd", ".if.lib", ".lib"),
     _ArtifactCategoryInfo("PIC_FILE", "", ".pic"),
@@ -320,7 +458,7 @@ def should_stamp(ctx):
     )
 
 def is_shared_library(file):
-    return file.extension in ["so", "dylib", "dll", "pyd", "wasm", "tgt", "vpi"]
+    return file.extension in ["so", "dylib", "dll", "pyd", "wasm", "tgt", "vpi", "xll"]
 
 def is_versioned_shared_library(file):
     # Because regex matching can be slow, we first do a quick check for ".so." and ".dylib."
@@ -373,8 +511,15 @@ def root_relative_path(file):
     Returns:
         (str) The root-relative path of the file.
     """
+
+    # This function matches Bazel's Artifact.getRootRelativePath() implementation bug-for-bug,
+    # including the surprising behavior that the result starts with "external/<repo>/" for external
+    # source files, but not for external generated files.
     if not file.is_source:
+        # https://github.com/bazelbuild/bazel/blob/795af54db5c348af5ca8b2961a982b399206ea20/src/main/java/com/google/devtools/build/lib/actions/Artifact.java#L310
         return file.path[len(file.root.path) + 1:]
+
+    # https://github.com/bazelbuild/bazel/blob/795af54db5c348af5ca8b2961a982b399206ea20/src/main/java/com/google/devtools/build/lib/actions/Artifact.java#L786
     short_path = file.short_path
     if not short_path.startswith("../"):
         return short_path

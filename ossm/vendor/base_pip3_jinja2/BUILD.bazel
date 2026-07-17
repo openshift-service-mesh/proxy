@@ -1,7 +1,14 @@
+load("@package_metadata//rules:package_metadata.bzl", "package_metadata")
 load("@base_pip3__config//:config.bzl", "packages")
 load("@rules_python//python/private/pypi:whl_library_targets.bzl", "whl_library_targets_from_requires")
 
 package(default_visibility = ["//visibility:public"])
+
+package_metadata(
+    name = "package_metadata",
+    purl = "pkg:pypi/jinja2@3.1.6?file_name=jinja2-3.1.6-py3-none-any.whl",
+    visibility = ["//:__subpackages__"],
+)
 
 whl_library_targets_from_requires(
     data_exclude = [],

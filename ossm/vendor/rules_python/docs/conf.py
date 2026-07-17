@@ -7,7 +7,7 @@ project = "rules_python"
 copyright = "2023, The Bazel Authors"
 author = "Bazel"
 
-# NOTE: These are overriden by -D flags via --//sphinxdocs:extra_defines
+# NOTE: These are overriden by -D flags via --@sphinxdocs//sphinxdocs:extra_defines
 version = "0.0.0"
 release = version
 
@@ -95,13 +95,6 @@ redirects = {
     "pypi-dependencies.html": "pypi/index.html",
 }
 
-# Adapted from the template code:
-# https://github.com/readthedocs/readthedocs.org/blob/main/readthedocs/doc_builder/templates/doc_builder/conf.py.tmpl
-if os.environ.get("READTHEDOCS") == "True":
-    # Must come first because it can interfere with other extensions, according
-    # to the original conf.py template comments
-    extensions.insert(0, "readthedocs_ext.readthedocs")
-
 exclude_patterns = ["_includes/*"]
 templates_path = ["_templates"]
 primary_domain = None  # The default is 'py', which we don't make much use of
@@ -139,9 +132,12 @@ intersphinx_mapping = {
 
 # --- Extlinks configuration
 extlinks = {
-    "gh-issue": (f"https://github.com/bazel-contrib/rules_python/issues/%s", "#%s issue"),
-    "gh-path": (f"https://github.com/bazel-contrib/rules_python/tree/main/%s", "%s"),
-    "gh-pr": (f"https://github.com/bazel-contrib/rules_python/pull/%s", "#%s PR"),
+    "gh-issue": (
+        "https://github.com/bazel-contrib/rules_python/issues/%s",
+        "#%s issue",
+    ),
+    "gh-path": ("https://github.com/bazel-contrib/rules_python/tree/main/%s", "%s"),
+    "gh-pr": ("https://github.com/bazel-contrib/rules_python/pull/%s", "#%s PR"),
 }
 
 # --- MyST configuration

@@ -25,13 +25,18 @@ buildifier:
   bazel: 7.x
   skip_in_bazel_downstream_pipeline: "Bazel 7 required"
 .reusable_config: &reusable_config
+  # USE_BAZEL_DIFF is disabled because target_compatible_with is used heavily,
+  # but BazelCI's bazel-diff integration errors when handling them.
+  # environment:
+  #   USE_BAZEL_DIFF: "1"
   build_targets:
     - "--"
     - "..."
     # As a regression test for #225, check that wheel targets still build when
     # their package path is qualified with the repo name.
     - "@rules_python//examples/wheel/..."
-  build_flags:
+  build_flags: &reusable_config_build_flags
+    - "--experimental_repository_cache_hardlinks=false"
     - "--keep_going"
     - "--build_tag_filters=-integration-test"
     - "--verbose_failures"
@@ -42,6 +47,7 @@ buildifier:
     - "--test_tag_filters=-integration-test"
 .common_workspace_flags_min_bazel: &common_workspace_flags_min_bazel
   build_flags:
+    - "--experimental_repository_cache_hardlinks=false"
     - "--noenable_bzlmod"
     - "--build_tag_filters=-integration-test"
   test_flags:
@@ -78,6 +84,9 @@ buildifier:
   coverage_targets: ["..."]
 .coverage_targets_example_bzlmod_build_file_generation: &coverage_targets_example_bzlmod_build_file_generation
   coverage_targets: ["//:bzlmod_build_file_generation_test"]
+.coverage_targets_bootstrap: &coverage_targets_bootstrap
+  coverage_targets:
+    - //tests/bootstrap_impls:stdlib_shadowing_system_python_test
 .coverage_targets_example_multi_python: &coverage_targets_example_multi_python
   coverage_targets:
     - //tests:my_lib_3_10_test
@@ -113,12 +122,14 @@ buildifier:
 
 
 matrix:
+  # Keep in sync with .bcr/presubmit.yml
   platform:
     - ubuntu2204
     - debian11
     - macos_arm64
     - windows
-  bazel: [7.*, 8.*, 9.*]
+  # Keep in sync with .bcr/presubmit.yml
+  bazel: [7.x, 8.x, 9.x]
 
 tasks:
   # Keep in sync with .bcr/presubmit.yml
@@ -172,6 +183,27 @@ tasks:
     test_targets: ["//..."]
     working_directory: gazelle
 
+  sphinxdocs_ubuntu:
+    name: "Sphinxdocs: Ubuntu"
+    working_directory: "sphinxdocs"
+    platform: ubuntu2204
+    shell_commands:
+      - "../.bazelci/isolate.sh sphinxdocs"
+    build_targets:
+      - "//..."
+    test_targets:
+      - "//..."
+  sphinxdocs_mac:
+    name: "Sphinxdocs: Mac"
+    working_directory: "sphinxdocs"
+    platform: macos_arm64
+    shell_commands:
+      - "../.bazelci/isolate.sh sphinxdocs"
+    build_targets:
+      - "//..."
+    test_targets:
+      - "//..."
+
   ubuntu_min_workspace:
     <<: *minimum_supported_version
     <<: *reusable_config
@@ -187,13 +219,20 @@ tasks:
     bazel: 7.x
   ubuntu:
     <<: *reusable_config
-    name: "Default: Ubuntu"
+    <<: *coverage_targets_bootstrap
+    name: "Default: Ubuntu, Bazel {bazel}"
     platform: ubuntu2204
+    bazel: ${{ bazel }}
   ubuntu_upcoming:
     <<: *reusable_config
     name: "Default: Ubuntu, upcoming Bazel"
     platform: ubuntu2204
     bazel: last_rc
+    # This is an advisory job; doesn't block merges
+    # RCs may have regressions, so don't fail our CI on them
+    soft_fail:
+      - exit_status: 1
+      - exit_status: 3
   ubuntu_rolling:
     name: "Default: Ubuntu, rolling Bazel"
     platform: ubuntu2204
@@ -246,24 +285,28 @@ tasks:
 
   debian:
     <<: *reusable_config
-    name: "Default: Debian"
+    name: "Default: Debian, Bazel {bazel}"
     platform: debian11
+    bazel: ${{ bazel }}
   macos_arm64:
     <<: *reusable_config
-    name: "Default: MacOS"
+    name: "Default: MacOS, Bazel {bazel}"
     platform: macos_arm64
+    bazel: ${{ bazel }}
   windows:
     <<: *reusable_config
-    name: "Default: Windows"
+    name: "Default: Windows, Bazel {bazel}"
     platform: windows
+    bazel: ${{ bazel }}
     test_flags:
       - "--test_tag_filters=-integration-test,-fix-windows"
   rbe_min:
     <<: *minimum_supported_version
     <<: *reusable_config
     name: "RBE: Ubuntu, minimum Bazel"
-    platform: rbe_ubuntu2204
+    platform: rbe_ubuntu2404
     build_flags:
+      - "--experimental_repository_cache_hardlinks=false"
       # BazelCI sets --action_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1,
       # which prevents cc toolchain autodetection from working correctly
       # on Bazel 5.4 and earlier. To workaround this, manually specify the
@@ -280,7 +323,7 @@ tasks:
   rbe:
     <<: *reusable_config
     name: "RBE: Ubuntu"
-    platform: rbe_ubuntu2204
+    platform: rbe_ubuntu2404
     # TODO @aignas 2024-12-11: get the RBE working in CI for bazel 8.0
     # See https://github.com/bazelbuild/rules_python/issues/2499
     bazel: 8.x
@@ -422,31 +465,6 @@ tasks:
   # We don't run pip_parse_vendored under Windows as the file checked in is
   # generated from a repository rule containing OS-specific rendered paths.
 
-  integration_test_pip_repository_annotations_ubuntu_workspace:
-    <<: *reusable_build_test_all
-    <<: *common_workspace_flags
-    name: "examples/pip_repository_annotations: Ubuntu, workspace"
-    working_directory: examples/pip_repository_annotations
-    platform: ubuntu2204
-  integration_test_pip_repository_annotations_debian_workspace:
-    <<: *reusable_build_test_all
-    <<: *common_workspace_flags
-    name: "examples/pip_repository_annotations: Debian, workspace"
-    working_directory: examples/pip_repository_annotations
-    platform: debian11
-  integration_test_pip_repository_annotations_macos_workspace:
-    <<: *reusable_build_test_all
-    <<: *common_workspace_flags
-    name: "examples/pip_repository_annotations: macOS, workspace"
-    working_directory: examples/pip_repository_annotations
-    platform: macos_arm64
-  integration_test_pip_repository_annotations_windows_workspace:
-    <<: *reusable_build_test_all
-    <<: *common_workspace_flags
-    name: "examples/pip_repository_annotations: Windows, workspace"
-    working_directory: examples/pip_repository_annotations
-    platform: windows
-
   integration_test_bazelinbazel_ubuntu:
     <<: *common_bazelinbazel_config
     name: "tests/integration bazel-in-bazel: Ubuntu"
@@ -462,8 +480,8 @@ tasks:
     <<: *common_bazelinbazel_config
     name: "tests/integration bazel-in-bazel: macOS (subset)"
     platform: macos_arm64
-    build_targets: ["//tests/integration:local_toolchains_test_bazel_self"]
-    test_targets: ["//tests/integration:local_toolchains_test_bazel_self"]
+    build_targets: ["//tests/integration:subset"]
+    test_targets: ["//tests/integration:subset"]
   # The bazelinbazel tests were disabled on Windows to save CI jobs slots, and
   # have bitrotted a bit. For now, just run a subset of what we're most
   # interested in.
@@ -471,8 +489,8 @@ tasks:
     <<: *common_bazelinbazel_config
     name: "tests/integration bazel-in-bazel: Windows (subset)"
     platform: windows
-    build_targets: ["//tests/integration:local_toolchains_test_bazel_self"]
-    test_targets: ["//tests/integration:local_toolchains_test_bazel_self"]
+    build_targets: ["//tests/integration:subset"]
+    test_targets: ["//tests/integration:subset"]
 
   integration_test_compile_pip_requirements_ubuntu:
     <<: *reusable_build_test_all

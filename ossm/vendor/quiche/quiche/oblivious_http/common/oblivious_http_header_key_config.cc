@@ -5,13 +5,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/escaping.h"
@@ -19,7 +19,6 @@
 #include "absl/strings/string_view.h"
 #include "openssl/base.h"
 #include "openssl/hpke.h"
-#include "quiche/common/platform/api/quiche_bug_tracker.h"
 #include "quiche/common/platform/api/quiche_logging.h"
 #include "quiche/common/quiche_data_reader.h"
 #include "quiche/common/quiche_data_writer.h"
@@ -38,10 +37,20 @@ constexpr size_t kSizeOfHpkeKemId = 2;
 constexpr size_t kSizeOfSymmetricAlgorithmHpkeKdfId = 2;
 constexpr size_t kSizeOfSymmetricAlgorithmHpkeAeadId = 2;
 
+}  // namespace
+
 absl::StatusOr<const EVP_HPKE_KEM*> CheckKemId(uint16_t kem_id) {
   switch (kem_id) {
+    case EVP_HPKE_DHKEM_P256_HKDF_SHA256:
+      return EVP_hpke_p256_hkdf_sha256();
     case EVP_HPKE_DHKEM_X25519_HKDF_SHA256:
       return EVP_hpke_x25519_hkdf_sha256();
+    case EVP_HPKE_XWING:
+      return EVP_hpke_xwing();
+    case EVP_HPKE_MLKEM768:
+      return EVP_hpke_mlkem768();
+    case EVP_HPKE_MLKEM1024:
+      return EVP_hpke_mlkem1024();
     default:
       return absl::UnimplementedError(
           absl::StrCat("KEM ID", absl::Hex(kem_id), " not supported"));
@@ -52,6 +61,8 @@ absl::StatusOr<const EVP_HPKE_KDF*> CheckKdfId(uint16_t kdf_id) {
   switch (kdf_id) {
     case EVP_HPKE_HKDF_SHA256:
       return EVP_hpke_hkdf_sha256();
+    case EVP_HPKE_HKDF_SHA384:
+      return EVP_hpke_hkdf_sha384();
     default:
       return absl::UnimplementedError(
           absl::StrCat("KDF ID ", absl::Hex(kdf_id), " not supported"));
@@ -71,8 +82,6 @@ absl::StatusOr<const EVP_HPKE_AEAD*> CheckAeadId(uint16_t aead_id) {
           absl::StrCat("AEAD ID ", absl::Hex(aead_id), " not supported"));
   }
 }
-
-}  // namespace
 
 ObliviousHttpHeaderKeyConfig::ObliviousHttpHeaderKeyConfig(uint8_t key_id,
                                                            uint16_t kem_id,
@@ -287,30 +296,60 @@ absl::Status StoreKeyConfigIfValid(
 
 }  // namespace
 
+// static
+std::string ObliviousHttpKeyConfigs::GetAcceptHeaderValueForConcatenatedKeys() {
+  return "application/ohttp-keys";
+}
+
 absl::StatusOr<ObliviousHttpKeyConfigs>
-ObliviousHttpKeyConfigs::ParseConcatenatedKeys(absl::string_view key_config) {
+ObliviousHttpKeyConfigs::ParseConcatenatedKeys(
+    absl::string_view key_config,
+    std::optional<absl::string_view> /*media_type*/) {
   ConfigMap configs;
   PublicKeyMap keys;
-  auto reader = QuicheDataReader(key_config);
-  while (!reader.IsDoneReading()) {
-    absl::Status status = ReadSingleKeyConfig(reader, configs, keys);
-    if (!status.ok()) return status;
+  std::vector<uint8_t> key_ids;
+  // First, try to parse the keys using the length-prefixed format from RFC
+  // 9458.
+  if (ReadKeyConfigsWithLengthPrefix(key_config, configs, keys, key_ids).ok()) {
+    return ObliviousHttpKeyConfigs(std::move(configs), std::move(keys),
+                                   key_ids);
   }
-  return ObliviousHttpKeyConfigs(std::move(configs), std::move(keys));
+  // Otherwise, try parsing using the non-length-prefixed format from
+  // draft-ietf-ohai-ohttp-08, a precursor to RFC 9458.
+  configs.clear();
+  keys.clear();
+  key_ids.clear();
+  QuicheDataReader reader(key_config);
+  while (!reader.IsDoneReading()) {
+    uint8_t key_id;
+    QUICHE_RETURN_IF_ERROR(ReadSingleKeyConfig(reader, configs, keys, key_id,
+                                               /*skip_unknown_kems=*/false));
+    if (!configs.empty() && (key_ids.empty() || key_ids.back() != key_id)) {
+      key_ids.push_back(key_id);
+    }
+  }
+  return ObliviousHttpKeyConfigs(std::move(configs), std::move(keys), key_ids);
 }
 
 absl::StatusOr<ObliviousHttpKeyConfigs> ObliviousHttpKeyConfigs::Create(
-    absl::flat_hash_set<OhttpKeyConfig> ohttp_key_configs) {
+    std::vector<OhttpKeyConfig> ohttp_key_configs) {
   if (ohttp_key_configs.empty()) {
     return absl::InvalidArgumentError("Empty input");
   }
   ConfigMap configs_map;
   PublicKeyMap keys_map;
+  std::vector<uint8_t> key_ids;
+  key_ids.reserve(ohttp_key_configs.size());
   for (OhttpKeyConfig ohttp_key_config : ohttp_key_configs) {
+    const uint8_t key_id = ohttp_key_config.key_id;
     QUICHE_RETURN_IF_ERROR(StoreKeyConfigIfValid(std::move(ohttp_key_config),
                                                  configs_map, keys_map));
+    if (key_ids.empty() || key_ids.back() != key_id) {
+      key_ids.push_back(key_id);
+    }
   }
-  return ObliviousHttpKeyConfigs(std::move(configs_map), std::move(keys_map));
+  return ObliviousHttpKeyConfigs(std::move(configs_map), std::move(keys_map),
+                                 std::move(key_ids));
 }
 
 absl::StatusOr<ObliviousHttpKeyConfigs> ObliviousHttpKeyConfigs::Create(
@@ -328,20 +367,34 @@ absl::StatusOr<ObliviousHttpKeyConfigs> ObliviousHttpKeyConfigs::Create(
   ConfigMap configs;
   PublicKeyMap keys;
   uint8_t key_id = single_key_config.GetKeyId();
+  std::vector<uint8_t> key_ids = {key_id};
   keys.emplace(key_id, public_key);
   configs[key_id].emplace_back(std::move(single_key_config));
-  return ObliviousHttpKeyConfigs(std::move(configs), std::move(keys));
+  return ObliviousHttpKeyConfigs(std::move(configs), std::move(keys),
+                                 std::move(key_ids));
 }
 
-absl::StatusOr<std::string> ObliviousHttpKeyConfigs::GenerateConcatenatedKeys()
-    const {
+absl::StatusOr<std::string> ObliviousHttpKeyConfigs::GenerateConcatenatedKeys(
+    bool with_length_prefix) const {
   std::string concatenated_keys;
-  for (const auto& [key_id, ohttp_configs] : configs_) {
+  for (const uint8_t key_id : key_ids_) {
+    const auto it = configs_.find(key_id);
+    if (it == configs_.end()) {
+      continue;
+    }
+    const std::vector<ObliviousHttpHeaderKeyConfig>& ohttp_configs = it->second;
     QUICHE_ASSIGN_OR_RETURN(absl::string_view public_key,
                             GetPublicKeyForId(key_id));
     QUICHE_ASSIGN_OR_RETURN(
         std::string serialized,
         SerializeOhttpKeyWithPublicKey(key_id, public_key, ohttp_configs));
+    if (with_length_prefix) {
+      char length_prefix[sizeof(uint16_t)];
+      QuicheDataWriter writer(sizeof(uint16_t), length_prefix);
+      QUICHE_CHECK(writer.WriteUInt16(serialized.size()));
+      absl::StrAppend(&concatenated_keys,
+                      absl::string_view(length_prefix, sizeof(uint16_t)));
+    }
     absl::StrAppend(&concatenated_keys, std::move(serialized));
   }
   return concatenated_keys;
@@ -350,6 +403,12 @@ absl::StatusOr<std::string> ObliviousHttpKeyConfigs::GenerateConcatenatedKeys()
 ObliviousHttpHeaderKeyConfig ObliviousHttpKeyConfigs::PreferredConfig() const {
   // configs_ is forced to have at least one object during construction.
   QUICHE_CHECK(!configs_.empty());
+  if (!key_ids_.empty()) {
+    auto it = configs_.find(key_ids_.front());
+    if (it != configs_.end()) {
+      return it->second.front();
+    }
+  }
   return configs_.begin()->second.front();
 }
 
@@ -364,17 +423,25 @@ absl::StatusOr<absl::string_view> ObliviousHttpKeyConfigs::GetPublicKeyForId(
 }
 
 absl::Status ObliviousHttpKeyConfigs::ReadSingleKeyConfig(
-    QuicheDataReader& reader, ConfigMap& configs, PublicKeyMap& keys) {
-  uint8_t key_id;
-  if (!reader.ReadUInt8(&key_id)) {
+    QuicheDataReader& reader, ConfigMap& configs, PublicKeyMap& keys,
+    uint8_t& key_id, bool skip_unknown_kems) {
+  uint8_t key_id2;
+  if (!reader.ReadUInt8(&key_id2)) {
     return absl::InvalidArgumentError("Failed to read key_id");
   }
+  key_id = key_id2;
   uint16_t kem_id;
   if (!reader.ReadUInt16(&kem_id)) {
     return absl::InvalidArgumentError("Failed to read kem_id");
   }
-  QUICHE_ASSIGN_OR_RETURN(uint16_t key_length, KeyLength(kem_id));
-  std::string key_str(key_length, '\0');
+  absl::StatusOr<uint16_t> key_length = KeyLength(kem_id);
+  if (!key_length.ok()) {
+    if (skip_unknown_kems) {
+      return absl::OkStatus();
+    }
+    return key_length.status();
+  }
+  std::string key_str(*key_length, '\0');
   if (!reader.ReadBytes(key_str.data(), key_str.size())) {
     return absl::InvalidArgumentError("Failed to read public key");
   }
@@ -420,14 +487,46 @@ absl::Status ObliviousHttpKeyConfigs::ReadSingleKeyConfig(
   return absl::OkStatus();
 }
 
+// static
+absl::Status ObliviousHttpKeyConfigs::ReadKeyConfigsWithLengthPrefix(
+    absl::string_view key_configs, ConfigMap& configs, PublicKeyMap& keys,
+    std::vector<uint8_t>& key_ids) {
+  QuicheDataReader reader(key_configs);
+  while (!reader.IsDoneReading()) {
+    absl::string_view single_key_config;
+    if (!reader.ReadStringPiece16(&single_key_config)) {
+      return absl::InvalidArgumentError(
+          "Failed to read length-prefixed key config");
+    }
+    QuicheDataReader single_reader(single_key_config);
+    uint8_t key_id;
+    QUICHE_RETURN_IF_ERROR(ReadSingleKeyConfig(single_reader, configs, keys,
+                                               key_id,
+                                               /*skip_unknown_kems=*/true));
+    if (!configs.empty() && (key_ids.empty() || key_ids.back() != key_id)) {
+      key_ids.push_back(key_id);
+    }
+  }
+  if (configs.empty() || keys.empty()) {
+    return absl::InvalidArgumentError("No supported key configs found");
+  }
+  return absl::OkStatus();
+}
+
 // https://www.iana.org/assignments/hpke
 
 std::string ObliviousHttpKemIdToString(uint16_t kem_id) {
   switch (kem_id) {
-    case EVP_HPKE_DHKEM_X25519_HKDF_SHA256:
-      return "X25519-SHA256";
     case EVP_HPKE_DHKEM_P256_HKDF_SHA256:
       return "P256-SHA256";
+    case EVP_HPKE_DHKEM_X25519_HKDF_SHA256:
+      return "X25519-SHA256";
+    case EVP_HPKE_XWING:
+      return "XWING";
+    case EVP_HPKE_MLKEM768:
+      return "MLKEM768";
+    case EVP_HPKE_MLKEM1024:
+      return "MLKEM1024";
     default:
       return absl::StrCat("UnknownKEM(", kem_id, ")");
   }
@@ -437,6 +536,8 @@ std::string ObliviousHttpKdfIdToString(uint16_t kdf_id) {
   switch (kdf_id) {
     case EVP_HPKE_HKDF_SHA256:
       return "SHA256";
+    case EVP_HPKE_HKDF_SHA384:
+      return "SHA384";
     default:
       return absl::StrCat("UnknownKDF(", kdf_id, ")");
   }
@@ -484,7 +585,16 @@ std::string ObliviousHttpKeyConfigs::OhttpKeyConfig::DebugString() const {
 
 std::string ObliviousHttpKeyConfigs::DebugString() const {
   std::string s;
-  for (const auto& [key_id, ohttp_configs] : configs_) {
+  for (const uint8_t key_id : key_ids_) {
+    const auto kit = configs_.find(key_id);
+    if (kit == configs_.end()) {
+      continue;
+    }
+    const std::vector<ObliviousHttpHeaderKeyConfig>& ohttp_configs =
+        kit->second;
+    if (!s.empty()) {
+      absl::StrAppend(&s, "\n");
+    }
     absl::StrAppend(&s, "[key_id: ", static_cast<uint16_t>(key_id), ", {");
     for (const ObliviousHttpHeaderKeyConfig& ohttp_config : ohttp_configs) {
       absl::StrAppend(&s, "\n  ", ohttp_config.DebugString());
@@ -497,6 +607,34 @@ std::string ObliviousHttpKeyConfigs::DebugString() const {
     absl::StrAppend(&s, "\n}, public_key: ", public_key, "]");
   }
   return s;
+}
+
+// static
+absl::StatusOr<ObliviousHttpHeaderKeyConfig>
+ObliviousHttpKeyConfigs::ParseOhttpPayloadHeaderAgainstConfigs(
+    absl::string_view payload_bytes,
+    const std::vector<ObliviousHttpHeaderKeyConfig>& configs) {
+  for (const ObliviousHttpHeaderKeyConfig& config : configs) {
+    if (config.ParseOhttpPayloadHeader(payload_bytes).ok()) {
+      return config;
+    }
+  }
+  return absl::InvalidArgumentError("Payload did not match any key configs");
+}
+
+absl::StatusOr<ObliviousHttpHeaderKeyConfig>
+ObliviousHttpKeyConfigs::GetConfigForPayload(
+    absl::string_view payload_bytes) const {
+  QUICHE_ASSIGN_OR_RETURN(
+      uint8_t key_id,
+      ObliviousHttpHeaderKeyConfig::ParseKeyIdFromObliviousHttpRequestPayload(
+          payload_bytes));
+  auto it = configs_.find(key_id);
+  if (it == configs_.end()) {
+    return absl::NotFoundError(
+        absl::StrCat("No config found for key_id ", key_id));
+  }
+  return ParseOhttpPayloadHeaderAgainstConfigs(payload_bytes, it->second);
 }
 
 }  // namespace quiche

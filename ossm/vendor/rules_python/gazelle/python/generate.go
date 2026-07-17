@@ -48,11 +48,19 @@ var (
 	buildFilenames = []string{"BUILD", "BUILD.bazel"}
 )
 
-func GetActualKindName(kind string, args language.GenerateArgs) string {
-	if kindOverride, ok := args.Config.KindMap[kind]; ok {
-		return kindOverride.KindName
+// Returns the mapped kind, or kind if no mapping is configured with the map_kind directive.
+func getMappedKind(c *config.Config, kind string) string {
+	if mapped, ok := c.KindMap[kind]; ok {
+		return mapped.KindName
 	}
 	return kind
+}
+
+// kindMatches returns whether r matches the canonical Python rule kind `expected`, respecting `# gazelle:map_kind` and
+// `# gazelle:alias_kind` directives in the config.Config c.
+func kindMatches(c *config.Config, r *rule.Rule, expected string) bool {
+	kind := r.Kind()
+	return kind == getMappedKind(c, expected) || c.AliasMap[kind] == expected
 }
 
 func matchesAnyGlob(s string, globs []string) bool {
@@ -111,10 +119,6 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 			}
 		}
 	}
-
-	actualPyBinaryKind := GetActualKindName(pyBinaryKind, args)
-	actualPyLibraryKind := GetActualKindName(pyLibraryKind, args)
-	actualPyTestKind := GetActualKindName(pyTestKind, args)
 
 	pythonProjectRoot := cfg.PythonProjectRoot()
 
@@ -258,6 +262,15 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 	// Create a validFilesMap of mainModules to validate if python macros have valid srcs.
 	validFilesMap := make(map[string]struct{})
 
+	// Determine whether we have an __init__.py file in this package and whether we'll implicitly include it in srcs.
+	var hasPopulatedInit bool
+	var autoIncludeInit bool
+	if cfg.PerFileGeneration() {
+		var hasInit bool
+		hasInit, hasPopulatedInit = hasLibraryEntrypointFile(args.Dir)
+		autoIncludeInit = cfg.PerFileGenerationIncludeInit() && hasInit && hasPopulatedInit
+	}
+
 	appendPyLibrary := func(srcs *treeset.Set, pyLibraryTargetName string) {
 		allDeps, mainModules, annotations, err := parser.parse(srcs)
 		for name := range mainModules {
@@ -277,16 +290,20 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 				// that we don't also generate a py_library target for it.
 				if cfg.PerFileGeneration() {
 					srcs.Remove(name)
+					// Also remove the __init__.py that was added earlier.
+					if autoIncludeInit {
+						srcs.Remove(pyLibraryEntrypointFilename)
+					}
 				}
 			}
 
 			sort.Strings(mainFileNames)
 			for _, filename := range mainFileNames {
 				pyBinaryTargetName := strings.TrimSuffix(filepath.Base(filename), ".py")
-				if err := ensureNoCollision(args.File, pyBinaryTargetName, actualPyBinaryKind); err != nil {
+				if err := ensureNoCollision(args.Config, args.File, pyBinaryTargetName, pyBinaryKind); err != nil {
 					fqTarget := label.New("", args.Rel, pyBinaryTargetName)
 					log.Printf("failed to generate target %q of kind %q: %v",
-						fqTarget.String(), actualPyBinaryKind, err)
+						fqTarget.String(), getMappedKind(args.Config, pyBinaryKind), err)
 					continue
 				}
 
@@ -294,15 +311,20 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 				filenames := treeset.NewWith(godsutils.StringComparator, filename)
 				pyiSrcs, _ := getPyiFilenames(filenames, cfg.GeneratePyiSrcs(), args.Dir)
 
-				pyBinary := newTargetBuilder(pyBinaryKind, pyBinaryTargetName, pythonProjectRoot, args.Rel, pyFileNames, cfg.ResolveSiblingImports()).
+				pyBinaryBuilder := newTargetBuilder(pyBinaryKind, pyBinaryTargetName, pythonProjectRoot, args.Rel, pyFileNames, cfg.ResolveSiblingImports()).
 					addVisibility(visibility).
 					addSrc(filename).
 					addPyiSrcs(pyiSrcs).
 					addModuleDependencies(mainModules[filename]).
 					addResolvedDependencies(annotations.includeDeps).
 					generateImportsAttribute().
-					setAnnotations(*annotations).
-					build()
+					setAnnotations(*annotations)
+
+				if autoIncludeInit {
+					pyBinaryBuilder.addSrc(pyLibraryEntrypointFilename)
+				}
+
+				pyBinary := pyBinaryBuilder.build()
 				result.Gen = append(result.Gen, pyBinary)
 				result.Imports = append(result.Imports, pyBinary.PrivateAttr(config.GazelleImportsKey))
 			}
@@ -316,7 +338,7 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 			}
 			generateEmptyLibrary := false
 			for _, r := range args.File.Rules {
-				if r.Kind() == actualPyLibraryKind && r.Name() == pyLibraryTargetName {
+				if r.Name() == pyLibraryTargetName && kindMatches(args.Config, r, pyLibraryKind) {
 					generateEmptyLibrary = true
 				}
 			}
@@ -332,11 +354,11 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 		// exists, and if it is of a different kind from the one we are
 		// generating. If so, we have to throw an error since Gazelle won't
 		// generate it correctly.
-		if err := ensureNoCollision(args.File, pyLibraryTargetName, actualPyLibraryKind); err != nil {
+		if err := ensureNoCollision(args.Config, args.File, pyLibraryTargetName, pyLibraryKind); err != nil {
 			fqTarget := label.New("", args.Rel, pyLibraryTargetName)
 			err := fmt.Errorf("failed to generate target %q of kind %q: %w. "+
 				"Use the '# gazelle:%s' directive to change the naming convention.",
-				fqTarget.String(), actualPyLibraryKind, err, pythonconfig.LibraryNamingConvention)
+				fqTarget.String(), getMappedKind(args.Config, pyLibraryKind), err, pythonconfig.LibraryNamingConvention)
 			collisionErrors.Add(err)
 		}
 
@@ -357,15 +379,15 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 			result.Imports = append(result.Imports, pyLibrary.PrivateAttr(config.GazelleImportsKey))
 		}
 	}
+
 	if cfg.PerFileGeneration() {
-		hasInit, nonEmptyInit := hasLibraryEntrypointFile(args.Dir)
 		pyLibraryFilenames.Each(func(index int, filename interface{}) {
 			pyLibraryTargetName := strings.TrimSuffix(filepath.Base(filename.(string)), ".py")
-			if filename == pyLibraryEntrypointFilename && !nonEmptyInit {
+			if filename == pyLibraryEntrypointFilename && !hasPopulatedInit {
 				return // ignore empty __init__.py.
 			}
 			srcs := treeset.NewWith(godsutils.StringComparator, filename)
-			if cfg.PerFileGenerationIncludeInit() && hasInit && nonEmptyInit {
+			if autoIncludeInit {
 				srcs.Add(pyLibraryEntrypointFilename)
 			}
 			appendPyLibrary(srcs, pyLibraryTargetName)
@@ -386,11 +408,11 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 		// exists, and if it is of a different kind from the one we are
 		// generating. If so, we have to throw an error since Gazelle won't
 		// generate it correctly.
-		if err := ensureNoCollision(args.File, pyBinaryTargetName, actualPyBinaryKind); err != nil {
+		if err := ensureNoCollision(args.Config, args.File, pyBinaryTargetName, pyBinaryKind); err != nil {
 			fqTarget := label.New("", args.Rel, pyBinaryTargetName)
 			err := fmt.Errorf("failed to generate target %q of kind %q: %w. "+
 				"Use the '# gazelle:%s' directive to change the naming convention.",
-				fqTarget.String(), actualPyBinaryKind, err, pythonconfig.BinaryNamingConvention)
+				fqTarget.String(), getMappedKind(args.Config, pyBinaryKind), err, pythonconfig.BinaryNamingConvention)
 			collisionErrors.Add(err)
 		}
 
@@ -425,10 +447,10 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 		// exists, and if it is of a different kind from the one we are
 		// generating. If so, we have to throw an error since Gazelle won't
 		// generate it correctly.
-		if err := ensureNoCollision(args.File, conftestTargetname, actualPyLibraryKind); err != nil {
+		if err := ensureNoCollision(args.Config, args.File, conftestTargetname, pyLibraryKind); err != nil {
 			fqTarget := label.New("", args.Rel, conftestTargetname)
 			err := fmt.Errorf("failed to generate target %q of kind %q: %w. ",
-				fqTarget.String(), actualPyLibraryKind, err)
+				fqTarget.String(), getMappedKind(args.Config, pyLibraryKind), err)
 			collisionErrors.Add(err)
 		}
 
@@ -462,11 +484,11 @@ func (py *Python) GenerateRules(args language.GenerateArgs) language.GenerateRes
 		// exists, and if it is of a different kind from the one we are
 		// generating. If so, we have to throw an error since Gazelle won't
 		// generate it correctly.
-		if err := ensureNoCollision(args.File, pyTestTargetName, actualPyTestKind); err != nil {
+		if err := ensureNoCollision(args.Config, args.File, pyTestTargetName, pyTestKind); err != nil {
 			fqTarget := label.New("", args.Rel, pyTestTargetName)
 			err := fmt.Errorf("failed to generate target %q of kind %q: %w. "+
 				"Use the '# gazelle:%s' directive to change the naming convention.",
-				fqTarget.String(), actualPyTestKind, err, pythonconfig.TestNamingConvention)
+				fqTarget.String(), getMappedKind(args.Config, pyTestKind), err, pythonconfig.TestNamingConvention)
 			collisionErrors.Add(err)
 		}
 
@@ -571,27 +593,53 @@ func (py *Python) getRulesWithInvalidSrcs(args language.GenerateArgs, validFiles
 		validFilesMap[file] = struct{}{}
 	}
 
+	// allFilesMap extends validFilesMap with all regular files on disk.
+	// py_binary uses validFilesMap (main modules + generated files), while py_library
+	// and py_test use allFilesMap since any file is a valid src for them.
+	allFilesMap := make(map[string]struct{}, len(validFilesMap)+len(args.RegularFiles))
+	for file := range validFilesMap {
+		allFilesMap[file] = struct{}{}
+	}
+	for _, file := range args.RegularFiles {
+		allFilesMap[file] = struct{}{}
+	}
+
 	isTarget := func(src string) bool {
 		return strings.HasPrefix(src, "@") || strings.HasPrefix(src, "//") || strings.HasPrefix(src, ":")
 	}
 	for _, existingRule := range args.File.Rules {
-		actualPyBinaryKind := GetActualKindName(pyBinaryKind, args)
-		if existingRule.Kind() != actualPyBinaryKind {
+		var matchedKind string
+		var filesMap map[string]struct{}
+		if kindMatches(args.Config, existingRule, pyBinaryKind) {
+			matchedKind = pyBinaryKind
+			filesMap = validFilesMap
+		} else if kindMatches(args.Config, existingRule, pyLibraryKind) {
+			matchedKind = pyLibraryKind
+			filesMap = allFilesMap
+		} else if kindMatches(args.Config, existingRule, pyTestKind) {
+			matchedKind = pyTestKind
+			filesMap = allFilesMap
+		} else {
+			continue
+		}
+
+		srcs := existingRule.AttrStrings("srcs")
+		if len(srcs) == 0 {
 			continue
 		}
 		var hasValidSrcs bool
-		for _, src := range existingRule.AttrStrings("srcs") {
+		for _, src := range srcs {
 			if isTarget(src) {
 				hasValidSrcs = true
 				break
 			}
-			if _, ok := validFilesMap[src]; ok {
+			if _, ok := filesMap[src]; ok {
 				hasValidSrcs = true
 				break
 			}
 		}
 		if !hasValidSrcs {
-			invalidRules = append(invalidRules, newTargetBuilder(pyBinaryKind, existingRule.Name(), "", "", nil, false).build())
+			invalidRules = append(invalidRules, newTargetBuilder(matchedKind, existingRule.Name(), "", "", nil, false).build())
 		}
 	}
 	return invalidRules
@@ -652,12 +700,12 @@ func isEntrypointFile(path string) bool {
 	}
 }
 
-func ensureNoCollision(file *rule.File, targetName, kind string) error {
+func ensureNoCollision(c *config.Config, file *rule.File, targetName, kind string) error {
 	if file == nil {
 		return nil
 	}
 	for _, t := range file.Rules {
-		if t.Name() == targetName && t.Kind() != kind {
+		if t.Name() == targetName && !kindMatches(c, t, kind) {
 			return fmt.Errorf("a target of kind %q with the same name already exists", t.Kind())
 		}
 	}
@@ -680,7 +728,7 @@ func generateProtoLibraries(args language.GenerateArgs, cfg *pythonconfig.Config
 	pyProtoRulesForProto := map[string]string{}
 	if args.File != nil {
 		for _, r := range args.File.Rules {
-			if r.Kind() == "py_proto_library" {
+			if kindMatches(args.Config, r, pyProtoLibraryKind) {
 				pyProtoRules[r.Name()] = false
 
 				protos := r.AttrStrings("deps")

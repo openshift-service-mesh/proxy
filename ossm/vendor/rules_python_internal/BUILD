@@ -8,11 +8,11 @@ package(
 )
 
 bzl_library(
-    name = "rules_python_config_bzl",
-    srcs = ["rules_python_config.bzl"]
+    name = "extra_transition_settings",
+    srcs = ["extra_transition_settings.bzl"],
 )
 
 bzl_library(
-    name = "extra_transition_settings_bzl",
-    srcs = ["extra_transition_settings.bzl"],
+    name = "rules_python_config",
+    srcs = ["rules_python_config.bzl"],
 )

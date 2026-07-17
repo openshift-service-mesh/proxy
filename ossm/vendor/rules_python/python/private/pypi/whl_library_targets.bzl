@@ -26,12 +26,13 @@ load(
     "EXTRACTED_WHEEL_FILES",
     "PY_LIBRARY_IMPL_LABEL",
     "PY_LIBRARY_PUBLIC_LABEL",
-    "WHEEL_ENTRY_POINT_PREFIX",
     "WHEEL_FILE_IMPL_LABEL",
     "WHEEL_FILE_PUBLIC_LABEL",
 )
 load(":namespace_pkgs.bzl", _create_inits = "create_inits")
 load(":pep508_deps.bzl", "deps")
+load(":venv_entry_point.bzl", "venv_entry_point")
+load(":venv_rewrite_shebang.bzl", "venv_rewrite_shebang")
 
 # Files that are special to the Bazel processing of things.
 _BAZEL_REPO_FILE_GLOBS = [
@@ -39,9 +40,12 @@ _BAZEL_REPO_FILE_GLOBS = [
     "BUILD.bazel",
     "REPO.bazel",
     "WORKSPACE",
-    "WORKSPACE",
+    "WORKSPACE.bzlmod",
     "WORKSPACE.bazel",
 ]
+
+_IS_VENV_SITE_PACKAGES_YES = Label("//python/config_settings:_is_venvs_site_packages_yes")
+_VENV_SITE_PACKAGES_FLAG = Label("//python/config_settings:venvs_site_packages")
 
 def whl_library_targets_from_requires(
         *,
@@ -50,6 +54,7 @@ def whl_library_targets_from_requires(
         metadata_version = "",
         requires_dist = [],
         extras = [],
+        entry_points = {},
         include = [],
         group_deps = [],
         **kwargs):
@@ -66,6 +71,7 @@ def whl_library_targets_from_requires(
         requires_dist: {type}`list[str]` The list of `Requires-Dist` values from
             the whl `METADATA`.
         extras: {type}`list[str]` The list of requested extras. This essentially includes extra transitive dependencies in the final targets depending on the wheel `METADATA`.
+        entry_points: {type}`list[dict]` A list of parsed entry point definitions.
         include: {type}`list[str]` The list of packages to include.
         **kwargs: Extra args passed to the {obj}`whl_library_targets`
     """
@@ -81,6 +87,7 @@ def whl_library_targets_from_requires(
         name = name,
         dependencies = package_deps.deps,
         dependencies_with_markers = package_deps.deps_select,
+        entry_points = entry_points,
         tags = [
             "pypi_name={}".format(metadata_name),
             "pypi_version={}".format(metadata_version),
@@ -113,14 +120,12 @@ def whl_library_targets(
         tags = [],
         dependencies = [],
         filegroups = None,
-        dependencies_by_platform = {},
         dependencies_with_markers = {},
-        group_deps = [],
+        entry_points = {},
         group_name = "",
         data = [],
         copy_files = {},
         copy_executables = {},
-        entry_points = {},
         native = native,
         enable_implicit_namespace_pkgs = False,
         namespace_package_files = [],
@@ -128,6 +133,8 @@ def whl_library_targets(
             copy_file = copy_file,
             py_binary = py_binary,
             py_library = py_library,
+            venv_entry_point = venv_entry_point,
+            venv_rewrite_shebang = venv_rewrite_shebang,
             env_marker_setting = env_marker_setting,
             create_inits = _create_inits,
         )):
@@ -142,20 +149,15 @@ def whl_library_targets(
             the filename of the sdist.
         tags: {type}`list[str]` The tags set on the `py_library`.
         dependencies: {type}`list[str]` A list of dependencies.
-        dependencies_by_platform: {type}`dict[str, list[str]]` A list of
-            dependencies by platform key.
         dependencies_with_markers: {type}`dict[str, str]` A marker to evaluate
             in order for the dep to be included.
+        entry_points: {type}`list[dict]` A list of parsed entry point definitions.
         filegroups: {type}`dict[str, list[str]] | None` A dictionary of the target
             names and the glob matches. If `None`, defaults will be used.
         group_name: {type}`str` name of the dependency group (if any) which
             contains this library. If set, this library will behave as a shim
             to group implementation rules which will provide simultaneously
             installed dependencies which would otherwise form a cycle.
-        group_deps: {type}`list[str]` names of fellow members of the group (if
-            any). These will be excluded from generated deps lists so as to avoid
-            direct cycles. These dependencies will be provided at runtime by the
-            group rules which wrap this library and its fellows together.
         copy_executables: {type}`dict[str, str]` The mapping between src and
             dest locations for the targets.
         copy_files: {type}`dict[str, str]` The mapping between src and
@@ -165,8 +167,6 @@ def whl_library_targets(
         srcs_exclude: {type}`list[str]` The globs for srcs attribute exclusion
             in `py_library`.
         data: {type}`list[str]` A list of labels to include as part of the `data` attribute in `py_library`.
-        entry_points: {type}`dict[str, str]` The mapping between the script
-            name and the python file to use. DEPRECATED.
         enable_implicit_namespace_pkgs: {type}`boolean` generate __init__.py
             files for namespace pkgs.
         native: {type}`native` The native struct for overriding in tests.
@@ -175,12 +175,38 @@ def whl_library_targets(
         rules: {type}`struct` A struct with references to rules for creating targets.
     """
     dependencies = sorted([normalize_name(d) for d in dependencies])
-    dependencies_by_platform = {
-        platform: sorted([normalize_name(d) for d in deps])
-        for platform, deps in dependencies_by_platform.items()
-    }
     tags = sorted(tags)
     data = [] + data
+
+    bins_for_data_label = []
+
+    for ep_dict in entry_points.values():
+        kwargs = dict(ep_dict)
+        ep_name = kwargs.pop("name")
+        ep_target_name = "bin/{}".format(ep_name)
+        rules.venv_entry_point(
+            name = ep_target_name,
+            **kwargs
+        )
+        bins_for_data_label.append(ep_target_name)
+        data.append(ep_target_name)
+
+    existing_bin_names = {ep["name"].lower(): None for ep in entry_points.values()}
+    for p in native.glob(["bin/*"], allow_empty = True):
+        existing_bin_names[p[len("bin/"):].lower()] = None
+
+    for src_path in native.glob(["rewrite-bin/*"], allow_empty = True):
+        script_name = src_path[len("rewrite-bin/"):]
+        if script_name.lower() in existing_bin_names:
+            continue
+        rewrite_target_name = "bin/{}".format(script_name)
+        rules.venv_rewrite_shebang(
+            name = rewrite_target_name,
+            src = src_path,
+            package = name,
+        )
+        bins_for_data_label.append(rewrite_target_name)
+        data.append(rewrite_target_name)
 
     if filegroups == None:
         filegroups = {
@@ -195,15 +221,18 @@ def whl_library_targets(
                 include = ["site-packages/*.dist-info/**"],
             ),
             DATA_LABEL: dict(
-                include = ["data/**"],
+                include = ["data/**", "bin/**", "include/**"],
             ),
         }
 
     for filegroup_name, glob_kwargs in filegroups.items():
         glob_kwargs = {"allow_empty": True} | glob_kwargs
+        srcs = native.glob(**glob_kwargs)
+        if filegroup_name == DATA_LABEL:
+            srcs = srcs + bins_for_data_label
         native.filegroup(
             name = filegroup_name,
-            srcs = native.glob(**glob_kwargs),
+            srcs = srcs,
             visibility = ["//visibility:public"],
         )
 
@@ -226,48 +255,13 @@ def whl_library_targets(
         data.append(dest)
 
     _config_settings(
-        dependencies_by_platform = dependencies_by_platform.keys(),
         dependencies_with_markers = dependencies_with_markers,
-        native = native,
         rules = rules,
         visibility = ["//visibility:private"],
     )
     deps_conditional = {
         d: "is_include_{}_true".format(d)
         for d in dependencies_with_markers
-    }
-
-    # TODO @aignas 2024-10-25: remove the entry_point generation once
-    # `py_console_script_binary` is the only way to use entry points.
-    for entry_point, entry_point_script_name in entry_points.items():
-        rules.py_binary(
-            name = "{}_{}".format(WHEEL_ENTRY_POINT_PREFIX, entry_point),
-            # Ensure that this works on Windows as well - script may have Windows path separators.
-            srcs = [entry_point_script_name.replace("\\", "/")],
-            # This makes this directory a top-level in the python import
-            # search path for anything that depends on this.
-            imports = ["."],
-            deps = [":" + PY_LIBRARY_PUBLIC_LABEL],
-            visibility = ["//visibility:public"],
-        )
-
-    # Ensure this list is normalized
-    # Note: mapping used as set
-    group_deps = {
-        normalize_name(d): True
-        for d in group_deps
-    }
-
-    dependencies = [
-        d
-        for d in dependencies
-        if d not in group_deps
-    ]
-    dependencies_by_platform = {
-        p: deps
-        for p, deps in dependencies_by_platform.items()
-        for deps in [[d for d in deps if d not in group_deps]]
-        if deps
     }
 
     # If this library is a member of a group, its public label aliases need to
@@ -324,7 +318,6 @@ def whl_library_targets(
             srcs = [name],
             data = _deps(
                 deps = dependencies,
-                deps_by_platform = dependencies_by_platform,
                 deps_conditional = deps_conditional,
                 tmpl = dep_template.format(name = "{}", target = WHEEL_FILE_PUBLIC_LABEL),
             ),
@@ -347,11 +340,9 @@ def whl_library_targets(
             "**/*.py",
             "**/*.pyc",
             "**/*.pyc.*",  # During pyc creation, temp files named *.pyc.NNNN are created
-            # RECORD is known to contain sha256 checksums of files which might include the checksums
-            # of generated files produced when wheels are installed. The file is ignored to avoid
-            # Bazel caching issues.
-            "**/*.dist-info/RECORD",
         ]
+        if sdist_filename:
+            _data_exclude.append("**/*.dist-info/RECORD")
         for item in data_exclude:
             if item not in _data_exclude:
                 _data_exclude.append(item)
@@ -369,7 +360,7 @@ def whl_library_targets(
 
         if not enable_implicit_namespace_pkgs:
             generated_namespace_package_files = select({
-                Label("//python/config_settings:is_venvs_site_packages"): [],
+                _IS_VENV_SITE_PACKAGES_YES: [],
                 "//conditions:default": rules.create_inits(
                     srcs = srcs + data + pyi_srcs,
                     ignored_dirnames = [],  # If you need to ignore certain folders, you can patch rules_python here to do so.
@@ -378,6 +369,10 @@ def whl_library_targets(
             })
             namespace_package_files += generated_namespace_package_files
             srcs = srcs + generated_namespace_package_files
+
+        # This is done after create_inits() is called so that the data scheme
+        # files don't have such files created in their directories.
+        data = data + [DATA_LABEL]
 
         rules.py_library(
             name = py_library_label,
@@ -389,32 +384,22 @@ def whl_library_targets(
             imports = ["site-packages"],
             deps = _deps(
                 deps = dependencies,
-                deps_by_platform = dependencies_by_platform,
                 deps_conditional = deps_conditional,
                 tmpl = dep_template.format(name = "{}", target = PY_LIBRARY_PUBLIC_LABEL),
             ),
             tags = tags,
             visibility = impl_vis,
-            experimental_venvs_site_packages = Label("@rules_python//python/config_settings:venvs_site_packages"),
+            experimental_venvs_site_packages = _VENV_SITE_PACKAGES_FLAG,
             namespace_package_files = namespace_package_files,
         )
 
-def _config_settings(dependencies_by_platform, dependencies_with_markers, rules, native = native, **kwargs):
+def _config_settings(dependencies_with_markers, rules, **kwargs):
     """Generate config settings for the targets.
 
     Args:
-        dependencies_by_platform: {type}`list[str]` platform keys, can be
-            one of the following formats:
-            * `//conditions:default`
-            * `@platforms//os:{value}`
-            * `@platforms//cpu:{value}`
-            * `@//python/config_settings:is_python_3.{minor_version}`
-            * `{os}_{cpu}`
-            * `cp3{minor_version}_{os}_{cpu}`
         dependencies_with_markers: {type}`dict[str, str]` The markers to evaluate by
             each dep.
         rules: used for testing
-        native: {type}`native` The native struct for overriding in tests.
         **kwargs: Extra kwargs to pass to the rule.
     """
     for dep, expression in dependencies_with_markers.items():
@@ -424,46 +409,7 @@ def _config_settings(dependencies_by_platform, dependencies_with_markers, rules,
             **kwargs
         )
 
-    for p in dependencies_by_platform:
-        if p.startswith("@") or p.endswith("default"):
-            continue
-
-        # TODO @aignas 2025-04-20: add tests here
-        abi, _, tail = p.partition("_")
-        if not abi.startswith("cp"):
-            tail = p
-            abi = ""
-        os, _, arch = tail.partition("_")
-
-        _kwargs = dict(kwargs)
-        _kwargs["constraint_values"] = [
-            "@platforms//cpu:{}".format(arch),
-            "@platforms//os:{}".format(os),
-        ]
-
-        if abi:
-            _kwargs["flag_values"] = {
-                Label("//python/config_settings:python_version"): "3.{}".format(abi[len("cp3"):]),
-            }
-
-        native.config_setting(
-            name = "is_{name}".format(
-                name = p.replace("cp3", "python_3."),
-            ),
-            **_kwargs
-        )
-
-def _plat_label(plat):
-    if plat.endswith("default"):
-        return plat
-    elif plat.startswith("@//"):
-        return Label(plat.strip("@"))
-    elif plat.startswith("@"):
-        return plat
-    else:
-        return ":is_" + plat.replace("cp3", "python_3.")
-
-def _deps(deps, deps_by_platform, deps_conditional, tmpl):
+def _deps(deps, deps_conditional, tmpl):
     deps = [tmpl.format(d) for d in sorted(deps)]
 
     for dep, setting in deps_conditional.items():
@@ -472,22 +418,4 @@ def _deps(deps, deps_by_platform, deps_conditional, tmpl):
             "//conditions:default": [],
         })
 
-    if not deps_by_platform:
-        return deps
-
-    deps_by_platform = {
-        _plat_label(p): [
-            tmpl.format(d)
-            for d in sorted(deps)
-        ]
-        for p, deps in sorted(deps_by_platform.items())
-    }
-
-    # Add the default, which means that we will be just using the dependencies in
-    # `deps` for platforms that are not handled in a special way by the packages
-    deps_by_platform.setdefault("//conditions:default", [])
-
-    if not deps:
-        return select(deps_by_platform)
-    else:
-        return deps + select(deps_by_platform)
+    return deps

@@ -21,8 +21,6 @@ settings for rules to later use.
 load("//python/private:text_util.bzl", "render")
 load(":repo_utils.bzl", "repo_utils")
 
-_ENABLE_PIPSTAR_ENVVAR_NAME = "RULES_PYTHON_ENABLE_PIPSTAR"
-_ENABLE_PIPSTAR_DEFAULT = "1"
 _ENABLE_DEPRECATION_WARNINGS_ENVVAR_NAME = "RULES_PYTHON_DEPRECATION_WARNINGS"
 _ENABLE_DEPRECATION_WARNINGS_DEFAULT = "0"
 
@@ -31,8 +29,8 @@ config = struct(
   build_python_zip_default = {build_python_zip_default},
   supports_whl_extraction = {supports_whl_extraction},
   enable_pystar = True,
-  enable_pipstar = {enable_pipstar},
   enable_deprecation_warnings = {enable_deprecation_warnings},
+  extract_needs_chmod = {extract_needs_chmod},
   bazel_8_or_later = {bazel_8_or_later},
   bazel_9_or_later = {bazel_9_or_later},
   bazel_10_or_later = {bazel_10_or_later},
@@ -52,13 +50,13 @@ package(
 )
 
 bzl_library(
-    name = "rules_python_config_bzl",
-    srcs = ["rules_python_config.bzl"]
+    name = "extra_transition_settings",
+    srcs = ["extra_transition_settings.bzl"],
 )
 
 bzl_library(
-    name = "extra_transition_settings_bzl",
-    srcs = ["extra_transition_settings.bzl"],
+    name = "rules_python_config",
+    srcs = ["rules_python_config.bzl"],
 )
 """
 
@@ -89,6 +87,7 @@ def _internal_config_repo_impl(rctx):
         bazel_minor_version = 99999
 
     supports_whl_extraction = False
+    extract_needs_chmod = bazel_major_version < 8 or (bazel_major_version == 8 and bazel_minor_version < 6)
     if bazel_major_version >= 8:
         # Extracting .whl files requires Bazel 8.3.0 or later.
         if bazel_major_version > 8 or bazel_minor_version >= 3:
@@ -104,11 +103,11 @@ def _internal_config_repo_impl(rctx):
 
     rctx.file("rules_python_config.bzl", _CONFIG_TEMPLATE.format(
         build_python_zip_default = repo_utils.get_platforms_os_name(rctx) == "windows",
-        enable_pipstar = _bool_from_environ(rctx, _ENABLE_PIPSTAR_ENVVAR_NAME, _ENABLE_PIPSTAR_DEFAULT),
         enable_deprecation_warnings = _bool_from_environ(rctx, _ENABLE_DEPRECATION_WARNINGS_ENVVAR_NAME, _ENABLE_DEPRECATION_WARNINGS_DEFAULT),
         builtin_py_info_symbol = builtin_py_info_symbol,
         builtin_py_runtime_info_symbol = builtin_py_runtime_info_symbol,
         supports_whl_extraction = str(supports_whl_extraction),
+        extract_needs_chmod = str(extract_needs_chmod),
         builtin_py_cc_link_params_provider = builtin_py_cc_link_params_provider,
         bazel_8_or_later = str(bazel_major_version >= 8),
         bazel_9_or_later = str(bazel_major_version >= 9),
@@ -139,7 +138,7 @@ def _internal_config_repo_impl(rctx):
 internal_config_repo = repository_rule(
     implementation = _internal_config_repo_impl,
     configure = True,
-    environ = [_ENABLE_PIPSTAR_ENVVAR_NAME],
+    environ = [],
     attrs = {
         "transition_setting_generators": attr.string_list_dict(),
         "transition_settings": attr.string_list(),
@@ -147,4 +146,4 @@ internal_config_repo = repository_rule(
 )
 
 def _bool_from_environ(rctx, key, default):
-    return bool(int(repo_utils.getenv(rctx, key, default)))
+    return bool(int(rctx.getenv(key, default)))

@@ -24,7 +24,6 @@ import re
 import stat
 import sys
 import zipfile
-from collections.abc import Iterable
 from pathlib import Path
 
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
@@ -100,7 +99,10 @@ def normalize_pep440(version):
 
 
 def arcname_from(
-    name: str, distribution_prefix: str, strip_path_prefixes: Sequence[str] = ()
+    name: str,
+    distribution_prefix: str,
+    strip_path_prefixes: Sequence[str] = (),  # noqa: F821
+    add_path_prefix: str = "",
 ) -> str:
     """Return the within-archive name for a given file path name.
 
@@ -110,6 +112,7 @@ def arcname_from(
         name: The file path eg 'mylib/a/b/c/file.py'
         distribution_prefix: The
         strip_path_prefixes: Remove these prefixes from names.
+        add_path_prefix: Add prefix after stripping the path from names.
     """
     # Always use unix path separators.
     normalized_arcname = name.replace(os.path.sep, "/")
@@ -118,9 +121,9 @@ def arcname_from(
         return normalized_arcname
     for prefix in strip_path_prefixes:
         if normalized_arcname.startswith(prefix):
-            return normalized_arcname[len(prefix) :]
+            return add_path_prefix + normalized_arcname[len(prefix) :]
 
-    return normalized_arcname
+    return add_path_prefix + normalized_arcname
 
 
 class _WhlFile(zipfile.ZipFile):
@@ -131,6 +134,7 @@ class _WhlFile(zipfile.ZipFile):
         mode,
         distribution_prefix: str,
         strip_path_prefixes=None,
+        add_path_prefix=None,
         compression=zipfile.ZIP_DEFLATED,
         quote_all_filenames: bool = False,
         **kwargs,
@@ -138,6 +142,7 @@ class _WhlFile(zipfile.ZipFile):
         self._distribution_prefix = distribution_prefix
 
         self._strip_path_prefixes = strip_path_prefixes or []
+        self._add_path_prefix = add_path_prefix or ""
         # Entries for the RECORD file as (filename, digest, size) tuples.
         self._record: list[tuple[str, str, str]] = []
         # Whether to quote filenames in the RECORD file (for compatibility with
@@ -168,6 +173,7 @@ class _WhlFile(zipfile.ZipFile):
             package_filename,
             distribution_prefix=self._distribution_prefix,
             strip_path_prefixes=self._strip_path_prefixes,
+            add_path_prefix=self._add_path_prefix,
         )
         zinfo = self._zipinfo(arcname)
 
@@ -261,6 +267,7 @@ class WheelMaker(object):
         compress,
         outfile=None,
         strip_path_prefixes=None,
+        add_path_prefix=None,
     ):
         self._name = name
         self._version = normalize_pep440(version)
@@ -270,6 +277,7 @@ class WheelMaker(object):
         self._platform = platform
         self._outfile = outfile
         self._strip_path_prefixes = strip_path_prefixes
+        self._add_path_prefix = add_path_prefix
         self._compress = compress
         self._wheelname_fragment_distribution_name = escape_filename_distribution_name(
             self._name
@@ -287,7 +295,10 @@ class WheelMaker(object):
             mode="w",
             distribution_prefix=self._distribution_prefix,
             strip_path_prefixes=self._strip_path_prefixes,
-            compression=zipfile.ZIP_DEFLATED if self._compress else zipfile.ZIP_STORED,
+            add_path_prefix=self._add_path_prefix,
+            compression=(
+                zipfile.ZIP_DEFLATED if self._compress else zipfile.ZIP_STORED
+            ),
         )
         return self
 
@@ -365,6 +376,9 @@ def get_files_to_package(input_files):
 
 def get_new_requirement_line(reqs_text: str, extra: str) -> str:
     """Formats a requirement text into a Requires-Dist metadata line."""
+    # This is not imported at the top of the file due to the reliance
+    # on this file in the `whl_library` repository rule which does not
+    # provide `packaging` but does import symbols defined here.
     from packaging.requirements import Requirement
 
     req = Requirement(reqs_text.strip())
@@ -465,6 +479,13 @@ def parse_args() -> argparse.Namespace:
         help="Path prefix to be stripped from input package files' path. "
         "Can be supplied multiple times. Evaluated in order.",
     )
+    output_group.add_argument(
+        "--path_prefix",
+        type=str,
+        default="",
+        help="Path prefix to be prepended to input package files' path. "
+        "It is prepended after stripping any specified path prefixes first.",
+    )
 
     wheel_group = parser.add_argument_group("Wheel metadata")
     wheel_group.add_argument(
@@ -477,7 +498,8 @@ def parse_args() -> argparse.Namespace:
         "--description_file", help="Path to the file with package description"
     )
     wheel_group.add_argument(
-        "--description_content_type", help="Content type of the package description"
+        "--description_content_type",
+        help="Content type of the package description",
     )
     wheel_group.add_argument(
         "--entry_points_file",
@@ -526,7 +548,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args(sys.argv[1:])
 
 
-def _parse_file_pairs(content: List[str]) -> List[List[str]]:
+def _parse_file_pairs(content: List[str]) -> List[List[str]]:  # noqa: F821
     """
     Parse ; delimited lists of files into a 2D list.
     """
@@ -579,6 +601,7 @@ def main() -> None:
         platform=arguments.platform,
         outfile=arguments.out,
         strip_path_prefixes=strip_prefixes,
+        add_path_prefix=arguments.path_prefix,
         compress=not arguments.no_compress,
     ) as maker:
         for package_filename, real_filename in all_files:
@@ -593,11 +616,6 @@ def main() -> None:
                 description = description_file.read()
 
         metadata = arguments.metadata_file.read_text(encoding="utf-8")
-
-        # This is not imported at the top of the file due to the reliance
-        # on this file in the `whl_library` repository rule which does not
-        # provide `packaging` but does import symbols defined here.
-        from packaging.requirements import Requirement
 
         # Search for any `Requires-Dist` entries that refer to other files and
         # expand them.
@@ -650,7 +668,8 @@ def main() -> None:
 
         if arguments.entry_points_file:
             maker.add_file(
-                maker.distinfo_path("entry_points.txt"), arguments.entry_points_file
+                maker.distinfo_path("entry_points.txt"),
+                arguments.entry_points_file,
             )
 
         # Sort the files for reproducible order in the archive.

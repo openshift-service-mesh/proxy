@@ -5,9 +5,10 @@ import hashlib
 import itertools
 import optparse
 import os
+import typing as _t
+from collections.abc import Iterator
 from contextlib import contextmanager
 from shutil import rmtree
-from typing import Any, BinaryIO, ContextManager, Iterator, NamedTuple
 
 from click import progressbar
 from pip._internal.cache import WheelCache
@@ -31,6 +32,7 @@ from pip._vendor.packaging.version import _BaseVersion
 from pip._vendor.requests import RequestException, Session
 
 from .._compat import create_wheel_cache
+from .._internal import _pip_api
 from ..exceptions import NoCandidateFound
 from ..logging import log
 from ..utils import (
@@ -38,15 +40,14 @@ from ..utils import (
     is_pinned_requirement,
     is_url_requirement,
     lookup_table,
-    make_install_requirement,
 )
 from .base import BaseRepository
 
 FILE_CHUNK_SIZE = 4096
 
 
-class FileStream(NamedTuple):
-    stream: BinaryIO
+class FileStream(_t.NamedTuple):
+    stream: _t.BinaryIO
     size: float | None
 
 
@@ -67,6 +68,8 @@ class PyPIRepository(BaseRepository):
         self._command: InstallCommand = create_command("install")
 
         options, _ = self.command.parse_args(pip_args)
+        _pip_api.postprocess_cli_options(options)
+
         if options.cache_dir:
             options.cache_dir = normalize_path(options.cache_dir)
         options.require_hashes = False
@@ -115,6 +118,20 @@ class PyPIRepository(BaseRepository):
     def finder(self) -> PackageFinder:
         return self._finder
 
+    def _clear_finder_cache(self) -> None:
+        """Clear the cache of installation candidates."""
+        # `finder.find_all_candidates` is an lru_cache wrapped method on older `pip`
+        # versions, which can be cleared with `cache_clear()`
+        # but on newer versions, it's a simple method, and the underlying cache is a
+        # dict on the instance
+        # the same holds for `finder.find_best_candidate`
+        if _pip_api.PIP_VERSION_MAJOR_MINOR >= (25, 1):
+            self.finder._all_candidates.clear()
+            self.finder._best_candidates.clear()
+        else:
+            self.finder.find_all_candidates.cache_clear()
+            self.finder.find_best_candidate.cache_clear()
+
     @property
     def command(self) -> InstallCommand:
         """Return an install command instance."""
@@ -155,7 +172,7 @@ class PyPIRepository(BaseRepository):
         best_candidate = best_candidate_result.best_candidate
 
         # Turn the candidate into a pinned InstallRequirement
-        return make_install_requirement(
+        return _pip_api.create_install_requirement(
             best_candidate.name,
             best_candidate.version,
             ireq,
@@ -167,9 +184,11 @@ class PyPIRepository(BaseRepository):
         ireq: InstallRequirement,
         wheel_cache: WheelCache,
     ) -> set[InstallationCandidate]:
-        with get_build_tracker() as build_tracker, TempDirectory(
-            kind="resolver"
-        ) as temp_dir, indent_log():
+        with (
+            get_build_tracker() as build_tracker,
+            TempDirectory(kind="resolver") as temp_dir,
+            indent_log(),
+        ):
             preparer_kwargs = {
                 "temp_build_dir": temp_dir,
                 "options": self.options,
@@ -245,7 +264,7 @@ class PyPIRepository(BaseRepository):
 
         return self._dependencies_cache[ireq]
 
-    def _get_project(self, ireq: InstallRequirement) -> Any:
+    def _get_project(self, ireq: InstallRequirement) -> _t.Any:
         """
         Return a dict of a project info from PyPI JSON API for a given
         InstallRequirement. Return None on HTTP/JSON error or if a package
@@ -400,7 +419,7 @@ class PyPIRepository(BaseRepository):
             chunks = iter(lambda: f.stream.read(FILE_CHUNK_SIZE), b"")
 
             # Choose a context manager depending on verbosity
-            context_manager: ContextManager[Iterator[bytes]]
+            context_manager: _t.ContextManager[Iterator[bytes]]
             if log.verbosity >= 1:
                 iter_length = int(f.size / FILE_CHUNK_SIZE) if f.size else None
                 bar_template = f"{' ' * log.current_indent}  |%(bar)s| %(info)s"
@@ -447,9 +466,10 @@ class PyPIRepository(BaseRepository):
         Wheel.support_index_min = _wheel_support_index_min
         self._available_candidates_cache = {}
 
-        # If we don't clear this cache then it can contain results from an
-        # earlier call when allow_all_wheels wasn't active. See GH-1532
-        self.finder.find_all_candidates.cache_clear()
+        # Finder internally caches results. If we don't clear this cache then it can
+        # contain results from an earlier call when allow_all_wheels wasn't active.
+        # See GH-1532
+        self._clear_finder_cache()
 
         try:
             yield

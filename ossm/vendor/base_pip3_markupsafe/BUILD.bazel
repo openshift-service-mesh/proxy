@@ -1,6 +1,13 @@
+load("@package_metadata//rules:package_metadata.bzl", "package_metadata")
 load("@rules_python//python/private/pypi:whl_library_targets.bzl", "whl_library_targets_from_requires")
 
 package(default_visibility = ["//visibility:public"])
+
+package_metadata(
+    name = "package_metadata",
+    purl = "pkg:pypi/markupsafe@2.1.5?file_name=MarkupSafe-2.1.5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+    visibility = ["//:__subpackages__"],
+)
 
 whl_library_targets_from_requires(
     data_exclude = [],
@@ -14,6 +21,5 @@ whl_library_targets_from_requires(
     metadata_version = "2.1.5",
     name = "MarkupSafe-2.1.5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
     namespace_package_files = [],
-    requires_dist = [],
     sdist_filename = None,
 )

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import collections
 import copy
+import typing as _t
 from abc import ABCMeta, abstractmethod
+from collections.abc import Container, Iterable, Iterator
 from functools import partial
 from itertools import chain, count, groupby
-from typing import Any, Container, DefaultDict, Iterable, Iterator
 
 import click
 from pip._internal.exceptions import DistributionNotFound
@@ -14,26 +15,24 @@ from pip._internal.operations.build.build_tracker import (
     update_env_context_manager,
 )
 from pip._internal.req import InstallRequirement
-from pip._internal.req.constructors import install_req_from_line
 from pip._internal.resolution.resolvelib.base import Candidate
 from pip._internal.resolution.resolvelib.candidates import ExtrasCandidate
 from pip._internal.resolution.resolvelib.resolver import Resolver
 from pip._internal.utils.logging import indent_log
 from pip._internal.utils.temp_dir import TempDirectory, global_tempdir_manager
 from pip._vendor.packaging.specifiers import SpecifierSet
-from pip._vendor.packaging.utils import canonicalize_name
 from pip._vendor.resolvelib.resolvers import ResolutionImpossible, Result
 
 from piptools.cache import DependencyCache
 from piptools.repositories.base import BaseRepository
 
-from ._compat import create_wheel_cache
+from ._compat import canonicalize_name, create_wheel_cache
+from ._internal import _pip_api
 from .exceptions import PipToolsError
 from .logging import log
 from .utils import (
     UNSAFE_PACKAGES,
     as_tuple,
-    copy_install_requirement,
     format_requirement,
     format_specifier,
     is_pinned_requirement,
@@ -133,7 +132,7 @@ def combine_install_requirements(
             key=lambda x: (len(str(x)), str(x)),
         )
 
-    combined_ireq = copy_install_requirement(
+    combined_ireq = _pip_api.copy_install_requirement(
         template=source_ireqs[0],
         req=req,
         comes_from=comes_from,
@@ -152,16 +151,18 @@ class BaseResolver(metaclass=ABCMeta):
 
     @abstractmethod
     def resolve(self, max_rounds: int) -> set[InstallRequirement]:
-        """
+        r"""
         Find concrete package versions for all the given InstallRequirements
-        and their recursive dependencies and return a set of pinned
-        ``InstallRequirement``'s.
+        and their recursive dependencies.
+        :returns: a set of pinned ``InstallRequirement``\ s.
         """
 
     def resolve_hashes(
         self, ireqs: set[InstallRequirement]
     ) -> dict[InstallRequirement, set[str]]:
-        """Find acceptable hashes for all of the given ``InstallRequirement``s."""
+        r"""
+        Find acceptable hashes for all of the given ``InstallRequirement``\ s.
+        """
         log.debug("")
         log.debug("Generating hashes:")
         with self.repository.allow_all_wheels(), log.indentation():
@@ -172,8 +173,8 @@ class BaseResolver(metaclass=ABCMeta):
         ireqs: set[InstallRequirement],
         unsafe_packages: Container[str],
     ) -> None:
-        """
-        Remove from a given set of ``InstallRequirement``'s unsafe constraints.
+        r"""
+        Remove from a given set of ``InstallRequirement``\ s unsafe constraints.
         """
         for req in ireqs.copy():
             if req.name in unsafe_packages:
@@ -182,6 +183,10 @@ class BaseResolver(metaclass=ABCMeta):
 
 
 class LegacyResolver(BaseResolver):
+    """
+    Wrapper for the (deprecated) legacy dependency resolver.
+    """
+
     def __init__(
         self,
         constraints: Iterable[InstallRequirement],
@@ -193,10 +198,24 @@ class LegacyResolver(BaseResolver):
         allow_unsafe: bool = False,
         unsafe_packages: set[str] | None = None,
     ) -> None:
-        """
-        This class resolves a given set of constraints (a collection of
-        InstallRequirement objects) by consulting the given Repository and the
-        DependencyCache.
+        """Initialize LegacyResolver.
+
+        :param constraints: the constraints given
+        :type constraints: Iterable[InstallRequirement]
+        :param existing_constraints: constraints already present
+        :param repository: the repository to get the constraints from
+        :type repository: BaseRepository
+        :param cache: the cache to be used
+        :param prereleases: whether prereleases should be taken into account when resolving
+            (default is :py:data:`False`)
+        :param clear_caches: whether to clear repository and dependency caches before resolving
+            (default is :py:data:`False`)
+        :param allow_unsafe: whether unsafe packages should be allowed in the resulting requirements
+            (default is :py:data:`False`)
+        :param unsafe_packages: packages to be considered as unsafe
+            (default is :py:data:`None`)
+        :type unsafe_packages: set[str]
+        :raises: ``PipToolsError`` if the legacy resolver is not enabled
         """
         self.our_constraints = set(constraints)
         self.their_constraints: set[InstallRequirement] = set()
@@ -224,14 +243,16 @@ class LegacyResolver(BaseResolver):
         )
 
     def resolve(self, max_rounds: int = 10) -> set[InstallRequirement]:
-        """
-        Find concrete package versions for all the given InstallRequirements
+        r"""
+        Find concrete package versions for all the given ``InstallRequirement``\ s
         and their recursive dependencies and return a set of pinned
-        ``InstallRequirement``'s.
+        ``InstallRequirement``\ s.
 
         Resolves constraints one round at a time, until they don't change
-        anymore.  Protects against infinite loops by breaking out after a max
-        number rounds.
+        anymore.
+
+        :param max_rounds: break out of resolution process after the given number of rounds
+            to prevent infinite loops (default is 10)
         """
         if self.clear_caches:
             self.dependency_cache.clear()
@@ -277,8 +298,9 @@ class LegacyResolver(BaseResolver):
         self, constraints: Iterable[InstallRequirement]
     ) -> Iterator[InstallRequirement]:
         """
-        Groups constraints (remember, InstallRequirements!) by their key name,
-        and combining their SpecifierSets into a single InstallRequirement per
+        Group constraints (remember, InstallRequirements!) by their key name.
+
+        Then combine their SpecifierSets into a single InstallRequirement per
         package.  For example, given the following constraints:
 
             Django<1.9,>=1.4.2
@@ -311,14 +333,16 @@ class LegacyResolver(BaseResolver):
 
     def _resolve_one_round(self) -> tuple[bool, set[InstallRequirement]]:
         """
-        Resolves one level of the current constraints, by finding the best
-        match for each package in the repository and adding all requirements
-        for those best package versions.  Some of these constraints may be new
+        Resolve one level of the current constraints.
+
+        This is achieved by finding the best match for each package
+        in the repository and adding all requirements for those best
+        package versions.  Some of these constraints may be new
         or updated.
 
-        Returns whether new constraints appeared in this round.  If no
-        constraints were added or changed, this indicates a stable
-        configuration.
+        :returns: whether new constraints appeared in this round.  If no
+            constraints were added or changed, this indicates a stable
+            configuration.
         """
         # Sort this list for readability of terminal output
         constraints = sorted(self.constraints, key=key_from_ireq)
@@ -371,9 +395,10 @@ class LegacyResolver(BaseResolver):
 
     def get_best_match(self, ireq: InstallRequirement) -> InstallRequirement:
         """
-        Returns a (pinned or editable) InstallRequirement, indicating the best
-        match to use for the given InstallRequirement (in the form of an
-        InstallRequirement).
+        Return a (pinned or editable) InstallRequirement.
+
+        This indicates the best match to use for the given
+        InstallRequirement (in the form of an InstallRequirement).
 
         Example:
         Given the constraint Flask>=0.10, may return Flask==0.10.1 at
@@ -416,6 +441,8 @@ class LegacyResolver(BaseResolver):
         self, ireq: InstallRequirement
     ) -> Iterator[InstallRequirement]:
         """
+        Emit all secondary dependencies for an ireq.
+
         Given a pinned, url, or editable InstallRequirement, collects all the
         secondary dependencies for them, either by looking them up in a local
         cache, or by reaching out to the repository.
@@ -473,13 +500,13 @@ class LegacyResolver(BaseResolver):
         # produced the dependency_strings, but they lack `markers` on their
         # underlying Requirements:
         for dependency_string in dependency_strings:
-            yield install_req_from_line(
+            yield _pip_api.create_install_requirement_from_line(
                 dependency_string, constraint=ireq.constraint, comes_from=ireq
             )
 
 
 class BacktrackingResolver(BaseResolver):
-    """A wrapper for backtracking resolver."""
+    """A wrapper for the backtracking (or 2020) resolver."""
 
     def __init__(
         self,
@@ -488,7 +515,7 @@ class BacktrackingResolver(BaseResolver):
         repository: BaseRepository,
         allow_unsafe: bool = False,
         unsafe_packages: set[str] | None = None,
-        **kwargs: Any,
+        **kwargs: _t.Any,
     ) -> None:
         self.constraints = list(constraints)
         self.repository = repository
@@ -504,7 +531,7 @@ class BacktrackingResolver(BaseResolver):
         self.existing_constraints = existing_constraints
 
         # Categorize InstallRequirements into sets by key
-        constraints_sets: DefaultDict[str, set[InstallRequirement]] = (
+        constraints_sets: collections.defaultdict[str, set[InstallRequirement]] = (
             collections.defaultdict(set)
         )
         for ireq in constraints:
@@ -521,14 +548,20 @@ class BacktrackingResolver(BaseResolver):
         )
 
     def resolve(self, max_rounds: int = 10) -> set[InstallRequirement]:
-        """
+        r"""
+        Resolve given ireqs.
+
         Find concrete package versions for all the given InstallRequirements
-        and their recursive dependencies and return a set of pinned
-        ``InstallRequirement``'s.
+        and their recursive dependencies.
+
+        :returns: A set of pinned ``InstallRequirement``\ s.
         """
-        with update_env_context_manager(
-            PIP_EXISTS_ACTION="i"
-        ), get_build_tracker() as build_tracker, global_tempdir_manager(), indent_log():
+        with (
+            update_env_context_manager(PIP_EXISTS_ACTION="i"),
+            get_build_tracker() as build_tracker,
+            global_tempdir_manager(),
+            indent_log(),
+        ):
             # Mark direct/primary/user_supplied packages
             for ireq in self.constraints:
                 if ireq.constraint:
@@ -574,6 +607,11 @@ class BacktrackingResolver(BaseResolver):
             }
             preparer = self.command.make_requirement_preparer(**preparer_kwargs)
 
+            extra_resolver_kwargs = {}
+            if _pip_api.PIP_VERSION_MAJOR_MINOR < (25, 3):  # pragma: <3.9 cover
+                # Ref: https://github.com/jazzband/pip-tools/issues/2252
+                extra_resolver_kwargs["use_pep517"] = self.options.use_pep517
+
             resolver = self.command.make_resolver(
                 preparer=preparer,
                 finder=self.finder,
@@ -583,8 +621,8 @@ class BacktrackingResolver(BaseResolver):
                 ignore_installed=True,
                 ignore_requires_python=False,
                 force_reinstall=False,
-                use_pep517=self.options.use_pep517,
                 upgrade_strategy="to-satisfy-only",
+                **extra_resolver_kwargs,
             )
 
             self.command.trace_basic_info(self.finder)
@@ -629,8 +667,11 @@ class BacktrackingResolver(BaseResolver):
         compatible_existing_constraints: dict[str, InstallRequirement],
     ) -> bool:
         """
-        Return true on successful resolution, otherwise remove problematic
-        requirements from existing constraints and return false.
+        Resolve dependencies based on resolvelib ``Resolver``.
+
+        :returns: :py:data:`True` on successful resolution, otherwise removes
+            problematic requirements from existing constraints and
+            returns :py:data:`False`.
         """
         try:
             resolver.resolve(
@@ -712,7 +753,9 @@ class BacktrackingResolver(BaseResolver):
     def _get_reverse_dependencies(
         resolver_result: Result,
     ) -> dict[str, set[str]]:
-        reverse_dependencies: DefaultDict[str, set[str]] = collections.defaultdict(set)
+        reverse_dependencies: collections.defaultdict[str, set[str]] = (
+            collections.defaultdict(set)
+        )
 
         for candidate in resolver_result.mapping.values():
             stripped_name = strip_extras(canonicalize_name(candidate.name))
@@ -749,7 +792,7 @@ class BacktrackingResolver(BaseResolver):
 
         # Prepare pinned install requirement. Copy it from candidate's install
         # requirement so that it could be mutated later.
-        pinned_ireq = copy_install_requirement(
+        pinned_ireq = _pip_api.copy_install_requirement(
             template=ireq,
             # The link this candidate "originates" from. This is different
             # from ``ireq.link`` when the link is found in the wheel cache.

@@ -285,7 +285,7 @@ class bdist_wheel(Command):
             raise ValueError(
                 f"`py_limited_api={self.py_limited_api!r}` not supported. "
                 "`Py_LIMITED_API` is currently incompatible with "
-                "`Py_GIL_DISABLED`."
+                "`Py_GIL_DISABLED`. "
                 "See https://github.com/python/cpython/issues/111506."
             )
 
@@ -449,8 +449,7 @@ class bdist_wheel(Command):
 
         if not self.keep_temp:
             log.info(f"removing {self.bdist_dir}")
-            if not self.dry_run:
-                _shutil.rmtree(self.bdist_dir)
+            _shutil.rmtree(self.bdist_dir)
 
     def write_wheelfile(
         self, wheelfile_base: str, generator: str = f"setuptools ({__version__})"

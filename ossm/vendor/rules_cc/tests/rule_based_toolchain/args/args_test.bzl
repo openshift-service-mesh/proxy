@@ -36,6 +36,7 @@ load(
     "format_dict_values",
 )
 load("//tests/rule_based_toolchain:generics.bzl", "struct_subject")
+load("//tests/rule_based_toolchain:helpers.bzl", "path_pattern")
 load(
     "//tests/rule_based_toolchain:subjects.bzl",
     "result_fn_wrapper",
@@ -50,6 +51,8 @@ _SIMPLE_FILES = [
     "tests/rule_based_toolchain/testdata/multiple2",
 ]
 _TOOL_DIRECTORY = "tests/rule_based_toolchain/testdata"
+_OVERRIDDEN_MIN_OS = "-mmacosx-version-min=13.0"
+_MIN_OS_FLAG = Label("//tests/rule_based_toolchain/args:macos_min_os_flag")
 
 _CONVERTED_ARGS = subjects.struct(
     flag_sets = subjects.collection,
@@ -149,6 +152,31 @@ def _env_only_requires_test(env, targets):
 
     converted.flag_sets().contains_exactly([])
 
+    void_env_only = env.expect.that_target(targets.env_only_requires_void).provider(ArgsInfo)
+    void_env_only.actions().contains_exactly([
+        Label("//cc/toolchains/actions:cpp_link_executable"),
+    ])
+    void_env_only.env().entries().contains_exactly(
+        {"STRIP_DEBUG_SYMBOLS": "1"},
+    )
+    void_env_only.env().requires_not_none().some().equals("strip_debug_symbols")
+
+    converted_void = env.expect.that_value(
+        convert_args(targets.env_only_requires_void[ArgsInfo]),
+        factory = _CONVERTED_ARGS,
+    )
+
+    converted_void.env_sets().contains_exactly([env_set(
+        actions = ["c++-link-executable"],
+        env_entries = [env_entry(
+            key = "STRIP_DEBUG_SYMBOLS",
+            value = "1",
+            expand_if_available = "strip_debug_symbols",
+        )],
+    )])
+
+    converted_void.flag_sets().contains_exactly([])
+
 def _with_dir_test(env, targets):
     with_dir = env.expect.that_target(targets.with_dir).provider(ArgsInfo)
     with_dir.allowlist_include_directories().contains_exactly([_TOOL_DIRECTORY])
@@ -169,16 +197,81 @@ def _with_dir_and_data_test(env, targets):
     )
     c_compile.files().contains_at_least(_SIMPLE_FILES)
 
+def _directory_format_in_args_test(env, targets):
+    dir_args = env.expect.that_target(targets.directory_format_in_args).provider(ArgsInfo)
+    dir_args.actions().contains_exactly([
+        targets.c_compile.label,
+        targets.cpp_compile.label,
+    ])
+
+    converted = env.expect.that_value(
+        convert_args(targets.directory_format_in_args[ArgsInfo]),
+        factory = _CONVERTED_ARGS,
+    )
+    converted.flag_sets().contains_exactly([flag_set(
+        actions = ["c_compile", "cpp_compile"],
+        flag_groups = [flag_group(flags = ["-resource-dir=" + path_pattern(targets.directory[DirectoryInfo].path)])],
+    )])
+
+def _build_setting_format_test(env, targets):
+    build_setting = env.expect.that_target(targets.build_setting_format).provider(ArgsInfo)
+    build_setting.actions().contains_exactly([
+        targets.c_compile.label,
+        targets.cpp_compile.label,
+    ])
+    build_setting.env().entries().contains_exactly({"APPLE_MIN_OS": "-mmacosx-version-min=12.0"})
+
+    converted = env.expect.that_value(
+        convert_args(targets.build_setting_format[ArgsInfo]),
+        factory = _CONVERTED_ARGS,
+    )
+    converted.env_sets().contains_exactly([env_set(
+        actions = ["c_compile", "cpp_compile"],
+        env_entries = [env_entry(key = "APPLE_MIN_OS", value = "-mmacosx-version-min=12.0")],
+    )])
+    converted.flag_sets().contains_exactly([flag_set(
+        actions = ["c_compile", "cpp_compile"],
+        flag_groups = [flag_group(flags = ["-mmacosx-version-min=12.0"])],
+    )])
+
+def _build_setting_format_override_test(env, targets):
+    build_setting = env.expect.that_target(targets.build_setting_format).provider(ArgsInfo)
+    build_setting.actions().contains_exactly([
+        targets.c_compile.label,
+        targets.cpp_compile.label,
+    ])
+    build_setting.env().entries().contains_exactly({"APPLE_MIN_OS": _OVERRIDDEN_MIN_OS})
+
+    converted = env.expect.that_value(
+        convert_args(targets.build_setting_format[ArgsInfo]),
+        factory = _CONVERTED_ARGS,
+    )
+    converted.env_sets().contains_exactly([env_set(
+        actions = ["c_compile", "cpp_compile"],
+        env_entries = [env_entry(key = "APPLE_MIN_OS", value = _OVERRIDDEN_MIN_OS)],
+    )])
+    converted.flag_sets().contains_exactly([flag_set(
+        actions = ["c_compile", "cpp_compile"],
+        flag_groups = [flag_group(flags = [_OVERRIDDEN_MIN_OS])],
+    )])
+
 TARGETS = [
     ":simple",
     ":some_variable",
     ":env_only",
     ":env_only_requires",
+    ":env_only_requires_void",
+    ":build_setting_format",
     ":with_dir",
     ":with_dir_and_data",
+    ":with_make_vars",
+    ":with_make_vars_env",
     ":iterate_over_optional",
     ":good_env_format",
     ":good_env_format_optional",
+    ":genrule_data_with_env_format",
+    ":generated_file",
+    ":directory_format_in_args",
     "//tests/rule_based_toolchain/actions:c_compile",
     "//tests/rule_based_toolchain/actions:cpp_compile",
     "//tests/rule_based_toolchain/testdata:directory",
@@ -222,7 +315,7 @@ def _format_dict_values_test(env, targets):
         {"bar": targets.directory},
     ).ok()
     res.env().contains_exactly([
-        ("foo", targets.directory[DirectoryInfo].path),
+        ("foo", path_pattern(targets.directory[DirectoryInfo].path)),
     ])
     res.used_items().contains_exactly(["bar"])
 
@@ -232,7 +325,7 @@ def _format_dict_values_test(env, targets):
         {"bar": targets.bin_wrapper},
     ).ok()
     res.env().contains_exactly([
-        ("foo", targets.bin_wrapper[DefaultInfo].files.to_list()[0].path),
+        ("foo", path_pattern(targets.bin_wrapper[DefaultInfo].files.to_list()[0].path)),
     ])
     res.used_items().contains_exactly(["bar"])
 
@@ -250,9 +343,9 @@ def _format_dict_values_test(env, targets):
         },
     ).ok()
     res.env().contains_exactly([
-        ("foo", targets.directory[DirectoryInfo].path),
-        ("baz", targets.bin_wrapper[DefaultInfo].files.to_list()[0].path),
-        ("bat", targets.subdirectory_1[DirectoryInfo].path),
+        ("foo", path_pattern(targets.directory[DirectoryInfo].path)),
+        ("baz", path_pattern(targets.bin_wrapper[DefaultInfo].files.to_list()[0].path)),
+        ("bat", path_pattern(targets.subdirectory_1[DirectoryInfo].path)),
     ])
     res.used_items().contains_exactly(["bar", "quuz", "qux"])
 
@@ -293,6 +386,17 @@ def _format_dict_values_test(env, targets):
         must_use = ["var"],
     ).err().contains('"var" was not used')
 
+def _genrule_data_with_env_format_test(env, targets):
+    genrule_args = env.expect.that_target(targets.genrule_data_with_env_format).provider(ArgsInfo)
+    genrule_args.actions().contains_exactly([
+        targets.c_compile.label,
+        targets.cpp_compile.label,
+    ])
+    genrule_args.env().entries().contains_exactly({
+        "GENERATED_PATH": path_pattern(targets.generated_file[DefaultInfo].files.to_list()[0].path),
+    })
+    genrule_args.files().contains_exactly(["tests/rule_based_toolchain/args/generated_file.txt"])
+
 def _good_env_format_test(env, targets):
     good_env = env.expect.that_target(targets.good_env_format).provider(ArgsInfo)
     good_env.env().entries().contains_exactly({"FOO": "%{gcov_gcno_file}"})
@@ -321,6 +425,20 @@ def _good_env_format_test(env, targets):
             value = "%{gcov_gcno_file}",
         )],
     )])
+
+def _with_make_vars_test(env, targets):
+    converted = env.expect.that_value(
+        convert_args(targets.with_make_vars[ArgsInfo]),
+        factory = _CONVERTED_ARGS,
+    )
+    converted.flag_sets().contains_exactly([flag_set(
+        actions = ["c_compile", "cpp_compile"],
+        flag_groups = [flag_group(flags = ["--path=/usr/local", "-DFOO"])],
+    )])
+
+def _with_make_vars_env_test(env, targets):
+    make_vars_env = env.expect.that_target(targets.with_make_vars_env).provider(ArgsInfo)
+    make_vars_env.env().entries().contains_exactly({"MY_ENV": "/usr/local/bin"})
 
 def _good_env_format_optional_test(env, targets):
     """Test that env formatting works with optional types."""
@@ -361,6 +479,15 @@ TESTS = {
     "env_only_requires_test": _env_only_requires_test,
     "with_dir_test": _with_dir_test,
     "with_dir_and_data_test": _with_dir_and_data_test,
+    "genrule_data_with_env_format_test": _genrule_data_with_env_format_test,
+    "directory_format_in_args_test": _directory_format_in_args_test,
+    "build_setting_format_test": _build_setting_format_test,
+    "build_setting_format_override_test": struct(
+        impl = _build_setting_format_override_test,
+        config_settings = {str(_MIN_OS_FLAG): _OVERRIDDEN_MIN_OS},
+    ),
     "good_env_format_test": _good_env_format_test,
     "good_env_format_optional_test": _good_env_format_optional_test,
+    "with_make_vars_test": _with_make_vars_test,
+    "with_make_vars_env_test": _with_make_vars_env_test,
 }

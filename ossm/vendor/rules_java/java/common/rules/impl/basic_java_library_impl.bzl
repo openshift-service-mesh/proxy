@@ -72,7 +72,8 @@ def basic_java_library(
         add_opens = [],
         bootclasspath = None,
         javabuilder_jvm_flags = None,
-        is_library = True):
+        is_library = True,
+        disable_lint_checks = []):
     """
     Creates actions that compile and lint Java sources, sets up coverage and returns JavaInfo, InstrumentedFilesInfo and output groups.
 
@@ -109,6 +110,7 @@ def basic_java_library(
       bootclasspath: (Target) The JDK APIs to compile this library against.
       javabuilder_jvm_flags: (list[str]) Additional JVM flags to pass to JavaBuilder.
       is_library: (bool) Whether the target is a library. Primarily for static analysis purposes.
+      disable_lint_checks: (list[str]) A list of AndroidLint checks to be skipped.
     Returns:
       (dict[str, Provider],
         {files_to_build: list[File],
@@ -160,7 +162,8 @@ def basic_java_library(
 
     validation_outputs = []
 
-    if ctx.fragments.java.run_android_lint:
+    # Validation actions don't run in the exec config, so no need to create them.
+    if ctx.fragments.java.run_android_lint and not ctx.configuration.is_tool_configuration():
         generated_source_jars = [
             output.generated_source_jar
             for output in java_info.java_outputs
@@ -171,6 +174,7 @@ def basic_java_library(
             source_jars + generated_source_jars,
             compilation_info,
             is_library,
+            disable_lint_checks,
         )
         if lint_output:
             validation_outputs.append(depset([lint_output]))

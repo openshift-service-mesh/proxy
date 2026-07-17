@@ -1,19 +1,12 @@
 module(
     name = "rules_java",
-    version = "9.6.1",
+    version = "9.7.0",
     bazel_compatibility = [">=7.0.0"],
     compatibility_level = 1,
 )
 
 bazel_dep(name = "platforms", version = "0.0.11")
-bazel_dep(name = "rules_cc", version = "0.2.13")
-archive_override(
-    module_name = "rules_cc",
-    integrity = "sha256-y3RA9zEyB7HqBXVTgrlFmvfJARcEDzILe2ugNGC4ZrE=",
-    strip_prefix = "rules_cc-b5a65591334f74371f4d75003768957a740cd868",
-    urls = ["https://github.com/bazelbuild/rules_cc/archive/b5a65591334f74371f4d75003768957a740cd868.tar.gz"],
-)
-
+bazel_dep(name = "rules_cc", version = "0.2.17")
 bazel_dep(name = "bazel_features", version = "1.30.0")
 bazel_dep(name = "bazel_skylib", version = "1.6.1")
 bazel_dep(name = "protobuf", version = "32.1", repo_name = "com_google_protobuf")
@@ -127,10 +120,10 @@ bazel_dep(name = "rules_shell", version = "0.2.0", dev_dependency = True)
 bazel_dep(name = "rules_testing", dev_dependency = True)
 archive_override(
     module_name = "rules_testing",
-    integrity = "sha256-TqwTCQnzt/hRKQtdJ7d8ebtZ8+I8IMgmWiEjOKvo6mI=",
-    strip_prefix = "rules_testing-f8e869d452507fa4a59748c9d69cfab63ec9385a",
-    urls = ["https://github.com/bazelbuild/rules_testing/archive/f8e869d452507fa4a59748c9d69cfab63ec9385a.tar.gz"],
+    integrity = "sha256-ZmrwZSmn3NkEj0MOnix9oSMzPXJWbuJbCCbOM1C03QQ=",
+    strip_prefix = "rules_testing-ff65fc8b7f1b7c37de71d781601ff40288de80f2",
+    urls = ["https://github.com/bazelbuild/rules_testing/archive/ff65fc8b7f1b7c37de71d781601ff40288de80f2.tar.gz"],
 )
 
 test_repositories = use_extension("//test:repositories.bzl", "test_repositories_ext", dev_dependency = True)
-use_repo(test_repositories, "guava", "truth")
+use_repo(test_repositories, "guava", "other_repo", "truth")

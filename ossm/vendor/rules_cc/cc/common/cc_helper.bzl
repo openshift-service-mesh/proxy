@@ -13,6 +13,7 @@
 # limitations under the License.
 """Utility functions for C++ rules."""
 
+load("//cc:action_names.bzl", "ACTION_NAMES")
 load("//cc:find_cc_toolchain.bzl", "CC_TOOLCHAIN_TYPE")
 load("//cc/private:paths.bzl", "is_path_absolute")
 load("//cc/private/rules_impl:objc_common.bzl", "objc_common")
@@ -25,13 +26,14 @@ load(
     "should_create_per_object_debug_info",
     _artifact_category = "artifact_category_names",
     _extensions = "extensions",
+    _get_cc_runtimes = "get_cc_runtimes",
+    _get_cc_runtimes_copts = "get_cc_runtimes_copts",
     _is_stamping_enabled = "is_stamping_enabled",
     _package_source_root = "package_source_root",
     _repository_exec_path = "repository_exec_path",
     _should_stamp = "should_stamp",
 )
 load(":cc_info.bzl", "CcInfo")
-load(":semantics.bzl", "semantics")
 load(":visibility.bzl", "INTERNAL_VISIBILITY")
 
 visibility(INTERNAL_VISIBILITY)
@@ -68,7 +70,8 @@ def _is_valid_shared_library_name(shared_library_name):
         shared_library_name.endswith(".dll") or
         shared_library_name.endswith(".dylib") or
         shared_library_name.endswith(".pyd") or
-        shared_library_name.endswith(".wasm")):
+        shared_library_name.endswith(".wasm") or
+        shared_library_name.endswith(".xll")):
         return True
 
     return is_versioned_shared_library_extension_valid(shared_library_name)
@@ -374,7 +377,7 @@ def _check_file_extensions(attr_values, allowed_extensions, attr_name, label, ru
                         label,
                         str(attr_value.label),
                     ))
-            else:
+            elif len(files) > 0:
                 at_least_one_good = False
                 for file in files:
                     if _check_file_extension(file, allowed_extensions, allow_versioned_shared_libraries) or file.is_directory:
@@ -391,14 +394,6 @@ def _matches_extension(extension, patterns):
         if extension.endswith(pattern):
             return True
     return False
-
-def _is_non_empty_list_or_select(value, attr):
-    if type(value) == "list":
-        return len(value) > 0
-    elif type(value) == "select":
-        return True
-    else:
-        fail("Only select or list is valid for {} attr".format(attr))
 
 def _gen_empty_def_file(ctx):
     trivial_def_file = ctx.actions.declare_file(ctx.label.name + ".gen.empty.def")
@@ -421,7 +416,14 @@ def _should_generate_def_file(ctx, feature_configuration):
     no_windows_export_all_symbols_enabled = cc_common.is_enabled(feature_configuration = feature_configuration, feature_name = "no_windows_export_all_symbols")
     return windows_export_all_symbols_enabled and (not no_windows_export_all_symbols_enabled) and (ctx.attr.win_def_file == None)
 
-def _generate_def_file(ctx, def_parser, object_files, dll_name):
+def _generate_def_file(ctx, def_parser, object_files, dll_name, cc_toolchain, feature_configuration):
+    use_toolchain_action = cc_common.action_is_enabled(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.generate_def_file,
+    )
+    if not use_toolchain_action and def_parser == None:
+        return None
+
     def_file = ctx.actions.declare_file(ctx.label.name + ".gen.def")
     args = ctx.actions.args()
     args.add(def_file)
@@ -432,12 +434,40 @@ def _generate_def_file(ctx, def_parser, object_files, dll_name):
     for object_file in object_files:
         argv.add(object_file.path)
 
+    executable = def_parser
+    inputs = object_files
+    env = {}
+    execution_requirements = {}
+    if use_toolchain_action:
+        executable = cc_common.get_tool_for_action(
+            feature_configuration = feature_configuration,
+            action_name = ACTION_NAMES.generate_def_file,
+        )
+        env = cc_common.get_environment_variables(
+            feature_configuration = feature_configuration,
+            action_name = ACTION_NAMES.generate_def_file,
+            variables = cc_common.empty_variables(),
+        )
+        execution_requirements = {
+            requirement: ""
+            for requirement in cc_common.get_execution_requirements(
+                feature_configuration = feature_configuration,
+                action_name = ACTION_NAMES.generate_def_file,
+            )
+        }
+        inputs = depset(
+            direct = object_files,
+            transitive = [cc_toolchain.all_files],
+        )
+
     ctx.actions.run(
         mnemonic = "DefParser",
-        executable = def_parser,
+        executable = executable,
         toolchain = None,
         arguments = [args, argv],
-        inputs = object_files,
+        env = env,
+        execution_requirements = execution_requirements,
+        inputs = inputs,
         outputs = [def_file],
         use_default_shell_env = True,
     )
@@ -471,25 +501,53 @@ def _get_compilation_contexts_from_deps(deps):
             compilation_contexts.append(dep[CcInfo].compilation_context)
     return compilation_contexts
 
-def _tool_path(cc_toolchain, tool):
-    return cc_toolchain._tool_paths.get(tool, None)
+def _tool_path(cc_toolchain, tool, feature_configuration = None, action_name = None):
+    tool = cc_toolchain._tool_paths.get(tool, None)
+    if tool:
+        return tool
+    if feature_configuration != None and action_name != None:
+        if not cc_common.action_is_enabled(
+            feature_configuration = feature_configuration,
+            action_name = action_name,
+        ):
+            return None
 
-def _get_toolchain_global_make_variables(cc_toolchain):
+        return cc_common.get_tool_for_action(
+            feature_configuration = feature_configuration,
+            action_name = action_name,
+        )
+    return None
+
+def _tool_path_for_action(cc_toolchain, tool, feature_configuration, action_name):
+    path = cc_toolchain._tool_paths.get(tool, None)
+    if path:
+        return path
+    if action_name != None and cc_common.action_is_enabled(
+        feature_configuration = feature_configuration,
+        action_name = action_name,
+    ):
+        return cc_common.get_tool_for_action(
+            feature_configuration = feature_configuration,
+            action_name = action_name,
+        ) or ""
+    return ""
+
+def _get_toolchain_global_make_variables(cc_toolchain, feature_configuration):
     result = {
-        "CC": _tool_path(cc_toolchain, "gcc"),
-        "AR": _tool_path(cc_toolchain, "ar"),
-        "NM": _tool_path(cc_toolchain, "nm"),
-        "LD": _tool_path(cc_toolchain, "ld"),
-        "STRIP": _tool_path(cc_toolchain, "strip"),
+        "CC": _tool_path_for_action(cc_toolchain, "gcc", feature_configuration, ACTION_NAMES.c_compile),
+        "AR": _tool_path_for_action(cc_toolchain, "ar", feature_configuration, ACTION_NAMES.cpp_link_static_library),
+        "NM": _tool_path_for_action(cc_toolchain, "nm", feature_configuration, None),
+        "LD": _tool_path_for_action(cc_toolchain, "ld", feature_configuration, ACTION_NAMES.cpp_link_executable),
+        "STRIP": _tool_path_for_action(cc_toolchain, "strip", feature_configuration, ACTION_NAMES.strip),
         "C_COMPILER": cc_toolchain.compiler,
     }  # buildifier: disable=unsorted-dict-items
 
-    obj_copy_tool = _tool_path(cc_toolchain, "objcopy")
+    obj_copy_tool = _tool_path_for_action(cc_toolchain, "objcopy", feature_configuration, ACTION_NAMES.objcopy_embed_data)
     if obj_copy_tool != None:
         # objcopy is optional in Crostool.
         result["OBJCOPY"] = obj_copy_tool
-    gcov_tool = _tool_path(cc_toolchain, "gcov-tool")
-    if gcov_tool != None:
+    gcov_tool = _tool_path_for_action(cc_toolchain, "gcov-tool", feature_configuration, None)
+    if gcov_tool:
         # gcovtool is optional in Crostool.
         result["GCOVTOOL"] = gcov_tool
 
@@ -511,7 +569,7 @@ def _get_toolchain_global_make_variables(cc_toolchain):
     result["CROSSTOOLTOP"] = cc_toolchain._crosstool_top_path
     return result
 
-_SHARED_LIBRARY_EXTENSIONS = ["so", "dll", "dylib", "pyd", "wasm"]
+_SHARED_LIBRARY_EXTENSIONS = ["so", "dll", "dylib", "pyd", "wasm", "xll"]
 
 def _is_valid_shared_library_artifact(shared_library):
     if (shared_library.extension in _SHARED_LIBRARY_EXTENSIONS):
@@ -812,13 +870,13 @@ def _get_cc_flags_make_variable(_ctx, feature_configuration, cc_toolchain):
 def _package_exec_path(ctx, package, sibling_repository_layout):
     return get_relative_path(_repository_exec_path(ctx.label.workspace_name, sibling_repository_layout), package)
 
-def _include_dirs(ctx, additional_make_variable_substitutions):
+def _include_dirs(ctx, additional_make_variable_substitutions, attr = "includes"):
     result = []
     sibling_repository_layout = ctx.configuration.is_sibling_repository_layout()
     package = ctx.label.package
     package_exec_path = _package_exec_path(ctx, package, sibling_repository_layout)
     package_source_root = _package_source_root(ctx.label.workspace_name, package, sibling_repository_layout)
-    for include in ctx.attr.includes:
+    for include in getattr(ctx.attr, attr):
         includes_attr = _expand(ctx, include, additional_make_variable_substitutions)
         if is_path_absolute(includes_attr):
             continue
@@ -919,22 +977,6 @@ def _defines(ctx, additional_make_variable_substitutions):
 def _local_defines(ctx, additional_make_variable_substitutions):
     return _defines_attribute(ctx, additional_make_variable_substitutions, "local_defines", getattr(ctx.attr, "additional_compiler_inputs", []))
 
-def _copts_filter(ctx, additional_make_variable_substitutions):
-    nocopts = getattr(ctx.attr, "nocopts", None)
-
-    if nocopts == None or len(nocopts) == 0:
-        return nocopts
-
-    if semantics.is_allowed_nocopts(nocopts):
-        return nocopts
-
-    # Check if nocopts is disabled.
-    if ctx.fragments.cpp.disable_nocopts():
-        fail("This attribute was removed. See https://github.com/bazelbuild/bazel/issues/8706 for details.", attr = "nocopts")
-
-    # Expand nocopts and create CoptsFilter.
-    return _expand(ctx, nocopts, additional_make_variable_substitutions)
-
 def _map_to_list(m):
     result = []
     for k, v in m.items():
@@ -1018,15 +1060,15 @@ def _linkopts(ctx, additional_make_variable_substitutions, cc_toolchain):
         fail("in linkopts attribute of cc_library rule {}: Apple builds do not support statically linked binaries".format(ctx.label))
     return tokens
 
-def _get_coverage_environment(ctx, cc_config, cc_toolchain):
+def _get_coverage_environment(ctx, cc_config, cc_toolchain, feature_configuration):
     if not ctx.configuration.coverage_enabled:
         return {}
 
     # buildifier: disable=unsorted-dict-items
     env = {
-        "COVERAGE_GCOV_PATH": _tool_path(cc_toolchain, "gcov"),
-        "LLVM_COV": _tool_path(cc_toolchain, "llvm-cov"),
-        "LLVM_PROFDATA": _tool_path(cc_toolchain, "llvm-profdata"),
+        "COVERAGE_GCOV_PATH": _tool_path(cc_toolchain, "gcov", feature_configuration, ACTION_NAMES.gcov),
+        "LLVM_COV": _tool_path(cc_toolchain, "llvm-cov", feature_configuration, ACTION_NAMES.llvm_cov),
+        "LLVM_PROFDATA": _tool_path(cc_toolchain, "llvm-profdata", feature_configuration, ACTION_NAMES.llvm_profdata),
         "GENERATE_LLVM_LCOV": "1" if cc_config.generate_llvm_lcov() else "0",
     }
     for k in list(env.keys()):
@@ -1036,7 +1078,7 @@ def _get_coverage_environment(ctx, cc_config, cc_toolchain):
         env["FDO_DIR"] = cc_config.fdo_instrument()
     return env
 
-def _create_cc_instrumented_files_info(ctx, cc_config, cc_toolchain, metadata_files, virtual_to_original_headers = None):
+def _create_cc_instrumented_files_info(ctx, cc_config, cc_toolchain, feature_configuration, metadata_files, virtual_to_original_headers = None):
     source_extensions = extensions.CC_SOURCE + \
                         extensions.C_SOURCE + \
                         extensions.CC_HEADER + \
@@ -1044,7 +1086,7 @@ def _create_cc_instrumented_files_info(ctx, cc_config, cc_toolchain, metadata_fi
                         extensions.ASSEMBLER
     coverage_environment = {}
     if ctx.configuration.coverage_enabled:
-        coverage_environment = _get_coverage_environment(ctx, cc_config, cc_toolchain)
+        coverage_environment = _get_coverage_environment(ctx, cc_config, cc_toolchain, feature_configuration)
     coverage_support_files = cc_toolchain._coverage_files if ctx.configuration.coverage_enabled else depset([])
     info = coverage_common.instrumented_files_info(
         ctx = ctx,
@@ -1104,7 +1146,6 @@ cc_helper = struct(
     stringify_linker_input = _stringify_linker_input,
     generate_def_file = _generate_def_file,
     get_windows_def_file_for_linking = _get_windows_def_file_for_linking,
-    is_non_empty_list_or_select = _is_non_empty_list_or_select,
     check_file_extensions = _check_file_extensions,
     check_srcs_extensions = _check_srcs_extensions,
     libraries_from_linking_context = _libraries_from_linking_context,
@@ -1114,7 +1155,6 @@ cc_helper = struct(
     get_copts = _get_copts,
     defines = _defines,
     local_defines = _local_defines,
-    copts_filter = _copts_filter,
     get_srcs = _get_srcs,
     get_cpp_module_interfaces = _get_cpp_module_interfaces,
     get_private_hdrs = _get_private_hdrs,
@@ -1144,4 +1184,6 @@ cc_helper = struct(
     has_target_constraints = _has_target_constraints,
     package_exec_path = _package_exec_path,
     should_create_test_dwp_for_statically_linked_test = _should_create_test_dwp_for_statically_linked_test,
+    get_cc_runtimes = _get_cc_runtimes,
+    get_cc_runtimes_copts = _get_cc_runtimes_copts,
 )
