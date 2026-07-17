@@ -107,7 +107,7 @@ struct evthread_lock_callbacks {
 	/** Function to allocate and initialize new lock of type 'locktype'.
 	 * Returns NULL on failure. */
 	void *(*alloc)(unsigned locktype);
-	/** Funtion to release all storage held in 'lock', which was created
+	/** Function to release all storage held in 'lock', which was created
 	 * with type 'locktype'. */
 	void (*free)(void *lock, unsigned locktype);
 	/** Acquire an already-allocated lock at 'lock' with mode 'mode'.
@@ -213,7 +213,8 @@ int evthread_use_windows_threads(void);
 EVENT2_EXPORT_SYMBOL
 int evthread_use_pthreads(void);
 
-/* Enables posix mutex priority inheritance. */
+/* Enables posix mutex priority inheritance
+ * (if pthread_mutexattr_setprotocol() is supported). */
 #define EVTHREAD_PTHREAD_PRIO_INHERIT 0x01
 
 /**

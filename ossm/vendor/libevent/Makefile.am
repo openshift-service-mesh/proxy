@@ -34,7 +34,7 @@ RELEASE = -release 2.2
 #
 # Once an RC is out, DO NOT MAKE ANY ABI-BREAKING CHANGES IN THAT SERIES
 # UNLESS YOU REALLY REALLY HAVE TO.
-VERSION_INFO = 1:0:0
+VERSION_INFO = 1:1:0
 
 # History:          RELEASE    VERSION_INFO
 #  2.0.1-alpha --     2.0        1:0:0
@@ -70,7 +70,8 @@ VERSION_INFO = 1:0:0
 #  2.1.8-stable--     2.1        6:2:0 (ABI changed slightly)
 #
 # For Libevent 2.2:
-#  2.2.0-alpha --     2.2        1:0:0
+#  2.2.1-alpha --     2.2        1:0:0
+#  2.2.2-alpha --     2.2        1:1:0 (No ABI change)
 
 # ABI version history for this package effectively restarts every time
 # we change RELEASE.  Version 1.4.x had RELEASE of 1.4.
@@ -101,12 +102,14 @@ LIBEVENT_PKGCONFIG=libevent.pc libevent_core.pc libevent_extra.pc
 # included from other files.
 PLATFORM_DEPENDENT_SRC = \
 	arc4random.c \
-	epoll_sub.c \
 	bufferevent_ssl.c \
+	epoll_sub.c \
+	PrivacyInfo.xcprivacy \
 	test/regress_ssl.c
 
 CMAKE_FILES = \
 	cmake/AddCompilerFlags.cmake \
+	cmake/AddLinkerFlags.cmake \
 	cmake/AddEventLibrary.cmake \
 	cmake/CheckConstExists.cmake \
 	cmake/CheckFileOffsetBits.c \
@@ -135,6 +138,8 @@ DOCUMENTATION_FILES = \
 EXTRA_DIST = \
 	ChangeLog-1.4 \
 	ChangeLog-2.0 \
+	ChangeLog-2.1 \
+	ChangeLog \
 	Doxyfile \
 	LICENSE \
 	autogen.sh \
@@ -183,7 +188,7 @@ include test/include.am
 if BUILD_WIN32
 
 SYS_CORE_LIBS = -liphlpapi
-SYS_LIBS = -lws2_32 -lshell32 -ladvapi32
+SYS_LIBS = -lws2_32 -lshell32 -ladvapi32 -lbcrypt
 SYS_SRC = win32select.c buffer_iocp.c event_iocp.c \
 	bufferevent_async.c
 SYS_INCLUDES = -IWIN32-Code
@@ -229,6 +234,9 @@ endif
 if SIGNAL_SUPPORT
 SYS_SRC += signal.c
 endif
+if SIGNALFD_SUPPORT
+SYS_SRC += signalfd.c
+endif
 
 BUILT_SOURCES += include/event2/event-config.h
 
@@ -259,6 +267,8 @@ EXTRAS_SRC =					\
 	evdns.c					\
 	event_tagging.c				\
 	evrpc.c					\
+	sha1.c					\
+	ws.c					\
 	http.c
 
 if BUILD_WITH_NO_UNDEFINED
@@ -315,6 +325,7 @@ noinst_HEADERS +=				\
 	bufferevent-internal.h		\
 	changelist-internal.h		\
 	compat/sys/queue.h			\
+	compat/sys/tree.h			\
 	defer-internal.h			\
 	epolltable-internal.h		\
 	evbuffer-internal.h			\
@@ -323,6 +334,7 @@ noinst_HEADERS +=				\
 	evrpc-internal.h			\
 	evsignal-internal.h			\
 	evthread-internal.h			\
+	evdns-internal.h			\
 	ht-internal.h				\
 	http-internal.h				\
 	iocp-internal.h				\
@@ -338,6 +350,7 @@ noinst_HEADERS +=				\
 	util-internal.h				\
 	openssl-compat.h			\
 	mbedtls-compat.h			\
+	sha1.h						\
 	ssl-compat.h			    \
 	wepoll.h
 

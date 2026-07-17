@@ -258,7 +258,7 @@
 
   A finalized event cannot be re-added or activated.  The finalizer
   callback must not add events, activate events, or attempt to
-  "resucitate" the event being finalized in any way.
+  "resuscitate" the event being finalized in any way.
 
   If any finalizer callbacks are pending as the event_base is being
   freed, they will be invoked.  You can override this behavior with the
@@ -271,7 +271,7 @@
 
   The event_enable_lock_debugging() function is now spelled correctly.
   You can still use the old "event_enable_lock_debuging" name, though,
-  so your old programs shouldnt' break.
+  so your old programs shouldn't break.
 
   There's also been some work done to try to make the debugging logs
   more generally useful.
@@ -544,7 +544,7 @@
 
 2.3. Microoptimizations
 
-  Internal event list maintainance no longer use the antipattern where
+  Internal event list maintenance no longer use the antipattern where
   we have one function with multiple totally independent behaviors
   depending on an argument:
       #define OP1 1
@@ -590,7 +590,7 @@
 
 3.1. Linux-specific improvements
 
-  The logic for deciding which arguements to use with epoll_ctl() is now
+  The logic for deciding which arguments to use with epoll_ctl() is now
   a table-driven lookup, rather than the previous pile of cascading
   branches.  This should minimize epoll_ctl() calls and make the epoll
   code run a little faster on change-heavy loads.

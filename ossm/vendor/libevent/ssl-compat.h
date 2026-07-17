@@ -20,7 +20,7 @@ struct le_ssl_ops {
 	int (*clear)(void *ssl);
 	void (*set_connect_state)(void *ssl);
 	void (*set_accept_state)(void *ssl);
-	int (*err_is_ok)(int err);
+	int (*handshake_is_ok)(int err);
 	int (*err_is_want_read)(int err);
 	int (*err_is_want_write)(int err);
 	evutil_socket_t (*get_fd)(void *ssl);
@@ -73,15 +73,15 @@ struct bufferevent_ssl {
 	unsigned read_blocked_on_write : 1;
 	/* When we next get data, we should say "write" instead of "read". */
 	unsigned write_blocked_on_read : 1;
-	/* Treat TCP close before SSL close on SSL >= v3 as clean EOF. */
-	unsigned allow_dirty_shutdown : 1;
 	/* XXX */
 	unsigned n_errors : 2;
 
 	/* Are we currently connecting, accepting, or doing IO? */
 	unsigned state : 2;
-	/* If we reset fd, we sould reset state too */
+	/* If we reset fd, we should reset state too */
 	unsigned old_state : 2;
+
+	ev_uint64_t flags;
 };
 
 struct bufferevent *bufferevent_ssl_new_impl(struct event_base *base,

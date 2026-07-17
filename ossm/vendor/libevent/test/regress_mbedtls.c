@@ -27,9 +27,14 @@
 #define EVENT_VISIBILITY_WANT_DLLIMPORT
 
 #include "event2/util.h"
+#include <mbedtls/version.h>
 #include <mbedtls/ssl.h>
+#if MBEDTLS_VERSION_MAJOR >= 4
+#include <psa/crypto.h>
+#else
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
+#endif
 #include <mbedtls/debug.h>
 #include "regress.h"
 #include "tinytest.h"
@@ -45,9 +50,14 @@
 
 #define get_ssl_ctx get_mbedtls_config
 
+/* FIXME: clean this up, add some prefix, i.e. le_ssl_ */
+#if MBEDTLS_VERSION_MAJOR < 3
 #define SSL_renegotiate mbedtls_ssl_renegotiate
+#endif
+#undef SSL_get_peer_certificate
 #define SSL_get_peer_certificate mbedtls_ssl_get_peer_cert
-#define SSL_new mbedtls_ssl_new
+#define SSL_get1_peer_certificate mbedtls_ssl_get_peer_cert
+#define SSL_new bufferevent_mbedtls_dyncontext_new
 #define SSL_use_certificate(a, b) \
 	do {                          \
 	} while (0);
@@ -69,18 +79,18 @@
 
 struct rwcount;
 static void BIO_setup(SSL *ssl, struct rwcount *rw);
-static mbedtls_ssl_config *get_mbedtls_config(int endpoint);
-static mbedtls_ssl_context *mbedtls_ssl_new(mbedtls_ssl_config *config);
 static void *mbedtls_test_setup(const struct testcase_t *testcase);
 static int mbedtls_test_cleanup(const struct testcase_t *testcase, void *ptr);
-static const struct testcase_setup_t ssl_setup = {
+const struct testcase_setup_t mbedtls_setup = {
 	mbedtls_test_setup, mbedtls_test_cleanup};
+#define SSL_SET_HOSTNAME(ssl) mbedtls_ssl_set_hostname((ssl), "example.com")
+#define ssl_setup mbedtls_setup
 #include "regress_ssl.c"
 static mbedtls_ssl_config *the_mbedtls_conf[2] = {NULL, NULL};
-static mbedtls_ssl_context *the_mbedtls_ctx[1024] = {NULL};
-static int the_mbedtls_ctx_count = 0;
+#if MBEDTLS_VERSION_MAJOR < 4
 static mbedtls_entropy_context entropy;
 static mbedtls_ctr_drbg_context ctr_drbg;
+#endif
 static mbedtls_x509_crt *the_cert;
 static mbedtls_pk_context *the_key;
 
@@ -95,6 +105,22 @@ mbedtls_debug(
 		line, loglen, str));
 }
 
+#if MBEDTLS_VERSION_MAJOR < 4
+static int
+mbedtls_rng(void* ctx, unsigned char* buffer, size_t len)
+{
+	int rc;
+
+	(void)ctx;
+
+	rc = evutil_secure_rng_init();
+	if (rc != 0)
+		return rc;
+	evutil_secure_rng_get_bytes(buffer, len);
+	return 0;
+}
+#endif
+
 static mbedtls_pk_context *
 mbedtls_getkey(void)
 {
@@ -102,8 +128,13 @@ mbedtls_getkey(void)
 	mbedtls_pk_context *pk = malloc(sizeof(mbedtls_pk_context));
 	tt_assert(pk);
 	mbedtls_pk_init(pk);
-	ret = mbedtls_pk_parse_key(
-		pk, (const unsigned char *)KEY, sizeof(KEY), NULL, 0);
+	ret = mbedtls_pk_parse_key(pk,
+		(const unsigned char *)KEY, sizeof(KEY),
+		NULL, 0
+#if MBEDTLS_VERSION_MAJOR >= 3 && MBEDTLS_VERSION_MAJOR < 4
+		, mbedtls_rng, NULL
+#endif
+		);
 	tt_assert(ret == 0);
 	return pk;
 end:
@@ -134,7 +165,6 @@ mbedtls_getcert(mbedtls_pk_context *pk)
 {
 	const char *name = "commonName=example.com";
 	time_t now = time(NULL);
-	char now_string[32] = "";
 	char not_before[32] = "";
 	char not_after[32] = "";
 	unsigned char certbuf[8192];
@@ -142,10 +172,19 @@ mbedtls_getcert(mbedtls_pk_context *pk)
 	mbedtls_x509_crt *crt = NULL;
 	int ret = 0;
 
+#if MBEDTLS_VERSION_MAJOR >= 4
+	unsigned char serial_buf[8];
+	uint64_t serial_val = (uint64_t)now;
+	int i;
+#else
+	char now_string[32] = "";
 	mbedtls_mpi serial;
+#endif
 	mbedtls_x509write_cert write_cert;
 
+#if MBEDTLS_VERSION_MAJOR < 4
 	snprintf(now_string, sizeof(now_string), "%lld", (long long)now);
+#endif
 
 	create_tm_from_unix_epoch(&tm, now);
 	strftime(not_before, sizeof(not_before), "%Y%m%d%H%M%S", &tm);
@@ -156,12 +195,22 @@ mbedtls_getcert(mbedtls_pk_context *pk)
 	mbedtls_x509write_crt_init(&write_cert);
 	mbedtls_x509write_crt_set_version(&write_cert, 2);
 
+#if MBEDTLS_VERSION_MAJOR >= 4
+	for (i = 7; i >= 0; i--) {
+		serial_buf[i] = serial_val & 0xff;
+		serial_val >>= 8;
+	}
+	ret = mbedtls_x509write_crt_set_serial_raw(&write_cert, serial_buf,
+		sizeof(serial_buf));
+	tt_assert(ret == 0);
+#else
 	mbedtls_mpi_init(&serial);
 	ret = mbedtls_mpi_read_string(&serial, 10, now_string);
 	tt_assert(ret == 0);
 	ret = mbedtls_x509write_crt_set_serial(&write_cert, &serial);
 	tt_assert(ret == 0);
 	mbedtls_mpi_free(&serial);
+#endif
 
 	ret = mbedtls_x509write_crt_set_subject_name(&write_cert, name);
 	tt_assert(ret == 0);
@@ -176,11 +225,15 @@ mbedtls_getcert(mbedtls_pk_context *pk)
 	mbedtls_x509write_crt_set_issuer_key(&write_cert, pk);
 	mbedtls_x509write_crt_set_subject_key(&write_cert, pk);
 
+#if MBEDTLS_VERSION_MAJOR >= 4
+	ret = mbedtls_x509write_crt_pem(&write_cert, certbuf, sizeof(certbuf));
+#else
 	ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
 		(const unsigned char *)name, strlen(name));
 	tt_assert(ret == 0);
 	ret = mbedtls_x509write_crt_pem(&write_cert, certbuf, sizeof(certbuf),
 		mbedtls_ctr_drbg_random, &ctr_drbg);
+#endif
 	tt_assert(ret == 0);
 	mbedtls_x509write_crt_free(&write_cert);
 
@@ -198,7 +251,7 @@ end:
 	return NULL;
 }
 
-static mbedtls_ssl_config *
+mbedtls_ssl_config *
 get_mbedtls_config(int endpoint)
 {
 	if (the_mbedtls_conf[endpoint])
@@ -213,12 +266,17 @@ get_mbedtls_config(int endpoint)
 		(void *)(endpoint == MBEDTLS_SSL_IS_SERVER ? "server" : "client"));
 	mbedtls_ssl_config_defaults(the_mbedtls_conf[endpoint], endpoint,
 		MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
+#if MBEDTLS_VERSION_MAJOR < 4
 	mbedtls_ssl_conf_rng(
 		the_mbedtls_conf[endpoint], mbedtls_ctr_drbg_random, &ctr_drbg);
+#endif
+#if MBEDTLS_VERSION_MAJOR < 3
+	/* Mbed-TLS 3 doesn't support anything below TLS v1.2 */
 	if (disable_tls_11_and_12) {
 		mbedtls_ssl_conf_max_version(the_mbedtls_conf[endpoint],
 			MBEDTLS_SSL_MAJOR_VERSION_3, MBEDTLS_SSL_MINOR_VERSION_1);
 	}
+#endif
 	if (endpoint == MBEDTLS_SSL_IS_SERVER) {
 		mbedtls_ssl_conf_own_cert(
 			the_mbedtls_conf[endpoint], the_cert, the_key);
@@ -239,10 +297,14 @@ mbedtls_test_setup(const struct testcase_t *testcase)
 {
 	init_mbedtls();
 
+#if MBEDTLS_VERSION_MAJOR >= 4
+	psa_crypto_init();
+#else
 	mbedtls_entropy_init(&entropy);
 	mbedtls_ctr_drbg_init(&ctr_drbg);
 	mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
 		(const unsigned char *)"libevent", sizeof("libevent"));
+#endif
 
 	the_key = mbedtls_getkey();
 	EVUTIL_ASSERT(the_key);
@@ -257,7 +319,6 @@ mbedtls_test_setup(const struct testcase_t *testcase)
 static int
 mbedtls_test_cleanup(const struct testcase_t *testcase, void *ptr)
 {
-	int i;
 	int ret = basic_test_cleanup(testcase, ptr);
 	if (!ret) {
 		return ret;
@@ -278,9 +339,6 @@ mbedtls_test_cleanup(const struct testcase_t *testcase, void *ptr)
 	mbedtls_pk_free(the_key);
 	free(the_key);
 
-	for (i = 0; i < the_mbedtls_ctx_count; i++) {
-		mbedtls_ssl_free(the_mbedtls_ctx[i]);
-	}
 	if (the_mbedtls_conf[0]) {
 		mbedtls_ssl_config_free(the_mbedtls_conf[0]);
 		free(the_mbedtls_conf[0]);
@@ -293,16 +351,6 @@ mbedtls_test_cleanup(const struct testcase_t *testcase, void *ptr)
 	}
 
 	return 1;
-}
-
-static mbedtls_ssl_context *
-mbedtls_ssl_new(mbedtls_ssl_config *config)
-{
-	mbedtls_ssl_context *ssl = malloc(sizeof(*ssl));
-	mbedtls_ssl_init(ssl);
-	mbedtls_ssl_setup(ssl, config);
-	the_mbedtls_ctx[the_mbedtls_ctx_count++] = ssl;
-	return ssl;
 }
 
 static int
