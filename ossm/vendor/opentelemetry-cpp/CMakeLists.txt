@@ -9,7 +9,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20.0")
   cmake_policy(SET CMP0117 NEW)
 endif()
 
-set(OPENTELEMETRY_VERSION_NUMBER "1.26.0")
+set(OPENTELEMETRY_VERSION_NUMBER "1.27.0")
 set(OPENTELEMETRY_VERSION_SUFFIX "")
 set(OPENTELEMETRY_VERSION
     "${OPENTELEMETRY_VERSION_NUMBER}${OPENTELEMETRY_VERSION_SUFFIX}")
@@ -131,11 +131,10 @@ if(NOT WITH_STL STREQUAL "OFF")
   endif()
 endif()
 
-option(WITH_OTLP_RETRY_PREVIEW
-       "Whether to enable experimental retry functionality" OFF)
+option(WITH_OTLP_RETRY_PREVIEW "Whether to enable retry functionality" ON)
 
 option(WITH_OTLP_GRPC_SSL_MTLS_PREVIEW
-       "Whether to enable mTLS support for gRPC" OFF)
+       "Whether to enable mTLS support for gRPC" ON)
 
 option(WITH_OTLP_GRPC_CREDENTIAL_PREVIEW
        "Whether to enable gRPC credentials option in OTLP gRPC Exporter" OFF)
@@ -153,6 +152,10 @@ option(
   WITH_OTLP_HTTP_COMPRESSION
   "Whether to include gzip compression for the OTLP http exporter in the SDK"
   OFF)
+
+option(
+  WITH_OTLP_UTF8_VALIDITY
+  "Whether to enable UTF-8 validity checks for the OTLP exporter in the SDK" ON)
 
 option(WITH_CURL_LOGGING "Whether to enable select CURL verbosity in OTel logs"
        OFF)
@@ -361,6 +364,15 @@ if(WITH_OPENTRACING)
   include("${opentelemetry-cpp_SOURCE_DIR}/cmake/opentracing-cpp.cmake")
 endif()
 
+include(CTest)
+if(BUILD_TESTING)
+  include("${opentelemetry-cpp_SOURCE_DIR}/cmake/googletest.cmake")
+  enable_testing()
+  if(WITH_BENCHMARK)
+    include("${opentelemetry-cpp_SOURCE_DIR}/cmake/benchmark.cmake")
+  endif()
+endif()
+
 if(OTELCPP_MAINTAINER_MODE)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     message(STATUS "Building with gcc in maintainer mode.")
@@ -453,15 +465,6 @@ if(OTELCPP_MAINTAINER_MODE)
 endif(OTELCPP_MAINTAINER_MODE)
 
 list(APPEND CMAKE_PREFIX_PATH "${CMAKE_BINARY_DIR}")
-
-include(CTest)
-if(BUILD_TESTING)
-  include("${opentelemetry-cpp_SOURCE_DIR}/cmake/googletest.cmake")
-  enable_testing()
-  if(WITH_BENCHMARK)
-    include("${opentelemetry-cpp_SOURCE_DIR}/cmake/benchmark.cmake")
-  endif()
-endif()
 
 # Record build config and versions
 message(STATUS "---------------------------------------------")

@@ -47,29 +47,30 @@ Provider for storing information about a fuzz test binary.
     },
 )
 
-def _fuzzing_binary_transition_impl(settings, _attr):
+def _fuzzing_binary_transition_impl(settings, attr):
     opts = instrum_opts.make(
         copts = settings["//command_line_option:copt"],
         conlyopts = settings["//command_line_option:conlyopt"],
         cxxopts = settings["//command_line_option:cxxopt"],
         linkopts = settings["//command_line_option:linkopt"],
     )
+    compiler_type = getattr(attr, "compiler", "clang")
 
     is_fuzzing_build_mode = settings["@rules_fuzzing//fuzzing:cc_fuzzing_build_mode"]
     if is_fuzzing_build_mode:
         opts = instrum_opts.merge(opts, instrum_defaults.fuzzing_build)
 
     instrum_config = settings["@rules_fuzzing//fuzzing:cc_engine_instrumentation"]
-    if instrum_config in instrum_configs:
-        opts = instrum_opts.merge(opts, instrum_configs[instrum_config])
+    if instrum_config in instrum_configs[compiler_type]:
+        opts = instrum_opts.merge(opts, instrum_configs[compiler_type][instrum_config])
     else:
-        fail("unsupported engine instrumentation '%s'" % instrum_config)
+        fail("unsupported engine instrumentation '%s' for compiler '%s'" % (instrum_config, compiler_type))
 
     sanitizer_config = settings["@rules_fuzzing//fuzzing:cc_engine_sanitizer"]
-    if sanitizer_config in sanitizer_configs:
-        opts = instrum_opts.merge(opts, sanitizer_configs[sanitizer_config])
+    if sanitizer_config in sanitizer_configs[compiler_type]:
+        opts = instrum_opts.merge(opts, sanitizer_configs[compiler_type][sanitizer_config])
     else:
-        fail("unsupported sanitizer '%s'" % sanitizer_config)
+        fail("unsupported sanitizer '%s' for compiler '%s'" % (sanitizer_config, compiler_type))
 
     return {
         "//command_line_option:copt": opts.copts,
@@ -184,6 +185,11 @@ The instrumentation is controlled by the following flags:
             doc = "The fuzz test executable to instrument.",
             cfg = fuzzing_binary_transition,
             mandatory = True,
+        ),
+        "compiler": attr.string(
+            default = "clang",
+            values = ["clang", "gcc"],
+            doc = "The compiler used to build the fuzz test executable.",
         ),
         "_allowlist_function_transition": attr.label(
             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
