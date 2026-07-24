@@ -21,6 +21,7 @@ if [[ ${EXIT_CODE} -eq 0 ]]; then
   tail -300 "${TMPLOG}"
 
   ARTIFACT=$(ls envoy-alpha-*.tar.gz 2>/dev/null | head -1)
+  [[ -z "${ARTIFACT}" ]] && { echo "ERROR: No envoy-alpha-*.tar.gz found after post-submit"; exit 1; }
   cp "${ARTIFACT}" "${TMT_TEST_DATA}/${ARTIFACT}"
   echo "Artifact built: ${ARTIFACT} ($(du -sh "${ARTIFACT}" | cut -f1))"
 

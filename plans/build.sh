@@ -23,6 +23,7 @@ if [[ ${EXIT_CODE} -eq 0 ]]; then
     bash -c 'SKIP_GCS_UPLOAD=true bash ossm/ci/post-submit.sh' >> "${TMPLOG}" 2>&1
 
   ARTIFACT=$(ls envoy-alpha-*.tar.gz 2>/dev/null | head -1)
+  [[ -z "${ARTIFACT}" ]] && { echo "ERROR: No envoy-alpha-*.tar.gz found after post-submit"; exit 1; }
   cp "${ARTIFACT}" "${TMT_TEST_DATA}/${ARTIFACT}"
   echo "Release artifact: ${ARTIFACT} ($(du -sh "${ARTIFACT}" | cut -f1))"
 

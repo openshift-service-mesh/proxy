@@ -28,5 +28,5 @@ podman run -d --name "${CNAME}" --privileged \
   -e LOCAL_CPU_RESOURCES="$(nproc)" \
   -e LOCAL_RAM_RESOURCES="${LOCAL_RAM}" \
   -v "$(pwd)":/work:z -w /work \
-  $(cat ossm/ci/builder-image) \
+  "$(cat ossm/ci/builder-image)" \
   sleep infinity
