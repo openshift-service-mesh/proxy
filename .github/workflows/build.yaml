@@ -96,7 +96,14 @@ jobs:
               core.warning(`Building ancestor commit ${headSha} (PR HEAD is now ${pr.head.sha})`);
             }
 
-            if (pr.head.repo && sourceRepo !== pr.head.repo.clone_url) {
+            if (!pr.head.repo) {
+              const baseCloneUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}.git`;
+              if (sourceRepo !== baseCloneUrl) {
+                core.setFailed(`PR fork appears deleted and source_repo ${sourceRepo} is not the base repo`);
+                return;
+              }
+              core.warning('PR fork deleted or same-repo PR; source_repo matches base repo');
+            } else if (sourceRepo !== pr.head.repo.clone_url) {
               core.setFailed(`source_repo ${sourceRepo} does not match PR head repo ${pr.head.repo.clone_url}`);
               return;
             }
