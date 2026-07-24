@@ -1,0 +1,15 @@
+summary: Build and package openshift-service-mesh proxy release artifact
+test: bash release.sh
+duration: 2h
+
+prepare:
+  - name: Install dependencies
+    how: shell
+    script: dnf install -y git podman
+
+discover:
+  how: fmf
+  test: /plans/release
+
+execute:
+  how: tmt

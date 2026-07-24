@@ -1,0 +1,15 @@
+summary: Build openshift-service-mesh proxy on bare metal
+test: bash build.sh
+duration: 3h
+
+prepare:
+  - name: Install dependencies
+    how: shell
+    script: dnf install -y git podman
+
+discover:
+  how: fmf
+  test: /plans/build
+
+execute:
+  how: tmt
