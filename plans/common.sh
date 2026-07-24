@@ -21,8 +21,12 @@ LOCAL_JOBS=$(( $(nproc) * 3 / 4 ))
 LOCAL_RAM=$(( $(free -m | awk '/^Mem:/{print $2}') * 85 / 100 ))
 
 CNAME="${CNAME:-ossm-$$}"
-cleanup_container() { podman rm -f "${CNAME}" 2>/dev/null || true; }
-trap cleanup_container EXIT
+_TMPLOG=""
+_cleanup() {
+  rm -f "${_TMPLOG}"
+  podman rm -f "${CNAME}" 2>/dev/null || true
+}
+trap _cleanup EXIT
 
 podman run -d --name "${CNAME}" --privileged \
   -e CI=true \
@@ -32,3 +36,33 @@ podman run -d --name "${CNAME}" --privileged \
   -v "$(pwd)":/work:z -w /work \
   "$(cat ossm/ci/builder-image)" \
   sleep infinity
+
+run_in_podman() {
+  local cmd="$1"
+  _TMPLOG=$(mktemp)
+
+  local exit_code=0
+  podman exec --workdir /work "${CNAME}" bash -c "${cmd}" > "${_TMPLOG}" 2>&1 || exit_code=$?
+
+  if [[ ${exit_code} -eq 0 ]]; then
+    echo "=== first 300 lines ==="
+    head -300 "${_TMPLOG}"
+    echo "=== last 300 lines ==="
+    tail -300 "${_TMPLOG}"
+  else
+    echo "=== FAILED — full output ==="
+    cat "${_TMPLOG}"
+  fi
+
+  rm -f "${_TMPLOG}"
+  _TMPLOG=""
+  return ${exit_code}
+}
+
+collect_artifact() {
+  local artifact
+  artifact=$(ls envoy-alpha-*.tar.gz 2>/dev/null | head -1)
+  [[ -z "${artifact}" ]] && { echo "ERROR: No envoy-alpha-*.tar.gz found" >&2; exit 1; }
+  cp "${artifact}" "${TMT_TEST_DATA}/${artifact}"
+  echo "Artifact: ${artifact} ($(du -sh "${artifact}" | cut -f1))"
+}
