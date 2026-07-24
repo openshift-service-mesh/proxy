@@ -1,1 +1,7 @@
-* @istio/wg-policies-and-telemetry-maintainers
+# Inherited from upstream Envoy. No effect while require_code_owner_reviews is disabled.
+# * @istio/wg-policies-and-telemetry-maintainers
+
+# CI configuration requires review from the proxy maintainers team.
+# For this to work, enable "Require review from Code Owners" in branch protection settings.
+/.github/workflows/ @openshift-service-mesh/envoy-team @openshift-service-mesh/sail-team
+/plans/             @openshift-service-mesh/envoy-team @openshift-service-mesh/sail-team
