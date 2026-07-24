@@ -3,6 +3,6 @@
 
 # CI configuration requires review from the proxy maintainers team.
 # For this to work, enable "Require review from Code Owners" in branch protection settings.
-/.github/workflows/ @openshift-service-mesh/envoy-team @openshift-service-mesh/sail-team
-/.github/scripts/   @openshift-service-mesh/envoy-team @openshift-service-mesh/sail-team
-/plans/             @openshift-service-mesh/envoy-team @openshift-service-mesh/sail-team
+#/.github/workflows/ @openshift-service-mesh/envoy-team @openshift-service-mesh/sail-team
+#/.github/scripts/   @openshift-service-mesh/envoy-team @openshift-service-mesh/sail-team
+#/plans/             @openshift-service-mesh/envoy-team @openshift-service-mesh/sail-team
