@@ -1,4 +1,4 @@
-sysctl -w user.max_user_namespaces=15000
+# Sourced by build.sh / release.sh; not meant to be executed directly.
 
 # Validate SOURCE_REPO is a github.com HTTPS URL (prevents shell injection and SSRF)
 if [[ ! "${SOURCE_REPO}" =~ ^https://github\.com/[a-zA-Z0-9_.\-]+/[a-zA-Z0-9_.\-]+\.git$ ]]; then
@@ -10,6 +10,8 @@ if [[ ! "${SOURCE_REF}" =~ ^[0-9a-f]{40}$ ]]; then
   echo "ERROR: SOURCE_REF must be a 40-char hex SHA, got: ${SOURCE_REF}" >&2
   exit 1
 fi
+
+sysctl -w user.max_user_namespaces=15000
 
 git clone "${SOURCE_REPO}" proxy-src
 cd proxy-src
