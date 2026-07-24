@@ -97,7 +97,8 @@ jobs:
             }
 
             if (pr.head.repo && sourceRepo !== pr.head.repo.clone_url) {
-              core.warning(`source_repo ${sourceRepo} differs from PR head repo ${pr.head.repo.clone_url}`);
+              core.setFailed(`source_repo ${sourceRepo} does not match PR head repo ${pr.head.repo.clone_url}`);
+              return;
             }
 
             core.info(`Inputs validated: PR #${prNumber}, SHA ${headSha}`);
