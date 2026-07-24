@@ -67,7 +67,7 @@ jobs:
               core.setFailed(`Invalid head_sha format: ${headSha}`);
               return;
             }
-            if (!/^[a-zA-Z0-9_.\-\/]+$/.test(baseRef)) {
+            if (!/^[a-zA-Z0-9_.\-\/]+$/.test(baseRef) || baseRef.includes('..')) {
               core.setFailed(`Invalid base_ref format: ${baseRef}`);
               return;
             }
