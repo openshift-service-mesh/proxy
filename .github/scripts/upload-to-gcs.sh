@@ -15,12 +15,12 @@ if [[ "${DRY_RUN:-false}" == "true" ]]; then
   exit 0
 fi
 
+pip install --quiet google-cloud-storage
 GCS_KEY_FILE=$(mktemp)
 echo "${GCS_SERVICE_ACCOUNT_KEY}" > "${GCS_KEY_FILE}"
 chmod 600 "${GCS_KEY_FILE}"
 trap "rm -f '${GCS_KEY_FILE}'" EXIT
 export GCS_KEY_FILE
-pip install --quiet google-cloud-storage
 python3 - <<'EOF'
 import os
 from google.cloud import storage
