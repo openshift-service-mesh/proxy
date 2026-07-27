@@ -1,6 +1,4 @@
-summary: Build and package openshift-service-mesh proxy release artifact
-test: bash release.sh
-duration: 2h
+summary: Build & package proxy release artifact
 
 prepare:
   - name: Install dependencies
@@ -8,8 +6,12 @@ prepare:
     script: dnf install -y git podman
 
 discover:
-  how: fmf
-  test: /plans/release
+  how: shell
+  tests:
+    - name: /release
+      test: bash release.sh
+      path: /plans
+      duration: 2h
 
 execute:
   how: tmt
