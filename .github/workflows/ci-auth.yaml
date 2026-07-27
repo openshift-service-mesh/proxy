@@ -64,21 +64,14 @@ jobs:
             const hasOkToTest = labels.some(l => l.name === 'ok-to-test');
 
             if (isMember) {
-              core.info(`Sender ${sender} is org member`);
-              if (hasOkToTest) {
-                if (action === 'opened' || action === 'reopened') {
-                  await github.rest.issues.removeLabel({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: prNumber,
-                    name: 'needs-ok-to-test'
-                  }).catch(() => {});
-                }
-                core.info('ok-to-test present, dispatching build');
-                await dispatchBuild();
-              } else {
-                core.info('No ok-to-test label, skipping build');
-              }
+              core.info(`Sender ${sender} is org member, dispatching build`);
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                name: 'needs-ok-to-test'
+              }).catch(() => {});
+              await dispatchBuild();
             } else {
               core.info(`Sender ${sender} is not org member`);
               await github.rest.issues.addLabels({
