@@ -49,6 +49,7 @@ function init(){
         "rules_foreign_cc_framework_toolchain_freebsd_commands"
         "rules_foreign_cc_framework_toolchain_macos_commands"
         "rules_foreign_cc_framework_toolchain_windows_commands"
+        "remote_java_tools",
         "emscripten"
         "python3_12_host"
         "python3_12_x86_64"

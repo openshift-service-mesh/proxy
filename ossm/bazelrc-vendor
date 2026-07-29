@@ -107,8 +107,6 @@ build --override_repository=pypi__zipp=%workspace%/ossm/vendor/pypi__zipp
 build --override_repository=pythons_hub=%workspace%/ossm/vendor/pythons_hub
 build --override_repository=quiche=%workspace%/ossm/vendor/quiche
 build --override_repository=re2=%workspace%/ossm/vendor/re2
-build --override_repository=remote_java_tools=%workspace%/ossm/vendor/remote_java_tools
-build --override_repository=remote_java_tools_linux=%workspace%/ossm/vendor/remote_java_tools_linux
 build --override_repository=remote_jdk8_linux_aarch64_toolchain_config_repo=%workspace%/ossm/vendor/remote_jdk8_linux_aarch64_toolchain_config_repo
 build --override_repository=remote_jdk8_linux_s390x_toolchain_config_repo=%workspace%/ossm/vendor/remote_jdk8_linux_s390x_toolchain_config_repo
 build --override_repository=remote_jdk8_linux_toolchain_config_repo=%workspace%/ossm/vendor/remote_jdk8_linux_toolchain_config_repo

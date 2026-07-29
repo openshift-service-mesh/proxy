@@ -16,6 +16,7 @@ build --host_force_python=PY3
 build --extra_toolchains=@rules_python//python:autodetecting_toolchain
 
 build --extra_toolchains=@local_jdk//:all
+build --java_runtime_version=local_jdk
 build --tool_java_runtime_version=local_jdk
 
 # OpenSSL configuration
