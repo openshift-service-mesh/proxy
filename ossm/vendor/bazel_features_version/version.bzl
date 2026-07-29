@@ -1,1 +1,1 @@
-version = '7.7.1- (@non-git)'
+version = '7.7.1'
