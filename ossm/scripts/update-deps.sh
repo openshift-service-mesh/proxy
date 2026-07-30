@@ -108,6 +108,9 @@ function run_bazel() {
   # Workaround to force fetch of rules_license
   bazel --output_base="${OUTPUT_BASE}" fetch @remote_java_tools//java_tools/zlib:zlib || true
 
+  # Fetch platform-specific java tools for arm64 (not fetched automatically on x86_64)
+  bazel --output_base="${OUTPUT_BASE}" fetch @remote_java_tools_linux_aarch64//:all || true
+
   # Workaround to force fetch of protoc for arm
   bazel --output_base="${OUTPUT_BASE}" fetch @com_google_protobuf_protoc_linux_aarch_64//:protoc
 
