@@ -47,9 +47,11 @@ struct MockSessionCallbacks {
                              MoqtResponseCallback)>
       incoming_publish_namespace_callback;
   testing::MockFunction<std::unique_ptr<MoqtNamespaceTask>(
-      const TrackNamespace&, SubscribeNamespaceOption, const MessageParameters&,
-      MoqtResponseCallback)>
+      const TrackNamespace&, const MessageParameters&, MoqtResponseCallback)>
       incoming_subscribe_namespace_callback;
+  testing::MockFunction<bool(const TrackNamespace&, const MessageParameters&,
+                             MoqtResponseCallback)>
+      incoming_subscribe_tracks_callback;
 
   MockSessionCallbacks() {
     ON_CALL(incoming_publish_namespace_callback, Call)
@@ -187,7 +189,7 @@ class TestTrackPublisher : public MoqtTrackPublisher {
 };
 
 // TODO(martinduke): Rename to MockSubscribeVisitor.
-class MockSubscribeRemoteTrackVisitor : public SubscribeVisitor {
+class MockLiveSubscriberVisitor : public SubscribeVisitor {
  public:
   MOCK_METHOD(void, OnReply,
               (const FullTrackName& full_track_name,

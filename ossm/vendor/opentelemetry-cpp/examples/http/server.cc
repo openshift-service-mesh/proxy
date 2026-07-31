@@ -5,7 +5,6 @@
 #include "opentelemetry/context/propagation/global_propagator.h"
 #include "opentelemetry/context/propagation/text_map_propagator.h"
 #include "opentelemetry/context/runtime_context.h"
-#include "opentelemetry/nostd/shared_ptr.h"
 #include "opentelemetry/nostd/string_view.h"
 #include "opentelemetry/nostd/variant.h"
 #include "opentelemetry/semconv/client_attributes.h"
@@ -21,8 +20,8 @@
 #include "opentelemetry/trace/tracer.h"
 #include "tracer_common.h"
 
-#include <stdlib.h>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <map>
 #include <thread>
@@ -98,7 +97,7 @@ int main(int argc, char *argv[])
   // The port the validation service listens to can be specified via the command line.
   if (argc > 1)
   {
-    server_port = static_cast<uint16_t>(atoi(argv[1]));
+    server_port = static_cast<uint16_t>(std::strtol(argv[1], nullptr, 10));
   }
 
   HttpServer http_server(server_name, server_port);

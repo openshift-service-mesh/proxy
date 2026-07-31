@@ -96,7 +96,7 @@ class MoqtIntegrationTest : public quiche::test::QuicheTest {
 
   // Client subscribes to the latest object in |track_name|.
   void SubscribeLatestObject(FullTrackName track_name,
-                             MockSubscribeRemoteTrackVisitor* visitor) {
+                             MockLiveSubscriberVisitor* visitor) {
     bool received_ok = false;
     EXPECT_CALL(*visitor, OnReply)
         .WillOnce(
@@ -117,7 +117,7 @@ class MoqtIntegrationTest : public quiche::test::QuicheTest {
 
   MockSessionCallbacks client_callbacks_;
   MockSessionCallbacks server_callbacks_;
-  MockSubscribeRemoteTrackVisitor subscribe_visitor_;
+  MockLiveSubscriberVisitor subscribe_visitor_;
   testing::MockFunction<void(TrackNamespace track_namespace,
                              std::optional<MoqtRequestErrorInfo> error_message)>
       outgoing_publish_namespace_callback_;
@@ -849,6 +849,10 @@ TEST_F(MoqtIntegrationTest, AlternateDeliveryTimeout) {
       test_harness_.RunUntilWithDefaultTimeout([&]() { return stream_reset; });
   EXPECT_TRUE(success);
   EXPECT_EQ(bytes_received, 2000);
+  // On teardown, streams are destroyed in arbitrary order. If the uni stream
+  // is destroyed before the bidi stream, there will be a second stream reset
+  // notification to the visitor. If not, there won't be.
+  EXPECT_CALL(subscribe_visitor_, OnStreamReset).Times(testing::AnyNumber());
 }
 
 TEST_F(MoqtIntegrationTest, BandwidthProbe) {

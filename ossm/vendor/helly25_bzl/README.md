@@ -4,6 +4,11 @@ This library provides [Bazel](http://bazel.build) [Starlark](https://bazel.build
 
 [![Test](https://github.com/helly25/bzl/actions/workflows/main.yml/badge.svg)](https://github.com/helly25/bzl/actions/workflows/main.yml)
 
+The following libraries are implemented:
+
+- [Versions](#versions)
+- [Paths](#paths)
+
 ## Versions
 
 Implements versioning functions that mostly follow [Semver](https://semver.org/).
@@ -19,8 +24,9 @@ becomes 'rc' + '1' while 'alpha--2' becomes 'alpha-' + '2').
 The full functionality is exposed as a singele struct containing all functions.
 
 The version parameters support:
+
 - a string that can be parsed according to:
-     `major`['.' `minor` [ '.' `patch` [ '.' `digits`]\*]] ['-' [^+]+] ['+' .\*]
+  `major`['.' `minor` [ '.' `patch` [ '.' `digits`]\*]] ['-' [^+]+] ['+' .\*]
 - a `list` or `tuple` where each component is a version part. If present, then:
   - a pre-release component must be separated by a single "-" and split by ".".
   - a build component must be separated by a single "+" and split by "."
@@ -38,7 +44,8 @@ The functionality has exhaustive tests. If something still works wrong please,
 file a bug report or propose a fix.
 
 Example:
-```bazel
+
+```starlark
 my_version = "25.33.42"
 min_version = (10, 11, 12)
 if _versions.lt(my_version, min_version):
@@ -50,20 +57,43 @@ if _versions.lt(my_version, min_version):
 
 Provides:
 
-* `load("@helly25_bzl//bzl/versions:versions_bzl", _versions = "versions")`
-  * `versions` is a single import structure:
-    * `parse`: Parses a version.
-    * `ge`: Implements `L >= R`.
-    * `gt`: Implements `L > R`.
-    * `le`: Implements `L <= R`.
-    * `lt`: Implements `L < R`.
-    * `eq`: Implements `L == R`.
-    * `ne`: Implements `L != R`.
-    * `cmp`: Implements `L <=> R` aka `(L < R) - (L > R)`.
-    * `compare`: Implements `L OP R`.
-    * `check_one_requirement`: Checks a version adheres to a single requirement.
-    * `check_all_requirements`: Checks a version adheres to a requirements list.
-    * `parse_requirements`: Parses a requirements specification.
+- `load("@helly25_bzl//bzl/versions:versions_bzl", _versions = "versions")`
+  - `versions` is a single import structure:
+    - `parse`: Parses a version.
+    - `ge`: Implements `L >= R`.
+    - `gt`: Implements `L > R`.
+    - `le`: Implements `L <= R`.
+    - `lt`: Implements `L < R`.
+    - `eq`: Implements `L == R`.
+    - `ne`: Implements `L != R`.
+    - `cmp`: Implements `L <=> R` aka `(L < R) - (L > R)`.
+    - `compare`: Implements `L OP R`.
+    - `check_one_requirement`: Checks a version adheres to a single requirement.
+    - `check_all_requirements`: Checks a version adheres to a requirements list.
+    - `parse_requirements`: Parses a requirements specification.
+
+## Paths
+
+Implements file path manipulation functions.
+
+NOTE: These functions do not support Windows drive letter relative paths.
+
+Provides:
+
+- `load("@helly25_bzl//bzl/paths:paths_bzl", _paths = "paths")`
+  - `paths` is a single import structure:
+    - `collapse`: Collapse '.' and '..' path segments for normalized Unix paths.
+    - `collapse_windows`: Collapse '.' and '..' path segments for normalized Windows paths.
+    - `ensure_trailing_slash`: Ensure a Unix path ends with a single trailing slash.
+    - `ensure_trailing_slash_windows`: Ensure a Windows path ends with a single trailing backslash.
+    - `is_absolute`: Returns `True` if a Unix path is absolute.
+    - `is_absolute_windows`: Returns `True` if a Windows path is absolute.
+    - `join`: Join path elements and return as normalized Unix paths.
+    - `join_windows`: Join path elements and return as normalized Windows paths.
+    - `join_respect_absolute`: Join path elements (respecting absolute paths) and return as normalized Unix paths.
+    - `join_respect_absolute_windows`: Join path elements (respecting absolute paths) and return as normalized Windows paths.
+    - `normalize`: Normalize a Unix file path.
+    - `normalize_windows`: Normalize a Windows file path.
 
 ## Installation
 
@@ -73,9 +103,9 @@ simply not tested). However future version may drop Windows support.
 
 ### For MODULES.bazel
 
-See https://github.com/helly25/bzl/releases to replace the version number.
+See [helly25/bzl/releases](https://github.com/helly25/bzl/releases) to replace the version number.
 
-```
+```starlark
 bazel_dep(name = "helly25_bzl", version = "0.0.0")
 ```
 
@@ -93,4 +123,4 @@ http_archive(
 
 ### Dependencies
 
-* `bazel_skylib`.
+- `bazel_skylib`.

@@ -544,12 +544,6 @@ quiche::QuicheBuffer MoqtFramer::SerializeRequestError(
       WireStringWithMoqVarIntLength(message.reason_phrase));
 }
 
-quiche::QuicheBuffer MoqtFramer::SerializeUnsubscribe(
-    const MoqtUnsubscribe& message) {
-  return SerializeControlMessage(MoqtMessageType::kUnsubscribe,
-                                 WireMoqVarInt(message.request_id));
-}
-
 quiche::QuicheBuffer MoqtFramer::SerializePublishDone(
     const MoqtPublishDone& message) {
   return SerializeControlMessage(
@@ -618,7 +612,14 @@ quiche::QuicheBuffer MoqtFramer::SerializeSubscribeNamespace(
   return SerializeControlMessage(
       MoqtMessageType::kSubscribeNamespace, WireMoqVarInt(message.request_id),
       WireTrackNamespace(message.track_namespace_prefix),
-      WireMoqVarInt(message.subscribe_options),
+      WireKeyValuePairList(message.parameters.ToKeyValuePairList()));
+}
+
+quiche::QuicheBuffer MoqtFramer::SerializeSubscribeTracks(
+    const MoqtSubscribeTracks& message) {
+  return SerializeControlMessage(
+      MoqtMessageType::kSubscribeTracks, WireMoqVarInt(message.request_id),
+      WireTrackNamespace(message.track_namespace_prefix),
       WireKeyValuePairList(message.parameters.ToKeyValuePairList()));
 }
 
@@ -707,8 +708,8 @@ quiche::QuicheBuffer MoqtFramer::SerializePublish(const MoqtPublish& message) {
 quiche::QuicheBuffer MoqtFramer::SerializeObjectAck(
     const MoqtObjectAck& message) {
   return SerializeControlMessage(
-      MoqtMessageType::kObjectAck, WireMoqVarInt(message.subscribe_id),
-      WireMoqVarInt(message.group_id), WireMoqVarInt(message.object_id),
+      MoqtMessageType::kObjectAck, WireMoqVarInt(message.group_id),
+      WireMoqVarInt(message.object_id),
       WireMoqVarInt(SignedVarintSerializedForm(
           message.delta_from_deadline.ToMicroseconds())));
 }

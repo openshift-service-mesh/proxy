@@ -23,26 +23,43 @@ filegroup(
 )
 """
 
-LLVM_VERSION = "18.1.8"
+LLVM_VERSION = "22.1.8"
+
+# Extra distributions for versions not (yet) in toolchains_llvm's version table
+LLVM_DISTRIBUTIONS = {
+    "LLVM-22.1.8-Linux-ARM64.tar.xz": "805efad2bb91cb4967fa569e0881d10c0f69c04461cf671cccbae19f547acc34",
+    "LLVM-22.1.8-Linux-X64.tar.xz": "df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384",
+    "LLVM-22.1.8-macOS-ARM64.tar.xz": "f260f4f7c0d430828a81ae8a3826a1d63fc0963ec2459489308cc23b1f7eab4f",
+}
 
 VERSIONS = {
     "cmake": "3.23.2",
     "llvm": LLVM_VERSION,
     "ninja": "1.12.0",
     "python": "3.12",
-    "bins_release": "0.1.57",
-    "msan_libs_sha256": "d4e9d018af22d30ca4d7dd8feeea1c3d3912ab8c50db90f62140ab47bf4843e1",
-    "tsan_libs_sha256": "8730c906a234646cbb22c145c80ea59b832c59f108b5545ecec750f378bba880",
+    "bins_release": "0.2.0",
+    "msan_libs_sha256": "efad249d6718f49ac08bbc9ba6ca4e21453fd8d94d96aa02b07aa90622600db6",
+    "tsan_libs_sha256": "2d136d0c63021b3280ec4b33a88c8381f2214a849a50ae557d7f5d9e9f9b93d0",
 
     "libcxx_libs_sha256": {
-        "aarch64": "9c900495dac5c214d135caab02cfcf01806916a8eeb994687b2815ed38a79831",
-        "x86_64": "50c7385dd1c17fd3606fa8850cfb1c7d0166ab109e404964f55abd6b508560eb",
+        "aarch64": "b3bd8dfc1c250d5c2c36de174138ffef9754402b33e54abe9b5efb25982fa2f7",
+        "x86_64": "e40f39338ffe561dfa26541557c9e548fc7760db9d99f7b6c5de237b725482aa",
+    },
+
+    # Darwin libc++ for cross-compilation (extracted from LLVM macOS release)
+    "libcxx_libs_darwin_sha256": {
+        "aarch64": "89fcb9752ed026bcf2a5f50b745f23a5a4fbfad870e9813235d22c648e1d2be7",
+    },
+
+    # macOS SDK sysroot for cross-compilation (extracted from Apple CLTools)
+    "macos_sysroot_sha256": {
+        "arm64": "774b285de5e1d6636d08e54499fc1dff6e225ab4f510058162e50d874c3fd223",
     },
 
     # Glint binary hashes by architecture
     "glint_sha256": {
-        "amd64": "a9389398ba5719197f7c81e6a8127262095a1a5f1ea3a509f16c32bf4ee65719",
-        "arm64": "4c54995d0015b446b1d4fb086bc53c8dad088b2d633179d3b5ba5f19ce965a23",
+        "amd64": "67c91213b7ae3ebf37a59ccd9272d5b940d7a8c6557f36f3a0481b8fc80a0121",
+        "arm64": "9961efa497a7637faba50450e10c7ec783d0813a61b974c7b7c83ab86a555a3e",
     },
 
     # Sysroot hashes organized by glibc version, stdlib variant, and architecture
@@ -51,22 +68,22 @@ VERSIONS = {
     "sysroot_hashes": {
         "2.31": {
             "base": {
-                "amd64": "3db4a6da412f3fa68a882f5972b2b5ec246157d53beeec96758aa3a5c8bdde25",
-                "arm64": "e9357635998cb3ffa2016840b7199bd75bd50e5ed641b856a456fa9123ca3e18",
+                "amd64": "a2dbb3d5590dead5a6887d947de8a18bf6be1f7dc8436e9a61d009deb3144bf3",
+                "arm64": "7b7e827b7ecc529fb95ccf2faf24b8bd051fed801854f348ba3cc869b46bcfcd",
             },
             "13": {
-                "amd64": "4701eabc64431142a6e126f403727b0a745ddf3266050d4d7b3f41a2cb90c1de",
-                "arm64": "35bf533c5ccd27ebfeca5c4e5a8aa8fc077b1c30cac50af077168179acd2df87",
+                "amd64": "25a7a48f38904906c92fb36dd3143af0666d6618814625b03c426ae708a8fbf6",
+                "arm64": "dcb1eaaea629db0f03d5ecbc6bb0b9b071e90fc9c795b79d02732caee387b403",
             },
         },
         "2.28": {
             "base": {
-                "amd64": "c7ca56e79181a8236b14bc750f8fbf84ec2fe71ed4a3964972341f6e2e83be96",
-                "arm64": "541c2c2adc37d6d3e3622b2eafd1016bbc394efdcdfa7d412f318fb2b02f381d",
+                "amd64": "f1a0ac58dd10fcff2b6f501b0591d502f0546533db4afeb5b5d167f93b3f1b46",
+                "arm64": "6ae69f247c888079216bbdf89438b4e60a4a1c6ae15b44f829df955beaef1309",
             },
             "13": {
-                "amd64": "7be43ae94046d55fbea91529f3e524214634c567366053eebdd0bd6927181b40",
-                "arm64": "f4019ba6d2a4d549a1a7825e60b911bc7cad9503b4f99e25be2ed3c8fd6735fe",
+                "amd64": "9096d82673999676a6a0d87fdc0e1d1fce31ed8389441723609ed264ccd04d3e",
+                "arm64": "6da57853a875c9c70484d0c91d1e88d22779a194bd6e64fa2dd9aedb668309a1",
             },
         },
     },
@@ -91,37 +108,37 @@ VERSIONS = {
     "bazel_skylib": {
         "type": "github_archive",
         "repo": "bazelbuild/bazel-skylib",
-        "version": "1.4.2",
-        "sha256": "66ffd9315665bfaafc96b52278f57c7e2dd09f5ede279ea6d39b2be471e7e3aa",
+        "version": "1.9.2",
+        "sha256": "37cdfbc6faefea94f7b37760a305c98c08981116c2bc9e821e3b423221fad8c8",
         "url": "https://github.com/{repo}/releases/download/{version}/bazel-skylib-{version}.tar.gz",
     },
     "llvm_libcxx_aarch64": {
         "arch": "aarch64",
         "type": "http_archive",
         "repo": "llvm/llvm-project",
-        "download_suffix": "linux-gnu",
+        "download_suffix": "Linux-ARM64",
         "version": LLVM_VERSION,
-        "sha256": "dcaa1bebbfbb86953fdfbdc7f938800229f75ad26c5c9375ef242edad737d999",
-        "url": "https://github.com/{repo}/releases/download/llvmorg-{version}/clang+llvm-{version}-{arch}-{download_suffix}.tar.xz",
-        "strip_prefix": "clang+llvm-{version}-{arch}-linux-gnu/",
+        "sha256": "805efad2bb91cb4967fa569e0881d10c0f69c04461cf671cccbae19f547acc34",
+        "url": "https://github.com/{repo}/releases/download/llvmorg-{version}/LLVM-{version}-{download_suffix}.tar.xz",
+        "strip_prefix": "LLVM-{version}-{download_suffix}/",
         "build_file_content": LLVM_CXX_BUILD,
     },
     "llvm_libcxx_x86_64": {
         "arch": "x86_64",
-        "download_suffix": "linux-gnu-ubuntu-18.04",
+        "download_suffix": "Linux-X64",
         "type": "http_archive",
         "repo": "llvm/llvm-project",
         "version": LLVM_VERSION,
-        "sha256": "54ec30358afcc9fb8aa74307db3046f5187f9fb89fb37064cdde906e062ebf36",
-        "url": "https://github.com/{repo}/releases/download/llvmorg-{version}/clang+llvm-{version}-{arch}-{download_suffix}.tar.xz",
-        "strip_prefix": "clang+llvm-{version}-{arch}-linux-gnu-ubuntu-18.04/",
+        "sha256": "df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384",
+        "url": "https://github.com/{repo}/releases/download/llvmorg-{version}/LLVM-{version}-{download_suffix}.tar.xz",
+        "strip_prefix": "LLVM-{version}-{download_suffix}/",
         "build_file_content": LLVM_CXX_BUILD,
     },
     "llvm_source": {
         "type": "github_archive",
         "repo": "llvm/llvm-project",
         "version": "llvmorg-%s" % LLVM_VERSION,
-        "sha256": "09c08693a9afd6236f27a2ebae62cda656eba19021ef3f94d59e931d662d4856",
+        "sha256": "ad18b70e287954c3d62bc7e0b86e7b7af2adf87bcfce21c15fe717f101d7aace",
         "url": "https://github.com/{repo}/archive/{version}.tar.gz",
         "strip_prefix": "llvm-project-{version}",
         "build_file_content": """filegroup(name = \"all\", srcs = glob([\"**\"]), visibility = [\"//visibility:public\"])""",
@@ -185,8 +202,8 @@ VERSIONS = {
         "patch_args": ["-p1"],
         "patches": ["@envoy_toolshed//:patches/toolchains_llvm.patch"],
         "repo": "bazel-contrib/toolchains_llvm",
-        "version": "1.6.0",
-        "sha256": "2b298a1d7ea99679f5edf8af09367363e64cb9fbc46e0b7c1b1ba2b1b1b51058",
+        "version": "1.8.0",
+        "sha256": "3b05826f256040f91c24dcaad673eb1c91e4cc93f4043d0205f2512327640205",
         "url": "https://github.com/{repo}/releases/download/v{version}/{name}-v{version}.tar.gz",
         "strip_prefix": "{name}-v{version}",
     },

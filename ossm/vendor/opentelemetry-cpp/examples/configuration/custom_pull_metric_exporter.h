@@ -6,7 +6,6 @@
 #include <chrono>
 #include <string>
 
-#include "opentelemetry/sdk/metrics/instruments.h"
 #include "opentelemetry/sdk/metrics/metric_reader.h"
 
 class CustomPullMetricExporter : public opentelemetry::sdk::metrics::MetricReader
@@ -22,12 +21,12 @@ public:
   opentelemetry::sdk::metrics::AggregationTemporality GetAggregationTemporality(
       opentelemetry::sdk::metrics::InstrumentType instrument_type) const noexcept override;
 
+private:
   bool OnForceFlush(std::chrono::microseconds timeout) noexcept override;
 
   bool OnShutDown(std::chrono::microseconds timeout) noexcept override;
 
   void OnInitialized() noexcept override;
 
-private:
   std::string comment_;
 };

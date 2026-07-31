@@ -22,15 +22,13 @@
 #  include "foo_library/foo_library.h"
 #endif
 
-namespace trace     = opentelemetry::trace;
 namespace trace_sdk = opentelemetry::sdk::trace;
 namespace zipkin    = opentelemetry::exporter::zipkin;
 namespace resource  = opentelemetry::sdk::resource;
 
 namespace
 {
-zipkin::ZipkinExporterOptions opts;
-void InitTracer()
+void InitTracer(const zipkin::ZipkinExporterOptions &opts)
 {
   // Create zipkin exporter instance
   resource::ResourceAttributes attributes = {{"service.name", "zipkin_demo_service"}};
@@ -52,12 +50,13 @@ void CleanupTracer()
 
 int main(int argc, char *argv[])
 {
+  zipkin::ZipkinExporterOptions opts;
   if (argc == 2)
   {
     opts.endpoint = argv[1];
   }
   // Removing this line will leave the default noop TracerProvider in place.
-  InitTracer();
+  InitTracer(opts);
 
   foo_library();
 

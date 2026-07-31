@@ -8,11 +8,13 @@ run --color=yes
 build --color=yes
 
 common --noenable_bzlmod
+common --enable_workspace
+common --legacy_external_runfiles
 common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
 common --@rules_python//python/config_settings:bootstrap_impl=script
 
 common --registry=https://bcr.bazel.build/
-common --registry=https://raw.githubusercontent.com/envoyproxy/toolshed/1296ec77aaabb68289c2588840592b481696f760/bazel-registry
+common --registry=https://raw.githubusercontent.com/envoyproxy/toolshed/90e1a4c1735b75f7e02996d2c055a3ce7822a16e/bazel-registry
 
 
 #############################################################################
@@ -47,7 +49,8 @@ common:rbe --config=remote-cache
 common:rbe --config=remote-exec
 
 # Override the default RBE platforms to use the gcc worker container.
-# Use alongside --config=rbe and --config=gcc for gcc RBE builds.
+# Use alongside --config=gcc for gcc RBE builds.
+common:rbe-gcc --config=rbe
 common:rbe-gcc --host_platform=//platforms/rbe:linux_x64_gcc
 common:rbe-gcc --extra_execution_platforms=//platforms/rbe:linux_x64_gcc,//platforms/rbe:linux_arm64_gcc
 
@@ -74,8 +77,9 @@ common:remote-exec --extra_execution_platforms=//platforms/rbe:linux_x64,//platf
 # gcc
 #############################################################################
 
-common:gcc --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=0
 common:gcc --//compile:use_gcc_toolchain=true
+common:gcc --extra_toolchains=//toolchains/gcc:linux_x64_toolchain
+common:gcc --extra_toolchains=//toolchains/gcc:linux_arm64_toolchain
 
 
 #############################################################################

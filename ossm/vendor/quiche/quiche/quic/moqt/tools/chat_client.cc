@@ -201,7 +201,7 @@ void ChatClient::OnTerminalLineInput(absl::string_view input_message) {
   queue_->AddObject(std::move(message_slice), /*key=*/true);
 }
 
-void ChatClient::RemoteTrackVisitor::OnReply(
+void ChatClient::ObjectSubscriberVisitor::OnReply(
     const FullTrackName& full_track_name,
     std::variant<SubscribeOkData, MoqtRequestErrorInfo> response) {
   auto it = client_->other_users_.find(full_track_name);
@@ -223,7 +223,7 @@ void ChatClient::RemoteTrackVisitor::OnReply(
       response);
 }
 
-void ChatClient::RemoteTrackVisitor::OnObjectFragment(
+void ChatClient::ObjectSubscriberVisitor::OnObjectFragment(
     const FullTrackName& full_track_name,
     const PublishedObjectMetadata& metadata, absl::string_view object,
     uint64_t offset) {
@@ -324,9 +324,8 @@ bool ChatClient::PublishNamespaceAndSubscribeNamespace() {
   MessageParameters parameters;
   parameters.authorization_tokens.emplace_back(
       AuthTokenType::kOutOfBand, std::string(GetUsername(my_track_name_)));
-  namespace_task_ =
-      session_->SubscribeNamespace(prefix, SubscribeNamespaceOption::kNamespace,
-                                   parameters, std::move(response_callback));
+  namespace_task_ = session_->SubscribeNamespace(prefix, parameters,
+                                                 std::move(response_callback));
   if (namespace_task_ != nullptr) {
     namespace_task_->SetObjectsAvailableCallback(
         [this]() {

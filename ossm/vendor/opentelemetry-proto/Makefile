@@ -14,7 +14,7 @@ $(1)
 endef
 
 .PHONY: all
-all: gen-all markdown-link-check markdownlint
+all: gen-all markdown-link-check markdownlint markdown-toc
 
 # Generate all implementations
 .PHONY: gen-all
@@ -162,10 +162,10 @@ gen-ruby:
 	$(PROTOC) --ruby_out=./$(PROTO_GEN_RUBY_DIR) --grpc-ruby_out=./$(PROTO_GEN_RUBY_DIR) opentelemetry/proto/collector/logs/v1/logs_service.proto
 	$(PROTOC) --ruby_out=./$(PROTO_GEN_RUBY_DIR) --grpc-ruby_out=./$(PROTO_GEN_RUBY_DIR) opentelemetry/proto/collector/profiles/v1development/profiles_service.proto
 
-# The Profiling protocol is still development. So it is excluded from the breaking-change check.
+# The Profiling and Process Context Sharing protos are still development. So they are excluded from the breaking-change check.
 .PHONY: breaking-change
 breaking-change:
-	$(BUF) breaking --against $(BUF_AGAINST) --config '{"version":"v1","breaking":{"ignore":["opentelemetry/proto/profiles", "opentelemetry/proto/collector/profiles"]}}' $(BUF_FLAGS)
+	$(BUF) breaking --against $(BUF_AGAINST) --config '{"version":"v1","breaking":{"ignore":["opentelemetry/proto/profiles", "opentelemetry/proto/collector/profiles", "opentelemetry/proto/processcontext"]}}' $(BUF_FLAGS)
 
 
 ALL_DOCS := $(shell find . -type f -name '*.md' -not -path './.github/*' -not -path './node_modules/*' | sort)
@@ -191,3 +191,13 @@ markdownlint:
 			$(MARKDOWNLINTIMAGE) \
 			--config .markdownlint.yaml $$f || exit 1; \
 	done
+
+.PHONY: markdown-toc
+markdown-toc:
+	@if ! npm ls doctoc; then npm ci --ignore-scripts; fi
+	npx --no -- doctoc . --update-only --mintocitems 1 --toc-pragma-style compact --notitle --entryprefix='-,*,+' || exit 1;
+
+.PHONY: markdown-toc-check
+markdown-toc-check:
+	@if ! npm ls doctoc; then npm ci --ignore-scripts; fi
+	npx --no -- doctoc . --update-only --mintocitems 1 --toc-pragma-style compact --notitle --entryprefix='-,*,+' --dryrun || exit 1;

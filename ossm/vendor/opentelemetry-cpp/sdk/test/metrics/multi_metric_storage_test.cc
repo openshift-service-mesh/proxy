@@ -4,8 +4,8 @@
 #include <gtest/gtest.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string>
 
-#include "opentelemetry/common/key_value_iterable.h"
 #include "opentelemetry/context/context.h"
 #include "opentelemetry/nostd/shared_ptr.h"
 #include "opentelemetry/sdk/metrics/state/metric_storage.h"
@@ -13,6 +13,9 @@
 
 using namespace opentelemetry;
 using namespace opentelemetry::sdk::metrics;
+
+namespace
+{
 
 class TestMetricStorage : public SyncWritableMetricStorage
 {
@@ -62,3 +65,5 @@ TEST(MultiMetricStorageTest, BasicTests)
   EXPECT_EQ(static_cast<TestMetricStorage *>(storage.get())->num_calls_long, 3);
   EXPECT_EQ(static_cast<TestMetricStorage *>(storage.get())->num_calls_double, 1);
 }
+
+}  // namespace

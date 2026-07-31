@@ -461,9 +461,7 @@ void WasmShuffleAnalyzer::ProcessShuffleOfLoads(const Simd128ShuffleOp& shuffle,
 
   if (!DemandedByteLanes(&shuffle)) {
     // Full width shuffles.
-    // TODO(jwendell): Remove <> workaround once LLVM toolchain is bumped (clang 18
-    // doesn't support default template args on alias templates without <>).
-    wasm::SimdShuffle::ShuffleArray<> shuffle_bytes;
+    wasm::SimdShuffle::ShuffleArray shuffle_bytes;
     std::copy_n(shuffle.shuffle, kSimd128Size, shuffle_bytes.begin());
     auto canonical = wasm::SimdShuffle::TryMatchCanonical(shuffle_bytes);
     switch (canonical) {

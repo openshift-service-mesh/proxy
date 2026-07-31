@@ -8,7 +8,6 @@
 #include <thread>
 #include <utility>
 
-#include "opentelemetry/common/attribute_value.h"
 #include "opentelemetry/exporters/otlp/otlp_grpc_metric_exporter_factory.h"
 #include "opentelemetry/exporters/otlp/otlp_grpc_metric_exporter_options.h"
 #include "opentelemetry/metrics/meter_provider.h"
@@ -37,16 +36,14 @@
 #endif
 
 namespace metric_sdk    = opentelemetry::sdk::metrics;
-namespace common        = opentelemetry::common;
 namespace metrics_api   = opentelemetry::metrics;
 namespace otlp_exporter = opentelemetry::exporter::otlp;
 
 namespace
 {
 
-otlp_exporter::OtlpGrpcMetricExporterOptions exporter_options;
-
-void InitMetrics(std::string &name)
+void InitMetrics(const otlp_exporter::OtlpGrpcMetricExporterOptions &exporter_options,
+                 std::string &name)
 {
   auto exporter = otlp_exporter::OtlpGrpcMetricExporterFactory::Create(exporter_options);
 
@@ -102,6 +99,7 @@ void CleanupMetrics()
 
 int main(int argc, char *argv[])
 {
+  otlp_exporter::OtlpGrpcMetricExporterOptions exporter_options;
   std::string example_type;
   if (argc > 1)
   {
@@ -125,7 +123,7 @@ int main(int argc, char *argv[])
 
   std::string name{"otlp_grpc_metric_example"};
 
-  InitMetrics(name);
+  InitMetrics(exporter_options, name);
 
   if (example_type == "counter")
   {

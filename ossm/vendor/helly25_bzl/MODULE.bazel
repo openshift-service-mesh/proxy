@@ -16,7 +16,7 @@
 
 module(
     name = "helly25_bzl",
-    version = "0.3.1",
+    version = "0.4.3",
 )
 
 bazel_dep(name = "bazel_skylib", version = "1.7.1")
