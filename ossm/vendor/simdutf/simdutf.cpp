@@ -1,4 +1,3 @@
-#include "atomic_ref_polyfill.h"
 /* auto-generated on 2026-03-06 22:26:29 -0500. Do not edit! */
 /* begin file src/simdutf.cpp */
 #include "simdutf.h"

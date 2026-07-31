@@ -67,8 +67,8 @@ build --override_repository=jq_toolchains=%workspace%/ossm/vendor/jq_toolchains
 build --override_repository=libcircllhist=%workspace%/ossm/vendor/libcircllhist
 build --override_repository=libevent=%workspace%/ossm/vendor/libevent
 build --override_repository=liburing=%workspace%/ossm/vendor/liburing
+build --override_repository=llvm_distributions_data=%workspace%/ossm/vendor/llvm_distributions_data
 build --override_repository=luajit=%workspace%/ossm/vendor/luajit
-build --override_repository=luajit2=%workspace%/ossm/vendor/luajit2
 build --override_repository=msgpack-cxx=%workspace%/ossm/vendor/msgpack-cxx
 build --override_repository=nghttp2=%workspace%/ossm/vendor/nghttp2
 build --override_repository=nlohmann_json=%workspace%/ossm/vendor/nlohmann_json

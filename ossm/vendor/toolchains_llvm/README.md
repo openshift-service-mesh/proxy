@@ -50,8 +50,10 @@ We currently offer limited customizability through attributes of the
 [llvm_toolchain\_\* rules](toolchain/rules.bzl). You can send us a PR to add
 more configuration attributes.
 
-The `MODULE.bazel` example below demonstrates how to add new LLVM distributions before the toolchain has
-been updated. They can easily be computed using the provided checksum tool (see `llvm_checksums.sh -h`).
+The `MODULE.bazel` example below demonstrates how to use an LLVM release that
+is not yet present in the bundled distribution table. The required SHA-256s
+can be obtained with `utils/extra_distributions.sh -v <version>`
+(see [Distribution data and scripts](#distribution-data-and-scripts) below).
 
 ```starlark
 llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm", dev_dependency = True)
@@ -68,7 +70,8 @@ llvm.toolchain(
 ```
 
 The following `WORKSPACE` snippet shows how to add a specific version for a specific target before
-the version was added to [llvm_distributions.bzl](toolchain/internal/llvm_distributions.bzl).
+the version was added to the bundled distribution data under
+[`toolchain/distributions/`](toolchain/distributions).
 
 ```starlark
 llvm_toolchain(
@@ -250,6 +253,39 @@ bazel build \
   //...
 ```
 
+#### Per-target toolchain root
+
+By default a single LLVM distribution (the "toolchain root") provides both the
+clang/lld binaries that run (the _exec_ configuration) and the libraries that
+get linked into the produced binaries (the _target_ configuration). When the
+target needs a different distribution than the exec tools (for example a
+target-arch build of libc++ or compiler-rt), specify it separately through the
+`target_toolchain_roots` attribute (without bzlmod) or the
+`target_toolchain_root` module extension tag (with bzlmod). It is the
+per-target counterpart of `toolchain_roots` / `toolchain_root`, and falls back
+to the exec toolchain root when unset.
+
+#### libstdc++ and Yocto sysroot layouts
+
+When linking against libstdc++ from a sysroot, three attributes (each keyed by
+target OS/arch pair) tune how it is found and linked:
+
+- `stdlib`: in addition to the values described under
+  [Sysroots](#sysroots), `dynamic-stdc++` (optionally `dynamic-stdc++-<ver>`)
+  behaves like `stdc++` but links `libstdc++.so` instead of the default static
+  `libstdc++.a`.
+- `multiarch`: overrides the multiarch tuple used to construct the sysroot
+  include and library paths. Useful when the sysroot uses a non-standard tuple,
+  e.g. Yocto's `aarch64-oe4t-linux`.
+- `cxx_include_layout`: selects how libstdc++ headers and the gcc runtime libs
+  are laid out in the sysroot. `debian` (the default) expects
+  `/usr/include/<multiarch>/c++/<ver>` and `/usr/lib/gcc/<multiarch>/<ver>`;
+  `yocto` expects `/usr/include/c++/<ver>/<multiarch>` and
+  `/usr/lib/<multiarch>/<ver>`.
+
+All three are optional: omit them to get static libstdc++ linking, the builtin
+multiarch tuple, and the `debian` layout.
+
 ### Multi-platform builds
 
 The toolchain supports multi-platform builds through the combination of the
@@ -333,6 +369,135 @@ The toolchain supports Bazel's `layering_check` feature, which relies on
 deps (also known as "depend on what you use") for `cc_*` rules. This feature
 can be enabled by enabling the `layering_check` feature on a per-target,
 per-package or global basis.
+
+### Sanitizers
+
+The toolchain can build with AddressSanitizer, UndefinedBehaviorSanitizer,
+ThreadSanitizer, or MemorySanitizer. Enable at most one at a time, via Bazel
+features:
+
+```sh
+bazel build //... --features=asan
+bazel build //... --features=ubsan
+bazel build //... --features=tsan
+bazel build //... --features=msan   # Linux only; see below
+```
+
+`asan`, `ubsan`, and `tsan` are rules_cc's stock sanitizer features and work
+with the regular standard library. Enabling sanitizers as features means Bazel
+resets them to `--host_features` in the exec configuration, so build tools stay
+uninstrumented. For finer-grained control, combine with
+`--copt=-fsanitize-ignorelist=...` (the provided file is made available to
+compile actions via the `extra_compiler_files` attribute).
+
+MemorySanitizer additionally swaps in an instrumented libc++ (see below).
+
+#### MemorySanitizer and the instrumented libc++
+
+MemorySanitizer is Linux-only and is enabled with `--features=msan`. A feature
+is used so Bazel resets it to `--host_features` in the exec configuration,
+keeping build tools uninstrumented.
+
+MemorySanitizer reports false positives unless the C++ standard library is also
+instrumented, so `msan` swaps the toolchain's libc++ for an instrumented build
+(headers under `libcxx-msan/include`, libraries under `libcxx-msan/lib`).
+There is no official prebuilt instrumented libc++; you must build one from the
+matching LLVM sources and point the distribution at it with the `libcxx_url`
+and `libcxx_sha256` attributes (`llvm`/`llvm_toolchain` rules, or the
+`llvm.toolchain` module extension tag):
+
+```python
+llvm(
+    name = "llvm_toolchain_llvm",
+    llvm_version = "20.1.0",
+    libcxx_url = "https://example.com/libcxx-msan-20.1.0-x86_64-linux-gnu.tar.zst",
+    libcxx_sha256 = "<sha256>",
+)
+```
+
+Build the instrumented libc++ following the [MemorySanitizer libc++
+how-to](https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo),
+e.g.:
+
+```sh
+cmake -GNinja <llvm-src>/runtimes \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+  -DLLVM_USE_SANITIZER=MemoryWithOrigins \
+  -DLLVM_ENABLE_PIC=ON \
+  -DCMAKE_INSTALL_PREFIX=<prefix>
+ninja && ninja install
+# Archive the resulting <prefix>/lib and <prefix>/include directories; that is
+# the layout extracted into libcxx-msan/. libunwind itself is too low-level to
+# instrument, so overwrite the instrumented libunwind.* with the uninstrumented
+# one from your clang distribution before archiving.
+```
+
+## Distribution data and scripts
+
+The list of LLVM releases this toolchain knows about lives as JSONC data
+under [`toolchain/distributions/`](toolchain/distributions). A repository
+rule merges every JSONC file into a single lookup table at module-load time:
+
+| file                                                                 | role                                                                                                                                       |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| [`pre_github.jsonc`](toolchain/distributions/pre_github.jsonc)       | LLVM 6.x–9.x hosted on releases.llvm.org. Hand-maintained, frozen.                                                                         |
+| [`github_legacy.jsonc`](toolchain/distributions/github_legacy.jsonc) | LLVM 10.x–18.x with pre-19.x irregular naming. Hand-maintained, frozen.                                                                    |
+| [`github.jsonc`](toolchain/distributions/github.jsonc)               | LLVM 19.x and newer. Regenerated end-to-end by `utils/update_distributions.sh`.                                                            |
+| [`extra.jsonc`](toolchain/distributions/extra.jsonc)                 | Empty by default. Downstream slot for additional bundled releases; loaded last, so any key here overrides the same key in the other files. |
+
+Each file has the shape:
+
+```jsonc
+{
+  "_meta": {
+    "description": "...",
+    "base_url": {
+      "": "https://example.com/llvm-{version}/",
+      "<version>": "https://override/{version}/", // optional per-version
+    },
+  },
+  "<tarball-basename>": "<sha256>",
+  "<full-url-or-path>": "<sha256>",
+}
+```
+
+`base_url` is optional. Its `""` key sets a per-file default URL template;
+the optional `"<version>"` keys override individual releases. Templates may
+contain `{version}` (substituted at materialization time) and should end
+with `/` — the basename is appended directly. Files that omit `base_url`
+fall back to the standard GitHub release URL
+(`https://github.com/llvm/llvm-project/releases/download/llvmorg-{version}/`).
+
+Entry keys are either a tarball **basename** (URL derived via `base_url`)
+or a **full URL/path** (used verbatim, bypassing `base_url`). Comments are
+stripped before parsing, and trailing commas are tolerated.
+
+### Two helper scripts
+
+- **`utils/update_distributions.sh`** — refreshes
+  [`toolchain/distributions/github.jsonc`](toolchain/distributions/github.jsonc)
+  by paging through the GitHub releases API for `llvm/llvm-project` and
+  rewriting the file in place. Use this when contributing a new LLVM release
+  to the bundled list. The script also regenerates the test golden file so
+  the diff stays self-contained. No tarballs are downloaded — checksums come
+  from GitHub's release-asset `.digest` field, with existing values
+  preserved for older assets that predate that field. Set `GITHUB_TOKEN` to
+  avoid the unauthenticated API rate limit. See `-h` for details.
+
+- **`utils/extra_distributions.sh`** — prints checksums for a single LLVM
+  release, formatted to paste straight into the `extra_llvm_distributions`
+  attribute shown earlier. Use this only when the version you want is _not
+  yet bundled_ in `github.jsonc`; if it is, just bump `llvm_version` and let
+  the toolchain pick up the existing entries. Falls back to downloading
+  tarballs and computing SHA-256 locally for older assets that don't have a
+  `.digest`. See `-h` for details.
+
+Both scripts run on Linux, macOS, and on Windows under Git Bash / MSYS2 /
+WSL. They require `bash`, `curl`, `jq`, and `awk`;
+`utils/extra_distributions.sh` additionally needs `sha256sum` (Linux, Git
+Bash) or `shasum` (macOS).
 
 ## Prior Art
 

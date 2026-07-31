@@ -21,17 +21,14 @@
 #  include "foo_library/foo_library.h"
 #endif
 
-namespace trace     = opentelemetry::trace;
 namespace trace_sdk = opentelemetry::sdk::trace;
 namespace otlp      = opentelemetry::exporter::otlp;
 
 namespace
 {
-opentelemetry::exporter::otlp::OtlpGrpcExporterOptions opts;
-
 std::shared_ptr<opentelemetry::sdk::trace::TracerProvider> provider;
 
-void InitTracer()
+void InitTracer(const otlp::OtlpGrpcExporterOptions &opts)
 {
   // Create OTLP exporter instance
   auto exporter  = otlp::OtlpGrpcExporterFactory::Create(opts);
@@ -59,6 +56,7 @@ void CleanupTracer()
 
 int main(int argc, char *argv[])
 {
+  otlp::OtlpGrpcExporterOptions opts;
   if (argc > 1)
   {
     opts.endpoint = argv[1];
@@ -69,7 +67,7 @@ int main(int argc, char *argv[])
     }
   }
   // Removing this line will leave the default noop TracerProvider in place.
-  InitTracer();
+  InitTracer(opts);
 
   foo_library();
 

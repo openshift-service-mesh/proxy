@@ -20,7 +20,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <ratio>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -28,9 +27,9 @@
 #include <vector>
 
 #include "opentelemetry/ext//http/client/curl/http_client_curl.h"
+#include "opentelemetry/ext/http/client/curl/http_client_factory_curl.h"
 #include "opentelemetry/ext/http/client/curl/http_operation_curl.h"
 #include "opentelemetry/ext/http/client/http_client.h"
-#include "opentelemetry/ext/http/client/http_client_factory.h"
 #include "opentelemetry/ext/http/server/http_server.h"
 #include "opentelemetry/nostd/function_ref.h"
 #include "opentelemetry/nostd/string_view.h"
@@ -40,6 +39,9 @@ constexpr int HTTP_PORT{19000};
 namespace curl        = opentelemetry::ext::http::client::curl;
 namespace http_client = opentelemetry::ext::http::client;
 namespace nostd       = opentelemetry::nostd;
+
+namespace
+{
 
 class CustomEventHandler : public http_client::EventHandler
 {
@@ -70,6 +72,7 @@ public:
 
 class GetEventHandler : public CustomEventHandler
 {
+public:
   void OnResponse(http_client::Response &response) noexcept override
   {
     ASSERT_EQ(200, response.GetStatusCode());
@@ -81,6 +84,7 @@ class GetEventHandler : public CustomEventHandler
 
 class PostEventHandler : public CustomEventHandler
 {
+public:
   void OnResponse(http_client::Response &response) noexcept override
   {
     ASSERT_EQ(200, response.GetStatusCode());
@@ -118,6 +122,7 @@ private:
 
 class RetryEventHandler : public CustomEventHandler
 {
+public:
   void OnResponse(http_client::Response &response) noexcept override
   {
     ASSERT_EQ(429, response.GetStatusCode());
@@ -143,6 +148,7 @@ protected:
 public:
   BasicCurlHttpTests() : is_setup_(false), is_running_(false) {}
 
+protected:
   void SetUp() override
   {
     if (is_setup_.exchange(true))
@@ -171,6 +177,7 @@ public:
     is_running_ = false;
   }
 
+public:
   int onHttpRequest(HTTP_SERVER_NS::HttpRequest const &request,
                     HTTP_SERVER_NS::HttpResponse &response) override
   {
@@ -276,7 +283,7 @@ TEST_F(BasicCurlHttpTests, HttpResponse)
 TEST_F(BasicCurlHttpTests, SendGetRequest)
 {
   received_requests_.clear();
-  auto session_manager = http_client::HttpClientFactory::Create();
+  auto session_manager = std::make_shared<http_client::curl::HttpCurlClientFactory>()->Create();
   EXPECT_TRUE(session_manager != nullptr);
 
   auto session = session_manager->CreateSession("http://127.0.0.1:19000");
@@ -293,7 +300,7 @@ TEST_F(BasicCurlHttpTests, SendGetRequest)
 TEST_F(BasicCurlHttpTests, SendPostRequest)
 {
   received_requests_.clear();
-  auto session_manager = http_client::HttpClientFactory::Create();
+  auto session_manager = std::make_shared<http_client::curl::HttpCurlClientFactory>()->Create();
   EXPECT_TRUE(session_manager != nullptr);
 
   auto session = session_manager->CreateSession("http://127.0.0.1:19000");
@@ -319,7 +326,7 @@ TEST_F(BasicCurlHttpTests, SendPostRequest)
 TEST_F(BasicCurlHttpTests, RequestTimeout)
 {
   received_requests_.clear();
-  auto session_manager = http_client::HttpClientFactory::Create();
+  auto session_manager = std::make_shared<http_client::curl::HttpCurlClientFactory>()->Create();
   EXPECT_TRUE(session_manager != nullptr);
 
   auto session = session_manager->CreateSession("192.0.2.0:19000");  // RFC 5737 TEST-NET-1
@@ -655,7 +662,7 @@ TEST_F(BasicCurlHttpTests, FinishInAsyncCallback)
 
 TEST_F(BasicCurlHttpTests, ElegantQuitQuick)
 {
-  auto http_client = http_client::HttpClientFactory::Create();
+  auto http_client = std::make_shared<http_client::curl::HttpCurlClientFactory>()->Create();
   std::static_pointer_cast<curl::HttpClient>(http_client)->MaybeSpawnBackgroundThread();
   // start background first, then test it could wakeup
   auto session = http_client->CreateSession("http://127.0.0.1:19000/get/");
@@ -721,7 +728,7 @@ struct GzipEventHandler : public CustomEventHandler
 TEST_F(BasicCurlHttpTests, GzipCompressibleData)
 {
   received_requests_.clear();
-  auto session_manager = http_client::HttpClientFactory::Create();
+  auto session_manager = std::make_shared<http_client::curl::HttpCurlClientFactory>()->Create();
   EXPECT_TRUE(session_manager != nullptr);
 
   auto session = session_manager->CreateSession("http://127.0.0.1:19000");
@@ -755,7 +762,7 @@ TEST_F(BasicCurlHttpTests, GzipCompressibleData)
 TEST_F(BasicCurlHttpTests, GzipIncompressibleData)
 {
   received_requests_.clear();
-  auto session_manager = http_client::HttpClientFactory::Create();
+  auto session_manager = std::make_shared<http_client::curl::HttpCurlClientFactory>()->Create();
   EXPECT_TRUE(session_manager != nullptr);
 
   auto session = session_manager->CreateSession("http://127.0.0.1:19000");
@@ -823,3 +830,5 @@ TEST_F(BasicCurlHttpTests, GzipIncompressibleData)
   session_manager->FinishAllSessions();
 }
 #endif  // ENABLE_OTLP_COMPRESSION_PREVIEW
+
+}  // namespace

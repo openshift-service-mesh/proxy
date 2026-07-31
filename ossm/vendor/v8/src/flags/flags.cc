@@ -305,7 +305,7 @@ constexpr size_t kNumFlags = arraysize(flags);
 
 base::Vector<Flag> Flags() { return base::ArrayVector(flags); }
 
-constexpr std::array<int, kNumFlags> GetSortedFlagIndices() {
+consteval std::array<int, kNumFlags> GetSortedFlagIndices() {
   constexpr const char* kFlagNames[] = {
 #define FLAG_MODE_APPLY_NAME(nam) #nam,
 #define FLAG_ALIAS(ftype, ctype, alias, nam) #alias,

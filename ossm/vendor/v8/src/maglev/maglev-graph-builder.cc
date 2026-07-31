@@ -1904,7 +1904,7 @@ using GenericNodeForOperation =
 // Bitwise operations reinterprets the numeric input as Int32 bits for a
 // bitwise operation, which means we want to do slightly different conversions.
 template <Operation kOperation>
-constexpr bool BinaryOperationIsBitwiseInt32() {
+consteval bool BinaryOperationIsBitwiseInt32() {
   switch (kOperation) {
     case Operation::kBitwiseNot:
     case Operation::kBitwiseAnd:

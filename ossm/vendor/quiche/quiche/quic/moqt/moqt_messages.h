@@ -213,13 +213,14 @@ enum class QUICHE_EXPORT MoqtMessageType : uint64_t {
   kTrackStatus = 0x0d,
   kNamespaceDone = 0x0e,
   kGoAway = 0x10,
-  kSubscribeNamespace = 0x11,
   kMaxRequestId = 0x15,
   kFetch = 0x16,
   kFetchCancel = 0x17,
   kFetchOk = 0x18,
   kRequestsBlocked = 0x1a,
   kPublish = 0x1d,
+  kSubscribeNamespace = 0x50,
+  kSubscribeTracks = 0x51,
   kSetup = 0x2f00,
 
   // QUICHE-specific extensions.
@@ -386,10 +387,6 @@ struct QUICHE_EXPORT MoqtSubscribeOk {
   TrackExtensions extensions;
 };
 
-struct QUICHE_EXPORT MoqtUnsubscribe {
-  uint64_t request_id;
-};
-
 struct QUICHE_EXPORT MoqtPublishDone {
   uint64_t request_id;
   PublishDoneCode status_code;
@@ -436,7 +433,12 @@ struct QUICHE_EXPORT MoqtGoAway {
 struct QUICHE_EXPORT MoqtSubscribeNamespace {
   uint64_t request_id;
   TrackNamespace track_namespace_prefix;
-  SubscribeNamespaceOption subscribe_options;
+  MessageParameters parameters;
+};
+
+struct QUICHE_EXPORT MoqtSubscribeTracks {
+  uint64_t request_id;
+  TrackNamespace track_namespace_prefix;
   MessageParameters parameters;
 };
 
@@ -526,11 +528,10 @@ struct QUICHE_EXPORT MoqtPublish {
   TrackExtensions extensions;
 };
 
-// All of the four values in this message are encoded as varints.
+// All of the three values in this message are encoded as varints.
 // `delta_from_deadline` is encoded as an absolute value, with the lowest bit
 // indicating the sign (0 if positive).
 struct QUICHE_EXPORT MoqtObjectAck {
-  uint64_t subscribe_id;
   uint64_t group_id;
   uint64_t object_id;
   // Positive if the object has been received before the deadline.

@@ -27,9 +27,9 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
     name = "bazel_features",
-    sha256 = "c26b4e69cf02fea24511a108d158188b9d8174426311aac59ce803a78d107648",
-    strip_prefix = "bazel_features-1.43.0",
-    url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.43.0/bazel_features-v1.43.0.tar.gz",
+    sha256 = "89eca73d4c334cf664f84920365d2ce04e2c98099b89f7c5b676b5f377c8e754",
+    strip_prefix = "bazel_features-1.48.1",
+    url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.48.1/bazel_features-v1.48.1.tar.gz",
 )
 
 load("@bazel_features//:deps.bzl", "bazel_features_deps")
@@ -38,16 +38,23 @@ bazel_features_deps()
 
 http_archive(
     name = "aspect_bazel_lib",
-    sha256 = "3d62bf30b95b71a566d9ebca50ee78d370b12522d244235b41166f65b142705d",
-    strip_prefix = "bazel-lib-3.2.2",
-    url = "https://github.com/aspect-build/bazel-lib/releases/download/v3.2.2/bazel-lib-v3.2.2.tar.gz",
+    sha256 = "c6e2be1c7a30ef6de9d0e15cd3a4b6bc62fe156848117c0a1eeedf97561a4f6b",
+    strip_prefix = "bazel-lib-3.3.1",
+    url = "https://github.com/aspect-build/bazel-lib/releases/download/v3.3.1/bazel-lib-v3.3.1.tar.gz",
 )
 
 http_archive(
     name = "tar.bzl",
-    sha256 = "80d99a88c75efcb4e3a31661d53efbe9a6c50e497d9d033198b823868bc5434f",
-    strip_prefix = "tar.bzl-0.10.0",
-    url = "https://github.com/bazel-contrib/tar.bzl/releases/download/v0.10.0/tar.bzl-v0.10.0.tar.gz",
+    sha256 = "2799dfd43131e872c8f9fed41a547a8c5afd571c5df6b809eab6219d44403872",
+    strip_prefix = "tar.bzl-0.10.5",
+    url = "https://github.com/bazel-contrib/tar.bzl/releases/download/v0.10.5/tar.bzl-v0.10.5.tar.gz",
+)
+
+http_archive(
+    name = "rules_shell",
+    sha256 = "20721f63908879c083f94869e618ea8d4ff5edb91ff9a72a2ebee357fdbc352d",
+    strip_prefix = "rules_shell-0.8.0",
+    url = "https://github.com/bazelbuild/rules_shell/releases/download/v0.8.0/rules_shell-v0.8.0.tar.gz",
 )
 
 load("@tar.bzl//tar:extensions.bzl", "create_repositories")
@@ -71,6 +78,8 @@ LLVM_VERSIONS = {
 llvm_toolchain(
     name = "llvm_toolchain",
     cxx_standard = {"": "c++17"},
+    extra_compiler_files = "//extra_files:all_files",
+    extra_linker_files = "//extra_files:all_files",
     extra_target_compatible_with = {
         "": ["@//:cxx17"],
     },
@@ -84,6 +93,27 @@ llvm_toolchain(
         "": ["@//:cxx20"],
     },
     llvm_versions = LLVM_VERSIONS,
+)
+
+# Toolchain examples for testing different stdlib implementations on Linux.
+# These are used by run_external_tests.sh in CI to verify that the toolchain
+# works with system-hosted libc++ and libstdc++ instead of the builtin libc++.
+llvm_toolchain(
+    name = "llvm_toolchain_libcxx",
+    llvm_versions = LLVM_VERSIONS,
+    stdlib = {"": "libc++"},
+)
+
+llvm_toolchain(
+    name = "llvm_toolchain_stdcpp",
+    llvm_versions = LLVM_VERSIONS,
+    stdlib = {"": "stdc++"},
+)
+
+llvm_toolchain(
+    name = "llvm_toolchain_dynamic_stdcpp",
+    llvm_versions = LLVM_VERSIONS,
+    stdlib = {"": "dynamic-stdc++"},
 )
 
 # Example toolchain with user provided URLs.
@@ -156,13 +186,44 @@ sysroot(
     urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/toolchain/2202c161310ffde63729f29d27fe7bb24a0bc540/debian_stretch_amd64_sysroot.tar.xz"],
 )
 
+# arm64 sysroot used to exercise cross-compilation to linux-aarch64 from any host.
+sysroot(
+    name = "org_chromium_sysroot_linux_arm64",
+    sha256 = "e39b700d8858d18868544c8c84922f6adfa8419f3f42471b92024ba38eff7aca",
+    urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/toolchain/2202c161310ffde63729f29d27fe7bb24a0bc540/debian_stretch_arm64_sysroot.tar.xz"],
+)
+
 llvm_toolchain(
     name = "llvm_toolchain_with_sysroot",
+    # The chromium sysroots use the Debian libstdc++ header/library layout.
+    cxx_include_layout = {
+        "linux-x86_64": "debian",
+        "linux-aarch64": "debian",
+    },
     llvm_versions = LLVM_VERSIONS,
     sysroot = {
         "linux-x86_64": "@org_chromium_sysroot_linux_x64//sysroot",
+        "linux-aarch64": "@org_chromium_sysroot_linux_arm64//sysroot",
+    },
+    # Exercise per-target target_toolchain_roots: the target's toolchain comes
+    # from the same shared LLVM distribution as the host.
+    target_toolchain_roots = {
+        "linux-x86_64": "@llvm_toolchain_llvm//",
+        "linux-aarch64": "@llvm_toolchain_llvm//",
     },
     # We can share the downloaded LLVM distribution with the first configuration.
+    toolchain_roots = {
+        "": "@llvm_toolchain_llvm//",
+    },
+)
+
+llvm_toolchain(
+    name = "llvm_toolchain_with_sysroot_stdcpp",
+    llvm_versions = LLVM_VERSIONS,
+    stdlib = {"": "stdc++"},
+    sysroot = {
+        "linux-x86_64": "@org_chromium_sysroot_linux_x64//sysroot",
+    },
     toolchain_roots = {
         "": "@llvm_toolchain_llvm//",
     },
@@ -258,6 +319,13 @@ http_archive(
     urls = ["https://github.com/abseil/abseil-cpp/releases/download/20250814.2/abseil-cpp-20250814.2.tar.gz"],
 )
 
+http_archive(
+    name = "google_benchmark",
+    sha256 = "9631341c82bac4a288bef951f8b26b41f69021794184ece969f8473977eaa340",
+    strip_prefix = "benchmark-1.9.5",
+    urls = ["https://github.com/google/benchmark/archive/refs/tags/v1.9.5.tar.gz"],
+)
+
 # As a test dep of com_google_absl.
 http_archive(
     name = "googletest",
@@ -268,17 +336,19 @@ http_archive(
 
 http_archive(
     name = "boringssl",
-    sha256 = "6f64bf1e4af8d14144ca931f8881ff890d01c240add517357e8c54f4b8d79b65",
-    strip_prefix = "boringssl-0.20260204.0",
-    urls = ["https://github.com/google/boringssl/releases/download/0.20260204.0/boringssl-0.20260204.0.tar.gz"],
+    patch_args = ["-p1"],
+    patches = ["//:boringssl-20260413.0.patch"],
+    sha256 = "6c94f115372978f4505df8280522111c03f2ec4efbdf2dcc713cb8cf1fa9aaab",
+    strip_prefix = "boringssl-0.20260526.0",
+    urls = ["https://github.com/google/boringssl/releases/download/0.20260526.0/boringssl-0.20260526.0.tar.gz"],
 )
 
 http_archive(
     name = "io_bazel_rules_go",
-    sha256 = "86d3dc8f59d253524f933aaf2f3c05896cb0b605fc35b460c0b4b039996124c6",
+    sha256 = "763f4a3f6b03469fdb00a77a333dd0b5546d3ee1fa29db373128c08fee73e0e8",
     urls = [
-        "https://mirror.bazel.build/github.com/bazel-contrib/rules_go/releases/download/v0.60.0/rules_go-v0.60.0.zip",
-        "https://github.com/bazel-contrib/rules_go/releases/download/v0.60.0/rules_go-v0.60.0.zip",
+        "https://mirror.bazel.build/github.com/bazel-contrib/rules_go/releases/download/v0.61.1/rules_go-v0.61.1.zip",
+        "https://github.com/bazel-contrib/rules_go/releases/download/v0.61.1/rules_go-v0.61.1.zip",
     ],
 )
 
@@ -313,9 +383,9 @@ rust_register_toolchains()
 
 http_archive(
     name = "rules_python",
-    sha256 = "098ba13578e796c00c853a2161f382647f32eb9a77099e1c88bc5299333d0d6e",
-    strip_prefix = "rules_python-1.9.0",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/1.9.0/rules_python-1.9.0.tar.gz",
+    sha256 = "2119ca04726066c53b8f1ff42dffa090ea7f3e42a75679f1cfda937406cf7753",
+    strip_prefix = "rules_python-2.0.2",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/2.0.2/rules_python-2.0.2.tar.gz",
 )
 
 load("@rules_python//python:repositories.bzl", "py_repositories")
@@ -334,9 +404,9 @@ http_archive(
 
 http_archive(
     name = "com_google_protobuf",
-    sha256 = "2f3c0e4327b34ff34d1315a885d539f5772726acc1b847a1a3f632657fec07c0",
-    strip_prefix = "protobuf-34.0",
-    urls = ["https://github.com/protocolbuffers/protobuf/releases/download/v34.0/protobuf-34.0.zip"],
+    sha256 = "bf89df2fa0088de9c9890fbfba0076263a36c2f84847a7b54e7e32effd6201c7",
+    strip_prefix = "protobuf-35.1",
+    urls = ["https://github.com/protocolbuffers/protobuf/releases/download/v35.1/protobuf-35.1.zip"],
 )
 
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
@@ -386,9 +456,9 @@ http_archive(
 
 http_archive(
     name = "platforms",
-    sha256 = "3384eb1c30762704fbe38e440204e114154086c8fc8a8c2e3e28441028c019a8",
+    sha256 = "dbad4a23abcca6171e47b79edc53bd6a41067a3b75f9e8b104656b459ff25046",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/platforms/releases/download/1.0.0/platforms-1.0.0.tar.gz",
-        "https://github.com/bazelbuild/platforms/releases/download/1.0.0/platforms-1.0.0.tar.gz",
+        "https://mirror.bazel.build/github.com/bazelbuild/platforms/releases/download/1.1.0/platforms-1.1.0.tar.gz",
+        "https://github.com/bazelbuild/platforms/releases/download/1.1.0/platforms-1.1.0.tar.gz",
     ],
 )

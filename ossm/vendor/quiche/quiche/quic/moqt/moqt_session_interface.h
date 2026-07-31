@@ -97,13 +97,19 @@ class MoqtSessionInterface {
   virtual void Error(MoqtError code, absl::string_view error) = 0;
 
   // Return true if SUBSCRIBE was actually sent.
-  virtual bool Subscribe(const FullTrackName& name, SubscribeVisitor* visitor,
+  virtual bool Subscribe(const FullTrackName& name,
+                         SubscribeVisitor* absl_nonnull visitor,
                          const MessageParameters& parameters) = 0;
   // If a parameter is nullopt, there is no change to the current value.
-  // Returns false if the subscription is not found.
+  // Returns false if the subscription is not found. Used by the subscriber for
+  // a SUBSCRIBE or PUBLISH.
   virtual bool SubscribeUpdate(const FullTrackName& name,
                                const MessageParameters& parameters,
                                MoqtResponseCallback response_callback) = 0;
+  // Used by the publisher of a PUBLISH message.
+  virtual bool PublishUpdate(const FullTrackName& name,
+                             const MessageParameters& parameters,
+                             MoqtResponseCallback response_callback) = 0;
 
   // Sends an UNSUBSCRIBE message and removes all of the state related to the
   // subscription.  Returns false if the subscription is not found.
@@ -171,9 +177,12 @@ class MoqtSessionInterface {
   // Returns nullptr if the message cannot be sent.
   // To unsubscribe, simply destroy the returned MoqtNamespaceTask.
   virtual std::unique_ptr<MoqtNamespaceTask> SubscribeNamespace(
-      TrackNamespace& prefix, SubscribeNamespaceOption option,
-      const MessageParameters& parameters,
+      TrackNamespace& prefix, const MessageParameters& parameters,
       MoqtResponseCallback response_callback) = 0;
+  virtual bool SubscribeTracks(TrackNamespace& prefix,
+                               const MessageParameters& parameters,
+                               MoqtResponseCallback response_callback) = 0;
+  virtual void UnsubscribeTracks(TrackNamespace& prefix) = 0;
 
   // TODO(martinduke): Add an API for absolute joining fetch.
 

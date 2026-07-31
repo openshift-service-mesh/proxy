@@ -2141,7 +2141,7 @@ class ContinuationRecord {
     return static_cast<Type>(result - 1);
   }
 
-  static constexpr Type ContinuationTypeForArray(ElementsKind kind,
+  static consteval Type ContinuationTypeForArray(ElementsKind kind,
                                                  bool with_interrupt_check) {
     DCHECK(IsObjectElementsKind(kind));
     if (IsHoleyElementsKind(kind)) {

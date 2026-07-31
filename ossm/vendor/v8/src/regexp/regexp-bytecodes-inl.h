@@ -74,7 +74,7 @@ constexpr int CountOf() {
 }
 
 template <size_t N>
-constexpr std::array<std::string_view, N> SplitNames(const char* raw_names) {
+consteval std::array<std::string_view, N> SplitNames(const char* raw_names) {
   std::array<std::string_view, N> result;
   std::string_view names(raw_names);
 
@@ -103,7 +103,7 @@ constexpr std::array<std::string_view, N> SplitNames(const char* raw_names) {
 // Calculates packed offsets for each Bytecode operand.
 // All operands are aligned to their own size.
 template <RegExpBytecodeOperandType... operand_types>
-constexpr auto CalculateAlignedOffsets() {
+consteval auto CalculateAlignedOffsets() {
   constexpr int N = sizeof...(operand_types);
   constexpr std::array<uint8_t, N> kOperandSizes = {
       RegExpOperandTypeTraits<operand_types>::kSize...};
@@ -174,14 +174,14 @@ class RegExpBytecodeOperandsBase {
   using Traits = RegExpBytecodeOperandsTraits<OpTypes...>;
   static constexpr int kCount = Traits::kOperandCount;
   static constexpr int kTotalSize = Traits::kSize;
-  static constexpr int Index(Operand op) { return static_cast<uint8_t>(op); }
-  static constexpr int Size(Operand op) {
+  static consteval int Index(Operand op) { return static_cast<uint8_t>(op); }
+  static consteval int Size(Operand op) {
     return Traits::kOperandSizes[Index(op)];
   }
-  static constexpr int Offset(Operand op) {
+  static consteval int Offset(Operand op) {
     return Traits::kOperandOffsets[Index(op)];
   }
-  static constexpr RegExpBytecodeOperandType Type(Operand op) {
+  static consteval RegExpBytecodeOperandType Type(Operand op) {
     return Traits::kOperandTypes[Index(op)];
   }
 
@@ -190,7 +190,7 @@ class RegExpBytecodeOperandsBase {
   }
 
   // Returns a tuple of all operands.
-  static constexpr auto GetOperandsTuple() {
+  static consteval auto GetOperandsTuple() {
     return []<size_t... Is>(std::index_sequence<Is...>) {
       return std::tuple_cat([]<size_t I>() {
         constexpr auto id = static_cast<Operand>(I);

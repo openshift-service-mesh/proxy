@@ -685,17 +685,6 @@ absl::StatusOr<MoqtRequestError> MoqtControlMessageParser::ProcessRequestError(
   return request_error;
 }
 
-absl::StatusOr<MoqtUnsubscribe> MoqtControlMessageParser::ProcessUnsubscribe(
-    absl::string_view data) const {
-  quic::QuicDataReader reader(data);
-  MoqtUnsubscribe unsubscribe;
-  if (!reader.ReadMoqVarInt(&unsubscribe.request_id)) {
-    return absl::InvalidArgumentError("Message missing fields");
-  }
-  QUICHE_RETURN_IF_ERROR(CheckForTrailingData(reader));
-  return unsubscribe;
-}
-
 absl::StatusOr<MoqtPublishDone> MoqtControlMessageParser::ProcessPublishDone(
     absl::string_view data) const {
   quic::QuicDataReader reader(data);
@@ -825,24 +814,30 @@ MoqtControlMessageParser::ProcessSubscribeNamespace(
     absl::string_view data) const {
   quic::QuicDataReader reader(data);
   MoqtSubscribeNamespace subscribe_namespace;
-  uint64_t raw_option;
   if (!reader.ReadMoqVarInt(&subscribe_namespace.request_id)) {
     return absl::InvalidArgumentError("Request ID missing");
   }
   QUICHE_RETURN_IF_ERROR(
       ReadTrackNamespace(reader, subscribe_namespace.track_namespace_prefix));
-  if (!reader.ReadMoqVarInt(&raw_option)) {
-    return absl::InvalidArgumentError("SUBSCRIBE_NAMESPACE option missing");
-  }
-  if (raw_option > kMaxSubscribeOption) {
-    return absl::InvalidArgumentError("Invalid SUBSCRIBE_NAMESPACE option");
-  }
-  subscribe_namespace.subscribe_options =
-      static_cast<SubscribeNamespaceOption>(raw_option);
   QUICHE_RETURN_IF_ERROR(
       FillAndValidateMessageParameters(reader, subscribe_namespace.parameters));
   QUICHE_RETURN_IF_ERROR(CheckForTrailingData(reader));
   return subscribe_namespace;
+}
+
+absl::StatusOr<MoqtSubscribeTracks>
+MoqtControlMessageParser::ProcessSubscribeTracks(absl::string_view data) const {
+  quic::QuicDataReader reader(data);
+  MoqtSubscribeTracks subscribe_tracks;
+  if (!reader.ReadMoqVarInt(&subscribe_tracks.request_id)) {
+    return absl::InvalidArgumentError("Request ID missing");
+  }
+  QUICHE_RETURN_IF_ERROR(
+      ReadTrackNamespace(reader, subscribe_tracks.track_namespace_prefix));
+  QUICHE_RETURN_IF_ERROR(
+      FillAndValidateMessageParameters(reader, subscribe_tracks.parameters));
+  QUICHE_RETURN_IF_ERROR(CheckForTrailingData(reader));
+  return subscribe_tracks;
 }
 
 absl::StatusOr<MoqtMaxRequestId> MoqtControlMessageParser::ProcessMaxRequestId(
@@ -1002,8 +997,7 @@ absl::StatusOr<MoqtObjectAck> MoqtControlMessageParser::ProcessObjectAck(
   quic::QuicDataReader reader(data);
   MoqtObjectAck object_ack;
   uint64_t raw_delta;
-  if (!reader.ReadMoqVarInt(&object_ack.subscribe_id) ||
-      !reader.ReadMoqVarInt(&object_ack.group_id) ||
+  if (!reader.ReadMoqVarInt(&object_ack.group_id) ||
       !reader.ReadMoqVarInt(&object_ack.object_id) ||
       !reader.ReadMoqVarInt(&raw_delta)) {
     return absl::InvalidArgumentError("Message missing fields");

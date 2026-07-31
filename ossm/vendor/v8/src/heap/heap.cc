@@ -5287,7 +5287,7 @@ constexpr size_t kCrashKeyPrefixLen = sizeof(kCrashKeyPrefix) - 1;
 // `v8-oom-last-few-messages`. The result needs to be static because of the
 // CrashKey API.
 template <size_t N>
-constexpr std::array<char, kCrashKeyPrefixLen + N> BuildCrashKeyName(
+consteval std::array<char, kCrashKeyPrefixLen + N> BuildCrashKeyName(
     const char (&name)[N]) {
   std::array<char, kCrashKeyPrefixLen + N> data{};
   for (size_t i = 0; i < kCrashKeyPrefixLen; ++i) data[i] = kCrashKeyPrefix[i];

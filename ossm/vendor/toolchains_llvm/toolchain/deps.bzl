@@ -13,15 +13,21 @@
 # limitations under the License.
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+load("//toolchain:setup_distributions.bzl", "setup_llvm_distributions")
 
 def bazel_toolchain_dependencies():
+    # Materialize the merged LLVM distribution table. In bzlmod this is done
+    # by the `llvm_distributions` module extension; in WORKSPACE mode the
+    # consumer calls `bazel_toolchain_dependencies()` which dispatches here.
+    setup_llvm_distributions()
+
     # Load rules_cc if the user has not defined them.
     if not native.existing_rule("rules_cc"):
         http_archive(
             name = "rules_cc",
-            urls = ["https://github.com/bazelbuild/rules_cc/releases/download/0.2.17/rules_cc-0.2.17.tar.gz"],
-            sha256 = "283fa1cdaaf172337898749cf4b9b1ef5ea269da59540954e51fba0e7b8f277a",
-            strip_prefix = "rules_cc-0.2.17",
+            urls = ["https://github.com/bazelbuild/rules_cc/releases/download/0.2.19/rules_cc-0.2.19.tar.gz"],
+            sha256 = "351248f6be41d18694d4d7c390aaebd9f865eea72a4758b2c9d782ae744c97f4",
+            strip_prefix = "rules_cc-0.2.19",
         )
 
     # Load bazel_skylib if the user has not defined them.
@@ -39,16 +45,16 @@ def bazel_toolchain_dependencies():
     if not native.existing_rule("bazel_features"):
         http_archive(
             name = "bazel_features",
-            sha256 = "c26b4e69cf02fea24511a108d158188b9d8174426311aac59ce803a78d107648",
-            strip_prefix = "bazel_features-1.43.0",
-            url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.43.0/bazel_features-v1.43.0.tar.gz",
+            sha256 = "89eca73d4c334cf664f84920365d2ce04e2c98099b89f7c5b676b5f377c8e754",
+            strip_prefix = "bazel_features-1.48.1",
+            url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.48.1/bazel_features-v1.48.1.tar.gz",
         )
 
     # Load helly25_bzl for version comparisons.
     if not native.existing_rule("helly25_bzl"):
         http_archive(
             name = "helly25_bzl",
-            strip_prefix = "bzl-0.3.1",
-            url = "https://github.com/helly25/bzl/releases/download/0.3.1/bzl-0.3.1.tar.gz",
-            sha256 = "c8e28a3cb7e465b4b71f5d4d366c5796cc0ae822fa510a8adf12cf39a9709902",
+            url = "https://github.com/helly25/bzl/releases/download/0.4.3/bzl-0.4.3.tar.gz",
+            sha256 = "8846d5363ed05dfe242af692759c9b7439c1b7ce47b9720c3338e254651cbe99",
+            strip_prefix = "bzl-0.4.3",
         )

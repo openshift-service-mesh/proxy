@@ -13,7 +13,7 @@
 # limitations under the License.
 
 #
-# This is for the gRPC build system. This isn't intended to be used outsite of
+# This is for the gRPC build system. This isn't intended to be used outside of
 # the BUILD file for gRPC. It contains the mapping for the template system we
 # use to generate other platform's build system files.
 #
@@ -103,6 +103,10 @@ def _update_visibility(visibility):
         final_visibility != ["//visibility:private"] and
         "//:__subpackages__" not in final_visibility):
         final_visibility.append("//:__subpackages__")
+
+        if ("//bazel:friends" not in final_visibility):
+            final_visibility.append("//bazel:friends")
+
     return final_visibility
 
 def _include_prefix():

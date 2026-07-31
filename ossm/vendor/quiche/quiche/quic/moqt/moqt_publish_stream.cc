@@ -19,18 +19,18 @@
 #include "quiche/quic/moqt/moqt_fetch_task.h"
 #include "quiche/quic/moqt/moqt_framer.h"
 #include "quiche/quic/moqt/moqt_key_value_pair.h"
+#include "quiche/quic/moqt/moqt_live_publisher.h"
 #include "quiche/quic/moqt/moqt_messages.h"
+#include "quiche/quic/moqt/moqt_object_subscriber.h"
 #include "quiche/quic/moqt/moqt_parser.h"
 #include "quiche/quic/moqt/moqt_session_callbacks.h"
-#include "quiche/quic/moqt/moqt_subscription.h"
-#include "quiche/quic/moqt/moqt_track.h"
 
 namespace moqt {
 
-MoqtPublishPublisherStream::MoqtPublishPublisherStream(
+MoqtPublishRequestStream::MoqtPublishRequestStream(
     MoqtFramer* absl_nonnull framer,
     const MoqtControlMessageParser& message_parser,
-    SubscriptionPublisher::RemoveCallback stream_deleted_callback,
+    LivePublisher::RemoveCallback stream_deleted_callback,
     SessionErrorCallback session_error_callback,
     MoqtResponseCallback response_callback)
     : MoqtBidiStreamBase(framer, message_parser,
@@ -38,9 +38,14 @@ MoqtPublishPublisherStream::MoqtPublishPublisherStream(
       response_callback_(std::move(response_callback)),
       stream_deleted_callback_(std::move(stream_deleted_callback)) {}
 
-MoqtPublishPublisherStream::~MoqtPublishPublisherStream() { Detach(); }
+MoqtPublishRequestStream::~MoqtPublishRequestStream() {
+  if (publisher_ != nullptr) {
+    publisher_->IgnoreResetAllStreams();
+  }
+  Detach();
+}
 
-void MoqtPublishPublisherStream::OnStreamBound() {
+void MoqtPublishRequestStream::OnStreamBound() {
   stream_parser()->set_allow_fin(true);
   publisher_->parameters().largest_object =
       publisher_->publisher().largest_location();
@@ -54,7 +59,7 @@ void MoqtPublishPublisherStream::OnStreamBound() {
       publisher_->publisher().extensions().default_publisher_group_order();
 }
 
-absl::Status MoqtPublishPublisherStream::OnRawControlMessage(
+absl::Status MoqtPublishRequestStream::OnRawControlMessage(
     const MoqtRawControlMessage& message) {
   return ControlMessageDispatcher::DispatchControlMessage(
       *this, message_parser(), message, "publish publisher");
@@ -62,7 +67,7 @@ absl::Status MoqtPublishPublisherStream::OnRawControlMessage(
 
 // TODO(martinduke): When we allow the publisher to send REQUEST_UPDATE,
 // REQUEST_OK and REQUEST_ERROR processing need to check the request ID.
-absl::Status MoqtPublishPublisherStream::OnControlMessage(
+absl::Status MoqtPublishRequestStream::OnControlMessage(
     const MoqtRequestOk& message) {
   if (message.request_id != publisher_->request_id()) {
     OnFatalError(absl::InvalidArgumentError(
@@ -78,7 +83,7 @@ absl::Status MoqtPublishPublisherStream::OnControlMessage(
   return absl::OkStatus();
 }
 
-absl::Status MoqtPublishPublisherStream::OnControlMessage(
+absl::Status MoqtPublishRequestStream::OnControlMessage(
     const MoqtRequestError& message) {
   if (message.request_id != publisher_->request_id()) {
     OnFatalError(absl::InvalidArgumentError(
@@ -90,7 +95,7 @@ absl::Status MoqtPublishPublisherStream::OnControlMessage(
   return absl::OkStatus();
 }
 
-absl::Status MoqtPublishPublisherStream::OnControlMessage(
+absl::Status MoqtPublishRequestStream::OnControlMessage(
     const MoqtRequestUpdate& message) {
   MessageParameters in_parameters = message.parameters, out_parameters;
   out_parameters.largest_object = publisher_->publisher().largest_location();
@@ -103,15 +108,15 @@ absl::Status MoqtPublishPublisherStream::OnControlMessage(
   return absl::OkStatus();
 }
 
-MoqtPublishSubscriberStream::MoqtPublishSubscriberStream(
+MoqtPublishResponseStream::MoqtPublishResponseStream(
     MoqtFramer* absl_nonnull framer,
     const MoqtControlMessageParser& message_parser,
     const quic::QuicClock* absl_nonnull clock,
     quic::QuicAlarmFactory* absl_nonnull alarm_factory,
     SessionErrorCallback session_error_callback,
     const MoqtIncomingPublishCallback* absl_nonnull incoming_publish_callback,
-    SubscribeRemoteTrack::AddCallback add_callback,
-    SubscribeRemoteTrack::RemoveCallback remove_callback)
+    LiveSubscriber::AddCallback add_callback,
+    LiveSubscriber::RemoveCallback remove_callback)
     : MoqtBidiStreamBase(framer, message_parser,
                          std::move(session_error_callback)),
       clock_(clock),
@@ -121,19 +126,19 @@ MoqtPublishSubscriberStream::MoqtPublishSubscriberStream(
       remove_callback_(std::move(remove_callback)),
       weak_ptr_factory_(this) {}
 
-absl::Status MoqtPublishSubscriberStream::OnRawControlMessage(
+absl::Status MoqtPublishResponseStream::OnRawControlMessage(
     const MoqtRawControlMessage& message) {
   return ControlMessageDispatcher::DispatchControlMessage(
       *this, message_parser(), message, "publish subscriber");
 }
 
-absl::Status MoqtPublishSubscriberStream::OnControlMessage(
+absl::Status MoqtPublishResponseStream::OnControlMessage(
     const MoqtPublish& message) {
   if (add_callback_ == nullptr) {
     // Two PUBLISH messages for the same stream.
     return absl::InvalidArgumentError("Multiple PUBLISH on the same stream");
   }
-  subscriber_ = std::make_unique<SubscribeRemoteTrack>(message, nullptr, this);
+  subscriber_ = std::make_unique<LiveSubscriber>(message, nullptr, this);
   if (!std::move(add_callback_)(subscriber_.get())) {
     add_callback_ = nullptr;
     return SendRequestError(message.request_id,
@@ -149,7 +154,7 @@ absl::Status MoqtPublishSubscriberStream::OnControlMessage(
         [weakptr = weak_ptr_factory_.Create(), request_id = message.request_id](
             const std::variant<MessageParameters, MoqtRequestErrorInfo>
                 response) {
-          MoqtPublishSubscriberStream* stream = weakptr.GetIfAvailable();
+          MoqtPublishResponseStream* stream = weakptr.GetIfAvailable();
           if (stream == nullptr) {
             return;
           }
@@ -165,6 +170,11 @@ absl::Status MoqtPublishSubscriberStream::OnControlMessage(
                              }},
               response);
         }));
+  } else {
+    // Since the application already called SUBSCRIBE, there will be no
+    // invocation of the request callback. Send REQUEST_OK immediately.
+    CheckStatus(
+        SendRequestOk(message.request_id, subscriber_->const_parameters()));
   }
   incoming_publish_callback_ = nullptr;
   if (subscriber_->visitor() == nullptr) {
@@ -181,26 +191,30 @@ absl::Status MoqtPublishSubscriberStream::OnControlMessage(
   return absl::OkStatus();
 }
 
-absl::Status MoqtPublishSubscriberStream::OnControlMessage(
+absl::Status MoqtPublishResponseStream::OnControlMessage(
     const MoqtRequestUpdate& message) {
+  if (subscriber_ == nullptr) {
+    // Stream is already closing.
+    return absl::OkStatus();
+  }
   subscriber_->Update(message.parameters);
   CheckStatus(SendRequestOk(message.request_id, MessageParameters()));
   return absl::OkStatus();
 }
 
-absl::Status MoqtPublishSubscriberStream::OnControlMessage(
+absl::Status MoqtPublishResponseStream::OnControlMessage(
     const MoqtRequestOk& message) {
   // TODO(martinduke): Implement REQUEST_UPDATE.
   return absl::OkStatus();
 }
 
-absl::Status MoqtPublishSubscriberStream::OnControlMessage(
+absl::Status MoqtPublishResponseStream::OnControlMessage(
     const MoqtRequestError& message) {
   // TODO(martinduke): Implement REQUEST_UPDATE.
   return absl::OkStatus();
 }
 
-absl::Status MoqtPublishSubscriberStream::OnControlMessage(
+absl::Status MoqtPublishResponseStream::OnControlMessage(
     const MoqtPublishDone& message) {
   if (subscriber_ == nullptr) {
     // PUBLISH_DONE can be sent before the subscriber rejects the track.

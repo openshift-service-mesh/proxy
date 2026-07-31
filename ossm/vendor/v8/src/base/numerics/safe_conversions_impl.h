@@ -73,7 +73,7 @@ constexpr auto SafeUnsignedAbs(T value) {
 
 // TODO(jschuh): Debug builds don't reliably propagate constants, so we restrict
 // some accelerated runtime paths to release builds until this can be forced
-// with constexpr support in C++20 or C++23.
+// with consteval support in C++20 or C++23.
 #if defined(NDEBUG)
 inline constexpr bool kEnableAsmCode = true;
 #else

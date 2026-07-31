@@ -120,6 +120,18 @@ llvm_repo_attrs.update({
                "distribution. The key is the label of a libclang_rt library, " +
                "and the value is `\"{llvm_target_name}/{library_name}.a\"`."),
     ),
+    "libcxx_url": attr.string(
+        mandatory = False,
+        doc = ("URL of an archive containing a memory-sanitizer-instrumented build of " +
+               "libc++ (headers under `include/` and libraries under `lib/`). When set, " +
+               "it is extracted into `libcxx-msan/` in the distribution and used in place " +
+               "of the regular libc++ for builds with MemorySanitizer enabled " +
+               "(`--features=msan`, Linux only)."),
+    ),
+    "libcxx_sha256": attr.string(
+        mandatory = False,
+        doc = "The expected SHA-256 of the archive downloaded as per the `libcxx_url` attribute.",
+    ),
     "netrc": attr.string(
         mandatory = False,
         doc = "Path to the netrc file for authenticated LLVM URL downloads.",
@@ -150,6 +162,24 @@ _compiler_configuration_attrs = {
                "will be added to cxx_builtin_include_directories and lib/ will be added to " +
                "the linker search path via extra_link_flags for the specified target."),
     ),
+    "multiarch": attr.string_dict(
+        mandatory = False,
+        doc = ("Multiarch triple used to construct sysroot include and library paths " +
+               "(e.g. `<sysroot>/usr/include/<multiarch>` or, for Yocto-style sysroots, " +
+               "`<sysroot>/usr/include/c++/<ver>/<multiarch>`), for each target OS and arch pair " +
+               "({}). ".format(_target_pairs) +
+               "If unset, a default is chosen per target. Useful when the sysroot uses a " +
+               "non-standard multiarch tuple, e.g. Yocto `aarch64-oe4t-linux`."),
+    ),
+    "cxx_include_layout": attr.string_dict(
+        mandatory = False,
+        doc = ("How libstdc++ headers and gcc runtime libraries are laid out in the " +
+               "sysroot. Allowed values per target OS/arch pair " +
+               "({}): ".format(_target_pairs) +
+               "`debian` (default): `/usr/include/<multiarch>/c++/<ver>` and " +
+               "`/usr/lib/gcc/<multiarch>/<ver>`; `yocto`: " +
+               "`/usr/include/c++/<ver>/<multiarch>` and `/usr/lib/<multiarch>/<ver>`."),
+    ),
     "cxx_builtin_include_directories": attr.string_list_dict(
         mandatory = False,
         doc = ("Additional builtin include directories to be added to the default system " +
@@ -164,8 +194,10 @@ _compiler_configuration_attrs = {
                "linked to the compiled binaries. An empty key can be used to specify a " +
                "value for all target pairs. Possible values are `builtin-libc++` (default) " +
                "which uses the libc++ shipped with clang, `libc++` which uses libc++ available on " +
-               "the host or sysroot, `stdc++` which uses libstdc++ available on the host or " +
-               "sysroot, and `none` which uses `-nostdlib` with the compiler."),
+               "the host or sysroot, `stdc++` which uses (static) libstdc++ available on the host " +
+               "or sysroot, `dynamic-stdc++` (optionally `dynamic-stdc++-<ver>`) which is like " +
+               "`stdc++` but links `libstdc++.so` instead of `libstdc++.a`, and `none` which uses " +
+               "`-nostdlib` with the compiler."),
     ),
     "cxx_standard": attr.string_dict(
         mandatory = False,
@@ -377,6 +409,23 @@ _compiler_configuration_attrs = {
                "Mostly useful for providing files containing lists of flags, e.g. " +
                "sanitizer ignorelists."),
     ),
+    "extra_linker_files": attr.label(
+        mandatory = False,
+        doc = ("Files to be made available in the sandbox for link actions. " +
+               "Useful for providing files such as linker scripts."),
+    ),
+    "extra_compiler_files_dict": attr.string_dict(
+        mandatory = False,
+        doc = ("Per-target files to be made available in the sandbox for compile actions. " +
+               "Keys are target OS-arch pairs (e.g. 'linux-x86_64') or empty string for all targets. " +
+               "Values are label strings. Intended for use via the bzlmod `llvm.extra_compiler_files` tag."),
+    ),
+    "extra_linker_files_dict": attr.string_dict(
+        mandatory = False,
+        doc = ("Per-target files to be made available in the sandbox for link actions. " +
+               "Keys are target OS-arch pairs (e.g. 'linux-x86_64') or empty string for all targets. " +
+               "Values are label strings. Intended for use via the bzlmod `llvm.extra_linker_files` tag."),
+    ),
     "extra_enabled_features": attr.label_list(
         mandatory = False,
         doc = ("Extra `cc_feature` features to add to this toolchain in an initially " +
@@ -414,6 +463,19 @@ llvm_config_attrs.update({
                "assumed to be a system path and the toolchain is configured to use absolute " +
                "paths. Else, the value will be assumed to be a bazel package containing the " +
                "filegroup targets as in BUILD.llvm_repo."),
+    ),
+    "target_toolchain_roots": attr.string_dict(
+        mandatory = False,
+        # TODO: Ideally, we should be taking a filegroup label here instead of a package path, but
+        # we ultimately need to subset the files to be more selective in what we include in the
+        # sandbox for which operations, and it is not straightforward to subset a filegroup.
+        doc = ("System or package path, keyed by target OS release name and architecture, e.g. " +
+               "darwin-x86_64, darwin-aarch64, ubuntu-20.04-x86_64, etc., or a less specific " +
+               "OS and arch pair ({}), to be used as the LLVM toolchain ".format(_target_pairs) +
+               "distributions. If the value begins with exactly one forward slash '/', then " +
+               "the value is assumed to be a system path and the toolchain is configured to use " +
+               "absolute paths. Else, the value will be assumed to be a bazel package " +
+               "containing the filegroup targets as in BUILD.llvm_repo."),
     ),
     "absolute_paths": attr.bool(
         default = False,
