@@ -62,4 +62,3 @@ jobs:
         labels: |
           auto-merge
           tide/merge-method-merge
-          ok-to-test
