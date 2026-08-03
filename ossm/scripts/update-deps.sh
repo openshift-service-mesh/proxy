@@ -41,6 +41,7 @@ function init(){
         "bazel_gazelle_go"
         "openssl"
         "llvm_toolchain"
+        "llvm_minimal_linux"
         "go_sdk"
         "host_platform"
         "remotejdk"
