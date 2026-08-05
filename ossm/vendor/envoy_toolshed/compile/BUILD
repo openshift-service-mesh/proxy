@@ -1,12 +1,15 @@
+load("@aspect_bazel_lib//lib:tar.bzl", "mtree_mutate", "mtree_spec", "tar")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
-load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
 load("@rules_pkg//pkg:pkg.bzl", "pkg_tar")
-load("//:versions.bzl", "SUPPORTED_ARCHES", "VERSIONS")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:versions.bzl", "LLVM_VERSION", "SUPPORTED_ARCHES", "VERSIONS")
+load(":llvm_minimal.bzl", "LLVM_MINIMAL_BINS", "LLVM_MINIMAL_LIB_GLOBS", "LLVM_MINIMAL_LLVM_REPO_BUILD", "llvm_minimal_strip_bins")
 
 package(default_visibility = ["//visibility:public"])
 
-exports_files(["sanitizer_libs.bzl", "libcxx_libs.bzl", "extensions.bzl"])
+exports_files(["sanitizer_libs.bzl", "libcxx_libs.bzl", "llvm_minimal.bzl", "extensions.bzl"])
 
 # Build setting to control which toolchain to use
 # This can be set with --//compile:use_gcc_toolchain=true
@@ -250,3 +253,170 @@ pkg_tar(
     )
     for arch in SUPPORTED_ARCHES
 ]
+
+# =============================================================================
+# Minimal LLVM extraction targets
+# =============================================================================
+
+_LLVM_MINIMAL_MACOS_ONLY_BINS = [
+    "llvm-libtool-darwin",
+    "llvm-install-name-tool",
+]
+
+_LLVM_MINIMAL_LLVM_MAJOR = LLVM_VERSION.split(".")[0]
+
+# Use llvm-strip/llvm-readobj from the upstream Linux-X64 build tarball when
+# producing all minimal artifact variants. This preserves the intended
+# bootstrapping flow: strip the minimal artifacts with tools from the full
+# upstream tarball, not from the minimal artifact alias.
+_LLVM_MINIMAL_HOST_STRIPPER = "@llvm_tarball_linux_x86_64//:bin/llvm-strip"
+_LLVM_MINIMAL_HOST_READOBJ = "@llvm_tarball_linux_x86_64//:bin/llvm-readobj"
+
+[
+    (
+        llvm_minimal_strip_bins(
+            name = "llvm_minimal_%s_strip_bins" % repo_suffix,
+            bin_all = "@llvm_tarball_%s//:bin_all" % repo_suffix,
+            bins = bins,
+            stripper = _LLVM_MINIMAL_HOST_STRIPPER,
+            readobj = _LLVM_MINIMAL_HOST_READOBJ,
+            repo_suffix = repo_suffix,
+            platform = platform,
+            tags = ["manual"],
+        ),
+        mtree_spec(
+            name = "llvm_minimal_%s_bins_mtree_src" % repo_suffix,
+            srcs = [":llvm_minimal_%s_strip_bins" % repo_suffix],
+            tags = ["manual"],
+        ),
+        mtree_mutate(
+            name = "llvm_minimal_%s_bins_mtree" % repo_suffix,
+            mtree = ":llvm_minimal_%s_bins_mtree_src" % repo_suffix,
+            preserve_symlinks = False,
+            srcs = [":llvm_minimal_%s_strip_bins" % repo_suffix],
+            package_dir = "llvm-minimal-%s-%s" % (LLVM_VERSION, platform),
+            strip_prefix = "compile/llvm_minimal_%s_bins_src" % repo_suffix,
+            tags = ["manual"],
+        ),
+        mtree_spec(
+            name = "llvm_minimal_%s_libs_mtree_src" % repo_suffix,
+            srcs = ["@llvm_tarball_%s//:minimal_libs" % repo_suffix],
+            tags = ["manual"],
+        ),
+        mtree_mutate(
+            name = "llvm_minimal_%s_libs_mtree" % repo_suffix,
+            mtree = ":llvm_minimal_%s_libs_mtree_src" % repo_suffix,
+            package_dir = "llvm-minimal-%s-%s" % (LLVM_VERSION, platform),
+            tags = ["manual"],
+        ),
+        genrule(
+            name = "llvm_minimal_%s_build_bazel" % repo_suffix,
+            outs = ["llvm_minimal_%s/BUILD.bazel" % repo_suffix],
+            cmd = """cat >"$@" <<'EOF'
+%s
+EOF""" % LLVM_MINIMAL_LLVM_REPO_BUILD,
+            tags = ["manual"],
+        ),
+        mtree_spec(
+            name = "llvm_minimal_%s_build_mtree_src" % repo_suffix,
+            srcs = [":llvm_minimal_%s_build_bazel" % repo_suffix],
+            tags = ["manual"],
+        ),
+        mtree_mutate(
+            name = "llvm_minimal_%s_build_mtree" % repo_suffix,
+            mtree = ":llvm_minimal_%s_build_mtree_src" % repo_suffix,
+            package_dir = "llvm-minimal-%s-%s" % (LLVM_VERSION, platform),
+            strip_prefix = "compile/llvm_minimal_%s" % repo_suffix,
+            tags = ["manual"],
+        ),
+        genrule(
+            name = "llvm_minimal_%s_mtree" % repo_suffix,
+            srcs = [
+                ":llvm_minimal_%s_bins_mtree" % repo_suffix,
+                ":llvm_minimal_%s_libs_mtree" % repo_suffix,
+                ":llvm_minimal_%s_build_mtree" % repo_suffix,
+            ],
+            outs = ["llvm_minimal_%s.mtree" % repo_suffix],
+            cmd = "cat $(SRCS) > $@",
+            tags = ["manual"],
+        ),
+        tar(
+            name = "llvm_minimal_%s" % repo_suffix,
+            args = ["--options=zstd:compression-level=19,zstd:threads=4"],
+            compress = "zstd",
+            exec_properties = {"Pool": "linux_x64_xlarge"},
+            mtree = ":llvm_minimal_%s_mtree" % repo_suffix,
+            out = "llvm-minimal-%s-%s.tar.zst" % (LLVM_VERSION, platform),
+            srcs = [
+                ":llvm_minimal_%s_strip_bins" % repo_suffix,
+                "@llvm_tarball_%s//:minimal_libs" % repo_suffix,
+                ":llvm_minimal_%s_build_bazel" % repo_suffix,
+            ],
+            tags = ["manual"],
+        ),
+    )
+    for platform, repo_suffix, bins in [
+        (
+            "Linux-X64",
+            "linux_x86_64",
+            [b for b in LLVM_MINIMAL_BINS if b not in _LLVM_MINIMAL_MACOS_ONLY_BINS],
+        ),
+        (
+            "Linux-ARM64",
+            "linux_arm64",
+            [b for b in LLVM_MINIMAL_BINS if b not in _LLVM_MINIMAL_MACOS_ONLY_BINS],
+        ),
+        (
+            "macOS-ARM64",
+            "macos_arm64",
+            LLVM_MINIMAL_BINS,
+        ),
+    ]
+]
+
+[
+    sh_test(
+        name = "llvm_minimal_%s_manifest_test" % repo_suffix,
+        size = "small",
+        srcs = ["//compile/test:assert_llvm_minimal_manifest.sh"],
+        data = [":llvm_minimal_%s_mtree" % repo_suffix],
+        env = {
+            "MTREE": "$(rootpath :llvm_minimal_%s_mtree)" % repo_suffix,
+            "PLATFORM": platform,
+            "LLVM_MAJOR": _LLVM_MINIMAL_LLVM_MAJOR,
+            "BINS": ",".join(bins),
+            "LIB_GLOBS": ",".join(LLVM_MINIMAL_LIB_GLOBS),
+        },
+        tags = ["manual"],
+    )
+    for platform, repo_suffix, bins in [
+        (
+            "Linux-X64",
+            "linux_x86_64",
+            [b for b in LLVM_MINIMAL_BINS if b not in _LLVM_MINIMAL_MACOS_ONLY_BINS],
+        ),
+        (
+            "Linux-ARM64",
+            "linux_arm64",
+            [b for b in LLVM_MINIMAL_BINS if b not in _LLVM_MINIMAL_MACOS_ONLY_BINS],
+        ),
+        (
+            "macOS-ARM64",
+            "macos_arm64",
+            LLVM_MINIMAL_BINS,
+        ),
+    ]
+]
+
+sh_test(
+    name = "llvm_minimal_linux_x86_64_bins_layout_test",
+    size = "small",
+    srcs = ["//compile/test:assert_llvm_minimal_bins_layout.sh"],
+    data = [":llvm_minimal_linux_x86_64"],
+    env = {
+        "CLANG_REAL": "clang-%s" % _LLVM_MINIMAL_LLVM_MAJOR,
+        "TARBALL": "$(rootpath :llvm_minimal_linux_x86_64)",
+        "ROOT_DIR": "llvm-minimal-%s-Linux-X64" % LLVM_VERSION,
+    },
+    tags = ["manual"],
+)

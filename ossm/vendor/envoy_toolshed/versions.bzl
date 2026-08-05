@@ -1,5 +1,7 @@
 SUPPORTED_ARCHES = ["aarch64", "x86_64"]
 
+BINS_RELEASE = "0.2.4"
+
 # This is only used for cross-compilation (toolchains_llvm provides these otherwise)
 LLVM_CXX_BUILD = """
 filegroup(
@@ -37,9 +39,9 @@ VERSIONS = {
     "llvm": LLVM_VERSION,
     "ninja": "1.12.0",
     "python": "3.12",
-    "bins_release": "0.2.0",
-    "msan_libs_sha256": "efad249d6718f49ac08bbc9ba6ca4e21453fd8d94d96aa02b07aa90622600db6",
-    "tsan_libs_sha256": "2d136d0c63021b3280ec4b33a88c8381f2214a849a50ae557d7f5d9e9f9b93d0",
+    "bins_release": BINS_RELEASE,
+    "msan_libs_sha256": "2f6f94738a00e3547a1921a0853e5b064e4d88f6918bfd885d7c0d536f59986f",
+    "tsan_libs_sha256": "99d023e4f65d5dd1f75a4a1424571d1d54c22687245d35a4c551829e3b34d9dd",
 
     "libcxx_libs_sha256": {
         "aarch64": "b3bd8dfc1c250d5c2c36de174138ffef9754402b33e54abe9b5efb25982fa2f7",
@@ -48,12 +50,21 @@ VERSIONS = {
 
     # Darwin libc++ for cross-compilation (extracted from LLVM macOS release)
     "libcxx_libs_darwin_sha256": {
-        "aarch64": "89fcb9752ed026bcf2a5f50b745f23a5a4fbfad870e9813235d22c648e1d2be7",
+        "aarch64": "afb6f0a172c0293aef5912b96094b47cad91cf162c3c9bb96735d8d9ac951f64",
     },
 
     # macOS SDK sysroot for cross-compilation (extracted from Apple CLTools)
     "macos_sysroot_sha256": {
-        "arm64": "774b285de5e1d6636d08e54499fc1dff6e225ab4f510058162e50d874c3fd223",
+        "arm64": "3f3d55551caf166a6b66f2ff799ec85a9872fd291497baa95aa337801b5d1a87",
+    },
+
+    # Minimal LLVM artifact hashes by platform
+    # Keys match the platform suffix in artifact names (Linux-X64, Linux-ARM64, macOS-ARM64).
+    # Empty strings are placeholders; the update-versions workflow fills them after release.
+    "llvm_minimal_sha256": {
+        "Linux-X64": "10db9add822de89b3cf930693de870c38cc118a171ff63f819b525f5deb9a1c8",
+        "Linux-ARM64": "14878d7015e4e945dc861ab1e490425abdd9075135ff9470625d602abfdb5229",
+        "macOS-ARM64": "0effb4701a3a9850012a98419a1565e08a1c07beb8ef3d50eb4297cf2f9370be",
     },
 
     # Glint binary hashes by architecture
@@ -68,22 +79,22 @@ VERSIONS = {
     "sysroot_hashes": {
         "2.31": {
             "base": {
-                "amd64": "a2dbb3d5590dead5a6887d947de8a18bf6be1f7dc8436e9a61d009deb3144bf3",
-                "arm64": "7b7e827b7ecc529fb95ccf2faf24b8bd051fed801854f348ba3cc869b46bcfcd",
+                "amd64": "eacfff2d6ae859d12548b9a42deeaa58ebc91d7317acee05c7be0d054ebc3cbf",
+                "arm64": "644a245f09ab415dd7ca646771660fc9bf7fb7a9873b8db75be8834c7e96b359",
             },
             "13": {
-                "amd64": "25a7a48f38904906c92fb36dd3143af0666d6618814625b03c426ae708a8fbf6",
-                "arm64": "dcb1eaaea629db0f03d5ecbc6bb0b9b071e90fc9c795b79d02732caee387b403",
+                "amd64": "a9e16db0a4fde35fb303a2ec60a66ecb655daf06497cad4df9c246438e466a29",
+                "arm64": "667a756dcd4c69553c07e441b01990775bb7e803429e7be89462a1759041d095",
             },
         },
         "2.28": {
             "base": {
-                "amd64": "f1a0ac58dd10fcff2b6f501b0591d502f0546533db4afeb5b5d167f93b3f1b46",
-                "arm64": "6ae69f247c888079216bbdf89438b4e60a4a1c6ae15b44f829df955beaef1309",
+                "amd64": "f2f3cd5151cef42a5b6f4f953727e42a048b8ce040a83f3d51fc0979bcb6d94b",
+                "arm64": "bf74b8f98948e1b6b552bfa576a897de28baad539184d48f8e7f90f5847e43c1",
             },
             "13": {
-                "amd64": "9096d82673999676a6a0d87fdc0e1d1fce31ed8389441723609ed264ccd04d3e",
-                "arm64": "6da57853a875c9c70484d0c91d1e88d22779a194bd6e64fa2dd9aedb668309a1",
+                "amd64": "fe1ecde969bf278e5dea30581317fccffc64a8eb50719cae85d9bc4115411ea6",
+                "arm64": "86e8306807e3b6acd05c6d5b42dcbf5d558153774d69cedf93588867baa8680f",
             },
         },
     },
@@ -133,6 +144,36 @@ VERSIONS = {
         "url": "https://github.com/{repo}/releases/download/llvmorg-{version}/LLVM-{version}-{download_suffix}.tar.xz",
         "strip_prefix": "LLVM-{version}-{download_suffix}/",
         "build_file_content": LLVM_CXX_BUILD,
+    },
+    "llvm_minimal_linux_x64": {
+        "type": "http_archive",
+        "repo": "envoyproxy/toolshed",
+        "download_suffix": "Linux-X64",
+        "version": LLVM_VERSION,
+        "bins_release": BINS_RELEASE,
+        "sha256": "10db9add822de89b3cf930693de870c38cc118a171ff63f819b525f5deb9a1c8",
+        "url": "https://github.com/{repo}/releases/download/bins-v{bins_release}/llvm-minimal-{version}-{download_suffix}.tar.zst",
+        "strip_prefix": "llvm-minimal-{version}-{download_suffix}",
+    },
+    "llvm_minimal_linux_arm64": {
+        "type": "http_archive",
+        "repo": "envoyproxy/toolshed",
+        "download_suffix": "Linux-ARM64",
+        "version": LLVM_VERSION,
+        "bins_release": BINS_RELEASE,
+        "sha256": "14878d7015e4e945dc861ab1e490425abdd9075135ff9470625d602abfdb5229",
+        "url": "https://github.com/{repo}/releases/download/bins-v{bins_release}/llvm-minimal-{version}-{download_suffix}.tar.zst",
+        "strip_prefix": "llvm-minimal-{version}-{download_suffix}",
+    },
+    "llvm_minimal_macos_arm64": {
+        "type": "http_archive",
+        "repo": "envoyproxy/toolshed",
+        "download_suffix": "macOS-ARM64",
+        "version": LLVM_VERSION,
+        "bins_release": BINS_RELEASE,
+        "sha256": "0effb4701a3a9850012a98419a1565e08a1c07beb8ef3d50eb4297cf2f9370be",
+        "url": "https://github.com/{repo}/releases/download/bins-v{bins_release}/llvm-minimal-{version}-{download_suffix}.tar.zst",
+        "strip_prefix": "llvm-minimal-{version}-{download_suffix}",
     },
     "llvm_source": {
         "type": "github_archive",
