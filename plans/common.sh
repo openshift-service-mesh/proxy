@@ -29,7 +29,7 @@ _cleanup() {
 trap _cleanup EXIT
 
 podman run -d --name "${CNAME}" \
-  --privileged \
+  --pids-limit=-1 \
   -e CI=true \
   -e LOCAL_JOBS="${LOCAL_JOBS}" \
   -e LOCAL_CPU_RESOURCES="$(nproc)" \
