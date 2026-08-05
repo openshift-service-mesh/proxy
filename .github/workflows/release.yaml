@@ -140,6 +140,7 @@ jobs:
           compose: CentOS-Stream-10
           arch: ${{ matrix.arch }}
           tmt_hardware: '{"virtualization": {"is-virtualized": false}}'
+          pipeline_settings: '{"skip_guest_setup": true}'
           variables: "SOURCE_REPO=${{ format('{0}/{1}.git', github.server_url, github.repository) }};SOURCE_REF=${{ github.sha }}"
           timeout: 120
 
