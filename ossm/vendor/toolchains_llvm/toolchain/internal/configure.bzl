@@ -277,7 +277,7 @@ def llvm_config_impl(rctx):
         cxx_cross_lib_cxx_flags[target_pair] = [
             "-nostdinc++",
             "-isystem",
-            llvm_dist_path_prefix + "include/c++/v1",
+            paths.join(target_llvm_repo_paths.get(target_pair, llvm_dist_path_prefix), "include/c++/v1"),
             "-isystem",
             cxx_cross_lib_path + "/include",
         ]
