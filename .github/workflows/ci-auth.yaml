@@ -33,7 +33,6 @@ jobs:
           script: |
             const prNumber = context.payload.pull_request.number;
             const sender = context.payload.sender.login;
-            const action = context.payload.action;
             const org = context.repo.owner;
 
             const dispatchBuild = async () => {
