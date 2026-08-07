@@ -83,6 +83,7 @@ fn new_http_filter_config_fn<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     "reset_stream" => Some(Box::new(ResetStreamFilterConfig {})),
     "send_go_away_and_close" => Some(Box::new(SendGoAwayAndCloseFilterConfig {})),
     "recreate_stream" => Some(Box::new(RecreateStreamFilterConfig {})),
+    "destroy_logging" => Some(Box::new(DestroyLoggingFilterConfig {})),
     "socket_option_callbacks" => Some(Box::new(SocketOptionCallbacksFilterConfig {})),
     "span_callbacks" => Some(Box::new(SpanCallbacksFilterConfig {})),
     "cluster_callbacks" => Some(Box::new(ClusterCallbacksFilterConfig {})),
@@ -647,6 +648,29 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for RecreateStreamFilter {
   }
 }
 
+/// A HTTP filter configuration that implements
+/// [`envoy_proxy_dynamic_modules_rust_sdk::HttpFilterConfig`] to observe when the in-module filter
+/// is destroyed.
+struct DestroyLoggingFilterConfig {}
+
+impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for DestroyLoggingFilterConfig {
+  fn new_http_filter(&self, _envoy: &mut EHF) -> Box<dyn HttpFilter<EHF>> {
+    Box::new(DestroyLoggingFilter {})
+  }
+}
+
+/// A HTTP filter that implements [`envoy_proxy_dynamic_modules_rust_sdk::HttpFilter`] and logs on
+/// drop so that the point at which Envoy destroys the in-module filter is observable.
+struct DestroyLoggingFilter {}
+
+impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for DestroyLoggingFilter {}
+
+impl Drop for DestroyLoggingFilter {
+  fn drop(&mut self) {
+    envoy_log_info!("destroy_logging filter dropped");
+  }
+}
+
 struct SocketOptionCallbacksFilterConfig {}
 
 impl<EHF: EnvoyHttpFilter> HttpFilterConfig<EHF> for SocketOptionCallbacksFilterConfig {
@@ -818,6 +842,27 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for DynamicMetadataCallbacksFilter {
 
     // Set a non-UTF-8 byte value, asserted end-to-end by the C++ integration test in filter_test.cc.
     envoy_filter.set_dynamic_metadata_bytes("ns_req_header_bytes", "key", &[0xff, 0x00, 0xfe]);
+
+    // Set a whole namespace from a serialized google.protobuf.Struct { "k": "v" }, asserted
+    // end-to-end by the C++ integration test in filter_test.cc. The bytes are hand-encoded because
+    // the test module has no protobuf dependency:
+    //   0a 08              field 1 (fields), LEN 8
+    //     0a 01 6b           entry.key   = "k"
+    //     12 03 1a 01 76     entry.value = Value { string_value = "v" }
+    envoy_filter.set_dynamic_metadata_struct(
+      "ns_req_header_struct",
+      &[0x0a, 0x08, 0x0a, 0x01, 0x6b, 0x12, 0x03, 0x1a, 0x01, 0x76],
+    );
+
+    // Set a whole typed namespace from a serialized google.protobuf.Any, asserted end-to-end by
+    // the C++ integration test in filter_test.cc. The bytes are hand-encoded because the test
+    // module has no protobuf dependency:
+    //   0a 03 74 2f 78     field 1 (type_url) = "t/x"
+    //   12 02 01 02        field 2 (value)    = 0x01 0x02
+    envoy_filter.set_dynamic_typed_metadata(
+      "ns_req_header_typed",
+      &[0x0a, 0x03, 0x74, 0x2f, 0x78, 0x12, 0x02, 0x01, 0x02],
+    );
 
     // Try getting metadata from rotuer cluster and host.
     let metadata = envoy_filter.get_metadata_string(
