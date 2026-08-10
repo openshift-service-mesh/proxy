@@ -76,10 +76,6 @@ class MoqtRelayTrackPublisherTest : public quiche::test::QuicheTest {
                      bool fin_after_this = false) {
     EXPECT_CALL(listener_,
                 OnNewObjectAvailable(location, Optional(subgroup), 128));
-    if (fin_after_this || status == MoqtObjectStatus::kEndOfTrack ||
-        status == MoqtObjectStatus::kEndOfGroup) {
-      EXPECT_CALL(listener_, OnNewFinAvailable(location, subgroup));
-    }
     publisher_.OnObjectFragment(
         kTrackName,
         PublishedObjectMetadata{location, subgroup, "", status, 128,
@@ -573,6 +569,27 @@ TEST_F(MoqtRelayTrackPublisherTest, AlreadyReceivedFragment) {
     payload += std::string(slice.AsStringView());
   }
   EXPECT_EQ(payload, "0123456789");
+}
+
+// Repro for b/539633547.
+TEST_F(MoqtRelayTrackPublisherTest,
+       GetCachedObjectWithOffsetReturnsNulloptAtEnd) {
+  SubscribeAndOk();
+  Location location = kLargestLocation.Next();
+  uint64_t subgroup = 0;
+  PublishedObjectMetadata metadata = {location, subgroup,
+                                      "",       MoqtObjectStatus::kNormal,
+                                      128,      location.object == 0,
+                                      1000};
+  EXPECT_CALL(listener_,
+              OnNewObjectAvailable(location, Optional(subgroup), 128));
+  publisher_.OnObjectFragment(kTrackName, metadata, std::string(900, 'a'), 0);
+  std::optional<PublishedObject> object =
+      publisher_.GetCachedObject(location.group, subgroup, location.object, 0);
+  ASSERT_TRUE(object.has_value());
+  object = publisher_.GetCachedObject(location.group, subgroup, location.object,
+                                      900);
+  EXPECT_FALSE(object.has_value());
 }
 
 }  // namespace

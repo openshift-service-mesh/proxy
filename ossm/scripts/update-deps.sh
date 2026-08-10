@@ -106,19 +106,13 @@ function copy_files() {
 }
 
 function run_bazel() {
-  # Workaround to force fetch of rules_license
-  bazel --output_base="${OUTPUT_BASE}" fetch @remote_java_tools//java_tools/zlib:zlib || true
-
   # Fetch platform-specific java tools for arm64 (not fetched automatically on x86_64)
-  bazel --output_base="${OUTPUT_BASE}" fetch @remote_java_tools_linux_aarch64//:all || true
+  bazel --output_base="${OUTPUT_BASE}" fetch @remote_java_tools_linux_aarch64//:all
 
-  # Workaround to force fetch of protoc for arm
-  bazel --output_base="${OUTPUT_BASE}" fetch @com_google_protobuf_protoc_linux_aarch_64//:protoc
-
-  bazel --output_base="${OUTPUT_BASE}" fetch @gperftools//:all || true
+  bazel --output_base="${OUTPUT_BASE}" fetch @gperftools//:all
 
   # Fetch luajit2 explicitly - needed for s390x/ppc64le builds
-  bazel --output_base="${OUTPUT_BASE}" fetch @luajit2//:all || true
+  # bazel --output_base="${OUTPUT_BASE}" fetch @luajit2//:all || true
 
   # Fetch all the rest and check everything using "build --nobuild "option
   # Note: The envoy repository is automatically patched via patches = [...] in WORKSPACE

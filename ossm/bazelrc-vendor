@@ -33,8 +33,6 @@ build --override_repository=com_github_spf13_afero=%workspace%/ossm/vendor/com_g
 build --override_repository=com_google_googleapis=%workspace%/ossm/vendor/com_google_googleapis
 build --override_repository=com_google_googleapis_imports=%workspace%/ossm/vendor/com_google_googleapis_imports
 build --override_repository=com_google_protobuf=%workspace%/ossm/vendor/com_google_protobuf
-build --override_repository=com_google_protobuf_protoc_linux_aarch_64=%workspace%/ossm/vendor/com_google_protobuf_protoc_linux_aarch_64
-build --override_repository=com_google_protobuf_protoc_linux_x86_64=%workspace%/ossm/vendor/com_google_protobuf_protoc_linux_x86_64
 build --override_repository=compatibility_proxy=%workspace%/ossm/vendor/compatibility_proxy
 build --override_repository=copy_directory_toolchains=%workspace%/ossm/vendor/copy_directory_toolchains
 build --override_repository=copy_to_directory_toolchains=%workspace%/ossm/vendor/copy_to_directory_toolchains
