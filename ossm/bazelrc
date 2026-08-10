@@ -11,6 +11,7 @@ build --action_env=Clang_DIR=/usr/lib64/llvm21
 build --cxxopt=-Wno-nullability-completeness
 build --host_linkopt=-latomic
 build --linkopt=-latomic
+build --features=-layering_check --host_features=-layering_check
 
 build --host_force_python=PY3
 build --extra_toolchains=@rules_python//python:autodetecting_toolchain
