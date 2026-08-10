@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: "PR number (passed by ok-to-test.yaml)"
+        description: "PR number"
         required: true
         type: string
       head_sha:
@@ -13,52 +13,19 @@ on:
         required: true
         type: string
       base_ref:
-        description: "PR base branch (e.g. release-1.30)"
+        description: "PR base branch (e.g. master)"
         required: true
         type: string
       source_repo:
-        description: "PR head repo clone URL"
+        description: "PR head repo clone URL (github.com HTTPS only)"
         required: true
         type: string
-  pull_request_target:
-    types: [opened, synchronize, reopened]
-    branches:
-      - release-1.30-DISABLED
+
+concurrency:
+  group: build-pr-${{ inputs.pr_number }}
+  cancel-in-progress: true
 
 jobs:
-  manage-labels:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request_target'
-    permissions:
-      pull-requests: write
-    steps:
-      - name: Add needs-ok-to-test for external contributors
-        if: |
-          github.event.pull_request.author_association != 'OWNER' &&
-          github.event.pull_request.author_association != 'MEMBER' &&
-          github.event.pull_request.author_association != 'COLLABORATOR'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              labels: ['needs-ok-to-test']
-            }).catch(() => {})
-
-      - name: Remove ok-to-test on new commit
-        if: github.event.action == 'synchronize'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.removeLabel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              name: 'ok-to-test'
-            }).catch(() => {})
-
   build:
     runs-on: ubuntu-latest
     permissions:
@@ -78,65 +45,110 @@ jobs:
             status_name: arm64 bare metal
     name: "build (${{ matrix.arch }}, Testing Farm bare metal${{ matrix.name_suffix }})"
     steps:
-      - name: Check authorization
-        run: |
-          # workflow_dispatch is always authorized:
-          # only ok-to-test.yaml calls createWorkflowDispatch, and only after
-          # a maintainer adds the ok-to-test label
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "Triggered via workflow_dispatch (ok-to-test authorized)"
-            exit 0
-          fi
-          ASSOCIATION="${{ github.event.pull_request.author_association }}"
-          if [[ "$ASSOCIATION" == "OWNER" || "$ASSOCIATION" == "MEMBER" || \
-                "$ASSOCIATION" == "COLLABORATOR" ]]; then
-            echo "Trusted author ($ASSOCIATION)"
-            exit 0
-          fi
-          echo "::error::External contributor. A maintainer must add the 'ok-to-test' label to run CI."
-          exit 1
+      - name: Validate inputs
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          INPUT_HEAD_SHA: ${{ inputs.head_sha }}
+          INPUT_BASE_REF: ${{ inputs.base_ref }}
+          INPUT_SOURCE_REPO: ${{ inputs.source_repo }}
+        with:
+          script: |
+            const prNumber = parseInt(process.env.INPUT_PR_NUMBER);
+            const headSha = process.env.INPUT_HEAD_SHA;
+            const baseRef = process.env.INPUT_BASE_REF;
+            const sourceRepo = process.env.INPUT_SOURCE_REPO;
+
+            if (isNaN(prNumber) || prNumber <= 0) {
+              core.setFailed(`Invalid pr_number: ${process.env.INPUT_PR_NUMBER}`);
+              return;
+            }
+            if (!/^[0-9a-f]{40}$/.test(headSha)) {
+              core.setFailed(`Invalid head_sha format: ${headSha}`);
+              return;
+            }
+            if (!/^[a-zA-Z0-9_.\-\/]+$/.test(baseRef) || baseRef.includes('..')) {
+              core.setFailed(`Invalid base_ref format: ${baseRef}`);
+              return;
+            }
+            if (!/^https:\/\/github\.com\/[a-zA-Z0-9_.\-]+\/[a-zA-Z0-9_.\-]+\.git$/.test(sourceRepo)) {
+              core.setFailed(`Invalid source_repo (must be a github.com HTTPS URL): ${sourceRepo}`);
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+
+            if (pr.head.sha !== headSha) {
+              const compare = await github.rest.repos.compareCommits({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                base: headSha,
+                head: pr.head.sha
+              });
+              if (!['ahead', 'identical'].includes(compare.data.status)) {
+                core.setFailed(`head_sha ${headSha} does not belong to PR #${prNumber} (compare: ${compare.data.status})`);
+                return;
+              }
+              core.warning(`Building ancestor commit ${headSha} (PR HEAD is now ${pr.head.sha})`);
+            }
+
+            if (!pr.head.repo) {
+              const baseCloneUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}.git`;
+              if (sourceRepo !== baseCloneUrl) {
+                core.setFailed(`PR fork appears deleted and source_repo ${sourceRepo} is not the base repo`);
+                return;
+              }
+              core.warning('PR fork deleted or same-repo PR; source_repo matches base repo');
+            } else if (sourceRepo !== pr.head.repo.clone_url) {
+              core.setFailed(`source_repo ${sourceRepo} does not match PR head repo ${pr.head.repo.clone_url}`);
+              return;
+            }
+
+            core.info(`Inputs validated: PR #${prNumber}, SHA ${headSha}`);
 
       - name: Run build on Testing Farm bare metal
         id: tf
-        uses: sclorg/testing-farm-as-github-action@v4
+        uses: sclorg/testing-farm-as-github-action@230555baceb860aa468d216f1822974836b965d1 # v4
         with:
           api_key: ${{ secrets.TESTING_FARM_PUBLIC_API_TOKEN }}
           api_url: https://api.testing-farm.io/v0.1
           git_url: https://github.com/openshift-service-mesh/proxy.git
-          git_ref: ${{ inputs.base_ref || github.base_ref || github.ref_name }}
+          git_ref: ${{ inputs.base_ref }}
           tmt_plan_regex: /plans/build
           compose: CentOS-Stream-10
           arch: ${{ matrix.arch }}
           tmt_hardware: '{"virtualization": {"is-virtualized": false}}'
-          variables: "SOURCE_REPO=${{ inputs.source_repo || github.event.pull_request.head.repo.clone_url || format('{0}/{1}.git', github.server_url, github.repository) }};SOURCE_REF=${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}"
+          pipeline_settings: '{"skip_guest_setup": true}'
+          variables: "SOURCE_REPO=${{ inputs.source_repo }};SOURCE_REF=${{ inputs.head_sha }}"
           timeout: 120
           update_pull_request_status: true
           pull_request_status_name: ${{ matrix.status_name }}
           create_issue_comment: true
-          commit_sha: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}
-          pr_number: ${{ inputs.pr_number || github.event.pull_request.number || '' }}
+          commit_sha: ${{ inputs.head_sha }}
+          pr_number: ${{ inputs.pr_number }}
 
       - name: Collect build artifact
         if: success()
         env:
           REQUEST_ID: ${{ steps.tf.outputs.request_id }}
-          SOURCE_REF: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+          SOURCE_REF: ${{ inputs.head_sha }}
           SUFFIX: ${{ matrix.suffix }}
         run: |
           ARTIFACTS_URL="https://artifacts.dev.testing-farm.io/${REQUEST_ID}"
           ARTIFACT="envoy-alpha-${SOURCE_REF}${SUFFIX}.tar.gz"
-          echo "Fetching results.xml to locate artifact URL..."
           curl -fSL -o results.xml "${ARTIFACTS_URL}/results.xml"
           TF_PATH=$(grep -oP 'href="\K[^"]+'"${ARTIFACT}"'[^"]*' results.xml | head -1)
           [[ -z "${TF_PATH}" ]] && { echo "ERROR: ${ARTIFACT} not found in results.xml"; cat results.xml; exit 1; }
-          echo "Downloading: ${TF_PATH}"
           curl -fSL -o "${ARTIFACT}" "${TF_PATH}"
-          echo "Downloaded: ${ARTIFACT} ($(du -sh "${ARTIFACT}" | cut -f1))"
 
       - name: Upload build artifact
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: envoy-alpha-${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}${{ matrix.suffix }}
-          path: envoy-alpha-${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}${{ matrix.suffix }}.tar.gz
+          name: envoy-alpha-${{ inputs.head_sha }}${{ matrix.suffix }}
+          path: envoy-alpha-${{ inputs.head_sha }}${{ matrix.suffix }}.tar.gz
           retention-days: 7

@@ -15,13 +15,17 @@ if [[ "${DRY_RUN:-false}" == "true" ]]; then
   exit 0
 fi
 
-echo "${GCS_SERVICE_ACCOUNT_KEY}" > /tmp/gcs-key.json
 pip install --quiet google-cloud-storage
+GCS_KEY_FILE=$(mktemp)
+echo "${GCS_SERVICE_ACCOUNT_KEY}" > "${GCS_KEY_FILE}"
+chmod 600 "${GCS_KEY_FILE}"
+trap "rm -f '${GCS_KEY_FILE}'" EXIT
+export GCS_KEY_FILE
 python3 - <<'EOF'
 import os
 from google.cloud import storage
 
-client = storage.Client.from_service_account_json('/tmp/gcs-key.json')
+client = storage.Client.from_service_account_json(os.environ['GCS_KEY_FILE'])
 bucket = client.bucket('maistra-prow-testing')
 artifact = os.environ['ARTIFACT_NAME']
 blob = bucket.blob(f'proxy/{artifact}')
@@ -29,4 +33,4 @@ blob.upload_from_filename(artifact)
 url = f'https://storage.googleapis.com/maistra-prow-testing/proxy/{artifact}'
 print(f'Uploaded: {url}')
 EOF
-rm -f /tmp/gcs-key.json
+rm -f "${GCS_KEY_FILE}"

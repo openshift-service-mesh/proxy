@@ -1,0 +1,101 @@
+---
+name: CI Authorization
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches:
+      - master
+
+concurrency:
+  group: ci-auth-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.OSSM_ORG_MEM_GH_APP_ID }}
+          private-key: ${{ secrets.OSSM_ORG_MEM_GH_APP_PRIVATE_KEY }}
+
+      - name: Check authorization and manage CI
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const sender = context.payload.sender.login;
+            const org = context.repo.owner;
+
+            const dispatchBuild = async () => {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'build.yaml',
+                ref: context.payload.pull_request.base.ref,
+                inputs: {
+                  pr_number: String(prNumber),
+                  head_sha: context.payload.pull_request.head.sha,
+                  base_ref: context.payload.pull_request.base.ref,
+                  source_repo: context.payload.pull_request.head.repo?.clone_url
+                    ?? `https://github.com/${context.repo.owner}/${context.repo.repo}.git`
+                }
+              });
+            };
+
+            // Check org membership via GitHub App token (works for private memberships)
+            const { Octokit } = require('@octokit/core');
+            const appOctokit = new Octokit({ auth: process.env.APP_TOKEN });
+            let isMember = false;
+            try {
+              const res = await appOctokit.request('GET /orgs/{org}/members/{username}', {
+                org: org,
+                username: sender
+              });
+              isMember = (res.status === 204);
+            } catch (e) {
+              isMember = false;
+            }
+
+            // Live label check (fresh API call, not frozen event snapshot)
+            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+            const hasOkToTest = labels.some(l => l.name === 'ok-to-test');
+
+            if (isMember) {
+              core.info(`Sender ${sender} is org member, dispatching build`);
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                name: 'needs-ok-to-test'
+              }).catch(() => {});
+              await dispatchBuild();
+            } else {
+              core.info(`Sender ${sender} is not org member`);
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['needs-ok-to-test']
+              }).catch(() => {});
+              if (hasOkToTest) {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  name: 'ok-to-test'
+                }).catch(() => {});
+              }
+            }
