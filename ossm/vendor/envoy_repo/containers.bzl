@@ -2,11 +2,11 @@
 
 REPO = "docker.io/envoyproxy/envoy-build"
 REPO_GCR = "gcr.io/envoy-ci/envoy-build"
-SHA = "fed53e3048bfc6bacaa02557d30fad43780ab610dfe70049796ce0a21744df85"
-SHA_GCC = "342d7eaccb753e8efb2aa171dccfd3bd7e531a22730ecb72372ab64c5967681b"
-SHA_MOBILE = "8652a1160c71fee4a18c1a044d195bcb0b9d75b10b1189c089a8fe24b78117b1"
-SHA_WORKER = "934b50777b1eb9348b0e62cafd9eee5c79828e57d4ca08083c86d3099b14bb42"
-TAG = "v0.1.8"
+SHA = "4bee2c190e816d47ccb992d17c2c8c3f96815f79dcba5c207cbdf3b0e2510041"
+SHA_GCC = "08924bde058f9d4254dfc53e1b7d22767ae1bac7fb005c0db1ef3b289b0b5c2f"
+SHA_MOBILE = "f8807abfea33717aadb61ef6d5756332917409043a61a4f0fd19abb4986d548f"
+SHA_WORKER = "1714d9c81bd61b493f24ae796b74db685f34cebdff6c3bb27c0cac6c683df66a"
+TAG = "v0.1.10"
 
 def image_gcc():
     return "%s@sha256:%s" % (

@@ -15,6 +15,7 @@
 #include <variant>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/strings/string_view.h"
 #include "quiche/common/platform/api/quiche_export.h"
 #include "quiche/common/platform/api/quiche_logging.h"
@@ -89,21 +90,43 @@ class QUICHE_EXPORT Item {
   bool is_boolean() const { return Type() == kBooleanType; }
 
   int64_t GetInteger() const {
-    const auto* value = std::get_if<int64_t>(&value_);
+    const auto* value = GetIfInteger();
     QUICHE_CHECK(value);
     return *value;
   }
   double GetDecimal() const {
-    const auto* value = std::get_if<double>(&value_);
+    const auto* value = GetIfDecimal();
     QUICHE_CHECK(value);
     return *value;
   }
   bool GetBoolean() const {
-    const auto* value = std::get_if<bool>(&value_);
+    const auto* value = GetIfBoolean();
     QUICHE_CHECK(value);
     return *value;
   }
-  // TODO(iclelland): Split up accessors for String, Token and Byte Sequence.
+
+  const int64_t* GetIfInteger() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  int64_t* GetIfInteger() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+
+  const double* GetIfDecimal() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  double* GetIfDecimal() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+
+  const std::string* GetIfToken() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::string* GetIfToken() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+
+  // Note: This only returns a non-nullptr if `Type() == kString`, unlike the
+  // deprecated `GetString()` and `TakeString()` methods.
+  const std::string* GetIfString() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::string* GetIfString() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+
+  const std::string* GetIfByteSequence() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::string* GetIfByteSequence() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+
+  const bool* GetIfBoolean() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  bool* GetIfBoolean() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+
+  // Deprecated: Prefer `GetIfString()`, `GetIfToken()`, or
+  // `GetIfByteSequence()`.
   const std::string& GetString() const {
     struct Visitor {
       const std::string* operator()(const std::monostate&) { return nullptr; }
@@ -115,20 +138,6 @@ class QUICHE_EXPORT Item {
     const std::string* value = std::visit(Visitor(), value_);
     QUICHE_CHECK(value);
     return *value;
-  }
-
-  // Transfers ownership of the underlying String, Token, or Byte Sequence.
-  std::string TakeString() && {
-    struct Visitor {
-      std::string* operator()(std::monostate&) { return nullptr; }
-      std::string* operator()(int64_t&) { return nullptr; }
-      std::string* operator()(double&) { return nullptr; }
-      std::string* operator()(std::string& value) { return &value; }
-      std::string* operator()(bool&) { return nullptr; }
-    };
-    std::string* value = std::visit(Visitor(), value_);
-    QUICHE_CHECK(value);
-    return std::move(*value);
   }
 
   ItemType Type() const { return static_cast<ItemType>(value_.index()); }
@@ -149,7 +158,7 @@ QUICHE_EXPORT bool IsValidToken(absl::string_view str);
 // Token, and there may be any number of parameters. Parameter ordering is not
 // significant.
 struct QUICHE_EXPORT ParameterisedIdentifier {
-  using Parameters = std::map<std::string, Item>;
+  using Parameters = std::map<std::string, Item, std::less<>>;
 
   Item identifier;
   Parameters params;
@@ -212,6 +221,9 @@ class QUICHE_EXPORT Dictionary {
  public:
   using iterator = std::vector<DictionaryMember>::iterator;
   using const_iterator = std::vector<DictionaryMember>::const_iterator;
+  using key_type = std::string;
+  using mapped_type = ParameterizedMember;
+  using value_type = std::pair<const std::string, ParameterizedMember>;
 
   Dictionary();
   Dictionary(const Dictionary&);
@@ -264,14 +276,22 @@ using ListOfLists = std::vector<std::vector<Item>>;
 using List = std::vector<ParameterizedMember>;
 
 // Returns the result of parsing the header value as an Item, if it can be
-// parsed as one, or nullopt if it cannot. Note that this uses the Draft 15
+// parsed as one, or nullopt if it cannot. Note that this uses the RFC 8941
 // parsing rules, and so applies tighter range limits to integers.
-QUICHE_EXPORT std::optional<ParameterizedItem> ParseItem(absl::string_view str);
+//
+// When `strict` is true, trailing decimal points are prohibited and byte
+// sequences must strictly conform to the specification.
+QUICHE_EXPORT std::optional<ParameterizedItem> ParseItem(absl::string_view str,
+                                                         bool strict = false);
 
 // Returns the result of parsing the header value as an Item with no parameters,
-// or nullopt if it cannot. Note that this uses the Draft 15 parsing rules, and
+// or nullopt if it cannot. Note that this uses the RFC 8941 parsing rules, and
 // so applies tighter range limits to integers.
-QUICHE_EXPORT std::optional<Item> ParseBareItem(absl::string_view str);
+//
+// When `strict` is true, trailing decimal points are prohibited and byte
+// sequences must strictly conform to the specification.
+QUICHE_EXPORT std::optional<Item> ParseBareItem(absl::string_view str,
+                                                bool strict = false);
 
 // Returns the result of parsing the header value as a Parameterised List, if it
 // can be parsed as one, or nullopt if it cannot. Note that parameter keys will
@@ -291,16 +311,22 @@ QUICHE_EXPORT std::optional<ListOfLists> ParseListOfLists(
     absl::string_view str);
 
 // Returns the result of parsing the header value as a general List, if it can
-// be parsed as one, or nullopt if it cannot.
-// Structured-Headers Draft 15 only.
-QUICHE_EXPORT std::optional<List> ParseList(absl::string_view str);
+// be parsed as one, or nullopt if it cannot. RFC 8941 only.
+//
+// When `strict` is true, trailing decimal points are prohibited and byte
+// sequences must strictly conform to the specification.
+QUICHE_EXPORT std::optional<List> ParseList(absl::string_view str,
+                                            bool strict = false);
 
 // Returns the result of parsing the header value as a general Dictionary, if it
-// can be parsed as one, or nullopt if it cannot. Structured-Headers Draft 15
-// only.
-QUICHE_EXPORT std::optional<Dictionary> ParseDictionary(absl::string_view str);
+// can be parsed as one, or nullopt if it cannot. RFC 8941 only.
+//
+// When `strict` is true, trailing decimal points are prohibited and byte
+// sequences must strictly conform to the specification.
+QUICHE_EXPORT std::optional<Dictionary> ParseDictionary(absl::string_view str,
+                                                        bool strict = false);
 
-// Serialization is implemented for Structured-Headers Draft 15 only.
+// Serialization is implemented for RFC 8941 only.
 QUICHE_EXPORT std::optional<std::string> SerializeItem(const Item& value);
 QUICHE_EXPORT std::optional<std::string> SerializeItem(
     const ParameterizedItem& value);
