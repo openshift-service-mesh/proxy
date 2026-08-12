@@ -122,7 +122,7 @@ jobs:
           compose: CentOS-Stream-10
           arch: ${{ matrix.arch }}
           tmt_hardware: '{"virtualization": {"is-virtualized": false}}'
-          pipeline_settings: '{"skip_guest_setup": true}'
+          environment_settings: '{"pipeline": {"skip_guest_setup": true}}'
           variables: "SOURCE_REPO=${{ inputs.source_repo }};SOURCE_REF=${{ inputs.head_sha }}"
           timeout: 120
           update_pull_request_status: true
