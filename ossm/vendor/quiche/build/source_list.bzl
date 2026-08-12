@@ -1017,6 +1017,11 @@ balsa_srcs = [
     "balsa/simple_buffer.cc",
     "balsa/standard_header_map.cc",
 ]
+masque_test_hdrs = [
+]
+masque_test_srcs = [
+    "quic/masque/masque_utils_test.cc",
+]
 masque_private_tokens_hdrs = [
     "quic/masque/private_tokens.h",
 ]
@@ -1740,7 +1745,6 @@ qbone_hdrs = [
     "quic/qbone/bonnet/icmp_reachable.h",
     "quic/qbone/bonnet/icmp_reachable_interface.h",
     "quic/qbone/bonnet/mock_icmp_reachable.h",
-    "quic/qbone/bonnet/mock_packet_exchanger_stats_interface.h",
     "quic/qbone/bonnet/mock_qbone_client_packet_exchanger.h",
     "quic/qbone/bonnet/mock_qbone_tunnel.h",
     "quic/qbone/bonnet/mock_tun_device.h",
