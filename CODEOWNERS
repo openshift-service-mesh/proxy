@@ -1,4 +1,3 @@
-# CI configuration paths protected by code owner review
 /.github/workflows/ @openshift-service-mesh/envoy-team
 /.github/scripts/   @openshift-service-mesh/envoy-team
 /plans/             @openshift-service-mesh/envoy-team
