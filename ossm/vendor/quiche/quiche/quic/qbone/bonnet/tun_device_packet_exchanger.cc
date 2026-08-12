@@ -26,7 +26,7 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
-#include "quiche/quic/core/quic_packets.h"
+#include "quiche/quic/platform/api/quic_bug_tracker.h"
 #include "quiche/quic/platform/api/quic_ip_address.h"
 #include "quiche/quic/platform/api/quic_logging.h"
 #include "quiche/quic/qbone/platform/icmp_packet.h"
@@ -42,29 +42,47 @@ using ::quiche::QuicheEndian;
 
 TunDevicePacketExchanger::TunDevicePacketExchanger(
     size_t mtu, KernelInterface* kernel, NetlinkInterface* netlink,
-    Visitor* absl_nullable visitor, bool is_tap, StatsInterface* stats,
-    absl::string_view ifname)
+    Visitor* absl_nonnull visitor, bool is_tap, absl::string_view ifname)
     : kernel_(kernel),
       netlink_(netlink),
-      visitor_(visitor),
+      visitor_(*visitor),
       ifname_(ifname),
       // Reading on a TUN device returns a packet at a time. If the packet is
       // longer than the buffer, it's truncated.
       read_buffer_(mtu),
-      is_tap_(is_tap),
-      stats_(stats) {}
+      is_tap_(is_tap) {}
+
+TunDevicePacketExchanger::~TunDevicePacketExchanger() {
+  QUIC_BUG_IF(bonnet_tun_device_packet_exchanger_not_stopped,
+              read_fd_ >= 0 || write_fd_ >= 0);
+}
+
+void TunDevicePacketExchanger::Start(int read_fd, int write_fd) {
+  // Allow idempotent Start() calls with the same file descriptors, but
+  // otherwise it's a bug to try starting an already started exchanger.
+  QUIC_BUG_IF(qbone_tun_device_packet_exchanger_already_started,
+              (read_fd_ >= 0 || write_fd_ >= 0) &&
+                  (read_fd_ != read_fd || write_fd_ != write_fd));
+
+  QUIC_BUG_IF(qbone_tun_device_packet_exchanger_invalid_read_fd, read_fd < 0);
+  QUIC_BUG_IF(qbone_tun_device_packet_exchanger_invalid_write_fd, write_fd < 0);
+
+  read_fd_ = read_fd;
+  write_fd_ = write_fd;
+}
+
+void TunDevicePacketExchanger::Stop() {
+  // This implementation does not employ any worker threads, so there cannot be
+  // any pending operations to wait for completion.
+  read_fd_ = -1;
+  write_fd_ = -1;
+}
 
 bool TunDevicePacketExchanger::ReadAndDeliverPacket(
     QboneClientInterface* qbone_client) {
   if (read_fd_ < 0) {
-    absl::Status error = absl::InternalError(
-        absl::StrCat("Invalid file descriptor of the TUN device: ", read_fd_));
-    QUIC_LOG_EVERY_N_SEC(ERROR, 60) << "Packet read failed: " << error;
-    stats_->OnReadError(absl::StrCat(absl::StatusCodeToString(error.code()),
-                                     ": ", error.message()));
-    if (visitor_) {
-      visitor_->OnRead(std::move(error));
-    }
+    QUIC_BUG(qbone_tun_device_packet_exchanger_read_with_invalid_fd)
+        << "Invalid file descriptor of the TUN device: " << read_fd_;
     return false;
   }
 
@@ -91,11 +109,7 @@ bool TunDevicePacketExchanger::ReadAndDeliverPacket(
 
   if (!status.ok()) {
     QUIC_LOG_EVERY_N_SEC(ERROR, 60) << "Packet read failed: " << status;
-    stats_->OnReadError(absl::StrCat(absl::StatusCodeToString(status.code()),
-                                     ": ", status.message()));
-    if (visitor_) {
-      visitor_->OnRead(std::move(status));
-    }
+    visitor_.OnRead(std::move(status));
     return false;
   }
 
@@ -104,11 +118,7 @@ bool TunDevicePacketExchanger::ReadAndDeliverPacket(
     absl::Status error =
         absl::InternalError(absl::StrCat("Invalid packet size."));
     QUIC_LOG_EVERY_N_SEC(ERROR, 60) << "Packet read failed: " << error;
-    stats_->OnReadError(absl::StrCat(absl::StatusCodeToString(error.code()),
-                                     ": ", error.message()));
-    if (visitor_) {
-      visitor_->OnRead(std::move(error));
-    }
+    visitor_.OnRead(std::move(error));
     return false;
   }
   absl::Span<const std::byte> l3_packet =
@@ -118,11 +128,7 @@ bool TunDevicePacketExchanger::ReadAndDeliverPacket(
     switch (ValidateL2Headers(eth_header, l3_packet)) {
       case L2ValidationResult::kInvalid: {
         absl::Status error = absl::InvalidArgumentError("Invalid L2 headers.");
-        stats_->OnReadError(absl::StrCat(absl::StatusCodeToString(error.code()),
-                                         ": ", error.message()));
-        if (visitor_) {
-          visitor_->OnRead(std::move(error));
-        }
+        visitor_.OnRead(std::move(error));
         return false;
       }
       case L2ValidationResult::kValidLinkLocal:
@@ -138,11 +144,8 @@ bool TunDevicePacketExchanger::ReadAndDeliverPacket(
     }
   }
 
-  if (visitor_) {
-    visitor_->OnRead(std::vector<ReadResult>{
-        ReadResult{.packet = l3_packet, .latency = latency}});
-  }
-  stats_->OnPacketRead(l3_packet.size(), latency);
+  visitor_.OnRead(std::vector<ReadResult>{
+      ReadResult{.packet = l3_packet, .latency = latency}});
   qbone_client->ProcessPacketFromNetwork(absl::string_view(
       reinterpret_cast<const char*>(l3_packet.data()), l3_packet.size()));
   return true;
@@ -151,14 +154,8 @@ bool TunDevicePacketExchanger::ReadAndDeliverPacket(
 void TunDevicePacketExchanger::WritePacketToNetwork(const char* packet,
                                                     size_t size) {
   if (write_fd_ < 0) {
-    absl::Status error = absl::InternalError(
-        absl::StrCat("Invalid file descriptor of the TUN device: ", write_fd_));
-    QUIC_LOG_EVERY_N_SEC(ERROR, 60) << "Packet write failed: " << error;
-    stats_->OnWriteError(absl::StrCat(absl::StatusCodeToString(error.code()),
-                                      ": ", error.message()));
-    if (visitor_) {
-      visitor_->OnWrite(std::move(error));
-    }
+    QUIC_BUG(qbone_tun_device_packet_exchanger_write_with_invalid_fd)
+        << "Invalid file descriptor of the TUN device: " << write_fd_;
     return;
   }
 
@@ -181,33 +178,14 @@ void TunDevicePacketExchanger::WritePacketToNetwork(const char* packet,
 
   if (!status.ok()) {
     QUIC_LOG_EVERY_N_SEC(ERROR, 60) << "Packet write failed: " << status;
-    stats_->OnWriteError(absl::StrCat(absl::StatusCodeToString(status.code()),
-                                      ": ", status.message()));
-    if (visitor_) {
-      visitor_->OnWrite(std::move(status));
-    }
+    visitor_.OnWrite(std::move(status));
     return;
   }
 
-  if (visitor_) {
-    visitor_->OnWrite(std::vector<WriteResult>{WriteResult{
-        .packet =
-            absl::MakeSpan(reinterpret_cast<const std::byte*>(packet), size),
-        .latency = latency}});
-  }
-  stats_->OnPacketWritten(result, latency);
-}
-
-void TunDevicePacketExchanger::set_read_file_descriptor(int fd) {
-  read_fd_ = fd;
-}
-void TunDevicePacketExchanger::set_write_file_descriptor(int fd) {
-  write_fd_ = fd;
-}
-
-const TunDevicePacketExchanger::StatsInterface*
-TunDevicePacketExchanger::stats_interface() const {
-  return stats_;
+  visitor_.OnWrite(std::vector<WriteResult>{WriteResult{
+      .packet =
+          absl::MakeSpan(reinterpret_cast<const std::byte*>(packet), size),
+      .latency = latency}});
 }
 
 void TunDevicePacketExchanger::InitializeEthHdr() {
