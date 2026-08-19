@@ -454,7 +454,7 @@ class RotatingScope : public Logger::Loggable<Logger::Id::filter> {
 public:
   RotatingScope(Server::Configuration::FactoryContext& factory_context, uint64_t rotate_interval_ms,
                 uint64_t delete_interval_ms)
-      : parent_scope_(factory_context.scope()), active_scope_(parent_scope_.createScope("")),
+      : parent_scope_(factory_context.scope()), active_scope_(parent_scope_.createScope("", true)),
         raw_scope_(active_scope_.get()), rotate_interval_ms_(rotate_interval_ms),
         delete_interval_ms_(delete_interval_ms) {
     if (rotate_interval_ms_ > 0) {
@@ -483,7 +483,7 @@ private:
     ENVOY_LOG(info, "Rotating active Istio stats scope after {}ms.", rotate_interval_ms_);
     draining_scope_ = active_scope_;
     delete_timer_->enableTimer(std::chrono::milliseconds(delete_interval_ms_));
-    active_scope_ = parent_scope_.createScope("");
+    active_scope_ = parent_scope_.createScope("", true);
     raw_scope_.store(active_scope_.get());
     rotate_timer_->enableTimer(std::chrono::milliseconds(rotate_interval_ms_));
   }
