@@ -30,7 +30,6 @@ build --override_repository=com_github_grpc_grpc=%workspace%/ossm/vendor/com_git
 build --override_repository=com_github_iancoleman_strcase=%workspace%/ossm/vendor/com_github_iancoleman_strcase
 build --override_repository=com_github_lyft_protoc_gen_star_v2=%workspace%/ossm/vendor/com_github_lyft_protoc_gen_star_v2
 build --override_repository=com_github_spf13_afero=%workspace%/ossm/vendor/com_github_spf13_afero
-build --override_repository=com_google_googleapis=%workspace%/ossm/vendor/com_google_googleapis
 build --override_repository=com_google_googleapis_imports=%workspace%/ossm/vendor/com_google_googleapis_imports
 build --override_repository=com_google_protobuf=%workspace%/ossm/vendor/com_google_protobuf
 build --override_repository=compatibility_proxy=%workspace%/ossm/vendor/compatibility_proxy
@@ -50,6 +49,7 @@ build --override_repository=flatbuffers=%workspace%/ossm/vendor/flatbuffers
 build --override_repository=fmt=%workspace%/ossm/vendor/fmt
 build --override_repository=fp16=%workspace%/ossm/vendor/fp16
 build --override_repository=fuzzing_pip3=%workspace%/ossm/vendor/fuzzing_pip3
+build --override_repository=googleapis=%workspace%/ossm/vendor/googleapis
 build --override_repository=googletest=%workspace%/ossm/vendor/googletest
 build --override_repository=googleurl=%workspace%/ossm/vendor/googleurl
 build --override_repository=gperftools=%workspace%/ossm/vendor/gperftools
