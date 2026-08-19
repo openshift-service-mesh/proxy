@@ -1,6 +1,6 @@
 module(
     name = "envoy_toolshed",
-    version = "0.4.2",
+    version = "0.4.6",
     bazel_compatibility = [">=7.2.1"],
 )
 
@@ -8,16 +8,19 @@ bazel_dep(name = "aspect_bazel_lib", version = "2.22.0")
 bazel_dep(name = "bazel_skylib", version = "1.8.2")
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "v8", version = "14.6.202.10.envoy")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
 bazel_dep(name = "rules_pkg", version = "1.1.0")
 bazel_dep(name = "rules_python", version = "1.7.0")
 bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "protobuf", version = "35.1.bcr.envoy", repo_name = "com_google_protobuf")
 bazel_dep(name = "toolchains_llvm", version = "1.8.0.envoy", dev_dependency = True)
 
 bazel_lib_toolchains = use_extension("@aspect_bazel_lib//lib:extensions.bzl", "toolchains")
 bazel_lib_toolchains.jq(version = "1.7")
 bazel_lib_toolchains.yq()
-use_repo(bazel_lib_toolchains, "jq", "jq_toolchains", "yq", "yq_toolchains")
+bazel_lib_toolchains.tar()
+use_repo(bazel_lib_toolchains, "jq", "jq_toolchains", "yq", "yq_toolchains", "bsd_tar_toolchains")
 
 PYTHON_VERSION_DEFAULT = "3.12"
 
@@ -76,6 +79,13 @@ sysroot_ext = use_extension("//sysroot:extensions.bzl", "sysroot_extension", dev
 sysroot_ext.setup()
 use_repo(sysroot_ext, "sysroot_linux_amd64", "sysroot_linux_arm64")
 
+macos_sysroot_build_ext = use_extension("//sysroot:extensions.bzl", "macos_sysroot_build_extension", dev_dependency = True)
+use_repo(macos_sysroot_build_ext, "macos_sdk_pkg", "pkgutil_linux_amd64")
+
+wee8_prebuilt_ext = use_extension("//v8:extensions.bzl", "wee8_prebuilt_extension")
+wee8_prebuilt_ext.setup()
+use_repo(wee8_prebuilt_ext, "wee8_prebuilt_x86_64", "wee8_prebuilt_x86_64_libstdcxx", "wee8_prebuilt_aarch64")
+
 # Setup sanitizer libraries (MSAN and TSAN) - example for downstream consumers
 # Uncomment to use in your MODULE.bazel:
 # sanitizer_ext = use_extension("@envoy_toolshed//compile:extensions.bzl", "sanitizer_extension")
@@ -100,6 +110,12 @@ use_repo(sysroot_ext, "sysroot_linux_amd64", "sysroot_linux_arm64")
 # grcov_ext = use_extension("@envoy_toolshed//coverage/grcov:extensions.bzl", "grcov_extension")
 # grcov_ext.setup()
 # use_repo(grcov_ext, "grcov")
+
+# This needs to be before llvm to win in transitionsj
+register_toolchains(
+    "//toolchains/gcc:linux_x64_toolchain",
+    "//toolchains/gcc:linux_arm64_toolchain",
+)
 
 # Configure LLVM toolchain
 
@@ -147,6 +163,10 @@ llvm.sysroot(
     name = "llvm_toolchain",
     label = "@sysroot_linux_arm64//:sysroot",
     targets = ["linux-aarch64"],
+)
+llvm.extra_exec_compatible_with(
+    name = "llvm_toolchain",
+    constraints = ["//compile:llvm_worker"],
 )
 use_repo(llvm, "llvm_toolchain")
 

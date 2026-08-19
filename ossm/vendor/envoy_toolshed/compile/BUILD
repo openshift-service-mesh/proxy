@@ -1,15 +1,17 @@
 load("@aspect_bazel_lib//lib:tar.bzl", "mtree_mutate", "mtree_spec", "tar")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
-load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "pkg_mklink", "strip_prefix")
 load("@rules_pkg//pkg:pkg.bzl", "pkg_tar")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:versions.bzl", "LLVM_VERSION", "SUPPORTED_ARCHES", "VERSIONS")
-load(":llvm_minimal.bzl", "LLVM_MINIMAL_BINS", "LLVM_MINIMAL_LIB_GLOBS", "LLVM_MINIMAL_LLVM_REPO_BUILD", "llvm_minimal_strip_bins")
+load(":libcxx_darwin.bzl", "libcxx_darwin_extract")
+load(":llvm_minimal.bzl", "LLVM_MINIMAL_BINS", "LLVM_MINIMAL_LIB_GLOBS", "LLVM_MINIMAL_LLVM_REPO_BUILD", "LLVM_TARBALL_STRIP_PREFIXES", "llvm_minimal_extract_host_tools", "llvm_minimal_extract_libs", "llvm_minimal_strip_bins")
+load(":llvm_prebuilt.bzl", "llvm_prebuilt_extract_libcxx")
 
 package(default_visibility = ["//visibility:public"])
 
-exports_files(["sanitizer_libs.bzl", "libcxx_libs.bzl", "llvm_minimal.bzl", "extensions.bzl"])
+exports_files(["sanitizer_libs.bzl", "libcxx_libs.bzl", "libcxx_darwin.bzl", "llvm_minimal.bzl", "extensions.bzl"])
 
 # Build setting to control which toolchain to use
 # This can be set with --//compile:use_gcc_toolchain=true
@@ -196,10 +198,31 @@ pkg_tar(
 
 [
     (
+        llvm_prebuilt_extract_libcxx(
+            name = "llvm_libcxx_%s_extract" % arch,
+            tarball = "@llvm_libcxx_%s//:llvm.tar.xz" % arch,
+            strip_prefix = "LLVM-%s-%s/" % (LLVM_VERSION, "Linux-ARM64" if arch == "aarch64" else "Linux-X64"),
+            arch = arch,
+        ),
+        filegroup(
+            name = "llvm_libcxx_%s_libcxx" % arch,
+            srcs = [":llvm_libcxx_%s_extract" % arch],
+            output_group = "libcxx",
+        ),
+        filegroup(
+            name = "llvm_libcxx_%s_compiler_rt" % arch,
+            srcs = [":llvm_libcxx_%s_extract" % arch],
+            output_group = "compiler_rt",
+        ),
+        filegroup(
+            name = "llvm_libcxx_%s_config_site" % arch,
+            srcs = [":llvm_libcxx_%s_extract" % arch],
+            output_group = "config_site",
+        ),
         pkg_files(
             name = "libcxx_%s_lib_files" % arch,
             srcs = [
-                "@llvm_libcxx_%s//:libcxx" % arch,
+                ":llvm_libcxx_%s_libcxx" % arch,
             ],
             prefix = "lib",
             strip_prefix = ".",
@@ -212,7 +235,7 @@ pkg_tar(
         pkg_files(
             name = "libcxx_%s_compiler_rt_files" % arch,
             srcs = [
-                "@llvm_libcxx_%s//:compiler_rt" % arch,
+                ":llvm_libcxx_%s_compiler_rt" % arch,
             ],
             prefix = "lib",
             strip_prefix = ".",
@@ -225,7 +248,7 @@ pkg_tar(
         pkg_files(
             name = "libcxx_%s_include_files" % arch,
             srcs = [
-                "@llvm_libcxx_%s//:config_site" % arch,
+                ":llvm_libcxx_%s_config_site" % arch,
             ],
             prefix = "include",
             strip_prefix = ".",
@@ -254,6 +277,105 @@ pkg_tar(
     for arch in SUPPORTED_ARCHES
 ]
 
+libcxx_darwin_extract(
+    name = "libcxx_darwin_aarch64_src",
+    tarball = "@llvm_tarball_macos_arm64//:llvm.tar.xz",
+    strip_prefix = LLVM_TARBALL_STRIP_PREFIXES["macOS-ARM64"],
+    # @llvm_toolchain_llvm is the host-arch alias backed by the *minimal* LLVM
+    # artifacts, and llvm-install-name-tool is macOS-only there (see
+    # _LLVM_MINIMAL_MACOS_ONLY_BINS), so it is absent on a Linux host. Take the
+    # host tool from the full upstream Linux-X64 tarball instead, matching the
+    # llvm-strip/llvm-readobj bootstrapping below.
+    install_name_tool = ":llvm_minimal_host_llvm_install_name_tool",
+    tags = ["manual"],
+)
+
+genrule(
+    name = "libcxx_darwin_aarch64_config_site",
+    srcs = [":libcxx_darwin_aarch64_src"],
+    outs = ["libcxx_darwin_aarch64_files/__config_site"],
+    cmd = "cp $(location :libcxx_darwin_aarch64_src)/include/__config_site $@",
+    tags = ["manual"],
+)
+
+genrule(
+    name = "libcxx_darwin_aarch64_libcxx_real",
+    srcs = [":libcxx_darwin_aarch64_src"],
+    outs = ["libcxx_darwin_aarch64_files/libc++.1.0.dylib"],
+    cmd = "cp $(location :libcxx_darwin_aarch64_src)/lib/libc++.1.0.dylib $@",
+    tags = ["manual"],
+)
+
+genrule(
+    name = "libcxx_darwin_aarch64_libcxxabi_real",
+    srcs = [":libcxx_darwin_aarch64_src"],
+    outs = ["libcxx_darwin_aarch64_files/libc++abi.1.0.dylib"],
+    cmd = "cp $(location :libcxx_darwin_aarch64_src)/lib/libc++abi.1.0.dylib $@",
+    tags = ["manual"],
+)
+
+pkg_files(
+    name = "libcxx_darwin_aarch64_include_files",
+    srcs = [":libcxx_darwin_aarch64_config_site"],
+    prefix = "include",
+    strip_prefix = strip_prefix.files_only(),
+    tags = ["manual"],
+)
+
+pkg_files(
+    name = "libcxx_darwin_aarch64_lib_files",
+    srcs = [
+        ":libcxx_darwin_aarch64_libcxx_real",
+        ":libcxx_darwin_aarch64_libcxxabi_real",
+    ],
+    prefix = "lib",
+    strip_prefix = strip_prefix.files_only(),
+    tags = ["manual"],
+)
+
+pkg_mklink(
+    name = "libcxx_darwin_aarch64_libcxx_1_link",
+    link_name = "lib/libc++.1.dylib",
+    target = "libc++.1.0.dylib",
+    tags = ["manual"],
+)
+
+pkg_mklink(
+    name = "libcxx_darwin_aarch64_libcxx_link",
+    link_name = "lib/libc++.dylib",
+    target = "libc++.1.0.dylib",
+    tags = ["manual"],
+)
+
+pkg_mklink(
+    name = "libcxx_darwin_aarch64_libcxxabi_1_link",
+    link_name = "lib/libc++abi.1.dylib",
+    target = "libc++abi.1.0.dylib",
+    tags = ["manual"],
+)
+
+pkg_mklink(
+    name = "libcxx_darwin_aarch64_libcxxabi_link",
+    link_name = "lib/libc++abi.dylib",
+    target = "libc++abi.1.0.dylib",
+    tags = ["manual"],
+)
+
+pkg_tar(
+    name = "libcxx_darwin_aarch64",
+    extension = "tar.xz",
+    package_file_name = "libcxx-llvm%s-darwin-aarch64.tar.xz" % LLVM_VERSION,
+    srcs = [
+        ":libcxx_darwin_aarch64_include_files",
+        ":libcxx_darwin_aarch64_lib_files",
+        ":libcxx_darwin_aarch64_libcxx_1_link",
+        ":libcxx_darwin_aarch64_libcxx_link",
+        ":libcxx_darwin_aarch64_libcxxabi_1_link",
+        ":libcxx_darwin_aarch64_libcxxabi_link",
+    ],
+    tags = ["manual"],
+)
+
 # =============================================================================
 # Minimal LLVM extraction targets
 # =============================================================================
@@ -265,18 +387,47 @@ _LLVM_MINIMAL_MACOS_ONLY_BINS = [
 
 _LLVM_MINIMAL_LLVM_MAJOR = LLVM_VERSION.split(".")[0]
 
-# Use llvm-strip/llvm-readobj from the upstream Linux-X64 build tarball when
-# producing all minimal artifact variants. This preserves the intended
-# bootstrapping flow: strip the minimal artifacts with tools from the full
-# upstream tarball, not from the minimal artifact alias.
-_LLVM_MINIMAL_HOST_STRIPPER = "@llvm_tarball_linux_x86_64//:bin/llvm-strip"
-_LLVM_MINIMAL_HOST_READOBJ = "@llvm_tarball_linux_x86_64//:bin/llvm-readobj"
+# Use llvm-strip/llvm-readobj/llvm-install-name-tool from the upstream Linux-X64
+# build tarball when producing all minimal artifact variants. This preserves the
+# intended bootstrapping flow: strip the minimal artifacts with tools from the
+# full upstream tarball, not from the minimal artifact alias.
+llvm_minimal_extract_host_tools(
+    name = "llvm_minimal_host_tools",
+    tarball = "@llvm_tarball_linux_x86_64//:llvm.tar.xz",
+    strip_prefix = LLVM_TARBALL_STRIP_PREFIXES["Linux-X64"],
+    tags = ["manual"],
+)
+
+filegroup(
+    name = "llvm_minimal_host_llvm_strip",
+    srcs = [":llvm_minimal_host_tools"],
+    output_group = "llvm_strip",
+    tags = ["manual"],
+)
+
+filegroup(
+    name = "llvm_minimal_host_llvm_readobj",
+    srcs = [":llvm_minimal_host_tools"],
+    output_group = "llvm_readobj",
+    tags = ["manual"],
+)
+
+filegroup(
+    name = "llvm_minimal_host_llvm_install_name_tool",
+    srcs = [":llvm_minimal_host_tools"],
+    output_group = "llvm_install_name_tool",
+    tags = ["manual"],
+)
+
+_LLVM_MINIMAL_HOST_STRIPPER = ":llvm_minimal_host_llvm_strip"
+_LLVM_MINIMAL_HOST_READOBJ = ":llvm_minimal_host_llvm_readobj"
 
 [
     (
         llvm_minimal_strip_bins(
             name = "llvm_minimal_%s_strip_bins" % repo_suffix,
-            bin_all = "@llvm_tarball_%s//:bin_all" % repo_suffix,
+            tarball = "@llvm_tarball_%s//:llvm.tar.xz" % repo_suffix,
+            strip_prefix = LLVM_TARBALL_STRIP_PREFIXES[platform],
             bins = bins,
             stripper = _LLVM_MINIMAL_HOST_STRIPPER,
             readobj = _LLVM_MINIMAL_HOST_READOBJ,
@@ -292,21 +443,31 @@ _LLVM_MINIMAL_HOST_READOBJ = "@llvm_tarball_linux_x86_64//:bin/llvm-readobj"
         mtree_mutate(
             name = "llvm_minimal_%s_bins_mtree" % repo_suffix,
             mtree = ":llvm_minimal_%s_bins_mtree_src" % repo_suffix,
-            preserve_symlinks = False,
+            preserve_symlinks = True,
             srcs = [":llvm_minimal_%s_strip_bins" % repo_suffix],
             package_dir = "llvm-minimal-%s-%s" % (LLVM_VERSION, platform),
             strip_prefix = "compile/llvm_minimal_%s_bins_src" % repo_suffix,
             tags = ["manual"],
         ),
+        llvm_minimal_extract_libs(
+            name = "llvm_minimal_%s_extract_libs" % repo_suffix,
+            tarball = "@llvm_tarball_%s//:llvm.tar.xz" % repo_suffix,
+            strip_prefix = LLVM_TARBALL_STRIP_PREFIXES[platform],
+            lib_globs = LLVM_MINIMAL_LIB_GLOBS,
+            repo_suffix = repo_suffix,
+            platform = platform,
+            tags = ["manual"],
+        ),
         mtree_spec(
             name = "llvm_minimal_%s_libs_mtree_src" % repo_suffix,
-            srcs = ["@llvm_tarball_%s//:minimal_libs" % repo_suffix],
+            srcs = [":llvm_minimal_%s_extract_libs" % repo_suffix],
             tags = ["manual"],
         ),
         mtree_mutate(
             name = "llvm_minimal_%s_libs_mtree" % repo_suffix,
             mtree = ":llvm_minimal_%s_libs_mtree_src" % repo_suffix,
             package_dir = "llvm-minimal-%s-%s" % (LLVM_VERSION, platform),
+            strip_prefix = "compile/llvm_minimal_%s_libs_src" % repo_suffix,
             tags = ["manual"],
         ),
         genrule(
@@ -349,7 +510,7 @@ EOF""" % LLVM_MINIMAL_LLVM_REPO_BUILD,
             out = "llvm-minimal-%s-%s.tar.zst" % (LLVM_VERSION, platform),
             srcs = [
                 ":llvm_minimal_%s_strip_bins" % repo_suffix,
-                "@llvm_tarball_%s//:minimal_libs" % repo_suffix,
+                ":llvm_minimal_%s_extract_libs" % repo_suffix,
                 ":llvm_minimal_%s_build_bazel" % repo_suffix,
             ],
             tags = ["manual"],
@@ -373,6 +534,18 @@ EOF""" % LLVM_MINIMAL_LLVM_REPO_BUILD,
         ),
     ]
 ]
+
+filegroup(
+    name = "llvm_minimal_packages",
+    srcs = [
+        ":llvm_minimal_linux_x86_64",
+        ":llvm_minimal_linux_arm64",
+        ":llvm_minimal_macos_arm64",
+    ],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
+)
 
 [
     sh_test(
@@ -419,4 +592,26 @@ sh_test(
         "ROOT_DIR": "llvm-minimal-%s-Linux-X64" % LLVM_VERSION,
     },
     tags = ["manual"],
+)
+
+constraint_setting(name = "stdlib")
+
+constraint_value(
+    name = "libstdcxx",
+    constraint_setting = ":stdlib",
+)
+
+constraint_setting(
+    name = "worker",
+    default_constraint_value = ":llvm_worker",
+)
+
+constraint_value(
+    name = "llvm_worker",
+    constraint_setting = ":worker",
+)
+
+constraint_value(
+    name = "gcc_worker",
+    constraint_setting = ":worker",
 )

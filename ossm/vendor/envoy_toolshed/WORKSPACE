@@ -3,8 +3,20 @@ workspace(name = "envoy_toolshed")
 load(":archives.bzl", "load_archives")
 load_archives()
 
-load("//compile:llvm_minimal.bzl", "llvm_toolchain_alias")
-llvm_toolchain_alias(name = "llvm_toolchain_llvm")
+load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
+bazel_skylib_workspace()
+
+load("//v8:wee8_prebuilt.bzl", "setup_wee8_prebuilt")
+setup_wee8_prebuilt()
+
+load("//compile:llvm_minimal.bzl", "llvm_toolchain_alias", "setup_llvm_minimal")
+setup_llvm_minimal()
+llvm_toolchain_alias(
+    name = "llvm_toolchain_llvm",
+    minimal_linux_x64 = "@llvm_minimal_linux_x64//:BUILD.bazel",
+    minimal_linux_arm64 = "@llvm_minimal_linux_arm64//:BUILD.bazel",
+    minimal_macos_arm64 = "@llvm_minimal_macos_arm64//:BUILD.bazel",
+)
 
 load(":deps.bzl", "resolve_dependencies")
 resolve_dependencies()
