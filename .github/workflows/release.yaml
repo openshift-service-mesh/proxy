@@ -13,7 +13,6 @@ name: Release artifact (post-merge)
 on:
   push:
     branches:
-      - release-1.28
       - release-1.30
   workflow_dispatch:
     inputs:
@@ -42,7 +41,7 @@ jobs:
           - arch: aarch64
             suffix: "-arm64"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Find pre-submit artifact (fast path)
         id: cache
@@ -76,10 +75,15 @@ jobs:
                 exit 0
               fi
             else
-              # Fast-forward or squash merge: GITHUB_SHA may be the PR commit itself.
-              # Use it and let the artifact lookup below determine if a pre-built artifact exists.
-              PR_HEAD_SHA="${GITHUB_SHA}"
-              echo "No merge commit detected (fast-forward or squash), trying SHA: ${PR_HEAD_SHA}"
+              # Squash or fast-forward merge: look up the original PR HEAD SHA via the API.
+              PR_HEAD_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+                --jq '.[0].head.sha // empty')
+              if [[ -n "${PR_HEAD_SHA}" ]]; then
+                echo "Squash merge detected, original PR HEAD SHA: ${PR_HEAD_SHA}"
+              else
+                PR_HEAD_SHA="${GITHUB_SHA}"
+                echo "No associated PR found, trying SHA: ${PR_HEAD_SHA}"
+              fi
             fi
           fi
 
@@ -130,7 +134,7 @@ jobs:
       - name: Build release artifact on Testing Farm (fallback)
         id: tf
         if: steps.cache.outputs.found != 'true'
-        uses: sclorg/testing-farm-as-github-action@v4
+        uses: sclorg/testing-farm-as-github-action@230555baceb860aa468d216f1822974836b965d1 # v4
         with:
           api_key: ${{ secrets.TESTING_FARM_PUBLIC_API_TOKEN }}
           api_url: https://api.testing-farm.io/v0.1
@@ -140,6 +144,7 @@ jobs:
           compose: CentOS-Stream-10
           arch: ${{ matrix.arch }}
           tmt_hardware: '{"virtualization": {"is-virtualized": false}}'
+          environment_settings: '{"pipeline": {"skip_guest_setup": true}}'
           variables: "SOURCE_REPO=${{ format('{0}/{1}.git', github.server_url, github.repository) }};SOURCE_REF=${{ github.sha }}"
           timeout: 120
 
