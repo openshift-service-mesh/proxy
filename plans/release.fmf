@@ -1,0 +1,17 @@
+summary: Build & package proxy release artifact
+
+prepare:
+  - name: Install dependencies
+    how: shell
+    script: dnf install -y git podman
+
+discover:
+  how: shell
+  tests:
+    - name: /release
+      test: bash release.sh
+      path: /plans
+      duration: 2h
+
+execute:
+  how: tmt
