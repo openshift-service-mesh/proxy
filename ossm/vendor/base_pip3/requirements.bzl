@@ -8,7 +8,6 @@ load("@rules_python//python/pip_install:pip_repository.bzl", "whl_config_repo", 
 
 all_requirements = [
     "@base_pip3//abstracts:pkg",
-    "@base_pip3//aio_api_bazel:pkg",
     "@base_pip3//aio_api_github:pkg",
     "@base_pip3//aio_core:pkg",
     "@base_pip3//aio_run_checker:pkg",
@@ -90,7 +89,6 @@ all_requirements = [
 
 all_whl_requirements_by_package = {
     "abstracts": "@base_pip3//abstracts:whl",
-    "aio_api_bazel": "@base_pip3//aio_api_bazel:whl",
     "aio_api_github": "@base_pip3//aio_api_github:whl",
     "aio_core": "@base_pip3//aio_core:whl",
     "aio_run_checker": "@base_pip3//aio_run_checker:whl",
@@ -174,7 +172,6 @@ all_whl_requirements = all_whl_requirements_by_package.values()
 
 all_data_requirements = [
     "@base_pip3//abstracts:data",
-    "@base_pip3//aio_api_bazel:data",
     "@base_pip3//aio_api_github:data",
     "@base_pip3//aio_core:data",
     "@base_pip3//aio_run_checker:data",
@@ -256,7 +253,6 @@ all_data_requirements = [
 
 _packages = [
     ("base_pip3_abstracts", "abstracts==0.2.0 --hash=sha256:1dd6df509a67cae1722c0dd9f58cdd6dee6e42f45bf0d7197e159b2e4c5e98e9 --hash=sha256:995f326ab4408a6652a346439cb33169f48e66f25515c6baf9fc47f1a3e4652a"),
-    ("base_pip3_aio_api_bazel", "aio-api-bazel==0.1.1 --hash=sha256:04ee9aa1dddc2998b674ca0a6a791cb7ab9d49f1f400bd19fcd431e00ea54587 --hash=sha256:59a5050d43f4d5ebf19bb669b4a386c74a66520002dc72e5d900ebd058f4d5d7"),
     ("base_pip3_aio_api_github", "aio-api-github==0.3.1 --hash=sha256:04d2e3fb4fcb55927b75f9a3cefae7673cefabd2387dd2416848ff19326d719c --hash=sha256:d083ca09e5577d0c4217138e45b18ea63d57d0cbb030eb336cc2a979f8b244b4"),
     ("base_pip3_aio_core", "aio-core==0.11.1 --hash=sha256:03f1202029655c68d5d41c2fa1d18e344d61515b71080f770f8cf6f99fbc5f5a --hash=sha256:76608a1dad3985866c1b3ffc81e0d08bd1a740e8e72125bfbf46d1ee6fc3abfe"),
     ("base_pip3_aio_run_checker", "aio-run-checker==0.6.1 --hash=sha256:0c929c3534600b5f163de177892841ed36267472a8d0609f550d717a523f28fd --hash=sha256:17f8ccf7976406adc062c5042888dab9507c5332bb00b697c3bd48e56a1ffee0"),

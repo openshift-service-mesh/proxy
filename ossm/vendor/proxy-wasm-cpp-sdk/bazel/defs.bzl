@@ -81,16 +81,16 @@ def proxy_wasm_cc_binary(
         deps = [],
         protobuf = "",
         **kwargs):
-    proxy_wasm_deps = ["@proxy_wasm_cpp_sdk//:proxy_wasm_intrinsics"]
+    proxy_wasm_deps = [Label("//:proxy_wasm_intrinsics")]
     if protobuf == "lite":
-        proxy_wasm_deps.append("@proxy_wasm_cpp_sdk//:proxy_wasm_intrinsics_lite")
+        proxy_wasm_deps.append(Label("//:proxy_wasm_intrinsics_lite"))
     if protobuf == "full":
-        proxy_wasm_deps.append("@proxy_wasm_cpp_sdk//:proxy_wasm_intrinsics_full")
+        proxy_wasm_deps.append(Label("//:proxy_wasm_intrinsics_full"))
 
     cc_binary(
         name = "proxy_wasm_" + name.rstrip(".wasm"),
         additional_linker_inputs = additional_linker_inputs + [
-            "@proxy_wasm_cpp_sdk//:proxy_wasm_intrinsics_js",
+            Label("//:proxy_wasm_intrinsics_js"),
         ],
         linkopts = linkopts + [
             # Setting to indicate module is a "reactor library" without a main() entry point:
@@ -98,7 +98,7 @@ def proxy_wasm_cc_binary(
             "--no-entry",
             # File listing additional functions that Emscripten should expect to be implemented by the host:
             # https://emscripten.org/docs/porting/connecting_cpp_and_javascript/Interacting-with-code.html#implement-c-in-javascript
-            "--js-library=$(location @proxy_wasm_cpp_sdk//:proxy_wasm_intrinsics_js)",
+            "--js-library=$(location {})".format(Label("//:proxy_wasm_intrinsics_js")),
             # Emit Wasm module that can run without JavaScript
             "-sSTANDALONE_WASM",
             # Give host code access to Emscripten's _malloc() function
