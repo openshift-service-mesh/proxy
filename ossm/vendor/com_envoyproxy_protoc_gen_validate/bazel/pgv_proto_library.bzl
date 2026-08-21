@@ -22,6 +22,8 @@ def pgv_cc_proto_library(
         deps = [],
         cc_deps = [],
         copts = [],
+        re2 = None,
+        protobuf = None,
         **kargs):
     """Bazel rule to create a C++ protobuf validation library from proto source files
     Args:
@@ -47,8 +49,8 @@ def pgv_cc_proto_library(
             ":" + name + "_cc_proto",
             "@com_envoyproxy_protoc_gen_validate//validate:cc_validate",
             "@com_envoyproxy_protoc_gen_validate//validate:validate_cc",
-            "@com_google_protobuf//:protobuf",
-            "@re2",
+            protobuf or "@com_google_protobuf//:protobuf",
+            re2 or "@com_googlesource_code_re2//:re2",
         ],
         copts = copts + select({
             "@com_envoyproxy_protoc_gen_validate//bazel:windows_x86_64": ["-DWIN32"],

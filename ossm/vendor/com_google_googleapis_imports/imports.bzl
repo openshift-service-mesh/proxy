@@ -1,7 +1,7 @@
 
-load("@com_github_grpc_grpc//bazel:python_rules.bzl", _py_proto_library = "py_proto_library")
+load("@grpc//bazel:python_rules.bzl", _py_proto_library = "py_proto_library")
 
-load("@com_github_grpc_grpc//bazel:python_rules.bzl", _py_grpc_library = "py_grpc_library")
+load("@grpc//bazel:python_rules.bzl", _py_grpc_library = "py_grpc_library")
 
 load("@io_bazel_rules_go//proto:def.bzl", _go_proto_library = "go_proto_library")
 
@@ -9,7 +9,7 @@ load("@io_bazel_rules_go//proto:def.bzl", _go_grpc_library = "go_grpc_library")
 
 load("@io_bazel_rules_go//go:def.bzl", _go_library = "go_library")
 
-load("@com_github_grpc_grpc//bazel:cc_grpc_library.bzl", _cc_grpc_library = "cc_grpc_library")
+load("@grpc//bazel:cc_grpc_library.bzl", _cc_grpc_library = "cc_grpc_library")
 
 def proto_library_with_info(**kwargs):
     pass

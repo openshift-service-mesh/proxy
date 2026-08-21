@@ -6,7 +6,6 @@ with your usecase. This may change in between rules_python versions without any 
 
 packages = {
     "abstracts": None,
-    "aio_api_bazel": None,
     "aio_api_github": None,
     "aio_core": None,
     "aio_run_checker": None,
