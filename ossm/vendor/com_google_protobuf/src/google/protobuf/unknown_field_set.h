@@ -17,17 +17,14 @@
 
 #include <assert.h>
 
-#include <cstddef>
-#include <cstdint>
+#include <atomic>
 #include <string>
-#include <type_traits>
-#include <utility>
 
+#include "google/protobuf/stubs/common.h"
 #include "absl/log/absl_check.h"
 #include "absl/strings/cord.h"
 #include "absl/strings/string_view.h"
 #include "google/protobuf/arena.h"
-#include "google/protobuf/internal_visibility.h"
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 #include "google/protobuf/message_lite.h"
@@ -46,16 +43,21 @@
 namespace google {
 namespace protobuf {
 namespace internal {
-class InternalMetadata;  // metadata_lite.h
-class WireFormat;        // wire_format.h
+class InternalMetadata;           // metadata_lite.h
+class WireFormat;                 // wire_format.h
 class MessageSetFieldSkipperUsingCord;
 // extension_set_heavy.cc
 class UnknownFieldParserHelper;
 struct UnknownFieldSetTestPeer;
 
+#if defined(PROTOBUF_FUTURE_STRING_VIEW_RETURN_TYPE)
+using UFSStringView = absl::string_view;
+#else
+using UFSStringView = const std::string&;
+#endif
 }  // namespace internal
 
-class Message;  // message.h
+class Message;       // message.h
 
 // Represents one field in an UnknownFieldSet.
 class PROTOBUF_EXPORT UnknownField {
@@ -69,21 +71,19 @@ class PROTOBUF_EXPORT UnknownField {
   };
 
   // The field's field number, as seen on the wire.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline int number() const;
+  inline int number() const;
 
   // The field type.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline Type type() const;
+  inline Type type() const;
 
   // Accessors -------------------------------------------------------
   // Each method works only for UnknownFields of the corresponding type.
 
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline uint64_t varint() const;
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline uint32_t fixed32() const;
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline uint64_t fixed64() const;
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline absl::string_view
-  length_delimited() const;
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline const UnknownFieldSet& group()
-      const;
+  inline uint64_t varint() const;
+  inline uint32_t fixed32() const;
+  inline uint64_t fixed64() const;
+  inline internal::UFSStringView length_delimited() const;
+  inline const UnknownFieldSet& group() const;
 
   inline void set_varint(uint64_t value);
   inline void set_fixed32(uint32_t value);
@@ -93,13 +93,14 @@ class PROTOBUF_EXPORT UnknownField {
   template <int&...>
   inline void set_length_delimited(std::string&& value);
   inline void set_length_delimited(const absl::Cord& value);
+#if !defined(PROTOBUF_FUTURE_STRING_VIEW_RETURN_TYPE)
+  inline std::string* mutable_length_delimited();
+#endif  // PROTOBUF_FUTURE_STRING_VIEW_RETURN_TYPE
   inline UnknownFieldSet* mutable_group();
 
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline size_t GetLengthDelimitedSize()
-      const;
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD uint8_t*
-  InternalSerializeLengthDelimitedNoTag(uint8_t* target,
-                                        io::EpsCopyOutputStream* stream) const;
+  inline size_t GetLengthDelimitedSize() const;
+  uint8_t* InternalSerializeLengthDelimitedNoTag(
+      uint8_t* target, io::EpsCopyOutputStream* stream) const;
 
  private:
   friend class UnknownFieldSet;
@@ -117,11 +118,11 @@ class PROTOBUF_EXPORT UnknownField {
   uint32_t number_;
   uint32_t type_;
   union {
-    uint64_t varint;
-    uint32_t fixed32;
-    uint64_t fixed64;
+    uint64_t varint_;
+    uint32_t fixed32_;
+    uint64_t fixed64_;
     std::string* string_value;
-    UnknownFieldSet* group;
+    UnknownFieldSet* group_;
   } data_;
 };
 
@@ -151,7 +152,7 @@ class PROTOBUF_EXPORT UnknownFieldSet {
   void ClearAndFreeMemory();
 
   // Is this set empty?
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline bool empty() const;
+  inline bool empty() const;
 
   // Merge the contents of some other UnknownFieldSet with this one.
   void MergeFrom(const UnknownFieldSet& other);
@@ -171,30 +172,26 @@ class PROTOBUF_EXPORT UnknownFieldSet {
   // Computes (an estimate of) the total number of bytes currently used for
   // storing the unknown fields in memory. Does NOT include
   // sizeof(*this) in the calculation.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD size_t SpaceUsedExcludingSelfLong() const;
+  size_t SpaceUsedExcludingSelfLong() const;
 
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD int SpaceUsedExcludingSelf() const {
+  int SpaceUsedExcludingSelf() const {
     return internal::ToIntSize(SpaceUsedExcludingSelfLong());
   }
 
   // Version of SpaceUsed() including sizeof(*this).
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD size_t SpaceUsedLong() const;
+  size_t SpaceUsedLong() const;
 
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD int SpaceUsed() const {
-    return internal::ToIntSize(SpaceUsedLong());
-  }
+  int SpaceUsed() const { return internal::ToIntSize(SpaceUsedLong()); }
 
   // Returns the number of fields present in the UnknownFieldSet.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline int field_count() const;
+  inline int field_count() const;
   // Get a field in the set, where 0 <= index < field_count().  The fields
   // appear in the order in which they were added.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline const UnknownField& field(
-      int index) const;
+  inline const UnknownField& field(int index) const;
   // Get a mutable pointer to a field in the set, where
   // 0 <= index < field_count().  The fields appear in the order in which
   // they were added.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline UnknownField* mutable_field(
-      int index);
+  inline UnknownField* mutable_field(int index);
 
   // Adding fields ---------------------------------------------------
 
@@ -207,6 +204,9 @@ class PROTOBUF_EXPORT UnknownFieldSet {
   void AddLengthDelimited(int number, std::string&& value);
   void AddLengthDelimited(int number, const absl::Cord& value);
 
+#if !defined(PROTOBUF_FUTURE_STRING_VIEW_RETURN_TYPE)
+  std::string* AddLengthDelimited(int number);
+#endif  // PROTOBUF_FUTURE_STRING_VIEW_RETURN_TYPE
   UnknownFieldSet* AddGroup(int number);
 
   // Adds an unknown field from another set.
@@ -224,16 +224,11 @@ class PROTOBUF_EXPORT UnknownFieldSet {
   // Parsing helpers -------------------------------------------------
   // These work exactly like the similarly-named methods of Message.
 
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool MergeFromCodedStream(
-      io::CodedInputStream* input);
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool ParseFromCodedStream(
-      io::CodedInputStream* input);
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool ParseFromZeroCopyStream(
-      io::ZeroCopyInputStream* input);
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool ParseFromArray(const void* data,
-                                                          int size);
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD inline bool ParseFromString(
-      const absl::string_view data) {
+  bool MergeFromCodedStream(io::CodedInputStream* input);
+  bool ParseFromCodedStream(io::CodedInputStream* input);
+  bool ParseFromZeroCopyStream(io::ZeroCopyInputStream* input);
+  bool ParseFromArray(const void* data, int size);
+  inline bool ParseFromString(const absl::string_view data) {
     return ParseFromArray(data.data(), static_cast<int>(data.size()));
   }
 
@@ -241,18 +236,13 @@ class PROTOBUF_EXPORT UnknownFieldSet {
   // the message is a lite or full proto (for legacy reasons, lite and full
   // return different types for MessageType::unknown_fields()).
   template <typename MessageType>
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool MergeFromMessage(
-      const MessageType& message);
+  bool MergeFromMessage(const MessageType& message);
 
   // Serialization.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool SerializeToString(
-      std::string* output) const;
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool SerializeToCord(
-      absl::Cord* output) const;
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool SerializeToCodedStream(
-      io::CodedOutputStream* output) const;
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static const UnknownFieldSet&
-  default_instance();
+  bool SerializeToString(std::string* output) const;
+  bool SerializeToCord(absl::Cord* output) const;
+  bool SerializeToCodedStream(io::CodedOutputStream* output) const;
+  static const UnknownFieldSet& default_instance();
 
   UnknownFieldSet(internal::InternalVisibility, Arena* arena)
       : UnknownFieldSet(arena) {}
@@ -262,7 +252,9 @@ class PROTOBUF_EXPORT UnknownFieldSet {
   friend internal::UnknownFieldParserHelper;
   friend internal::UnknownFieldSetTestPeer;
 
+#if defined(PROTOBUF_FUTURE_STRING_VIEW_RETURN_TYPE)
   std::string* AddLengthDelimited(int number);
+#endif  // PROTOBUF_FUTURE_STRING_VIEW_RETURN_TYPE
 
   using InternalArenaConstructable_ = void;
   using DestructorSkippable_ = void;
@@ -272,15 +264,12 @@ class PROTOBUF_EXPORT UnknownFieldSet {
 
   Arena* arena() { return fields_.GetArena(); }
 
-  const RepeatedField<UnknownField>& fields() const { return fields_.field(); }
-  RepeatedField<UnknownField>& fields() { return fields_.field(); }
-
   void ClearFallback();
   void SwapSlow(UnknownFieldSet* other);
 
   template <typename MessageType,
-            typename std::enable_if_t<
-                std::is_base_of<Message, MessageType>::value, int> = 0>
+            typename std::enable_if<
+                std::is_base_of<Message, MessageType>::value, int>::type = 0>
   bool InternalMergeFromMessage(const MessageType& message) {
     MergeFrom(message.GetReflection()->GetUnknownFields(message));
     return true;
@@ -299,7 +288,7 @@ class PROTOBUF_EXPORT UnknownFieldSet {
     return MergeFromCodedStream(&coded_stream);
   }
 
-  internal::RepeatedFieldWithArena<UnknownField> fields_;
+  RepeatedField<UnknownField> fields_;
 };
 
 namespace internal {
@@ -326,10 +315,7 @@ const char* UnknownFieldParse(uint64_t tag, UnknownFieldSet* unknown,
 
 constexpr UnknownFieldSet::UnknownFieldSet() = default;
 
-inline UnknownFieldSet::~UnknownFieldSet() {
-  Clear();
-  ABSL_DCHECK_EQ(arena(), nullptr);
-}
+inline UnknownFieldSet::~UnknownFieldSet() { Clear(); }
 
 inline const UnknownFieldSet& UnknownFieldSet::default_instance() {
   PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT static const UnknownFieldSet
@@ -340,16 +326,16 @@ inline const UnknownFieldSet& UnknownFieldSet::default_instance() {
 inline void UnknownFieldSet::ClearAndFreeMemory() { Clear(); }
 
 inline void UnknownFieldSet::Clear() {
-  if (!fields().empty()) {
+  if (!fields_.empty()) {
     ClearFallback();
   }
 }
 
-inline bool UnknownFieldSet::empty() const { return fields().empty(); }
+inline bool UnknownFieldSet::empty() const { return fields_.empty(); }
 
 inline void UnknownFieldSet::Swap(UnknownFieldSet* x) {
   if (arena() == x->arena()) {
-    fields().Swap(&x->fields());
+    fields_.Swap(&x->fields_);
   } else {
     // We might need to do a deep copy, so use Merge instead
     SwapSlow(x);
@@ -357,13 +343,13 @@ inline void UnknownFieldSet::Swap(UnknownFieldSet* x) {
 }
 
 inline int UnknownFieldSet::field_count() const {
-  return static_cast<int>(fields().size());
+  return static_cast<int>(fields_.size());
 }
 inline const UnknownField& UnknownFieldSet::field(int index) const {
-  return (fields())[static_cast<size_t>(index)];
+  return (fields_)[static_cast<size_t>(index)];
 }
 inline UnknownField* UnknownFieldSet::mutable_field(int index) {
-  return &(fields())[static_cast<size_t>(index)];
+  return &(fields_)[static_cast<size_t>(index)];
 }
 
 inline void UnknownFieldSet::AddLengthDelimited(int number,
@@ -378,36 +364,36 @@ inline UnknownField::Type UnknownField::type() const {
 
 inline uint64_t UnknownField::varint() const {
   assert(type() == TYPE_VARINT);
-  return data_.varint;
+  return data_.varint_;
 }
 inline uint32_t UnknownField::fixed32() const {
   assert(type() == TYPE_FIXED32);
-  return data_.fixed32;
+  return data_.fixed32_;
 }
 inline uint64_t UnknownField::fixed64() const {
   assert(type() == TYPE_FIXED64);
-  return data_.fixed64;
+  return data_.fixed64_;
 }
-inline absl::string_view UnknownField::length_delimited() const {
+inline internal::UFSStringView UnknownField::length_delimited() const {
   assert(type() == TYPE_LENGTH_DELIMITED);
   return *data_.string_value;
 }
 inline const UnknownFieldSet& UnknownField::group() const {
   assert(type() == TYPE_GROUP);
-  return *data_.group;
+  return *data_.group_;
 }
 
 inline void UnknownField::set_varint(uint64_t value) {
   assert(type() == TYPE_VARINT);
-  data_.varint = value;
+  data_.varint_ = value;
 }
 inline void UnknownField::set_fixed32(uint32_t value) {
   assert(type() == TYPE_FIXED32);
-  data_.fixed32 = value;
+  data_.fixed32_ = value;
 }
 inline void UnknownField::set_fixed64(uint64_t value) {
   assert(type() == TYPE_FIXED64);
-  data_.fixed64 = value;
+  data_.fixed64_ = value;
 }
 inline void UnknownField::set_length_delimited(const absl::string_view value) {
   assert(type() == TYPE_LENGTH_DELIMITED);
@@ -422,9 +408,15 @@ inline void UnknownField::set_length_delimited(const absl::Cord& value) {
   assert(type() == TYPE_LENGTH_DELIMITED);
   absl::CopyCordToString(value, data_.string_value);
 }
+#if !defined(PROTOBUF_FUTURE_STRING_VIEW_RETURN_TYPE)
+inline std::string* UnknownField::mutable_length_delimited() {
+  assert(type() == TYPE_LENGTH_DELIMITED);
+  return data_.string_value;
+}
+#endif  // PROTOBUF_FUTURE_STRING_VIEW_RETURN_TYPE
 inline UnknownFieldSet* UnknownField::mutable_group() {
   assert(type() == TYPE_GROUP);
-  return data_.group;
+  return data_.group_;
 }
 template <typename MessageType>
 bool UnknownFieldSet::MergeFromMessage(const MessageType& message) {

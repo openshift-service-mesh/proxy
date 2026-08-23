@@ -14,25 +14,25 @@ namespace google {
 namespace protobuf {
 namespace {
 
-using proto2_unittest::TestAllTypes;
+using protobuf_unittest::TestAllTypes;
 
 TEST(MessageConstructorTest, RegularCtor) {
-  using T = proto2_unittest::TestAllTypes;
+  using T = protobuf_unittest::TestAllTypes;
   EXPECT_TRUE((std::is_constructible<T>::value));
 }
 
 TEST(MessageConstructorTest, RegularCopyCtor) {
-  using T = proto2_unittest::TestAllTypes;
+  using T = protobuf_unittest::TestAllTypes;
   EXPECT_TRUE((std::is_constructible<T, const T&>::value));
 }
 
 TEST(MessageConstructorTest, ArenaCtor) {
-  using T = proto2_unittest::TestAllTypes;
+  using T = protobuf_unittest::TestAllTypes;
   EXPECT_FALSE((std::is_constructible<T, Arena*>::value));
 }
 
 TEST(MessageConstructorTest, ArenaCopyCtor) {
-  using T = proto2_unittest::TestAllTypes;
+  using T = protobuf_unittest::TestAllTypes;
   EXPECT_FALSE((std::is_constructible<T, Arena*, const T&>::value));
 }
 

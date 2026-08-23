@@ -26,7 +26,6 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
-#include "absl/strings/substitute.h"
 #include "absl/types/span.h"
 #include "google/protobuf/cpp_features.pb.h"
 #include "google/protobuf/descriptor.h"
@@ -39,10 +38,10 @@
 // Must be included last.
 #include "google/protobuf/port_def.inc"
 
-#define RETURN_IF_ERROR(expr)                              \
-  do {                                                     \
-    const absl::Status _status = (expr);                   \
-    if (ABSL_PREDICT_FALSE(!_status.ok())) return _status; \
+#define RETURN_IF_ERROR(expr)                                  \
+  do {                                                         \
+    const absl::Status _status = (expr);                       \
+    if (PROTOBUF_PREDICT_FALSE(!_status.ok())) return _status; \
   } while (0)
 
 namespace google {
@@ -54,7 +53,39 @@ absl::Status Error(Args... args) {
   return absl::FailedPreconditionError(absl::StrCat(args...));
 }
 
-absl::Status ValidateFieldDescriptor(const FieldDescriptor& field) {
+absl::Status ValidateFeatureSupport(const FieldOptions::FeatureSupport& support,
+                                    absl::string_view full_name) {
+  if (support.has_edition_deprecated()) {
+    if (support.edition_deprecated() < support.edition_introduced()) {
+      return Error("Feature ", full_name,
+                   " was deprecated before it was introduced.");
+    }
+    if (!support.has_deprecation_warning()) {
+      return Error(
+          "Feature ", full_name,
+          " is deprecated but does not specify a deprecation warning.");
+    }
+  }
+  if (!support.has_edition_deprecated() && support.has_deprecation_warning()) {
+    return Error("Feature ", full_name,
+                 " specifies a deprecation warning but is not marked "
+                 "deprecated in any edition.");
+  }
+  if (support.has_edition_removed()) {
+    if (support.edition_deprecated() >= support.edition_removed()) {
+      return Error("Feature ", full_name,
+                   " was deprecated after it was removed.");
+    }
+    if (support.edition_removed() < support.edition_introduced()) {
+      return Error("Feature ", full_name,
+                   " was removed before it was introduced.");
+    }
+  }
+
+  return absl::OkStatus();
+}
+
+absl::Status ValidateFieldFeatureSupport(const FieldDescriptor& field) {
   if (!field.options().has_feature_support()) {
     return Error("Feature field ", field.full_name(),
                  " has no feature support specified.");
@@ -66,6 +97,7 @@ absl::Status ValidateFieldDescriptor(const FieldDescriptor& field) {
     return Error("Feature field ", field.full_name(),
                  " does not specify the edition it was introduced in.");
   }
+  RETURN_IF_ERROR(ValidateFeatureSupport(support, field.full_name()));
 
   // Validate edition defaults specification wrt support windows.
   for (const auto& d : field.options().edition_defaults()) {
@@ -90,36 +122,49 @@ absl::Status ValidateFieldDescriptor(const FieldDescriptor& field) {
   return absl::OkStatus();
 }
 
-absl::Status ValidateEnumValueFeatureSupport(
+absl::Status ValidateValueFeatureSupport(
     const FieldOptions::FeatureSupport& parent,
     const EnumValueDescriptor& value, absl::string_view field_name) {
-  // We allow missing support windows on feature values, and they'll
-  // inherit from the feature spec.
-  // We will skip validation when parent has no feature support.
-  if (!value.options().has_feature_support() ||
-      &parent == &FieldOptions::FeatureSupport::default_instance()) {
+  if (!value.options().has_feature_support()) {
+    // We allow missing support windows on feature values, and they'll inherit
+    // from the feature spec.
     return absl::OkStatus();
   }
 
   FieldOptions::FeatureSupport support = parent;
   support.MergeFrom(value.options().feature_support());
-  RETURN_IF_ERROR(
-      FeatureResolver::ValidateFeatureSupport(support, value.full_name()));
+  RETURN_IF_ERROR(ValidateFeatureSupport(support, value.full_name()));
 
   // Make sure the value doesn't expand any bounds.
   if (support.edition_introduced() < parent.edition_introduced()) {
-    return Error("value ", value.full_name(), " was introduced before ",
-                 field_name, " was.");
+    return Error("Feature value ", value.full_name(),
+                 " was introduced before feature ", field_name, " was.");
   }
   if (parent.has_edition_removed() &&
       support.edition_removed() > parent.edition_removed()) {
-    return Error("value ", value.full_name(), " was removed after ", field_name,
-                 " was.");
+    return Error("Feature value ", value.full_name(),
+                 " was removed after feature ", field_name, " was.");
   }
   if (parent.has_edition_deprecated() &&
       support.edition_deprecated() > parent.edition_deprecated()) {
-    return Error("value ", value.full_name(), " was deprecated after ",
-                 field_name, " was.");
+    return Error("Feature value ", value.full_name(),
+                 " was deprecated after feature ", field_name, " was.");
+  }
+
+  return absl::OkStatus();
+}
+
+absl::Status ValidateValuesFeatureSupport(const FieldDescriptor& field) {
+  // This only applies to enum features.
+  ABSL_CHECK(field.enum_type() != nullptr);
+
+  const FieldOptions::FeatureSupport& parent =
+      field.options().feature_support();
+
+  for (int i = 0; i < field.enum_type()->value_count(); ++i) {
+    const EnumValueDescriptor& value = *field.enum_type()->value(i);
+    RETURN_IF_ERROR(
+        ValidateValueFeatureSupport(parent, value, field.full_name()));
   }
 
   return absl::OkStatus();
@@ -164,7 +209,10 @@ absl::Status ValidateDescriptor(const Descriptor& descriptor) {
                    "was introduced.");
     }
 
-    RETURN_IF_ERROR(ValidateFieldDescriptor(field));
+    RETURN_IF_ERROR(ValidateFieldFeatureSupport(field));
+    if (field.enum_type() != nullptr) {
+      RETURN_IF_ERROR(ValidateValuesFeatureSupport(field));
+    }
   }
 
   return absl::OkStatus();
@@ -205,7 +253,7 @@ absl::Status ValidateExtension(const Descriptor& feature_set,
 
 void MaybeInsertEdition(Edition edition, Edition maximum_edition,
                         absl::btree_set<Edition>& editions) {
-  if (edition <= maximum_edition || edition == EDITION_UNSTABLE) {
+  if (edition <= maximum_edition) {
     editions.insert(edition);
   }
 }
@@ -303,11 +351,6 @@ absl::Status ValidateMergedFeatures(const FeatureSet& features) {
   CHECK_ENUM_FEATURE(utf8_validation, Utf8Validation, UTF8_VALIDATION)
   CHECK_ENUM_FEATURE(message_encoding, MessageEncoding, MESSAGE_ENCODING)
   CHECK_ENUM_FEATURE(json_format, JsonFormat, JSON_FORMAT)
-  CHECK_ENUM_FEATURE(enforce_naming_style, EnforceNamingStyle,
-                     ENFORCE_NAMING_STYLE)
-  CHECK_ENUM_FEATURE(default_symbol_visibility,
-                     VisibilityFeature::DefaultSymbolVisibility,
-                     VisibilityFeature::DEFAULT_SYMBOL_VISIBILITY)
 
 #undef CHECK_ENUM_FEATURE
 
@@ -316,36 +359,26 @@ absl::Status ValidateMergedFeatures(const FeatureSet& features) {
 
 void ValidateSingleFeatureLifetimes(
     Edition edition, absl::string_view full_name,
-    const FieldOptions::FeatureSupport& feature_support,
+    const FieldOptions::FeatureSupport& support,
     FeatureResolver::ValidationResults& results) {
   // Skip fields that don't have feature support specified.
-  if (&feature_support == &FieldOptions::FeatureSupport::default_instance())
-    return;
-  // safe guarding new features that aren't available yet
-  if (edition < feature_support.edition_introduced()) {
-    std::string error_message = absl::Substitute(
-        "$0 wasn't introduced until edition $1 and can't be used in "
-        "edition $2",
-        full_name, feature_support.edition_introduced(), edition);
-    results.errors.emplace_back(std::move(error_message));
+  if (&support == &FieldOptions::FeatureSupport::default_instance()) return;
+
+  if (edition < support.edition_introduced()) {
+    results.errors.emplace_back(
+        absl::StrCat("Feature ", full_name, " wasn't introduced until edition ",
+                     support.edition_introduced(),
+                     " and can't be used in edition ", edition));
   }
-  if (feature_support.has_edition_removed() &&
-      edition >= feature_support.edition_removed()) {
-    std::string error_message = absl::Substitute(
-        "$0 has been removed in edition $1$2", full_name,
-        feature_support.edition_removed(),
-        (feature_support.has_removal_error())
-            ? absl::StrCat(": ", feature_support.removal_error())
-            : "");
-    results.errors.emplace_back(std::move(error_message));
-  } else if (feature_support.has_edition_deprecated() &&
-             edition >= feature_support.edition_deprecated()) {
-    std::string warning_message = absl::Substitute(
-        "$0 has been deprecated in edition "
-        "$1: $2",
-        full_name, feature_support.edition_deprecated(),
-        feature_support.deprecation_warning());
-    results.warnings.emplace_back(std::move(warning_message));
+  if (support.has_edition_removed() && edition >= support.edition_removed()) {
+    results.errors.emplace_back(absl::StrCat(
+        "Feature ", full_name, " has been removed in edition ",
+        support.edition_removed(), " and can't be used in edition ", edition));
+  } else if (support.has_edition_deprecated() &&
+             edition >= support.edition_deprecated()) {
+    results.warnings.emplace_back(absl::StrCat(
+        "Feature ", full_name, " has been deprecated in edition ",
+        support.edition_deprecated(), ": ", support.deprecation_warning()));
   }
 }
 
@@ -354,48 +387,28 @@ void ValidateFeatureLifetimesImpl(Edition edition, const Message& message,
   std::vector<const FieldDescriptor*> fields;
   message.GetReflection()->ListFields(message, &fields);
   for (const FieldDescriptor* field : fields) {
-    const Reflection* reflector = message.GetReflection();
-    // Recurse into all Messages to be validated
-    if (field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
-      // Recursing into repeated Messages
-      if (field->is_repeated()) {
-        for (int index = 0; index < reflector->FieldSize(message, field);
-             index++) {
-          ValidateFeatureLifetimesImpl(
-              edition, reflector->GetRepeatedMessage(message, field, index),
-              results);
-        }
-      } else {
-        ValidateFeatureLifetimesImpl(
-            edition, reflector->GetMessage(message, field), results);
-      }
+    // Recurse into message extension.
+    if (field->is_extension() &&
+        field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
+      ValidateFeatureLifetimesImpl(
+          edition, message.GetReflection()->GetMessage(message, field),
+          results);
+      continue;
     }
-    // Validating ENUM value
+
     if (field->enum_type() != nullptr) {
-      // Handling repeated enum values. Ex: OptionTargetType option
-      if (field->is_repeated()) {
-        for (int index = 0; index < reflector->FieldSize(message, field);
-             index++) {
-          int number = reflector->GetRepeatedEnumValue(message, field, index);
-          auto value = field->enum_type()->FindValueByNumber(number);
-          if (value == nullptr) {
-            continue;
-          }
-          ValidateSingleFeatureLifetimes(edition, value->full_name(),
-                                         value->options().feature_support(),
-                                         results);
-        }
-      } else {
-        int number = reflector->GetEnumValue(message, field);
-        auto value = field->enum_type()->FindValueByNumber(number);
-        if (value == nullptr) {
-          continue;
-        }
-        ValidateSingleFeatureLifetimes(edition, value->full_name(),
-                                       value->options().feature_support(),
-                                       results);
+      int number = message.GetReflection()->GetEnumValue(message, field);
+      auto value = field->enum_type()->FindValueByNumber(number);
+      if (value == nullptr) {
+        results.errors.emplace_back(absl::StrCat(
+            "Feature ", field->full_name(), " has no known value ", number));
+        continue;
       }
+      ValidateSingleFeatureLifetimes(edition, value->full_name(),
+                                     value->options().feature_support(),
+                                     results);
     }
+
     ValidateSingleFeatureLifetimes(edition, field->full_name(),
                                    field->options().feature_support(), results);
   }
@@ -465,11 +478,9 @@ absl::StatusOr<FeatureSetDefaults> FeatureResolver::CompileDefaults(
     }
     auto* edition_defaults = defaults.mutable_defaults()->Add();
     edition_defaults->set_edition(edition);
-    // TODO: Remove this suppression.
-    (void)edition_defaults->mutable_fixed_features()->MergeFromString(
+    edition_defaults->mutable_fixed_features()->MergeFromString(
         fixed_defaults_dynamic->SerializeAsString());
-    // TODO: Remove this suppression.
-    (void)edition_defaults->mutable_overridable_features()->MergeFromString(
+    edition_defaults->mutable_overridable_features()->MergeFromString(
         overridable_defaults_dynamic->SerializeAsString());
   }
   return defaults;
@@ -482,8 +493,7 @@ absl::StatusOr<FeatureResolver> FeatureResolver::Create(
                  " is earlier than the minimum supported edition ",
                  compiled_defaults.minimum_edition());
   }
-  if (compiled_defaults.maximum_edition() < edition &&
-      edition != EDITION_UNSTABLE) {
+  if (compiled_defaults.maximum_edition() < edition) {
     return Error("Edition ", edition,
                  " is later than the maximum supported edition ",
                  compiled_defaults.maximum_edition());
@@ -511,10 +521,21 @@ absl::StatusOr<FeatureResolver> FeatureResolver::Create(
     prev_edition = edition_default.edition();
   }
 
-  auto features =
-      internal::GetEditionFeatureSetDefaults(edition, compiled_defaults);
-  RETURN_IF_ERROR(features.status());
-  return FeatureResolver(std::move(features.value()));
+  // Select the matching edition defaults.
+  auto comparator = [](const auto& a, const auto& b) {
+    return a.edition() < b.edition();
+  };
+  FeatureSetDefaults::FeatureSetEditionDefault search;
+  search.set_edition(edition);
+  auto first_nonmatch =
+      absl::c_upper_bound(compiled_defaults.defaults(), search, comparator);
+  if (first_nonmatch == compiled_defaults.defaults().begin()) {
+    return Error("No valid default found for edition ", edition);
+  }
+
+  FeatureSet features = std::prev(first_nonmatch)->fixed_features();
+  features.MergeFrom(std::prev(first_nonmatch)->overridable_features());
+  return FeatureResolver(std::move(features));
 }
 
 absl::StatusOr<FeatureSet> FeatureResolver::MergeFeatures(
@@ -529,108 +550,32 @@ absl::StatusOr<FeatureSet> FeatureResolver::MergeFeatures(
 }
 
 FeatureResolver::ValidationResults FeatureResolver::ValidateFeatureLifetimes(
-    Edition edition, const Message& option, const Descriptor* pool_descriptor) {
-  const Message* pool_option = nullptr;
+    Edition edition, const FeatureSet& features,
+    const Descriptor* pool_descriptor) {
+  const Message* pool_features = nullptr;
   DynamicMessageFactory factory;
-  std::unique_ptr<Message> message_storage;
-  if (pool_descriptor != nullptr) {
-    // Move the messages back to the current pool so that we can reflect on
-    // any extensions.
-    message_storage =
-        absl::WrapUnique(factory.GetPrototype(pool_descriptor)->New());
-    // TODO: Remove this suppression
-    (void)message_storage->ParseFromString(option.SerializeAsString());
-    pool_option = message_storage.get();
-  } else {
-    // The Message descriptor can be null if no custom extensions are
-    // defined in any transitive dependency.  In this case, we can just use
-    // the generated pool for validation, since there wouldn't be any feature
+  std::unique_ptr<Message> features_storage;
+  if (pool_descriptor == nullptr) {
+    // The FeatureSet descriptor can be null if no custom extensions are defined
+    // in any transitive dependency.  In this case, we can just use the
+    // generated pool for validation, since there wouldn't be any feature
     // extensions defined anyway.
-    pool_option = &option;
+    pool_features = &features;
+  } else {
+    // Move the features back to the current pool so that we can reflect on any
+    // extensions.
+    features_storage =
+        absl::WrapUnique(factory.GetPrototype(pool_descriptor)->New());
+    features_storage->ParseFromString(features.SerializeAsString());
+    pool_features = features_storage.get();
   }
-  ABSL_CHECK(pool_option != nullptr);
+  ABSL_CHECK(pool_features != nullptr);
 
   ValidationResults results;
-  // Validate feature support
-  ValidateFeatureLifetimesImpl(edition, *pool_option, results);
-
+  ValidateFeatureLifetimesImpl(edition, *pool_features, results);
   return results;
 }
 
-absl::Status FeatureResolver::ValidateFeatureSupport(
-    const FieldOptions::FeatureSupport& support, absl::string_view full_name) {
-  if (support.has_edition_deprecated()) {
-    if (support.edition_deprecated() < support.edition_introduced()) {
-      return Error(full_name, " was deprecated before it was introduced.");
-    }
-    if (!support.has_deprecation_warning()) {
-      return Error(
-          full_name,
-          " is deprecated but does not specify a deprecation warning.");
-    }
-  }
-  if (!support.has_edition_deprecated() && support.has_deprecation_warning()) {
-    return Error(full_name,
-                 " specifies a deprecation warning but is not marked "
-                 "deprecated in any edition.");
-  }
-  if (support.has_edition_removed()) {
-    if (support.edition_deprecated() >= support.edition_removed()) {
-      return Error(full_name, " was deprecated after it was removed.");
-    }
-    if (support.edition_removed() < support.edition_introduced()) {
-      return Error(full_name, " was removed before it was introduced.");
-    }
-    // Not enforcing removal errors on features or options that have been
-    // introduced and removed in the same edition
-    if ((support.edition_introduced() != support.edition_removed()) &&
-        !support.has_removal_error()) {
-      return Error(full_name,
-                   " has been removed but does not specify a removal error.");
-    }
-  } else if (support.has_removal_error()) {
-    return Error(full_name,
-                 " specifies a removal error but is not marked removed in any "
-                 "edition.");
-  }
-  return absl::OkStatus();
-}
-
-absl::Status FeatureResolver::ValidateFieldFeatureSupport(
-    const FieldDescriptor& field) {
-  const FieldOptions::FeatureSupport& parent =
-      field.options().feature_support();
-  RETURN_IF_ERROR(ValidateFeatureSupport(parent, field.full_name()));
-
-  if (field.enum_type() != nullptr) {
-    for (int i = 0; i < field.enum_type()->value_count(); ++i) {
-      const EnumValueDescriptor& value = *field.enum_type()->value(i);
-      RETURN_IF_ERROR(
-          ValidateEnumValueFeatureSupport(parent, value, field.full_name()));
-    }
-  }
-  return absl::OkStatus();
-}
-
-namespace internal {
-absl::StatusOr<FeatureSet> GetEditionFeatureSetDefaults(
-    Edition edition, const FeatureSetDefaults& defaults) {
-  // Select the matching edition defaults.
-  auto comparator = [](const auto& a, const auto& b) {
-    return a.edition() < b.edition();
-  };
-  FeatureSetDefaults::FeatureSetEditionDefault search;
-  search.set_edition(edition);
-  auto first_nonmatch =
-      absl::c_upper_bound(defaults.defaults(), search, comparator);
-  if (first_nonmatch == defaults.defaults().begin()) {
-    return Error("No valid default found for edition ", edition);
-  }
-  FeatureSet features = std::prev(first_nonmatch)->fixed_features();
-  features.MergeFrom(std::prev(first_nonmatch)->overridable_features());
-  return features;
-}
-}  // namespace internal
 }  // namespace protobuf
 }  // namespace google
 

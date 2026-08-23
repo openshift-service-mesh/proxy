@@ -22,6 +22,12 @@
       "name": "Jerry Berg"
     },
     {
+      "email": "acozette@google.com",
+      "github": "acozette",
+      "name": "Adam Cozette",
+      "do_not_notify": true
+    },
+    {
       "email": "deannagarcia@google.com",
       "github": "deannagarcia",
       "name": "Deanna Garcia",
@@ -64,14 +70,8 @@
       "do_not_notify": true
     },
     {
-      "email": "sangki@google.com",
-      "github": "jguamie",
-      "name": "John Lee",
-      "do_not_notify": true
-    },
-    {
       "email": "sbenza@google.com",
-      "github": "sbenzaquen",
+      "github": "sbenza",
       "name": "Samuel Benzaquen",
       "do_not_notify": true
     },
@@ -82,33 +82,15 @@
       "do_not_notify": true
     },
     {
+      "email": "theodorerose@google.com",
+      "github": "theodorerose",
+      "name": "Theodore Rose",
+      "do_not_notify": true
+    },
+    {
       "email": "tonyliaoss@google.com",
       "github": "tonyliaoss",
       "name": "Tony Liao",
-      "do_not_notify": true
-    },
-    {
-      "email": "rgoldfinger@google.com",
-      "github": "rgoldfinger6",
-      "name": "Rachel Goldfinger",
-      "do_not_notify": true
-    },
-    {
-      "email": "jamiepilgrim@google.com",
-      "github": "pilgrimmemoirs",
-      "name": "Jamie Pilgrim",
-      "do_not_notify": true
-    },
-    {
-      "email": "karenwuz@google.com",
-      "github": "karenwuz",
-      "name": "Karen Wu",
-      "do_not_notify": true
-    },
-    {
-      "email": "runze@google.com",
-      "github": "runzw",
-      "name": "Runze Wang",
       "do_not_notify": true
     }
   ],

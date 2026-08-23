@@ -8,7 +8,6 @@
 #ifndef GOOGLE_PROTOBUF_PYTHON_CPP_DESCRIPTOR_POOL_H__
 #define GOOGLE_PROTOBUF_PYTHON_CPP_DESCRIPTOR_POOL_H__
 
-#include <memory>
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
@@ -33,12 +32,10 @@ struct CMessageClass;
 // "Methods" that interacts with this DescriptorPool are in the cdescriptor_pool
 // namespace.
 typedef struct PyDescriptorPool {
-  // clang-format off
-  PyObject_HEAD
+  PyObject_HEAD;
 
   // The C++ pool containing Descriptors.
   const DescriptorPool* pool;
-  // clang-format on
 
   // True if we should free the pointer above.
   bool is_owned;
@@ -72,6 +69,7 @@ typedef struct PyDescriptorPool {
   // Similar cache for features.
   absl::flat_hash_map<const void*, PyObject*>* descriptor_features;
 } PyDescriptorPool;
+
 
 extern PyTypeObject PyDescriptorPool_Type;
 
@@ -119,16 +117,6 @@ PyDescriptorPool* GetDescriptorPool_FromPool(const DescriptorPool* pool);
 // Wraps a C++ descriptor pool in a Python object, creates it if necessary.
 // Returns a new reference.
 PyObject* PyDescriptorPool_FromPool(const DescriptorPool* pool);
-
-// Takes ownership of a C++ DescriptorPool and returns a new Python
-// DescriptorPool that wraps it.
-// If set, the DescriptorDatabase is also managed by the returned object.
-PyObject* PyDescriptorPool_FromPool(
-    std::unique_ptr<const google::protobuf::DescriptorPool> pool,
-    std::unique_ptr<const google::protobuf::DescriptorDatabase> database);
-
-// Returns the C++ descriptor pool wrapped by a Python object.
-const DescriptorPool* PyDescriptorPool_AsPool(PyObject* pool);
 
 // Initialize objects used by this module.
 bool InitDescriptorPool();

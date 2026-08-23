@@ -56,26 +56,8 @@ class DescriptorDatabaseTest(unittest.TestCase):
         'google.protobuf.python.internal.Factory2Enum.FACTORY_2_VALUE_0'))
     self.assertEqual(file_desc_proto, db.FindFileContainingSymbol(
         'google.protobuf.python.internal.FACTORY_2_VALUE_0'))
-    self.assertEqual(
-        file_desc_proto2, db.FindFileContainingSymbol('NO_PACKAGE_VALUE_0')
-    )
-    self.assertEqual(
-        file_desc_proto2, db.FindFileContainingSymbol('.NO_PACKAGE_VALUE_0')
-    )
-    self.assertEqual(
-        file_desc_proto2, db.FindFileContainingSymbol('NoPackageMessage')
-    )
-    self.assertEqual(
-        file_desc_proto2, db.FindFileContainingSymbol('.NoPackageMessage')
-    )
-    self.assertEqual(
-        file_desc_proto2,
-        db.FindFileContainingSymbol('NoPackageEnum'),
-    )
-    self.assertEqual(
-        file_desc_proto2,
-        db.FindFileContainingSymbol('.NoPackageEnum'),
-    )
+    self.assertEqual(file_desc_proto2, db.FindFileContainingSymbol(
+        '.NO_PACKAGE_VALUE_0'))
     # Can find top level extension.
     self.assertEqual(file_desc_proto, db.FindFileContainingSymbol(
         'google.protobuf.python.internal.another_field'))
@@ -88,20 +70,15 @@ class DescriptorDatabaseTest(unittest.TestCase):
         unittest_pb2.DESCRIPTOR.serialized_pb)
     db.Add(file_desc_proto2)
     self.assertEqual(file_desc_proto2, db.FindFileContainingSymbol(
-        'proto2_unittest.TestService'))
+        'protobuf_unittest.TestService'))
 
     # Non-existent field under a valid top level symbol can also be
     # found. The behavior is the same with protobuf C++.
     self.assertEqual(file_desc_proto2, db.FindFileContainingSymbol(
-        'proto2_unittest.TestAllTypes.none_field'))
+        'protobuf_unittest.TestAllTypes.none_field'))
 
-    with self.assertRaisesRegex(KeyError, r'\'proto2_unittest\.NoneMessage\''):
-      db.FindFileContainingSymbol('proto2_unittest.NoneMessage')
-
-    with self.assertRaises(KeyError):
-      db.FindFileContainingSymbol(
-          '.google.protobuf.python.internal.FACTORY_2_VALUE_0'
-      )
+    with self.assertRaisesRegex(KeyError, r'\'protobuf_unittest\.NoneMessage\''):
+      db.FindFileContainingSymbol('protobuf_unittest.NoneMessage')
 
   def testConflictRegister(self):
     db = descriptor_database.DescriptorDatabase()

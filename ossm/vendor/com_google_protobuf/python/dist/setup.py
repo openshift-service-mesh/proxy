@@ -12,7 +12,7 @@ import glob
 import os
 import sys
 
-from setuptools import setup, Extension, find_namespace_packages
+from setuptools import setup, Extension, find_packages
 
 
 def GetVersion():
@@ -37,24 +37,6 @@ extra_link_args = []
 if sys.platform.startswith('win'):
   extra_link_args = ['-static']
 
-# If at some point the fasttable decoder is ready for prime time, we could
-# enable it here. But even then we'll need to disable it on platforms where
-# it will not work (eg. 32-bit, MSVC).
-fasttable_decoder_enabled = False
-
-srcs = (
-    glob.glob('google/protobuf/*.c')
-    + glob.glob('python/*.c')
-    + glob.glob('upb/**/*.c', recursive=True)
-    + glob.glob('utf8_range/*.c')
-)
-
-if not fasttable_decoder_enabled:
-  # Our heuristic is to match any file that contains `decode_fast` in the name.
-  # If we change the file names of the fast decoder, we will have to update
-  # this heuristic.
-  srcs = list(filter(lambda src: 'decode_fast' not in src, srcs))
-
 setup(
     name='protobuf',
     version=GetVersion(),
@@ -71,22 +53,26 @@ setup(
     classifiers=[
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
-        'Programming Language :: Python :: 3.13',
-        'Programming Language :: Python :: 3.14',
     ],
-    packages=find_namespace_packages(include=['google*']),
+    namespace_packages=['google'],
+    packages=find_packages(),
     install_requires=[],
     ext_modules=[
         Extension(
             'google._upb._message',
-            srcs,
+            glob.glob('google/protobuf/*.c')
+            + glob.glob('python/*.c')
+            + glob.glob('upb/**/*.c', recursive=True)
+            + glob.glob('utf8_range/*.c'),
             include_dirs=[current_dir, os.path.join(current_dir, 'utf8_range')],
             language='c',
             extra_link_args=extra_link_args,
         )
     ],
-    python_requires='>=3.10',
+    python_requires='>=3.8',
 )

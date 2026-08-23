@@ -12,13 +12,10 @@
 #   `//rust:protobuf`.
 
 load("@rules_rust//rust:defs.bzl", "rust_test")
-load("//bazel:proto_library.bzl", "proto_library")
 load(
     "//rust:defs.bzl",
     "rust_cc_proto_library",
 )
-
-package(default_applicable_licenses = ["//:license"])
 
 proto_library(
     name = "debug_proto",
@@ -41,7 +38,9 @@ proto_library(
 rust_cc_proto_library(
     name = "optimize_for_lite_cpp_rust_proto",
     testonly = True,
-    visibility = ["//visibility:private"],
+    visibility = [
+        "//rust/test/shared:__subpackages__",
+    ],
     deps = [":optimize_for_lite_proto"],
 )
 

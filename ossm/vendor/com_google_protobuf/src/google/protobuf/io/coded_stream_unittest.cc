@@ -40,7 +40,6 @@
 #include "absl/strings/string_view.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 
-#include "google/protobuf/stubs/common.h"
 #include "google/protobuf/testing/googletest.h"
 
 
@@ -179,19 +178,8 @@ TEST_F(CodedStreamTest, EmptyInputBeforeEos) {
     int count_;
   } in;
   CodedInputStream input(&in);
-  // TODO: Remove this suppression.
-  (void)input.ReadTagNoLastTag();
+  input.ReadTagNoLastTag();
   EXPECT_TRUE(input.ConsumedEntireMessage());
-}
-
-TEST_F(CodedStreamTest, ReadRawFailsGracefullyOnBadSize) {
-  char buf[10]{};
-  ArrayInputStream in(buf, sizeof(buf));
-  CodedInputStream input(&in);
-  int c;
-  EXPECT_FALSE(input.ReadRaw(&c, -1));
-  EXPECT_FALSE(input.ReadRaw(&c, -1));
-  EXPECT_FALSE(input.ReadRaw(&c, -1));
 }
 
 class VarintCases : public CodedStreamTest,
@@ -211,8 +199,7 @@ TEST_P(VarintCases, ExpectTag) {
     // Read one byte to force coded_input.Refill() to be called.  Otherwise,
     // ExpectTag() will return a false negative.
     uint8_t dummy;
-    // TODO: Remove this suppression.
-    (void)coded_input.ReadRaw(&dummy, 1);
+    coded_input.ReadRaw(&dummy, 1);
     EXPECT_EQ((uint)'\0', (uint)dummy);
 
     uint32_t expected_value = static_cast<uint32_t>(kVarintCases_case.value);
@@ -751,27 +738,6 @@ TEST_P(BlockSizes, ReadRaw) {
   EXPECT_EQ(sizeof(kRawBytes), input.ByteCount());
 }
 
-TEST_P(BlockSizes, ReadRawFailsGracefullyAtEndOfStream) {
-  int kBlockSizes_case = GetParam();
-  memcpy(buffer_, kRawBytes, sizeof(kRawBytes));
-  ArrayInputStream input(buffer_, sizeof(buffer_), kBlockSizes_case);
-
-  CodedInputStream coded_input(&input);
-  char c[10];
-  while (coded_input.ReadRaw(c, sizeof(c))) {
-    // nothing. Just consuming it.
-  }
-  // and we can call it a few times without UB
-  EXPECT_FALSE(coded_input.ReadRaw(c, sizeof(c)));
-  EXPECT_FALSE(coded_input.ReadRaw(c, sizeof(c)));
-  EXPECT_FALSE(coded_input.ReadRaw(c, sizeof(c)));
-
-  // Read zero is fine too
-  EXPECT_TRUE(coded_input.ReadRaw(nullptr, 0));
-  EXPECT_TRUE(coded_input.ReadRaw(nullptr, 0));
-  EXPECT_TRUE(coded_input.ReadRaw(nullptr, 0));
-}
-
 TEST_P(BlockSizes, WriteRaw) {
   int kBlockSizes_case = GetParam();
   ArrayOutputStream output(buffer_, sizeof(buffer_), kBlockSizes_case);
@@ -864,8 +830,7 @@ TEST_P(BlockSizes, ReadStringReservesMemoryOnPushedLimit) {
 
   {
     CodedInputStream coded_input(&input);
-    // TODO: Remove this suppression.
-    (void)coded_input.PushLimit(sizeof(buffer_));
+    coded_input.PushLimit(sizeof(buffer_));
 
     std::string str;
     EXPECT_TRUE(coded_input.ReadString(&str, strlen(kRawBytes)));
@@ -910,8 +875,7 @@ TEST_F(CodedStreamTest, ReadStringNoReservationSizeIsNegative) {
 
   {
     CodedInputStream coded_input(&input);
-    // TODO: Remove this suppression.
-    (void)coded_input.PushLimit(sizeof(buffer_));
+    coded_input.PushLimit(sizeof(buffer_));
 
     std::string str;
     EXPECT_FALSE(coded_input.ReadString(&str, -1));
@@ -931,8 +895,7 @@ TEST_F(CodedStreamTest, ReadStringNoReservationSizeIsLarge) {
 
   {
     CodedInputStream coded_input(&input);
-    // TODO: Remove this suppression.
-    (void)coded_input.PushLimit(sizeof(buffer_));
+    coded_input.PushLimit(sizeof(buffer_));
 
     std::string str;
     EXPECT_FALSE(coded_input.ReadString(&str, 1 << 30));
@@ -949,8 +912,7 @@ TEST_F(CodedStreamTest, ReadStringNoReservationSizeIsOverTheLimit) {
 
   {
     CodedInputStream coded_input(&input);
-    // TODO: Remove this suppression.
-    (void)coded_input.PushLimit(16);
+    coded_input.PushLimit(16);
 
     std::string str;
     EXPECT_FALSE(coded_input.ReadString(&str, strlen(kRawBytes)));
@@ -991,8 +953,7 @@ TEST_F(CodedStreamTest,
 
   {
     CodedInputStream coded_input(&input);
-    // TODO: Remove this suppression.
-    (void)coded_input.PushLimit(sizeof(buffer_));
+    coded_input.PushLimit(sizeof(buffer_));
     coded_input.SetTotalBytesLimit(16);
 
     std::string str;
@@ -1014,8 +975,7 @@ TEST_F(CodedStreamTest,
 
   {
     CodedInputStream coded_input(&input);
-    // TODO: Remove this suppression.
-    (void)coded_input.PushLimit(16);
+    coded_input.PushLimit(16);
     coded_input.SetTotalBytesLimit(sizeof(buffer_));
     EXPECT_EQ(sizeof(buffer_), coded_input.BytesUntilTotalBytesLimit());
 
@@ -1588,14 +1548,15 @@ class ReallyBigInputStream : public ZeroCopyInputStream {
 
     switch (buffer_count_++) {
       case 0:
-        *data = buffer_.get();
-        *size = 1024;
+        *data = buffer_;
+        *size = sizeof(buffer_);
         return true;
       case 1:
         // Return an enormously large buffer that, when combined with the 1k
         // returned already, should overflow the total_bytes_read_ counter in
-        // CodedInputStream.
-        *data = buffer_.get();
+        // CodedInputStream.  Note that we'll only read the first 1024 bytes
+        // of this buffer so it's OK that we have it point at buffer_.
+        *data = buffer_;
         *size = INT_MAX;
         return true;
       default:
@@ -1617,12 +1578,7 @@ class ReallyBigInputStream : public ZeroCopyInputStream {
   int backup_amount_;
 
  private:
-  // On 32-bit platforms, only allocate 1024 bytes because we would exhaust our
-  // address space otherwise. This will result in UB when
-  // CodedInputStream::Refresh computes an out-of-bounds pointer by adding
-  // INT_MAX (from case 1 above) but this is largely only a theoretical issue.
-  std::unique_ptr<char[], void (*)(void*)> buffer_{
-      static_cast<char*>(calloc(sizeof(void*) > 4 ? INT_MAX : 1024, 1)), free};
+  char buffer_[1024] = {};
   int64_t buffer_count_;
 };
 

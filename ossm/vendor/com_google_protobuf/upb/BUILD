@@ -6,11 +6,13 @@
 # https://developers.google.com/open-source/licenses/bsd
 
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
-load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_python//python:defs.bzl", "py_binary")
-load("//upb/bazel:copts.bzl", "UPB_DEFAULT_COPTS", "UPB_DEFAULT_FEATURES")
-load("//upb/bazel/private:upb_proto_library_internal/copts.bzl", "upb_proto_library_copts")
-load("//upb/bazel/private/oss:amalgamation.bzl", "upb_amalgamation")  # buildifier: disable=bzl-visibility
+load("//bazel/private:upb_proto_library_internal/copts.bzl", "upb_proto_library_copts")
+load(
+    "//upb/bazel:amalgamation.bzl",
+    "upb_amalgamation",
+)
+load("//upb/bazel:build_defs.bzl", "UPB_DEFAULT_COPTS")
 
 package(default_applicable_licenses = ["//:license"])
 
@@ -21,6 +23,7 @@ exports_files(["LICENSE"])
 exports_files(
     [
         "BUILD",
+        "WORKSPACE",
     ],
     visibility = ["//upb/cmake:__pkg__"],
 )
@@ -28,42 +31,25 @@ exports_files(
 config_setting(
     name = "windows",
     constraint_values = ["@platforms//os:windows"],
-    visibility = [
-        "//benchmarks:__subpackages__",
-        "//hpb:__subpackages__",
-        "//hpb_generator:__subpackages__",
-        "//lua:__pkg__",
-        "//python:__pkg__",
-        "//upb:__subpackages__",
-        "//upb_generator:__subpackages__",
-    ],
+    visibility = ["//visibility:public"],
 )
 
 bool_flag(
     name = "fasttable_enabled",
     build_setting_default = False,
-    visibility = [
-        "//upb/bazel:__pkg__",
-    ],
+    visibility = ["//visibility:public"],
 )
 
 config_setting(
     name = "fasttable_enabled_setting",
     flag_values = {"//upb:fasttable_enabled": "true"},
-    visibility = [
-        "//benchmarks:__subpackages__",
-        "//lua:__pkg__",
-        "//python:__pkg__",
-        "//upb:__subpackages__",
-        "//upb_generator:__subpackages__",
-    ],
+    visibility = ["//visibility:public"],
 )
 
 upb_proto_library_copts(
-    name = "upb_proto_library_copts",
+    name = "upb_proto_library_copts__for_generated_code_only_do_not_use",
     copts = UPB_DEFAULT_COPTS,
-    features = UPB_DEFAULT_FEATURES,
-    visibility = ["//upb/bazel:__pkg__"],
+    visibility = ["//visibility:public"],
 )
 
 # Please update copy.bara.sky target = ":friends" if
@@ -85,44 +71,149 @@ package_group(
 # upb_c_proto_library() only. This interface is not stable and by using it you
 # give up any backward compatibility guarantees.
 cc_library(
-    name = "generated_code_support",
+    name = "generated_code_support__only_for_generated_code_do_not_use__i_give_permission_to_break_me",
     hdrs = ["generated_code_support.h"],
     copts = UPB_DEFAULT_COPTS,
-    features = UPB_DEFAULT_FEATURES,
     textual_hdrs = [
-        "//upb/port:inc",
+        ":port_inc",
     ],
-    visibility = [
-        "//pkg:__pkg__",
-        "//upb/reflection:__pkg__",
-        "//upb_generator:__subpackages__",
-    ],
+    visibility = ["//visibility:public"],
     deps = [
-        "//upb/base",
-        "//upb/mem",
-        "//upb/message",
+        ":base",
+        ":mem",
+        ":message",
+        ":mini_descriptor",
+        ":mini_table",
+        ":wire",
         "//upb/message:internal",
-        "//upb/mini_descriptor",
-        "//upb/mini_table",
-        "//upb/mini_table:internal",
-        "//upb/wire",
-    ] + select({
-        ":fasttable_enabled_setting": [
-            "//upb/wire/decode_fast:field_parsers",
-        ],
-        "//conditions:default": [],
-    }),
+    ],
 )
 
 # Common support code for C++ generated code.
 cc_library(
-    name = "generated_cpp_support",
+    name = "generated_cpp_support__only_for_generated_code_do_not_use__i_give_permission_to_break_me",
     copts = UPB_DEFAULT_COPTS,
-    features = UPB_DEFAULT_FEATURES,
     textual_hdrs = [
-        "//upb/port:inc",
+        ":port_inc",
     ],
-    visibility = ["//hpb/bazel:__pkg__"],
+    visibility = ["//visibility:public"],
+)
+
+# Aliases ######################################################################
+# TODO: Remove these.
+
+alias(
+    name = "base",
+    actual = "//upb/base",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "generated_reflection_support__only_for_generated_code_do_not_use__i_give_permission_to_break_me",
+    actual = "//upb/reflection:generated_reflection_support__only_for_generated_code_do_not_use__i_give_permission_to_break_me",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "json",
+    actual = "//upb/json",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "mem",
+    actual = "//upb/mem",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "message",
+    actual = "//upb/message",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "message_compare",
+    actual = "//upb/message:compare",
+    visibility = ["//upb:friends"],
+)
+
+alias(
+    name = "message_copy",
+    actual = "//upb/message:copy",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "message_promote",
+    actual = "//upb/message:promote",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "message_split64",
+    actual = "//upb/message:split64",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "mini_descriptor",
+    actual = "//upb/mini_descriptor",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "mini_table",
+    actual = "//upb/mini_table",
+    visibility = ["//upb:friends"],
+)
+
+alias(
+    name = "mini_table_compat",
+    actual = "//upb/mini_table:compat",
+    visibility = ["//upb:friends"],
+)
+
+alias(
+    name = "port",
+    actual = "//upb/port",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "port_inc",
+    actual = "//upb/port:inc",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "reflection",
+    actual = "//upb/reflection",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "text",
+    actual = "//upb/text",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "wire",
+    actual = "//upb/wire",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "wire_reader",
+    actual = "//upb/wire:reader",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "eps_copy_input_stream",
+    actual = "//upb/wire:eps_copy_input_stream",
+    visibility = ["//visibility:public"],
 )
 
 # Amalgamation #################################################################
@@ -134,38 +225,35 @@ upb_amalgamation(
         "upb.h",
     ],
     libs = [
-        ":generated_code_support",
+        ":base",
+        ":eps_copy_input_stream",
+        ":generated_code_support__only_for_generated_code_do_not_use__i_give_permission_to_break_me",
+        ":mem",
+        ":message",
+        ":message_compare",
+        ":message_copy",
+        ":mini_descriptor",
+        ":mini_table",
+        ":mini_table_compat",
+        ":port",
+        ":reflection",
+        ":wire",
+        ":wire_reader",
         "//src/google/protobuf:descriptor_upb_c_proto",
         "//src/google/protobuf:descriptor_upb_minitable_proto",
-        "//upb/base",
         "//upb/base:internal",
         "//upb/hash:hash",
         "//upb/lex:lex",
-        "//upb/mem",
         "//upb/mem:internal",
-        "//upb/message",
-        "//upb/message:compare",
-        "//upb/message:copy",
         "//upb/message:internal",
         "//upb/message:iterator",
         "//upb/message:types",
-        "//upb/mini_descriptor",
         "//upb/mini_descriptor:internal",
-        "//upb/mini_table",
         "//upb/mini_table:internal",
-        "//upb/port",
-        "//upb/reflection",
         "//upb/reflection:descriptor_upb_proto",
         "//upb/reflection:internal",
         "//upb/text:debug",
         "//upb/text:internal",
-        "//upb/wire",
-        "//upb/wire:decoder",
-        "//upb/wire:eps_copy_input_stream",
-        "//upb/wire:eps_copy_input_stream_internal",
-        "//upb/wire:reader",
-        "//upb/wire:reader_internal",
-        "//upb/wire:writer",
     ],
     strip_import_prefix = ["src"],
     visibility = ["//rust:__pkg__"],
@@ -186,38 +274,35 @@ upb_amalgamation(
         "php-upb.h",
     ],
     libs = [
-        ":generated_code_support",
+        ":base",
+        ":eps_copy_input_stream",
+        ":generated_code_support__only_for_generated_code_do_not_use__i_give_permission_to_break_me",
+        ":json",
+        ":mem",
+        ":message",
+        ":message_compare",
+        ":message_copy",
+        ":mini_descriptor",
+        ":mini_table",
+        ":mini_table_compat",
+        ":port",
+        ":reflection",
+        ":wire",
+        ":wire_reader",
         "//src/google/protobuf:descriptor_upb_c_proto",
         "//src/google/protobuf:descriptor_upb_minitable_proto",
         "//src/google/protobuf:descriptor_upb_reflection_proto",
-        "//upb/base",
         "//upb/base:internal",
         "//upb/hash:hash",
-        "//upb/json",
         "//upb/lex:lex",
-        "//upb/mem",
         "//upb/mem:internal",
-        "//upb/message",
-        "//upb/message:compare",
-        "//upb/message:copy",
         "//upb/message:internal",
         "//upb/message:iterator",
         "//upb/message:types",
-        "//upb/mini_descriptor",
         "//upb/mini_descriptor:internal",
-        "//upb/mini_table",
         "//upb/mini_table:internal",
-        "//upb/port",
-        "//upb/reflection",
         "//upb/reflection:descriptor_upb_proto",
         "//upb/reflection:internal",
-        "//upb/wire",
-        "//upb/wire:decoder",
-        "//upb/wire:eps_copy_input_stream",
-        "//upb/wire:eps_copy_input_stream_internal",
-        "//upb/wire:reader",
-        "//upb/wire:reader_internal",
-        "//upb/wire:writer",
     ],
     prefix = "php-",
     strip_import_prefix = ["src"],
@@ -239,38 +324,34 @@ upb_amalgamation(
         "ruby-upb.h",
     ],
     libs = [
-        ":generated_code_support",
+        ":base",
+        ":eps_copy_input_stream",
+        ":generated_code_support__only_for_generated_code_do_not_use__i_give_permission_to_break_me",
+        ":json",
+        ":mem",
+        ":message",
+        ":message_compare",
+        ":message_copy",
+        ":mini_descriptor",
+        ":mini_table",
+        ":mini_table_compat",
+        ":port",
+        ":reflection",
+        ":wire",
+        ":wire_reader",
         "//src/google/protobuf:descriptor_upb_c_proto",
         "//src/google/protobuf:descriptor_upb_minitable_proto",
-        "//upb/base",
         "//upb/base:internal",
         "//upb/hash:hash",
-        "//upb/json",
         "//upb/lex:lex",
-        "//upb/mem",
         "//upb/mem:internal",
-        "//upb/message",
-        "//upb/message:compare",
-        "//upb/message:copy",
         "//upb/message:internal",
         "//upb/message:iterator",
         "//upb/message:types",
-        "//upb/mini_descriptor",
         "//upb/mini_descriptor:internal",
-        "//upb/mini_table",
         "//upb/mini_table:internal",
-        "//upb/port",
-        "//upb/reflection",
         "//upb/reflection:descriptor_upb_proto",
         "//upb/reflection:internal",
-        "//upb/util:def_to_proto",
-        "//upb/wire",
-        "//upb/wire:decoder",
-        "//upb/wire:eps_copy_input_stream",
-        "//upb/wire:eps_copy_input_stream_internal",
-        "//upb/wire:reader",
-        "//upb/wire:reader_internal",
-        "//upb/wire:writer",
     ],
     prefix = "ruby-",
     strip_import_prefix = ["src"],
@@ -283,6 +364,14 @@ cc_library(
     hdrs = ["ruby-upb.h"],
     copts = UPB_DEFAULT_COPTS,
     deps = ["//third_party/utf8_range"],
+)
+
+exports_files(
+    [
+        "third_party/lunit/console.lua",
+        "third_party/lunit/lunit.lua",
+    ],
+    visibility = ["//lua:__pkg__"],
 )
 
 filegroup(
@@ -310,7 +399,6 @@ filegroup(
         "//src/google/protobuf:well_known_type_protos",
         "//upb/json:test_protos",
         "//upb/message:test_protos",
-        "//upb/mini_table:test_protos",
         "//upb/test:test_protos",
         "//upb/util:test_protos",
     ],
@@ -320,13 +408,9 @@ filegroup(
 filegroup(
     name = "test_srcs",
     srcs = [
-        "//upb/hash:test_srcs",
         "//upb/json:test_srcs",
-        "//upb/lex:test_srcs",
         "//upb/mem:test_srcs",
         "//upb/message:test_srcs",
-        "//upb/mini_descriptor:test_srcs",
-        "//upb/mini_table:test_srcs",
         "//upb/test:test_srcs",
         "//upb/util:test_srcs",
         "//upb/wire:test_srcs",
@@ -334,16 +418,11 @@ filegroup(
     visibility = ["//pkg:__pkg__"],
 )
 
-cc_library(
+filegroup(
     name = "test_util",
-    testonly = True,
-    visibility = ["//pkg:__pkg__"],
-    deps = [
-        "//upb/test:fuzz_util",
-        "//upb/test:parse_text_proto",
-        "//upb/util:def_to_proto_test_lib",
-        "//upb/wire/test_util:field_types",
-        "//upb/wire/test_util:make_mini_table",
-        "//upb/wire/test_util:wire_message",
+    srcs = [
+        "//upb/test:test_util",
+        "//upb/util:test_util",
     ],
+    visibility = ["//pkg:__pkg__"],
 )

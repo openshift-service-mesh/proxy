@@ -30,19 +30,19 @@ namespace {
 
 TEST(RetentionTest, DirectOptions) {
   const FileOptions& file_options =
-      proto2_unittest::OptionsMessage::descriptor()->file()->options();
-  EXPECT_EQ(file_options.GetExtension(proto2_unittest::plain_option), 1);
+      protobuf_unittest::OptionsMessage::descriptor()->file()->options();
+  EXPECT_EQ(file_options.GetExtension(protobuf_unittest::plain_option), 1);
   EXPECT_EQ(
-      file_options.GetExtension(proto2_unittest::runtime_retention_option), 2);
+      file_options.GetExtension(protobuf_unittest::runtime_retention_option), 2);
   // RETENTION_SOURCE option should be stripped.
   EXPECT_FALSE(
-      file_options.HasExtension(proto2_unittest::source_retention_option));
-  EXPECT_EQ(file_options.GetExtension(proto2_unittest::source_retention_option),
+      file_options.HasExtension(protobuf_unittest::source_retention_option));
+  EXPECT_EQ(file_options.GetExtension(protobuf_unittest::source_retention_option),
             0);
 }
 
 void CheckOptionsMessageIsStrippedCorrectly(
-    const proto2_unittest::OptionsMessage& options) {
+    const protobuf_unittest::OptionsMessage& options) {
   EXPECT_EQ(options.plain_field(), 1);
   EXPECT_EQ(options.runtime_retention_field(), 2);
   // RETENTION_SOURCE field should be stripped.
@@ -52,120 +52,120 @@ void CheckOptionsMessageIsStrippedCorrectly(
 
 TEST(RetentionTest, FieldsNestedInRepeatedMessage) {
   const FileOptions& file_options =
-      proto2_unittest::OptionsMessage::descriptor()->file()->options();
-  ASSERT_EQ(1, file_options.ExtensionSize(proto2_unittest::repeated_options));
-  const proto2_unittest::OptionsMessage& options_message =
-      file_options.GetRepeatedExtension(proto2_unittest::repeated_options)[0];
+      protobuf_unittest::OptionsMessage::descriptor()->file()->options();
+  ASSERT_EQ(1, file_options.ExtensionSize(protobuf_unittest::repeated_options));
+  const protobuf_unittest::OptionsMessage& options_message =
+      file_options.GetRepeatedExtension(protobuf_unittest::repeated_options)[0];
   CheckOptionsMessageIsStrippedCorrectly(options_message);
 }
 
 TEST(RetentionTest, File) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::OptionsMessage::descriptor()
+      protobuf_unittest::OptionsMessage::descriptor()
           ->file()
           ->options()
-          .GetExtension(proto2_unittest::file_option));
+          .GetExtension(protobuf_unittest::file_option));
 }
 
 TEST(RetentionTest, TopLevelMessage) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::TopLevelMessage::descriptor()->options().GetExtension(
-          proto2_unittest::message_option));
+      protobuf_unittest::TopLevelMessage::descriptor()->options().GetExtension(
+          protobuf_unittest::message_option));
 }
 
 TEST(RetentionTest, NestedMessage) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::TopLevelMessage::NestedMessage::descriptor()
+      protobuf_unittest::TopLevelMessage::NestedMessage::descriptor()
           ->options()
-          .GetExtension(proto2_unittest::message_option));
+          .GetExtension(protobuf_unittest::message_option));
 }
 
 TEST(RetentionTest, TopLevelEnum) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::TopLevelEnum_descriptor()->options().GetExtension(
-          proto2_unittest::enum_option));
+      protobuf_unittest::TopLevelEnum_descriptor()->options().GetExtension(
+          protobuf_unittest::enum_option));
 }
 
 TEST(RetentionTest, NestedEnum) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::TopLevelMessage::NestedEnum_descriptor()
+      protobuf_unittest::TopLevelMessage::NestedEnum_descriptor()
           ->options()
-          .GetExtension(proto2_unittest::enum_option));
+          .GetExtension(protobuf_unittest::enum_option));
 }
 
 TEST(RetentionTest, EnumEntry) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::TopLevelEnum_descriptor()
+      protobuf_unittest::TopLevelEnum_descriptor()
           ->value(0)
           ->options()
-          .GetExtension(proto2_unittest::enum_entry_option));
+          .GetExtension(protobuf_unittest::enum_entry_option));
 }
 
 TEST(RetentionTest, TopLevelExtension) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::TopLevelMessage::descriptor()
+      protobuf_unittest::TopLevelMessage::descriptor()
           ->file()
           ->FindExtensionByName("i")
           ->options()
-          .GetExtension(proto2_unittest::field_option));
+          .GetExtension(protobuf_unittest::field_option));
 }
 
 TEST(RetentionTest, NestedExtension) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::TopLevelMessage::descriptor()
+      protobuf_unittest::TopLevelMessage::descriptor()
           ->extension(0)
           ->options()
-          .GetExtension(proto2_unittest::field_option));
+          .GetExtension(protobuf_unittest::field_option));
 }
 
 TEST(RetentionTest, Field) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::TopLevelMessage::descriptor()
+      protobuf_unittest::TopLevelMessage::descriptor()
           ->field(0)
           ->options()
-          .GetExtension(proto2_unittest::field_option));
+          .GetExtension(protobuf_unittest::field_option));
 }
 
 TEST(RetentionTest, Oneof) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::TopLevelMessage::descriptor()
+      protobuf_unittest::TopLevelMessage::descriptor()
           ->oneof_decl(0)
           ->options()
-          .GetExtension(proto2_unittest::oneof_option));
+          .GetExtension(protobuf_unittest::oneof_option));
 }
 
 TEST(RetentionTest, ExtensionRange) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::TopLevelMessage::descriptor()
+      protobuf_unittest::TopLevelMessage::descriptor()
           ->extension_range(0)
           ->options()
-          .GetExtension(proto2_unittest::extension_range_option));
+          .GetExtension(protobuf_unittest::extension_range_option));
 }
 
 TEST(RetentionTest, Service) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::TopLevelMessage::descriptor()
+      protobuf_unittest::TopLevelMessage::descriptor()
           ->file()
           ->service(0)
           ->options()
-          .GetExtension(proto2_unittest::service_option));
+          .GetExtension(protobuf_unittest::service_option));
 }
 
 TEST(RetentionTest, Method) {
   CheckOptionsMessageIsStrippedCorrectly(
-      proto2_unittest::TopLevelMessage::descriptor()
+      protobuf_unittest::TopLevelMessage::descriptor()
           ->file()
           ->service(0)
           ->method(0)
           ->options()
-          .GetExtension(proto2_unittest::method_option));
+          .GetExtension(protobuf_unittest::method_option));
 }
 
 class SimpleErrorCollector : public io::ErrorCollector {
  public:
   SimpleErrorCollector() = default;
   void RecordError(int line, io::ColumnNumber column,
-                   absl::string_view message) override {};
+                   absl::string_view message) override{};
 };
 
 TEST(RetentionTest, StripSourceRetentionOptionsWithSourceCodeInfo) {
@@ -302,6 +302,9 @@ TEST(RetentionTest, InvalidDescriptor) {
   ASSERT_NE(pool.BuildFile(descriptor_proto_descriptor), nullptr);
   const FileDescriptor* file_descriptor = pool.BuildFile(file_descriptor_proto);
   ASSERT_NE(file_descriptor, nullptr);
+
+  FileDescriptorProto stripped_file =
+      compiler::StripSourceRetentionOptions(*file_descriptor);
 }
 
 TEST(RetentionTest, MissingRequiredField) {

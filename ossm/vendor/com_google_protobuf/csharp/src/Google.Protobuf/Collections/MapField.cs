@@ -590,7 +590,7 @@ namespace Google.Protobuf.Collections
         IEnumerable<TValue> IReadOnlyDictionary<TKey, TValue>.Values => Values;
         #endregion
 
-        private sealed class DictionaryEnumerator : IDictionaryEnumerator
+        private class DictionaryEnumerator : IDictionaryEnumerator
         {
             private readonly IEnumerator<KeyValuePair<TKey, TValue>> enumerator;
 

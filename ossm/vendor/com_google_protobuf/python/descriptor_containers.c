@@ -24,26 +24,20 @@ err:
   return ret;
 }
 
-#define CHECK_TYPE(obj, state_member)                                   \
-  assert(PyUpb_ModuleState_MaybeGet() == NULL || /* During shutdown. */ \
-         Py_TYPE(obj) == PyUpb_ModuleState_Get()->state_member)
-
 // -----------------------------------------------------------------------------
 // ByNameIterator
 // -----------------------------------------------------------------------------
 
 typedef struct {
-  // clang-format off
-  PyObject_HEAD
+  PyObject_HEAD;
   const PyUpb_ByNameMap_Funcs* funcs;
-  // clang-format on
   const void* parent;    // upb_MessageDef*, upb_DefPool*, etc.
   PyObject* parent_obj;  // Python object that keeps parent alive, we own a ref.
   int index;             // Current iterator index.
 } PyUpb_ByNameIterator;
 
 static PyUpb_ByNameIterator* PyUpb_ByNameIterator_Self(PyObject* obj) {
-  CHECK_TYPE(obj, by_name_iterator_type);
+  assert(Py_TYPE(obj) == PyUpb_ModuleState_Get()->by_name_iterator_type);
   return (PyUpb_ByNameIterator*)obj;
 }
 
@@ -95,17 +89,15 @@ static PyType_Spec PyUpb_ByNameIterator_Spec = {
 // -----------------------------------------------------------------------------
 
 typedef struct {
-  // clang-format off
-  PyObject_HEAD
+  PyObject_HEAD;
   const PyUpb_ByNumberMap_Funcs* funcs;
-  // clang-format on
   const void* parent;    // upb_MessageDef*, upb_DefPool*, etc.
   PyObject* parent_obj;  // Python object that keeps parent alive, we own a ref.
   int index;             // Current iterator index.
 } PyUpb_ByNumberIterator;
 
 static PyUpb_ByNumberIterator* PyUpb_ByNumberIterator_Self(PyObject* obj) {
-  CHECK_TYPE(obj, by_number_iterator_type);
+  assert(Py_TYPE(obj) == PyUpb_ModuleState_Get()->by_number_iterator_type);
   return (PyUpb_ByNumberIterator*)obj;
 }
 
@@ -157,16 +149,14 @@ static PyType_Spec PyUpb_ByNumberIterator_Spec = {
 // -----------------------------------------------------------------------------
 
 typedef struct {
-  // clang-format off
-  PyObject_HEAD
+  PyObject_HEAD;
   const PyUpb_GenericSequence_Funcs* funcs;
-  // clang-format on
   const void* parent;    // upb_MessageDef*, upb_DefPool*, etc.
   PyObject* parent_obj;  // Python object that keeps parent alive, we own a ref.
 } PyUpb_GenericSequence;
 
 PyUpb_GenericSequence* PyUpb_GenericSequence_Self(PyObject* obj) {
-  CHECK_TYPE(obj, generic_sequence_type);
+  assert(Py_TYPE(obj) == PyUpb_ModuleState_Get()->generic_sequence_type);
   return (PyUpb_GenericSequence*)obj;
 }
 
@@ -352,16 +342,14 @@ static PyType_Spec PyUpb_GenericSequence_Spec = {
 // -----------------------------------------------------------------------------
 
 typedef struct {
-  // clang-format off
-  PyObject_HEAD
+  PyObject_HEAD;
   const PyUpb_ByNameMap_Funcs* funcs;
-  // clang-format on
   const void* parent;    // upb_MessageDef*, upb_DefPool*, etc.
   PyObject* parent_obj;  // Python object that keeps parent alive, we own a ref.
 } PyUpb_ByNameMap;
 
 PyUpb_ByNameMap* PyUpb_ByNameMap_Self(PyObject* obj) {
-  CHECK_TYPE(obj, by_name_map_type);
+  assert(Py_TYPE(obj) == PyUpb_ModuleState_Get()->by_name_map_type);
   return (PyUpb_ByNameMap*)obj;
 }
 
@@ -568,16 +556,14 @@ static PyType_Spec PyUpb_ByNameMap_Spec = {
 // -----------------------------------------------------------------------------
 
 typedef struct {
-  // clang-format off
-  PyObject_HEAD
+  PyObject_HEAD;
   const PyUpb_ByNumberMap_Funcs* funcs;
-  // clang-format on
   const void* parent;    // upb_MessageDef*, upb_DefPool*, etc.
   PyObject* parent_obj;  // Python object that keeps parent alive, we own a ref.
 } PyUpb_ByNumberMap;
 
 PyUpb_ByNumberMap* PyUpb_ByNumberMap_Self(PyObject* obj) {
-  CHECK_TYPE(obj, by_number_map_type);
+  assert(Py_TYPE(obj) == PyUpb_ModuleState_Get()->by_number_map_type);
   return (PyUpb_ByNumberMap*)obj;
 }
 

@@ -28,7 +28,6 @@
 #include <vector>
 
 #include "absl/base/attributes.h"
-#include "absl/log/absl_check.h"
 #include "absl/strings/cord.h"
 #include "google/protobuf/compiler/cpp/unittest.h"
 #include "absl/strings/string_view.h"
@@ -40,14 +39,14 @@
 #include "google/protobuf/stubs/callback.h"
 #include "google/protobuf/stubs/common.h"
 #include "google/protobuf/compiler/cpp/helpers.h"
+#include "google/protobuf/unittest_no_generic_services.pb.h"
 #include "google/protobuf/descriptor.pb.h"
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include "absl/base/casts.h"
 #include "absl/strings/substitute.h"
 #include "google/protobuf/arena.h"
-#include "google/protobuf/compiler/cpp/test_bad_identifiers_editions.pb.h"
-#include "google/protobuf/compiler/cpp/test_bad_identifiers_proto2.pb.h"
+#include "google/protobuf/compiler/cpp/test_bad_identifiers.pb.h"
 #include "google/protobuf/compiler/importer.h"
 #include "google/protobuf/compiler/retention.h"
 #include "google/protobuf/compiler/scc.h"
@@ -56,7 +55,6 @@
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/test_util2.h"
-#include "google/protobuf/unittest_no_generic_services.pb.h"
 
 // Must be included last.
 #include "google/protobuf/port_def.inc"
@@ -76,8 +74,8 @@ void DoNothing() {}
 
 class MockErrorCollector : public MultiFileErrorCollector {
  public:
-  MockErrorCollector() = default;
-  ~MockErrorCollector() override = default;
+  MockErrorCollector() {}
+  ~MockErrorCollector() override {}
 
   std::string text_;
 
@@ -128,7 +126,7 @@ TEST(GENERATED_DESCRIPTOR_TEST_NAME, IdenticalDescriptors) {
 // limit for string literal size
 TEST(GENERATED_DESCRIPTOR_TEST_NAME, EnormousDescriptor) {
   const Descriptor* generated_descriptor =
-    ::proto2_unittest::TestEnormousDescriptor::descriptor();
+    ::protobuf_unittest::TestEnormousDescriptor::descriptor();
 
   EXPECT_TRUE(generated_descriptor != nullptr);
 }
@@ -557,8 +555,8 @@ TEST(GENERATED_MESSAGE_TEST_NAME, CopyConstructorWithArenas) {
   UNITTEST::TestAllTypes message2_stack(*message1);
   TestUtil::ExpectAllFieldsSet(message2_stack);
 
-  std::unique_ptr<UNITTEST::TestAllTypes> message2_heap =
-      std::make_unique<UNITTEST::TestAllTypes>(*message1);
+  std::unique_ptr<UNITTEST::TestAllTypes> message2_heap(
+      new UNITTEST::TestAllTypes(*message1));
   TestUtil::ExpectAllFieldsSet(*message2_heap);
 
   arena.Reset();
@@ -758,7 +756,7 @@ TEST(GENERATED_MESSAGE_TEST_NAME, ReallyLargeTagNumber) {
   // We'll try serializing just for fun.
   message1.set_a(1234);
   message1.set_bb(5678);
-  ABSL_CHECK(message1.SerializeToString(&data));
+  message1.SerializeToString(&data);
   EXPECT_TRUE(message2.ParseFromString(data));
   EXPECT_EQ(1234, message2.a());
   EXPECT_EQ(5678, message2.bb());
@@ -834,7 +832,7 @@ TEST(GENERATED_MESSAGE_TEST_NAME, TestEmbedOptimizedForSize) {
   message.mutable_optional_message()->set_i(1);
   message.add_repeated_message()->mutable_msg()->set_c(2);
   std::string data;
-  ABSL_CHECK(message.SerializeToString(&data));
+  message.SerializeToString(&data);
   ASSERT_TRUE(message2.ParseFromString(data));
   EXPECT_EQ(1, message2.optional_message().i());
   EXPECT_EQ(2, message2.repeated_message(0).msg().c());
@@ -952,7 +950,7 @@ TEST(GENERATED_MESSAGE_TEST_NAME, ParseFromTruncated) {
   const std::string msg = p.SerializeAsString();
   int successful_count = 0;
   for (int i = 0; i <= msg.size(); i++) {
-    if (p.ParseFromString(absl::string_view(msg.c_str(), i))) {
+    if (p.ParseFromArray(msg.c_str(), i)) {
       ++successful_count;
     }
   }
@@ -1116,7 +1114,7 @@ class GENERATED_SERVICE_TEST_NAME : public testing::Test {
           response_(nullptr),
           done_(nullptr) {}
 
-    ~MockTestService() override = default;
+    ~MockTestService() override {}
 
     void Reset() { called_ = false; }
 
@@ -1362,7 +1360,7 @@ TEST_F(GENERATED_SERVICE_TEST_NAME, NotImplemented) {
   // A service which doesn't implement any methods.
   class UnimplementedService : public UNITTEST::TestService {
    public:
-    UnimplementedService() = default;
+    UnimplementedService() {}
   };
 
   UnimplementedService unimplemented_service;
@@ -2121,7 +2119,7 @@ TEST(HELPERS_TEST_NAME, TestSCCAnalysis) {
     MessageSCCAnalyzer scc_analyzer((Options()));
     const SCC* scc = scc_analyzer.GetSCC(msg.GetDescriptor());
     MessageAnalysis result = scc_analyzer.GetSCCAnalysis(scc);
-    EXPECT_EQ(result.is_recursive, true);
+    EXPECT_EQ(result.is_recursive, false);
     EXPECT_EQ(result.contains_required, true);
     EXPECT_EQ(result.contains_cord, false);
     EXPECT_EQ(result.contains_extension, false);
@@ -2131,29 +2129,6 @@ TEST(HELPERS_TEST_NAME, TestSCCAnalysis) {
 }  // namespace cpp_unittest
 }  // namespace cpp
 }  // namespace compiler
-}  // namespace protobuf
-}  // namespace google
-
-#ifndef PROTOBUF_TEST_NO_DESCRIPTORS
-// We use a separate namespace to test the ADL hooks.
-// Doing the calls from the protobuf namespace might hide lexical scope lookups.
-namespace other_ns {
-namespace {
-TEST(GENERATED_ENUM_TEST_NAME, GetEnumDescriptorViaADL) {
-  EXPECT_EQ(
-      UNITTEST::TestAllTypes::NestedEnum_descriptor(),
-      ProtobufInternalGetEnumDescriptor(UNITTEST::TestAllTypes::NestedEnum{}));
-  EXPECT_EQ(UNITTEST::ForeignEnum_descriptor(),
-            ProtobufInternalGetEnumDescriptor(UNITTEST::ForeignEnum{}));
-  EXPECT_EQ(
-      UNITTEST::TestEnumWithDupValue_descriptor(),
-      ProtobufInternalGetEnumDescriptor(UNITTEST::TestEnumWithDupValue{}));
-  EXPECT_EQ(UNITTEST::TestSparseEnum_descriptor(),
-            ProtobufInternalGetEnumDescriptor(UNITTEST::TestSparseEnum{}));
-}
-}  // namespace
-}  // namespace other_ns
-#endif  // PROTOBUF_TEST_NO_DESCRIPTORS
 
 namespace no_generic_services_test {
   // Verify that no class called "TestService" was defined in
@@ -2164,8 +2139,6 @@ namespace no_generic_services_test {
   };
 }
 
-namespace google {
-namespace protobuf {
 namespace compiler {
 namespace cpp {
 namespace cpp_unittest {
@@ -2173,12 +2146,12 @@ namespace cpp_unittest {
 TEST_F(GENERATED_SERVICE_TEST_NAME, NoGenericServices) {
   // Verify that non-services in unittest_no_generic_services.proto were
   // generated.
-  ::proto2_unittest::no_generic_services_test::TestMessage message;
+  ::protobuf_unittest::no_generic_services_test::TestMessage message;
   message.set_a(1);
   message.SetExtension(
-      ::proto2_unittest::no_generic_services_test::test_extension, 123);
-  ::proto2_unittest::no_generic_services_test::TestEnum e =
-      ::proto2_unittest::no_generic_services_test::FOO;
+      ::protobuf_unittest::no_generic_services_test::test_extension, 123);
+  ::protobuf_unittest::no_generic_services_test::TestEnum e =
+      ::protobuf_unittest::no_generic_services_test::FOO;
   EXPECT_EQ(e, 1);
 
   // Verify that a ServiceDescriptor is generated for the service even if the
@@ -2215,6 +2188,7 @@ TEST(DESCRIPTOR_INIT_TEST_NAME, Initialized) {
 }
 
 }  // namespace cpp_unittest
+
 }  // namespace cpp
 }  // namespace compiler
 }  // namespace protobuf

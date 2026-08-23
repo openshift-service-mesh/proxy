@@ -8,9 +8,6 @@
 #ifndef GOOGLE_PROTOBUF_COMPILER_ANNOTATION_TEST_UTIL_H__
 #define GOOGLE_PROTOBUF_COMPILER_ANNOTATION_TEST_UTIL_H__
 
-#include <string>
-#include <vector>
-
 #include "google/protobuf/descriptor.pb.h"
 #include "google/protobuf/testing/googletest.h"
 #include <gtest/gtest.h>

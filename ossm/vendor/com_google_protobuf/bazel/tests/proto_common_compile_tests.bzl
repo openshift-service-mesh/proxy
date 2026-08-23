@@ -36,15 +36,7 @@ def proto_common_compile_test_suite(name):
             _test_compile_protoc_opts,
             _test_compile_direct_generated_protos,
             _test_compile_indirect_generated_protos,
-            _test_compile_override_progress_message,
         ],
-    )
-
-def _match_proto_compiler():
-    return matching.any(
-        matching.str_endswith(protocol_compiler),
-        matching.str_endswith("/protoc"),
-        matching.str_endswith("/protoc.exe"),
     )
 
 # Verifies basic usage of `proto_common.compile`.
@@ -65,8 +57,8 @@ def _test_compile_basic_impl(env, target):
     action = env.expect.that_target(target).action_named("MyMnemonic")
     action.argv().contains_exactly_predicates(
         [
-            _match_proto_compiler(),
-            matching.str_matches("--plugin=*out*testdata/plugin"),
+            matching.str_endswith(protocol_compiler),
+            matching.str_matches("--plugin=b*-out/*-exec-*/bin/*/testdata/plugin"),
             matching.equals_wrapper("-I."),
             matching.str_endswith("/A.proto"),
         ],
@@ -92,7 +84,7 @@ def _test_compile_noplugin_impl(env, target):
     action = env.expect.that_target(target).action_named("MyMnemonic")
     action.argv().contains_exactly_predicates(
         [
-            _match_proto_compiler(),
+            matching.str_endswith(protocol_compiler),
             matching.equals_wrapper("-I."),
             matching.str_endswith("/A.proto"),
         ],
@@ -117,9 +109,9 @@ def _test_compile_with_plugin_output_impl(env, target):
     action = env.expect.that_target(target).action_named("MyMnemonic")
     action.argv().contains_exactly_predicates(
         [
-            _match_proto_compiler(),
-            matching.str_matches("--java_out=param1,param2:*out*test_compile_with_plugin_output_compile"),
-            matching.str_matches("--plugin=*out*testdata/plugin"),
+            matching.str_endswith(protocol_compiler),
+            matching.str_matches("--java_out=param1,param2:b*-out/*/test_compile_with_plugin_output_compile"),
+            matching.str_matches("--plugin=b*-out/*-exec-*/bin/*/testdata/plugin"),
             matching.equals_wrapper("-I."),
             matching.str_endswith("/A.proto"),
         ],
@@ -144,9 +136,9 @@ def _test_compile_with_directory_plugin_output_impl(env, target):
     action = env.expect.that_target(target).action_named("MyMnemonic")
     action.argv().contains_exactly_predicates(
         [
-            _match_proto_compiler(),
-            matching.str_matches("--java_out=param1,param2:*out*bin"),
-            matching.str_matches("--plugin=*out*testdata/plugin"),
+            matching.str_endswith(protocol_compiler),
+            matching.str_matches("--java_out=param1,param2:b*-out/*/bin"),
+            matching.str_matches("--plugin=b*-out/*-exec-*/bin/*/testdata/plugin"),
             matching.equals_wrapper("-I."),
             matching.str_endswith("/A.proto"),
         ],
@@ -171,12 +163,12 @@ def _test_compile_additional_args_impl(env, target):
     action = env.expect.that_target(target).action_named("MyMnemonic")
     action.argv().contains_exactly_predicates(
         [
-            _match_proto_compiler(),
-            matching.str_matches("--plugin=*out*testdata/plugin"),
-            matching.equals_wrapper("-I."),
-            matching.str_endswith("/A.proto"),
+            matching.str_endswith(protocol_compiler),
             matching.equals_wrapper("--a"),
             matching.equals_wrapper("--b"),
+            matching.str_matches("--plugin=b*-out/*-exec-*/bin/*/testdata/plugin"),
+            matching.equals_wrapper("-I."),
+            matching.str_endswith("/A.proto"),
         ],
     )
 
@@ -202,9 +194,9 @@ def _test_compile_additional_tools_impl(env, target):
     action = env.expect.that_target(target).action_named("MyMnemonic")
     action.inputs().contains_at_least_predicates(
         [
-            matching.any(matching.file_basename_equals("_tool1"), matching.file_basename_equals("_tool1.exe")),
-            matching.any(matching.file_basename_equals("_tool2"), matching.file_basename_equals("_tool2.exe")),
-            matching.any(matching.file_basename_equals("plugin"), matching.file_basename_equals("plugin.exe")),
+            matching.file_basename_equals("_tool1"),
+            matching.file_basename_equals("_tool2"),
+            matching.file_basename_equals("plugin"),
         ],
     )
 
@@ -231,11 +223,11 @@ def _test_compile_additional_tools_no_plugin_impl(env, target):
     action = env.expect.that_target(target).action_named("MyMnemonic")
     action.inputs().contains_at_least_predicates(
         [
-            matching.any(matching.file_basename_equals("_tool1"), matching.file_basename_equals("_tool1.exe")),
-            matching.any(matching.file_basename_equals("_tool2"), matching.file_basename_equals("_tool2.exe")),
+            matching.file_basename_equals("_tool1"),
+            matching.file_basename_equals("_tool2"),
         ],
     )
-    action.inputs().not_contains_predicate(matching.any(matching.file_basename_equals("plugin"), matching.file_basename_equals("plugin.exe")))
+    action.inputs().not_contains_predicate(matching.file_basename_equals("plugin"))
 
 # Verifies usage of `proto_common.compile` with `additional_inputs` parameter.
 def _test_compile_additional_inputs(name):
@@ -299,16 +291,16 @@ def _test_compile_protoc_opts_impl(env, target):
     action = env.expect.that_target(target).action_named("MyMnemonic")
     action.argv().contains_exactly_predicates(
         [
-            _match_proto_compiler(),
-            matching.str_matches("--plugin=*out*testdata/plugin"),
-            matching.equals_wrapper("-I."),
+            matching.str_endswith(protocol_compiler),
             matching.equals_wrapper("--foo"),
             matching.equals_wrapper("--bar"),
+            matching.str_matches("--plugin=b*-out/*-exec-*/bin/*/testdata/plugin"),
+            matching.equals_wrapper("-I."),
             matching.str_endswith("/A.proto"),
         ],
     )
 
-#  Verifies `proto_common.compile` correctly handles direct generated `.proto` files.
+#  Verifies `proto_common.compile`> correctly handles direct generated `.proto` files.
 def _test_compile_direct_generated_protos(name):
     util.helper_target(native.genrule, name = name + "_generate_G", cmd = "", outs = ["G.proto"])
     util.helper_target(
@@ -332,12 +324,12 @@ def _test_compile_direct_generated_protos_impl(env, target):
     action = env.expect.that_target(target).action_named("MyMnemonic")
     action.argv().contains_exactly_predicates(
         [
-            _match_proto_compiler(),
-            matching.str_matches("--plugin=*out*testdata/plugin"),
-            matching.str_matches("-I*out/*"),
+            matching.str_endswith(protocol_compiler),
+            matching.str_matches("--plugin=b*-out/*-exec-*/bin/*/testdata/plugin"),
+            matching.str_matches("-Ib*-out/*/*"),
             matching.equals_wrapper("-I."),
             matching.str_endswith("/A.proto"),
-            matching.str_matches("*out*G.proto"),
+            matching.str_matches("*-out/*/*/*/G.proto"),
         ],
     )
 
@@ -367,29 +359,10 @@ def _test_compile_indirect_generated_protos_impl(env, target):
     action = env.expect.that_target(target).action_named("MyMnemonic")
     action.argv().contains_exactly_predicates(
         [
-            _match_proto_compiler(),
-            matching.str_matches("--plugin=*out*testdata/plugin"),
-            matching.str_matches("-I*out/*"),
+            matching.str_endswith(protocol_compiler),
+            matching.str_matches("--plugin=b*-out/*-exec-*/bin/*/testdata/plugin"),
+            matching.str_matches("-Ib*-out/*/*"),
             matching.equals_wrapper("-I."),
             matching.str_endswith("/A.proto"),
         ],
     )
-
-# Verifies usage of `proto_common.compile` with `experimental_progress_message` parameter
-def _test_compile_override_progress_message(name):
-    util.helper_target(
-        compile_rule,
-        name = name + "_compile",
-        progress_message = "My custom progress message %{label}",
-        proto_dep = ":simple_proto",
-    )
-
-    analysis_test(
-        name = name,
-        target = name + "_compile",
-        impl = _test_compile_override_progress_message_impl,
-    )
-
-def _test_compile_override_progress_message_impl(env, target):
-    action = env.expect.that_target(target).action_named("MyMnemonic")
-    env.expect.that_str(repr(action.actual)).contains("My custom progress message //")

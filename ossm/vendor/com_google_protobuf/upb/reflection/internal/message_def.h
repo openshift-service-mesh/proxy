@@ -8,12 +8,7 @@
 #ifndef UPB_REFLECTION_MESSAGE_DEF_INTERNAL_H_
 #define UPB_REFLECTION_MESSAGE_DEF_INTERNAL_H_
 
-#include <stddef.h>
-
-#include "upb/hash/common.h"
-#include "upb/mem/arena.h"
-#include "upb/reflection/def.h"
-#include "upb/reflection/descriptor_bootstrap.h"
+#include "upb/reflection/message_def.h"
 
 // Must be last.
 #include "upb/port/def.inc"
@@ -35,10 +30,12 @@ void _upb_MessageDef_LinkMiniTable(upb_DefBuilder* ctx,
 void _upb_MessageDef_Resolve(upb_DefBuilder* ctx, upb_MessageDef* m);
 
 // Allocate and initialize an array of |n| message defs.
-upb_MessageDef* _upb_MessageDefs_New(
-    upb_DefBuilder* ctx, int n, const google_protobuf_DescriptorProto* const* protos,
-    const google_protobuf_FeatureSet* parent_features,
-    const upb_MessageDef* containing_type);
+upb_MessageDef* _upb_MessageDefs_New(upb_DefBuilder* ctx, int n,
+                                     const UPB_DESC(DescriptorProto*)
+                                         const* protos,
+                                     const UPB_DESC(FeatureSet*)
+                                         parent_features,
+                                     const upb_MessageDef* containing_type);
 
 #ifdef __cplusplus
 } /* extern "C" */

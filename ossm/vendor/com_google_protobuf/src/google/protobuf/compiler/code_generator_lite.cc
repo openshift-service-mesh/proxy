@@ -16,7 +16,6 @@
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
 
-
 namespace google {
 namespace protobuf {
 namespace compiler {
@@ -57,19 +56,5 @@ bool IsKnownFeatureProto(absl::string_view filename) {
 }
 
 }  // namespace compiler
-
-namespace internal {
-
-bool is_oss_was_read = false;
-
-bool is_oss = true;
-
-bool IsOss() {
-  is_oss_was_read = true;
-  return is_oss;
-}
-
-}  // namespace internal
-
 }  // namespace protobuf
 }  // namespace google

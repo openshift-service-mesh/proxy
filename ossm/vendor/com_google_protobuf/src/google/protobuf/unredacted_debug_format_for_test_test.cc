@@ -13,9 +13,9 @@ using ::google::protobuf::util::UnredactedUtf8DebugFormatForTest;
 using ::testing::StrEq;
 
 TEST(UnredactedDebugFormatAPITest, MessageUnredactedDebugFormat) {
-  proto2_unittest::RedactedFields proto;
-  proto2_unittest::TestNestedMessageRedaction redacted_nested_proto;
-  proto2_unittest::TestNestedMessageRedaction unredacted_nested_proto;
+  protobuf_unittest::RedactedFields proto;
+  protobuf_unittest::TestNestedMessageRedaction redacted_nested_proto;
+  protobuf_unittest::TestNestedMessageRedaction unredacted_nested_proto;
   redacted_nested_proto.set_optional_unredacted_nested_string(
       "\350\260\267\346\255\214");
   unredacted_nested_proto.set_optional_unredacted_nested_string(
@@ -33,9 +33,9 @@ TEST(UnredactedDebugFormatAPITest, MessageUnredactedDebugFormat) {
 }
 
 TEST(UnredactedDebugFormatAPITest, MessageUnredactedShortDebugFormat) {
-  proto2_unittest::RedactedFields proto;
-  proto2_unittest::TestNestedMessageRedaction redacted_nested_proto;
-  proto2_unittest::TestNestedMessageRedaction unredacted_nested_proto;
+  protobuf_unittest::RedactedFields proto;
+  protobuf_unittest::TestNestedMessageRedaction redacted_nested_proto;
+  protobuf_unittest::TestNestedMessageRedaction unredacted_nested_proto;
   redacted_nested_proto.set_optional_unredacted_nested_string("hello");
   unredacted_nested_proto.set_optional_unredacted_nested_string("world");
   *proto.mutable_optional_redacted_message() = redacted_nested_proto;
@@ -49,9 +49,9 @@ TEST(UnredactedDebugFormatAPITest, MessageUnredactedShortDebugFormat) {
 }
 
 TEST(UnredactedDebugFormatAPITest, MessageUnredactedUtf8DebugFormat) {
-  proto2_unittest::RedactedFields proto;
-  proto2_unittest::TestNestedMessageRedaction redacted_nested_proto;
-  proto2_unittest::TestNestedMessageRedaction unredacted_nested_proto;
+  protobuf_unittest::RedactedFields proto;
+  protobuf_unittest::TestNestedMessageRedaction redacted_nested_proto;
+  protobuf_unittest::TestNestedMessageRedaction unredacted_nested_proto;
   redacted_nested_proto.set_optional_unredacted_nested_string(
       "\350\260\267\346\255\214");
   unredacted_nested_proto.set_optional_unredacted_nested_string(
@@ -69,18 +69,18 @@ TEST(UnredactedDebugFormatAPITest, MessageUnredactedUtf8DebugFormat) {
 }
 
 TEST(UnredactedDebugFormatAPITest, LiteUnredactedDebugFormat) {
-  proto2_unittest::TestAllTypesLite message;
+  protobuf_unittest::TestAllTypesLite message;
   EXPECT_EQ(UnredactedDebugFormatForTest(message), message.DebugString());
 }
 
 TEST(UnredactedDebugFormatAPITest, LiteUnredactedShortDebugFormat) {
-  proto2_unittest::TestAllTypesLite message;
+  protobuf_unittest::TestAllTypesLite message;
   EXPECT_EQ(UnredactedShortDebugFormatForTest(message),
             message.ShortDebugString());
 }
 
 TEST(UnredactedDebugFormatAPITest, LiteUnredactedUtf8DebugFormat) {
-  proto2_unittest::TestAllTypesLite message;
+  protobuf_unittest::TestAllTypesLite message;
   EXPECT_EQ(UnredactedUtf8DebugFormatForTest(message),
             message.Utf8DebugString());
 }

@@ -20,9 +20,6 @@
 // those functions directly inside these vtables, greatly reducing the amount of
 // "adaptor" code we need to write.
 
-// clang-format on
-#include "Python.h"
-// clang-format off
 #include <stdbool.h>
 
 #include "protobuf.h"

@@ -64,12 +64,17 @@ bool CodeGenerator::GenerateAll(const std::vector<const FileDescriptor*>& files,
 
 absl::StatusOr<FeatureSetDefaults> CodeGenerator::BuildFeatureSetDefaults()
     const {
-  // For generators that don't fully support editions yet, provide an
-  // optimistic set of defaults.  Protoc will check this condition later
-  // anyway.
+  if ((GetSupportedFeatures() & FEATURE_SUPPORTS_EDITIONS) == 0) {
+    // For generators that don't fully support editions yet, provide an
+    // optimistic set of defaults.  Protoc will check this condition later
+    // anyway.
+    return FeatureResolver::CompileDefaults(
+        FeatureSet::descriptor(), GetFeatureExtensions(),
+        MinimumAllowedEdition(), MaximumAllowedEdition());
+  }
   return FeatureResolver::CompileDefaults(
-      FeatureSet::descriptor(), GetFeatureExtensions(), ProtocMinimumEdition(),
-      MaximumKnownEdition());
+      FeatureSet::descriptor(), GetFeatureExtensions(), GetMinimumEdition(),
+      GetMaximumEdition());
 }
 
 GeneratorContext::~GeneratorContext() = default;
@@ -105,11 +110,7 @@ void GeneratorContext::GetCompilerVersion(Version* version) const {
 
 bool CanSkipEditionCheck(absl::string_view filename) {
   return absl::StartsWith(filename, "google/protobuf/") ||
-         absl::StartsWith(filename, "upb/") ||
-         absl::StartsWith(filename, "com/google/protobuf/") ||
-         absl::StartsWith(filename, "conformance/test_protos/") ||
-         // TODO: Remove this once internal proto rule is resolved.
-         absl::StartsWith(filename, "test_messages_edition_unstable");
+         absl::StartsWith(filename, "upb/");
 }
 
 }  // namespace compiler

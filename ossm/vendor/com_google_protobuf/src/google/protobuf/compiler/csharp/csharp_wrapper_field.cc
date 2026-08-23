@@ -10,10 +10,10 @@
 #include <sstream>
 
 #include "google/protobuf/compiler/code_generator.h"
+#include "google/protobuf/descriptor.h"
 #include "google/protobuf/compiler/csharp/csharp_doc_comment.h"
 #include "google/protobuf/compiler/csharp/csharp_helpers.h"
 #include "google/protobuf/compiler/csharp/csharp_options.h"
-#include "google/protobuf/descriptor.h"
 #include "google/protobuf/descriptor.pb.h"
 #include "google/protobuf/io/printer.h"
 #include "google/protobuf/io/zero_copy_stream.h"
@@ -36,7 +36,8 @@ WrapperFieldGenerator::WrapperFieldGenerator(const FieldDescriptor* descriptor,
   }
 }
 
-WrapperFieldGenerator::~WrapperFieldGenerator() = default;
+WrapperFieldGenerator::~WrapperFieldGenerator() {
+}
 
 void WrapperFieldGenerator::GenerateMembers(io::Printer* printer) {
   printer->Print(
@@ -191,7 +192,8 @@ WrapperOneofFieldGenerator::WrapperOneofFieldGenerator(
     SetCommonOneofFieldVariables(&variables_);
 }
 
-WrapperOneofFieldGenerator::~WrapperOneofFieldGenerator() = default;
+WrapperOneofFieldGenerator::~WrapperOneofFieldGenerator() {
+}
 
 void WrapperOneofFieldGenerator::GenerateMembers(io::Printer* printer) {
   // Note: deliberately _oneof_$name$_codec, not _$oneof_name$_codec... we have one codec per field.

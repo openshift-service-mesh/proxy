@@ -1,10 +1,7 @@
-load("@rules_cc//cc:cc_test.bzl", "cc_test")
-load("@rules_cc//cc:defs.bzl", "cc_library")
 load(
-    "//upb/bazel:copts.bzl",
+    "//upb/bazel:build_defs.bzl",
     "UPB_DEFAULT_COPTS",
     "UPB_DEFAULT_CPPOPTS",
-    "UPB_DEFAULT_FEATURES",
 )
 
 package(default_applicable_licenses = ["//:license"])
@@ -22,24 +19,17 @@ cc_library(
         "link.h",
     ],
     copts = UPB_DEFAULT_COPTS,
-    features = UPB_DEFAULT_FEATURES,
     visibility = ["//visibility:public"],
     deps = [
         ":internal",
-        "//upb/base",
+        "//upb:base",
+        "//upb:mem",
+        "//upb:mini_table",
+        "//upb:port",
         "//upb/base:internal",
-        "//upb/mem",
         "//upb/message:types",
-        "//upb/mini_table",
         "//upb/mini_table:internal",
-        "//upb/port",
-    ] + select({
-        "//upb:fasttable_enabled_setting": [
-            "//upb/wire/decode_fast:function_array",
-            "//upb/wire/decode_fast:select",
-        ],
-        "//conditions:default": [],
-    }),
+    ],
 )
 
 cc_library(
@@ -57,12 +47,11 @@ cc_library(
         "internal/wire_constants.h",
     ],
     copts = UPB_DEFAULT_COPTS,
-    features = UPB_DEFAULT_FEATURES,
     visibility = ["//visibility:public"],
     deps = [
-        "//upb/base",
+        "//upb:base",
+        "//upb:port",
         "//upb/base:internal",
-        "//upb/port",
     ],
 )
 
@@ -70,21 +59,20 @@ cc_test(
     name = "encode_test",
     srcs = ["internal/encode_test.cc"],
     copts = UPB_DEFAULT_CPPOPTS,
-    features = UPB_DEFAULT_FEATURES,
     deps = [
         ":internal",
         ":mini_descriptor",
-        "//src/google/protobuf",
-        "//upb/base",
-        "//upb/mem",
-        "//upb/message",
+        "//:protobuf",
+        "//upb:base",
+        "//upb:mem",
+        "//upb:message",
+        "//upb:mini_table",
+        "//upb:port",
+        "//upb:wire",
         "//upb/message:internal",
-        "//upb/mini_table",
-        "//upb/port",
-        "//upb/wire",
-        "@abseil-cpp//absl/container:flat_hash_set",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -109,5 +97,5 @@ filegroup(
             "**/*test.cc",
         ],
     ),
-    visibility = ["//upb:__pkg__"],
+    visibility = ["//pkg:__pkg__"],
 )

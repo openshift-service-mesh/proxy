@@ -97,7 +97,12 @@ static size_t ComputeSerializedSizeIncludingTagOfObject(GPBExtensionDescription 
     FIELD_CASE2(Bytes)
     FIELD_CASE2(String)
     FIELD_CASE2(Group)
-    FIELD_CASE2(Message)
+    case GPBDataTypeMessage:
+      if (GPBExtensionIsWireFormat(description)) {
+        return GPBComputeMessageSetExtensionSize(description->fieldNumber, object);
+      } else {
+        return GPBComputeMessageSize(description->fieldNumber, object);
+      }
   }
 #undef FIELD_CASE
 #undef FIELD_CASE2
@@ -155,7 +160,13 @@ static void WriteObjectIncludingTagToCodedOutputStream(id object,
     FIELD_CASE2(Bytes)
     FIELD_CASE2(String)
     FIELD_CASE2(Group)
-    FIELD_CASE2(Message)
+    case GPBDataTypeMessage:
+      if (GPBExtensionIsWireFormat(description)) {
+        [output writeMessageSetExtension:description->fieldNumber value:object];
+      } else {
+        [output writeMessage:description->fieldNumber value:object];
+      }
+      return;
   }
 #undef FIELD_CASE
 #undef FIELD_CASE2

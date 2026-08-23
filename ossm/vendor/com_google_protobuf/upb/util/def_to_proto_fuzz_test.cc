@@ -24,6 +24,9 @@ FUZZ_TEST(FuzzTest, RoundTripDescriptor)
                 .WithFieldUnset("source_code_info")
                 .WithProtobufField(
                     "service",
-                    ::fuzztest::Arbitrary<google::protobuf::ServiceDescriptorProto>())));
+                    ::fuzztest::Arbitrary<google::protobuf::ServiceDescriptorProto>()
+                        // streams are google3-only, and we do not currently
+                        // attempt to preserve them.
+                        .WithFieldUnset("stream"))));
 
 }  // namespace upb_test

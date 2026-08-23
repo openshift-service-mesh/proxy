@@ -166,8 +166,7 @@ public class MapFieldBuilder<
 
   @SuppressWarnings("unchecked")
   @Override
-  public boolean equals(
-          Object object) {
+  public boolean equals(Object object) {
     if (!(object instanceof MapFieldBuilder)) {
       return false;
     }
@@ -189,10 +188,9 @@ public class MapFieldBuilder<
 
   /** Converts this MapFieldBuilder to a MapField. */
   public MapField<KeyT, MessageT> build(MapEntry<KeyT, MessageT> defaultEntry) {
-    Map<KeyT, MessageOrBuilderT> builderMap = ensureBuilderMap();
-    MapField<KeyT, MessageT> mapField = MapField.newMapField(defaultEntry, builderMap.size());
+    MapField<KeyT, MessageT> mapField = MapField.newMapField(defaultEntry);
     Map<KeyT, MessageT> map = mapField.getMutableMap();
-    for (Map.Entry<KeyT, MessageOrBuilderT> entry : builderMap.entrySet()) {
+    for (Map.Entry<KeyT, MessageOrBuilderT> entry : ensureBuilderMap().entrySet()) {
       map.put(entry.getKey(), converter.build(entry.getValue()));
     }
     mapField.makeImmutable();

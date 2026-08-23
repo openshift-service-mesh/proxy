@@ -46,7 +46,8 @@ class PROTOC_EXPORT ExtensionGenerator {
  public:
   // See generator.cc for the meaning of dllexport_decl.
   explicit ExtensionGenerator(const FieldDescriptor* descriptor,
-                              const Options& options);
+                              const Options& options,
+                              MessageSCCAnalyzer* scc_analyzer);
   ExtensionGenerator(const ExtensionGenerator&) = delete;
   ExtensionGenerator& operator=(const ExtensionGenerator&) = delete;
   ~ExtensionGenerator();
@@ -56,9 +57,6 @@ class PROTOC_EXPORT ExtensionGenerator {
 
   // Source file stuff.
   void GenerateDefinition(io::Printer* p);
-
-  // Feature-specific defaults.
-  void GenerateFeatureDefaults(io::Printer* p) const;
 
   // Extension registration can happen at different priority levels depending on
   // the features used.
@@ -81,6 +79,7 @@ class PROTOC_EXPORT ExtensionGenerator {
   const FieldDescriptor* descriptor_;
   std::string type_traits_;
   Options options_;
+  MessageSCCAnalyzer* scc_analyzer_;
 
   absl::flat_hash_map<absl::string_view, std::string> variables_;
 };
@@ -92,4 +91,4 @@ class PROTOC_EXPORT ExtensionGenerator {
 
 #include "google/protobuf/port_undef.inc"
 
-#endif  // GOOGLE_PROTOBUF_COMPILER_CPP_EXTENSION_H__
+#endif  // GOOGLE_PROTOBUF_COMPILER_CPP_MESSAGE_H__

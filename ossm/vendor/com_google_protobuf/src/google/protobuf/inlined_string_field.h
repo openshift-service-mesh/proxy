@@ -8,8 +8,6 @@
 #ifndef GOOGLE_PROTOBUF_INLINED_STRING_FIELD_H__
 #define GOOGLE_PROTOBUF_INLINED_STRING_FIELD_H__
 
-#include <cstddef>
-#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -36,6 +34,10 @@ namespace internal {
 
 // InlinedStringField wraps a std::string instance and exposes an API similar to
 // ArenaStringPtr's wrapping of a std::string* instance.
+//
+// default_value parameters are taken for consistency with ArenaStringPtr, but
+// are not used for most methods. With inlining, these should be removed from
+// the generated binary.
 //
 // InlinedStringField has a donating mechanism that allows string buffer
 // allocated on arena. A string is donated means both the string container and
@@ -83,47 +85,79 @@ namespace internal {
 // For more details of the donating states transitions, go/pd-inlined-string.
 class PROTOBUF_EXPORT InlinedStringField {
  public:
-  // OSS may use C++17 which would fail on constexpr constructor with
-  // std::string. As no actual OSS code refers to this constructor, templating
-  // it avoids ifdef'ing.
-  template <typename = void>
-  constexpr InlinedStringField() : str_() {}
+  InlinedStringField() : str_() {}
   InlinedStringField(const InlinedStringField&) = delete;
   InlinedStringField& operator=(const InlinedStringField&) = delete;
+#if defined(__cpp_lib_constexpr_string) && __cpp_lib_constexpr_string >= 201907L
+  // No need to do dynamic initialization here.
+  constexpr void Init() {}
+  // Add the dummy parameter just to make InlinedStringField(nullptr)
+  // unambiguous.
+  constexpr InlinedStringField(
+      const ExplicitlyConstructed<std::string>* /*default_value*/,
+      bool /*dummy*/)
+      : str_{} {}
+#else
+  inline void Init() { ::new (static_cast<void*>(&str_)) std::string(); }
+  // Add the dummy parameter just to make InlinedStringField(nullptr)
+  // unambiguous.
+  constexpr InlinedStringField(
+      const ExplicitlyConstructed<std::string>* /*default_value*/,
+      bool /*dummy*/)
+      : dummy_{} {}
+#endif
+
   explicit InlinedStringField(const std::string& default_value);
   explicit InlinedStringField(Arena* arena);
   InlinedStringField(Arena* arena, const InlinedStringField& rhs);
-  ~InlinedStringField() {
-    ABSL_DCHECK(!IsLongDonated());
-    Destruct();
-  }
+  ~InlinedStringField() { Destruct(); }
 
-  // Lvalue Set.
-  void Set(absl::string_view value, Arena* arena);
+  // Lvalue Set. To save space, we pack the donating states of multiple
+  // InlinedStringFields into an uint32_t `donating_states`. The `mask`
+  // indicates the position of the bit for this InlinedStringField. `donated` is
+  // whether this field is donated.
+  //
+  // The caller should guarantee that:
+  //
+  //   `donated == ((donating_states & ~mask) != 0)`
+  //
+  // This method never changes the `donating_states`.
+  void Set(absl::string_view value, Arena* arena, bool donated,
+           uint32_t* donating_states, uint32_t mask, MessageLite* msg);
 
-  // Rvalue Set. If this field is donated, this method might undonate this
-  // field.
-  void Set(std::string&& value, Arena* arena);
+  // Rvalue Set. If this field is donated, this method will undonate this field
+  // by mutating the `donating_states` according to `mask`.
+  void Set(std::string&& value, Arena* arena, bool donated,
+           uint32_t* donating_states, uint32_t mask, MessageLite* msg);
 
-  void Set(const char* str, Arena* arena);
+  void Set(const char* str, ::google::protobuf::Arena* arena, bool donated,
+           uint32_t* donating_states, uint32_t mask, MessageLite* msg);
 
-  void Set(const char* str, size_t size, Arena* arena);
+  void Set(const char* str, size_t size, ::google::protobuf::Arena* arena, bool donated,
+           uint32_t* donating_states, uint32_t mask, MessageLite* msg);
 
   template <typename RefWrappedType>
   void Set(std::reference_wrapper<RefWrappedType> const_string_ref,
-           Arena* arena);
+           ::google::protobuf::Arena* arena, bool donated, uint32_t* donating_states,
+           uint32_t mask, MessageLite* msg);
 
-  void SetBytes(absl::string_view value, Arena* arena);
+  void SetBytes(absl::string_view value, Arena* arena, bool donated,
+                uint32_t* donating_states, uint32_t mask, MessageLite* msg);
 
-  void SetBytes(std::string&& value, Arena* arena);
+  void SetBytes(std::string&& value, Arena* arena, bool donated,
+                uint32_t* donating_states, uint32_t mask, MessageLite* msg);
 
-  void SetBytes(const char* str, Arena* arena);
+  void SetBytes(const char* str, ::google::protobuf::Arena* arena, bool donated,
+                uint32_t* donating_states, uint32_t mask, MessageLite* msg);
 
-  void SetBytes(const void* p, size_t size, Arena* arena);
+  void SetBytes(const void* p, size_t size, ::google::protobuf::Arena* arena,
+                bool donated, uint32_t* donating_states, uint32_t mask,
+                MessageLite* msg);
 
   template <typename RefWrappedType>
   void SetBytes(std::reference_wrapper<RefWrappedType> const_string_ref,
-                Arena* arena);
+                ::google::protobuf::Arena* arena, bool donated, uint32_t* donating_states,
+                uint32_t mask, MessageLite* msg);
 
   PROTOBUF_NDEBUG_INLINE void SetNoArena(absl::string_view value);
   PROTOBUF_NDEBUG_INLINE void SetNoArena(std::string&& value);
@@ -133,9 +167,14 @@ class PROTOBUF_EXPORT InlinedStringField {
   PROTOBUF_NDEBUG_INLINE const std::string& GetNoArena() const;
 
   // Mutable returns a std::string* instance that is heap-allocated. If this
-  // field is donated, this method undonates this field and copies the content
-  // of the original string to the returning string.
-  std::string* Mutable(Arena* arena);
+  // field is donated, this method undonates this field by mutating the
+  // `donating_states` according to `mask`, and copies the content of the
+  // original string to the returning string.
+  std::string* Mutable(Arena* arena, bool donated, uint32_t* donating_states,
+                       uint32_t mask, MessageLite* msg);
+  std::string* Mutable(const LazyString& default_value, Arena* arena,
+                       bool donated, uint32_t* donating_states, uint32_t mask,
+                       MessageLite* msg);
 
   // Mutable(nullptr_t) is an overload to explicitly support Mutable(nullptr)
   // calls used by the internal parser logic. This provides API equivalence with
@@ -147,32 +186,146 @@ class PROTOBUF_EXPORT InlinedStringField {
   // std::string's destructor is registered with the arena. Used to implement
   // set_allocated_<field> in generated classes.
   //
-  // If this field is donated, this method might undonate this field.
-  void SetAllocated(std::string* value, Arena* arena);
+  // If this field is donated, this method undonates this field by mutating the
+  // `donating_states` according to `mask`.
+  void SetAllocated(const std::string* default_value, std::string* value,
+                    Arena* arena, bool donated, uint32_t* donating_states,
+                    uint32_t mask, MessageLite* msg);
 
-  void SetAllocatedNoArena(std::string* value);
+  void SetAllocatedNoArena(const std::string* default_value,
+                           std::string* value);
 
   // Release returns a std::string* instance that is heap-allocated and is not
-  // Own()'d by any arena. The caller retains ownership. Clears this field back
-  // to nullptr state. Used to implement release_<field>() methods on generated
-  // classes.
-  [[nodiscard]] std::string* Release(Arena* arena);
-  [[nodiscard]] std::string* Release();
+  // Own()'d by any arena. If the field is not set, this returns nullptr. The
+  // caller retains ownership. Clears this field back to nullptr state. Used to
+  // implement release_<field>() methods on generated classes.
+  PROTOBUF_NODISCARD std::string* Release(Arena* arena, bool donated);
+  PROTOBUF_NODISCARD std::string* Release();
+
+  // --------------------------------------------------------
+  // Below functions will be removed in subsequent code change
+  // --------------------------------------------------------
+#ifdef DEPRECATED_METHODS_TO_BE_DELETED
+  PROTOBUF_NODISCARD std::string* Release(const std::string*, Arena* arena,
+                                          bool donated) {
+    return Release(arena, donated);
+  }
+
+  PROTOBUF_NODISCARD std::string* ReleaseNonDefault(const std::string*,
+                                                    Arena* arena) {
+    return Release();
+  }
+
+  std::string* ReleaseNonDefaultNoArena(const std::string* default_value) {
+    return Release();
+  }
+
+  void Set(const std::string*, absl::string_view value, Arena* arena,
+           bool donated, uint32_t* donating_states, uint32_t mask,
+           MessageLite* msg) {
+    Set(value, arena, donated, donating_states, mask, msg);
+  }
+
+  void Set(const std::string*, std::string&& value, Arena* arena, bool donated,
+           uint32_t* donating_states, uint32_t mask, MessageLite* msg) {
+    Set(std::move(value), arena, donated, donating_states, mask, msg);
+  }
+
+
+  template <typename FirstParam>
+  void Set(FirstParam, const char* str, ::google::protobuf::Arena* arena, bool donated,
+           uint32_t* donating_states, uint32_t mask, MessageLite* msg) {
+    Set(str, arena, donated, donating_states, mask, msg);
+  }
+
+  template <typename FirstParam>
+  void Set(FirstParam p1, const char* str, size_t size, ::google::protobuf::Arena* arena,
+           bool donated, uint32_t* donating_states, uint32_t mask,
+           MessageLite* msg) {
+    Set(str, size, arena, donated, donating_states, mask, msg);
+  }
+
+  template <typename FirstParam, typename RefWrappedType>
+  void Set(FirstParam p1,
+           std::reference_wrapper<RefWrappedType> const_string_ref,
+           ::google::protobuf::Arena* arena, bool donated, uint32_t* donating_states,
+           uint32_t mask, MessageLite* msg) {
+    Set(const_string_ref, arena, donated, donating_states, mask, msg);
+  }
+
+  void SetBytes(const std::string*, absl::string_view value, Arena* arena,
+                bool donated, uint32_t* donating_states, uint32_t mask,
+                MessageLite* msg) {
+    Set(value, arena, donated, donating_states, mask, msg);
+  }
+
+
+  void SetBytes(const std::string*, std::string&& value, Arena* arena,
+                bool donated, uint32_t* donating_states, uint32_t mask,
+                MessageLite* msg) {
+    Set(std::move(value), arena, donated, donating_states, mask, msg);
+  }
+
+  template <typename FirstParam>
+  void SetBytes(FirstParam p1, const char* str, ::google::protobuf::Arena* arena,
+                bool donated, uint32_t* donating_states, uint32_t mask,
+                MessageLite* msg) {
+    SetBytes(str, arena, donated, donating_states, mask, msg);
+  }
+
+  template <typename FirstParam>
+  void SetBytes(FirstParam p1, const void* p, size_t size,
+                ::google::protobuf::Arena* arena, bool donated, uint32_t* donating_states,
+                uint32_t mask, MessageLite* msg) {
+    SetBytes(p, size, arena, donated, donating_states, mask, msg);
+  }
+
+  template <typename FirstParam, typename RefWrappedType>
+  void SetBytes(FirstParam p1,
+                std::reference_wrapper<RefWrappedType> const_string_ref,
+                ::google::protobuf::Arena* arena, bool donated, uint32_t* donating_states,
+                uint32_t mask, MessageLite* msg) {
+    SetBytes(const_string_ref.get(), arena, donated, donating_states, mask,
+             msg);
+  }
+
+  void SetNoArena(const std::string*, absl::string_view value) {
+    SetNoArena(value);
+  }
+  void SetNoArena(const std::string*, std::string&& value) {
+    SetNoArena(std::move(value));
+  }
+
+  std::string* Mutable(ArenaStringPtr::EmptyDefault, Arena* arena, bool donated,
+                       uint32_t* donating_states, uint32_t mask,
+                       MessageLite* msg) {
+    return Mutable(arena, donated, donating_states, mask, msg);
+  }
+
+  PROTOBUF_NDEBUG_INLINE std::string* MutableNoArenaNoDefault(
+      const std::string* /*default_value*/) {
+    return MutableNoCopy(nullptr);
+  }
+
+#endif  // DEPRECATED_METHODS_TO_BE_DELETED
 
   // Arena-safety semantics: this is guarded by the logic in
   // Swap()/UnsafeArenaSwap() at the message level, so this method is
   // 'unsafe' if called directly.
-  PROTOBUF_NDEBUG_INLINE static void InternalSwap(InlinedStringField* lhs,
-                                                  InlinedStringField* rhs,
-                                                  Arena* arena);
+  inline PROTOBUF_NDEBUG_INLINE static void InternalSwap(
+      InlinedStringField* lhs, bool lhs_arena_dtor_registered,
+      MessageLite* lhs_msg,  //
+      InlinedStringField* rhs, bool rhs_arena_dtor_registered,
+      MessageLite* rhs_msg, Arena* arena);
 
   // Frees storage (if not on an arena).
-  PROTOBUF_NDEBUG_INLINE void Destroy(Arena* arena) {
+  PROTOBUF_NDEBUG_INLINE void Destroy(const std::string* default_value,
+                                      Arena* arena) {
     if (arena == nullptr) {
-      DestroyNoArena();
+      DestroyNoArena(default_value);
     }
   }
-  PROTOBUF_NDEBUG_INLINE void DestroyNoArena();
+  PROTOBUF_NDEBUG_INLINE void DestroyNoArena(const std::string* default_value);
 
   // Clears content, but keeps allocated std::string, to avoid the overhead of
   // heap operations. After this returns, the content (as seen by the user) will
@@ -196,15 +349,6 @@ class PROTOBUF_EXPORT InlinedStringField {
   static constexpr bool IsDefault() { return false; }
   static constexpr bool IsDefault(const std::string*) { return false; }
 
-  // The existing capacity of the backing string.
-  // It might be donated capacity.
-  size_t Capacity() const;
-
-  // Whether the string is in donated mode.
-  bool IsDonated() const;
-
-  size_t SpaceUsedExcludingSelfLong() const;
-
  private:
   // ScopedCheckInvariants checks all string in-variants at destruction.
   class ScopedCheckInvariants;
@@ -214,38 +358,18 @@ class PROTOBUF_EXPORT InlinedStringField {
   PROTOBUF_NDEBUG_INLINE std::string* get_mutable();
   PROTOBUF_NDEBUG_INLINE const std::string* get_const() const;
 
-  // This can be any bit large enough to not be part of any real capacity.
-  // Note that long capacity is stored in 63 bits, not 64.
-  static constexpr uint64_t kDonatedBit = uint64_t{1} << 48;
-
-  static bool IsDonated(const std::string& str);
-  bool IsLongDonated() const;
-
-  // Pointer / Size pair describing an allocated string buffer.
-  struct StringBuffer {
-    char* ptr;
-    size_t capacity;
-  };
-  static StringBuffer AllocateStringBuffer(Arena& arena, size_t length);
-  static void DonateForInlineStr(std::string* str, StringBuffer buffer,
-                                 size_t length);
-
   union {
     std::string str_;
+    char dummy_;
   };
 
-  std::string* MutableSlow(Arena* arena);
-
-  static void RegisterForDestruction(Arena* arena, std::string* str);
-  static void MaybeRegisterForDestruction(Arena* arena, std::string* str) {
-    if (IsDonated(*str)) return;
-    RegisterForDestruction(arena, str);
-  }
-  static void DestroyArenaString(void* p);
+  std::string* MutableSlow(::google::protobuf::Arena* arena, bool donated,
+                           uint32_t* donating_states, uint32_t mask,
+                           MessageLite* msg);
 
 
   // When constructed in an Arena, we want our destructor to be skipped.
-  friend google::protobuf::Arena;
+  friend class ::google::protobuf::Arena;
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
 };
@@ -262,9 +386,22 @@ inline InlinedStringField::InlinedStringField(
 }
 
 
+#ifdef GOOGLE_PROTOBUF_INTERNAL_DONATE_STEAL_INLINE
+constexpr uint32_t InitDonatingStates() { return ~0u; }
+inline void InternalRegisterArenaDtor(Arena*, void*, void (*)(void*)) {}
+#else   // !GOOGLE_PROTOBUF_INTERNAL_DONATE_STEAL_INLINE
+constexpr uint32_t InitDonatingStates() { return 0u; }
+inline void InternalRegisterArenaDtor(Arena* arena, void* object,
+                                      void (*destruct)(void*)) {
+  if (arena != nullptr) {
+    arena->OwnCustomDestructor(object, destruct);
+  }
+}
+#endif  // GOOGLE_PROTOBUF_INTERNAL_DONATE_STEAL_INLINE
+
 inline InlinedStringField::InlinedStringField(Arena* /*arena*/) : str_() {}
 
-inline InlinedStringField::InlinedStringField([[maybe_unused]] Arena* arena,
+inline InlinedStringField::InlinedStringField(Arena* arena,
                                               const InlinedStringField& rhs) {
   const std::string& src = *rhs.get_const();
   ::new (static_cast<void*>(&str_)) std::string(src);
@@ -274,7 +411,8 @@ inline const std::string& InlinedStringField::GetNoArena() const {
   return *get_const();
 }
 
-inline void InlinedStringField::SetAllocatedNoArena(std::string* value) {
+inline void InlinedStringField::SetAllocatedNoArena(
+    const std::string* /*default_value*/, std::string* value) {
   if (value == nullptr) {
     // Currently, inlined string field can't have non empty default.
     get_mutable()->clear();
@@ -284,7 +422,7 @@ inline void InlinedStringField::SetAllocatedNoArena(std::string* value) {
   }
 }
 
-inline void InlinedStringField::DestroyNoArena() {
+inline void InlinedStringField::DestroyNoArena(const std::string*) {
   // This is invoked from the generated message's ArenaDtor, which is used to
   // clean up objects not allocated on the Arena.
   this->~InlinedStringField();
@@ -298,64 +436,92 @@ inline void InlinedStringField::SetNoArena(std::string&& value) {
   get_mutable()->assign(std::move(value));
 }
 
-PROTOBUF_NDEBUG_INLINE void InlinedStringField::InternalSwap(
-    InlinedStringField* lhs, InlinedStringField* rhs, Arena* arena) {
+inline PROTOBUF_NDEBUG_INLINE void InlinedStringField::InternalSwap(
+    InlinedStringField* lhs, bool lhs_arena_dtor_registered,
+    MessageLite* lhs_msg,  //
+    InlinedStringField* rhs, bool rhs_arena_dtor_registered,
+    MessageLite* rhs_msg, Arena* arena) {
 #ifdef GOOGLE_PROTOBUF_INTERNAL_DONATE_STEAL_INLINE
-  const bool lhs_donated = lhs->IsDonated();
-  const bool rhs_donated = rhs->IsDonated();
   lhs->get_mutable()->swap(*rhs->get_mutable());
-  if (arena != nullptr && lhs_donated != rhs_donated) {
-    if (lhs_donated) lhs->RegisterForDestruction(arena, lhs->get_mutable());
-    if (rhs_donated) rhs->RegisterForDestruction(arena, rhs->get_mutable());
+  if (!lhs_arena_dtor_registered && rhs_arena_dtor_registered) {
+    lhs_msg->OnDemandRegisterArenaDtor(arena);
+  } else if (lhs_arena_dtor_registered && !rhs_arena_dtor_registered) {
+    rhs_msg->OnDemandRegisterArenaDtor(arena);
   }
 #else
   (void)arena;
+  (void)lhs_arena_dtor_registered;
+  (void)rhs_arena_dtor_registered;
+  (void)lhs_msg;
+  (void)rhs_msg;
   lhs->get_mutable()->swap(*rhs->get_mutable());
 #endif
 }
 
-inline void InlinedStringField::Set(absl::string_view value, Arena* arena) {
+inline void InlinedStringField::Set(absl::string_view value, Arena* arena,
+                                    bool donated, uint32_t* /*donating_states*/,
+                                    uint32_t /*mask*/, MessageLite* /*msg*/) {
   (void)arena;
+  (void)donated;
   SetNoArena(value);
 }
 
-inline void InlinedStringField::Set(const char* str, Arena* arena) {
-  Set(absl::string_view(str), arena);
+inline void InlinedStringField::Set(const char* str, ::google::protobuf::Arena* arena,
+                                    bool donated, uint32_t* donating_states,
+                                    uint32_t mask, MessageLite* msg) {
+  Set(absl::string_view(str), arena, donated, donating_states, mask, msg);
 }
 
 inline void InlinedStringField::Set(const char* str, size_t size,
-                                    Arena* arena) {
-  Set(absl::string_view{str, size}, arena);
+                                    ::google::protobuf::Arena* arena, bool donated,
+                                    uint32_t* donating_states, uint32_t mask,
+                                    MessageLite* msg) {
+  Set(absl::string_view{str, size}, arena, donated, donating_states, mask, msg);
 }
 
-inline void InlinedStringField::SetBytes(absl::string_view value,
-                                         Arena* arena) {
-  Set(value, arena);
+inline void InlinedStringField::SetBytes(absl::string_view value, Arena* arena,
+                                         bool donated,
+                                         uint32_t* donating_states,
+                                         uint32_t mask, MessageLite* msg) {
+  Set(value, arena, donated, donating_states, mask, msg);
 }
 
-inline void InlinedStringField::SetBytes(std::string&& value, Arena* arena) {
-  Set(std::move(value), arena);
+inline void InlinedStringField::SetBytes(std::string&& value, Arena* arena,
+                                         bool donated,
+                                         uint32_t* donating_states,
+                                         uint32_t mask, MessageLite* msg) {
+  Set(std::move(value), arena, donated, donating_states, mask, msg);
 }
 
-inline void InlinedStringField::SetBytes(const char* str, Arena* arena) {
-  Set(str, arena);
+inline void InlinedStringField::SetBytes(const char* str,
+                                         ::google::protobuf::Arena* arena, bool donated,
+                                         uint32_t* donating_states,
+                                         uint32_t mask, MessageLite* msg) {
+  Set(str, arena, donated, donating_states, mask, msg);
 }
 
 inline void InlinedStringField::SetBytes(const void* p, size_t size,
-                                         Arena* arena) {
-  Set(static_cast<const char*>(p), size, arena);
+                                         ::google::protobuf::Arena* arena, bool donated,
+                                         uint32_t* donating_states,
+                                         uint32_t mask, MessageLite* msg) {
+  Set(static_cast<const char*>(p), size, arena, donated, donating_states, mask,
+      msg);
 }
 
 template <typename RefWrappedType>
 inline void InlinedStringField::Set(
-    std::reference_wrapper<RefWrappedType> const_string_ref, Arena* arena) {
-  Set(const_string_ref.get(), arena);
+    std::reference_wrapper<RefWrappedType> const_string_ref,
+    ::google::protobuf::Arena* arena, bool donated, uint32_t* donating_states,
+    uint32_t mask, MessageLite* msg) {
+  Set(const_string_ref.get(), arena, donated, donating_states, mask, msg);
 }
 
 template <typename RefWrappedType>
 inline void InlinedStringField::SetBytes(
-    std::reference_wrapper<RefWrappedType> const_string_ref, Arena* arena) {
-  Set(const_string_ref.get(), arena);
+    std::reference_wrapper<RefWrappedType> const_string_ref,
+    ::google::protobuf::Arena* arena, bool donated, uint32_t* donating_states,
+    uint32_t mask, MessageLite* msg) {
+  Set(const_string_ref.get(), arena, donated, donating_states, mask, msg);
 }
 
 inline std::string* InlinedStringField::UnsafeMutablePointer() {

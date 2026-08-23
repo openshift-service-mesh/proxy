@@ -9,12 +9,11 @@ load(":cc_dist_library.bzl", "CcFileList")
 # Macro to create CMake and Automake source lists.
 ################################################################################
 
-def gen_file_lists(name, out_stem, testonly = False, **kwargs):
+def gen_file_lists(name, out_stem, **kwargs):
     gen_cmake_file_lists(
         name = name + "_cmake",
         out = out_stem + ".cmake",
         source_prefix = "${protobuf_SOURCE_DIR}/",
-        testonly = testonly,
         **kwargs
     )
     native.filegroup(
@@ -23,7 +22,6 @@ def gen_file_lists(name, out_stem, testonly = False, **kwargs):
             out_stem + ".cmake",
         ],
         visibility = ["//src:__pkg__"],
-        testonly = testonly,
     )
 
 ################################################################################

@@ -39,7 +39,7 @@ GPBWireFormat GPBWireFormatForType(GPBDataType type, BOOL isPacked) {
     return GPBWireFormatLengthDelimited;
   }
 
-  static const GPBWireFormat format[] = {
+  static const GPBWireFormat format[GPBDataType_Count] = {
       GPBWireFormatVarint,           // GPBDataTypeBool
       GPBWireFormatFixed32,          // GPBDataTypeFixed32
       GPBWireFormatFixed32,          // GPBDataTypeSFixed32

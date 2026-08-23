@@ -32,6 +32,7 @@
 #include "absl/strings/strip.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
+#include "absl/types/variant.h"
 
 namespace google {
 namespace protobuf {
@@ -112,33 +113,12 @@ Printer::Format Printer::TokenizeFormat(absl::string_view format_string,
     // a while loop, not a do/while loop.
 
     absl::string_view orig = format_string;
-    absl::string_view first_pp_directive;
     while (absl::ConsumePrefix(&format_string, "\n")) {
-      // clang-format will think a # at the beginning of the line in a raw
-      // string is a preprocessor directive and put it at the start of the line,
-      // which throws off indent calculation. Skip past those to find code that
-      // is indented more realistically.
-      if (absl::StartsWith(format_string, "#")) {
-        // We don't want to drop the first #... lines. We just want to skip
-        // through here. Remember to allow resetting later.
-        if (first_pp_directive.empty()) {
-          first_pp_directive = format_string;
-        }
-        size_t next_newline_index = format_string.find('\n');
-        if (next_newline_index != absl::string_view::npos) {
-          format_string = format_string.substr(next_newline_index);
-          continue;
-        }
-      }
       raw_string_indent = 0;
       format.is_raw_string = true;
       while (absl::ConsumePrefix(&format_string, " ")) {
         ++raw_string_indent;
       }
-    }
-    // Reset if we skipped through some #... lines, so that we don't drop them.
-    if (!first_pp_directive.empty()) {
-      format_string = first_pp_directive;
     }
 
     // If we consume the entire string, this probably wasn't a raw string and
@@ -180,9 +160,6 @@ Printer::Format Printer::TokenizeFormat(absl::string_view format_string,
       if (comment_index != absl::string_view::npos) {
         line_text = line_text.substr(0, comment_index);
         if (absl::StripLeadingAsciiWhitespace(line_text).empty()) {
-          // If the first line is part of an ignored comment, consider that a
-          // first line as well.
-          is_first = false;
           continue;
         }
       }
@@ -331,17 +308,11 @@ bool Printer::Validate(bool cond, Printer::PrintOptions opts,
 
 // This function is outlined to isolate the use of
 // ABSL_CHECK into the .cc file.
-void Printer::Outdent(const SourceLocation loc) {
+void Printer::Outdent() {
   PrintOptions opts;
   opts.checks_are_debug_only = true;
-
-  // Fills in the file name and line number if they are valid.
-  const std::string source_location_str =
-      loc.line() == 0 ? ""
-                      : absl::StrCat(": ", loc.file_name(), ":", loc.line());
   if (!Validate(indent_ >= options_.spaces_per_indent, opts,
-                absl::StrCat("Outdent() without matching Indent()",
-                             source_location_str))) {
+                "Outdent() without matching Indent()")) {
     return;
   }
   indent_ -= options_.spaces_per_indent;

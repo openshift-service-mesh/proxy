@@ -5,9 +5,7 @@
 # license that can be found in the LICENSE file or at
 # https://developers.google.com/open-source/licenses/bsd
 
-load("@rules_cc//cc:cc_test.bzl", "cc_test")
-load("@rules_cc//cc:defs.bzl", "cc_library")
-load("//upb/bazel:copts.bzl", "UPB_DEFAULT_COPTS", "UPB_DEFAULT_FEATURES")
+load("//upb/bazel:build_defs.bzl", "UPB_DEFAULT_COPTS")
 
 package(default_applicable_licenses = ["//:license"])
 
@@ -23,11 +21,10 @@ cc_library(
         "arena.hpp",
     ],
     copts = UPB_DEFAULT_COPTS,
-    features = UPB_DEFAULT_FEATURES,
     visibility = ["//visibility:public"],
     deps = [
         ":internal",
-        "//upb/port",
+        "//upb:port",
     ],
 )
 
@@ -37,10 +34,9 @@ cc_library(
         "internal/arena.h",
     ],
     copts = UPB_DEFAULT_COPTS,
-    features = UPB_DEFAULT_FEATURES,
     visibility = ["//visibility:public"],
     deps = [
-        "//upb/port",
+        "//upb:port",
     ],
 )
 
@@ -49,16 +45,13 @@ cc_test(
     srcs = ["arena_test.cc"],
     deps = [
         ":mem",
-        "//upb/port",
-        "@abseil-cpp//absl/base:core_headers",
-        "@abseil-cpp//absl/cleanup",
-        "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/random",
-        "@abseil-cpp//absl/random:distributions",
-        "@abseil-cpp//absl/synchronization",
-        "@abseil-cpp//absl/time",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
+        "//upb:port",
+        "@com_google_absl//absl/random",
+        "@com_google_absl//absl/random:distributions",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 

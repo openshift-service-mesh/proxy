@@ -17,8 +17,8 @@ edition = "2023";
 
 // We don't put this in a package within proto2 because we need to make sure
 // that the generated code doesn't depend on being in the proto2 namespace.
-// In test_util.h we do "using namespace unittest = proto2_unittest".
-package proto2_unittest;
+// In test_util.h we do "using namespace unittest = protobuf_unittest".
+package protobuf_unittest;
 
 import "google/protobuf/unittest_import.proto";
 
@@ -43,10 +43,6 @@ option java_outer_classname = "UnittestProto";
 
 // This proto includes every type of field in both singular and repeated
 // forms.
-// Warning: Many tests make assume about the number of fields in TestAllTypes,
-//          including assumptions about wire compatibility of overlay messages.
-//          Take care when adding or modifying fields in this message to check
-//          TGP results and fix any issues.
 message TestAllTypes {
   message NestedMessage {
     // The field name "b" fails to compile in proto1 because it conflicts with
@@ -89,10 +85,10 @@ message TestAllTypes {
 
   NestedMessage optional_nested_message = 18;
   ForeignMessage optional_foreign_message = 19;
-  proto2_unittest_import.ImportMessage optional_import_message = 20;
+  protobuf_unittest_import.ImportMessage optional_import_message = 20;
   NestedEnum optional_nested_enum = 21;
   ForeignEnum optional_foreign_enum = 22;
-  proto2_unittest_import.ImportEnum optional_import_enum = 23;
+  protobuf_unittest_import.ImportEnum optional_import_enum = 23;
   string optional_string_piece = 24 [
     ctype = STRING_PIECE
   ];
@@ -103,7 +99,7 @@ message TestAllTypes {
   bytes optional_bytes_cord = 86 [ctype=CORD];
 
   // Defined in unittest_import_public.proto
-  proto2_unittest_import.PublicImportMessage optional_public_import_message = 26;
+  protobuf_unittest_import.PublicImportMessage optional_public_import_message = 26;
   NestedMessage optional_lazy_message = 27 [
     lazy = true
   ];
@@ -139,10 +135,10 @@ message TestAllTypes {
 
   repeated NestedMessage repeated_nested_message = 48;
   repeated ForeignMessage repeated_foreign_message = 49;
-  repeated proto2_unittest_import.ImportMessage repeated_import_message = 50;
+  repeated protobuf_unittest_import.ImportMessage repeated_import_message = 50;
   repeated NestedEnum repeated_nested_enum = 51;
   repeated ForeignEnum repeated_foreign_enum = 52;
-  repeated proto2_unittest_import.ImportEnum repeated_import_enum = 53;
+  repeated protobuf_unittest_import.ImportEnum repeated_import_enum = 53;
   repeated string repeated_string_piece = 54 [
     ctype = STRING_PIECE
   ];
@@ -224,7 +220,7 @@ message TestAllTypes {
     default = FOREIGN_BAR
   ];
 
-  proto2_unittest_import.ImportEnum default_import_enum = 83 [
+  protobuf_unittest_import.ImportEnum default_import_enum = 83 [
     default = IMPORT_BAR
   ];
 
@@ -256,9 +252,6 @@ message TestAllTypes {
       lazy = true
     ];
   }
-
-  // Field numbers used by TestAllExtensions.
-  reserved 1001, 1002, 1003;
 }
 
 // This proto includes a recursively nested message.
@@ -316,6 +309,14 @@ enum ForeignEnum {
   FOREIGN_LARGE = 123456; // Large enough to escape the Boxed Integer cache.
 }
 
+enum TestDeprecatedEnum {
+  option deprecated = true;
+
+  TEST_DEPRECATED_ENUM_UNSPECIFIED = 0;
+  TEST_DEPRECATED_ENUM_VALUE1 = 1;
+  TEST_DEPRECATED_ENUM_VALUE2 = 2;
+}
+
 message TestReservedFields {
   reserved 2, 15, 9 to 11;
 
@@ -334,10 +335,6 @@ message TestAllExtensions {
   extensions 1 to max;
 }
 
-// Warning: some tests assume that TestAllTypes and TestAllExtensions are
-// wire compatible. Take care when adding or modifying fields in this message
-// to add a corresponding field in TestAllTypes and vice versa, ensuring that
-// they have the same field number and have compatible wire formats.
 extend TestAllExtensions {
   // Singular
   int32 optional_int32_extension = 1;
@@ -361,10 +358,10 @@ extend TestAllExtensions {
 
   TestAllTypes.NestedMessage optional_nested_message_extension = 18;
   ForeignMessage optional_foreign_message_extension = 19;
-  proto2_unittest_import.ImportMessage optional_import_message_extension = 20;
+  protobuf_unittest_import.ImportMessage optional_import_message_extension = 20;
   TestAllTypes.NestedEnum optional_nested_enum_extension = 21;
   ForeignEnum optional_foreign_enum_extension = 22;
-  proto2_unittest_import.ImportEnum optional_import_enum_extension = 23;
+  protobuf_unittest_import.ImportEnum optional_import_enum_extension = 23;
   string optional_string_piece_extension = 24 [
     ctype = STRING_PIECE
   ];
@@ -374,15 +371,15 @@ extend TestAllExtensions {
   string optional_cord_extension = 25;
   bytes optional_bytes_cord_extension = 86;
 
-  proto2_unittest_import.PublicImportMessage
+  protobuf_unittest_import.PublicImportMessage
       optional_public_import_message_extension = 26;
   TestAllTypes.NestedMessage optional_lazy_message_extension = 27 [
     lazy = true
   ];
 
-  // "unverified_lazy" is copied from the counterpart field in TestAllTypes.
-  // An extension can't be labeled as "unverified_lazy".
-  TestAllTypes.NestedMessage optional_unverified_lazy_message_extension = 28;
+  TestAllTypes.NestedMessage optional_unverified_lazy_message_extension = 28 [
+    unverified_lazy = true
+  ];
 
   // Repeated
   repeated int32 repeated_int32_extension = 31;
@@ -406,11 +403,11 @@ extend TestAllExtensions {
 
   repeated TestAllTypes.NestedMessage repeated_nested_message_extension = 48;
   repeated ForeignMessage repeated_foreign_message_extension = 49;
-  repeated proto2_unittest_import.ImportMessage
+  repeated protobuf_unittest_import.ImportMessage
       repeated_import_message_extension = 50;
   repeated TestAllTypes.NestedEnum repeated_nested_enum_extension = 51;
   repeated ForeignEnum repeated_foreign_enum_extension = 52;
-  repeated proto2_unittest_import.ImportEnum repeated_import_enum_extension = 53;
+  repeated protobuf_unittest_import.ImportEnum repeated_import_enum_extension = 53;
   repeated string repeated_string_piece_extension = 54 [
     ctype = STRING_PIECE
   ];
@@ -491,7 +488,7 @@ extend TestAllExtensions {
     default = FOREIGN_BAR
   ];
 
-  proto2_unittest_import.ImportEnum default_import_enum_extension = 83 [
+  protobuf_unittest_import.ImportEnum default_import_enum_extension = 83 [
     default = IMPORT_BAR
   ];
 
@@ -511,10 +508,6 @@ extend TestAllExtensions {
   TestAllTypes.NestedMessage oneof_nested_message_extension = 112;
   string oneof_string_extension = 113;
   bytes oneof_bytes_extension = 114;
-
-  // Don't use field numbers 115 through 117, they are used by
-  // TestAllTypes.oneof_field. Use of 117 below for TestRequired (rather than
-  // TestAllTypes.NestedMessage) is a bug and should be fixed.
 }
 
 message OptionalGroup_extension {
@@ -784,8 +777,6 @@ message TestRequired {
 
   // Add an optional child message to make this non-trivial for go/pdlazy.
   ForeignMessage optional_foreign = 34;
-
-  map<string, TestRequired> map_field = 35;
 }
 
 message TestRequiredForeign {
@@ -805,11 +796,6 @@ message TestRequiredMessage {
   TestRequired required_message = 3 [
     features.field_presence = LEGACY_REQUIRED
   ];
-}
-
-message TestRequiredLazyMessage {
-  TestRequired child = 1 [lazy = true];
-  TestRequiredLazyMessage recurse = 2 [lazy = true];
 }
 
 message TestNestedRequiredForeign {
@@ -919,7 +905,7 @@ message TestIsInitialized {
 // Test that groups have disjoint field numbers from their siblings and
 // parents.  This is NOT possible in proto1; only google.protobuf.  When attempting
 // to compile with proto1, this will emit an error; so we only include it
-// in proto2_unittest_proto.
+// in protobuf_unittest_proto.
 message TestDupFieldNumber {// NO_PROTO1
   int32 a = 1; // NO_PROTO1
   message Foo { // NO_PROTO1
@@ -943,19 +929,6 @@ message TestLazyMessage {
   TestAllTypes sub_message = 1 [
     lazy = true
   ];
-
-  oneof one {
-    TestAllTypes oneof1 = 10 [ lazy = true ];
-    TestAllTypes oneof2 = 20 [ lazy = true ];
-  }
-}
-
-message TestLazyRequiredEnum {
-  TestRequiredOpenEnum optional_required_open_enum = 1 [lazy = true];
-  TestRequiredEnum optional_required_enum = 2 [lazy = true];
-  TestRequiredEnumNoMask optional_required_enum_no_mask = 3 [lazy = true];
-  TestRequiredEnumMulti optional_required_enum_multi = 4 [lazy = true];
-  TestRequiredNoMaskMulti optional_required_no_mask = 5 [lazy = true];
 }
 
 message TestLazyMessageRepeated {
@@ -1752,14 +1725,6 @@ message OpenEnumMessage {
   repeated ForeignEnum repeated_closed = 4;
 }
 
-// Tests eager verification of a lazy message field.
-message TestEagerlyVerifiedLazyMessage {
-  message LazyMessage {
-    bytes bytes_field = 1;
-  }
-  LazyMessage lazy_message = 1 [lazy = true];
-}
-
 // Test that RPC services work.
 message FooRequest {
 }
@@ -1828,29 +1793,11 @@ message TestHugeFieldNumbers {
     bytes oneof_bytes = 536870014;
   }
 
-  bool optional_bool = 536870015;
-  int64 optional_int64 = 536870016;
-  float optional_float = 536870017;
-  double optional_double = 536870018;
-  string optional_utf8_string = 536870019 [
-    features.utf8_validation = VERIFY
-  ];
-  string optional_cord = 536870020 [
-    ctype=CORD, features.utf8_validation = VERIFY
-  ];
-  string optional_string_piece = 536870021 [
-    ctype=STRING_PIECE, features.utf8_validation = VERIFY
-  ];
-
-  repeated string repeated_utf8_string = 536870022 [
-    features.utf8_validation = VERIFY
-  ];
-
   extensions 536860000 to 536869999 [
     declaration = {
       number: 536860000
-      full_name: ".proto2_unittest.test_all_types"
-      type: ".proto2_unittest.TestAllTypes"
+      full_name: ".protobuf_unittest.test_all_types"
+      type: ".protobuf_unittest.TestAllTypes"
     }
   ];
 }
@@ -1889,7 +1836,7 @@ message TestNestedGroupExtensionOuter {
       // [metadata = {
       //  NOTE: can't write type there due to some clever build gen code at
       //  http://google3/google/protobuf/BUILD;l=1247;rcl=411090862
-      //  type: "proto2_unittest.TestNestedGroupExtensionInnerExtension",
+      //  type: "protobuf_unittest.TestNestedGroupExtensionInnerExtension",
       //  name: "inner",
       //  }]
       ;
@@ -2500,10 +2447,6 @@ extend RedactedFields {
   ];
 }
 
-message TestString {
-  string optional_string = 1;
-}
-
 message TestCord {
   bytes optional_bytes_cord = 1 [
     ctype = CORD
@@ -2659,73 +2602,4 @@ message MessageCreatorFunc {
   string c = 3 [
     ctype = CORD
   ];
-}
-
-message FastParseTableCompression {
-  int32 important_field_1 = 1;
-  int32 important_field_2 = 2;
-  int32 unimportant_field_3 = 3;
-  int32 unimportant_field_4 = 4;
-  int32 unimportant_field_5 = 5;
-  reserved 6, 7, 8;
-
-  int32 unimportant_field_9 = 9;
-  reserved 10;
-  int32 important_field_11 = 11;
-  int32 unimportant_field_12 = 12;
-  reserved 13;
-  int32 important_field_14 = 14;
-  int32 unimportant_field_15 = 15;
-  reserved 16;
-}
-
-message TestMessageForMove_Small {
-  int32 a = 1;
-  int32 b = 2;
-}
-
-message TestMessageForMove_Large {
-  int32 a1 = 1;
-  int32 a2 = 2;
-  int32 a3 = 3;
-  int32 a4 = 4;
-  int32 a5 = 5;
-  int32 a6 = 6;
-  int32 a7 = 7;
-  int32 a8 = 8;
-  int32 a9 = 9;
-  repeated int32 a11 = 11;
-  repeated int32 a12 = 12;
-  repeated int32 a13 = 13;
-  repeated int32 a14 = 14;
-  repeated int32 a15 = 15;
-  repeated int32 a16 = 16;
-  repeated int32 a17 = 17;
-  repeated int32 a18 = 18;
-  repeated int32 a19 = 19;
-  string s101 = 101;
-  string s102 = 102;
-  string s103 = 103;
-  string s104 = 104;
-  string s105 = 105;
-  string s106 = 106;
-  string s107 = 107;
-  string s108 = 108;
-  string s109 = 109;
-  repeated string s111 = 111;
-  repeated string s112 = 112;
-  repeated string s113 = 113;
-  repeated string s114 = 114;
-  repeated string s115 = 115;
-  repeated string s116 = 116;
-  repeated string s117 = 117;
-  repeated string s118 = 118;
-  repeated string s119 = 119;
-}
-
-message TestAllTypesAsExtension {
-  extensions 10 to max;
-  extend TestAllTypesAsExtension {
-    TestAllTypes ext = 10;
-  }
 }

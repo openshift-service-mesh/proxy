@@ -13,15 +13,15 @@ import static com.google.protobuf.TestUtil.TEST_REQUIRED_INITIALIZED;
 import static com.google.protobuf.TestUtil.TEST_REQUIRED_UNINITIALIZED;
 
 import com.google.protobuf.Descriptors.FieldDescriptor;
-import proto2_unittest.UnittestOptimizeFor.TestOptimizedForSize;
-import proto2_unittest.UnittestProto;
-import proto2_unittest.UnittestProto.ForeignMessage;
-import proto2_unittest.UnittestProto.TestAllExtensions;
-import proto2_unittest.UnittestProto.TestAllTypes;
-import proto2_unittest.UnittestProto.TestPackedTypes;
-import proto2_unittest.UnittestProto.TestRequired;
-import proto2_unittest.UnittestProto.TestRequiredForeign;
-import proto2_unittest.UnittestProto.TestUnpackedTypes;
+import protobuf_unittest.UnittestOptimizeFor.TestOptimizedForSize;
+import protobuf_unittest.UnittestProto;
+import protobuf_unittest.UnittestProto.ForeignMessage;
+import protobuf_unittest.UnittestProto.TestAllExtensions;
+import protobuf_unittest.UnittestProto.TestAllTypes;
+import protobuf_unittest.UnittestProto.TestPackedTypes;
+import protobuf_unittest.UnittestProto.TestRequired;
+import protobuf_unittest.UnittestProto.TestRequiredForeign;
+import protobuf_unittest.UnittestProto.TestUnpackedTypes;
 import java.util.Map;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -458,7 +458,7 @@ public class AbstractMessageTest {
             .mergeFrom(MERGE_SOURCE)
             .build();
 
-    assertThat(TextFormat.printer().printToString(result)).isEqualTo(MERGE_RESULT_TEXT);
+    assertThat(result.toString()).isEqualTo(MERGE_RESULT_TEXT);
   }
 
   // -----------------------------------------------------------------
@@ -550,7 +550,7 @@ public class AbstractMessageTest {
     assertWithMessage(equalsError).that(m1.equals(m2)).isFalse();
     assertWithMessage(equalsError).that(m2.equals(m1)).isFalse();
 
-    assertWithMessage("%s should have a different hash code from %s", m1, m2)
+    assertWithMessage(String.format("%s should have a different hash code from %s", m1, m2))
         .that(m1.hashCode())
         .isNotEqualTo(m2.hashCode());
   }

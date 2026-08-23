@@ -79,10 +79,12 @@ build --override_repository=org_golang_x_text=%workspace%/ossm/vendor/org_golang
 build --override_repository=org_golang_x_tools=%workspace%/ossm/vendor/org_golang_x_tools
 build --override_repository=package_metadata=%workspace%/ossm/vendor/package_metadata
 build --override_repository=platforms=%workspace%/ossm/vendor/platforms
+build --override_repository=prebuilt_protoc.linux_x86_64=%workspace%/ossm/vendor/prebuilt_protoc.linux_x86_64
 build --override_repository=prometheus_metrics_model=%workspace%/ossm/vendor/prometheus_metrics_model
 build --override_repository=proto-converter=%workspace%/ossm/vendor/proto-converter
 build --override_repository=proto-field-extraction=%workspace%/ossm/vendor/proto-field-extraction
 build --override_repository=proto_bazel_features=%workspace%/ossm/vendor/proto_bazel_features
+build --override_repository=protobuf=%workspace%/ossm/vendor/protobuf
 build --override_repository=proxy-wasm-cpp-host=%workspace%/ossm/vendor/proxy-wasm-cpp-host
 build --override_repository=proxy-wasm-cpp-sdk=%workspace%/ossm/vendor/proxy-wasm-cpp-sdk
 build --override_repository=proxy-wasm-rust-sdk=%workspace%/ossm/vendor/proxy-wasm-rust-sdk

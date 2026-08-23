@@ -21,7 +21,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
-#include "google/protobuf/descriptor.h"
+#include "google/protobuf/descriptor_legacy.h"
 #include "google/protobuf/io/strtod.h"
 #include "google/protobuf/util/type_resolver.h"
 
@@ -63,57 +63,49 @@ void ConvertOptionField(const Reflection* reflection, const Message& options,
   Any* value = out->mutable_value();
   switch (field->cpp_type()) {
     case FieldDescriptor::CPPTYPE_MESSAGE:
-      // TODO: Remove this suppression.
-      (void)value->PackFrom(
+      value->PackFrom(
           field->is_repeated()
               ? reflection->GetRepeatedMessage(options, field, index)
               : reflection->GetMessage(options, field));
       return;
     case FieldDescriptor::CPPTYPE_DOUBLE:
-      // TODO: Remove this suppression.
-      (void)value->PackFrom(WrapValue<DoubleValue>(
+      value->PackFrom(WrapValue<DoubleValue>(
           field->is_repeated()
               ? reflection->GetRepeatedDouble(options, field, index)
               : reflection->GetDouble(options, field)));
       return;
     case FieldDescriptor::CPPTYPE_FLOAT:
-      // TODO: Remove this suppression.
-      (void)value->PackFrom(WrapValue<FloatValue>(
+      value->PackFrom(WrapValue<FloatValue>(
           field->is_repeated()
               ? reflection->GetRepeatedFloat(options, field, index)
               : reflection->GetFloat(options, field)));
       return;
     case FieldDescriptor::CPPTYPE_INT64:
-      // TODO: Remove this suppression.
-      (void)value->PackFrom(WrapValue<Int64Value>(
+      value->PackFrom(WrapValue<Int64Value>(
           field->is_repeated()
               ? reflection->GetRepeatedInt64(options, field, index)
               : reflection->GetInt64(options, field)));
       return;
     case FieldDescriptor::CPPTYPE_UINT64:
-      // TODO: Remove this suppression.
-      (void)value->PackFrom(WrapValue<UInt64Value>(
+      value->PackFrom(WrapValue<UInt64Value>(
           field->is_repeated()
               ? reflection->GetRepeatedUInt64(options, field, index)
               : reflection->GetUInt64(options, field)));
       return;
     case FieldDescriptor::CPPTYPE_INT32:
-      // TODO: Remove this suppression.
-      (void)value->PackFrom(WrapValue<Int32Value>(
+      value->PackFrom(WrapValue<Int32Value>(
           field->is_repeated()
               ? reflection->GetRepeatedInt32(options, field, index)
               : reflection->GetInt32(options, field)));
       return;
     case FieldDescriptor::CPPTYPE_UINT32:
-      // TODO: Remove this suppression.
-      (void)value->PackFrom(WrapValue<UInt32Value>(
+      value->PackFrom(WrapValue<UInt32Value>(
           field->is_repeated()
               ? reflection->GetRepeatedUInt32(options, field, index)
               : reflection->GetUInt32(options, field)));
       return;
     case FieldDescriptor::CPPTYPE_BOOL:
-      // TODO: Remove this suppression.
-      (void)value->PackFrom(WrapValue<BoolValue>(
+      value->PackFrom(WrapValue<BoolValue>(
           field->is_repeated()
               ? reflection->GetRepeatedBool(options, field, index)
               : reflection->GetBool(options, field)));
@@ -124,11 +116,9 @@ void ConvertOptionField(const Reflection* reflection, const Message& options,
               ? reflection->GetRepeatedString(options, field, index)
               : reflection->GetString(options, field);
       if (field->type() == FieldDescriptor::TYPE_STRING) {
-        // TODO: Remove this suppression.
-        (void)value->PackFrom(WrapValue<StringValue>(val));
+        value->PackFrom(WrapValue<StringValue>(val));
       } else {
-        // TODO: Remove this suppression.
-        (void)value->PackFrom(WrapValue<BytesValue>(val));
+        value->PackFrom(WrapValue<BytesValue>(val));
       }
       return;
     }
@@ -137,8 +127,7 @@ void ConvertOptionField(const Reflection* reflection, const Message& options,
           field->is_repeated()
               ? reflection->GetRepeatedEnum(options, field, index)
               : reflection->GetEnum(options, field);
-      // TODO: Remove this suppression.
-      (void)value->PackFrom(WrapValue<Int32Value>(val->number()));
+      value->PackFrom(WrapValue<Int32Value>(val->number()));
       return;
     }
   }
@@ -228,15 +217,18 @@ std::string GetTypeUrl(absl::string_view url_prefix, const T& descriptor) {
 }
 
 void ConvertFieldDescriptor(absl::string_view url_prefix,
-                            const FieldDescriptor& descriptor,
-                            const FieldDescriptorProto& proto, Field* field) {
+                            const FieldDescriptor& descriptor, Field* field) {
   field->set_kind(static_cast<Field::Kind>(descriptor.type()));
-  if (descriptor.is_required()) {
-    field->set_cardinality(Field::CARDINALITY_REQUIRED);
-  } else if (descriptor.is_repeated()) {
-    field->set_cardinality(Field::CARDINALITY_REPEATED);
-  } else {
-    field->set_cardinality(Field::CARDINALITY_OPTIONAL);
+  switch (descriptor.label()) {
+    case FieldDescriptor::LABEL_OPTIONAL:
+      field->set_cardinality(Field::CARDINALITY_OPTIONAL);
+      break;
+    case FieldDescriptor::LABEL_REPEATED:
+      field->set_cardinality(Field::CARDINALITY_REPEATED);
+      break;
+    case FieldDescriptor::LABEL_REQUIRED:
+      field->set_cardinality(Field::CARDINALITY_REQUIRED);
+      break;
   }
   field->set_number(descriptor.number());
   field->set_name(descriptor.name());
@@ -257,28 +249,24 @@ void ConvertFieldDescriptor(absl::string_view url_prefix,
     field->set_packed(true);
   }
 
-  ConvertFieldOptions(proto.options(), *field->mutable_options());
+  ConvertFieldOptions(descriptor.options(), *field->mutable_options());
 }
 
-Syntax ConvertSyntax(absl::string_view syntax) {
-  if (syntax == "proto2" || syntax.empty()) {
-    return Syntax::SYNTAX_PROTO2;
+Syntax ConvertSyntax(Edition edition) {
+  switch (edition) {
+    case Edition::EDITION_PROTO2:
+      return Syntax::SYNTAX_PROTO2;
+    case Edition::EDITION_PROTO3:
+      return Syntax::SYNTAX_PROTO3;
+    default:
+      return Syntax::SYNTAX_EDITIONS;
   }
-  if (syntax == "proto3") {
-    return Syntax::SYNTAX_PROTO3;
-  }
-
-  return Syntax::SYNTAX_EDITIONS;
 }
 
-void ConvertEnumDescriptor(const EnumDescriptor& descriptor,
-                           const FileDescriptorProto& file,
-                           const EnumDescriptorProto& proto, Enum* enum_type) {
+void ConvertEnumDescriptor(const EnumDescriptor& descriptor, Enum* enum_type) {
   enum_type->Clear();
-  enum_type->set_syntax(ConvertSyntax(file.syntax()));
-  if (enum_type->syntax() == Syntax::SYNTAX_EDITIONS) {
-    enum_type->set_edition(absl::StrCat(file.edition()));
-  }
+  enum_type->set_syntax(
+      ConvertSyntax(FileDescriptorLegacy(descriptor.file()).edition()));
 
   enum_type->set_name(descriptor.full_name());
   enum_type->mutable_source_context()->set_file_name(descriptor.file()->name());
@@ -288,32 +276,28 @@ void ConvertEnumDescriptor(const EnumDescriptor& descriptor,
     value->set_name(value_descriptor.name());
     value->set_number(value_descriptor.number());
 
-    ConvertEnumValueOptions(proto.value(i).options(),
+    ConvertEnumValueOptions(value_descriptor.options(),
                             *value->mutable_options());
   }
 
-  ConvertEnumOptions(proto.options(), *enum_type->mutable_options());
+  ConvertEnumOptions(descriptor.options(), *enum_type->mutable_options());
 }
 
 void ConvertDescriptor(absl::string_view url_prefix,
-                       const Descriptor& descriptor,
-                       const FileDescriptorProto& file,
-                       const DescriptorProto& proto, Type* type) {
+                       const Descriptor& descriptor, Type* type) {
   type->Clear();
   type->set_name(descriptor.full_name());
-  type->set_syntax(ConvertSyntax(file.syntax()));
-  if (type->syntax() == Syntax::SYNTAX_EDITIONS) {
-    type->set_edition(absl::StrCat(file.edition()));
-  }
+  type->set_syntax(
+      ConvertSyntax(FileDescriptorLegacy(descriptor.file()).edition()));
   for (int i = 0; i < descriptor.field_count(); ++i) {
-    ConvertFieldDescriptor(url_prefix, *descriptor.field(i), proto.field(i),
+    ConvertFieldDescriptor(url_prefix, *descriptor.field(i),
                            type->add_fields());
   }
   for (int i = 0; i < descriptor.oneof_decl_count(); ++i) {
     type->add_oneofs(descriptor.oneof_decl(i)->name());
   }
   type->mutable_source_context()->set_file_name(descriptor.file()->name());
-  ConvertMessageOptions(proto.options(), *type->mutable_options());
+  ConvertMessageOptions(descriptor.options(), *type->mutable_options());
 }
 
 class DescriptorPoolTypeResolver : public TypeResolver {
@@ -335,7 +319,7 @@ class DescriptorPoolTypeResolver : public TypeResolver {
       return absl::NotFoundError(
           absl::StrCat("Invalid type URL, unknown type: ", type_name));
     }
-    *type = ConvertDescriptorToType(url_prefix_, *descriptor);
+    ConvertDescriptor(url_prefix_, *descriptor, type);
     return absl::Status();
   }
 
@@ -352,7 +336,7 @@ class DescriptorPoolTypeResolver : public TypeResolver {
       return absl::InvalidArgumentError(
           absl::StrCat("Invalid type URL, unknown type: ", type_name));
     }
-    *enum_type = ConvertDescriptorToType(*descriptor);
+    ConvertEnumDescriptor(*descriptor, enum_type);
     return absl::Status();
   }
 
@@ -374,30 +358,6 @@ class DescriptorPoolTypeResolver : public TypeResolver {
   const DescriptorPool* pool_;
 };
 
-template <typename DescriptorT, typename DescriptorProtoT>
-void PartiallyResolveFeatures(const FileDescriptorProto& file,
-                              const DescriptorT& descriptor,
-                              DescriptorProtoT& proto) {
-  FeatureSet features = file.options().features();
-  std::vector<FeatureSet> nested_features;
-  const Descriptor* parent = descriptor.containing_type();
-  while (parent != nullptr) {
-    DescriptorProto parent_proto;
-    parent->CopyHeadingTo(&parent_proto);
-    if (parent_proto.options().has_features()) {
-      nested_features.push_back(parent_proto.options().features());
-    }
-    parent = parent->containing_type();
-  }
-  for (int i = nested_features.size() - 1; i >= 0; --i) {
-    features.MergeFrom(nested_features[i]);
-  }
-  if (features.ByteSizeLong() > 0) {
-    features.MergeFrom(proto.options().features());
-    *proto.mutable_options()->mutable_features() = features;
-  }
-}
-
 }  // namespace
 
 TypeResolver* NewTypeResolverForDescriptorPool(absl::string_view url_prefix,
@@ -409,23 +369,14 @@ TypeResolver* NewTypeResolverForDescriptorPool(absl::string_view url_prefix,
 Type ConvertDescriptorToType(absl::string_view url_prefix,
                              const Descriptor& descriptor) {
   Type type;
-  FileDescriptorProto proto;
-  descriptor.file()->CopyHeadingTo(&proto);
-  descriptor.CopyTo(proto.add_message_type());
-  PartiallyResolveFeatures(proto, descriptor, *proto.mutable_message_type(0));
-  ConvertDescriptor(url_prefix, descriptor, proto, proto.message_type(0),
-                    &type);
+  ConvertDescriptor(url_prefix, descriptor, &type);
   return type;
 }
 
 // Performs a direct conversion from an enum descriptor to a type proto.
 Enum ConvertDescriptorToType(const EnumDescriptor& descriptor) {
   Enum enum_type;
-  FileDescriptorProto proto;
-  descriptor.file()->CopyHeadingTo(&proto);
-  descriptor.CopyTo(proto.add_enum_type());
-  PartiallyResolveFeatures(proto, descriptor, *proto.mutable_enum_type(0));
-  ConvertEnumDescriptor(descriptor, proto, proto.enum_type(0), &enum_type);
+  ConvertEnumDescriptor(descriptor, &enum_type);
   return enum_type;
 }
 

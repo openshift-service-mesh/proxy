@@ -161,7 +161,7 @@ inline char* ParseOneIsland(char* current, char* begin, char* end,
 //  ProcessFirstLine(begin, end, is_request, &headers, &error_code);
 //
 
-bool ParseHTTPFirstLine(char* begin, char* end, bool is_request,
+bool ParseHTTPFirstLine(char*& begin, char* end, bool is_request,
                         BalsaHeaders* headers,
                         BalsaFrameEnums::ErrorCode* error_code,
                         FirstLineValidationOption whitespace_option,
@@ -266,6 +266,8 @@ bool ParseHTTPFirstLine(char* begin, char* end, bool is_request,
                         : BalsaFrameEnums::MULTIPLE_SPACES_IN_STATUS_LINE;
       return false;
     }
+    QUICHE_DCHECK(multiple_spaces_option ==
+                  FirstLineValidationOption::SANITIZE);
     const absl::string_view part1(
         begin + headers->non_whitespace_1_idx_,
         headers->whitespace_2_idx_ - headers->non_whitespace_1_idx_);
@@ -278,6 +280,7 @@ bool ParseHTTPFirstLine(char* begin, char* end, bool is_request,
 
     QUICHE_CODE_COUNT(sanitize_firstline_spaces_sanitized);
     headers->SetRequestFirstlineFromStringPieces(part1, part2, part3);
+    begin = headers->BeginningOfFirstLine();
   }
 
   return true;
@@ -896,6 +899,10 @@ void BalsaFrame::ProcessHeaderLines(const Lines& lines, bool is_trailer,
     }
 
     if (headers->transfer_encoding_is_chunked_) {
+      // Verify this code block is never reached as
+      // headers->transfer_encoding_is_chunked_ is supposed to be false before
+      // the call to ProcessTransferEncodingLine.
+      QUICHE_CODE_COUNT(chunked_transfer_encoding_detected);
       headers->content_length_ = 0;
       headers->content_length_status_ = BalsaHeadersEnums::NO_CONTENT_LENGTH;
       content_length_remaining_ = 0;

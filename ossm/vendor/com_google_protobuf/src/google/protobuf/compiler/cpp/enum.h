@@ -47,9 +47,6 @@ class EnumGenerator {
   // header.
   void GenerateSymbolImports(io::Printer* p) const;
 
-  // Generate the `inline` implementation of the _IsValid function.
-  void GenerateIsValid(io::Printer* p) const;
-
   // Source file stuff.
 
   // Generate non-inline methods related to the enum, such as IsValidValue().
@@ -69,7 +66,6 @@ class EnumGenerator {
 
   const EnumDescriptor* enum_;
   Options options_;
-  std::vector<int> sorted_unique_values_;
 
   bool generate_array_size_;
   bool should_cache_;

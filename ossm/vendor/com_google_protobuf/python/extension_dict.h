@@ -8,9 +8,6 @@
 #ifndef PYUPB_EXTENSION_DICT_H__
 #define PYUPB_EXTENSION_DICT_H__
 
-// clang-format off
-#include "Python.h"
-// clang-format on
 #include <stdbool.h>
 
 #include "python/python_api.h"

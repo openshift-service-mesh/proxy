@@ -11,6 +11,9 @@
 #include <memory>
 #include <type_traits>
 
+class upb_Message;
+class upb_Arena;
+
 namespace hpb {
 
 template <typename T>
@@ -58,6 +61,8 @@ class Ptr final {
 #endif
 
  private:
+  Ptr(upb_Message* msg, upb_Arena* arena) : p_(msg, arena) {}  // NOLINT
+
   friend class Ptr<const T>;
   friend typename T::Access;
 

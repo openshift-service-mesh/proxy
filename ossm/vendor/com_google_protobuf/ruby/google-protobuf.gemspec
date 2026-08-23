@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name        = "google-protobuf"
-  s.version     = "4.35.1"
+  s.version     = "4.29.0.rc.2"
   git_tag       = "v#{s.version.to_s.sub('.rc.', '-rc')}" # Converts X.Y.Z.rc.N to vX.Y.Z-rcN, used for the git tag
   s.licenses    = ["BSD-3-Clause"]
   s.summary     = "Protocol Buffers"
@@ -16,7 +16,7 @@ Gem::Specification.new do |s|
     s.files     += ["lib/google/protobuf_java.jar"] +
       Dir.glob('ext/**/*').reject do |file|
         File.basename(file) =~ /^((convert|defs|map|repeated_field)\.[ch]|
-                                   BUILD\.bazel|extconf\.rb)$/x
+                                   BUILD\.bazel|extconf\.rb|wrap_memcpy\.c)$/x
       end
     s.extensions = ["ext/google/protobuf_c/Rakefile"]
     s.add_dependency "ffi", "~>1"
@@ -25,30 +25,22 @@ Gem::Specification.new do |s|
     s.files     += Dir.glob('ext/**/*').reject do |file|
       File.basename(file) =~ /^(BUILD\.bazel)$/
     end
-
-    # When installing this gem from git via bundler
-    # (ie: 'gem "google-protobuf", git: "https://.../protobuf.git"' in your
-    # Gemfile), Rakefile is necessary so the prerequisite tasks run to copy
-    # third party C libraries and generate well known protobufs.  When building
-    # the gem via `rake gem`, these steps will have already occurred, and so we
-    # replace the `Rakefile` extension with `ext/google/protobuf_c/extconf.rb`.
-    # See the `Gem::PackageTask.new` declaration in `Rakefile` for more details.
-    s.extensions = [
-      File.exist?("Rakefile") ? "Rakefile" : "ext/google/protobuf_c/extconf.rb",
-      "ext/google/protobuf_c/Rakefile"
+    s.extensions = %w[
+      ext/google/protobuf_c/extconf.rb
+      ext/google/protobuf_c/Rakefile
     ]
+    s.add_development_dependency "rake-compiler-dock", "= 1.2.1"
   end
-  s.required_ruby_version = '>= 3.1'
+  s.required_ruby_version = '>= 3.0'
   # bigdecimal must be used as a non-built in gem as of ruby-3.4
   s.add_dependency "bigdecimal"
   # TODO: evaluate removing Rakefile and moving logic to extconf.rb, so that we
   # can remove this runtime dependency on rake. See the discussion here for
   # more details:
   # https://github.com/protocolbuffers/protobuf/pull/15203
-  s.add_dependency "rake", "~> 13.3"
+  s.add_dependency "rake", ">= 13"
   s.add_development_dependency "ffi", "~>1"
   s.add_development_dependency "ffi-compiler", "~>1"
-  s.add_development_dependency "rake-compiler", "~> 1.3"
-  s.add_development_dependency "rake-compiler-dock", "~> 1.11"
-  s.add_development_dependency "test-unit", '~> 3.7'
+  s.add_development_dependency "rake-compiler", "~> 1.1.0"
+  s.add_development_dependency "test-unit", '~> 3.0', '>= 3.0.9'
 end

@@ -26,7 +26,7 @@ final class ExtensionSchemaFull extends ExtensionSchema<FieldDescriptor> {
       Field field = GeneratedMessage.ExtendableMessage.class.getDeclaredField("extensions");
       return UnsafeUtil.objectFieldOffset(field);
     } catch (Throwable e) {
-      throw new IllegalStateException("Unable to lookup extension field offset", e);
+      throw new IllegalStateException("Unable to lookup extension field offset");
     }
   }
 
@@ -494,8 +494,7 @@ final class ExtensionSchemaFull extends ExtensionSchema<FieldDescriptor> {
     } else {
       extensions.setField(
           extensionInfo.descriptor,
-          new InternalLazyField(
-              extensionInfo.defaultInstance, extensionRegistry, reader.readBytes()));
+          new LazyField(extensionInfo.defaultInstance, extensionRegistry, reader.readBytes()));
     }
   }
 
@@ -520,7 +519,7 @@ final class ExtensionSchemaFull extends ExtensionSchema<FieldDescriptor> {
     } else {
       extensions.setField(
           extensionInfo.descriptor,
-          new InternalLazyField(extensionInfo.defaultInstance, extensionRegistry, data));
+          new LazyField(extensionInfo.defaultInstance, extensionRegistry, data));
     }
   }
 }

@@ -5,8 +5,7 @@
 # license that can be found in the LICENSE file or at
 # https://developers.google.com/open-source/licenses/bsd
 
-load("@rules_cc//cc:defs.bzl", "cc_library")
-load("//upb/bazel:copts.bzl", "UPB_DEFAULT_COPTS", "UPB_DEFAULT_FEATURES")
+load("//upb/bazel:build_defs.bzl", "UPB_DEFAULT_COPTS")
 
 package(default_applicable_licenses = ["//:license"])
 
@@ -14,11 +13,9 @@ cc_library(
     name = "port",
     hdrs = [
         "atomic.h",
-        "sanitizers.h",
         "vsnprintf_compat.h",
     ],
     copts = UPB_DEFAULT_COPTS,
-    features = UPB_DEFAULT_FEATURES,
     textual_hdrs = [
         # We must list the headers explicitly here instead of relying on the
         # :inc filegroup below. gRPC auto-generates various build configs from

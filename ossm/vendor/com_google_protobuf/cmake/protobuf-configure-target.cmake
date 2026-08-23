@@ -7,11 +7,7 @@
 
 # Refactors configuration options set on all Protobuf targets
 function(protobuf_configure_target target)
-    if(protobuf_LINK_LIBATOMIC AND "${target}" STREQUAL "libprotobuf")
-        target_link_libraries("${target}" PRIVATE atomic)
-    endif()
-
-    target_compile_features("${target}" PUBLIC cxx_std_17)
+    target_compile_features("${target}" PUBLIC cxx_std_14)
     if (MSVC)
         # Build with multiple processes
         target_compile_options("${target}" PRIVATE /MP)

@@ -112,6 +112,7 @@ class PROTOC_EXPORT FileGenerator {
                                            io::Printer* p);
   void GenerateSourceIncludes(io::Printer* p);
   void GenerateSourcePrelude(io::Printer* p);
+  void GenerateSourceDefaultInstance(int idx, io::Printer* p);
 
   void GenerateInitForSCC(const SCC* scc, const CrossFileReferences& refs,
                           io::Printer* p);
@@ -181,6 +182,8 @@ class PROTOC_EXPORT FileGenerator {
 
   const FileDescriptor* file_;
   Options options_;
+
+  MessageSCCAnalyzer scc_analyzer_;
 
   // This member is unused and should be deleted once all old-style variable
   // maps are gone.

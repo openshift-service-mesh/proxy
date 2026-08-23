@@ -7,14 +7,17 @@
 
 package com.google.protobuf.util;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.math.IntMath.checkedAdd;
+import static com.google.common.math.IntMath.checkedSubtract;
+import static com.google.common.math.LongMath.checkedAdd;
+import static com.google.common.math.LongMath.checkedMultiply;
+import static com.google.common.math.LongMath.checkedSubtract;
 import static com.google.protobuf.util.Timestamps.MICROS_PER_SECOND;
 import static com.google.protobuf.util.Timestamps.MILLIS_PER_SECOND;
 import static com.google.protobuf.util.Timestamps.NANOS_PER_MICROSECOND;
 import static com.google.protobuf.util.Timestamps.NANOS_PER_MILLISECOND;
 import static com.google.protobuf.util.Timestamps.NANOS_PER_SECOND;
-import static java.lang.Math.addExact;
-import static java.lang.Math.multiplyExact;
-import static java.lang.Math.subtractExact;
 
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.errorprone.annotations.CompileTimeConstant;
@@ -138,10 +141,7 @@ public final class Durations {
    */
   @CanIgnoreReturnValue
   public static Duration checkNotNegative(Duration duration) {
-    if (isNegative(duration)) {
-      throw new IllegalArgumentException(
-          "duration (" + toString(duration) + ") must not be negative");
-    }
+    checkArgument(!isNegative(duration), "duration (%s) must not be negative", toString(duration));
     return duration;
   }
 
@@ -153,9 +153,7 @@ public final class Durations {
    */
   @CanIgnoreReturnValue
   public static Duration checkPositive(Duration duration) {
-    if (!isPositive(duration)) {
-      throw new IllegalArgumentException("duration (" + toString(duration) + ") must be positive");
-    }
+    checkArgument(isPositive(duration), "duration (%s) must be positive", toString(duration));
     return duration;
   }
 
@@ -166,14 +164,12 @@ public final class Durations {
     int nanos = duration.getNanos();
     if (!isValid(seconds, nanos)) {
       throw new IllegalArgumentException(
-          "Duration is not valid. See proto definition for valid values. "
-              + "Seconds ("
-              + seconds
-              + ") must be in range [-315,576,000,000, +315,576,000,000]. "
-              + "Nanos ("
-              + nanos
-              + ") must be in range [-999,999,999, +999,999,999]. "
-              + "Nanos must have the same sign as seconds");
+          String.format(
+              "Duration is not valid. See proto definition for valid values. "
+                  + "Seconds (%s) must be in range [-315,576,000,000, +315,576,000,000]. "
+                  + "Nanos (%s) must be in range [-999,999,999, +999,999,999]. "
+                  + "Nanos must have the same sign as seconds",
+              seconds, nanos));
     }
     return duration;
   }
@@ -241,12 +237,7 @@ public final class Durations {
       nanoValue = secondValue.substring(pointPosition + 1);
       secondValue = secondValue.substring(0, pointPosition);
     }
-    long seconds;
-    try {
-      seconds = Long.parseLong(secondValue);
-    } catch (NumberFormatException e) {
-      throw new ParseException("Invalid duration string: " + value, 0);
-    }
+    long seconds = Long.parseLong(secondValue);
     int nanos = nanoValue.isEmpty() ? 0 : Timestamps.parseNanos(nanoValue);
     if (seconds < 0) {
       throw new ParseException("Invalid duration string: " + value, 0);
@@ -288,19 +279,28 @@ public final class Durations {
   /** Create a Duration from the number of days. */
   @SuppressWarnings("GoodTime") // this is a legacy conversion API
   public static Duration fromDays(long days) {
-    return Durations.fromSeconds(multiplyExact(days, SECONDS_PER_DAY));
+    return Duration.newBuilder()
+        .setSeconds(checkedMultiply(days, SECONDS_PER_DAY))
+        .setNanos(0)
+        .build();
   }
 
   /** Create a Duration from the number of hours. */
   @SuppressWarnings("GoodTime") // this is a legacy conversion API
   public static Duration fromHours(long hours) {
-    return Durations.fromSeconds(multiplyExact(hours, SECONDS_PER_HOUR));
+    return Duration.newBuilder()
+        .setSeconds(checkedMultiply(hours, SECONDS_PER_HOUR))
+        .setNanos(0)
+        .build();
   }
 
   /** Create a Duration from the number of minutes. */
   @SuppressWarnings("GoodTime") // this is a legacy conversion API
   public static Duration fromMinutes(long minutes) {
-    return Durations.fromSeconds(multiplyExact(minutes, SECONDS_PER_MINUTE));
+    return Duration.newBuilder()
+        .setSeconds(checkedMultiply(minutes, SECONDS_PER_MINUTE))
+        .setNanos(0)
+        .build();
   }
 
   /** Create a Duration from the number of seconds. */
@@ -395,8 +395,8 @@ public final class Durations {
   @SuppressWarnings("GoodTime") // this is a legacy conversion API
   public static long toMillis(Duration duration) {
     checkValid(duration);
-    return addExact(
-        multiplyExact(duration.getSeconds(), (long) MILLIS_PER_SECOND),
+    return checkedAdd(
+        checkedMultiply(duration.getSeconds(), MILLIS_PER_SECOND),
         duration.getNanos() / NANOS_PER_MILLISECOND);
   }
 
@@ -407,8 +407,8 @@ public final class Durations {
   @SuppressWarnings("GoodTime") // this is a legacy conversion API
   public static long toMicros(Duration duration) {
     checkValid(duration);
-    return addExact(
-        multiplyExact(duration.getSeconds(), (long) MICROS_PER_SECOND),
+    return checkedAdd(
+        checkedMultiply(duration.getSeconds(), MICROS_PER_SECOND),
         duration.getNanos() / NANOS_PER_MICROSECOND);
   }
 
@@ -416,32 +416,52 @@ public final class Durations {
   @SuppressWarnings("GoodTime") // this is a legacy conversion API
   public static long toNanos(Duration duration) {
     checkValid(duration);
-    return addExact(
-        multiplyExact(duration.getSeconds(), (long) NANOS_PER_SECOND), duration.getNanos());
+    return checkedAdd(
+        checkedMultiply(duration.getSeconds(), NANOS_PER_SECOND), duration.getNanos());
   }
 
   // Math operations
 
-  /** Add two durations. */
+  /**
+   * Add two durations.
+   *
+   * <!-- MOE:begin_intracomment_strip -->
+   * @deprecated Do not use this method for new code. Instead, convert to {@link java.time.Duration}
+   *     using {@link com.google.protobuf.util.JavaTimeConversions#toJavaDuration}, do the
+   *     arithmetic there, and convert back using {@link
+   *     com.google.protobuf.util.JavaTimeConversions#toProtoDuration}.
+   * <!-- MOE:end_intracomment_strip -->
+   */
+  @Deprecated // MOE:strip_line
   public static Duration add(Duration d1, Duration d2) {
     checkValid(d1);
     checkValid(d2);
     return normalizedDuration(
-        addExact(d1.getSeconds(), d2.getSeconds()), addExact(d1.getNanos(), d2.getNanos()));
+        checkedAdd(d1.getSeconds(), d2.getSeconds()), checkedAdd(d1.getNanos(), d2.getNanos()));
   }
 
-  /** Subtract a duration from another. */
+  /**
+   * Subtract a duration from another.
+   *
+   * <!-- MOE:begin_intracomment_strip -->
+   * @deprecated Do not use this method for new code. Instead, convert to {@link java.time.Duration}
+   *     using {@link com.google.protobuf.util.JavaTimeConversions#toJavaDuration}, do the
+   *     arithmetic there, and convert back using {@link
+   *     com.google.protobuf.util.JavaTimeConversions#toProtoDuration}.
+   * <!-- MOE:end_intracomment_strip -->
+   */
+  @Deprecated // MOE:strip_line
   public static Duration subtract(Duration d1, Duration d2) {
     checkValid(d1);
     checkValid(d2);
     return normalizedDuration(
-        subtractExact(d1.getSeconds(), d2.getSeconds()),
-        subtractExact(d1.getNanos(), d2.getNanos()));
+        checkedSubtract(d1.getSeconds(), d2.getSeconds()),
+        checkedSubtract(d1.getNanos(), d2.getNanos()));
   }
 
   static Duration normalizedDuration(long seconds, int nanos) {
     if (nanos <= -NANOS_PER_SECOND || nanos >= NANOS_PER_SECOND) {
-      seconds = addExact(seconds, nanos / NANOS_PER_SECOND);
+      seconds = checkedAdd(seconds, nanos / NANOS_PER_SECOND);
       nanos %= NANOS_PER_SECOND;
     }
     if (seconds > 0 && nanos < 0) {

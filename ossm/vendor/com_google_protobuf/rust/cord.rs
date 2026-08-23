@@ -6,7 +6,10 @@
 // https://developers.google.com/open-source/licenses/bsd
 
 use crate::__internal::{Private, SealedInternal};
-use crate::{AsView, IntoProxied, IntoView, ProtoBytes, ProtoStr, ProtoString, Proxied, View};
+use crate::{
+    AsView, IntoProxied, IntoView, ProtoBytes, ProtoStr, ProtoString, Proxied, Proxy, View,
+    ViewProxy,
+};
 use paste::paste;
 use std::cmp::PartialEq;
 use std::ops::Deref;
@@ -37,6 +40,10 @@ macro_rules! impl_cord_types {
               unimplemented!("Proto Cord should never be constructed");
             }
           }
+
+          impl<'msg> Proxy<'msg> for [< $t Cow>]<'msg> {}
+
+          impl<'msg> ViewProxy<'msg> for [< $t Cow>]<'msg> {}
 
           impl<'msg> AsView for [< $t Cow>]<'msg> {
             type Proxied = [< $t Cord>];

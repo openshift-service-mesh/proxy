@@ -53,10 +53,13 @@ end
 # Tests the case of string objects that are marked UTF-8, but contain invalid
 # UTF-8.
 #
-# This case will raise Encoding::InvalidByteSequenceError
+# For now these only warn, but in the next major version they will throw an
+# exception.
 class MarkedUtf8Test < Test::Unit::TestCase
   def assert_bad_utf8(&block)
-    assert_raises(Encoding::InvalidByteSequenceError, &block)
+    warnings = CaptureWarnings.capture(&block)
+    assert_equal 1, warnings.length
+    assert_match(/String is invalid UTF-8. This will be an error in a future version./, warnings[0])
   end
 
   def bad_utf8_string
@@ -76,10 +79,13 @@ if !defined? JRUBY_VERSION
   # valid UTF-8, but are later modified to be invalid UTF-8.  This may put the
   # string into an state of "unknown" validity.
   #
-  # This case will raise Encoding::InvalidByteSequenceError
+  # For now these only warn, but in the next major version they will throw an
+  # exception.
   class MarkedModifiedUtf8Test < Test::Unit::TestCase
     def assert_bad_utf8(&block)
-      assert_raises(Encoding::InvalidByteSequenceError, &block)
+      warnings = CaptureWarnings.capture(&block)
+      assert_equal 1, warnings.length
+      assert_match(/String is invalid UTF-8. This will be an error in a future version./, warnings[0])
     end
 
     def bad_utf8_string

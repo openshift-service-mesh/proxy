@@ -5,8 +5,8 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
-#ifndef GOOGLE_UPB_UPB_GENERATOR_C_NAMES_H__
-#define GOOGLE_UPB_UPB_GENERATOR_C_NAMES_H__
+#ifndef THIRD_PARTY_UPB_UPB_GENERATOR_C_NAMES_H_
+#define THIRD_PARTY_UPB_UPB_GENERATOR_C_NAMES_H_
 
 #include <string>
 
@@ -122,4 +122,4 @@ ABSL_CONST_INIT const absl::string_view kMutableMapGetterPostfix =
 }  // namespace generator
 }  // namespace upb
 
-#endif  // GOOGLE_UPB_UPB_GENERATOR_C_NAMES_H__
+#endif  // THIRD_PARTY_UPB_UPB_GENERATOR_C_NAMES_H_

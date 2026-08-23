@@ -11,7 +11,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "absl/log/absl_check.h"
@@ -284,7 +283,7 @@ std::string DefaultValue(const FieldDescriptor* field) {
 
         // Must convert to a standard byte order for packing length into
         // a cstring.
-        uint32_t length = ghtonl((uint32_t)default_string.length());
+        uint32_t length = ghtonl(default_string.length());
         std::string bytes((const char*)&length, sizeof(length));
         absl::StrAppend(&bytes, default_string);
         return absl::StrCat("(NSData*)\"",
@@ -427,15 +426,6 @@ bool IsWKTWithObjCCategory(const Descriptor* descriptor) {
     return true;
   }
   return false;
-}
-
-void SubstitutionMap::Set(io::Printer::Sub&& sub) {
-  if (auto [it, inserted] = subs_map_.try_emplace(sub.key(), subs_.size());
-      !inserted) {
-    subs_[it->second] = std::move(sub);
-  } else {
-    subs_.emplace_back(std::move(sub));
-  }
 }
 
 }  // namespace objectivec

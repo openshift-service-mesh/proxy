@@ -7,17 +7,13 @@
 
 #include "upb/reflection/internal/oneof_def.h"
 
-#include <stdint.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "upb/base/string_view.h"
-#include "upb/hash/common.h"
 #include "upb/hash/int_table.h"
 #include "upb/hash/str_table.h"
-#include "upb/reflection/def.h"
 #include "upb/reflection/def_type.h"
-#include "upb/reflection/descriptor_bootstrap.h"
 #include "upb/reflection/internal/def_builder.h"
 #include "upb/reflection/internal/field_def.h"
 #include "upb/reflection/internal/message_def.h"
@@ -26,8 +22,8 @@
 #include "upb/port/def.inc"
 
 struct upb_OneofDef {
-  UPB_ALIGN_AS(8) const google_protobuf_OneofOptions* opts;
-  const google_protobuf_FeatureSet* resolved_features;
+  const UPB_DESC(OneofOptions*) opts;
+  const UPB_DESC(FeatureSet*) resolved_features;
   const upb_MessageDef* parent;
   const char* full_name;
   int field_count;
@@ -41,7 +37,7 @@ upb_OneofDef* _upb_OneofDef_At(const upb_OneofDef* o, int i) {
   return (upb_OneofDef*)&o[i];
 }
 
-const google_protobuf_OneofOptions* upb_OneofDef_Options(const upb_OneofDef* o) {
+const UPB_DESC(OneofOptions) * upb_OneofDef_Options(const upb_OneofDef* o) {
   return o->opts;
 }
 
@@ -49,7 +45,8 @@ bool upb_OneofDef_HasOptions(const upb_OneofDef* o) {
   return o->opts != (void*)kUpbDefOptDefault;
 }
 
-const google_protobuf_FeatureSet* upb_OneofDef_ResolvedFeatures(const upb_OneofDef* o) {
+const UPB_DESC(FeatureSet) *
+    upb_OneofDef_ResolvedFeatures(const upb_OneofDef* o) {
   return o->resolved_features;
 }
 
@@ -156,7 +153,7 @@ size_t _upb_OneofDefs_Finalize(upb_DefBuilder* ctx, upb_MessageDef* m) {
     }
 
     o->fields =
-        UPB_DEFBUILDER_ALLOCARRAY(ctx, const upb_FieldDef*, o->field_count);
+        _upb_DefBuilder_Alloc(ctx, sizeof(upb_FieldDef*) * o->field_count);
     o->field_count = 0;
   }
 
@@ -172,16 +169,16 @@ size_t _upb_OneofDefs_Finalize(upb_DefBuilder* ctx, upb_MessageDef* m) {
 }
 
 static void create_oneofdef(upb_DefBuilder* ctx, upb_MessageDef* m,
-                            const google_protobuf_OneofDescriptorProto* oneof_proto,
-                            const google_protobuf_FeatureSet* parent_features,
+                            const UPB_DESC(OneofDescriptorProto*) oneof_proto,
+                            const UPB_DESC(FeatureSet*) parent_features,
                             const upb_OneofDef* _o) {
   upb_OneofDef* o = (upb_OneofDef*)_o;
 
   UPB_DEF_SET_OPTIONS(o->opts, OneofDescriptorProto, OneofOptions, oneof_proto);
   o->resolved_features = _upb_DefBuilder_ResolveFeatures(
-      ctx, parent_features, google_protobuf_OneofOptions_features(o->opts));
+      ctx, parent_features, UPB_DESC(OneofOptions_features)(o->opts));
 
-  upb_StringView name = google_protobuf_OneofDescriptorProto_name(oneof_proto);
+  upb_StringView name = UPB_DESC(OneofDescriptorProto_name)(oneof_proto);
 
   o->parent = m;
   o->full_name =
@@ -205,13 +202,14 @@ static void create_oneofdef(upb_DefBuilder* ctx, upb_MessageDef* m,
 }
 
 // Allocate and initialize an array of |n| oneof defs.
-upb_OneofDef* _upb_OneofDefs_New(
-    upb_DefBuilder* ctx, int n,
-    const google_protobuf_OneofDescriptorProto* const* protos,
-    const google_protobuf_FeatureSet* parent_features, upb_MessageDef* m) {
+upb_OneofDef* _upb_OneofDefs_New(upb_DefBuilder* ctx, int n,
+                                 const UPB_DESC(OneofDescriptorProto*)
+                                     const* protos,
+                                 const UPB_DESC(FeatureSet*) parent_features,
+                                 upb_MessageDef* m) {
   _upb_DefType_CheckPadding(sizeof(upb_OneofDef));
 
-  upb_OneofDef* o = UPB_DEFBUILDER_ALLOCARRAY(ctx, upb_OneofDef, n);
+  upb_OneofDef* o = _upb_DefBuilder_Alloc(ctx, sizeof(upb_OneofDef) * n);
   for (int i = 0; i < n; i++) {
     create_oneofdef(ctx, m, protos[i], parent_features, &o[i]);
   }

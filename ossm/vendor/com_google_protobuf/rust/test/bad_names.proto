@@ -23,9 +23,6 @@ message Self {
   optional Self self = 2;
   optional bool true = 3;
   optional string false = 4;
-  repeated int32 match = 5;
-  optional bool clear = 6;
-  optional bool new = 7;
 }
 
 message Pub {
@@ -44,8 +41,8 @@ message Ref {
 
 // A message where the accessors would collide that should still work. Note that
 // not all collisions problems are avoided, not least because C++ Proto does not
-// avoid all possible collisions itself, and we obviously can't avoid that while
-// being built on top of C++ gencode.
+// avoid all possible collisions (eg a field `x` and `clear_x` will often not
+// compile on C++).
 message AccessorsCollide {
   message X {}
   message SetX {}
@@ -54,14 +51,4 @@ message AccessorsCollide {
   oneof o {
     bool x_mut = 5;
   }
-
-  optional int32 clear_x = 7;
 }
-
-message SomeMsg {}
-enum SomeMsgView {
-  SOME_MSG_VIEW_UNSPECIFIED = 0;
-}
-
-message MangleViewTest {}
-message MangleViewTestView {}

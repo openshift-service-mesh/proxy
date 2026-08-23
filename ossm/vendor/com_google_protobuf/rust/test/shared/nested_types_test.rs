@@ -7,11 +7,6 @@
 
 //! Tests covering nested types.
 
-#[cfg(not(bzl))]
-mod protos;
-#[cfg(not(bzl))]
-use protos::*;
-
 use googletest::prelude::*;
 
 #[gtest]

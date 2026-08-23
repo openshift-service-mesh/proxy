@@ -36,10 +36,6 @@ module Google
       ## JSON Decoding options
       Upb_JsonDecode_IgnoreUnknown = 1
 
-      ## JSON Decoding results
-      Upb_JsonDecodeResult_Ok = 0
-      Upb_JsonDecodeResult_Error = 2
-
       typedef :pointer, :Array
       typedef :pointer, :DefPool
       typedef :pointer, :EnumValueDef
@@ -151,7 +147,8 @@ module Google
       end
 
       class MiniTable < ::FFI::Struct
-        layout :fields, :pointer,
+        layout :subs, :pointer,
+               :fields, :pointer,
                :size, :uint16_t,
                :field_count, :uint16_t,
                :ext, :uint8_t,  # upb_ExtMode, declared as uint8_t so sizeof(ext) == 1

@@ -9,9 +9,8 @@ package com.google.protobuf;
 
 import static com.google.common.truth.Truth.assertThat;
 
-import proto2_unittest.UnittestProto.ForeignMessage;
-import proto2_unittest.UnittestProto.TestAllExtensions;
-import proto2_unittest.UnittestProto.TestAllTypes;
+import protobuf_unittest.UnittestProto.TestAllExtensions;
+import protobuf_unittest.UnittestProto.TestAllTypes;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -81,33 +80,6 @@ public class LazyFieldTest {
     changeValue(lazyField);
     assertThat(lazyField).isNotEqualTo(message);
     assertThat(message).isNotEqualTo(lazyField.getValue());
-  }
-
-  @Test
-  public void testMergeUnparsedWithDifferentExtensionRegistryInstances() throws Exception {
-    TestAllTypes message1 = TestAllTypes.newBuilder().setOptionalInt32(1).build();
-    LazyField field1 = createLazyFieldFromMessage(message1);
-    TestAllTypes message2 = TestAllTypes.newBuilder().setOptionalInt64(2).build();
-    LazyField field2 = createLazyFieldFromMessage(message2);
-
-    field1.merge(field2);
-
-    TestAllTypes expected =
-        TestAllTypes.newBuilder().setOptionalInt32(1).setOptionalInt64(2).build();
-    assertThat(field1.getValue(TestAllTypes.getDefaultInstance())).isEqualTo(expected);
-  }
-
-  @Test
-  public void testMergeUnparsedWithDifferentMessageTypes() throws Exception {
-    TestAllTypes message1 = TestAllTypes.newBuilder().setOptionalInt32(1).build();
-    LazyField field1 = createLazyFieldFromMessage(message1);
-    ForeignMessage message2 = ForeignMessage.newBuilder().setC(2).build();
-    LazyField field2 = createLazyFieldFromMessage(message2);
-
-    field1.merge(field2);
-
-    TestAllTypes expected = TestAllTypes.newBuilder().setOptionalInt32(2).build();
-    assertThat(field1.getValue(TestAllTypes.getDefaultInstance())).isEqualTo(expected);
   }
 
   // Help methods.

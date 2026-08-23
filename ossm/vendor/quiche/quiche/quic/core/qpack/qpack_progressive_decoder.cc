@@ -86,10 +86,8 @@ void QpackProgressiveDecoder::Decode(absl::string_view data) {
     if (max_buffered_data_ > 0 &&
         buffer_.size() + data.size() > max_buffered_data_) {
       QUIC_CODE_COUNT(quic_qpack_buffered_data_over_limit);
-      if (GetQuicheReloadableFlag(quic_enforce_qpack_buffer_limit)) {
-        OnError(QUIC_QPACK_DECOMPRESSION_FAILED, "Too much buffered data.");
-        return;
-      }
+      OnError(QUIC_QPACK_DECOMPRESSION_FAILED, "Too much buffered data.");
+      return;
     }
     buffer_.append(data.data(), data.size());
   } else {

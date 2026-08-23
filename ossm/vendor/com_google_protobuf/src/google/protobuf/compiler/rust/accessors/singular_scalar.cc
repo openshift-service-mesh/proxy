@@ -8,7 +8,6 @@
 #include <string>
 
 #include "absl/log/absl_check.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "google/protobuf/compiler/cpp/helpers.h"
 #include "google/protobuf/compiler/rust/accessors/accessor_case.h"
@@ -19,7 +18,6 @@
 #include "google/protobuf/compiler/rust/naming.h"
 #include "google/protobuf/compiler/rust/upb_helpers.h"
 #include "google/protobuf/descriptor.h"
-#include "google/protobuf/io/printer.h"
 
 namespace google {
 namespace protobuf {
@@ -28,29 +26,26 @@ namespace rust {
 
 namespace {
 
-using Sub = ::google::protobuf::io::Printer::Sub;
-
-// The type name to use for the get/set methods on `MessagePtr`, e.g. `i32`
-// for `MessagePtr::get_i32_at_index()` and
-// `MessagePtr::set_base_field_i32_at_index()`.
+// The upb function to use for the get/set functions, eg `Int32` for the
+// functions `upb_Message_GetInt32` and upb_Message_SetInt32`.
 std::string UpbCTypeNameForFunctions(const FieldDescriptor& field) {
   switch (field.cpp_type()) {
     case FieldDescriptor::CPPTYPE_INT32:
-      return "i32";
+      return "Int32";
     case FieldDescriptor::CPPTYPE_INT64:
-      return "i64";
+      return "Int64";
     case FieldDescriptor::CPPTYPE_UINT32:
-      return "u32";
+      return "UInt32";
     case FieldDescriptor::CPPTYPE_UINT64:
-      return "u64";
+      return "UInt64";
     case FieldDescriptor::CPPTYPE_DOUBLE:
-      return "f64";
+      return "Double";
     case FieldDescriptor::CPPTYPE_FLOAT:
-      return "f32";
+      return "Float";
     case FieldDescriptor::CPPTYPE_BOOL:
-      return "bool";
+      return "Bool";
     case FieldDescriptor::CPPTYPE_ENUM:
-      return "i32";
+      return "Int32";
     case FieldDescriptor::CPPTYPE_STRING:
     case FieldDescriptor::CPPTYPE_MESSAGE:
       // Handled by a different file.
@@ -72,37 +67,38 @@ void SingularScalar::InMsgImpl(Context& ctx, const FieldDescriptor& field,
 
   ctx.Emit(
       {
+          {"field", RsSafeName(field_name)},
+          {"raw_field_name", field_name},  // Never r# prefixed
           {"view_self", ViewReceiver(accessor_case)},
           {"Scalar", RsTypePath(ctx, field)},
           {"default_value", DefaultValue(ctx, field)},
           {"upb_mt_field_index", UpbMiniTableFieldIndex(field)},
-          {"type_name", UpbCTypeNameForFunctions(field)},
+          {"upb_fn_type_name", UpbCTypeNameForFunctions(field)},
           {"getter",
            [&] {
              if (ctx.is_cpp()) {
-               ctx.Emit({Sub("getter_fn_name", RsSafeName(field_name))
-                             .AnnotatedAs(&field),
-                         {"getter_thunk", ThunkName(ctx, field, "get")}},
-                        R"rs(
-                    pub fn $getter_fn_name$($view_self$) -> $Scalar$ {
+               ctx.Emit({{"getter_thunk", ThunkName(ctx, field, "get")}}, R"rs(
+                    pub fn $field$($view_self$) -> $Scalar$ {
                       unsafe { $getter_thunk$(self.raw_msg()) }
                     }
                   )rs");
              } else {
-               ctx.Emit({Sub("getter_fn_name", RsSafeName(field_name))
-                             .AnnotatedAs(&field)},
-                        R"rs(
-                    pub fn $getter_fn_name$($view_self$) -> $Scalar$ {
+               ctx.Emit(
+                   R"rs(
+                    pub fn $field$($view_self$) -> $Scalar$ {
                       unsafe {
+                        let mt = <Self as $pbr$::AssociatedMiniTable>::mini_table();
+                        let f = $pbr$::upb_MiniTable_GetFieldByIndex(
+                            mt, $upb_mt_field_index$);
+
                         // TODO: b/361751487: This .into() and .try_into() is only
                         // here for the enum<->i32 case, we should avoid it for
                         // other primitives where the types naturally match
                         // perfectly (and do an unchecked conversion for
                         // i32->enum types, since even for closed enums we trust
                         // upb to only return one of the named values).
-                        self.inner.ptr().get_$type_name$_at_index(
-                          $upb_mt_field_index$, ($default_value$).into()
-                        ).try_into().unwrap()
+                        $pbr$::upb_Message_Get$upb_fn_type_name$(
+                            self.raw_msg(), f, ($default_value$).into()).try_into().unwrap()
                       }
                     }
                   )rs");
@@ -112,36 +108,24 @@ void SingularScalar::InMsgImpl(Context& ctx, const FieldDescriptor& field,
            [&] {
              if (accessor_case == AccessorCase::VIEW) return;
              if (ctx.is_cpp()) {
-               ctx.Emit(
-                   {Sub("setter_fn_name", absl::StrCat("set_", field_name))
-                        .AnnotatedAs({&field, io::AnnotationCollector::
-                                                  Semantic::kSet}),  // Never r#
-                                                                     // prefixed
-                    {"setter_thunk", ThunkName(ctx, field, "set")}},
-                   R"rs(
-                  pub fn $setter_fn_name$(&mut self, val: $Scalar$) {
+               ctx.Emit({{"setter_thunk", ThunkName(ctx, field, "set")}}, R"rs(
+                  pub fn set_$raw_field_name$(&mut self, val: $Scalar$) {
                     unsafe { $setter_thunk$(self.raw_msg(), val) }
                   }
                 )rs");
              } else {
-               ctx.Emit(
-                   {
-                       Sub("setter_fn_name", absl::StrCat("set_", field_name))
-                           .AnnotatedAs({&field,
-                                         io::AnnotationCollector::Semantic::
-                                             kSet})  // Never r#
-                                                     // prefixed
-                   },
-                   R"rs(
-                  pub fn $setter_fn_name$(&mut self, val: $Scalar$) {
+               ctx.Emit(R"rs(
+                  pub fn set_$raw_field_name$(&mut self, val: $Scalar$) {
                     unsafe {
+                      let mt = <Self as $pbr$::AssociatedMiniTable>::mini_table();
+                      let f = $pbr$::upb_MiniTable_GetFieldByIndex(
+                          mt, $upb_mt_field_index$);
                       // TODO: b/361751487: This .into() is only here
                       // here for the enum<->i32 case, we should avoid it for
                       // other primitives where the types naturally match
-                      //perfectly.
-                      self.inner.ptr_mut().set_base_field_$type_name$_at_index(
-                        $upb_mt_field_index$, val.into()
-                      )
+                      // perfectly.
+                      $pbr$::upb_Message_SetBaseField$upb_fn_type_name$(
+                          self.raw_msg(), f, val.into());
                     }
                   }
                 )rs");
@@ -205,7 +189,7 @@ void SingularScalar::InThunkCc(Context& ctx,
             {"getter_thunk", ThunkName(ctx, field, "get")},
             {"setter_thunk", ThunkName(ctx, field, "set")}},
            R"cc(
-             $Scalar$ $getter_thunk$(const $QualifiedMsg$* msg) {
+             $Scalar$ $getter_thunk$($QualifiedMsg$* msg) {
                return msg->$field$();
              }
              void $setter_thunk$($QualifiedMsg$* msg, $Scalar$ val) {

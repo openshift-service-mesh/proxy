@@ -16,7 +16,7 @@ cc_library(
     deps = [
         "//src/google/protobuf",
         "//src/google/protobuf:port",
-        "@abseil-cpp//absl/strings",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -78,10 +78,10 @@ cc_library(
         "//src/google/protobuf/io",
         "//src/google/protobuf/io:printer",
         "//src/google/protobuf/stubs:lite",
-        "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/container:flat_hash_set",
-        "@abseil-cpp//absl/log:absl_log",
-        "@abseil-cpp//absl/strings",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log:absl_log",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -90,6 +90,8 @@ cc_test(
     srcs = ["csharp_bootstrap_unittest.cc"],
     data = [
         "//:well_known_type_protos",
+        "//conformance:all_files",
+        "//conformance:conformance_proto",
         "//csharp:wkt_cs_srcs",
         "//src/google/protobuf:descriptor_proto_srcs",
         "//src/google/protobuf:testdata",
@@ -103,10 +105,10 @@ cc_test(
         "//src/google/protobuf/stubs",
         "//src/google/protobuf/testing",
         "//src/google/protobuf/testing:file",
-        "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/strings",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -121,8 +123,8 @@ cc_test(
         "//src/google/protobuf/compiler:command_line_interface",
         "//src/google/protobuf/io",
         "//src/google/protobuf/io:printer",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 

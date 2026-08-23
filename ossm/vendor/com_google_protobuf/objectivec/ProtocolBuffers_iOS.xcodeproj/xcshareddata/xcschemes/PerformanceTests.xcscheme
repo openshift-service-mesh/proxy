@@ -279,6 +279,9 @@
                   Identifier = "MessageTests">
                </Test>
                <Test
+                  Identifier = "UnknownFieldSetTest">
+               </Test>
+               <Test
                   Identifier = "UtilitiesTests">
                </Test>
                <Test

@@ -783,8 +783,7 @@ namespace Conformance {
     /// protobuf_test_messages.proto2.TestAllTypesProto2 or
     /// protobuf_test_messages.editions.proto2.TestAllTypesProto2 or
     /// protobuf_test_messages.editions.proto3.TestAllTypesProto3 or
-    /// protobuf_test_messages.editions.TestAllTypesEdition2023 or
-    /// protobuf_test_messages.edition_unstable.TestAllTypesEditionUnstable.
+    /// protobuf_test_messages.editions.TestAllTypesEdition2023.
     /// </summary>
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]

@@ -11,7 +11,6 @@ import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.Random;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -95,7 +94,7 @@ public class Utf8Test {
 
     ByteBuffer buffer = ByteBuffer.wrap(data);
     assertWithMessage("isValidUtf8[NIO_HEAP]")
-        .that(safeProcessor.isValidUtf8BufferDefault(buffer, buffer.position(), buffer.remaining()))
+        .that(safeProcessor.isValidUtf8(buffer, buffer.position(), buffer.remaining()))
         .isEqualTo(valid);
 
     // Direct buffers.
@@ -103,16 +102,15 @@ public class Utf8Test {
     buffer.put(data);
     buffer.flip();
     assertWithMessage("isValidUtf8[NIO_DEFAULT]")
-        .that(safeProcessor.isValidUtf8BufferDefault(buffer, buffer.position(), buffer.remaining()))
+        .that(safeProcessor.isValidUtf8(buffer, buffer.position(), buffer.remaining()))
         .isEqualTo(valid);
     assertWithMessage("isValidUtf8[NIO_UNSAFE]")
-        .that(
-            unsafeProcessor.isValidUtf8BufferDirect(buffer, buffer.position(), buffer.remaining()))
+        .that(unsafeProcessor.isValidUtf8(buffer, buffer.position(), buffer.remaining()))
         .isEqualTo(valid);
   }
 
   private static void assertEncoding(String message) {
-    byte[] expected = message.getBytes(StandardCharsets.UTF_8);
+    byte[] expected = message.getBytes(Internal.UTF_8);
     byte[] output = encodeToByteArray(message, expected.length, safeProcessor);
     assertWithMessage("encodeUtf8[ARRAY]")
         .that(output).isEqualTo(expected);
@@ -144,9 +142,8 @@ public class Utf8Test {
     } catch (Throwable t) {
       // Expected
       assertThat(t).isInstanceOf(clazz);
-      assertThat(t)
-          .hasMessageThat()
-          .isEqualTo("Not enough space in output buffer to encode UTF-8 string");
+      // byte[] + safeProcessor will not exit early. We can't match the message since we don't
+      // know which char/index due to random input.
     }
 
     try {
@@ -154,9 +151,9 @@ public class Utf8Test {
       assertWithMessage("Expected " + clazz.getSimpleName()).fail();
     } catch (Throwable t) {
       assertThat(t).isInstanceOf(clazz);
-      assertThat(t)
-          .hasMessageThat()
-          .isEqualTo("Not enough space in output buffer to encode UTF-8 string");
+      // byte[] + unsafeProcessor will exit early, so we have can match the message.
+      String pattern = "Failed writing (.) at index " + length;
+      assertThat(t).hasMessageThat().matches(pattern);
     }
 
     try {
@@ -165,9 +162,8 @@ public class Utf8Test {
     } catch (Throwable t) {
       // Expected
       assertThat(t).isInstanceOf(clazz);
-      assertThat(t)
-          .hasMessageThat()
-          .isEqualTo("Not enough space in output buffer to encode UTF-8 string");
+      // ByteBuffer + safeProcessor will not exit early. We can't match the message since we don't
+      // know which char/index due to random input.
     }
 
     try {
@@ -176,9 +172,8 @@ public class Utf8Test {
     } catch (Throwable t) {
       // Expected
       assertThat(t).isInstanceOf(clazz);
-      assertThat(t)
-          .hasMessageThat()
-          .isEqualTo("Not enough space in output buffer to encode UTF-8 string");
+      // ByteBuffer + safeProcessor will not exit early. We can't match the message since we don't
+      // know which char/index due to random input.
     }
 
     try {
@@ -187,9 +182,13 @@ public class Utf8Test {
     } catch (Throwable t) {
       // Expected
       assertThat(t).isInstanceOf(clazz);
-      assertThat(t)
-          .hasMessageThat()
-          .isEqualTo("Not enough space in output buffer to encode UTF-8 string");
+      // Direct ByteBuffer + unsafeProcessor will exit early if it's not on Android, so we can
+      // match the message. On Android, a direct ByteBuffer will have hasArray() being true and
+      // it will take a different code path and produces a different message.
+      if (!Android.isOnAndroidDevice()) {
+        String pattern = "Failed writing (.) at index " + length;
+        assertThat(t).hasMessageThat().matches(pattern);
+      }
     }
   }
 

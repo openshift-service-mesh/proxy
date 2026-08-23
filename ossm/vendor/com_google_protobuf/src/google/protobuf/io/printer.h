@@ -20,7 +20,6 @@
 #include <string>
 #include <type_traits>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "absl/cleanup/cleanup.h"
@@ -28,13 +27,13 @@
 #include "absl/functional/any_invocable.h"
 #include "absl/functional/function_ref.h"
 #include "absl/log/absl_check.h"
+#include "absl/meta/type_traits.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
-#include "absl/types/span.h"
+#include "absl/types/variant.h"
 #include "google/protobuf/io/zero_copy_sink.h"
-#include "google/protobuf/io/zero_copy_stream.h"
 
 
 // Must be included last.
@@ -125,8 +124,8 @@ class AnnotationProtoCollector : public AnnotationCollector {
                      const std::string& file_path, const std::vector<int>& path,
                      absl::optional<Semantic> semantic) override {
     auto* annotation = annotation_proto_->add_annotation();
-    for (const int segment : path) {
-      annotation->add_path(segment);
+    for (int i = 0; i < path.size(); ++i) {
+      annotation->add_path(path[i]);
     }
     annotation->set_source_file(file_path);
     annotation->set_begin(begin_offset);
@@ -139,8 +138,7 @@ class AnnotationProtoCollector : public AnnotationCollector {
 
   void AddAnnotationNew(Annotation& a) override {
     auto* annotation = annotation_proto_->add_annotation();
-    // TODO: Remove this suppression.
-    (void)annotation->ParseFromString(a.second);
+    annotation->ParseFromString(a.second);
     annotation->set_begin(a.first.first);
     annotation->set_end(a.first.second);
   }
@@ -664,7 +662,7 @@ class PROTOBUF_EXPORT Printer {
   void Indent() { indent_ += options_.spaces_per_indent; }
 
   // Undoes a call to Indent().
-  void Outdent(SourceLocation loc = SourceLocation::current());
+  void Outdent();
 
   // FormatInternal is a helper function not meant to use directly, use
   // compiler::cpp::Formatter instead.
@@ -844,7 +842,7 @@ struct Printer::ValueImpl {
   using StringType = std::conditional_t<owned, std::string, absl::string_view>;
   // These callbacks return false if this is a recursive call.
   using Callback = std::function<bool()>;
-  using StringOrCallback = std::variant<StringType, Callback>;
+  using StringOrCallback = absl::variant<StringType, Callback>;
 
   ValueImpl() = default;
 
@@ -854,7 +852,7 @@ struct Printer::ValueImpl {
                 !IsSubImpl<absl::remove_cvref_t<Value>>::value>>
   ValueImpl(Value&& value)  // NOLINT
       : value(ToStringOrCallback(std::forward<Value>(value), Rank2{})) {
-    if (std::holds_alternative<Callback>(this->value)) {
+    if (absl::holds_alternative<Callback>(this->value)) {
       consume_after = ";,";
     }
   }
@@ -868,9 +866,11 @@ struct Printer::ValueImpl {
   template <bool that_owned>
   ValueImpl& operator=(const ValueImpl<that_owned>& that);
 
-  const StringType* AsString() const { return std::get_if<StringType>(&value); }
+  const StringType* AsString() const {
+    return absl::get_if<StringType>(&value);
+  }
 
-  const Callback* AsCallback() const { return std::get_if<Callback>(&value); }
+  const Callback* AsCallback() const { return absl::get_if<Callback>(&value); }
 
   StringOrCallback value;
   std::string consume_after;
@@ -912,10 +912,10 @@ Printer::ValueImpl<owned>& Printer::ValueImpl<owned>::operator=(
 
   using ThatStringType = typename ValueImpl<that_owned>::StringType;
 
-  if (auto* str = std::get_if<ThatStringType>(&that.value)) {
+  if (auto* str = absl::get_if<ThatStringType>(&that.value)) {
     value = StringType(*str);
   } else {
-    value = std::get<Callback>(that.value);
+    value = absl::get<Callback>(that.value);
   }
 
   consume_after = that.consume_after;

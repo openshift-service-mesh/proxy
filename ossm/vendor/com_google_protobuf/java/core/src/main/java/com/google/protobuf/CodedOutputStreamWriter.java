@@ -18,13 +18,12 @@ import java.util.Map;
 /** An adapter between the {@link Writer} interface and {@link CodedOutputStream}. */
 @CheckReturnValue
 @ExperimentalApi
-@SuppressWarnings({"unchecked", "rawtypes"})
 final class CodedOutputStreamWriter implements Writer {
   private final CodedOutputStream output;
 
   public static CodedOutputStreamWriter forCodedOutput(CodedOutputStream output) {
     if (output.wrapper != null) {
-      return (CodedOutputStreamWriter) output.wrapper;
+      return output.wrapper;
     }
     return new CodedOutputStreamWriter(output);
   }
@@ -128,13 +127,9 @@ final class CodedOutputStreamWriter implements Writer {
     output.writeMessage(fieldNumber, (MessageLite) value);
   }
 
-  @SuppressWarnings({"unchecked", "rawtypes"})
   @Override
   public void writeMessage(int fieldNumber, Object value, Schema schema) throws IOException {
-    AbstractMessageLite<?, ?> message = (AbstractMessageLite) value;
-    output.writeTag(fieldNumber, WireFormat.WIRETYPE_LENGTH_DELIMITED);
-    output.writeUInt32NoTag(message.getSerializedSize(schema));
-    schema.writeTo(message, this);
+    output.writeMessage(fieldNumber, (MessageLite) value, schema);
   }
 
   @Deprecated
@@ -143,13 +138,9 @@ final class CodedOutputStreamWriter implements Writer {
     output.writeGroup(fieldNumber, (MessageLite) value);
   }
 
-  @SuppressWarnings({"unchecked", "rawtypes"})
   @Override
   public void writeGroup(int fieldNumber, Object value, Schema schema) throws IOException {
-    AbstractMessageLite<?, ?> message = (AbstractMessageLite) value;
-    output.writeTag(fieldNumber, WireFormat.WIRETYPE_START_GROUP);
-    schema.writeTo(message, this);
-    output.writeTag(fieldNumber, WireFormat.WIRETYPE_END_GROUP);
+    output.writeGroup(fieldNumber, (MessageLite) value, schema);
   }
 
   @Deprecated
@@ -339,7 +330,6 @@ final class CodedOutputStreamWriter implements Writer {
       }
     }
   }
-
   @Override
   public void writeUInt64List(int fieldNumber, List<Long> value, boolean packed)
       throws IOException {
@@ -1035,11 +1025,11 @@ final class CodedOutputStreamWriter implements Writer {
     switch (metadata.keyType) {
       case BOOL:
         V value;
-        if ((value = map.get(false)) != null) {
+        if ((value = map.get(Boolean.FALSE)) != null) {
           writeDeterministicBooleanMapEntry(
               fieldNumber, /* key= */ false, value, (MapEntryLite.Metadata<Boolean, V>) metadata);
         }
-        if ((value = map.get(true)) != null) {
+        if ((value = map.get(Boolean.TRUE)) != null) {
           writeDeterministicBooleanMapEntry(
               fieldNumber, /* key= */ true, value, (MapEntryLite.Metadata<Boolean, V>) metadata);
         }

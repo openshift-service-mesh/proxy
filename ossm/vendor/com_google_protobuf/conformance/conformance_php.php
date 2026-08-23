@@ -36,8 +36,6 @@ if (!ini_get('date.timezone')) {
     ini_set('date.timezone', 'UTC');
 }
 
-error_reporting(0);
-
 $test_count = 0;
 
 function doTest($request)
@@ -63,9 +61,6 @@ function doTest($request)
                 case 'protobuf_test_messages.editions.TestAllTypesEdition2023':
                     $response->setSkipped('PHP doesn\'t support editions-specific features yet');
                     return $response;
-                case 'protobuf_test_messages.edition_unstable.TestAllTypesEditionUnstable':
-                    $response->setSkipped('PHP doesn\'t support editions-specific features yet');
-                    return $response;
                 case '':
                     trigger_error(
                         'Protobuf request doesn\'t have specific payload type',
@@ -83,9 +78,6 @@ function doTest($request)
             } catch (Exception $e) {
                 $response->setParseError($e->getMessage());
                 return $response;
-            } catch (Error $e) {
-                $response->setParseError($e->getMessage());
-                return $response;
             }
             break;
 
@@ -94,7 +86,6 @@ function doTest($request)
                 case 'protobuf_test_messages.editions.proto3.TestAllTypesProto3':
                     $test_message = new TestAllTypesProto3Editions();
                     break;
-                case 'protobuf_test_messages.proto2.TestAllTypesProto2':
                 case 'protobuf_test_messages.editions.proto2.TestAllTypesProto2':
                     $response->setSkipped('PHP doesn\'t support proto2');
                     return $response;
@@ -110,9 +101,6 @@ function doTest($request)
                     $ignore_json_unknown
                 );
             } catch (Exception $e) {
-                $response->setParseError($e->getMessage());
-                return $response;
-            } catch (Error $e) {
                 $response->setParseError($e->getMessage());
                 return $response;
             }
@@ -138,9 +126,6 @@ function doTest($request)
             try {
                 $response->setJsonPayload($test_message->serializeToJsonString());
             } catch (Exception $e) {
-                $response->setSerializeError($e->getMessage());
-                return $response;
-            } catch (Error $e) {
                 $response->setSerializeError($e->getMessage());
                 return $response;
             }

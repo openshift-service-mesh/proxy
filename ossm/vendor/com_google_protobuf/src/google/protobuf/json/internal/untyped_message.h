@@ -1,6 +1,3 @@
-#ifndef GOOGLE_PROTOBUF_JSON_INTERNAL_UNTYPED_MESSAGE_H__
-#define GOOGLE_PROTOBUF_JSON_INTERNAL_UNTYPED_MESSAGE_H__
-
 #include "absl/log/absl_check.h"
 // Protocol Buffers - Google's data interchange format
 // Copyright 2008 Google Inc.  All rights reserved.
@@ -17,7 +14,6 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "google/protobuf/type.pb.h"
@@ -27,6 +23,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
+#include "absl/types/variant.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/dynamic_message.h"
 #include "google/protobuf/io/coded_stream.h"
@@ -149,14 +146,14 @@ class UntypedMessage final {
  public:
   // New nominal type instead of `bool` to avoid vector<bool> shenanigans.
   enum Bool : unsigned char { kTrue, kFalse };
-  using Value = std::variant<Bool, int32_t, uint32_t, int64_t, uint64_t, float,
-                             double, std::string, UntypedMessage,
-                             //
-                             std::vector<Bool>, std::vector<int32_t>,
-                             std::vector<uint32_t>, std::vector<int64_t>,
-                             std::vector<uint64_t>, std::vector<float>,
-                             std::vector<double>, std::vector<std::string>,
-                             std::vector<UntypedMessage>>;
+  using Value = absl::variant<Bool, int32_t, uint32_t, int64_t, uint64_t, float,
+                              double, std::string, UntypedMessage,
+                              //
+                              std::vector<Bool>, std::vector<int32_t>,
+                              std::vector<uint32_t>, std::vector<int64_t>,
+                              std::vector<uint64_t>, std::vector<float>,
+                              std::vector<double>, std::vector<std::string>,
+                              std::vector<UntypedMessage>>;
 
   UntypedMessage(const UntypedMessage&) = delete;
   UntypedMessage& operator=(const UntypedMessage&) = delete;
@@ -180,7 +177,7 @@ class UntypedMessage final {
       return 0;
     }
 
-    return std::visit(SizeVisitor{}, *it->second);
+    return absl::visit(SizeVisitor{}, it->second);
   }
 
   // Returns the contents of a field by number.
@@ -196,9 +193,9 @@ class UntypedMessage final {
       return {};
     }
 
-    if (auto* val = std::get_if<T>(it->second.get())) {
+    if (auto* val = absl::get_if<T>(&it->second)) {
       return absl::Span<const T>(val, 1);
-    } else if (auto* vec = std::get_if<std::vector<T>>(it->second.get())) {
+    } else if (auto* vec = absl::get_if<std::vector<T>>(&it->second)) {
       return *vec;
     } else {
       ABSL_CHECK(false) << "wrong type for UntypedMessage::Get(" << field_number
@@ -230,11 +227,7 @@ class UntypedMessage final {
   absl::Status InsertField(const ResolverPool::Field& field, T&& value);
 
   const ResolverPool::Message* desc_;
-  // We use std::unique_ptr here to work around a compiler error with older
-  // versions of Clang when this is built for C++20. Once we can drop support
-  // for Clang 14 and below, we should drop the extra indirection and have just
-  // Value as the value type of the map.
-  absl::flat_hash_map<int32_t, std::unique_ptr<Value>> fields_;
+  absl::flat_hash_map<int32_t, Value> fields_;
 };
 }  // namespace json_internal
 }  // namespace protobuf
@@ -242,5 +235,3 @@ class UntypedMessage final {
 
 #include "google/protobuf/port_undef.inc"
 #endif  // GOOGLE_PROTOBUF_UITL_UNTYPED_MESSAGE_H__
-
-#endif  // GOOGLE_PROTOBUF_JSON_INTERNAL_UNTYPED_MESSAGE_H__

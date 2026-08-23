@@ -11,50 +11,15 @@ class GeneratedPhpdocTest extends TestBase
     {
         $class = new ReflectionClass('Foo\TestMessage');
         $doc = $class->getDocComment();
-        $this->assertStringContainsString('foo.TestMessage', $doc);
+        $this->assertStringContains('foo.TestMessage', $doc);
     }
 
     public function testPhpDocForConstructor()
     {
         $class = new ReflectionClass('Foo\TestMessage');
         $doc = $class->getMethod('__construct')->getDocComment();
-        $this->assertStringContainsString('@param array $data', $doc);
-        $this->assertStringContainsString('@type int $optional_int32', $doc);
-    }
-
-    /**
-     * @dataProvider providePhpDocForEnum
-     */
-    public function testPhpDocForEnum($method, $enumClass)
-    {
-        $class = new ReflectionClass('Foo\TestMessage');
-        $doc = $class->getMethod($method)->getDocComment();
-        $this->assertStringContainsString(
-            sprintf('one of the values in {@see %s}', $enumClass),
-            $doc
-        );
-    }
-
-    public static function providePhpDocForEnum()
-    {
-        return [
-            ['getOptionalEnum', '\Foo\TestEnum'],
-            ['setOptionalEnum', '\Foo\TestEnum'],
-            ['getTrueOptionalEnum', '\Foo\TestEnum'],
-            ['setTrueOptionalEnum', '\Foo\TestEnum'],
-            ['getRepeatedEnum', '\Foo\TestEnum'],
-            ['setRepeatedEnum', '\Foo\TestEnum'],
-            ['getOneofEnum', '\Foo\TestEnum'],
-            ['setOneofEnum', '\Foo\TestEnum'],
-            ['getOptionalNoNamespaceEnum', '\NoNamespaceEnum'],
-            ['setOptionalNoNamespaceEnum', '\NoNamespaceEnum'],
-            ['getRepeatedNoNamespaceEnum', '\NoNamespaceEnum'],
-            ['setRepeatedNoNamespaceEnum', '\NoNamespaceEnum'],
-            ['getOptionalNestedEnum', '\Foo\TestMessage\NestedEnum'],
-            ['setOptionalNestedEnum', '\Foo\TestMessage\NestedEnum'],
-            ['getDeprecatedEnum', '\Foo\TestMessage\NestedEnum'],
-            ['setDeprecatedEnum', '\Foo\TestMessage\NestedEnum'],
-        ];
+        $this->assertStringContains('@param array $data', $doc);
+        $this->assertStringContains('@type int $optional_int32', $doc);
     }
 
     /**
@@ -65,11 +30,11 @@ class GeneratedPhpdocTest extends TestBase
         $class = new ReflectionClass('Foo\TestMessage');
         foreach ($methods as $method) {
             $doc = $class->getMethod($method)->getDocComment();
-            $this->assertStringContainsString($expectedDoc, $doc);
+            $this->assertStringContains($expectedDoc, $doc);
         }
     }
 
-    public static function providePhpDocForGettersAndSetters()
+    public function providePhpDocForGettersAndSetters()
     {
         return [
             [
@@ -143,62 +108,27 @@ class GeneratedPhpdocTest extends TestBase
             [
                 [
                     'getRepeatedInt32',
-                    'getRepeatedUint32',
-                    'getRepeatedSint32',
-                    'getRepeatedFixed32',
-                    'getRepeatedSfixed32',
-                    'getRepeatedEnum',
-                    'getRepeatedNoNamespaceEnum',
-                ],
-                '@return RepeatedField<int>'
-            ],
-            [
-                [
                     'getRepeatedInt64',
+                    'getRepeatedUint32',
                     'getRepeatedUint64',
+                    'getRepeatedSint32',
                     'getRepeatedSint64',
+                    'getRepeatedFixed32',
                     'getRepeatedFixed64',
+                    'getRepeatedSfixed32',
                     'getRepeatedSfixed64',
-                ],
-                '@return RepeatedField<int>|RepeatedField<string>'
-            ],
-            [
-                [
                     'getRepeatedFloat',
                     'getRepeatedDouble',
-                ],
-                '@return RepeatedField<float>'
-            ],
-            [
-                [
                     'getRepeatedBool',
-                ],
-                '@return RepeatedField<bool>'
-            ],
-            [
-                [
                     'getRepeatedString',
                     'getRepeatedBytes',
-                ],
-                '@return RepeatedField<string>'
-            ],
-            [
-                [
+                    'getRepeatedEnum',
                     'getRepeatedMessage',
-                ],
-                '@return RepeatedField<\Foo\TestMessage\Sub>'
-            ],
-            [
-                [
                     'getRepeatedRecursive',
-                ],
-                '@return RepeatedField<\Foo\TestMessage>'
-            ],
-            [
-                [
                     'getRepeatedNoNamespaceMessage',
+                    'getRepeatedNoNamespaceEnum',
                 ],
-                '@return RepeatedField<\NoNamespaceMessage>'
+                '@return \Google\Protobuf\Internal\RepeatedField'
             ],
             [
                 [
@@ -233,7 +163,7 @@ class GeneratedPhpdocTest extends TestBase
                     'setRepeatedEnum',
                     'setRepeatedNoNamespaceEnum',
                 ],
-                '@param int[] $var'
+                '@param array<int>|\Google\Protobuf\Internal\RepeatedField $var'
             ],
             [
                 [
@@ -243,45 +173,45 @@ class GeneratedPhpdocTest extends TestBase
                     'setRepeatedFixed64',
                     'setRepeatedSfixed64',
                 ],
-                '@param int[]|string[] $var'
+                '@param array<int>|array<string>|\Google\Protobuf\Internal\RepeatedField $var'
             ],
             [
                 [
                     'setRepeatedFloat',
                     'setRepeatedDouble',
                 ],
-                '@param float[] $var'
+                '@param array<float>|\Google\Protobuf\Internal\RepeatedField $var'
             ],
             [
                 [
                     'setRepeatedBool',
                 ],
-                '@param bool[] $var'
+                '@param array<bool>|\Google\Protobuf\Internal\RepeatedField $var'
             ],
             [
                 [
                     'setRepeatedString',
                     'setRepeatedBytes',
                 ],
-                '@param string[] $var'
+                '@param array<string>|\Google\Protobuf\Internal\RepeatedField $var'
             ],
             [
                 [
                     'setRepeatedMessage',
                 ],
-                '@param \Foo\TestMessage\Sub[] $var'
+                '@param array<\Foo\TestMessage\Sub>|\Google\Protobuf\Internal\RepeatedField $var'
             ],
             [
                 [
                     'setRepeatedRecursive',
                 ],
-                '@param \Foo\TestMessage[] $var'
+                '@param array<\Foo\TestMessage>|\Google\Protobuf\Internal\RepeatedField $var'
             ],
             [
                 [
                     'setRepeatedNoNamespaceMessage',
                 ],
-                '@param \NoNamespaceMessage[] $var'
+                '@param array<\NoNamespaceMessage>|\Google\Protobuf\Internal\RepeatedField $var'
             ],
             [
                 [

@@ -13,8 +13,6 @@
 #define GOOGLE_PROTOBUF_COMPILER_CPP_PADDING_OPTIMIZER_H__
 
 #include "google/protobuf/compiler/cpp/message_layout_helper.h"
-#include "google/protobuf/compiler/cpp/options.h"
-#include "google/protobuf/descriptor.h"
 
 namespace google {
 namespace protobuf {
@@ -26,24 +24,14 @@ namespace cpp {
 // For example, grouping four boolean fields and one int32
 // field results in zero padding overhead. See OptimizeLayout's
 // comment for details.
-class PaddingOptimizer final : public MessageLayoutHelper {
+class PaddingOptimizer : public MessageLayoutHelper {
  public:
-  explicit PaddingOptimizer(const Descriptor* descriptor)
-      : MessageLayoutHelper(descriptor) {}
-  ~PaddingOptimizer() override = default;
+  PaddingOptimizer() {}
+  ~PaddingOptimizer() override {}
 
- private:
-  bool HasProfiledData() const override { return false; }
-
-  FieldHotness GetFieldHotness(const FieldDescriptor* field,
-                               const Options& options) const override {
-    // Assume all fields are hot.
-    return FieldHotness::kHot;
-  }
-
-  FieldGroup SingleFieldGroup(const FieldDescriptor* field) const override {
-    return FieldGroup(field->number(), field);
-  }
+  void OptimizeLayout(std::vector<const FieldDescriptor*>* fields,
+                      const Options& options,
+                      MessageSCCAnalyzer* scc_analyzer) override;
 };
 
 }  // namespace cpp

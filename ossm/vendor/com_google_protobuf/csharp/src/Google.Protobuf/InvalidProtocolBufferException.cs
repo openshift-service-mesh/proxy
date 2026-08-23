@@ -76,12 +76,6 @@ namespace Google.Protobuf
             return new InvalidProtocolBufferException("Invalid base64 data", innerException);
         }
 
-        internal static InvalidProtocolBufferException InvalidUtf8(Exception innerException)
-        {
-            return new InvalidProtocolBufferException(
-                "String is invalid UTF-8.", innerException);
-        }
-
         internal static InvalidProtocolBufferException InvalidEndTag()
         {
             return new InvalidProtocolBufferException(

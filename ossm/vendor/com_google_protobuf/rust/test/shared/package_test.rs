@@ -7,11 +7,6 @@
 
 //! Tests covering proto packages.
 
-#[cfg(not(bzl))]
-mod protos;
-#[cfg(not(bzl))]
-use protos::*;
-
 use googletest::prelude::*;
 
 #[gtest]

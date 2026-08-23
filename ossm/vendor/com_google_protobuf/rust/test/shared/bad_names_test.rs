@@ -5,22 +5,14 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
-#[cfg(not(bzl))]
-mod protos;
-#[cfg(not(bzl))]
-use protos::*;
-
 use bad_names_rust_proto::*;
 use googletest::prelude::*;
-use protobuf::proto;
 
 #[gtest]
 fn test_reserved_keyword_in_accessors() {
-    let mut msg = Self_::new();
-    let res = msg.self_().r#for();
+    let msg = Self__mangled_because_ident_isnt_a_legal_raw_identifier::new();
+    let res = msg.self__mangled_because_ident_isnt_a_legal_raw_identifier().r#for();
     assert_that!(res, eq(0));
-    msg.set_new(true);
-    assert_that!(msg.new_(), eq(true));
 }
 
 #[gtest]
@@ -30,29 +22,11 @@ fn test_reserved_keyword_in_messages() {
 }
 
 #[gtest]
-fn test_reserved_keyword_with_proto_macro() {
-    let _ = proto!(Self_ { r#true: false, r#match: [0i32] });
-}
-
-#[gtest]
 fn test_collision_in_accessors() {
     let mut m = AccessorsCollide::new();
     m.set_x_mut_5(false);
     assert_that!(m.x_mut_5(), eq(false));
     assert_that!(m.has_x_mut_5(), eq(true));
-    assert_that!(m.has_set_x_2(), eq(false));
-
     assert_that!(m.has_x(), eq(false));
-    m.x_mut();
-    m.clear_x_7();
-    assert_that!(m.has_x(), eq(true));
-    assert_that!(m.has_clear_x_7(), eq(false));
-}
-
-#[gtest]
-fn test_mangled_names() {
-    let _ = MangleViewTest::new();
-    let _ = MangleViewTestView_::new();
-    let _ = SomeMsg::new();
-    let _ = SomeMsgView_::Unspecified;
+    assert_that!(m.has_set_x_2(), eq(false));
 }

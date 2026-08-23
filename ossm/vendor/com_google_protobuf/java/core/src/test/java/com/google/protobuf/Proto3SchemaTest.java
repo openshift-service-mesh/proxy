@@ -13,6 +13,10 @@ import org.junit.runners.JUnit4;
 
 @RunWith(JUnit4.class)
 public class Proto3SchemaTest extends AbstractProto3SchemaTest {
+  @Override
+  protected void registerSchemas() {
+    TestSchemas.registerGenericProto3Schemas();
+  }
 
   @Override
   protected Schema<Proto3Message> schema() {

@@ -8,12 +8,13 @@
 #include "google/protobuf/json/internal/untyped_message.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cstdint>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "google/protobuf/type.pb.h"
@@ -26,6 +27,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
+#include "absl/types/variant.h"
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/port.h"
 #include "google/protobuf/util/type_resolver.h"
@@ -199,10 +201,6 @@ PROTOBUF_NOINLINE static absl::Status MakeTooDeepError() {
   return absl::InvalidArgumentError("allowed depth exceeded");
 }
 
-PROTOBUF_NOINLINE static absl::Status MakeMalformedLengthDelimError() {
-  return absl::InvalidArgumentError("malformed length-delimited field");
-}
-
 absl::Status UntypedMessage::Decode(io::CodedInputStream& stream,
                                     absl::optional<int32_t> current_group) {
   std::vector<int32_t> group_stack;
@@ -260,9 +258,7 @@ absl::Status UntypedMessage::Decode(io::CodedInputStream& stream,
           if (!stream.ReadVarint32(&x)) {
             return MakeUnexpectedEofError();
           }
-          if (!stream.Skip(x)) {
-            return MakeMalformedLengthDelimError();
-          }
+          stream.Skip(x);
           continue;
         }
         case WireFormatLite::WIRETYPE_START_GROUP: {
@@ -522,8 +518,7 @@ absl::Status UntypedMessage::DecodeDelimited(io::CodedInputStream& stream,
       break;
     }
   }
-  // TODO: Remove this suppression.
-  (void)stream.DecrementRecursionDepthAndPopLimit(limit);
+  stream.DecrementRecursionDepthAndPopLimit(limit);
   return absl::OkStatus();
 }
 
@@ -531,10 +526,8 @@ template <typename T>
 absl::Status UntypedMessage::InsertField(const ResolverPool::Field& field,
                                          T&& value) {
   int32_t number = field.proto().number();
-  auto emplace_result = fields_.try_emplace(number);
+  auto emplace_result = fields_.try_emplace(number, std::forward<T>(value));
   if (emplace_result.second) {
-    emplace_result.first->second =
-        std::make_unique<Value>(std::forward<T>(value));
     return absl::OkStatus();
   }
 
@@ -544,15 +537,15 @@ absl::Status UntypedMessage::InsertField(const ResolverPool::Field& field,
         absl::StrCat("repeated entries for singular field number ", number));
   }
 
-  Value& slot = *emplace_result.first->second;
+  Value& slot = emplace_result.first->second;
   using value_type = std::decay_t<T>;
-  if (auto* extant = std::get_if<value_type>(&slot)) {
+  if (auto* extant = absl::get_if<value_type>(&slot)) {
     std::vector<value_type> repeated;
     repeated.push_back(std::move(*extant));
     repeated.push_back(std::forward<T>(value));
 
     slot = std::move(repeated);
-  } else if (auto* extant = std::get_if<std::vector<value_type>>(&slot)) {
+  } else if (auto* extant = absl::get_if<std::vector<value_type>>(&slot)) {
     extant->push_back(std::forward<T>(value));
   } else {
     absl::optional<absl::string_view> name =

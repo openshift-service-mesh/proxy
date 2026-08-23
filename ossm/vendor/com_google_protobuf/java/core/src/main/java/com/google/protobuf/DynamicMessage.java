@@ -31,18 +31,7 @@ public final class DynamicMessage extends AbstractMessage {
   private final FieldSet<FieldDescriptor> fields;
   private final FieldDescriptor[] oneofCases;
   private final UnknownFieldSet unknownFields;
-
-  /**
-   * Stores previously-computed {@code isInitialized} results. {@code isInitialized} can be
-   * expensive to compute in situations where a large message is converted to a builder, modified,
-   * and then rebuilt. A byte field used instead of an idiomatic tristate enum to follow the pattern
-   * established on gencode, micro-optimizing for better layout.
-   */
-  private transient byte memoizedIsInitialized = NO_MEMO_PRESENT;
-
-  private static final byte NO_MEMO_PRESENT = -1;
-  private static final byte IS_INITIALIZED_FALSE = 0;
-  private static final byte IS_INITIALIZED_TRUE = 1;
+  private int memoizedSize = -1;
 
   /**
    * Construct a {@code DynamicMessage} using the given {@code FieldSet}. oneofCases stores the
@@ -212,9 +201,7 @@ public final class DynamicMessage extends AbstractMessage {
 
   static boolean isInitialized(Descriptor type, FieldSet<FieldDescriptor> fields) {
     // Check that all required fields are present.
-    int numFields = type.getFieldCount();
-    for (int i = 0; i < numFields; i++) {
-      FieldDescriptor field = type.getField(i);
+    for (final FieldDescriptor field : type.getFields()) {
       if (field.isRequired()) {
         if (!fields.hasField(field)) {
           return false;
@@ -228,18 +215,7 @@ public final class DynamicMessage extends AbstractMessage {
 
   @Override
   public boolean isInitialized() {
-    if (memoizedIsInitialized == IS_INITIALIZED_TRUE) {
-      return true;
-    }
-    if (memoizedIsInitialized == IS_INITIALIZED_FALSE) {
-      return false;
-    }
-    if (isInitialized(type, fields)) {
-      memoizedIsInitialized = IS_INITIALIZED_TRUE;
-      return true;
-    }
-    memoizedIsInitialized = IS_INITIALIZED_FALSE;
-    return false;
+    return isInitialized(type, fields);
   }
 
   @Override
@@ -256,9 +232,7 @@ public final class DynamicMessage extends AbstractMessage {
   @Override
   public int getSerializedSize() {
     int size = memoizedSize;
-    if (size != -1) {
-      return size;
-    }
+    if (size != -1) return size;
 
     if (type.getOptions().getMessageSetWireFormat()) {
       size = fields.getMessageSetSerializedSize();
@@ -402,9 +376,7 @@ public final class DynamicMessage extends AbstractMessage {
     public DynamicMessage buildPartial() {
       // Set default values for all fields in a MapEntry.
       if (type.getOptions().getMapEntry()) {
-        int numFields = type.getFieldCount();
-        for (int i = 0; i < numFields; i++) {
-          FieldDescriptor field = type.getField(i);
+        for (FieldDescriptor field : type.getFields()) {
           if (field.isOptional() && !fields.hasField(field)) {
             if (field.getJavaType() == FieldDescriptor.JavaType.MESSAGE) {
               fields.setField(field, getDefaultInstance(field.getMessageType()));
@@ -436,9 +408,7 @@ public final class DynamicMessage extends AbstractMessage {
     @Override
     public boolean isInitialized() {
       // Check that all required fields are present.
-      int numFields = type.getFieldCount();
-      for (int i = 0; i < numFields; i++) {
-        FieldDescriptor field = type.getField(i);
+      for (FieldDescriptor field : type.getFields()) {
         if (field.isRequired()) {
           if (!fields.hasField(field)) {
             return false;
@@ -527,12 +497,6 @@ public final class DynamicMessage extends AbstractMessage {
 
     @Override
     public Builder setField(FieldDescriptor field, Object value) {
-      // This should be kept as long as LazyField is still around. We will use InternalLazyField
-      // as the internal details so we should not allow the legacy LazyField to be passed in.
-      // TODO: Consider converting from LazyField to InternalLazyField here.
-      if (value instanceof LazyField) {
-        value = ((LazyField) value).getValue();
-      }
       verifyContainingType(field);
       // TODO: This check should really be put in FieldSet.setField()
       // where all other such checks are done. However, currently
@@ -549,9 +513,7 @@ public final class DynamicMessage extends AbstractMessage {
         }
         oneofCases[index] = field;
       } else if (!field.hasPresence()) {
-        if (field.isRepeated()
-            ? ((List<?>) value).isEmpty()
-            : value.equals(field.getDefaultValue())) {
+        if (!field.isRepeated() && value.equals(field.getDefaultValue())) {
           // Setting a field without presence to its default value is equivalent to clearing the
           // field.
           fields.clearField(field);
@@ -737,8 +699,8 @@ public final class DynamicMessage extends AbstractMessage {
         return (Message.Builder) o;
       }
 
-      if (o instanceof InternalLazyField) {
-        o = ((InternalLazyField) o).getValue();
+      if (o instanceof LazyField) {
+        o = ((LazyField) o).getValue();
       }
       if (o instanceof Message) {
         return ((Message) o).toBuilder();

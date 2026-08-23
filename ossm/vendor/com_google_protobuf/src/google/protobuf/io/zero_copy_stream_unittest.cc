@@ -42,6 +42,7 @@
 #include <utility>
 #include <vector>
 
+#include "google/protobuf/stubs/common.h"
 #include "google/protobuf/testing/file.h"
 #include "google/protobuf/testing/file.h"
 #include <gtest/gtest.h>
@@ -52,11 +53,9 @@
 #include "absl/strings/cord_buffer.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "absl/synchronization/mutex.h"
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/io_win32.h"
 #include "google/protobuf/io/zero_copy_stream_impl.h"
-#include "google/protobuf/port.h"
 #include "google/protobuf/test_util2.h"
 
 #if HAVE_ZLIB
@@ -360,7 +359,7 @@ TEST_F(IoTest, GzipIo) {
           }
           GzipOutputStream gzout(&output, options);
           WriteStuff(&gzout);
-          (void)gzout.Close();
+          gzout.Close();
           size = output.ByteCount();
         }
         {
@@ -395,7 +394,7 @@ TEST_F(IoTest, GzipIoWithFlush) {
           GzipOutputStream gzout(&output, options);
           WriteStuff(&gzout);
           EXPECT_TRUE(gzout.Flush());
-          (void)gzout.Close();
+          gzout.Close();
           size = output.ByteCount();
         }
         {
@@ -427,7 +426,7 @@ TEST_F(IoTest, GzipIoContiguousFlushes) {
   WriteStuff(&gzout);
   EXPECT_TRUE(gzout.Flush());
   EXPECT_TRUE(gzout.Flush());
-  (void)gzout.Close();
+  gzout.Close();
   size = output.ByteCount();
 
   ArrayInputStream input(buffer, size, block_size);
@@ -460,7 +459,7 @@ TEST_F(IoTest, GzipIoReadAfterFlush) {
   GzipInputStream gzin(&input, GzipInputStream::GZIP, gzip_buffer_size);
   ReadStuff(&gzin);
 
-  (void)gzout.Close();
+  gzout.Close();
 
   delete[] buffer;
 }
@@ -482,7 +481,7 @@ TEST_F(IoTest, ZlibIo) {
           }
           GzipOutputStream gzout(&output, options);
           WriteStuff(&gzout);
-          (void)gzout.Close();
+          gzout.Close();
           size = output.ByteCount();
         }
         {
@@ -506,7 +505,7 @@ TEST_F(IoTest, ZlibIoInputAutodetect) {
     options.format = GzipOutputStream::ZLIB;
     GzipOutputStream gzout(&output, options);
     WriteStuff(&gzout);
-    (void)gzout.Close();
+    gzout.Close();
     size = output.ByteCount();
   }
   {
@@ -520,7 +519,7 @@ TEST_F(IoTest, ZlibIoInputAutodetect) {
     options.format = GzipOutputStream::GZIP;
     GzipOutputStream gzout(&output, options);
     WriteStuff(&gzout);
-    (void)gzout.Close();
+    gzout.Close();
     size = output.ByteCount();
   }
   {
@@ -559,7 +558,7 @@ std::string IoTest::Uncompress(const std::string& data) {
 TEST_F(IoTest, CompressionOptions) {
   // Some ad-hoc testing of compression options.
 
-  proto2_unittest::TestAllTypes message;
+  protobuf_unittest::TestAllTypes message;
   TestUtil::SetAllFields(&message);
   std::string golden = message.SerializeAsString();
 
@@ -782,7 +781,7 @@ TEST(DefaultReadCordTest, ReadCordEof) {
 
   absl::Cord dest;
   ArrayInputStream input(source.data(), source.size());
-  (void)input.Skip(1);
+  input.Skip(1);
   EXPECT_FALSE(input.ReadCord(&dest, source.size()));
 
   absl::Cord expected(source);
@@ -980,7 +979,7 @@ TEST_F(IoTest, ReadCordEof) {
 
   absl::Cord dest;
   CordInputStream input(&source);
-  (void)input.Skip(1);
+  input.Skip(1);
   EXPECT_FALSE(input.ReadCord(&dest, source.size()));
 
   absl::Cord expected = source;
@@ -1264,7 +1263,7 @@ TEST(CordOutputStreamTest, UsesPrivateCapacityInAppendedCord) {
 
   // Add cord. Clearing it makes it privately owned by 'output' as it's non
   // trivial size guarantees it is ref counted, not deep copied.
-  (void)output.WriteCord(cord);
+  output.WriteCord(cord);
   cord.Clear();
 
   ASSERT_TRUE(output.Next(&data, &size));
@@ -1447,14 +1446,14 @@ TEST_F(IoTest, NonBlockingFileIo) {
       ASSERT_EQ(fcntl(fd[0], F_SETFL, O_NONBLOCK), 0);
       ASSERT_EQ(fcntl(fd[1], F_SETFL, O_NONBLOCK), 0);
 
-      absl::Mutex go_write;
-      go_write.Lock();
+      std::mutex go_write;
+      go_write.lock();
 
       bool done_reading = false;
 
       std::thread write_thread([this, fd, &go_write, i]() {
-        go_write.Lock();
-        go_write.Unlock();
+        go_write.lock();
+        go_write.unlock();
         FileOutputStream output(fd[1], kBlockSizes[i]);
         WriteStuff(&output);
         EXPECT_EQ(0, output.GetErrno());
@@ -1473,7 +1472,7 @@ TEST_F(IoTest, NonBlockingFileIo) {
       // reading thread waits for the data to be available before returning.
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       EXPECT_FALSE(done_reading);
-      go_write.Unlock();
+      go_write.unlock();
       write_thread.join();
       read_thread.join();
       EXPECT_TRUE(done_reading);
@@ -1513,8 +1512,8 @@ TEST_F(IoTest, GzipFileIo) {
         FileOutputStream output(file, kBlockSizes[i]);
         GzipOutputStream gzout(&output);
         WriteStuffLarge(&gzout);
-        (void)gzout.Close();
-        (void)output.Flush();
+        gzout.Close();
+        output.Flush();
         EXPECT_EQ(0, output.GetErrno());
       }
 
@@ -1560,7 +1559,7 @@ class MsvcDebugDisabler {
 #else
   // Dummy constructor and destructor to ensure that GCC doesn't complain
   // that debug_disabler is an unused variable.
-  MsvcDebugDisabler() = default;
+  MsvcDebugDisabler() {}
   ~MsvcDebugDisabler() {}
 #endif
 };

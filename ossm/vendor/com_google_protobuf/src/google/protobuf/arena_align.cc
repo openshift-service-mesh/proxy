@@ -8,6 +8,7 @@
 #include "google/protobuf/arena_align.h"
 
 #include <cstddef>
+#include <cstdint>
 
 namespace google {
 namespace protobuf {

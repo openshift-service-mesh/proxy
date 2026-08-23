@@ -8,26 +8,11 @@
 #include "google/protobuf/parse_context.h"
 
 #include <algorithm>
-#include <climits>
-#include <cstddef>
-#include <cstdint>
 #include <cstring>
-#include <memory>
-#include <string>
-#include <utility>
 
-#include "absl/base/optimization.h"
-#include "absl/base/prefetch.h"
-#include "absl/log/absl_check.h"
-#include "absl/numeric/bits.h"
 #include "absl/strings/cord.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/span.h"
-#include "google/protobuf/internal_visibility.h"
 #include "google/protobuf/message_lite.h"
-#include "google/protobuf/micro_string.h"
-#include "google/protobuf/port.h"
 #include "google/protobuf/repeated_field.h"
 #include "google/protobuf/wire_format_lite.h"
 #include "utf8_validity.h"
@@ -40,8 +25,14 @@ namespace google {
 namespace protobuf {
 namespace internal {
 
-namespace {
-bool ParsingEndsInBuffer(const char* ptr, const char* end, int depth) {
+// Only call if at start of tag.
+bool EpsCopyInputStream::ParseEndsInSlopRegion(const char* begin, int overrun,
+                                               int depth) {
+  constexpr int kSlopBytes = EpsCopyInputStream::kSlopBytes;
+  ABSL_DCHECK_GE(overrun, 0);
+  ABSL_DCHECK_LE(overrun, kSlopBytes);
+  auto ptr = begin + overrun;
+  auto end = begin + kSlopBytes;
   while (ptr < end) {
     uint32_t tag;
     ptr = ReadTag(ptr, &tag);
@@ -70,7 +61,7 @@ bool ParsingEndsInBuffer(const char* ptr, const char* end, int depth) {
         depth++;
         break;
       }
-      case 4: {                        // end group
+      case 4: {                    // end group
         if (--depth < 0) return true;  // We exit early
         break;
       }
@@ -83,32 +74,6 @@ bool ParsingEndsInBuffer(const char* ptr, const char* end, int depth) {
     }
   }
   return false;
-}
-}  // namespace
-
-bool EpsCopyInputStream::IsRequestedLessThanOrEqualTo(int requested,
-                                                      int available) {
-  return static_cast<int64_t>(static_cast<uint32_t>(requested)) <=
-         static_cast<int64_t>(available);
-}
-
-bool EpsCopyInputStream::CanReadFromPtr(int requested, const char* ptr) {
-  return IsRequestedLessThanOrEqualTo(requested, BytesAvailable(ptr));
-}
-
-bool EpsCopyInputStream::HasEnoughTillLimit(int requested, const char* ptr) {
-  return IsRequestedLessThanOrEqualTo(requested, BytesUntilLimit(ptr));
-}
-
-// Only call if at start of tag.
-bool EpsCopyInputStream::ParseEndsInSlopRegion(const char* begin, int overrun,
-                                               int depth) {
-  constexpr int kSlopBytes = EpsCopyInputStream::kSlopBytes;
-  ABSL_DCHECK_GE(overrun, 0);
-  ABSL_DCHECK_LE(overrun, kSlopBytes);
-  auto ptr = begin + overrun;
-  auto end = begin + kSlopBytes;
-  return ParsingEndsInBuffer(ptr, end, depth);
 }
 
 const char* EpsCopyInputStream::NextBuffer(int overrun, int depth) {
@@ -183,7 +148,7 @@ const char* EpsCopyInputStream::Next() {
 std::pair<const char*, bool> EpsCopyInputStream::DoneFallback(int overrun,
                                                               int depth) {
   // Did we exceeded the limit (parse error).
-  if (ABSL_PREDICT_FALSE(overrun > limit_)) return {nullptr, true};
+  if (PROTOBUF_PREDICT_FALSE(overrun > limit_)) return {nullptr, true};
   ABSL_DCHECK(overrun != limit_);  // Guaranteed by caller.
   ABSL_DCHECK(overrun < limit_);   // Follows from above
   // TODO Instead of this dcheck we could just assign, and remove
@@ -201,7 +166,7 @@ std::pair<const char*, bool> EpsCopyInputStream::DoneFallback(int overrun,
     p = NextBuffer(overrun, depth);
     if (p == nullptr) {
       // We are at the end of the stream
-      if (ABSL_PREDICT_FALSE(overrun != 0)) return {nullptr, true};
+      if (PROTOBUF_PREDICT_FALSE(overrun != 0)) return {nullptr, true};
       ABSL_DCHECK_GT(limit_, 0);
       limit_end_ = buffer_end_;
       // Distinguish ending on a pushed limit or ending on end-of-stream.
@@ -223,7 +188,7 @@ const char* EpsCopyInputStream::SkipFallback(const char* ptr, int size) {
 const char* EpsCopyInputStream::ReadStringFallback(const char* ptr, int size,
                                                    std::string* str) {
   str->clear();
-  if (ABSL_PREDICT_TRUE(HasEnoughTillLimit(size, ptr))) {
+  if (PROTOBUF_PREDICT_TRUE(size <= buffer_end_ - ptr + limit_)) {
     // Reserve the string up to a static safe size. If strings are bigger than
     // this we proceed by growing the string as needed. This protects against
     // malicious payloads making protobuf hold on to a lot of memory.
@@ -233,145 +198,9 @@ const char* EpsCopyInputStream::ReadStringFallback(const char* ptr, int size,
                     [str](const char* p, int s) { str->append(p, s); });
 }
 
-const char* EpsCopyInputStream::ReadArray(const char* ptr,
-                                          absl::Span<char> out) {
-  if (CanReadFromPtr(out.size(), ptr)) {
-    memcpy(out.data(), ptr, out.size());
-    return ptr + out.size();
-  }
-  return ReadArrayFallback(ptr, out);
-}
-
-const char* EpsCopyInputStream::ReadArrayFallback(const char* ptr,
-                                                  absl::Span<char> out) {
-  char* dst = out.data();
-  return AppendSize(ptr, out.size(), [&dst](const char* p, int s) {
-    memcpy(dst, p, s);
-    dst += s;
-  });
-}
-
-namespace {
-
-// A valid UTF8 ranges in [1, 4]: https://en.wikipedia.org/wiki/UTF-8
-constexpr size_t kUtfMax = 4;
-
-void UnrolledMemcpy(char* dst, const char* src, size_t size) {
-  PROTOBUF_ASSUME(size < 4);
-  for (size_t i = 0; i < size; ++i) {
-    dst[i] = src[i];
-  }
-}
-
-struct LeftoverBuffer {
-  absl::string_view view() const { return {buffer, size}; }
-  bool empty() const { return size == 0; }
-
-  void assign(absl::string_view from);
-  void append(absl::string_view from);
-  // Removes [0, pos) and moves data to the front if any.
-  void remove_prefix(uint32_t pos);
-
-  uint32_t size = 0;
-  char buffer[kUtfMax];
-};
-
-void LeftoverBuffer::assign(absl::string_view from) {
-  ABSL_DCHECK_LT(from.size(), kUtfMax);
-
-  UnrolledMemcpy(buffer, from.data(), from.size());
-  size = from.size();
-}
-
-void LeftoverBuffer::append(absl::string_view from) {
-  ABSL_DCHECK_LE(size + from.size(), kUtfMax);
-
-  UnrolledMemcpy(buffer + size, from.data(), from.size());
-  size += from.size();
-}
-
-void LeftoverBuffer::remove_prefix(uint32_t pos) {
-  ABSL_DCHECK_LE(pos, size);
-
-  size -= pos;
-  UnrolledMemcpy(buffer, buffer + pos, size);
-}
-
-// Returns true if "fragment" potentially prefixed with "leftover" is valid
-// UTF8. Copied from `CordIsValid()`:
-// http://google3/util/utf8/internal/unilib.cc;l=85;rcl=740640507
-bool IsViewValidUTF8WithLeftover(absl::string_view fragment,
-                                 LeftoverBuffer& leftover) {
-  if (size_t leftover_size = leftover.size; leftover_size > 0) {
-    ABSL_DCHECK_LT(leftover_size, kUtfMax);
-
-    // Copy into the leftover buffer until it has kUtfMax bytes, and match code
-    // points within that buffer, removing them from the prefix of the next
-    // chunk.
-    const size_t fill_size = kUtfMax - leftover_size;
-    if (fragment.size() < fill_size) {
-      // If the full fragment fits in the buffer, match and consume if possible.
-      leftover.append(fragment);
-      // Opportunistically validate but it's okay otherwise as we may be
-      // building up to a valid UTF8.
-      leftover.remove_prefix(
-          utf8_range::SpanStructurallyValid(leftover.view()));
-      return true;
-    }
-
-    // Otherwise, fill the buffer from the prefix of the fragment, match, and
-    // remove the bytes in the *match* (not the unmatched part of the buffer)
-    // that originally came from the current fragment.
-    //
-    // Note that fragment is big enough to fill leftover to the max UTF8 value.
-    // It has to have a valid UTF8.
-    leftover.append(fragment.substr(0, fill_size));
-    const size_t leftover_valid =
-        utf8_range::SpanStructurallyValid(leftover.view());
-    if (leftover_valid == 0) {
-      return false;
-    }
-    fragment.remove_prefix(leftover_valid - leftover_size);
-  }
-
-  const size_t valid = utf8_range::SpanStructurallyValid(fragment);
-  fragment.remove_prefix(valid);
-  // If the last Unicode char crosses to next fragment, length must be smaller
-  // than kUtfMax.
-  if (kUtfMax <= fragment.size()) {
-    return false;
-  }
-
-  leftover.assign(fragment);
-
-  // So far so good. Continue to the next fragment.
-  return true;
-}
-
-}  // namespace
-
-const char* EpsCopyInputStream::VerifyUTF8(const char* ptr, size_t size) {
-  if (size <= static_cast<size_t>(BytesAvailable(ptr))) {
-    return utf8_range::IsStructurallyValid({ptr, size}) ? ptr + size : nullptr;
-  }
-  return VerifyUTF8Fallback(ptr, size);
-}
-
-const char* EpsCopyInputStream::VerifyUTF8Fallback(const char* ptr,
-                                                   size_t size) {
-  // Copied the implementation of CordIsValid().
-  LeftoverBuffer leftover;
-
-  ptr = AppendSize(ptr, size, [&leftover](const char* p, int s) -> bool {
-    return IsViewValidUTF8WithLeftover({p, static_cast<size_t>(s)}, leftover);
-  });
-  return leftover.empty() ? ptr : nullptr;
-}
-
 const char* EpsCopyInputStream::AppendStringFallback(const char* ptr, int size,
                                                      std::string* str) {
-  if (ABSL_PREDICT_TRUE(
-          IsRequestedLessThanOrEqualTo(size, BytesUntilLimit(ptr)))) {
+  if (PROTOBUF_PREDICT_TRUE(size <= buffer_end_ - ptr + limit_)) {
     // Reserve the string up to a static safe size. If strings are bigger than
     // this we proceed by growing the string as needed. This protects against
     // malicious payloads making protobuf hold on to a lot of memory.
@@ -384,7 +213,8 @@ const char* EpsCopyInputStream::AppendStringFallback(const char* ptr, int size,
 const char* EpsCopyInputStream::ReadCordFallback(const char* ptr, int size,
                                                  absl::Cord* cord) {
   if (zcis_ == nullptr) {
-    if (CanReadFromPtr(size, ptr)) {
+    int bytes_from_buffer = buffer_end_ - ptr + kSlopBytes;
+    if (size <= bytes_from_buffer) {
       *cord = absl::string_view(ptr, size);
       return ptr + size;
     }
@@ -393,9 +223,9 @@ const char* EpsCopyInputStream::ReadCordFallback(const char* ptr, int size,
     });
   }
   int new_limit = buffer_end_ - ptr + limit_;
-  if (!IsRequestedLessThanOrEqualTo(size, new_limit)) return nullptr;
+  if (size > new_limit) return nullptr;
   new_limit -= size;
-  int bytes_from_buffer = BytesAvailable(ptr);
+  int bytes_from_buffer = buffer_end_ - ptr + kSlopBytes;
   const bool in_patch_buf = reinterpret_cast<uintptr_t>(ptr) -
                                 reinterpret_cast<uintptr_t>(patch_buffer_) <=
                             kPatchBufferSize;
@@ -507,14 +337,14 @@ std::pair<const char*, uint32_t> VarintParseSlow32(const char* p,
   for (std::uint32_t i = 1; i < 5; i++) {
     uint32_t byte = static_cast<uint8_t>(p[i]);
     res += (byte - 1) << (7 * i);
-    if (ABSL_PREDICT_TRUE(byte < 128)) {
+    if (PROTOBUF_PREDICT_TRUE(byte < 128)) {
       return {p + i + 1, res};
     }
   }
   // Accept >5 bytes
   for (std::uint32_t i = 5; i < 10; i++) {
     uint32_t byte = static_cast<uint8_t>(p[i]);
-    if (ABSL_PREDICT_TRUE(byte < 128)) {
+    if (PROTOBUF_PREDICT_TRUE(byte < 128)) {
       return {p + i + 1, res};
     }
   }
@@ -527,7 +357,7 @@ std::pair<const char*, uint64_t> VarintParseSlow64(const char* p,
   for (std::uint32_t i = 1; i < 10; i++) {
     uint64_t byte = static_cast<uint8_t>(p[i]);
     res += (byte - 1) << (7 * i);
-    if (ABSL_PREDICT_TRUE(byte < 128)) {
+    if (PROTOBUF_PREDICT_TRUE(byte < 128)) {
       return {p + i + 1, res};
     }
   }
@@ -538,7 +368,7 @@ std::pair<const char*, uint32_t> ReadTagFallback(const char* p, uint32_t res) {
   for (std::uint32_t i = 2; i < 5; i++) {
     uint32_t byte = static_cast<uint8_t>(p[i]);
     res += (byte - 1) << (7 * i);
-    if (ABSL_PREDICT_TRUE(byte < 128)) {
+    if (PROTOBUF_PREDICT_TRUE(byte < 128)) {
       return {p + i + 1, res};
     }
   }
@@ -549,17 +379,17 @@ std::pair<const char*, int32_t> ReadSizeFallback(const char* p, uint32_t res) {
   for (std::uint32_t i = 1; i < 4; i++) {
     uint32_t byte = static_cast<uint8_t>(p[i]);
     res += (byte - 1) << (7 * i);
-    if (ABSL_PREDICT_TRUE(byte < 128)) {
+    if (PROTOBUF_PREDICT_TRUE(byte < 128)) {
       return {p + i + 1, res};
     }
   }
   std::uint32_t byte = static_cast<uint8_t>(p[4]);
-  if (ABSL_PREDICT_FALSE(byte >= 8)) return {nullptr, 0};  // size >= 2gb
+  if (PROTOBUF_PREDICT_FALSE(byte >= 8)) return {nullptr, 0};  // size >= 2gb
   res += (byte - 1) << 28;
   // Protect against sign integer overflow in PushLimit. Limits are relative
   // to buffer ends and ptr could potential be kSlopBytes beyond a buffer end.
   // To protect against overflow we reject limits absurdly close to INT_MAX.
-  if (ABSL_PREDICT_FALSE(res > INT_MAX - ParseContext::kSlopBytes)) {
+  if (PROTOBUF_PREDICT_FALSE(res > INT_MAX - ParseContext::kSlopBytes)) {
     return {nullptr, 0};
   }
   return {p + 5, res};
@@ -592,58 +422,10 @@ const char* InlineGreedyStringParser(std::string* s, const char* ptr,
   return ctx->ReadString(ptr, size, s);
 }
 
-void WireFormatStringSink::Flush(const char* ptr) {
-  ABSL_CHECK_GE(ptr, prev);
-  absl::StrAppend(&data,
-                  absl::string_view(prev, static_cast<size_t>(ptr - prev)));
-}
-void WireFormatStringSink::Append(absl::string_view view) {
-  absl::StrAppend(&data, view);
-  prev = view.data() + view.size();
-}
-
-template <typename SinkT>
-[[nodiscard]] const char* EpsCopyInputStream::ReadArrayMaybeFlush(
-    const char* ptr, absl::Span<char> out, SinkT& sink) {
-  char* dst = out.data();
-  return AdvancePtrMaybeFlush<char>(
-      ptr, out.size(), sink, [&](absl::string_view view) {
-        memcpy(dst, view.data(), view.size());
-        dst += view.size();
-        ABSL_DCHECK_LE(dst, out.data() + out.size());
-        return true;
-      });
-}
-
-template <typename SinkT>
-const char* ParseContext::VerifyUTF8MaybeFlushFallback(const char* ptr,
-                                                       int64_t size,
-                                                       SinkT& sink) {
-  // Copied the implementation of CordIsValid().
-  LeftoverBuffer leftover;
-
-  ptr = AdvancePtrMaybeFlush<char>(
-      ptr, size, sink, [&leftover](absl::string_view view) -> bool {
-        return IsViewValidUTF8WithLeftover(view, leftover);
-      });
-  return leftover.empty() ? ptr : nullptr;
-}
-
-template const char* EpsCopyInputStream::ReadArrayMaybeFlush(
-    const char* ptr, absl::Span<char> out, WireFormatNoOpSink& sink);
-template const char* EpsCopyInputStream::ReadArrayMaybeFlush(
-    const char* ptr, absl::Span<char> out, WireFormatStringSink& sink);
-
-template const char* ParseContext::VerifyUTF8MaybeFlushFallback(
-    const char* ptr, int64_t size, WireFormatNoOpSink& sink);
-template const char* ParseContext::VerifyUTF8MaybeFlushFallback(
-    const char* ptr, int64_t size, WireFormatStringSink& sink);
-
 
 template <typename T, bool sign>
-const char* VarintParser(void* object, Arena* arena, const char* ptr,
-                         ParseContext* ctx) {
-  return ctx->ReadPackedVarint(ptr, [object, arena](uint64_t varint) {
+const char* VarintParser(void* object, const char* ptr, ParseContext* ctx) {
+  return ctx->ReadPackedVarint(ptr, [object](uint64_t varint) {
     T val;
     if (sign) {
       if (sizeof(T) == 8) {
@@ -654,77 +436,73 @@ const char* VarintParser(void* object, Arena* arena, const char* ptr,
     } else {
       val = varint;
     }
-    static_cast<RepeatedField<T>*>(object)->InternalAddWithArena(
-        InternalVisibility(), arena, val);
+    static_cast<RepeatedField<T>*>(object)->Add(val);
   });
 }
 
-const char* PackedInt32Parser(void* object, Arena* arena, const char* ptr,
+const char* PackedInt32Parser(void* object, const char* ptr,
                               ParseContext* ctx) {
-  return VarintParser<int32_t, false>(object, arena, ptr, ctx);
+  return VarintParser<int32_t, false>(object, ptr, ctx);
 }
-const char* PackedUInt32Parser(void* object, Arena* arena, const char* ptr,
+const char* PackedUInt32Parser(void* object, const char* ptr,
                                ParseContext* ctx) {
-  return VarintParser<uint32_t, false>(object, arena, ptr, ctx);
+  return VarintParser<uint32_t, false>(object, ptr, ctx);
 }
-const char* PackedInt64Parser(void* object, Arena* arena, const char* ptr,
+const char* PackedInt64Parser(void* object, const char* ptr,
                               ParseContext* ctx) {
-  return VarintParser<int64_t, false>(object, arena, ptr, ctx);
+  return VarintParser<int64_t, false>(object, ptr, ctx);
 }
-const char* PackedUInt64Parser(void* object, Arena* arena, const char* ptr,
+const char* PackedUInt64Parser(void* object, const char* ptr,
                                ParseContext* ctx) {
-  return VarintParser<uint64_t, false>(object, arena, ptr, ctx);
+  return VarintParser<uint64_t, false>(object, ptr, ctx);
 }
-const char* PackedSInt32Parser(void* object, Arena* arena, const char* ptr,
+const char* PackedSInt32Parser(void* object, const char* ptr,
                                ParseContext* ctx) {
-  return VarintParser<int32_t, true>(object, arena, ptr, ctx);
+  return VarintParser<int32_t, true>(object, ptr, ctx);
 }
-const char* PackedSInt64Parser(void* object, Arena* arena, const char* ptr,
+const char* PackedSInt64Parser(void* object, const char* ptr,
                                ParseContext* ctx) {
-  return VarintParser<int64_t, true>(object, arena, ptr, ctx);
+  return VarintParser<int64_t, true>(object, ptr, ctx);
 }
 
-const char* PackedEnumParser(void* object, Arena* arena, const char* ptr,
-                             ParseContext* ctx) {
-  return VarintParser<int, false>(object, arena, ptr, ctx);
+const char* PackedEnumParser(void* object, const char* ptr, ParseContext* ctx) {
+  return VarintParser<int, false>(object, ptr, ctx);
 }
 
-const char* PackedBoolParser(void* object, Arena* arena, const char* ptr,
-                             ParseContext* ctx) {
-  return VarintParser<bool, false>(object, arena, ptr, ctx);
+const char* PackedBoolParser(void* object, const char* ptr, ParseContext* ctx) {
+  return VarintParser<bool, false>(object, ptr, ctx);
 }
 
 template <typename T>
-const char* FixedParser(void* object, Arena* arena, const char* ptr,
-                        ParseContext* ctx) {
+const char* FixedParser(void* object, const char* ptr, ParseContext* ctx) {
   int size = ReadSize(&ptr);
-  return ctx->ReadPackedFixed(ptr, arena, size,
+  return ctx->ReadPackedFixed(ptr, size,
                               static_cast<RepeatedField<T>*>(object));
 }
 
-const char* PackedFixed32Parser(void* object, Arena* arena, const char* ptr,
+const char* PackedFixed32Parser(void* object, const char* ptr,
                                 ParseContext* ctx) {
-  return FixedParser<uint32_t>(object, arena, ptr, ctx);
+  return FixedParser<uint32_t>(object, ptr, ctx);
 }
-const char* PackedSFixed32Parser(void* object, Arena* arena, const char* ptr,
+const char* PackedSFixed32Parser(void* object, const char* ptr,
                                  ParseContext* ctx) {
-  return FixedParser<int32_t>(object, arena, ptr, ctx);
+  return FixedParser<int32_t>(object, ptr, ctx);
 }
-const char* PackedFixed64Parser(void* object, Arena* arena, const char* ptr,
+const char* PackedFixed64Parser(void* object, const char* ptr,
                                 ParseContext* ctx) {
-  return FixedParser<uint64_t>(object, arena, ptr, ctx);
+  return FixedParser<uint64_t>(object, ptr, ctx);
 }
-const char* PackedSFixed64Parser(void* object, Arena* arena, const char* ptr,
+const char* PackedSFixed64Parser(void* object, const char* ptr,
                                  ParseContext* ctx) {
-  return FixedParser<int64_t>(object, arena, ptr, ctx);
+  return FixedParser<int64_t>(object, ptr, ctx);
 }
-const char* PackedFloatParser(void* object, Arena* arena, const char* ptr,
+const char* PackedFloatParser(void* object, const char* ptr,
                               ParseContext* ctx) {
-  return FixedParser<float>(object, arena, ptr, ctx);
+  return FixedParser<float>(object, ptr, ctx);
 }
-const char* PackedDoubleParser(void* object, Arena* arena, const char* ptr,
+const char* PackedDoubleParser(void* object, const char* ptr,
                                ParseContext* ctx) {
-  return FixedParser<double>(object, arena, ptr, ctx);
+  return FixedParser<double>(object, ptr, ctx);
 }
 
 class UnknownFieldLiteParserHelper {
@@ -741,8 +519,7 @@ class UnknownFieldLiteParserHelper {
     if (unknown_ == nullptr) return;
     WriteVarint(num * 8 + 1, unknown_);
     char buffer[8];
-    // TODO: Remove this suppression.
-    (void)io::CodedOutputStream::WriteLittleEndian64ToArray(
+    io::CodedOutputStream::WriteLittleEndian64ToArray(
         value, reinterpret_cast<uint8_t*>(buffer));
     unknown_->append(buffer, 8);
   }
@@ -768,8 +545,7 @@ class UnknownFieldLiteParserHelper {
     if (unknown_ == nullptr) return;
     WriteVarint(num * 8 + 5, unknown_);
     char buffer[4];
-    // TODO: Remove this suppression.
-    (void)io::CodedOutputStream::WriteLittleEndian32ToArray(
+    io::CodedOutputStream::WriteLittleEndian32ToArray(
         value, reinterpret_cast<uint8_t*>(buffer));
     unknown_->append(buffer, 4);
   }
@@ -788,59 +564,6 @@ const char* UnknownFieldParse(uint32_t tag, std::string* unknown,
                               const char* ptr, ParseContext* ctx) {
   UnknownFieldLiteParserHelper field_parser(unknown);
   return FieldParser(tag, field_parser, ptr, ctx);
-}
-
-const char* EpsCopyInputStream::ReadMicroStringFallback(const char* ptr,
-                                                        int size,
-                                                        MicroString& str,
-                                                        Arena* arena) {
-  str.SetInChunks(size, arena, [&](auto append) {
-    ptr = AppendSize(ptr, size, [&](const char* p, int s) {
-      append(absl::string_view(p, s));
-    });
-  });
-  return ptr;
-}
-
-int CountVarintsAssumingLargeArray(const char* ptr, const char* end) {
-  // The number of varints is the number of bytes with the highest bit clear.
-  // This is easier to compute as the total number of bytes, minus the number
-  // of bytes with the highest bit set.
-  int num_varints = end - ptr;
-  ABSL_DCHECK_GE(num_varints, int{sizeof(uint64_t)});
-
-  // Count in whole blocks, except for the last one.
-  const char* const limit = end - sizeof(uint64_t);
-  while (ptr < limit) {
-    num_varints -=
-        absl::popcount(EndianHelper<8>::Load(ptr) & 0x8080808080808080);
-    ptr += sizeof(uint64_t);
-  }
-
-  // Count in the last, possibly incomplete block.
-  return num_varints -
-         absl::popcount(EndianHelper<8>::Load(limit) &
-                        (0x8080808080808080 << ((ptr - limit) * 8)));
-}
-
-bool VerifyBoolsAssumingLargeArray(const char* ptr, const char* end) {
-  ABSL_DCHECK_GE(end - ptr, int{sizeof(uint64_t)});
-
-  // Verify whole blocks, except for the last one.
-  uint64_t bit_or = 0;
-  const char* const limit = end - sizeof(uint64_t);
-  while (ptr < limit) {
-    uint64_t block;
-    std::memcpy(&block, ptr, 8);
-    bit_or |= block;
-    ptr += 8;
-  }
-  // Verify the last, possibly incomplete block.
-  uint64_t block;
-  std::memcpy(&block, limit, 8);
-  bit_or |= block;
-
-  return (bit_or & ~0x0101010101010101) == 0;
 }
 
 }  // namespace internal

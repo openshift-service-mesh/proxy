@@ -18,10 +18,8 @@ static PyObject* PyUpb_RepeatedScalarContainer_Append(PyObject* _self,
 
 // Wrapper for a repeated field.
 typedef struct {
-  // clang-format off
-  PyObject_HEAD
+  PyObject_HEAD;
   PyObject* arena;
-  // clang-format on
   // The field descriptor (PyObject*).
   // The low bit indicates whether the container is reified (see ptr below).
   //   - low bit set: repeated field is a stub (no underlying data).
@@ -55,28 +53,19 @@ static upb_Array* PyUpb_RepeatedContainer_GetIfReified(
   return PyUpb_RepeatedContainer_IsStub(self) ? NULL : self->ptr.arr;
 }
 
-upb_Array* PyUpb_RepeatedContainer_Reify(PyObject* _self, upb_Array* arr,
-                                         PyUpb_WeakMap* subobj_map,
-                                         intptr_t iter) {
+void PyUpb_RepeatedContainer_Reify(PyObject* _self, upb_Array* arr) {
   PyUpb_RepeatedContainer* self = (PyUpb_RepeatedContainer*)_self;
   assert(PyUpb_RepeatedContainer_IsStub(self));
-  const upb_FieldDef* f = PyUpb_RepeatedContainer_GetField(self);
   if (!arr) {
+    const upb_FieldDef* f = PyUpb_RepeatedContainer_GetField(self);
     upb_Arena* arena = PyUpb_Arena_Get(self->arena);
     arr = upb_Array_New(arena, upb_FieldDef_CType(f));
-  }
-  if (subobj_map) {
-    PyUpb_WeakMap_DeleteIter(subobj_map, &iter);
-  } else {
-    PyUpb_Message_SetConcreteSubobj(self->ptr.parent, f,
-                                    (upb_MessageValue){.array_val = arr});
   }
   PyUpb_ObjCache_Add(arr, &self->ob_base);
   Py_DECREF(self->ptr.parent);
   self->ptr.arr = arr;  // Overwrites self->ptr.parent.
   self->field &= ~(uintptr_t)1;
   assert(!PyUpb_RepeatedContainer_IsStub(self));
-  return arr;
 }
 
 upb_Array* PyUpb_RepeatedContainer_EnsureReified(PyObject* _self) {
@@ -84,7 +73,13 @@ upb_Array* PyUpb_RepeatedContainer_EnsureReified(PyObject* _self) {
   upb_Array* arr = PyUpb_RepeatedContainer_GetIfReified(self);
   if (arr) return arr;  // Already writable.
 
-  return PyUpb_RepeatedContainer_Reify((PyObject*)self, NULL, NULL, 0);
+  const upb_FieldDef* f = PyUpb_RepeatedContainer_GetField(self);
+  upb_Arena* arena = PyUpb_Arena_Get(self->arena);
+  arr = upb_Array_New(arena, upb_FieldDef_CType(f));
+  PyUpb_Message_SetConcreteSubobj(self->ptr.parent, f,
+                                  (upb_MessageValue){.array_val = arr});
+  PyUpb_RepeatedContainer_Reify((PyObject*)self, arr);
+  return arr;
 }
 
 static void PyUpb_RepeatedContainer_Dealloc(PyObject* _self) {
@@ -184,32 +179,15 @@ PyObject* PyUpb_RepeatedContainer_Extend(PyObject* _self, PyObject* value) {
   bool submsg = upb_FieldDef_IsSubMessage(f);
   PyObject* e;
 
-  if (submsg) {
-    while ((e = PyIter_Next(it))) {
-      PyObject* ret = PyUpb_RepeatedCompositeContainer_Append(_self, e);
-      Py_XDECREF(ret);
-      Py_DECREF(e);
-    }
-  } else {
-    upb_Arena* arena = PyUpb_Arena_Get(self->arena);
-    Py_ssize_t size = PyObject_Size(value);
-    if (size < 0) {
-      // Some iterables may not have len. Size() will return -1 and
-      // set an error in such cases.
-      PyErr_Clear();
+  while ((e = PyIter_Next(it))) {
+    PyObject* ret;
+    if (submsg) {
+      ret = PyUpb_RepeatedCompositeContainer_Append(_self, e);
     } else {
-      upb_Array_Reserve(arr, start_size + size, arena);
+      ret = PyUpb_RepeatedScalarContainer_Append(_self, e);
     }
-    while ((e = PyIter_Next(it))) {
-      upb_MessageValue msgval;
-      if (!PyUpb_PyToUpb(e, f, &msgval, arena)) {
-        assert(PyErr_Occurred());
-        Py_DECREF(e);
-        break;
-      }
-      upb_Array_Append(arr, msgval, arena);
-      Py_DECREF(e);
-    }
+    Py_XDECREF(ret);
+    Py_DECREF(e);
   }
 
   Py_DECREF(it);
@@ -533,15 +511,6 @@ static PyObject* PyUpb_RepeatedContainer_Reverse(PyObject* _self) {
   Py_RETURN_NONE;
 }
 
-static PyObject* PyUpb_RepeatedContainer_Clear(PyObject* _self) {
-  PyUpb_RepeatedContainer* self = (PyUpb_RepeatedContainer*)_self;
-  Py_ssize_t size = PyUpb_RepeatedContainer_Length(_self);
-  if (size > 0) {
-    upb_Array_Delete(self->ptr.arr, 0, size);
-  }
-  Py_RETURN_NONE;
-}
-
 static PyObject* PyUpb_RepeatedContainer_MergeFrom(PyObject* _self,
                                                    PyObject* args) {
   return PyUpb_RepeatedContainer_Extend(_self, args);
@@ -650,8 +619,6 @@ static PyMethodDef PyUpb_RepeatedCompositeContainer_Methods[] = {
      METH_VARARGS | METH_KEYWORDS, "Sorts the repeated container."},
     {"reverse", (PyCFunction)PyUpb_RepeatedContainer_Reverse, METH_NOARGS,
      "Reverses elements order of the repeated container."},
-    {"clear", (PyCFunction)PyUpb_RepeatedContainer_Clear, METH_NOARGS,
-     "Clears repeated container."},
     {"MergeFrom", PyUpb_RepeatedContainer_MergeFrom, METH_O,
      "Adds objects to the repeated container."},
     {NULL, NULL}};
@@ -729,203 +696,9 @@ static PyObject* PyUpb_RepeatedScalarContainer_Reduce(PyObject* unused_self,
   return NULL;
 }
 
-char* GetDefaultDTypeStr(upb_CType cpp_type) {
-  switch (cpp_type) {
-    case kUpb_CType_Float:
-      return "f4";
-    case kUpb_CType_Int32:
-      return "i4";
-    case kUpb_CType_Int64:
-      return "i8";
-    case kUpb_CType_UInt32:
-      return "u4";
-    case kUpb_CType_UInt64:
-      return "u8";
-    case kUpb_CType_Double:
-      return "f8";
-    case kUpb_CType_Bool:
-      return "?";  // Boolean is '?' per official docs.
-    case kUpb_CType_Enum:
-      return "i4";
-    case kUpb_CType_String:
-    case kUpb_CType_Bytes:
-    case kUpb_CType_Message:
-      return NULL;
-  }
-  return NULL;
-}
-
-PyObject* CreateArrayFromView(PyObject* _self, PyObject* np_module) {
-  PyUpb_RepeatedContainer* self = (PyUpb_RepeatedContainer*)(_self);
-  upb_Array* arr = PyUpb_RepeatedContainer_GetIfReified(self);
-  size_t size = arr ? upb_Array_Size(arr) : 0;
-  const upb_FieldDef* f = PyUpb_RepeatedContainer_GetField(self);
-  Py_ssize_t out_buffer_size_bytes;
-  const char* out_dtype = GetDefaultDTypeStr(upb_FieldDef_CType(f));
-  switch (upb_FieldDef_CType(f)) {
-    case kUpb_CType_Float: {
-      out_buffer_size_bytes = sizeof(float) * size;
-      break;
-    }
-    case kUpb_CType_Int32: {
-      out_buffer_size_bytes = 4 * size;
-      break;
-    }
-    case kUpb_CType_Int64: {
-      out_buffer_size_bytes = 8 * size;
-      break;
-    }
-    case kUpb_CType_UInt32: {
-      out_buffer_size_bytes = 4 * size;
-      break;
-    }
-    case kUpb_CType_UInt64: {
-      out_buffer_size_bytes = 8 * size;
-      break;
-    }
-    case kUpb_CType_Double: {
-      out_buffer_size_bytes = sizeof(double) * size;
-      break;
-    }
-    case kUpb_CType_Bool: {
-      out_buffer_size_bytes = sizeof(bool) * size;
-      break;
-    }
-    case kUpb_CType_Enum: {
-      out_buffer_size_bytes = 4 * size;
-      break;
-    }
-    case kUpb_CType_Message:
-    case kUpb_CType_Bytes:
-    case kUpb_CType_String: {
-      PyErr_Format(PyExc_SystemError,
-                   "Code should never reach here: cpp type "
-                   "should not be message nor string in CreateArrayFromView.");
-      return NULL;
-    }
-  }
-  if (out_buffer_size_bytes == 0) {
-    return PyObject_CallMethod(np_module, "empty", "is", 0, out_dtype);
-  }
-  const void* out_ptr = upb_Array_DataPtr(arr);
-  PyObject* view = PyMemoryView_FromMemory(
-      (char*)(const char*)out_ptr, out_buffer_size_bytes, 0x100 /*PyBUF_READ*/);
-  PyObject* return_value =
-      PyObject_CallMethod(np_module, "frombuffer", "Os", view, out_dtype);
-  Py_DECREF(view);
-  return return_value;
-}
-
-// CPython equivalent of nparray.astype(dtype_requested, copy=copy).
-PyObject* NpArrayAsType(PyObject* nparray, PyObject* dtype_requested,
-                        bool copy) {
-  PyObject* astype_args = Py_BuildValue("(O)", dtype_requested);
-  PyObject* keywords = PyDict_New();
-  PyDict_SetItemString(keywords, "copy", copy ? Py_True : Py_False);
-  PyObject* np_array_astype = PyObject_GetAttrString(nparray, "astype");
-
-  PyObject* return_value =
-      PyObject_Call(np_array_astype, astype_args, keywords);
-  Py_DECREF(np_array_astype);
-  Py_DECREF(keywords);
-  Py_DECREF(astype_args);
-  return return_value;
-}
-
-PyObject* ConstructArrayByIteration(PyObject* _self, PyObject* np_module) {
-  PyUpb_RepeatedContainer* self = (PyUpb_RepeatedContainer*)_self;
-  upb_Array* arr = PyUpb_RepeatedContainer_GetIfReified(self);
-  Py_ssize_t array_length = PyUpb_RepeatedContainer_Length(_self);
-  const upb_FieldDef* f = PyUpb_RepeatedContainer_GetField(self);
-  PyObject* nparray =
-      PyObject_CallMethod(np_module, "empty", "is", array_length, "O");
-  PyObject* arena = self->arena;
-  for (Py_ssize_t i = 0; i < array_length; ++i) {
-    upb_MessageValue msgval = upb_Array_Get(arr, i);
-    PyObject* item = PyUpb_UpbToPy(msgval, f, arena);
-    PySequence_SetItem(nparray, i, item);
-    Py_DECREF(item);
-  }
-  return nparray;
-}
-
-static PyObject* PyUpb_RepeatedScalarContainer_AsNpArray(PyObject* _self,
-                                                         PyObject* args,
-                                                         PyObject* kwargs) {
-  static const char* kwlist[] = {"dtype", "copy", NULL};
-  PyObject* dtype_requested = NULL;
-  PyObject* copy = NULL;
-  PyObject* return_value = NULL;
-  PyObject* default_dtype = NULL;
-  PyObject* nparray = NULL;
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|OO", (char**)kwlist,
-                                   &dtype_requested, &copy)) {
-    return NULL;
-  }
-
-  PyObject* np_module = PyImport_ImportModule("numpy");
-  if (np_module == NULL) {
-    PyErr_Format(PyExc_ImportError, "Unable to import numpy.");
-    return NULL;
-  }
-  PyUpb_RepeatedContainer* self = (PyUpb_RepeatedContainer*)(_self);
-  const upb_FieldDef* f = PyUpb_RepeatedContainer_GetField(self);
-  upb_CType c_type = upb_FieldDef_CType(f);
-
-  // string repeated
-  if (c_type == kUpb_CType_String || c_type == kUpb_CType_Bytes) {
-    nparray = ConstructArrayByIteration(_self, np_module);
-    if (dtype_requested == NULL) {
-      if (c_type == kUpb_CType_String) {
-        dtype_requested = PyObject_CallMethod(np_module, "dtype", "s", "str");
-      } else {
-        dtype_requested = PyObject_CallMethod(np_module, "dtype", "s", "S");
-      }
-      default_dtype = dtype_requested;
-    }
-    return_value = NpArrayAsType(nparray, dtype_requested, false);
-    goto ret;
-  }
-
-  // non-string scalar repeated
-  if (dtype_requested == NULL) {
-    char* returned_dtype = GetDefaultDTypeStr(c_type);
-    if (returned_dtype == NULL) {
-      PyErr_SetString(PyExc_SystemError,
-                      "Implementation error: Unhandled case in AsNpArray.");
-      return NULL;
-    }
-    if (PyUpb_RepeatedContainer_Length(_self) == 0) {
-      return_value =
-          PyObject_CallMethod(np_module, "empty", "is", 0, returned_dtype);
-      goto ret;
-    }
-
-    dtype_requested =
-        PyObject_CallMethod(np_module, "dtype", "s", returned_dtype);
-    // For ref-counting.
-    default_dtype = dtype_requested;
-  }
-  nparray = CreateArrayFromView(_self, np_module);
-  if (nparray == NULL) {
-    goto ret;
-  }
-
-  return_value = NpArrayAsType(nparray, dtype_requested, true);
-
-ret:
-  Py_XDECREF(default_dtype);
-  Py_XDECREF(nparray);
-  Py_DECREF(np_module);
-  assert(!PyErr_Occurred());
-  return return_value;
-}
-
 static PyMethodDef PyUpb_RepeatedScalarContainer_Methods[] = {
     {"__deepcopy__", PyUpb_RepeatedContainer_DeepCopy, METH_VARARGS,
      "Makes a deep copy of the class."},
-    {"__array__", (PyCFunction)PyUpb_RepeatedScalarContainer_AsNpArray,
-     METH_VARARGS | METH_KEYWORDS, "Returns a np.array."},
     {"__reduce__", PyUpb_RepeatedScalarContainer_Reduce, METH_NOARGS,
      "Outputs picklable representation of the repeated field."},
     {"append", PyUpb_RepeatedScalarContainer_Append, METH_O,
@@ -942,8 +715,6 @@ static PyMethodDef PyUpb_RepeatedScalarContainer_Methods[] = {
      METH_VARARGS | METH_KEYWORDS, "Sorts the repeated container."},
     {"reverse", (PyCFunction)PyUpb_RepeatedContainer_Reverse, METH_NOARGS,
      "Reverses elements order of the repeated container."},
-    {"clear", (PyCFunction)PyUpb_RepeatedContainer_Clear, METH_NOARGS,
-     "Clears repeated container."},
     {"MergeFrom", PyUpb_RepeatedContainer_MergeFrom, METH_O,
      "Merges a repeated container into the current container."},
     {NULL, NULL}};

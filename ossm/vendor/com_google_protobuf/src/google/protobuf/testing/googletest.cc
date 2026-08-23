@@ -29,12 +29,10 @@
 #else
 #include <unistd.h>
 #endif
-#include <fcntl.h>
 #include <stdio.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
+#include <fcntl.h>
+#include <iostream>
+#include <fstream>
 
 namespace google {
 namespace protobuf {
@@ -97,12 +95,7 @@ std::string TestSourceDir() {
 namespace {
 
 std::string GetTemporaryDirectoryName() {
-#ifdef _WIN32
-  DWORD pid = GetCurrentProcessId();
-#else
-  int pid = getpid();
-#endif
-  std::string result = absl::StrCat(testing::TempDir(), "protobuf_tempdir.", pid);
+  std::string result = absl::StrCat(testing::TempDir(), "protobuf_tempdir");
 #ifdef _WIN32
   // The Win32 API accepts forward slashes as a path delimiter as long as the
   // path doesn't use the "\\?\" prefix.
@@ -126,7 +119,6 @@ class TempDirDeleter {
   std::string GetTempDir() {
     if (name_.empty()) {
       name_ = GetTemporaryDirectoryName();
-      File::DeleteRecursively(name_, nullptr, nullptr);
       ABSL_CHECK(mkdir(name_.c_str(), 0777) == 0) << strerror(errno);
 
       // Stick a file in the directory that tells people what this is, in case

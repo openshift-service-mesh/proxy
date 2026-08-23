@@ -8,6 +8,7 @@
 #ifndef GOOGLE_PROTOBUF_COMPILER_OBJECTIVEC_MESSAGE_H__
 #define GOOGLE_PROTOBUF_COMPILER_OBJECTIVEC_MESSAGE_H__
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -61,9 +62,7 @@ class MessageGenerator {
   const std::string deprecated_attribute_;
   std::vector<const ExtensionGenerator*> extension_generators_;
   std::vector<std::unique_ptr<OneofGenerator>> oneof_generators_;
-  int sizeof_has_storage_;
-
-  void GenerateClassBasedExtensionHeader(io::Printer* printer) const;
+  size_t sizeof_has_storage_;
 };
 
 }  // namespace objectivec

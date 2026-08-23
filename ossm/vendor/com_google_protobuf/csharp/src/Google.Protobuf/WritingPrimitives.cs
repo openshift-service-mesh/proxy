@@ -27,8 +27,6 @@ namespace Google.Protobuf
     [SecuritySafeCritical]
     internal static class WritingPrimitives
     {
-      // Ideally we would use the same UTF8Encoding as parse, but we should be able to serialize
-      // invalid UTF-8 that make it in via unvalidated setters without throwing an exception.
 #if NET5_0_OR_GREATER
       internal static Encoding Utf8Encoding => Encoding.UTF8;  // allows JIT to devirtualize
 #else
@@ -37,7 +35,7 @@ namespace Google.Protobuf
                           // difference.)
 #endif
 
-#region Writing of values (not including tags)
+        #region Writing of values (not including tags)
 
         /// <summary>
         /// Writes a double field value, without a tag, to the stream.

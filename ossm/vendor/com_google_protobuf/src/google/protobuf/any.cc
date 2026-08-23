@@ -23,29 +23,26 @@ namespace internal {
 using UrlType = std::string;
 using ValueType = std::string;
 
-bool InternalPackFrom(const Message& message, UrlType* PROTOBUF_NONNULL dst_url,
-                      ValueType* PROTOBUF_NONNULL dst_value) {
+bool InternalPackFrom(const Message& message, UrlType* dst_url,
+                      ValueType* dst_value) {
   return InternalPackFromLite(message, kTypeGoogleApisComPrefix,
                               message.GetTypeName(), dst_url, dst_value);
 }
 
 bool InternalPackFrom(const Message& message, absl::string_view type_url_prefix,
-                      UrlType* PROTOBUF_NONNULL dst_url,
-                      ValueType* PROTOBUF_NONNULL dst_value) {
+                      UrlType* dst_url, ValueType* dst_value) {
   return InternalPackFromLite(message, type_url_prefix, message.GetTypeName(),
                               dst_url, dst_value);
 }
 
 bool InternalUnpackTo(absl::string_view type_url, const ValueType& value,
-                      Message* PROTOBUF_NONNULL message) {
+                      Message* message) {
   return InternalUnpackToLite(message->GetTypeName(), type_url, value, message);
 }
 
 bool GetAnyFieldDescriptors(const Message& message,
-                            const FieldDescriptor * PROTOBUF_NULLABLE *
-                                PROTOBUF_NONNULL type_url_field,
-                            const FieldDescriptor * PROTOBUF_NULLABLE *
-                                PROTOBUF_NONNULL value_field) {
+                            const FieldDescriptor** type_url_field,
+                            const FieldDescriptor** value_field) {
   const Descriptor* descriptor = message.GetDescriptor();
   if (descriptor->full_name() != kAnyFullTypeName) {
     return false;

@@ -43,15 +43,6 @@ module BasicTestProto2
 
       m = TestMessage.new(:optional_int32 => nil)
       refute m.has_optional_int32?
-      refute TestMessage.descriptor.lookup('optional_int32').has?(m)
-
-      m = TestMessage.new(:optional_int32 => 0)
-      assert m.has_optional_int32?
-      assert TestMessage.descriptor.lookup('optional_int32').has?(m)
-
-      m = TestMessage.decode(TestMessage.encode(m))
-      assert m.has_optional_int32?
-      assert TestMessage.descriptor.lookup('optional_int32').has?(m)
 
       assert_raises NoMethodError do
         m.has_repeated_msg?
@@ -189,26 +180,6 @@ module BasicTestProto2
       assert m.has_my_oneof?
       OneofMessage.descriptor.lookup('a').clear(m)
       refute m.has_my_oneof?
-    end
-
-    def test_enums_are_open
-      # Normally proto2 enums would be closed, but Ruby treats all enums as
-      # open.
-      m = TestMessage.new
-      m.optional_enum = 999  # Not a valid enum value.
-      assert_equal 999, m.optional_enum
-
-      serialized = TestMessage.encode(m)
-      m2 = TestMessage.decode(serialized)
-
-      if RUBY_PLATFORM == "java" && Google::Protobuf::IMPLEMENTATION == :NATIVE
-        # When JRuby is using Java Protobuf, it does not have this special
-        # behavior of treating all enums as open.
-        refute m2.has_optional_enum?
-      else
-        assert m2.has_optional_enum?
-        assert_equal 999, m2.optional_enum
-      end
     end
 
     def test_assign_nil

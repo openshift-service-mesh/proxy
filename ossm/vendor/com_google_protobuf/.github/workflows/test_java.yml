@@ -30,44 +30,44 @@ jobs:
         include:
           - name: OpenJDK 8
             cache_key: '8'
-            image: us-docker.pkg.dev/protobuf-build/containers/test/linux/java:9.0.0-11-1c31a2985011c75c33dcdf646fc86898aac1ec5d
+            image: us-docker.pkg.dev/protobuf-build/containers/test/linux/java:6.4.0-8-27cf7b86212020d7e552bc13b1e084abb971da75
             # TODO: b/318555165 - enable the layering check. Currently it does
             # not work correctly with the toolchain in this Docker image.
-            targets: //java/... //java/internal:java_version --features=-layering_check
-            flags: --java_language_version=8
+            targets: //java/... //java/internal:java_version //compatibility/... --features=-layering_check
           - name: OpenJDK 11
             cache_key: '11'
-            image: us-docker.pkg.dev/protobuf-build/containers/test/linux/java:9.0.0-11-1c31a2985011c75c33dcdf646fc86898aac1ec5d
+            image: us-docker.pkg.dev/protobuf-build/containers/test/linux/java:6.4.0-11-27cf7b86212020d7e552bc13b1e084abb971da75
             targets: //java/... //java/internal:java_version //compatibility/...
             continuous-only: true
           - name: OpenJDK 17
             cache_key: '17'
-            image: us-docker.pkg.dev/protobuf-build/containers/test/linux/java:9.0.0-17-1c31a2985011c75c33dcdf646fc86898aac1ec5d
+            image: us-docker.pkg.dev/protobuf-build/containers/test/linux/java:6.4.0-17-27cf7b86212020d7e552bc13b1e084abb971da75
             targets: //java/... //java/internal:java_version //compatibility/...
-          - name: OpenJDK 21 bazel 8
-            cache_key: 'bazel8'
-            image: us-docker.pkg.dev/protobuf-build/containers/test/linux/java:8.6.0-21-856ad422dddd3b8fbd85e36129496b37bba174ef
+          - name: Bazel7
+            cache_key: 'bazel7nobzlmod'
+            image: us-docker.pkg.dev/protobuf-build/containers/common/linux/bazel:7.1.2-cf84e92285ca133b9c8104ad7b14d70e953cbb8e
             targets: //java/... //java/internal:java_version //compatibility/...
-          - name: OpenJDK 21
-            cache_key: '21'
-            image: us-docker.pkg.dev/protobuf-build/containers/test/linux/java:9.0.0-21-1c31a2985011c75c33dcdf646fc86898aac1ec5d
+            flags: --noenable_bzlmod
+          - name: Bazel7 with Bzlmod
+            cache_key: 'bazel7bzlmod'
+            image: us-docker.pkg.dev/protobuf-build/containers/common/linux/bazel:7.1.2-cf84e92285ca133b9c8104ad7b14d70e953cbb8e
             targets: //java/... //java/internal:java_version //compatibility/...
-          # TODO: b/395623141 - restore this test once runtime uses / emulates aarch64.
-          # - name: aarch64
-          #   cache_key: 'aarch64'
-          #   image: us-docker.pkg.dev/protobuf-build/containers/test/linux/emulation:8.0.1-aarch64-168f9c9d015a0fa16611e1e9eede796fe9bfbb69
-          #   targets: //java/... //compatibility/... //src/google/protobuf/compiler:protoc_aarch64_test
+            flags: --enable_bzlmod --enable_workspace
+          - name: aarch64
+            cache_key: 'aarch64'
+            image: us-docker.pkg.dev/protobuf-build/containers/test/linux/emulation:6.4.0-aarch64-08714ed7a713068c8418003a2d95f423d4b1eac9
+            targets: //java/... //compatibility/... //src/google/protobuf/compiler:protoc_aarch64_test
 
     name: ${{ matrix.continuous-only && inputs.continuous-prefix || '' }} Linux ${{ matrix.name }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout pending changes
-        uses: protocolbuffers/protobuf-ci/checkout@v5
+        uses: protocolbuffers/protobuf-ci/checkout@v3
         if: ${{ !matrix.continuous-only || inputs.continuous-run }}
         with:
           ref: ${{ inputs.safe-checkout }}
       - name: Run tests
-        uses: protocolbuffers/protobuf-ci/bazel-docker@v5
+        uses: protocolbuffers/protobuf-ci/bazel-docker@v3
         if: ${{ !matrix.continuous-only || inputs.continuous-run }}
         with:
           image: ${{ matrix.image }}
@@ -81,11 +81,11 @@ jobs:
   #   runs-on: ubuntu-latest
   #   steps:
   #     - name: Checkout pending changes
-  #       uses: protocolbuffers/protobuf-ci/checkout@v5
+  #       uses: protocolbuffers/protobuf-ci/checkout@v3
   #       with:
   #         ref: ${{ inputs.safe-checkout }}
   #     - name: Run Linkage Monitor test
-  #       uses: protocolbuffers/protobuf-ci/bazel-docker@v5
+  #       uses: protocolbuffers/protobuf-ci/bazel-docker@v3
   #       with:
   #         image: us-docker.pkg.dev/protobuf-build/containers/test/linux/java:8-1fdbb997433cb22c1e49ef75ad374a8d6bb88702
   #         credentials: ${{ secrets.GAR_SERVICE_ACCOUNT }}
@@ -99,18 +99,18 @@ jobs:
     runs-on: ubuntu-22-4core
     steps:
     - name: Checkout pending changes
-      uses: protocolbuffers/protobuf-ci/checkout@v5
+      uses: protocolbuffers/protobuf-ci/checkout@v3
       with:
         ref: ${{ inputs.safe-checkout }}
     - name: Generate maven artifacts with bazel and install using maven
-      uses: protocolbuffers/protobuf-ci/bazel-docker@v5
+      uses: protocolbuffers/protobuf-ci/bazel-docker@v3
       with:
-        image: us-docker.pkg.dev/protobuf-build/containers/test/linux/java:9.0.0-11-1c31a2985011c75c33dcdf646fc86898aac1ec5d
+        image: us-docker.pkg.dev/protobuf-build/containers/test/linux/java:6.4.0-11-27cf7b86212020d7e552bc13b1e084abb971da75
         credentials: ${{ secrets.GAR_SERVICE_ACCOUNT }}
         bazel-cache: java_linux/11
         bash: |
           set -ex
-          bazel build //java:release $BAZEL_FLAGS
+          bazel build //java:release
           mvn install:install-file -Dfile=java/bom/pom.xml -DpomFile=java/bom/pom.xml
           mvn install:install-file -Dfile=java/pom.xml -DpomFile=java/pom.xml
           mvn install:install-file -Dfile=bazel-bin/java/core/core_mvn-project.jar -DpomFile=bazel-bin/java/core/core_mvn-pom.xml

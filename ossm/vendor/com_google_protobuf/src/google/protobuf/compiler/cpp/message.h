@@ -16,11 +16,11 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/span.h"
 #include "google/protobuf/compiler/cpp/enum.h"
 #include "google/protobuf/compiler/cpp/extension.h"
 #include "google/protobuf/compiler/cpp/field.h"
@@ -31,9 +31,6 @@
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/io/printer.h"
 
-// must be last
-#include "google/protobuf/port_def.inc"
-
 namespace google {
 namespace protobuf {
 namespace compiler {
@@ -43,7 +40,8 @@ class MessageGenerator {
   MessageGenerator(
       const Descriptor* descriptor,
       const absl::flat_hash_map<absl::string_view, std::string>& ignored,
-      int index_in_file_messages, const Options& options);
+      int index_in_file_messages, const Options& options,
+      MessageSCCAnalyzer* scc_analyzer);
 
   MessageGenerator(const MessageGenerator&) = delete;
   MessageGenerator& operator=(const MessageGenerator&) = delete;
@@ -77,13 +75,11 @@ class MessageGenerator {
   // default instance.
   void GenerateConstexprConstructor(io::Printer* p);
 
-  void GenerateSourceDefaultInstance(io::Printer* p);
+  void GenerateSchema(io::Printer* p, int offset, int has_offset);
 
-  void GenerateSchema(io::Printer* p, int offset);
-
-  // Generate the field offsets array.  Returns the total number of entries
-  // generated.
-  size_t GenerateOffsets(io::Printer* p);
+  // Generate the field offsets array.  Returns the a pair of the total number
+  // of entries generated and the index of the first has_bit entry.
+  std::pair<size_t, size_t> GenerateOffsets(io::Printer* p);
 
   const Descriptor* descriptor() const { return descriptor_; }
 
@@ -128,7 +124,6 @@ class MessageGenerator {
   void GenerateSerializeWithCachedSizesBody(io::Printer* p);
   void GenerateSerializeWithCachedSizesBodyShuffled(io::Printer* p);
   void GenerateByteSize(io::Printer* p);
-  void GenerateInternalGenerateClassData(io::Printer* p);
   void GenerateClassData(io::Printer* p);
   void GenerateMapEntryClassDefinition(io::Printer* p);
   void GenerateAnyMethodDefinition(io::Printer* p);
@@ -143,11 +138,12 @@ class MessageGenerator {
     // Some field is initialized to non-zero values. Eg string fields pointing
     // to default string.
     bool needs_memcpy = false;
+    // Some field has a copy of the arena.
+    bool needs_arena_seeding = false;
     // Some field has logic that needs to run.
     bool needs_to_run_constructor = false;
   };
-  NewOpRequirements GetNewOp() const;
-  void GenerateNewOp(io::Printer* p) const;
+  NewOpRequirements GetNewOp(io::Printer* arena_emitter) const;
 
   // Helpers for GenerateSerializeWithCachedSizes().
   //
@@ -161,7 +157,6 @@ class MessageGenerator {
   void GenerateSerializeOneofFields(
       io::Printer* p, const std::vector<const FieldDescriptor*>& fields);
   void GenerateSerializeOneExtensionRange(io::Printer* p, int start, int end);
-  void GenerateSerializeAllExtensions(io::Printer* p);
 
   // Generates has_foo() functions and variables for singular field has-bits.
   void GenerateSingularFieldHasBits(const FieldDescriptor* field,
@@ -173,15 +168,13 @@ class MessageGenerator {
   // Generates the clear_foo() method for a field.
   void GenerateFieldClear(const FieldDescriptor* field, bool is_inline,
                           io::Printer* p);
-  void GenerateCheckHasBitConsistency(io::Printer* p, absl::string_view prefix);
 
   // Returns true if any of the fields needs an `arena` variable containing
   // the current message's arena, reducing `GetArena()` call churn.
   bool RequiresArena(GeneratorFunction function) const;
 
-  // Returns true if all fields are trivially copayble, and has no non-field
-  // state (eg extensions).
-  bool CanUseTrivialCopy() const;
+  // Returns whether impl_ has a copy ctor.
+  bool ImplHasCopyCtor() const;
 
   // Returns the level that this message needs ArenaDtor. If the message has
   // a field that is not arena-exclusive, it needs an ArenaDtor
@@ -195,9 +188,8 @@ class MessageGenerator {
   //   at construction.
   ArenaDtorNeeds NeedsArenaDestructor() const;
 
-  bool ShouldGenerateEnclosingIf(const FieldDescriptor& field) const;
-
   size_t HasBitsSize() const;
+  size_t InlinedStringDonatedSize() const;
   absl::flat_hash_map<absl::string_view, std::string> HasBitVars(
       const FieldDescriptor* field) const;
   int HasBitIndex(const FieldDescriptor* field) const;
@@ -210,15 +202,6 @@ class MessageGenerator {
                                           io::Printer* p) const;
   void EmitUpdateByteSizeForField(const FieldDescriptor* field, io::Printer* p,
                                   int& cached_has_word_index) const;
-
-  void MaybeEmitUpdateCachedHasbits(const FieldDescriptor* field,
-                                    io::Printer* p,
-                                    int& cached_has_word_index) const;
-
-  void EmitCheckAndSerializeField(const FieldDescriptor* field,
-                                  io::Printer* p) const;
-  template <typename T>
-  void EmitOneofFields(io::Printer* p, const T& emitter) const;
 
   const Descriptor* descriptor_;
   int index_in_file_messages_;
@@ -233,6 +216,13 @@ class MessageGenerator {
   std::vector<int> has_bit_indices_;
   int max_has_bit_index_ = 0;
 
+  // A map from field index to inlined_string index. For non-inlined-string
+  // fields, the element is -1. If there is no inlined string in the message,
+  // this is empty.
+  std::vector<int> inlined_string_indices_;
+  // The count of inlined_string fields in the message.
+  int max_inlined_string_index_ = 0;
+
   std::vector<const EnumGenerator*> enum_generators_;
   std::vector<const ExtensionGenerator*> extension_generators_;
   int num_required_fields_ = 0;
@@ -240,6 +230,8 @@ class MessageGenerator {
 
   std::unique_ptr<MessageLayoutHelper> message_layout_helper_;
   std::unique_ptr<ParseFunctionGenerator> parse_function_generator_;
+
+  MessageSCCAnalyzer* scc_analyzer_;
 
   absl::flat_hash_map<absl::string_view, std::string> variables_;
 
@@ -249,7 +241,5 @@ class MessageGenerator {
 }  // namespace compiler
 }  // namespace protobuf
 }  // namespace google
-
-#include "google/protobuf/port_undef.inc"
 
 #endif  // GOOGLE_PROTOBUF_COMPILER_CPP_MESSAGE_H__

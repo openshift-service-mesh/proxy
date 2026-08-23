@@ -5,25 +5,25 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
-#ifndef GOOGLE_PROTOBUF_COMPILER_HPB_GEN_ACCESSORS_H__
-#define GOOGLE_PROTOBUF_COMPILER_HPB_GEN_ACCESSORS_H__
+#ifndef PROTOBUF_COMPILER_HBP_GEN_ACCESSORS_H_
+#define PROTOBUF_COMPILER_HBP_GEN_ACCESSORS_H_
 
-#include "hpb_generator/context.h"
-#include "hpb_generator/gen_utils.h"
 #include "google/protobuf/descriptor.h"
+#include "google/protobuf/compiler/hpb/gen_utils.h"
+#include "google/protobuf/compiler/hpb/output.h"
 
-namespace google {
-namespace protobuf {
-namespace hpb_generator {
+namespace google::protobuf::hpb_generator {
 
-void WriteFieldAccessorsInHeader(const google::protobuf::Descriptor* desc, Context& ctx);
-void WriteAccessorsInSource(const google::protobuf::Descriptor* desc, Context& ctx);
+namespace protobuf = ::proto2;
 
-void WriteUsingAccessorsInHeader(const google::protobuf::Descriptor* desc,
-                                 MessageClassType handle_type, Context& ctx);
-void WriteOneofAccessorsInHeader(const google::protobuf::Descriptor* desc, Context& ctx);
-}  // namespace hpb_generator
+void WriteFieldAccessorsInHeader(const protobuf::Descriptor* desc,
+                                 Output& output);
+void WriteAccessorsInSource(const protobuf::Descriptor* desc, Output& output);
+void WriteUsingAccessorsInHeader(const protobuf::Descriptor* desc,
+                                 MessageClassType handle_type, Output& output);
+void WriteOneofAccessorsInHeader(const protobuf::Descriptor* desc,
+                                 Output& output);
 }  // namespace protobuf
-}  // namespace google
+}  // namespace google::hpb_generator
 
-#endif  // GOOGLE_PROTOBUF_COMPILER_HPB_GEN_ACCESSORS_H__
+#endif  // PROTOBUF_COMPILER_HBP_GEN_ACCESSORS_H_

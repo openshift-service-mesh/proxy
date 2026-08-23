@@ -10,7 +10,8 @@
 
 #include <string>
 
-#include "google/protobuf/compiler/objectivec/helpers.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/strings/string_view.h"
 #include "google/protobuf/compiler/objectivec/options.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/io/printer.h"
@@ -45,7 +46,7 @@ class OneofGenerator {
  private:
   const OneofDescriptor* descriptor_;
   const GenerationOptions& generation_options_;
-  SubstitutionMap variables_;
+  absl::flat_hash_map<absl::string_view, std::string> variables_;
 };
 
 }  // namespace objectivec

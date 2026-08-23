@@ -21,23 +21,11 @@ add_library(libupb STATIC
 )
 
 target_include_directories(libupb PUBLIC
-  $<BUILD_INTERFACE:${protobuf_SOURCE_DIR}>
   $<BUILD_INTERFACE:${bootstrap_cmake_dir}>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 protobuf_configure_target(libupb)
-
-if (MSVC)
-  target_compile_options(libupb PRIVATE
-    # Our preprocessor code does not work with the default (buggy) MSVC
-    # preprocessor.
-    #
-    # TODO: Remove this once the new preprocessor is enabled by
-    # default.
-    /Zc:preprocessor
-  )
-endif()
 
 set_target_properties(libupb PROPERTIES
     VERSION ${protobuf_VERSION}

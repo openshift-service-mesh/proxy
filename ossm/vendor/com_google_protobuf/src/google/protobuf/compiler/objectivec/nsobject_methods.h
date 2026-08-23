@@ -1,6 +1,3 @@
-#ifndef GOOGLE_PROTOBUF_COMPILER_OBJECTIVEC_NSOBJECT_METHODS_H__
-#define GOOGLE_PROTOBUF_COMPILER_OBJECTIVEC_NSOBJECT_METHODS_H__
-
 // Protocol Buffers - Google's data interchange format
 // Copyright 2008 Google Inc.  All rights reserved.
 //
@@ -205,5 +202,3 @@ const char* const kNSObjectMethodsList[] = {
     // Protocol: NSObject
     // Protocol: ROCKRemoteInvocationInterface
 };
-
-#endif  // GOOGLE_PROTOBUF_COMPILER_OBJECTIVEC_NSOBJECT_METHODS_H__

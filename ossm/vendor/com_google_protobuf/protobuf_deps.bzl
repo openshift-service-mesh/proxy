@@ -5,41 +5,36 @@ and sets up the repositories protobuf needs:
 
 ```
 http_archive(
-    name = "com_google_protobuf",
+    name = "protobuf",
     strip_prefix = "protobuf-VERSION",
     sha256 = ...,
     url = ...,
 )
 
-load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
+load("@protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
 protobuf_deps()
-
-load("@rules_java//java:rules_java_deps.bzl", "rules_java_dependencies")
-
-rules_java_dependencies()
-
-load("@rules_java//java:repositories.bzl", "rules_java_toolchains")
-
-rules_java_toolchains()
-
-load("@rules_python//python:repositories.bzl", "py_repositories")
-
-py_repositories()
 ```
 """
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("//bazel/private/oss:proto_bazel_features.bzl", "proto_bazel_features")  # buildifier: disable=bzl-visibility
+load("//bazel/private:proto_bazel_features.bzl", "proto_bazel_features")  # buildifier: disable=bzl-visibility
 load("//python/dist:python_downloads.bzl", "python_nuget_package", "python_source_archive")
 load("//python/dist:system_python.bzl", "system_python")
 
 PROTOBUF_MAVEN_ARTIFACTS = [
+    "com.google.caliper:caliper:1.0-beta-3",
     "com.google.code.findbugs:jsr305:3.0.2",
     "com.google.code.gson:gson:2.8.9",
     "com.google.errorprone:error_prone_annotations:2.5.1",
     "com.google.j2objc:j2objc-annotations:2.8",
     "com.google.guava:guava:32.0.1-jre",
+    "com.google.guava:guava-testlib:32.0.1-jre",
+    "com.google.truth:truth:1.1.2",
+    "junit:junit:4.13.2",
+    "org.mockito:mockito-core:4.3.1",
+    "biz.aQute.bnd:biz.aQute.bndlib:6.4.0",
+    "info.picocli:picocli:4.6.3",
 ]
 
 def _github_archive(repo, commit, **kwargs):
@@ -53,36 +48,30 @@ def _github_archive(repo, commit, **kwargs):
 def protobuf_deps():
     """Loads common dependencies needed to compile the protobuf library."""
 
-    if not native.existing_rule("bazel_features"):
-        http_archive(
-            name = "bazel_features",
-            sha256 = "c41853e3b636c533b86bf5ab4658064e6cc9db0a3bce52cbff0629e094344ca9",
-            strip_prefix = "bazel_features-1.33.0",
-            url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.33.0/bazel_features-v1.33.0.tar.gz",
-        )
-
     if not native.existing_rule("bazel_skylib"):
         http_archive(
             name = "bazel_skylib",
-            sha256 = "3b5b49006181f5f8ff626ef8ddceaa95e9bb8ad294f7b5d7b11ea9f7ddaf8c59",
+            sha256 = "d00f1389ee20b60018e92644e0948e16e350a7707219e7a390fb0a99b6ec9262",
             urls = [
-                "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.9.0/bazel-skylib-1.9.0.tar.gz",
-                "https://github.com/bazelbuild/bazel-skylib/releases/download/1.9.0/bazel-skylib-1.9.0.tar.gz",
+                "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.7.0/bazel-skylib-1.7.0.tar.gz",
+                "https://github.com/bazelbuild/bazel-skylib/releases/download/1.7.0/bazel-skylib-1.7.0.tar.gz",
             ],
         )
 
-    if not native.existing_rule("abseil-cpp"):
+    if not native.existing_rule("com_google_absl"):
         _github_archive(
-            name = "abseil-cpp",
+            name = "com_google_absl",
             repo = "https://github.com/abseil/abseil-cpp",
-            commit = "76bb24329e8bf5f39704eb10d21b9a80befa7c81",  # Abseil LTS 20250512.1
-            integrity = "sha256-jF3/tZRlrthY/Y+cEgf1ljqPmtqNOcwVh392LHtERWA=",
+            # TODO: use Layout::WithStaticSizes in SerialArenaChunk when we update
+            # abseil to new release.
+            commit = "4a2c63365eff8823a5221db86ef490e828306f9d",  # Abseil LTS 20240116.0
+            sha256 = "f49929d22751bf70dd61922fb1fd05eb7aec5e7a7f870beece79a6e28f0a06c1",
         )
 
     if not native.existing_rule("zlib"):
         http_archive(
             name = "zlib",
-            build_file = Label("//third_party:zlib.BUILD"),
+            build_file = Label("//:third_party/zlib.BUILD"),
             sha256 = "38ef96b8dfe510d42707d9c781877914792541133e1870841463bfa73f883e32",
             strip_prefix = "zlib-1.3.1",
             urls = [
@@ -95,26 +84,24 @@ def protobuf_deps():
         _github_archive(
             name = "jsoncpp",
             repo = "https://github.com/open-source-parsers/jsoncpp",
-            commit = "89e2973c754a9c02a49974d839779b151e95afd6",  # 1.9.6
-            sha256 = "02f0804596c1e18c064d890ac9497fa17d585e822fcacf07ff8a8aa0b344a7bd",
-            build_file = Label("//third_party:jsoncpp.BUILD"),
+            commit = "5defb4ed1a4293b8e2bf641e16b156fb9de498cc",  # 1.9.5
+            sha256 = "a03d3136ff6dd092143bba8d3ded641e87b44e6c0b1f632b368f6cc8587524b5",
+            build_file = Label("//:third_party/jsoncpp.BUILD"),
         )
 
     if not native.existing_rule("rules_cc"):
         http_archive(
             name = "rules_cc",
-            urls = ["https://github.com/bazelbuild/rules_cc/releases/download/0.0.16/rules_cc-0.0.16.tar.gz"],
-            sha256 = "bbf1ae2f83305b7053b11e4467d317a7ba3517a12cef608543c1b1c5bf48a4df",
-            strip_prefix = "rules_cc-0.0.16",
+            urls = ["https://github.com/bazelbuild/rules_cc/releases/download/0.0.13/rules_cc-0.0.13.tar.gz"],
+            sha256 = "d9bdd3ec66b6871456ec9c965809f43a0901e692d754885e89293807762d3d80",
+            strip_prefix = "rules_cc-0.0.13",
         )
 
     if not native.existing_rule("rules_java"):
         http_archive(
             name = "rules_java",
-            urls = [
-                "https://github.com/bazelbuild/rules_java/releases/download/8.6.1/rules_java-8.6.1.tar.gz",
-            ],
-            sha256 = "c5bc17e17bb62290b1fd8fdd847a2396d3459f337a7e07da7769b869b488ec26",
+            url = "https://github.com/bazelbuild/rules_java/releases/download/7.12.2/rules_java-7.12.2.tar.gz",
+            sha256 = "a9690bc00c538246880d5c83c233e4deb83fe885f54c21bb445eb8116a180b83",
         )
 
     if not native.existing_rule("rules_shell"):
@@ -131,23 +118,23 @@ def protobuf_deps():
     if not native.existing_rule("rules_python"):
         http_archive(
             name = "rules_python",
-            sha256 = "fa7dd2c6b7d63b3585028dd8a90a6cf9db83c33b250959c2ee7b583a6c130e12",
-            strip_prefix = "rules_python-1.6.0",
-            url = "https://github.com/bazel-contrib/rules_python/releases/download/1.6.0/rules_python-1.6.0.tar.gz",
+            sha256 = "d70cd72a7a4880f0000a6346253414825c19cdd40a28289bdf67b8e6480edff8",
+            strip_prefix = "rules_python-0.28.0",
+            url = "https://github.com/bazelbuild/rules_python/releases/download/0.28.0/rules_python-0.28.0.tar.gz",
         )
 
     if not native.existing_rule("system_python"):
         system_python(
             name = "system_python",
-            minimum_python_version = "3.10",
+            minimum_python_version = "3.8",
         )
 
     if not native.existing_rule("rules_jvm_external"):
         http_archive(
             name = "rules_jvm_external",
-            strip_prefix = "rules_jvm_external-6.7",
-            sha256 = "a1e351607f04fed296ba33c4977d3fe2a615ed50df7896676b67aac993c53c18",
-            url = "https://github.com/bazelbuild/rules_jvm_external/releases/download/6.7/rules_jvm_external-6.7.tar.gz",
+            strip_prefix = "rules_jvm_external-6.3",
+            sha256 = "c18a69d784bcd851be95897ca0eca0b57dc86bb02e62402f15736df44160eb02",
+            url = "https://github.com/bazelbuild/rules_jvm_external/releases/download/6.3/rules_jvm_external-6.3.tar.gz",
         )
 
     if not native.existing_rule("rules_pkg"):
@@ -160,11 +147,18 @@ def protobuf_deps():
             sha256 = "d20c951960ed77cb7b341c2a59488534e494d5ad1d30c4818c736d57772a9fef",
         )
 
+    if not native.existing_rule("build_bazel_rules_apple"):
+        http_archive(
+            name = "build_bazel_rules_apple",
+            sha256 = "9c4f1e1ec4fdfeac5bddb07fa0e872c398e3d8eb0ac596af9c463f9123ace292",
+            url = "https://github.com/bazelbuild/rules_apple/releases/download/3.2.1/rules_apple.3.2.1.tar.gz",
+        )
+
     if not native.existing_rule("build_bazel_apple_support"):
         http_archive(
             name = "build_bazel_apple_support",
-            sha256 = "1ae6fcf983cff3edab717636f91ad0efff2e5ba75607fdddddfd6ad0dbdfaf10",
-            url = "https://github.com/bazelbuild/apple_support/releases/download/1.24.5/apple_support.1.24.5.tar.gz",
+            sha256 = "100d12617a84ebc7ee7a10ecf3b3e2fdadaebc167ad93a21f820a6cb60158ead",
+            url = "https://github.com/bazelbuild/apple_support/releases/download/1.12.0/apple_support.1.12.0.tar.gz",
         )
 
     if not native.existing_rule("rules_kotlin"):
@@ -186,17 +180,31 @@ def protobuf_deps():
 
     # Python Downloads
     python_source_archive(
-        version = "3.10.0",
-        sha256 = "c4e0cbad57c90690cb813fb4663ef670b4d0f587d8171e2c42bd4c9245bd2758",
+        name = "python-3.8.0",
+        sha256 = "f1069ad3cae8e7ec467aa98a6565a62a48ef196cb8f1455a245a08db5e1792df",
     )
     python_nuget_package(
-        version = "3.10.0",
-        cpu = "i686",
+        name = "nuget_python_i686_3.8.0",
+        sha256 = "87a6481f5eef30b42ac12c93f06f73bd0b8692f26313b76a6615d1641c4e7bca",
+    )
+    python_nuget_package(
+        name = "nuget_python_x86-64_3.8.0",
+        sha256 = "96c61321ce90dd053c8a04f305a5f6cc6d91350b862db34440e4a4f069b708a0",
+    )
+    python_nuget_package(
+        name = "nuget_python_i686_3.9.0",
+        sha256 = "229abecbe49dc08fe5709e0b31e70edfb3b88f23335ebfc2904c44f940fd59b6",
+    )
+    python_nuget_package(
+        name = "nuget_python_x86-64_3.9.0",
+        sha256 = "6af58a733e7dfbfcdd50d55788134393d6ffe7ab8270effbf724bdb786558832",
+    )
+    python_nuget_package(
+        name = "nuget_python_i686_3.10.0",
         sha256 = "e115e102eb90ce160ab0ef7506b750a8d7ecc385bde0a496f02a54337a8bc333",
     )
     python_nuget_package(
-        version = "3.10.0",
-        cpu = "x86-64",
+        name = "nuget_python_x86-64_3.10.0",
         sha256 = "4474c83c25625d93e772e926f95f4cd398a0abbb52793625fa30f39af3d2cc00",
     )
-    native.register_toolchains("//bazel/private/oss/toolchains:all")
+    native.register_toolchains("//bazel/private/toolchains:all")

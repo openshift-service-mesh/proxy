@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "absl/base/attributes.h"
-#include "absl/base/optimization.h"
 #include "absl/base/prefetch.h"
 
 // Must be included last.
@@ -29,7 +28,7 @@ namespace cleanup {
 
 // Helper function invoking the destructor of `object`
 template <typename T>
-void arena_destruct_object(void* PROTOBUF_NONNULL object) {
+void arena_destruct_object(void* object) {
   reinterpret_cast<T*>(object)->~T();
 }
 
@@ -50,8 +49,8 @@ struct CleanupNode {
   // Destroys the object referenced by the cleanup node.
   ABSL_ATTRIBUTE_ALWAYS_INLINE void Destroy() { destructor(elem); }
 
-  void* PROTOBUF_NONNULL elem;
-  void (*PROTOBUF_NONNULL destructor)(void* PROTOBUF_NONNULL);
+  void* elem;
+  void (*destructor)(void*);
 };
 
 // Manages the list of cleanup nodes in a chunked linked list. Chunks grow by
@@ -59,11 +58,9 @@ struct CleanupNode {
 // called before destruction.
 class ChunkList {
  public:
-  PROTOBUF_ALWAYS_INLINE void Add(
-      void* PROTOBUF_NONNULL elem,
-      void (*PROTOBUF_NONNULL destructor)(void* PROTOBUF_NONNULL),
-      SerialArena& arena) {
-    if (ABSL_PREDICT_TRUE(next_ < limit_)) {
+  PROTOBUF_ALWAYS_INLINE void Add(void* elem, void (*destructor)(void*),
+                                  SerialArena& arena) {
+    if (PROTOBUF_PREDICT_TRUE(next_ < limit_)) {
       AddFromExisting(elem, destructor);
       return;
     }
@@ -78,24 +75,21 @@ class ChunkList {
   struct Chunk;
   friend class internal::SerialArena;
 
-  void AddFallback(void* PROTOBUF_NONNULL elem,
-                   void (*PROTOBUF_NONNULL destructor)(void* PROTOBUF_NONNULL),
-                   SerialArena& arena);
-  ABSL_ATTRIBUTE_ALWAYS_INLINE void AddFromExisting(
-      void* PROTOBUF_NONNULL elem,
-      void (*PROTOBUF_NONNULL destructor)(void* PROTOBUF_NONNULL)) {
+  void AddFallback(void* elem, void (*destructor)(void*), SerialArena& arena);
+  ABSL_ATTRIBUTE_ALWAYS_INLINE void AddFromExisting(void* elem,
+                                                    void (*destructor)(void*)) {
     *next_++ = CleanupNode{elem, destructor};
   }
 
   // Returns the pointers to the to-be-cleaned objects.
   std::vector<void*> PeekForTesting();
 
-  Chunk* PROTOBUF_NULLABLE head_ = nullptr;
-  CleanupNode* PROTOBUF_NULLABLE next_ = nullptr;
-  CleanupNode* PROTOBUF_NULLABLE limit_ = nullptr;
+  Chunk* head_ = nullptr;
+  CleanupNode* next_ = nullptr;
+  CleanupNode* limit_ = nullptr;
   // Current prefetch position. Data from `next_` up to but not including
   // `prefetch_ptr_` is software prefetched. Used in SerialArena prefetching.
-  const char* PROTOBUF_NULLABLE prefetch_ptr_ = nullptr;
+  const char* prefetch_ptr_ = nullptr;
 };
 
 }  // namespace cleanup

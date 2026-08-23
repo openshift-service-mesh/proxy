@@ -4,12 +4,18 @@
 
 #include "quiche/quic/moqt/test_tools/moqt_framer_utils.h"
 
+#include <cstdint>
 #include <string>
 #include <variant>
 
+#include "absl/strings/string_view.h"
+#include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/moqt/moqt_framer.h"
 #include "quiche/quic/moqt/moqt_messages.h"
+#include "quiche/quic/moqt/moqt_parser.h"
+#include "quiche/common/platform/api/quiche_test.h"
 #include "quiche/common/quiche_buffer_allocator.h"
+#include "quiche/common/quiche_data_reader.h"
 
 namespace moqt::test {
 
@@ -40,17 +46,11 @@ struct FramingVisitor {
   quiche::QuicheBuffer operator()(const MoqtPublishNamespace& message) {
     return framer.SerializePublishNamespace(message);
   }
-  quiche::QuicheBuffer operator()(const MoqtPublishNamespaceDone& message) {
-    return framer.SerializePublishNamespaceDone(message);
-  }
   quiche::QuicheBuffer operator()(const MoqtNamespace& message) {
     return framer.SerializeNamespace(message);
   }
   quiche::QuicheBuffer operator()(const MoqtNamespaceDone& message) {
     return framer.SerializeNamespaceDone(message);
-  }
-  quiche::QuicheBuffer operator()(const MoqtPublishNamespaceCancel& message) {
-    return framer.SerializePublishNamespaceCancel(message);
   }
   quiche::QuicheBuffer operator()(const MoqtTrackStatus& message) {
     return framer.SerializeTrackStatus(message);
@@ -103,6 +103,22 @@ std::string SerializeGenericMessage(const AnyMoqtControlMessage& frame,
   }
   MoqtFramer framer(use_webtrans, perspective);
   return std::string(std::visit(FramingVisitor{framer}, frame).AsStringView());
+}
+
+MoqtRawControlMessage UnframeRawControlMessage(absl::string_view message) {
+  quiche::QuicheDataReader reader(message);
+  uint64_t raw_type;
+  uint16_t message_size;
+  bool parse_success = reader.ReadMoqVarInt(&raw_type) &&
+                       reader.ReadUInt16(&message_size) &&
+                       reader.BytesRemaining() == message_size;
+  if (!parse_success) {
+    ADD_FAILURE() << "Failed to unframe the control message";
+    return MoqtRawControlMessage();
+  }
+  return MoqtRawControlMessage{
+      .type = static_cast<MoqtMessageType>(raw_type),
+      .payload = std::string(reader.ReadRemainingPayload())};
 }
 
 }  // namespace moqt::test

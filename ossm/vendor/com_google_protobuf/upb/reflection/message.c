@@ -172,18 +172,15 @@ bool upb_Message_Next(const upb_Message* msg, const upb_MessageDef* m,
   }
 
   if (ext_pool) {
-    upb_Message_Internal* in = UPB_PRIVATE(_upb_Message_GetInternal)(msg);
-    if (!in) return false;
-
-    for (; (i - n) < in->size; i++) {
-      upb_TaggedAuxPtr tagged_ptr = in->aux_data[i - n];
-      if (upb_TaggedAuxPtr_IsExtension(tagged_ptr)) {
-        const upb_Extension* ext = upb_TaggedAuxPtr_Extension(tagged_ptr);
-        memcpy(out_val, &ext->data, sizeof(*out_val));
-        *out_f = upb_DefPool_FindExtensionByMiniTable(ext_pool, ext->ext);
-        *iter = i;
-        return true;
-      }
+    // Return any extensions that are set.
+    size_t count;
+    const upb_Extension* ext = UPB_PRIVATE(_upb_Message_Getexts)(msg, &count);
+    if (i - n < count) {
+      ext += count - 1 - (i - n);
+      memcpy(out_val, &ext->data, sizeof(*out_val));
+      *out_f = upb_DefPool_FindExtensionByMiniTable(ext_pool, ext->ext);
+      *iter = i;
+      return true;
     }
   }
 
@@ -192,7 +189,7 @@ bool upb_Message_Next(const upb_Message* msg, const upb_MessageDef* m,
 }
 
 bool _upb_Message_DiscardUnknown(upb_Message* msg, const upb_MessageDef* m,
-                                 const upb_DefPool* ext_pool, int depth) {
+                                 int depth) {
   UPB_ASSERT(!upb_Message_IsFrozen(msg));
   size_t iter = kUpb_Message_Begin;
   const upb_FieldDef* f;
@@ -203,7 +200,7 @@ bool _upb_Message_DiscardUnknown(upb_Message* msg, const upb_MessageDef* m,
 
   _upb_Message_DiscardUnknown_shallow(msg);
 
-  while (upb_Message_Next(msg, m, ext_pool, &f, &val, &iter)) {
+  while (upb_Message_Next(msg, m, NULL /*ext_pool*/, &f, &val, &iter)) {
     const upb_MessageDef* subm = upb_FieldDef_MessageSubDef(f);
     if (!subm) continue;
     if (upb_FieldDef_IsMap(f)) {
@@ -217,7 +214,7 @@ bool _upb_Message_DiscardUnknown(upb_Message* msg, const upb_MessageDef* m,
       upb_MessageValue map_key, map_val;
       while (upb_Map_Next(map, &map_key, &map_val, &iter)) {
         if (!_upb_Message_DiscardUnknown((upb_Message*)map_val.msg_val, val_m,
-                                         ext_pool, depth)) {
+                                         depth)) {
           ret = false;
         }
       }
@@ -227,13 +224,13 @@ bool _upb_Message_DiscardUnknown(upb_Message* msg, const upb_MessageDef* m,
       for (i = 0; i < n; i++) {
         upb_MessageValue elem = upb_Array_Get(arr, i);
         if (!_upb_Message_DiscardUnknown((upb_Message*)elem.msg_val, subm,
-                                         ext_pool, depth)) {
+                                         depth)) {
           ret = false;
         }
       }
     } else {
       if (!_upb_Message_DiscardUnknown((upb_Message*)val.msg_val, subm,
-                                       ext_pool, depth)) {
+                                       depth)) {
         ret = false;
       }
     }
@@ -243,6 +240,6 @@ bool _upb_Message_DiscardUnknown(upb_Message* msg, const upb_MessageDef* m,
 }
 
 bool upb_Message_DiscardUnknown(upb_Message* msg, const upb_MessageDef* m,
-                                const upb_DefPool* ext_pool, int maxdepth) {
-  return _upb_Message_DiscardUnknown(msg, m, ext_pool, maxdepth);
+                                int maxdepth) {
+  return _upb_Message_DiscardUnknown(msg, m, maxdepth);
 }

@@ -1,7 +1,4 @@
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
-load("@rules_cc//cc/toolchains:cc_toolchain.bzl", "cc_toolchain")
-load("@rules_cc//cc/toolchains:cc_toolchain_suite.bzl", "cc_toolchain_suite")
-load("//build_defs:platforms.bzl", "PLATFORMS")
 load(":cc_toolchain_config.bzl", "cc_toolchain_config")
 
 package(default_visibility = ["//visibility:public"])
@@ -13,14 +10,27 @@ bool_flag(
     build_setting_default = False,
 )
 
-config_setting(
-    name = "is_cross_compiling",
-    flag_values = {":release": "True"},
+TOOLCHAINS = {
+    "osx-x86_64": "cc-compiler-osx-x86_64",
+    "osx-aarch_64": "cc-compiler-osx-aarch_64",
+    "linux-aarch_64": "cc-compiler-linux-aarch_64",
+    "linux-ppcle_64": "cc-compiler-linux-ppcle_64",
+    "linux-s390_64": "cc-compiler-linux-s390_64",
+    "linux-x86_32": "cc-compiler-linux-x86_32",
+    "linux-x86_64": "cc-compiler-linux-x86_64",
+    "win32": "cc-compiler-windows-x86_32",
+    "win64": "cc-compiler-windows-x86_64",
+    "k8": "cc-compiler-k8",
+}
+
+cc_toolchain_suite(
+    name = "clang_suite",
+    toolchains = TOOLCHAINS,
 )
 
 [
     cc_toolchain(
-        name = name + "-cc_toolchain",
+        name = toolchain,
         all_files = ":empty",
         compiler_files = ":empty",
         dwp_files = ":empty",
@@ -30,21 +40,10 @@ config_setting(
         output_licenses = ["restricted"],
         static_runtime_lib = ":empty",
         strip_files = ":empty",
-        toolchain_config = ":" + name + "-config",
-        toolchain_identifier = name + "-cc_toolchain",
+        toolchain_config = ":" + cpu + "-config",
+        toolchain_identifier = toolchain,
     )
-    for name in PLATFORMS.keys()
-]
-
-[
-    toolchain(
-        name = name + "-toolchain",
-        target_compatible_with = constraints,
-        target_settings = [":is_cross_compiling"],
-        toolchain = ":" + name + "-cc_toolchain",
-        toolchain_type = "@rules_cc//cc:toolchain_type",
-    )
-    for name, constraints in PLATFORMS.items()
+    for cpu, toolchain in TOOLCHAINS.items()
 ]
 
 cc_toolchain_config(
@@ -109,7 +108,7 @@ cc_toolchain_config(
     linker_path = "/usr/tools",
     sysroot = "/usr/tools/xcode_14_0/macosx",
     target_cpu = "aarch64",
-    target_full_name = "aarch64-apple-macosx12.0",
+    target_full_name = "aarch64-apple-macosx10.15",
 )
 
 cc_toolchain_config(
@@ -126,7 +125,7 @@ cc_toolchain_config(
     linker_path = "/usr/tools",
     sysroot = "/usr/tools/xcode_14_0/macosx",
     target_cpu = "x86_64",
-    target_full_name = "x86_64-apple-macosx12.0",
+    target_full_name = "x86_64-apple-macosx10.15",
 )
 
 cc_toolchain_config(

@@ -13,8 +13,8 @@
 
 #include "google/protobuf/compiler/parser.h"
 
-#include <cassert>
-#include <climits>
+#include <float.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-#include "absl/base/attributes.h"
+#include "absl/base/casts.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -34,12 +34,13 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/descriptor.pb.h"
 #include "google/protobuf/io/strtod.h"
 #include "google/protobuf/io/tokenizer.h"
 #include "google/protobuf/message_lite.h"
+#include "google/protobuf/port.h"
+#include "google/protobuf/wire_format.h"
 
 // Must be included last.
 #include "google/protobuf/port_def.inc"
@@ -51,18 +52,6 @@ namespace {
 
 using TypeNameMap =
     absl::flat_hash_map<absl::string_view, FieldDescriptorProto::Type>;
-
-absl::optional<absl::string_view> NumericTypeMaybeReplacedWith(
-    absl::string_view type_name) {
-  static const auto* const kReplacements =
-      new absl::flat_hash_map<absl::string_view, absl::string_view>{
-          {"fixed32", "uint32"}, {"fixed64", "uint64"},  {"sfixed32", "int32"},
-          {"sfixed64", "int64"}, {"sint32", "zigzag32"}, {"sint64", "zigzag64"},
-      };
-  auto it = kReplacements->find(type_name);
-  return it == kReplacements->end() ? absl::nullopt
-                                    : absl::make_optional(it->second);
-}
 
 const TypeNameMap& GetTypeNameTable() {
   static auto* table = new auto([]() {
@@ -85,35 +74,6 @@ const TypeNameMap& GetTypeNameTable() {
     result["int64"] = FieldDescriptorProto::TYPE_INT64;
     result["sint32"] = FieldDescriptorProto::TYPE_SINT32;
     result["sint64"] = FieldDescriptorProto::TYPE_SINT64;
-
-    return result;
-  }());
-  return *table;
-}
-
-const TypeNameMap& GetTypeNameTableWithFixedWireForIntTypes() {
-  static auto* table = new auto([]() {
-    TypeNameMap result;
-
-    result["double"] = FieldDescriptorProto::TYPE_DOUBLE;
-    result["float"] = FieldDescriptorProto::TYPE_FLOAT;
-    result["uint64"] = FieldDescriptorProto::TYPE_FIXED64;
-    result["bool"] = FieldDescriptorProto::TYPE_BOOL;
-    result["string"] = FieldDescriptorProto::TYPE_STRING;
-    result["group"] = FieldDescriptorProto::TYPE_GROUP;
-
-    result["bytes"] = FieldDescriptorProto::TYPE_BYTES;
-    result["uint32"] = FieldDescriptorProto::TYPE_FIXED32;
-    result["int32"] = FieldDescriptorProto::TYPE_SFIXED32;
-    result["int64"] = FieldDescriptorProto::TYPE_SFIXED64;
-
-    // New types added to preserve legacy behavior.
-    result["varint32"] = FieldDescriptorProto::TYPE_INT32;
-    result["varint64"] = FieldDescriptorProto::TYPE_INT64;
-    result["uvarint32"] = FieldDescriptorProto::TYPE_UINT32;
-    result["uvarint64"] = FieldDescriptorProto::TYPE_UINT64;
-    result["zigzag32"] = FieldDescriptorProto::TYPE_SINT32;
-    result["zigzag64"] = FieldDescriptorProto::TYPE_SINT64;
 
     return result;
   }());
@@ -144,6 +104,57 @@ std::string MapEntryName(absl::string_view field_name) {
   }
   result.append(kSuffix);
   return result;
+}
+
+bool IsUppercase(char c) { return c >= 'A' && c <= 'Z'; }
+
+bool IsLowercase(char c) { return c >= 'a' && c <= 'z'; }
+
+bool IsNumber(char c) { return c >= '0' && c <= '9'; }
+
+bool IsUpperCamelCase(absl::string_view name) {
+  if (name.empty()) {
+    return true;
+  }
+  // Name must start with an upper case character.
+  if (!IsUppercase(name[0])) {
+    return false;
+  }
+  // Must not contains underscore.
+  for (const char c : name) {
+    if (c == '_') {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsUpperUnderscore(absl::string_view name) {
+  for (const char c : name) {
+    if (!IsUppercase(c) && c != '_' && !IsNumber(c)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsLowerUnderscore(absl::string_view name) {
+  for (const char c : name) {
+    if (!IsLowercase(c) && c != '_' && !IsNumber(c)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsNumberFollowUnderscore(absl::string_view name) {
+  for (int i = 1; i < name.length(); i++) {
+    const char c = name[i];
+    if (IsNumber(c) && name[i - 1] == '_') {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // anonymous namespace
@@ -497,7 +508,7 @@ void Parser::LocationRecorder::AttachComments(
   if (!trailing->empty()) {
     location_->mutable_trailing_comments()->swap(*trailing);
   }
-  for (size_t i = 0; i < detached_comments->size(); ++i) {
+  for (int i = 0; i < detached_comments->size(); ++i) {
     location_->add_leading_detached_comments()->swap((*detached_comments)[i]);
   }
   detached_comments->clear();
@@ -615,6 +626,22 @@ bool Parser::ValidateEnum(const EnumDescriptorProto* proto) {
     return false;
   }
 
+  // Enforce that enum constants must be UPPER_CASE except in case of
+  // enum_alias.
+  if (!allow_alias) {
+    for (const auto& enum_value : proto->value()) {
+      if (!IsUpperUnderscore(enum_value.name())) {
+        RecordWarning([&] {
+          return absl::StrCat(
+              "Enum constant should be in UPPER_CASE. Found: ",
+              enum_value.name(),
+              ". See "
+              "https://developers.google.com/protocol-buffers/docs/style");
+        });
+      }
+    }
+  }
+
   return true;
 }
 
@@ -656,10 +683,11 @@ bool Parser::Parse(io::Tokenizer* input, FileDescriptorProto* file) {
         }
       }
     } else if (!stop_after_syntax_identifier_) {
-      ABSL_LOG(WARNING) << "No edition or syntax specified for the proto file: "
-                        << file->name() << ". Please use 'edition = \"YYYY\";' "
-                        << " to specify a valid edition "
-                        << "version. (Defaulted to \"syntax = \"proto2\";\".)";
+      ABSL_LOG(WARNING) << "No syntax specified for the proto file: "
+                        << file->name()
+                        << ". Please use 'syntax = \"proto2\";' "
+                        << "or 'syntax = \"proto3\";' to specify a syntax "
+                        << "version. (Defaulted to proto2 syntax.)";
       syntax_identifier_ = "proto2";
     }
 
@@ -699,8 +727,8 @@ bool Parser::ParseSyntaxIdentifier(const FileDescriptorProto* file,
     has_edition = true;
   } else {
     DO(Consume("syntax",
-               "File must begin with an edition or syntax statement, e.g."
-               " 'edition = \"2023\";'."));
+               "File must begin with a syntax statement, e.g. 'syntax = "
+               "\"proto2\";'."));
   }
 
   DO(Consume("="));
@@ -742,27 +770,18 @@ bool Parser::ParseTopLevelStatement(FileDescriptorProto* file,
   if (TryConsumeEndOfDeclaration(";", nullptr)) {
     // empty statement; ignore
     return true;
-  }
-
-  SymbolVisibility visibility = SymbolVisibility::VISIBILITY_UNSET;
-  if (LookingAt("export") || LookingAt("local")) {
-    DO(ParseVisibility(file, &visibility));
-  }
-
-  if (LookingAt("message")) {
+  } else if (LookingAt("message")) {
     LocationRecorder location(root_location,
                               FileDescriptorProto::kMessageTypeFieldNumber,
                               file->message_type_size());
     // Maximum depth allowed by the DescriptorPool.
     recursion_depth_ = internal::cpp::MaxMessageDeclarationNestingDepth();
-    return ParseMessageDefinition(file->add_message_type(), visibility,
-                                  location, file);
+    return ParseMessageDefinition(file->add_message_type(), location, file);
   } else if (LookingAt("enum")) {
     LocationRecorder location(root_location,
                               FileDescriptorProto::kEnumTypeFieldNumber,
                               file->enum_type_size());
-    return ParseEnumDefinition(file->add_enum_type(), visibility, location,
-                               file);
+    return ParseEnumDefinition(file->add_enum_type(), location, file);
   } else if (LookingAt("service")) {
     LocationRecorder location(root_location,
                               FileDescriptorProto::kServiceFieldNumber,
@@ -776,7 +795,6 @@ bool Parser::ParseTopLevelStatement(FileDescriptorProto* file,
         FileDescriptorProto::kMessageTypeFieldNumber, location, file);
   } else if (LookingAt("import")) {
     return ParseImport(file->mutable_dependency(),
-                       file->mutable_option_dependency(),
                        file->mutable_public_dependency(),
                        file->mutable_weak_dependency(), root_location, file);
   } else if (LookingAt("package")) {
@@ -833,8 +851,7 @@ PROTOBUF_NOINLINE static void GenerateSyntheticOneofs(
 }
 
 bool Parser::ParseMessageDefinition(
-    DescriptorProto* message, const SymbolVisibility& visibility,
-    const LocationRecorder& message_location,
+    DescriptorProto* message, const LocationRecorder& message_location,
     const FileDescriptorProto* containing_file) {
   const auto undo_depth = absl::MakeCleanup([&] { ++recursion_depth_; });
   if (--recursion_depth_ <= 0) {
@@ -849,15 +866,19 @@ bool Parser::ParseMessageDefinition(
     location.RecordLegacyLocation(message,
                                   DescriptorPool::ErrorCollector::NAME);
     DO(ConsumeIdentifier(message->mutable_name(), "Expected message name."));
+    if (!IsUpperCamelCase(message->name())) {
+      RecordWarning([=] {
+        return absl::StrCat(
+            "Message name should be in UpperCamelCase. Found: ",
+            message->name(),
+            ". See https://developers.google.com/protocol-buffers/docs/style");
+      });
+    }
   }
   DO(ParseMessageBlock(message, message_location, containing_file));
 
   if (syntax_identifier_ == "proto3") {
     GenerateSyntheticOneofs(message);
-  }
-
-  if (visibility != SymbolVisibility::VISIBILITY_UNSET) {
-    message->set_visibility(visibility);
   }
 
   return true;
@@ -949,24 +970,17 @@ bool Parser::ParseMessageStatement(DescriptorProto* message,
   if (TryConsumeEndOfDeclaration(";", nullptr)) {
     // empty statement; ignore
     return true;
-  }
-
-  SymbolVisibility visibility = SymbolVisibility::VISIBILITY_UNSET;
-  if (LookingAt("export") || LookingAt("local")) {
-    DO(ParseVisibility(containing_file, &visibility));
-  }
-
-  if (LookingAt("message")) {
+  } else if (LookingAt("message")) {
     LocationRecorder location(message_location,
                               DescriptorProto::kNestedTypeFieldNumber,
                               message->nested_type_size());
-    return ParseMessageDefinition(message->add_nested_type(), visibility,
-                                  location, containing_file);
+    return ParseMessageDefinition(message->add_nested_type(), location,
+                                  containing_file);
   } else if (LookingAt("enum")) {
     LocationRecorder location(message_location,
                               DescriptorProto::kEnumTypeFieldNumber,
                               message->enum_type_size());
-    return ParseEnumDefinition(message->add_enum_type(), visibility, location,
+    return ParseEnumDefinition(message->add_enum_type(), location,
                                containing_file);
   } else if (LookingAt("extensions")) {
     LocationRecorder location(message_location,
@@ -1087,6 +1101,22 @@ bool Parser::ParseMessageFieldNoLabel(
                               FieldDescriptorProto::kNameFieldNumber);
     location.RecordLegacyLocation(field, DescriptorPool::ErrorCollector::NAME);
     DO(ConsumeIdentifier(field->mutable_name(), "Expected field name."));
+
+    if (!IsLowerUnderscore(field->name())) {
+      RecordWarning([=] {
+        return absl::StrCat(
+            "Field name should be lowercase. Found: ", field->name(),
+            ". See: https://developers.google.com/protocol-buffers/docs/style");
+      });
+    }
+    if (IsNumberFollowUnderscore(field->name())) {
+      RecordWarning([=] {
+        return absl::StrCat(
+            "Number should not come right after an underscore. Found: ",
+            field->name(),
+            ". See: https://developers.google.com/protocol-buffers/docs/style");
+      });
+    }
   }
   DO(Consume("=", "Missing field number."));
 
@@ -1344,7 +1374,7 @@ bool Parser::ParseDefaultAssignment(
       DO(ConsumeInteger64(max_value, &value,
                           "Expected integer for field default value."));
       // And stringify it again.
-      absl::StrAppend(default_value, value);
+      default_value->append(absl::StrCat(value));
       break;
     }
 
@@ -1367,7 +1397,7 @@ bool Parser::ParseDefaultAssignment(
       DO(ConsumeInteger64(max_value, &value,
                           "Expected integer for field default value."));
       // And stringify it again.
-      absl::StrAppend(default_value, value);
+      default_value->append(absl::StrCat(value));
       break;
     }
 
@@ -1666,10 +1696,6 @@ bool Parser::ParseOption(Message* options,
           return false;
         }
         break;
-
-      case io::Tokenizer::TYPE_URL_CHARS:
-        ABSL_LOG(FATAL) << "Unexpected token type (URL chars).";
-        return false;
     }
   }
 
@@ -1835,11 +1861,6 @@ bool Parser::ParseReservedName(std::string* name, ErrorMaker error_message) {
   int col = input_->current().column;
   DO(ConsumeString(name, error_message));
   if (!io::Tokenizer::IsIdentifier(*name)) {
-    // Before Edition 2023, it was possible to reserve any string literal. This
-    // doesn't really make sense if the string literal wasn't a valid
-    // identifier, so warn about it here.
-    // Note that this warning is also load-bearing for tests that intend to
-    // verify warnings work as expected today.
     RecordWarning(line, col, [=] {
       return absl::StrFormat("Reserved name \"%s\" is not a valid identifier.",
                              *name);
@@ -2156,7 +2177,6 @@ bool Parser::ParseOneof(OneofDescriptorProto* oneof_decl,
 // Enums
 
 bool Parser::ParseEnumDefinition(EnumDescriptorProto* enum_type,
-                                 const SymbolVisibility& visibility,
                                  const LocationRecorder& enum_location,
                                  const FileDescriptorProto* containing_file) {
   DO(Consume("enum"));
@@ -2172,10 +2192,6 @@ bool Parser::ParseEnumDefinition(EnumDescriptorProto* enum_type,
   DO(ParseEnumBlock(enum_type, enum_location, containing_file));
 
   DO(ValidateEnum(enum_type));
-
-  if (visibility != SymbolVisibility::VISIBILITY_UNSET) {
-    enum_type->set_visibility(visibility);
-  }
 
   return true;
 }
@@ -2460,17 +2476,9 @@ bool Parser::ParseLabel(FieldDescriptorProto::Label* label,
   return true;
 }
 
-bool Parser::ShouldUseFixedWireForIntTypes() const {
-  return syntax_identifier_ == "editions" &&
-         edition_ == Edition::EDITION_UNSTABLE;
-}
-
 bool Parser::ParseType(FieldDescriptorProto::Type* type,
                        std::string* type_name) {
-  const auto& type_names_table =
-      ShouldUseFixedWireForIntTypes()
-          ? GetTypeNameTableWithFixedWireForIntTypes()
-          : GetTypeNameTable();
+  const auto& type_names_table = GetTypeNameTable();
   auto iter = type_names_table.find(input_->current().text);
   if (iter != type_names_table.end()) {
     if (syntax_identifier_ == "editions" &&
@@ -2481,15 +2489,6 @@ bool Parser::ParseType(FieldDescriptorProto::Type* type,
           "message field.");
     }
     *type = iter->second;
-    input_->Next();
-  } else if (ShouldUseFixedWireForIntTypes() &&
-             NumericTypeMaybeReplacedWith(input_->current().text)) {
-    RecordError([&] {
-      return absl::StrFormat(
-          "Type '%s' is obsolete in unstable editions, use '%s' instead.",
-          input_->current().text,
-          *NumericTypeMaybeReplacedWith(input_->current().text));
-    });
     input_->Next();
   } else {
     DO(ParseUserDefinedType(type_name));
@@ -2565,42 +2564,16 @@ bool Parser::ParsePackage(FileDescriptorProto* file,
 }
 
 bool Parser::ParseImport(RepeatedPtrField<std::string>* dependency,
-                         RepeatedPtrField<std::string>* option_dependency,
                          RepeatedField<int32_t>* public_dependency,
                          RepeatedField<int32_t>* weak_dependency,
                          const LocationRecorder& root_location,
                          const FileDescriptorProto* containing_file) {
-  io::Tokenizer::Token import_start = input_->current();
+  LocationRecorder location(root_location,
+                            FileDescriptorProto::kDependencyFieldNumber,
+                            dependency->size());
+
   DO(Consume("import"));
-  std::string import_file;
-  if (LookingAt("option")) {
-    if (edition_ < Edition::EDITION_2024) {
-      RecordError("option import is not supported before edition 2024.");
-    }
-    LocationRecorder option_import_location(
-        root_location, FileDescriptorProto::kOptionDependencyFieldNumber,
-        option_dependency->size());
-    option_import_location.StartAt(import_start);
-    DO(Consume("option"));
-    DO(ConsumeString(&import_file,
-                     "Expected a string naming the file to import."));
-    *option_dependency->Add() = import_file;
 
-    option_import_location.RecordLegacyImportLocation(containing_file,
-                                                      import_file);
-    DO(ConsumeEndOfDeclaration(";", &option_import_location));
-    return true;
-  }
-
-  LocationRecorder import_location(root_location,
-                                   FileDescriptorProto::kDependencyFieldNumber,
-                                   dependency->size());
-  import_location.StartAt(import_start);
-  if (!option_dependency->empty()) {
-    RecordError(
-        "imports should precede any option imports to ensure proto files "
-        "can roundtrip.");
-  }
   if (LookingAt("public")) {
     LocationRecorder public_location(
         root_location, FileDescriptorProto::kPublicDependencyFieldNumber,
@@ -2608,11 +2581,6 @@ bool Parser::ParseImport(RepeatedPtrField<std::string>* dependency,
     DO(Consume("public"));
     *public_dependency->Add() = dependency->size();
   } else if (LookingAt("weak")) {
-    if (edition_ >= Edition::EDITION_2024) {
-      RecordError(
-          "weak import is not supported in edition 2024 and above. Consider "
-          "using option import instead.");
-    }
     LocationRecorder weak_location(
         root_location, FileDescriptorProto::kWeakDependencyFieldNumber,
         weak_dependency->size());
@@ -2620,50 +2588,22 @@ bool Parser::ParseImport(RepeatedPtrField<std::string>* dependency,
     DO(Consume("weak"));
     *weak_dependency->Add() = dependency->size();
   }
+
+  std::string import_file;
   DO(ConsumeString(&import_file,
                    "Expected a string naming the file to import."));
   *dependency->Add() = import_file;
+  location.RecordLegacyImportLocation(containing_file, import_file);
 
-  import_location.RecordLegacyImportLocation(containing_file, import_file);
-  DO(ConsumeEndOfDeclaration(";", &import_location));
-  return true;
-}
-
-bool Parser::ParseVisibility(const FileDescriptorProto* containing_file,
-                             SymbolVisibility* out) {
-  if (containing_file == nullptr || out == nullptr) {
-    return false;
-  }
-
-  // Bail out of visibility checks if < 2024
-  if (containing_file->edition() <= Edition::EDITION_2023) {
-    return true;
-  }
-
-  if (TryConsume("export")) {
-    *out = SymbolVisibility::VISIBILITY_EXPORT;
-  } else if (TryConsume("local")) {
-    *out = SymbolVisibility::VISIBILITY_LOCAL;
-  }
-
-  // If we set a visibility make sure it's OK.
-  if (*out != SymbolVisibility::VISIBILITY_UNSET) {
-    if (!LookingAt("message") && !LookingAt("enum")) {
-      RecordError(
-          "'local' and 'export' visibility modifiers are valid only on "
-          "'message' "
-          "and 'enum'");
-      return false;
-    }
-  }
+  DO(ConsumeEndOfDeclaration(";", &location));
 
   return true;
 }
 
 // ===================================================================
 
-SourceLocationTable::SourceLocationTable() = default;
-SourceLocationTable::~SourceLocationTable() = default;
+SourceLocationTable::SourceLocationTable() {}
+SourceLocationTable::~SourceLocationTable() {}
 
 bool SourceLocationTable::Find(
     const Message* descriptor,
