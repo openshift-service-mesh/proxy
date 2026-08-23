@@ -13,6 +13,7 @@
 
 #include <ostream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "google/protobuf/descriptor.pb.h"
@@ -175,7 +176,7 @@ class FakeAnnotationCollector : public AnnotationCollector {
 
   void AddAnnotationNew(Annotation& a) override {
     GeneratedCodeInfo::Annotation annotation;
-    ABSL_CHECK(annotation.ParseFromString(a.second));
+    annotation.ParseFromString(a.second);
 
     Record r{a.first.first, a.first.second, annotation.source_file(), {}};
     for (int i : annotation.path()) {
@@ -712,46 +713,6 @@ TEST_F(PrinterTest, EmitWithIndent) {
             "  };\n");
 }
 
-TEST_F(PrinterTest, EmitWithIndentAndIgnoredCommentOnFirstLine) {
-  {
-    Printer printer(output());
-    auto v = printer.WithIndent();
-    printer.Emit({{"f1", "x"}, {"f2", "y"}, {"f3", "z"}}, R"cc(
-      //~ First line comment.
-      class Foo {
-        int $f1$, $f2$, $f3$;
-      };
-    )cc");
-  }
-
-  EXPECT_EQ(written(),
-            "  class Foo {\n"
-            "    int x, y, z;\n"
-            "  };\n");
-}
-
-TEST_F(PrinterTest, EmitWithCPPDirectiveOnFirstLine) {
-  {
-    Printer printer(output());
-    printer.Emit({{"f1", "x"}, {"f2", "y"}, {"f3", "z"}}, R"cc(
-#if NDEBUG
-#pragma foo
-      class Foo {
-        int $f1$, $f2$, $f3$;
-      };
-#endif
-    )cc");
-  }
-
-  EXPECT_EQ(written(),
-            "#if NDEBUG\n"
-            "#pragma foo\n"
-            "class Foo {\n"
-            "  int x, y, z;\n"
-            "};\n"
-            "#endif\n");
-}
-
 TEST_F(PrinterTest, EmitWithPreprocessor) {
   {
     Printer printer(output());
@@ -781,9 +742,9 @@ TEST_F(PrinterTest, EmitWithPreprocessor) {
   EXPECT_EQ(written(),
             R"(  int val = (
   #if FOO
-  0,
+                         0,
   #else
-  1,
+                         1,
   #endif
    0);
   #pragma foo

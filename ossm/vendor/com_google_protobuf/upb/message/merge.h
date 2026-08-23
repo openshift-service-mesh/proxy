@@ -1,5 +1,5 @@
-#ifndef GOOGLE_UPB_UPB_MESSAGE_MERGE_H__
-#define GOOGLE_UPB_UPB_MESSAGE_MERGE_H__
+#ifndef THIRD_PARTY_UPB_UPB_MESSAGE_MERGE_H_
+#define THIRD_PARTY_UPB_UPB_MESSAGE_MERGE_H_
 
 #include "upb/mem/arena.h"
 #include "upb/message/message.h"
@@ -23,4 +23,4 @@ UPB_API bool upb_Message_MergeFrom(upb_Message* dst, const upb_Message* src,
 #endif
 
 #include "upb/port/undef.inc"
-#endif  // GOOGLE_UPB_UPB_MESSAGE_MERGE_H__
+#endif  // THIRD_PARTY_UPB_UPB_MESSAGE_MERGE_H_

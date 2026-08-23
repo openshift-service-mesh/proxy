@@ -28,56 +28,56 @@ constexpr absl::string_view kUnittestProtoFile =
 
 TEST(VisitDescriptorsTest, SingleTypeNoProto) {
   const FileDescriptor& file =
-      *proto2_unittest::TestAllTypes::GetDescriptor()->file();
+      *protobuf_unittest::TestAllTypes::GetDescriptor()->file();
   std::vector<absl::string_view> descriptors;
-  internal::VisitDescriptors(file, [&](const Descriptor& descriptor) {
+  VisitDescriptors(file, [&](const Descriptor& descriptor) {
     descriptors.push_back(descriptor.full_name());
   });
   EXPECT_THAT(descriptors,
-              IsSupersetOf({"proto2_unittest.TestAllTypes",
-                            "proto2_unittest.TestAllTypes.NestedMessage"}));
+              IsSupersetOf({"protobuf_unittest.TestAllTypes",
+                            "protobuf_unittest.TestAllTypes.NestedMessage"}));
 }
 
 TEST(VisitDescriptorsTest, SingleTypeWithProto) {
   const FileDescriptor& file =
-      *proto2_unittest::TestAllTypes::GetDescriptor()->file();
+      *protobuf_unittest::TestAllTypes::GetDescriptor()->file();
   FileDescriptorProto proto;
   file.CopyTo(&proto);
   std::vector<absl::string_view> descriptors;
-  internal::VisitDescriptors(
+  VisitDescriptors(
       file, proto,
       [&](const Descriptor& descriptor, const DescriptorProto& proto) {
         descriptors.push_back(descriptor.full_name());
         EXPECT_EQ(descriptor.name(), proto.name());
       });
   EXPECT_THAT(descriptors,
-              IsSupersetOf({"proto2_unittest.TestAllTypes",
-                            "proto2_unittest.TestAllTypes.NestedMessage"}));
+              IsSupersetOf({"protobuf_unittest.TestAllTypes",
+                            "protobuf_unittest.TestAllTypes.NestedMessage"}));
 }
 
 TEST(VisitDescriptorsTest, SingleTypeMutableProto) {
   const FileDescriptor& file =
-      *proto2_unittest::TestAllTypes::GetDescriptor()->file();
+      *protobuf_unittest::TestAllTypes::GetDescriptor()->file();
   FileDescriptorProto proto;
   file.CopyTo(&proto);
   std::vector<absl::string_view> descriptors;
-  internal::VisitDescriptors(
-      file, proto, [&](const Descriptor& descriptor, DescriptorProto& proto) {
-        descriptors.push_back(descriptor.full_name());
-        EXPECT_EQ(descriptor.name(), proto.name());
-        proto.set_name("<redacted>");
-      });
+  VisitDescriptors(file, proto,
+                   [&](const Descriptor& descriptor, DescriptorProto& proto) {
+                     descriptors.push_back(descriptor.full_name());
+                     EXPECT_EQ(descriptor.name(), proto.name());
+                     proto.set_name("<redacted>");
+                   });
   EXPECT_THAT(descriptors,
-              IsSupersetOf({"proto2_unittest.TestAllTypes",
-                            "proto2_unittest.TestAllTypes.NestedMessage"}));
+              IsSupersetOf({"protobuf_unittest.TestAllTypes",
+                            "protobuf_unittest.TestAllTypes.NestedMessage"}));
   EXPECT_EQ(proto.message_type(0).name(), "<redacted>");
 }
 
 TEST(VisitDescriptorsTest, AllTypesDeduce) {
   const FileDescriptor& file =
-      *proto2_unittest::TestAllTypes::GetDescriptor()->file();
+      *protobuf_unittest::TestAllTypes::GetDescriptor()->file();
   std::vector<absl::string_view> descriptors;
-  internal::VisitDescriptors(file, [&](const auto& descriptor) {
+  VisitDescriptors(file, [&](const auto& descriptor) {
     descriptors.push_back(descriptor.name());
   });
   EXPECT_THAT(descriptors, Contains(kUnittestProtoFile));
@@ -89,9 +89,9 @@ TEST(VisitDescriptorsTest, AllTypesDeduce) {
 
 TEST(VisitDescriptorsTest, AllTypesDeduceSelective) {
   const FileDescriptor& file =
-      *proto2_unittest::TestAllTypes::GetDescriptor()->file();
+      *protobuf_unittest::TestAllTypes::GetDescriptor()->file();
   std::vector<absl::string_view> descriptors;
-  internal::VisitDescriptors(
+  VisitDescriptors(
       file,
       // Only select on descriptors with a full_name method.
       [&](const auto& descriptor)
@@ -103,12 +103,12 @@ TEST(VisitDescriptorsTest, AllTypesDeduceSelective) {
   EXPECT_THAT(descriptors, Not(Contains(kUnittestProtoFile)));
   EXPECT_THAT(descriptors,
               IsSupersetOf(
-                  {"proto2_unittest.TestAllTypes",
-                   "proto2_unittest.TestSparseEnum", "proto2_unittest.SPARSE_C",
-                   "proto2_unittest.TestAllTypes.optional_int32",
-                   "proto2_unittest.TestAllTypes.oneof_nested_message",
-                   "proto2_unittest.TestAllTypes.oneof_field",
-                   "proto2_unittest.optional_nested_message_extension"}));
+                  {"protobuf_unittest.TestAllTypes",
+                   "protobuf_unittest.TestSparseEnum", "protobuf_unittest.SPARSE_C",
+                   "protobuf_unittest.TestAllTypes.optional_int32",
+                   "protobuf_unittest.TestAllTypes.oneof_nested_message",
+                   "protobuf_unittest.TestAllTypes.oneof_field",
+                   "protobuf_unittest.optional_nested_message_extension"}));
 }
 
 void TestHandle(const Descriptor& message, const DescriptorProto& proto,
@@ -123,20 +123,19 @@ void TestHandle(const EnumDescriptor& enm, const EnumDescriptorProto& proto,
 }
 TEST(VisitDescriptorsTest, AllTypesDeduceDelegate) {
   const FileDescriptor& file =
-      *proto2_unittest::TestAllTypes::GetDescriptor()->file();
+      *protobuf_unittest::TestAllTypes::GetDescriptor()->file();
   FileDescriptorProto proto;
   file.CopyTo(&proto);
   std::vector<absl::string_view> descriptors;
 
-  internal::VisitDescriptors(
-      file, proto,
-      [&](const auto& descriptor, const auto& proto)
-          -> decltype(TestHandle(descriptor, proto, nullptr)) {
-        TestHandle(descriptor, proto, &descriptors);
-      });
+  VisitDescriptors(file, proto,
+                   [&](const auto& descriptor, const auto& proto)
+                       -> decltype(TestHandle(descriptor, proto, nullptr)) {
+                     TestHandle(descriptor, proto, &descriptors);
+                   });
 
-  EXPECT_THAT(descriptors, IsSupersetOf({"proto2_unittest.TestAllTypes",
-                                         "proto2_unittest.TestSparseEnum"}));
+  EXPECT_THAT(descriptors, IsSupersetOf({"protobuf_unittest.TestAllTypes",
+                                         "protobuf_unittest.TestSparseEnum"}));
 }
 
 }  // namespace

@@ -1,4 +1,3 @@
-load("@rules_java//java:java_test.bzl", "java_test")
 load("@rules_jvm_external//:kt_defs.bzl", "kt_jvm_export")
 load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
@@ -70,6 +69,7 @@ protobuf_versioned_kt_jvm_library(
 kt_jvm_export(
     name = "kotlin-lite_mvn",
     deploy_env = [
+        "@rules_kotlin//kotlin/compiler:kotlin-stdlib",
         "//java/lite",
     ],
     maven_coordinates = "com.google.protobuf:protobuf-kotlin-lite:%s" % PROTOBUF_JAVA_VERSION,
@@ -114,8 +114,8 @@ kt_jvm_library(
         "//java/kotlin:only_for_use_in_proto_generated_code_its_generator_and_tests",
         "//java/kotlin:shared_runtime",
         "//java/lite",
-        "@protobuf_maven_dev//:com_google_truth_truth",
-        "@protobuf_maven_dev//:junit_junit",
+        "@maven//:com_google_truth_truth",
+        "@maven//:junit_junit",
         "@rules_kotlin//kotlin/compiler:kotlin-test",
     ],
 )
@@ -210,8 +210,8 @@ kt_jvm_library(
     deps = [
         ":kotlin_unittest_lite",
         "//java/core:test_util_lite",
-        "@protobuf_maven_dev//:com_google_truth_truth",
-        "@protobuf_maven_dev//:junit_junit",
+        "@maven//:com_google_truth_truth",
+        "@maven//:junit_junit",
     ],
 )
 
@@ -227,8 +227,8 @@ kt_jvm_library(
     deps = [
         ":kotlin_proto3_unittest_lite",
         "//java/core:test_util_lite",
-        "@protobuf_maven_dev//:com_google_truth_truth",
-        "@protobuf_maven_dev//:junit_junit",
+        "@maven//:com_google_truth_truth",
+        "@maven//:junit_junit",
     ],
 )
 
@@ -236,4 +236,21 @@ java_test(
     name = "proto3_test_lite",
     test_class = "com.google.protobuf.kotlin.Proto3Test",
     runtime_deps = [":proto3_test_lite_library"],
+)
+
+pkg_files(
+    name = "dist_files",
+    srcs = glob([
+        "src/main/kotlin/com/google/protobuf/*.kt",
+        "src/test/kotlin/**/*.kt",
+    ]) + [
+        "BUILD.bazel",
+        "generate-sources-build.xml",
+        "generate-test-sources-build.xml",
+        "lite.awk",
+        "pom_template.xml",
+        "process-lite-sources-build.xml",
+    ],
+    strip_prefix = strip_prefix.from_root(""),
+    visibility = ["//java:__pkg__"],
 )

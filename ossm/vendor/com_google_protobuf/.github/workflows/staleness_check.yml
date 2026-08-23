@@ -17,9 +17,7 @@ on:
         type: string
   workflow_dispatch:
 
-permissions:
-  contents: read
-
+permissions: {}
 jobs:
   test:
     name: Test staleness
@@ -27,9 +25,9 @@ jobs:
     if: ${{ github.event.repository.full_name == 'protocolbuffers/protobuf' }}
     steps:
       - name: Checkout
-        uses: protocolbuffers/protobuf-ci/checkout@v5
+        uses: protocolbuffers/protobuf-ci/checkout@v3
         with:
-          ref: ${{ inputs.safe-checkout }}
+          ref: ${{ inputs.safe-checkout || github.head_ref || github.ref }}
 
       - name: Mark runs associated with commits
         if: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
@@ -50,9 +48,8 @@ jobs:
         # In branches where automatic updates work as post-submits, we don't want to run staleness
         # tests along with user changes.  Any stale files will be automatically fixed in a follow-up
         # commit.
-        uses: protocolbuffers/protobuf-ci/bazel@v5
+        uses: protocolbuffers/protobuf-ci/bazel@v3
         with:
-          version: 9.0.0 # Bazel version
           credentials: ${{ secrets.GAR_SERVICE_ACCOUNT }}
           bazel-cache: staleness
           bash: >

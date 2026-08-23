@@ -42,12 +42,10 @@
 #include "google/protobuf/compiler/versions.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/descriptor.pb.h"
-#include "google/protobuf/descriptor_visitor.h"
 #include "google/protobuf/dynamic_message.h"
 #include "google/protobuf/io/printer.h"
 
 // Must be last.
-#include "google/protobuf/port.h"
 #include "google/protobuf/port_def.inc"
 
 namespace google {
@@ -62,7 +60,7 @@ absl::flat_hash_map<absl::string_view, std::string> FileVars(
     const FileDescriptor* file, const Options& options) {
   return {
       {"filename", std::string(file->name())},
-      {"package_ns", Namespace(file)},
+      {"package_ns", Namespace(file, options)},
       {"tablename", UniqueName("TableStruct", file, options)},
       {"desc_table", DescriptorTableName(file, options)},
       {"dllexport_decl", options.dllexport_decl},
@@ -112,16 +110,16 @@ bool FileGenerator::ShouldSkipDependencyImports(
 }
 
 FileGenerator::FileGenerator(const FileDescriptor* file, const Options& options)
-    : file_(file), options_(options) {
+    : file_(file), options_(options), scc_analyzer_(options) {
   std::vector<const Descriptor*> msgs = FlattenMessagesInFile(file);
   std::vector<const Descriptor*> msgs_topologically_ordered =
-      TopologicalSortMessagesInFile(file, *options.scc_analyzer);
+      TopologicalSortMessagesInFile(file, scc_analyzer_);
   ABSL_CHECK(msgs_topologically_ordered.size() == msgs.size())
       << "Size mismatch";
 
   for (size_t i = 0; i < msgs.size(); ++i) {
-    message_generators_.push_back(
-        std::make_unique<MessageGenerator>(msgs[i], variables_, i, options));
+    message_generators_.push_back(std::make_unique<MessageGenerator>(
+        msgs[i], variables_, i, options, &scc_analyzer_));
     message_generators_.back()->AddGenerators(&enum_generators_,
                                               &extension_generators_);
   }
@@ -153,8 +151,8 @@ FileGenerator::FileGenerator(const FileDescriptor* file, const Options& options)
   }
 
   for (int i = 0; i < file->extension_count(); ++i) {
-    extension_generators_.push_back(
-        std::make_unique<ExtensionGenerator>(file->extension(i), options));
+    extension_generators_.push_back(std::make_unique<ExtensionGenerator>(
+        file->extension(i), options, &scc_analyzer_));
   }
 
   for (int i = 0; i < file->weak_dependency_count(); ++i) {
@@ -185,9 +183,7 @@ void FileGenerator::GenerateFile(io::Printer* p, GeneratedFileType file_type,
     #include <type_traits>
     #include <utility>
 
-    // clang-format off
     $cb$;
-    // clang-format on
 
     #endif  // $guard$
   )");
@@ -250,17 +246,15 @@ void FileGenerator::GenerateSharedHeaderCode(io::Printer* p) {
            [&] { GenerateProto2NamespaceEnumSpecializations(p); }},
           {"main_decls",
            [&] {
-             NamespaceOpener ns(Namespace(file_), p);
+             NamespaceOpener ns(Namespace(file_, options_), p);
              p->Emit(
                  {
                      {"enums", [&] { GenerateEnumDefinitions(p); }},
                      {"messages", [&] { GenerateMessageDefinitions(p); }},
                      {"services", [&] { GenerateServiceDefinitions(p); }},
                      {"extensions", [&] { GenerateExtensionIdentifiers(p); }},
-                     {"inline_defs",
-                      [&] {
-                        GenerateInlineFunctionDefinitions(p);
-                      }},
+                     {"inline_fns",
+                      [&] { GenerateInlineFunctionDefinitions(p); }},
                  },
                  R"(
                    $enums$
@@ -277,7 +271,7 @@ void FileGenerator::GenerateSharedHeaderCode(io::Printer* p) {
 
                    $hrule_thick$
 
-                   $inline_defs$
+                   $inline_fns$
 
                    // @@protoc_insertion_point(namespace_scope)
                  )");
@@ -386,7 +380,7 @@ void FileGenerator::GeneratePBHeader(io::Printer* p,
                }
 
                {
-                 NamespaceOpener ns(Namespace(file_), p);
+                 NamespaceOpener ns(Namespace(file_, options_), p);
                  p->Emit(R"cc(
 
                    // @@protoc_insertion_point(namespace_scope)
@@ -494,13 +488,12 @@ void FileGenerator::GenerateSourceIncludes(io::Printer* p) {
 
   IncludeFile("third_party/protobuf/io/coded_stream.h", p);
   IncludeFile("third_party/protobuf/generated_message_tctable_impl.h", p);
-  IncludeFile("third_party/protobuf/internal_visibility.h", p);
   // TODO This is to include parse_context.h, we need a better way
   IncludeFile("third_party/protobuf/extension_set.h", p);
   IncludeFile("third_party/protobuf/generated_message_util.h", p);
   IncludeFile("third_party/protobuf/wire_format_lite.h", p);
 
-  if (ShouldVerify(file_, options_)) {
+  if (ShouldVerify(file_, options_, &scc_analyzer_)) {
     IncludeFile("third_party/protobuf/wire_format_verify.h", p);
   }
 
@@ -554,10 +547,157 @@ void FileGenerator::GenerateSourcePrelude(io::Printer* p) {
   // required by the standard.
   p->Emit(R"cc(
     PROTOBUF_PRAGMA_INIT_SEG
-    namespace _pb = $pb$;
-    namespace _pbi = $pbi$;
-    namespace _fl = $pbi$::field_layout;
+    namespace _pb = ::$proto_ns$;
+    namespace _pbi = ::$proto_ns$::internal;
+    namespace _fl = ::$proto_ns$::internal::field_layout;
   )cc");
+}
+
+void FileGenerator::GenerateSourceDefaultInstance(int idx, io::Printer* p) {
+  MessageGenerator* generator = message_generators_[idx].get();
+
+  if (!ShouldGenerateClass(generator->descriptor(), options_)) return;
+
+  // Generate the split instance first because it's needed in the constexpr
+  // constructor.
+  if (ShouldSplit(generator->descriptor(), options_)) {
+    // Use a union to disable the destructor of the _instance member.
+    // We can constant initialize, but the object will still have a non-trivial
+    // destructor that we need to elide.
+    //
+    // NO_DESTROY is not necessary for correctness. The empty destructor is
+    // enough. However, the empty destructor fails to be elided in some
+    // configurations (like non-opt or with certain sanitizers). NO_DESTROY is
+    // there just to improve performance and binary size in these builds.
+    p->Emit(
+        {
+            {"type", DefaultInstanceType(generator->descriptor(), options_,
+                                         /*split=*/true)},
+            {"name", DefaultInstanceName(generator->descriptor(), options_,
+                                         /*split=*/true)},
+            {"default",
+             [&] { generator->GenerateInitDefaultSplitInstance(p); }},
+            {"class", absl::StrCat(ClassName(generator->descriptor()),
+                                   "::Impl_::Split")},
+        },
+        R"cc(
+          struct $type$ {
+            PROTOBUF_CONSTEXPR $type$() : _instance{$default$} {}
+            union {
+              $class$ _instance;
+            };
+          };
+
+          PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT$ dllexport_decl$
+              PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 const $type$ $name$;
+        )cc");
+  }
+
+  generator->GenerateConstexprConstructor(p);
+
+  if (IsFileDescriptorProto(file_, options_)) {
+    p->Emit(
+        {
+            {"type", DefaultInstanceType(generator->descriptor(), options_)},
+            {"name", DefaultInstanceName(generator->descriptor(), options_)},
+            {"class", ClassName(generator->descriptor())},
+        },
+        R"cc(
+          struct $type$ {
+#if defined(PROTOBUF_CONSTINIT_DEFAULT_INSTANCES)
+            constexpr $type$() : _instance(::_pbi::ConstantInitialized{}) {}
+#else   // defined(PROTOBUF_CONSTINIT_DEFAULT_INSTANCES)
+            $type$() {}
+            void Init() { ::new (&_instance) $class$(); };
+#endif  // defined(PROTOBUF_CONSTINIT_DEFAULT_INSTANCES)
+            ~$type$() {}
+            union {
+              $class$ _instance;
+            };
+          };
+
+          PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT$ dllexport_decl$
+              PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 $type$ $name$;
+        )cc");
+  } else if (UsingImplicitWeakDescriptor(file_, options_)) {
+    p->Emit(
+        {
+            {"index", generator->index_in_file_messages()},
+            {"type", DefaultInstanceType(generator->descriptor(), options_)},
+            {"name", DefaultInstanceName(generator->descriptor(), options_)},
+            {"class", ClassName(generator->descriptor())},
+            {"section", WeakDefaultInstanceSection(
+                            generator->descriptor(),
+                            generator->index_in_file_messages(), options_)},
+        },
+        R"cc(
+          struct $type$ {
+            PROTOBUF_CONSTEXPR $type$() : _instance(::_pbi::ConstantInitialized{}) {}
+            ~$type$() {}
+            //~ _instance must be the first member.
+            union {
+              $class$ _instance;
+            };
+            ::_pbi::WeakDescriptorDefaultTail tail = {
+                file_default_instances + $index$, sizeof($type$)};
+          };
+
+          PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT$ dllexport_decl$
+              PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 $type$ $name$
+              __attribute__((section("$section$")));
+        )cc");
+  } else {
+    p->Emit(
+        {
+            {"type", DefaultInstanceType(generator->descriptor(), options_)},
+            {"name", DefaultInstanceName(generator->descriptor(), options_)},
+            {"class", ClassName(generator->descriptor())},
+        },
+        R"cc(
+          struct $type$ {
+            PROTOBUF_CONSTEXPR $type$() : _instance(::_pbi::ConstantInitialized{}) {}
+            ~$type$() {}
+            union {
+              $class$ _instance;
+            };
+          };
+
+          PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT$ dllexport_decl$
+              PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 $type$ $name$;
+        )cc");
+  }
+
+  for (int i = 0; i < generator->descriptor()->field_count(); ++i) {
+    const FieldDescriptor* field = generator->descriptor()->field(i);
+    if (!IsStringInlined(field, options_)) {
+      continue;
+    }
+
+    // Force the initialization of the inlined string in the default instance.
+    p->Emit(
+        {
+            {"class", ClassName(generator->descriptor())},
+            {"field", FieldName(field)},
+            {"default", DefaultInstanceName(generator->descriptor(), options_)},
+            {"member", FieldMemberName(field, ShouldSplit(field, options_))},
+        },
+        R"cc(
+          PROTOBUF_ATTRIBUTE_INIT_PRIORITY2 std::true_type
+              $class$::Impl_::_init_inline_$field$_ =
+                  ($default$._instance.$member$.Init(), std::true_type{});
+        )cc");
+  }
+
+  if (options_.lite_implicit_weak_fields) {
+    p->Emit(
+        {
+            {"ptr", DefaultInstancePtr(generator->descriptor(), options_)},
+            {"name", DefaultInstanceName(generator->descriptor(), options_)},
+        },
+        R"cc(
+          PROTOBUF_CONSTINIT const void* $ptr$ = &$name$;
+        )cc");
+  }
 }
 
 // A list of things defined in one .pb.cc file that we need to reference from
@@ -592,7 +732,8 @@ void FileGenerator::GetCrossFileReferencesForField(const FieldDescriptor* field,
     return;
   }
 
-  if (IsImplicitWeakField(field, options_) || IsWeak(field, options_)) {
+  if (IsImplicitWeakField(field, options_, &scc_analyzer_) ||
+      IsWeak(field, options_)) {
     refs->weak_default_instances.insert(msg);
   }
 }
@@ -625,22 +766,18 @@ void FileGenerator::GenerateInternalForwardDeclarations(
     NamespaceOpener ns(p);
 
     for (auto instance : refs.weak_default_instances) {
-      ns.ChangeTo(Namespace(instance));
+      ns.ChangeTo(Namespace(instance, options_));
 
       if (options_.lite_implicit_weak_fields) {
-        p->Emit({{"ptr", MsgGlobalsInstancePtr(instance, options_)}}, R"cc(
+        p->Emit({{"ptr", DefaultInstancePtr(instance, options_)}}, R"cc(
           PROTOBUF_CONSTINIT __attribute__((weak)) const void* $ptr$ =
-              &::_pbi::implicit_weak_message_globals;
+              &::_pbi::implicit_weak_message_default_instance;
         )cc");
       } else {
-        p->Emit({{"type", MsgGlobalsInstanceType(instance, options_)},
-                 {"name", MsgGlobalsInstanceName(instance, options_)}},
+        p->Emit({{"type", DefaultInstanceType(instance, options_)},
+                 {"name", DefaultInstanceName(instance, options_)}},
                 R"cc(
-#ifndef PROTOBUF_MESSAGE_GLOBALS
                   extern __attribute__((weak)) $type$ $name$;
-#else
-                  extern __attribute__((weak)) const $type$ $name$;
-#endif
                 )cc");
       }
     }
@@ -672,13 +809,10 @@ void FileGenerator::GenerateSourceForMessage(int idx, io::Printer* p) {
   GenerateInternalForwardDeclarations(refs, p);
 
   {
-    NamespaceOpener ns(Namespace(file_), p);
+    NamespaceOpener ns(Namespace(file_, options_), p);
     p->Emit(
         {
-            {"defaults",
-             [&] {
-               message_generators_[idx]->GenerateSourceDefaultInstance(p);
-             }},
+            {"defaults", [&] { GenerateSourceDefaultInstance(idx, p); }},
             {"class_methods",
              [&] { message_generators_[idx]->GenerateClassMethods(p); }},
         },
@@ -720,7 +854,7 @@ void FileGenerator::GenerateStaticInitializer(io::Printer* p) {
           }}},
         R"cc(
           PROTOBUF_ATTRIBUTE_INIT_PRIORITY$priority$ static ::std::false_type
-              _static_init$priority$_ [[maybe_unused]] =
+              _static_init$priority$_ PROTOBUF_UNUSED =
                   ($expr$, ::std::false_type{});
         )cc");
     // Reset the vector because we might be generating many files.
@@ -733,7 +867,7 @@ void FileGenerator::GenerateSourceForExtension(int idx, io::Printer* p) {
   GenerateSourceIncludes(p);
   GenerateSourcePrelude(p);
 
-  NamespaceOpener ns(Namespace(file_), p);
+  NamespaceOpener ns(Namespace(file_, options_), p);
   extension_generators_[idx]->GenerateDefinition(p);
   for (auto priority : {kInitPriority101, kInitPriority102}) {
     if (extension_generators_[idx]->WillGenerateRegistration(priority)) {
@@ -758,7 +892,7 @@ void FileGenerator::GenerateGlobalSource(io::Printer* p) {
     }
   }
 
-  NamespaceOpener ns(Namespace(file_), p);
+  NamespaceOpener ns(Namespace(file_, options_), p);
   for (size_t i = 0; i < enum_generators_.size(); ++i) {
     enum_generators_[i]->GenerateMethods(i, p);
   }
@@ -772,42 +906,6 @@ void FileGenerator::GenerateSource(io::Printer* p) {
   CrossFileReferences refs;
   GetCrossFileReferencesForFile(file_, &refs);
   GenerateInternalForwardDeclarations(refs, p);
-
-  if (HasDescriptorMethods(file_, options_) && !message_generators_.empty()) {
-    p->Emit(
-        {{"reflection_data",
-          [&] {
-            for (const auto& generator : message_generators_) {
-              p->Emit(
-                  {{"class",
-                    QualifiedClassName(generator->descriptor(), options_)},
-                   {"tracker_on_get_metadata",
-                    [&] {
-                      if (HasTracker(generator->descriptor(), options_)) {
-                        p->Emit(
-                            R"cc(&::_pbi::PrivateAccess::TrackerOnGetMetadata<
-                                     $class$>,)cc");
-                      } else {
-                        p->Emit(R"cc(/* tracker*/ nullptr,)cc");
-                      }
-                    }}},
-                  R"cc(
-                    // $class$
-                    {&::_pbi::kDescriptorMethods, &::$desc_table$, $tracker_on_get_metadata$},
-                  )cc");
-            }
-          }}},
-        R"cc(
-#ifdef PROTOBUF_MESSAGE_GLOBALS
-          namespace {
-          PROTOBUF_CONSTINIT ::google::protobuf::internal::ReflectionData
-              file_reflection_data[] = {
-                  $reflection_data$,
-          };
-          }  // namespace
-#endif
-        )cc");
-  }
 
   // When in weak descriptor mode, we generate the file_default_instances before
   // the default instances.
@@ -827,12 +925,12 @@ void FileGenerator::GenerateSource(io::Printer* p) {
                               options_)},
                      },
                      R"cc(
-                       // $class$
-                       extern const ::_pbi::MessageGlobalsBase __start_$section$ __attribute__((weak));
+                       extern const $class$ __start_$section$
+                           __attribute__((weak));
                      )cc");
                }
              }},
-            {"globals",
+            {"defaults",
              [&] {
                for (auto& gen : message_generators_) {
                  p->Emit({{"section",
@@ -847,8 +945,8 @@ void FileGenerator::GenerateSource(io::Printer* p) {
         },
         R"cc(
           $weak_defaults$;
-          static const ::_pbi::MessageGlobalsBase* file_message_globals[] = {
-              $globals$,
+          static const ::_pb::Message* file_default_instances[] = {
+              $defaults$,
           };
         )cc");
   }
@@ -859,10 +957,10 @@ void FileGenerator::GenerateSource(io::Printer* p) {
   }
 
   {
-    NamespaceOpener ns(Namespace(file_), p);
+    NamespaceOpener ns(Namespace(file_, options_), p);
     for (size_t i = 0; i < message_generators_.size(); ++i) {
-      message_generators_[message_generators_topologically_ordered_[i]]
-          ->GenerateSourceDefaultInstance(p);
+      GenerateSourceDefaultInstance(
+          message_generators_topologically_ordered_[i], p);
     }
   }
 
@@ -875,7 +973,7 @@ void FileGenerator::GenerateSource(io::Printer* p) {
   }
 
   {
-    NamespaceOpener ns(Namespace(file_), p);
+    NamespaceOpener ns(Namespace(file_, options_), p);
 
     // Actually implement the protos
 
@@ -955,20 +1053,6 @@ static void GatherAllCustomOptionTypes(
     return;
   }
 
-  const auto is_import_option = [file](const FieldDescriptor* field) {
-    if (!field->is_extension() || field->message_type() == nullptr) {
-      return false;
-    }
-
-    for (int i = 0; i < file->option_dependency_count(); ++i) {
-      if (field->file()->name() == file->option_dependency_name(i)) {
-        return true;
-      }
-    }
-
-    return false;
-  };
-
   // It's easier to inspect file as a proto, because we can use reflection on
   // the proto to iterate over all content.
   // However, we can't use the generated proto linked into the proto compiler
@@ -997,11 +1081,6 @@ static void GatherAllCustomOptionTypes(
     reflection.ListFields(msg, &fields);
 
     for (auto* field : fields) {
-      if (is_import_option(field)) {
-        // If it is an `import option` dependency we can skip it.
-        continue;
-      }
-
       if (field->is_extension()) {
         // Always add the extended.
         const Descriptor* desc = msg.GetDescriptor();
@@ -1061,32 +1140,29 @@ GetMessagesToPinGloballyForWeakDescriptors(const FileDescriptor* file,
 void FileGenerator::GenerateReflectionInitializationCode(io::Printer* p) {
   if (!enum_generators_.empty()) {
     p->Emit({{"len", enum_generators_.size()}}, R"cc(
-      //~ Default initialized to null, but set to non-null values before use.
-      static const ::_pb::EnumDescriptor* $nonnull$
-          $file_level_enum_descriptors$[$len$];
+      static const ::_pb::EnumDescriptor* $file_level_enum_descriptors$[$len$];
     )cc");
   } else {
     p->Emit(R"cc(
-      static constexpr const ::_pb::EnumDescriptor* $nonnull$* $nullable$
+      static constexpr const ::_pb::EnumDescriptor**
           $file_level_enum_descriptors$ = nullptr;
     )cc");
   }
 
   if (HasGenericServices(file_, options_) && file_->service_count() > 0) {
     p->Emit({{"len", file_->service_count()}}, R"cc(
-      //~ Default initialized to null, but set to non-null values before use.
-      static const ::_pb::ServiceDescriptor* $nonnull$
+      static const ::_pb::ServiceDescriptor*
           $file_level_service_descriptors$[$len$];
     )cc");
   } else {
     p->Emit(R"cc(
-      static constexpr const ::_pb::ServiceDescriptor* $nonnull$* $nullable$
+      static constexpr const ::_pb::ServiceDescriptor**
           $file_level_service_descriptors$ = nullptr;
     )cc");
   }
 
   if (!message_generators_.empty()) {
-    std::vector<size_t> offsets;
+    std::vector<std::pair<size_t, size_t>> offsets;
     offsets.reserve(message_generators_.size());
 
     p->Emit(
@@ -1101,8 +1177,9 @@ void FileGenerator::GenerateReflectionInitializationCode(io::Printer* p) {
              [&] {
                int offset = 0;
                for (size_t i = 0; i < message_generators_.size(); ++i) {
-                 message_generators_[i]->GenerateSchema(p, offset);
-                 offset += offsets[i];
+                 message_generators_[i]->GenerateSchema(p, offset,
+                                                        offsets[i].second);
+                 offset += offsets[i].first;
                }
              }},
         },
@@ -1118,27 +1195,25 @@ void FileGenerator::GenerateReflectionInitializationCode(io::Printer* p) {
                   $schemas$,
           };
         )cc");
-    constexpr absl::string_view file_default_instances_code = R"cc(
-      static const ::_pbi::MessageGlobalsBase* $nonnull$ const
-          file_message_globals[] = {
-              $globals$,
-      };
-    )cc";
     if (!UsingImplicitWeakDescriptor(file_, options_)) {
-      std::vector<Sub> subs = {
-          {"globals", [&] {
-             for (auto& gen : message_generators_) {
-               p->Emit(
-                   {
-                       {"ns", Namespace(gen->descriptor())},
-                       {"class", ClassName(gen->descriptor())},
-                   },
-                   R"cc(
-                     &$ns$::$class$_globals_,
-                   )cc");
-             }
-           }}};
-      p->Emit(subs, file_default_instances_code);
+      p->Emit({{"defaults",
+                [&] {
+                  for (auto& gen : message_generators_) {
+                    p->Emit(
+                        {
+                            {"ns", Namespace(gen->descriptor(), options_)},
+                            {"class", ClassName(gen->descriptor())},
+                        },
+                        R"cc(
+                          &$ns$::_$class$_default_instance_._instance,
+                        )cc");
+                  }
+                }}},
+              R"cc(
+                static const ::_pb::Message* const file_default_instances[] = {
+                    $defaults$,
+                };
+              )cc");
     }
   } else {
     // Ee still need these symbols to exist.
@@ -1146,9 +1221,8 @@ void FileGenerator::GenerateReflectionInitializationCode(io::Printer* p) {
     // MSVC doesn't like empty arrays, so we add a dummy.
     p->Emit(R"cc(
       const ::uint32_t $tablename$::offsets[1] = {};
-      static constexpr ::_pbi::MigrationSchema* $nullable$ schemas = nullptr;
-      static constexpr ::_pbi::MessageGlobalsBase* $nonnull$ const* $nullable$
-          file_message_globals = nullptr;
+      static constexpr ::_pbi::MigrationSchema* schemas = nullptr;
+      static constexpr ::_pb::Message* const* file_default_instances = nullptr;
     )cc");
   }
 
@@ -1160,7 +1234,7 @@ void FileGenerator::GenerateReflectionInitializationCode(io::Printer* p) {
 
   FileDescriptorProto file_proto = StripSourceRetentionOptions(*file_);
   std::string file_data;
-  ABSL_CHECK(file_proto.SerializeToString(&file_data));
+  file_proto.SerializeToString(&file_data);
 
   auto desc_name = UniqueName("descriptor_table_protodef", file_, options_);
   p->Emit(
@@ -1239,8 +1313,8 @@ void FileGenerator::GenerateReflectionInitializationCode(io::Printer* p) {
              }},
         },
         R"cc(
-          static const ::_pbi::DescriptorTable* $nonnull$ const
-              $desc_table$_deps[$len$] = {
+          static const ::_pbi::DescriptorTable* const $desc_table$_deps[$len$] =
+              {
                   $deps$,
           };
         )cc");
@@ -1276,7 +1350,7 @@ void FileGenerator::GenerateReflectionInitializationCode(io::Printer* p) {
             $num_deps$,
             $num_msgs$,
             schemas,
-            file_message_globals,
+            file_default_instances,
             $tablename$::offsets,
             $file_level_enum_descriptors$,
             $file_level_service_descriptors$,
@@ -1291,13 +1365,13 @@ void FileGenerator::GenerateReflectionInitializationCode(io::Printer* p) {
     if (UsingImplicitWeakDescriptor(file_, options_)) {
       for (auto* pinned :
            GetMessagesToPinGloballyForWeakDescriptors(file_, options_)) {
-        static_initializers_[kInitPriority102].push_back(
-            [this, pinned](auto* p) {
-              p->Emit({{"pin", StrongReferenceToType(pinned, options_)}},
-                      R"cc(
-                        $pin$,
-                      )cc");
-            });
+        static_initializers_[kInitPriority102].push_back([this,
+                                                          pinned](auto* p) {
+          p->Emit({{"pin", StrongReferenceToType(pinned, options_)}},
+                  R"cc(
+                    $pin$,
+                  )cc");
+        });
       }
     }
     static_initializers_[kInitPriority102].push_back([](auto* p) {
@@ -1319,7 +1393,7 @@ void FileGenerator::GenerateReflectionInitializationCode(io::Printer* p) {
                                         [&](std::string* out, const auto& gen) {
                                           absl::StrAppend(
                                               out,
-                                              MsgGlobalsInstanceName(
+                                              DefaultInstanceName(
                                                   gen->descriptor(), options_),
                                               ".Init();");
                                         })}},
@@ -1330,8 +1404,8 @@ void FileGenerator::GenerateReflectionInitializationCode(io::Printer* p) {
             $initializers$;
           }
           PROTOBUF_ATTRIBUTE_INIT_PRIORITY1
-          static ::std::true_type $dummy${
-              (InitializeFileDescriptorDefaultInstances(), ::std::true_type{})};
+          static std::true_type $dummy${
+              (InitializeFileDescriptorDefaultInstances(), std::true_type{})};
 #endif  // !defined(PROTOBUF_CONSTINIT_DEFAULT_INSTANCES)
         )cc");
   }
@@ -1345,16 +1419,10 @@ class FileGenerator::ForwardDeclarations {
 
   void Print(io::Printer* p, const Options& options) const {
     for (const auto& e : enums_) {
-      p->Emit(
-          {
-              Sub("enum", e.first).AnnotatedAs(e.second),
-              {"DEPRECATED",
-               e.second->options().deprecated() ? "[[deprecated]]" : ""},
-          },
-          R"cc(
-            enum $DEPRECATED $$enum$ : int;
-            $dllexport_decl $extern const uint32_t $enum$_internal_data_[];
-          )cc");
+      p->Emit({Sub("enum", e.first).AnnotatedAs(e.second)}, R"cc(
+        enum $enum$ : int;
+        bool $enum$_IsValid(int value);
+      )cc");
     }
 
     for (const auto& c : classes_) {
@@ -1362,21 +1430,13 @@ class FileGenerator::ForwardDeclarations {
       p->Emit(
           {
               Sub("class", c.first).AnnotatedAs(desc),
-              {"globals_type", MsgGlobalsInstanceType(desc, options)},
-              {"globals_name", MsgGlobalsInstanceName(desc, options)},
-              {"const",
-               IsFileDescriptorProto(desc->file(), options) ? "" : "const"},
-              {"classdata_type", ClassDataType(desc, options)},
+              {"default_type", DefaultInstanceType(desc, options)},
+              {"default_name", DefaultInstanceName(desc, options)},
           },
           R"cc(
             class $class$;
-            struct $globals_type$;
-#ifndef PROTOBUF_MESSAGE_GLOBALS
-            $dllexport_decl $extern $globals_type$ $globals_name$;
-            $dllexport_decl $extern const $pbi$::$classdata_type$ $class$_class_data_;
-#else
-            $dllexport_decl $extern $const $$globals_type$ $globals_name$;
-#endif  // PROTOBUF_MESSAGE_GLOBALS
+            struct $default_type$;
+            $dllexport_decl $extern $default_type$ $default_name$;
           )cc");
     }
 
@@ -1384,8 +1444,10 @@ class FileGenerator::ForwardDeclarations {
       const Descriptor* desc = s.second;
       p->Emit(
           {
-              {"default_type", SplitDefaultInstanceType(desc, options)},
-              {"default_name", SplitDefaultInstanceName(desc, options)},
+              {"default_type",
+               DefaultInstanceType(desc, options, /*split=*/true)},
+              {"default_name",
+               DefaultInstanceName(desc, options, /*split=*/true)},
           },
           R"cc(
             struct $default_type$;
@@ -1395,33 +1457,26 @@ class FileGenerator::ForwardDeclarations {
   }
 
   void PrintTopLevelDecl(io::Printer* p, const Options& options) const {
-    for (const auto& e : enums_) {
-      p->Emit({{"enum", QualifiedClassName(e.second, options)}},
-              R"cc(
-                template <>
-                internal::EnumTraitsT<$enum$_internal_data_>
-                    internal::EnumTraitsImpl::value<$enum$>;
-              )cc");
-    }
     if (ShouldGenerateExternSpecializations(options)) {
       for (const auto& c : classes_) {
         if (!ShouldGenerateClass(c.second, options)) continue;
-        auto vars =
-            p->WithVars({{"class", QualifiedClassName(c.second, options)},
-                         {"default_name",
-                          QualifiedMsgGlobalsInstanceName(c.second, options)}});
+        auto vars = p->WithVars(
+            {{"class", QualifiedClassName(c.second, options)},
+             {"default_name", QualifiedDefaultInstanceName(c.second, options,
+                                                           /*split=*/false)}});
         // To reduce total linker input size in large binaries we make these
         // functions extern and define then in the pb.cc file. This avoids bloat
         // in callers by having duplicate definitions of the template.
         // However, it increases the size of the pb.cc translation units so it
         // is a tradeoff.
-        p->Emit(R"(
-          extern template void* $nonnull$ Arena::DefaultConstruct<$class$>(Arena* $nullable$);
-        )");
+        p->Emit(R"cc(
+          extern template void* Arena::DefaultConstruct<$class$>(Arena*);
+        )cc");
         if (!IsMapEntryMessage(c.second)) {
-          p->Emit(R"(
-            extern template void* $nonnull$ Arena::CopyConstruct<$class$>(Arena* $nullable$, const void* $nonnull$);
-          )");
+          p->Emit(R"cc(
+            extern template void* Arena::CopyConstruct<$class$>(Arena*,
+                                                                const void*);
+          )cc");
         }
         // We can't make a constexpr pointer to the global if we have DLL
         // linkage so skip this.
@@ -1429,12 +1484,8 @@ class FileGenerator::ForwardDeclarations {
         if (options.dllexport_decl.empty()) {
           p->Emit(R"cc(
             template <>
-            internal::GeneratedMessageTraitsT<&$default_name$
-#ifndef PROTOBUF_MESSAGE_GLOBALS
-                                              ,
-                                              &$class$_class_data_
-#endif  // PROTOBUF_MESSAGE_GLOBALS
-                                              >
+            internal::GeneratedMessageTraitsT<decltype($default_name$),
+                                              &$default_name$>
                 internal::MessageTraitsImpl::value<$class$>;
           )cc");
         }
@@ -1477,10 +1528,6 @@ void FileGenerator::GenerateForwardDeclarations(io::Printer* p) {
     ListAllTypesForServices(file_, &classes);
   }
 
-  // List all enums in this file, to declare the traits.
-  google::protobuf::internal::VisitDescriptors(
-      *file_, [&](const EnumDescriptor& e) { enums.push_back(&e); });
-
   // Calculate the set of files whose definitions we get through include.
   // No need to forward declare types that are defined in these.
   absl::flat_hash_set<const FileDescriptor*> public_set;
@@ -1490,17 +1537,17 @@ void FileGenerator::GenerateForwardDeclarations(io::Printer* p) {
   for (const auto* d : classes) {
     if (d != nullptr && !public_set.contains(d->file()) &&
         ShouldGenerateClass(d, options_))
-      decls[Namespace(d)].AddMessage(d);
+      decls[Namespace(d, options_)].AddMessage(d);
   }
   for (const auto* e : enums) {
     if (e != nullptr && !public_set.contains(e->file()))
-      decls[Namespace(e)].AddEnum(e);
+      decls[Namespace(e, options_)].AddEnum(e);
   }
   for (const auto& mg : message_generators_) {
     const Descriptor* d = mg->descriptor();
     if (d != nullptr && public_set.count(d->file()) == 0u &&
         ShouldSplit(mg->descriptor(), options_))
-      decls[Namespace(d)].AddSplit(d);
+      decls[Namespace(d, options_)].AddSplit(d);
   }
 
   NamespaceOpener ns(p);
@@ -1512,10 +1559,6 @@ void FileGenerator::GenerateForwardDeclarations(io::Printer* p) {
   ns.ChangeTo(ProtobufNamespace(options_));
   for (const auto& decl : decls) {
     decl.second.PrintTopLevelDecl(p, options_);
-  }
-
-  for (auto& extension_generator : extension_generators_) {
-    extension_generator->GenerateFeatureDefaults(p);
   }
 
   if (IsFileDescriptorProto(file_, options_)) {
@@ -1537,15 +1580,12 @@ void FileGenerator::GenerateLibraryIncludes(io::Printer* p) {
     ABSL_CHECK(!options_.opensource_runtime);
     IncludeFile("third_party/protobuf/weak_field_map.h", p);
   }
-  if (HasLazyFields(file_, options_)) {
+  if (HasLazyFields(file_, options_, &scc_analyzer_)) {
     ABSL_CHECK(!options_.opensource_runtime);
     IncludeFile("third_party/protobuf/lazy_field.h", p);
   }
-  if (ShouldVerify(file_, options_)) {
+  if (ShouldVerify(file_, options_, &scc_analyzer_)) {
     IncludeFile("third_party/protobuf/wire_format_verify.h", p);
-  }
-  if (options_.experimental_use_micro_string) {
-    IncludeFile("third_party/protobuf/micro_string.h", p);
   }
 
   IncludeFile("third_party/protobuf/runtime_version.h", p);
@@ -1586,8 +1626,6 @@ void FileGenerator::GenerateLibraryIncludes(io::Printer* p) {
   if (HasGeneratedMethods(file_, options_)) {
     IncludeFile("third_party/protobuf/generated_message_tctable_decl.h", p);
   }
-
-
   IncludeFile("third_party/protobuf/generated_message_util.h", p);
   IncludeFile("third_party/protobuf/metadata_lite.h", p);
 
@@ -1602,31 +1640,19 @@ void FileGenerator::GenerateLibraryIncludes(io::Printer* p) {
     IncludeFile("third_party/protobuf/message_lite.h", p);
   }
   if (options_.opensource_runtime) {
-    // Open-source relies on unconditional includes of repeated_field.h because
-    // many years it was unconditionally included. Removing it would technically
-    // be a breaking change.
+    // Open-source relies on unconditional includes of these.
     IncludeFileAndExport("third_party/protobuf/repeated_field.h", p);
-    if (HasRepeatedFields(file_, FieldDescriptor::CppRepeatedType::kProxy)) {
-      IncludeFileAndExport("third_party/protobuf/repeated_field_proxy.h", p);
-    }
-    // Open-source relies on unconditional includes of extension_set.h.
     IncludeFileAndExport("third_party/protobuf/extension_set.h", p);
   } else {
     // Google3 includes these files only when they are necessary.
     if (HasExtensionsOrExtendableMessage(file_)) {
       IncludeFileAndExport("third_party/protobuf/extension_set.h", p);
     }
-    if (HasRepeatedFields(file_, FieldDescriptor::CppRepeatedType::kRepeated)) {
+    if (HasRepeatedFields(file_)) {
       IncludeFileAndExport("third_party/protobuf/repeated_field.h", p);
-    }
-    if (HasRepeatedFields(file_, FieldDescriptor::CppRepeatedType::kProxy)) {
-      IncludeFileAndExport("third_party/protobuf/repeated_field_proxy.h", p);
     }
     if (HasStringPieceFields(file_, options_)) {
       IncludeFile("third_party/protobuf/string_piece_field_support.h", p);
-    }
-    if (HasRegularStringFields(file_, options_)) {
-      IncludeFileAndExport("third_party/protobuf/string_view_migration.h", p);
     }
   }
   if (HasCordFields(file_, options_)) {
@@ -1636,10 +1662,9 @@ void FileGenerator::GenerateLibraryIncludes(io::Printer* p) {
   }
   if (HasMapFields(file_)) {
     IncludeFileAndExport("third_party/protobuf/map.h", p);
-    IncludeFileAndExport("third_party/protobuf/map_type_handler.h", p);
     if (HasDescriptorMethods(file_, options_)) {
       IncludeFile("third_party/protobuf/map_entry.h", p);
-      IncludeFile("third_party/protobuf/map_field.h", p);
+      IncludeFile("third_party/protobuf/map_field_inl.h", p);
     } else {
       IncludeFile("third_party/protobuf/map_field_lite.h", p);
     }
@@ -1719,13 +1744,9 @@ void FileGenerator::GenerateGlobalStateFunctionDeclarations(io::Printer* p) {
   )cc");
 
   if (HasDescriptorMethods(file_, options_)) {
-    // The DescriptorTable needs to be extern "C" so that we can access it from
-    // Rust. We do not attempt to read the contents of the table in Rust, but
-    // just use the symbol to force-link the C++ generated code when necessary.
     p->Emit(R"cc(
-      extern "C" {
-      $dllexport_decl $extern const $pbi$::DescriptorTable $desc_table$;
-      }  // extern "C"
+      $dllexport_decl $extern const ::$proto_ns$::internal::DescriptorTable
+          $desc_table$;
     )cc");
   }
 }
@@ -1743,13 +1764,6 @@ void FileGenerator::GenerateMessageDefinitions(io::Printer* p) {
 void FileGenerator::GenerateEnumDefinitions(io::Printer* p) {
   for (size_t i = 0; i < enum_generators_.size(); ++i) {
     enum_generators_[i]->GenerateDefinition(p);
-  }
-  if (HasEnumDefinitions(file_)) {
-    // Inject the ADL hooks for absl flags.
-    p->Emit(R"cc(
-      using $pbi$::generated_enum::AbslParseFlag;
-      using $pbi$::generated_enum::AbslUnparseFlag;
-    )cc");
   }
 }
 

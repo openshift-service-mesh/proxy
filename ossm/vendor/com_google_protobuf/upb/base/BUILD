@@ -5,9 +5,7 @@
 # license that can be found in the LICENSE file or at
 # https://developers.google.com/open-source/licenses/bsd
 
-load("@rules_cc//cc:cc_test.bzl", "cc_test")
-load("@rules_cc//cc:defs.bzl", "cc_library")
-load("//upb/bazel:copts.bzl", "UPB_DEFAULT_COPTS", "UPB_DEFAULT_FEATURES")
+load("//upb/bazel:build_defs.bzl", "UPB_DEFAULT_COPTS")
 
 package(default_applicable_licenses = ["//:license"])
 
@@ -18,17 +16,15 @@ cc_library(
     ],
     hdrs = [
         "descriptor_constants.h",
-        "error_handler.h",
         "status.h",
         "status.hpp",
         "string_view.h",
         "upcast.h",
     ],
     copts = UPB_DEFAULT_COPTS,
-    features = UPB_DEFAULT_FEATURES,
     visibility = ["//visibility:public"],
     deps = [
-        "//upb/port",
+        "//upb:port",
     ],
 )
 
@@ -39,29 +35,8 @@ cc_library(
         "internal/log2.h",
     ],
     copts = UPB_DEFAULT_COPTS,
-    features = UPB_DEFAULT_FEATURES,
     visibility = ["//visibility:public"],
-    deps = ["//upb/port"],
-)
-
-cc_test(
-    name = "log2_test",
-    srcs = ["internal/log2_test.cc"],
-    deps = [
-        ":internal",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "string_view_test",
-    srcs = ["string_view_test.cc"],
-    deps = [
-        ":base",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
-    ],
+    deps = ["//upb:port"],
 )
 
 filegroup(

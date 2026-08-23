@@ -5,24 +5,28 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
-#ifndef GOOGLE_PROTOBUF_COMPILER_HPB_GEN_EXTENSIONS_H__
-#define GOOGLE_PROTOBUF_COMPILER_HPB_GEN_EXTENSIONS_H__
+#ifndef PROTOBUF_COMPILER_HBP_GEN_EXTENSIONS_H_
+#define PROTOBUF_COMPILER_HBP_GEN_EXTENSIONS_H_
 
-#include "hpb_generator/context.h"
 #include "google/protobuf/descriptor.h"
+#include "google/protobuf/compiler/hpb/output.h"
 
-namespace google {
-namespace protobuf {
-namespace hpb_generator {
+namespace google::protobuf::hpb_generator {
+
+namespace protobuf = ::proto2;
 
 void WriteExtensionIdentifiersHeader(
-    const std::vector<const google::protobuf::FieldDescriptor*>& extensions,
-    Context& ctx);
-void WriteExtensionIdentifierHeader(const google::protobuf::FieldDescriptor* ext,
-                                    Context& ctx);
+    const std::vector<const protobuf::FieldDescriptor*>& extensions,
+    Output& output);
+void WriteExtensionIdentifierHeader(const protobuf::FieldDescriptor* ext,
+                                    Output& output);
+void WriteExtensionIdentifiers(
+    const std::vector<const protobuf::FieldDescriptor*>& extensions,
+    Output& output);
+void WriteExtensionIdentifier(const protobuf::FieldDescriptor* ext,
+                              Output& output);
 
-}  // namespace hpb_generator
 }  // namespace protobuf
-}  // namespace google
+}  // namespace google::hpb_generator
 
-#endif  // GOOGLE_PROTOBUF_COMPILER_HPB_GEN_EXTENSIONS_H__
+#endif  // PROTOBUF_COMPILER_HBP_GEN_EXTENSIONS_H_

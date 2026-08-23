@@ -48,7 +48,7 @@ final class ExtensionRegistryFactory {
   }
 
   static boolean isFullRegistry(ExtensionRegistryLite registry) {
-    return !Android.assumeLiteRuntime
+    return !Protobuf.assumeLiteRuntime
         && EXTENSION_REGISTRY_CLASS != null
         && EXTENSION_REGISTRY_CLASS.isAssignableFrom(registry.getClass());
   }

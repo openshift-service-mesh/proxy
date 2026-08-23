@@ -54,16 +54,6 @@ final class LongArrayList extends AbstractProtobufList<Long>
     this.size = size;
   }
 
-  /**
-   * Constructs a new mutable {@code LongArrayList} containing the same elements as {@code other}.
-   */
-  LongArrayList(LongArrayList other, boolean isMutable) {
-    this(
-        other.size == 0 ? EMPTY_ARRAY : Arrays.copyOf(other.array, other.size),
-        other.size,
-        isMutable);
-  }
-
   @Override
   protected void removeRange(int fromIndex, int toIndex) {
     ensureIsMutable();
@@ -77,8 +67,7 @@ final class LongArrayList extends AbstractProtobufList<Long>
   }
 
   @Override
-  public boolean equals(
-          Object o) {
+  public boolean equals(Object o) {
     if (this == o) {
       return true;
     }
@@ -155,13 +144,11 @@ final class LongArrayList extends AbstractProtobufList<Long>
   }
 
   @Override
-  @CanIgnoreReturnValue
   public Long set(int index, Long element) {
     return setLong(index, element);
   }
 
   @Override
-  @CanIgnoreReturnValue
   public long setLong(int index, long element) {
     ensureIsMutable();
     ensureIndexInRange(index);
@@ -171,7 +158,6 @@ final class LongArrayList extends AbstractProtobufList<Long>
   }
 
   @Override
-  @CanIgnoreReturnValue
   public boolean add(Long element) {
     addLong(element);
     return true;
@@ -225,7 +211,6 @@ final class LongArrayList extends AbstractProtobufList<Long>
   }
 
   @Override
-  @CanIgnoreReturnValue
   public boolean addAll(Collection<? extends Long> collection) {
     ensureIsMutable();
 
@@ -259,7 +244,6 @@ final class LongArrayList extends AbstractProtobufList<Long>
   }
 
   @Override
-  @CanIgnoreReturnValue
   public Long remove(int index) {
     ensureIsMutable();
     ensureIndexInRange(index);

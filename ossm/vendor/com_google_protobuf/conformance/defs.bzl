@@ -11,7 +11,6 @@ def conformance_test(
         failure_list = None,
         text_format_failure_list = None,
         maximum_edition = None,
-        performance = None,
         **kwargs):
     """Conformance test runner.
 
@@ -23,31 +22,32 @@ def conformance_test(
           for the text format conformance suite.
       **kwargs: common arguments to pass to sh_test.
     """
-    args = ["--testee $(location %s)" % testee]
+    args = ["--testee %s" % _strip_bazel(testee)]
     failure_lists = []
     if failure_list:
-        args = args + ["--failure_list $(location %s)" % failure_list]
+        args = args + ["--failure_list %s" % _strip_bazel(failure_list)]
         failure_lists = failure_lists + [failure_list]
     if text_format_failure_list:
-        args = args + ["--text_format_failure_list $(location %s)" % text_format_failure_list]
+        args = args + ["--text_format_failure_list %s" % _strip_bazel(text_format_failure_list)]
         failure_lists = failure_lists + [text_format_failure_list]
     if maximum_edition:
         args = args + ["--maximum_edition %s" % maximum_edition]
-    if performance:
-        args = args + ["--performance"]
 
     sh_test(
         name = name,
-        srcs = [
-            Label("//conformance:bazel_conformance_test_runner.sh"),
-        ],
+        srcs = ["//conformance:bazel_conformance_test_runner.sh"],
         data = [testee] + failure_lists + [
-            Label("//conformance:conformance_test_runner"),
+            "//conformance:conformance_test_runner",
         ],
         args = args,
         deps = [
-            Label("@bazel_tools//tools/bash/runfiles"),
+            "@bazel_tools//tools/bash/runfiles",
         ],
         tags = ["conformance"],
         **kwargs
     )
+
+def _strip_bazel(testee):
+    if testee.startswith("//"):
+        testee = testee.replace("//", "com_google_protobuf/")
+    return testee.replace(":", "/")

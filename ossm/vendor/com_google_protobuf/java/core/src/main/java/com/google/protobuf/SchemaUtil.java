@@ -19,7 +19,6 @@ import java.util.RandomAccess;
 /** Helper methods used by schemas. */
 @ExperimentalApi
 @CheckReturnValue
-@SuppressWarnings("rawtypes")
 final class SchemaUtil {
   private static final Class<?> GENERATED_MESSAGE_CLASS = getGeneratedMessageClass();
   private static final UnknownFieldSchema<?, ?> UNKNOWN_FIELD_SET_FULL_SCHEMA =
@@ -39,7 +38,7 @@ final class SchemaUtil {
     // TODO decide if we're keeping support for Full in schema classes and handle this
     // better.
     if (!GeneratedMessageLite.class.isAssignableFrom(messageType)
-        && !Android.assumeLiteRuntime
+        && !Protobuf.assumeLiteRuntime
         && GENERATED_MESSAGE_CLASS != null
         && !GENERATED_MESSAGE_CLASS.isAssignableFrom(messageType)) {
       throw new IllegalArgumentException(
@@ -647,27 +646,10 @@ final class SchemaUtil {
 
   static int computeSizeMessage(int fieldNumber, Object value, Schema<?> schema) {
     if (value instanceof LazyFieldLite) {
-      return ((LazyFieldLite) value).computeSize(fieldNumber);
+      return CodedOutputStream.computeLazyFieldSize(fieldNumber, (LazyFieldLite) value);
     } else {
-      return computeMessageSize(fieldNumber, (AbstractMessageLite) value, schema);
+      return CodedOutputStream.computeMessageSize(fieldNumber, (MessageLite) value, schema);
     }
-  }
-
-  /**
-   * Compute the number of bytes that would be needed to encode an embedded message field, including
-   * tag.
-   */
-  @SuppressWarnings("rawtypes")
-  static int computeMessageSize(
-      final int fieldNumber, final AbstractMessageLite value, final Schema schema) {
-    return CodedOutputStream.computeTagSize(fieldNumber) + computeMessageSizeNoTag(value, schema);
-  }
-
-  /** Compute the number of bytes that would be needed to encode an embedded message field. */
-  @SuppressWarnings("rawtypes")
-  static int computeMessageSizeNoTag(final AbstractMessageLite value, final Schema schema) {
-    return CodedOutputStream.computeLengthDelimitedFieldSize(
-        ((AbstractMessageLite) value).getSerializedSize(schema));
   }
 
   static int computeSizeMessageList(int fieldNumber, List<?> list) {
@@ -679,7 +661,7 @@ final class SchemaUtil {
     for (int i = 0; i < length; i++) {
       Object value = list.get(i);
       if (value instanceof LazyFieldLite) {
-        size += ((LazyFieldLite) value).computeSizeNoTag();
+        size += CodedOutputStream.computeLazyFieldSizeNoTag((LazyFieldLite) value);
       } else {
         size += CodedOutputStream.computeMessageSizeNoTag((MessageLite) value);
       }
@@ -696,9 +678,9 @@ final class SchemaUtil {
     for (int i = 0; i < length; i++) {
       Object value = list.get(i);
       if (value instanceof LazyFieldLite) {
-        size += ((LazyFieldLite) value).computeSizeNoTag();
+        size += CodedOutputStream.computeLazyFieldSizeNoTag((LazyFieldLite) value);
       } else {
-        size += computeMessageSizeNoTag((AbstractMessageLite) value, schema);
+        size += CodedOutputStream.computeMessageSizeNoTag((MessageLite) value, schema);
       }
     }
     return size;
@@ -714,27 +696,6 @@ final class SchemaUtil {
       size += CodedOutputStream.computeBytesSizeNoTag(list.get(i));
     }
     return size;
-  }
-
-  /**
-   * Compute the number of bytes that would be needed to encode a {@code group} field.
-   *
-   * @deprecated groups are deprecated.
-   */
-  @Deprecated
-  static int computeGroupSizeNoTag(final MessageLite value, Schema schema) {
-    return ((AbstractMessageLite) value).getSerializedSize(schema);
-  }
-
-  /**
-   * Compute the number of bytes that would be needed to encode a {@code group} field, including
-   * tag.
-   *
-   * @deprecated groups are deprecated.
-   */
-  @Deprecated
-  static int computeGroupSize(final int fieldNumber, final MessageLite value, Schema schema) {
-    return CodedOutputStream.computeTagSize(fieldNumber) * 2 + computeGroupSizeNoTag(value, schema);
   }
 
   static int computeSizeGroupList(int fieldNumber, List<MessageLite> list) {
@@ -756,7 +717,7 @@ final class SchemaUtil {
     }
     int size = 0;
     for (int i = 0; i < length; i++) {
-      size += computeGroupSize(fieldNumber, list.get(i), schema);
+      size += CodedOutputStream.computeGroupSize(fieldNumber, list.get(i), schema);
     }
     return size;
   }
@@ -821,7 +782,7 @@ final class SchemaUtil {
   }
 
   private static Class<?> getGeneratedMessageClass() {
-    if (Android.assumeLiteRuntime) {
+    if (Protobuf.assumeLiteRuntime) {
       return null;
     }
     try {
@@ -834,7 +795,7 @@ final class SchemaUtil {
   }
 
   private static Class<?> getUnknownFieldSetSchemaClass() {
-    if (Android.assumeLiteRuntime) {
+    if (Protobuf.assumeLiteRuntime) {
       return null;
     }
     try {

@@ -93,15 +93,9 @@ const upb_DefPool* DescriptorPool_GetSymtab(VALUE desc_pool_rb) {
   return pool->symtab;
 }
 
-/**
- * ruby-doc: DescriptorPool
- *
- * A DescriptorPool is the registry of all known Protobuf descriptor objects.
- *
- */
-
 /*
- * ruby-doc: DescriptorPool.new
+ * call-seq:
+ *     DescriptorPool.new => pool
  *
  * Creates a new, empty, descriptor pool.
  */
@@ -114,22 +108,14 @@ static VALUE DescriptorPool_alloc(VALUE klass) {
 
   RB_OBJ_WRITE(ret, &self->def_to_descriptor, rb_hash_new());
   self->symtab = upb_DefPool_New();
-
-  // Ruby treats all enums as open.
-  upb_DefPool_DisableClosedEnumChecking(self->symtab);
-
   return ObjectCache_TryAdd(self->symtab, ret);
 }
 
 /*
- * ruby-doc: DescriptorPool#add_serialized_file
+ * call-seq:
+ *     DescriptorPool.add_serialized_file(serialized_file_proto)
  *
- * Adds the given serialized
- * {https://protobuf.com/docs/descriptors#file-descriptors FileDescriptorProto}
- * to the pool.
- *
- * @param serialized_file_proto [String]
- * @return [FileDescriptor]
+ * Adds the given serialized FileDescriptorProto to the pool.
  */
 VALUE DescriptorPool_add_serialized_file(VALUE _self,
                                          VALUE serialized_file_proto) {
@@ -157,14 +143,11 @@ VALUE DescriptorPool_add_serialized_file(VALUE _self,
 }
 
 /*
- * ruby-doc: DescriptorPool#lookup
+ * call-seq:
+ *     DescriptorPool.lookup(name) => descriptor
  *
- * Finds a {Descriptor}, {EnumDescriptor},
- * {FieldDescriptor} or {ServiceDescriptor} by
- * name and returns it, or nil if none exists with the given name.
- *
- * @param name [String]
- * @return [Descriptor,EnumDescriptor,FieldDescriptor,ServiceDescriptor]
+ * Finds a Descriptor, EnumDescriptor or FieldDescriptor by name and returns it,
+ * or nil if none exists with the given name.
  */
 static VALUE DescriptorPool_lookup(VALUE _self, VALUE name) {
   DescriptorPool* self = ruby_to_DescriptorPool(_self);
@@ -173,7 +156,6 @@ static VALUE DescriptorPool_lookup(VALUE _self, VALUE name) {
   const upb_EnumDef* enumdef;
   const upb_FieldDef* fielddef;
   const upb_ServiceDef* servicedef;
-  const upb_FileDef* filedef;
 
   msgdef = upb_DefPool_FindMessageByName(self->symtab, name_str);
   if (msgdef) {
@@ -195,23 +177,17 @@ static VALUE DescriptorPool_lookup(VALUE _self, VALUE name) {
     return get_servicedef_obj(_self, servicedef);
   }
 
-  filedef = upb_DefPool_FindFileByName(self->symtab, name_str);
-  if (filedef) {
-    return get_filedef_obj(_self, filedef);
-  }
-
   return Qnil;
 }
 
 /*
- * ruby-doc: DescriptorPool.generated_pool
+ * call-seq:
+ *     DescriptorPool.generated_pool => descriptor_pool
  *
- * Class method that returns the global {DescriptorPool}. This is a singleton
- * into which generated-code message and enum types are registered. The user may
- * also register types in this pool for convenience so that they do not have to
- * hold a reference to a private pool instance.
- *
- * @return [DescriptorPool]
+ * Class method that returns the global DescriptorPool. This is a singleton into
+ * which generated-code message and enum types are registered. The user may also
+ * register types in this pool for convenience so that they do not have to hold
+ * a reference to a private pool instance.
  */
 static VALUE DescriptorPool_generated_pool(VALUE _self) {
   return generated_pool;
@@ -308,13 +284,8 @@ static VALUE decode_options(VALUE self, const char* option_type, int size,
 }
 
 /*
- * ruby-doc: Descriptor
- *
- * A Descriptor provides information about a given Protobuf definition.
- */
-
-/*
- * ruby-doc: Descriptor.initialize
+ * call-seq:
+ *     Descriptor.new => descriptor
  *
  * Creates a new, empty, message type descriptor. At a minimum, its name must be
  * set before it is added to a pool. It cannot be used to create messages until
@@ -352,11 +323,10 @@ static VALUE Descriptor_initialize(VALUE _self, VALUE cookie,
 }
 
 /*
- * ruby-doc: Descriptor#file_descriptor
+ * call-seq:
+ *    Descriptor.file_descriptor
  *
- * Returns the {FileDescriptor} object this message belongs to.
- *
- * @return [FileDescriptor]
+ * Returns the FileDescriptor object this message belongs to.
  */
 static VALUE Descriptor_file_descriptor(VALUE _self) {
   Descriptor* self = ruby_to_Descriptor(_self);
@@ -365,12 +335,11 @@ static VALUE Descriptor_file_descriptor(VALUE _self) {
 }
 
 /*
- * ruby-doc: Descriptor#name
+ * call-seq:
+ *     Descriptor.name => name
  *
  * Returns the name of this message type as a fully-qualified string (e.g.,
  * My.Package.MessageType).
- *
- * @return [String]
  */
 static VALUE Descriptor_name(VALUE _self) {
   Descriptor* self = ruby_to_Descriptor(_self);
@@ -378,12 +347,10 @@ static VALUE Descriptor_name(VALUE _self) {
 }
 
 /*
- * ruby-doc: Descriptor#each
+ * call-seq:
+ *     Descriptor.each(&block)
  *
  * Iterates over fields in this message type, yielding to the block on each one.
- *
- * @yield [FieldDescriptor]
- * @return [nil]
  */
 static VALUE Descriptor_each(VALUE _self) {
   Descriptor* self = ruby_to_Descriptor(_self);
@@ -398,13 +365,11 @@ static VALUE Descriptor_each(VALUE _self) {
 }
 
 /*
- * ruby-doc: Descriptor#lookup
+ * call-seq:
+ *     Descriptor.lookup(name) => FieldDescriptor
  *
  * Returns the field descriptor for the field with the given name, if present,
  * or nil if none.
- *
- * @param name [String]
- * @return [FieldDescriptor]
  */
 static VALUE Descriptor_lookup(VALUE _self, VALUE name) {
   Descriptor* self = ruby_to_Descriptor(_self);
@@ -417,13 +382,11 @@ static VALUE Descriptor_lookup(VALUE _self, VALUE name) {
 }
 
 /*
- * ruby-doc: Descriptor#each_oneof
+ * call-seq:
+ *     Descriptor.each_oneof(&block) => nil
  *
  * Invokes the given block for each oneof in this message type, passing the
- * corresponding {OneofDescriptor}.
- *
- * @yield [OneofDescriptor]
- * @return [nil]
+ * corresponding OneofDescriptor.
  */
 static VALUE Descriptor_each_oneof(VALUE _self) {
   Descriptor* self = ruby_to_Descriptor(_self);
@@ -438,13 +401,11 @@ static VALUE Descriptor_each_oneof(VALUE _self) {
 }
 
 /*
- * ruby-doc: Descriptor#lookup_oneof
+ * call-seq:
+ *     Descriptor.lookup_oneof(name) => OneofDescriptor
  *
  * Returns the oneof descriptor for the oneof with the given name, if present,
  * or nil if none.
- *
- * @param name [String]
- * @return [OneofDescriptor]
  */
 static VALUE Descriptor_lookup_oneof(VALUE _self, VALUE name) {
   Descriptor* self = ruby_to_Descriptor(_self);
@@ -457,11 +418,10 @@ static VALUE Descriptor_lookup_oneof(VALUE _self, VALUE name) {
 }
 
 /*
- * ruby-doc: Descriptor#msgclass
+ * call-seq:
+ *     Descriptor.msgclass => message_klass
  *
  * Returns the Ruby class created for this message type.
- *
- * @return [Class<Google::Protobuf::AbstractMessage>]
  */
 static VALUE Descriptor_msgclass(VALUE _self) {
   Descriptor* self = ruby_to_Descriptor(_self);
@@ -472,13 +432,10 @@ static VALUE Descriptor_msgclass(VALUE _self) {
 }
 
 /*
- * ruby-doc: Descriptor#options
+ * call-seq:
+ *     Descriptor.options => options
  *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L571
- * MessageOptions} for this {Descriptor}.
- *
- * @return [MessageOptions]
+ * Returns the `MessageOptions` for this `Descriptor`.
  */
 static VALUE Descriptor_options(VALUE _self) {
   Descriptor* self = ruby_to_Descriptor(_self);
@@ -494,30 +451,6 @@ static VALUE Descriptor_options(VALUE _self) {
   return message_options;
 }
 
-/*
- * ruby-doc: Descriptor#to_proto
- *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L147
- * DescriptorProto} of this {Descriptor}.
- *
- * @return [DescriptorProto]
- */
-static VALUE Descriptor_to_proto(VALUE _self) {
-  Descriptor* self = ruby_to_Descriptor(_self);
-  upb_Arena* arena = upb_Arena_New();
-  google_protobuf_DescriptorProto* proto =
-      upb_MessageDef_ToProto(self->msgdef, arena);
-  size_t size;
-  const char* serialized =
-      google_protobuf_DescriptorProto_serialize(proto, arena, &size);
-  VALUE proto_class = rb_path2class("Google::Protobuf::DescriptorProto");
-  VALUE proto_rb =
-      Message_decode_bytes(size, serialized, 0, proto_class, false);
-  upb_Arena_Free(arena);
-  return proto_rb;
-}
-
 static void Descriptor_register(VALUE module) {
   VALUE klass = rb_define_class_under(module, "Descriptor", rb_cObject);
   rb_define_alloc_func(klass, Descriptor_alloc);
@@ -530,7 +463,6 @@ static void Descriptor_register(VALUE module) {
   rb_define_method(klass, "name", Descriptor_name, 0);
   rb_define_method(klass, "file_descriptor", Descriptor_file_descriptor, 0);
   rb_define_method(klass, "options", Descriptor_options, 0);
-  rb_define_method(klass, "to_proto", Descriptor_to_proto, 0);
   rb_include_module(klass, rb_mEnumerable);
   rb_gc_register_address(&cDescriptor);
   cDescriptor = klass;
@@ -574,15 +506,9 @@ static VALUE FileDescriptor_alloc(VALUE klass) {
   return ret;
 }
 
-/**
- * ruby-doc: FileDescriptor
- *
- * A FileDescriptor provides information about all Protobuf definitions in a
- * particular file.
- */
-
 /*
- * ruby-doc: FileDescriptor#initialize
+ * call-seq:
+ *     FileDescriptor.new => file
  *
  * Returns a new file descriptor. May
  * to a builder.
@@ -603,11 +529,10 @@ static VALUE FileDescriptor_initialize(VALUE _self, VALUE cookie,
 }
 
 /*
- * ruby-doc: FileDescriptor#name
+ * call-seq:
+ *     FileDescriptor.name => name
  *
  * Returns the name of the file.
- *
- * @return [String]
  */
 static VALUE FileDescriptor_name(VALUE _self) {
   FileDescriptor* self = ruby_to_FileDescriptor(_self);
@@ -616,13 +541,10 @@ static VALUE FileDescriptor_name(VALUE _self) {
 }
 
 /*
- * ruby-doc: FileDescriptor#options
+ * call-seq:
+ *     FileDescriptor.options => options
  *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L442
- * FileOptions} for this {FileDescriptor}.
- *
- * @return [FileOptions]
+ * Returns the `FileOptions` for this `FileDescriptor`.
  */
 static VALUE FileDescriptor_options(VALUE _self) {
   FileDescriptor* self = ruby_to_FileDescriptor(_self);
@@ -636,40 +558,12 @@ static VALUE FileDescriptor_options(VALUE _self) {
   return file_options;
 }
 
-/*
- * ruby-doc: FileDescriptor#to_proto
- *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L104
- * FileDescriptorProto} of this {FileDescriptor}.
- *
- * @return [FileDescriptorProto]
- */
-static VALUE FileDescriptor_to_proto(VALUE _self) {
-  FileDescriptor* self = ruby_to_FileDescriptor(_self);
-  upb_Arena* arena = upb_Arena_New();
-  google_protobuf_FileDescriptorProto* file_proto =
-      upb_FileDef_ToProto(self->filedef, arena);
-
-  size_t size;
-  const char* serialized =
-      google_protobuf_FileDescriptorProto_serialize(file_proto, arena, &size);
-
-  VALUE file_proto_class =
-      rb_path2class("Google::Protobuf::FileDescriptorProto");
-  VALUE proto_rb =
-      Message_decode_bytes(size, serialized, 0, file_proto_class, false);
-  upb_Arena_Free(arena);
-  return proto_rb;
-}
-
 static void FileDescriptor_register(VALUE module) {
   VALUE klass = rb_define_class_under(module, "FileDescriptor", rb_cObject);
   rb_define_alloc_func(klass, FileDescriptor_alloc);
   rb_define_method(klass, "initialize", FileDescriptor_initialize, 3);
   rb_define_method(klass, "name", FileDescriptor_name, 0);
   rb_define_method(klass, "options", FileDescriptor_options, 0);
-  rb_define_method(klass, "to_proto", FileDescriptor_to_proto, 0);
   rb_gc_register_address(&cFileDescriptor);
   cFileDescriptor = klass;
 }
@@ -704,15 +598,9 @@ static FieldDescriptor* ruby_to_FieldDescriptor(VALUE val) {
   return ret;
 }
 
-/**
- * ruby-doc: FieldDescriptor
- *
- * A FieldDescriptor provides information about the Protobuf definition of a
- * field inside a {Descriptor}.
- */
-
 /*
- * ruby-doc: FieldDescriptor#initialize
+ * call-seq:
+ *     FieldDescriptor.new => field
  *
  * Returns a new field descriptor. Its name, type, etc. must be set before it is
  * added to a message type.
@@ -746,11 +634,10 @@ static VALUE FieldDescriptor_initialize(VALUE _self, VALUE cookie,
 }
 
 /*
- * ruby-doc: FieldDescriptor#name
+ * call-seq:
+ *     FieldDescriptor.name => name
  *
  * Returns the name of this field.
- *
- * @return [String]
  */
 static VALUE FieldDescriptor_name(VALUE _self) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -815,15 +702,14 @@ static VALUE descriptortype_to_ruby(upb_FieldType type) {
 }
 
 /*
- * ruby-doc: FieldDescriptor#type
+ * call-seq:
+ *     FieldDescriptor.type => type
  *
  * Returns this field's type, as a Ruby symbol, or nil if not yet set.
  *
  * Valid field types are:
  *     :int32, :int64, :uint32, :uint64, :float, :double, :bool, :string,
  *     :bytes, :message.
- *
- * @return [Symbol]
  */
 static VALUE FieldDescriptor__type(VALUE _self) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -831,11 +717,10 @@ static VALUE FieldDescriptor__type(VALUE _self) {
 }
 
 /*
- * ruby-doc: FieldDescriptor#default
+ * call-seq:
+ *     FieldDescriptor.default => default
  *
  * Returns this field's default, as a Ruby object, or nil if not yet set.
- *
- * @return [Object,nil]
  */
 static VALUE FieldDescriptor_default(VALUE _self) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -850,11 +735,10 @@ static VALUE FieldDescriptor_default(VALUE _self) {
 }
 
 /*
- * ruby-doc: FieldDescriptor.has_presence?
+ * call-seq:
+ *     FieldDescriptor.has_presence? => bool
  *
  * Returns whether this field tracks presence.
- *
- * @return [Boolean]
  */
 static VALUE FieldDescriptor_has_presence(VALUE _self) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -862,33 +746,10 @@ static VALUE FieldDescriptor_has_presence(VALUE _self) {
 }
 
 /*
- * ruby-doc: FieldDescriptor#required?
- *
- * Returns whether this is a required field.
- *
- * @return [Boolean]
- */
-static VALUE FieldDescriptor_is_required(VALUE _self) {
-  FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
-  return upb_FieldDef_IsRequired(self->fielddef) ? Qtrue : Qfalse;
-}
-
-/*
- * ruby-doc: FieldDescriptor#repeated?
- *
- * Returns whether this is a repeated field.
- * @return [Boolean]
- */
-static VALUE FieldDescriptor_is_repeated(VALUE _self) {
-  FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
-  return upb_FieldDef_IsRepeated(self->fielddef) ? Qtrue : Qfalse;
-}
-
-/*
- * ruby-doc: FieldDescriptor#is_packed?
+ * call-seq:
+ *     FieldDescriptor.is_packed? => bool
  *
  * Returns whether this is a repeated field that uses packed encoding.
- * @return [Boolean]
  */
 static VALUE FieldDescriptor_is_packed(VALUE _self) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -896,11 +757,10 @@ static VALUE FieldDescriptor_is_packed(VALUE _self) {
 }
 
 /*
- * ruby-doc: FieldDescriptor#json_name
+ * call-seq:
+ *     FieldDescriptor.json_name => json_name
  *
  * Returns this field's json_name, as a Ruby string, or nil if not yet set.
- *
- * @return [String,nil]
  */
 static VALUE FieldDescriptor_json_name(VALUE _self) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -910,14 +770,13 @@ static VALUE FieldDescriptor_json_name(VALUE _self) {
 }
 
 /*
- * ruby-doc: FieldDescriptor#label
+ * call-seq:
+ *     FieldDescriptor.label => label
  *
  * Returns this field's label (i.e., plurality), as a Ruby symbol.
- * Valid field labels are:
- *   :optional, :repeated
  *
- * @return [Symbol]
- * @deprecated Use {#repeated?} or {#required?} instead.
+ * Valid field labels are:
+ *     :optional, :repeated
  */
 static VALUE FieldDescriptor_label(VALUE _self) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -937,11 +796,10 @@ static VALUE FieldDescriptor_label(VALUE _self) {
 }
 
 /*
- * ruby-doc: FieldDescriptor#number
+ * call-seq:
+ *     FieldDescriptor.number => number
  *
  * Returns the tag number for this field.
- *
- * @return [Integer]
  */
 static VALUE FieldDescriptor_number(VALUE _self) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -949,14 +807,13 @@ static VALUE FieldDescriptor_number(VALUE _self) {
 }
 
 /*
- * ruby-doc: FieldDescriptor#submsg_name
+ * call-seq:
+ *     FieldDescriptor.submsg_name => submsg_name
  *
  * Returns the name of the message or enum type corresponding to this field, if
  * it is a message or enum field (respectively), or nil otherwise. This type
  * name will be resolved within the context of the pool to which the containing
  * message type is added.
- *
- * @return [String,nil]
  */
 static VALUE FieldDescriptor_submsg_name(VALUE _self) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -973,14 +830,13 @@ static VALUE FieldDescriptor_submsg_name(VALUE _self) {
 }
 
 /*
- * ruby-doc: FieldDescriptor#subtype
+ * call-seq:
+ *     FieldDescriptor.subtype => message_or_enum_descriptor
  *
  * Returns the message or enum descriptor corresponding to this field's type if
  * it is a message or enum field, respectively, or nil otherwise. Cannot be
  * called *until* the containing message type is added to a pool (and thus
  * resolved).
- *
- * @return [Descriptor,EnumDescriptor,nil]
  */
 static VALUE FieldDescriptor_subtype(VALUE _self) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -997,13 +853,11 @@ static VALUE FieldDescriptor_subtype(VALUE _self) {
 }
 
 /*
- * ruby-doc: FieldDescriptor#get
+ * call-seq:
+ *     FieldDescriptor.get(message) => value
  *
  * Returns the value set for this field on the given message. Raises an
  * exception if message is of the wrong type.
- *
- * @param message [AbstractMessage]
- * @return [Object]
  */
 static VALUE FieldDescriptor_get(VALUE _self, VALUE msg_rb) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -1019,13 +873,11 @@ static VALUE FieldDescriptor_get(VALUE _self, VALUE msg_rb) {
 }
 
 /*
- * ruby-doc: FieldDescriptor.has?
+ * call-seq:
+ *     FieldDescriptor.has?(message) => boolean
  *
  * Returns whether the value is set on the given message. Raises an
  * exception when calling for fields that do not have presence.
- *
- * @param message [AbstractMessage]
- * @return [Boolean]
  */
 static VALUE FieldDescriptor_has(VALUE _self, VALUE msg_rb) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -1042,12 +894,10 @@ static VALUE FieldDescriptor_has(VALUE _self, VALUE msg_rb) {
 }
 
 /*
- * ruby-doc: FieldDescriptor#clear
+ * call-seq:
+ *     FieldDescriptor.clear(message)
  *
  * Clears the field from the message if it's set.
- *
- * @param message [AbstractMessage]
- * @return [nil]
  */
 static VALUE FieldDescriptor_clear(VALUE _self, VALUE msg_rb) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -1063,14 +913,12 @@ static VALUE FieldDescriptor_clear(VALUE _self, VALUE msg_rb) {
 }
 
 /*
- * ruby-doc: FieldDescriptor#set
+ * call-seq:
+ *     FieldDescriptor.set(message, value)
  *
  * Sets the value corresponding to this field to the given value on the given
  * message. Raises an exception if message is of the wrong type. Performs the
  * ordinary type-checks for field setting.
- *
- * @param message [AbstractMessage]
- * @param value [Object]
  */
 static VALUE FieldDescriptor_set(VALUE _self, VALUE msg_rb, VALUE value) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -1090,13 +938,10 @@ static VALUE FieldDescriptor_set(VALUE _self, VALUE msg_rb, VALUE value) {
 }
 
 /*
- * ruby-doc: FieldDescriptor#options
+ * call-seq:
+ *     FieldDescriptor.options => options
  *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L656
- * FieldOptions} for this {FieldDescriptor}.
- *
- * @return [FieldOptions]
+ * Returns the `FieldOptions` for this `FieldDescriptor`.
  */
 static VALUE FieldDescriptor_options(VALUE _self) {
   FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
@@ -1111,30 +956,6 @@ static VALUE FieldDescriptor_options(VALUE _self) {
   return field_options;
 }
 
-/*
- * ruby-doc: FieldDescriptor#to_proto
- *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L236
- * FieldDescriptorProto} of this {FieldDescriptor}.
- *
- * @return [FieldDescriptorProto]
- */
-static VALUE FieldDescriptor_to_proto(VALUE _self) {
-  FieldDescriptor* self = ruby_to_FieldDescriptor(_self);
-  upb_Arena* arena = upb_Arena_New();
-  google_protobuf_FieldDescriptorProto* proto =
-      upb_FieldDef_ToProto(self->fielddef, arena);
-  size_t size;
-  const char* serialized =
-      google_protobuf_FieldDescriptorProto_serialize(proto, arena, &size);
-  VALUE proto_class = rb_path2class("Google::Protobuf::FieldDescriptorProto");
-  VALUE proto_rb =
-      Message_decode_bytes(size, serialized, 0, proto_class, false);
-  upb_Arena_Free(arena);
-  return proto_rb;
-}
-
 static void FieldDescriptor_register(VALUE module) {
   VALUE klass = rb_define_class_under(module, "FieldDescriptor", rb_cObject);
   rb_define_alloc_func(klass, FieldDescriptor_alloc);
@@ -1143,8 +964,6 @@ static void FieldDescriptor_register(VALUE module) {
   rb_define_method(klass, "type", FieldDescriptor__type, 0);
   rb_define_method(klass, "default", FieldDescriptor_default, 0);
   rb_define_method(klass, "has_presence?", FieldDescriptor_has_presence, 0);
-  rb_define_method(klass, "required?", FieldDescriptor_is_required, 0);
-  rb_define_method(klass, "repeated?", FieldDescriptor_is_repeated, 0);
   rb_define_method(klass, "is_packed?", FieldDescriptor_is_packed, 0);
   rb_define_method(klass, "json_name", FieldDescriptor_json_name, 0);
   rb_define_method(klass, "label", FieldDescriptor_label, 0);
@@ -1156,7 +975,6 @@ static void FieldDescriptor_register(VALUE module) {
   rb_define_method(klass, "get", FieldDescriptor_get, 1);
   rb_define_method(klass, "set", FieldDescriptor_set, 2);
   rb_define_method(klass, "options", FieldDescriptor_options, 0);
-  rb_define_method(klass, "to_proto", FieldDescriptor_to_proto, 0);
   rb_gc_register_address(&cFieldDescriptor);
   cFieldDescriptor = klass;
 }
@@ -1191,15 +1009,9 @@ static OneofDescriptor* ruby_to_OneofDescriptor(VALUE val) {
   return ret;
 }
 
-/**
- * ruby-doc: OneofDescriptor
- *
- * A OneofDescriptor provides information about the Protobuf definition of a
- * oneof inside a {Descriptor}.
- */
-
 /*
- * ruby-doc: OneofDescriptor#initialize
+ * call-seq:
+ *     OneofDescriptor.new => oneof_descriptor
  *
  * Creates a new, empty, oneof descriptor. The oneof may only be modified prior
  * to being added to a message descriptor which is subsequently added to a pool.
@@ -1234,11 +1046,10 @@ static VALUE OneofDescriptor_initialize(VALUE _self, VALUE cookie,
 }
 
 /*
- * ruby-doc: OneofDescriptor#name
+ * call-seq:
+ *     OneofDescriptor.name => name
  *
  * Returns the name of this oneof.
- *
- * @return [String]
  */
 static VALUE OneofDescriptor_name(VALUE _self) {
   OneofDescriptor* self = ruby_to_OneofDescriptor(_self);
@@ -1246,12 +1057,10 @@ static VALUE OneofDescriptor_name(VALUE _self) {
 }
 
 /*
- * ruby-doc: OneofDescriptor#each
+ * call-seq:
+ *     OneofDescriptor.each(&block) => nil
  *
  * Iterates through fields in this oneof, yielding to the block on each one.
- *
- * @yield [FieldDescriptor]
- * @return [nil]
  */
 static VALUE OneofDescriptor_each(VALUE _self) {
   OneofDescriptor* self = ruby_to_OneofDescriptor(_self);
@@ -1266,13 +1075,10 @@ static VALUE OneofDescriptor_each(VALUE _self) {
 }
 
 /*
- * ruby-doc: OneofDescriptor#options
+ * call-seq:
+ *     OneofDescriptor.options => options
  *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L824
- * OneofOptions} for this {OneofDescriptor}.
- *
- * @return [OneofOptions]
+ * Returns the `OneofOptions` for this `OneofDescriptor`.
  */
 static VALUE OneOfDescriptor_options(VALUE _self) {
   OneofDescriptor* self = ruby_to_OneofDescriptor(_self);
@@ -1287,30 +1093,6 @@ static VALUE OneOfDescriptor_options(VALUE _self) {
   return oneof_options;
 }
 
-/*
- * ruby-doc: OneofDescriptor#to_proto
- *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L343
- * OneofDescriptorProto} of this {OneofDescriptor}.
- *
- * @return [OneofDescriptorProto]
- */
-static VALUE OneOfDescriptor_to_proto(VALUE _self) {
-  OneofDescriptor* self = ruby_to_OneofDescriptor(_self);
-  upb_Arena* arena = upb_Arena_New();
-  google_protobuf_OneofDescriptorProto* proto =
-      upb_OneofDef_ToProto(self->oneofdef, arena);
-  size_t size;
-  const char* serialized =
-      google_protobuf_OneofDescriptorProto_serialize(proto, arena, &size);
-  VALUE proto_class = rb_path2class("Google::Protobuf::OneofDescriptorProto");
-  VALUE proto_rb =
-      Message_decode_bytes(size, serialized, 0, proto_class, false);
-  upb_Arena_Free(arena);
-  return proto_rb;
-}
-
 static void OneofDescriptor_register(VALUE module) {
   VALUE klass = rb_define_class_under(module, "OneofDescriptor", rb_cObject);
   rb_define_alloc_func(klass, OneofDescriptor_alloc);
@@ -1318,7 +1100,6 @@ static void OneofDescriptor_register(VALUE module) {
   rb_define_method(klass, "name", OneofDescriptor_name, 0);
   rb_define_method(klass, "each", OneofDescriptor_each, 0);
   rb_define_method(klass, "options", OneOfDescriptor_options, 0);
-  rb_define_method(klass, "to_proto", OneOfDescriptor_to_proto, 0);
   rb_include_module(klass, rb_mEnumerable);
   rb_gc_register_address(&cOneofDescriptor);
   cOneofDescriptor = klass;
@@ -1371,13 +1152,6 @@ const upb_EnumDef* EnumDescriptor_GetEnumDef(VALUE enum_desc_rb) {
   return desc->enumdef;
 }
 
-/**
- * ruby-doc: EnumDescriptor
- *
- * An EnumDescriptor provides information about the Protobuf definition of an
- * enum inside a {Descriptor}.
- */
-
 /*
  * call-seq:
  *    EnumDescriptor.new(c_only_cookie, ptr) => EnumDescriptor
@@ -1400,11 +1174,10 @@ static VALUE EnumDescriptor_initialize(VALUE _self, VALUE cookie,
 }
 
 /*
- * ruby-doc: EnumDescriptor#file_descriptor
+ * call-seq:
+ *    EnumDescriptor.file_descriptor
  *
- * Returns the {FileDescriptor} object this enum belongs to.
- *
- * @return [FileDescriptor]
+ * Returns the FileDescriptor object this enum belongs to.
  */
 static VALUE EnumDescriptor_file_descriptor(VALUE _self) {
   EnumDescriptor* self = ruby_to_EnumDescriptor(_self);
@@ -1413,11 +1186,10 @@ static VALUE EnumDescriptor_file_descriptor(VALUE _self) {
 }
 
 /*
- * ruby-doc: EnumDescriptor#is_closed?
+ * call-seq:
+ *     EnumDescriptor.is_closed? => bool
  *
  * Returns whether this enum is open or closed.
- *
- * @return [Boolean]
  */
 static VALUE EnumDescriptor_is_closed(VALUE _self) {
   EnumDescriptor* self = ruby_to_EnumDescriptor(_self);
@@ -1425,11 +1197,10 @@ static VALUE EnumDescriptor_is_closed(VALUE _self) {
 }
 
 /*
- * ruby-doc: EnumDescriptor#name
+ * call-seq:
+ *     EnumDescriptor.name => name
  *
  * Returns the name of this enum type.
- *
- * @return [String]
  */
 static VALUE EnumDescriptor_name(VALUE _self) {
   EnumDescriptor* self = ruby_to_EnumDescriptor(_self);
@@ -1437,13 +1208,11 @@ static VALUE EnumDescriptor_name(VALUE _self) {
 }
 
 /*
- * ruby-doc: EnumDescriptor#lookup_name
+ * call-seq:
+ *     EnumDescriptor.lookup_name(name) => value
  *
  * Returns the numeric value corresponding to the given key name (as a Ruby
  * symbol), or nil if none.
- *
- * @param name [Symbol]
- * @return [Integer,nil]
  */
 static VALUE EnumDescriptor_lookup_name(VALUE _self, VALUE name) {
   EnumDescriptor* self = ruby_to_EnumDescriptor(_self);
@@ -1458,13 +1227,11 @@ static VALUE EnumDescriptor_lookup_name(VALUE _self, VALUE name) {
 }
 
 /*
- * ruby-doc: EnumDescriptor#lookup_value
+ * call-seq:
+ *     EnumDescriptor.lookup_value(name) => value
  *
  * Returns the key name (as a Ruby symbol) corresponding to the integer value,
  * or nil if none.
- *
- * @param name [Integer]
- * @return [Symbol,nil]
  */
 static VALUE EnumDescriptor_lookup_value(VALUE _self, VALUE number) {
   EnumDescriptor* self = ruby_to_EnumDescriptor(_self);
@@ -1479,13 +1246,11 @@ static VALUE EnumDescriptor_lookup_value(VALUE _self, VALUE number) {
 }
 
 /*
- * ruby-doc: EnumDescriptor#each
+ * call-seq:
+ *     EnumDescriptor.each(&block)
  *
  * Iterates over key => value mappings in this enum's definition, yielding to
  * the block with (key, value) arguments for each one.
- *
- * @yield [Symbol, Integer]
- * @return [nil]
  */
 static VALUE EnumDescriptor_each(VALUE _self) {
   EnumDescriptor* self = ruby_to_EnumDescriptor(_self);
@@ -1502,11 +1267,10 @@ static VALUE EnumDescriptor_each(VALUE _self) {
 }
 
 /*
- * ruby-doc: EnumDescriptor#enummodule
+ * call-seq:
+ *     EnumDescriptor.enummodule => module
  *
  * Returns the Ruby module corresponding to this enum type.
- *
- * @return [Module]
  */
 static VALUE EnumDescriptor_enummodule(VALUE _self) {
   EnumDescriptor* self = ruby_to_EnumDescriptor(_self);
@@ -1517,13 +1281,10 @@ static VALUE EnumDescriptor_enummodule(VALUE _self) {
 }
 
 /*
- * ruby-doc: EnumDescriptor#options
+ * call-seq:
+ *     EnumDescriptor.options => options
  *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L838
- * EnumOptions} for this {EnumDescriptor}.
- *
- * @return [EnumOptions]
+ * Returns the `EnumOptions` for this `EnumDescriptor`.
  */
 static VALUE EnumDescriptor_options(VALUE _self) {
   EnumDescriptor* self = ruby_to_EnumDescriptor(_self);
@@ -1535,31 +1296,6 @@ static VALUE EnumDescriptor_options(VALUE _self) {
                                       self->descriptor_pool);
   upb_Arena_Free(arena);
   return enum_options;
-}
-
-/*
- * ruby-doc: EnumDescriptor#to_proto
- *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L349
- * EnumDescriptorProto} of this {EnumDescriptor}.
- * @return [EnumDescriptorProto]
- */
-static VALUE EnumDescriptor_to_proto(VALUE _self) {
-  EnumDescriptor* self = ruby_to_EnumDescriptor(_self);
-  upb_Arena* arena = upb_Arena_New();
-  google_protobuf_EnumDescriptorProto* proto =
-      upb_EnumDef_ToProto(self->enumdef, arena);
-
-  size_t size;
-  const char* serialized =
-      google_protobuf_EnumDescriptorProto_serialize(proto, arena, &size);
-
-  VALUE proto_class = rb_path2class("Google::Protobuf::EnumDescriptorProto");
-  VALUE proto_rb =
-      Message_decode_bytes(size, serialized, 0, proto_class, false);
-  upb_Arena_Free(arena);
-  return proto_rb;
 }
 
 static void EnumDescriptor_register(VALUE module) {
@@ -1574,7 +1310,6 @@ static void EnumDescriptor_register(VALUE module) {
   rb_define_method(klass, "file_descriptor", EnumDescriptor_file_descriptor, 0);
   rb_define_method(klass, "is_closed?", EnumDescriptor_is_closed, 0);
   rb_define_method(klass, "options", EnumDescriptor_options, 0);
-  rb_define_method(klass, "to_proto", EnumDescriptor_to_proto, 0);
   rb_include_module(klass, rb_mEnumerable);
   rb_gc_register_address(&cEnumDescriptor);
   cEnumDescriptor = klass;
@@ -1621,13 +1356,6 @@ static VALUE ServiceDescriptor_alloc(VALUE klass) {
   return ret;
 }
 
-/**
- * ruby-doc: ServiceDescriptor
- *
- * A ServiceDescriptor provides information about the Protobuf definition of an
- * RPC service.
- */
-
 /*
  * call-seq:
  *    ServiceDescriptor.new(c_only_cookie, ptr) => ServiceDescriptor
@@ -1650,11 +1378,10 @@ static VALUE ServiceDescriptor_initialize(VALUE _self, VALUE cookie,
 }
 
 /*
- * ruby-doc: ServiceDescriptor#name
+ * call-seq:
+ *     ServiceDescriptor.name => name
  *
  * Returns the name of this service.
- *
- * @return [String]
  */
 static VALUE ServiceDescriptor_name(VALUE _self) {
   ServiceDescriptor* self = ruby_to_ServiceDescriptor(_self);
@@ -1662,10 +1389,10 @@ static VALUE ServiceDescriptor_name(VALUE _self) {
 }
 
 /*
- * ruby-doc: ServiceDescriptor#file_descriptor
+ * call-seq:
+ *    ServiceDescriptor.file_descriptor
  *
- * Returns the {FileDescriptor} object this service belongs to.
- * @return [FileDescriptor]
+ * Returns the FileDescriptor object this service belongs to.
  */
 static VALUE ServiceDescriptor_file_descriptor(VALUE _self) {
   ServiceDescriptor* self = ruby_to_ServiceDescriptor(_self);
@@ -1674,12 +1401,10 @@ static VALUE ServiceDescriptor_file_descriptor(VALUE _self) {
 }
 
 /*
- * ruby-doc: ServiceDescriptor#each
+ * call-seq:
+ *     ServiceDescriptor.each(&block)
  *
  * Iterates over methods in this service, yielding to the block on each one.
- *
- * @yield [MethodDescriptor]
- * @return [nil]
  */
 static VALUE ServiceDescriptor_each(VALUE _self) {
   ServiceDescriptor* self = ruby_to_ServiceDescriptor(_self);
@@ -1694,13 +1419,10 @@ static VALUE ServiceDescriptor_each(VALUE _self) {
 }
 
 /*
- * ruby-doc: ServiceDescriptor#options
+ * call-seq:
+ *     ServiceDescriptor.options => options
  *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L901
- * ServiceOptions} for this {ServiceDescriptor}.
- *
- * @return [ServiceOptions]
+ * Returns the `ServiceOptions` for this `ServiceDescriptor`.
  */
 static VALUE ServiceDescriptor_options(VALUE _self) {
   ServiceDescriptor* self = ruby_to_ServiceDescriptor(_self);
@@ -1716,30 +1438,6 @@ static VALUE ServiceDescriptor_options(VALUE _self) {
   return service_options;
 }
 
-/*
- * ruby-doc: ServiceDescriptor#to_proto
- *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L386
- * ServiceDescriptorProto} of this {ServiceDescriptor}.
- *
- * @return [ServiceDescriptorProto]
- */
-static VALUE ServiceDescriptor_to_proto(VALUE _self) {
-  ServiceDescriptor* self = ruby_to_ServiceDescriptor(_self);
-  upb_Arena* arena = upb_Arena_New();
-  google_protobuf_ServiceDescriptorProto* proto =
-      upb_ServiceDef_ToProto(self->servicedef, arena);
-  size_t size;
-  const char* serialized =
-      google_protobuf_ServiceDescriptorProto_serialize(proto, arena, &size);
-  VALUE proto_class = rb_path2class("Google::Protobuf::ServiceDescriptorProto");
-  VALUE proto_rb =
-      Message_decode_bytes(size, serialized, 0, proto_class, false);
-  upb_Arena_Free(arena);
-  return proto_rb;
-}
-
 static void ServiceDescriptor_register(VALUE module) {
   VALUE klass = rb_define_class_under(module, "ServiceDescriptor", rb_cObject);
   rb_define_alloc_func(klass, ServiceDescriptor_alloc);
@@ -1749,7 +1447,6 @@ static void ServiceDescriptor_register(VALUE module) {
   rb_define_method(klass, "file_descriptor", ServiceDescriptor_file_descriptor,
                    0);
   rb_define_method(klass, "options", ServiceDescriptor_options, 0);
-  rb_define_method(klass, "to_proto", ServiceDescriptor_to_proto, 0);
   rb_include_module(klass, rb_mEnumerable);
   rb_gc_register_address(&cServiceDescriptor);
   cServiceDescriptor = klass;
@@ -1796,13 +1493,6 @@ static VALUE MethodDescriptor_alloc(VALUE klass) {
   return ret;
 }
 
-/**
- * ruby-doc: MethodDescriptor
- *
- * A MethodDescriptor provides information about the Protobuf definition of a
- * method inside an RPC service.
- */
-
 /*
  * call-seq:
  *    MethodDescriptor.new(c_only_cookie, ptr) => MethodDescriptor
@@ -1825,11 +1515,10 @@ static VALUE MethodDescriptor_initialize(VALUE _self, VALUE cookie,
 }
 
 /*
- * ruby-doc: MethodDescriptor#name
+ * call-seq:
+ *     MethodDescriptor.name => name
  *
  * Returns the name of this method
- *
- * @return [String]
  */
 static VALUE MethodDescriptor_name(VALUE _self) {
   MethodDescriptor* self = ruby_to_MethodDescriptor(_self);
@@ -1837,13 +1526,10 @@ static VALUE MethodDescriptor_name(VALUE _self) {
 }
 
 /*
- * ruby-doc: MethodDescriptor#options
+ * call-seq:
+ *     MethodDescriptor.options => options
  *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L927
- * MethodOptions} for this {MethodDescriptor}.
- *
- * @return [MethodOptions]
+ * Returns the `MethodOptions` for this `MethodDescriptor`.
  */
 static VALUE MethodDescriptor_options(VALUE _self) {
   MethodDescriptor* self = ruby_to_MethodDescriptor(_self);
@@ -1860,11 +1546,10 @@ static VALUE MethodDescriptor_options(VALUE _self) {
 }
 
 /*
- * ruby-doc: MethodDescriptor#input_type
+ * call-seq:
+ *      MethodDescriptor.input_type => Descriptor
  *
- * Returns the {Descriptor} for the request message type of this method
- *
- * @return [Descriptor]
+ * Returns the `Descriptor` for the request message type of this method
  */
 static VALUE MethodDescriptor_input_type(VALUE _self) {
   MethodDescriptor* self = ruby_to_MethodDescriptor(_self);
@@ -1873,11 +1558,10 @@ static VALUE MethodDescriptor_input_type(VALUE _self) {
 }
 
 /*
- * ruby-doc: MethodDescriptor#output_type
+ * call-seq:
+ *      MethodDescriptor.output_type => Descriptor
  *
- * Returns the {Descriptor} for the response message type of this method
- *
- * @return [Descriptor]
+ * Returns the `Descriptor` for the response message type of this method
  */
 static VALUE MethodDescriptor_output_type(VALUE _self) {
   MethodDescriptor* self = ruby_to_MethodDescriptor(_self);
@@ -1886,11 +1570,10 @@ static VALUE MethodDescriptor_output_type(VALUE _self) {
 }
 
 /*
- * ruby-doc: MethodDescriptor#client_streaming
+ * call-seq:
+ *      MethodDescriptor.client_streaming => bool
  *
  * Returns whether or not this is a streaming request method
- *
- * @return [Boolean]
  */
 static VALUE MethodDescriptor_client_streaming(VALUE _self) {
   MethodDescriptor* self = ruby_to_MethodDescriptor(_self);
@@ -1898,35 +1581,10 @@ static VALUE MethodDescriptor_client_streaming(VALUE _self) {
 }
 
 /*
- * ruby-doc: MethodDescriptor#to_proto
- *
- * Returns the
- * {https://github.com/protocolbuffers/protobuf/blob/v30.2/src/google/protobuf/descriptor.proto#L394
- * MethodDescriptorProto} of this {MethodDescriptor}.
- *
- * @return [MethodDescriptorProto]
- */
-static VALUE MethodDescriptor_to_proto(VALUE _self) {
-  MethodDescriptor* self = ruby_to_MethodDescriptor(_self);
-  upb_Arena* arena = upb_Arena_New();
-  google_protobuf_MethodDescriptorProto* proto =
-      upb_MethodDef_ToProto(self->methoddef, arena);
-  size_t size;
-  const char* serialized =
-      google_protobuf_MethodDescriptorProto_serialize(proto, arena, &size);
-  VALUE proto_class = rb_path2class("Google::Protobuf::MethodDescriptorProto");
-  VALUE proto_rb =
-      Message_decode_bytes(size, serialized, 0, proto_class, false);
-  upb_Arena_Free(arena);
-  return proto_rb;
-}
-
-/*
- * ruby-doc: MethodDescriptor#server_streaming
+ * call-seq:
+ *      MethodDescriptor.server_streaming => bool
  *
  * Returns whether or not this is a streaming response method
- *
- * @return [Boolean]
  */
 static VALUE MethodDescriptor_server_streaming(VALUE _self) {
   MethodDescriptor* self = ruby_to_MethodDescriptor(_self);
@@ -1945,7 +1603,6 @@ static void MethodDescriptor_register(VALUE module) {
                    0);
   rb_define_method(klass, "server_streaming", MethodDescriptor_server_streaming,
                    0);
-  rb_define_method(klass, "to_proto", MethodDescriptor_to_proto, 0);
   rb_gc_register_address(&cMethodDescriptor);
   cMethodDescriptor = klass;
 }

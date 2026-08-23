@@ -16,6 +16,8 @@
 #import "GPBMessage_PackagePrivate.h"
 #import "GPBTestUtilities.h"
 #import "GPBUnknownField.h"
+#import "GPBUnknownFieldSet.h"
+#import "GPBUnknownFieldSet_PackagePrivate.h"
 #import "GPBUnknownField_PackagePrivate.h"
 #import "GPBUnknownFields.h"
 #import "objectivec/Tests/Unittest.pbobjc.h"
@@ -128,96 +130,39 @@
 
 - (TestAllExtensions *)mergeExtensionsDestination {
   TestAllExtensions *message = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalInt32Extension() value:@5];
-#else
   [message setExtension:[UnittestRoot optionalInt32Extension] value:@5];
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalStringExtension() value:@"foo"];
-#else
   [message setExtension:[UnittestRoot optionalStringExtension] value:@"foo"];
-#endif
   ForeignMessage *foreignMessage = [ForeignMessage message];
   foreignMessage.c = 4;
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalForeignMessageExtension()
-                  value:foreignMessage];
-#else
   [message setExtension:[UnittestRoot optionalForeignMessageExtension] value:foreignMessage];
-#endif
   TestAllTypes_NestedMessage *nestedMessage = [TestAllTypes_NestedMessage message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalNestedMessageExtension()
-                  value:nestedMessage];
-#else
   [message setExtension:[UnittestRoot optionalNestedMessageExtension] value:nestedMessage];
-#endif
   return message;
 }
 
 - (TestAllExtensions *)mergeExtensionsSource {
   TestAllExtensions *message = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalInt64Extension() value:@6];
-#else
   [message setExtension:[UnittestRoot optionalInt64Extension] value:@6];
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalStringExtension() value:@"bar"];
-#else
   [message setExtension:[UnittestRoot optionalStringExtension] value:@"bar"];
-#endif
   ForeignMessage *foreignMessage = [ForeignMessage message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalForeignMessageExtension()
-                  value:foreignMessage];
-#else
   [message setExtension:[UnittestRoot optionalForeignMessageExtension] value:foreignMessage];
-#endif
   TestAllTypes_NestedMessage *nestedMessage = [TestAllTypes_NestedMessage message];
   nestedMessage.bb = 7;
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalNestedMessageExtension()
-                  value:nestedMessage];
-#else
   [message setExtension:[UnittestRoot optionalNestedMessageExtension] value:nestedMessage];
-#endif
   return message;
 }
 
 - (TestAllExtensions *)mergeExtensionsResult {
   TestAllExtensions *message = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalInt32Extension() value:@5];
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalInt64Extension() value:@6];
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalStringExtension() value:@"bar"];
-#else
   [message setExtension:[UnittestRoot optionalInt32Extension] value:@5];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalInt64Extension() value:@6];
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalStringExtension() value:@"bar"];
-#else
   [message setExtension:[UnittestRoot optionalInt64Extension] value:@6];
   [message setExtension:[UnittestRoot optionalStringExtension] value:@"bar"];
-#endif
-#endif
   ForeignMessage *foreignMessage = [ForeignMessage message];
   foreignMessage.c = 4;
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalForeignMessageExtension()
-                  value:foreignMessage];
-#else
   [message setExtension:[UnittestRoot optionalForeignMessageExtension] value:foreignMessage];
-#endif
   TestAllTypes_NestedMessage *nestedMessage = [TestAllTypes_NestedMessage message];
   nestedMessage.bb = 7;
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalNestedMessageExtension()
-                  value:nestedMessage];
-#else
   [message setExtension:[UnittestRoot optionalNestedMessageExtension] value:nestedMessage];
-#endif
   return message;
 }
 
@@ -262,15 +207,9 @@
   NSData *data = [[self mergeExtensionsSource] data];
   XCTAssertNotNil(data);
   NSError *error = nil;
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertTrue([result mergeFromData:data
-                    extensionRegistry:Objc_Protobuf_Tests_UnittestRoot_Registry()
-                                error:&error]);
-#else
   XCTAssertTrue([result mergeFromData:data
                     extensionRegistry:[UnittestRoot extensionRegistry]
                                 error:&error]);
-#endif
   XCTAssertNil(error);
   resultData = [result data];
   XCTAssertEqualObjects(resultData, mergeResultData);
@@ -334,32 +273,16 @@
 
   XCTAssertTrue(message.initialized);
 
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:TestRequired_extension_Single() value:[TestRequired message]];
-#else
   [message setExtension:[TestRequired single] value:[TestRequired message]];
-#endif
   XCTAssertFalse(message.initialized);
 
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:TestRequired_extension_Single() value:self.testRequiredInitialized];
-#else
   [message setExtension:[TestRequired single] value:self.testRequiredInitialized];
-#endif
   XCTAssertTrue(message.initialized);
 
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message addExtension:TestRequired_extension_Multi() value:[TestRequired message]];
-#else
   [message addExtension:[TestRequired multi] value:[TestRequired message]];
-#endif
   XCTAssertFalse(message.initialized);
 
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:TestRequired_extension_Multi() index:0 value:self.testRequiredInitialized];
-#else
   [message setExtension:[TestRequired multi] index:0 value:self.testRequiredInitialized];
-#endif
   XCTAssertTrue(message.initialized);
 }
 
@@ -481,11 +404,7 @@
 }
 
 - (void)testRoot {
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertNotNil(Objc_Protobuf_Tests_UnittestRoot_Registry());
-#else
   XCTAssertNotNil([UnittestRoot extensionRegistry]);
-#endif
 }
 
 - (void)testGPBMessageSize {
@@ -577,6 +496,19 @@
   TestAllTypes *message = [TestAllTypes message];
   [self setAllFields:message repeatedCount:kGPBDefaultRepeatCount];
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  GPBUnknownFieldSet *unknownFields = [[[GPBUnknownFieldSet alloc] init] autorelease];
+  GPBUnknownField *field = [[[GPBUnknownField alloc] initWithNumber:2] autorelease];
+  [field addVarint:2];
+  [unknownFields addField:field];
+  field = [[[GPBUnknownField alloc] initWithNumber:3] autorelease];
+  [field addVarint:4];
+  [unknownFields addField:field];
+
+  [message setUnknownFields:unknownFields];
+#pragma clang diagnostic pop
+
   GPBUnknownFields *ufs = [[[GPBUnknownFields alloc] init] autorelease];
   [ufs addFieldNumber:1234 fixed32:1234];
   [ufs addFieldNumber:2345 varint:54321];
@@ -586,15 +518,9 @@
   XCTAssertGreaterThan([description length], 0U);
 
   GPBMessage *message2 = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message2 setExtension:Objc_Protobuf_Tests_extension_OptionalInt32Extension() value:@1];
-
-  [message2 addExtension:Objc_Protobuf_Tests_extension_RepeatedInt32Extension() value:@2];
-#else
   [message2 setExtension:[UnittestRoot optionalInt32Extension] value:@1];
 
   [message2 addExtension:[UnittestRoot repeatedInt32Extension] value:@2];
-#endif
 
   description = [message2 description];
   XCTAssertGreaterThan([description length], 0U);
@@ -672,24 +598,6 @@
   XCTAssertFalse(message.hasOptionalString);
   XCTAssertEqualObjects(message.optionalString, @"");
 
-  // Test oneof.
-  XCTAssertFalse(message.hasOneofUint32);
-  XCTAssertEqual(message.oneofUint32, 0U);
-  XCTAssertEqual(message.oneofFieldOneOfCase, TestAllTypes_OneofField_OneOfCase_GPBUnsetOneOfCase);
-  XCTAssertFalse(message.hasOneofUint32);
-  [message setHasOneofUint32:NO];
-  XCTAssertFalse(message.hasOneofUint32);
-  XCTAssertEqual(message.oneofUint32, 0U);
-  XCTAssertEqual(message.oneofFieldOneOfCase, TestAllTypes_OneofField_OneOfCase_GPBUnsetOneOfCase);
-  message.oneofUint32 = 1;
-  XCTAssertEqual(message.oneofUint32, 1);
-  XCTAssertTrue(message.hasOneofUint32);
-  XCTAssertEqual(message.oneofFieldOneOfCase, TestAllTypes_OneofField_OneOfCase_OneofUint32);
-  [message setHasOneofUint32:NO];
-  XCTAssertFalse(message.hasOneofUint32);
-  XCTAssertEqual(message.oneofUint32, 0);
-  XCTAssertEqual(message.oneofFieldOneOfCase, TestAllTypes_OneofField_OneOfCase_GPBUnsetOneOfCase);
-
   // Test optional data.
   XCTAssertFalse(message.hasOptionalBytes);
   XCTAssertEqualObjects(message.optionalBytes, GPBEmptyNSData());
@@ -759,32 +667,13 @@
 - (void)testClearExtension {
   // clearExtension() is not actually used in TestUtil, so try it manually.
   GPBMessage *message1 = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message1 setExtension:Objc_Protobuf_Tests_extension_OptionalInt32Extension() value:@1];
-
-  XCTAssertTrue([message1 hasExtension:Objc_Protobuf_Tests_extension_OptionalInt32Extension()]);
-  [message1 clearExtension:Objc_Protobuf_Tests_extension_OptionalInt32Extension()];
-  XCTAssertFalse([message1 hasExtension:Objc_Protobuf_Tests_extension_OptionalInt32Extension()]);
-#else
   [message1 setExtension:[UnittestRoot optionalInt32Extension] value:@1];
 
   XCTAssertTrue([message1 hasExtension:[UnittestRoot optionalInt32Extension]]);
   [message1 clearExtension:[UnittestRoot optionalInt32Extension]];
   XCTAssertFalse([message1 hasExtension:[UnittestRoot optionalInt32Extension]]);
-#endif
 
   GPBMessage *message2 = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message2 addExtension:Objc_Protobuf_Tests_extension_RepeatedInt32Extension() value:@1];
-
-  XCTAssertEqual(
-      [[message2 getExtension:Objc_Protobuf_Tests_extension_RepeatedInt32Extension()] count],
-      (NSUInteger)1);
-  [message2 clearExtension:Objc_Protobuf_Tests_extension_RepeatedInt32Extension()];
-  XCTAssertEqual(
-      [[message2 getExtension:Objc_Protobuf_Tests_extension_RepeatedInt32Extension()] count],
-      (NSUInteger)0);
-#else
   [message2 addExtension:[UnittestRoot repeatedInt32Extension] value:@1];
 
   XCTAssertEqual([[message2 getExtension:[UnittestRoot repeatedInt32Extension]] count],
@@ -792,23 +681,14 @@
   [message2 clearExtension:[UnittestRoot repeatedInt32Extension]];
   XCTAssertEqual([[message2 getExtension:[UnittestRoot repeatedInt32Extension]] count],
                  (NSUInteger)0);
-#endif
 
   // Clearing an unset extension field shouldn't make the target message
   // visible.
   GPBMessage *message3 = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  GPBMessage *extension_msg =
-      [message3 getExtension:Objc_Protobuf_Tests_extension_RecursiveExtension()];
-  XCTAssertFalse([message3 hasExtension:Objc_Protobuf_Tests_extension_RecursiveExtension()]);
-  [extension_msg clearExtension:Objc_Protobuf_Tests_extension_OptionalInt32Extension()];
-  XCTAssertFalse([message3 hasExtension:Objc_Protobuf_Tests_extension_RecursiveExtension()]);
-#else
   GPBMessage *extension_msg = [message3 getExtension:[UnittestObjcRoot recursiveExtension]];
   XCTAssertFalse([message3 hasExtension:[UnittestObjcRoot recursiveExtension]]);
   [extension_msg clearExtension:[UnittestRoot optionalInt32Extension]];
   XCTAssertFalse([message3 hasExtension:[UnittestObjcRoot recursiveExtension]]);
-#endif
 }
 
 - (void)testDefaultingSubMessages {
@@ -1099,6 +979,47 @@
   XCTAssertFalse(GPBWasMessageAutocreatedBy(nestedMessage, message));
 
   [nestedMessage release];
+}
+
+- (void)testAutocreatedUnknownFields {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
+  // Doing anything with (except reading) unknown fields should cause the
+  // submessage to become visible.
+  TestAllTypes *message = [TestAllTypes message];
+  XCTAssertNotNil(message.optionalNestedMessage);
+  XCTAssertFalse([message hasOptionalNestedMessage]);
+  XCTAssertNil(message.optionalNestedMessage.unknownFields);
+  XCTAssertFalse([message hasOptionalNestedMessage]);
+
+  GPBUnknownFieldSet *unknownFields = [[[GPBUnknownFieldSet alloc] init] autorelease];
+  message.optionalNestedMessage.unknownFields = unknownFields;
+  XCTAssertTrue([message hasOptionalNestedMessage]);
+
+  message.optionalNestedMessage = nil;
+  XCTAssertFalse([message hasOptionalNestedMessage]);
+  [message.optionalNestedMessage setUnknownFields:unknownFields];
+  XCTAssertTrue([message hasOptionalNestedMessage]);
+
+  message.optionalNestedMessage = nil;
+  XCTAssertFalse([message hasOptionalNestedMessage]);
+  GPBUnknownFields *ufs = [[[GPBUnknownFields alloc] init] autorelease];
+  [ufs addFieldNumber:1 varint:1];
+  XCTAssertTrue([message.optionalNestedMessage mergeUnknownFields:ufs
+                                                extensionRegistry:nil
+                                                            error:NULL]);
+  XCTAssertTrue([message hasOptionalNestedMessage]);
+
+  message.optionalNestedMessage = nil;
+  XCTAssertFalse([message hasOptionalNestedMessage]);
+  [ufs clear];  // Also make sure merging zero length forces it to become visible.
+  XCTAssertTrue([message.optionalNestedMessage mergeUnknownFields:ufs
+                                                extensionRegistry:nil
+                                                            error:NULL]);
+  XCTAssertTrue([message hasOptionalNestedMessage]);
+
+#pragma clang diagnostic pop
 }
 
 - (void)testSetAutocreatedSubmessageToSelf {
@@ -1591,49 +1512,40 @@
                                                       error:&error];
   XCTAssertNil(error);
 
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse([msg hasExtension:Objc_Protobuf_Tests_extension_OptionalNestedEnumExtension()]);
-#else
   XCTAssertFalse([msg hasExtension:[UnittestRoot optionalNestedEnumExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse([msg hasExtension:Objc_Protobuf_Tests_extension_RepeatedNestedEnumExtension()]);
-#else
   XCTAssertFalse([msg hasExtension:[UnittestRoot repeatedNestedEnumExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse([msg hasExtension:Objc_Protobuf_Tests_extension_RepeatedForeignEnumExtension()]);
-#else
   XCTAssertFalse([msg hasExtension:[UnittestRoot repeatedForeignEnumExtension]]);
-#endif
 
   GPBUnknownFields *ufs = [[[GPBUnknownFields alloc] initFromMessage:msg] autorelease];
   XCTAssertEqual(ufs.count, 3);
   uint64_t varint;
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertTrue([ufs
-      getFirst:Objc_Protobuf_Tests_extension_OptionalNestedEnumExtension().fieldNumber
-#else
   XCTAssertTrue([ufs getFirst:[UnittestRoot optionalNestedEnumExtension].fieldNumber
-#endif
-        varint:&varint]);
+                       varint:&varint]);
   XCTAssertEqual(varint, 10);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertTrue([ufs
-      getFirst:Objc_Protobuf_Tests_extension_RepeatedNestedEnumExtension().fieldNumber
-#else
   XCTAssertTrue([ufs getFirst:[UnittestRoot repeatedNestedEnumExtension].fieldNumber
-#endif
-        varint:&varint]);
+                       varint:&varint]);
   XCTAssertEqual(varint, 11);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertTrue([ufs
-      getFirst:Objc_Protobuf_Tests_extension_RepeatedForeignEnumExtension().fieldNumber
-#else
   XCTAssertTrue([ufs getFirst:[UnittestRoot repeatedForeignEnumExtension].fieldNumber
-#endif
-        varint:&varint]);
+                       varint:&varint]);
   XCTAssertEqual(varint, 12);
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  GPBUnknownFieldSet *unknownFields = msg.unknownFields;
+  GPBUnknownField *field =
+      [unknownFields getField:[UnittestRoot optionalNestedEnumExtension].fieldNumber];
+  XCTAssertNotNil(field);
+  XCTAssertEqual(field.varintList.count, 1);
+  XCTAssertEqual([field.varintList valueAtIndex:0], 10);
+  field = [unknownFields getField:[UnittestRoot repeatedNestedEnumExtension].fieldNumber];
+  XCTAssertNotNil(field);
+  XCTAssertEqual(field.varintList.count, 1);
+  XCTAssertEqual([field.varintList valueAtIndex:0], 11);
+  field = [unknownFields getField:[UnittestRoot repeatedForeignEnumExtension].fieldNumber];
+  XCTAssertNotNil(field);
+  XCTAssertEqual(field.varintList.count, 1);
+  XCTAssertEqual([field.varintList valueAtIndex:0], 12);
+#pragma clang diagnostic pop
 
   // Unknown and known, the known come though an unknown go to unknown fields.
 
@@ -1653,68 +1565,43 @@
                                    error:&error];
   XCTAssertNil(error);
 
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertTrue([msg hasExtension:Objc_Protobuf_Tests_extension_OptionalNestedEnumExtension()]);
-#else
   XCTAssertTrue([msg hasExtension:[UnittestRoot optionalNestedEnumExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqualObjects(
-      [msg getExtension:Objc_Protobuf_Tests_extension_OptionalNestedEnumExtension()], @2);
-#else
   XCTAssertEqualObjects([msg getExtension:[UnittestRoot optionalNestedEnumExtension]], @2);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertTrue([msg hasExtension:Objc_Protobuf_Tests_extension_RepeatedNestedEnumExtension()]);
-#else
   XCTAssertTrue([msg hasExtension:[UnittestRoot repeatedNestedEnumExtension]]);
-#endif
   id expected = @[ @2, @3 ];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqualObjects(
-      [msg getExtension:Objc_Protobuf_Tests_extension_RepeatedNestedEnumExtension()], expected);
-#else
   XCTAssertEqualObjects([msg getExtension:[UnittestRoot repeatedNestedEnumExtension]], expected);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertTrue([msg hasExtension:Objc_Protobuf_Tests_extension_RepeatedForeignEnumExtension()]);
-#else
   XCTAssertTrue([msg hasExtension:[UnittestRoot repeatedForeignEnumExtension]]);
-#endif
   expected = @[ @4, @6 ];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqualObjects(
-      [msg getExtension:Objc_Protobuf_Tests_extension_RepeatedForeignEnumExtension()], expected);
-#else
   XCTAssertEqualObjects([msg getExtension:[UnittestRoot repeatedForeignEnumExtension]], expected);
-#endif
 
   ufs = [[[GPBUnknownFields alloc] initFromMessage:msg] autorelease];
   XCTAssertEqual(ufs.count, 3);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertTrue([ufs
-      getFirst:Objc_Protobuf_Tests_extension_OptionalNestedEnumExtension().fieldNumber
-#else
   XCTAssertTrue([ufs getFirst:[UnittestRoot optionalNestedEnumExtension].fieldNumber
-#endif
-        varint:&varint]);
+                       varint:&varint]);
   XCTAssertEqual(varint, 10);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertTrue([ufs
-      getFirst:Objc_Protobuf_Tests_extension_RepeatedNestedEnumExtension().fieldNumber
-#else
   XCTAssertTrue([ufs getFirst:[UnittestRoot repeatedNestedEnumExtension].fieldNumber
-#endif
-        varint:&varint]);
+                       varint:&varint]);
   XCTAssertEqual(varint, 11);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertTrue([ufs
-      getFirst:Objc_Protobuf_Tests_extension_RepeatedForeignEnumExtension().fieldNumber
-#else
   XCTAssertTrue([ufs getFirst:[UnittestRoot repeatedForeignEnumExtension].fieldNumber
-#endif
-        varint:&varint]);
+                       varint:&varint]);
   XCTAssertEqual(varint, 12);
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  unknownFields = msg.unknownFields;
+  field = [unknownFields getField:[UnittestRoot optionalNestedEnumExtension].fieldNumber];
+  XCTAssertNotNil(field);
+  XCTAssertEqual(field.varintList.count, 1);
+  XCTAssertEqual([field.varintList valueAtIndex:0], 10);
+  field = [unknownFields getField:[UnittestRoot repeatedNestedEnumExtension].fieldNumber];
+  XCTAssertNotNil(field);
+  XCTAssertEqual(field.varintList.count, 1);
+  XCTAssertEqual([field.varintList valueAtIndex:0], 11);
+  field = [unknownFields getField:[UnittestRoot repeatedForeignEnumExtension].fieldNumber];
+  XCTAssertNotNil(field);
+  XCTAssertEqual(field.varintList.count, 1);
+  XCTAssertEqual([field.varintList valueAtIndex:0], 12);
+#pragma clang diagnostic pop
 }
 
 - (void)testDefaultingExtensionMessages {
@@ -1722,85 +1609,28 @@
 
   // Initially they should all not have values.
 
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse([message hasExtension:Objc_Protobuf_Tests_extension_OptionalGroupExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalGroupExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse([message hasExtension:Objc_Protobuf_Tests_extension_OptionalGroupExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalGroupExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalNestedMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalNestedMessageExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalForeignMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalForeignMessageExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalImportMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalImportMessageExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalPublicImportMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalPublicImportMessageExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalLazyMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalLazyMessageExtension]]);
-#endif
 
   // They should auto create something when fetched.
 
   TestAllTypes_OptionalGroup *optionalGroup =
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalGroupExtension()];
-#else
       [message getExtension:[UnittestRoot optionalGroupExtension]];
-#endif
   TestAllTypes_NestedMessage *optionalNestedMessage =
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalNestedMessageExtension()];
-#else
       [message getExtension:[UnittestRoot optionalNestedMessageExtension]];
-#endif
   ForeignMessage *optionalForeignMessage =
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalForeignMessageExtension()];
-#else
       [message getExtension:[UnittestRoot optionalForeignMessageExtension]];
-#endif
   ImportMessage *optionalImportMessage =
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalImportMessageExtension()];
-#else
       [message getExtension:[UnittestRoot optionalImportMessageExtension]];
-#endif
   PublicImportMessage *optionalPublicImportMessage =
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalPublicImportMessageExtension()];
-#else
       [message getExtension:[UnittestRoot optionalPublicImportMessageExtension]];
-#endif
   TestAllTypes_NestedMessage *optionalLazyMessage =
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalLazyMessageExtension()];
-#else
       [message getExtension:[UnittestRoot optionalLazyMessageExtension]];
-#endif
 
   XCTAssertNotNil(optionalGroup);
   XCTAssertNotNil(optionalNestedMessage);
@@ -1812,91 +1642,28 @@
   // Although it auto-created empty messages, it should not show that it has
   // them.
 
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse([message hasExtension:Objc_Protobuf_Tests_extension_OptionalGroupExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalGroupExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse([message hasExtension:Objc_Protobuf_Tests_extension_OptionalGroupExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalGroupExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalNestedMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalNestedMessageExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalForeignMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalForeignMessageExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalImportMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalImportMessageExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalPublicImportMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalPublicImportMessageExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalLazyMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalLazyMessageExtension]]);
-#endif
 
   // And they set that value back in to the message since the value created was
   // mutable (so a second fetch should give the same object).
 
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqual([message getExtension:Objc_Protobuf_Tests_extension_OptionalGroupExtension()],
-                 optionalGroup);
-#else
   XCTAssertEqual([message getExtension:[UnittestRoot optionalGroupExtension]], optionalGroup);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqual(
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalNestedMessageExtension()],
-#else
   XCTAssertEqual([message getExtension:[UnittestRoot optionalNestedMessageExtension]],
-#endif
-      optionalNestedMessage);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqual(
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalForeignMessageExtension()],
-#else
+                 optionalNestedMessage);
   XCTAssertEqual([message getExtension:[UnittestRoot optionalForeignMessageExtension]],
-#endif
-      optionalForeignMessage);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqual(
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalImportMessageExtension()],
-#else
+                 optionalForeignMessage);
   XCTAssertEqual([message getExtension:[UnittestRoot optionalImportMessageExtension]],
-#endif
-      optionalImportMessage);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqual(
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalPublicImportMessageExtension()],
-#else
+                 optionalImportMessage);
   XCTAssertEqual([message getExtension:[UnittestRoot optionalPublicImportMessageExtension]],
-#endif
-      optionalPublicImportMessage);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqual(
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalLazyMessageExtension()],
-#else
+                 optionalPublicImportMessage);
   XCTAssertEqual([message getExtension:[UnittestRoot optionalLazyMessageExtension]],
-#endif
-      optionalLazyMessage);
+                 optionalLazyMessage);
 
   // And the default objects for a second message should be distinct (again,
   // since they are mutable, each needs their own copy).
@@ -1904,169 +1671,47 @@
   TestAllExtensions *message2 = [TestAllExtensions message];
 
   // Intentionally doing a pointer comparison.
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertNotEqual([message2 getExtension:Objc_Protobuf_Tests_extension_OptionalGroupExtension()],
-                    optionalGroup);
-#else
   XCTAssertNotEqual([message2 getExtension:[UnittestRoot optionalGroupExtension]], optionalGroup);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertNotEqual(
-      [message2 getExtension:Objc_Protobuf_Tests_extension_OptionalNestedMessageExtension()],
-#else
   XCTAssertNotEqual([message2 getExtension:[UnittestRoot optionalNestedMessageExtension]],
-#endif
-      optionalNestedMessage);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertNotEqual(
-      [message2 getExtension:Objc_Protobuf_Tests_extension_OptionalForeignMessageExtension()],
-#else
+                    optionalNestedMessage);
   XCTAssertNotEqual([message2 getExtension:[UnittestRoot optionalForeignMessageExtension]],
-#endif
-      optionalForeignMessage);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertNotEqual(
-      [message2 getExtension:Objc_Protobuf_Tests_extension_OptionalImportMessageExtension()],
-#else
+                    optionalForeignMessage);
   XCTAssertNotEqual([message2 getExtension:[UnittestRoot optionalImportMessageExtension]],
-#endif
-      optionalImportMessage);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertNotEqual(
-      [message2 getExtension:Objc_Protobuf_Tests_extension_OptionalPublicImportMessageExtension()],
-#else
+                    optionalImportMessage);
   XCTAssertNotEqual([message2 getExtension:[UnittestRoot optionalPublicImportMessageExtension]],
-#endif
-      optionalPublicImportMessage);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertNotEqual(
-      [message2 getExtension:Objc_Protobuf_Tests_extension_OptionalLazyMessageExtension()],
-#else
+                    optionalPublicImportMessage);
   XCTAssertNotEqual([message2 getExtension:[UnittestRoot optionalLazyMessageExtension]],
-#endif
-      optionalLazyMessage);
+                    optionalLazyMessage);
 
   // Clear values, and on next access you get back new submessages.
 
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalGroupExtension() value:nil];
-#else
   [message setExtension:[UnittestRoot optionalGroupExtension] value:nil];
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalGroupExtension() value:nil];
-#else
   [message setExtension:[UnittestRoot optionalGroupExtension] value:nil];
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalNestedMessageExtension() value:nil];
-#else
   [message setExtension:[UnittestRoot optionalNestedMessageExtension] value:nil];
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalForeignMessageExtension() value:nil];
-#else
   [message setExtension:[UnittestRoot optionalForeignMessageExtension] value:nil];
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalImportMessageExtension() value:nil];
-#else
   [message setExtension:[UnittestRoot optionalImportMessageExtension] value:nil];
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalPublicImportMessageExtension()
-                  value:nil];
-#else
   [message setExtension:[UnittestRoot optionalPublicImportMessageExtension] value:nil];
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message setExtension:Objc_Protobuf_Tests_extension_OptionalLazyMessageExtension() value:nil];
-#else
   [message setExtension:[UnittestRoot optionalLazyMessageExtension] value:nil];
-#endif
 
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse([message hasExtension:Objc_Protobuf_Tests_extension_OptionalGroupExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalGroupExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse([message hasExtension:Objc_Protobuf_Tests_extension_OptionalGroupExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalGroupExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalNestedMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalNestedMessageExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalForeignMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalForeignMessageExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalImportMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalImportMessageExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalPublicImportMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalPublicImportMessageExtension]]);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertFalse(
-      [message hasExtension:Objc_Protobuf_Tests_extension_OptionalLazyMessageExtension()]);
-#else
   XCTAssertFalse([message hasExtension:[UnittestRoot optionalLazyMessageExtension]]);
-#endif
 
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqual([message getExtension:Objc_Protobuf_Tests_extension_OptionalGroupExtension()],
-                 optionalGroup);
-#else
   XCTAssertEqual([message getExtension:[UnittestRoot optionalGroupExtension]], optionalGroup);
-#endif
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqual(
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalNestedMessageExtension()],
-#else
   XCTAssertEqual([message getExtension:[UnittestRoot optionalNestedMessageExtension]],
-#endif
-      optionalNestedMessage);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqual(
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalForeignMessageExtension()],
-#else
+                 optionalNestedMessage);
   XCTAssertEqual([message getExtension:[UnittestRoot optionalForeignMessageExtension]],
-#endif
-      optionalForeignMessage);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqual(
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalImportMessageExtension()],
-#else
+                 optionalForeignMessage);
   XCTAssertEqual([message getExtension:[UnittestRoot optionalImportMessageExtension]],
-#endif
-      optionalImportMessage);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqual(
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalPublicImportMessageExtension()],
-#else
+                 optionalImportMessage);
   XCTAssertEqual([message getExtension:[UnittestRoot optionalPublicImportMessageExtension]],
-#endif
-      optionalPublicImportMessage);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  XCTAssertEqual(
-      [message getExtension:Objc_Protobuf_Tests_extension_OptionalLazyMessageExtension()],
-#else
+                 optionalPublicImportMessage);
   XCTAssertEqual([message getExtension:[UnittestRoot optionalLazyMessageExtension]],
-#endif
-      optionalLazyMessage);
+                 optionalLazyMessage);
 }
 
 - (void)testMultiplePointersToAutocreatedExtension {
@@ -2074,11 +1719,7 @@
   // The other should not.
   TestAllExtensions *message = [TestAllExtensions message];
   TestAllExtensions *message2 = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  GPBExtensionDescriptor *extension = Objc_Protobuf_Tests_extension_OptionalGroupExtension();
-#else
   GPBExtensionDescriptor *extension = [UnittestRoot optionalGroupExtension];
-#endif
   [message setExtension:extension value:[message2 getExtension:extension]];
   XCTAssertEqual([message getExtension:extension], [message2 getExtension:extension]);
   XCTAssertFalse([message2 hasExtension:extension]);
@@ -2093,18 +1734,9 @@
 - (void)testCopyWithAutocreatedExtension {
   // Mutable copy shouldn't copy autocreated extensions.
   TestAllExtensions *message = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  GPBExtensionDescriptor *optionalGroupExtension =
-      Objc_Protobuf_Tests_extension_OptionalGroupExtension();
-#else
   GPBExtensionDescriptor *optionalGroupExtension = [UnittestRoot optionalGroupExtension];
-#endif
   GPBExtensionDescriptor *optionalNestedMessageExtension =
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-      Objc_Protobuf_Tests_extension_OptionalNestedMessageExtension();
-#else
       [UnittestRoot optionalNestedMessageExtension];
-#endif
   TestAllTypes_OptionalGroup *optionalGroup = [message getExtension:optionalGroupExtension];
   optionalGroup.a = 42;
   XCTAssertNotNil(optionalGroup);
@@ -2132,12 +1764,7 @@
 - (void)testClearMessageAutocreatedExtension {
   // Call clear should cause it to recreate its autocreated extensions.
   TestAllExtensions *message = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  GPBExtensionDescriptor *optionalGroupExtension =
-      Objc_Protobuf_Tests_extension_OptionalGroupExtension();
-#else
   GPBExtensionDescriptor *optionalGroupExtension = [UnittestRoot optionalGroupExtension];
-#endif
   TestAllTypes_OptionalGroup *optionalGroup =
       [[message getExtension:optionalGroupExtension] retain];
   [message clear];
@@ -2152,12 +1779,7 @@
   // Should be able to retain autocreated extension while the creator is
   // dealloced.
   TestAllExtensions *message = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  GPBExtensionDescriptor *optionalGroupExtension =
-      Objc_Protobuf_Tests_extension_OptionalGroupExtension();
-#else
   GPBExtensionDescriptor *optionalGroupExtension = [UnittestRoot optionalGroupExtension];
-#endif
 
   @autoreleasepool {
     TestAllExtensions *message2 = [TestAllExtensions message];
@@ -2174,12 +1796,7 @@
 - (void)testClearAutocreatedExtension {
   // Clearing autocreated extension should NOT cause it to lose its creator.
   TestAllExtensions *message = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  GPBExtensionDescriptor *optionalGroupExtension =
-      Objc_Protobuf_Tests_extension_OptionalGroupExtension();
-#else
   GPBExtensionDescriptor *optionalGroupExtension = [UnittestRoot optionalGroupExtension];
-#endif
   TestAllTypes_OptionalGroup *optionalGroup =
       [[message getExtension:optionalGroupExtension] retain];
   [message clearExtension:optionalGroupExtension];
@@ -2190,11 +1807,7 @@
 
   // Clearing autocreated extension should not cause its creator to become
   // visible
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  GPBExtensionDescriptor *recursiveExtension = Objc_Protobuf_Tests_extension_RecursiveExtension();
-#else
   GPBExtensionDescriptor *recursiveExtension = [UnittestObjcRoot recursiveExtension];
-#endif
   TestAllExtensions *message_lvl2 = [message getExtension:recursiveExtension];
   TestAllExtensions *message_lvl3 = [message_lvl2 getExtension:recursiveExtension];
   [message_lvl3 clearExtension:recursiveExtension];
@@ -2205,11 +1818,7 @@
   // Setting an extension should cause the extension to appear to its creator.
   // Test this several levels deep.
   TestAllExtensions *message = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  GPBExtensionDescriptor *recursiveExtension = Objc_Protobuf_Tests_extension_RecursiveExtension();
-#else
   GPBExtensionDescriptor *recursiveExtension = [UnittestObjcRoot recursiveExtension];
-#endif
   TestAllExtensions *message_lvl2 = [message getExtension:recursiveExtension];
   TestAllExtensions *message_lvl3 = [message_lvl2 getExtension:recursiveExtension];
   TestAllExtensions *message_lvl4 = [message_lvl3 getExtension:recursiveExtension];
@@ -2217,11 +1826,7 @@
   XCTAssertFalse([message_lvl2 hasExtension:recursiveExtension]);
   XCTAssertFalse([message_lvl3 hasExtension:recursiveExtension]);
   XCTAssertFalse([message_lvl4 hasExtension:recursiveExtension]);
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  [message_lvl4 setExtension:Objc_Protobuf_Tests_extension_OptionalInt32Extension() value:@(1)];
-#else
   [message_lvl4 setExtension:[UnittestRoot optionalInt32Extension] value:@(1)];
-#endif
   XCTAssertTrue([message hasExtension:recursiveExtension]);
   XCTAssertTrue([message_lvl2 hasExtension:recursiveExtension]);
   XCTAssertTrue([message_lvl3 hasExtension:recursiveExtension]);
@@ -2234,12 +1839,7 @@
 - (void)testSetAutocreatedExtensionToSelf {
   // Setting extension to itself should cause it to become visible.
   TestAllExtensions *message = [TestAllExtensions message];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  GPBExtensionDescriptor *optionalGroupExtension =
-      Objc_Protobuf_Tests_extension_OptionalGroupExtension();
-#else
   GPBExtensionDescriptor *optionalGroupExtension = [UnittestRoot optionalGroupExtension];
-#endif
   XCTAssertNotNil([message getExtension:optionalGroupExtension]);
   XCTAssertFalse([message hasExtension:optionalGroupExtension]);
   [message setExtension:optionalGroupExtension value:[message getExtension:optionalGroupExtension]];
@@ -2247,11 +1847,7 @@
 }
 
 - (void)testAutocreatedExtensionMemoryLeaks {
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  GPBExtensionDescriptor *recursiveExtension = Objc_Protobuf_Tests_extension_RecursiveExtension();
-#else
   GPBExtensionDescriptor *recursiveExtension = [UnittestObjcRoot recursiveExtension];
-#endif
 
   // Test for memory leaks with autocreated extensions.
   TestAllExtensions *message;
@@ -2263,11 +1859,7 @@
     message_lvl2 = [[message getExtension:recursiveExtension] retain];
     message_lvl3 = [[message_lvl2 getExtension:recursiveExtension] retain];
     message_lvl4 = [[message_lvl3 getExtension:recursiveExtension] retain];
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-    [message_lvl2 setExtension:Objc_Protobuf_Tests_extension_OptionalInt32Extension() value:@(1)];
-#else
     [message_lvl2 setExtension:[UnittestRoot optionalInt32Extension] value:@(1)];
-#endif
   }
 
   XCTAssertEqual(message.retainCount, (NSUInteger)1);
@@ -2287,11 +1879,7 @@
 }
 
 - (void)testSetExtensionWithAutocreatedValue {
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  GPBExtensionDescriptor *recursiveExtension = Objc_Protobuf_Tests_extension_RecursiveExtension();
-#else
   GPBExtensionDescriptor *recursiveExtension = [UnittestObjcRoot recursiveExtension];
-#endif
 
   TestAllExtensions *message;
   @autoreleasepool {
@@ -2314,9 +1902,15 @@
 }
 
 - (void)testGenerateAndParseUnknownMessage {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  GPBUnknownFieldSet *unknowns = [[[GPBUnknownFieldSet alloc] init] autorelease];
+  [unknowns mergeVarintField:123 value:456];
+  GPBMessage *message = [GPBMessage message];
+  [message setUnknownFields:unknowns];
+#pragma clang diagnostic pop
   GPBUnknownFields *ufs = [[[GPBUnknownFields alloc] init] autorelease];
   [ufs addFieldNumber:1234 varint:5678];
-  GPBMessage *message = [GPBMessage message];
   XCTAssertTrue([message mergeUnknownFields:ufs extensionRegistry:nil error:NULL]);
   NSData *data = [message data];
   GPBMessage *message2 = [GPBMessage parseFromData:data extensionRegistry:nil error:NULL];
@@ -2324,15 +1918,28 @@
 }
 
 - (void)testDelimitedWriteAndParseMultipleMessages {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  GPBUnknownFieldSet *unknowns1 = [[[GPBUnknownFieldSet alloc] init] autorelease];
+  [unknowns1 mergeVarintField:123 value:456];
+  GPBMessage *message1 = [GPBMessage message];
+  [message1 setUnknownFields:unknowns1];
+#pragma clang diagnostic pop
   GPBUnknownFields *ufs1 = [[[GPBUnknownFields alloc] init] autorelease];
   [ufs1 addFieldNumber:1234 varint:5678];
-  GPBMessage *message1 = [GPBMessage message];
   XCTAssertTrue([message1 mergeUnknownFields:ufs1 extensionRegistry:nil error:NULL]);
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  GPBUnknownFieldSet *unknowns2 = [[[GPBUnknownFieldSet alloc] init] autorelease];
+  [unknowns2 mergeVarintField:789 value:987];
+  [unknowns2 mergeVarintField:654 value:321];
+  GPBMessage *message2 = [GPBMessage message];
+  [message2 setUnknownFields:unknowns2];
+#pragma clang diagnostic pop
   GPBUnknownFields *ufs2 = [[[GPBUnknownFields alloc] init] autorelease];
   [ufs2 addFieldNumber:2345 fixed32:6789];
   [ufs2 addFieldNumber:3456 fixed32:7890];
-  GPBMessage *message2 = [GPBMessage message];
   XCTAssertTrue([message2 mergeUnknownFields:ufs2 extensionRegistry:nil error:NULL]);
 
   NSMutableData *delimitedData = [NSMutableData data];
@@ -2370,12 +1977,7 @@
 }
 
 - (void)testEnumDescriptorFromExtensionDescriptor {
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-  GPBExtensionDescriptor *extDescriptor =
-      Objc_Protobuf_Tests_extension_OptionalForeignEnumExtension();
-#else
   GPBExtensionDescriptor *extDescriptor = [UnittestRoot optionalForeignEnumExtension];
-#endif
   XCTAssertEqual(extDescriptor.dataType, GPBDataTypeEnum);
   GPBEnumDescriptor *enumDescriptor = extDescriptor.enumDescriptor;
   GPBEnumDescriptor *expectedDescriptor = ForeignEnum_EnumDescriptor();
@@ -2534,6 +2136,26 @@
   XCTAssertEqual(fields.count, 2U);
   XCTAssertEqual(fields[0].varint, (uint64_t)EnumTestMsg_MyEnum_Two);
   XCTAssertEqual(fields[1].varint, (uint64_t)EnumTestMsg_MyEnum_NegTwo);
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  GPBUnknownFieldSet *unknownFields = msg2.unknownFields;
+  XCTAssertNotNil(unknownFields);
+  XCTAssertEqual(unknownFields.countOfFields, 3U);
+  XCTAssertTrue([unknownFields hasField:EnumTestMsg_FieldNumber_Bar]);
+  XCTAssertTrue([unknownFields hasField:EnumTestMsg_FieldNumber_Baz]);
+  XCTAssertTrue([unknownFields hasField:EnumTestMsg_FieldNumber_MumbleArray]);
+  GPBUnknownField *field = [unknownFields getField:EnumTestMsg_FieldNumber_Bar];
+  XCTAssertEqual(field.varintList.count, 1U);
+  XCTAssertEqual([field.varintList valueAtIndex:0], (uint64_t)EnumTestMsg_MyEnum_NegTwo);
+  field = [unknownFields getField:EnumTestMsg_FieldNumber_Baz];
+  XCTAssertEqual(field.varintList.count, 1U);
+  XCTAssertEqual([field.varintList valueAtIndex:0], (uint64_t)EnumTestMsg_MyEnum_Two);
+  field = [unknownFields getField:EnumTestMsg_FieldNumber_MumbleArray];
+  XCTAssertEqual(field.varintList.count, 2U);
+  XCTAssertEqual([field.varintList valueAtIndex:0], (uint64_t)EnumTestMsg_MyEnum_Two);
+  XCTAssertEqual([field.varintList valueAtIndex:1], (uint64_t)EnumTestMsg_MyEnum_NegTwo);
+#pragma clang diagnostic pop
 }
 
 - (void)testReservedWordNaming {
@@ -2714,10 +2336,8 @@
   XCTAssertNotEqual(value, 0);
 
   // Verify that roots get the prefix.
-#if !defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
   GPBTESTUnittestObjcOptionsRoot *root = nil;
   XCTAssertNil(root);
-#endif
 
   // Verify that messages that don't already have the prefix get a prefix.
   GPBTESTTestObjcProtoPrefixMessage *prefixedMessage = nil;

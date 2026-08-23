@@ -7,10 +7,6 @@
 
 #include "upb/reflection/internal/enum_reserved_range.h"
 
-#include <stdint.h>
-
-#include "upb/reflection/def.h"
-#include "upb/reflection/descriptor_bootstrap.h"
 #include "upb/reflection/enum_def.h"
 #include "upb/reflection/field_def.h"
 #include "upb/reflection/internal/def_builder.h"
@@ -37,16 +33,16 @@ int32_t upb_EnumReservedRange_End(const upb_EnumReservedRange* r) {
 
 upb_EnumReservedRange* _upb_EnumReservedRanges_New(
     upb_DefBuilder* ctx, int n,
-    const google_protobuf_EnumDescriptorProto_EnumReservedRange* const* protos,
+    const UPB_DESC(EnumDescriptorProto_EnumReservedRange) * const* protos,
     const upb_EnumDef* e) {
   upb_EnumReservedRange* r =
-      UPB_DEFBUILDER_ALLOCARRAY(ctx, upb_EnumReservedRange, n);
+      _upb_DefBuilder_Alloc(ctx, sizeof(upb_EnumReservedRange) * n);
 
   for (int i = 0; i < n; i++) {
     const int32_t start =
-        google_protobuf_EnumDescriptorProto_EnumReservedRange_start(protos[i]);
+        UPB_DESC(EnumDescriptorProto_EnumReservedRange_start)(protos[i]);
     const int32_t end =
-        google_protobuf_EnumDescriptorProto_EnumReservedRange_end(protos[i]);
+        UPB_DESC(EnumDescriptorProto_EnumReservedRange_end)(protos[i]);
 
     // A full validation would also check that each range is disjoint, and that
     // none of the fields overlap with the extension ranges, but we are just

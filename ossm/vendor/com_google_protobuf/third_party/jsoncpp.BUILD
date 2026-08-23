@@ -24,6 +24,7 @@ cc_library(
     ],
     copts = [
         "-DJSON_USE_EXCEPTION=0",
+        "-DJSON_HAS_INT64",
     ],
     includes = ["include"],
     visibility = ["//visibility:public"],

@@ -33,10 +33,10 @@ namespace util {
 // Implementations of this interface must be thread-safe.
 class PROTOBUF_EXPORT TypeResolver {
  public:
-  TypeResolver() = default;
+  TypeResolver() {}
   TypeResolver(const TypeResolver&) = delete;
   TypeResolver& operator=(const TypeResolver&) = delete;
-  virtual ~TypeResolver() = default;
+  virtual ~TypeResolver() {}
 
   // Resolves a type url for a message type.
   virtual absl::Status ResolveMessageType(

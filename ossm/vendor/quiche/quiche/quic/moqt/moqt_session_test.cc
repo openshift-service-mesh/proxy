@@ -37,9 +37,11 @@
 #include "quiche/quic/moqt/moqt_session_callbacks.h"
 #include "quiche/quic/moqt/moqt_session_interface.h"
 #include "quiche/quic/moqt/moqt_types.h"
+#include "quiche/quic/moqt/test_tools/mock_moqt_session.h"
 #include "quiche/quic/moqt/test_tools/moqt_framer_utils.h"
 #include "quiche/quic/moqt/test_tools/moqt_mock_visitor.h"
 #include "quiche/quic/moqt/test_tools/moqt_session_peer.h"
+#include "quiche/quic/platform/api/quic_expect_bug.h"
 #include "quiche/quic/platform/api/quic_test.h"
 #include "quiche/quic/test_tools/quic_test_utils.h"
 #include "quiche/common/quiche_buffer_allocator.h"
@@ -57,6 +59,7 @@ namespace test {
 namespace {
 
 using ::testing::_;
+using ::testing::IsNull;
 using ::testing::Optional;
 using ::testing::Return;
 using ::testing::StrictMock;
@@ -170,6 +173,8 @@ class MoqtSessionTest : public quic::test::QuicTest {
   static constexpr absl::string_view kSubscribeByte = "\x03";
   static constexpr absl::string_view kSubscribeNamespaceByte = "\x50";
   static constexpr absl::string_view kPublishByte = "\x1d";
+  static constexpr absl::string_view kTrackStatusByte = "\x0d";
+  static constexpr absl::string_view kPublishNamespaceByte = "\x06";
   std::unique_ptr<MoqtBidiStreamBase> ResponseStream(
       absl::string_view first_byte,
       webtransport::test::MockStream* wt_stream = nullptr) {
@@ -215,8 +220,8 @@ class MoqtSessionTest : public quic::test::QuicTest {
       webtransport::test::MockStream* wt_stream = nullptr) {
     webtransport::test::MockStream* stream =
         wt_stream != nullptr ? wt_stream : &mock_bidi_stream_;
-    EXPECT_CALL(mock_session_, CanOpenNextOutgoingBidirectionalStream())
-        .WillOnce(Return(true));
+    ON_CALL(mock_session_, CanOpenNextOutgoingBidirectionalStream())
+        .WillByDefault(Return(true));
     EXPECT_CALL(mock_session_, OpenOutgoingBidirectionalStream())
         .WillOnce(Return(stream));
     EXPECT_CALL(*stream, SetVisitor)
@@ -323,8 +328,8 @@ class MoqtSessionTest : public quic::test::QuicTest {
   MoqtKnownTrackPublisher publisher_;
   webtransport::test::MockSession mock_session_;
   MockSessionCallbacks session_callbacks_;
-  std::unique_ptr<MoqtBidiStreamTestWrapper> bidi_wrapper_;
   MoqtSession session_;
+  std::unique_ptr<MoqtBidiStreamTestWrapper> bidi_wrapper_;
   webtransport::test::MockStream mock_bidi_stream_, mock_uni_stream_;
   //  std::shared_ptr<IncomingSubscribeInfo> last_incoming_subscribe_;
 };
@@ -510,16 +515,14 @@ TEST_F(MoqtSessionTest, PublishNamespaceWithOkAndCancel) {
   testing::MockFunction<void(
       std::variant<MessageParameters, MoqtRequestErrorInfo> error_message)>
       publish_namespace_response_callback;
-  std::unique_ptr<MoqtBidiStreamTestWrapper> bidi_wrapper_ =
-      MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
+  PrepareRequestStream(bidi_wrapper_);
   EXPECT_CALL(
       mock_bidi_stream_,
       Writev(ControlMessageOfType(MoqtMessageType::kPublishNamespace), _));
-  MoqtRequestErrorInfo cancel_error_info;
-  session_.PublishNamespace(
-      TrackNamespace({"foo"}), MessageParameters(),
-      publish_namespace_response_callback.AsStdFunction(),
-      [&](MoqtRequestErrorInfo info) { cancel_error_info = info; });
+  bool cancel_called = false;
+  session_.PublishNamespace(TrackNamespace({"foo"}), MessageParameters(),
+                            publish_namespace_response_callback.AsStdFunction(),
+                            [&]() { cancel_called = true; });
 
   MoqtRequestOk ok = {/*request_id=*/0, MessageParameters()};
   EXPECT_CALL(publish_namespace_response_callback, Call)
@@ -529,30 +532,25 @@ TEST_F(MoqtSessionTest, PublishNamespaceWithOkAndCancel) {
           });
   bidi_wrapper_->ReceiveMessage(ok);
 
-  MoqtPublishNamespaceCancel cancel = {
-      /*request_id=*/0,
-      RequestErrorCode::kInternalError,
-      /*error_reason=*/"Test error",
-  };
-  bidi_wrapper_->ReceiveMessage(cancel);
-  EXPECT_EQ(cancel_error_info.error_code, RequestErrorCode::kInternalError);
-  EXPECT_EQ(cancel_error_info.reason_phrase, "Test error");
+  bidi_wrapper_->stream().OnResetStreamReceived(
+      webtransport::StreamErrorCode(kResetCodeInternalError));
+  EXPECT_TRUE(cancel_called);
   // State is gone.
-  EXPECT_FALSE(session_.PublishNamespaceDone(TrackNamespace({"foo"})));
+  EXPECT_QUIC_BUG(session_.PublishNamespaceDone(TrackNamespace({"foo"})),
+                  "Tried to reset PUBLISH_NAMESPACE for unknown namespace foo");
 }
 
 TEST_F(MoqtSessionTest, PublishNamespaceWithOkAndPublishNamespaceDone) {
   testing::MockFunction<void(
       std::variant<MessageParameters, MoqtRequestErrorInfo>)>
       publish_namespace_resolved_callback;
-  std::unique_ptr<MoqtBidiStreamTestWrapper> bidi_wrapper_ =
-      MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
+  PrepareRequestStream(bidi_wrapper_);
   EXPECT_CALL(
       mock_bidi_stream_,
       Writev(ControlMessageOfType(MoqtMessageType::kPublishNamespace), _));
   session_.PublishNamespace(TrackNamespace{"foo"}, MessageParameters(),
                             publish_namespace_resolved_callback.AsStdFunction(),
-                            [](MoqtRequestErrorInfo) {});
+                            []() {});
 
   MoqtRequestOk ok = {/*request_id=*/0, MessageParameters()};
   EXPECT_CALL(publish_namespace_resolved_callback, Call)
@@ -562,26 +560,24 @@ TEST_F(MoqtSessionTest, PublishNamespaceWithOkAndPublishNamespaceDone) {
           });
   bidi_wrapper_->ReceiveMessage(ok);
 
-  EXPECT_CALL(
-      mock_bidi_stream_,
-      Writev(ControlMessageOfType(MoqtMessageType::kPublishNamespaceDone), _));
+  EXPECT_CALL(mock_bidi_stream_, ResetWithUserCode);
   session_.PublishNamespaceDone(TrackNamespace{"foo"});
   // State is gone.
-  EXPECT_FALSE(session_.PublishNamespaceDone(TrackNamespace{"foo"}));
+  EXPECT_QUIC_BUG(session_.PublishNamespaceDone(TrackNamespace({"foo"})),
+                  "Tried to reset PUBLISH_NAMESPACE for unknown namespace foo");
 }
 
 TEST_F(MoqtSessionTest, PublishNamespaceWithError) {
   testing::MockFunction<void(
       std::variant<MessageParameters, MoqtRequestErrorInfo>)>
       publish_namespace_resolved_callback;
-  std::unique_ptr<MoqtBidiStreamTestWrapper> bidi_wrapper_ =
-      MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
+  PrepareRequestStream(bidi_wrapper_);
   EXPECT_CALL(
       mock_bidi_stream_,
       Writev(ControlMessageOfType(MoqtMessageType::kPublishNamespace), _));
   session_.PublishNamespace(TrackNamespace{"foo"}, MessageParameters(),
                             publish_namespace_resolved_callback.AsStdFunction(),
-                            [](MoqtRequestErrorInfo) {});
+                            []() {});
 
   MoqtRequestError error{/*request_id=*/0, RequestErrorCode::kInternalError,
                          std::nullopt, "Test error"};
@@ -594,9 +590,11 @@ TEST_F(MoqtSessionTest, PublishNamespaceWithError) {
             EXPECT_EQ(error.error_code, RequestErrorCode::kInternalError);
             EXPECT_EQ(error.reason_phrase, "Test error");
           });
+  ExpectFin(mock_bidi_stream_);
   bidi_wrapper_->ReceiveMessage(error);
   // State is gone.
-  EXPECT_FALSE(session_.PublishNamespaceDone(TrackNamespace{"foo"}));
+  EXPECT_QUIC_BUG(session_.PublishNamespaceDone(TrackNamespace({"foo"})),
+                  "Tried to reset PUBLISH_NAMESPACE for unknown namespace foo");
 }
 
 TEST_F(MoqtSessionTest, AsynchronousSubscribeReturnsOk) {
@@ -1030,16 +1028,18 @@ TEST_F(MoqtSessionTest, ReplyToPublishNamespaceWithOkThenPublishNamespaceDone) {
   MessageParameters parameters;
   parameters.authorization_tokens.emplace_back(AuthTokenType::kOutOfBand,
                                                "foo");
+  bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
+      ResponseStream(kPublishNamespaceByte));
   MoqtPublishNamespace publish_namespace = {
       kDefaultPeerRequestId,
       track_namespace,
       parameters,
   };
   EXPECT_CALL(session_callbacks_.incoming_publish_namespace_callback,
-              Call(track_namespace, std::make_optional(parameters), _))
-      .WillOnce([](const TrackNamespace&,
-                   const std::optional<MessageParameters>&,
-                   MoqtResponseCallback callback) {
+              Call(track_namespace, _, _))
+      .WillOnce([&](const TrackNamespace&, const MessageParameters* params,
+                    MoqtResponseCallback callback) {
+        EXPECT_TRUE(params != nullptr && *params == parameters);
         std::move(callback)(MessageParameters());
       });
   EXPECT_CALL(mock_bidi_stream_,
@@ -1047,23 +1047,16 @@ TEST_F(MoqtSessionTest, ReplyToPublishNamespaceWithOkThenPublishNamespaceDone) {
                          kDefaultPeerRequestId, MessageParameters()}),
                      _));
   bidi_wrapper_->ReceiveMessage(publish_namespace);
-  MoqtPublishNamespaceDone publish_namespace_done = {
-      /*request_id=*/0,
-  };
   EXPECT_CALL(session_callbacks_.incoming_publish_namespace_callback,
-              Call(track_namespace, std::optional<MessageParameters>(), _))
-      .WillOnce(
-          [](const TrackNamespace&, const std::optional<MessageParameters>&,
-             MoqtResponseCallback callback) { EXPECT_EQ(callback, nullptr); });
-  bidi_wrapper_->ReceiveMessage(publish_namespace_done);
+              Call(track_namespace, IsNull(), IsNull()));
+  bidi_wrapper_->stream().OnResetStreamReceived(kResetCodeCancelled);
 }
 
 TEST_F(MoqtSessionTest,
        ReplyToPublishNamespaceWithOkThenPublishNamespaceCancel) {
   TrackNamespace track_namespace{"foo"};
-
-  bidi_wrapper_ =
-      MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
+  bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
+      ResponseStream(kPublishNamespaceByte));
   MessageParameters parameters;
   parameters.authorization_tokens.emplace_back(AuthTokenType::kOutOfBand,
                                                "foo");
@@ -1073,10 +1066,10 @@ TEST_F(MoqtSessionTest,
       parameters,
   };
   EXPECT_CALL(session_callbacks_.incoming_publish_namespace_callback,
-              Call(track_namespace, std::make_optional(parameters), _))
-      .WillOnce([](const TrackNamespace&,
-                   const std::optional<MessageParameters>&,
-                   MoqtResponseCallback callback) {
+              Call(track_namespace, _, _))
+      .WillOnce([&](const TrackNamespace&, const MessageParameters* params,
+                    MoqtResponseCallback callback) {
+        EXPECT_TRUE(params != nullptr && *params == parameters);
         std::move(callback)(MessageParameters());
       });
   EXPECT_CALL(mock_bidi_stream_,
@@ -1084,20 +1077,19 @@ TEST_F(MoqtSessionTest,
                          kDefaultPeerRequestId, MessageParameters()}),
                      _));
   bidi_wrapper_->ReceiveMessage(publish_namespace);
-  EXPECT_CALL(mock_bidi_stream_,
-              Writev(SerializedControlMessage(MoqtPublishNamespaceCancel{
-                         kDefaultPeerRequestId,
-                         RequestErrorCode::kInternalError, "deadbeef"}),
-                     _));
-  session_.PublishNamespaceCancel(track_namespace,
-                                  RequestErrorCode::kInternalError, "deadbeef");
+  EXPECT_CALL(session_callbacks_.incoming_publish_namespace_callback,
+              Call(track_namespace, IsNull(), IsNull()));
+  EXPECT_TRUE(
+      session_.PublishNamespaceCancel(track_namespace, kResetCodeCancelled));
+  // State is gone.
+  EXPECT_QUIC_BUG(session_.PublishNamespaceDone(TrackNamespace({"foo"})),
+                  "Tried to reset PUBLISH_NAMESPACE for unknown namespace foo");
 }
 
 TEST_F(MoqtSessionTest, ReplyToPublishNamespaceWithError) {
   TrackNamespace track_namespace{"foo"};
-
-  bidi_wrapper_ =
-      MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
+  bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
+      ResponseStream(kPublishNamespaceByte));
   MessageParameters parameters;
   parameters.authorization_tokens.emplace_back(AuthTokenType::kOutOfBand,
                                                "foo");
@@ -1112,10 +1104,17 @@ TEST_F(MoqtSessionTest, ReplyToPublishNamespaceWithError) {
       "deadbeef",
   };
   EXPECT_CALL(session_callbacks_.incoming_publish_namespace_callback,
-              Call(track_namespace, std::make_optional(parameters), _))
-      .WillOnce(
-          [&](const TrackNamespace&, const std::optional<MessageParameters>&,
-              MoqtResponseCallback callback) { std::move(callback)(error); });
+              Call(track_namespace, _, _))
+      .WillOnce([&](const TrackNamespace&, const MessageParameters* params,
+                    MoqtResponseCallback callback) {
+        EXPECT_TRUE(params != nullptr && *params == parameters);
+        std::move(callback)(error);
+      })
+      .WillOnce([&](const TrackNamespace&, const MessageParameters* params,
+                    MoqtResponseCallback callback) {  // Teardown
+        EXPECT_TRUE(params == nullptr);
+        EXPECT_TRUE(callback == nullptr);
+      });
   EXPECT_CALL(mock_bidi_stream_,
               Writev(SerializedControlMessage(MoqtRequestError{
                          kDefaultPeerRequestId, error.error_code,
@@ -2309,10 +2308,9 @@ TEST_F(MoqtSessionTest, ReceiveGoAwayEnforcement) {
                 prefix, MessageParameters(),
                 +[](std::variant<MessageParameters, MoqtRequestErrorInfo>) {}),
             nullptr);
-  session_.PublishNamespace(
+  EXPECT_FALSE(session_.PublishNamespace(
       TrackNamespace{"foo"}, MessageParameters(),
-      +[](std::variant<MessageParameters, MoqtRequestErrorInfo>) {},
-      +[](MoqtRequestErrorInfo) {});
+      +[](std::variant<MessageParameters, MoqtRequestErrorInfo>) {}, +[]() {}));
   EXPECT_FALSE(session_.Fetch(
       FullTrackName{TrackNamespace({"foo"}), "bar"},
       +[](std::unique_ptr<MoqtFetchTask>) {}, Location(0, 0), 5, std::nullopt,
@@ -2339,10 +2337,6 @@ TEST_F(MoqtSessionTest, SendGoAwayEnforcement) {
               Writev(ControlMessageOfType(MoqtMessageType::kGoAway), _));
   session_.GoAway("");
 
-  EXPECT_CALL(mock_bidi_stream_,
-              Writev(ControlMessageOfType(MoqtMessageType::kRequestError), _));
-  bidi_wrapper_->ReceiveMessage(
-      MoqtPublishNamespace(3, TrackNamespace({"foo"}), MessageParameters()));
   EXPECT_CALL(mock_bidi_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kRequestError), _));
   MoqtFetch fetch = DefaultFetch();
@@ -2383,10 +2377,9 @@ TEST_F(MoqtSessionTest, SendGoAwayEnforcement) {
                 prefix, MessageParameters(),
                 +[](std::variant<MessageParameters, MoqtRequestErrorInfo>) {}),
             nullptr);
-  session_.PublishNamespace(
+  EXPECT_FALSE(session_.PublishNamespace(
       TrackNamespace{"foo"}, MessageParameters(),
-      +[](std::variant<MessageParameters, MoqtRequestErrorInfo>) {},
-      +[](MoqtRequestErrorInfo) {});
+      +[](std::variant<MessageParameters, MoqtRequestErrorInfo>) {}, +[]() {}));
   EXPECT_FALSE(session_.Fetch(
       FullTrackName(TrackNamespace({"foo"}), "bar"),
       +[](std::unique_ptr<MoqtFetchTask>) {}, Location(0, 0), 5, std::nullopt,
@@ -2437,8 +2430,8 @@ TEST_F(MoqtSessionTest, ServerCannotReceiveNewSessionUri) {
 }
 
 TEST_F(MoqtSessionTest, IncomingTrackStatusThenSynchronousOk) {
-  bidi_wrapper_ =
-      MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
+  bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
+      ResponseStream(kTrackStatusByte));
   auto* track = CreateTrackPublisher();
 
   MoqtTrackStatus track_status = DefaultSubscribe();
@@ -2463,8 +2456,8 @@ TEST_F(MoqtSessionTest, IncomingTrackStatusThenSynchronousOk) {
 }
 
 TEST_F(MoqtSessionTest, IncomingTrackStatusThenAsynchronousOk) {
-  bidi_wrapper_ =
-      MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
+  bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
+      ResponseStream(kTrackStatusByte));
   auto* track = CreateTrackPublisher();
 
   MoqtTrackStatus track_status = DefaultSubscribe();
@@ -2487,8 +2480,8 @@ TEST_F(MoqtSessionTest, IncomingTrackStatusThenAsynchronousOk) {
 }
 
 TEST_F(MoqtSessionTest, IncomingTrackStatusThenSynchronousError) {
-  bidi_wrapper_ =
-      MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
+  bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
+      ResponseStream(kTrackStatusByte));
   auto* track = CreateTrackPublisher();
 
   MoqtTrackStatus track_status = DefaultSubscribe();
@@ -2508,8 +2501,8 @@ TEST_F(MoqtSessionTest, IncomingTrackStatusThenSynchronousError) {
 }
 
 TEST_F(MoqtSessionTest, IncomingTrackStatusThenAsynchronousError) {
-  bidi_wrapper_ =
-      MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
+  bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
+      ResponseStream(kTrackStatusByte));
   auto* track = CreateTrackPublisher();
 
   MoqtTrackStatus track_status = DefaultSubscribe();
@@ -2611,8 +2604,8 @@ TEST_F(MoqtSessionTest, ResetReportedToVisitor) {
 }
 
 TEST_F(MoqtSessionTest, IncomingPublishNamespaceCleanup) {
-  bidi_wrapper_ =
-      MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
+  bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
+      ResponseStream(kPublishNamespaceByte));
   // Register two incoming PUBLISH_NAMESPACE.
   MoqtPublishNamespace publish_namespace{
       /*request_id=*/1, TrackNamespace{"foo"}, MessageParameters()};
@@ -2620,8 +2613,7 @@ TEST_F(MoqtSessionTest, IncomingPublishNamespaceCleanup) {
   expected_ok.parameters.expires = quic::QuicTimeDelta::FromSeconds(60);
   EXPECT_CALL(session_callbacks_.incoming_publish_namespace_callback,
               Call(TrackNamespace{"foo"}, _, _))
-      .WillOnce([&](const TrackNamespace&,
-                    const std::optional<MessageParameters>&,
+      .WillOnce([&](const TrackNamespace&, const MessageParameters*,
                     MoqtResponseCallback callback) {
         std::move(callback)(expected_ok.parameters);
       });
@@ -2629,36 +2621,28 @@ TEST_F(MoqtSessionTest, IncomingPublishNamespaceCleanup) {
               Writev(SerializedControlMessage(expected_ok), _));
   bidi_wrapper_->ReceiveMessage(publish_namespace);
 
+  auto bidi_wrapper_2 = std::make_unique<MoqtBidiStreamTestWrapper>(
+      ResponseStream(kPublishNamespaceByte));
   publish_namespace = MoqtPublishNamespace(
       /*request_id=*/3, TrackNamespace{"bar"}, MessageParameters());
   EXPECT_CALL(session_callbacks_.incoming_publish_namespace_callback,
               Call(TrackNamespace{"bar"}, _, _))
-      .WillOnce([&](const TrackNamespace&,
-                    const std::optional<MessageParameters>&,
+      .WillOnce([&](const TrackNamespace&, const MessageParameters*,
                     MoqtResponseCallback callback) {
         std::move(callback)(MessageParameters());
       });
   EXPECT_CALL(mock_bidi_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kRequestOk), _));
-  bidi_wrapper_->ReceiveMessage(publish_namespace);
+  bidi_wrapper_2->ReceiveMessage(publish_namespace);
 
   // Revoke "bar"
-  MoqtPublishNamespaceDone done{/*request_id=*/3};
-  EXPECT_CALL(
-      session_callbacks_.incoming_publish_namespace_callback,
-      Call(TrackNamespace{"bar"}, std::optional<MessageParameters>(), _))
-      .WillOnce(
-          [](const TrackNamespace&, const std::optional<MessageParameters>&,
-             MoqtResponseCallback callback) { EXPECT_EQ(callback, nullptr); });
-  bidi_wrapper_->ReceiveMessage(done);
+  EXPECT_CALL(session_callbacks_.incoming_publish_namespace_callback,
+              Call(TrackNamespace{"bar"}, IsNull(), IsNull()));
+  bidi_wrapper_2->stream().OnResetStreamReceived(kResetCodeCancelled);
 
   // Destroying the session should revoke "foo".
-  EXPECT_CALL(
-      session_callbacks_.incoming_publish_namespace_callback,
-      Call(TrackNamespace{"foo"}, std::optional<MessageParameters>(), _))
-      .WillOnce(
-          [](const TrackNamespace&, const std::optional<MessageParameters>&,
-             MoqtResponseCallback callback) { EXPECT_EQ(callback, nullptr); });
+  EXPECT_CALL(session_callbacks_.incoming_publish_namespace_callback,
+              Call(TrackNamespace{"foo"}, IsNull(), IsNull()));
   // Test teardown will destroy session_, triggering removal of "foo".
 }
 
@@ -2910,15 +2894,17 @@ TEST_F(MoqtSessionTest, IncrementRequestId) {
   next_request_id += 2;
 
   // 2. PublishNamespace
+  webtransport::test::InMemoryStreamWithWriteBuffer pub_ns_stream(5);
+  EXPECT_CALL(mock_session_, OpenOutgoingBidirectionalStream)
+      .WillOnce(Return(&pub_ns_stream));
   TrackNamespace namespace2({"namespace2"});
   bool p1 = session_.PublishNamespace(
       namespace2, MessageParameters(),
-      [](std::variant<MessageParameters, MoqtRequestErrorInfo>) {},
-      [](MoqtRequestErrorInfo) {});
+      [](std::variant<MessageParameters, MoqtRequestErrorInfo>) {}, []() {});
   EXPECT_TRUE(p1);
-  EXPECT_EQ(next_request_id, get_request_id(control_stream));
+  EXPECT_EQ(next_request_id, get_request_id(pub_ns_stream));
   next_request_id += 2;
-  control_stream.write_buffer().clear();
+  pub_ns_stream.write_buffer().clear();
 
   // 3. PublishNamespaceUpdate
   MessageParameters params_update;
@@ -2926,9 +2912,9 @@ TEST_F(MoqtSessionTest, IncrementRequestId) {
       namespace2, params_update,
       [](std::variant<MessageParameters, MoqtRequestErrorInfo>) {});
   EXPECT_TRUE(p_update);
-  EXPECT_EQ(get_request_id(control_stream), next_request_id);
+  EXPECT_EQ(get_request_id(pub_ns_stream), next_request_id);
   next_request_id += 2;
-  control_stream.write_buffer().clear();
+  pub_ns_stream.write_buffer().clear();
 
   // 4. Subscribe
   webtransport::test::InMemoryStreamWithWriteBuffer sub_stream(5);

@@ -50,11 +50,6 @@ static void PrintHexDigit(char digit, protobuf::io::Printer* printer) {
   printer->WriteRaw(&text, 1);
 }
 
-static bool IsPrint(int ch) {
-  // isprint(ch) with negative values is UB.
-  return ch < 0 ? false : isprint(ch);
-}
-
 static void PrintString(int max_cols, absl::string_view* str,
                         protobuf::io::Printer* printer) {
   printer->Print("\'");
@@ -66,7 +61,7 @@ static void PrintString(int max_cols, absl::string_view* str,
     } else if (ch == '\'') {
       printer->PrintRaw("\\'");
       max_cols--;
-    } else if (IsPrint(ch)) {
+    } else if (isprint(ch)) {
       printer->WriteRaw(&ch, 1);
       max_cols--;
     } else {
@@ -99,8 +94,7 @@ bool LuaGenerator::Generate(const protobuf::FileDescriptor* file,
   protobuf::FileDescriptorProto file_proto;
   file->CopyTo(&file_proto);
   std::string file_data;
-  // TODO: Remove this suppression.
-  (void)file_proto.SerializeToString(&file_data);
+  file_proto.SerializeToString(&file_data);
 
   printer.Print("local descriptor = table.concat({\n");
   absl::string_view data(file_data);

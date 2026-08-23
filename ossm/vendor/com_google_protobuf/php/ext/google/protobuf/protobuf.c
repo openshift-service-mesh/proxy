@@ -17,7 +17,6 @@
 #include "map.h"
 #include "message.h"
 #include "names.h"
-#include "print_options.h"
 
 // -----------------------------------------------------------------------------
 // Module "globals"
@@ -293,7 +292,6 @@ static PHP_MINIT_FUNCTION(protobuf) {
   Def_ModuleInit();
   Map_ModuleInit();
   Message_ModuleInit();
-  PrintOptions_ModuleInit();
   return SUCCESS;
 }
 

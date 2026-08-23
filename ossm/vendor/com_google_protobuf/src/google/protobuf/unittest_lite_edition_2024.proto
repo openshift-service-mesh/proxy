@@ -1,6 +1,6 @@
 edition = "2024";
 
-package proto2_unittest;
+package protobuf_unittest;
 
 option optimize_for = LITE_RUNTIME;
 

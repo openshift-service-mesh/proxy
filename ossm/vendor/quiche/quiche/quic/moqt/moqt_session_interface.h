@@ -25,6 +25,7 @@
 #include "quiche/common/platform/api/quiche_export.h"
 #include "quiche/common/quiche_callbacks.h"
 #include "quiche/common/quiche_weak_ptr.h"
+#include "quiche/web_transport/web_transport.h"
 
 namespace moqt {
 
@@ -96,6 +97,12 @@ class MoqtSessionInterface {
   // Close the session with a fatal error.
   virtual void Error(MoqtError code, absl::string_view error) = 0;
 
+  // Many of these functions initiate a request and take MoqtResponseCallback to
+  // report the peer's response. These functions return false if there is an
+  // immediate problem that prevents sending the request, in which case the
+  // callback will not be invoked. For example, there might not be stream credit
+  // to open a request stream, or the request is a duplicate, or the session
+  // is in a GOAWAY state.
   // Return true if SUBSCRIBE was actually sent.
   virtual bool Subscribe(const FullTrackName& name,
                          SubscribeVisitor* absl_nonnull visitor,
@@ -154,23 +161,22 @@ class MoqtSessionInterface {
   // Send a PUBLISH_NAMESPACE message for |track_namespace|, and call
   // |response_callback| when the response arrives. Will fail
   // immediately if there is already an unresolved PUBLISH_NAMESPACE for that
-  // namespace. Calls |cancel_callback| if the peer sends a
-  // PUBLISH_NAMESPACE_CANCEL. Returns true if the message was sent.
+  // namespace. Calls |cancel_callback| if the peer closes the stream. Returns
+  // true if the message was sent.
   virtual bool PublishNamespace(
       const TrackNamespace& track_namespace,
       const MessageParameters& parameters,
       MoqtResponseCallback response_callback,
-      quiche::SingleUseCallback<void(MoqtRequestErrorInfo)>
-          cancel_callback) = 0;
+      quiche::SingleUseCallback<void()> cancel_callback) = 0;
   virtual bool PublishNamespaceUpdate(
       const TrackNamespace& track_namespace, MessageParameters& parameters,
       MoqtResponseCallback response_callback) = 0;
   // Returns true if message was sent, false if there is no PUBLISH_NAMESPACE
   // that relates.
   virtual bool PublishNamespaceDone(const TrackNamespace& track_namespace) = 0;
-  virtual bool PublishNamespaceCancel(const TrackNamespace& track_namespace,
-                                      RequestErrorCode error_code,
-                                      absl::string_view error_reason) = 0;
+  virtual bool PublishNamespaceCancel(
+      const TrackNamespace& track_namespace,
+      webtransport::StreamErrorCode error_code) = 0;
 
   // Sends a SUBSCRIBE_NAMESPACE message for |prefix| and returns a
   // MoqtNamespaceTask that can be used to process the response.
@@ -186,9 +192,12 @@ class MoqtSessionInterface {
 
   // TODO(martinduke): Add an API for absolute joining fetch.
 
-  // TODO: Add SubscribeNamespace, UnsubscribeNamespace method.
-  // TODO: Add PublishNamespaceCancel method.
-  // TODO: Add TrackStatusRequest method.
+  // Sends TRACK_STATUS request to the peer. Returns `false` if the request
+  // immediately fails (usually due to flow control), and `true` otherwise;
+  // `response_callback` will be eventually invoked if true.
+  virtual bool TrackStatus(const FullTrackName& name,
+                           const MessageParameters& parameters,
+                           MoqtResponseCallback response_callback) = 0;
   // TODO: Add RequestUpdate, PublishDone method.
   virtual quiche::QuicheWeakPtr<MoqtSessionInterface> GetWeakPtr() = 0;
 };

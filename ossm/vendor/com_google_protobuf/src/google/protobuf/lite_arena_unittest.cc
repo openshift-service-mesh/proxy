@@ -5,11 +5,8 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
-#include "absl/log/absl_check.h"
 #include "google/protobuf/arena_test_util.h"
-#include "google/protobuf/map_lite_unittest.pb.h"
-#include "google/protobuf/map_test_util.h"
-
+#include "google/protobuf/map_lite_test_util.h"
 #include <gtest/gtest.h>
 
 
@@ -26,7 +23,7 @@ class LiteArenaTest : public testing::Test {
     arena_.reset(new Arena(options));
     // Trigger the allocation of the first arena block, so that further use of
     // the arena will not require any heap allocations.
-    (void)Arena::CreateArray<char>(arena_.get(), 1);
+    Arena::CreateArray<char>(arena_.get(), 1);
   }
 
   std::unique_ptr<Arena> arena_;
@@ -41,28 +38,28 @@ TEST_F(LiteArenaTest, MapNoHeapAllocation) {
     // Map.
     // internal::NoHeapChecker no_heap;
 
-    proto2_unittest::TestArenaMapLite* from =
-        Arena::Create<proto2_unittest::TestArenaMapLite>(arena_.get());
-    MapTestUtil::SetArenaMapFields(from);
-    ABSL_CHECK(from->SerializeToString(&data));
+    protobuf_unittest::TestArenaMapLite* from =
+        Arena::Create<protobuf_unittest::TestArenaMapLite>(arena_.get());
+    MapLiteTestUtil::SetArenaMapFields(from);
+    from->SerializeToString(&data);
 
-    proto2_unittest::TestArenaMapLite* to =
-        Arena::Create<proto2_unittest::TestArenaMapLite>(arena_.get());
-    ABSL_CHECK(to->ParseFromString(data));
-    MapTestUtil::ExpectArenaMapFieldsSet(*to);
+    protobuf_unittest::TestArenaMapLite* to =
+        Arena::Create<protobuf_unittest::TestArenaMapLite>(arena_.get());
+    to->ParseFromString(data);
+    MapLiteTestUtil::ExpectArenaMapFieldsSet(*to);
   }
 }
 
 TEST_F(LiteArenaTest, UnknownFieldMemLeak) {
-  proto2_unittest::ForeignMessageArenaLite* message =
-      Arena::Create<proto2_unittest::ForeignMessageArenaLite>(arena_.get());
+  protobuf_unittest::ForeignMessageArenaLite* message =
+      Arena::Create<protobuf_unittest::ForeignMessageArenaLite>(arena_.get());
   std::string data = "\012\000";
   int original_capacity = data.capacity();
   while (data.capacity() <= original_capacity) {
     data.append("a");
   }
   data[1] = data.size() - 2;
-  ABSL_CHECK(message->ParseFromString(data));
+  message->ParseFromString(data);
 }
 
 }  // namespace

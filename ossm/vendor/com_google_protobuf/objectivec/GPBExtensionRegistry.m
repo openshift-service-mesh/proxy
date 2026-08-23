@@ -16,10 +16,6 @@
 
 - (instancetype)init {
   if ((self = [super init])) {
-    // IMPORTANT: In c_function mode, this may be called from any thread during a dispatch_once
-    // scoped to each specific registry - i.e., other registries may be initializing at the same
-    // time.
-
     // The keys are ObjC classes, so straight up ptr comparisons are fine.
     mutableClassMap_ =
         CFDictionaryCreateMutable(kCFAllocatorDefault, 0, NULL, &kCFTypeDictionaryValueCallBacks);

@@ -1,5 +1,5 @@
 module github.com/protocolbuffers/protobuf/examples/go
 
-go 1.23
+go 1.14
 
-require google.golang.org/protobuf v1.36.9
+require google.golang.org/protobuf v1.27.1

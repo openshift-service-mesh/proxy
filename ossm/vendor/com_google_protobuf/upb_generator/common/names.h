@@ -8,8 +8,8 @@
 // This file contains common functionality used by names.h in other code
 // generators.
 
-#ifndef GOOGLE_UPB_UPB_GENERATOR_COMMON_NAMES_H__
-#define GOOGLE_UPB_UPB_GENERATOR_COMMON_NAMES_H__
+#ifndef THIRD_PARTY_UPB_UPB_GENERATOR_COMMON_NAMES_H_
+#define THIRD_PARTY_UPB_UPB_GENERATOR_COMMON_NAMES_H_
 
 #include <string>
 
@@ -27,4 +27,4 @@ std::string PadPrefix(absl::string_view tag);
 }  // namespace generator
 }  // namespace upb
 
-#endif  // GOOGLE_UPB_UPB_GENERATOR_COMMON_NAMES_H__
+#endif  // THIRD_PARTY_UPB_UPB_GENERATOR_COMMON_NAMES_H_

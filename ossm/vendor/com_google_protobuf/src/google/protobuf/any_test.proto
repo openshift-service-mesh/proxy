@@ -7,7 +7,7 @@
 
 syntax = "proto3";
 
-package proto2_unittest;
+package protobuf_unittest;
 
 import "google/protobuf/any.proto";
 

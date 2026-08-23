@@ -49,7 +49,10 @@ void WithPresenceAccessorsInMsgImpl(Context& ctx, const FieldDescriptor& field,
                      R"rs(
                   pub fn has_$raw_field_name$($view_self$) -> bool {
                     unsafe {
-                      self.inner.ptr().has_field_at_index($upb_mt_field_index$)
+                      let f = $pbr$::upb_MiniTable_GetFieldByIndex(
+                          <Self as $pbr$::AssociatedMiniTable>::mini_table(),
+                          $upb_mt_field_index$);
+                      $pbr$::upb_Message_HasBaseField(self.raw_msg(), f)
                     }
                   }
                   )rs");
@@ -69,9 +72,10 @@ void WithPresenceAccessorsInMsgImpl(Context& ctx, const FieldDescriptor& field,
                      R"rs(
                     pub fn clear_$raw_field_name$(&mut self) {
                       unsafe {
-                        self.inner.ptr().clear_field_at_index(
-                          $upb_mt_field_index$
-                        );
+                        let mt = <Self as $pbr$::AssociatedMiniTable>::mini_table();
+                        let f = $pbr$::upb_MiniTable_GetFieldByIndex(
+                            mt, $upb_mt_field_index$);
+                        $pbr$::upb_Message_ClearBaseField(self.raw_msg(), f);
                       }
                     })rs");
           }
@@ -79,16 +83,11 @@ void WithPresenceAccessorsInMsgImpl(Context& ctx, const FieldDescriptor& field,
        {"opt_getter",
         [&] {
           // Cord fields don't support the _opt getter.
-          if (ctx.is_cpp() &&
-              field.cpp_type() == FieldDescriptor::CPPTYPE_STRING &&
-              field.cpp_string_type() ==
-                  FieldDescriptor::CppStringType::kCord) {
-            return;
-          }
+          if (field.options().ctype() == FieldOptions::CORD) return;
           ctx.Emit(
               R"rs(
-              pub fn $raw_field_name$_opt($view_self$) -> $std$::option::Option<$view_type$> {
-                self.has_$raw_field_name$().then(|| self.$field$())
+              pub fn $raw_field_name$_opt($view_self$) -> $pb$::Optional<$view_type$> {
+                    $pb$::Optional::new(self.$field$(), self.has_$raw_field_name$())
               }
               )rs");
         }}},

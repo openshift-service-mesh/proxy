@@ -13,7 +13,6 @@
 
 #include "absl/log/absl_log.h"
 #include "absl/strings/str_cat.h"
-#include "google/protobuf/compiler/code_generator_lite.h"
 #include "google/protobuf/compiler/java/context.h"
 #include "google/protobuf/compiler/java/doc_comment.h"
 #include "google/protobuf/compiler/java/helpers.h"
@@ -34,14 +33,14 @@ ImmutableServiceGenerator::ImmutableServiceGenerator(
       context_(context),
       name_resolver_(context->GetNameResolver()) {}
 
-ImmutableServiceGenerator::~ImmutableServiceGenerator() = default;
+ImmutableServiceGenerator::~ImmutableServiceGenerator() {}
 
 void ImmutableServiceGenerator::Generate(io::Printer* printer) {
   bool is_own_file = IsOwnFile(descriptor_, /* immutable = */ true);
   WriteServiceDocComment(printer, descriptor_, context_->options());
   MaybePrintGeneratedAnnotation(context_, printer, descriptor_,
                                 /* immutable = */ true);
-  if (!google::protobuf::internal::IsOss()) {
+  if (!context_->options().opensource_runtime) {
     printer->Print("@com.google.protobuf.Internal.ProtoNonnullApi\n");
   }
 
@@ -66,7 +65,7 @@ void ImmutableServiceGenerator::Generate(io::Printer* printer) {
       "public static final\n"
       "    com.google.protobuf.Descriptors.ServiceDescriptor\n"
       "    getDescriptor() {\n"
-      "  return $file$.getDescriptor().getService($index$);\n"
+      "  return $file$.getDescriptor().getServices().get($index$);\n"
       "}\n",
       "file", name_resolver_->GetImmutableClassName(descriptor_->file()),
       "index", absl::StrCat(descriptor_->index()));
@@ -340,7 +339,7 @@ void ImmutableServiceGenerator::GenerateStub(io::Printer* printer) {
     vars["output"] = GetOutput(method);
     printer->Print(vars,
                    "channel.callMethod(\n"
-                   "  getDescriptor().getMethod($index$),\n"
+                   "  getDescriptor().getMethods().get($index$),\n"
                    "  controller,\n"
                    "  request,\n"
                    "  $output$.getDefaultInstance(),\n"
@@ -404,7 +403,7 @@ void ImmutableServiceGenerator::GenerateBlockingStub(io::Printer* printer) {
     vars["output"] = GetOutput(method);
     printer->Print(vars,
                    "return ($output$) channel.callBlockingMethod(\n"
-                   "  getDescriptor().getMethod($index$),\n"
+                   "  getDescriptor().getMethods().get($index$),\n"
                    "  controller,\n"
                    "  request,\n"
                    "  $output$.getDefaultInstance());\n");

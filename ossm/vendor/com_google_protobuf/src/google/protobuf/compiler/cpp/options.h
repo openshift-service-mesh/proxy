@@ -13,16 +13,12 @@
 #include <string>
 
 #include "absl/container/flat_hash_set.h"
-#include "google/protobuf/port.h"
 
 namespace google {
 namespace protobuf {
 namespace compiler {
 class AccessInfoMap;
 class SplitMap;
-namespace cpp {
-class MessageSCCAnalyzer;
-}  // namespace cpp
 
 namespace cpp {
 
@@ -42,7 +38,6 @@ struct FieldListenerOptions {
 struct Options {
   const AccessInfoMap* access_info_map = nullptr;
   const SplitMap* split_map = nullptr;
-  cpp::MessageSCCAnalyzer* scc_analyzer = nullptr;
   std::string dllexport_decl;
   std::string runtime_include_base;
   std::string annotation_pragma_name;
@@ -50,6 +45,7 @@ struct Options {
   FieldListenerOptions field_listener_options;
   EnforceOptimizeMode enforce_mode = EnforceOptimizeMode::kNoEnforcement;
   int num_cc_files = 0;
+  bool safe_boundary_check = false;
   bool proto_h = false;
   bool transitive_pb_h = true;
   bool annotate_headers = false;
@@ -59,12 +55,17 @@ struct Options {
   bool opensource_runtime = false;
   bool annotate_accessor = false;
   bool force_split = false;
-  bool force_eagerly_verified_lazy =
-      google::protobuf::internal::ForceEagerlyVerifiedLazyInProtoc();
-  bool force_inline_string = google::protobuf::internal::ForceInlineStringInProtoc();
+  // TODO: clean this up after the change is rolled out for 2
+  // weeks.
+  bool profile_driven_cluster_aux_subtable = true;
+#ifdef PROTOBUF_STABLE_EXPERIMENTS
+  bool force_eagerly_verified_lazy = true;
+  bool force_inline_string = true;
+#else   // PROTOBUF_STABLE_EXPERIMENTS
+  bool force_eagerly_verified_lazy = false;
+  bool force_inline_string = false;
+#endif  // !PROTOBUF_STABLE_EXPERIMENTS
   bool strip_nonfunctional_codegen = false;
-  bool experimental_use_micro_string =
-      google::protobuf::internal::EnableExperimentalMicroString();
 };
 
 }  // namespace cpp

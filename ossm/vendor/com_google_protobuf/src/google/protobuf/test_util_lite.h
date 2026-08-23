@@ -17,8 +17,8 @@
 namespace google {
 namespace protobuf {
 
-namespace unittest = proto2_unittest;
-namespace unittest_import = proto2_unittest_import;
+namespace unittest = protobuf_unittest;
+namespace unittest_import = protobuf_unittest_import;
 
 class TestUtilLite {
  public:
@@ -27,15 +27,7 @@ class TestUtilLite {
   // Set every field in the message to a unique value.
   static void SetAllFields(unittest::TestAllTypesLite* message);
   static void SetAllExtensions(unittest::TestAllExtensionsLite* message);
-  static void SetPackedVarintFields(unittest::TestPackedTypesLite* message,
-                                    bool large_values = true,
-                                    int repetitions = 1);
-  static void SetPackedBoolField(unittest::TestPackedTypesLite* message,
-                                 int repetitions = 1);
-  static void SetPackedFixedFields(unittest::TestPackedTypesLite* message,
-                                   int repetitions = 1);
-  static void SetPackedFields(unittest::TestPackedTypesLite* message,
-                              bool large_values = true, int repetitions = 1);
+  static void SetPackedFields(unittest::TestPackedTypesLite* message);
   static void SetPackedExtensions(unittest::TestPackedExtensionsLite* message);
 
   // Use the repeated versions of the set_*() accessors to modify all the
@@ -55,8 +47,7 @@ class TestUtilLite {
   static void ExpectAllExtensionsSet(
       const unittest::TestAllExtensionsLite& message);
   static void ExpectPackedFieldsSet(
-      const unittest::TestPackedTypesLite& message, bool large_values = true,
-      int repetitions = 1);
+      const unittest::TestPackedTypesLite& message);
   static void ExpectPackedExtensionsSet(
       const unittest::TestPackedExtensionsLite& message);
 

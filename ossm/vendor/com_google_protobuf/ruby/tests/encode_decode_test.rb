@@ -3,51 +3,12 @@
 # generated_code.rb is in the same directory as this test.
 $LOAD_PATH.unshift(File.expand_path(File.dirname(__FILE__)))
 
-require 'basic_test_proto2_pb'
 require 'generated_code_pb'
 require 'google/protobuf/well_known_types'
 require 'test/unit'
 
-module CaptureWarnings
-  @@warnings = nil
-
-  module_function
-
-  def warn(message, category: nil, **kwargs)
-    if @@warnings
-      @@warnings << message
-    else
-      super
-    end
-  end
-
-  def capture
-    @@warnings = []
-    yield
-    @@warnings
-  ensure
-    @@warnings = nil
-  end
-end
-
-Warning.extend CaptureWarnings
-
 def hex2bin(s)
   s.scan(/../).map { |x| x.hex.chr }.join
-end
-
-class NonConformantNumericsTest < Test::Unit::TestCase
-  def test_empty_json_numerics
-    assert_raises Google::Protobuf::ParseError do
-      msg = ::BasicTestProto2::TestMessage.decode_json('{"optionalInt32":""}')
-    end
-  end
-
-  def test_trailing_non_numeric_characters
-    assert_raises Google::Protobuf::ParseError do
-      msg = ::BasicTestProto2::TestMessage.decode_json('{"optionalDouble":"123abc"}')
-    end
-  end
 end
 
 class EncodeDecodeTest < Test::Unit::TestCase
@@ -212,19 +173,6 @@ class EncodeDecodeTest < Test::Unit::TestCase
     msg_encoded = A::B::C::TestMessage.encode(msg, { recursion_limit: 6 })
     msg_out = A::B::C::TestMessage.decode(msg_encoded)
     assert_match msg.to_json, msg_out.to_json
-  end
-
-  def test_decode_2gb_payload_without_crashing
-    # Skip if JRuby
-    omit "JRuby cannot create strings >= 2GB" if defined?(JRUBY_VERSION)
-
-    # 2. Skip 32-bit: Address space cannot hold a 2GB string + overhead
-    omit "Cannot test 2GB+ payloads on 32-bit systems" if 0.size <= 4
-
-    payload = "A" * (2**31)
-    assert_raises Google::Protobuf::ParseError do
-      A::B::C::TestMessage.decode(payload)
-    end
   end
 
 end

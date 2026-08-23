@@ -17,14 +17,11 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
-#include "absl/strings/string_view.h"
-#include "google/protobuf/compiler/code_generator_lite.h"
 #include "google/protobuf/compiler/java/context.h"
 #include "google/protobuf/compiler/java/doc_comment.h"
 #include "google/protobuf/compiler/java/helpers.h"
 #include "google/protobuf/compiler/java/internal_helpers.h"
 #include "google/protobuf/compiler/java/name_resolver.h"
-#include "google/protobuf/descriptor.h"
 #include "google/protobuf/descriptor.pb.h"
 #include "google/protobuf/io/printer.h"
 
@@ -55,17 +52,11 @@ EnumLiteGenerator::EnumLiteGenerator(const EnumDescriptor* descriptor,
   }
 }
 
-EnumLiteGenerator::~EnumLiteGenerator() = default;
+EnumLiteGenerator::~EnumLiteGenerator() {}
 
 void EnumLiteGenerator::Generate(io::Printer* printer) {
   WriteEnumDocComment(printer, descriptor_, context_->options());
   MaybePrintGeneratedAnnotation(context_, printer, descriptor_, immutable_api_);
-
-  if (CheckLargeEnum(descriptor_)) {
-    GenerateLarge(printer, descriptor_, immutable_api_, context_,
-                  name_resolver_);
-    return;
-  }
 
 
   printer->Print(
@@ -76,16 +67,17 @@ void EnumLiteGenerator::Generate(io::Printer* printer) {
   printer->Annotate("classname", descriptor_);
   printer->Indent();
 
-  for (const EnumValueDescriptor* value : canonical_values_) {
+  for (int i = 0; i < canonical_values_.size(); i++) {
     absl::flat_hash_map<absl::string_view, std::string> vars;
-    vars["name"] = std::string(value->name());
-    vars["number"] = absl::StrCat(value->number());
-    WriteEnumValueDocComment(printer, value, context_->options());
-    if (value->options().deprecated()) {
+    vars["name"] = canonical_values_[i]->name();
+    vars["number"] = absl::StrCat(canonical_values_[i]->number());
+    WriteEnumValueDocComment(printer, canonical_values_[i],
+                             context_->options());
+    if (canonical_values_[i]->options().deprecated()) {
       printer->Print("@java.lang.Deprecated\n");
     }
     printer->Print(vars, "$name$($number$),\n");
-    printer->Annotate("name", value);
+    printer->Annotate("name", canonical_values_[i]);
   }
 
   if (!descriptor_->is_closed()) {
@@ -99,20 +91,20 @@ void EnumLiteGenerator::Generate(io::Printer* printer) {
 
   // -----------------------------------------------------------------
 
-  for (const Alias& alias : aliases_) {
+  for (int i = 0; i < aliases_.size(); i++) {
     absl::flat_hash_map<absl::string_view, std::string> vars;
-    vars["classname"] = std::string(descriptor_->name());
-    vars["name"] = std::string(alias.value->name());
-    vars["canonical_name"] = std::string(alias.canonical_value->name());
-    WriteEnumValueDocComment(printer, alias.value, context_->options());
+    vars["classname"] = descriptor_->name();
+    vars["name"] = aliases_[i].value->name();
+    vars["canonical_name"] = aliases_[i].canonical_value->name();
+    WriteEnumValueDocComment(printer, aliases_[i].value, context_->options());
     printer->Print(
         vars, "public static final $classname$ $name$ = $canonical_name$;\n");
-    printer->Annotate("name", alias.value);
+    printer->Annotate("name", aliases_[i].value);
   }
 
   for (int i = 0; i < descriptor_->value_count(); i++) {
     absl::flat_hash_map<absl::string_view, std::string> vars;
-    vars["name"] = std::string(descriptor_->value(i)->name());
+    vars["name"] = descriptor_->value(i)->name();
     vars["number"] = absl::StrCat(descriptor_->value(i)->number());
     vars["{"] = "";
     vars["}"] = "";
@@ -137,15 +129,15 @@ void EnumLiteGenerator::Generate(io::Printer* printer) {
   if (!descriptor_->is_closed()) {
     printer->Print(
         "  if (this == UNRECOGNIZED) {\n"
-        "    return "
-        "com.google.protobuf.Internal.throwCannotGetNumberOfUnrecognized();\n"
+        "    throw new java.lang.IllegalArgumentException(\n"
+        "        \"Can't get the number of an unknown enum value.\");\n"
         "  }\n");
   }
   printer->Print(
       "  return value;\n"
       "}\n"
       "\n");
-  if (google::protobuf::internal::IsOss()) {
+  if (context_->options().opensource_runtime) {
     printer->Print(
         "/**\n"
         " * @param value The number of the enum to look for.\n"
@@ -160,7 +152,7 @@ void EnumLiteGenerator::Generate(io::Printer* printer) {
         "classname", descriptor_->name());
   }
 
-  if (!google::protobuf::internal::IsOss()) {
+  if (!context_->options().opensource_runtime) {
     printer->Print("@com.google.protobuf.Internal.ProtoMethodMayReturnNull\n");
   }
   printer->Print(
@@ -170,9 +162,10 @@ void EnumLiteGenerator::Generate(io::Printer* printer) {
   printer->Indent();
   printer->Indent();
 
-  for (const EnumValueDescriptor* value : canonical_values_) {
-    printer->Print("case $number$: return $name$;\n", "name", value->name(),
-                   "number", absl::StrCat(value->number()));
+  for (int i = 0; i < canonical_values_.size(); i++) {
+    printer->Print("case $number$: return $name$;\n", "name",
+                   canonical_values_[i]->name(), "number",
+                   absl::StrCat(canonical_values_[i]->number()));
   }
 
   printer->Outdent();
@@ -202,8 +195,8 @@ void EnumLiteGenerator::Generate(io::Printer* printer) {
       "\n"
       "private static final class $classname$Verifier implements \n"
       "     com.google.protobuf.Internal.EnumVerifier { \n"
-      "        static final com.google.protobuf.Internal.EnumVerifier\n"
-      "            INSTANCE = new $classname$Verifier();\n"
+      "        static final com.google.protobuf.Internal.EnumVerifier "
+      "          INSTANCE = new $classname$Verifier();\n"
       "        @java.lang.Override\n"
       "        public boolean isInRange(int number) {\n"
       "          return $classname$.forNumber(number) != null;\n"
@@ -211,7 +204,7 @@ void EnumLiteGenerator::Generate(io::Printer* printer) {
       "      };\n"
       "\n",
       "classname", descriptor_->name());
-  if (!google::protobuf::internal::IsOss()) {
+  if (!context_->options().opensource_runtime) {
     printer->Print(
         "/**\n"
         " * Override of toString that prints the number and name.\n"

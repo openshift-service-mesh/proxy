@@ -18,7 +18,6 @@
 #include "absl/strings/str_format.h"
 #include "conformance_test.h"
 #include "conformance/test_protos/test_messages_edition2023.pb.h"
-#include "conformance/test_protos/test_messages_edition_unstable.pb.h"
 #include "editions/golden/test_messages_proto2_editions.pb.h"
 #include "editions/golden/test_messages_proto3_editions.pb.h"
 #include "google/protobuf/test_messages_proto2.pb.h"
@@ -144,10 +143,6 @@ TextFormatConformanceTestSuiteImpl<MessageType>::
       // There are no editions-sensitive performance tests.
       return;
     }
-    if (MessageType::GetDescriptor()->name() == "TestAllTypesEditionUnstable") {
-      // There are no editions-sensitive performance tests.
-      return;
-    }
     RunTextFormatPerformanceTests();
   } else {
     if (MessageType::GetDescriptor()->name() == "TestAllTypesProto2") {
@@ -244,8 +239,7 @@ void TextFormatConformanceTestSuiteImpl<
     MessageType>::RunValidUnknownTextFormatTest(const std::string& test_name,
                                                 const Message& message) {
   std::string serialized_input;
-  // TODO: Remove this suppression.
-  (void)message.SerializeToString(&serialized_input);
+  message.SerializeToString(&serialized_input);
   MessageType prototype;
   ConformanceRequestSetting setting1(
       RECOMMENDED, conformance::PROTOBUF, conformance::TEXT_FORMAT,
@@ -289,14 +283,6 @@ void TextFormatConformanceTestSuiteImpl<MessageType>::RunDelimitedTests() {
   ExpectParseFailure(
       "DelimitedFieldExtensionMessageName", REQUIRED,
       "[protobuf_test_messages.editions.GroupLikeType] { group_int32: 1 }");
-
-  // Extension names can contain whitespace and comments.
-  RunValidTextFormatTest(
-      "ExtensionNameWithWhitespace", REQUIRED,
-      "[protobuf _test_messages.edit\tions.exten\nsion_int32]: 1");
-  RunValidTextFormatTest(
-      "ExtensionNameWithComment", REQUIRED,
-      "[protobuf_test_messages.edit # comment \nions.extension_int32]: 1");
 }
 
 template <typename MessageType>
@@ -728,25 +714,6 @@ void TextFormatConformanceTestSuiteImpl<MessageType>::RunAllTests() {
   message.add_repeated_int32(3);
   RunValidUnknownTextFormatTest("RepeatedUnknownFields", message);
 
-  // Reserved field names
-  for (const auto& test_case : std::vector<std::pair<std::string, std::string>>{
-           {"Boolean", "true"},
-           {"Integer", "-123"},
-           {"Float", "0.123"},
-           {"Enum", "ENUM_VALUE"},
-           {"String", "\"hello\""},
-           {"Message", "{ a: 123 }"},
-           {"MessageAngleBrackets", "< a: 123 >"},
-           {"RepeatedInteger", "[-123, 456]"},
-           {"RepeatedFloat", "[0.123, 1e-10] "},
-           {"RepeatedString", R"pb(["hello", "world"])pb"},
-       }) {
-    RunValidTextFormatTest(absl::StrCat("ReservedFieldName.", test_case.first),
-                           REQUIRED,
-                           absl::StrCat("reserved_field: ", test_case.second));
-    // TODO: Add a test for reserved field numbers on 999999.
-  }
-
   // Map fields
   MessageType prototype;
   (*prototype.mutable_map_string_string())["c"] = "value";
@@ -856,63 +823,6 @@ void TextFormatConformanceTestSuiteImpl<MessageType>::RunAnyTests() {
           }
         }
         )");
-  RunValidTextFormatTest("AnyFieldWithCustomTypeUrlPrefix", REQUIRED,
-                         R"(
-        optional_any: {
-          [non.default.domain/protobuf_test_messages.proto3.TestAllTypesProto3]
-          {
-            optional_int32: 12345
-          }
-        }
-        )");
-  RunValidTextFormatTest("AnyFieldWithSpecialCharactersInTypeUrlPrefix",
-                         REQUIRED,
-                         R"(
-        optional_any: {
-          [non.default.domain/sub-path_0/~!$&()*+,;=/protobuf_test_messages.proto3.TestAllTypesProto3]
-          {
-            optional_int32: 12345
-          }
-        }
-        )");
-  RunValidTextFormatTest("AnyFieldWithValidUrlPercentEscapeInTypeUrlPrefix",
-                         REQUIRED,
-                         R"(
-        optional_any: {
-          [non.default.domain/%2F/protobuf_test_messages.proto3.TestAllTypesProto3]
-          {
-            optional_int32: 12345
-          }
-        }
-        )");
-  ExpectParseFailure("AnyFieldWithInvalidUrlPercentEscapeInTypeUrlPrefix",
-                     REQUIRED,
-                     R"(
-        optional_any: {
-          [non.default.domain/%ZZ/protobuf_test_messages.proto3.TestAllTypesProto3]
-          {
-            optional_int32: 12345
-          }
-        }
-        )");
-  RunValidTextFormatTest(
-      "AnyFieldWithWhitespaceInTypeUrl", REQUIRED,
-      "optional_any: {\n"
-      "  [ ty pe.go\nogleap\tis.com/\n"
-      "    proto buf_te\nst_messages.proto3.Test\tAllTypesProto3 ]\n"
-      "  {\n"
-      "    optional_int32: 12345\n"
-      "  }\n"
-      "}");
-  RunValidTextFormatTest(
-      "AnyFieldWithCommentsInTypeUrl", REQUIRED,
-      "optional_any: {\n"
-      "  [type.google # comment \napis.com/"
-      "protobuf_test_messages.proto3.Test # comment \nAllTypesProto3]"
-      "  {\n"
-      "    optional_int32: 12345\n"
-      "  }\n"
-      "}");
 }
 
 template <typename MessageType>

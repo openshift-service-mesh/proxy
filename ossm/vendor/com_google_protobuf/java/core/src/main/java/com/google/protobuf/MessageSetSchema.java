@@ -92,9 +92,9 @@ final class MessageSetSchema<T> implements Schema<T> {
       if (fd.getLiteJavaType() != WireFormat.JavaType.MESSAGE || fd.isRepeated() || fd.isPacked()) {
         throw new IllegalStateException("Found invalid MessageSet item.");
       }
-      if (extension instanceof InternalLazyField.LazyEntry) {
+      if (extension instanceof LazyField.LazyEntry) {
         writer.writeMessageSetItem(
-            fd.getNumber(), ((InternalLazyField.LazyEntry) extension).getField().toByteString());
+            fd.getNumber(), ((LazyField.LazyEntry) extension).getField().toByteString());
       } else {
         writer.writeMessageSetItem(fd.getNumber(), extension.getValue());
       }
@@ -329,8 +329,6 @@ final class MessageSetSchema<T> implements Schema<T> {
         // We haven't seen a type ID yet or we want parse message lazily.
         rawBytes = reader.readBytes();
         continue;
-      } else if (tag == WireFormat.MESSAGE_SET_ITEM_END_TAG) {
-        break loop;
       } else {
         if (!reader.skipField()) {
           break loop; // End of group

@@ -18,9 +18,6 @@ NS_ASSUME_NONNULL_BEGIN
  **/
 @interface GPBRootObject : NSObject
 
-- (instancetype)init NS_UNAVAILABLE;
-+ (instancetype)new NS_UNAVAILABLE;
-
 /**
  * @return An extension registry for the given file and all the files it depends
  * on.

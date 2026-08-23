@@ -8,10 +8,11 @@
 #ifndef GOOGLE_PROTOBUF_JSON_INTERNAL_ZERO_COPY_BUFFERED_STREAM_H__
 #define GOOGLE_PROTOBUF_JSON_INTERNAL_ZERO_COPY_BUFFERED_STREAM_H__
 
-#include <cstddef>
+#include <algorithm>
+#include <cstdint>
+#include <iostream>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "absl/log/absl_check.h"
@@ -69,11 +70,11 @@ class MaybeOwnedString {
 
   // Returns the string as a view, regardless of whether it is owned or not.
   absl::string_view AsView() const {
-    if (auto* unowned = std::get_if<StreamOwned>(&data_)) {
+    if (auto* unowned = absl::get_if<StreamOwned>(&data_)) {
       return unowned->AsView();
     }
 
-    return std::get<std::string>(data_);
+    return absl::get<std::string>(data_);
   }
 
   operator absl::string_view() const { return AsView(); }  // NOLINT
@@ -81,12 +82,12 @@ class MaybeOwnedString {
   // Returns a reference to an owned string; if the wrapped string is not
   // owned, this function will perform a copy and make it owned.
   std::string& ToString() {
-    if (auto* unowned = std::get_if<StreamOwned>(&data_)) {
+    if (auto* unowned = absl::get_if<StreamOwned>(&data_)) {
       data_ = std::string(unowned->AsView());
       token_ = BufferingGuard{};
     }
 
-    return std::get<std::string>(data_);
+    return absl::get<std::string>(data_);
   }
 
   template <typename String>
@@ -104,7 +105,7 @@ class MaybeOwnedString {
     size_t start, len;
     absl::string_view AsView() const;
   };
-  std::variant<std::string, StreamOwned> data_;
+  absl::variant<std::string, StreamOwned> data_;
   BufferingGuard token_;
 };
 
@@ -139,7 +140,7 @@ class ZeroCopyBufferedStream {
   // This function will buffer at least one character to verify whether it
   // actually *is* at EOF.
   bool AtEof() {
-    (void)BufferAtLeastOne();
+    (void)BufferAtLeast(1);
     return eof_;
   }
 
@@ -202,13 +203,6 @@ class ZeroCopyBufferedStream {
   //
   // Returns an error if that many bytes could not be RawBuffer.
   absl::StatusOr<BufferingGuard> BufferAtLeast(size_t bytes);
-
-  // Ensures that at least one byte is available to read. The will never
-  // enable buffering if it was not already buffering, as the requisite 1 byte
-  // will never be split across two streaming chunks.
-  //
-  // Returns an error if EOF is hit.
-  absl::Status BufferAtLeastOne();
 
  private:
   friend BufferingGuard;
@@ -293,7 +287,7 @@ absl::StatusOr<MaybeOwnedString> ZeroCopyBufferedStream::TakeWhile(Pred p) {
   size_t start = cursor_;
   BufferingGuard guard(this);
   while (true) {
-    if (!BufferAtLeastOne().ok()) {
+    if (!BufferAtLeast(1).ok()) {
       // We treat EOF as ending the take, rather than being an error.
       break;
     }

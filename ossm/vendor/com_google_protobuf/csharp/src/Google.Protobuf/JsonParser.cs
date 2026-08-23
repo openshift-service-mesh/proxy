@@ -124,86 +124,70 @@ namespace Google.Protobuf
         /// of tokens provided by the tokenizer. This token stream is assumed to be valid JSON, with the
         /// tokenizer performing that validation - but not every token stream is valid "protobuf JSON".
         /// </summary>
-        /// <remarks>
-        /// This method maintains and checks the recursion depth, so *must* be called for any nested parsing.
-        /// </remarks>
         private void Merge(IMessage message, JsonTokenizer tokenizer)
         {
-            if (tokenizer.RecursionDepth > settings.RecursionLimit)
+            if (tokenizer.ObjectDepth > settings.RecursionLimit)
             {
                 throw InvalidProtocolBufferException.JsonRecursionLimitExceeded();
             }
-            tokenizer.RecursionDepth++;
-
-            // try/finally used in order to decrement the recursion depth regardless of outcome.
-            // If an exception is thrown, the recursion depth is irrelevant anyway - but as the method
-            // has multiple return statements, this is the simplest way of ensuring the recursion depth
-            // is always decremented. An alternative would be to use a local function.
-            try
+            if (message.Descriptor.IsWellKnownType)
             {
-                if (message.Descriptor.IsWellKnownType)
+                if (WellKnownTypeHandlers.TryGetValue(message.Descriptor.FullName, out Action<JsonParser, IMessage, JsonTokenizer> handler))
                 {
-                    if (WellKnownTypeHandlers.TryGetValue(message.Descriptor.FullName, out Action<JsonParser, IMessage, JsonTokenizer> handler))
-                    {
-                        handler(this, message, tokenizer);
-                        return;
-                    }
-                    // Well-known types with no special handling continue in the normal way.
+                    handler(this, message, tokenizer);
+                    return;
                 }
-                var token = tokenizer.Next();
-                if (token.Type != JsonToken.TokenType.StartObject)
+                // Well-known types with no special handling continue in the normal way.
+            }
+            var token = tokenizer.Next();
+            if (token.Type != JsonToken.TokenType.StartObject)
+            {
+                throw new InvalidProtocolBufferException("Expected an object");
+            }
+            var descriptor = message.Descriptor;
+            var jsonFieldMap = descriptor.Fields.ByJsonName();
+            // All the oneof fields we've already accounted for - we can only see each of them once.
+            // The set is created lazily to avoid the overhead of creating a set for every message
+            // we parsed, when oneofs are relatively rare.
+            HashSet<OneofDescriptor> seenOneofs = null;
+            while (true)
+            {
+                token = tokenizer.Next();
+                if (token.Type == JsonToken.TokenType.EndObject)
                 {
-                    throw new InvalidProtocolBufferException("Expected an object");
+                    return;
                 }
-                var descriptor = message.Descriptor;
-                var jsonFieldMap = descriptor.Fields.ByJsonName();
-                // All the oneof fields we've already accounted for - we can only see each of them once.
-                // The set is created lazily to avoid the overhead of creating a set for every message
-                // we parsed, when oneofs are relatively rare.
-                HashSet<OneofDescriptor> seenOneofs = null;
-                while (true)
+                if (token.Type != JsonToken.TokenType.Name)
                 {
-                    token = tokenizer.Next();
-                    if (token.Type == JsonToken.TokenType.EndObject)
+                    throw new InvalidOperationException("Unexpected token type " + token.Type);
+                }
+                string name = token.StringValue;
+                if (jsonFieldMap.TryGetValue(name, out FieldDescriptor field))
+                {
+                    if (field.ContainingOneof != null)
                     {
-                        return;
-                    }
-                    if (token.Type != JsonToken.TokenType.Name)
-                    {
-                        throw new InvalidOperationException("Unexpected token type " + token.Type);
-                    }
-                    string name = token.StringValue;
-                    if (jsonFieldMap.TryGetValue(name, out FieldDescriptor field))
-                    {
-                        if (field.ContainingOneof != null)
+                        if (seenOneofs == null)
                         {
-                            if (seenOneofs == null)
-                            {
-                                seenOneofs = new HashSet<OneofDescriptor>();
-                            }
-                            if (!seenOneofs.Add(field.ContainingOneof))
-                            {
-                                throw new InvalidProtocolBufferException($"Multiple values specified for oneof {field.ContainingOneof.Name}");
-                            }
+                            seenOneofs = new HashSet<OneofDescriptor>();
                         }
-                        MergeField(message, field, tokenizer);
+                        if (!seenOneofs.Add(field.ContainingOneof))
+                        {
+                            throw new InvalidProtocolBufferException($"Multiple values specified for oneof {field.ContainingOneof.Name}");
+                        }
+                    }
+                    MergeField(message, field, tokenizer);
+                }
+                else
+                {
+                    if (settings.IgnoreUnknownFields)
+                    {
+                        tokenizer.SkipValue();
                     }
                     else
                     {
-                        if (settings.IgnoreUnknownFields)
-                        {
-                            tokenizer.SkipValue();
-                        }
-                        else
-                        {
-                            throw new InvalidProtocolBufferException("Unknown field: " + name);
-                        }
+                        throw new InvalidProtocolBufferException("Unknown field: " + name);
                     }
                 }
-            }
-            finally
-            {
-                tokenizer.RecursionDepth--;
             }
         }
 
@@ -532,13 +516,9 @@ namespace Google.Protobuf
                 tokens.Add(token);
                 token = tokenizer.Next();
 
-                // If we get to the end of the object and haven't seen a type URL, just return.
-                // (The message will be empty at this point.)
-                // We could potentially make this more conservative, failing if there are
-                // other properties but no type URL.
                 if (tokenizer.ObjectDepth < typeUrlObjectDepth)
                 {
-                    return;
+                    throw new InvalidProtocolBufferException("Any message with no @type");
                 }
             }
 
@@ -550,15 +530,6 @@ namespace Google.Protobuf
             }
             string typeUrl = token.StringValue;
             string typeName = Any.GetTypeName(typeUrl);
-            // If we don't find a slash, GetTypeName returns an empty string. An empty string can
-            // never be a valid type name (whether that was through @type="", @type="blah" or
-            // @type="blah/") so we fail. This is InvalidProtocolBufferException rather than
-            // the InvalidOperationException used below, as it's the data that's invalid rather than
-            // the context in which we're parsing it.
-            if (typeName == "")
-            {
-                throw new InvalidProtocolBufferException("Invalid Any.@type value");
-            }
 
             MessageDescriptor descriptor = settings.TypeRegistry.Find(typeName);
             if (descriptor == null)
@@ -859,7 +830,7 @@ namespace Google.Protobuf
                 // TODO: It would be nice not to have to create all these objects... easy to optimize later though.
                 Timestamp timestamp = Timestamp.FromDateTime(parsed);
                 int nanosToAdd = 0;
-                if (subseconds.Length != 0)
+                if (subseconds != "")
                 {
                     // This should always work, as we've got 1-9 digits.
                     int parsedFraction = int.Parse(subseconds.Substring(1), CultureInfo.InvariantCulture);
@@ -935,7 +906,7 @@ namespace Google.Protobuf
             {
                 long seconds = long.Parse(secondsText, CultureInfo.InvariantCulture) * multiplier;
                 int nanos = 0;
-                if (subseconds.Length != 0)
+                if (subseconds != "")
                 {
                     // This should always work, as we've got 1-9 digits.
                     int parsedFraction = int.Parse(subseconds.Substring(1));

@@ -27,13 +27,15 @@ namespace protobuf {
 namespace internal {
 namespace {
 
-using ::proto2_unittest::NestedTestAllTypes;
-using ::proto2_unittest::TestAllExtensions;
-using ::proto2_unittest::TestAllTypes;
-using ::proto2_unittest::TestMap;
-using ::proto2_unittest::TestOneof2;
-using ::proto2_unittest::TestPackedExtensions;
-using ::proto2_unittest::TestPackedTypes;
+#ifdef __cpp_if_constexpr
+
+using ::protobuf_unittest::NestedTestAllTypes;
+using ::protobuf_unittest::TestAllExtensions;
+using ::protobuf_unittest::TestAllTypes;
+using ::protobuf_unittest::TestMap;
+using ::protobuf_unittest::TestOneof2;
+using ::protobuf_unittest::TestPackedExtensions;
+using ::protobuf_unittest::TestPackedTypes;
 using ::proto2_wireformat_unittest::TestMessageSet;
 
 struct TestParam {
@@ -170,7 +172,7 @@ void MutateNothingByVisit(Message& message) {
         }
       } else {
         for (auto& it : info.Mutable()) {
-          it = *&it;  // Avoid -Wself-assign.
+          it = it;
         }
       }
     } else {
@@ -205,12 +207,6 @@ TEST_P(VisitFieldsTest, MutateNothingByVisitIdempotent) {
 
 template <typename InfoT>
 inline size_t MapKeyByteSizeLong(FieldDescriptor::Type type, InfoT info) {
-  // There is a bug in GCC 9.5 where if-constexpr arguments are not understood
-  // if passed into a helper function. A reproduction of the bug can be found
-  // at: https://godbolt.org/z/65qW3vGhP
-  // This is fixed in GCC 10.1+.
-  (void)type;  // Suppress -Wunused-but-set-parameter
-
   if constexpr (info.cpp_type == FieldDescriptor::CPPTYPE_STRING) {
     return WireFormatLite::StringSize(info.Get());
   } else {
@@ -220,12 +216,6 @@ inline size_t MapKeyByteSizeLong(FieldDescriptor::Type type, InfoT info) {
 
 template <typename InfoT>
 inline size_t MapValueByteSizeLong(FieldDescriptor::Type type, InfoT info) {
-  // There is a bug in GCC 9.5 where if-constexpr arguments are not understood
-  // if passed into a helper function. A reproduction of the bug can be found
-  // at: https://godbolt.org/z/65qW3vGhP
-  // This is fixed in GCC 10.1+.
-  (void)type;  // Suppress -Wunused-but-set-parameter
-
   if constexpr (info.cpp_type == FieldDescriptor::CPPTYPE_STRING) {
     return WireFormatLite::StringSize(info.Get());
   } else if constexpr (info.cpp_type == FieldDescriptor::CPPTYPE_MESSAGE) {
@@ -462,6 +452,8 @@ TEST(ReflectionVisitTest, VisitMapAfterMutableRepeated) {
   EXPECT_THAT(key_val_pairs, testing::UnorderedElementsAre(
                                  testing::Pair(0, 200), testing::Pair(1, 200)));
 }
+
+#endif  // __cpp_if_constexpr
 
 }  // namespace
 }  // namespace internal

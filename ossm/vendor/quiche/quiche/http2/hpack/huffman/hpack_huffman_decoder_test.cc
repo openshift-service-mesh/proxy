@@ -16,6 +16,7 @@
 #include "quiche/http2/decoder/decode_status.h"
 #include "quiche/http2/test_tools/random_decoder_test_base.h"
 #include "quiche/common/platform/api/quiche_expect_bug.h"
+#include "quiche/common/platform/api/quiche_flags.h"
 #include "quiche/common/platform/api/quiche_test.h"
 
 namespace http2 {
@@ -39,7 +40,8 @@ TEST(HuffmanBitBufferTest, AppendBytesAligned) {
   absl::string_view sp(s);
 
   HuffmanBitBuffer bb;
-  sp.remove_prefix(bb.AppendBytes(sp));
+  sp.remove_prefix(bb.AppendBytes(
+      sp, GetQuicheReloadableFlag(hpack_huffman_decoder_optimizations)));
   EXPECT_TRUE(sp.empty());
   EXPECT_FALSE(bb.IsEmpty()) << bb;
   EXPECT_FALSE(bb.InputProperlyTerminated());
@@ -51,7 +53,8 @@ TEST(HuffmanBitBufferTest, AppendBytesAligned) {
   s.push_back('\x44');
   sp = s;
 
-  sp.remove_prefix(bb.AppendBytes(sp));
+  sp.remove_prefix(bb.AppendBytes(
+      sp, GetQuicheReloadableFlag(hpack_huffman_decoder_optimizations)));
   EXPECT_TRUE(sp.empty());
   EXPECT_EQ(bb.count(), 32u) << bb;
   EXPECT_EQ(bb.free_count(), 32u) << bb;
@@ -65,14 +68,16 @@ TEST(HuffmanBitBufferTest, AppendBytesAligned) {
   s.push_back('\x99');
   sp = s;
 
-  sp.remove_prefix(bb.AppendBytes(sp));
+  sp.remove_prefix(bb.AppendBytes(
+      sp, GetQuicheReloadableFlag(hpack_huffman_decoder_optimizations)));
   EXPECT_EQ(sp.size(), 1u);
   EXPECT_EQ('\x99', sp[0]);
   EXPECT_EQ(bb.count(), 64u) << bb;
   EXPECT_EQ(bb.free_count(), 0u) << bb;
   EXPECT_EQ(bb.value(), HuffmanAccumulator(0x1122334455667788LL)) << bb;
 
-  sp.remove_prefix(bb.AppendBytes(sp));
+  sp.remove_prefix(bb.AppendBytes(
+      sp, GetQuicheReloadableFlag(hpack_huffman_decoder_optimizations)));
   EXPECT_EQ(sp.size(), 1u);
   EXPECT_EQ('\x99', sp[0]);
   EXPECT_EQ(bb.count(), 64u) << bb;
@@ -88,7 +93,8 @@ TEST(HuffmanBitBufferTest, ConsumeBits) {
   absl::string_view sp(s);
 
   HuffmanBitBuffer bb;
-  sp.remove_prefix(bb.AppendBytes(sp));
+  sp.remove_prefix(bb.AppendBytes(
+      sp, GetQuicheReloadableFlag(hpack_huffman_decoder_optimizations)));
   EXPECT_TRUE(sp.empty());
 
   bb.ConsumeBits(1);
@@ -120,7 +126,8 @@ TEST(HuffmanBitBufferTest, AppendBytesUnaligned) {
   absl::string_view sp(s);
 
   HuffmanBitBuffer bb;
-  sp.remove_prefix(bb.AppendBytes(sp));
+  sp.remove_prefix(bb.AppendBytes(
+      sp, GetQuicheReloadableFlag(hpack_huffman_decoder_optimizations)));
   EXPECT_EQ(sp.size(), 5u);
   EXPECT_FALSE(bb.InputProperlyTerminated());
 
@@ -132,7 +139,8 @@ TEST(HuffmanBitBufferTest, AppendBytesUnaligned) {
   expected <<= 15;
   EXPECT_EQ(bb.value(), expected);
 
-  sp.remove_prefix(bb.AppendBytes(sp));
+  sp.remove_prefix(bb.AppendBytes(
+      sp, GetQuicheReloadableFlag(hpack_huffman_decoder_optimizations)));
   EXPECT_EQ(sp.size(), 4u);
   EXPECT_EQ(bb.count(), 57u) << bb;
   EXPECT_EQ(bb.free_count(), 7u) << bb;
@@ -200,7 +208,7 @@ TEST_F(HpackHuffmanDecoderTest, SpecRequestExamples) {
       "25a849e95bb8e8b4bf",
       "custom-value",
   };
-  for (size_t i = 0; i != ABSL_ARRAYSIZE(test_table); i += 2) {
+  for (size_t i = 0; i != std::size(test_table); i += 2) {
     std::string huffman_encoded;
     ASSERT_TRUE(absl::HexStringToBytes(test_table[i], &huffman_encoded));
     const std::string& plain_string(test_table[i + 1]);
@@ -231,7 +239,7 @@ TEST_F(HpackHuffmanDecoderTest, SpecResponseExamples) {
       "03ed4ee5b1063d5007",
       "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1",
   };
-  for (size_t i = 0; i != ABSL_ARRAYSIZE(test_table); i += 2) {
+  for (size_t i = 0; i != std::size(test_table); i += 2) {
     std::string huffman_encoded;
     ASSERT_TRUE(absl::HexStringToBytes(test_table[i], &huffman_encoded));
     const std::string& plain_string(test_table[i + 1]);
@@ -240,6 +248,24 @@ TEST_F(HpackHuffmanDecoderTest, SpecResponseExamples) {
     EXPECT_TRUE(decoder.Decode(huffman_encoded, &buffer)) << decoder;
     EXPECT_TRUE(decoder.InputProperlyTerminated()) << decoder;
     EXPECT_EQ(buffer, plain_string);
+  }
+}
+
+TEST(HpackHuffmanDecoderStandaloneTest, ReloadableFlag8BitTable) {
+  std::string huffman_encoded;
+  ASSERT_TRUE(
+      absl::HexStringToBytes("f1e3c2e5f23a6ba0ab90f4ff", &huffman_encoded));
+  std::string plain_string = "www.example.com";
+
+  for (bool flag_value : {false, true}) {
+    SetQuicheReloadableFlag(hpack_huffman_decoder_optimizations, flag_value);
+    HpackHuffmanDecoder decoder;
+    std::string buffer;
+    EXPECT_TRUE(decoder.Decode(huffman_encoded, &buffer))
+        << "Failed when flag is " << flag_value;
+    EXPECT_TRUE(decoder.InputProperlyTerminated())
+        << "Failed when flag is " << flag_value;
+    EXPECT_EQ(buffer, plain_string) << "Failed when flag is " << flag_value;
   }
 }
 

@@ -10,9 +10,8 @@
 #include <string>
 #include <vector>
 
-#include <gtest/gtest.h>
-#include "absl/log/absl_check.h"
 #include "google/protobuf/arena.h"
+#include <gtest/gtest.h>
 
 using UNITTEST::TestAllTypes;
 
@@ -95,7 +94,7 @@ TEST(LITE_TEST_NAME, Parsing) {
   SetAllFields(&original);
 
   TestAllTypes msg;
-  ABSL_CHECK(msg.ParseFromString(original.SerializeAsString()));
+  msg.ParseFromString(original.SerializeAsString());
   ExpectAllFieldsSet(msg);
 }
 

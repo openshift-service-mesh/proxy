@@ -75,11 +75,12 @@
 
 // Portable check for GCC minimum version:
 // https://gcc.gnu.org/onlinedocs/cpp/Common-Predefined-Macros.html
-#if defined(__GNUC__) && defined(__GNUC_MINOR__) && defined(__GNUC_PATCHLEVEL__)
-#define PROTOBUF_GNUC_MIN(x, y) \
+#if defined(__GNUC__) && defined(__GNUC_MINOR__) \
+    && defined(__GNUC_PATCHLEVEL__)
+#  define PROTOBUF_GNUC_MIN(x, y) \
   (__GNUC__ > (x) || (__GNUC__ == (x) && __GNUC_MINOR__ >= (y)))
 #else
-#define PROTOBUF_GNUC_MIN(x, y) 0
+#  define PROTOBUF_GNUC_MIN(x, y) 0
 #endif
 
 #if defined(__clang__) && defined(__clang_major__) && defined(__clang_minor__)
@@ -106,6 +107,17 @@
 #define PROTOBUF_CPLUSPLUS_MIN(x) (_MSVC_LANG >= x)
 #endif
 
+// Check minimum Protobuf support defined at:
+// https://github.com/google/oss-policies-info/blob/main/foundational-cxx-support-matrix.md
+#ifdef __clang__
+static_assert(PROTOBUF_CLANG_MIN(6, 0), "Protobuf only supports Clang 6.0 and newer.");
+#elif defined(__GNUC__)
+static_assert(PROTOBUF_GNUC_MIN(7, 3), "Protobuf only supports GCC 7.3 and newer.");
+#elif defined(_MSVC_LANG)
+static_assert(PROTOBUF_MSC_VER_MIN(1910), "Protobuf only supports MSVC 2017 and newer.");
+#endif
+static_assert(PROTOBUF_CPLUSPLUS_MIN(201402L), "Protobuf only supports C++14 and newer.");
+
 // Check minimum Abseil version.
 #if defined(ABSL_LTS_RELEASE_VERSION) && defined(ABSL_LTS_RELEASE_PATCH_LEVEL)
 #define PROTOBUF_ABSL_MIN(x, y)      \
@@ -118,6 +130,9 @@
 #define PROTOBUF_ABSL_MIN(x, y) 1
 #endif
 
+static_assert(PROTOBUF_ABSL_MIN(20230125, 3),
+              "Protobuf only supports Abseil version 20230125.3 and newer.");
+
 // Future versions of protobuf will include breaking changes to some APIs.
 // This macro can be set to enable these API changes ahead of time, so that
 // user code can be updated before upgrading versions of protobuf.
@@ -128,23 +143,21 @@
 // Owner: shaod@, gberg@
 #define PROTOBUF_FUTURE_DESCRIPTOR_EXTENSION_DECL 1
 
-// Marks several logically constant operations on Repeated*Field as nodiscard.
+// Removes Arena::CreateMessage, as Arena::Create is equivalent
 // Owner: ckennelly@, mkruskal@
-#define PROTOBUF_FUTURE_ADD_NODISCARD [[nodiscard]]
+#define PROTOBUF_FUTURE_REMOVE_CREATEMESSAGE 1
 
-#else
-
-#define PROTOBUF_FUTURE_ADD_NODISCARD
+// Renames DescriptorPool::AddUnusedImportTrackFile
+// Owner: mkruskal@
+#define PROTOBUF_FUTURE_RENAME_ADD_UNUSED_IMPORT 1
 
 #endif
 
-#define PROTOBUF_FUTURE_ADD_EARLY_NODISCARD [[nodiscard]]
-#if !defined(__clang__) && defined(__GNUC__) && __GNUC__ < 13
-// GCC < 13 doesn't support mixing [[]] attributes with __attribute__, and this
-// is used with PROTOBUF_EXPORT for shared library visibility.
-#define PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED __attribute__((warn_unused))
-#else
-#define PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED ABSL_ATTRIBUTE_WARN_UNUSED
+#ifdef PROTOBUF_FUTURE_STRING_VIEW_RETURN_TYPE
+#error PROTOBUF_FUTURE_STRING_VIEW_RETURN_TYPE was previously defined
+#endif
+#if defined(PROTOBUF_TEMPORARY_ENABLE_STRING_VIEW_RETURN_TYPE)
+#define PROTOBUF_FUTURE_STRING_VIEW_RETURN_TYPE 1
 #endif
 
 #ifdef PROTOBUF_ALWAYS_INLINE
@@ -152,13 +165,13 @@
 #endif
 // For functions we want to force inline.
 #if defined(PROTOBUF_NO_INLINE)
-#define PROTOBUF_ALWAYS_INLINE inline
+# define PROTOBUF_ALWAYS_INLINE
 #elif defined(__GNUC__)
-#define PROTOBUF_ALWAYS_INLINE inline __attribute__((always_inline))
+# define PROTOBUF_ALWAYS_INLINE __attribute__((always_inline))
 #elif defined(_MSC_VER)
-#define PROTOBUF_ALWAYS_INLINE __forceinline
+# define PROTOBUF_ALWAYS_INLINE __forceinline
 #else
-#define PROTOBUF_ALWAYS_INLINE inline
+# define PROTOBUF_ALWAYS_INLINE
 #endif
 
 #ifdef PROTOBUF_ALWAYS_INLINE_CALL
@@ -184,9 +197,9 @@
 // functions, especially in the proto-generated serialization functions, produce
 // stack frames so large that many tests run into stack overflows (b/32192897).
 #if defined(NDEBUG) || (defined(_MSC_VER) && !defined(_DEBUG))
-#define PROTOBUF_NDEBUG_INLINE PROTOBUF_ALWAYS_INLINE
+# define PROTOBUF_NDEBUG_INLINE PROTOBUF_ALWAYS_INLINE
 #else
-#define PROTOBUF_NDEBUG_INLINE inline
+# define PROTOBUF_NDEBUG_INLINE
 #endif
 
 // Note that PROTOBUF_NOINLINE is an attribute applied to functions, to prevent
@@ -201,10 +214,10 @@
 #error PROTOBUF_NOINLINE was previously defined
 #endif
 #if defined(__GNUC__)
-#define PROTOBUF_NOINLINE __attribute__((noinline))
+# define PROTOBUF_NOINLINE __attribute__((noinline))
 #elif defined(_MSC_VER)
 // Seems to have been around since at least Visual Studio 2005
-#define PROTOBUF_NOINLINE __declspec(noinline)
+# define PROTOBUF_NOINLINE __declspec(noinline)
 #endif
 
 #ifdef PROTOBUF_MUSTTAIL
@@ -213,8 +226,9 @@
 #ifdef PROTOBUF_TAILCALL
 #error PROTOBUF_TAILCALL was previously defined
 #endif
-#if ABSL_HAVE_CPP_ATTRIBUTE(clang::musttail) && \
-    (defined(__aarch64__) || defined(__x86_64__) || defined(_M_X64))
+#if ABSL_HAVE_CPP_ATTRIBUTE(clang::musttail) && !defined(__arm__) &&  \
+    !defined(_ARCH_PPC) && !defined(__wasm__) &&                      \
+    !(defined(_MSC_VER) && defined(_M_IX86)) && !defined(__i386__)
 // Compilation fails on ARM32: b/195943306
 // Compilation fails on powerpc64le: b/187985113
 // Compilation fails on X86 Windows:
@@ -226,29 +240,23 @@
 #define PROTOBUF_TAILCALL false
 #endif
 
-// On windows, you need to hint to the compiler that you want to do empty base
-// class optimization with multiple inheritance.
-#ifdef _MSC_VER
-#define PROTOBUF_DECLSPEC_EMPTY_BASES __declspec(empty_bases)
-#else
-#define PROTOBUF_DECLSPEC_EMPTY_BASES
-#endif
-
 #ifdef PROTOBUF_CC
 #error PROTOBUF_CC was previously defined
 #endif
 #define PROTOBUF_CC
 
 #if defined(__clang__)
-#define PROTOBUF_IGNORE_DEPRECATION_START \
-  _Pragma("clang diagnostic push")        \
+#define PROTOBUF_IGNORE_DEPRECATION_START                     \
+  _Pragma("clang diagnostic push")                                  \
   _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
-#define PROTOBUF_IGNORE_DEPRECATION_STOP _Pragma("clang diagnostic pop")
+#define PROTOBUF_IGNORE_DEPRECATION_STOP                     \
+  _Pragma("clang diagnostic pop")
 #elif defined(__GNUC__)
-#define PROTOBUF_IGNORE_DEPRECATION_START \
-  _Pragma("GCC diagnostic push")          \
+#define PROTOBUF_IGNORE_DEPRECATION_START                     \
+  _Pragma("GCC diagnostic push")                                  \
   _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
-#define PROTOBUF_IGNORE_DEPRECATION_STOP _Pragma("GCC diagnostic pop")
+#define PROTOBUF_IGNORE_DEPRECATION_STOP                     \
+  _Pragma("GCC diagnostic pop")
 #else
 #define PROTOBUF_IGNORE_DEPRECATION_START
 #define PROTOBUF_IGNORE_DEPRECATION_STOP
@@ -296,17 +304,17 @@
   _Pragma("clang diagnostic ignored \"-Winvalid-offsetof\"") \
   __builtin_offsetof(TYPE, FIELD)                            \
   _Pragma("clang diagnostic pop")
-#elif defined(__GNUC__) || defined(_MSC_VER)
+#elif defined(__GNUC__)
 #define PROTOBUF_FIELD_OFFSET(TYPE, FIELD) __builtin_offsetof(TYPE, FIELD)
-#else
+#else  // defined(__clang__)
 // Note that we calculate relative to the pointer value 16 here since if we
 // just use zero, GCC complains about dereferencing a NULL pointer.  We
 // choose 16 rather than some other number just in case the compiler would
 // be confused by an unaligned pointer.
-#define PROTOBUF_FIELD_OFFSET(TYPE, FIELD)                                  \
+#define PROTOBUF_FIELD_OFFSET(TYPE, FIELD)                                \
   static_cast< ::uint32_t>(reinterpret_cast<const char*>(                   \
-                               &reinterpret_cast<const TYPE*>(16)->FIELD) - \
-                           reinterpret_cast<const char*>(16))
+                             &reinterpret_cast<const TYPE*>(16)->FIELD) - \
+                         reinterpret_cast<const char*>(16))
 #endif
 
 #ifdef PROTOBUF_EXPORT
@@ -314,23 +322,23 @@
 #endif
 
 #if defined(PROTOBUF_USE_DLLS) && defined(_MSC_VER)
-#if defined(LIBPROTOBUF_EXPORTS)
-#define PROTOBUF_EXPORT __declspec(dllexport)
-#define PROTOBUF_EXPORT_TEMPLATE_DECLARE
-#define PROTOBUF_EXPORT_TEMPLATE_DEFINE __declspec(dllexport)
-#else
-#define PROTOBUF_EXPORT __declspec(dllimport)
-#define PROTOBUF_EXPORT_TEMPLATE_DECLARE
-#define PROTOBUF_EXPORT_TEMPLATE_DEFINE __declspec(dllimport)
-#endif  // defined(LIBPROTOBUF_EXPORTS)
+# if defined(LIBPROTOBUF_EXPORTS)
+#  define PROTOBUF_EXPORT __declspec(dllexport)
+#  define PROTOBUF_EXPORT_TEMPLATE_DECLARE
+#  define PROTOBUF_EXPORT_TEMPLATE_DEFINE __declspec(dllexport)
+# else
+#  define PROTOBUF_EXPORT __declspec(dllimport)
+#  define PROTOBUF_EXPORT_TEMPLATE_DECLARE
+#  define PROTOBUF_EXPORT_TEMPLATE_DEFINE __declspec(dllimport)
+# endif  // defined(LIBPROTOBUF_EXPORTS)
 #elif defined(PROTOBUF_USE_DLLS) && defined(LIBPROTOBUF_EXPORTS)
-#define PROTOBUF_EXPORT __attribute__((visibility("default")))
-#define PROTOBUF_EXPORT_TEMPLATE_DECLARE __attribute__((visibility("default")))
-#define PROTOBUF_EXPORT_TEMPLATE_DEFINE
+# define PROTOBUF_EXPORT __attribute__((visibility("default")))
+# define PROTOBUF_EXPORT_TEMPLATE_DECLARE __attribute__((visibility("default")))
+# define PROTOBUF_EXPORT_TEMPLATE_DEFINE
 #else
-#define PROTOBUF_EXPORT
-#define PROTOBUF_EXPORT_TEMPLATE_DECLARE
-#define PROTOBUF_EXPORT_TEMPLATE_DEFINE
+# define PROTOBUF_EXPORT
+# define PROTOBUF_EXPORT_TEMPLATE_DECLARE
+# define PROTOBUF_EXPORT_TEMPLATE_DEFINE
 #endif
 
 #ifdef PROTOC_EXPORT
@@ -338,21 +346,43 @@
 #endif
 
 #if defined(PROTOBUF_USE_DLLS) && defined(_MSC_VER)
-#if defined(LIBPROTOC_EXPORTS)
-#define PROTOC_EXPORT __declspec(dllexport)
-#else
-#define PROTOC_EXPORT __declspec(dllimport)
-#endif  // defined(LIBPROTOC_EXPORTS)
+# if defined(LIBPROTOC_EXPORTS)
+#  define PROTOC_EXPORT __declspec(dllexport)
+# else
+#  define PROTOC_EXPORT __declspec(dllimport)
+# endif  // defined(LIBPROTOC_EXPORTS)
 #elif defined(PROTOBUF_USE_DLLS) && defined(LIBPROTOC_EXPORTS)
-#define PROTOC_EXPORT __attribute__((visibility("default")))
+# define PROTOC_EXPORT __attribute__((visibility("default")))
 #else
-#define PROTOC_EXPORT
+# define PROTOC_EXPORT
+#endif
+
+#if defined(PROTOBUF_PREDICT_TRUE) || defined(PROTOBUF_PREDICT_FALSE)
+#error PROTOBUF_PREDICT_(TRUE|FALSE) was previously defined
+#endif
+#if defined(__GNUC__)
+# define PROTOBUF_PREDICT_TRUE(x) (__builtin_expect(false || (x), true))
+# define PROTOBUF_PREDICT_FALSE(x) (__builtin_expect(false || (x), false))
+#else
+# define PROTOBUF_PREDICT_TRUE(x) (x)
+# define PROTOBUF_PREDICT_FALSE(x) (x)
+#endif
+
+#ifdef PROTOBUF_NODISCARD
+#error PROTOBUF_NODISCARD was previously defined
+#endif
+#if ABSL_HAVE_CPP_ATTRIBUTE(nodiscard) && PROTOBUF_CPLUSPLUS_MIN(201703L)
+#define PROTOBUF_NODISCARD [[nodiscard]]
+#elif ABSL_HAVE_ATTRIBUTE(warn_unused_result) || defined(__GNUC__)
+#define PROTOBUF_NODISCARD __attribute__((warn_unused_result))
+#else
+#define PROTOBUF_NODISCARD
 #endif
 
 #ifdef PROTOBUF_RESTRICT
 #error PROTOBUF_RESTRICT was previously defined
 #endif
-#if defined(__clang__) || defined(__GNUC__)
+#if defined( __clang__) || defined(__GNUC__)
 #define PROTOBUF_RESTRICT __restrict
 #else
 #define PROTOBUF_RESTRICT
@@ -404,38 +434,41 @@
 #error PROTOBUF_CONSTINIT was previously defined
 #endif
 
-#if defined(PROTOBUF_USE_DLLS) && (defined(_WIN32) || defined(__CYGWIN__))
-// On Windows, `constinit` structures cannot include pointers to dllimport
-// symbols, which are defined in another dll. If libprotobuf is built as a dll,
-// generated parse tables breaks this. See
-// https://github.com/protocolbuffers/protobuf/issues/10159 and
-// https://github.com/protocolbuffers/protobuf/pull/13240. Work around this by
-// suppressing `constinit`.
-#define PROTOBUF_CONSTINIT
-#elif defined(_MSC_VER) && !defined(__clang__)
-// On MSVC, but not clang-cl, the above workaround must extend to static library
-// builds too. MSVC can avoid a global constructor when initializing structures
-// containing pointers to same-dll symbols, it relies on the optimizer for this,
-// so we can't enforce constinit. This limitation does not apply to constexpr.
-// See https://godbolt.org/z/hsT9e3zs4
-#define PROTOBUF_CONSTINIT
+// Lexan sets both MSV_VER and clang, so handle it with the clang path.
+#if defined(_MSC_VER) && !defined(__clang__)
+// MSVC 17 currently seems to raise an error about constant-initialized pointers.
+# if PROTOBUF_MSC_VER_MIN(1930)
+#  define PROTOBUF_CONSTINIT
+#  define PROTOBUF_CONSTEXPR constexpr
+# endif
 #elif defined(__GNUC__) && !defined(__clang__)
 // GCC doesn't support constinit aggregate initialization of absl::Cord.
-#define PROTOBUF_CONSTINIT
-#elif defined(__cpp_constinit)
-#define PROTOBUF_CONSTINIT constinit
-#define PROTOBUF_CONSTINIT_DEFAULT_INSTANCES
+# if PROTOBUF_GNUC_MIN(12, 2)
+#  define PROTOBUF_CONSTINIT
+#  define PROTOBUF_CONSTEXPR constexpr
+# endif
+#else
+# if defined(__cpp_constinit) && !defined(__CYGWIN__)
+#  define PROTOBUF_CONSTINIT constinit
+#  define PROTOBUF_CONSTEXPR constexpr
+#  define PROTOBUF_CONSTINIT_DEFAULT_INSTANCES
 // Some older Clang versions incorrectly raise an error about
 // constant-initializing weak default instance pointers. Versions 12.0 and
 // higher seem to work, except that XCode 12.5.1 shows the error even though it
 // uses Clang 12.0.5.
-#elif ABSL_HAVE_CPP_ATTRIBUTE(clang::require_constant_initialization) && \
-    ((defined(__APPLE__) && PROTOBUF_CLANG_MIN(13, 0)) ||                \
+#elif !defined(__CYGWIN__) && !defined(__MINGW32__) &&                 \
+    ABSL_HAVE_CPP_ATTRIBUTE(clang::require_constant_initialization) && \
+    ((defined(__APPLE__) && PROTOBUF_CLANG_MIN(13, 0)) ||              \
      (!defined(__APPLE__) && PROTOBUF_CLANG_MIN(12, 0)))
-#define PROTOBUF_CONSTINIT [[clang::require_constant_initialization]]
-#define PROTOBUF_CONSTINIT_DEFAULT_INSTANCES
-#else
+#  define PROTOBUF_CONSTINIT [[clang::require_constant_initialization]]
+#  define PROTOBUF_CONSTEXPR constexpr
+#  define PROTOBUF_CONSTINIT_DEFAULT_INSTANCES
+# endif
+#endif
+
+#ifndef PROTOBUF_CONSTINIT
 #define PROTOBUF_CONSTINIT
+#define PROTOBUF_CONSTEXPR
 #endif
 
 // Some globals with an empty non-trivial destructor are annotated with
@@ -465,7 +498,7 @@
 #error PROTOBUF_ATTRIBUTE_INIT_PRIORITY2 was previously defined
 #endif
 #if defined(__GNUC__) && (!defined(__APPLE__) || defined(__clang__)) && \
-    !((defined(sun) || defined(__sun)) &&                               \
+    !((defined(sun) || defined(__sun)) &&                                     \
       (defined(__SVR4) || defined(__svr4__)))
 #define PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 __attribute__((init_priority((101))))
 #define PROTOBUF_ATTRIBUTE_INIT_PRIORITY2 __attribute__((init_priority((102))))
@@ -495,9 +528,56 @@
 #define PROTOBUF_HAVE_ATTRIBUTE_WEAK 0
 #endif
 
-// Variable used to inject artificial language races to detect API level races.
-#if defined(ABSL_HAVE_THREAD_SANITIZER)
-#define PROTOBUF_TSAN_DECLARE_MEMBER char _tsan_detect_race = 0;
+// Macros to detect sanitizers.
+#ifdef PROTOBUF_ASAN
+#error PROTOBUF_ASAN was previously defined
+#endif
+#ifdef PROTOBUF_MSAN
+#error PROTOBUF_MSAN was previously defined
+#endif
+#ifdef PROTOBUF_TSAN
+#error PROTOBUF_TSAN was previously defined
+#endif
+#if defined(__clang__)
+#if ABSL_HAVE_FEATURE(address_sanitizer)
+#    define PROTOBUF_ASAN 1
+#  endif
+#if ABSL_HAVE_FEATURE(thread_sanitizer)
+#    define PROTOBUF_TSAN 1
+#  endif
+#if ABSL_HAVE_FEATURE(memory_sanitizer)
+#    define PROTOBUF_MSAN 1
+#  endif
+#elif defined(__GNUC__)
+// Double-guard is needed for -Wundef:
+#  ifdef __SANITIZE_ADDRESS__
+#  if    __SANITIZE_ADDRESS__
+#    define PROTOBUF_ASAN 1
+#  endif
+#  endif
+#  ifdef __SANITIZE_THREAD__
+#  if    __SANITIZE_THREAD__
+#    define PROTOBUF_TSAN 1
+#  endif
+#  endif
+#  ifdef __SANITIZE_MEMORY__
+#  if    __SANITIZE_MEMORY__
+#    define PROTOBUF_ASAN 1
+#  endif
+#  endif
+#endif
+
+#ifdef PROTOBUF_ASAN
+#include <sanitizer/asan_interface.h>
+#define PROTOBUF_POISON_MEMORY_REGION(p, n) ASAN_POISON_MEMORY_REGION(p, n)
+#define PROTOBUF_UNPOISON_MEMORY_REGION(p, n) ASAN_UNPOISON_MEMORY_REGION(p, n)
+#else  // PROTOBUF_ASAN
+#define PROTOBUF_POISON_MEMORY_REGION(p, n)
+#define PROTOBUF_UNPOISON_MEMORY_REGION(p, n)
+#endif  // PROTOBUF_ASAN
+
+#ifdef PROTOBUF_TSAN
+#define PROTOBUF_TSAN_DECLARE_MEMBER ::uint32_t _tsan_detect_race = 0;
 #else
 #define PROTOBUF_TSAN_DECLARE_MEMBER
 #endif
@@ -532,6 +612,18 @@
 #define PROTOBUF_TC_PARAM_NO_DATA_PASS \
   msg, ptr, ctx, ::google::protobuf::internal::TcFieldData::DefaultInit(), table, hasbits
 
+#ifdef PROTOBUF_UNUSED
+#error PROTOBUF_UNUSED was previously defined
+#endif
+#if ABSL_HAVE_CPP_ATTRIBUTE(maybe_unused) || \
+    (PROTOBUF_MSC_VER_MIN(1911) && PROTOBUF_CPLUSPLUS_MIN(201703L))
+#define PROTOBUF_UNUSED [[maybe_unused]]
+#elif ABSL_HAVE_ATTRIBUTE(unused) || defined(__GNUC__)
+#define PROTOBUF_UNUSED __attribute__((__unused__))
+#else
+#define PROTOBUF_UNUSED
+#endif
+
 // For the toolchains that support it, evaluates to `true` if the input is
 // determined to be a compile time constant after optimizations have happened
 // (like inlining and constant propagation). A `false` result means that the
@@ -560,10 +652,10 @@
 #error PROTOBUF_DESCRIPTOR_WEAK_MESSAGES_ALLOWED was previously defined
 #endif
 #if defined(__GNUC__) && defined(__clang__) && !defined(__APPLE__) && \
-    !defined(_MSC_VER) && !defined(_WIN32) && !defined(__wasm__) &&   \
-    !defined(__EMSCRIPTEN__)
+    !defined(_MSC_VER)
 #define PROTOBUF_DESCRIPTOR_WEAK_MESSAGES_ALLOWED
 #endif
+
 
 // TODO: Enable the feature by default and remove this flag.
 #ifdef PROTOBUF_PREFETCH_PARSE_TABLE
@@ -582,7 +674,155 @@
 
 // ThreadSafeArenaz is turned off completely in opensource builds.
 
-#include "google/protobuf/os_macros_undef.inc"
+// noreturn is defined as a macro in C's stdnoreturn.h
+#ifdef noreturn
+#define PROTOBUF_DID_UNDEF_noreturn
+#pragma push_macro("noreturn")
+#undef noreturn
+#endif
+
+// autoheader defines this in some circumstances
+#ifdef PACKAGE
+#define PROTOBUF_DID_UNDEF_PACKAGE
+#pragma push_macro("PACKAGE")
+#undef PACKAGE
+#endif
+
+// a few common headers define this
+#ifdef PACKED
+#define PROTOBUF_DID_UNDEF_PACKED
+#pragma push_macro("PACKED")
+#undef PACKED
+#endif
+
+// This is a macro on Windows, macOS, and some variants of GCC.
+#ifdef DOMAIN
+#define PROTOBUF_DID_UNDEF_DOMAIN
+#pragma push_macro("DOMAIN")
+#undef DOMAIN
+#endif
+
+// linux is a legacy MACRO defined in most popular C++ standards.
+#ifdef linux
+#pragma push_macro("linux")
+#undef linux
+#define PROTOBUF_DID_UNDEF_LINUX
+#endif
+
+// Windows declares several inconvenient macro names.  We #undef them and then
+// restore them in port_undef.inc.
+#ifdef _WIN32
+#pragma push_macro("CompareString")
+#undef CompareString
+#pragma push_macro("CREATE_NEW")
+#undef CREATE_NEW
+#pragma push_macro("DELETE")
+#undef DELETE
+#pragma push_macro("DOUBLE_CLICK")
+#undef DOUBLE_CLICK
+#pragma push_macro("ERROR")
+#undef ERROR
+#pragma push_macro("ERROR_BUSY")
+#undef ERROR_BUSY
+#pragma push_macro("ERROR_INSTALL_FAILED")
+#undef ERROR_INSTALL_FAILED
+#pragma push_macro("ERROR_NOT_FOUND")
+#undef ERROR_NOT_FOUND
+#pragma push_macro("ERROR_RETRY")
+#undef ERROR_RETRY
+#pragma push_macro("ERROR_TIMEOUT")
+#undef ERROR_TIMEOUT
+#pragma push_macro("GetClassName")
+#undef GetClassName
+#pragma push_macro("GetCurrentTime")
+#undef GetCurrentTime
+#pragma push_macro("GetMessage")
+#undef GetMessage
+#pragma push_macro("GetObject")
+#undef GetObject
+#pragma push_macro("IGNORE")
+#undef IGNORE
+#pragma push_macro("IN")
+#undef IN
+#pragma push_macro("INPUT_KEYBOARD")
+#undef INPUT_KEYBOARD
+#pragma push_macro("NO_ERROR")
+#undef NO_ERROR
+#pragma push_macro("OUT")
+#undef OUT
+#pragma push_macro("OPTIONAL")
+#undef OPTIONAL
+#pragma push_macro("min")
+#undef min
+#pragma push_macro("max")
+#undef max
+#pragma push_macro("NEAR")
+#undef NEAR
+#pragma push_macro("NO_DATA")
+#undef NO_DATA
+#pragma push_macro("REASON_UNKNOWN")
+#undef REASON_UNKNOWN
+#pragma push_macro("SERVICE_DISABLED")
+#undef SERVICE_DISABLED
+#pragma push_macro("SERVICE_STOP")
+#undef SERVICE_STOP
+#pragma push_macro("SEVERITY_ERROR")
+#undef SEVERITY_ERROR
+#pragma push_macro("STATUS_PENDING")
+#undef STATUS_PENDING
+#pragma push_macro("STRICT")
+#undef STRICT
+#pragma push_macro("timezone")
+#undef timezone
+#pragma push_macro("TRUE")
+#undef TRUE
+#pragma push_macro("FALSE")
+#undef FALSE
+#endif  // _WIN32
+
+#ifdef __APPLE__
+// Inconvenient macro names from /usr/include/mach/boolean.h in some macOS SDKs.
+#pragma push_macro("TRUE")
+#undef TRUE
+#pragma push_macro("FALSE")
+#undef FALSE
+// Inconvenient macro names from usr/include/sys/syslimits.h in some macOS SDKs.
+#pragma push_macro("UID_MAX")
+#undef UID_MAX
+#pragma push_macro("GID_MAX")
+#undef GID_MAX
+// TYPE_BOOL is defined in the MacOS's ConditionalMacros.h.
+#pragma push_macro("TYPE_BOOL")
+#undef TYPE_BOOL
+#endif  // __APPLE__
+
+#if defined(ANDROID) || defined(__ANDROID__)
+// Inconvenient macro names from usr/include/limits.h in some Android NDKs.
+#pragma push_macro("UID_MAX")
+#undef UID_MAX
+#pragma push_macro("GID_MAX")
+#undef GID_MAX
+#endif  // defined(ANDROID) || defined(__ANDROID__)
+
+#ifdef __FreeBSD__
+// Inconvenient macro names from /usr/include/sys/param.h.
+#pragma push_macro("TRUE")
+#undef TRUE
+#pragma push_macro("FALSE")
+#undef FALSE
+// Inconvenient macro names from /usr/include/sys/limits.h.
+#pragma push_macro("UID_MAX")
+#undef UID_MAX
+#pragma push_macro("GID_MAX")
+#undef GID_MAX
+#endif  // __FreeBSD__
+
+#if defined(__clang__) || defined(__GNUC__) || defined(_MSC_VER)
+// Don't let Objective-C Macros interfere with proto identifiers with the same
+// name.
+#pragma push_macro("DEBUG")
+#undef DEBUG
+#endif // defined(__clang__) || defined(__GNUC__) || defined(_MSC_VER)
 
 // Protobuf does not support building with a number of warnings that are noisy
 // (and of variable quality across compiler versions) or impossible to implement
@@ -596,10 +836,6 @@
 // Turn on -Wdeprecated-enum-enum-conversion. This deprecation comes in C++20
 // via http://wg21.link/p1120r0.
 #pragma clang diagnostic error "-Wdeprecated-enum-enum-conversion"
-// Turn on -Wconstant-conversion which is used in chromiumos_x86_64 builds.
-#pragma clang diagnostic error "-Wconstant-conversion"
-// Turn on -Wunused-label which is used in chromiumos_x86_64 builds.
-#pragma clang diagnostic error "-Wunused-label"
 // This error has been generally flaky, but we need to disable it specifically
 // to fix https://github.com/protocolbuffers/protobuf/issues/12313
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -608,14 +844,9 @@
 //   for (int i = 0; i < public_dep->message_type_count(); ++i)
 #pragma clang diagnostic ignored "-Wshadow"
 #pragma clang diagnostic ignored "-Wextra-semi"
-// Ensure we don't regress nullability annotations (related: b/383569842)
-#pragma clang diagnostic error "-Wnullability-completeness"
 #endif
 #ifdef __GNUC__
 #pragma GCC diagnostic push
-// We sometimes use "unnecessary" parenthesis in codegen to prevent ambiguity or
-// conflicts with contextual keywords.
-#pragma GCC diagnostic ignored "-Wparentheses"
 // Some of the warnings below only exist in some GCC versions; those version
 // ranges are poorly documented.
 #pragma GCC diagnostic ignored "-Wpragmas"
@@ -629,12 +860,6 @@
 // captured `this`.
 // https://bugzilla.mozilla.org/show_bug.cgi?id=1373625
 #pragma GCC diagnostic ignored "-Wunused-lambda-capture"
-// GCC complains when attributes are specified on anything other than the first
-// declaration for enums, even if they all specify the same set.
-// Eg this would trigger the warning:
-//   enum [[deprecated]] foo : int;
-//   enum [[deprecated]] foo : int;
-#pragma GCC diagnostic ignored "-Wattributes"
 // -Wsign-conversion causes a lot of warnings on mostly code like:
 //   int index = ...
 //   int value = vec[index];
@@ -674,13 +899,12 @@
 // To silence the fact that we will pop this push from another file
 #pragma warning(disable : 5031)
 // Conditional expression is constant
-#pragma warning(disable : 4127)
+#pragma warning(disable: 4127)
 // decimal digit terminates octal escape sequence
-#pragma warning(disable : 4125)
+#pragma warning(disable: 4125)
 #endif
 
-#if defined(PROTOBUF_ENABLE_DEBUG_LOGGING_MAY_LEAK_PII) && \
-    PROTOBUF_ENABLE_DEBUG_LOGGING_MAY_LEAK_PII
+#if PROTOBUF_ENABLE_DEBUG_LOGGING_MAY_LEAK_PII
 #define PROTOBUF_DEBUG true
 #else
 #define PROTOBUF_DEBUG false
@@ -697,8 +921,8 @@
 namespace google {
 namespace protobuf {
 namespace internal {
-[[noreturn]] PROTOBUF_EXPORT void protobuf_assumption_failed(const char* pred,
-                                                             const char* file,
+[[noreturn]] PROTOBUF_EXPORT void protobuf_assumption_failed(const char *pred,
+                                                             const char *file,
                                                              int line);
 }  // namespace internal
 }  // namespace protobuf
@@ -733,20 +957,6 @@ namespace internal {
 #endif  // !NDEBUG
 #endif  // has_builtin(__builtin_assume)
 
-// PROTOBUF_EXPECT_TRUE_WITH_PROBABILITY(expr, prob) tells the compiler that
-// the expression expr is likely to be true with probability prob. This is
-// helpful for the compiler to make better optimization decisions when we know
-// the probability of a certain branch (e.g. from a profile).
-#ifdef PROTOBUF_EXPECT_TRUE_WITH_PROBABILITY
-#error PROTOBUF_EXPECT_TRUE_WITH_PROBABILITY was previously defined
-#endif
-#if ABSL_HAVE_BUILTIN(__builtin_expect_with_probability)
-#define PROTOBUF_EXPECT_TRUE_WITH_PROBABILITY(expr, prob) \
-  __builtin_expect_with_probability((expr), 1, (prob))
-#else
-#define PROTOBUF_EXPECT_TRUE_WITH_PROBABILITY(expr, prob) (expr)
-#endif
-
 #ifdef PROTOBUF_DEPRECATE_AND_INLINE
 #error PROTOBUF_DEPRECATE_AND_INLINE was previously defined
 #endif
@@ -756,57 +966,14 @@ namespace internal {
 #define PROTOBUF_DEPRECATE_AND_INLINE() [[deprecated]]
 #endif
 
-#ifdef PROTOBUF_NONNULL
-#error PROTOBUF_NONNULL was previously defined
-#endif
-#ifndef PROTOBUF_NONNULL
-#define PROTOBUF_NONNULL
-#define PROTOBUF_NULLABLE
-#endif
-
-#ifdef PROTOBUF_MESSAGE_GLOBALS_SECTION
-#error PROTOBUF_MESSAGE_GLOBALS_SECTION was previously defined
-#endif  // PROTOBUF_MESSAGE_GLOBALS_SECTION
-#ifdef PROTOBUF_MESSAGE_GLOBALS
-#error PROTOBUF_MESSAGE_GLOBALS was previously defined
-#endif
-#if defined(PROTOBUF_ENABLE_MESSAGE_GLOBALS) || \
-    defined(PROTOBUF_ENABLE_STABLE_EXPERIMENTS)
-#define PROTOBUF_MESSAGE_GLOBALS
-
-#define PROTOBUF_MESSAGE_GLOBALS_CONST const
-// PowerPC tools complain about section type mismatch.
-#if !defined(__powerpc__)
-#define PROTOBUF_MESSAGE_GLOBALS_SECTION(x) ABSL_ATTRIBUTE_SECTION_VARIABLE(x)
-#else  // defined(__powerpc__)
-#define PROTOBUF_MESSAGE_GLOBALS_SECTION(x)
-#endif  // defined(__powerpc__)
-#else
-#define PROTOBUF_MESSAGE_GLOBALS_CONST
-#define PROTOBUF_MESSAGE_GLOBALS_SECTION(x)
-#endif
-
-#ifdef PROTOBUF_NO_MERGE
-#error PROTOBUF_NO_MERGE was previously defined
-#endif  // PROTOBUF_NO_MERGE
-#ifndef PROTOBUF_NO_MERGE
-#define PROTOBUF_NO_MERGE
-#endif  // PROTOBUF_NO_MERGE
-
-#ifdef PROTOBUF_PRESERVE_ALL
-#error PROTOBUF_PRESERVE_ALL was previously defined
-#endif  // PROTOBUF_PRESERVE_ALL
-#ifndef PROTOBUF_PRESERVE_ALL
-#define PROTOBUF_PRESERVE_ALL
-#endif  // PROTOBUF_PRESERVE_ALL
 
 namespace google {
 namespace protobuf {
 namespace internal {
 #if defined(PROTOBUF_INTERNAL_ENABLE_DEBUG_COUNTERS)
 #define PROTOBUF_DEBUG_COUNTER(name)                                   \
-  ([]() -> auto& {                                                     \
-    static constexpr const char* counter_name = name;                  \
+  ([]() -> auto & {                                                    \
+    static constexpr const char *counter_name = name;                  \
     static ::google::protobuf::internal::RealDebugCounter counter(counter_name); \
     return counter;                                                    \
   }())

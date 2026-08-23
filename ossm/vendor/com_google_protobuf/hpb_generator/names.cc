@@ -5,22 +5,24 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
-#include "hpb_generator/names.h"
+#include "google/protobuf/compiler/hpb/names.h"
 
 #include <string>
 
-#include "absl/log/absl_check.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "google/protobuf/compiler/code_generator.h"
-#include "hpb_generator/keywords.h"
-#include "google/protobuf/descriptor.h"
+#include "google/protobuf/compiler/hpb/keywords.h"
 
-namespace google {
-namespace protobuf {
-namespace hpb_generator {
+namespace google::protobuf::hpb_generator {
+namespace protobuf = ::proto2;
 
 namespace {
+
+// TODO: b/346865271 append ::hpb instead of ::protos after namespace swap
+std::string NamespaceFromPackageName(absl::string_view package_name) {
+  return absl::StrCat(absl::StrReplaceAll(package_name, {{".", "::"}}),
+                      "::protos");
+}
 
 std::string DotsToColons(const absl::string_view name) {
   return absl::StrReplaceAll(name, {{".", "::"}});
@@ -32,7 +34,7 @@ std::string Namespace(const absl::string_view package) {
 }
 
 // Return the qualified C++ name for a file level symbol.
-std::string QualifiedFileLevelSymbol(const google::protobuf::FileDescriptor* file,
+std::string QualifiedFileLevelSymbol(const protobuf::FileDescriptor* file,
                                      const std::string& name) {
   if (file->package().empty()) {
     return absl::StrCat("::", name);
@@ -41,11 +43,11 @@ std::string QualifiedFileLevelSymbol(const google::protobuf::FileDescriptor* fil
   return absl::StrCat(Namespace(file->package()), "::protos::", name);
 }
 
-std::string CppTypeInternal(const google::protobuf::FieldDescriptor* field, bool is_const,
-                            bool is_type_parameter) {
+std::string CppTypeInternal(const protobuf::FieldDescriptor* field,
+                            bool is_const, bool is_type_parameter) {
   std::string maybe_const = is_const ? "const " : "";
   switch (field->cpp_type()) {
-    case google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE: {
+    case protobuf::FieldDescriptor::CPPTYPE_MESSAGE: {
       if (is_type_parameter) {
         return absl::StrCat(maybe_const,
                             QualifiedClassName(field->message_type()));
@@ -54,23 +56,23 @@ std::string CppTypeInternal(const google::protobuf::FieldDescriptor* field, bool
                             QualifiedClassName(field->message_type()), "*");
       }
     }
-    case google::protobuf::FieldDescriptor::CPPTYPE_BOOL:
+    case protobuf::FieldDescriptor::CPPTYPE_BOOL:
       return "bool";
-    case google::protobuf::FieldDescriptor::CPPTYPE_FLOAT:
+    case protobuf::FieldDescriptor::CPPTYPE_FLOAT:
       return "float";
-    case google::protobuf::FieldDescriptor::CPPTYPE_INT32:
-    case google::protobuf::FieldDescriptor::CPPTYPE_ENUM:
+    case protobuf::FieldDescriptor::CPPTYPE_INT32:
+    case protobuf::FieldDescriptor::CPPTYPE_ENUM:
       return "int32_t";
-    case google::protobuf::FieldDescriptor::CPPTYPE_UINT32:
+    case protobuf::FieldDescriptor::CPPTYPE_UINT32:
       return "uint32_t";
-    case google::protobuf::FieldDescriptor::CPPTYPE_DOUBLE:
+    case protobuf::FieldDescriptor::CPPTYPE_DOUBLE:
       return "double";
-    case google::protobuf::FieldDescriptor::CPPTYPE_INT64:
+    case protobuf::FieldDescriptor::CPPTYPE_INT64:
       return "int64_t";
-    case google::protobuf::FieldDescriptor::CPPTYPE_UINT64:
+    case protobuf::FieldDescriptor::CPPTYPE_UINT64:
       return "uint64_t";
-    case google::protobuf::FieldDescriptor::CPPTYPE_STRING:
-      return "::absl::string_view";
+    case protobuf::FieldDescriptor::CPPTYPE_STRING:
+      return "absl::string_view";
     default:
       ABSL_LOG(FATAL) << "Unexpected type: " << field->cpp_type();
   }
@@ -78,8 +80,8 @@ std::string CppTypeInternal(const google::protobuf::FieldDescriptor* field, bool
 
 }  // namespace
 
-std::string ClassName(const google::protobuf::Descriptor* descriptor) {
-  const google::protobuf::Descriptor* parent = descriptor->containing_type();
+std::string ClassName(const protobuf::Descriptor* descriptor) {
+  const protobuf::Descriptor* parent = descriptor->containing_type();
   std::string res;
   // Classes in global namespace without package names are prefixed
   // by hpb_ to avoid collision with C compiler structs defined in
@@ -93,17 +95,21 @@ std::string ClassName(const google::protobuf::Descriptor* descriptor) {
   return ResolveKeywordConflict(res);
 }
 
-std::string QualifiedClassName(const google::protobuf::Descriptor* descriptor) {
+std::string QualifiedClassName(const protobuf::Descriptor* descriptor) {
   return QualifiedFileLevelSymbol(descriptor->file(), ClassName(descriptor));
 }
 
-std::string QualifiedInternalClassName(const google::protobuf::Descriptor* descriptor) {
+std::string QualifiedInternalClassName(const protobuf::Descriptor* descriptor) {
   return QualifiedFileLevelSymbol(
       descriptor->file(), absl::StrCat("internal::", ClassName(descriptor)));
 }
 
 std::string CppSourceFilename(const google::protobuf::FileDescriptor* file) {
-  return compiler::StripProto(file->name()) + ".hpb.cc";
+  return compiler::StripProto(file->name()) + ".upb.proto.cc";
+}
+
+std::string ForwardingHeaderFilename(const google::protobuf::FileDescriptor* file) {
+  return compiler::StripProto(file->name()) + ".upb.fwd.h";
 }
 
 std::string UpbCFilename(const google::protobuf::FileDescriptor* file) {
@@ -111,49 +117,65 @@ std::string UpbCFilename(const google::protobuf::FileDescriptor* file) {
 }
 
 std::string CppHeaderFilename(const google::protobuf::FileDescriptor* file) {
-  return absl::StrCat(compiler::StripProto(file->name()), ".hpb.h");
+  return compiler::StripProto(file->name()) + ".upb.proto.h";
 }
 
-std::string CppConstType(const google::protobuf::FieldDescriptor* field) {
+void WriteStartNamespace(const protobuf::FileDescriptor* file, Output& output) {
+  // Skip namespace generation if package name is not specified.
+  if (file->package().empty()) {
+    return;
+  }
+
+  output("namespace $0 {\n\n", NamespaceFromPackageName(file->package()));
+}
+
+void WriteEndNamespace(const protobuf::FileDescriptor* file, Output& output) {
+  if (file->package().empty()) {
+    return;
+  }
+  output("} //  namespace $0\n\n", NamespaceFromPackageName(file->package()));
+}
+
+std::string CppConstType(const protobuf::FieldDescriptor* field) {
   return CppTypeInternal(field, /* is_const= */ true,
                          /* is_type_parameter= */ false);
 }
 
-std::string CppTypeParameterName(const google::protobuf::FieldDescriptor* field) {
+std::string CppTypeParameterName(const protobuf::FieldDescriptor* field) {
   return CppTypeInternal(field, /* is_const= */ false,
                          /* is_type_parameter= */ true);
 }
 
-std::string MessageBaseType(const google::protobuf::FieldDescriptor* field,
+std::string MessageBaseType(const protobuf::FieldDescriptor* field,
                             bool is_const) {
-  ABSL_DCHECK(field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE);
+  ABSL_DCHECK(field->cpp_type() == protobuf::FieldDescriptor::CPPTYPE_MESSAGE);
   std::string maybe_const = is_const ? "const " : "";
   return maybe_const + QualifiedClassName(field->message_type());
 }
 
-std::string MessagePtrConstType(const google::protobuf::FieldDescriptor* field,
+std::string MessagePtrConstType(const protobuf::FieldDescriptor* field,
                                 bool is_const) {
-  ABSL_DCHECK(field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE);
+  ABSL_DCHECK(field->cpp_type() == protobuf::FieldDescriptor::CPPTYPE_MESSAGE);
   std::string maybe_const = is_const ? "const " : "";
   return "::hpb::Ptr<" + maybe_const +
          QualifiedClassName(field->message_type()) + ">";
 }
 
-std::string MessageCProxyType(const google::protobuf::FieldDescriptor* field,
+std::string MessageCProxyType(const protobuf::FieldDescriptor* field,
                               bool is_const) {
-  ABSL_DCHECK(field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE);
+  ABSL_DCHECK(field->cpp_type() == protobuf::FieldDescriptor::CPPTYPE_MESSAGE);
   std::string maybe_const = is_const ? "const " : "";
   return maybe_const + QualifiedInternalClassName(field->message_type()) +
          "CProxy";
 }
 
-std::string MessageProxyType(const google::protobuf::FieldDescriptor* field,
+std::string MessageProxyType(const protobuf::FieldDescriptor* field,
                              bool is_const) {
-  ABSL_DCHECK(field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE);
+  ABSL_DCHECK(field->cpp_type() == protobuf::FieldDescriptor::CPPTYPE_MESSAGE);
   std::string maybe_const = is_const ? "const " : "";
   return maybe_const + QualifiedInternalClassName(field->message_type()) +
          "Proxy";
 }
-}  // namespace hpb_generator
+
 }  // namespace protobuf
-}  // namespace google
+}  // namespace google::hpb_generator

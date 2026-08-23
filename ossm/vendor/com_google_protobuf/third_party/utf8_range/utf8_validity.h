@@ -10,20 +10,15 @@
 #include <cstddef>
 
 #include "absl/strings/string_view.h"
-#include "utf8_range.h"
 
 namespace utf8_range {
 
 // Returns true if the sequence of characters is a valid UTF-8 sequence.
-inline bool IsStructurallyValid(absl::string_view str) {
-  return utf8_range_IsValid(str.data(), str.size());
-}
+bool IsStructurallyValid(absl::string_view str);
 
 // Returns the length in bytes of the prefix of str that is all
 // structurally valid UTF-8.
-inline size_t SpanStructurallyValid(absl::string_view str) {
-  return utf8_range_ValidPrefix(str.data(), str.size());
-}
+size_t SpanStructurallyValid(absl::string_view str);
 
 }  // namespace utf8_range
 

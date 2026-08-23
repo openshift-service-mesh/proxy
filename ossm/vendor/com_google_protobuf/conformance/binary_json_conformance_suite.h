@@ -5,8 +5,8 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
-#ifndef GOOGLE_PROTOBUF_CONFORMANCE_BINARY_JSON_CONFORMANCE_SUITE_H__
-#define GOOGLE_PROTOBUF_CONFORMANCE_BINARY_JSON_CONFORMANCE_SUITE_H__
+#ifndef CONFORMANCE_BINARY_JSON_CONFORMANCE_SUITE_H
+#define CONFORMANCE_BINARY_JSON_CONFORMANCE_SUITE_H
 
 #include <functional>
 #include <memory>
@@ -45,30 +45,12 @@ class BinaryAndJsonConformanceSuite : public ConformanceTestSuite {
                                   const std::string& equivalent_text_format);
 
   template <typename MessageType>
-  void RunValidRoundtripProtobufTest(const std::string& test_name,
-                                     ConformanceLevel level,
-                                     const std::string& input_protobuf);
-
-  template <typename MessageType>
   void RunValidProtobufTest(const std::string& test_name,
                             ConformanceLevel level,
                             const std::string& input_protobuf,
                             const std::string& equivalent_text_format);
 
-  template <typename MessageType>
-  void ExpectParseFailureForProto(const std::string& proto,
-                                  const std::string& test_name,
-                                  ConformanceLevel level);
-
   void RunDelimitedFieldTests();
-
-  void RunUnstableTests();
-
-  void RunUtf8ValidationTests();
-
-  void RunMessageSetTests();
-
-  void RunRecursionLimitTests();
 
   template <typename MessageType>
   friend class BinaryAndJsonConformanceSuiteImpl;
@@ -93,6 +75,7 @@ class BinaryAndJsonConformanceSuiteImpl {
   void RunAllTests();
 
   void RunBinaryPerformanceTests();
+  void RunJsonPerformanceTests();
   void RunJsonTests();
   void RunJsonTestsForStoresDefaultPrimitive();
   void RunJsonTestsForFieldNameConvention();
@@ -105,7 +88,6 @@ class BinaryAndJsonConformanceSuiteImpl {
   void RunJsonTestsForValue();
   void RunJsonTestsForAny();
   void RunJsonTestsForUnknownEnumStringValues();
-  void RunJsonTestsForReservedFields();
   void RunValidJsonTest(const std::string& test_name, ConformanceLevel level,
                         const std::string& input_json,
                         const std::string& equivalent_text_format);
@@ -161,9 +143,7 @@ class BinaryAndJsonConformanceSuiteImpl {
                                       ConformanceLevel level);
   void TestPrematureEOFForType(google::protobuf::FieldDescriptor::Type type);
   void TestIllegalTags();
-  void TestUnmatchedGroup();
   void TestUnknownWireType();
-  void TestInvalidUtf8String();
   void TestOneofMessage();
   void TestUnknownMessage();
   void TestUnknownOrdering();
@@ -181,6 +161,8 @@ class BinaryAndJsonConformanceSuiteImpl {
       google::protobuf::FieldDescriptor::Type);
   void TestBinaryPerformanceMergeMessageWithUnknownFieldForType(
       google::protobuf::FieldDescriptor::Type);
+  void TestJsonPerformanceMergeMessageWithRepeatedFieldForType(
+      google::protobuf::FieldDescriptor::Type, std::string field_value);
 
   enum class Packed {
     kUnspecified = 0,
@@ -203,4 +185,4 @@ class BinaryAndJsonConformanceSuiteImpl {
 }  // namespace protobuf
 }  // namespace google
 
-#endif  // GOOGLE_PROTOBUF_CONFORMANCE_BINARY_JSON_CONFORMANCE_SUITE_H__
+#endif  // CONFORMANCE_BINARY_JSON_CONFORMANCE_SUITE_H

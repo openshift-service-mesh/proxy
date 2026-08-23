@@ -54,16 +54,6 @@ final class FloatArrayList extends AbstractProtobufList<Float>
     this.size = size;
   }
 
-  /**
-   * Constructs a new mutable {@code FloatArrayList} containing the same elements as {@code other}.
-   */
-  FloatArrayList(FloatArrayList other, boolean isMutable) {
-    this(
-        other.size == 0 ? EMPTY_ARRAY : Arrays.copyOf(other.array, other.size),
-        other.size,
-        isMutable);
-  }
-
   @Override
   protected void removeRange(int fromIndex, int toIndex) {
     ensureIsMutable();
@@ -77,8 +67,7 @@ final class FloatArrayList extends AbstractProtobufList<Float>
   }
 
   @Override
-  public boolean equals(
-          Object o) {
+  public boolean equals(Object o) {
     if (this == o) {
       return true;
     }
@@ -155,13 +144,11 @@ final class FloatArrayList extends AbstractProtobufList<Float>
   }
 
   @Override
-  @CanIgnoreReturnValue
   public Float set(int index, Float element) {
     return setFloat(index, element);
   }
 
   @Override
-  @CanIgnoreReturnValue
   public float setFloat(int index, float element) {
     ensureIsMutable();
     ensureIndexInRange(index);
@@ -171,7 +158,6 @@ final class FloatArrayList extends AbstractProtobufList<Float>
   }
 
   @Override
-  @CanIgnoreReturnValue
   public boolean add(Float element) {
     addFloat(element);
     return true;
@@ -225,7 +211,6 @@ final class FloatArrayList extends AbstractProtobufList<Float>
   }
 
   @Override
-  @CanIgnoreReturnValue
   public boolean addAll(Collection<? extends Float> collection) {
     ensureIsMutable();
 
@@ -259,7 +244,6 @@ final class FloatArrayList extends AbstractProtobufList<Float>
   }
 
   @Override
-  @CanIgnoreReturnValue
   public Float remove(int index) {
     ensureIsMutable();
     ensureIndexInRange(index);

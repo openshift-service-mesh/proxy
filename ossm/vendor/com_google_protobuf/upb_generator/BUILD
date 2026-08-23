@@ -5,8 +5,7 @@
 # license that can be found in the LICENSE file or at
 # https://developers.google.com/open-source/licenses/bsd
 
-load("@rules_cc//cc:defs.bzl", "cc_library")
-load("//upb/bazel:copts.bzl", "UPB_DEFAULT_CPPOPTS", "UPB_DEFAULT_FEATURES")
+load("//upb/bazel:build_defs.bzl", "UPB_DEFAULT_CPPOPTS")
 load(
     "//upb_generator:bootstrap_compiler.bzl",
     "bootstrap_cc_library",
@@ -20,13 +19,22 @@ licenses(["notice"])
 bootstrap_upb_proto_library(
     name = "plugin_upb_proto",
     bootstrap_hdr = "plugin_bootstrap.h",
-    proto_lib_deps = ["//:compiler_plugin_proto"],
-    src_files = ["google/protobuf/compiler/plugin.proto"],
-    src_rules = [
+    google3_src_files = [
+        "net/proto2/compiler/proto/profile.proto",
+        "third_party/protobuf/compiler/plugin.proto",
+    ],
+    google3_src_rules = [
+        "//net/proto2/proto:descriptor_proto_source",
+        "//net/proto2/compiler/proto:profile.proto",
+        "//src/google/protobuf/compiler:plugin_proto_source",
+    ],
+    oss_src_files = ["google/protobuf/compiler/plugin.proto"],
+    oss_src_rules = [
         "//:descriptor_proto_srcs",
         "//src/google/protobuf/compiler:plugin_proto_src",
     ],
-    strip_prefix = "third_party/protobuf/github/bootstrap/src",
+    oss_strip_prefix = "third_party/protobuf/github/bootstrap/src",
+    proto_lib_deps = ["//:compiler_plugin_proto"],
     deps = ["//upb/reflection:descriptor_upb_proto"],
 )
 
@@ -42,14 +50,12 @@ bootstrap_cc_library(
         "//upb/reflection:reflection",
     ],
     copts = UPB_DEFAULT_CPPOPTS,
-    features = UPB_DEFAULT_FEATURES,
     visibility = ["//upb:friend_generators"],
     deps = [
         "//src/google/protobuf:port",
-        "//upb/mini_table",
-        "//upb/mini_table:internal",
-        "//upb/port",
-        "@abseil-cpp//absl/strings",
+        "//upb:mini_table",
+        "//upb:port",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -67,23 +73,19 @@ bootstrap_cc_library(
         "//upb/reflection:descriptor_upb_proto",
     ],
     copts = UPB_DEFAULT_CPPOPTS,
-    features = UPB_DEFAULT_FEATURES,
     visibility = ["//visibility:public"],
     deps = [
-        "//upb/base",
-        "//upb/mini_descriptor",
-        "//upb/mini_table",
-        "//upb/port",
-        "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/strings",
+        "//upb:base",
+        "//upb:mini_descriptor",
+        "//upb:mini_table",
+        "//upb:port",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/strings",
     ],
 )
 
 bootstrap_cc_library(
     name = "plugin",
-    srcs = [
-        "plugin.cc",
-    ],
     hdrs = [
         "plugin.h",
     ],
@@ -91,24 +93,19 @@ bootstrap_cc_library(
         ":plugin_upb_proto",
         "//upb/reflection:descriptor_upb_proto",
         "//upb/reflection:reflection",
-        "//upb_generator:file_layout",
     ],
     copts = UPB_DEFAULT_CPPOPTS,
-    features = UPB_DEFAULT_FEATURES,
-    visibility = [
-        "//upb:friend_generators",
-    ],
+    visibility = ["//upb:friend_generators"],
     deps = [
-        "//src/google/protobuf",
         "//src/google/protobuf/compiler:code_generator_lite",
-        "//upb/base",
-        "//upb/mem",
-        "//upb/port",
-        "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/container:flat_hash_set",
-        "@abseil-cpp//absl/log:absl_check",
-        "@abseil-cpp//absl/log:absl_log",
-        "@abseil-cpp//absl/strings",
+        "//upb:base",
+        "//upb:mem",
+        "//upb:port",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/log:absl_log",
+        "@com_google_absl//absl/strings",
     ],
 )
 

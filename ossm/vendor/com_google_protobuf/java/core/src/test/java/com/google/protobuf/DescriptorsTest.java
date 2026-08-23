@@ -38,25 +38,23 @@ import com.google.protobuf.test.UnittestImport;
 import com.google.protobuf.test.UnittestImport.ImportEnum;
 import com.google.protobuf.test.UnittestImport.ImportEnumForMap;
 import legacy_features_unittest.UnittestLegacyFeatures;
-import pb.EnumFeature;
 import pb.UnittestFeatures;
-import proto2_unittest.TestCustomOptions;
-import proto2_unittest.UnittestCustomOptions;
-import proto2_unittest.UnittestProto;
-import proto2_unittest.UnittestProto.ForeignEnum;
-import proto2_unittest.UnittestProto.ForeignMessage;
-import proto2_unittest.UnittestProto.TestAllExtensions;
-import proto2_unittest.UnittestProto.TestAllTypes;
-import proto2_unittest.UnittestProto.TestExtremeDefaultValues;
-import proto2_unittest.UnittestProto.TestJsonName;
-import proto2_unittest.UnittestProto.TestMultipleExtensionRanges;
-import proto2_unittest.UnittestProto.TestRequired;
-import proto2_unittest.UnittestProto.TestReservedEnumFields;
-import proto2_unittest.UnittestProto.TestReservedFields;
-import proto2_unittest.UnittestProto.TestService;
-import proto2_unittest.UnittestRetention;
+import protobuf_unittest.TestCustomOptions;
+import protobuf_unittest.UnittestCustomOptions;
+import protobuf_unittest.UnittestProto;
+import protobuf_unittest.UnittestProto.ForeignEnum;
+import protobuf_unittest.UnittestProto.ForeignMessage;
+import protobuf_unittest.UnittestProto.TestAllExtensions;
+import protobuf_unittest.UnittestProto.TestAllTypes;
+import protobuf_unittest.UnittestProto.TestExtremeDefaultValues;
+import protobuf_unittest.UnittestProto.TestJsonName;
+import protobuf_unittest.UnittestProto.TestMultipleExtensionRanges;
+import protobuf_unittest.UnittestProto.TestRequired;
+import protobuf_unittest.UnittestProto.TestReservedEnumFields;
+import protobuf_unittest.UnittestProto.TestReservedFields;
+import protobuf_unittest.UnittestProto.TestService;
+import protobuf_unittest.UnittestRetention;
 import protobuf_unittest.UnittestProto3Extensions.Proto3FileExtensions;
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
 import org.junit.Before;
@@ -64,8 +62,8 @@ import org.junit.Test;
 import org.junit.experimental.runners.Enclosed;
 import org.junit.runner.RunWith;
 
-import proto2_unittest.NestedExtension;
-import proto2_unittest.NonNestedExtension;
+import protobuf_unittest.NestedExtension;
+import protobuf_unittest.NonNestedExtension;
 
 /** Unit test for {@link Descriptors}. */
 @RunWith(Enclosed.class)
@@ -93,9 +91,8 @@ public class DescriptorsTest {
     public void testFileDescriptor() throws Exception {
       FileDescriptor file = UnittestProto.getDescriptor();
 
-      assertThat(file.isPlaceholder()).isFalse();
       assertThat(file.getName()).isEqualTo("google/protobuf/unittest.proto");
-      assertThat(file.getPackage()).isEqualTo("proto2_unittest");
+      assertThat(file.getPackage()).isEqualTo("protobuf_unittest");
       assertThat(file.getOptions().getJavaOuterClassname()).isEqualTo("UnittestProto");
       assertThat(file.toProto().getName()).isEqualTo("google/protobuf/unittest.proto");
 
@@ -105,7 +102,7 @@ public class DescriptorsTest {
       assertThat(file.getMessageTypes().get(0)).isEqualTo(messageType);
       assertThat(file.findMessageTypeByName("TestAllTypes")).isEqualTo(messageType);
       assertThat(file.findMessageTypeByName("NoSuchType")).isNull();
-      assertThat(file.findMessageTypeByName("proto2_unittest.TestAllTypes")).isNull();
+      assertThat(file.findMessageTypeByName("protobuf_unittest.TestAllTypes")).isNull();
       for (int i = 0; i < file.getMessageTypes().size(); i++) {
         assertThat(file.getMessageTypes().get(i).getIndex()).isEqualTo(i);
       }
@@ -114,7 +111,7 @@ public class DescriptorsTest {
       assertThat(file.getEnumTypes().get(0)).isEqualTo(enumType);
       assertThat(file.findEnumTypeByName("ForeignEnum")).isEqualTo(enumType);
       assertThat(file.findEnumTypeByName("NoSuchType")).isNull();
-      assertThat(file.findEnumTypeByName("proto2_unittest.ForeignEnum")).isNull();
+      assertThat(file.findEnumTypeByName("protobuf_unittest.ForeignEnum")).isNull();
       assertThat(UnittestImport.getDescriptor().getEnumTypes())
           .containsExactly(ImportEnum.getDescriptor(), ImportEnumForMap.getDescriptor())
           .inOrder();
@@ -126,7 +123,7 @@ public class DescriptorsTest {
       assertThat(file.getServices().get(0)).isEqualTo(service);
       assertThat(file.findServiceByName("TestService")).isEqualTo(service);
       assertThat(file.findServiceByName("NoSuchType")).isNull();
-      assertThat(file.findServiceByName("proto2_unittest.TestService")).isNull();
+      assertThat(file.findServiceByName("protobuf_unittest.TestService")).isNull();
       assertThat(UnittestImport.getDescriptor().getServices()).isEqualTo(Collections.emptyList());
       for (int i = 0; i < file.getServices().size(); i++) {
         assertThat(file.getServices().get(i).getIndex()).isEqualTo(i);
@@ -136,7 +133,7 @@ public class DescriptorsTest {
       assertThat(file.getExtensions().get(0)).isEqualTo(extension);
       assertThat(file.findExtensionByName("optional_int32_extension")).isEqualTo(extension);
       assertThat(file.findExtensionByName("no_such_ext")).isNull();
-      assertThat(file.findExtensionByName("proto2_unittest.optional_int32_extension")).isNull();
+      assertThat(file.findExtensionByName("protobuf_unittest.optional_int32_extension")).isNull();
       assertThat(UnittestImport.getDescriptor().getExtensions()).isEqualTo(Collections.emptyList());
       for (int i = 0; i < file.getExtensions().size(); i++) {
         assertThat(file.getExtensions().get(i).getIndex()).isEqualTo(i);
@@ -211,13 +208,10 @@ public class DescriptorsTest {
     @Test
     public void testDescriptor() throws Exception {
       Descriptor messageType = TestAllTypes.getDescriptor();
-      assertThat(messageType.isPlaceholder()).isFalse();
-
       Descriptor nestedType = TestAllTypes.NestedMessage.getDescriptor();
-      assertThat(nestedType.isPlaceholder()).isFalse();
 
       assertThat(messageType.getName()).isEqualTo("TestAllTypes");
-      assertThat(messageType.getFullName()).isEqualTo("proto2_unittest.TestAllTypes");
+      assertThat(messageType.getFullName()).isEqualTo("protobuf_unittest.TestAllTypes");
       assertThat(messageType.getFile()).isEqualTo(UnittestProto.getDescriptor());
       assertThat(messageType.getContainingType()).isNull();
       assertThat(messageType.getOptions())
@@ -225,7 +219,7 @@ public class DescriptorsTest {
       assertThat(messageType.toProto().getName()).isEqualTo("TestAllTypes");
 
       assertThat(nestedType.getName()).isEqualTo("NestedMessage");
-      assertThat(nestedType.getFullName()).isEqualTo("proto2_unittest.TestAllTypes.NestedMessage");
+      assertThat(nestedType.getFullName()).isEqualTo("protobuf_unittest.TestAllTypes.NestedMessage");
       assertThat(nestedType.getFile()).isEqualTo(UnittestProto.getDescriptor());
       assertThat(nestedType.getContainingType()).isEqualTo(messageType);
 
@@ -267,7 +261,7 @@ public class DescriptorsTest {
 
       assertThat(primitiveField.getName()).isEqualTo("optional_int32");
       assertThat(primitiveField.getFullName())
-          .isEqualTo("proto2_unittest.TestAllTypes.optional_int32");
+          .isEqualTo("protobuf_unittest.TestAllTypes.optional_int32");
       assertThat(primitiveField.getNumber()).isEqualTo(1);
       assertThat(primitiveField.getContainingType()).isEqualTo(messageType);
       assertThat(primitiveField.getFile()).isEqualTo(UnittestProto.getDescriptor());
@@ -295,7 +289,7 @@ public class DescriptorsTest {
           .isEqualTo(DescriptorProtos.FieldOptions.CType.CORD);
 
       assertThat(extension.getName()).isEqualTo("optional_int32_extension");
-      assertThat(extension.getFullName()).isEqualTo("proto2_unittest.optional_int32_extension");
+      assertThat(extension.getFullName()).isEqualTo("protobuf_unittest.optional_int32_extension");
       assertThat(extension.getNumber()).isEqualTo(1);
       assertThat(extension.getContainingType()).isEqualTo(TestAllExtensions.getDescriptor());
       assertThat(extension.getFile()).isEqualTo(UnittestProto.getDescriptor());
@@ -308,7 +302,7 @@ public class DescriptorsTest {
       assertThat(extension.toProto().getName()).isEqualTo("optional_int32_extension");
 
       assertThat(nestedExtension.getName()).isEqualTo("single");
-      assertThat(nestedExtension.getFullName()).isEqualTo("proto2_unittest.TestRequired.single");
+      assertThat(nestedExtension.getFullName()).isEqualTo("protobuf_unittest.TestRequired.single");
       assertThat(nestedExtension.getExtensionScope()).isEqualTo(TestRequired.getDescriptor());
     }
 
@@ -352,7 +346,7 @@ public class DescriptorsTest {
       assertThat(d.findFieldByName("escaped_bytes").getDefaultValue())
           .isEqualTo(
               ByteString.copyFrom(
-                  "\0\001\007\b\f\n\r\t\013\\\'\"\u00fe".getBytes(StandardCharsets.ISO_8859_1)));
+                  "\0\001\007\b\f\n\r\t\013\\\'\"\u00fe".getBytes(Internal.ISO_8859_1)));
       assertThat(d.findFieldByName("large_uint32").getDefaultValue()).isEqualTo(-1);
       assertThat(d.findFieldByName("large_uint64").getDefaultValue()).isEqualTo(-1L);
     }
@@ -628,7 +622,7 @@ public class DescriptorsTest {
       EnumDescriptor nestedType = TestAllTypes.NestedEnum.getDescriptor();
 
       assertThat(enumType.getName()).isEqualTo("ForeignEnum");
-      assertThat(enumType.getFullName()).isEqualTo("proto2_unittest.ForeignEnum");
+      assertThat(enumType.getFullName()).isEqualTo("protobuf_unittest.ForeignEnum");
       assertThat(enumType.getFile()).isEqualTo(UnittestProto.getDescriptor());
       assertThat(enumType.isClosed()).isTrue();
       assertThat(enumType.getContainingType()).isNull();
@@ -636,7 +630,7 @@ public class DescriptorsTest {
           .isEqualTo(DescriptorProtos.EnumOptions.getDefaultInstance());
 
       assertThat(nestedType.getName()).isEqualTo("NestedEnum");
-      assertThat(nestedType.getFullName()).isEqualTo("proto2_unittest.TestAllTypes.NestedEnum");
+      assertThat(nestedType.getFullName()).isEqualTo("protobuf_unittest.TestAllTypes.NestedEnum");
       assertThat(nestedType.getFile()).isEqualTo(UnittestProto.getDescriptor());
       assertThat(nestedType.getContainingType()).isEqualTo(TestAllTypes.getDescriptor());
 
@@ -658,7 +652,7 @@ public class DescriptorsTest {
       ServiceDescriptor service = TestService.getDescriptor();
 
       assertThat(service.getName()).isEqualTo("TestService");
-      assertThat(service.getFullName()).isEqualTo("proto2_unittest.TestService");
+      assertThat(service.getFullName()).isEqualTo("protobuf_unittest.TestService");
       assertThat(service.getFile()).isEqualTo(UnittestProto.getDescriptor());
 
       MethodDescriptor fooMethod = service.getMethods().get(0);
@@ -806,6 +800,32 @@ public class DescriptorsTest {
       }
     }
 
+    /** Tests that parsing an unknown enum throws an exception */
+    @Test
+    public void testParseUnknownEnum() {
+      FieldDescriptorProto.Builder field =
+          FieldDescriptorProto.newBuilder()
+              .setLabel(FieldDescriptorProto.Label.LABEL_OPTIONAL)
+              .setTypeName("UnknownEnum")
+              .setType(FieldDescriptorProto.Type.TYPE_ENUM)
+              .setName("bar")
+              .setNumber(1);
+      DescriptorProto.Builder messageType =
+          DescriptorProto.newBuilder().setName("Foo").addField(field);
+      FileDescriptorProto fooProto =
+          FileDescriptorProto.newBuilder()
+              .setName("foo.proto")
+              .addDependency("bar.proto")
+              .addMessageType(messageType)
+              .build();
+      try {
+        Descriptors.FileDescriptor.buildFrom(fooProto, new FileDescriptor[0], true);
+        assertWithMessage("DescriptorValidationException expected").fail();
+      } catch (DescriptorValidationException expected) {
+        assertThat(expected.getMessage()).contains("\"UnknownEnum\" is not an enum type.");
+      }
+    }
+
     /**
      * Tests the translate/crosslink for an example where a message field's name and type name are
      * the same.
@@ -946,170 +966,8 @@ public class DescriptorsTest {
                               .setName("bar")
                               .setNumber(1)))
               .build();
-      FileDescriptor foo =
+      FileDescriptor unused =
           Descriptors.FileDescriptor.buildFrom(fooProto, new FileDescriptor[0], true);
-      assertThat(
-              foo.findMessageTypeByName("Foo")
-                  .findFieldByName("bar")
-                  .getMessageType()
-                  .isPlaceholder())
-          .isTrue();
-      assertThat(
-              foo.findMessageTypeByName("Foo")
-                  .findFieldByName("bar")
-                  .getMessageType()
-                  .getFile()
-                  .isPlaceholder())
-          .isTrue();
-    }
-
-    @Test
-    public void testUnknownMessageSetExtension() throws Exception {
-      FileDescriptorProto fooProto =
-          FileDescriptorProto.newBuilder()
-              .setName("foo.proto")
-              .addDependency("message_set.proto")
-              .addExtension(
-                  FieldDescriptorProto.newBuilder()
-                      .setLabel(FieldDescriptorProto.Label.LABEL_OPTIONAL)
-                      .setType(FieldDescriptorProto.Type.TYPE_INT32)
-                      .setExtendee("MessageSet")
-                      .setName("bar")
-                      .setNumber(2147476052))
-              .build();
-
-      FileDescriptor foo =
-          Descriptors.FileDescriptor.buildFrom(fooProto, new FileDescriptor[0], true);
-      FieldDescriptor field = foo.findExtensionByName("bar");
-
-      assertThat(field.isExtension()).isTrue();
-      assertThat(field.getNumber()).isEqualTo(2147476052);
-      assertThat(field.getContainingType().isPlaceholder()).isTrue();
-      assertThat(field.getContainingType().getFullName()).isEqualTo("MessageSet");
-    }
-
-    @Test
-    public void testUnknownEnumFieldsAllowed() throws Exception {
-      FileDescriptorProto fooProto =
-          FileDescriptorProto.newBuilder()
-              .setName("foo.proto")
-              .addDependency("bar.proto")
-              .addMessageType(
-                  DescriptorProto.newBuilder()
-                      .setName("Foo")
-                      // TYPE_ENUM signals that this is an enum field, not a message.
-                      .addField(
-                          FieldDescriptorProto.newBuilder()
-                              .setLabel(FieldDescriptorProto.Label.LABEL_OPTIONAL)
-                              .setTypeName("Bar")
-                              .setName("bar")
-                              .setNumber(1)
-                              .setType(FieldDescriptorProto.Type.TYPE_ENUM))
-                      // Default values signal that this must be an enum field, not
-                      // a message.
-                      .addField(
-                          FieldDescriptorProto.newBuilder()
-                              .setLabel(FieldDescriptorProto.Label.LABEL_OPTIONAL)
-                              .setTypeName("Baz")
-                              .setName("baz")
-                              .setNumber(2)
-                              .setDefaultValue("BAZ_VALUE")))
-              .build();
-
-      FileDescriptor foo =
-          Descriptors.FileDescriptor.buildFrom(fooProto, new FileDescriptor[0], true);
-      FieldDescriptor barField = foo.findMessageTypeByName("Foo").findFieldByName("bar");
-      FieldDescriptor bazField = foo.findMessageTypeByName("Foo").findFieldByName("baz");
-
-      assertThat(barField.getEnumType().isPlaceholder()).isTrue();
-      assertThat(bazField.getEnumType().isPlaceholder()).isTrue();
-      assertThat(barField.hasDefaultValue()).isFalse();
-      assertThat(bazField.hasDefaultValue()).isTrue();
-      assertThat(bazField.getDefaultValue()).isEqualTo(null);
-    }
-
-    @Test
-    public void testUnknownEnumFieldsConflictAllowed() throws Exception {
-      FileDescriptorProto fooProto =
-          FileDescriptorProto.newBuilder()
-              .setName("foo.proto")
-              .addDependency("bar.proto")
-              .addMessageType(
-                  DescriptorProto.newBuilder()
-                      .setName("Foo")
-                      // Trick the parser into thinking these are a message field by not setting
-                      // the type or default value.
-                      .addField(
-                          FieldDescriptorProto.newBuilder()
-                              .setLabel(FieldDescriptorProto.Label.LABEL_OPTIONAL)
-                              .setTypeName("Bar")
-                              .setName("bar")
-                              .setNumber(1))
-                      // TYPE_ENUM signals that this is an enum field, not a message.
-                      .addField(
-                          FieldDescriptorProto.newBuilder()
-                              .setLabel(FieldDescriptorProto.Label.LABEL_OPTIONAL)
-                              .setTypeName("Bar")
-                              .setName("baz")
-                              .setNumber(2)
-                              .setType(FieldDescriptorProto.Type.TYPE_ENUM))
-                      // Default values signal that this must be an enum field, not
-                      // a message.
-                      .addField(
-                          FieldDescriptorProto.newBuilder()
-                              .setLabel(FieldDescriptorProto.Label.LABEL_OPTIONAL)
-                              .setTypeName("Baz")
-                              .setName("bam")
-                              .setNumber(3)
-                              .setDefaultValue("BAZ_VALUE")))
-              .build();
-
-      FileDescriptor foo =
-          Descriptors.FileDescriptor.buildFrom(fooProto, new FileDescriptor[0], true);
-      FieldDescriptor bazField = foo.findMessageTypeByName("Foo").findFieldByName("baz");
-      FieldDescriptor bamField = foo.findMessageTypeByName("Foo").findFieldByName("bam");
-
-      assertThat(bazField.getEnumType().isPlaceholder()).isTrue();
-      assertThat(bamField.getEnumType().isPlaceholder()).isTrue();
-      assertThat(bazField.hasDefaultValue()).isFalse();
-      assertThat(bamField.hasDefaultValue()).isTrue();
-      assertThat(bamField.getDefaultValue()).isEqualTo(null);
-    }
-
-    @Test
-    public void testUnknownFieldWithUnknownNestedType() throws Exception {
-      FileDescriptorProto fooProto =
-          FileDescriptorProto.newBuilder()
-              .setName("foo.proto")
-              .setPackage("com.google.protobuf")
-              .addDependency("bar.proto")
-              .addMessageType(
-                  DescriptorProto.newBuilder()
-                      .setName("FirstMessage")
-                      .addField(
-                          FieldDescriptorProto.newBuilder()
-                              .setLabel(FieldDescriptorProto.Label.LABEL_OPTIONAL)
-                              .setTypeName("com.google.protobuf.Bar.Baz")
-                              .setName("baz")
-                              .setNumber(1)))
-              .addMessageType(
-                  DescriptorProto.newBuilder()
-                      .setName("Foo")
-                      .addField(
-                          FieldDescriptorProto.newBuilder()
-                              .setLabel(FieldDescriptorProto.Label.LABEL_OPTIONAL)
-                              .setTypeName("Bar")
-                              .setName("bar")
-                              .setNumber(2)))
-              .build();
-
-      FileDescriptor foo =
-          Descriptors.FileDescriptor.buildFrom(fooProto, new FileDescriptor[0], true);
-      FieldDescriptor baz = foo.findMessageTypeByName("FirstMessage").findFieldByName("baz");
-      FieldDescriptor bar = foo.findMessageTypeByName("Foo").findFieldByName("bar");
-
-      assertThat(baz.getMessageType().isPlaceholder()).isTrue();
-      assertThat(bar.getMessageType().isPlaceholder()).isTrue();
     }
 
     @Test
@@ -1304,7 +1162,7 @@ public class DescriptorsTest {
               UnittestProto.TestAllTypes.getDescriptor()
                   .findFieldByNumber(UnittestProto.TestAllTypes.OPTIONAL_UINT64_FIELD_NUMBER)
                   .toString())
-          .isEqualTo("proto2_unittest.TestAllTypes.optional_uint64");
+          .isEqualTo("protobuf_unittest.TestAllTypes.optional_uint64");
     }
 
     @Test
@@ -1508,7 +1366,7 @@ public class DescriptorsTest {
           FileDescriptor.buildFrom(
               FileDescriptorProto.newBuilder()
                   .setName("some/filename/some.proto")
-                  .setPackage("proto2_unittest")
+                  .setPackage("protobuf_unittest")
                   .setSyntax("proto2")
                   .setOptions(FileOptions.newBuilder().setJavaStringCheckUtf8(true))
                   .build(),
@@ -1523,7 +1381,7 @@ public class DescriptorsTest {
           FileDescriptor.buildFrom(
               FileDescriptorProto.newBuilder()
                   .setName("some/filename/some.proto")
-                  .setPackage("proto2_unittest")
+                  .setPackage("protobuf_unittest")
                   .setSyntax("proto2")
                   .build(),
               new FileDescriptor[0]);
@@ -1617,7 +1475,7 @@ public class DescriptorsTest {
       this.fileProto =
           DescriptorProtos.FileDescriptorProto.newBuilder()
               .setName("some/filename/some.proto")
-              .setPackage("proto2_unittest")
+              .setPackage("protobuf_unittest")
               .setEdition(DescriptorProtos.Edition.EDITION_2023)
               .setSyntax("editions");
 
@@ -1628,7 +1486,7 @@ public class DescriptorsTest {
               .setNumber(10)
               .setType(FieldDescriptorProto.Type.TYPE_INT32)
               .setLabel(FieldDescriptorProto.Label.LABEL_OPTIONAL)
-              .setExtendee(".proto2_unittest.TopMessage");
+              .setExtendee(".protobuf_unittest.TopMessage");
 
       this.topEnumProto = this.fileProto.addEnumTypeBuilder().setName("TopEnum");
       this.enumValueProto = this.topEnumProto.addValueBuilder().setName("TOP_VALUE").setNumber(0);
@@ -1653,7 +1511,7 @@ public class DescriptorsTest {
               .setNumber(11)
               .setType(FieldDescriptorProto.Type.TYPE_INT32)
               .setLabel(FieldDescriptorProto.Label.LABEL_OPTIONAL)
-              .setExtendee(".proto2_unittest.TopMessage");
+              .setExtendee(".protobuf_unittest.TopMessage");
       this.nestedMessageProto =
           this.topMessageProto.addNestedTypeBuilder().setName("NestedMessage");
       this.nestedEnumProto =
@@ -1675,15 +1533,15 @@ public class DescriptorsTest {
           this.serviceProto
               .addMethodBuilder()
               .setName("CallMethod")
-              .setInputType(".proto2_unittest.TopMessage")
-              .setOutputType(".proto2_unittest.TopMessage");
+              .setInputType(".protobuf_unittest.TopMessage")
+              .setOutputType(".protobuf_unittest.TopMessage");
     }
 
     void setTestFeature(DescriptorProtos.FeatureSet.Builder features, int value) {
       features.setExtension(
           UnittestFeatures.test,
           features.getExtension(UnittestFeatures.test).toBuilder()
-              .setMultipleFeature(EnumFeature.forNumber(value))
+              .setMultipleFeature(UnittestFeatures.EnumFeature.forNumber(value))
               .build());
     }
 

@@ -21,7 +21,6 @@
 #include "def.h"
 #include "map.h"
 #include "php-upb.h"
-#include "print_options.h"
 #include "protobuf.h"
 
 // -----------------------------------------------------------------------------
@@ -65,8 +64,7 @@ static zend_object* Message_create(zend_class_entry* class_type) {
   Message_SuppressDefaultProperties(class_type);
   zend_object_std_init(&intern->std, class_type);
   intern->std.handlers = &message_object_handlers;
-  intern->desc = NULL;
-  ZVAL_NULL(&intern->arena);
+  Arena_Init(&intern->arena);
   return &intern->std;
 }
 
@@ -90,15 +88,6 @@ static void Message_dtor(zend_object* obj) {
  * Helper function to look up a field given a member name (as a string).
  */
 static const upb_FieldDef* get_field(Message* msg, zend_string* member) {
-  if (!msg || !msg->desc || !msg->desc->msgdef) {
-    zend_throw_exception_ex(NULL, 0,
-                            "Couldn't find descriptor. "
-                            "The message constructor was likely bypassed, "
-                            "resulting in an uninitialized descriptor.");
-
-    return NULL;
-  }
-
   const upb_MessageDef* m = msg->desc->msgdef;
   const upb_FieldDef* f = upb_MessageDef_FindFieldByNameWithSize(
       m, ZSTR_VAL(member), ZSTR_LEN(member));
@@ -323,13 +312,7 @@ static zval* Message_read_property(zend_object* obj, zend_string* member,
   const upb_FieldDef* f = get_field(intern, member);
 
   if (!f) return &EG(uninitialized_zval);
-
-  if (upb_FieldDef_IsOptional(f) && upb_FieldDef_HasPresence(f) &&
-      Message_has_property(obj, member, 0, cache_slot) == false) {
-    ZVAL_NULL(rv);
-  } else {
-    Message_get(intern, f, rv);
-  }
+  Message_get(intern, f, rv);
   return rv;
 }
 
@@ -519,14 +502,6 @@ bool Message_InitFromPhp(upb_Message* msg, const upb_MessageDef* m, zval* init,
       return false;
     }
 
-    // Handle NULL optional field
-    if (Z_TYPE_P(val) == IS_NULL && upb_FieldDef_IsOptional(f)) {
-      upb_Message_ClearFieldByDef(msg, f);
-      zend_hash_move_forward_ex(table, &pos);
-      zval_dtor(&key);
-      continue;
-    }
-
     if (upb_FieldDef_IsMap(f)) {
       msgval.map_val = MapField_GetUpbMap(val, MapType_Get(f), arena);
       if (!msgval.map_val) return false;
@@ -548,7 +523,6 @@ bool Message_InitFromPhp(upb_Message* msg, const upb_MessageDef* m, zval* init,
 static void Message_Initialize(Message* intern, const Descriptor* desc) {
   intern->desc = desc;
   const upb_MiniTable* t = upb_MessageDef_MiniTable(desc->msgdef);
-  Arena_Init(&intern->arena);
   intern->msg = upb_Message_New(t, Arena_Get(&intern->arena));
   ObjCache_Add(intern->msg, &intern->std);
 }
@@ -563,6 +537,7 @@ PHP_METHOD(Message, __construct) {
   Message* intern = (Message*)Z_OBJ_P(getThis());
   const Descriptor* desc;
   zend_class_entry* ce = Z_OBJCE_P(getThis());
+  upb_Arena* arena = Arena_Get(&intern->arena);
   zval* init_arr = NULL;
 
   // This descriptor should always be available, as the generated __construct
@@ -591,8 +566,7 @@ PHP_METHOD(Message, __construct) {
   }
 
   if (init_arr) {
-    Message_InitFromPhp(intern->msg, desc->msgdef, init_arr,
-                        Arena_Get(&intern->arena));
+    Message_InitFromPhp(intern->msg, desc->msgdef, init_arr, arena);
   }
 }
 
@@ -603,8 +577,7 @@ PHP_METHOD(Message, __construct) {
  */
 PHP_METHOD(Message, discardUnknownFields) {
   Message* intern = (Message*)Z_OBJ_P(getThis());
-  upb_Message_DiscardUnknown(intern->msg, intern->desc->msgdef,
-                             DescriptorPool_GetSymbolTable(), 64);
+  upb_Message_DiscardUnknown(intern->msg, intern->desc->msgdef, 64);
 }
 
 /**
@@ -749,17 +722,12 @@ PHP_METHOD(Message, mergeFromJsonString) {
   }
 
   upb_Status_Clear(&status);
-  int result = upb_JsonDecodeDetectingNonconformance(
-      data, data_len, intern->msg, intern->desc->msgdef,
-      DescriptorPool_GetSymbolTable(), options, arena, &status);
-
-  switch (result) {
-    case kUpb_JsonDecodeResult_Ok:
-      break;
-    case kUpb_JsonDecodeResult_Error:
-      zend_throw_exception_ex(NULL, 0, "Error occurred during parsing: %s",
-                              upb_Status_ErrorMessage(&status));
-      return;
+  if (!upb_JsonDecode(data, data_len, intern->msg, intern->desc->msgdef,
+                      DescriptorPool_GetSymbolTable(), options, arena,
+                      &status)) {
+    zend_throw_exception_ex(NULL, 0, "Error occurred during parsing: %s",
+                            upb_Status_ErrorMessage(&status));
+    return;
   }
 }
 
@@ -774,27 +742,16 @@ PHP_METHOD(Message, serializeToJsonString) {
   size_t size;
   int options = 0;
   char buf[1024];
-  zval* flags = NULL;
+  zend_bool preserve_proto_fieldnames = false;
   upb_Status status;
 
-  if (zend_parse_parameters(ZEND_NUM_ARGS(), "|z", &flags) == FAILURE) {
+  if (zend_parse_parameters(ZEND_NUM_ARGS(), "|b",
+                            &preserve_proto_fieldnames) == FAILURE) {
     return;
   }
 
-  if (flags == NULL || Z_TYPE_P(flags) == IS_FALSE) {
-    // do nothing
-  } else if (Z_TYPE_P(flags) == IS_TRUE) {
+  if (preserve_proto_fieldnames) {
     options |= upb_JsonEncode_UseProtoNames;
-  } else if (Z_TYPE_P(flags) == IS_LONG) {
-    if (Z_LVAL_P(flags) & ALWAYS_PRINT_ENUMS_AS_INTS) {
-      options |= upb_JsonEncode_FormatEnumsAsIntegers;
-    }
-    if (Z_LVAL_P(flags) & PRESERVE_PROTO_FIELD_NAMES) {
-      options |= upb_JsonEncode_UseProtoNames;
-    }
-    if (Z_LVAL_P(flags) & EMIT_DEFAULTS) {
-      options |= upb_JsonEncode_EmitDefaults;
-    }
   }
 
   upb_Status_Clear(&status);
@@ -1087,10 +1044,6 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_construct, 0, 0, 0)
   ZEND_ARG_INFO(0, data)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_INFO_EX(arginfo_serializeToJsonString, 0, 0, 0)
-  ZEND_ARG_INFO(0, flags)
-ZEND_END_ARG_INFO()
-
 ZEND_BEGIN_ARG_INFO_EX(arginfo_mergeFrom, 0, 0, 1)
   ZEND_ARG_INFO(0, data)
 ZEND_END_ARG_INFO()
@@ -1114,7 +1067,7 @@ static zend_function_entry Message_methods[] = {
   PHP_ME(Message, discardUnknownFields,  arginfo_void,      ZEND_ACC_PUBLIC)
   PHP_ME(Message, serializeToString,     arginfo_void,      ZEND_ACC_PUBLIC)
   PHP_ME(Message, mergeFromString,       arginfo_mergeFrom, ZEND_ACC_PUBLIC)
-  PHP_ME(Message, serializeToJsonString, arginfo_serializeToJsonString,      ZEND_ACC_PUBLIC)
+  PHP_ME(Message, serializeToJsonString, arginfo_void,      ZEND_ACC_PUBLIC)
   PHP_ME(Message, mergeFromJsonString,   arginfo_mergeFromWithArg, ZEND_ACC_PUBLIC)
   PHP_ME(Message, mergeFrom,             arginfo_mergeFrom, ZEND_ACC_PUBLIC)
   PHP_ME(Message, readWrapperValue,      arginfo_read,      ZEND_ACC_PROTECTED)

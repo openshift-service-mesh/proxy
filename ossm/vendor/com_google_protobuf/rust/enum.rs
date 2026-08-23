@@ -12,10 +12,6 @@ use std::{
     marker::PhantomData,
 };
 
-use crate::__internal::SealedInternal;
-use crate::codegen_traits::{entity_tag, EntityType};
-use crate::{Proxied, Singular};
-
 /// Implemented by all generated enum types.
 ///
 /// # Safety
@@ -23,15 +19,7 @@ use crate::{Proxied, Singular};
 ///   representation as erased enums in the runtime.
 ///   - For C++, this is `proto2::RepeatedField<c_int>`
 ///   - For UPB, this is an array compatible with `int32`
-pub unsafe trait Enum:
-    TryFrom<i32>
-    + Into<i32>
-    + Copy
-    + for<'a> Proxied<View<'a> = Self>
-    + EntityType<Tag = entity_tag::EnumTag>
-    + Singular
-    + SealedInternal
-{
+pub unsafe trait Enum: TryFrom<i32> {
     /// The name of the enum.
     const NAME: &'static str;
 

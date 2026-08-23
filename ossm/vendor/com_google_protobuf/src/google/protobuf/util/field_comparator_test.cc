@@ -20,7 +20,7 @@ namespace protobuf {
 namespace util {
 namespace {
 
-using proto2_unittest::TestAllTypes;
+using protobuf_unittest::TestAllTypes;
 
 class DefaultFieldComparatorTest : public ::testing::Test {
  protected:

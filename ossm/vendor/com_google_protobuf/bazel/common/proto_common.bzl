@@ -9,6 +9,7 @@
 
 load("@proto_bazel_features//:features.bzl", "bazel_features")
 load("//bazel/common:proto_lang_toolchain_info.bzl", "ProtoLangToolchainInfo")
+load("//bazel/private:native.bzl", "native_proto_common")
 load("//bazel/private:toolchain_helpers.bzl", "toolchains")
 
 def _import_virtual_proto_path(path):
@@ -62,7 +63,6 @@ def _get_import_path(proto_file):
 
     Args:
       proto_file: (File) The .proto file
-
     Returns:
       (str) import path
     """
@@ -99,6 +99,10 @@ def _check_collocated(label, proto_info, proto_lang_toolchain_info):
         Obtained from a `proto_lang_toolchain` target.
     """
     _PackageSpecificationInfo = bazel_features.globals.PackageSpecificationInfo
+    if not _PackageSpecificationInfo:
+        if proto_lang_toolchain_info.allowlist_different_package or getattr(proto_info, "allow_exports", None):
+            fail("Allowlist checks not supported before Bazel 6.4.0")
+        return
 
     if (proto_info.direct_descriptor_set.owner.package != label.package and
         proto_lang_toolchain_info.allowlist_different_package):
@@ -206,14 +210,12 @@ def _compile(
         additional_args.use_param_file(param_file_arg = "@%s")
         additional_args.set_param_file_format("multiline")
 
-    declarations = getattr(proto_info, "transitive_extension_declarations", depset())
-
     actions.run(
         mnemonic = proto_lang_toolchain_info.mnemonic,
         progress_message = experimental_progress_message if experimental_progress_message else proto_lang_toolchain_info.progress_message,
         executable = proto_lang_toolchain_info.proto_compiler,
         arguments = [args, additional_args] if additional_args else [args],
-        inputs = depset(transitive = [proto_info.transitive_sources, declarations, additional_inputs]),
+        inputs = depset(transitive = [proto_info.transitive_sources, additional_inputs]),
         outputs = generated_files,
         tools = tools,
         use_default_shell_env = True,
@@ -243,7 +245,7 @@ def _experimental_filter_sources(proto_info, proto_lang_toolchain_info):
             provided_paths[path] = None
 
     # Filter proto files
-    proto_files = proto_info.direct_sources
+    proto_files = proto_info._direct_proto_sources
     excluded = []
     included = []
     for proto_file in proto_files:
@@ -346,5 +348,8 @@ proto_common = struct(
     get_import_path = _get_import_path,
     ProtoLangToolchainInfo = ProtoLangToolchainInfo,
     INCOMPATIBLE_ENABLE_PROTO_TOOLCHAIN_RESOLUTION = toolchains.INCOMPATIBLE_ENABLE_PROTO_TOOLCHAIN_RESOLUTION,
-    INCOMPATIBLE_PASS_TOOLCHAIN_TYPE = True,
+    INCOMPATIBLE_PASS_TOOLCHAIN_TYPE = (
+        getattr(native_proto_common, "INCOMPATIBLE_PASS_TOOLCHAIN_TYPE", False) or
+        not hasattr(native_proto_common, "ProtoLangToolchainInfo")
+    ),
 )

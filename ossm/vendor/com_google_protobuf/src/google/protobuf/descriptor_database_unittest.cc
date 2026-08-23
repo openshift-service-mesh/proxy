@@ -14,16 +14,11 @@
 #include "google/protobuf/descriptor_database.h"
 
 #include <algorithm>
-#include <cstddef>
 #include <memory>
-#include <string>
-#include <utility>
-#include <vector>
 
 #include "google/protobuf/descriptor.pb.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include "absl/log/absl_check.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/test_textproto.h"
 #include "google/protobuf/text_format.h"
@@ -76,10 +71,10 @@ class SimpleDescriptorDatabaseTestCase : public DescriptorDatabaseTestCase {
     return new SimpleDescriptorDatabaseTestCase;
   }
 
-  ~SimpleDescriptorDatabaseTestCase() override {}
+  virtual ~SimpleDescriptorDatabaseTestCase() {}
 
-  DescriptorDatabase* GetDatabase() override { return &database_; }
-  bool AddToDatabase(const FileDescriptorProto& file) override {
+  virtual DescriptorDatabase* GetDatabase() { return &database_; }
+  virtual bool AddToDatabase(const FileDescriptorProto& file) {
     return database_.Add(file);
   }
 
@@ -94,12 +89,12 @@ class EncodedDescriptorDatabaseTestCase : public DescriptorDatabaseTestCase {
     return new EncodedDescriptorDatabaseTestCase;
   }
 
-  ~EncodedDescriptorDatabaseTestCase() override {}
+  virtual ~EncodedDescriptorDatabaseTestCase() {}
 
-  DescriptorDatabase* GetDatabase() override { return &database_; }
-  bool AddToDatabase(const FileDescriptorProto& file) override {
+  virtual DescriptorDatabase* GetDatabase() { return &database_; }
+  virtual bool AddToDatabase(const FileDescriptorProto& file) {
     std::string data;
-    ABSL_CHECK(file.SerializeToString(&data));
+    file.SerializeToString(&data);
     return database_.AddCopy(data.data(), data.size());
   }
 
@@ -115,10 +110,10 @@ class DescriptorPoolDatabaseTestCase : public DescriptorDatabaseTestCase {
   }
 
   DescriptorPoolDatabaseTestCase() : database_(pool_) {}
-  ~DescriptorPoolDatabaseTestCase() override {}
+  virtual ~DescriptorPoolDatabaseTestCase() {}
 
-  DescriptorDatabase* GetDatabase() override { return &database_; }
-  bool AddToDatabase(const FileDescriptorProto& file) override {
+  virtual DescriptorDatabase* GetDatabase() { return &database_; }
+  virtual bool AddToDatabase(const FileDescriptorProto& file) {
     return pool_.BuildFile(file);
   }
 
@@ -132,7 +127,7 @@ class DescriptorPoolDatabaseTestCase : public DescriptorDatabaseTestCase {
 class DescriptorDatabaseTest
     : public testing::TestWithParam<DescriptorDatabaseTestCaseFactory*> {
  protected:
-  void SetUp() override {
+  virtual void SetUp() {
     test_case_.reset(GetParam()());
     database_ = test_case_->GetDatabase();
   }
@@ -504,7 +499,7 @@ TEST(SimpleDescriptorDatabaseExtraTest, FindAllFileNames) {
 
   // Test!
   std::vector<std::string> all_files;
-  ASSERT_TRUE(db.FindAllFileNames(&all_files));
+  db.FindAllFileNames(&all_files);
   EXPECT_THAT(all_files, testing::ElementsAre("foo.proto"));
 }
 

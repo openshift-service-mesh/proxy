@@ -11,7 +11,6 @@ import static java.lang.Math.max;
 
 import com.google.protobuf.Internal.ProtobufList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.RandomAccess;
 
 /** Implements {@link ProtobufList} for non-primitive and {@link String} types. */
@@ -54,7 +53,6 @@ final class ProtobufArrayList<E> extends AbstractProtobufList<E> implements Rand
   }
 
   @Override
-  @CanIgnoreReturnValue
   public boolean add(E element) {
     ensureIsMutable();
 
@@ -105,65 +103,12 @@ final class ProtobufArrayList<E> extends AbstractProtobufList<E> implements Rand
   }
 
   @Override
-  public boolean equals(
-          Object o) {
-    if (o == this) {
-      return true;
-    }
-    if (!(o instanceof List)) {
-      return false;
-    }
-    // Handle lists that do not support RandomAccess as efficiently as possible by using an iterator
-    // based approach in our super class. Otherwise our index based approach will avoid those
-    // allocations.
-    if (!(o instanceof RandomAccess)) {
-      return super.equals(o);
-    }
-
-    List<?> other = (List<?>) o;
-    final int size = size();
-    if (size != other.size()) {
-      return false;
-    }
-
-    if (o instanceof ProtobufArrayList) {
-      ProtobufArrayList<?> otherArray = (ProtobufArrayList<?>) o;
-      for (int i = 0; i < size; i++) {
-        // ProtobufArrayLists never contain nulls, so don't need to check array[i] == null.
-        if (!array[i].equals(otherArray.array[i])) {
-          return false;
-        }
-      }
-      return true;
-    }
-
-    for (int i = 0; i < size; i++) {
-      // ProtobufArrayLists never contain nulls, so don't need to check array[i] == null.
-      if (!array[i].equals(other.get(i))) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  @Override
-  public int hashCode() {
-    final int size = size();
-    int hashCode = 1;
-    for (int i = 0; i < size; i++) {
-      hashCode = (31 * hashCode) + array[i].hashCode();
-    }
-    return hashCode;
-  }
-
-  @Override
   public E get(int index) {
     ensureIndexInRange(index);
     return array[index];
   }
 
   @Override
-  @CanIgnoreReturnValue
   public E remove(int index) {
     ensureIsMutable();
     ensureIndexInRange(index);
@@ -179,7 +124,6 @@ final class ProtobufArrayList<E> extends AbstractProtobufList<E> implements Rand
   }
 
   @Override
-  @CanIgnoreReturnValue
   public E set(int index, E element) {
     ensureIsMutable();
     ensureIndexInRange(index);

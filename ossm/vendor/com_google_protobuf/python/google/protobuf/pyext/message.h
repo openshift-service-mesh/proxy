@@ -11,13 +11,15 @@
 #ifndef GOOGLE_PROTOBUF_PYTHON_CPP_MESSAGE_H__
 #define GOOGLE_PROTOBUF_PYTHON_CPP_MESSAGE_H__
 
-#include <atomic>
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_map>
+
 #include "absl/strings/string_view.h"
-#include "google/protobuf/pyext/lazy_unique_ptr.h"
-#include "google/protobuf/pyext/weak_value_map.h"
 
 namespace google {
 namespace protobuf {
@@ -46,8 +48,7 @@ struct CMessageClass;
 // don't store any data, and always refer to their parent message.
 
 struct ContainerBase {
-  // clang-format off
-  PyObject_HEAD
+  PyObject_HEAD;
 
   // Strong reference to a parent message object. For a CMessage there are three
   // cases:
@@ -58,7 +59,6 @@ struct ContainerBase {
   // For all other types: repeated containers, maps, it always point to a
   // valid parent CMessage.
   struct CMessage* parent;
-  // clang-format on
 
   // If this object belongs to a parent message, describes which field it comes
   // from.
@@ -91,16 +91,15 @@ typedef struct CMessage : public ContainerBase {
   // which need to implement the "Release" mechanism:
   // direct submessages, RepeatedCompositeContainer, RepeatedScalarContainer
   // and MapContainer.
-  //   Maps: const FieldDescriptor* -> ContainerBase*
-  typedef PyWeakValueMap CompositeFieldsMap;
-  LazyUniquePtr<CompositeFieldsMap> composite_fields;
+  typedef std::unordered_map<const FieldDescriptor*, ContainerBase*>
+      CompositeFieldsMap;
+  CompositeFieldsMap* composite_fields;
 
   // A mapping containing weak references to indirect child messages, accessed
   // through containers: repeated messages, and values of message maps.
   // This avoid the creation of similar maps in each of those containers.
-  //   Maps: const Message* -> CMessage*
-  typedef PyWeakValueMap SubMessagesMap;
-  LazyUniquePtr<SubMessagesMap> child_submessages;
+  typedef std::unordered_map<const Message*, CMessage*> SubMessagesMap;
+  SubMessagesMap* child_submessages;
 
   // Implements the "weakref" protocol for this object.
   PyObject* weakreflist;
@@ -140,7 +139,9 @@ struct CMessageClass {
   // This reference must stay alive until all message pointers are destructed.
   PyMessageFactory* py_message_factory;
 
-  PyObject* AsPyObject() { return reinterpret_cast<PyObject*>(this); }
+  PyObject* AsPyObject() {
+    return reinterpret_cast<PyObject*>(this);
+  }
 };
 
 extern PyTypeObject* CMessageClass_Type;
@@ -161,23 +162,20 @@ const FieldDescriptor* GetExtensionDescriptor(PyObject* extension);
 // submessage as the result is cached in composite_fields.
 //
 // Corresponds to reflection api method GetMessage.
-CMessage* InternalGetSubMessage(CMessage* self,
-                                const FieldDescriptor* field_descriptor);
-
-// Delete the last n items in a repeated field.
-void DeleteLastRepeatedWithSize(CMessage* self,
-                                const FieldDescriptor* field_descriptor,
-                                Py_ssize_t n);
+CMessage* InternalGetSubMessage(
+    CMessage* self, const FieldDescriptor* field_descriptor);
 
 // Deletes a range of items in a repeated field (following a
 // removal in a RepeatedCompositeContainer).
 //
 // Corresponds to reflection api method RemoveLast.
-int DeleteRepeatedField(CMessage* self, const FieldDescriptor* field_descriptor,
+int DeleteRepeatedField(CMessage* self,
+                        const FieldDescriptor* field_descriptor,
                         PyObject* slice);
 
 // Sets the specified scalar value to the message.
-int InternalSetScalar(CMessage* self, const FieldDescriptor* field_descriptor,
+int InternalSetScalar(CMessage* self,
+                      const FieldDescriptor* field_descriptor,
                       PyObject* value);
 
 // Sets the specified scalar value to the message.  Requires it is not a Oneof.
@@ -194,7 +192,7 @@ PyObject* InternalGetScalar(const Message* message,
 bool SetCompositeField(CMessage* self, const FieldDescriptor* field,
                        ContainerBase* value);
 
-bool SetSubmessage(CMessage* self, CMessage*& submessage);
+bool SetSubmessage(CMessage* self, CMessage* submessage);
 
 // Clears the message, removing all contained data. Extension dictionary and
 // submessages are released first if there are remaining external references.
@@ -252,6 +250,7 @@ PyObject* SetAllowOversizeProtos(PyObject* m, PyObject* arg);
 
 }  // namespace cmessage
 
+
 /* Is 64bit */
 #define IS_64BIT (SIZEOF_LONG == 8)
 
@@ -303,15 +302,18 @@ PyObject* SetAllowOversizeProtos(PyObject* m, PyObject* arg);
 #define FULL_MODULE_NAME "google.protobuf.pyext._message"
 
 void FormatTypeError(PyObject* arg, const char* expected_types);
-template <class T>
+template<class T>
 bool CheckAndGetInteger(PyObject* arg, T* value);
 bool CheckAndGetDouble(PyObject* arg, double* value);
 bool CheckAndGetFloat(PyObject* arg, float* value);
 bool CheckAndGetBool(PyObject* arg, bool* value);
 PyObject* CheckString(PyObject* arg, const FieldDescriptor* descriptor);
-bool CheckAndSetString(PyObject* arg, Message* message,
-                       const FieldDescriptor* descriptor,
-                       const Reflection* reflection, bool append, int index);
+bool CheckAndSetString(
+    PyObject* arg, Message* message,
+    const FieldDescriptor* descriptor,
+    const Reflection* reflection,
+    bool append,
+    int index);
 PyObject* ToStringObject(const FieldDescriptor* descriptor,
                          absl::string_view value);
 
@@ -329,7 +331,7 @@ Message* PyMessage_GetMutableMessagePointer(PyObject* msg);
 PyObject* PyMessage_NewMessageOwnedExternally(Message* message,
                                               PyObject* py_message_factory);
 
-bool InitProto2MessageModule(PyObject* m);
+bool InitProto2MessageModule(PyObject *m);
 
 // These are referenced by repeated_scalar_container, and must
 // be explicitly instantiated.

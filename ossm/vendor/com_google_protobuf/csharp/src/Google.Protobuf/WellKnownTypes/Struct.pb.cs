@@ -52,15 +52,10 @@ namespace Google.Protobuf.WellKnownTypes {
   }
   #region Enums
   /// <summary>
-  /// Represents a JSON `null`.
+  /// `NullValue` is a singleton enumeration to represent the null value for the
+  /// `Value` type union.
   ///
-  /// `NullValue` is a sentinel, using an enum with only one value to represent
-  /// the null value for the `Value` type union.
-  ///
-  /// A field of type `NullValue` with any value other than `0` is considered
-  /// invalid. Most ProtoJSON serializers will emit a Value with a `null_value` set
-  /// as a JSON `null` regardless of the integer value, and so will round trip to
-  /// a `0` value.
+  /// The JSON representation for `NullValue` is JSON `null`.
   /// </summary>
   public enum NullValue {
     /// <summary>
@@ -73,19 +68,14 @@ namespace Google.Protobuf.WellKnownTypes {
 
   #region Messages
   /// <summary>
-  /// Represents a JSON object.
+  /// `Struct` represents a structured data value, consisting of fields
+  /// which map to dynamically typed values. In some languages, `Struct`
+  /// might be supported by a native representation. For example, in
+  /// scripting languages like JS a struct is represented as an
+  /// object. The details of that representation are described together
+  /// with the proto support for the language.
   ///
-  /// An unordered key-value map, intending to perfectly capture the semantics of a
-  /// JSON object. This enables parsing any arbitrary JSON payload as a message
-  /// field in ProtoJSON format.
-  ///
-  /// This follows RFC 8259 guidelines for interoperable JSON: notably this type
-  /// cannot represent large Int64 values or `NaN`/`Infinity` numbers,
-  /// since the JSON format generally does not support those values in its number
-  /// type.
-  ///
-  /// If you do not intend to parse arbitrary JSON into your message, a custom
-  /// typed message should be preferred instead of using this type.
+  /// The JSON representation for `Struct` is JSON object.
   /// </summary>
   [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class Struct : pb::IMessage<Struct>
@@ -278,12 +268,12 @@ namespace Google.Protobuf.WellKnownTypes {
   }
 
   /// <summary>
-  /// Represents a JSON value.
-  ///
   /// `Value` represents a dynamically typed value which can be either
   /// null, a number, a string, a boolean, a recursive struct value, or a
   /// list of values. A producer of value is expected to set one of these
-  /// variants. Absence of any variant is an invalid state.
+  /// variants. Absence of any variant indicates an error.
+  ///
+  /// The JSON representation for `Value` is JSON value.
   /// </summary>
   [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class Value : pb::IMessage<Value>
@@ -353,7 +343,7 @@ namespace Google.Protobuf.WellKnownTypes {
     /// <summary>Field number for the "null_value" field.</summary>
     public const int NullValueFieldNumber = 1;
     /// <summary>
-    /// Represents a JSON `null`.
+    /// Represents a null value.
     /// </summary>
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
@@ -382,10 +372,7 @@ namespace Google.Protobuf.WellKnownTypes {
     /// <summary>Field number for the "number_value" field.</summary>
     public const int NumberValueFieldNumber = 2;
     /// <summary>
-    /// Represents a JSON number. Must not be `NaN`, `Infinity` or
-    /// `-Infinity`, since those are not supported in JSON. This also cannot
-    /// represent large Int64 values, since JSON format generally does not
-    /// support them in its number type.
+    /// Represents a double value.
     /// </summary>
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
@@ -414,7 +401,7 @@ namespace Google.Protobuf.WellKnownTypes {
     /// <summary>Field number for the "string_value" field.</summary>
     public const int StringValueFieldNumber = 3;
     /// <summary>
-    /// Represents a JSON string.
+    /// Represents a string value.
     /// </summary>
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
@@ -443,7 +430,7 @@ namespace Google.Protobuf.WellKnownTypes {
     /// <summary>Field number for the "bool_value" field.</summary>
     public const int BoolValueFieldNumber = 4;
     /// <summary>
-    /// Represents a JSON boolean (`true` or `false` literal in JSON).
+    /// Represents a boolean value.
     /// </summary>
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
@@ -472,7 +459,7 @@ namespace Google.Protobuf.WellKnownTypes {
     /// <summary>Field number for the "struct_value" field.</summary>
     public const int StructValueFieldNumber = 5;
     /// <summary>
-    /// Represents a JSON object.
+    /// Represents a structured value.
     /// </summary>
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
@@ -487,7 +474,7 @@ namespace Google.Protobuf.WellKnownTypes {
     /// <summary>Field number for the "list_value" field.</summary>
     public const int ListValueFieldNumber = 6;
     /// <summary>
-    /// Represents a JSON array.
+    /// Represents a repeated `Value`.
     /// </summary>
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
@@ -819,7 +806,9 @@ namespace Google.Protobuf.WellKnownTypes {
   }
 
   /// <summary>
-  /// Represents a JSON array.
+  /// `ListValue` is a wrapper around a repeated field of values.
+  ///
+  /// The JSON representation for `ListValue` is JSON array.
   /// </summary>
   [global::System.Diagnostics.DebuggerDisplayAttribute("{ToString(),nq}")]
   public sealed partial class ListValue : pb::IMessage<ListValue>

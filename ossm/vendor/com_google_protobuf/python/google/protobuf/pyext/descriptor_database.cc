@@ -10,14 +10,12 @@
 
 #include "google/protobuf/pyext/descriptor_database.h"
 
-#include <Python.h>
-
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "google/protobuf/descriptor.pb.h"
 #include "absl/log/absl_log.h"
-#include "absl/strings/string_view.h"
 #include "google/protobuf/message.h"
 #include "google/protobuf/message_lite.h"
 #include "google/protobuf/pyext/message.h"
@@ -81,7 +79,7 @@ static bool GetFileDescriptorProto(PyObject* py_descriptor,
       return false;
     }
     FileDescriptorProto file_proto;
-    if (!file_proto.ParseFromString(absl::string_view(str, len))) {
+    if (!file_proto.ParseFromArray(str, len)) {
       ABSL_LOG(ERROR)
           << "DescriptorDatabase method did not return a FileDescriptorProto";
       return false;
@@ -92,19 +90,19 @@ static bool GetFileDescriptorProto(PyObject* py_descriptor,
 }
 
 // Find a file by file name.
-bool PyDescriptorDatabase::FindFileByName(absl::string_view filename,
+bool PyDescriptorDatabase::FindFileByName(const std::string& filename,
                                           FileDescriptorProto* output) {
   ScopedPyObjectPtr py_descriptor(PyObject_CallMethod(
-      py_database_, "FindFileByName", "s#", filename.data(), filename.size()));
+      py_database_, "FindFileByName", "s#", filename.c_str(), filename.size()));
   return GetFileDescriptorProto(py_descriptor.get(), output);
 }
 
 // Find the file that declares the given fully-qualified symbol name.
 bool PyDescriptorDatabase::FindFileContainingSymbol(
-    absl::string_view symbol_name, FileDescriptorProto* output) {
+    const std::string& symbol_name, FileDescriptorProto* output) {
   ScopedPyObjectPtr py_descriptor(
       PyObject_CallMethod(py_database_, "FindFileContainingSymbol", "s#",
-                          symbol_name.data(), symbol_name.size()));
+                          symbol_name.c_str(), symbol_name.size()));
   return GetFileDescriptorProto(py_descriptor.get(), output);
 }
 
@@ -112,7 +110,7 @@ bool PyDescriptorDatabase::FindFileContainingSymbol(
 // with the given field number.
 // Python DescriptorDatabases are not required to implement this method.
 bool PyDescriptorDatabase::FindFileContainingExtension(
-    absl::string_view containing_type, int field_number,
+    const std::string& containing_type, int field_number,
     FileDescriptorProto* output) {
   ScopedPyObjectPtr py_method(
       PyObject_GetAttrString(py_database_, "FindFileContainingExtension"));
@@ -122,7 +120,7 @@ bool PyDescriptorDatabase::FindFileContainingExtension(
     return false;
   }
   ScopedPyObjectPtr py_descriptor(
-      PyObject_CallFunction(py_method.get(), "s#i", containing_type.data(),
+      PyObject_CallFunction(py_method.get(), "s#i", containing_type.c_str(),
                             containing_type.size(), field_number));
   return GetFileDescriptorProto(py_descriptor.get(), output);
 }
@@ -132,7 +130,7 @@ bool PyDescriptorDatabase::FindFileContainingExtension(
 // order.
 // Python DescriptorDatabases are not required to implement this method.
 bool PyDescriptorDatabase::FindAllExtensionNumbers(
-    absl::string_view containing_type, std::vector<int>* output) {
+    const std::string& containing_type, std::vector<int>* output) {
   ScopedPyObjectPtr py_method(
       PyObject_GetAttrString(py_database_, "FindAllExtensionNumbers"));
   if (py_method == nullptr) {
@@ -140,21 +138,14 @@ bool PyDescriptorDatabase::FindAllExtensionNumbers(
     PyErr_Clear();
     return false;
   }
-  ScopedPyObjectPtr py_list(PyObject_CallFunction(
-      py_method.get(), "s#", containing_type.data(), containing_type.size()));
+  ScopedPyObjectPtr py_list(
+      PyObject_CallFunction(py_method.get(), "s#", containing_type.c_str(),
+                            containing_type.size()));
   if (py_list == nullptr) {
     PyErr_Print();
     return false;
   }
   Py_ssize_t size = PyList_Size(py_list.get());
-  if (size == -1) {
-    PyErr_Format(
-        PyExc_RuntimeError,
-        "FindAllExtensionNumbers() on fall back DB must return a list, not %S",
-        py_list.get());
-    PyErr_Print();
-    return false;
-  }
   int64_t item_value;
   for (Py_ssize_t i = 0 ; i < size; ++i) {
     ScopedPyObjectPtr item(PySequence_GetItem(py_list.get(), i));

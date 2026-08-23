@@ -25,7 +25,6 @@
 #include "absl/strings/string_view.h"
 #include "google/protobuf/compiler/code_generator.h"
 #include "google/protobuf/compiler/command_line_interface.h"
-#include "google/protobuf/testing/file.h"
 
 // Must be included last.
 #include "google/protobuf/port_def.inc"
@@ -45,8 +44,6 @@ class CommandLineInterfaceTester : public testing::Test {
   // is replaced with TestTempDir().
   void RunProtoc(absl::string_view command);
   void RunProtocWithArgs(std::vector<std::string> args);
-  void RunProtocAndExpectDeath(absl::string_view command,
-                               const std::string& death_message_regex);
 
   // -----------------------------------------------------------------
   // Methods to set up the test (called before Run()).
@@ -79,10 +76,12 @@ class CommandLineInterfaceTester : public testing::Test {
   // Creates a subdirectory within temp_directory_.
   void CreateTempDir(absl::string_view name);
 
+#ifdef PROTOBUF_OPENSOURCE
   // Changes working directory to temp directory.
   void SwitchToTempDirectory() {
     File::ChangeWorkingDirectory(temp_directory_);
   }
+#endif  // !PROTOBUF_OPENSOURCE
 
   // -----------------------------------------------------------------
   // Methods to check the test results (called after Run()).
@@ -125,14 +124,6 @@ class CommandLineInterfaceTester : public testing::Test {
 
   void ExpectFileContent(absl::string_view filename, absl::string_view content);
 
-  void ExpectFileContentContainsSubstring(absl::string_view filename,
-                                          absl::string_view content_substring);
-
-  void ExpectFileContentNotContainsSubstring(
-      absl::string_view filename, absl::string_view content_substring);
-
-  std::string FileContents(absl::string_view filename) const;
-
  private:
   // The object we are testing.
   CommandLineInterface cli_;
@@ -146,8 +137,10 @@ class CommandLineInterfaceTester : public testing::Test {
   // The result of Run().
   int return_code_;
 
-  std::string captured_stderr_;
+  // The captured stderr output.
+  std::string error_text_;
 
+  // The captured stdout.
   std::string captured_stdout_;
 
   std::vector<std::unique_ptr<CodeGenerator>> generators_;

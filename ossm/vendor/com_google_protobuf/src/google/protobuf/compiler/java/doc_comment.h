@@ -12,8 +12,6 @@
 #ifndef GOOGLE_PROTOBUF_COMPILER_JAVA_DOC_COMMENT_H__
 #define GOOGLE_PROTOBUF_COMPILER_JAVA_DOC_COMMENT_H__
 
-#include <stdbool.h>
-
 #include "absl/strings/string_view.h"
 #include "google/protobuf/compiler/java/options.h"
 #include "google/protobuf/descriptor.h"
@@ -55,15 +53,13 @@ void WriteFieldDocComment(io::Printer* printer, const FieldDescriptor* field,
 void WriteFieldAccessorDocComment(io::Printer* printer,
                                   const FieldDescriptor* field,
                                   FieldAccessorType type, Options options,
-                                  bool builder = false, bool kdoc = false,
-                                  bool is_private = false);
+                                  bool builder = false, bool kdoc = false);
 void WriteFieldEnumValueAccessorDocComment(
     io::Printer* printer, const FieldDescriptor* field, FieldAccessorType type,
-    Options options, bool builder = false, bool is_private = false);
+    Options options, bool builder = false, bool kdoc = false);
 void WriteFieldStringBytesAccessorDocComment(
     io::Printer* printer, const FieldDescriptor* field, FieldAccessorType type,
-    Options options, bool builder = false, bool kdoc = false,
-    bool is_private = false);
+    Options options, bool builder = false, bool kdoc = false);
 void WriteEnumDocComment(io::Printer* printer, const EnumDescriptor* enum_,
                          Options options, bool kdoc = false);
 void WriteEnumValueDocComment(io::Printer* printer,

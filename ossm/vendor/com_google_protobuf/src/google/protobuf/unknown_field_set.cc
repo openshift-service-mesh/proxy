@@ -11,7 +11,6 @@
 
 #include "google/protobuf/unknown_field_set.h"
 
-#include <cstdint>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -24,10 +23,11 @@
 #include "google/protobuf/generated_message_tctable_impl.h"
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/zero_copy_stream.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
-#include "google/protobuf/message_lite.h"
 #include "google/protobuf/parse_context.h"
 #include "google/protobuf/wire_format.h"
+#include "google/protobuf/wire_format_lite.h"
 
 // Must be included last.
 #include "google/protobuf/port_def.inc"
@@ -36,24 +36,22 @@ namespace google {
 namespace protobuf {
 
 void UnknownFieldSet::ClearFallback() {
-  auto& fields = this->fields();
-  ABSL_DCHECK(!fields.empty());
+  ABSL_DCHECK(!fields_.empty());
   if (arena() == nullptr) {
-    int n = fields.size();
+    int n = fields_.size();
     do {
-      fields[--n].Delete();
+      (fields_)[--n].Delete();
     } while (n > 0);
   }
-  fields.Clear();
+  fields_.Clear();
 }
 
 void UnknownFieldSet::MergeFrom(const UnknownFieldSet& other) {
   int other_field_count = other.field_count();
   if (other_field_count > 0) {
-    auto& fields = this->fields();
-    fields.Reserve(fields.size() + other_field_count);
-    for (auto elem : other.fields()) {
-      fields.Add(elem.DeepCopy(arena()));
+    fields_.Reserve(fields_.size() + other_field_count);
+    for (auto elem : other.fields_) {
+      fields_.Add(elem.DeepCopy(arena()));
     }
   }
 }
@@ -63,16 +61,11 @@ void UnknownFieldSet::MergeFrom(const UnknownFieldSet& other) {
 void UnknownFieldSet::MergeFromAndDestroy(UnknownFieldSet* other) {
   if (arena() != other->arena()) {
     MergeFrom(*other);
-    return;
-  }
-
-  auto& fields = this->fields();
-  auto& other_fields = other->fields();
-  if (fields.empty()) {
-    fields.Swap(&other_fields);
+  } else if (fields_.empty()) {
+    fields_.Swap(&other->fields_);
   } else {
-    fields.MergeFrom(other_fields);
-    other_fields.Clear();
+    fields_.MergeFrom(other->fields_);
+    other->fields_.Clear();
   }
 }
 
@@ -82,12 +75,11 @@ void UnknownFieldSet::MergeToInternalMetadata(
 }
 
 size_t UnknownFieldSet::SpaceUsedExcludingSelfLong() const {
-  auto& fields = this->fields();
-  if (fields.empty()) return 0;
+  if (fields_.empty()) return 0;
 
-  size_t total_size = fields.SpaceUsedExcludingSelfLong();
+  size_t total_size = fields_.SpaceUsedExcludingSelfLong();
 
-  for (const UnknownField& field : fields) {
+  for (const UnknownField& field : fields_) {
     switch (field.type()) {
       case UnknownField::TYPE_LENGTH_DELIMITED:
         total_size += sizeof(*field.data_.string_value) +
@@ -95,7 +87,7 @@ size_t UnknownFieldSet::SpaceUsedExcludingSelfLong() const {
                           *field.data_.string_value);
         break;
       case UnknownField::TYPE_GROUP:
-        total_size += field.data_.group->SpaceUsedLong();
+        total_size += field.data_.group_->SpaceUsedLong();
         break;
       default:
         break;
@@ -109,24 +101,24 @@ size_t UnknownFieldSet::SpaceUsedLong() const {
 }
 
 void UnknownFieldSet::AddVarint(int number, uint64_t value) {
-  auto& field = *fields().Add();
+  auto& field = *fields_.Add();
   field.number_ = number;
   field.SetType(UnknownField::TYPE_VARINT);
-  field.data_.varint = value;
+  field.data_.varint_ = value;
 }
 
 void UnknownFieldSet::AddFixed32(int number, uint32_t value) {
-  auto& field = *fields().Add();
+  auto& field = *fields_.Add();
   field.number_ = number;
   field.SetType(UnknownField::TYPE_FIXED32);
-  field.data_.fixed32 = value;
+  field.data_.fixed32_ = value;
 }
 
 void UnknownFieldSet::AddFixed64(int number, uint64_t value) {
-  auto& field = *fields().Add();
+  auto& field = *fields_.Add();
   field.number_ = number;
   field.SetType(UnknownField::TYPE_FIXED64);
-  field.data_.fixed64 = value;
+  field.data_.fixed64_ = value;
 }
 
 void UnknownFieldSet::AddLengthDelimited(int number, const absl::Cord& value) {
@@ -135,7 +127,7 @@ void UnknownFieldSet::AddLengthDelimited(int number, const absl::Cord& value) {
 
 template <int&...>
 void UnknownFieldSet::AddLengthDelimited(int number, std::string&& value) {
-  auto& field = *fields().Add();
+  auto& field = *fields_.Add();
   field.number_ = number;
   field.SetType(UnknownField::TYPE_LENGTH_DELIMITED);
   field.data_.string_value =
@@ -144,7 +136,7 @@ void UnknownFieldSet::AddLengthDelimited(int number, std::string&& value) {
 template void UnknownFieldSet::AddLengthDelimited(int, std::string&&);
 
 std::string* UnknownFieldSet::AddLengthDelimited(int number) {
-  auto& field = *fields().Add();
+  auto& field = *fields_.Add();
   field.number_ = number;
   field.SetType(UnknownField::TYPE_LENGTH_DELIMITED);
   field.data_.string_value = Arena::Create<std::string>(arena());
@@ -152,45 +144,43 @@ std::string* UnknownFieldSet::AddLengthDelimited(int number) {
 }
 
 UnknownFieldSet* UnknownFieldSet::AddGroup(int number) {
-  auto& field = *fields().Add();
+  auto& field = *fields_.Add();
   field.number_ = number;
   field.SetType(UnknownField::TYPE_GROUP);
-  field.data_.group = Arena::Create<UnknownFieldSet>(arena());
-  return field.data_.group;
+  field.data_.group_ = Arena::Create<UnknownFieldSet>(arena());
+  return field.data_.group_;
 }
 
 void UnknownFieldSet::AddField(const UnknownField& field) {
-  fields().Add(field.DeepCopy(arena()));
+  fields_.Add(field.DeepCopy(arena()));
 }
 
 void UnknownFieldSet::DeleteSubrange(int start, int num) {
-  auto& fields = this->fields();
   if (arena() == nullptr) {
     // Delete the specified fields.
     for (int i = 0; i < num; ++i) {
-      fields[i + start].Delete();
+      (fields_)[i + start].Delete();
     }
   }
-  fields.ExtractSubrange(start, num, nullptr);
+  fields_.ExtractSubrange(start, num, nullptr);
 }
 
 void UnknownFieldSet::DeleteByNumber(int number) {
-  auto& fields = this->fields();
-  int left = 0;  // The number of fields left after deletion.
-  for (int i = 0; i < fields.size(); ++i) {
-    UnknownField* field = &fields[i];
+  size_t left = 0;  // The number of fields left after deletion.
+  for (size_t i = 0; i < fields_.size(); ++i) {
+    UnknownField* field = &(fields_)[i];
     if (field->number() == number) {
       if (arena() == nullptr) {
         field->Delete();
       }
     } else {
       if (i != left) {
-        fields[left] = fields[i];
+        (fields_)[left] = (fields_)[i];
       }
       ++left;
     }
   }
-  fields.Truncate(left);
+  fields_.Truncate(left);
 }
 
 bool UnknownFieldSet::MergeFromCodedStream(io::CodedInputStream* input) {
@@ -224,8 +214,7 @@ bool UnknownFieldSet::SerializeToString(std::string* output) const {
   const size_t size =
       google::protobuf::internal::WireFormat::ComputeUnknownFieldsSize(*this);
   absl::strings_internal::STLStringResizeUninitializedAmortized(output, size);
-  // TODO: Remove this suppression.
-  (void)google::protobuf::internal::WireFormat::SerializeUnknownFieldsToArray(
+  google::protobuf::internal::WireFormat::SerializeUnknownFieldsToArray(
       *this, reinterpret_cast<uint8_t*>(const_cast<char*>(output->data())));
   return true;
 }
@@ -254,7 +243,7 @@ void UnknownField::Delete() {
       delete data_.string_value;
       break;
     case UnknownField::TYPE_GROUP:
-      delete data_.group;
+      delete data_.group_;
       break;
     default:
       break;
@@ -270,8 +259,8 @@ UnknownField UnknownField::DeepCopy(Arena* arena) const {
       break;
     case UnknownField::TYPE_GROUP: {
       UnknownFieldSet* group = Arena::Create<UnknownFieldSet>(arena);
-      group->MergeFrom(*data_.group);
-      copy.data_.group = group;
+      group->MergeFrom(*data_.group_);
+      copy.data_.group_ = group;
       break;
     }
     default:

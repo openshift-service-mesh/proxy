@@ -7,7 +7,6 @@
 
 #include "google/protobuf/compiler/objectivec/import_writer.h"
 
-#include <cstddef>
 #include <iostream>
 #include <ostream>
 #include <string>
@@ -49,7 +48,7 @@ class ProtoFrameworkCollector : public LineConsumer {
 
 bool ProtoFrameworkCollector::ConsumeLine(absl::string_view line,
                                           std::string* out_error) {
-  size_t offset = line.find(':');
+  int offset = line.find(':');
   if (offset == absl::string_view::npos) {
     *out_error = absl::StrCat(
         "Framework/proto file mapping line without colon sign: '", line, "'.");
@@ -60,7 +59,7 @@ bool ProtoFrameworkCollector::ConsumeLine(absl::string_view line,
   absl::string_view proto_file_list =
       absl::StripAsciiWhitespace(line.substr(offset + 1));
 
-  size_t start = 0;
+  int start = 0;
   while (start < proto_file_list.length()) {
     offset = proto_file_list.find(',', start);
     if (offset == absl::string_view::npos) {

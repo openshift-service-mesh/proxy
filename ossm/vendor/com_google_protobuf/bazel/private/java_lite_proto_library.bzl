@@ -6,12 +6,15 @@
 # https://developers.google.com/open-source/licenses/bsd
 """A Starlark implementation of the java_lite_proto_library rule."""
 
+load("@rules_java//java/common:java_common.bzl", "java_common")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("@rules_java//java/common:proguard_spec_info.bzl", "ProguardSpecInfo")
 load("//bazel/common:proto_common.bzl", "proto_common")
 load("//bazel/common:proto_info.bzl", "ProtoInfo")
 load("//bazel/private:java_proto_support.bzl", "JavaProtoAspectInfo", "java_compile_for_protos", "java_info_merge_for_protos")
 load("//bazel/private:toolchain_helpers.bzl", "toolchains")
+
+_PROTO_TOOLCHAIN_ATTR = "_aspect_proto_toolchain_for_javalite"
 
 _JAVA_LITE_PROTO_TOOLCHAIN = Label("//bazel/private:javalite_toolchain_type")
 
@@ -32,7 +35,7 @@ def _aspect_impl(target, ctx):
     exports = [exp[JavaInfo] for exp in ctx.rule.attr.exports]
     proto_toolchain_info = toolchains.find_toolchain(
         ctx,
-        "proto_toolchain_for_javalite",
+        "_aspect_proto_toolchain_for_javalite",
         _JAVA_LITE_PROTO_TOOLCHAIN,
     )
     source_jar = None
@@ -69,8 +72,8 @@ _java_lite_proto_aspect = aspect(
     implementation = _aspect_impl,
     attr_aspects = ["deps", "exports"],
     attrs = toolchains.if_legacy_toolchain({
-        "_proto_toolchain_for_javalite": attr.label(
-            default = Label("//bazel/flags/java:proto_toolchain_for_javalite"),
+        _PROTO_TOOLCHAIN_ATTR: attr.label(
+            default = configuration_field(fragment = "proto", name = "proto_toolchain_for_java_lite"),
         ),
     }),
     fragments = ["java"],
@@ -92,9 +95,10 @@ def _rule_impl(ctx):
     Returns:
       ([JavaInfo, DefaultInfo, OutputGroupInfo, ProguardSpecInfo])
     """
+
     proto_toolchain_info = toolchains.find_toolchain(
         ctx,
-        "proto_toolchain_for_javalite",
+        "_aspect_proto_toolchain_for_javalite",
         _JAVA_LITE_PROTO_TOOLCHAIN,
     )
     for dep in ctx.attr.deps:
@@ -105,12 +109,15 @@ def _rule_impl(ctx):
     if runtime:
         proguard_provider_specs = runtime[ProguardSpecInfo]
     else:
-        proguard_provider_specs = ProguardSpecInfo(depset())
+        proguard_provider_specs = ProguardSpecInfo(specs = depset())
 
     java_info = java_info_merge_for_protos([dep[JavaInfo] for dep in ctx.attr.deps], merge_java_outputs = False)
 
     transitive_src_and_runtime_jars = depset(transitive = [dep[JavaProtoAspectInfo].jars for dep in ctx.attr.deps])
     transitive_runtime_jars = depset(transitive = [java_info.transitive_runtime_jars])
+
+    if hasattr(java_common, "add_constraints"):
+        java_info = java_common.add_constraints(java_info, constraints = ["android"])
 
     return [
         java_info,
@@ -162,13 +169,10 @@ The list of <a href="protocol-buffer.html#proto_library"><code>proto_library</co
 rules to generate Java code for.
 """),
     } | toolchains.if_legacy_toolchain({
-        "_proto_toolchain_for_javalite": attr.label(
-            default = Label("//bazel/flags/java:proto_toolchain_for_javalite"),
+        _PROTO_TOOLCHAIN_ATTR: attr.label(
+            default = configuration_field(fragment = "proto", name = "proto_toolchain_for_java_lite"),
         ),
     }),
     provides = [JavaInfo],
     toolchains = toolchains.use_toolchain(_JAVA_LITE_PROTO_TOOLCHAIN),
 )
-
-# public re-export, note that we can't rename the original symbol because that changes the aspect id
-java_lite_proto_aspect = _java_lite_proto_aspect

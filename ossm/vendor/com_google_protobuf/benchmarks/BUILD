@@ -5,18 +5,11 @@
 # license that can be found in the LICENSE file or at
 # https://developers.google.com/open-source/licenses/bsd
 
-load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_python//python:defs.bzl", "py_binary")
 load("//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("//bazel:proto_library.bzl", "proto_library")
 load(
-    "//upb/bazel:copts.bzl",
-    "UPB_DEFAULT_CPPOPTS",
-    "UPB_DEFAULT_FEATURES",
-)
-load("//upb/bazel:upb_minitable_proto_library.bzl", "upb_minitable_proto_library")
-load(
-    "//upb/bazel:upb_proto_library.bzl",
+    "//bazel:upb_proto_library.bzl",
     "upb_c_proto_library",
     "upb_proto_reflection_library",
 )
@@ -41,11 +34,6 @@ upb_c_proto_library(
     deps = [":descriptor_proto"],
 )
 
-upb_minitable_proto_library(
-    name = "benchmark_descriptor_upb_minitable_proto",
-    deps = [":descriptor_proto"],
-)
-
 upb_proto_reflection_library(
     name = "benchmark_descriptor_upb_proto_reflection",
     deps = [":descriptor_proto"],
@@ -53,7 +41,7 @@ upb_proto_reflection_library(
 
 upb_proto_reflection_library(
     name = "ads_upb_proto_reflection",
-    deps = ["@googleapis//google/ads/googleads/v17/services:services_proto"],
+    deps = ["@com_google_googleapis//:ads_proto"],
 )
 
 cc_proto_library(
@@ -75,29 +63,24 @@ cc_test(
     name = "benchmark",
     testonly = 1,
     srcs = ["benchmark.cc"],
-    copts = UPB_DEFAULT_CPPOPTS,
-    features = UPB_DEFAULT_FEATURES,
     deps = [
         ":ads_upb_proto_reflection",
         ":benchmark_descriptor_cc_proto",
         ":benchmark_descriptor_sv_cc_proto",
-        ":benchmark_descriptor_upb_minitable_proto",
         ":benchmark_descriptor_upb_proto",
         ":benchmark_descriptor_upb_proto_reflection",
-        "//src/google/protobuf",
+        "//:protobuf",
         "//src/google/protobuf/json",
-        "//upb/base",
-        "//upb/json",
-        "//upb/mem",
-        "//upb/message",
-        "//upb/reflection",
-        "//upb/reflection:internal",
-        "//upb/wire",
-        "@abseil-cpp//absl/container:flat_hash_set",
-        "@abseil-cpp//absl/log:absl_check",
-        "@google_benchmark//:benchmark_main",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
+        "//upb:base",
+        "//upb:json",
+        "//upb:mem",
+        "//upb:reflection",
+        "//upb:wire",
+        "@com_github_google_benchmark//:benchmark_main",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -115,16 +98,19 @@ SIZE_BENCHMARKS = {
 py_binary(
     name = "gen_synthetic_protos",
     srcs = ["gen_synthetic_protos.py"],
+    python_version = "PY3",
 )
 
 py_binary(
     name = "gen_upb_binary_c",
     srcs = ["gen_upb_binary_c.py"],
+    python_version = "PY3",
 )
 
 py_binary(
     name = "gen_protobuf_binary_cc",
     srcs = ["gen_protobuf_binary_cc.py"],
+    python_version = "PY3",
 )
 
 genrule(

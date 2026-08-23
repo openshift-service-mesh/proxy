@@ -11,10 +11,10 @@
 #include <sstream>
 #include <string>
 
+#include "google/protobuf/compiler/code_generator.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/log/absl_log.h"
 #include "absl/strings/str_cat.h"
-#include "google/protobuf/compiler/code_generator.h"
 #include "google/protobuf/compiler/csharp/csharp_doc_comment.h"
 #include "google/protobuf/compiler/csharp/csharp_enum.h"
 #include "google/protobuf/compiler/csharp/csharp_field_base.h"
@@ -57,12 +57,14 @@ MessageGenerator::MessageGenerator(const Descriptor* descriptor,
     const FieldDescriptor* field = descriptor_->field(i);
     if (RequiresPresenceBit(field)) {
       presence_bit_count++;
+      if (has_bit_field_count_ == 0 || (presence_bit_count % 32) == 0) {
+        has_bit_field_count_++;
+      }
     }
   }
-  has_bit_field_count_ = (presence_bit_count + 31) / 32;
 }
 
-MessageGenerator::~MessageGenerator() = default;
+MessageGenerator::~MessageGenerator() {}
 
 std::string MessageGenerator::class_name() {
   return std::string(descriptor_->name());
@@ -210,7 +212,7 @@ void MessageGenerator::Generate(io::Printer* printer) {
     const OneofDescriptor* oneof = descriptor_->oneof_decl(i);
     vars["name"] = UnderscoresToCamelCase(oneof->name(), false);
     vars["property_name"] = UnderscoresToCamelCase(oneof->name(), true);
-    vars["original_name"] = std::string(oneof->name());
+    vars["original_name"] = oneof->name();
     printer->Print(vars,
                    "private object $name$_;\n"
                    "/// <summary>Enum of possible cases for the "

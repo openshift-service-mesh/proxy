@@ -31,7 +31,7 @@ void ServiceGenerator::GenerateDeclarations(io::Printer* printer) {
       },
       R"cc(
         class $classname$_Stub;
-        class $dllexport_decl $$classname$ : public $pb$::Service {
+        class $dllexport_decl $$classname$ : public ::$proto_ns$::Service {
          protected:
           $classname$() = default;
 
@@ -42,48 +42,44 @@ void ServiceGenerator::GenerateDeclarations(io::Printer* printer) {
           $classname$& operator=(const $classname$&) = delete;
           virtual ~$classname$() = default;
 
-          static const $pb$::ServiceDescriptor* $nonnull$ descriptor();
+          static const ::$proto_ns$::ServiceDescriptor* descriptor();
 
           $virts$;
 
           // implements Service ----------------------------------------------
-          const $pb$::ServiceDescriptor* $nonnull$ GetDescriptor() override;
+          const ::$proto_ns$::ServiceDescriptor* GetDescriptor() override;
 
-          void CallMethod(
-              //~
-              const $pb$::MethodDescriptor* $nonnull$ method,
-              $pb$::RpcController* $nullable$ controller,
-              const $pb$::Message* $nonnull$ request,
-              $pb$::Message* $nonnull$ response,
-              ::google::protobuf::Closure* $nullable$ done) override;
+          void CallMethod(const ::$proto_ns$::MethodDescriptor* method,
+                          ::$proto_ns$::RpcController* controller,
+                          const ::$proto_ns$::Message* request,
+                          ::$proto_ns$::Message* response,
+                          ::google::protobuf::Closure* done) override;
 
-          const $pb$::Message& GetRequestPrototype(
-              const $pb$::MethodDescriptor* $nonnull$ method) const override;
+          const ::$proto_ns$::Message& GetRequestPrototype(
+              const ::$proto_ns$::MethodDescriptor* method) const override;
 
-          const $pb$::Message& GetResponsePrototype(
-              const $pb$::MethodDescriptor* $nonnull$ method) const override;
+          const ::$proto_ns$::Message& GetResponsePrototype(
+              const ::$proto_ns$::MethodDescriptor* method) const override;
         };
 
         class $dllexport_decl $$classname$_Stub final : public $classname$ {
          public:
-          //~ It seems like channel should be nonnull, but some tests use
-          //~ nullptr. TODO: clean up and switch to nonnull.
-          $classname$_Stub($pb$::RpcChannel* $nullable$ channel);
-          $classname$_Stub($pb$::RpcChannel* $nullable$ channel,
-                           $pb$::Service::ChannelOwnership ownership);
+          $classname$_Stub(::$proto_ns$::RpcChannel* channel);
+          $classname$_Stub(::$proto_ns$::RpcChannel* channel,
+                           ::$proto_ns$::Service::ChannelOwnership ownership);
 
           $classname$_Stub(const $classname$_Stub&) = delete;
           $classname$_Stub& operator=(const $classname$_Stub&) = delete;
 
           ~$classname$_Stub() override;
 
-          inline $pb$::RpcChannel* $nullable$ channel() { return channel_; }
+          inline ::$proto_ns$::RpcChannel* channel() { return channel_; }
 
           // implements $classname$ ------------------------------------------
           $impls$;
 
          private:
-          $pb$::RpcChannel* $nullable$ channel_;
+          ::$proto_ns$::RpcChannel* channel_;
           bool owns_channel_;
         };
       )cc");
@@ -105,10 +101,10 @@ void ServiceGenerator::GenerateMethodSignatures(VirtualOrNot virtual_or_not,
         // No cc, clang-format does not format this string well due to the
         // $ override$ substitution.
         R"(
-          $virtual $void $name$($pb$::RpcController* $nullable$ controller,
-                                const $input$* $nonnull$ request,
-                                $output$* $nonnull$ response,
-                                ::google::protobuf::Closure* $nullable$ done)$ override$;
+          $virtual $void $name$(::$proto_ns$::RpcController* controller,
+                                const $input$* request,
+                                $output$* response,
+                                ::google::protobuf::Closure* done)$ override$;
         )");
   }
 }
@@ -127,12 +123,12 @@ void ServiceGenerator::GenerateImplementation(io::Printer* printer) {
           {"stub_methods", [&] { GenerateStubMethods(printer); }},
       },
       R"cc(
-        const $pb$::ServiceDescriptor* $nonnull$ $classname$::descriptor() {
-          $pbi$::AssignDescriptors(&$desc_table$);
+        const ::$proto_ns$::ServiceDescriptor* $classname$::descriptor() {
+          ::$proto_ns$::internal::AssignDescriptors(&$desc_table$);
           return $file_level_service_descriptors$[$index$];
         }
 
-        const $pb$::ServiceDescriptor* $nonnull$ $classname$::GetDescriptor() {
+        const ::$proto_ns$::ServiceDescriptor* $classname$::GetDescriptor() {
           return descriptor();
         }
 
@@ -144,14 +140,15 @@ void ServiceGenerator::GenerateImplementation(io::Printer* printer) {
 
         $get_response$;
 
-        $classname$_Stub::$classname$_Stub($pb$::RpcChannel* $nullable$ channel)
+        $classname$_Stub::$classname$_Stub(::$proto_ns$::RpcChannel* channel)
             : channel_(channel), owns_channel_(false) {}
 
         $classname$_Stub::$classname$_Stub(
-            $pb$::RpcChannel* $nullable$ channel,
-            $pb$::Service::ChannelOwnership ownership)
+            ::$proto_ns$::RpcChannel* channel,
+            ::$proto_ns$::Service::ChannelOwnership ownership)
             : channel_(channel),
-              owns_channel_(ownership == $pb$::Service::STUB_OWNS_CHANNEL) {}
+              owns_channel_(ownership ==
+                            ::$proto_ns$::Service::STUB_OWNS_CHANNEL) {}
 
         $classname$_Stub::~$classname$_Stub() {
           if (owns_channel_) delete channel_;
@@ -172,10 +169,8 @@ void ServiceGenerator::GenerateNotImplementedMethods(io::Printer* printer) {
             {"output", QualifiedClassName(method->output_type(), *options_)},
         },
         R"cc(
-          void $classname$::$name$($pb$::RpcController* $nullable$ controller,
-                                   const $input$* $nonnull$,
-                                   $output$* $nonnull$,
-                                   ::google::protobuf::Closure* $nullable$ done) {
+          void $classname$::$name$(::$proto_ns$::RpcController* controller,
+                                   const $input$*, $output$*, ::google::protobuf::Closure* done) {
             controller->SetFailed("Method $name$() not implemented.");
             done->Run();
           }
@@ -191,10 +186,10 @@ void ServiceGenerator::GenerateCallMethod(io::Printer* printer) {
       },
       R"cc(
         void $classname$::CallMethod(
-            const $pb$::MethodDescriptor* $nonnull$ method,
-            $pb$::RpcController* $nullable$ controller,
-            const $pb$::Message* $nonnull$ request,
-            $pb$::Message* $nonnull$ response, ::google::protobuf::Closure* $nullable$ done) {
+            const ::$proto_ns$::MethodDescriptor* method,
+            ::$proto_ns$::RpcController* controller,
+            const ::$proto_ns$::Message* request,
+            ::$proto_ns$::Message* response, ::google::protobuf::Closure* done) {
           ABSL_DCHECK_EQ(method->service(), $file_level_service_descriptors$[$index$]);
           switch (method->index()) {
             $cases$;
@@ -234,16 +229,16 @@ void ServiceGenerator::GenerateGetPrototype(RequestOrResponse which,
            }},
       },
       R"cc(
-        const $pb$::Message& $classname$::Get$which$Prototype(
-            const $pb$::MethodDescriptor* $nonnull$ method) const {
+        const ::$proto_ns$::Message& $classname$::Get$which$Prototype(
+            const ::$proto_ns$::MethodDescriptor* method) const {
           ABSL_DCHECK_EQ(method->service(), descriptor());
           switch (method->index()) {
             $cases$;
 
             default:
               ABSL_LOG(FATAL) << "Bad method index; this should never happen.";
-              return *$pb$::MessageFactory::generated_factory()->GetPrototype(
-                  method->$which_type$_type());
+              return *::$proto_ns$::MessageFactory::generated_factory()
+                          ->GetPrototype(method->$which_type$_type());
           }
         }
       )cc");
@@ -261,8 +256,10 @@ void ServiceGenerator::GenerateCallMethodCases(io::Printer* printer) {
         },
         R"cc(
           case $index$:
-            this->$name$(controller, $pb$::DownCastMessage<$input$>(request),
-                         $pb$::DownCastMessage<$output$>(response), done);
+            this->$name$(controller,
+                         ::$proto_ns$::DownCastMessage<$input$>(request),
+                         ::$proto_ns$::DownCastMessage<$output$>(response),
+                         done);
             break;
         )cc");
   }
@@ -280,10 +277,9 @@ void ServiceGenerator::GenerateStubMethods(io::Printer* printer) {
             {"index", absl::StrCat(i)},
         },
         R"cc(
-          void $classname$_Stub::$name$(
-              $pb$::RpcController* $nullable$ controller,
-              const $input$* $nonnull$ request, $output$* $nonnull$ response,
-              ::google::protobuf::Closure* $nullable$ done) {
+          void $classname$_Stub::$name$(::$proto_ns$::RpcController* controller,
+                                        const $input$* request,
+                                        $output$* response, ::google::protobuf::Closure* done) {
             channel_->CallMethod(descriptor()->method($index$), controller,
                                  request, response, done);
           }

@@ -18,18 +18,23 @@
 #include <string>
 #include <vector>
 
+#include "google/protobuf/stubs/callback.h"
+#include "google/protobuf/stubs/common.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/container/flat_hash_set.h"
+#include "absl/functional/bind_front.h"
 #include "absl/log/absl_check.h"
 #include "absl/strings/cord.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/io/coded_stream.h"
-#include "google/protobuf/port.h"
+#include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/test_util.h"
 #include "google/protobuf/text_format.h"
 #include "google/protobuf/unittest.pb.h"
-#include "google/protobuf/unittest_import.pb.h"
 #include "google/protobuf/unittest_lite.pb.h"
 #include "google/protobuf/wire_format.h"
 
@@ -60,7 +65,7 @@ class UnknownFieldSetTest : public testing::Test {
   void SetUp() override {
     descriptor_ = unittest::TestAllTypes::descriptor();
     TestUtil::SetAllFields(&all_fields_);
-    ABSL_CHECK(all_fields_.SerializeToString(&all_fields_data_));
+    all_fields_.SerializeToString(&all_fields_data_);
     ASSERT_TRUE(empty_message_.ParseFromString(all_fields_data_));
     unknown_fields_ = empty_message_.mutable_unknown_fields();
   }
@@ -305,7 +310,7 @@ TEST_F(UnknownFieldSetTest, Serialize) {
   // again.
 
   std::string data;
-  ABSL_CHECK(empty_message_.SerializeToString(&data));
+  empty_message_.SerializeToString(&data);
 
   // Don't use EXPECT_EQ because we don't want to dump raw binary data to
   // stdout.
@@ -347,7 +352,7 @@ TEST_F(UnknownFieldSetTest, SerializeViaReflection) {
 TEST_F(UnknownFieldSetTest, CopyFrom) {
   unittest::TestEmptyMessage message;
 
-  message = empty_message_;
+  message.CopyFrom(empty_message_);
 
   EXPECT_EQ(empty_message_.DebugString(), message.DebugString());
 }
@@ -387,7 +392,7 @@ TEST_F(UnknownFieldSetTest, MergeFrom) {
   destination.MergeFrom(source);
 
   std::string destination_text;
-  ASSERT_TRUE(TextFormat::PrintToString(destination, &destination_text));
+  TextFormat::PrintToString(destination, &destination_text);
   EXPECT_EQ(
       // Note:  The ordering of fields here depends on the ordering of adds
       //   and merging, above.
@@ -406,10 +411,10 @@ TEST_F(UnknownFieldSetTest, MergeFromMessage) {
   source.mutable_unknown_fields()->AddVarint(2, 3);
   source.mutable_unknown_fields()->AddVarint(3, 4);
 
-  ASSERT_TRUE(destination.mutable_unknown_fields()->MergeFromMessage(source));
+  destination.mutable_unknown_fields()->MergeFromMessage(source);
 
   std::string destination_text;
-  ASSERT_TRUE(TextFormat::PrintToString(destination, &destination_text));
+  TextFormat::PrintToString(destination, &destination_text);
   EXPECT_EQ(
       // Note:  The ordering of fields here depends on the ordering of adds
       //   and merging, above.
@@ -425,7 +430,7 @@ TEST_F(UnknownFieldSetTest, MergeFromMessageLite) {
   unittest::TestEmptyMessageLite destination;
 
   source.set_optional_fixed32(42);
-  ABSL_CHECK(destination.ParseFromString(source.SerializeAsString()));
+  destination.ParseFromString(source.SerializeAsString());
 
   UnknownFieldSet unknown_field_set;
   EXPECT_TRUE(unknown_field_set.MergeFromMessage(destination));
@@ -557,7 +562,7 @@ TEST_F(UnknownFieldSetTest, UnknownEnumValue) {
     unknown_fields->AddVarint(repeated_field->number(), 4);  // not valid
     unknown_fields->AddVarint(repeated_field->number(), TestAllTypes::BAZ);
     unknown_fields->AddVarint(repeated_field->number(), 6);  // not valid
-    ABSL_CHECK(empty_message.SerializeToString(&data));
+    empty_message.SerializeToString(&data);
   }
 
   {
@@ -639,8 +644,9 @@ TEST_F(UnknownFieldSetTest, SpaceUsed) {
     result += shadow_vector.SpaceUsedExcludingSelfLong();
     result += shadow_vector_group.SpaceUsedExcludingSelfLong();
     if (str != nullptr) {
-      result += sizeof(std::string) +
-                internal::StringSpaceUsedExcludingSelfLong(*str);
+      result += sizeof(std::string);
+      static const size_t sso_capacity = std::string().capacity();
+      if (str->capacity() > sso_capacity) result += str->capacity();
     }
     if (group != nullptr) {
       result += sizeof(UnknownFieldSet);
@@ -831,7 +837,7 @@ TEST_F(UnknownFieldSetTest, SerializeToCord_TestPackedTypes) {
   ASSERT_TRUE(field_set.SerializeToCord(&cord));
 
   unittest::TestPackedTypes message;
-  ASSERT_TRUE(message.ParseFromString(cord));
+  ASSERT_TRUE(message.ParseFromCord(cord));
   EXPECT_THAT(message.packed_int32(), ElementsAre(-1, -2, -3, -4));
   EXPECT_THAT(message.packed_uint64(), ElementsAre(5, 6, 7));
 }

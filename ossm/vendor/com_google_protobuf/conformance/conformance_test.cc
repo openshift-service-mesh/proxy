@@ -18,6 +18,8 @@
 #include <string>
 #include <utility>
 
+#include "google/protobuf/util/field_comparator.h"
+#include "google/protobuf/util/message_differencer.h"
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/absl_check.h"
@@ -32,8 +34,6 @@
 #include "google/protobuf/endian.h"
 #include "google/protobuf/message.h"
 #include "google/protobuf/text_format.h"
-#include "google/protobuf/util/field_comparator.h"
-#include "google/protobuf/util/message_differencer.h"
 
 using conformance::ConformanceRequest;
 using conformance::ConformanceResponse;
@@ -182,7 +182,7 @@ bool CheckSetEmpty(const absl::btree_map<std::string, TestStatus>& set_to_check,
 namespace google {
 namespace protobuf {
 
-constexpr int kMaximumWildcardExpansions = 20;
+constexpr int kMaximumWildcardExpansions = 5;
 
 ConformanceTestSuite::ConformanceRequestSetting::ConformanceRequestSetting(
     ConformanceLevel level, conformance::WireFormat input_format,
@@ -239,8 +239,6 @@ ConformanceTestSuite::ConformanceRequestSetting::GetSyntaxIdentifier() const {
       return "Proto3";
     case Edition::EDITION_PROTO2:
       return "Proto2";
-    case Edition::EDITION_UNSTABLE:
-      return "EditionUnstable";
     default: {
       std::string id = "Editions";
       if (prototype_message_.GetDescriptor()->name() == "TestAllTypesProto2") {
@@ -555,7 +553,8 @@ bool ConformanceTestSuite::RunTest(const std::string& test_name,
   }
 
   std::string serialized_request;
-  ABSL_CHECK(request.SerializeToString(&serialized_request));
+  std::string serialized_response;
+  request.SerializeToString(&serialized_request);
 
   uint32_t len = internal::little_endian::FromHost(
       static_cast<uint32_t>(serialized_request.size()));
@@ -598,8 +597,7 @@ bool ConformanceTestSuite::RunTest(const std::string& test_name,
 
   response->set_protobuf_payload(serialized_request);
 
-  std::string serialized_response =
-      runner_->RunTest(test_name, serialized_request);
+  runner_->RunTest(test_name, len, serialized_request, &serialized_response);
 
   if (!response->ParseFromString(serialized_response)) {
     response->Clear();

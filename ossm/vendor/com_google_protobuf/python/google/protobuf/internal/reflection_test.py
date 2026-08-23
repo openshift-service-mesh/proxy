@@ -32,7 +32,7 @@ from google.protobuf.internal import more_messages_pb2
 from google.protobuf.internal import test_util
 from google.protobuf.internal import testing_refleaks
 from google.protobuf.internal import wire_format
-from absl.testing import parameterized
+from google.protobuf.internal import _parameterized
 from google.protobuf import unittest_import_pb2
 from google.protobuf import unittest_mset_pb2
 from google.protobuf import unittest_pb2
@@ -87,7 +87,7 @@ class _MiniDecoder(object):
     return self._pos == len(self._bytes)
 
 
-@parameterized.named_parameters(
+@_parameterized.named_parameters(
     ('_proto2', unittest_pb2),
     ('_proto3', unittest_proto3_arena_pb2))
 @testing_refleaks.TestCase
@@ -266,6 +266,12 @@ class ReflectionTest(unittest.TestCase):
     self.assertFalse(proto1.HasField('optional_nested_message'))
 
   def testDisconnectingLazyNestedMessage(self, message_module):
+    # This test exercises releasing a nested message that is lazy. This test
+    # only exercises real code in the C++ implementation as Python does not
+    # support lazy parsing, but the current C++ implementation results in
+    # memory corruption and a crash.
+    if api_implementation.Type() != 'python':
+      return
     proto = message_module.TestAllTypes()
     proto.optional_lazy_message.bb = 5
     proto.ClearField('optional_lazy_message')
@@ -1474,7 +1480,6 @@ class Proto2ReflectionTest(unittest.TestCase):
 
     self.assertListsEqual([m2, m1, m0], proto.repeated_nested_message)
 
-  @testing_refleaks.SkipReferenceLeakChecker('This leaks in pure python')
   def testHandWrittenReflection(self):
     # Hand written extensions are only supported by the pure-Python
     # implementation of the API.
@@ -1514,6 +1519,11 @@ class Proto2ReflectionTest(unittest.TestCase):
 
   @testing_refleaks.SkipReferenceLeakChecker('MakeDescriptor is not repeatable')
   def testDescriptorProtoSupport(self):
+    # Hand written descriptors/reflection are only supported by the pure-Python
+    # implementation of the API.
+    if api_implementation.Type() != 'python':
+      return
+
     def AddDescriptorField(proto, field_name, field_type):
       AddDescriptorField.field_index += 1
       new_field = proto.field.add()
@@ -1597,11 +1607,6 @@ class Proto2ReflectionTest(unittest.TestCase):
     del extendee_proto.Extensions[extension_int32]
     self.assertEqual(len(extendee_proto.Extensions), 0)
 
-  @unittest.skipIf(
-      api_implementation.Type() == 'upb',
-      'This test relies on a specific iteration order for extensions, '
-      'which is not reasonable to guarantee.',
-  )
   def testExtensionIter(self):
     extendee_proto = more_extensions_pb2.ExtendedMessage()
 
@@ -1745,7 +1750,7 @@ class Proto2ReflectionTest(unittest.TestCase):
             unittest_pb2.TestAllExtensions.DESCRIPTOR, 1))
     self.assertIs(
         pool.FindExtensionByName(
-            'proto2_unittest.optional_int32_extension').containing_type,
+            'protobuf_unittest.optional_int32_extension').containing_type,
         unittest_pb2.TestAllExtensions.DESCRIPTOR)
     # Make sure extensions haven't been registered into types that shouldn't
     # have any.
@@ -1903,21 +1908,23 @@ class Proto2ReflectionTest(unittest.TestCase):
     self.assertEqual(222, ext2[1].bb)
     self.assertEqual(333, ext2[2].bb)
 
-  def testRepeatedExtensionsIn(self):
-    msg = more_extensions_pb2.ExtendedMessage()
-    ext = more_extensions_pb2.repeated_int_extension
-    self.assertNotIn(ext, msg.Extensions)
-    msg.Extensions[ext].append(123)
-    self.assertIn(ext, msg.Extensions)
-
   def testCopyFromBadType(self):
+    # The python implementation doesn't raise an exception in this
+    # case. In theory it should.
+    if api_implementation.Type() == 'python':
+      return
     proto1 = unittest_pb2.TestAllTypes()
     proto2 = unittest_pb2.TestAllExtensions()
     self.assertRaises(TypeError, proto1.CopyFrom, proto2)
 
   def testClear(self):
     proto = unittest_pb2.TestAllTypes()
-    test_util.SetAllFields(proto)
+    # C++ implementation does not support lazy fields right now so leave it
+    # out for now.
+    if api_implementation.Type() == 'python':
+      test_util.SetAllFields(proto)
+    else:
+      test_util.SetAllNonLazyFields(proto)
     # Clear the message.
     proto.Clear()
     self.assertEqual(proto.ByteSize(), 0)
@@ -2481,9 +2488,13 @@ class ByteSizeTest(unittest.TestCase):
 
     self.assertEqual(2, len(repeated_nested_message))
     del repeated_nested_message[0:1]
-    self.assertEqual(1, len(repeated_nested_message))
+    # TODO: Fix cpp extension bug when delete repeated message.
+    if api_implementation.Type() == 'python':
+      self.assertEqual(1, len(repeated_nested_message))
     del repeated_nested_message[-1]
-    self.assertEqual(0, len(repeated_nested_message))
+    # TODO: Fix cpp extension bug when delete repeated message.
+    if api_implementation.Type() == 'python':
+      self.assertEqual(0, len(repeated_nested_message))
 
   def testRepeatedGroups(self):
     # 2-byte START_GROUP plus 2-byte END_GROUP.
@@ -2558,11 +2569,12 @@ class ByteSizeTest(unittest.TestCase):
     self.proto.ClearField('optional_foreign_message')
     self.assertEqual(0, self.proto.ByteSize())
 
-    # This is only possible in pure-Python implementation of the API.
-    child = self.proto.optional_foreign_message
-    self.proto.ClearField('optional_foreign_message')
-    child.c = 128
-    self.assertEqual(0, self.proto.ByteSize())
+    if api_implementation.Type() == 'python':
+      # This is only possible in pure-Python implementation of the API.
+      child = self.proto.optional_foreign_message
+      self.proto.ClearField('optional_foreign_message')
+      child.c = 128
+      self.assertEqual(0, self.proto.ByteSize())
 
     # Test within extension.
     extension = more_extensions_pb2.optional_message_extension
@@ -2728,11 +2740,6 @@ class SerializationTest(unittest.TestCase):
         self.assertRaises(message.DecodeError, unknown_fields._InternalParse,
                           serialized, 0, truncation_point)
 
-  @unittest.skipIf(
-      api_implementation.Type() == 'upb',
-      'This test relies on a specific iteration order for extensions, '
-      'which is not reasonable to guarantee.',
-  )
   def testCanonicalSerializationOrder(self):
     proto = more_messages_pb2.OutOfOrderFields()
     # These are also their tag numbers.  Even though we're setting these in
@@ -2758,11 +2765,6 @@ class SerializationTest(unittest.TestCase):
     self.assertEqual((5, wire_format.WIRETYPE_VARINT), ReadTag())
     self.assertEqual(5, d.ReadSInt32())
 
-  @unittest.skipIf(
-      api_implementation.Type() == 'upb',
-      'This test relies on a specific iteration order for extensions, '
-      'which is not reasonable to guarantee.',
-  )
   def testCanonicalSerializationOrderSameAsCpp(self):
     # Copy of the same test we use for C++.
     proto = unittest_pb2.TestFieldOrderings()
@@ -2931,7 +2933,7 @@ class SerializationTest(unittest.TestCase):
     self._CheckRaises(
         message.EncodeError,
         proto.SerializeToString,
-        'Message proto2_unittest.TestRequired is missing required fields: '
+        'Message protobuf_unittest.TestRequired is missing required fields: '
         'a,b,c')
     # Shouldn't raise exceptions.
     partial = proto.SerializePartialToString()
@@ -2946,7 +2948,7 @@ class SerializationTest(unittest.TestCase):
     self._CheckRaises(
         message.EncodeError,
         proto.SerializeToString,
-        'Message proto2_unittest.TestRequired is missing required fields: b,c')
+        'Message protobuf_unittest.TestRequired is missing required fields: b,c')
     # Shouldn't raise exceptions.
     partial = proto.SerializePartialToString()
 
@@ -2954,7 +2956,7 @@ class SerializationTest(unittest.TestCase):
     self._CheckRaises(
         message.EncodeError,
         proto.SerializeToString,
-        'Message proto2_unittest.TestRequired is missing required fields: c')
+        'Message protobuf_unittest.TestRequired is missing required fields: c')
     # Shouldn't raise exceptions.
     partial = proto.SerializePartialToString()
 
@@ -2987,7 +2989,7 @@ class SerializationTest(unittest.TestCase):
     self._CheckRaises(
         message.EncodeError,
         proto.SerializeToString,
-        'Message proto2_unittest.TestRequiredForeign '
+        'Message protobuf_unittest.TestRequiredForeign '
         'is missing required fields: '
         'optional_message.b,optional_message.c')
 
@@ -3000,7 +3002,7 @@ class SerializationTest(unittest.TestCase):
     self._CheckRaises(
         message.EncodeError,
         proto.SerializeToString,
-        'Message proto2_unittest.TestRequiredForeign is missing required fields: '
+        'Message protobuf_unittest.TestRequiredForeign is missing required fields: '
         'repeated_message[0].b,repeated_message[0].c,'
         'repeated_message[1].a,repeated_message[1].c')
 
@@ -3139,40 +3141,19 @@ class SerializationTest(unittest.TestCase):
 
   def testFieldProperties(self):
     cls = unittest_pb2.TestAllTypes
-    if api_implementation.Type() == 'upb':
-      # Class accessors are not implemented in upb.
-      with self.assertRaises(AttributeError) as e:
-        # Try to access the descriptor of the field 'optional_int32'
-        cls.optional_int32.DESCRIPTOR
-        self.assertEqual('optional_int32', str(e.exception))
-    else:
-      self.assertIs(
-          cls.optional_int32.DESCRIPTOR,
-          cls.DESCRIPTOR.fields_by_name['optional_int32'],
-      )
-      self.assertEqual(
-          cls.OPTIONAL_INT32_FIELD_NUMBER, cls.optional_int32.DESCRIPTOR.number
-      )
-      self.assertIs(
-          cls.optional_nested_message.DESCRIPTOR,
-          cls.DESCRIPTOR.fields_by_name['optional_nested_message'],
-      )
-      self.assertEqual(
-          cls.OPTIONAL_NESTED_MESSAGE_FIELD_NUMBER,
-          cls.optional_nested_message.DESCRIPTOR.number,
-      )
-      self.assertIs(
-          cls.repeated_int32.DESCRIPTOR,
-          cls.DESCRIPTOR.fields_by_name['repeated_int32'],
-      )
-      self.assertEqual(
-          cls.REPEATED_INT32_FIELD_NUMBER, cls.repeated_int32.DESCRIPTOR.number
-      )
+    self.assertIs(cls.optional_int32.DESCRIPTOR,
+                  cls.DESCRIPTOR.fields_by_name['optional_int32'])
+    self.assertEqual(cls.OPTIONAL_INT32_FIELD_NUMBER,
+                     cls.optional_int32.DESCRIPTOR.number)
+    self.assertIs(cls.optional_nested_message.DESCRIPTOR,
+                  cls.DESCRIPTOR.fields_by_name['optional_nested_message'])
+    self.assertEqual(cls.OPTIONAL_NESTED_MESSAGE_FIELD_NUMBER,
+                     cls.optional_nested_message.DESCRIPTOR.number)
+    self.assertIs(cls.repeated_int32.DESCRIPTOR,
+                  cls.DESCRIPTOR.fields_by_name['repeated_int32'])
+    self.assertEqual(cls.REPEATED_INT32_FIELD_NUMBER,
+                     cls.repeated_int32.DESCRIPTOR.number)
 
-  @unittest.skipIf(
-      api_implementation.Type() == 'upb',
-      'Class accessors are not implemented in upb: see testFieldProperties.',
-  )
   def testFieldDataDescriptor(self):
     msg = unittest_pb2.TestAllTypes()
     msg.optional_int32 = 42
@@ -3286,8 +3267,9 @@ class OptionsTest(unittest.TestCase):
     proto.packed_int32.append(1)
     proto.packed_double.append(3.0)
     for field_descriptor, _ in proto.ListFields():
-      self.assertTrue(field_descriptor.is_packed)
-      self.assertTrue(field_descriptor.is_repeated)
+      self.assertEqual(True, field_descriptor.is_packed)
+      self.assertEqual(descriptor.FieldDescriptor.LABEL_REPEATED,
+                       field_descriptor.label)
 
 
 @testing_refleaks.TestCase
@@ -3295,8 +3277,7 @@ class ClassAPITest(unittest.TestCase):
 
   @unittest.skipIf(
       api_implementation.Type() != 'python',
-      'C++ and upb implementations require a call to MakeDescriptor()',
-  )
+      'C++ implementation requires a call to MakeDescriptor()')
   @testing_refleaks.SkipReferenceLeakChecker('MakeClass is not repeatable')
   def testMakeClassWithNestedDescriptor(self):
     leaf_desc = descriptor.Descriptor(
@@ -3390,6 +3371,13 @@ class ClassAPITest(unittest.TestCase):
   # conflicting message descriptors.
   def testParsingFlatClassWithExplicitClassDeclaration(self):
     """Test that the generated class can parse a flat message."""
+    # TODO: This test fails with cpp implementation in the call
+    # of six.with_metaclass(). The other two callsites of with_metaclass
+    # in this file are both excluded from cpp test, so it might be expected
+    # to fail. Need someone more familiar with the python code to take a
+    # look at this.
+    if api_implementation.Type() != 'python':
+      return
     file_descriptor = descriptor_pb2.FileDescriptorProto()
     file_descriptor.ParseFromString(self._GetSerializedFileDescriptor('A'))
     msg_descriptor = descriptor.MakeDescriptor(

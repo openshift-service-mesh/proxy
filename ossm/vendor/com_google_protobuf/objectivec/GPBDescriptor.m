@@ -10,27 +10,16 @@
 
 #import <objc/runtime.h>
 
-#import "GPBBootstrap.h"
 #import "GPBMessage.h"
 #import "GPBMessage_PackagePrivate.h"
 #import "GPBUtilities.h"
 #import "GPBUtilities_PackagePrivate.h"
 #import "GPBWireFormat.h"
 
-@interface GPBFileDescriptor ()
-- (instancetype)initWithPackage:(NSString *)package objcPrefix:(NSString *)objcPrefix;
-- (instancetype)initWithPackage:(NSString *)package;
-@end
-
-@interface GPBOneofDescriptor ()
-// name must be long lived.
-- (instancetype)initWithName:(const char *)name fields:(NSArray *)fields;
-@end
-
 @interface GPBDescriptor ()
 - (instancetype)initWithClass:(Class)messageClass
                   messageName:(NSString *)messageName
-              fileDescription:(GPBFilePackageAndPrefix *)fileDescription
+              fileDescription:(GPBFileDescription *)fileDescription
                        fields:(NSArray *)fields
                   storageSize:(uint32_t)storage
                    wireFormat:(BOOL)wireFormat;
@@ -62,11 +51,11 @@
 // The addresses of these variables are used as keys for objc_getAssociatedObject.
 static const char kTextFormatExtraValueKey = 0;
 static const char kParentClassValueKey = 0;
+static const char kClassNameSuffixKey = 0;
 static const char kFileDescriptorCacheKey = 0;
 
 static NSArray *NewFieldsArrayForHasIndex(int hasIndex, NSArray *allMessageFields)
     __attribute__((ns_returns_retained));
-GPB_INLINE void CheckRuntimeSupported(const int32_t *runtimeSupport);
 
 static NSArray *NewFieldsArrayForHasIndex(int hasIndex, NSArray *allMessageFields) {
   NSMutableArray *result = [[NSMutableArray alloc] init];
@@ -78,19 +67,10 @@ static NSArray *NewFieldsArrayForHasIndex(int hasIndex, NSArray *allMessageField
   return result;
 }
 
-GPB_INLINE void CheckRuntimeSupported(const int32_t *runtimeSupport) {
-  if (runtimeSupport != &GOOGLE_PROTOBUF_OBJC_EXPECTED_GENCODE_VERSION_40311 &&
-      runtimeSupport != &GOOGLE_PROTOBUF_OBJC_EXPECTED_GENCODE_VERSION_40310) {
-    [NSException raise:NSInternalInconsistencyException
-                format:@"Proto generation source appears to have been from a version newer than "
-                       @"this runtime."];
-  }
-}
-
 @implementation GPBDescriptor {
   Class messageClass_;
   NSString *messageName_;
-  const GPBFilePackageAndPrefix *fileDescription_;
+  const GPBFileDescription *fileDescription_;
   BOOL wireFormat_;
 }
 
@@ -103,66 +83,67 @@ GPB_INLINE void CheckRuntimeSupported(const int32_t *runtimeSupport) {
 
 + (instancetype)allocDescriptorForClass:(Class)messageClass
                             messageName:(NSString *)messageName
-                         runtimeSupport:(const int32_t *)runtimeSupport
-                        fileDescription:(GPBFilePackageAndPrefix *)fileDescription
+                        fileDescription:(GPBFileDescription *)fileDescription
                                  fields:(void *)fieldDescriptions
                              fieldCount:(uint32_t)fieldCount
                             storageSize:(uint32_t)storageSize
                                   flags:(GPBDescriptorInitializationFlags)flags {
-  CheckRuntimeSupported(runtimeSupport);
-#if defined(DEBUG) && DEBUG && !defined(NS_BLOCK_ASSERTIONS)
-  // Compute the unknown options by this version of the runtime and then check the passed in
-  // descriptor's options (from the generated code). If this does fire either something was
-  // added incorrectly to the runtime or some sorta corruption has happened.
+  // Compute the unknown flags by this version of the runtime and then check the passed in flags
+  // (from the generated code) to detect when sources from a newer version are being used with an
+  // older runtime.
   GPBDescriptorInitializationFlags unknownFlags =
-      (GPBDescriptorInitializationFlags)(~(GPBDescriptorInitializationFlag_FieldsWithDefault |
-                                           GPBDescriptorInitializationFlag_WireFormat));
-  NSAssert((flags & unknownFlags) == 0, @"Internal error: unknown descriptor flags set");
-  GPBFieldFlags mergedFieldFlags = GPBFieldNone;
-#endif  // defined(DEBUG) && DEBUG
+      ~(GPBDescriptorInitializationFlag_FieldsWithDefault |
+        GPBDescriptorInitializationFlag_WireFormat | GPBDescriptorInitializationFlag_UsesClassRefs |
+        GPBDescriptorInitializationFlag_Proto3OptionalKnown |
+        GPBDescriptorInitializationFlag_ClosedEnumSupportKnown);
+  if ((flags & unknownFlags) != 0) {
+    GPBRuntimeMatchFailure();
+  }
+
+#if defined(DEBUG) && DEBUG
+  NSAssert((flags & GPBDescriptorInitializationFlag_UsesClassRefs) != 0,
+           @"Internal error: all fields should have class refs");
+  NSAssert((flags & GPBDescriptorInitializationFlag_Proto3OptionalKnown) != 0,
+           @"Internal error: proto3 optional should be known");
+  NSAssert((flags & GPBDescriptorInitializationFlag_ClosedEnumSupportKnown) != 0,
+           @"Internal error: close enum should be known");
+
+  // `messageName` and `fileDescription` should both be set or both be unset depending on if this is
+  // being called from current code generation or legacy code generation.
+  NSAssert((messageName == nil) == (fileDescription == NULL),
+           @"name and fileDescription should always be provided together");
+#endif
 
   NSMutableArray *fields =
       (fieldCount ? [[NSMutableArray alloc] initWithCapacity:fieldCount] : nil);
   BOOL fieldsIncludeDefault = (flags & GPBDescriptorInitializationFlag_FieldsWithDefault) != 0;
 
   void *desc;
+  GPBFieldFlags mergedFieldFlags = GPBFieldNone;
   for (uint32_t i = 0; i < fieldCount; ++i) {
     // Need correctly typed pointer for array indexing below to work.
     if (fieldsIncludeDefault) {
       desc = &(((GPBMessageFieldDescriptionWithDefault *)fieldDescriptions)[i]);
-#if defined(DEBUG) && DEBUG && !defined(NS_BLOCK_ASSERTIONS)
       mergedFieldFlags |=
           (((GPBMessageFieldDescriptionWithDefault *)fieldDescriptions)[i]).core.flags;
-#endif
     } else {
       desc = &(((GPBMessageFieldDescription *)fieldDescriptions)[i]);
-#if defined(DEBUG) && DEBUG && !defined(NS_BLOCK_ASSERTIONS)
       mergedFieldFlags |= (((GPBMessageFieldDescription *)fieldDescriptions)[i]).flags;
-#endif
     }
     GPBFieldDescriptor *fieldDescriptor =
         [[GPBFieldDescriptor alloc] initWithFieldDescription:desc descriptorFlags:flags];
     [fields addObject:fieldDescriptor];
     [fieldDescriptor release];
   }
-#if defined(DEBUG) && DEBUG && !defined(NS_BLOCK_ASSERTIONS)
   // No real value in checking all the fields individually, just check the combined flags at the
   // end.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  GPBFieldFlags unknownFieldFlags = (GPBFieldFlags)(~(
-      GPBFieldRequired | GPBFieldRepeated | GPBFieldPacked | GPBFieldHasDefaultValue |
-      GPBFieldClearHasIvarOnZero | GPBFieldTextFormatNameCustom | GPBFieldMapKeyMask));
-#if GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION > 40310
-#error "Time to remove these methods"
-#else
-  if (runtimeSupport == &GOOGLE_PROTOBUF_OBJC_EXPECTED_GENCODE_VERSION_40310) {
-    unknownFieldFlags &= ~GPBFieldOptional;  // Allow 40310 to still have GPBFieldOptional.
+  GPBFieldFlags unknownFieldFlags =
+      ~(GPBFieldRequired | GPBFieldRepeated | GPBFieldPacked | GPBFieldOptional |
+        GPBFieldHasDefaultValue | GPBFieldClearHasIvarOnZero | GPBFieldTextFormatNameCustom |
+        GPBFieldHasEnumDescriptor | GPBFieldMapKeyMask | GPBFieldClosedEnum);
+  if ((mergedFieldFlags & unknownFieldFlags) != 0) {
+    GPBRuntimeMatchFailure();
   }
-#endif
-  NSAssert((mergedFieldFlags & unknownFieldFlags) == 0, @"Internal error: unknown field flags set");
-#pragma clang diagnostic pop
-#endif  // defined(DEBUG) && DEBUG
 
   BOOL wireFormat = (flags & GPBDescriptorInitializationFlag_WireFormat) != 0;
   GPBDescriptor *descriptor = [[self alloc] initWithClass:messageClass
@@ -175,85 +156,117 @@ GPB_INLINE void CheckRuntimeSupported(const int32_t *runtimeSupport) {
   return descriptor;
 }
 
-#if GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION > 30007
-#error "Time to remove these methods and the message and field flags being checked"
-#else
-
 + (instancetype)allocDescriptorForClass:(Class)messageClass
-                            messageName:(NSString *)messageName
-                        fileDescription:(GPBFileDescription *)fileDescription
+                                   file:(GPBFileDescriptor *)file
                                  fields:(void *)fieldDescriptions
                              fieldCount:(uint32_t)fieldCount
                             storageSize:(uint32_t)storageSize
                                   flags:(GPBDescriptorInitializationFlags)flags {
-#if defined(DEBUG) && DEBUG
-  NSAssert((flags & GPBDescriptorInitializationFlag_UsesClassRefs) != 0,
-           @"Internal error: all messages should have class refs");
-  NSAssert((flags & GPBDescriptorInitializationFlag_Proto3OptionalKnown) != 0,
-           @"Internal error: proto3 optional should be known");
-  NSAssert((flags & GPBDescriptorInitializationFlag_ClosedEnumSupportKnown) != 0,
-           @"Internal error: close enum should be known");
+  GPBInternalCompileAssert(GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION <= 30006,
+                           time_to_remove_this_old_version_shim);
 
-  NSAssert((messageName != nil), @"Internal error: missing messageName");
-  NSAssert((fileDescription != NULL), @"Internal error: missing fileDescription");
-#endif  // defined(DEBUG) && DEBUG
-  GPBDescriptorInitializationFlags flagsToClear =
-      (GPBDescriptorInitializationFlags)(GPBDescriptorInitializationFlag_UsesClassRefs |
-                                         GPBDescriptorInitializationFlag_Proto3OptionalKnown |
-                                         GPBDescriptorInitializationFlag_ClosedEnumSupportKnown);
-  flags = (GPBDescriptorInitializationFlags)(flags & ~flagsToClear);
+  BOOL fixClassRefs = (flags & GPBDescriptorInitializationFlag_UsesClassRefs) == 0;
+  GPBInternalCompileAssert(GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION <= 30003,
+                           time_to_remove_non_class_ref_support);
 
-  BOOL fieldsIncludeDefault = (flags & GPBDescriptorInitializationFlag_FieldsWithDefault) != 0;
-  for (uint32_t i = 0; i < fieldCount; ++i) {
-    GPBMessageFieldDescription *coreDesc;
-    if (fieldsIncludeDefault) {
-      coreDesc = &(((GPBMessageFieldDescriptionWithDefault *)fieldDescriptions)[i]).core;
-    } else {
-      coreDesc = &(((GPBMessageFieldDescription *)fieldDescriptions)[i]);
-    }
+  BOOL fixProto3Optional = (flags & GPBDescriptorInitializationFlag_Proto3OptionalKnown) == 0;
+  GPBInternalCompileAssert(GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION <= 30004,
+                           time_to_remove_proto3_optional_fallback);
+
+  BOOL fixClosedEnums = (flags & GPBDescriptorInitializationFlag_ClosedEnumSupportKnown) == 0;
+  GPBInternalCompileAssert(GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION <= 30005,
+                           time_to_remove_closed_enum_fallback);
+
+  if (fixClassRefs || fixProto3Optional || fixClosedEnums) {
+    BOOL fieldsIncludeDefault = (flags & GPBDescriptorInitializationFlag_FieldsWithDefault) != 0;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    coreDesc->flags &= ~GPBFieldOptional;  // Flag longer being used.
+    GPBFileSyntax fileSyntax = file.syntax;
 #pragma clang diagnostic pop
-    if ((coreDesc->flags & GPBFieldHasEnumDescriptor) != 0) {
-      // Clear the flag, no longer used.
-      coreDesc->flags &= ~GPBFieldHasEnumDescriptor;
-#if defined(DEBUG) && DEBUG
-      NSAssert((coreDesc->dataType == GPBDataTypeEnum),
-               @"Field shouldn't have GPBFieldHasEnumDescriptor set");
-      GPBEnumDescriptor *enumDescriptor = coreDesc->dataTypeSpecific.enumDescFunc();
-      if (enumDescriptor.isClosed) {
-        NSAssert((coreDesc->flags & GPBFieldClosedEnum) != 0,
-                 @"Field must have GPBFieldClosedEnum set");
-        // Clear the flag, no longer used.
-        coreDesc->flags &= ~GPBFieldClosedEnum;
+
+    for (uint32_t i = 0; i < fieldCount; ++i) {
+      GPBMessageFieldDescription *coreDesc;
+      if (fieldsIncludeDefault) {
+        coreDesc = &((((GPBMessageFieldDescriptionWithDefault *)fieldDescriptions)[i]).core);
       } else {
-        NSAssert((coreDesc->flags & GPBFieldClosedEnum) == 0,
-                 @"Field must not have GPBFieldClosedEnum set");
+        coreDesc = &(((GPBMessageFieldDescription *)fieldDescriptions)[i]);
       }
-#endif  // defined(DEBUG) && DEBUG
-    } else {
-#if defined(DEBUG) && DEBUG
-      NSAssert((coreDesc->dataType != GPBDataTypeEnum),
-               @"Field must have GPBFieldHasEnumDescriptor set");
-#endif
+
+      if (fixClassRefs && GPBDataTypeIsMessage(coreDesc->dataType)) {
+        const char *className = coreDesc->dataTypeSpecific.className;
+        Class msgClass = objc_getClass(className);
+        NSAssert(msgClass, @"Class %s not defined", className);
+        coreDesc->dataTypeSpecific.clazz = msgClass;
+      }
+
+      if (fixProto3Optional) {
+        // If it was...
+        //  - proto3 syntax
+        //  - not repeated/map
+        //  - not in a oneof (negative has index)
+        //  - not a message (the flag doesn't make sense for messages)
+        BOOL clearOnZero = ((fileSyntax == GPBFileSyntaxProto3) &&
+                            ((coreDesc->flags & (GPBFieldRepeated | GPBFieldMapKeyMask)) == 0) &&
+                            (coreDesc->hasIndex >= 0) && !GPBDataTypeIsMessage(coreDesc->dataType));
+        if (clearOnZero) {
+          coreDesc->flags |= GPBFieldClearHasIvarOnZero;
+        }
+      }
+
+      if (fixClosedEnums) {
+        // NOTE: This isn't correct, it is using the syntax of the file that
+        // declared the field, not the syntax of the file that declared the
+        // enum; but for older generated code, that's all we have and that happens
+        // to be what the runtime was doing (even though it was wrong). This is
+        // only wrong in the rare cases an enum is declared in a proto3 syntax
+        // file but used for a field in the proto2 syntax file.
+        BOOL isClosedEnum =
+            (coreDesc->dataType == GPBDataTypeEnum && fileSyntax == GPBFileSyntaxProto2);
+        if (isClosedEnum) {
+          coreDesc->flags |= GPBFieldClosedEnum;
+        }
+      }
     }
+    flags |= (GPBDescriptorInitializationFlag_UsesClassRefs |
+              GPBDescriptorInitializationFlag_Proto3OptionalKnown |
+              GPBDescriptorInitializationFlag_ClosedEnumSupportKnown);
   }
 
+  GPBDescriptor *result = [self allocDescriptorForClass:messageClass
+                                            messageName:nil
+                                        fileDescription:NULL
+                                                 fields:fieldDescriptions
+                                             fieldCount:fieldCount
+                                            storageSize:storageSize
+                                                  flags:flags];
+  objc_setAssociatedObject(result, &kFileDescriptorCacheKey, file,
+                           OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  return result;
+}
+
++ (instancetype)allocDescriptorForClass:(Class)messageClass
+                              rootClass:(__unused Class)rootClass
+                                   file:(GPBFileDescriptor *)file
+                                 fields:(void *)fieldDescriptions
+                             fieldCount:(uint32_t)fieldCount
+                            storageSize:(uint32_t)storageSize
+                                  flags:(GPBDescriptorInitializationFlags)flags {
+  GPBInternalCompileAssert(GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION <= 30006,
+                           time_to_remove_this_old_version_shim);
+  // The rootClass is no longer used, but it is passed as [ROOT class] to
+  // ensure it was started up during initialization also when the message
+  // scopes extensions.
   return [self allocDescriptorForClass:messageClass
-                           messageName:messageName
-                        runtimeSupport:&GOOGLE_PROTOBUF_OBJC_EXPECTED_GENCODE_VERSION_40311
-                       fileDescription:(GPBFilePackageAndPrefix *)fileDescription
+                                  file:file
                                 fields:fieldDescriptions
                             fieldCount:fieldCount
                            storageSize:storageSize
                                  flags:flags];
 }
 
-#endif  // GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION > 30007
 - (instancetype)initWithClass:(Class)messageClass
                   messageName:(NSString *)messageName
-              fileDescription:(GPBFilePackageAndPrefix *)fileDescription
+              fileDescription:(GPBFileDescription *)fileDescription
                        fields:(NSArray *)fields
                   storageSize:(uint32_t)storageSize
                    wireFormat:(BOOL)wireFormat {
@@ -291,8 +304,7 @@ GPB_INLINE void CheckRuntimeSupported(const int32_t *runtimeSupport) {
       firstHasIndex:(int32_t)firstHasIndex {
   NSCAssert(firstHasIndex < 0, @"Should always be <0");
   NSMutableArray *oneofs = [[NSMutableArray alloc] initWithCapacity:count];
-  int32_t hasIndex = firstHasIndex;
-  for (uint32_t i = 0; i < count; ++i, --hasIndex) {
+  for (uint32_t i = 0, hasIndex = firstHasIndex; i < count; ++i, --hasIndex) {
     const char *name = oneofNames[i];
     NSArray *fieldsForOneof = NewFieldsArrayForHasIndex(hasIndex, fields_);
     NSCAssert(fieldsForOneof.count > 0, @"No fields for this oneof? (%s:%d)", name, hasIndex);
@@ -320,11 +332,30 @@ GPB_INLINE void CheckRuntimeSupported(const int32_t *runtimeSupport) {
 
 - (void)setupExtensionRanges:(const GPBExtensionRange *)ranges count:(int32_t)count {
   extensionRanges_ = ranges;
-  extensionRangesCount_ = (uint32_t)count;
+  extensionRangesCount_ = count;
 }
 
 - (void)setupContainingMessageClass:(Class)messageClass {
   objc_setAssociatedObject(self, &kParentClassValueKey, messageClass, OBJC_ASSOCIATION_ASSIGN);
+}
+
+- (void)setupContainingMessageClassName:(const char *)msgClassName {
+  GPBInternalCompileAssert(GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION <= 30003,
+                           time_to_remove_this_old_version_shim);
+  // Note: Only fetch the class here, can't send messages to it because
+  // that could cause cycles back to this class within +initialize if
+  // two messages have each other in fields (i.e. - they build a graph).
+  Class clazz = objc_getClass(msgClassName);
+  NSAssert(clazz, @"Class %s not defined", msgClassName);
+  [self setupContainingMessageClass:clazz];
+}
+
+- (void)setupMessageClassNameSuffix:(NSString *)suffix {
+  GPBInternalCompileAssert(GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION <= 30007,
+                           time_to_remove_this_old_version_shim);
+  if (suffix.length) {
+    objc_setAssociatedObject(self, &kClassNameSuffixKey, suffix, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  }
 }
 
 - (NSString *)name {
@@ -342,10 +373,12 @@ GPB_INLINE void CheckRuntimeSupported(const int32_t *runtimeSupport) {
       NSString *package = fileDescription_->package ? @(fileDescription_->package) : @"";
       if (fileDescription_->prefix) {
         result = [[GPBFileDescriptor alloc] initWithPackage:package
-                                                 objcPrefix:@(fileDescription_->prefix)];
+                                                 objcPrefix:@(fileDescription_->prefix)
+                                                     syntax:fileDescription_->syntax];
 
       } else {
-        result = [[GPBFileDescriptor alloc] initWithPackage:package];
+        result = [[GPBFileDescriptor alloc] initWithPackage:package
+                                                     syntax:fileDescription_->syntax];
       }
       objc_setAssociatedObject(result, &kFileDescriptorCacheKey, result,
                                OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -371,10 +404,62 @@ GPB_INLINE void CheckRuntimeSupported(const int32_t *runtimeSupport) {
     return messageName_;
   }
 
-#if defined(DEBUG) && DEBUG
-  NSAssert(NO, @"Missing messageName_");
-#endif
-  return nil;
+  GPBInternalCompileAssert(GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION <= 30007,
+                           time_to_remove_this_old_approach);
+  // NOTE: When this code path is removed, this also means this api can't return nil any more but
+  // that would be a breaking code change (not longer a Swift optional), so changing that will be
+  // harder.
+
+  NSString *className = NSStringFromClass(self.messageClass);
+  GPBFileDescriptor *file = self.file;
+  NSString *objcPrefix = file.objcPrefix;
+  if (objcPrefix && ![className hasPrefix:objcPrefix]) {
+    NSAssert(0, @"Class didn't have correct prefix? (%@ - %@)", className, objcPrefix);
+    return nil;
+  }
+
+  NSString *name = nil;
+  if (parent) {
+    NSString *parentClassName = NSStringFromClass(parent.messageClass);
+    // The generator will add _Class to avoid reserved words, drop it.
+    NSString *suffix = objc_getAssociatedObject(parent, &kClassNameSuffixKey);
+    if (suffix) {
+      if (![parentClassName hasSuffix:suffix]) {
+        NSAssert(0, @"ParentMessage class didn't have correct suffix? (%@ - %@)", className,
+                 suffix);
+        return nil;
+      }
+      parentClassName = [parentClassName substringToIndex:(parentClassName.length - suffix.length)];
+    }
+    NSString *parentPrefix = [parentClassName stringByAppendingString:@"_"];
+    if (![className hasPrefix:parentPrefix]) {
+      NSAssert(0, @"Class didn't have the correct parent name prefix? (%@ - %@)", parentPrefix,
+               className);
+      return nil;
+    }
+    name = [className substringFromIndex:parentPrefix.length];
+  } else {
+    name = [className substringFromIndex:objcPrefix.length];
+  }
+
+  // The generator will add _Class to avoid reserved words, drop it.
+  NSString *suffix = objc_getAssociatedObject(self, &kClassNameSuffixKey);
+  if (suffix) {
+    if (![name hasSuffix:suffix]) {
+      NSAssert(0, @"Message class didn't have correct suffix? (%@ - %@)", name, suffix);
+      return nil;
+    }
+    name = [name substringToIndex:(name.length - suffix.length)];
+  }
+
+  NSString *prefix = (parent != nil ? parent.fullName : file.package);
+  NSString *result;
+  if (prefix.length > 0) {
+    result = [NSString stringWithFormat:@"%@.%@", prefix, name];
+  } else {
+    result = name;
+  }
+  return result;
 }
 
 - (GPBFieldDescriptor *)fieldWithNumber:(uint32_t)fieldNumber {
@@ -409,24 +494,30 @@ GPB_INLINE void CheckRuntimeSupported(const int32_t *runtimeSupport) {
 @implementation GPBFileDescriptor {
   NSString *package_;
   NSString *objcPrefix_;
+  GPBFileSyntax syntax_;
 }
 
 @synthesize package = package_;
 @synthesize objcPrefix = objcPrefix_;
+@synthesize syntax = syntax_;
 
-- (instancetype)initWithPackage:(NSString *)package objcPrefix:(NSString *)objcPrefix {
+- (instancetype)initWithPackage:(NSString *)package
+                     objcPrefix:(NSString *)objcPrefix
+                         syntax:(GPBFileSyntax)syntax {
   self = [super init];
   if (self) {
     package_ = [package copy];
     objcPrefix_ = [objcPrefix copy];
+    syntax_ = syntax;
   }
   return self;
 }
 
-- (instancetype)initWithPackage:(NSString *)package {
+- (instancetype)initWithPackage:(NSString *)package syntax:(GPBFileSyntax)syntax {
   self = [super init];
   if (self) {
     package_ = [package copy];
+    syntax_ = syntax;
   }
   return self;
 }
@@ -446,7 +537,7 @@ GPB_INLINE void CheckRuntimeSupported(const int32_t *runtimeSupport) {
   }
   GPBFileDescriptor *otherFile = other;
   // objcPrefix can be nil, otherwise, straight up compare.
-  return ([package_ isEqual:otherFile->package_] &&
+  return (syntax_ == otherFile->syntax_ && [package_ isEqual:otherFile->package_] &&
           (objcPrefix_ == otherFile->objcPrefix_ ||
            (otherFile->objcPrefix_ && [objcPrefix_ isEqual:otherFile->objcPrefix_])));
 }
@@ -574,8 +665,13 @@ uint32_t GPBFieldAlternateTag(GPBFieldDescriptor *self) {
       msgClass_ = coreDesc->dataTypeSpecific.clazz;
     } else if (dataType == GPBDataTypeEnum) {
       enumDescriptor_ = coreDesc->dataTypeSpecific.enumDescFunc();
+#if defined(DEBUG) && DEBUG
+      NSAssert((coreDesc->flags & GPBFieldHasEnumDescriptor) != 0,
+               @"Field must have GPBFieldHasEnumDescriptor set");
+#endif  // DEBUG
     }
 
+    // Non map<>/repeated fields can have defaults in proto2 syntax.
     BOOL isMapOrArray = GPBFieldIsMapOrArray(self);
     if (!isMapOrArray && includesDefault) {
       defaultValue_ = ((GPBMessageFieldDescriptionWithDefault *)description)->defaultValue;
@@ -628,6 +724,10 @@ uint32_t GPBFieldAlternateTag(GPBFieldDescriptor *self) {
 
 - (BOOL)isRequired {
   return (description_->flags & GPBFieldRequired) != 0;
+}
+
+- (BOOL)isOptional {
+  return (description_->flags & GPBFieldOptional) != 0;
 }
 
 - (GPBFieldType)fieldType {
@@ -713,7 +813,7 @@ uint32_t GPBFieldAlternateTag(GPBFieldDescriptor *self) {
       return nil;
     }
     const uint8_t *extraTextFormatInfo = [extraInfoValue pointerValue];
-    return GPBDecodeTextFormatName(extraTextFormatInfo, (int32_t)GPBFieldNumber(self), self.name);
+    return GPBDecodeTextFormatName(extraTextFormatInfo, GPBFieldNumber(self), self.name);
   }
 
   // The logic here has to match SetCommonFieldVariables() from
@@ -786,21 +886,19 @@ uint32_t GPBFieldAlternateTag(GPBFieldDescriptor *self) {
 @synthesize enumVerifier = enumVerifier_;
 
 + (instancetype)allocDescriptorForName:(NSString *)name
-                        runtimeSupport:(const int32_t *)runtimeSupport
                             valueNames:(const char *)valueNames
                                 values:(const int32_t *)values
                                  count:(uint32_t)valueCount
                           enumVerifier:(GPBEnumValidationFunc)enumVerifier
                                  flags:(GPBEnumDescriptorInitializationFlags)flags {
-  CheckRuntimeSupported(runtimeSupport);
-#if defined(DEBUG) && DEBUG && !defined(NS_BLOCK_ASSERTIONS)
-  // Compute the unknown options by this version of the runtime and then check the passed in
-  // descriptor's options (from the generated code). If this does fire either something was
-  // added incorrectly to the runtime or some sorta corruption has happened.
+  // Compute the unknown flags by this version of the runtime and then check the passed in flags
+  // (from the generated code) to detect when sources from a newer version are being used with an
+  // older runtime.
   GPBEnumDescriptorInitializationFlags unknownFlags =
-      (GPBEnumDescriptorInitializationFlags)(~(GPBEnumDescriptorInitializationFlag_IsClosed));
-  NSAssert((flags & unknownFlags) == 0, @"Internal error: unknown enum flags set");
-#endif  // defined(DEBUG) && DEBUG && !defined(NS_BLOCK_ASSERTIONS)
+      ~(GPBEnumDescriptorInitializationFlag_IsClosed);
+  if ((flags & unknownFlags) != 0) {
+    GPBRuntimeMatchFailure();
+  }
   GPBEnumDescriptor *descriptor = [[self alloc] initWithName:name
                                                   valueNames:valueNames
                                                       values:values
@@ -811,7 +909,6 @@ uint32_t GPBFieldAlternateTag(GPBFieldDescriptor *self) {
 }
 
 + (instancetype)allocDescriptorForName:(NSString *)name
-                        runtimeSupport:(const int32_t *)runtimeSupport
                             valueNames:(const char *)valueNames
                                 values:(const int32_t *)values
                                  count:(uint32_t)valueCount
@@ -820,7 +917,6 @@ uint32_t GPBFieldAlternateTag(GPBFieldDescriptor *self) {
                    extraTextFormatInfo:(const char *)extraTextFormatInfo {
   // Call the common case.
   GPBEnumDescriptor *descriptor = [self allocDescriptorForName:name
-                                                runtimeSupport:runtimeSupport
                                                     valueNames:valueNames
                                                         values:values
                                                          count:valueCount
@@ -831,24 +927,19 @@ uint32_t GPBFieldAlternateTag(GPBFieldDescriptor *self) {
   return descriptor;
 }
 
-#if GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION > 30007
-#error "Time to remove these methods"
-#else
-
 + (instancetype)allocDescriptorForName:(NSString *)name
                             valueNames:(const char *)valueNames
                                 values:(const int32_t *)values
                                  count:(uint32_t)valueCount
-                          enumVerifier:(GPBEnumValidationFunc)enumVerifier
-                                 flags:(GPBEnumDescriptorInitializationFlags)flags {
-  // This is the 30007 api point. Nothing to do, just bridge to the current version.
+                          enumVerifier:(GPBEnumValidationFunc)enumVerifier {
+  GPBInternalCompileAssert(GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION <= 30005,
+                           time_to_remove_this_old_version_shim);
   return [self allocDescriptorForName:name
-                       runtimeSupport:&GOOGLE_PROTOBUF_OBJC_EXPECTED_GENCODE_VERSION_40311
                            valueNames:valueNames
                                values:values
                                 count:valueCount
                          enumVerifier:enumVerifier
-                                flags:flags];
+                                flags:GPBEnumDescriptorInitializationFlag_None];
 }
 
 + (instancetype)allocDescriptorForName:(NSString *)name
@@ -856,20 +947,17 @@ uint32_t GPBFieldAlternateTag(GPBFieldDescriptor *self) {
                                 values:(const int32_t *)values
                                  count:(uint32_t)valueCount
                           enumVerifier:(GPBEnumValidationFunc)enumVerifier
-                                 flags:(GPBEnumDescriptorInitializationFlags)flags
                    extraTextFormatInfo:(const char *)extraTextFormatInfo {
-  // This is the 30007 api point. Nothing to do, just bridge to the current version.
+  GPBInternalCompileAssert(GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION <= 30005,
+                           time_to_remove_this_old_version_shim);
   return [self allocDescriptorForName:name
-                       runtimeSupport:&GOOGLE_PROTOBUF_OBJC_EXPECTED_GENCODE_VERSION_40311
                            valueNames:valueNames
                                values:values
                                 count:valueCount
                          enumVerifier:enumVerifier
-                                flags:flags
+                                flags:GPBEnumDescriptorInitializationFlag_None
                   extraTextFormatInfo:extraTextFormatInfo];
 }
-
-#endif  // GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION > 30007
 
 - (instancetype)initWithName:(NSString *)name
                   valueNames:(const char *)valueNames
@@ -903,10 +991,6 @@ uint32_t GPBFieldAlternateTag(GPBFieldDescriptor *self) {
 
 - (BOOL)isClosed {
   return (flags_ & GPBEnumDescriptorInitializationFlag_IsClosed) != 0;
-}
-
-- (BOOL)isOpenOrValidValue:(int32_t)value {
-  return (flags_ & GPBEnumDescriptorInitializationFlag_IsClosed) == 0 || enumVerifier_(value);
 }
 
 - (void)calcValueNameOffsets {
@@ -1052,19 +1136,30 @@ uint32_t GPBFieldAlternateTag(GPBFieldDescriptor *self) {
 }
 
 - (instancetype)initWithExtensionDescription:(GPBExtensionDescription *)desc
-                              runtimeSupport:(const int32_t *)runtimeSupport {
-  // IMPORTANT: In c_function mode, this may be called from any thread during a dispatch_once
-  // scoped to each specific descriptor - i.e., other descriptors may be initializing at the same
-  // time.
-  CheckRuntimeSupported(runtimeSupport);
-#if defined(DEBUG) && DEBUG && !defined(NS_BLOCK_ASSERTIONS)
+                               usesClassRefs:(BOOL)usesClassRefs {
   // Compute the unknown options by this version of the runtime and then check the passed in
-  // descriptor's options (from the generated code). If this does fire either something was
-  // added incorrectly to the runtime or some sorta corruption has happened.
+  // descriptor's options (from the generated code) to detect when sources from a newer version are
+  // being used with an older runtime.
   GPBExtensionOptions unknownOptions =
-      (GPBExtensionOptions)(~(GPBExtensionRepeated | GPBExtensionPacked));
-  NSAssert((desc->options & unknownOptions) == 0, @"Internal error: unknown extension flags set");
-#endif  // defined(DEBUG) && DEBUG && !defined(NS_BLOCK_ASSERTIONS)
+      ~(GPBExtensionRepeated | GPBExtensionPacked | GPBExtensionSetWireFormat);
+  if ((desc->options & unknownOptions) != 0) {
+    GPBRuntimeMatchFailure();
+  }
+
+#if defined(DEBUG) && DEBUG && !defined(NS_BLOCK_ASSERTIONS)
+  NSAssert(usesClassRefs, @"Internal error: all extensions should have class refs");
+
+  // These are also checked by the generator.
+  if ((desc->options & GPBExtensionSetWireFormat) != 0) {
+    NSAssert(desc->dataType == GPBDataTypeMessage,
+             @"Internal error: If a MessageSet extension is set, the data type must be a message.");
+    NSAssert((desc->options & GPBExtensionRepeated) == 0,
+             @"Internal Error: MessageSet extension can't be repeated.");
+    // NOTE: Could also check that the extended class is a MessageSet, but that would force the
+    // ObjC runtime to start up that class and that isn't desirable here.
+  }
+#endif
+
   if ((self = [super init])) {
     description_ = desc;
 
@@ -1091,25 +1186,26 @@ uint32_t GPBFieldAlternateTag(GPBFieldDescriptor *self) {
   return self;
 }
 
-#if GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION > 30007
-#error "Time to remove this method and the option being cleared below."
-#else
+- (instancetype)initWithExtensionDescription:(GPBExtensionDescription *)desc {
+  GPBInternalCompileAssert(GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION <= 30003,
+                           time_to_remove_this_old_version_shim);
 
-- (instancetype)initWithExtensionDescription:(GPBExtensionDescription *)desc
-                               usesClassRefs:(BOOL)usesClassRefs {
-#if defined(DEBUG) && DEBUG && !defined(NS_BLOCK_ASSERTIONS)
-  NSAssert(usesClassRefs, @"Internal error: all extensions should have class refs");
-#endif
+  const char *className = desc->messageOrGroupClass.name;
+  if (className) {
+    Class clazz = objc_lookUpClass(className);
+    NSAssert(clazz != Nil, @"Class %s not defined", className);
+    desc->messageOrGroupClass.clazz = clazz;
+  }
 
-  // Clear the flags that are not used by this version of the runtime.
-  GPBExtensionOptions flagsToClear = GPBExtensionSetWireFormat;
-  desc->options = (GPBExtensionOptions)(desc->options & ~flagsToClear);
+  const char *extendedClassName = desc->extendedClass.name;
+  if (extendedClassName) {
+    Class clazz = objc_lookUpClass(extendedClassName);
+    NSAssert(clazz, @"Class %s not defined", extendedClassName);
+    desc->extendedClass.clazz = clazz;
+  }
 
-  return [self initWithExtensionDescription:desc
-                             runtimeSupport:&GOOGLE_PROTOBUF_OBJC_EXPECTED_GENCODE_VERSION_40311];
+  return [self initWithExtensionDescription:desc usesClassRefs:YES];
 }
-
-#endif  // GOOGLE_PROTOBUF_OBJC_MIN_SUPPORTED_VERSION > 30007
 
 - (void)dealloc {
   if ((description_->dataType == GPBDataTypeBytes) && !GPBExtensionIsRepeated(description_)) {
@@ -1134,7 +1230,7 @@ uint32_t GPBFieldAlternateTag(GPBFieldDescriptor *self) {
 }
 
 - (uint32_t)fieldNumber {
-  return (uint32_t)(description_->fieldNumber);
+  return description_->fieldNumber;
 }
 
 - (GPBDataType)dataType {

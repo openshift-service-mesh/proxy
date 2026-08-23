@@ -32,7 +32,7 @@ rust_test(
     },
     deps = [
         "//rust:protobuf_upb_export",
-        "//rust/test:unittest_proto3_upb_rust_proto",
+        "//src/google/protobuf:unittest_proto3_upb_rust_proto",
         "@crate_index//:googletest",
     ],
 )
@@ -45,47 +45,8 @@ rust_test(
     deps = [
         "//rust:protobuf_upb",
         "//rust/test:map_unittest_upb_rust_proto",
-        "//rust/test:unittest_upb_rust_proto",
-        "@crate_index//:googletest",
-    ],
-)
-
-rust_test(
-    name = "thread_local_arena_test",
-    srcs = ["thread_local_arena_test.rs"],
-    aliases = {
-        "//rust:protobuf_upb_export": "protobuf",
-    },
-    deps = [
-        "//rust:protobuf_upb_export",
-        "//rust/test:unittest_upb_rust_proto",
-        "@crate_index//:googletest",
-    ],
-)
-
-rust_test(
-    name = "entity_type_test",
-    srcs = ["entity_type_test.rs"],
-    aliases = {
-        "//rust:protobuf_upb_export": "protobuf",
-    },
-    deps = [
-        "//rust:protobuf_upb_export",
-        "//rust/test:unittest_upb_rust_proto",
-        "@crate_index//:googletest",
-    ],
-)
-
-rust_test(
-    name = "generated_descriptors_test",
-    srcs = ["generated_descriptors_test.rs"],
-    aliases = {
-        "//rust:protobuf_upb_export": "protobuf",
-    },
-    deps = [
-        "//rust:protobuf_upb_export",
-        "//rust/test:descriptor_upb_rust_proto",
-        "//rust/test:unittest_upb_rust_proto",
+        "//src/google/protobuf:edition_unittest_upb_rust_proto",
+        "//src/google/protobuf:unittest_upb_rust_proto",
         "@crate_index//:googletest",
     ],
 )

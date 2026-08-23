@@ -12,8 +12,6 @@
 #ifndef GOOGLE_PROTOBUF_COMPILER_CPP_HELPERS_H__
 #define GOOGLE_PROTOBUF_COMPILER_CPP_HELPERS_H__
 
-#include <cstddef>
-#include <cstdint>
 #include <iterator>
 #include <string>
 #include <tuple>
@@ -44,7 +42,7 @@ namespace google {
 namespace protobuf {
 namespace compiler {
 namespace cpp {
-enum class ArenaDtorNeeds { kNone = 0, kRequired = 1 };
+enum class ArenaDtorNeeds { kNone = 0, kOnDemand = 1, kRequired = 2 };
 
 inline absl::string_view ProtobufNamespace(const Options& opts) {
   // This won't be transformed by copybara, since copybara looks for google::protobuf::.
@@ -52,13 +50,6 @@ inline absl::string_view ProtobufNamespace(const Options& opts) {
   constexpr absl::string_view kOssNs = "google::protobuf";
 
   return opts.opensource_runtime ? kOssNs : kGoogle3Ns;
-}
-
-// A helper for calling FieldDescriptor::CalculateCppRepeatedType() which is
-// private.
-inline FieldDescriptor::CppRepeatedType CalculateFieldDescriptorRepeatedType(
-    const FieldDescriptor* field) {
-  return field->CalculateCppRepeatedType();
 }
 
 inline std::string DeprecatedAttribute(const Options&,
@@ -101,10 +92,10 @@ bool IsBootstrapProto(const Options& options, const FileDescriptor* file);
 // "<namespace>::some_name" is the correct fully qualified namespace.
 // This means if the package is empty the namespace is "", and otherwise
 // the namespace is "::foo::bar::...::baz" without trailing semi-colons.
-std::string Namespace(const FileDescriptor* d);
-std::string Namespace(const Descriptor* d);
-std::string Namespace(const FieldDescriptor* d);
-std::string Namespace(const EnumDescriptor* d);
+std::string Namespace(const FileDescriptor* d, const Options& options);
+std::string Namespace(const Descriptor* d, const Options& options);
+std::string Namespace(const FieldDescriptor* d, const Options& options);
+std::string Namespace(const EnumDescriptor* d, const Options& options);
 PROTOC_EXPORT std::string Namespace(const FileDescriptor* d);
 PROTOC_EXPORT std::string Namespace(const Descriptor* d);
 PROTOC_EXPORT std::string Namespace(const FieldDescriptor* d);
@@ -114,11 +105,13 @@ class MessageSCCAnalyzer;
 
 // Returns true if it's safe to init "field" to zero.
 bool CanInitializeByZeroing(const FieldDescriptor* field,
-                            const Options& options);
+                            const Options& options,
+                            MessageSCCAnalyzer* scc_analyzer);
 // Returns true if it's safe to reset "field" to zero.
 bool CanClearByZeroing(const FieldDescriptor* field);
 // Determines if swap can be implemented via memcpy.
-bool HasTrivialSwap(const FieldDescriptor* field, const Options& options);
+bool HasTrivialSwap(const FieldDescriptor* field, const Options& options,
+                    MessageSCCAnalyzer* scc_analyzer);
 
 PROTOC_EXPORT std::string ClassName(const Descriptor* descriptor);
 PROTOC_EXPORT std::string ClassName(const EnumDescriptor* enum_descriptor);
@@ -158,40 +151,27 @@ std::string QualifiedExtensionName(const FieldDescriptor* d,
 std::string QualifiedExtensionName(const FieldDescriptor* d);
 
 // Type name of default instance.
-std::string SplitDefaultInstanceType(const Descriptor* descriptor,
-                                     const Options& options);
+std::string DefaultInstanceType(const Descriptor* descriptor,
+                                const Options& options, bool split = false);
 
 // Non-qualified name of the default_instance of this message.
-std::string SplitDefaultInstanceName(const Descriptor* descriptor,
-                                     const Options& options);
-
-// Type name of globals instance.
-std::string MsgGlobalsInstanceType(const Descriptor* descriptor,
-                                   const Options& options);
-
-// Non-qualified name of the globals instance of this message.
-std::string MsgGlobalsInstanceName(const Descriptor* descriptor,
-                                   const Options& options);
+std::string DefaultInstanceName(const Descriptor* descriptor,
+                                const Options& options, bool split = false);
 
 // Non-qualified name of the default instance pointer. This is used only for
 // implicit weak fields, where we need an extra indirection.
-std::string MsgGlobalsInstancePtr(const Descriptor* descriptor,
-                                  const Options& options);
+std::string DefaultInstancePtr(const Descriptor* descriptor,
+                               const Options& options, bool split = false);
 
 // Fully qualified name of the default_instance of this message.
-std::string QualifiedSplitDefaultInstanceName(const Descriptor* descriptor,
-                                              const Options& options);
-
-// Fully qualified name of the globals instance of this message.
-std::string QualifiedMsgGlobalsInstanceName(const Descriptor* descriptor,
-                                            const Options& options);
+std::string QualifiedDefaultInstanceName(const Descriptor* descriptor,
+                                         const Options& options,
+                                         bool split = false);
 
 // Fully qualified name of the default instance pointer.
-std::string QualifiedMsgGlobalsInstancePtr(const Descriptor* descriptor,
-                                           const Options& options);
-
-// Name of the ClassData subclass used for a message.
-std::string ClassDataType(const Descriptor* descriptor, const Options& options);
+std::string QualifiedDefaultInstancePtr(const Descriptor* descriptor,
+                                        const Options& options,
+                                        bool split = false);
 
 // DescriptorTable variable name.
 std::string DescriptorTableName(const FileDescriptor* file,
@@ -205,24 +185,6 @@ std::string FileDllExport(const FileDescriptor* file, const Options& options);
 std::string SuperClassName(const Descriptor* descriptor,
                            const Options& options);
 
-// Add an underscore if necessary to prevent conflicting with known names and
-// keywords.
-// We use the context and the kind of entity to try to determine if mangling is
-// necessary or not.
-// For example, a message named `New` at file scope is fine, but at message
-// scope it needs mangling because it collides with the `New` function.
-enum class NameContext {
-  kFile,
-  kMessage,
-};
-enum class NameKind {
-  kType,
-  kFunction,
-  kValue,
-};
-std::string ResolveKnownNameCollisions(absl::string_view name,
-                                       NameContext name_context,
-                                       NameKind name_kind);
 // Adds an underscore if necessary to prevent conflicting with a keyword.
 std::string ResolveKeyword(absl::string_view name);
 
@@ -365,51 +327,35 @@ inline bool IsWeak(const FieldDescriptor* field, const Options& options) {
 
 inline bool IsCord(const FieldDescriptor* field) {
   return field->cpp_type() == FieldDescriptor::CPPTYPE_STRING &&
-         field->cpp_string_type() == FieldDescriptor::CppStringType::kCord;
+         internal::cpp::EffectiveStringCType(field) == FieldOptions::CORD;
 }
 
 inline bool IsString(const FieldDescriptor* field) {
   return field->cpp_type() == FieldDescriptor::CPPTYPE_STRING &&
-         (field->cpp_string_type() == FieldDescriptor::CppStringType::kString ||
-          field->cpp_string_type() == FieldDescriptor::CppStringType::kView);
+         internal::cpp::EffectiveStringCType(field) == FieldOptions::STRING;
 }
 
-
-bool IsArenaStringPtr(const FieldDescriptor* field, const Options& opts);
-bool IsMicroString(const FieldDescriptor* field, const Options& opts);
+inline bool IsStringPiece(const FieldDescriptor* field) {
+  return field->cpp_type() == FieldDescriptor::CPPTYPE_STRING &&
+         internal::cpp::EffectiveStringCType(field) ==
+             FieldOptions::STRING_PIECE;
+}
 
 bool IsProfileDriven(const Options& options);
 
 // Returns true if `field` is unlikely to be present based on PDProto profile.
-PROTOC_EXPORT bool IsRarelyPresent(const FieldDescriptor* field,
-                                   const Options& options);
+bool IsRarelyPresent(const FieldDescriptor* field, const Options& options);
 
 // Returns true if `field` is likely to be present based on PDProto profile.
 bool IsLikelyPresent(const FieldDescriptor* field, const Options& options);
 
-absl::optional<float> GetPresenceProbability(const FieldDescriptor* field,
-                                             const Options& options);
-
-// GetFieldGroupPresenceProbability computes presence probability for a group of
-// fields. It uses the absence probability (easier to compute)
-// (1 - p1) * (1 - p2) * ... * (1 - pn), and in the end the aggregate presence
-// probability can be expressed as (1 - all_absent_probability).
-absl::optional<float> GetFieldGroupPresenceProbability(
-    const std::vector<const FieldDescriptor*>& fields, const Options& options);
-
-// Returns the "hasbit mode" of the field, which may depend on profile data.
-internal::cpp::HasbitMode GetFieldHasbitMode(const FieldDescriptor* field,
-                                             const Options& options);
-
-// Returns true if there are hasbits for the field, which may depend on profile
-// data.
-PROTOC_EXPORT bool HasHasbit(const FieldDescriptor* field,
+float GetPresenceProbability(const FieldDescriptor* field,
                              const Options& options);
 
 bool IsStringInliningEnabled(const Options& options);
 
 // Returns true if the provided field is a singular string and can be inlined.
-bool CanStringBeInlined(const FieldDescriptor* field, const Options& options);
+bool CanStringBeInlined(const FieldDescriptor* field);
 
 // Returns true if `field` is a string field that can and should be inlined
 // based on PDProto profile.
@@ -424,10 +370,12 @@ inline bool IsFieldInlined(const FieldDescriptor* field,
 }
 
 // Does the given FileDescriptor use lazy fields?
-bool HasLazyFields(const FileDescriptor* file, const Options& options);
+bool HasLazyFields(const FileDescriptor* file, const Options& options,
+                   MessageSCCAnalyzer* scc_analyzer);
 
 // Is the given field a supported lazy field?
-bool IsLazy(const FieldDescriptor* field, const Options& options);
+bool IsLazy(const FieldDescriptor* field, const Options& options,
+            MessageSCCAnalyzer* scc_analyzer);
 
 // Is this an explicit (non-profile driven) lazy field, as denoted by
 // lazy/unverified_lazy in the descriptor?
@@ -444,15 +392,18 @@ inline bool IsExplicitLazy(const FieldDescriptor* field) {
 }
 
 internal::field_layout::TransformValidation GetLazyStyle(
-    const FieldDescriptor* field, const Options& options);
+    const FieldDescriptor* field, const Options& options,
+    MessageSCCAnalyzer* scc_analyzer);
 
-bool IsEagerlyVerifiedLazy(const FieldDescriptor* field,
-                           const Options& options);
+bool IsEagerlyVerifiedLazy(const FieldDescriptor* field, const Options& options,
+                           MessageSCCAnalyzer* scc_analyzer);
 
 bool IsLazilyVerifiedLazy(const FieldDescriptor* field, const Options& options);
 
-bool ShouldVerify(const Descriptor* descriptor, const Options& options);
-bool ShouldVerify(const FileDescriptor* file, const Options& options);
+bool ShouldVerify(const Descriptor* descriptor, const Options& options,
+                  MessageSCCAnalyzer* scc_analyzer);
+bool ShouldVerify(const FileDescriptor* file, const Options& options,
+                  MessageSCCAnalyzer* scc_analyzer);
 bool ShouldVerifyRecursively(const FieldDescriptor* field);
 
 // Indicates whether to use predefined verify methods for a given message. If a
@@ -476,11 +427,10 @@ VerifySimpleType ShouldVerifySimple(const Descriptor* descriptor);
 
 
 // Is the given message being split (go/pdsplit)?
-PROTOC_EXPORT bool ShouldSplit(const Descriptor* desc, const Options& options);
+bool ShouldSplit(const Descriptor* desc, const Options& options);
 
 // Is the given field being split out?
-PROTOC_EXPORT bool ShouldSplit(const FieldDescriptor* field,
-                               const Options& options);
+bool ShouldSplit(const FieldDescriptor* field, const Options& options);
 
 // Should we generate code that force creating an allocation in the constructor
 // of the given message?
@@ -497,31 +447,31 @@ const FieldDescriptor* FindHottestField(
 // Does the file contain any definitions that need extension_set.h?
 bool HasExtensionsOrExtendableMessage(const FileDescriptor* file);
 
-// Does the file have any repeated fields matching the given repeated type,
-// necessitating the file to include repeated_field.h/repeated_field_proxy.h?
-// This does not include repeated extensions, since those are all stored
-// internally in an ExtensionSet, not a separate RepeatedField*.
-bool HasRepeatedFields(const FileDescriptor* file,
-                       FieldDescriptor::CppRepeatedType cpp_repeated_type);
+// Does the file have any repeated fields, necessitating the file to include
+// repeated_field.h? This does not include repeated extensions, since those are
+// all stored internally in an ExtensionSet, not a separate RepeatedField*.
+bool HasRepeatedFields(const FileDescriptor* file);
 
 // Does the file have any string/bytes fields with ctype=STRING_PIECE? This
 // does not include extensions, since ctype is ignored for extensions.
 bool HasStringPieceFields(const FileDescriptor* file, const Options& options);
-
-// Does the file have any string/bytes fields?.  This excludes cord and string
-// piece fields.
-bool HasRegularStringFields(const FileDescriptor* file, const Options& options);
 
 // Does the file have any string/bytes fields with ctype=CORD? This does not
 // include extensions, since ctype is ignored for extensions.
 bool HasCordFields(const FileDescriptor* file, const Options& options);
 
 // Does the file have any map fields, necessitating the file to include
-// map_field.h and map.h.
+// map_field_inl.h and map.h.
 bool HasMapFields(const FileDescriptor* file);
 
 // Does this file have any enum type definitions?
 bool HasEnumDefinitions(const FileDescriptor* file);
+
+// Returns true if a message in the file can have v2 table.
+bool HasV2Table(const FileDescriptor* file);
+
+// Returns true if a message (descriptor) can have v2 table.
+bool HasV2Table(const Descriptor* descriptor);
 
 // Does this file have generated parsing, serialization, and other
 // standard methods for which reflection-based fallback implementations exist?
@@ -559,15 +509,6 @@ inline bool IsMapEntryMessage(const Descriptor* descriptor) {
 
 // Returns true if the field's CPPTYPE is string or message.
 bool IsStringOrMessage(const FieldDescriptor* field);
-
-// Returns true if the field will be internally represented as a
-// `RepeatedPtrField`. This is true for message and string repeated fields, with
-// the exception of repeated cords.
-//
-// Note that this returns false for map fields, even though they use a
-// `RepeatedPtrField` internally for some reflection API methods. This method is
-// mainly used to inform how a field's constructor should be invoked.
-bool IsRepeatedPtrField(const FieldDescriptor* field);
 
 std::string UnderscoresToCamelCase(absl::string_view input,
                                    bool cap_next_letter);
@@ -752,23 +693,11 @@ void ListAllFields(const Descriptor* d,
 void ListAllFields(const FileDescriptor* d,
                    std::vector<const FieldDescriptor*>* fields);
 
-// Returns true if the field's position in the message is chosen by the layout
-// optimizer.
-bool IsLayoutOptimized(const FieldDescriptor* field, const Options& options);
-
-// Collects all fields from the given descriptor, excluding weak fields and
-// fields in oneofs.
-//
-// Returns the number of weak fields.
-int CollectFieldsExcludingWeakAndOneof(
-    const Descriptor* d, const Options& options,
-    std::vector<const FieldDescriptor*>& fields);
-
 template <bool do_nested_types, class T>
 void ForEachField(const Descriptor* d, T&& func) {
   if (do_nested_types) {
     for (int i = 0; i < d->nested_type_count(); i++) {
-      ForEachField<true>(d->nested_type(i), std::forward<T>(func));
+      ForEachField<true>(d->nested_type(i), std::forward<T&&>(func));
     }
   }
   for (int i = 0; i < d->extension_count(); i++) {
@@ -782,7 +711,7 @@ void ForEachField(const Descriptor* d, T&& func) {
 template <class T>
 void ForEachField(const FileDescriptor* d, T&& func) {
   for (int i = 0; i < d->message_type_count(); i++) {
-    ForEachField<true>(d->message_type(i), std::forward<T>(func));
+    ForEachField<true>(d->message_type(i), std::forward<T&&>(func));
   }
   for (int i = 0; i < d->extension_count(); i++) {
     func(d->extension(i));
@@ -875,7 +804,8 @@ bool UsingImplicitWeakFields(const FileDescriptor* file,
                              const Options& options);
 
 // Indicates whether to treat this field as implicitly weak.
-bool IsImplicitWeakField(const FieldDescriptor* field, const Options& options);
+bool IsImplicitWeakField(const FieldDescriptor* field, const Options& options,
+                         MessageSCCAnalyzer* scc_analyzer);
 
 inline std::string SimpleBaseClass(const Descriptor* desc,
                                    const Options& options) {
@@ -992,10 +922,12 @@ class PROTOC_EXPORT Formatter {
     Formatter* format_;
   };
 
-  [[nodiscard]] ScopedIndenter ScopedIndent() { return ScopedIndenter(this); }
+  PROTOBUF_NODISCARD ScopedIndenter ScopedIndent() {
+    return ScopedIndenter(this);
+  }
   template <typename... Args>
-  [[nodiscard]] ScopedIndenter ScopedIndent(const char* format,
-                                            const Args&&... args) {
+  PROTOBUF_NODISCARD ScopedIndenter ScopedIndent(const char* format,
+                                                 const Args&&... args) {
     (*this)(format, static_cast<Args&&>(args)...);
     return ScopedIndenter(this);
   }
@@ -1139,6 +1071,11 @@ void GenerateUtf8CheckCodeForString(const FieldDescriptor* field,
                                     absl::string_view parameters,
                                     const Formatter& format);
 
+void GenerateUtf8CheckCodeForCord(const FieldDescriptor* field,
+                                  const Options& options, bool for_parse,
+                                  absl::string_view parameters,
+                                  const Formatter& format);
+
 void GenerateUtf8CheckCodeForString(io::Printer* p,
                                     const FieldDescriptor* field,
                                     const Options& options, bool for_parse,
@@ -1147,8 +1084,6 @@ void GenerateUtf8CheckCodeForString(io::Printer* p,
 void GenerateUtf8CheckCodeForCord(io::Printer* p, const FieldDescriptor* field,
                                   const Options& options, bool for_parse,
                                   absl::string_view parameters);
-
-bool IsStrictUtf8String(const FieldDescriptor* field, const Options& options);
 
 inline bool ShouldGenerateExternSpecializations(const Options& options) {
   // For OSS we omit the specializations to reduce codegen size.

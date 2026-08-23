@@ -56,16 +56,12 @@ class DefPoolPair {
     pool64_._SetPlatform(kUpb_MiniTablePlatform_64Bit);
   }
 
-  upb::FileDefPtr AddFile(const google_protobuf_FileDescriptorProto* file_proto,
+  upb::FileDefPtr AddFile(const UPB_DESC(FileDescriptorProto) * file_proto,
                           upb::Status* status) {
     upb::FileDefPtr file32 = pool32_.AddFile(file_proto, status);
     upb::FileDefPtr file64 = pool64_.AddFile(file_proto, status);
     if (!file32) return file32;
     return file64;
-  }
-
-  upb::FileDefPtr GetFile(absl::string_view name) const {
-    return pool64_.FindFileByName(name.data());
   }
 
   const upb_MiniTable* GetMiniTable32(upb::MessageDefPtr m) const {

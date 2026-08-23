@@ -22,7 +22,6 @@
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "google/protobuf/compiler/code_generator_lite.h"
 #include "google/protobuf/compiler/java/context.h"
 #include "google/protobuf/compiler/java/doc_comment.h"
 #include "google/protobuf/compiler/java/field_common.h"
@@ -36,7 +35,6 @@
 #include "google/protobuf/descriptor.pb.h"
 #include "google/protobuf/io/printer.h"
 #include "google/protobuf/wire_format.h"
-#include "google/protobuf/wire_format_lite.h"
 
 // Must be last.
 #include "google/protobuf/port_def.inc"
@@ -69,6 +67,7 @@ bool BitfieldTracksMutability(const FieldDescriptor* const descriptor) {
   switch (descriptor->type()) {
     case FieldDescriptor::TYPE_GROUP:
     case FieldDescriptor::TYPE_MESSAGE:
+    case FieldDescriptor::TYPE_ENUM:
       return true;
     default:
       return false;
@@ -93,7 +92,7 @@ MessageBuilderGenerator::MessageBuilderGenerator(const Descriptor* descriptor,
   }
 }
 
-MessageBuilderGenerator::~MessageBuilderGenerator() = default;
+MessageBuilderGenerator::~MessageBuilderGenerator() {}
 
 void MessageBuilderGenerator::Generate(io::Printer* printer) {
   WriteMessageDocComment(printer, descriptor_, context_->options());
@@ -127,14 +126,7 @@ void MessageBuilderGenerator::Generate(io::Printer* printer) {
   }
 
   // oneof
-  absl::flat_hash_map<absl::string_view, std::string> vars = {
-      // These variables are placeholders to pick out the beginning and ends of
-      // identifiers for annotations (when doing so with existing variables
-      // would be ambiguous or impossible). They should never be set to anything
-      // but the empty string.
-      {"{", ""},
-      {"}", ""},
-  };
+  absl::flat_hash_map<absl::string_view, std::string> vars;
   for (auto& kv : oneofs_) {
     const OneofDescriptor* oneof = kv.second;
     vars["oneof_name"] = context_->GetOneofGeneratorInfo(oneof)->name;
@@ -145,25 +137,21 @@ void MessageBuilderGenerator::Generate(io::Printer* printer) {
     printer->Print(vars,
                    "private int $oneof_name$Case_ = 0;\n"
                    "private java.lang.Object $oneof_name$_;\n");
-    // getOneofCase()
+    // oneofCase() and clearOneof()
     printer->Print(vars,
                    "public $oneof_capitalized_name$Case\n"
-                   "    ${$get$oneof_capitalized_name$Case$}$() {\n"
+                   "    get$oneof_capitalized_name$Case() {\n"
                    "  return $oneof_capitalized_name$Case.forNumber(\n"
                    "      $oneof_name$Case_);\n"
-                   "}\n");
-    printer->Annotate("{", "}", oneof);
-    // clearOneof()
-    printer->Print(vars,
+                   "}\n"
                    "\n"
-                   "public Builder ${$clear$oneof_capitalized_name$$}$() {\n"
+                   "public Builder clear$oneof_capitalized_name$() {\n"
                    "  $oneof_name$Case_ = 0;\n"
                    "  $oneof_name$_ = null;\n"
                    "  onChanged();\n"
                    "  return this;\n"
                    "}\n"
                    "\n");
-    printer->Annotate("{", "}", oneof, io::AnnotationCollector::Semantic::kSet);
   }
 
   // Integers for bit fields.
@@ -223,7 +211,8 @@ void MessageBuilderGenerator::GenerateDescriptorMethods(io::Printer* printer) {
         "  switch (number) {\n");
     printer->Indent();
     printer->Indent();
-    for (const FieldDescriptor* field : map_fields) {
+    for (int i = 0; i < map_fields.size(); ++i) {
+      const FieldDescriptor* field = map_fields[i];
       const FieldGeneratorInfo* info = context_->GetFieldGeneratorInfo(field);
       printer->Print(
           "case $number$:\n"
@@ -248,7 +237,8 @@ void MessageBuilderGenerator::GenerateDescriptorMethods(io::Printer* printer) {
         "  switch (number) {\n");
     printer->Indent();
     printer->Indent();
-    for (const FieldDescriptor* field : map_fields) {
+    for (int i = 0; i < map_fields.size(); ++i) {
+      const FieldDescriptor* field = map_fields[i];
       const FieldGeneratorInfo* info = context_->GetFieldGeneratorInfo(field);
       printer->Print(
           "case $number$:\n"
@@ -404,36 +394,6 @@ void MessageBuilderGenerator::GenerateCommonBuilderMethods(
       "classname", name_resolver_->GetImmutableClassName(descriptor_));
 
   GenerateBuildPartial(printer);
-
-  // We include these methods only in open source to maintain long term ABI
-  // compatibility, and there should be no need to include them in Google3.
-  if (google::protobuf::internal::IsOss() && descriptor_->extension_range_count() > 0) {
-    printer->Print(
-        "public <Type> Builder setExtension(\n"
-        "    com.google.protobuf.GeneratedMessage.GeneratedExtension<\n"
-        "        $classname$, Type> extension,\n"
-        "    Type value) {\n"
-        "  return super.setExtension(extension, value);\n"
-        "}\n"
-        "public <Type> Builder setExtension(\n"
-        "    com.google.protobuf.GeneratedMessage.GeneratedExtension<\n"
-        "        $classname$, java.util.List<Type>> extension,\n"
-        "    int index, Type value) {\n"
-        "  return super.setExtension(extension, index, value);\n"
-        "}\n"
-        "public <Type> Builder addExtension(\n"
-        "    com.google.protobuf.GeneratedMessage.GeneratedExtension<\n"
-        "        $classname$, java.util.List<Type>> extension,\n"
-        "    Type value) {\n"
-        "  return super.addExtension(extension, value);\n"
-        "}\n"
-        "public <Type> Builder clearExtension(\n"
-        "    com.google.protobuf.GeneratedMessage.GeneratedExtension<\n"
-        "        $classname$, Type> extension) {\n"
-        "  return super.clearExtension(extension);\n"
-        "}\n",
-        "classname", name_resolver_->GetImmutableClassName(descriptor_));
-  }
 
   // -----------------------------------------------------------------
 
@@ -710,7 +670,7 @@ void MessageBuilderGenerator::GenerateBuilderParsingMethods(
 
 void MessageBuilderGenerator::GenerateBuilderFieldParsingCases(
     io::Printer* printer) {
-  std::vector<const FieldDescriptor*> sorted_fields(
+  std::unique_ptr<const FieldDescriptor*[]> sorted_fields(
       SortFieldsByNumber(descriptor_));
   for (int i = 0; i < descriptor_->field_count(); i++) {
     const FieldDescriptor* field = sorted_fields[i];
@@ -787,46 +747,50 @@ void MessageBuilderGenerator::GenerateIsInitialized(io::Printer* printer) {
     const FieldGeneratorInfo* info = context_->GetFieldGeneratorInfo(field);
     if (GetJavaType(field) == JAVATYPE_MESSAGE &&
         HasRequiredFields(field->message_type())) {
-      if (field->is_required()) {
-        printer->Print(
-            "if (!get$name$().isInitialized()) {\n"
-            "  return false;\n"
-            "}\n",
-            "type",
-            name_resolver_->GetImmutableClassName(field->message_type()),
-            "name", info->capitalized_name);
-      } else if (field->is_repeated()) {
-        if (IsMapEntry(field->message_type())) {
+      switch (field->label()) {
+        case FieldDescriptor::LABEL_REQUIRED:
           printer->Print(
-              "for ($type$ item : get$name$Map().values()) {\n"
-              "  if (!item.isInitialized()) {\n"
-              "    return false;\n"
-              "  }\n"
-              "}\n",
-              "type",
-              MapValueImmutableClassdName(field->message_type(),
-                                          name_resolver_),
-              "name", info->capitalized_name);
-        } else {
-          printer->Print(
-              "for (int i = 0; i < get$name$Count(); i++) {\n"
-              "  if (!get$name$(i).isInitialized()) {\n"
-              "    return false;\n"
-              "  }\n"
+              "if (!get$name$().isInitialized()) {\n"
+              "  return false;\n"
               "}\n",
               "type",
               name_resolver_->GetImmutableClassName(field->message_type()),
               "name", info->capitalized_name);
-        }
-      } else {
-        printer->Print(
-            "if (has$name$()) {\n"
-            "  if (!get$name$().isInitialized()) {\n"
-            "    return false;\n"
-            "  }\n"
-            "}\n",
-            "name", info->capitalized_name);
-      };
+          break;
+        case FieldDescriptor::LABEL_OPTIONAL:
+          printer->Print(
+              "if (has$name$()) {\n"
+              "  if (!get$name$().isInitialized()) {\n"
+              "    return false;\n"
+              "  }\n"
+              "}\n",
+              "name", info->capitalized_name);
+          break;
+        case FieldDescriptor::LABEL_REPEATED:
+          if (IsMapEntry(field->message_type())) {
+            printer->Print(
+                "for ($type$ item : get$name$Map().values()) {\n"
+                "  if (!item.isInitialized()) {\n"
+                "    return false;\n"
+                "  }\n"
+                "}\n",
+                "type",
+                MapValueImmutableClassdName(field->message_type(),
+                                            name_resolver_),
+                "name", info->capitalized_name);
+          } else {
+            printer->Print(
+                "for (int i = 0; i < get$name$Count(); i++) {\n"
+                "  if (!get$name$(i).isInitialized()) {\n"
+                "    return false;\n"
+                "  }\n"
+                "}\n",
+                "type",
+                name_resolver_->GetImmutableClassName(field->message_type()),
+                "name", info->capitalized_name);
+          }
+          break;
+      }
     }
   }
 

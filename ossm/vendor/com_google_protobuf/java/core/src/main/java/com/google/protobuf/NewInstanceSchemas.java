@@ -21,7 +21,7 @@ final class NewInstanceSchemas {
   }
 
   private static NewInstanceSchema loadSchemaForFullRuntime() {
-    if (Android.assumeLiteRuntime) {
+    if (Protobuf.assumeLiteRuntime) {
       return null;
     }
     try {

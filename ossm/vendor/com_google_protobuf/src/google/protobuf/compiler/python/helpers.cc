@@ -87,7 +87,7 @@ bool HasGenericServices(const FileDescriptor* file) {
 
 std::string GeneratedCodeToBase64(const GeneratedCodeInfo& annotations) {
   std::string result;
-  result = absl::Base64Escape(annotations.SerializeAsString());
+  absl::Base64Escape(annotations.SerializeAsString(), &result);
   return result;
 }
 

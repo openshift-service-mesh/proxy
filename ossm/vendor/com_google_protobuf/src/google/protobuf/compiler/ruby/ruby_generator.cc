@@ -7,18 +7,15 @@
 
 #include "google/protobuf/compiler/ruby/ruby_generator.h"
 
-#include <cstddef>
+#include <iomanip>
 #include <memory>
 #include <sstream>
-#include <string>
 
+#include "google/protobuf/compiler/code_generator.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/absl_log.h"
 #include "absl/strings/escaping.h"
-#include "absl/strings/match.h"
-#include "absl/strings/str_cat.h"
-#include "absl/strings/string_view.h"
-#include "google/protobuf/compiler/code_generator.h"
+#include "google/protobuf/compiler/plugin.h"
 #include "google/protobuf/compiler/retention.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/descriptor.pb.h"
@@ -30,7 +27,7 @@ namespace protobuf {
 namespace compiler {
 namespace ruby {
 
-// Forward declarations.
+// Forward decls.
 template <class numeric_type>
 std::string NumberToString(numeric_type value);
 std::string GetRequireName(absl::string_view proto_file);
@@ -76,7 +73,7 @@ std::string PackageToModule(absl::string_view name) {
   std::string result;
   result.reserve(name.size());
 
-  for (size_t i = 0; i < name.size(); i++) {
+  for (int i = 0; i < name.size(); i++) {
     if (name[i] == '_') {
       next_upper = true;
     } else {
@@ -166,19 +163,19 @@ int GeneratePackageModules(const FileDescriptor* file, io::Printer* printer) {
     //    -> A::B::C
     // otherwise, use the dot separator
     //    -> A.B.C
-    if (absl::StrContains(package_name, "::")) {
+    if (package_name.find("::") != std::string::npos) {
       need_change_to_module = false;
-    } else if (absl::StrContains(package_name, '.')) {
+    } else if (package_name.find('.') != std::string::npos) {
       ABSL_LOG(WARNING) << "ruby_package option should be in the form of:"
                         << " 'A::B::C' and not 'A.B.C'";
     }
   } else {
-    package_name = std::string(file->package());
+    package_name = file->package();
   }
 
   // Use the appropriate delimiter
   std::string delimiter = need_change_to_module ? "." : "::";
-  size_t delimiter_size = need_change_to_module ? 1 : 2;
+  int delimiter_size = need_change_to_module ? 1 : 2;
 
   // Extract each module name and indent
   while (!package_name.empty()) {
@@ -212,7 +209,7 @@ void EndPackageModules(int levels, io::Printer* printer) {
 std::string SerializedDescriptor(const FileDescriptor* file) {
   FileDescriptorProto file_proto = StripSourceRetentionOptions(*file);
   std::string file_data;
-  ABSL_CHECK(file_proto.SerializeToString(&file_data));
+  file_proto.SerializeToString(&file_data);
   return file_data;
 }
 
@@ -250,44 +247,18 @@ std::string DumpImportList(const FileDescriptor* file) {
   return ret;
 }
 
-namespace {
-
-// Escape a string for use in a Ruby string literal. This is a superset of
-// absl::CHexEscape() that also includes handling of the following characters:
-//   - # (hashmark)
-//
-// This is needed because Ruby double-quoted string literals interpolate the
-// contents of the string, and the hashmark character is used in the
-// interpolation syntax. Informed by MRI Ruby's implementation of String#dump.
-std::string RubyEscape(absl::string_view s) {
-  std::string c_escaped = absl::CHexEscape(s);
-  std::string result;
-  result.reserve(c_escaped.length());
-  for (size_t i = 0; i < c_escaped.length(); ++i) {
-    if (c_escaped[i] == '#' &&
-        (i + 1 < c_escaped.length() &&
-         (c_escaped[i + 1] == '{' || c_escaped[i + 1] == '$' ||
-          c_escaped[i + 1] == '@'))) {
-      absl::StrAppend(&result, "\\");
-    }
-    absl::StrAppend(&result, c_escaped.substr(i, 1));
-  }
-  return result;
-}
-
-}  // namespace
-
 void GenerateBinaryDescriptor(const FileDescriptor* file, io::Printer* printer,
                               std::string* error) {
   printer->Print(R"(
 descriptor_data = "$descriptor_data$"
 
-pool = ::Google::Protobuf::DescriptorPool.generated_pool
+pool = Google::Protobuf::DescriptorPool.generated_pool
 pool.add_serialized_file(descriptor_data)
 
 )",
-                 "descriptor_data", RubyEscape(SerializedDescriptor(file)),
-                 "imports", DumpImportList(file));
+                 "descriptor_data",
+                 absl::CHexEscape(SerializedDescriptor(file)), "imports",
+                 DumpImportList(file));
 }
 
 bool GenerateFile(const FileDescriptor* file, io::Printer* printer,

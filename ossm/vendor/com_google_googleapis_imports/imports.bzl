@@ -9,7 +9,11 @@ load("@io_bazel_rules_go//proto:def.bzl", _go_grpc_library = "go_grpc_library")
 
 load("@io_bazel_rules_go//go:def.bzl", _go_library = "go_library")
 
+load("@protobuf//bazel:cc_proto_library.bzl", _cc_proto_library = "cc_proto_library")
+
 load("@grpc//bazel:cc_grpc_library.bzl", _cc_grpc_library = "cc_grpc_library")
+
+load("@protobuf//bazel:proto_library.bzl", _proto_library = "proto_library")
 
 def proto_library_with_info(**kwargs):
     pass
@@ -63,7 +67,7 @@ def go_gapic_library(**kwargs):
 def go_gapic_assembly_pkg(**kwargs):
     pass
 
-cc_proto_library = native.cc_proto_library
+cc_proto_library = _cc_proto_library
 
 cc_grpc_library = _cc_grpc_library
 
@@ -114,3 +118,5 @@ def csharp_gapic_library(**kwargs):
 
 def csharp_gapic_assembly_pkg(**kwargs):
     pass
+
+proto_library = _proto_library

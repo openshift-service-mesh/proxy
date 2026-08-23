@@ -15,7 +15,6 @@
 #include <string.h>
 
 #include "upb/base/string_view.h"
-#include "upb/message/internal/types.h"
 
 // Must be last.
 #include "upb/port/def.inc"
@@ -37,13 +36,11 @@ typedef union {
   const struct upb_Message* msg_val;
   upb_StringView str_val;
 
-  // For an extension field, we are essentially treating ext->data (a
-  // upb_MessageValue) as if it were a message with one field that lives at
-  // offset 0. This works because upb_MessageValue is precisely one value that
-  // can hold any type of data. Recall that an extension can be of any type
-  // (scalar, repeated, or message). For a message extension, that will be a
-  // single upb_Message* at offset 0 of the upb_MessageValue.
-  struct upb_Message UPB_PRIVATE(ext_msg_val);
+  // EXPERIMENTAL: A tagged upb_Message*.  Users must use this instead of
+  // msg_val if unlinked sub-messages may possibly be in use.  See the
+  // documentation in kUpb_DecodeOption_ExperimentalAllowUnlinked for more
+  // information.
+  uintptr_t tagged_msg_val;  // upb_TaggedMessagePtr
 } upb_MessageValue;
 
 UPB_API_INLINE upb_MessageValue upb_MessageValue_Zero(void) {

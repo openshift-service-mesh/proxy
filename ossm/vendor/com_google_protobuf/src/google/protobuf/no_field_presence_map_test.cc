@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <string>
 #include <type_traits>
-#include <vector>
 
 #include "google/protobuf/descriptor.pb.h"
 #include <gmock/gmock.h>
@@ -25,11 +24,15 @@ namespace google {
 namespace protobuf {
 namespace {
 
+using ::proto2_nofieldpresence_unittest::ExplicitForeignMessage;
 using ::proto2_nofieldpresence_unittest::FOREIGN_BAZ;
 using ::proto2_nofieldpresence_unittest::FOREIGN_FOO;
+using ::proto2_nofieldpresence_unittest::ForeignMessage;
 using ::proto2_nofieldpresence_unittest::TestAllMapTypes;
 using ::testing::Eq;
+using ::testing::Gt;
 using ::testing::Not;
+using ::testing::StrEq;
 using ::testing::UnorderedPointwise;
 
 // Custom gmock matchers to simplify testing for map entries.
@@ -51,33 +54,6 @@ MATCHER(MapEntryHasValue, "") {
 
   return r->HasField(arg, key);
 }
-
-// The following pattern is used to create a monomorphic matcher that matches an
-// input type (to avoid implicit casts between sign and unsigned integers).
-// Intentionally choose a verbose and specific namespace name so that there are
-// no namespace conflicts. MSVC seems to not know how to prioritize
-// ns::internal vs. ns::(anonymous namespace)::internal.
-// Sample error:
-//  D:\a\protobuf\protobuf\src\google/protobuf/map.h(138): error C2872:
-//  'internal': ambiguous symbol
-//  D:\a\protobuf\protobuf\google/protobuf/unittest_no_field_presence.pb.h(46):
-//  note: could be 'google::protobuf::internal'
-//  D:\a\protobuf\protobuf\src\google\protobuf\no_field_presence_map_test.cc(61):
-//  note: or       'google::protobuf::`anonymous-namespace'::internal'
-namespace no_presence_map_test_internal {
-// `MATCHER_P` defines a polymorphic matcher; we monomorphize it for
-// `uint64_t` below to avoid conflicting deduced template arguments.
-MATCHER_P(MapEntryListFieldsSize, expected_size, "") {
-  const Reflection* r = arg.GetReflection();
-
-  std::vector<const FieldDescriptor*> list_fields_output;
-  r->ListFields(arg, &list_fields_output);
-  return list_fields_output.size() == expected_size;
-}
-}  // namespace no_presence_map_test_internal
-// TODO: b/371232929 - can make this `inline constexpr` with C++17 as baseline.
-constexpr auto& MapEntryListFieldsSize =
-    no_presence_map_test_internal::MapEntryListFieldsSize<uint64_t>;
 
 MATCHER(MapEntryKeyExplicitPresence, "") {
   const Descriptor* desc = arg.GetDescriptor();
@@ -112,26 +88,20 @@ TEST(NoFieldPresenceTest, GenCodeMapMissingKeyDeathTest) {
   TestAllMapTypes message;
 
   // Trying to find an unset key in a map would crash.
-  EXPECT_DEATH((void)message.map_int32_bytes().at(9), "key not found");
+  EXPECT_DEATH(message.map_int32_bytes().at(9), "key not found");
 }
 
-#ifndef NDEBUG
-// This test case tests a DCHECK assertion. If this scenario happens in
-// optimized builds, it's technically UB, so having a test case for it in opt
-// builds is meaningless.
-TEST(NoFieldPresenceTest, DISABLED_GenCodeMapReflectionMissingKeyDeathTest) {
+TEST(NoFieldPresenceTest, GenCodeMapReflectionMissingKeyDeathTest) {
   TestAllMapTypes message;
   const Reflection* r = message.GetReflection();
   const Descriptor* desc = message.GetDescriptor();
 
   const FieldDescriptor* field_map_int32_bytes =
       desc->FindFieldByName("map_int32_bytes");
-
-  // Trying to get an unset map entry would crash with a DCHECK in debug mode.
-  EXPECT_DEATH((void)r->GetRepeatedMessage(message, field_map_int32_bytes, 0),
-               "index < size");
+  // Trying to get an unset map entry would crash in debug mode.
+  EXPECT_DEBUG_DEATH(r->GetRepeatedMessage(message, field_map_int32_bytes, 0),
+                     "index < current_size_");
 }
-#endif
 
 TEST(NoFieldPresenceTest, ReflectionEmptyMapTest) {
   TestAllMapTypes message;
@@ -344,7 +314,6 @@ TEST(NoFieldPresenceTest, TestNonZeroStringMapEntriesPopulatedInReflection) {
   // HasField for both key and value returns true.
   EXPECT_THAT(bytes_map_entry, MapEntryHasKey());
   EXPECT_THAT(bytes_map_entry, MapEntryHasValue());
-  EXPECT_THAT(bytes_map_entry, MapEntryListFieldsSize(2));
 }
 
 TEST(NoFieldPresenceTest, TestNonZeroIntMapEntriesPopulatedInReflection) {
@@ -367,7 +336,6 @@ TEST(NoFieldPresenceTest, TestNonZeroIntMapEntriesPopulatedInReflection) {
   // HasField for both key and value returns true.
   EXPECT_THAT(enum_map_entry, MapEntryHasKey());
   EXPECT_THAT(enum_map_entry, MapEntryHasValue());
-  EXPECT_THAT(enum_map_entry, MapEntryListFieldsSize(2));
 }
 
 TEST(NoFieldPresenceTest,
@@ -389,7 +357,6 @@ TEST(NoFieldPresenceTest,
   // HasField for both key and value returns true.
   EXPECT_THAT(msg_map_entry, MapEntryHasKey());
   EXPECT_THAT(msg_map_entry, MapEntryHasValue());
-  EXPECT_THAT(msg_map_entry, MapEntryListFieldsSize(2));
 
   // For value types that are messages, further test that the message fields
   // show up on reflection.
@@ -416,7 +383,6 @@ TEST(NoFieldPresenceTest,
   // HasField for both key and value returns true.
   EXPECT_THAT(explicit_msg_map_entry, MapEntryHasKey());
   EXPECT_THAT(explicit_msg_map_entry, MapEntryHasValue());
-  EXPECT_THAT(explicit_msg_map_entry, MapEntryListFieldsSize(2));
 
   // For value types that are messages, further test that the message fields
   // show up on reflection.
@@ -629,7 +595,6 @@ TEST(NoFieldPresenceTest, TestEmptyStringMapEntriesPopulatedInReflection) {
   // HasField even though they are zero.
   EXPECT_THAT(bytes_map_entry, MapEntryHasKey());
   EXPECT_THAT(bytes_map_entry, MapEntryHasValue());
-  EXPECT_THAT(bytes_map_entry, MapEntryListFieldsSize(2));
 }
 
 TEST(NoFieldPresenceTest, TestEmptyIntMapEntriesPopulatedInReflection) {
@@ -659,7 +624,6 @@ TEST(NoFieldPresenceTest, TestEmptyIntMapEntriesPopulatedInReflection) {
   // HasField even though they are zero.
   EXPECT_THAT(enum_map_entry, MapEntryHasKey());
   EXPECT_THAT(enum_map_entry, MapEntryHasValue());
-  EXPECT_THAT(enum_map_entry, MapEntryListFieldsSize(2));
 }
 
 TEST(NoFieldPresenceTest, TestEmptySubMessageMapEntriesPopulatedInReflection) {
@@ -689,7 +653,6 @@ TEST(NoFieldPresenceTest, TestEmptySubMessageMapEntriesPopulatedInReflection) {
   // HasField even though they are zero.
   EXPECT_THAT(msg_map_entry, MapEntryHasKey());
   EXPECT_THAT(msg_map_entry, MapEntryHasValue());
-  EXPECT_THAT(msg_map_entry, MapEntryListFieldsSize(2));
 
   // For value types that are messages, further test that the message fields
   // do not show up on reflection.
@@ -725,7 +688,6 @@ TEST(NoFieldPresenceTest,
   // HasField even though they are zero.
   EXPECT_THAT(explicit_msg_map_entry, MapEntryHasKey());
   EXPECT_THAT(explicit_msg_map_entry, MapEntryHasValue());
-  EXPECT_THAT(explicit_msg_map_entry, MapEntryListFieldsSize(2));
 
   // For value types that are messages, further test that the message fields
   // do not show up on reflection.
@@ -745,7 +707,7 @@ bool TestSerialize<std::string>(const MessageLite& message,
 
 template <>
 bool TestSerialize<absl::Cord>(const MessageLite& message, absl::Cord* output) {
-  return message.SerializeToString(output);
+  return message.SerializeToCord(output);
 }
 
 template <typename T>
@@ -762,6 +724,9 @@ class NoFieldPresenceMapSerializeTest : public testing::Test {
 
 using SerializableOutputTypes = ::testing::Types<std::string, absl::Cord>;
 
+// TODO: b/358616816 - `if constexpr` can be used here once C++17 is baseline.
+// https://google.github.io/googletest/reference/testing.html#TYPED_TEST_SUITE
+#ifdef __cpp_if_constexpr
 // Providing the NameGenerator produces slightly more readable output in the
 // test invocation summary (type names are displayed instead of numbers).
 class NameGenerator {
@@ -782,6 +747,9 @@ class NameGenerator {
 
 TYPED_TEST_SUITE(NoFieldPresenceMapSerializeTest, SerializableOutputTypes,
                  NameGenerator);
+#else
+TYPED_TEST_SUITE(NoFieldPresenceMapSerializeTest, SerializableOutputTypes);
+#endif
 
 TYPED_TEST(NoFieldPresenceMapSerializeTest,
            MapRoundTripNonZeroKeyNonZeroString) {

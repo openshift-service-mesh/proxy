@@ -1,6 +1,6 @@
 """Wrapper around internal_ruby_proto_library to supply our rules_ruby"""
 
-load("@rules_ruby//ruby:defs.bzl", "rb_library")
+load("@rules_ruby//ruby:defs.bzl", "ruby_library")
 load("//:protobuf.bzl", _internal_ruby_proto_library = "internal_ruby_proto_library")
 
 def internal_ruby_proto_library(
@@ -14,11 +14,11 @@ def internal_ruby_proto_library(
 
     Args:
       name: the name of the ruby_proto_library.
-      **kwargs: other keyword arguments that are passed to rb_library.
+      **kwargs: other keyword arguments that are passed to ruby_library.
 
     """
     _internal_ruby_proto_library(
         name,
-        rb_library,
+        ruby_library,
         **kwargs
     )

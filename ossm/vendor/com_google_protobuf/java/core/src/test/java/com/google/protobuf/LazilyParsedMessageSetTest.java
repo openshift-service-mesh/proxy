@@ -9,12 +9,11 @@ package com.google.protobuf;
 
 import static com.google.common.truth.Truth.assertThat;
 
-import proto2_unittest.UnittestMset.RawMessageSet;
-import proto2_unittest.UnittestMset.TestMessageSetExtension1;
-import proto2_unittest.UnittestMset.TestMessageSetExtension2;
-import proto2_unittest.UnittestMset.TestMessageSetExtension3;
+import protobuf_unittest.UnittestMset.RawMessageSet;
+import protobuf_unittest.UnittestMset.TestMessageSetExtension1;
+import protobuf_unittest.UnittestMset.TestMessageSetExtension2;
+import protobuf_unittest.UnittestMset.TestMessageSetExtension3;
 import proto2_wireformat_unittest.UnittestMsetWireFormat.TestMessageSet;
-import proto2_wireformat_unittest.UnittestMsetWireFormat.TestMessageSetWireFormatContainer;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -148,41 +147,16 @@ public class LazilyParsedMessageSetTest {
     // Serialize. The first extension should be serialized as an empty message.
     ByteString outputData = messageSet.toByteString();
 
-    // Round trip and confirm the corrupted payload is preserved.
+    // Re-parse as RawMessageSet
     RawMessageSet actualRaw =
         RawMessageSet.parseFrom(outputData, ExtensionRegistry.getEmptyRegistry());
-    assertThat(actualRaw).isEqualTo(inputRaw);
-  }
 
-  @Test
-  public void testLoadCorruptedLazyField_getSerializedSize() throws Exception {
-    ExtensionRegistry extensionRegistry = ExtensionRegistry.newInstance();
-    extensionRegistry.add(TestMessageSetExtension1.messageSetExtension);
-    RawMessageSet inputRaw =
+    RawMessageSet expectedRaw =
         RawMessageSet.newBuilder()
             .addItem(
-                RawMessageSet.Item.newBuilder()
-                    .setTypeId(TYPE_ID_1)
-                    .setMessage(CORRUPTED_MESSAGE_PAYLOAD))
+                RawMessageSet.Item.newBuilder().setTypeId(TYPE_ID_1).setMessage(ByteString.empty()))
             .build();
-    ByteString inputData = inputRaw.toByteString();
-    TestMessageSet messageSet = TestMessageSet.parseFrom(inputData, extensionRegistry);
 
-    TestMessageSetWireFormatContainer container =
-        TestMessageSetWireFormatContainer.newBuilder().setMessageSet(messageSet).build();
-
-    // Effectively cache the serialized size of the message set.
-    assertThat(container.getSerializedSize()).isEqualTo(11);
-
-    // getExtension will notice that the extension is corrupted and replace it with the default
-    // empty message.
-    assertThat(container.getMessageSet().getExtension(TestMessageSetExtension1.messageSetExtension))
-        .isEqualTo(TestMessageSetExtension1.getDefaultInstance());
-
-    // Make sure that toByteString() works even though the total size has been cached, and round
-    // tripping should keep equals().
-    ByteString bytes = container.toByteString();
-    assertThat(container)
-        .isEqualTo(TestMessageSetWireFormatContainer.parseFrom(bytes, extensionRegistry));
+    assertThat(actualRaw).isEqualTo(expectedRaw);
   }
 }

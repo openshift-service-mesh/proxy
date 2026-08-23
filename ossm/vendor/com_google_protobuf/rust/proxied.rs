@@ -45,17 +45,20 @@
 //! indirection between the user and the internal memory representation.
 
 use crate::__internal::{Private, SealedInternal};
+use std::fmt::Debug;
 
 /// A type that can be accessed through a reference-like proxy.
 ///
 /// An instance of a `Proxied` can be accessed immutably via `Proxied::View`.
 ///
 /// All Protobuf field types implement `Proxied`.
-pub trait Proxied: SealedInternal + AsView<Proxied = Self> + Sized + 'static {
+pub trait Proxied: SealedInternal + AsView<Proxied = Self> + Sized {
     /// The proxy type that provides shared access to a `T`, like a `&'msg T`.
     ///
     /// Most code should use the type alias [`View`].
-    type View<'msg>: AsView<Proxied = Self> + IntoView<'msg>;
+    type View<'msg>: ViewProxy<'msg, Proxied = Self>
+    where
+        Self: 'msg;
 }
 
 /// A type that can be be accessed through a reference-like proxy.
@@ -64,12 +67,14 @@ pub trait Proxied: SealedInternal + AsView<Proxied = Self> + Sized + 'static {
 /// and immutably via `MutProxied::View`.
 ///
 /// `MutProxied` is implemented by message, map and repeated field types.
-pub trait MutProxied: SealedInternal + Proxied + AsMut<MutProxied = Self> + 'static {
+pub trait MutProxied: SealedInternal + Proxied + AsMut<MutProxied = Self> {
     /// The proxy type that provides exclusive mutable access to a `T`, like a
     /// `&'msg mut T`.
     ///
     /// Most code should use the type alias [`Mut`].
-    type Mut<'msg>: AsMut<MutProxied = Self> + IntoMut<'msg> + IntoView<'msg>;
+    type Mut<'msg>: MutProxy<'msg, MutProxied = Self>
+    where
+        Self: 'msg;
 }
 
 /// A proxy type that provides shared access to a `T`, like a `&'msg T`.
@@ -86,10 +91,10 @@ pub type View<'msg, T> = <T as Proxied>::View<'msg>;
 pub type Mut<'msg, T> = <T as MutProxied>::Mut<'msg>;
 
 /// Used to semantically do a cheap "to-reference" conversion. This is
-/// implemented on both owned `Proxied` types as well as view and mut proxy
+/// implemented on both owned `Proxied` types as well as ViewProxy and MutProxy
 /// types.
 ///
-/// On a view proxy this will behave as a reborrow into a shorter lifetime.
+/// On ViewProxy this will behave as a reborrow into a shorter lifetime.
 pub trait AsView: SealedInternal {
     type Proxied: Proxied;
 
@@ -115,26 +120,12 @@ pub trait AsView: SealedInternal {
     fn as_view(&self) -> View<'_, Self::Proxied>;
 }
 
-impl<T: Proxied> AsView for &T {
-    type Proxied = T::Proxied;
-    fn as_view(&self) -> View<'_, Self::Proxied> {
-        (**self).as_view()
-    }
-}
-
-impl<T: Proxied> AsView for &mut T {
-    type Proxied = T::Proxied;
-    fn as_view(&self) -> View<'_, Self::Proxied> {
-        (**self).as_view()
-    }
-}
-
-/// Used to turn another 'borrow' into a view proxy.
+/// Used to turn another 'borrow' into a ViewProxy.
 ///
-/// On a mut proxy this borrows to a View (semantically matching turning a `&mut
+/// On a MutProxy this borrows to a View (semantically matching turning a `&mut
 /// T` into a `&T`).
 ///
-/// On a view proxy this will behave as a reborrow into a shorter lifetime
+/// On a ViewProxy this will behave as a reborrow into a shorter lifetime
 /// (semantically matching a `&'a T` into a `&'b T` where `'a: 'b`).
 pub trait IntoView<'msg>: SealedInternal + AsView {
     /// Converts into a `View` with a potentially shorter lifetime.
@@ -167,28 +158,10 @@ pub trait IntoView<'msg>: SealedInternal + AsView {
         'msg: 'shorter;
 }
 
-impl<'msg, T: Proxied> IntoView<'msg> for &'msg T {
-    fn into_view<'shorter>(self) -> View<'shorter, T>
-    where
-        'msg: 'shorter,
-    {
-        (*self).as_view()
-    }
-}
-
-impl<'msg, T: Proxied> IntoView<'msg> for &'msg mut T {
-    fn into_view<'shorter>(self) -> View<'shorter, T>
-    where
-        'msg: 'shorter,
-    {
-        (*self).as_view()
-    }
-}
-
 /// Used to semantically do a cheap "to-mut-reference" conversion. This is
-/// implemented on both owned `Proxied` types as well as mut proxy types.
+/// implemented on both owned `Proxied` types as well as MutProxy types.
 ///
-/// On a mut proxy this will behave as a reborrow into a shorter lifetime.
+/// On MutProxy this will behave as a reborrow into a shorter lifetime.
 pub trait AsMut: SealedInternal + AsView<Proxied = Self::MutProxied> {
     type MutProxied: MutProxied;
 
@@ -196,16 +169,9 @@ pub trait AsMut: SealedInternal + AsView<Proxied = Self::MutProxied> {
     fn as_mut(&mut self) -> Mut<'_, Self::MutProxied>;
 }
 
-impl<T: MutProxied> AsMut for &mut T {
-    type MutProxied = T::MutProxied;
-    fn as_mut(&mut self) -> Mut<'_, Self::MutProxied> {
-        (*self).as_mut()
-    }
-}
-
-/// Used to turn another 'borrow' into a mut proxy.
+/// Used to turn another 'borrow' into a MutProxy.
 ///
-/// On a mut proxy this will behave as a reborrow into a shorter lifetime
+/// On a MutProxy this will behave as a reborrow into a shorter lifetime
 /// (semantically matching a `&mut 'a T` into a `&mut 'b T` where `'a: 'b`).
 pub trait IntoMut<'msg>: SealedInternal + AsMut {
     /// Converts into a `Mut` with a potentially shorter lifetime.
@@ -235,12 +201,31 @@ pub trait IntoMut<'msg>: SealedInternal + AsMut {
         'msg: 'shorter;
 }
 
-impl<'msg, T: MutProxied> IntoMut<'msg> for &'msg mut T {
-    fn into_mut<'shorter>(self) -> Mut<'shorter, T>
-    where
-        'msg: 'shorter,
-    {
-        (*self).as_mut()
+/// Declares conversion operations common to all proxies (both views and mut
+/// proxies).
+///
+/// This trait is intentionally made non-object-safe to prevent a potential
+/// future incompatible change.
+pub trait Proxy<'msg>:
+    SealedInternal + 'msg + IntoView<'msg> + Sync + Unpin + Sized + Debug
+{
+}
+
+/// Declares conversion operations common to view proxies.
+pub trait ViewProxy<'msg>: SealedInternal + Proxy<'msg> + Send {}
+
+/// Declares operations common to all mut proxies.
+///
+/// This trait is intentionally made non-object-safe to prevent a potential
+/// future incompatible change.
+pub trait MutProxy<'msg>: SealedInternal + Proxy<'msg> + AsMut + IntoMut<'msg> {
+    /// Gets an immutable view of this field. This is shorthand for `as_view`.
+    ///
+    /// This provides a shorter lifetime than `into_view` but can also be called
+    /// multiple times - if the result of `get` is not living long enough
+    /// for your use, use that instead.
+    fn get(&self) -> View<'_, Self::Proxied> {
+        self.as_view()
     }
 }
 
@@ -321,6 +306,10 @@ mod tests {
         }
     }
 
+    impl<'msg> Proxy<'msg> for MyProxiedView<'msg> {}
+
+    impl<'msg> ViewProxy<'msg> for MyProxiedView<'msg> {}
+
     impl<'msg> AsView for MyProxiedView<'msg> {
         type Proxied = MyProxied;
 
@@ -344,6 +333,8 @@ mod tests {
     }
 
     impl<'msg> SealedInternal for MyProxiedMut<'msg> {}
+
+    impl<'msg> Proxy<'msg> for MyProxiedMut<'msg> {}
 
     impl<'msg> AsView for MyProxiedMut<'msg> {
         type Proxied = MyProxied;
@@ -378,6 +369,8 @@ mod tests {
             self
         }
     }
+
+    impl<'msg> MutProxy<'msg> for MyProxiedMut<'msg> {}
 
     #[gtest]
     fn test_as_view() {

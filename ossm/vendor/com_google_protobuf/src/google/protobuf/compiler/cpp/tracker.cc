@@ -13,6 +13,7 @@
 
 #include "absl/log/absl_check.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "absl/types/optional.h"
@@ -220,9 +221,11 @@ Getters RepeatedFieldGetters(const FieldDescriptor* field,
 
 Getters StringFieldGetters(const FieldDescriptor* field, const Options& opts) {
   std::string member = FieldMemberName(field, ShouldSplit(field, opts));
+  bool is_std_string =
+      field->cpp_string_type() == FieldDescriptor::CppStringType::kString;
 
   Getters getters;
-  if (IsArenaStringPtr(field, opts) && !field->default_value_string().empty()) {
+  if (is_std_string && !field->default_value_string().empty()) {
     getters.base =
         absl::Substitute("$0.IsDefault() ? &$1.get() : $0.UnsafeGetPointer()",
                          member, MakeDefaultFieldName(field));
@@ -239,12 +242,12 @@ Getters StringOneofGetters(const FieldDescriptor* field,
   ABSL_CHECK(oneof != nullptr);
 
   std::string member = FieldMemberName(field, ShouldSplit(field, opts));
+  bool is_std_string =
+      field->cpp_string_type() == FieldDescriptor::CppStringType::kString;
 
   std::string field_ptr = member;
-  if (IsArenaStringPtr(field, opts)) {
+  if (is_std_string) {
     field_ptr = absl::Substitute("$0.UnsafeGetPointer()", member);
-  } else if (IsMicroString(field, opts)) {
-    field_ptr = absl::Substitute("&$0", member);
   }
 
   std::string has =
@@ -252,12 +255,12 @@ Getters StringOneofGetters(const FieldDescriptor* field,
                        UnderscoresToCamelCase(field->name(), true));
 
   std::string default_field = MakeDefaultFieldName(field);
-  if (IsArenaStringPtr(field, opts)) {
+  if (is_std_string) {
     absl::StrAppend(&default_field, ".get()");
   }
 
   Getters getters;
-  if (field->default_value_string().empty() || IsMicroString(field, opts)
+  if (field->default_value_string().empty()
   ) {
     getters.base = absl::Substitute("$0 ? $1 : nullptr", has, field_ptr);
   } else {

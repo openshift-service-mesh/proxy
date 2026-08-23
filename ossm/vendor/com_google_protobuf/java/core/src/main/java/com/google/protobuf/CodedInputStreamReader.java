@@ -35,7 +35,7 @@ final class CodedInputStreamReader implements Reader {
 
   public static CodedInputStreamReader forCodedInput(CodedInputStream input) {
     if (input.wrapper != null) {
-      return (CodedInputStreamReader) input.wrapper;
+      return input.wrapper;
     }
     return new CodedInputStreamReader(input);
   }
@@ -184,14 +184,16 @@ final class CodedInputStreamReader implements Reader {
   private <T> void mergeMessageFieldInternal(
       T target, Schema<T> schema, ExtensionRegistryLite extensionRegistry) throws IOException {
     int size = input.readUInt32();
-    input.checkRecursionLimit();
+    if (input.recursionDepth >= input.recursionLimit) {
+      throw InvalidProtocolBufferException.recursionLimitExceeded();
+    }
 
     // Push the new limit.
     final int prevLimit = input.pushLimit(size);
-    ++input.messageDepth;
+    ++input.recursionDepth;
     schema.mergeFrom(target, this, extensionRegistry);
     input.checkLastTagWas(0);
-    --input.messageDepth;
+    --input.recursionDepth;
     // Restore the previous limit.
     input.popLimit(prevLimit);
   }
@@ -1262,7 +1264,7 @@ final class CodedInputStreamReader implements Reader {
         } catch (InvalidProtocolBufferException.InvalidWireTypeException ignore) {
           // the type doesn't match, skip the field.
           if (!skipField()) {
-            throw new InvalidProtocolBufferException("Unable to parse map entry.", ignore);
+            throw new InvalidProtocolBufferException("Unable to parse map entry.");
           }
         }
       }

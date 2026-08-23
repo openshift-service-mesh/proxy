@@ -18,4 +18,9 @@ public class Proto2SchemaTest extends AbstractProto2SchemaTest {
   protected Schema<Proto2Message> schema() {
     return TestSchemas.genericProto2Schema;
   }
+
+  @Override
+  protected void registerSchemas() {
+    TestSchemas.registerGenericProto2Schemas();
+  }
 }

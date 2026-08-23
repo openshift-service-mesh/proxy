@@ -16,10 +16,9 @@ namespace java {
 void SetCommonFieldVariables(
     const FieldDescriptor* descriptor, const FieldGeneratorInfo* info,
     absl::flat_hash_map<absl::string_view, std::string>* variables) {
-  (*variables)["field_name"] = std::string(descriptor->name());
+  (*variables)["field_name"] = descriptor->name();
   (*variables)["name"] = info->name;
-  (*variables)["classname"] =
-      std::string(descriptor->containing_type()->name());
+  (*variables)["classname"] = descriptor->containing_type()->name();
   (*variables)["capitalized_name"] = info->capitalized_name;
   (*variables)["disambiguated_reason"] = info->disambiguated_reason;
   (*variables)["constant_name"] = FieldConstantName(descriptor);
@@ -101,8 +100,6 @@ void SetCommonOneofVariables(
       absl::StrCat(info->name, "Case_ = 0");
   (*variables)["has_oneof_case_message"] =
       absl::StrCat(info->name, "Case_ == ", descriptor->number());
-  (*variables)["negated_has_oneof_case_message"] =
-      absl::StrCat(info->name, "Case_ != ", descriptor->number());
 }
 
 void PrintExtraFieldInfo(

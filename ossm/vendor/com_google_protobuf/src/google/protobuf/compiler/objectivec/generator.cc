@@ -64,6 +64,8 @@ std::string NumberedObjCMFileName(absl::string_view basename, int number) {
 
 }  // namespace
 
+bool ObjectiveCGenerator::HasGenerateAll() const { return true; }
+
 bool ObjectiveCGenerator::Generate(const FileDescriptor* file,
                                    const std::string& parameter,
                                    GeneratorContext* context,
@@ -87,10 +89,6 @@ bool ObjectiveCGenerator::GenerateAll(
 
   Options validation_options;
   GenerationOptions generation_options;
-
-  // Set default value for extension generation mode to class based.
-   generation_options.extension_generation_mode =
-     ExtensionGenerationMode::kClassBased;
 
   std::vector<std::pair<std::string, std::string> > options;
   ParseGeneratorParameter(parameter, &options);
@@ -298,40 +296,6 @@ bool ObjectiveCGenerator::GenerateAll(
             options[i].second);
         return false;
       }
-    } else if (options[i].first == "annotation_pragma_name") {
-      generation_options.annotation_pragma_name = options[i].second;
-    } else if (options[i].first == "annotation_guard_name") {
-      generation_options.annotation_guard_name = options[i].second;
-    } else if (options[i].first == "extension_generation_mode") {
-      // This option controls the generation mode for extension code. The
-      // available options are:
-      //   "c_function": Root classes are removed. Extension descriptor and
-      //     registry functions are generated as C functions. This is the
-      //     preferred mode for new code, because it avoids potential namespace
-      //     collisions, allows the generated code to be stripped by the linker,
-      //     reduces binary size, and defers some initialization logic to the
-      //     first use instead of at app startup.
-      //   "class_based": Root classes are kept. Extension descriptor and
-      //     registry functions are generated as ObjC classes & methods.
-      //   "migration": C function based descriptor and registry functions are
-      //     generated alongside ObjC classes and methods. This is intended to
-      //     be a transitional state to help with migration to C function mode.
-      if (options[i].second == "c_function") {
-        generation_options.extension_generation_mode =
-            ExtensionGenerationMode::kCFunction;
-      } else if (options[i].second == "class_based") {
-        generation_options.extension_generation_mode =
-            ExtensionGenerationMode::kClassBased;
-      } else if (options[i].second == "migration") {
-        generation_options.extension_generation_mode =
-            ExtensionGenerationMode::kMigration;
-      } else {
-        *error = absl::StrCat(
-            "error: Unknown value for extension_generation_mode. Expected one "
-            "of 'c_function', 'class_based', or 'migration'. Got: ",
-            options[i].second);
-        return false;
-      }
     } else {
       *error =
           absl::StrCat("error: Unknown generator option: ", options[i].first);
@@ -378,6 +342,17 @@ bool ObjectiveCGenerator::GenerateAll(
               << std::endl;
     std::cerr.flush();
   }
+  if (!generation_options.generate_minimal_imports &&
+      !absl::StrContains(options_warnings_suppressions,
+                         "generate_minimal_imports")) {
+    std::cerr << "WARNING: generate_minimal_imports is disabled, this is "
+                 "deprecated and will be removed in the future. If you have a "
+                 "need for disabling it please file an issue at "
+                 "https://github.com/protocolbuffers/protobuf/issues with "
+                 "your use case."
+              << std::endl;
+    std::cerr.flush();
+  }
   if (!generation_options.strip_custom_options &&
       !absl::StrContains(options_warnings_suppressions,
                          "strip_custom_options")) {
@@ -411,19 +386,6 @@ bool ObjectiveCGenerator::GenerateAll(
 
   // -----------------------------------------------------------------
 
-  if (generation_options.annotation_guard_name.empty() !=
-      generation_options.annotation_pragma_name.empty()) {
-    *error =
-        "error: both annotation_guard_name and annotation_pragma_name must "
-        "be set to output annotations";
-    return false;
-  }
-  bool should_annotate_headers =
-      !generation_options.annotation_pragma_name.empty() &&
-      !generation_options.annotation_guard_name.empty();
-
-  // -----------------------------------------------------------------
-
   // Validate the objc prefix/package pairings.
   if (!ValidateObjCClassPrefixes(files, validation_options, error)) {
     // *error will have been filled in.
@@ -440,30 +402,12 @@ bool ObjectiveCGenerator::GenerateAll(
     {
       auto output =
           absl::WrapUnique(context->Open(absl::StrCat(filepath, ".pbobjc.h")));
-      GeneratedCodeInfo annotations;
-      io::AnnotationProtoCollector<GeneratedCodeInfo> annotation_collector(
-          &annotations);
-      io::Printer::Options options;
-      std::string info_path = "";
-      if (should_annotate_headers) {
-        info_path = absl::StrCat(filepath, ".pbobjc.h.meta");
-        options.annotation_collector = &annotation_collector;
-      }
-      io::Printer printer(output.get(), options);
-      file_generator.GenerateHeader(&printer, info_path);
+      io::Printer printer(output.get());
+      file_generator.GenerateHeader(&printer);
       if (printer.failed()) {
         *error = absl::StrCat("error: internal error generating a header: ",
                               file->name());
         return false;
-      }
-
-      if (should_annotate_headers) {
-        auto info_output = absl::WrapUnique(context->Open(info_path));
-        if (!annotations.SerializeToZeroCopyStream(info_output.get())) {
-          *error = absl::StrCat("error: internal error writing annotations: ",
-                                info_path);
-          return false;
-        }
       }
     }
 
@@ -501,7 +445,7 @@ bool ObjectiveCGenerator::GenerateAll(
           }
         }
 
-        for (size_t i = 0; i < file_generator.NumMessages(); ++i) {
+        for (int i = 0; i < file_generator.NumMessages(); ++i) {
           std::unique_ptr<io::ZeroCopyOutputStream> output(
               context->Open(NumberedObjCMFileName(filepath, file_number++)));
           io::Printer printer(output.get());

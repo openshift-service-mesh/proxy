@@ -9,13 +9,13 @@
 //  Based on original Protocol Buffers design by
 //  Sanjay Ghemawat, Jeff Dean, and others.
 
-#ifndef GOOGLE_PROTOBUF_COMPILER_CSHARP_CSHARP_HELPERS_H__
-#define GOOGLE_PROTOBUF_COMPILER_CSHARP_CSHARP_HELPERS_H__
+#ifndef GOOGLE_PROTOBUF_COMPILER_CSHARP_HELPERS_H__
+#define GOOGLE_PROTOBUF_COMPILER_CSHARP_HELPERS_H__
 
 #include <string>
 
-#include "absl/strings/string_view.h"
 #include "google/protobuf/compiler/code_generator.h"
+#include "absl/strings/string_view.h"
 #include "google/protobuf/compiler/csharp/names.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/descriptor.pb.h"
@@ -140,4 +140,4 @@ inline bool RequiresPresenceBit(const FieldDescriptor* descriptor) {
 
 #include "google/protobuf/port_undef.inc"
 
-#endif  // GOOGLE_PROTOBUF_COMPILER_CSHARP_CSHARP_HELPERS_H__
+#endif  // GOOGLE_PROTOBUF_COMPILER_CSHARP_HELPERS_H__

@@ -7,15 +7,13 @@
 
 #include "google/protobuf/compiler/cpp/file.h"
 
-#include <string>
+#include <algorithm>
+#include <cstddef>
 #include <vector>
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
-#include "absl/strings/strip.h"
-#include "google/protobuf/compiler/cpp/helpers.h"
-#include "google/protobuf/compiler/cpp/options.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/unittest.pb.h"
 
@@ -39,11 +37,8 @@ namespace {
 // Test that the descriptors are ordered in a topological order.
 TEST(FileTest, TopologicallyOrderedDescriptors) {
   const FileDescriptor* fdesc =
-      proto2_unittest::TestAllTypes::descriptor()->file();
-  Options options;
-  MessageSCCAnalyzer analyzer(options);
-  options.scc_analyzer = &analyzer;
-  FileGenerator fgen(fdesc, options);
+      protobuf_unittest::TestAllTypes::descriptor()->file();
+  FileGenerator fgen(fdesc, /*options=*/{});
   static constexpr absl::string_view kExpectedDescriptorOrder[] = {
       "Uint64Message",
       "Uint32Message",
@@ -52,7 +47,6 @@ TEST(FileTest, TopologicallyOrderedDescriptors) {
       "TestVerifyBigFieldNumberUint32.Nested",
       "TestUnpackedTypes",
       "TestUnpackedExtensions",
-      "TestString",
       "TestReservedFields",
       "TestRequiredOpenEnum",
       "TestRequiredOneof.NestedMessage",
@@ -85,8 +79,6 @@ TEST(FileTest, TopologicallyOrderedDescriptors) {
       "TestMixedFieldsAndExtensions",
       "TestMessageWithManyRepeatedPtrFields",
       "TestMessageSize",
-      "TestMessageForMove_Small",
-      "TestMessageForMove_Large",
       "TestJsonName",
       "TestIsInitialized.SubMessage.SubGroup",
       "TestHugeFieldNumbers.StringStringMapEntry",
@@ -102,7 +94,6 @@ TEST(FileTest, TopologicallyOrderedDescriptors) {
       "TestExtensionInsideTable",
       "TestEmptyMessageWithExtensions",
       "TestEmptyMessage",
-      "TestEagerlyVerifiedLazyMessage.LazyMessage",
       "TestDynamicExtensions.DynamicMessageType",
       "TestDupFieldNumber.Foo",
       "TestDupFieldNumber.Bar",
@@ -111,7 +102,6 @@ TEST(FileTest, TopologicallyOrderedDescriptors) {
       "TestCommentInjectionMessage",
       "TestChildExtensionData.NestedTestAllExtensionsData."
       "NestedDynamicExtensions",
-      "TestAllTypesAsExtension",
       "TestAllTypes.RepeatedGroup",
       "TestAllTypes.OptionalGroup",
       "TestAllTypes.NestedMessage",
@@ -141,7 +131,6 @@ TEST(FileTest, TopologicallyOrderedDescriptors) {
       "FooResponse",
       "FooRequest",
       "FooClientMessage",
-      "FastParseTableCompression",
       "EnumsForBenchmark",
       "EnumParseTester",
       "BoolParseTester",
@@ -152,17 +141,14 @@ TEST(FileTest, TopologicallyOrderedDescriptors) {
       "TestVerifyBigFieldNumberUint32",
       "TestRequiredOneof",
       "TestRequired",
-      "TestRequired.MapFieldEntry",
       "TestOneof2",
       "TestNestedMessageHasBits.NestedMessage",
       "TestNestedGroupExtensionOuter.Layer1OptionalGroup",
       "TestMergeException",
-      "TestLazyRequiredEnum",
       "TestIsInitialized.SubMessage",
       "TestGroup",
       "TestForeignNested",
       "TestFieldOrderings",
-      "TestEagerlyVerifiedLazyMessage",
       "TestEagerMaybeLazy.NestedMessage",
       "TestDynamicExtensions",
       "TestDupFieldNumber",
@@ -182,7 +168,6 @@ TEST(FileTest, TopologicallyOrderedDescriptors) {
       "TestVerifyInt32BigFieldNumber",
       "TestVerifyInt32",
       "TestRequiredMessage",
-      "TestRequiredLazyMessage",
       "TestParsingMerge.RepeatedGroup",
       "TestParsingMerge.RepeatedFieldsGenerator.Group2",
       "TestParsingMerge.RepeatedFieldsGenerator.Group1",
@@ -211,14 +196,23 @@ TEST(FileTest, TopologicallyOrderedDescriptors) {
       "TestLazyMessageRepeated",
       "TestNestedRequiredForeign",
   };
-  std::vector<std::string> actual_order;
-  for (const Descriptor* desc :
-       FileGeneratorFriendForTesting::MessagesInTopologicalOrder(fgen)) {
-    actual_order.emplace_back(
-        absl::StripPrefix(desc->full_name(), "proto2_unittest."));
+  static constexpr size_t kExpectedDescriptorCount =
+      std::end(kExpectedDescriptorOrder) - std::begin(kExpectedDescriptorOrder);
+  std::vector<const Descriptor*> actual_descriptor_order =
+      FileGeneratorFriendForTesting::MessagesInTopologicalOrder(fgen);
+  EXPECT_TRUE(kExpectedDescriptorCount == actual_descriptor_order.size())
+      << "Expected: " << kExpectedDescriptorCount
+      << ", got: " << actual_descriptor_order.size();
+
+  auto limit =
+      std::min(kExpectedDescriptorCount, actual_descriptor_order.size());
+  for (auto i = 0u; i < limit; ++i) {
+    const Descriptor* desc = actual_descriptor_order[i];
+    bool match = absl::EndsWith(desc->full_name(), kExpectedDescriptorOrder[i]);
+    EXPECT_TRUE(match) << "failed to match; expected "
+                       << kExpectedDescriptorOrder[i] << ", got "
+                       << desc->full_name();
   }
-  EXPECT_THAT(actual_order,
-              ::testing::ElementsAreArray(kExpectedDescriptorOrder));
 }
 
 }  // namespace

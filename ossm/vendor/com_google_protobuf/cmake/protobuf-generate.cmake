@@ -2,11 +2,11 @@ function(protobuf_generate)
   include(CMakeParseArguments)
 
   set(_options APPEND_PATH)
-  set(_singleargs LANGUAGE OUT_VAR EXPORT_MACRO PROTOC_OUT_DIR PLUGIN PLUGIN_OPTIONS PROTOC_EXE)
+  set(_singleargs LANGUAGE OUT_VAR EXPORT_MACRO PROTOC_OUT_DIR PLUGIN PLUGIN_OPTIONS DEPENDENCIES PROTOC_EXE)
   if(COMMAND target_sources)
     list(APPEND _singleargs TARGET)
   endif()
-  set(_multiargs PROTOS IMPORT_DIRS GENERATE_EXTENSIONS PROTOC_OPTIONS DEPENDENCIES)
+  set(_multiargs PROTOS IMPORT_DIRS GENERATE_EXTENSIONS PROTOC_OPTIONS)
 
   cmake_parse_arguments(protobuf_generate "${_options}" "${_singleargs}" "${_multiargs}" "${ARGN}")
 
@@ -140,12 +140,10 @@ function(protobuf_generate)
 
     set(_comment "Running ${protobuf_generate_LANGUAGE} protocol buffer compiler on ${_proto}")
     if(protobuf_generate_PROTOC_OPTIONS)
-      string(REPLACE ";" " " _protoc_options_str "${protobuf_generate_PROTOC_OPTIONS}")
-      set(_comment "${_comment}, protoc-options: ${_protoc_options_str}")
+      set(_comment "${_comment}, protoc-options: ${protobuf_generate_PROTOC_OPTIONS}")
     endif()
     if(_plugin_options)
-      string(REPLACE ";" " " _plugin_options_str "${_plugin_options}")
-      set(_comment "${_comment}, plugin-options: ${_plugin_options_str}")
+      set(_comment "${_comment}, plugin-options: ${_plugin_options}")
     endif()
 
     add_custom_command(

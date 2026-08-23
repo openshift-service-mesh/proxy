@@ -21,46 +21,14 @@ use PBEmpty\PBEcho\TestEmptyPackage;
 use Php\Test\TestNamespace;
 
 # This is not allowed, but we at least shouldn't crash.
-class C extends \Google\Protobuf\Internal\Message
-{
-    public function __construct($data = null)
-    {
+class C extends \Google\Protobuf\Internal\Message {
+    public function __construct($data = null) {
         parent::__construct($data);
-    }
-}
-
-# This is not allowed, but we at least shouldn't crash.
-class TestMessageMockProxy extends TestMessage
-{
-    public $_proxy_data = null;
-
-    public function __construct($data = null)
-    {
-        $this->_proxy_data = $data;
-        // bypass parent constructor
-        // This is common behavior by phpunit ond other mock/proxy libraries
     }
 }
 
 class GeneratedClassTest extends TestBase
 {
-    private $orig_level;
-
-    /**
-     * @before
-     */
-    public function setErrorLevel()
-    {
-        $this->orig_level = error_reporting();
-    }
-
-    /**
-     * @after
-     */
-    public function restoreErrorLevel()
-    {
-        error_reporting($this->orig_level);
-    }
 
     #########################################################
     # Test field accessors.
@@ -88,7 +56,7 @@ class GeneratedClassTest extends TestBase
         $this->assertSame(MIN_INT32, $m->getOptionalInt32());
 
         // Set float.
-        @$m->setOptionalInt32(1.1);
+        $m->setOptionalInt32(1.1);
         $this->assertSame(1, $m->getOptionalInt32());
         $m->setOptionalInt32(MAX_INT32_FLOAT);
         $this->assertSame(MAX_INT32, $m->getOptionalInt32());
@@ -98,7 +66,7 @@ class GeneratedClassTest extends TestBase
         // Set string.
         $m->setOptionalInt32('2');
         $this->assertSame(2, $m->getOptionalInt32());
-        @$m->setOptionalInt32('3.1');
+        $m->setOptionalInt32('3.1');
         $this->assertSame(3, $m->getOptionalInt32());
         $m->setOptionalInt32(MAX_INT32_STRING);
         $this->assertSame(MAX_INT32, $m->getOptionalInt32());
@@ -156,27 +124,6 @@ class GeneratedClassTest extends TestBase
         $message->getDeprecatedAny(); // any field
         $message->getDeprecatedMessage(); // message field
         $message->getDeprecatedEnum(); // enum field
-
-        restore_error_handler();
-
-        $this->assertEquals(0, $deprecationCount);
-    }
-
-    public function testDeprecatedFieldSetterDoesNotThrowWarningForRepeatedAndMapFieldsWithEmptyArrays()
-    {
-        // temporarily change error handler to capture the deprecated errors
-        $deprecationCount = 0;
-        set_error_handler(function ($errno, $errstr) use (&$deprecationCount) {
-            if (false !== strpos($errstr, ' is deprecated.')) {
-                $deprecationCount++;
-            }
-        }, E_USER_DEPRECATED);
-
-
-        // This behavior exists because otherwise the deprecation is thrown on serializeToJsonString
-        $message = new TestMessage();
-        $message->setDeprecatedRepeatedInt32([]); // repeated field
-        $message->setDeprecatedMapInt32Int32([]); // map field
 
         restore_error_handler();
 
@@ -271,24 +218,18 @@ class GeneratedClassTest extends TestBase
         $m = new TestMessage();
 
         // Set integer.
-        if (PHP_INT_SIZE !== 4) {
-            // 32-bit systems throw "TypeError: Argument #1 must be of type int, float given"
-            $m->setOptionalUint32(MAX_UINT32);
-            $this->assertSame(-1, $m->getOptionalUint32());
-        }
+        $m->setOptionalUint32(MAX_UINT32);
+        $this->assertSame(-1, $m->getOptionalUint32());
         $m->setOptionalUint32(-1);
         $this->assertSame(-1, $m->getOptionalUint32());
         $m->setOptionalUint32(MIN_UINT32);
         $this->assertSame(MIN_INT32, $m->getOptionalUint32());
 
         // Set float.
-        @$m->setOptionalUint32(1.1);
+        $m->setOptionalUint32(1.1);
         $this->assertSame(1, $m->getOptionalUint32());
-        if (PHP_INT_SIZE !== 4) {
-            // 32-bit systems throw "TypeError: Argument #1 must be of type int, float given"
-            $m->setOptionalUint32(MAX_UINT32_FLOAT);
-            $this->assertSame(-1, $m->getOptionalUint32());
-        }
+        $m->setOptionalUint32(MAX_UINT32_FLOAT);
+        $this->assertSame(-1, $m->getOptionalUint32());
         $m->setOptionalUint32(-1.0);
         $this->assertSame(-1, $m->getOptionalUint32());
         $m->setOptionalUint32(MIN_UINT32_FLOAT);
@@ -297,13 +238,10 @@ class GeneratedClassTest extends TestBase
         // Set string.
         $m->setOptionalUint32('2');
         $this->assertSame(2, $m->getOptionalUint32());
-        @$m->setOptionalUint32('3.1');
+        $m->setOptionalUint32('3.1');
         $this->assertSame(3, $m->getOptionalUint32());
-        if (PHP_INT_SIZE !== 4) {
-            // 32-bit systems throw "TypeError: Argument #1 must be of type int, float given"
-            $m->setOptionalUint32(MAX_UINT32_STRING);
-            $this->assertSame(-1, $m->getOptionalUint32());
-        }
+        $m->setOptionalUint32(MAX_UINT32_STRING);
+        $this->assertSame(-1, $m->getOptionalUint32());
         $m->setOptionalUint32('-1.0');
         $this->assertSame(-1, $m->getOptionalUint32());
         $m->setOptionalUint32(MIN_UINT32_STRING);
@@ -325,7 +263,7 @@ class GeneratedClassTest extends TestBase
         $this->assertEquals(MIN_INT64, $m->getOptionalInt64());
 
         // Set float.
-        @$m->setOptionalInt64(1.1);
+        $m->setOptionalInt64(1.1);
         if (PHP_INT_SIZE == 4) {
             $this->assertSame('1', $m->getOptionalInt64());
         } else {
@@ -379,7 +317,7 @@ class GeneratedClassTest extends TestBase
         }
 
         // Set float.
-        @$m->setOptionalUint64(1.1);
+        $m->setOptionalUint64(1.1);
         if (PHP_INT_SIZE == 4) {
             $this->assertSame('1', $m->getOptionalUint64());
         } else {
@@ -426,7 +364,7 @@ class GeneratedClassTest extends TestBase
         $this->assertEquals(TestEnum::ONE, $m->getOptionalEnum());
 
         // Set float.
-        @$m->setOptionalEnum(1.1);
+        $m->setOptionalEnum(1.1);
         $this->assertEquals(TestEnum::ONE, $m->getOptionalEnum());
 
         // Set string.
@@ -477,17 +415,17 @@ class GeneratedClassTest extends TestBase
 
         // Set integer.
         $m->setOptionalFloat(1);
-        $this->assertEqualsWithDelta(1.0, $m->getOptionalFloat(), MAX_FLOAT_DIFF);
+        $this->assertFloatEquals(1.0, $m->getOptionalFloat(), MAX_FLOAT_DIFF);
 
         // Set float.
         $m->setOptionalFloat(1.1);
-        $this->assertEqualsWithDelta(1.1, $m->getOptionalFloat(), MAX_FLOAT_DIFF);
+        $this->assertFloatEquals(1.1, $m->getOptionalFloat(), MAX_FLOAT_DIFF);
 
         // Set string.
         $m->setOptionalFloat('2');
-        $this->assertEqualsWithDelta(2.0, $m->getOptionalFloat(), MAX_FLOAT_DIFF);
+        $this->assertFloatEquals(2.0, $m->getOptionalFloat(), MAX_FLOAT_DIFF);
         $m->setOptionalFloat('3.1');
-        $this->assertEqualsWithDelta(3.1, $m->getOptionalFloat(), MAX_FLOAT_DIFF);
+        $this->assertFloatEquals(3.1, $m->getOptionalFloat(), MAX_FLOAT_DIFF);
     }
 
     #########################################################
@@ -500,17 +438,17 @@ class GeneratedClassTest extends TestBase
 
         // Set integer.
         $m->setOptionalDouble(1);
-        $this->assertEqualsWithDelta(1.0, $m->getOptionalDouble(), MAX_FLOAT_DIFF);
+        $this->assertFloatEquals(1.0, $m->getOptionalDouble(), MAX_FLOAT_DIFF);
 
         // Set float.
         $m->setOptionalDouble(1.1);
-        $this->assertEqualsWithDelta(1.1, $m->getOptionalDouble(), MAX_FLOAT_DIFF);
+        $this->assertFloatEquals(1.1, $m->getOptionalDouble(), MAX_FLOAT_DIFF);
 
         // Set string.
         $m->setOptionalDouble('2');
-        $this->assertEqualsWithDelta(2.0, $m->getOptionalDouble(), MAX_FLOAT_DIFF);
+        $this->assertFloatEquals(2.0, $m->getOptionalDouble(), MAX_FLOAT_DIFF);
         $m->setOptionalDouble('3.1');
-        $this->assertEqualsWithDelta(3.1, $m->getOptionalDouble(), MAX_FLOAT_DIFF);
+        $this->assertFloatEquals(3.1, $m->getOptionalDouble(), MAX_FLOAT_DIFF);
     }
 
     #########################################################
@@ -536,55 +474,6 @@ class GeneratedClassTest extends TestBase
         // Set string.
         $m->setOptionalBool('');
         $this->assertSame(false, $m->getOptionalBool());
-    }
-
-    public function testBoolFromDoubleArrayConstructor()
-    {
-        $m = new TestMessage(['optional_bool' => -0.0]);
-        $this->assertFalse($m->getOptionalBool());
-
-        $m = new TestMessage(['optional_bool' => 0.0]);
-        $this->assertFalse($m->getOptionalBool());
-
-        $m = new TestMessage(['optional_bool' => 1.5]);
-        $this->assertTrue($m->getOptionalBool());
-
-        // Currently this generates a warning so we suppress it. In PHP 9, this will be promoted to an error and the test should be removed.
-        // https://wiki.php.net/rfc/warnings-php-8-5#coercing_nan_to_other_types
-        error_reporting($this->orig_level & ~E_WARNING);
-        $m = new TestMessage(['optional_bool' => NAN]);
-        $this->assertTrue($m->getOptionalBool());
-        error_reporting($this->orig_level);
-
-        $m = new TestMessage(['optional_bool' => INF]);
-        $this->assertTrue($m->getOptionalBool());
-
-        $m = new TestMessage(['optional_bool' => -INF]);
-        $this->assertTrue($m->getOptionalBool());
-    }
-
-    public function testRepeatedBoolFromDouble()
-    {
-        $m  = new TestMessage();
-        $rf = $m->getRepeatedBool();
-
-        $rf[] = -0.0;
-        $rf[] = 0.0;
-        $rf[] = 1.5;
-        // Currently this generates a warning so we suppress it. In PHP 9, this will be promoted to an error and the test should be removed.
-        // https://wiki.php.net/rfc/warnings-php-8-5#coercing_nan_to_other_types
-        error_reporting($this->orig_level & ~E_WARNING);
-        $rf[] = NAN;
-        error_reporting($this->orig_level);
-        $rf[] = INF;
-        $rf[] = -INF;
-
-        $this->assertFalse($rf[0]);
-        $this->assertFalse($rf[1]);
-        $this->assertTrue($rf[2]);
-        $this->assertTrue($rf[3]);
-        $this->assertTrue($rf[4]);
-        $this->assertTrue($rf[5]);
     }
 
     #########################################################
@@ -703,7 +592,7 @@ class GeneratedClassTest extends TestBase
         $arr = array(1, 2.1, "3");
         $m->setRepeatedInt32($arr);
         $this->assertTrue($m->getRepeatedInt32() instanceof RepeatedField);
-        $this->assertSame("Google\Protobuf\RepeatedField",
+        $this->assertSame("Google\Protobuf\Internal\RepeatedField",
                           get_class($m->getRepeatedInt32()));
         $this->assertSame(3, count($m->getRepeatedInt32()));
         $this->assertSame(1, $m->getRepeatedInt32()[0]);
@@ -1737,26 +1626,6 @@ class GeneratedClassTest extends TestBase
         $this->assertTrue(true);
     }
 
-    public function testOptionalValueConstructor()
-    {
-        $m = new TestMessage([
-            'optional_message' => new Sub([
-                'a' => 1
-            ]),
-            'true_optional_message' => null,
-            'repeated_message' => [
-                new Sub(['a' => 2]),
-                new Sub(['a' => 3])
-            ],
-        ]);
-
-        $this->assertFalse($m->hasTrueOptionalMessage());
-        $this->assertNull($m->getTrueOptionalMessage());
-
-        $this->assertEquals(1, $m->getOptionalMessage()->getA());
-        $this->assertCount(2, $m->getRepeatedMessage());
-    }
-
     #########################################################
     # Test clone.
     #########################################################
@@ -2033,38 +1902,6 @@ class GeneratedClassTest extends TestBase
         new TestMessage(['optional_int32' => $this->throwIntendedException()]);
     }
 
-    public function testNoSegfaultWithContructorBypass()
-    {
-        if (!extension_loaded('protobuf')) {
-            $this->markTestSkipped('PHP Protobuf extension is not loaded');
-        }
-
-        $this->expectException(Exception::class);
-        $this->expectExceptionMessage(
-            "Couldn't find descriptor. " .
-            "The message constructor was likely bypassed, resulting in an uninitialized descriptor."
-        );
-
-        $m = new TestMessageMockProxy(['optional_int32' => 123]);
-
-        /**
-         * At this point the message constructor was bypassed and the descriptor is not initialized.
-         * This is a common PHP pattern where a proxy/mock class extends a concrete class,
-         * frequently used in frameworks like PHPUnit, phpspec, and Mockery.
-         *
-         * When this happens, the message's internal descriptor is never initialized.
-         *
-         * Without proper handling, accessing properties via getters (like $this->getOptionalInt32())
-         * would cause the C extension to segfault when trying to access the uninitialized descriptor.
-         *
-         * Instead of segfaulting, we now detect this uninitialized state and throw an exception.
-         *
-         * See: https://github.com/protocolbuffers/protobuf/issues/19978
-         */
-
-        $m->getOptionalInt32();
-    }
-
     public function testNoExceptionWithVarDump()
     {
         $m = new Sub(['a' => 1]);
@@ -2106,15 +1943,15 @@ class GeneratedClassTest extends TestBase
         $this->assertEquals('     */', array_pop($commentLines));
         $docComment = implode("\n", $commentLines);
         // test special characters
-        $this->assertStringContainsString(";,/?:&=+$-_.!~*'()", $docComment);
+        $this->assertContains(";,/?:&=+$-_.!~*'()", $docComment);
         // test open doc comment
-        $this->assertStringContainsString('/*', $docComment);
+        $this->assertContains('/*', $docComment);
         // test escaped closed doc comment
-        $this->assertStringNotContainsString('*/', $docComment);
-        $this->assertStringContainsString('{@*}', $docComment);
+        $this->assertNotContains('*/', $docComment);
+        $this->assertContains('{@*}', $docComment);
         // test escaped at-sign
-        $this->assertStringContainsString('\@foo', $docComment);
+        $this->assertContains('\@foo', $docComment);
         // test forwardslash on new line
-        $this->assertStringContainsString("* /\n", $docComment);
+        $this->assertContains("* /\n", $docComment);
     }
 }

@@ -5,17 +5,17 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
-#ifndef GOOGLE_PROTOBUF_COMPILER_CSHARP_CSHARP_FIELD_BASE_H__
-#define GOOGLE_PROTOBUF_COMPILER_CSHARP_CSHARP_FIELD_BASE_H__
+#ifndef GOOGLE_PROTOBUF_COMPILER_CSHARP_FIELD_BASE_H__
+#define GOOGLE_PROTOBUF_COMPILER_CSHARP_FIELD_BASE_H__
 
 #include <string>
 
+#include "google/protobuf/compiler/code_generator.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_replace.h"
 #include "absl/strings/str_split.h"
-#include "google/protobuf/compiler/code_generator.h"
 #include "google/protobuf/compiler/csharp/csharp_source_generator_base.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/io/printer.h"
@@ -30,7 +30,7 @@ class FieldGeneratorBase : public SourceGeneratorBase {
   FieldGeneratorBase(const FieldDescriptor* descriptor,
                      int presenceIndex,
                      const Options* options);
-  ~FieldGeneratorBase() override;
+  ~FieldGeneratorBase();
 
   FieldGeneratorBase(const FieldGeneratorBase&) = delete;
   FieldGeneratorBase& operator=(const FieldGeneratorBase&) = delete;
@@ -90,4 +90,5 @@ class FieldGeneratorBase : public SourceGeneratorBase {
 }  // namespace protobuf
 }  // namespace google
 
-#endif  // GOOGLE_PROTOBUF_COMPILER_CSHARP_CSHARP_FIELD_BASE_H__
+#endif  // GOOGLE_PROTOBUF_COMPILER_CSHARP_FIELD_BASE_H__
+

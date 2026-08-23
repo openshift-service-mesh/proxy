@@ -27,7 +27,7 @@ import "google/protobuf/descriptor.proto";
 
 // We don't put this in a package within proto2 because we need to make sure
 // that the generated code doesn't depend on being in the proto2 namespace.
-package proto2_unittest;
+package protobuf_unittest;
 
 // Some simple test custom options of various types.
 
@@ -69,69 +69,6 @@ enum MethodOpt1 {
 
 extend google.protobuf.MethodOptions {
   optional MethodOpt1 method_opt1 = 7890860;
-}
-
-// Custom options with feature support
-extend google.protobuf.MessageOptions {
-  optional bool removed_option = 7733026 [feature_support = {
-    edition_removed: EDITION_2023
-    removal_error: "removed_option removal error"
-  }];
-  optional bool deprecated_option = 7737036 [feature_support = {
-    edition_deprecated: EDITION_2023
-    deprecation_warning: "deprecated_option deprecation warning"
-  }];
-  optional CustomOptionLifetimesMessage custom_option_lifetimes_message =
-      7737026;
-  optional CustomOptionLifetimesEnum custom_option_lifetimes_enum = 7737022;
-  repeated CustomOptionLifetimesMessage
-      repeated_custom_option_lifetimes_message = 7737021;
-}
-
-message CustomOptionLifetimesMessage {
-  optional string removed_option = 1 [feature_support = {
-    edition_removed: EDITION_2023
-    removal_error: "removed_option removal error"
-  }];
-  optional string deprecated_option = 2 [feature_support = {
-    edition_deprecated: EDITION_2023
-    deprecation_warning: "deprecated_option deprecation warning"
-  }];
-
-  repeated CustomOptionLifetimesEnum repeated_custom_option_lifetimes_enum = 4;
-
-  optional NestedCustomOptionLifetimesMessage
-      nested_custom_option_lifetimes_message = 5;
-
-  extensions 100 to 200;
-}
-
-enum CustomOptionLifetimesEnum {
-  CUSTOM_OPTION_ENUM_DEFAULT = 0;
-  CUSTOM_OPTION_ENUM_REMOVED_EDITION2023 = 1 [feature_support = {
-    edition_removed: EDITION_2023
-    removal_error: "CUSTOM_OPTION_ENUM_REMOVED_EDITION2023 removal error"
-  }];
-  CUSTOM_OPTION_ENUM_REMOVED_PROTO3 = 2 [feature_support = {
-    edition_removed: EDITION_PROTO3
-    removal_error: "CUSTOM_OPTION_ENUM_REMOVED_PROTO3 removal error"
-  }];
-  CUSTOM_OPTION_ENUM_VALUE3 = 3;
-  CUSTOM_OPTION_ENUM_VALUE4 = 4;
-}
-
-message NestedCustomOptionLifetimesMessage {
-  optional string deprecated_option = 1 [feature_support = {
-    edition_deprecated: EDITION_2023
-    deprecation_warning: "deprecated_option deprecation warning"
-  }];
-}
-
-extend proto2_unittest.CustomOptionLifetimesMessage {
-  optional string custom_nested_option = 101 [feature_support = {
-    edition_removed: EDITION_2023
-    removal_error: "custom_nested_option removal error"
-  }];
 }
 
 // A test message with custom options at all possible locations (and also some
@@ -323,7 +260,7 @@ extend ComplexOptionType2 {
 }
 
 extend google.protobuf.MessageOptions {
-  optional proto2_unittest.ComplexOptionType1 complex_opt1 = 7646756;
+  optional protobuf_unittest.ComplexOptionType1 complex_opt1 = 7646756;
   optional ComplexOptionType2 complex_opt2 = 7636949;
   optional ComplexOptionType3 complex_opt3 = 7636463;
   optional group ComplexOpt6 = 7595468 {
@@ -333,19 +270,19 @@ extend google.protobuf.MessageOptions {
 
 // Note that we try various different ways of naming the same extension.
 message VariousComplexOptions {
-  option (.proto2_unittest.complex_opt1).foo = 42;
-  option (proto2_unittest.complex_opt1).(.proto2_unittest.mooo) = 324;
-  option (.proto2_unittest.complex_opt1).(proto2_unittest.corge).moo = 876;
-  option (proto2_unittest.complex_opt1).foo4 = 99;
-  option (proto2_unittest.complex_opt1).foo4 = 88;
+  option (.protobuf_unittest.complex_opt1).foo = 42;
+  option (protobuf_unittest.complex_opt1).(.protobuf_unittest.mooo) = 324;
+  option (.protobuf_unittest.complex_opt1).(protobuf_unittest.corge).moo = 876;
+  option (protobuf_unittest.complex_opt1).foo4 = 99;
+  option (protobuf_unittest.complex_opt1).foo4 = 88;
   option (complex_opt2).baz = 987;
   option (complex_opt2).(grault) = 654;
   option (complex_opt2).bar.foo = 743;
   option (complex_opt2).bar.(mooo) = 1999;
-  option (complex_opt2).bar.(proto2_unittest.corge).moo = 2008;
+  option (complex_opt2).bar.(protobuf_unittest.corge).moo = 2008;
   option (complex_opt2).(garply).foo = 741;
-  option (complex_opt2).(garply).(.proto2_unittest.mooo) = 1998;
-  option (complex_opt2).(proto2_unittest.garply).(corge).moo = 2121;
+  option (complex_opt2).(garply).(.protobuf_unittest.mooo) = 1998;
+  option (complex_opt2).(protobuf_unittest.garply).(corge).moo = 2121;
   option (ComplexOptionType2.ComplexOptionType4.complex_opt4).waldo = 1971;
   option (complex_opt2).fred.waldo = 321;
   option (complex_opt2).barney = {
@@ -354,7 +291,7 @@ message VariousComplexOptions {
   option (complex_opt2).barney = {
     waldo: 212
   };
-  option (proto2_unittest.complex_opt3).moo = 9;
+  option (protobuf_unittest.complex_opt3).moo = 9;
   option (complex_opt3).complexoptiontype5.plugh = 22;
   option (complexopt6).xyzzy = 24;
 }
@@ -433,18 +370,18 @@ option (fileopt) = {
   // Include a google.protobuf.FileOptions and recursively extend it with
   // another fileopt.
   file {
-    [proto2_unittest.fileopt] { s: 'FileExtensionAnnotation' }
+    [protobuf_unittest.fileopt] { s: 'FileExtensionAnnotation' }
   }
 
   // A message set inside an option value
   mset {
-    [proto2_unittest.AggregateMessageSetElement.message_set_extension] {
+    [protobuf_unittest.AggregateMessageSetElement.message_set_extension] {
       s: 'EmbeddedMessageSetElement'
     }
   }
 
   any {
-    [type.googleapis.com/proto2_unittest.AggregateMessageSetElement] {
+    [type.googleapis.com/protobuf_unittest.AggregateMessageSetElement] {
       s: 'EmbeddedMessageSetElement'
     }
   }

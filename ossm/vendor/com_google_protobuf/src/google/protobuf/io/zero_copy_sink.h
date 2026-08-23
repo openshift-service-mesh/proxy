@@ -5,8 +5,8 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
-#ifndef GOOGLE_PROTOBUF_IO_ZERO_COPY_SINK_H__
-#define GOOGLE_PROTOBUF_IO_ZERO_COPY_SINK_H__
+#ifndef GOOGLE_PROTOBUF_UTIL_ZERO_COPY_SINK_H__
+#define GOOGLE_PROTOBUF_UTIL_ZERO_COPY_SINK_H__
 
 #include <cstddef>
 
@@ -38,10 +38,8 @@ class PROTOBUF_EXPORT ZeroCopyStreamByteSink {
   void Append(const char* bytes, size_t len);
   void Write(absl::string_view str) { Append(str.data(), str.size()); }
 
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD size_t bytes_written() {
-    return bytes_written_;
-  }
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool failed() { return failed_; }
+  size_t bytes_written() { return bytes_written_; }
+  bool failed() { return failed_; }
 
  private:
   io::ZeroCopyOutputStream* stream_;
@@ -56,4 +54,4 @@ class PROTOBUF_EXPORT ZeroCopyStreamByteSink {
 }  // namespace google
 
 #include "google/protobuf/port_undef.inc"
-#endif  // GOOGLE_PROTOBUF_IO_ZERO_COPY_SINK_H__
+#endif  // GOOGLE_PROTOBUF_UTIL_ZERO_COPY_SINK_H__

@@ -7,8 +7,6 @@
 
 #include "google/protobuf/compiler/python/pyi_generator.h"
 
-#include <cstddef>
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -18,10 +16,8 @@
 #include "absl/log/absl_log.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
-#include "absl/synchronization/mutex.h"
 #include "google/protobuf/compiler/code_generator.h"
 #include "google/protobuf/compiler/python/helpers.h"
 #include "google/protobuf/descriptor.h"
@@ -36,7 +32,7 @@ namespace python {
 
 PyiGenerator::PyiGenerator() : file_(nullptr) {}
 
-PyiGenerator::~PyiGenerator() = default;
+PyiGenerator::~PyiGenerator() {}
 
 template <typename DescriptorT>
 std::string PyiGenerator::ModuleLevelName(const DescriptorT& descriptor) const {
@@ -64,16 +60,14 @@ std::string PyiGenerator::InternalPackage() const {
 
 struct ImportModules {
   bool has_repeated = false;    // _containers
-  bool has_iterable = false;    // collections.abc.Iterable
+  bool has_iterable = false;    // typing.Iterable
   bool has_messages = false;    // _message
   bool has_enums = false;       // _enum_type_wrapper
   bool has_extendable = false;  // _python_message
-  bool has_mapping = false;     // collections.abc.Mapping
+  bool has_mapping = false;     // typing.Mapping
   bool has_optional = false;    // typing.Optional
   bool has_union = false;       // typing.Union
-  bool has_callable = false;    // typing.Callable
   bool has_well_known_type = false;
-  bool has_datetime = false;
 };
 
 // Checks whether a descriptor name matches a well-known type.
@@ -113,15 +107,8 @@ void CheckImportModules(const Descriptor* descriptor,
     if (field->is_map()) {
       import_modules->has_mapping = true;
       const FieldDescriptor* value_des = field->message_type()->field(1);
-      if (value_des->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
-        import_modules->has_union = true;
-        const absl::string_view name = value_des->message_type()->full_name();
-        if (name == "google.protobuf.Duration" ||
-            name == "google.protobuf.Timestamp") {
-          import_modules->has_datetime = true;
-        }
-      }
-      if (value_des->cpp_type() == FieldDescriptor::CPPTYPE_ENUM) {
+      if (value_des->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE ||
+          value_des->cpp_type() == FieldDescriptor::CPPTYPE_ENUM) {
         import_modules->has_union = true;
       }
     } else {
@@ -131,11 +118,6 @@ void CheckImportModules(const Descriptor* descriptor,
       if (field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
         import_modules->has_union = true;
         import_modules->has_mapping = true;
-        const absl::string_view name = field->message_type()->full_name();
-        if (name == "google.protobuf.Duration" ||
-            name == "google.protobuf.Timestamp") {
-          import_modules->has_datetime = true;
-        }
       }
       if (field->cpp_type() == FieldDescriptor::CPPTYPE_ENUM) {
         import_modules->has_union = true;
@@ -183,26 +165,6 @@ void PyiGenerator::PrintImportForDescriptor(
 }
 
 void PyiGenerator::PrintImports() const {
-  // Checks what modules should be imported.
-  ImportModules import_modules;
-  if (file_->message_type_count() > 0) {
-    import_modules.has_messages = true;
-  }
-  if (file_->enum_type_count() > 0) {
-    import_modules.has_enums = true;
-  }
-  if (!opensource_runtime_ && file_->service_count() > 0) {
-    import_modules.has_callable = true;
-    import_modules.has_optional = true;
-    import_modules.has_union = true;
-  }
-  for (int i = 0; i < file_->message_type_count(); i++) {
-    CheckImportModules(file_->message_type(i), &import_modules);
-  }
-  if (import_modules.has_datetime) {
-    printer_->Print("import datetime\n\n");
-  }
-
   // Prints imported dependent _pb2 files.
   absl::flat_hash_set<std::string> seen_aliases;
   bool has_importlib = false;
@@ -216,6 +178,22 @@ void PyiGenerator::PrintImports() const {
       PrintImportForDescriptor(*dep->public_dependency(j), &seen_aliases,
                                &has_importlib);
     }
+  }
+
+  // Checks what modules should be imported.
+  ImportModules import_modules;
+  if (file_->message_type_count() > 0) {
+    import_modules.has_messages = true;
+  }
+  if (file_->enum_type_count() > 0) {
+    import_modules.has_enums = true;
+  }
+  if (!opensource_runtime_ && file_->service_count() > 0) {
+    import_modules.has_optional = true;
+    import_modules.has_union = true;
+  }
+  for (int i = 0; i < file_->message_type_count(); i++) {
+    CheckImportModules(file_->message_type(i), &import_modules);
   }
 
   // Prints modules (e.g. _containers, _messages, typing) that are
@@ -256,35 +234,23 @@ void PyiGenerator::PrintImports() const {
   } else {
     if (file_->service_count() > 0) {
       printer_->Print(
-          "from google3.net.rpc.python import legacy_stream_token as "
-          "_legacy_stream_token\n"
           "from google3.net.rpc.python import proto_python_api_2_stub as "
           "_proto_python_api_2_stub\n"
           "from google3.net.rpc.python import pywraprpc as _pywraprpc\n"
           "from google3.net.rpc.python import rpcserver as _rpcserver\n");
     }
   }
-  if (import_modules.has_iterable || import_modules.has_mapping) {
-    printer_->Print("from collections.abc import");
-    if (import_modules.has_iterable) {
-      printer_->Print(" Iterable as _Iterable");
-      if (import_modules.has_mapping) {
-        printer_->Print(",");
-      }
-    }
-    if (import_modules.has_mapping) {
-      printer_->Print(" Mapping as _Mapping");
-    }
-    printer_->Print("\n");
-  }
   printer_->Print("from typing import ");
   if (!opensource_runtime_ && file_->service_count() > 0) {
     printer_->Print("Any as _Any, ");
   }
-  if (import_modules.has_callable) {
-    printer_->Print("Callable as _Callable, ");
-  }
   printer_->Print("ClassVar as _ClassVar");
+  if (import_modules.has_iterable) {
+    printer_->Print(", Iterable as _Iterable");
+  }
+  if (import_modules.has_mapping) {
+    printer_->Print(", Mapping as _Mapping");
+  }
   if (import_modules.has_optional) {
     printer_->Print(", Optional as _Optional");
   }
@@ -310,7 +276,7 @@ void PyiGenerator::PrintImports() const {
                       public_dep->enum_type(i)->name());
     }
   }
-  printer_->Print("\n");
+printer_->Print("\n");
 }
 
 // Annotate wrapper for debugging purposes
@@ -318,7 +284,7 @@ void PyiGenerator::PrintImports() const {
 template <typename DescriptorT>
 void PyiGenerator::Annotate(const std::string& label,
                             const DescriptorT* descriptor) const {
-  printer_->Annotate(label, descriptor);
+printer_->Annotate(label.c_str(), descriptor);
 }
 
 void PyiGenerator::PrintEnum(const EnumDescriptor& enum_descriptor) const {
@@ -368,7 +334,6 @@ void PyiGenerator::PrintExtensions(const DescriptorT& descriptor) const {
     absl::AsciiStrToUpper(&constant_name);
     printer_->Print("$constant_name$: _ClassVar[int]\n",
                     "constant_name", constant_name);
-    Annotate("constant_name", extension_field);
     printer_->Print("$name$: _descriptor.FieldDescriptor\n",
                     "name", extension_field->name());
     Annotate("name", extension_field);
@@ -415,18 +380,8 @@ std::string PyiGenerator::GetFieldType(
   return "";
 }
 
-std::string PyiGenerator::ExtraInitTypes(const Descriptor& msg_des) const {
-  if (msg_des.full_name() == "google.protobuf.Timestamp") {
-    return "datetime.datetime, ";
-  } else if (msg_des.full_name() == "google.protobuf.Duration") {
-    return "datetime.timedelta, ";
-  } else {
-    return "";
-  }
-}
-
-void PyiGenerator::PrintMessage(const Descriptor& message_descriptor,
-                                bool is_nested) const {
+void PyiGenerator::PrintMessage(
+    const Descriptor& message_descriptor, bool is_nested) const {
   if (!is_nested) {
     printer_->Print("\n");
   }
@@ -485,7 +440,6 @@ void PyiGenerator::PrintMessage(const Descriptor& message_descriptor,
     printer_->Print(
         "$field_number_name$: _ClassVar[int]\n", "field_number_name",
         absl::StrCat(absl::AsciiStrToUpper(field_des.name()), "_FIELD_NUMBER"));
-    Annotate("field_number_name", &field_des);
   }
   // Prints field name and type
   for (int i = 0; i < message_descriptor.field_count(); ++i) {
@@ -521,28 +475,29 @@ void PyiGenerator::PrintMessage(const Descriptor& message_descriptor,
   }
 
   // Prints __init__
-  printer_->Print("def __init__(");
-  // If the message has a field named "self" (see b/144146793), it can still be
-  // passed to the initializer, which takes those as **kwargs. To avoid name
-  // collision, we rename the self parameter by appending underscores until it
-  // no longer collides. The self-parameter is in fact positional-only, so the
-  // name in the pyi doesn't matter with regard to what runtime usage is valid.
-  std::string self_arg_name = "self";
-  while (message_descriptor.FindFieldByName(self_arg_name) != nullptr) {
-    self_arg_name.append("_");
-  }
-  printer_->Print(self_arg_name);
-  bool has_python_keywords = false;
+  printer_->Print("def __init__(self");
+  bool has_key_words = false;
+  bool is_first = true;
   for (int i = 0; i < message_descriptor.field_count(); ++i) {
     const FieldDescriptor* field_des = message_descriptor.field(i);
     if (IsPythonKeyword(field_des->name())) {
-      has_python_keywords = true;
+      has_key_words = true;
       continue;
     }
     std::string field_name = std::string(field_des->name());
+    if (is_first && field_name == "self") {
+      // See b/144146793 for an example of real code that generates a (self,
+      // self) method signature. Since repeating a parameter name is illegal in
+      // Python, we rename the duplicate self.
+      field_name = "self_";
+    }
+    is_first = false;
     printer_->Print(", $field_name$: ", "field_name", field_name);
     Annotate("field_name", field_des);
-    printer_->Print("_Optional[");
+    if (field_des->is_repeated() ||
+        field_des->cpp_type() != FieldDescriptor::CPPTYPE_BOOL) {
+      printer_->Print("_Optional[");
+    }
     if (field_des->is_map()) {
       const Descriptor* map_entry = field_des->message_type();
       printer_->Print(
@@ -555,11 +510,9 @@ void PyiGenerator::PrintMessage(const Descriptor& message_descriptor,
         printer_->Print("_Iterable[");
       }
       if (field_des->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
-        const auto& extra_init_types =
-            ExtraInitTypes(*field_des->message_type());
-        printer_->Print("_Union[$extra_init_types$$type_name$, _Mapping]",
-                        "extra_init_types", extra_init_types, "type_name",
-                        GetFieldType(*field_des, message_descriptor));
+        printer_->Print(
+            "_Union[$type_name$, _Mapping]", "type_name",
+            GetFieldType(*field_des, message_descriptor));
       } else {
         if (field_des->cpp_type() == FieldDescriptor::CPPTYPE_ENUM) {
           printer_->Print("_Union[$type_name$, str]", "type_name",
@@ -574,9 +527,13 @@ void PyiGenerator::PrintMessage(const Descriptor& message_descriptor,
         printer_->Print("]");
       }
     }
-    printer_->Print("] = ...");
+    if (field_des->is_repeated() ||
+        field_des->cpp_type() != FieldDescriptor::CPPTYPE_BOOL) {
+      printer_->Print("]");
+    }
+    printer_->Print(" = ...");
   }
-  if (has_python_keywords) {
+  if (has_key_words) {
     printer_->Print(", **kwargs");
   }
   printer_->Print(") -> None: ...\n");

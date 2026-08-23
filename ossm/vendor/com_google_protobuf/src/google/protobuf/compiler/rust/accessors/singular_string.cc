@@ -8,7 +8,6 @@
 #include <string>
 
 #include "absl/log/absl_check.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "google/protobuf/compiler/cpp/helpers.h"
 #include "google/protobuf/compiler/rust/accessors/accessor_case.h"
@@ -19,14 +18,11 @@
 #include "google/protobuf/compiler/rust/naming.h"
 #include "google/protobuf/compiler/rust/upb_helpers.h"
 #include "google/protobuf/descriptor.h"
-#include "google/protobuf/io/printer.h"
 
 namespace google {
 namespace protobuf {
 namespace compiler {
 namespace rust {
-
-using Sub = ::google::protobuf::io::Printer::Sub;
 
 void SingularString::InMsgImpl(Context& ctx, const FieldDescriptor& field,
                                AccessorCase accessor_case) const {
@@ -37,6 +33,8 @@ void SingularString::InMsgImpl(Context& ctx, const FieldDescriptor& field,
   std::string field_name = FieldNameWithCollisionAvoidance(field);
   ctx.Emit(
       {
+          {"field", RsSafeName(field_name)},
+          {"raw_field_name", field_name},
           {"default_value", DefaultValue(ctx, field)},
           {"upb_mt_field_index", UpbMiniTableFieldIndex(field)},
           {"proxied_type", RsTypePath(ctx, field)},
@@ -44,7 +42,8 @@ void SingularString::InMsgImpl(Context& ctx, const FieldDescriptor& field,
                            [&] {
                              if (field.type() == FieldDescriptor::TYPE_STRING) {
                                ctx.Emit(R"rs(
-              $pb$::ProtoStr::from_utf8_unchecked(unsafe { str_view.as_ref() })
+              // SAFETY: The runtime doesn't require ProtoStr to be UTF-8.
+              unsafe { $pb$::ProtoStr::from_utf8_unchecked(str_view.as_ref()) }
             )rs");
                              } else {
                                ctx.Emit("unsafe { str_view.as_ref() }");
@@ -56,23 +55,21 @@ void SingularString::InMsgImpl(Context& ctx, const FieldDescriptor& field,
           {"getter",
            [&] {
              if (ctx.is_cpp()) {
-               ctx.Emit({{"getter_thunk", ThunkName(ctx, field, "get")},
-                         Sub("getter_fn_name", RsSafeName(field_name))
-                             .AnnotatedAs(&field)},
+               ctx.Emit({{"getter_thunk", ThunkName(ctx, field, "get")}},
                         R"rs(
-                  pub fn $getter_fn_name$($view_self$) -> $pb$::View<$view_lifetime$, $proxied_type$> {
+                  pub fn $field$($view_self$) -> $pb$::View<$view_lifetime$, $proxied_type$> {
                     let str_view = unsafe { $getter_thunk$(self.raw_msg()) };
                     $transform_view$
                   })rs");
              } else {
-               ctx.Emit({Sub("getter_fn_name", RsSafeName(field_name))
-                             .AnnotatedAs(&field)},
-                        R"rs(
-                  pub fn $getter_fn_name$($view_self$) -> $pb$::View<$view_lifetime$, $proxied_type$> {
+               ctx.Emit(R"rs(
+                  pub fn $field$($view_self$) -> $pb$::View<$view_lifetime$, $proxied_type$> {
                     let str_view = unsafe {
-                      self.inner.ptr().get_string_at_index(
-                        $upb_mt_field_index$, ($default_value$).into()
-                      )
+                      let f = $pbr$::upb_MiniTable_GetFieldByIndex(
+                          <Self as $pbr$::AssociatedMiniTable>::mini_table(),
+                          $upb_mt_field_index$);
+                      $pbr$::upb_Message_GetString(
+                          self.raw_msg(), f, ($default_value$).into())
                     };
                     $transform_view$
                   })rs");
@@ -86,35 +83,40 @@ void SingularString::InMsgImpl(Context& ctx, const FieldDescriptor& field,
                 let s = val.into_proxied($pbi$::Private);
                 unsafe {
                   $setter_thunk$(
-                    self.inner.raw(),
+                    self.as_mutator_message_ref($pbi$::Private).msg(),
                     s.into_inner($pbi$::Private).into_raw()
                   );
                 }
               )rs");
              } else {
-               ctx.Emit(
-                   {{"string_type", field.type() == FieldDescriptor::TYPE_STRING
-                                        ? "string"
-                                        : "bytes"}},
-                   R"rs(
+               ctx.Emit(R"rs(
+                let s = val.into_proxied($pbi$::Private);
+                let (view, arena) =
+                  s.into_inner($pbi$::Private).into_raw_parts();
+
+                let mm_ref =
+                  self.as_mutator_message_ref($pbi$::Private);
+                let parent_arena = mm_ref.arena();
+
+                parent_arena.fuse(&arena);
+
                 unsafe {
-                  $pbr$::message_set_$string_type$_field(
-                    $pb$::AsMut::as_mut(self).inner,
-                    $upb_mt_field_index$,
-                    val);
+                  let f = $pbr$::upb_MiniTable_GetFieldByIndex(
+                            <Self as $pbr$::AssociatedMiniTable>::mini_table(),
+                            $upb_mt_field_index$);
+                  $pbr$::upb_Message_SetBaseFieldString(
+                    self.as_mutator_message_ref($pbi$::Private).msg(),
+                    f,
+                    view);
                 }
-               )rs");
+              )rs");
              }
            }},
           {"setter",
            [&] {
              if (accessor_case == AccessorCase::VIEW) return;
-             ctx.Emit(
-                 {Sub("setter_fn_name", absl::StrCat("set_", field_name))
-                      .AnnotatedAs(
-                          {&field, io::AnnotationCollector::Semantic::kSet})},
-                 R"rs(
-              pub fn $setter_fn_name$(&mut self, val: impl $pb$::IntoProxied<$proxied_type$>) {
+             ctx.Emit(R"rs(
+              pub fn set_$raw_field_name$(&mut self, val: impl $pb$::IntoProxied<$proxied_type$>) {
                 $setter_impl$
               }
             )rs");
@@ -173,7 +175,7 @@ void SingularString::InThunkCc(Context& ctx,
           {"setter_thunk", ThunkName(ctx, field, "set")},
       },
       R"cc(
-        ::google::protobuf::rust::PtrAndLen $getter_thunk$(const $QualifiedMsg$* msg) {
+        ::google::protobuf::rust::PtrAndLen $getter_thunk$($QualifiedMsg$* msg) {
           absl::string_view val = msg->$field$();
           return ::google::protobuf::rust::PtrAndLen{val.data(), val.size()};
         }

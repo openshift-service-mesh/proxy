@@ -18,6 +18,8 @@ extension GPBUnknownField {
   }
 
   /// The value of the field in a type-safe manner.
+  ///
+  /// - Note: This is only valid for non-legacy fields.
   public var value: Value {
     switch type {
     case .varint:
@@ -30,6 +32,8 @@ extension GPBUnknownField {
       return .lengthDelimited(lengthDelimited)
     case .group:
       return .group(group)
+    case .legacy:
+      fatalError("`value` not valid for Legacy fields.")
     @unknown default:
       fatalError("Internal error: Unknown field type: \(type)")
     }

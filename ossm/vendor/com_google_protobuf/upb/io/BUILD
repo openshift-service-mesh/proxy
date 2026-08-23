@@ -1,14 +1,11 @@
-load("@rules_cc//cc:cc_test.bzl", "cc_test")
-load("@rules_cc//cc:defs.bzl", "cc_library")
-
 package(default_applicable_licenses = ["//:license"])
 
 cc_library(
     name = "string",
     hdrs = ["string.h"],
     deps = [
-        "//upb/mem",
-        "//upb/port",
+        "//upb:mem",
+        "//upb:port",
     ],
 )
 
@@ -19,10 +16,10 @@ cc_library(
     deps = [
         ":string",
         ":zero_copy_stream",
-        "//upb/base",
+        "//upb:base",
+        "//upb:mem",
+        "//upb:port",
         "//upb/lex",
-        "//upb/mem",
-        "//upb/port",
     ],
 )
 
@@ -33,9 +30,9 @@ cc_library(
         "zero_copy_output_stream.h",
     ],
     deps = [
-        "//upb/base",
-        "//upb/mem",
-        "//upb/port",
+        "//upb:base",
+        "//upb:mem",
+        "//upb:port",
     ],
 )
 
@@ -54,8 +51,8 @@ cc_library(
     ],
     deps = [
         ":zero_copy_stream",
-        "//upb/mem",
-        "//upb/port",
+        "//upb:mem",
+        "//upb:port",
     ],
 )
 
@@ -65,9 +62,9 @@ cc_test(
     srcs = ["string_test.cc"],
     deps = [
         ":string",
-        "//upb/mem",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
+        "//upb:mem",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -80,13 +77,13 @@ cc_test(
         ":string",
         ":tokenizer",
         ":zero_copy_stream",
+        "//upb:mem",
+        "//upb:port",
         "//upb/lex",
-        "//upb/mem",
-        "//upb/port",
-        "@abseil-cpp//absl/strings",
-        "@abseil-cpp//absl/strings:str_format",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -99,9 +96,9 @@ cc_test(
     deps = [
         ":chunked_stream",
         ":zero_copy_stream",
-        "//upb/base",
-        "//upb/mem",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main",
+        "//upb:base",
+        "//upb:mem",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
     ],
 )

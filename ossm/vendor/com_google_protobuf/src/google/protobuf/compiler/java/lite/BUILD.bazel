@@ -1,6 +1,3 @@
-load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("//build_defs:cpp_opts.bzl", "COPTS")
-
 cc_library(
     name = "field_generators",
     srcs = [
@@ -26,7 +23,6 @@ cc_library(
         "primitive_field.h",
         "string_field.h",
     ],
-    copts = COPTS,
     strip_include_prefix = "/src",
     visibility = [
         "//src/google/protobuf/compiler/java:__subpackages__",
@@ -35,17 +31,14 @@ cc_library(
     deps = [
         "//src/google/protobuf",
         "//src/google/protobuf:port",
-        "//src/google/protobuf/compiler:code_generator_lite",
-        "//src/google/protobuf/compiler/java:context",
-        "//src/google/protobuf/compiler/java:field_common",
         "//src/google/protobuf/compiler/java:generator_common",
         "//src/google/protobuf/compiler/java:helpers",
         "//src/google/protobuf/compiler/java:internal_helpers",
         "//src/google/protobuf/io:printer",
-        "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/log:absl_check",
-        "@abseil-cpp//absl/log:absl_log",
-        "@abseil-cpp//absl/strings",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/log:absl_log",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -69,7 +62,6 @@ cc_library(
         "message.h",
         "message_builder.h",
     ],
-    copts = COPTS,
     strip_include_prefix = "/src",
     visibility = [
         "//src/google/protobuf/compiler/java:__subpackages__",
@@ -79,18 +71,15 @@ cc_library(
         ":field_generators",
         "//src/google/protobuf",
         "//src/google/protobuf:port",
-        "//src/google/protobuf/compiler:code_generator_lite",
-        "//src/google/protobuf/compiler/java:context",
-        "//src/google/protobuf/compiler/java:field_common",
         "//src/google/protobuf/compiler/java:generator_common",
         "//src/google/protobuf/compiler/java:helpers",
         "//src/google/protobuf/compiler/java:internal_helpers",
         "//src/google/protobuf/compiler/java/full:service",
         "//src/google/protobuf/io",
         "//src/google/protobuf/io:printer",
-        "@abseil-cpp//absl/container:btree",
-        "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/log:absl_check",
-        "@abseil-cpp//absl/strings",
+        "@com_google_absl//absl/container:btree",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/strings",
     ],
 )

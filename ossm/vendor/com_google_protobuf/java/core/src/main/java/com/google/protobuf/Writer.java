@@ -14,7 +14,6 @@ import java.util.Map;
 /** A writer that performs serialization of protobuf message fields. */
 @ExperimentalApi
 @CheckReturnValue
-@SuppressWarnings({"unchecked", "rawtypes"})
 interface Writer {
 
   /** The order in which the fields are written by a {@link Writer}. */

@@ -413,7 +413,7 @@
 
   XCTAssertFalse(msg.hasOptionalEnum);
   XCTAssertEqual(msg.repeatedEnumArray.count, 0U);
-  XCTAssertEqual(msg.oOneOfCase, (int32_t)Message3_O_OneOfCase_GPBUnsetOneOfCase);
+  XCTAssertEqual(msg.oOneOfCase, Message3_O_OneOfCase_GPBUnsetOneOfCase);
 
   // All the values should be in unknown fields.
 
@@ -427,6 +427,30 @@
   XCTAssertTrue([ufs getFirst:Message2_FieldNumber_OneofEnum varint:&varint]);
   XCTAssertEqual(varint, (uint64_t)Message3_Enum_Extra3);
   [ufs release];
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
+  GPBUnknownFieldSet *unknownFields = msg.unknownFields;
+
+  XCTAssertEqual([unknownFields countOfFields], 3U);
+  XCTAssertTrue([unknownFields hasField:Message2_FieldNumber_OptionalEnum]);
+  XCTAssertTrue([unknownFields hasField:Message2_FieldNumber_RepeatedEnumArray]);
+  XCTAssertTrue([unknownFields hasField:Message2_FieldNumber_OneofEnum]);
+
+  GPBUnknownField *field = [unknownFields getField:Message2_FieldNumber_OptionalEnum];
+  XCTAssertEqual(field.varintList.count, 1U);
+  XCTAssertEqual([field.varintList valueAtIndex:0], (uint64_t)Message3_Enum_Extra3);
+
+  field = [unknownFields getField:Message2_FieldNumber_RepeatedEnumArray];
+  XCTAssertEqual(field.varintList.count, 1U);
+  XCTAssertEqual([field.varintList valueAtIndex:0], (uint64_t)Message3_Enum_Extra3);
+
+  field = [unknownFields getField:Message2_FieldNumber_OneofEnum];
+  XCTAssertEqual(field.varintList.count, 1U);
+  XCTAssertEqual([field.varintList valueAtIndex:0], (uint64_t)Message3_Enum_Extra3);
+
+#pragma clang diagnostic pop
 
   [msg release];
   [orig release];
@@ -1043,11 +1067,7 @@
   NSError *error = nil;
   TestPackedExtensions *packedParse =
       [TestPackedExtensions parseFromData:unpackedData
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-                        extensionRegistry:Objc_Protobuf_Tests_UnittestRoot_Registry()
-#else
                         extensionRegistry:[UnittestRoot extensionRegistry]
-#endif
                                     error:&error];
   XCTAssertNotNil(packedParse);
   XCTAssertNil(error);
@@ -1056,11 +1076,7 @@
   error = nil;
   TestUnpackedExtensions *unpackedParsed =
       [TestUnpackedExtensions parseFromData:packedData
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-                          extensionRegistry:Objc_Protobuf_Tests_UnittestRoot_Registry()
-#else
                           extensionRegistry:[UnittestRoot extensionRegistry]
-#endif
                                       error:&error];
   XCTAssertNotNil(unpackedParsed);
   XCTAssertNil(error);
@@ -1091,11 +1107,7 @@
   error = nil;
   TestPackedExtensions *extsParse =
       [TestPackedExtensions parseFromData:fieldsData
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-                        extensionRegistry:Objc_Protobuf_Tests_UnittestRoot_Registry()
-#else
                         extensionRegistry:[UnittestRoot extensionRegistry]
-#endif
                                     error:&error];
   XCTAssertNotNil(extsParse);
   XCTAssertNil(error);
@@ -1123,11 +1135,7 @@
 
   TestUnpackedExtensions *extsParse =
       [TestUnpackedExtensions parseFromData:fieldsData
-#if defined(GPB_UNITTEST_USE_C_FUNCTION_FOR_EXTENSIONS)
-                          extensionRegistry:Objc_Protobuf_Tests_UnittestRoot_Registry()
-#else
                           extensionRegistry:[UnittestRoot extensionRegistry]
-#endif
                                       error:NULL];
   XCTAssertNotNil(extsParse);
   XCTAssertEqualObjects(extsParse, extsOrig);
@@ -1407,6 +1415,10 @@
   GPBUnknownFields *ufs = [[GPBUnknownFields alloc] initFromMessage:msg1];
   XCTAssertEqual(ufs.count, 1U);
   [ufs release];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  XCTAssertEqual(msg1.unknownFields.countOfFields, 1U);
+#pragma clang diagnostic pop
 
   data = [msg1 data];
   TestEnumMapPlusExtra *msg2 = [TestEnumMapPlusExtra parseFromData:data error:NULL];
@@ -1421,6 +1433,10 @@
   ufs = [[GPBUnknownFields alloc] initFromMessage:msg2];
   XCTAssertTrue(ufs.empty);
   [ufs release];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  XCTAssertEqual(msg2.unknownFields.countOfFields, 0U);
+#pragma clang diagnostic pop
 
   XCTAssertEqualObjects(orig, msg2);
 

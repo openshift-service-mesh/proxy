@@ -139,7 +139,7 @@ inline StringBlock* StringBlock::New(StringBlock* next) {
     next_size = std::min<size_type>(size * 2, max_size());
   }
   size = RoundedSize(size);
-  void* p = Allocate(size);
+  void* p = ::operator new(size);
   return new (p) StringBlock(next, true, size, next_size);
 }
 

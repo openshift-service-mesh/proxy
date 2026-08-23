@@ -27,7 +27,7 @@ using ::testing::HasSubstr;
 
 TEST(TextFormatParsingMetricsTest, MetricsTest) {
   std::string value_replacement = "[REDACTED]";
-  proto2_unittest::RedactedFields proto;
+  protobuf_unittest::RedactedFields proto;
   proto.set_optional_redacted_string("foo");
   int64_t before = internal::GetRedactedFieldCount();
   EXPECT_THAT(absl::StrCat(proto), HasSubstr(value_replacement));

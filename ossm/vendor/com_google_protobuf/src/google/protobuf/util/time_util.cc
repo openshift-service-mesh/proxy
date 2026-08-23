@@ -9,8 +9,6 @@
 
 #include <cstdint>
 #include <cstdlib>
-#include <ctime>
-#include <string>
 
 #include "google/protobuf/duration.pb.h"
 #include "google/protobuf/timestamp.pb.h"
@@ -21,7 +19,6 @@
 #include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "google/protobuf/util/internal_timeval.h"  // IWYU pragma: keep for timeval
 
 // Must go after other includes.
 #include "google/protobuf/port_def.inc"
@@ -43,7 +40,11 @@ static constexpr int32_t kSecondsPerMinute =
     60;  // Note that we ignore leap seconds.
 static constexpr int32_t kSecondsPerHour = 3600;
 
-Timestamp CreateNormalizedTimestamp(int64_t seconds, int32_t nanos) {
+template <typename T>
+T CreateNormalized(int64_t seconds, int32_t nanos);
+
+template <>
+Timestamp CreateNormalized(int64_t seconds, int32_t nanos) {
   ABSL_DCHECK(seconds >= TimeUtil::kTimestampMinSeconds &&
               seconds <= TimeUtil::kTimestampMaxSeconds)
       << "Timestamp seconds are outside of the valid range";
@@ -66,11 +67,12 @@ Timestamp CreateNormalizedTimestamp(int64_t seconds, int32_t nanos) {
       << "Timestamp is outside of the valid range";
   Timestamp result;
   result.set_seconds(seconds);
-  result.set_nanos(nanos);
+  result.set_nanos(static_cast<int32_t>(nanos));
   return result;
 }
 
-Duration CreateNormalizedDuration(int64_t seconds, int32_t nanos) {
+template <>
+Duration CreateNormalized(int64_t seconds, int32_t nanos) {
   ABSL_DCHECK(seconds >= TimeUtil::kDurationMinSeconds &&
               seconds <= TimeUtil::kDurationMaxSeconds)
       << "Duration seconds are outside of the valid range";
@@ -96,7 +98,7 @@ Duration CreateNormalizedDuration(int64_t seconds, int32_t nanos) {
       << "Duration is outside of the valid range";
   Duration result;
   result.set_seconds(seconds);
-  result.set_nanos(nanos);
+  result.set_nanos(static_cast<int32_t>(nanos));
   return result;
 }
 
@@ -189,7 +191,7 @@ bool TimeUtil::FromString(absl::string_view value, Timestamp* timestamp) {
   if (!ParseTime(value, &seconds, &nanos)) {
     return false;
   }
-  *timestamp = CreateNormalizedTimestamp(seconds, nanos);
+  *timestamp = CreateNormalized<Timestamp>(seconds, nanos);
   return true;
 }
 
@@ -197,7 +199,7 @@ Timestamp TimeUtil::GetCurrentTime() {
   int64_t seconds;
   int32_t nanos;
   CurrentTime(&seconds, &nanos);
-  return CreateNormalizedTimestamp(seconds, nanos);
+  return CreateNormalized<Timestamp>(seconds, nanos);
 }
 
 Timestamp TimeUtil::GetEpoch() { return Timestamp(); }
@@ -268,24 +270,24 @@ bool TimeUtil::FromString(absl::string_view value, Duration* duration) {
 }
 
 Duration TimeUtil::NanosecondsToDuration(int64_t nanos) {
-  return CreateNormalizedDuration(nanos / kNanosPerSecond,
-                                  nanos % kNanosPerSecond);
+  return CreateNormalized<Duration>(nanos / kNanosPerSecond,
+                                    nanos % kNanosPerSecond);
 }
 
 Duration TimeUtil::MicrosecondsToDuration(int64_t micros) {
-  return CreateNormalizedDuration(
+  return CreateNormalized<Duration>(
       micros / kMicrosPerSecond,
       (micros % kMicrosPerSecond) * kNanosPerMicrosecond);
 }
 
 Duration TimeUtil::MillisecondsToDuration(int64_t millis) {
-  return CreateNormalizedDuration(
+  return CreateNormalized<Duration>(
       millis / kMillisPerSecond,
       (millis % kMillisPerSecond) * kNanosPerMillisecond);
 }
 
 Duration TimeUtil::SecondsToDuration(int64_t seconds) {
-  return CreateNormalizedDuration(seconds, 0);
+  return CreateNormalized<Duration>(seconds, 0);
 }
 
 Duration TimeUtil::MinutesToDuration(int64_t minutes) {
@@ -333,24 +335,24 @@ int64_t TimeUtil::DurationToHours(const Duration& duration) {
 }
 
 Timestamp TimeUtil::NanosecondsToTimestamp(int64_t nanos) {
-  return CreateNormalizedTimestamp(nanos / kNanosPerSecond,
-                                   nanos % kNanosPerSecond);
+  return CreateNormalized<Timestamp>(nanos / kNanosPerSecond,
+                                     nanos % kNanosPerSecond);
 }
 
 Timestamp TimeUtil::MicrosecondsToTimestamp(int64_t micros) {
-  return CreateNormalizedTimestamp(
+  return CreateNormalized<Timestamp>(
       micros / kMicrosPerSecond,
       micros % kMicrosPerSecond * kNanosPerMicrosecond);
 }
 
 Timestamp TimeUtil::MillisecondsToTimestamp(int64_t millis) {
-  return CreateNormalizedTimestamp(
+  return CreateNormalized<Timestamp>(
       millis / kMillisPerSecond,
       millis % kMillisPerSecond * kNanosPerMillisecond);
 }
 
 Timestamp TimeUtil::SecondsToTimestamp(int64_t seconds) {
-  return CreateNormalizedTimestamp(seconds, 0);
+  return CreateNormalized<Timestamp>(seconds, 0);
 }
 
 int64_t TimeUtil::TimestampToNanoseconds(const Timestamp& timestamp) {
@@ -380,32 +382,32 @@ int64_t TimeUtil::TimestampToSeconds(const Timestamp& timestamp) {
 }
 
 Timestamp TimeUtil::TimeTToTimestamp(time_t value) {
-  return CreateNormalizedTimestamp(static_cast<int64_t>(value), 0);
+  return CreateNormalized<Timestamp>(static_cast<int64_t>(value), 0);
 }
 
 time_t TimeUtil::TimestampToTimeT(const Timestamp& value) {
   return static_cast<time_t>(value.seconds());
 }
 
-Timestamp TimeUtil::TimevalToTimestamp(const struct timeval& value) {
-  return CreateNormalizedTimestamp(value.tv_sec,
-                                   value.tv_usec * kNanosPerMicrosecond);
+Timestamp TimeUtil::TimevalToTimestamp(const timeval& value) {
+  return CreateNormalized<Timestamp>(value.tv_sec,
+                                     value.tv_usec * kNanosPerMicrosecond);
 }
 
-struct timeval TimeUtil::TimestampToTimeval(const Timestamp& value) {
-  struct timeval result;
+timeval TimeUtil::TimestampToTimeval(const Timestamp& value) {
+  timeval result;
   result.tv_sec = value.seconds();
   result.tv_usec = RoundTowardZero(value.nanos(), kNanosPerMicrosecond);
   return result;
 }
 
-Duration TimeUtil::TimevalToDuration(const struct timeval& value) {
-  return CreateNormalizedDuration(value.tv_sec,
-                                  value.tv_usec * kNanosPerMicrosecond);
+Duration TimeUtil::TimevalToDuration(const timeval& value) {
+  return CreateNormalized<Duration>(value.tv_sec,
+                                    value.tv_usec * kNanosPerMicrosecond);
 }
 
-struct timeval TimeUtil::DurationToTimeval(const Duration& value) {
-  struct timeval result;
+timeval TimeUtil::DurationToTimeval(const Duration& value) {
+  timeval result;
   result.tv_sec = value.seconds();
   result.tv_usec = RoundTowardZero(value.nanos(), kNanosPerMicrosecond);
   // timeval.tv_usec's range is [0, 1000000)
@@ -423,8 +425,7 @@ struct timeval TimeUtil::DurationToTimeval(const Duration& value) {
 namespace google {
 namespace protobuf {
 namespace {
-using ::google::protobuf::util::CreateNormalizedDuration;
-using ::google::protobuf::util::CreateNormalizedTimestamp;
+using ::google::protobuf::util::CreateNormalized;
 using ::google::protobuf::util::kNanosPerSecond;
 
 // Convert a Duration to uint128.
@@ -440,7 +441,7 @@ void ToUint128(const Duration& value, absl::uint128* result, bool* negative) {
   }
 }
 
-void ToDuration(const absl::uint128 value, bool negative, Duration* duration) {
+void ToDuration(const absl::uint128& value, bool negative, Duration* duration) {
   int64_t seconds =
       static_cast<int64_t>(absl::Uint128Low64(value / kNanosPerSecond));
   int32_t nanos =
@@ -455,14 +456,14 @@ void ToDuration(const absl::uint128 value, bool negative, Duration* duration) {
 }  // namespace
 
 Duration& operator+=(Duration& d1, const Duration& d2) {
-  d1 = CreateNormalizedDuration(d1.seconds() + d2.seconds(),
-                                d1.nanos() + d2.nanos());
+  d1 = CreateNormalized<Duration>(d1.seconds() + d2.seconds(),
+                                  d1.nanos() + d2.nanos());
   return d1;
 }
 
 Duration& operator-=(Duration& d1, const Duration& d2) {  // NOLINT
-  d1 = CreateNormalizedDuration(d1.seconds() - d2.seconds(),
-                                d1.nanos() - d2.nanos());
+  d1 = CreateNormalized<Duration>(d1.seconds() - d2.seconds(),
+                                  d1.nanos() - d2.nanos());
   return d1;
 }
 
@@ -491,7 +492,7 @@ Duration& operator*=(Duration& d, double r) {  // NOLINT
   // sign from seconds but also that nanos can be any arbitrary value when
   // overflow happens (i.e., the result is a much larger value than what
   // int64 can represent).
-  d = CreateNormalizedDuration(seconds, nanos);
+  d = CreateNormalized<Duration>(seconds, nanos);
   return d;
 }
 
@@ -542,20 +543,20 @@ int64_t operator/(const Duration& d1, const Duration& d2) {
 }
 
 Timestamp& operator+=(Timestamp& t, const Duration& d) {  // NOLINT
-  t = CreateNormalizedTimestamp(t.seconds() + d.seconds(),
-                                t.nanos() + d.nanos());
+  t = CreateNormalized<Timestamp>(t.seconds() + d.seconds(),
+                                  t.nanos() + d.nanos());
   return t;
 }
 
 Timestamp& operator-=(Timestamp& t, const Duration& d) {  // NOLINT
-  t = CreateNormalizedTimestamp(t.seconds() - d.seconds(),
-                                t.nanos() - d.nanos());
+  t = CreateNormalized<Timestamp>(t.seconds() - d.seconds(),
+                                  t.nanos() - d.nanos());
   return t;
 }
 
 Duration operator-(const Timestamp& t1, const Timestamp& t2) {
-  return CreateNormalizedDuration(t1.seconds() - t2.seconds(),
-                                  t1.nanos() - t2.nanos());
+  return CreateNormalized<Duration>(t1.seconds() - t2.seconds(),
+                                    t1.nanos() - t2.nanos());
 }
 }  // namespace protobuf
 }  // namespace google

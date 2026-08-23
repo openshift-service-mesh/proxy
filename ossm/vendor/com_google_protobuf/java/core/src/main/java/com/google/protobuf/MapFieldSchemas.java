@@ -21,7 +21,7 @@ final class MapFieldSchemas {
   }
 
   private static MapFieldSchema loadSchemaForFullRuntime() {
-    if (Android.assumeLiteRuntime) {
+    if (Protobuf.assumeLiteRuntime) {
       return null;
     }
     try {

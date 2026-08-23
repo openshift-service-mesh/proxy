@@ -13,12 +13,11 @@
 #import "google/protobuf/TestMessagesProto2.pbobjc.h"
 #import "google/protobuf/TestMessagesProto3.pbobjc.h"
 #import "test_protos/TestMessagesEdition2023.pbobjc.h"
-#import "test_protos/TestMessagesEditionUnstable.pbobjc.h"
 
 static void Die(NSString *format, ...) __dead2;
 
-static BOOL gVerbose = NO;
-static int32_t gTestCount = 0;
+static BOOL verbose = NO;
+static int32_t testCount = 0;
 
 static void Die(NSString *format, ...) {
   va_list args;
@@ -53,47 +52,27 @@ static ConformanceResponse *DoTest(ConformanceRequest *request) {
       break;
 
     case ConformanceRequest_Payload_OneOfCase_ProtobufPayload: {
-      Class msgClass;
-      GPBExtensionRegistry *registry;
-      if ([request.messageType isEqual:@"protobuf_test_messages.proto2.TestAllTypesProto2"]) {
-        msgClass = [Proto2TestAllTypesProto2 class];
-        registry = [Proto2TestMessagesProto2Root extensionRegistry];
-      } else if ([request.messageType
-                     isEqual:@"protobuf_test_messages.proto3.TestAllTypesProto3"]) {
-        msgClass = [Proto3TestAllTypesProto3 class];
-        registry = [Proto3TestMessagesProto3Root extensionRegistry];
-      } else if ([request.messageType
-                     isEqual:@"protobuf_test_messages.editions.TestAllTypesEdition2023"]) {
-        msgClass = [EditionsTestAllTypesEdition2023 class];
-        registry = [EditionsTestMessagesEdition2023Root extensionRegistry];
-      } else if ([request.messageType
-                     isEqual:
-                         @"protobuf_test_messages.edition_unstable.TestAllTypesEditionUnstable"]) {
-        msgClass = [EditionUnstableTestAllTypesEditionUnstable class];
-        registry = [EditionUnstableTestMessagesEditionUnstableRoot extensionRegistry];
-      } else if ([request.messageType
-                     isEqual:@"protobuf_test_messages.editions.proto2.TestAllTypesProto2"]) {
-        msgClass = [EditionsProto2TestAllTypesProto2 class];
-        registry = [EditionsProto2TestMessagesProto2EditionsRoot extensionRegistry];
-      } else if ([request.messageType
-                     isEqual:@"protobuf_test_messages.editions.proto3.TestAllTypesProto3"]) {
-        msgClass = [EditionsProto3TestAllTypesProto3 class];
-        registry = [EditionsProto3TestMessagesProto3EditionsRoot extensionRegistry];
-      } else {
-        msgClass = nil;
-        registry = nil;
-        response.runtimeError =
-            [NSString stringWithFormat:@"Protobuf request had an unknown message_type: %@",
-                                       request.messageType];
-      }
+      NSDictionary *mappings = @{
+        @"protobuf_test_messages.proto2.TestAllTypesProto2" : [Proto2TestAllTypesProto2 class],
+        @"protobuf_test_messages.proto3.TestAllTypesProto3" : [Proto3TestAllTypesProto3 class],
+        @"protobuf_test_messages.editions.TestAllTypesEdition2023" :
+            [EditionsTestAllTypesEdition2023 class],
+        @"protobuf_test_messages.editions.proto2.TestAllTypesProto2" :
+            [EditionsProto2TestAllTypesProto2 class],
+        @"protobuf_test_messages.editions.proto3.TestAllTypesProto3" :
+            [EditionsProto3TestAllTypesProto3 class],
+      };
+      Class msgClass = mappings[request.messageType];
       if (msgClass) {
         NSError *error = nil;
-        testMessage = [msgClass parseFromData:request.protobufPayload
-                            extensionRegistry:registry
-                                        error:&error];
+        testMessage = [msgClass parseFromData:request.protobufPayload error:&error];
         if (!testMessage) {
           response.parseError = [NSString stringWithFormat:@"Parse error: %@", error];
         }
+      } else {
+        response.runtimeError =
+            [NSString stringWithFormat:@"Protobuf request had an unknown message_type: %@",
+                                       request.messageType];
       }
       break;
     }
@@ -188,15 +167,15 @@ static BOOL DoTestIo(NSFileHandle *input, NSFileHandle *output) {
   }
 
   data = response.data;
-  [output writeData:UInt32ToLittleEndianData((uint32_t)data.length)];
+  [output writeData:UInt32ToLittleEndianData((int32_t)data.length)];
   [output writeData:data];
 
-  if (gVerbose) {
+  if (verbose) {
     NSLog(@"Request: %@", request);
     NSLog(@"Response: %@", response);
   }
 
-  ++gTestCount;
+  ++testCount;
   return YES;
 }
 
@@ -212,7 +191,7 @@ int main(int argc, const char *argv[]) {
       }
     }
 
-    NSLog(@"Received EOF from test runner after %d tests, exiting.", gTestCount);
+    NSLog(@"Received EOF from test runner after %d tests, exiting.", testCount);
   }
   return 0;
 }

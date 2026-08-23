@@ -8,7 +8,6 @@
 package com.google.protobuf;
 
 import java.util.Arrays;
-import java.util.Locale;
 
 /**
  * A location in the source code.
@@ -33,11 +32,7 @@ public final class TextFormatParseLocation {
     }
     if (line < 0 || column < 0) {
       throw new IllegalArgumentException(
-          String.format(
-              Locale.ROOT,
-              "line and column values must be >= 0: line %d, column: %d",
-              line,
-              column));
+          String.format("line and column values must be >= 0: line %d, column: %d", line, column));
     }
     return new TextFormatParseLocation(line, column);
   }
@@ -60,12 +55,11 @@ public final class TextFormatParseLocation {
 
   @Override
   public String toString() {
-    return String.format(Locale.ROOT, "ParseLocation{line=%d, column=%d}", line, column);
+    return String.format("ParseLocation{line=%d, column=%d}", line, column);
   }
 
   @Override
-  public boolean equals(
-          Object o) {
+  public boolean equals(Object o) {
     if (o == this) {
       return true;
     }

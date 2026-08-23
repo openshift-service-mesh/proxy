@@ -8,24 +8,6 @@ import re
 
 import yaml
 
-
-def check_ctest(namein, jobin, filein, obj):
-  """Checks that the ctest command is not in a mode that allows missing tests to pass."""
-  for key in obj:
-    if (
-        isinstance(obj[key], str)
-        and 'ctest' in obj[key]
-        and 'ctest --no-tests=error' not in obj[key]
-    ):
-      raise ValueError(
-          'Step %s in job %s from file %s runs ctest in a mode that allows'
-          ' missing tests to pass.  Add --no-tests=error to the command and'
-          ' build with -Dprotobuf_BUILD_TESTS=ON.' % (namein, jobin, filein)
-      )
-    elif isinstance(obj[key], dict):
-      check_ctest(namein, jobin, filein, obj[key])
-
-
 # Ensure every job is in the list of blocking jobs.
 with open(
     os.path.join(os.path.dirname(__file__), '../workflows/test_runner.yml'), 'r'
@@ -71,25 +53,15 @@ for file in yaml_files:
       continuous_condition = 'inputs.continuous-prefix' in jobs[job]['name']
       steps = jobs[job]['steps']
       for step in steps:
-        if 'name' in step:
-          name = step['name']
-        elif 'with' in step and 'name' in step['with']:
-          name = step['with']['name']
-        else:
-          raise ValueError(
-              'Step in job %s from file %s does not have a name.' % (job, file)
-          )
         if continuous_condition and 'continuous-run' not in step.get('if', ''):
           raise ValueError(
-              'Step %s in job %s from file %s does not check the continuous-run'
-              ' condition' % (name, job, file)
+              'Step %s in job %s does not check the continuous-run condition'
+              % (step['name'], job)
           )
         if not continuous_condition and 'continuous-run' in step.get('if', ''):
           raise ValueError(
-              'Step %s in job %s from file %s checks the continuous-run'
-              ' condition but the job does not contain the continuous-prefix'
-              % (name, job, file)
+              'Step %s in job %s checks the continuous-run condition but '
+              'the job does not contain the continuous-prefix'
+              % (step['name'], job)
           )
-        check_ctest(name, job, file, step)
-
 print('PASSED: All steps in all jobs check the continuous-run condition.')

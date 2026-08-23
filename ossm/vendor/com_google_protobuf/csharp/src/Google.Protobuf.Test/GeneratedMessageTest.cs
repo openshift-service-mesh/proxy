@@ -7,13 +7,13 @@
 // https://developers.google.com/open-source/licenses/bsd
 #endregion
 
-using Google.Protobuf.Collections;
-using Google.Protobuf.TestProtos;
-using Google.Protobuf.WellKnownTypes;
-using NUnit.Framework;
 using System;
 using System.IO;
+using Google.Protobuf.TestProtos;
+using NUnit.Framework;
 using System.Linq;
+using Google.Protobuf.WellKnownTypes;
+using Google.Protobuf.Collections;
 
 namespace Google.Protobuf
 {
@@ -112,10 +112,14 @@ namespace Google.Protobuf
         }
 
         [Test]
-        public void ParseInvalidUtf8Rejected()
+        public void InvalidUtf8ParsesAsReplacementChars()
         {
             var payload = new byte[] { 0x72, 1, 0x80 };
-            Assert.Throws<InvalidProtocolBufferException>(() => TestAllTypes.Parser.ParseFrom(payload));
+
+            // We would prefer to have this parse operation fail, but at the moment it substitutes
+            // the replacement character.
+            var message = TestAllTypes.Parser.ParseFrom(payload);
+            Assert.AreEqual("\ufffd", message.SingleString);
         }
 
         [Test]

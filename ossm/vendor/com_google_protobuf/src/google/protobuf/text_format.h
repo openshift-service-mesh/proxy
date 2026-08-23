@@ -16,17 +16,14 @@
 #define GOOGLE_PROTOBUF_TEXT_FORMAT_H__
 
 #include <atomic>
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/status/statusor.h"
 #include "absl/strings/cord.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/message.h"
 #include "google/protobuf/message_lite.h"
@@ -47,13 +44,15 @@ namespace internal {
 PROTOBUF_EXPORT extern const char kDebugStringSilentMarker[1];
 PROTOBUF_EXPORT extern const char kDebugStringSilentMarkerForDetection[3];
 
+PROTOBUF_EXPORT extern std::atomic<bool> enable_debug_string_safe_format;
 PROTOBUF_EXPORT int64_t GetRedactedFieldCount();
+PROTOBUF_EXPORT bool ShouldRedactField(const FieldDescriptor* field);
 
 // This enum contains all the APIs that convert protos to human-readable
 // formats. A higher-level API must correspond to a greater number than any
 // lower-level APIs it calls under the hood (e.g kDebugString >
 // kMemberPrintToString > kPrintWithStream).
-enum class PROTOBUF_EXPORT FieldReporterLevel {
+PROTOBUF_EXPORT enum class FieldReporterLevel {
   kNoReport = 0,
   kPrintMessage = 1,
   kPrintWithGenerator = 2,
@@ -87,11 +86,13 @@ namespace internal {
 // Enum used to set printing options for StringifyMessage.
 PROTOBUF_EXPORT enum class Option;
 
-// Converts a protobuf message to a string. Sensitive fields are redacted, and a
-// per-process randomized prefix is inserted.
+// Converts a protobuf message to a string. If enable_safe_format is true,
+// sensitive fields are redacted, and a per-process randomized prefix is
+// inserted.
 PROTOBUF_EXPORT std::string StringifyMessage(const Message& message,
                                              Option option,
-                                             FieldReporterLevel reporter_level);
+                                             FieldReporterLevel reporter_level,
+                                             bool enable_safe_format);
 
 class UnsetFieldsMetadataTextFormatTestUtil;
 class UnsetFieldsMetadataMessageDifferencerTestUtil;
@@ -109,25 +110,23 @@ class PROTOBUF_EXPORT TextFormat {
 
   // Outputs a textual representation of the given message to the given
   // output stream. Returns false if printing fails.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static bool Print(
-      const Message& message, io::ZeroCopyOutputStream* output);
+  static bool Print(const Message& message, io::ZeroCopyOutputStream* output);
 
   // Print the fields in an UnknownFieldSet.  They are printed by tag number
   // only.  Embedded messages are heuristically identified by attempting to
   // parse them. Returns false if printing fails.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static bool PrintUnknownFields(
-      const UnknownFieldSet& unknown_fields, io::ZeroCopyOutputStream* output);
+  static bool PrintUnknownFields(const UnknownFieldSet& unknown_fields,
+                                 io::ZeroCopyOutputStream* output);
 
   // Like Print(), but outputs directly to a string.
   // Note: output will be cleared prior to printing, and will be left empty
   // even if printing fails. Returns false if printing fails.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static bool PrintToString(
-      const Message& message, std::string* output);
+  static bool PrintToString(const Message& message, std::string* output);
 
   // Like PrintUnknownFields(), but outputs directly to a string. Returns
   // false if printing fails.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static bool PrintUnknownFieldsToString(
-      const UnknownFieldSet& unknown_fields, std::string* output);
+  static bool PrintUnknownFieldsToString(const UnknownFieldSet& unknown_fields,
+                                         std::string* output);
 
   // Outputs a textual representation of the value of the field supplied on
   // the message supplied. For non-repeated fields, an index of -1 must
@@ -266,10 +265,10 @@ class PROTOBUF_EXPORT TextFormat {
 
   class PROTOBUF_EXPORT MessagePrinter {
    public:
-    MessagePrinter() = default;
+    MessagePrinter() {}
     MessagePrinter(const MessagePrinter&) = delete;
     MessagePrinter& operator=(const MessagePrinter&) = delete;
-    virtual ~MessagePrinter() = default;
+    virtual ~MessagePrinter() {}
     virtual void Print(const Message& message, bool single_line_mode,
                        BaseTextGenerator* generator) const = 0;
   };
@@ -283,28 +282,28 @@ class PROTOBUF_EXPORT TextFormat {
     // Try to find an extension of *message by fully-qualified field
     // name.  Returns nullptr if no extension is known for this name or number.
     // The base implementation uses the extensions already known by the message.
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD virtual const FieldDescriptor*
-    FindExtension(Message* message, const std::string& name) const;
+    virtual const FieldDescriptor* FindExtension(Message* message,
+                                                 const std::string& name) const;
 
     // Similar to FindExtension, but uses a Descriptor and the extension number
     // instead of using a Message and the name when doing the look up.
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD virtual const FieldDescriptor*
-    FindExtensionByNumber(const Descriptor* descriptor, int number) const;
+    virtual const FieldDescriptor* FindExtensionByNumber(
+        const Descriptor* descriptor, int number) const;
 
     // Find the message type for an Any proto.
     // Returns nullptr if no message is known for this name.
     // The base implementation only accepts prefixes of type.googleprod.com/ or
     // type.googleapis.com/, and searches the DescriptorPool of the parent
     // message.
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD virtual const Descriptor* FindAnyType(
-        const Message& message, const std::string& prefix,
-        const std::string& name) const;
+    virtual const Descriptor* FindAnyType(const Message& message,
+                                          const std::string& prefix,
+                                          const std::string& name) const;
 
     // Find the message factory for the given extension field. This can be used
     // to generalize the Parser to add extension fields to a message in the same
     // way as the "input" message for the Parser.
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD virtual MessageFactory*
-    FindExtensionFactory(const FieldDescriptor* field) const;
+    virtual MessageFactory* FindExtensionFactory(
+        const FieldDescriptor* field) const;
   };
 
   // Class for those users which require more fine-grained control over how
@@ -314,23 +313,19 @@ class PROTOBUF_EXPORT TextFormat {
     Printer();
 
     // Like TextFormat::Print
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool Print(
-        const Message& message, io::ZeroCopyOutputStream* output) const;
+    bool Print(const Message& message, io::ZeroCopyOutputStream* output) const;
     // Like TextFormat::Printer::Print but takes an additional
     // internal::FieldReporterLevel
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool Print(
-        const Message& message, io::ZeroCopyOutputStream* output,
-        internal::FieldReporterLevel reporter) const;
+    bool Print(const Message& message, io::ZeroCopyOutputStream* output,
+               internal::FieldReporterLevel reporter) const;
     // Like TextFormat::PrintUnknownFields
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool PrintUnknownFields(
-        const UnknownFieldSet& unknown_fields,
-        io::ZeroCopyOutputStream* output) const;
+    bool PrintUnknownFields(const UnknownFieldSet& unknown_fields,
+                            io::ZeroCopyOutputStream* output) const;
     // Like TextFormat::PrintToString
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool PrintToString(
-        const Message& message, std::string* output) const;
+    bool PrintToString(const Message& message, std::string* output) const;
     // Like TextFormat::PrintUnknownFieldsToString
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool PrintUnknownFieldsToString(
-        const UnknownFieldSet& unknown_fields, std::string* output) const;
+    bool PrintUnknownFieldsToString(const UnknownFieldSet& unknown_fields,
+                                    std::string* output) const;
     // Like TextFormat::PrintFieldValueToString
     void PrintFieldValueToString(const Message& message,
                                  const FieldDescriptor* field, int index,
@@ -348,9 +343,7 @@ class PROTOBUF_EXPORT TextFormat {
       single_line_mode_ = single_line_mode;
     }
 
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool IsInSingleLineMode() const {
-      return single_line_mode_;
-    }
+    bool IsInSingleLineMode() const { return single_line_mode_; }
 
     // If use_field_number is true, uses field number instead of field name.
     void SetUseFieldNumber(bool use_field_number) {
@@ -431,9 +424,6 @@ class PROTOBUF_EXPORT TextFormat {
       }
     }
 
-    // Sets whether strings will be redacted and thus unparsable.
-    void SetRedactDebugString(bool redact) { redact_debug_string_ = redact; }
-
     // Register a custom field-specific FastFieldValuePrinter for fields
     // with a particular FieldDescriptor.
     // Returns "true" if the registration succeeded, or "false", if there is
@@ -468,10 +458,13 @@ class PROTOBUF_EXPORT TextFormat {
     friend std::string Message::Utf8DebugString() const;
     friend std::string internal::StringifyMessage(
         const Message& message, internal::Option option,
-        internal::FieldReporterLevel reporter_level);
+        internal::FieldReporterLevel reporter_level, bool enable_safe_format);
 
     // Sets whether silent markers will be inserted.
     void SetInsertSilentMarker(bool v) { insert_silent_marker_ = v; }
+
+    // Sets whether strings will be redacted and thus unparsable.
+    void SetRedactDebugString(bool redact) { redact_debug_string_ = redact; }
 
     // Sets whether the output string should be made non-deterministic.
     // This discourages equality checks based on serialized string comparisons.
@@ -586,31 +579,27 @@ class PROTOBUF_EXPORT TextFormat {
   // If you would like to read a protocol buffer serialized in the
   // (non-human-readable) binary wire format, see
   // google::protobuf::MessageLite::ParseFromString().
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static bool Parse(
-      io::ZeroCopyInputStream* input, Message* output);
+  static bool Parse(io::ZeroCopyInputStream* input, Message* output);
   // Like Parse(), but reads directly from a string.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static bool ParseFromString(
-      absl::string_view input, Message* output);
+  static bool ParseFromString(absl::string_view input, Message* output);
   // Like Parse(), but reads directly from a Cord.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static bool ParseFromCord(
-      const absl::Cord& input, Message* output);
+  static bool ParseFromCord(const absl::Cord& input, Message* output);
 
   // Like Parse(), but the data is merged into the given message, as if
   // using Message::MergeFrom().
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static bool Merge(
-      io::ZeroCopyInputStream* input, Message* output);
+  static bool Merge(io::ZeroCopyInputStream* input, Message* output);
   // Like Merge(), but reads directly from a string.
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static bool MergeFromString(
-      absl::string_view input, Message* output);
+  static bool MergeFromString(absl::string_view input, Message* output);
 
   // Parse the given text as a single field value and store it into the
   // given field of the given message. If the field is a repeated field,
   // the new value will be added to the end
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static bool ParseFieldValueFromString(
-      absl::string_view input, const FieldDescriptor* field, Message* message);
+  static bool ParseFieldValueFromString(absl::string_view input,
+                                        const FieldDescriptor* field,
+                                        Message* message);
 
   // A location in the parsed text.
-  struct PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED ParseLocation {
+  struct ParseLocation {
     int line;
     int column;
 
@@ -621,7 +610,7 @@ class PROTOBUF_EXPORT TextFormat {
 
   // A range of locations in the parsed text, including `start` and excluding
   // `end`.
-  struct PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED ParseLocationRange {
+  struct ParseLocationRange {
     ParseLocation start;
     ParseLocation end;
     ParseLocationRange() : start(), end() {}
@@ -629,35 +618,6 @@ class PROTOBUF_EXPORT TextFormat {
         : start(start_param), end(end_param) {}
   };
 
-  // A collection of location ranges for a single occurrence of a field in the
-  // text proto input.
-  struct PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED FieldLocation {
-    // The range for the name and value of the field.
-    // Example: "optional_int32: 1"
-    ParseLocationRange full;
-    // The range for the name of the field.
-    // Example: "optional_int32"
-    ParseLocationRange name;
-    // The range(s) for the value(s) of the field.
-    // For repeated fields that use the short-form syntax:
-    //   repeated_field: [1, 2, 3]
-    // this vector contains 3 ranges for "1", "2", and "3".
-    // For other cases, this vector contains a single range for the value.
-    // Example: "1"
-    std::vector<ParseLocationRange> values;
-  };
-
-  struct PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED RedactionState {
-    bool redact;
-    bool report;
-  };
-
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static TextFormat::RedactionState
-  GetRedactionState(const FieldDescriptor* field);
-
-  PROTOBUF_FUTURE_ADD_EARLY_NODISCARD static TextFormat::RedactionState
-  IsOptionSensitive(const Message& opts, const Reflection* reflection,
-                    const FieldDescriptor* option);
   // Data structure which is populated with the locations of each field
   // value parsed from the text.
   class PROTOBUF_EXPORT ParseInfoTree {
@@ -666,57 +626,37 @@ class PROTOBUF_EXPORT TextFormat {
     ParseInfoTree(const ParseInfoTree&) = delete;
     ParseInfoTree& operator=(const ParseInfoTree&) = delete;
 
-    // Returns the field location for the occurrence of the singular field.
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD absl::StatusOr<FieldLocation>
-    GetFieldLocation(const FieldDescriptor* field) const;
+    // Returns the parse location range for index-th value of the field in
+    // the parsed text. If none exists, returns a location with start and end
+    // line -1. Index should be -1 for not-repeated fields.
+    ParseLocationRange GetLocationRange(const FieldDescriptor* field,
+                                        int index) const;
 
-    // Returns the field location for the index-th occurrence of the field.
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD absl::StatusOr<FieldLocation>
-    GetFieldLocation(const FieldDescriptor* field, uint32_t index) const;
-
-    // Prefer GetFieldLocation() over this function.
-    // Returns the parse location range for the name and value of the index-th
-    // field in the parsed text. If none exists, returns a location with start
-    // and end line -1. Index should be -1 for not-repeated fields.
-    [[deprecated("Please use GetFieldLocation()")]]
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD ParseLocationRange
-    GetLocationRange(const FieldDescriptor* field, int index) const;
-
-    // Prefer GetFieldLocation() over this function.
-    // Returns the starting parse location for the name and value of the
-    // index-th field in the parsed text. If none exists, returns a location
-    // with line = -1. Index should be -1 for not-repeated fields.
-    [[deprecated("Please use GetFieldLocation()")]]
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD ParseLocation
-    GetLocation(const FieldDescriptor* field, int index) const;
+    // Returns the starting parse location for index-th value of the field in
+    // the parsed text. If none exists, returns a location with line = -1. Index
+    // should be -1 for not-repeated fields.
+    ParseLocation GetLocation(const FieldDescriptor* field, int index) const {
+      return GetLocationRange(field, index).start;
+    }
 
     // Returns the parse info tree for the given field, which must be a message
     // type. The nested information tree is owned by the root tree and will be
     // deleted when it is deleted.
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD ParseInfoTree* GetTreeForNested(
-        const FieldDescriptor* field, int index) const;
+    ParseInfoTree* GetTreeForNested(const FieldDescriptor* field,
+                                    int index) const;
 
    private:
     // Allow the text format parser to record information into the tree.
     friend class TextFormat;
 
-    // Records the starting and ending locations of a field (both its name and
-    // its value).
-    void RecordLocation(const FieldDescriptor* field, ParseLocationRange range);
-
-    // Records the starting and ending locations of a field name.
-    void RecordNameLocation(const FieldDescriptor* field,
-                            ParseLocationRange range);
-
     // Records the starting and ending locations of a single value for a field.
-    void RecordValueLocation(const FieldDescriptor* field,
-                             ParseLocationRange range);
+    void RecordLocation(const FieldDescriptor* field, ParseLocationRange range);
 
     // Create and records a nested tree for a nested message field.
     ParseInfoTree* CreateNested(const FieldDescriptor* field);
 
-    // Defines the map from the index-th field descriptor to its field location.
-    absl::flat_hash_map<const FieldDescriptor*, std::vector<FieldLocation>>
+    // Defines the map from the index-th field descriptor to its parse location.
+    absl::flat_hash_map<const FieldDescriptor*, std::vector<ParseLocationRange>>
         locations_;
     // Defines the map from the index-th field descriptor to the nested parse
     // info tree.
@@ -729,23 +669,18 @@ class PROTOBUF_EXPORT TextFormat {
   class PROTOBUF_EXPORT Parser {
    public:
     Parser();
-    ~Parser() = default;
+    ~Parser();
 
     // Like TextFormat::Parse().
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool Parse(
-        io::ZeroCopyInputStream* input, Message* output);
+    bool Parse(io::ZeroCopyInputStream* input, Message* output);
     // Like TextFormat::ParseFromString().
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool ParseFromString(
-        absl::string_view input, Message* output);
+    bool ParseFromString(absl::string_view input, Message* output);
     // Like TextFormat::ParseFromCord().
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool ParseFromCord(
-        const absl::Cord& input, Message* output);
+    bool ParseFromCord(const absl::Cord& input, Message* output);
     // Like TextFormat::Merge().
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool Merge(
-        io::ZeroCopyInputStream* input, Message* output);
+    bool Merge(io::ZeroCopyInputStream* input, Message* output);
     // Like TextFormat::MergeFromString().
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool MergeFromString(
-        absl::string_view input, Message* output);
+    bool MergeFromString(absl::string_view input, Message* output);
 
     // Set where to report parse errors.  If nullptr (the default), errors will
     // be printed to stderr.
@@ -776,8 +711,9 @@ class PROTOBUF_EXPORT TextFormat {
     }
 
     // Like TextFormat::ParseFieldValueFromString
-    PROTOBUF_FUTURE_ADD_EARLY_NODISCARD bool ParseFieldValueFromString(
-        absl::string_view input, const FieldDescriptor* field, Message* output);
+    bool ParseFieldValueFromString(absl::string_view input,
+                                   const FieldDescriptor* field,
+                                   Message* output);
 
     // When an unknown extension is met, parsing will fail if this option is
     // set to false (the default). If true, unknown extensions will be ignored
@@ -874,12 +810,6 @@ class PROTOBUF_EXPORT TextFormat {
   static inline void RecordLocation(ParseInfoTree* info_tree,
                                     const FieldDescriptor* field,
                                     ParseLocationRange location);
-  static inline void RecordNameLocation(ParseInfoTree* info_tree,
-                                        const FieldDescriptor* field,
-                                        ParseLocationRange location);
-  static inline void RecordValueLocation(ParseInfoTree* info_tree,
-                                         const FieldDescriptor* field,
-                                         ParseLocationRange location);
   static inline ParseInfoTree* CreateNested(ParseInfoTree* info_tree,
                                             const FieldDescriptor* field);
   // To reduce stack frame bloat we use an out-of-line function to print
@@ -889,27 +819,11 @@ class PROTOBUF_EXPORT TextFormat {
                                    const T&... values);
 };
 
-namespace internal {
-void PrintTextMarker(TextFormat::BaseTextGenerator* generator, bool redact,
-                     bool randomize, bool single_line_mode);
-}  // namespace internal
 
 inline void TextFormat::RecordLocation(ParseInfoTree* info_tree,
                                        const FieldDescriptor* field,
                                        ParseLocationRange location) {
   info_tree->RecordLocation(field, location);
-}
-
-inline void TextFormat::RecordNameLocation(ParseInfoTree* info_tree,
-                                           const FieldDescriptor* field,
-                                           ParseLocationRange location) {
-  info_tree->RecordNameLocation(field, location);
-}
-
-inline void TextFormat::RecordValueLocation(ParseInfoTree* info_tree,
-                                            const FieldDescriptor* field,
-                                            ParseLocationRange location) {
-  info_tree->RecordValueLocation(field, location);
 }
 
 inline TextFormat::ParseInfoTree* TextFormat::CreateNested(

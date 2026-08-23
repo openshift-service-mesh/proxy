@@ -54,16 +54,6 @@ final class DoubleArrayList extends AbstractProtobufList<Double>
     this.size = size;
   }
 
-  /**
-   * Constructs a new mutable {@code DoubleArrayList} containing the same elements as {@code other}.
-   */
-  DoubleArrayList(DoubleArrayList other, boolean isMutable) {
-    this(
-        other.size == 0 ? EMPTY_ARRAY : Arrays.copyOf(other.array, other.size),
-        other.size,
-        isMutable);
-  }
-
   @Override
   protected void removeRange(int fromIndex, int toIndex) {
     ensureIsMutable();
@@ -77,8 +67,7 @@ final class DoubleArrayList extends AbstractProtobufList<Double>
   }
 
   @Override
-  public boolean equals(
-          Object o) {
+  public boolean equals(Object o) {
     if (this == o) {
       return true;
     }
@@ -156,13 +145,11 @@ final class DoubleArrayList extends AbstractProtobufList<Double>
   }
 
   @Override
-  @CanIgnoreReturnValue
   public Double set(int index, Double element) {
     return setDouble(index, element);
   }
 
   @Override
-  @CanIgnoreReturnValue
   public double setDouble(int index, double element) {
     ensureIsMutable();
     ensureIndexInRange(index);
@@ -172,7 +159,6 @@ final class DoubleArrayList extends AbstractProtobufList<Double>
   }
 
   @Override
-  @CanIgnoreReturnValue
   public boolean add(Double element) {
     addDouble(element);
     return true;
@@ -226,7 +212,6 @@ final class DoubleArrayList extends AbstractProtobufList<Double>
   }
 
   @Override
-  @CanIgnoreReturnValue
   public boolean addAll(Collection<? extends Double> collection) {
     ensureIsMutable();
 
@@ -260,7 +245,6 @@ final class DoubleArrayList extends AbstractProtobufList<Double>
   }
 
   @Override
-  @CanIgnoreReturnValue
   public Double remove(int index) {
     ensureIsMutable();
     ensureIndexInRange(index);
