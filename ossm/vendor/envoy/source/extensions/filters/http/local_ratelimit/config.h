@@ -1,0 +1,39 @@
+#pragma once
+
+#include "envoy/extensions/filters/http/local_ratelimit/v3/local_rate_limit.pb.h"
+#include "envoy/extensions/filters/http/local_ratelimit/v3/local_rate_limit.pb.validate.h"
+
+#include "source/extensions/filters/http/common/factory_base.h"
+
+namespace Envoy {
+namespace Extensions {
+namespace HttpFilters {
+namespace LocalRateLimitFilter {
+
+/**
+ * Config registration for the local rate limit filter. @see NamedHttpFilterConfigFactory.
+ */
+class LocalRateLimitFilterConfig
+    : public Common::ExceptionFreeFactoryBase<
+          envoy::extensions::filters::http::local_ratelimit::v3::LocalRateLimit> {
+public:
+  LocalRateLimitFilterConfig() : ExceptionFreeFactoryBase("envoy.filters.http.local_ratelimit") {}
+
+private:
+  absl::StatusOr<Http::FilterFactoryCb> createFilterFactoryFromProtoTyped(
+      const envoy::extensions::filters::http::local_ratelimit::v3::LocalRateLimit& proto_config,
+      const std::string& stats_prefix, Server::Configuration::FactoryContext& context) override;
+  absl::StatusOr<Http::FilterFactoryCb> createHttpFilterFactoryFromProtoTyped(
+      const envoy::extensions::filters::http::local_ratelimit::v3::LocalRateLimit& proto_config,
+      const std::string& stats_prefix,
+      Server::Configuration::ServerFactoryContext& context) override;
+  absl::StatusOr<Router::RouteSpecificFilterConfigConstSharedPtr>
+  createRouteSpecificFilterConfigTyped(
+      const envoy::extensions::filters::http::local_ratelimit::v3::LocalRateLimit& proto_config,
+      Server::Configuration::ServerFactoryContext&, ProtobufMessage::ValidationVisitor&) override;
+};
+
+} // namespace LocalRateLimitFilter
+} // namespace HttpFilters
+} // namespace Extensions
+} // namespace Envoy
