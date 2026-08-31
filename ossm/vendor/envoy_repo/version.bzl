@@ -1,0 +1,2 @@
+VERSION = '1.39.1-dev'
+API_VERSION = '3.0.0'
