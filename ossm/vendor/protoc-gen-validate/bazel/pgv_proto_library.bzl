@@ -9,9 +9,9 @@ def pgv_go_proto_library(name, compilers = _DEFAULT_GO_PROTOC, proto = None, dep
     go_proto_library(
         name = name,
         proto = proto,
-        deps = ["@com_envoyproxy_protoc_gen_validate//validate:validate"] + deps,
+        deps = ["@protoc-gen-validate//validate:validate"] + deps,
         compilers = compilers + [
-            "@com_envoyproxy_protoc_gen_validate//bazel/go:pgv_plugin_go",
+            "@protoc-gen-validate//bazel/go:pgv_plugin_go",
         ],
         visibility = ["//visibility:public"],
         **kwargs
@@ -47,13 +47,13 @@ def pgv_cc_proto_library(
         srcs = [":" + name + "_validate"],
         deps = cc_deps + [
             ":" + name + "_cc_proto",
-            "@com_envoyproxy_protoc_gen_validate//validate:cc_validate",
-            "@com_envoyproxy_protoc_gen_validate//validate:validate_cc",
+            "@protoc-gen-validate//validate:cc_validate",
+            "@protoc-gen-validate//validate:validate_cc",
             protobuf or "@com_google_protobuf//:protobuf",
             re2 or "@com_googlesource_code_re2//:re2",
         ],
         copts = copts + select({
-            "@com_envoyproxy_protoc_gen_validate//bazel:windows_x86_64": ["-DWIN32"],
+            "@protoc-gen-validate//bazel:windows_x86_64": ["-DWIN32"],
             "//conditions:default": [],
         }),
         alwayslink = 1,

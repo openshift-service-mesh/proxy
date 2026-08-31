@@ -21,7 +21,6 @@ build --override_repository=c-ares=%workspace%/ossm/vendor/c-ares
 build --override_repository=cc_compatibility_proxy=%workspace%/ossm/vendor/cc_compatibility_proxy
 build --override_repository=cel-cpp=%workspace%/ossm/vendor/cel-cpp
 build --override_repository=cel-spec=%workspace%/ossm/vendor/cel-spec
-build --override_repository=com_envoyproxy_protoc_gen_validate=%workspace%/ossm/vendor/com_envoyproxy_protoc_gen_validate
 build --override_repository=com_github_chrusty_protoc_gen_jsonschema=%workspace%/ossm/vendor/com_github_chrusty_protoc_gen_jsonschema
 build --override_repository=com_github_golang_protobuf=%workspace%/ossm/vendor/com_github_golang_protobuf
 build --override_repository=com_github_iancoleman_strcase=%workspace%/ossm/vendor/com_github_iancoleman_strcase
@@ -85,6 +84,7 @@ build --override_repository=proto-converter=%workspace%/ossm/vendor/proto-conver
 build --override_repository=proto-field-extraction=%workspace%/ossm/vendor/proto-field-extraction
 build --override_repository=proto_bazel_features=%workspace%/ossm/vendor/proto_bazel_features
 build --override_repository=protobuf=%workspace%/ossm/vendor/protobuf
+build --override_repository=protoc-gen-validate=%workspace%/ossm/vendor/protoc-gen-validate
 build --override_repository=proxy-wasm-cpp-host=%workspace%/ossm/vendor/proxy-wasm-cpp-host
 build --override_repository=proxy-wasm-cpp-sdk=%workspace%/ossm/vendor/proxy-wasm-cpp-sdk
 build --override_repository=proxy-wasm-rust-sdk=%workspace%/ossm/vendor/proxy-wasm-rust-sdk
