@@ -1,0 +1,158 @@
+# Common build flags
+
+build --verbose_failures
+
+# Toolchain configuration
+build --repo_env=BAZEL_USE_HOST_SYSROOT=True
+
+# Main C++ compile uses the host clang toolchain (@llvm_host, defined in the
+# root MODULE.bazel with an exec toolchain root of /usr). extra_toolchains
+# outrank the hermetic `@llvm_toolchain` Envoy registers, so this wins for the
+# default host platform -- reproducing the WORKSPACE-era host build.
+build --extra_toolchains=@llvm_host//:all
+
+# Envoy's compat/openssl prefixer links libclang-cpp / clang-tooling headers
+# from @llvm_toolchain_llvm. We back that repo with the host /usr LLVM via
+# `llvm_toolchain_alias_ext.host(path = "/usr")` in MODULE.bazel (envoy_toolshed's
+# host support), so the prefixer links the host libclang (matching the host
+# libstdc++) instead of the hermetic clang whose libstdc++ requirements the build
+# container does not satisfy.
+#
+# Skip downloading envoy_toolshed's prebuilt minimal LLVM. OSSM compiles with the
+# host clang (@llvm_host) and never uses it, but envoy still references it as the
+# hermetic @llvm_toolchain's toolchain_root, so it would otherwise fetch an unused
+# ~100MB+ artifact -- breaking offline/air-gapped builds and bloating the vendor
+# snapshot. Honored by envoy_toolshed >= 0.5.10.
+build --repo_env=ENVOY_TOOLSHED_SKIP_LLVM_MINIMAL_DOWNLOAD=1
+
+# OSSM: inline the former envoy `--config=libstdc++`. Upstream envoy removed that
+# config (and `BAZEL_USE_LIBSTDCPP`) when it switched `--config=gcc` to a
+# hermetic GCC 13 toolchain (see envoy's
+# changelogs/.../build__hermetic-gcc.rst). OSSM builds with the host clang
+# toolchain (@llvm_host), not that GCC, so we keep the two flags the removed
+# config expanded to: statically link the host's libstdc++ so the Envoy binary
+# does not depend on the build host's libstdc++.so.6 GLIBCXX versions at runtime.
+build --action_env=BAZEL_LINKLIBS=-l%:libstdc++.a
+build --repo_env=BAZEL_USE_LIBSTDCPP=True
+build --action_env=Clang_DIR=/usr/lib64/llvm21
+
+# Build wee8 (V8) from source instead of envoy_toolshed's prebuilt libwee8.a.
+# The prebuilt (~124MB) exceeds GitHub's 100MB file limit, so it cannot live in
+# the committed ossm/vendor snapshot, and it has no s390x/ppc64le build. Envoy's
+# //bazel:wee8_engine alias selects the source build when use_prebuilt_libs is
+# False (envoyproxy/envoy, the :wee8_source_build config_setting).
+build --@envoy//bazel:use_prebuilt_libs=False
+build --cxxopt=-Wno-nullability-completeness
+build --host_linkopt=-latomic
+build --linkopt=-latomic
+build --features=-layering_check --host_features=-layering_check
+
+# Build-time Python runs on the host interpreter via the local_runtime
+# toolchain registered in MODULE.bazel. Do NOT add
+# --extra_toolchains=@rules_python//python:autodetecting_toolchain here:
+# --extra_toolchains outrank MODULE-registered toolchains, so it would displace
+# the host local_runtime with the weaker autodetecting toolchain (no build-time
+# interpreter info, cannot build C extensions) and re-trigger the hermetic
+# CPython download.
+#
+# Pin the wheel-selection version to 3.12. The vendored pip wheels
+# (base_pip3/fuzzing_pip3/v8_python_deps) are cp312-only, and removing the
+# hermetic `python.toolchain(is_default=True, python_version="3.12")` from
+# MODULE.bazel dropped the default, letting rules_python fall back to 3.11 --
+# for which no wheel exists ("No matching wheel for current configuration").
+# This flag only drives the wheel select()s; it fetches no interpreter (the
+# host local_runtime above provides that, and must likewise be CPython 3.12).
+common --@rules_python//python/config_settings:python_version=3.12
+
+build --extra_toolchains=@local_jdk//:all
+build --tool_java_runtime_version=local_jdk
+
+# Use host-installed CMake/Make/Ninja/etc instead of building them from source.
+# extra_toolchains outrank rules_foreign_cc's own built-from-source toolchain
+# registrations, so the built tools are never fetched/built. Mirrors envoy's
+# bazelrc.windows. Requires the direct bazel_dep on rules_foreign_cc in
+# MODULE.bazel so `@rules_foreign_cc` resolves here.
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_autoconf_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_automake_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_cmake_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_m4_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_make_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_meson_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_ninja_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_pkgconfig_toolchain
+
+# OpenSSL configuration
+common --config=openssl
+
+# Test flags
+build --test_env=ENVOY_IP_TEST_VERSIONS=v4only
+build --test_env=HEAPCHECK=minimal
+build --test_output=all
+
+# Arch-specific build flags, triggered with --config=$ARCH in bazel build command
+build:x86_64 --define=DUMMY=dummy
+
+#build:s390x --@envoy//source/extensions/filters/common/lua:luajit2=1
+build:s390x --define=DUMMY=dummy
+
+#build:ppc --action_env=BAZEL_LINKLIBS=-lstdc++
+#build:ppc --@envoy//source/extensions/filters/common/lua:luajit2=1
+#build:ppc --platforms=//ppc64le_platform:host
+#build:ppc --extra_execution_platforms=//ppc64le_platform:host
+#build:ppc --extra_toolchains=//ppc64le_platform:jdk_runtime
+build:ppc --define=DUMMY=dummy
+
+build:aarch64 --define=DUMMY=dummy
+
+# OSSM: use the vendored envoy source directly on non-x86 arches.
+#
+# The vendor snapshot (ossm/vendor) is produced entirely on an x86_64 host --
+# update-deps.sh's per-arch passes are no-ops (--config=<arch> only sets
+# --define=DUMMY; nothing cross-compiles), so every repo's vendor marker is
+# computed on x86_64. For almost all repos that marker is arch-portable, but the
+# envoy+/envoy_api+ repos (the GitHub `archive_override` tarballs declared in
+# MODULE.bazel) are flagged "out-of-date" on a real aarch64/s390x/ppc host, so
+# Bazel tries to re-fetch them from github.com -- which fails in the air-gapped
+# build (Unknown host: github.com). x86_64 is unaffected because the snapshot was
+# vendored there.
+#
+# Point the envoy modules at their committed vendored source trees (each has a
+# MODULE.bazel at its root) so Bazel reads them locally instead of fetching the
+# archive during module resolution. This must be --override_module, not
+# --override_repository: envoy is a bzlmod module, so resolution reads the pinned
+# archive's own MODULE.bazel unless the module itself is overridden (see the
+# override note in MODULE.bazel). Scoped to the non-x86 arch configs so x86_64
+# keeps validating the snapshot natively and the local-dev
+# `--override_module=envoy=/path` workflow stays usable there. update-deps.sh
+# vendors x86_64 first and never wipes between passes, so envoy+ is captured
+# before any non-x86 pass could see this override.
+build:aarch64 --override_module=envoy=%workspace%/ossm/vendor/envoy+
+build:aarch64 --override_module=envoy_api=%workspace%/ossm/vendor/envoy_api+
+build:s390x --override_module=envoy=%workspace%/ossm/vendor/envoy+
+build:s390x --override_module=envoy_api=%workspace%/ossm/vendor/envoy_api+
+build:ppc --override_module=envoy=%workspace%/ossm/vendor/envoy+
+build:ppc --override_module=envoy_api=%workspace%/ossm/vendor/envoy_api+
+
+# Colored ouput messes with some of the logging systems in CI, so we disable that.
+build:ci-config --color=no
+build:ci-config --show_progress_rate_limit=10
+
+# Offline builds via bzlmod vendor mode.
+# Regenerate the snapshot with ossm/scripts/update-deps.sh. Missing repos fall
+# back to network fetch with a warning, so online builds keep working.
+# The path is relative to the workspace root (do NOT use %workspace%, which is
+# not expanded for --vendor_dir and silently disables the snapshot).
+common --vendor_dir=ossm/vendor
+
+# Override every vendored repo directly from its vendor path, bypassing marker
+# validation. Bazel 8.8.0 made vendor markers architecture-non-portable, so a
+# snapshot vendored on x86_64 is judged "out-of-date" on aarch64/s390x/ppc and
+# Bazel tries to re-fetch from the network, breaking offline cross-arch builds.
+# --override_repository uses the vendored tree directly (no marker check, no
+# fetch); the sources are arch-independent, so this is correct on every arch.
+# (envoy/envoy_api use --override_module above instead; the Go toolchain and
+# gazelle tool repos are deliberately excluded so they regenerate from the host.)
+# This file is generated by ossm/scripts/update-deps.sh (regenerated on every
+# snapshot). try-import: it is absent while update-deps.sh is mid-vendor (the
+# snapshot is wiped and rebuilt), and overrides aren't needed then anyway.
+try-import %workspace%/ossm/vendor/bazelrc-vendor

@@ -1,0 +1,10 @@
+--- a/MODULE.bazel
++++ b/MODULE.bazel
+@@ -22,6 +22,7 @@ pip.parse(
+     hub_name = "v8_python_deps",
+     python_version = "3.12",
+     requirements_lock = "//:bazel/requirements.txt",
++    target_platforms = ["linux_x86_64", "linux_aarch64"],
+     extra_pip_args = ["--require-hashes"],
+ )
+ use_repo(pip, "v8_python_deps")
