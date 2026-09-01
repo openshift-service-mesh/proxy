@@ -14,8 +14,6 @@ on:
   push:
     branches:
       - master
-      - release-1.28-DISABLED
-      - release-1.30-DISABLED
   workflow_dispatch:
     inputs:
       pr_head_sha:

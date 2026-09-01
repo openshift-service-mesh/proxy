@@ -29,7 +29,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'build.yaml',
-              ref: context.payload.pull_request.base.ref,
+              ref: context.payload.repository.default_branch,
               inputs: {
                 pr_number: String(context.payload.pull_request.number),
                 head_sha: context.payload.pull_request.head.sha,

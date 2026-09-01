@@ -29,8 +29,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
+      pull-requests: read
       statuses: write
-      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
