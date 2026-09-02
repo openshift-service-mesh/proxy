@@ -19,8 +19,6 @@ fi
 echo "Network disconnected: container is now isolated"
 
 # Phase 3: Full build without network (replicates Konflux hermetic build)
-run_in_podman "source ossm/ci/common.sh && bazel_build //:envoy"
-run_in_podman "source ossm/ci/common.sh && bazel_test //..."
-run_in_podman "source ossm/ci/common.sh && export ENVOY_PATH=bazel-bin/envoy && export GO111MODULE=on && GOPROXY=off go test -timeout=30m -p=1 -parallel=1 \$(go list ./...)"
+run_in_podman "GOPROXY=off bash ossm/ci/pre-submit.sh"
 
 echo "Hermetic build passed: all dependencies are available offline"
