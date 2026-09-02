@@ -78,6 +78,7 @@ build --override_repository=org_golang_x_text=%workspace%/ossm/vendor/org_golang
 build --override_repository=org_golang_x_tools=%workspace%/ossm/vendor/org_golang_x_tools
 build --override_repository=package_metadata=%workspace%/ossm/vendor/package_metadata
 build --override_repository=platforms=%workspace%/ossm/vendor/platforms
+build --override_repository=prebuilt_protoc.linux_aarch_64=%workspace%/ossm/vendor/prebuilt_protoc.linux_aarch_64
 build --override_repository=prebuilt_protoc.linux_x86_64=%workspace%/ossm/vendor/prebuilt_protoc.linux_x86_64
 build --override_repository=prometheus_metrics_model=%workspace%/ossm/vendor/prometheus_metrics_model
 build --override_repository=proto-converter=%workspace%/ossm/vendor/proto-converter
