@@ -19,10 +19,10 @@ workspace(
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
-    name = "helly25_bzl",
-    sha256 = "8846d5363ed05dfe242af692759c9b7439c1b7ce47b9720c3338e254651cbe99",
-    strip_prefix = "bzl-0.4.3",
-    url = "https://github.com/helly25/bzl/releases/download/0.4.3/bzl-0.4.3.tar.gz",
+    name = "mboworks_bzl",
+    sha256 = "0c51edbd3a3b69ebff59b5ffec411a3ab8cb137a845b9bba9803738cd7bd5c28",
+    strip_prefix = "bzl-0.5.1",
+    url = "https://github.com/mboworks/bzl/releases/download/0.5.1/bzl-0.5.1.tar.gz",
 )
 
 # Materialize the merged LLVM distribution table for WORKSPACE-mode builds

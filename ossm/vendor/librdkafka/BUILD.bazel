@@ -1,0 +1,14 @@
+
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+bool_flag(
+    name = "with_ssl",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+bool_flag(
+    name = "with_zlib",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+filegroup(name = "all", srcs = glob(["**"], exclude=[]), visibility = ["//visibility:public"])
+    

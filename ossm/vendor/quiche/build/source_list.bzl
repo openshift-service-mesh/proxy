@@ -1004,6 +1004,7 @@ balsa_hdrs = [
     "balsa/framer_interface.h",
     "balsa/header_api.h",
     "balsa/header_properties.h",
+    "balsa/http_protocol_defects.h",
     "balsa/http_validation_policy.h",
     "balsa/noop_balsa_visitor.h",
     "balsa/simple_buffer.h",
@@ -1751,6 +1752,7 @@ oblivious_http_srcs = [
     "oblivious_http/oblivious_http_gateway.cc",
 ]
 qbone_hdrs = [
+    "quic/qbone/bonnet/async_write_packet_exchanger.h",
     "quic/qbone/bonnet/icmp_reachable.h",
     "quic/qbone/bonnet/icmp_reachable_interface.h",
     "quic/qbone/bonnet/mock_icmp_reachable.h",
@@ -1791,6 +1793,8 @@ qbone_hdrs = [
     "quic/qbone/test_tools/qbone_basic_quic_server_handler.h",
 ]
 qbone_srcs = [
+    "quic/qbone/bonnet/async_write_packet_exchanger.cc",
+    "quic/qbone/bonnet/async_write_packet_exchanger_test.cc",
     "quic/qbone/bonnet/icmp_reachable.cc",
     "quic/qbone/bonnet/icmp_reachable_test.cc",
     "quic/qbone/bonnet/qbone_tunnel_info.cc",

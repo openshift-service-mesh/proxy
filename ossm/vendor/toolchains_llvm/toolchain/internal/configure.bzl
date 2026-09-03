@@ -13,7 +13,7 @@
 # limitations under the License.
 
 load("@bazel_features//:features.bzl", "bazel_features")
-load("@helly25_bzl//bzl/paths:paths.bzl", "paths")
+load("@mboworks_bzl//bzl/paths:paths.bzl", "paths")
 load(
     "//toolchain:aliases.bzl",
     _aliased_libs = "aliased_libs",
@@ -413,13 +413,6 @@ def llvm_config_impl(rctx):
         },
     )
 
-    rctx.file(
-        "redacted_dates.h",
-        "#define __DATE__      \"redacted\"\n" +
-        "#define __TIME__      \"redacted\"\n" +
-        "#define __TIMESTAMP__ \"redacted\"\n",
-    )
-
     if hasattr(rctx, "repo_metadata"):
         return rctx.repo_metadata(reproducible = True)
     else:
@@ -658,7 +651,6 @@ cc_toolchain_config(
     target_toolchain_path_prefix = "{target_toolchain_path_prefix}",
     tools_path_prefix = "{tools_path_prefix}",
     wrapper_bin_prefix = "{wrapper_bin_prefix}",
-    redacted_dates_path = "{redacted_dates_path}",
     compiler_configuration = {{
       "sysroot_path": "{sysroot_path}",
       "stdlib": "{stdlib}",
@@ -730,7 +722,6 @@ filegroup(
     name = "compiler-components-{suffix}",
     srcs = [
         ":sysroot-components-{suffix}",
-        "redacted_dates.h",
         {cxx_cross_lib_label_str}
         {extra_compiler_files}
     ],
@@ -779,7 +770,6 @@ filegroup(
         ":sysroot-components-{suffix}",
         "{llvm_dist_label_prefix}extra_config_site",
         "{toolchain_root}:clang",
-        "redacted_dates.h",
         {cxx_cross_lib_label_str}
         {extra_compiler_files}
     ],
@@ -822,13 +812,12 @@ system_module_map(
     name = "module-{suffix}",
     cxx_builtin_include_files = ":cxx_builtin_include_files-{suffix}",
     cxx_builtin_include_directories = {cxx_builtin_include_directories},
-    extra_textual_headers = "redacted_dates.h",
     sysroot_files = ":sysroot-components-{suffix}",
     sysroot_path = "{sysroot_path}",
 )
 
 filegroup(name = "runtime-libs-empty-{suffix}", srcs = [])
-
+{sanitizer_runtime_filegroup}
 cc_toolchain(
     name = "cc-clang-{suffix}",
     all_files = "all-files-{suffix}",
@@ -867,18 +856,45 @@ cc_toolchain(
     # a format argument (not inlined in the template) so its select() braces
     # are not re-interpreted by the outer format().
     runtime_lib_attrs = ""
+    runtime_lib_filegroup = ""
     if target_os == "darwin" and not use_absolute_paths_llvm:
         runtime_lib_attrs = """
     static_runtime_lib = ":runtime-libs-empty-{suffix}",
-    dynamic_runtime_lib = select({{
-        "{use_asan}": "{root}:libclang_rt-asan-darwin",
-        "{use_ubsan}": "{root}:libclang_rt-ubsan-darwin",
-        "{use_tsan}": "{root}:libclang_rt-tsan-darwin",
-        "//conditions:default": ":runtime-libs-empty-{suffix}",
-    }}),""".format(
+    dynamic_runtime_lib = ":sanitizer-runtime-libs-{suffix}",""".format(suffix = suffix)
+
+        # Like runtime_lib_attrs, this is passed as a format argument rather
+        # than inlined into the template, so its select() braces are not
+        # re-interpreted by the outer format().
+        #
+        # Sanitizers combine, so the enabled ones cannot be picked with a single
+        # select() over the use_* settings: they all match at once and Bazel
+        # rejects the ambiguous match. dynamic_runtime_lib takes one label, so
+        # instead of selecting the label, select the filegroup's contents -- one
+        # single-condition select() per sanitizer, concatenated. A combined
+        # build then gets exactly the runtimes it enabled, and no combination is
+        # ambiguous.
+        runtime_lib_filegroup = """
+filegroup(
+    name = "sanitizer-runtime-libs-{suffix}",
+    srcs = select({{
+        "{use_asan}": ["{root}:libclang_rt-asan-darwin"],
+        "//conditions:default": [],
+    }}) + select({{
+        "{use_lsan}": ["{root}:libclang_rt-lsan-darwin"],
+        "//conditions:default": [],
+    }}) + select({{
+        "{use_ubsan}": ["{root}:libclang_rt-ubsan-darwin"],
+        "//conditions:default": [],
+    }}) + select({{
+        "{use_tsan}": ["{root}:libclang_rt-tsan-darwin"],
+        "//conditions:default": [],
+    }}),
+)
+""".format(
             suffix = suffix,
             root = target_toolchain_root,
             use_asan = str(Label("//toolchain/config:use_asan")),
+            use_lsan = str(Label("//toolchain/config:use_lsan")),
             use_ubsan = str(Label("//toolchain/config:use_ubsan")),
             use_tsan = str(Label("//toolchain/config:use_tsan")),
         )
@@ -900,7 +916,6 @@ cc_toolchain(
         target_toolchain_path_prefix = target_toolchain_path_prefix,
         tools_path_prefix = toolchain_info.tools_path_prefix,
         wrapper_bin_prefix = toolchain_info.wrapper_bin_prefix,
-        redacted_dates_path = "external/{}/redacted_dates.h".format(rctx.name),
         sysroot_label_str = sysroot_label_str,
         sysroot_path = sysroot_path,
         stdlib = stdlib,
@@ -946,6 +961,7 @@ cc_toolchain(
         extra_exec_compatible_with_all_targets = toolchain_info.extra_exec_compatible_with.get("", []),
         extra_target_compatible_with_all_targets = toolchain_info.extra_target_compatible_with.get("", []),
         runtime_lib_attrs = runtime_lib_attrs,
+        sanitizer_runtime_filegroup = runtime_lib_filegroup,
     )
 
 def _is_remote(rctx, exec_os, exec_arch):

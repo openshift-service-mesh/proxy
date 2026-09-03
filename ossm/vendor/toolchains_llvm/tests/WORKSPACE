@@ -27,9 +27,9 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
     name = "bazel_features",
-    sha256 = "89eca73d4c334cf664f84920365d2ce04e2c98099b89f7c5b676b5f377c8e754",
-    strip_prefix = "bazel_features-1.48.1",
-    url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.48.1/bazel_features-v1.48.1.tar.gz",
+    sha256 = "5450bfb2c8b4bc961c75368838f86156f563cc9adef1be7d504fc5619d54daab",
+    strip_prefix = "bazel_features-1.51.0",
+    url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.51.0/bazel_features-v1.51.0.tar.gz",
 )
 
 load("@bazel_features//:deps.bzl", "bazel_features_deps")
@@ -38,16 +38,16 @@ bazel_features_deps()
 
 http_archive(
     name = "aspect_bazel_lib",
-    sha256 = "c6e2be1c7a30ef6de9d0e15cd3a4b6bc62fe156848117c0a1eeedf97561a4f6b",
-    strip_prefix = "bazel-lib-3.3.1",
-    url = "https://github.com/aspect-build/bazel-lib/releases/download/v3.3.1/bazel-lib-v3.3.1.tar.gz",
+    sha256 = "10f232c10df1ba5cbbbfbcde947090463348f0344d4153e25371b13ee3daf0ce",
+    strip_prefix = "bazel-lib-3.7.1",
+    url = "https://github.com/aspect-build/bazel-lib/releases/download/v3.7.1/bazel-lib-v3.7.1.tar.gz",
 )
 
 http_archive(
     name = "tar.bzl",
-    sha256 = "2799dfd43131e872c8f9fed41a547a8c5afd571c5df6b809eab6219d44403872",
-    strip_prefix = "tar.bzl-0.10.5",
-    url = "https://github.com/bazel-contrib/tar.bzl/releases/download/v0.10.5/tar.bzl-v0.10.5.tar.gz",
+    sha256 = "0ca2f75db5d9883cee6745ffd365a1d076480173b7b298060ce5944e8b293a70",
+    strip_prefix = "tar.bzl-0.10.8",
+    url = "https://github.com/bazel-contrib/tar.bzl/releases/download/v0.10.8/tar.bzl-v0.10.8.tar.gz",
 )
 
 http_archive(
@@ -329,26 +329,26 @@ http_archive(
 # As a test dep of com_google_absl.
 http_archive(
     name = "googletest",
-    sha256 = "65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c",
-    strip_prefix = "googletest-1.17.0",
-    urls = ["https://github.com/google/googletest/archive/v1.17.0.tar.gz"],
+    sha256 = "6e3191c1455468b3fc35a417fb565c1c5071aee1b7e7f85e30cf48a98d37d8b5",
+    strip_prefix = "googletest-1.18.0",
+    urls = ["https://github.com/google/googletest/archive/v1.18.0.tar.gz"],
 )
 
 http_archive(
     name = "boringssl",
     patch_args = ["-p1"],
     patches = ["//:boringssl-20260413.0.patch"],
-    sha256 = "6c94f115372978f4505df8280522111c03f2ec4efbdf2dcc713cb8cf1fa9aaab",
-    strip_prefix = "boringssl-0.20260526.0",
-    urls = ["https://github.com/google/boringssl/releases/download/0.20260526.0/boringssl-0.20260526.0.tar.gz"],
+    sha256 = "37e23cb9a5fa54f01b07cadd653cebc1d1b235945439a6c334fea58ea47b5b0a",
+    strip_prefix = "boringssl-0.20260813.0",
+    urls = ["https://github.com/google/boringssl/releases/download/0.20260813.0/boringssl-0.20260813.0.tar.gz"],
 )
 
 http_archive(
     name = "io_bazel_rules_go",
-    sha256 = "763f4a3f6b03469fdb00a77a333dd0b5546d3ee1fa29db373128c08fee73e0e8",
+    sha256 = "c3e253237109ab2e2a8d3cb075688b98a6e6fce43d849849648e8e3a84f20d6f",
     urls = [
-        "https://mirror.bazel.build/github.com/bazel-contrib/rules_go/releases/download/v0.61.1/rules_go-v0.61.1.zip",
-        "https://github.com/bazel-contrib/rules_go/releases/download/v0.61.1/rules_go-v0.61.1.zip",
+        "https://mirror.bazel.build/github.com/bazel-contrib/rules_go/releases/download/v0.63.0/rules_go-v0.63.0.zip",
+        "https://github.com/bazel-contrib/rules_go/releases/download/v0.63.0/rules_go-v0.63.0.zip",
     ],
 )
 
@@ -367,25 +367,18 @@ maybe(
     name = "host_platform",
 )
 
-# For testing rules_rust.
-
-http_archive(
-    name = "rules_rust",
-    integrity = "sha256-3Ch+PsqAsp1cyV4mHK4nPu3xr0oAqWrpN+I0U02tskw=",
-    urls = ["https://github.com/bazelbuild/rules_rust/releases/download/0.67.0/rules_rust-0.67.0.tar.gz"],
-)
-
-load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains")
-
-rules_rust_dependencies()
-
-rust_register_toolchains()
+# NOTE: rules_rust is intentionally NOT set up here. The rules_rust tests in
+# run_external_tests.sh only run with bzlmod (see tests/MODULE.bazel). As of
+# rules_rust 0.71 the WORKSPACE support files (rust/repositories.bzl) are gone,
+# and under hybrid mode (--enable_bzlmod --enable_workspace) bazel_dep repos
+# shadow same-named WORKSPACE repos, so loading them here would break the main
+# repository mapping for every hybrid invocation.
 
 http_archive(
     name = "rules_python",
-    sha256 = "2119ca04726066c53b8f1ff42dffa090ea7f3e42a75679f1cfda937406cf7753",
-    strip_prefix = "rules_python-2.0.2",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/2.0.2/rules_python-2.0.2.tar.gz",
+    sha256 = "25a00d55e4376ef6d9f28938b68038faca17c95580c9afe6953e7dde013d00e4",
+    strip_prefix = "rules_python-2.3.2",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/2.3.2/rules_python-2.3.2.tar.gz",
 )
 
 load("@rules_python//python:repositories.bzl", "py_repositories")
@@ -404,9 +397,9 @@ http_archive(
 
 http_archive(
     name = "com_google_protobuf",
-    sha256 = "bf89df2fa0088de9c9890fbfba0076263a36c2f84847a7b54e7e32effd6201c7",
-    strip_prefix = "protobuf-35.1",
-    urls = ["https://github.com/protocolbuffers/protobuf/releases/download/v35.1/protobuf-35.1.zip"],
+    sha256 = "b2ae760a4610c72fb80b14fb0ac202ade1ac5cf2aa1787a4fde08fbeb5f58a80",
+    strip_prefix = "protobuf-36.0",
+    urls = ["https://github.com/protocolbuffers/protobuf/releases/download/v36.0/protobuf-36.0.zip"],
 )
 
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
@@ -415,8 +408,8 @@ protobuf_deps()
 
 http_archive(
     name = "rules_java",
-    sha256 = "9de4e178c2c4f98d32aafe5194c3f2b717ae10405caa11bdcb460ac2a6f61516",
-    urls = ["https://github.com/bazelbuild/rules_java/releases/download/9.6.1/rules_java-9.6.1.tar.gz"],
+    sha256 = "0ad9898f81f8a3caf143fdbcf6229dbbff5da398b04c44c1c99c24888469a176",
+    urls = ["https://github.com/bazelbuild/rules_java/releases/download/9.9.0/rules_java-9.9.0.tar.gz"],
 )
 
 load("@rules_java//java:rules_java_deps.bzl", "rules_java_dependencies")
