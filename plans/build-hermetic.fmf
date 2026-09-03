@@ -1,0 +1,17 @@
+summary: Hermetic build - verify all Bazel dependencies are vendored (no network)
+
+prepare:
+  - name: Install dependencies
+    how: shell
+    script: dnf install -y git podman
+
+discover:
+  how: shell
+  tests:
+    - name: /build-hermetic
+      test: bash build-hermetic.sh
+      path: /plans
+      duration: 3h
+
+execute:
+  how: tmt
