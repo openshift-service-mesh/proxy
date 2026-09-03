@@ -162,7 +162,7 @@ cc_library(
         "@abseil-cpp//absl/log:absl_log",
     ] + select({
         "//build_defs:config_msvc": [],
-        "//conditions:default": ["@envoy//bazel:zlib"],
+        "//conditions:default": ["//:zlib"],
     }),
 )
 

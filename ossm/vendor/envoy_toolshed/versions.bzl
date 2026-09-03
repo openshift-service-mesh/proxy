@@ -1,12 +1,13 @@
 SUPPORTED_ARCHES = ["aarch64", "x86_64"]
 
-BINS_RELEASE = "0.2.11"
+BINS_RELEASE = "0.2.13"
 
 LLVM_VERSION = "22.1.8"
 
 V8_VERSION = "14.6.202.10"
 
-# Extra distributions for versions not (yet) in toolchains_llvm's version table
+# LLVM release archive checksums, used to fetch the distribution directly when
+# building the minimal LLVM toolchain repos.
 LLVM_DISTRIBUTIONS = {
     "LLVM-22.1.8-Linux-ARM64.tar.xz": "805efad2bb91cb4967fa569e0881d10c0f69c04461cf671cccbae19f547acc34",
     "LLVM-22.1.8-Linux-X64.tar.xz": "df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384",
@@ -20,7 +21,7 @@ VERSIONS = {
     "ninja": "1.12.0",
     "python": "3.12",
     "bins_release": BINS_RELEASE,
-    "msan_libs_sha256": "35dd97061183341d298ef40e1912a76af33ffe15802dd4435f6305661fe7db8d",
+    "msan_libs_sha256": "63ebd618961a72d367b3ab2bf0483bfdaec0b4e5be06cdab0bae9c84b6db2827",
     "tsan_libs_sha256": "805775e81aaf33c31ce321742413e6f55d46f8888debb7709656a9911f699041",
     "libcxx_libs_sha256": {
         "aarch64": "b3bd8dfc1c250d5c2c36de174138ffef9754402b33e54abe9b5efb25982fa2f7",
@@ -81,22 +82,22 @@ VERSIONS = {
     "sysroot_hashes": {
         "2.31": {
             "base": {
-                "amd64": "39f9c4935364dcd4efe4009d143cc2f36d01faa9fe5e8a90e0c6667a203544f9",
-                "arm64": "14295338a1a850a75baf57c8ad82a0e1324f11e32e36bbb2b5787dca31763fe1",
+                "amd64": "de5818c24eea910a3504198822342fabb769f647ea483de7014ba6e9782f6965",
+                "arm64": "ea84ea4bf6307c9e50346fa72aa489a82e532cd3765778af94ce5846c89cabf9",
             },
             "13": {
-                "amd64": "63b3b31f7e1a0182816bde18513d72f734e02cc5d2ec50336f04c72c720e4484",
-                "arm64": "cea58c40b0ced7ff83e1de70879ab904142167d4e0f3caf9e93aecd67845d1c5",
+                "amd64": "bed3fdbd19aa840be669a0a35b5da83ca018d79832a1fa07ce2cc9ccdbeaab5a",
+                "arm64": "289261af0b04eb91e1c1c9e4482f7e29c971449599e69b21c0d2afc617d2afe5",
             },
         },
         "2.28": {
             "base": {
-                "amd64": "605da16c83884933398caca34c761384b3aca1199d8f91e4a812285d6288aa30",
-                "arm64": "462550774d8fb387c7938450ff1d7705de820b6aba4d0675da165096df047426",
+                "amd64": "2a9b3356383e3a5ea3bde40127a3e5c8cf23f54426df65475d7e3da1af51f5bf",
+                "arm64": "4a883f722cf6c944938c4afbaf5566eb15f8e7323e1827b57c844f9bbb025d08",
             },
             "13": {
-                "amd64": "b7774baff94d74df3202b56abf657289672ea896727b96bad5b523294dc77db1",
-                "arm64": "5f42b33a29066eafe6f8db1280dac11a5d87c12cde7203b902d59a29066f0301",
+                "amd64": "332b70236700bd5482a22890481e11c274c321210d4c10a304e5d4f4045ae39e",
+                "arm64": "ced4fca9dc6d47d84f2a7fecbd77c6b5740b20063e8568f12149cef812924c82",
             },
         },
     },
@@ -243,8 +244,8 @@ VERSIONS = {
         "patch_args": ["-p1"],
         "patches": ["@envoy_toolshed//:patches/toolchains_llvm.patch"],
         "repo": "bazel-contrib/toolchains_llvm",
-        "version": "1.8.0",
-        "sha256": "3b05826f256040f91c24dcaad673eb1c91e4cc93f4043d0205f2512327640205",
+        "version": "1.9.0",
+        "sha256": "779b3280571647034931c7f9ce8ef3836bfc55d00d23e7dad5370151e1f7149e",
         "url": "https://github.com/{repo}/releases/download/v{version}/{name}-v{version}.tar.gz",
         "strip_prefix": "{name}-v{version}",
     },

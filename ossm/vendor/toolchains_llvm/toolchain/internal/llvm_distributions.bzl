@@ -13,18 +13,19 @@
 # limitations under the License.
 
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "read_netrc", "use_netrc")
-load("@helly25_bzl//bzl/versions:versions.bzl", "versions")
 load(
     "@llvm_distributions_data//:data.bzl",
     "LLVM_DISTRIBUTIONS",
     "LLVM_DISTRIBUTION_URLS",
 )
+load("@mboworks_bzl//bzl/versions:versions.bzl", "versions")
 load(
     "//toolchain/internal:common.bzl",
     "attr_dict",
     "exec_os_arch_dict_value",
     "host_info",
 )
+load("//toolchain/internal:distributions_repo.bzl", "load_distribution_files")
 
 # The merged distribution table is built at module-load time by the
 # `llvm_distributions` module extension (see
@@ -60,10 +61,21 @@ _llvm_distribution_urls = LLVM_DISTRIBUTION_URLS
 _DEFAULT_URL_TEMPLATE = "https://github.com/llvm/llvm-project/releases/download/llvmorg-{version}/"
 
 def _parse_version(v):
-    return tuple([int(s) for s in v.split(".")])
+    return tuple(versions.parse(v))
 
 def _version_string(version):
-    return ".".join([str(v) for v in version])
+    core = []
+    suffix = ""
+    for part in version:
+        if part in ["-", "+"]:
+            suffix += part
+        elif suffix:
+            # The versions helper tokenizes LLVM's `rc3` identifier as
+            # `"rc", 3`; LLVM release tags use the compact spelling.
+            suffix += str(part)
+        else:
+            core.append(str(part))
+    return ".".join(core) + suffix
 
 def _distribution_basename(distribution):
     return distribution.split("?", 1)[0].split("#", 1)[0].split("/")[-1].split("\\")[-1].replace("%2B", "+")
@@ -72,7 +84,51 @@ def _distribution_version_string(distribution):
     # We assume here that the `distribution` contains a basename of the forms:
     # - `LLVM-<version>-...`, or
     # - `clang+llvm-<version>-...`.
-    return _distribution_basename(distribution).split("-", 2)[1]
+    parts = _distribution_basename(distribution).split("-")
+    version = parts[1]
+    if len(parts) > 2 and parts[2].startswith("rc") and parts[2][2:].isdigit():
+        version += "-" + parts[2]
+    return version
+
+def _is_prerelease(version):
+    return "-" in version
+
+def _parsed_version_core(parsed):
+    core = []
+    for part in parsed:
+        if part in ["-", "+"]:
+            break
+        core.append(part)
+    return tuple(core)
+
+def _version_core(version):
+    return _parsed_version_core(_parse_version(version))
+
+def _requirements_allow_prerelease(version, requirements):
+    if not _is_prerelease(version):
+        return True
+    if not requirements:
+        return False
+    core = _version_core(version)
+    return any([
+        "-" in requirement.version and _parsed_version_core(requirement.version) == core
+        for requirement in requirements
+    ])
+
+def _sort_versions(version_strings, *, reverse):
+    result = []
+    for version in version_strings:
+        inserted = False
+        for pos in range(len(result)):
+            if versions.cmp(result[pos], version) >= 0:
+                result = result[:pos] + [version] + result[pos:]
+                inserted = True
+                break
+        if not inserted:
+            result.append(version)
+    if reverse:
+        result = result[::-1]
+    return result
 
 def _distribution_version(distribution):
     # Return the version string of a distribution.
@@ -223,6 +279,27 @@ def _get_all_llvm_distributions(*, llvm_distributions, extra_llvm_distributions,
         )
     return distributions
 
+def _configured_distribution_data(rctx):
+    """Return the enabled built-ins, merged user entries, and user URL map."""
+    file_distributions, file_urls = load_distribution_files(
+        rctx,
+        rctx.attr.extra_llvm_distribution_files,
+    )
+    user_distributions = dict(file_distributions)
+    user_distributions.update(rctx.attr.extra_llvm_distributions)
+    return (
+        _llvm_distributions if rctx.attr.use_builtin_llvm_distributions else {},
+        user_distributions,
+        file_urls,
+    )
+
+def _configured_distribution_url(*, basename, use_builtin_llvm_distributions, user_distribution_urls):
+    if basename in user_distribution_urls:
+        return user_distribution_urls[basename]
+    if use_builtin_llvm_distributions:
+        return _llvm_distribution_urls.get(basename)
+    return None
+
 _UBUNTU_NAMES = [
     "arch",
     "chainguard",
@@ -332,16 +409,18 @@ def _dist_to_os_names(dist, default_os_names = []):
 def _find_llvm_basenames_by_stem(*, prefixes, all_llvm_distributions, is_prefix = False, return_first_match = False):
     basenames = []
     for prefix in prefixes:
-        for suffix in [".tar.gz", ".tar.xz"]:
+        # LLVM publishes equivalent xz and zstd archives for newer releases.
+        # Prefer zstd because it is substantially faster to unpack.
+        for suffix in [".tar.zst", ".tar.xz", ".tar.gz"]:
             basename = prefix + suffix
             if basename in all_llvm_distributions:
                 return [basename]
         if not is_prefix:
             continue
-        for basename in all_llvm_distributions.keys():
-            if not basename.startswith(prefix):
-                continue
-            for suffix in [".tar.gz", ".tar.xz"]:
+        for suffix in [".tar.zst", ".tar.xz", ".tar.gz"]:
+            for basename in all_llvm_distributions.keys():
+                if not basename.startswith(prefix):
+                    continue
                 if basename.endswith(suffix) and basename not in basenames:
                     basenames.append(basename)
                     if return_first_match:
@@ -541,15 +620,22 @@ def _parse_version_or_requirements(version_or_requirements):
 def _get_version_from_distribution(distribution):
     # We assume here that the `distribution` is a basename of the form `LLVM-<version>-...` or
     # `clang+llvm-<version>-...`.
-    return distribution.split("-")[1]
+    return _distribution_version_string(distribution)
 
 def _get_llvm_versions(*, version_or_requirements, all_llvm_distributions):
+    requirements = _parse_version_or_requirements(version_or_requirements)
     llvm_version_dict = {}
     for distribution in all_llvm_distributions.keys():
         version = _get_version_from_distribution(distribution)
-        llvm_version_dict[_parse_version(version)] = version
 
-    return [v for k, v in sorted(llvm_version_dict.items(), reverse = version_or_requirements.startswith("latest"))]
+        # Match the common SemVer range convention: prereleases are excluded
+        # unless a comparator explicitly mentions a prerelease with the same
+        # major/minor/patch tuple.
+        if not _requirements_allow_prerelease(version, requirements):
+            continue
+        llvm_version_dict[version] = None
+
+    return _sort_versions(llvm_version_dict.keys(), reverse = version_or_requirements.startswith("latest"))
 
 def _required_llvm_release_name(*, version_or_requirements, all_llvm_distributions, host_info):
     llvm_versions = _get_llvm_versions(version_or_requirements = version_or_requirements, all_llvm_distributions = all_llvm_distributions)
@@ -595,9 +681,10 @@ def _resolve_llvm_version_rctx_env(rctx, llvm_version):
 
 def _required_llvm_release_name_rctx(rctx, llvm_version):
     llvm_version = _resolve_llvm_version_rctx_env(rctx, llvm_version)
+    builtin_distributions, user_distributions, _ = _configured_distribution_data(rctx)
     all_llvm_distributions = _get_all_llvm_distributions(
-        llvm_distributions = _llvm_distributions,
-        extra_llvm_distributions = rctx.attr.extra_llvm_distributions,
+        llvm_distributions = builtin_distributions,
+        extra_llvm_distributions = user_distributions,
         parsed_llvm_version = _parse_version(llvm_version) if not _is_requirement(llvm_version) else None,
     )
     return _required_llvm_release_name(
@@ -631,9 +718,10 @@ def _filter_llvm_distributions(*, llvm_version, all_llvm_distributions):
 def _distribution_urls(rctx):
     """Return LLVM `urls`, `sha256` and `strip_prefix` for the given context."""
     llvm_version = _get_llvm_version(rctx)
+    builtin_distributions, user_distributions, user_distribution_urls = _configured_distribution_data(rctx)
     all_llvm_distributions = _get_all_llvm_distributions(
-        llvm_distributions = _llvm_distributions,
-        extra_llvm_distributions = rctx.attr.extra_llvm_distributions,
+        llvm_distributions = builtin_distributions,
+        extra_llvm_distributions = user_distributions,
         parsed_llvm_version = _parse_version(llvm_version) if not _is_requirement(llvm_version) else None,
     )
     _, sha256, strip_prefix, _ = _key_attrs(rctx)
@@ -680,8 +768,13 @@ def _distribution_urls(rctx):
     if rctx.attr.alternative_llvm_sources:
         for pattern in rctx.attr.alternative_llvm_sources:
             urls.append(pattern.format(llvm_version = llvm_version, basename = basename))
-    if basename in _llvm_distribution_urls:
-        urls.append(_llvm_distribution_urls[basename])
+    configured_url = _configured_distribution_url(
+        basename = basename,
+        use_builtin_llvm_distributions = rctx.attr.use_builtin_llvm_distributions,
+        user_distribution_urls = user_distribution_urls,
+    )
+    if configured_url:
+        urls.append(configured_url)
     else:
         # Basename not covered by any `_meta.base_url` template: fall back to
         # the standard GitHub release URL. Covers both bundled `.jsonc` files
@@ -709,6 +802,9 @@ def _distributions_test_writer_impl(ctx):
 
     # Inject version '0.0.0' that verifies additional behavior using `extra_llvm_distributions`.
     extra_llvm_distributions = {
+        # Keep the equivalent xz asset to verify that automatic selection
+        # prefers zstd when both compression formats are available.
+        "LLVM-0.0.0-Linux-ARM64.tar.zst": "d6b8679be46bdaa383e0c7f13a473ca8f7a4f87233f2cc0e0a7ab19e1b6265e7",
         "LLVM-0.0.0-Linux-ARM64.tar.xz": "a6b8679be46bdaa383e0c7f13a473ca8f7a4f87233f2cc0e0a7ab19e1b6265e7",
         "/foo/bar/LLVM-0.0.0-Linux-X64.tar.xz?xyz": "0a764a8ca521606532ca9ec4e5745c933b16b7d30f4701a47ee851d448fcdb74",
         "http://server/foo/bar/LLVM-0.0.0-macOS-ARM64.tar.xz#xyz": "9da86f64a99f5ce9b679caf54e938736ca269c5e069d0c94ad08b995c5f25c16",
@@ -998,6 +1094,79 @@ def _requirements_test_writer_impl(ctx):
 
 requirements_test_writer = rule(
     implementation = _requirements_test_writer_impl,
+    attrs = {
+        "result": attr.output(mandatory = True),
+    },
+)
+
+def _prerelease_test_writer_impl(ctx):
+    # Exercise the checked-in release table so this also proves that published
+    # prereleases are bundled, not merely supported through user-supplied data.
+    distributions = _llvm_distributions
+    host = struct(
+        arch = "x86_64",
+        os = "linux",
+        dist = struct(name = "ubuntu", version = "24.04"),
+    )
+    result = []
+
+    for requested in ["23.1.0-rc3", "22.1.8"]:
+        available = _get_all_llvm_distributions(
+            llvm_distributions = distributions,
+            extra_llvm_distributions = {},
+            parsed_llvm_version = _parse_version(requested),
+        )
+        basename, error = _find_llvm_basename_or_error(requested, available, host)
+        result.append("exact {version}: {result}".format(
+            version = requested,
+            result = error or basename,
+        ))
+
+    all_distributions = _get_all_llvm_distributions(
+        llvm_distributions = distributions,
+        extra_llvm_distributions = {},
+        parsed_llvm_version = None,
+    )
+    for requested in ["latest", "latest:>=23", "latest:>22", "latest:>=23.1.0-rc1"]:
+        version, basename, error = _required_llvm_release_name(
+            version_or_requirements = requested,
+            all_llvm_distributions = all_distributions,
+            host_info = host,
+        )
+        result.append("{requested}: {result}".format(
+            requested = requested,
+            result = error or "{} = {}".format(version, basename),
+        ))
+
+    # With built-ins suppressed, version resolution must see only the user
+    # entries. In particular, `latest` must not leak a newer bundled release.
+    custom_only = _get_all_llvm_distributions(
+        llvm_distributions = {},
+        extra_llvm_distributions = {
+            "https://example.com/LLVM-20.1.4-Linux-X64.tar.zst": "3" * 64,
+        },
+        parsed_llvm_version = None,
+    )
+    version, basename, error = _required_llvm_release_name(
+        version_or_requirements = "latest",
+        all_llvm_distributions = custom_only,
+        host_info = host,
+    )
+    result.append("custom-only latest: {result}".format(
+        result = error or "{} = {}".format(version, basename),
+    ))
+    builtin_basename = "LLVM-22.1.8-Linux-X64.tar.xz"
+    result.append("custom-only bundled URL: {}".format(
+        _configured_distribution_url(
+            basename = builtin_basename,
+            use_builtin_llvm_distributions = False,
+            user_distribution_urls = {},
+        ) or "suppressed",
+    ))
+    ctx.actions.write(ctx.outputs.result, "\n".join(result) + "\n")
+
+prerelease_test_writer = rule(
+    implementation = _prerelease_test_writer_impl,
     attrs = {
         "result": attr.output(mandatory = True),
     },

@@ -30,15 +30,25 @@ config_setting(
     flag_values = {":grpc_use_openssl": "true"},
 )
 
+label_flag(
+    name = "ssl_lib",
+    build_setting_default = "@envoy//bazel:ssl",
+)
+
+label_flag(
+    name = "crypto_lib",
+    build_setting_default = "@envoy//bazel:crypto",
+)
+
 alias(
     name = "libssl",
-    actual = "@envoy//bazel:ssl",
+    actual = ":ssl_lib",
     tags = ["manual"],
 )
 
 alias(
     name = "libcrypto",
-    actual = "@envoy//bazel:crypto",
+    actual = ":crypto_lib",
     tags = ["manual"],
 )
 

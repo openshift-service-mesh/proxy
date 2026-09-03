@@ -124,4 +124,9 @@ v8_lib_no_pointer_compression(
     library = "@v8//:wee8",
 )
 
+label_flag(
+    name = "crypto_lib",
+    build_setting_default = "@envoy//bazel:crypto",
+)
+
 exports_files(["tsan_suppressions.txt"])

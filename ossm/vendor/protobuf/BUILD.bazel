@@ -808,3 +808,9 @@ filegroup(
     srcs = glob(["**/*.bzl"]),
     visibility = ["//visibility:public"],
 )
+
+label_flag(
+    name = "zlib",
+    build_setting_default = "@envoy//bazel:zlib",
+    visibility = ["//visibility:public"],
+)

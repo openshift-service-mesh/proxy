@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
 package(default_visibility = ["//visibility:public"])
 
 # Some targets may need to directly depend on these files.
@@ -75,6 +77,12 @@ filegroup(
     ),
 )
 
+cc_library(
+    name = "clang_headers",
+    hdrs = glob(["include/**"]),
+    strip_include_prefix = "include",
+)
+
 # This filegroup should only have source directories, not individual files.
 # We rely on this assumption in system_module_map.bzl.
 filegroup(
@@ -135,6 +143,11 @@ filegroup(
 )
 
 filegroup(
+    name = "lib_archives",
+    srcs = glob(["lib/*.a"], allow_empty = True),
+)
+
+filegroup(
     name = "lib_legacy",
     srcs = glob(
         [
@@ -166,6 +179,14 @@ filegroup(
     name = "libclang_rt-asan-darwin",
     srcs = glob(
         ["lib/clang/{LLVM_VERSION}/lib/darwin/libclang_rt.asan_osx_dynamic.dylib"],
+        allow_empty = True,
+    ),
+)
+
+filegroup(
+    name = "libclang_rt-lsan-darwin",
+    srcs = glob(
+        ["lib/clang/{LLVM_VERSION}/lib/darwin/libclang_rt.lsan_osx_dynamic.dylib"],
         allow_empty = True,
     ),
 )
@@ -225,6 +246,11 @@ filegroup(
 )
 
 filegroup(
+    name = "install-name-tool",
+    srcs = ["bin/llvm-install-name-tool"],
+)
+
+filegroup(
     name = "ranlib",
     srcs = ["bin/llvm-ranlib"],
 )
@@ -247,6 +273,11 @@ filegroup(
 filegroup(
     name = "clang-tidy",
     srcs = ["bin/clang-tidy"],
+)
+
+filegroup(
+    name = "clang-apply-replacements",
+    srcs = ["bin/clang-apply-replacements"],
 )
 
 filegroup(

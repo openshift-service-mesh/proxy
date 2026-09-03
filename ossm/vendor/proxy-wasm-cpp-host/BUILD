@@ -93,7 +93,7 @@ cc_library(
         "@com_google_absl//absl/cleanup",
     ] + select({
         "//bazel:crypto_system": [],
-        "//conditions:default": ["@envoy//bazel:crypto"],
+        "//conditions:default": ["//bazel:crypto_lib"],
     }),
     alwayslink = 1,
 )

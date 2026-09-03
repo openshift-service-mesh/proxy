@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 
 bool_flag(
@@ -41,18 +42,19 @@ config_setting(
 # Sanitizers are enabled via Bazel features, not //toolchain/config flags:
 #
 #   --features=asan      (AddressSanitizer)
+#   --features=lsan      (LeakSanitizer)
 #   --features=ubsan     (UndefinedBehaviorSanitizer)
 #   --features=tsan      (ThreadSanitizer)
 #   --features=msan      (MemorySanitizer; Linux only)
 #
-# asan/ubsan/tsan are rules_cc's stock sanitizer cc_features. msan is wired up
+# asan/lsan/ubsan/tsan are rules_cc's stock sanitizer cc_features. msan is wired up
 # in cc_toolchain_config.bzl because it must swap in an instrumented libc++
 # (supplied via the `libcxx_url`/`libcxx_sha256` attributes of the LLVM
 # distribution repo). Using features (rather than flags) lets Bazel reset them
 # to `--host_features` in the exec configuration, so build tools stay
 # uninstrumented.
 #
-# The config_settings below match `--features=asan|ubsan|tsan` so
+# The config_settings below match `--features=asan|lsan|ubsan|tsan` so
 # cc_toolchain_config.bzl can `select()` extra flags onto the stock features
 # (the C++ sanitizer runtime, and ubsan's bounds/nullability checks). Matching
 # on `--features` keeps the exec-configuration reset: the extra flags are
@@ -71,7 +73,46 @@ config_setting(
 )
 
 config_setting(
+    name = "use_lsan",
+    values = {"features": "lsan"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
     name = "use_tsan",
     values = {"features": "tsan"},
+    visibility = ["//visibility:public"],
+)
+
+# The four settings above are not mutually exclusive: `--features=asan
+# --features=ubsan` matches both. A select() may therefore only key on more
+# than one of them when every matching branch resolves to the same value, so
+# anything shared by asan/lsan/ubsan/tsan keys on this group instead, and
+# anything sanitizer-specific gets its own single-condition select().
+#
+# The group holds the sanitizers that need the same treatment, which is all
+# four of rules_cc's stock ones but not every sanitizer:
+#
+#   msan needs no config_setting of its own. It is driven entirely by the
+#   mutually-exclusive msan/nomsan cc_features in cc_toolchain_config.bzl, so
+#   no select() keys on it and it cannot produce an ambiguous match. It also
+#   does not want what this group guards: it links the instrumented libc++
+#   itself rather than through `-fsanitize-link-c++-runtime`, and it is
+#   Linux-only, so the macOS runtime dylibs never apply.
+#
+# Newer sanitizers keep appearing (the LLVM distributions already carry an
+# rtsan runtime), so expect to extend this. Anything added here must keep every
+# select() keyed on exactly one condition, and a sanitizer with a macOS dynamic
+# runtime also needs its dylib in the sanitizer-runtime-libs filegroup that
+# internal/configure.bzl emits -- otherwise the binary references
+# @rpath/libclang_rt.<san>_osx_dynamic.dylib that nothing ships.
+selects.config_setting_group(
+    name = "use_common_sanitizer",
+    match_any = [
+        ":use_asan",
+        ":use_lsan",
+        ":use_tsan",
+        ":use_ubsan",
+    ],
     visibility = ["//visibility:public"],
 )

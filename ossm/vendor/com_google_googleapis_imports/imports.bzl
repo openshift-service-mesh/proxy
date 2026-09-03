@@ -3,11 +3,11 @@ load("@grpc//bazel:python_rules.bzl", _py_proto_library = "py_proto_library")
 
 load("@grpc//bazel:python_rules.bzl", _py_grpc_library = "py_grpc_library")
 
-load("@io_bazel_rules_go//proto:def.bzl", _go_proto_library = "go_proto_library")
+load("@rules_go//proto:def.bzl", _go_proto_library = "go_proto_library")
 
-load("@io_bazel_rules_go//proto:def.bzl", _go_grpc_library = "go_grpc_library")
+load("@rules_go//proto:def.bzl", _go_grpc_library = "go_grpc_library")
 
-load("@io_bazel_rules_go//go:def.bzl", _go_library = "go_library")
+load("@rules_go//go:def.bzl", _go_library = "go_library")
 
 load("@protobuf//bazel:cc_proto_library.bzl", _cc_proto_library = "cc_proto_library")
 

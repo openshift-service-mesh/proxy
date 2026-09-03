@@ -18,10 +18,13 @@
 #include "quiche/quic/qbone/bonnet/qbone_client_packet_exchanger.h"
 #include "quiche/quic/qbone/platform/kernel_interface.h"
 #include "quiche/quic/qbone/platform/netlink_interface.h"
-#include "quiche/quic/qbone/qbone_client_interface.h"
 
 namespace quic {
 
+// Exchanger implementation that does read and write operations synchronously in
+// the calling thread, invoking visitor callbacks on that same thread. Safe to
+// use separate threads for reading and writing as long as all writes occur on
+// the same thread and all reads occur on the same thread.
 class TunDevicePacketExchanger : public QboneClientPacketExchanger {
  public:
   // |mtu| is the mtu of the TUN device.
@@ -36,11 +39,11 @@ class TunDevicePacketExchanger : public QboneClientPacketExchanger {
   ~TunDevicePacketExchanger() override;
 
   // QboneClientPacketExchanger:
-  void Start(int read_fd, int write_fd) override;
+  void Start(int read_fd, int write_fd,
+             QboneClientPacketExchanger* absl_nullable exchanger) override;
   void Stop() override;
-  int OnReadFromNetworkReady(int max_packets_to_read,
-                             QboneClientInterface* qbone_client) override;
-  void WritePacketToNetwork(const char* packet, size_t size) override;
+  int OnReadFromNetworkReady(int max_packets_to_read) override;
+  void WritePacketToNetwork(absl::Span<const std::byte> packet) override;
 
  private:
   enum class L2ValidationResult {
@@ -57,15 +60,12 @@ class TunDevicePacketExchanger : public QboneClientPacketExchanger {
   };
 
   // Returns true if more packets may be available to read.
-  bool ReadAndExchangeSinglePacket(QboneClientInterface* qbone_client,
-                                   bool exchange_blocked_error);
+  bool ReadAndExchangeSinglePacket(bool exchange_blocked_error);
 
   void InitializeEthHdr();
   L2ValidationResult ValidateL2Headers(const ethhdr& eth_header,
                                        absl::Span<const std::byte> packet);
 
-  int read_fd_ = -1;
-  int write_fd_ = -1;
   KernelInterface* kernel_;
   NetlinkInterface* netlink_;
   QboneClientPacketExchanger::Visitor& visitor_;
@@ -76,6 +76,11 @@ class TunDevicePacketExchanger : public QboneClientPacketExchanger {
   const bool is_tap_;
   ethhdr eth_hdr_ = {};
   bool eth_hdr_initialized_ = false;
+
+  // -1/nullptr before Start() or after Stop().
+  int read_fd_ = -1;
+  int write_fd_ = -1;
+  QboneClientPacketExchanger* absl_nullable exchanger_ = nullptr;
 };
 
 }  // namespace quic
