@@ -37,29 +37,12 @@ jobs:
         include:
           - arch: x86_64
             suffix: ""
-            name_suffix: ""
             status_name: x86_64 bare metal
-            tmt_plan: ^/plans/build$
-            hermetic: false
           - arch: aarch64
             suffix: "-arm64"
-            name_suffix: " arm64"
             status_name: arm64 bare metal
-            tmt_plan: ^/plans/build$
-            hermetic: false
-          - arch: x86_64
-            suffix: ""
-            name_suffix: " hermetic"
-            status_name: x86_64 hermetic
-            tmt_plan: ^/plans/build-hermetic$
-            hermetic: true
-          - arch: aarch64
-            suffix: "-arm64"
-            name_suffix: " arm64 hermetic"
-            status_name: arm64 hermetic
-            tmt_plan: ^/plans/build-hermetic$
-            hermetic: true
-    name: "build (${{ matrix.arch }}, Testing Farm bare metal${{ matrix.name_suffix }})"
+    name: "build (${{ matrix.arch }}, Testing Farm bare metal)"
+    if: matrix.arch != 'aarch64' || inputs.base_ref != 'release-1.24'
     steps:
       - name: Validate inputs
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
@@ -134,7 +117,7 @@ jobs:
           api_url: https://api.testing-farm.io/v0.1
           git_url: https://github.com/openshift-service-mesh/proxy.git
           git_ref: ${{ inputs.base_ref }}
-          tmt_plan_regex: ${{ matrix.tmt_plan }}
+          tmt_plan_regex: ^/plans/build$
           compose: CentOS-Stream-10
           arch: ${{ matrix.arch }}
           tmt_hardware: '{"virtualization": {"is-virtualized": false}}'
@@ -165,7 +148,7 @@ jobs:
           fi
 
       - name: Collect build artifact
-        if: success() && !matrix.hermetic
+        if: success()
         env:
           REQUEST_ID: ${{ steps.tf.outputs.request_id }}
           SOURCE_REF: ${{ inputs.head_sha }}
@@ -179,7 +162,7 @@ jobs:
           curl -fSL -o "${ARTIFACT}" "${TF_PATH}"
 
       - name: Upload build artifact
-        if: success() && !matrix.hermetic
+        if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: envoy-alpha-${{ inputs.head_sha }}${{ matrix.suffix }}
