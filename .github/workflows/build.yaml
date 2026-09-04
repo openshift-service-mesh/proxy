@@ -39,25 +39,25 @@ jobs:
             suffix: ""
             name_suffix: ""
             status_name: x86_64 bare metal
-            tmt_plan: /plans/build
+            tmt_plan: ^/plans/build$
             hermetic: false
           - arch: aarch64
             suffix: "-arm64"
             name_suffix: " arm64"
             status_name: arm64 bare metal
-            tmt_plan: /plans/build
+            tmt_plan: ^/plans/build$
             hermetic: false
           - arch: x86_64
             suffix: ""
             name_suffix: " hermetic"
             status_name: x86_64 hermetic
-            tmt_plan: /plans/build-hermetic
+            tmt_plan: ^/plans/build-hermetic$
             hermetic: true
           - arch: aarch64
             suffix: "-arm64"
             name_suffix: " arm64 hermetic"
             status_name: arm64 hermetic
-            tmt_plan: /plans/build-hermetic
+            tmt_plan: ^/plans/build-hermetic$
             hermetic: true
     name: "build (${{ matrix.arch }}, Testing Farm bare metal${{ matrix.name_suffix }})"
     steps:
@@ -146,6 +146,23 @@ jobs:
           create_issue_comment: false
           commit_sha: ${{ inputs.head_sha }}
           pr_number: ${{ inputs.pr_number }}
+
+      - name: Verify single plan executed
+        if: always() && steps.tf.outputs.request_id != ''
+        env:
+          REQUEST_ID: ${{ steps.tf.outputs.request_id }}
+        run: |
+          ARTIFACTS_URL="https://artifacts.dev.testing-farm.io/${REQUEST_ID}"
+          if ! curl -sSL -o results.xml "${ARTIFACTS_URL}/results.xml"; then
+            echo "WARNING: results.xml not available (TF may not have discovered any plans)"
+            exit 0
+          fi
+          PLAN_COUNT=$(grep -c '<testsuite ' results.xml)
+          if [ "${PLAN_COUNT}" -ne 1 ]; then
+            echo "ERROR: expected exactly 1 plan, found ${PLAN_COUNT}:"
+            grep '<testsuite ' results.xml
+            exit 1
+          fi
 
       - name: Collect build artifact
         if: success() && !matrix.hermetic
