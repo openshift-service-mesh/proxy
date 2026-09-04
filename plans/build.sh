@@ -24,5 +24,3 @@ run_in_podman "GOPROXY=off bash ossm/ci/pre-submit.sh"
 # Phase 4: Produce release artifact (bazel cache is warm, no network needed)
 run_in_podman "GOPROXY=off SKIP_GCS_UPLOAD=true bash ossm/ci/post-submit.sh"
 collect_artifact
-
-echo "Hermetic build passed: all dependencies are available offline"
