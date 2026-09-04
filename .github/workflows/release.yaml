@@ -138,7 +138,7 @@ jobs:
           api_url: https://api.testing-farm.io/v0.1
           git_url: https://github.com/openshift-service-mesh/proxy.git
           git_ref: ${{ github.ref_name }}
-          tmt_plan_regex: /plans/release
+          tmt_plan_regex: ^/plans/release$
           compose: CentOS-Stream-10
           arch: ${{ matrix.arch }}
           tmt_hardware: '{"virtualization": {"is-virtualized": false}}'
