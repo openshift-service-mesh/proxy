@@ -26,23 +26,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        run: |
+          if [[ "${{ inputs.base_ref }}" == "release-1.24" ]]; then
+            echo 'matrix={"include":[{"arch":"x86_64","suffix":"","status_name":"x86_64 bare metal"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"include":[{"arch":"x86_64","suffix":"","status_name":"x86_64 bare metal"},{"arch":"aarch64","suffix":"-arm64","status_name":"arm64 bare metal"}]}' >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: setup
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
       statuses: write
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            suffix: ""
-            status_name: x86_64 bare metal
-          - arch: aarch64
-            suffix: "-arm64"
-            status_name: arm64 bare metal
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
     name: "build (${{ matrix.arch }}, Testing Farm bare metal)"
-    if: matrix.arch != 'aarch64' || inputs.base_ref != 'release-1.24'
     steps:
       - name: Validate inputs
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
