@@ -15,7 +15,7 @@
 # limitations under the License.
 
 
-# Update the Envoy SHA in istio/proxy WORKSPACE with the first argument (aka ENVOY_SHA) and
+# Update the Envoy SHA in istio/proxy MODULE.bazel with the first argument (aka ENVOY_SHA) and
 # the second argument (aka ENVOY_SHA commit date)
 
 # Exit immediately for non zero status
@@ -30,10 +30,10 @@ UPDATE_BRANCH=${UPDATE_BRANCH:-"main"}
 ENVOY_SHA=${ENVOY_SHA:-""}
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-WORKSPACE=${ROOT}/WORKSPACE
+MODULE_BAZEL=${ROOT}/MODULE.bazel
 
-ENVOY_ORG="$(grep -Pom1 "^ENVOY_ORG = \"\K[a-zA-Z-]+" "${WORKSPACE}")"
-ENVOY_REPO="$(grep -Pom1 "^ENVOY_REPO = \"\K[a-zA-Z-]+" "${WORKSPACE}")"
+ENVOY_ORG="$(grep -Pom1 "^ENVOY_ORG = \"\K[a-zA-Z-]+" "${MODULE_BAZEL}")"
+ENVOY_REPO="$(grep -Pom1 "^ENVOY_REPO = \"\K[a-zA-Z-]+" "${MODULE_BAZEL}")"
 
 # get latest commit for specified org/repo
 LATEST_SHA="$(git ls-remote https://github.com/"${ENVOY_ORG}"/"${ENVOY_REPO}" "refs/heads/$UPDATE_BRANCH" | awk '{ print $1}')"
@@ -52,15 +52,95 @@ SHA256=${SHAArr[0]}
 rm "${LATEST_SHA}".tar.gz
 
 # Update ENVOY_SHA commit date
-sed -i "s/Commit date: .*/Commit date: ${DATE}/" "${WORKSPACE}"
+sed -i "s/Commit date: .*/Commit date: ${DATE}/" "${MODULE_BAZEL}"
 
-# Update the dependency in istio/proxy WORKSPACE
-sed -i 's/ENVOY_SHA = .*/ENVOY_SHA = "'"$LATEST_SHA"'"/' "${WORKSPACE}"
-sed -i 's/ENVOY_SHA256 = .*/ENVOY_SHA256 = "'"$SHA256"'"/' "${WORKSPACE}"
+# Update the dependency in istio/proxy MODULE.bazel
+sed -i 's/ENVOY_SHA = .*/ENVOY_SHA = "'"$LATEST_SHA"'"/' "${MODULE_BAZEL}"
+sed -i 's/ENVOY_SHA256 = .*/ENVOY_SHA256 = "'"$SHA256"'"/' "${MODULE_BAZEL}"
 
 # Update .bazelversion and envoy.bazelrc
-curl -sSL "https://raw.githubusercontent.com/${ENVOY_ORG}/${ENVOY_REPO}/${LATEST_SHA}/.bazelversion" > .bazelversion
-curl -sSL "https://raw.githubusercontent.com/${ENVOY_ORG}/${ENVOY_REPO}/${LATEST_SHA}/.bazelrc" > envoy.bazelrc
+# -f (fail on 404/5xx) matters here: without it curl exits 0 and writes the
+# error body to the destination file, which later steps then treat as valid.
+curl -sSfL "https://raw.githubusercontent.com/${ENVOY_ORG}/${ENVOY_REPO}/${LATEST_SHA}/.bazelversion" > .bazelversion
+curl -sSfL "https://raw.githubusercontent.com/${ENVOY_ORG}/${ENVOY_REPO}/${LATEST_SHA}/.bazelrc" > envoy.bazelrc
 
 # Update VERSION.txt
-curl -sSL "https://raw.githubusercontent.com/${ENVOY_ORG}/${ENVOY_REPO}/${LATEST_SHA}/VERSION.txt" > ENVOY_VERSION.txt
+curl -sSfL "https://raw.githubusercontent.com/${ENVOY_ORG}/${ENVOY_REPO}/${LATEST_SHA}/VERSION.txt" > ENVOY_VERSION.txt
+
+# Keep MODULE.bazel's `bazel_dep(name = "envoy", ...)` and
+# `bazel_dep(name = "envoy_api", ...)` versions aligned with the version
+# Envoy itself declares in its own MODULE.bazel (== VERSION.txt) -- upstream
+# keeps both in lockstep, so both must be updated together or the module file
+# ends up internally inconsistent.
+ENVOY_MODULE_VERSION="$(cat ENVOY_VERSION.txt)"
+# Sanity-check before substituting: a bad/empty ENVOY_VERSION.txt must not be
+# written into MODULE.bazel as a version string.
+echo "${ENVOY_MODULE_VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-dev)?$' || {
+  echo "ENVOY_VERSION.txt has unexpected content: ${ENVOY_MODULE_VERSION}" >&2
+  exit 1
+}
+sed -i -E 's/bazel_dep\(name = "(envoy|envoy_api)", version = "[^"]*"\)/bazel_dep(name = "\1", version = "'"${ENVOY_MODULE_VERSION}"'")/' "${MODULE_BAZEL}"
+
+# Keep every other `bazel_dep` we declare pinned to the exact version Envoy
+# (or envoy_api) declares. Most of these are transitive deps we only declare
+# directly because envoy.bazelrc references them with unqualified `@repo`
+# labels; a version that drifts from Envoy's forces a second module
+# resolution (or an outright resolution failure) at build time.
+ENVOY_MODULE_FILES_DIR="$(mktemp -d)"
+trap 'rm -rf "${ENVOY_MODULE_FILES_DIR}"' EXIT
+curl -sSfL "https://raw.githubusercontent.com/${ENVOY_ORG}/${ENVOY_REPO}/${LATEST_SHA}/MODULE.bazel" > "${ENVOY_MODULE_FILES_DIR}/envoy.MODULE.bazel"
+curl -sSfL "https://raw.githubusercontent.com/${ENVOY_ORG}/${ENVOY_REPO}/${LATEST_SHA}/api/MODULE.bazel" > "${ENVOY_MODULE_FILES_DIR}/envoy_api.MODULE.bazel"
+
+# name<TAB>version pairs; envoy's own MODULE.bazel wins over envoy_api's when
+# both declare a dep (they are kept in lockstep upstream anyway).
+sed -nE 's/^bazel_dep\(name = "([^"]+)", version = "([^"]+)".*/\1\t\2/p' \
+  "${ENVOY_MODULE_FILES_DIR}/envoy.MODULE.bazel" "${ENVOY_MODULE_FILES_DIR}/envoy_api.MODULE.bazel" \
+  > "${ENVOY_MODULE_FILES_DIR}/versions.tsv"
+
+awk -v versions="${ENVOY_MODULE_FILES_DIR}/versions.tsv" '
+BEGIN {
+  FS = "\t"
+  while ((getline line < versions) > 0) {
+    split(line, kv, "\t")
+    # First occurrence wins (envoy/MODULE.bazel is read first).
+    if (!(kv[1] in upstream)) {
+      upstream[kv[1]] = kv[2]
+    }
+  }
+}
+{
+  line = $0
+  if (match(line, /^bazel_dep\(name = "[^"]+", version = "[^"]+"/)) {
+    name = line
+    sub(/^bazel_dep\(name = "/, "", name)
+    sub(/".*/, "", name)
+    # envoy/envoy_api are pinned to ENVOY_VERSION.txt above.
+    if (name != "envoy" && name != "envoy_api") {
+      if (name in upstream) {
+        sub(/version = "[^"]+"/, "version = \"" upstream[name] "\"", line)
+      } else {
+        print "WARNING: " name " is not declared by envoy; leaving version untouched" > "/dev/stderr"
+      }
+    }
+  }
+  print line
+}
+' "${MODULE_BAZEL}" > "${MODULE_BAZEL}.tmp"
+
+# Guard against a truncated/garbled rewrite clobbering MODULE.bazel.
+if [[ "$(wc -l < "${MODULE_BAZEL}.tmp")" -ne "$(wc -l < "${MODULE_BAZEL}")" ]]; then
+  echo "MODULE.bazel rewrite changed the line count; aborting" >&2
+  rm -f "${MODULE_BAZEL}.tmp"
+  exit 1
+fi
+mv "${MODULE_BAZEL}.tmp" "${MODULE_BAZEL}"
+
+# Refresh MODULE.bazel.lock: bumping ENVOY_SHA/ENVOY_SHA256 above invalidates
+# the digests the lockfile recorded for Envoy-provided module extensions
+# (envoy_build_config_ext, envoy_repo_extension, envoy_toolchains_extension,
+# envoy_module_graph_extension). Without this, `bazel_get_workspace_status`
+# sees a lockfile refresh (triggered by Bazel's default
+# --lockfile_mode=update during loading) as an uncommitted change and stamps
+# BUILD_SCM_STATUS=Modified on released binaries, and any job passing
+# --lockfile_mode=error hard-fails on this bot's own PRs.
+bazel mod deps --lockfile_mode=update
