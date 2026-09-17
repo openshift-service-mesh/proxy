@@ -98,6 +98,24 @@ single_version_override(
     patches = ["//ossm/patches:envoy_toolshed-host-llvm.patch"],
 )
 
+# Vendor v8's Python wheels for aarch64 as well as x86_64. v8 (from Envoy's
+# bazel-registry) pins markupsafe, whose wheels are arch-specific. Its pip.parse
+# sets no `target_platforms`, so rules_python resolves wheels for the *host* arch
+# only (see hub_builder.bzl: `target_platforms = pip_attr.target_platforms or
+# ["{os}_{arch}"]`). We vendor on x86_64, so the aarch64 wheel is never fetched
+# and an offline build on an aarch64 host fails downloading it. Patch v8's
+# pip.parse to resolve both arches so `bazel vendor` captures both wheels in one
+# x86_64 pass. (Patching MODULE.bazel via override *does* feed extension
+# resolution in Bazel 8.7 -- verified: both wheel repos get defined and the hub
+# select() gains a cp312_linux_aarch64 branch.) Only x86_64/aarch64 are listed:
+# rules_python's default platform set has no s390x/ppc, and markupsafe ships no
+# wheels for them (those hosts build it from sdist at build time instead).
+single_version_override(
+    module_name = "v8",
+    patch_strip = 1,
+    patches = ["//ossm/patches:v8-pip-target-platforms.patch"],
+)
+
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2", dev_dependency = True)
 
 # 1. Determine SHA256 `wget https://github.com/envoyproxy/envoy/archive/$COMMIT.tar.gz && sha256sum $COMMIT.tar.gz`
@@ -155,16 +173,38 @@ use_repo(envoy_toolchains_ext, "clang_platform")
 # module directly, downstream modules provide their own toolchain.
 bazel_dep(name = "toolchains_llvm", version = "1.9.0.envoy", dev_dependency = True)
 
-python = use_extension("@rules_python//python/extensions:python.bzl", "python")
-python.toolchain(
-    is_default = True,
-    python_version = "3.12",
+# Build-time Python uses the *host* interpreter, mirroring the WORKSPACE-era
+# `use_host_tools = True` behavior. Without this, rules_python (registered by
+# both this module and @envoy) downloads a ~300MB hermetic CPython whose two
+# largest files exceed GitHub's 100MB limit and defeat offline vendoring.
+#
+# local_runtime introspects the host python3 (version, headers, ABI) into a
+# full toolchain -- unlike the autodetecting toolchain, it can build C
+# extensions and satisfies pip. register_toolchains() inserts it ahead of the
+# hermetic 3.12 toolchain so the download is never triggered. The host must be
+# CPython 3.12 to match the ABI of the vendored cp312 wheels (base_pip3,
+# fuzzing_pip3, v8_python_deps). Must be a dev_dependency: a local toolchain
+# only makes sense for the root module.
+local_runtime_repo = use_repo_rule(
+    "@rules_python//python/local_toolchains:repos.bzl",
+    "local_runtime_repo",
 )
-use_repo(
-    python,
-    "python_3_12",
-    python = "python_versions",
+local_runtime_toolchains_repo = use_repo_rule(
+    "@rules_python//python/local_toolchains:repos.bzl",
+    "local_runtime_toolchains_repo",
 )
+local_runtime_repo(
+    name = "local_python3",
+    interpreter_path = "python3",
+    on_failure = "fail",
+    dev_dependency = True,
+)
+local_runtime_toolchains_repo(
+    name = "local_python_toolchains",
+    runtimes = ["local_python3"],
+    dev_dependency = True,
+)
+register_toolchains("@local_python_toolchains//:all", dev_dependency = True)
 
 # Named "envoy_build_config" (not e.g. "istio_proxy_envoy_build_config") so
 # it is visible under that exact apparent name both here in the root module
@@ -258,11 +298,10 @@ local_path_override(
 # only in Envoy's WORKSPACE macros and are gone now that Envoy is Bzlmod-only,
 # so we re-create each of their three effects here.
 #
-# (1) Python: use the host autodetecting toolchain rather than the hermetic
-#     rules_python interpreter. Already handled in ossm/bazelrc via
-#     `--extra_toolchains=@rules_python//python:autodetecting_toolchain`
-#     (extra_toolchains outrank the module-registered hermetic one), so nothing
-#     is needed here.
+# (1) Python: use the host interpreter rather than the hermetic rules_python
+#     one. Handled above via the local_runtime host toolchain (search for
+#     local_runtime_repo), which register_toolchains() ranks ahead of the
+#     hermetic 3.12 toolchain @envoy registers.
 #
 # (2) rules_foreign_cc (CMake/Make/Ninja/etc): prefer the host-installed tools
 #     instead of building them from source. Registered in ossm/bazelrc via

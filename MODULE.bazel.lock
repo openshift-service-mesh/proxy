@@ -1266,7 +1266,7 @@
     "@@envoy+//bazel:extensions.bzl%envoy_build_config_ext": {
       "general": {
         "bzlTransitiveDigest": "jGSg6SA7EX9il07uJALFLV4YsugZdY4Szc3sFtbpAW8=",
-        "usagesDigest": "TuOVqMd/o4niT8nvdAZPAES1h8jyxGgg0RVLBOcXTGA=",
+        "usagesDigest": "VzwBF4R+mMbcTrFRBeA8RrGpShy5CQMz+AMijo2CMVk=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -1480,7 +1480,7 @@
     },
     "@@envoy_toolshed+//compile:extensions.bzl%libcxx_extension": {
       "general": {
-        "bzlTransitiveDigest": "s0/r6mfqp0rXyIhom2PcbxWgVMxzxZ1h54y9ehc6UB8=",
+        "bzlTransitiveDigest": "8xIu+Nqw61+6E4GzxYqqUJvvxBq8BohlpJ71F7/l3T0=",
         "usagesDigest": "KpydMUF67Thjj7dxFRyP1XfRypHyTi2PieulXg/q++8=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
@@ -1508,7 +1508,7 @@
     },
     "@@envoy_toolshed+//compile:extensions.bzl%libcxx_libs_extension": {
       "general": {
-        "bzlTransitiveDigest": "s0/r6mfqp0rXyIhom2PcbxWgVMxzxZ1h54y9ehc6UB8=",
+        "bzlTransitiveDigest": "8xIu+Nqw61+6E4GzxYqqUJvvxBq8BohlpJ71F7/l3T0=",
         "usagesDigest": "z47Defo42ymUqFSeAV/Zd/WotswORz2XQzadP9dIQ/I=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
@@ -1536,7 +1536,7 @@
     },
     "@@envoy_toolshed+//compile:extensions.bzl%llvm_minimal_build_extension": {
       "general": {
-        "bzlTransitiveDigest": "s0/r6mfqp0rXyIhom2PcbxWgVMxzxZ1h54y9ehc6UB8=",
+        "bzlTransitiveDigest": "8xIu+Nqw61+6E4GzxYqqUJvvxBq8BohlpJ71F7/l3T0=",
         "usagesDigest": "jRuNylX+Wvm9FUqKjwwEVWdejsJARKKUNm6FKUUVu90=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
@@ -1575,7 +1575,7 @@
     },
     "@@envoy_toolshed+//compile:extensions.bzl%llvm_minimal_extension": {
       "general": {
-        "bzlTransitiveDigest": "s0/r6mfqp0rXyIhom2PcbxWgVMxzxZ1h54y9ehc6UB8=",
+        "bzlTransitiveDigest": "8xIu+Nqw61+6E4GzxYqqUJvvxBq8BohlpJ71F7/l3T0=",
         "usagesDigest": "nd8zmbfX+BIKHjNpn0Uu3prvphO/8AKVvH0kNcKYxq8=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
@@ -1655,7 +1655,7 @@
     },
     "@@envoy_toolshed+//compile:extensions.bzl%sanitizer_extension": {
       "general": {
-        "bzlTransitiveDigest": "s0/r6mfqp0rXyIhom2PcbxWgVMxzxZ1h54y9ehc6UB8=",
+        "bzlTransitiveDigest": "8xIu+Nqw61+6E4GzxYqqUJvvxBq8BohlpJ71F7/l3T0=",
         "usagesDigest": "hakpQpF46t2OQfRzm/zoeJQF2gQG+W9JVF7J4xeiVFk=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},

@@ -52,6 +52,3 @@ function bazel_test() {
     "${@}" \
   2>&1 | grep --line-buffered -v -E "${OUTPUT_TO_IGNORE}"
 }
-
-# Fix path to the vendor deps
-sed -i "s|=/work/|=$(pwd)/|" ossm/bazelrc-vendor

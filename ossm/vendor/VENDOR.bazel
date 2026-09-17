@@ -1,0 +1,29 @@
+# Vendor-mode configuration for offline (air-gapped) builds.
+# See https://bazel.build/external/vendor and ossm/scripts/update-deps.sh.
+#
+# The repos below are backed by the *host* toolchain: they symlink into /usr
+# (clang/LLVM, the host JDK, the host Go SDK, system OpenSSL). Bazel does NOT
+# rewrite absolute symlinks that point outside the output base, so freezing
+# them into the vendor snapshot would bake in this machine's paths and break on
+# any other host. Instead we `ignore` them here: they are cheap to regenerate
+# from the host at build time and need no network, so offline builds still work.
+#
+# Repos declared with `local`/`configure = True` repo rules (e.g. @local_jdk,
+# the host Go SDK, the autodetecting Python toolchain) are excluded by Bazel
+# automatically; the entries below cover the ones that are not.
+ignore("@@toolchains_llvm++llvm+llvm_host")
+ignore("@@envoy_toolshed++llvm_toolchain_alias_extension+llvm_toolchain_llvm")
+ignore("@@openssl++_repo_rules+system_openssl")
+ignore("@@rules_go++go_sdk+main___host_0")
+ignore("@@rules_java++toolchains+local_jdk")
+
+# The host Python runtime (local_runtime, defined in the root MODULE.bazel).
+# Like the toolchain repos above it symlinks into /usr (libpython3.12.so, the
+# CPython headers), so it must regenerate from the host rather than freeze this
+# machine's paths into the snapshot. This is what replaces the hermetic CPython.
+ignore("@@+_repo_rules+local_python3")
+
+# The hermetic CPython interpreter (~300MB, exceeds GitHub's file size limit)
+# is not vendored. Build-time Python runs on the host via the autodetecting
+# toolchain (--extra_toolchains in ossm/bazelrc), matching the WORKSPACE build.
+ignore("@@rules_python++python+python_3_12_x86_64-unknown-linux-gnu")
