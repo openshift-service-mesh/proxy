@@ -1,0 +1,72 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "modernize",
+    srcs = [
+        "any.go",
+        "bloop.go",
+        "doc.go",
+        "errorsastype.go",
+        "fmtappendf.go",
+        "forvar.go",
+        "maps.go",
+        "minmax.go",
+        "modernize.go",
+        "newexpr.go",
+        "omitzero.go",
+        "plusbuild.go",
+        "rangeint.go",
+        "reflect.go",
+        "slices.go",
+        "slicescontains.go",
+        "slicesdelete.go",
+        "sortslice.go",
+        "stditerators.go",
+        "stringsbuilder.go",
+        "stringscut.go",
+        "stringscutprefix.go",
+        "stringsseq.go",
+        "testingcontext.go",
+        "unsafefuncs.go",
+        "waitgroup.go",
+    ],
+    embedsrcs = ["doc.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/modernize",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/analysis",
+        "//go/analysis/passes/inspect",
+        "//go/ast/edge",
+        "//go/ast/inspector",
+        "//go/types/typeutil",
+        "//internal/analysis/analyzerutil",
+        "//internal/analysis/typeindex",
+        "//internal/astutil",
+        "//internal/goplsexport",
+        "//internal/moreiters",
+        "//internal/packagepath",
+        "//internal/refactor",
+        "//internal/stdlib",
+        "//internal/typeparams",
+        "//internal/typesinternal",
+        "//internal/typesinternal/typeindex",
+        "//internal/versions",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":modernize",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "modernize_test",
+    srcs = ["modernize_test.go"],
+    deps = [
+        ":modernize",
+        "//go/analysis/analysistest",
+        "//internal/goplsexport",
+        "//internal/testenv",
+    ],
+)

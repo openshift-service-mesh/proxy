@@ -1,0 +1,706 @@
+load("@io_bazel_rules_go//go/private:go_toolchain.bzl", "declare_bazel_toolchains")
+load(
+    "@main___host_0//:version.bzl",
+    __0000_MAIN___HOST_0_MAJOR_VERSION = "MAJOR_VERSION",
+    __0000_MAIN___HOST_0_MINOR_VERSION = "MINOR_VERSION",
+    __0000_MAIN___HOST_0_PATCH_VERSION = "PATCH_VERSION",
+    __0000_MAIN___HOST_0_PRERELEASE_SUFFIX = "PRERELEASE_SUFFIX",
+)
+
+package(default_visibility = ["//visibility:public"])
+declare_bazel_toolchains(
+    prefix = "_0000_main___host_0_",
+    go_toolchain_repo = "@main___host_0",
+    host_goarch = "amd64",
+    host_goos = "linux",
+    major = __0000_MAIN___HOST_0_MAJOR_VERSION,
+    minor = __0000_MAIN___HOST_0_MINOR_VERSION,
+    patch = __0000_MAIN___HOST_0_PATCH_VERSION,
+    prerelease = __0000_MAIN___HOST_0_PRERELEASE_SUFFIX,
+    sdk_name = "main___host_0",
+    sdk_type = "host",
+)
+
+
+__0001_PROTOC_GEN_VALIDATE__DOWNLOAD_0_MAJOR_VERSION = "1"
+__0001_PROTOC_GEN_VALIDATE__DOWNLOAD_0_MINOR_VERSION = "24"
+__0001_PROTOC_GEN_VALIDATE__DOWNLOAD_0_PATCH_VERSION = "0"
+__0001_PROTOC_GEN_VALIDATE__DOWNLOAD_0_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0001_protoc-gen-validate__download_0_",
+    go_toolchain_repo = "@protoc-gen-validate__download_0",
+    host_goarch = "amd64",
+    host_goos = "linux",
+    major = __0001_PROTOC_GEN_VALIDATE__DOWNLOAD_0_MAJOR_VERSION,
+    minor = __0001_PROTOC_GEN_VALIDATE__DOWNLOAD_0_MINOR_VERSION,
+    patch = __0001_PROTOC_GEN_VALIDATE__DOWNLOAD_0_PATCH_VERSION,
+    prerelease = __0001_PROTOC_GEN_VALIDATE__DOWNLOAD_0_PRERELEASE_SUFFIX,
+    sdk_name = "protoc-gen-validate__download_0",
+    sdk_type = "remote",
+)
+
+
+__0002_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_AMD64_MAJOR_VERSION = "1"
+__0002_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_AMD64_MINOR_VERSION = "24"
+__0002_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_AMD64_PATCH_VERSION = "0"
+__0002_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_AMD64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0002_protoc-gen-validate__download_0_darwin_amd64_",
+    go_toolchain_repo = "@protoc-gen-validate__download_0_darwin_amd64",
+    host_goarch = "amd64",
+    host_goos = "darwin",
+    major = __0002_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_AMD64_MAJOR_VERSION,
+    minor = __0002_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_AMD64_MINOR_VERSION,
+    patch = __0002_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_AMD64_PATCH_VERSION,
+    prerelease = __0002_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_AMD64_PRERELEASE_SUFFIX,
+    sdk_name = "protoc-gen-validate__download_0_darwin_amd64",
+    sdk_type = "remote",
+)
+
+
+__0003_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_ARM64_MAJOR_VERSION = "1"
+__0003_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_ARM64_MINOR_VERSION = "24"
+__0003_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_ARM64_PATCH_VERSION = "0"
+__0003_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0003_protoc-gen-validate__download_0_darwin_arm64_",
+    go_toolchain_repo = "@protoc-gen-validate__download_0_darwin_arm64",
+    host_goarch = "arm64",
+    host_goos = "darwin",
+    major = __0003_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_ARM64_MAJOR_VERSION,
+    minor = __0003_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_ARM64_MINOR_VERSION,
+    patch = __0003_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_ARM64_PATCH_VERSION,
+    prerelease = __0003_PROTOC_GEN_VALIDATE__DOWNLOAD_0_DARWIN_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "protoc-gen-validate__download_0_darwin_arm64",
+    sdk_type = "remote",
+)
+
+
+__0004_PROTOC_GEN_VALIDATE__DOWNLOAD_0_LINUX_ARM64_MAJOR_VERSION = "1"
+__0004_PROTOC_GEN_VALIDATE__DOWNLOAD_0_LINUX_ARM64_MINOR_VERSION = "24"
+__0004_PROTOC_GEN_VALIDATE__DOWNLOAD_0_LINUX_ARM64_PATCH_VERSION = "0"
+__0004_PROTOC_GEN_VALIDATE__DOWNLOAD_0_LINUX_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0004_protoc-gen-validate__download_0_linux_arm64_",
+    go_toolchain_repo = "@protoc-gen-validate__download_0_linux_arm64",
+    host_goarch = "arm64",
+    host_goos = "linux",
+    major = __0004_PROTOC_GEN_VALIDATE__DOWNLOAD_0_LINUX_ARM64_MAJOR_VERSION,
+    minor = __0004_PROTOC_GEN_VALIDATE__DOWNLOAD_0_LINUX_ARM64_MINOR_VERSION,
+    patch = __0004_PROTOC_GEN_VALIDATE__DOWNLOAD_0_LINUX_ARM64_PATCH_VERSION,
+    prerelease = __0004_PROTOC_GEN_VALIDATE__DOWNLOAD_0_LINUX_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "protoc-gen-validate__download_0_linux_arm64",
+    sdk_type = "remote",
+)
+
+
+__0005_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_AMD64_MAJOR_VERSION = "1"
+__0005_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_AMD64_MINOR_VERSION = "24"
+__0005_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_AMD64_PATCH_VERSION = "0"
+__0005_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_AMD64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0005_protoc-gen-validate__download_0_windows_amd64_",
+    go_toolchain_repo = "@protoc-gen-validate__download_0_windows_amd64",
+    host_goarch = "amd64",
+    host_goos = "windows",
+    major = __0005_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_AMD64_MAJOR_VERSION,
+    minor = __0005_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_AMD64_MINOR_VERSION,
+    patch = __0005_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_AMD64_PATCH_VERSION,
+    prerelease = __0005_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_AMD64_PRERELEASE_SUFFIX,
+    sdk_name = "protoc-gen-validate__download_0_windows_amd64",
+    sdk_type = "remote",
+)
+
+
+__0006_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_ARM64_MAJOR_VERSION = "1"
+__0006_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_ARM64_MINOR_VERSION = "24"
+__0006_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_ARM64_PATCH_VERSION = "0"
+__0006_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0006_protoc-gen-validate__download_0_windows_arm64_",
+    go_toolchain_repo = "@protoc-gen-validate__download_0_windows_arm64",
+    host_goarch = "arm64",
+    host_goos = "windows",
+    major = __0006_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_ARM64_MAJOR_VERSION,
+    minor = __0006_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_ARM64_MINOR_VERSION,
+    patch = __0006_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_ARM64_PATCH_VERSION,
+    prerelease = __0006_PROTOC_GEN_VALIDATE__DOWNLOAD_0_WINDOWS_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "protoc-gen-validate__download_0_windows_arm64",
+    sdk_type = "remote",
+)
+
+
+__0007_GO_DEFAULT_SDK_MAJOR_VERSION = "1"
+__0007_GO_DEFAULT_SDK_MINOR_VERSION = "25"
+__0007_GO_DEFAULT_SDK_PATCH_VERSION = "0"
+__0007_GO_DEFAULT_SDK_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0007_go_default_sdk_",
+    go_toolchain_repo = "@go_default_sdk",
+    host_goarch = "amd64",
+    host_goos = "linux",
+    major = __0007_GO_DEFAULT_SDK_MAJOR_VERSION,
+    minor = __0007_GO_DEFAULT_SDK_MINOR_VERSION,
+    patch = __0007_GO_DEFAULT_SDK_PATCH_VERSION,
+    prerelease = __0007_GO_DEFAULT_SDK_PRERELEASE_SUFFIX,
+    sdk_name = "go_default_sdk",
+    sdk_type = "remote",
+)
+
+
+__0008_RULES_GO__DOWNLOAD_0_DARWIN_AMD64_MAJOR_VERSION = "1"
+__0008_RULES_GO__DOWNLOAD_0_DARWIN_AMD64_MINOR_VERSION = "25"
+__0008_RULES_GO__DOWNLOAD_0_DARWIN_AMD64_PATCH_VERSION = "0"
+__0008_RULES_GO__DOWNLOAD_0_DARWIN_AMD64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0008_rules_go__download_0_darwin_amd64_",
+    go_toolchain_repo = "@rules_go__download_0_darwin_amd64",
+    host_goarch = "amd64",
+    host_goos = "darwin",
+    major = __0008_RULES_GO__DOWNLOAD_0_DARWIN_AMD64_MAJOR_VERSION,
+    minor = __0008_RULES_GO__DOWNLOAD_0_DARWIN_AMD64_MINOR_VERSION,
+    patch = __0008_RULES_GO__DOWNLOAD_0_DARWIN_AMD64_PATCH_VERSION,
+    prerelease = __0008_RULES_GO__DOWNLOAD_0_DARWIN_AMD64_PRERELEASE_SUFFIX,
+    sdk_name = "rules_go__download_0_darwin_amd64",
+    sdk_type = "remote",
+)
+
+
+__0009_RULES_GO__DOWNLOAD_0_DARWIN_ARM64_MAJOR_VERSION = "1"
+__0009_RULES_GO__DOWNLOAD_0_DARWIN_ARM64_MINOR_VERSION = "25"
+__0009_RULES_GO__DOWNLOAD_0_DARWIN_ARM64_PATCH_VERSION = "0"
+__0009_RULES_GO__DOWNLOAD_0_DARWIN_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0009_rules_go__download_0_darwin_arm64_",
+    go_toolchain_repo = "@rules_go__download_0_darwin_arm64",
+    host_goarch = "arm64",
+    host_goos = "darwin",
+    major = __0009_RULES_GO__DOWNLOAD_0_DARWIN_ARM64_MAJOR_VERSION,
+    minor = __0009_RULES_GO__DOWNLOAD_0_DARWIN_ARM64_MINOR_VERSION,
+    patch = __0009_RULES_GO__DOWNLOAD_0_DARWIN_ARM64_PATCH_VERSION,
+    prerelease = __0009_RULES_GO__DOWNLOAD_0_DARWIN_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "rules_go__download_0_darwin_arm64",
+    sdk_type = "remote",
+)
+
+
+__0010_RULES_GO__DOWNLOAD_0_LINUX_ARM64_MAJOR_VERSION = "1"
+__0010_RULES_GO__DOWNLOAD_0_LINUX_ARM64_MINOR_VERSION = "25"
+__0010_RULES_GO__DOWNLOAD_0_LINUX_ARM64_PATCH_VERSION = "0"
+__0010_RULES_GO__DOWNLOAD_0_LINUX_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0010_rules_go__download_0_linux_arm64_",
+    go_toolchain_repo = "@rules_go__download_0_linux_arm64",
+    host_goarch = "arm64",
+    host_goos = "linux",
+    major = __0010_RULES_GO__DOWNLOAD_0_LINUX_ARM64_MAJOR_VERSION,
+    minor = __0010_RULES_GO__DOWNLOAD_0_LINUX_ARM64_MINOR_VERSION,
+    patch = __0010_RULES_GO__DOWNLOAD_0_LINUX_ARM64_PATCH_VERSION,
+    prerelease = __0010_RULES_GO__DOWNLOAD_0_LINUX_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "rules_go__download_0_linux_arm64",
+    sdk_type = "remote",
+)
+
+
+__0011_RULES_GO__DOWNLOAD_0_WINDOWS_AMD64_MAJOR_VERSION = "1"
+__0011_RULES_GO__DOWNLOAD_0_WINDOWS_AMD64_MINOR_VERSION = "25"
+__0011_RULES_GO__DOWNLOAD_0_WINDOWS_AMD64_PATCH_VERSION = "0"
+__0011_RULES_GO__DOWNLOAD_0_WINDOWS_AMD64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0011_rules_go__download_0_windows_amd64_",
+    go_toolchain_repo = "@rules_go__download_0_windows_amd64",
+    host_goarch = "amd64",
+    host_goos = "windows",
+    major = __0011_RULES_GO__DOWNLOAD_0_WINDOWS_AMD64_MAJOR_VERSION,
+    minor = __0011_RULES_GO__DOWNLOAD_0_WINDOWS_AMD64_MINOR_VERSION,
+    patch = __0011_RULES_GO__DOWNLOAD_0_WINDOWS_AMD64_PATCH_VERSION,
+    prerelease = __0011_RULES_GO__DOWNLOAD_0_WINDOWS_AMD64_PRERELEASE_SUFFIX,
+    sdk_name = "rules_go__download_0_windows_amd64",
+    sdk_type = "remote",
+)
+
+
+__0012_RULES_GO__DOWNLOAD_0_WINDOWS_ARM64_MAJOR_VERSION = "1"
+__0012_RULES_GO__DOWNLOAD_0_WINDOWS_ARM64_MINOR_VERSION = "25"
+__0012_RULES_GO__DOWNLOAD_0_WINDOWS_ARM64_PATCH_VERSION = "0"
+__0012_RULES_GO__DOWNLOAD_0_WINDOWS_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0012_rules_go__download_0_windows_arm64_",
+    go_toolchain_repo = "@rules_go__download_0_windows_arm64",
+    host_goarch = "arm64",
+    host_goos = "windows",
+    major = __0012_RULES_GO__DOWNLOAD_0_WINDOWS_ARM64_MAJOR_VERSION,
+    minor = __0012_RULES_GO__DOWNLOAD_0_WINDOWS_ARM64_MINOR_VERSION,
+    patch = __0012_RULES_GO__DOWNLOAD_0_WINDOWS_ARM64_PATCH_VERSION,
+    prerelease = __0012_RULES_GO__DOWNLOAD_0_WINDOWS_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "rules_go__download_0_windows_arm64",
+    sdk_type = "remote",
+)
+
+
+__0013_ENVOY_API__DOWNLOAD_0_MAJOR_VERSION = "1"
+__0013_ENVOY_API__DOWNLOAD_0_MINOR_VERSION = "24"
+__0013_ENVOY_API__DOWNLOAD_0_PATCH_VERSION = "6"
+__0013_ENVOY_API__DOWNLOAD_0_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0013_envoy_api__download_0_",
+    go_toolchain_repo = "@envoy_api__download_0",
+    host_goarch = "amd64",
+    host_goos = "linux",
+    major = __0013_ENVOY_API__DOWNLOAD_0_MAJOR_VERSION,
+    minor = __0013_ENVOY_API__DOWNLOAD_0_MINOR_VERSION,
+    patch = __0013_ENVOY_API__DOWNLOAD_0_PATCH_VERSION,
+    prerelease = __0013_ENVOY_API__DOWNLOAD_0_PRERELEASE_SUFFIX,
+    sdk_name = "envoy_api__download_0",
+    sdk_type = "remote",
+)
+
+
+__0014_ENVOY_API__DOWNLOAD_0_DARWIN_AMD64_MAJOR_VERSION = "1"
+__0014_ENVOY_API__DOWNLOAD_0_DARWIN_AMD64_MINOR_VERSION = "24"
+__0014_ENVOY_API__DOWNLOAD_0_DARWIN_AMD64_PATCH_VERSION = "6"
+__0014_ENVOY_API__DOWNLOAD_0_DARWIN_AMD64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0014_envoy_api__download_0_darwin_amd64_",
+    go_toolchain_repo = "@envoy_api__download_0_darwin_amd64",
+    host_goarch = "amd64",
+    host_goos = "darwin",
+    major = __0014_ENVOY_API__DOWNLOAD_0_DARWIN_AMD64_MAJOR_VERSION,
+    minor = __0014_ENVOY_API__DOWNLOAD_0_DARWIN_AMD64_MINOR_VERSION,
+    patch = __0014_ENVOY_API__DOWNLOAD_0_DARWIN_AMD64_PATCH_VERSION,
+    prerelease = __0014_ENVOY_API__DOWNLOAD_0_DARWIN_AMD64_PRERELEASE_SUFFIX,
+    sdk_name = "envoy_api__download_0_darwin_amd64",
+    sdk_type = "remote",
+)
+
+
+__0015_ENVOY_API__DOWNLOAD_0_DARWIN_ARM64_MAJOR_VERSION = "1"
+__0015_ENVOY_API__DOWNLOAD_0_DARWIN_ARM64_MINOR_VERSION = "24"
+__0015_ENVOY_API__DOWNLOAD_0_DARWIN_ARM64_PATCH_VERSION = "6"
+__0015_ENVOY_API__DOWNLOAD_0_DARWIN_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0015_envoy_api__download_0_darwin_arm64_",
+    go_toolchain_repo = "@envoy_api__download_0_darwin_arm64",
+    host_goarch = "arm64",
+    host_goos = "darwin",
+    major = __0015_ENVOY_API__DOWNLOAD_0_DARWIN_ARM64_MAJOR_VERSION,
+    minor = __0015_ENVOY_API__DOWNLOAD_0_DARWIN_ARM64_MINOR_VERSION,
+    patch = __0015_ENVOY_API__DOWNLOAD_0_DARWIN_ARM64_PATCH_VERSION,
+    prerelease = __0015_ENVOY_API__DOWNLOAD_0_DARWIN_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "envoy_api__download_0_darwin_arm64",
+    sdk_type = "remote",
+)
+
+
+__0016_ENVOY_API__DOWNLOAD_0_LINUX_ARM64_MAJOR_VERSION = "1"
+__0016_ENVOY_API__DOWNLOAD_0_LINUX_ARM64_MINOR_VERSION = "24"
+__0016_ENVOY_API__DOWNLOAD_0_LINUX_ARM64_PATCH_VERSION = "6"
+__0016_ENVOY_API__DOWNLOAD_0_LINUX_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0016_envoy_api__download_0_linux_arm64_",
+    go_toolchain_repo = "@envoy_api__download_0_linux_arm64",
+    host_goarch = "arm64",
+    host_goos = "linux",
+    major = __0016_ENVOY_API__DOWNLOAD_0_LINUX_ARM64_MAJOR_VERSION,
+    minor = __0016_ENVOY_API__DOWNLOAD_0_LINUX_ARM64_MINOR_VERSION,
+    patch = __0016_ENVOY_API__DOWNLOAD_0_LINUX_ARM64_PATCH_VERSION,
+    prerelease = __0016_ENVOY_API__DOWNLOAD_0_LINUX_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "envoy_api__download_0_linux_arm64",
+    sdk_type = "remote",
+)
+
+
+__0017_ENVOY_API__DOWNLOAD_0_WINDOWS_AMD64_MAJOR_VERSION = "1"
+__0017_ENVOY_API__DOWNLOAD_0_WINDOWS_AMD64_MINOR_VERSION = "24"
+__0017_ENVOY_API__DOWNLOAD_0_WINDOWS_AMD64_PATCH_VERSION = "6"
+__0017_ENVOY_API__DOWNLOAD_0_WINDOWS_AMD64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0017_envoy_api__download_0_windows_amd64_",
+    go_toolchain_repo = "@envoy_api__download_0_windows_amd64",
+    host_goarch = "amd64",
+    host_goos = "windows",
+    major = __0017_ENVOY_API__DOWNLOAD_0_WINDOWS_AMD64_MAJOR_VERSION,
+    minor = __0017_ENVOY_API__DOWNLOAD_0_WINDOWS_AMD64_MINOR_VERSION,
+    patch = __0017_ENVOY_API__DOWNLOAD_0_WINDOWS_AMD64_PATCH_VERSION,
+    prerelease = __0017_ENVOY_API__DOWNLOAD_0_WINDOWS_AMD64_PRERELEASE_SUFFIX,
+    sdk_name = "envoy_api__download_0_windows_amd64",
+    sdk_type = "remote",
+)
+
+
+__0018_ENVOY_API__DOWNLOAD_0_WINDOWS_ARM64_MAJOR_VERSION = "1"
+__0018_ENVOY_API__DOWNLOAD_0_WINDOWS_ARM64_MINOR_VERSION = "24"
+__0018_ENVOY_API__DOWNLOAD_0_WINDOWS_ARM64_PATCH_VERSION = "6"
+__0018_ENVOY_API__DOWNLOAD_0_WINDOWS_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0018_envoy_api__download_0_windows_arm64_",
+    go_toolchain_repo = "@envoy_api__download_0_windows_arm64",
+    host_goarch = "arm64",
+    host_goos = "windows",
+    major = __0018_ENVOY_API__DOWNLOAD_0_WINDOWS_ARM64_MAJOR_VERSION,
+    minor = __0018_ENVOY_API__DOWNLOAD_0_WINDOWS_ARM64_MINOR_VERSION,
+    patch = __0018_ENVOY_API__DOWNLOAD_0_WINDOWS_ARM64_PATCH_VERSION,
+    prerelease = __0018_ENVOY_API__DOWNLOAD_0_WINDOWS_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "envoy_api__download_0_windows_arm64",
+    sdk_type = "remote",
+)
+
+
+__0019_XDS__DOWNLOAD_0_MAJOR_VERSION = "1"
+__0019_XDS__DOWNLOAD_0_MINOR_VERSION = "24"
+__0019_XDS__DOWNLOAD_0_PATCH_VERSION = "6"
+__0019_XDS__DOWNLOAD_0_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0019_xds__download_0_",
+    go_toolchain_repo = "@xds__download_0",
+    host_goarch = "amd64",
+    host_goos = "linux",
+    major = __0019_XDS__DOWNLOAD_0_MAJOR_VERSION,
+    minor = __0019_XDS__DOWNLOAD_0_MINOR_VERSION,
+    patch = __0019_XDS__DOWNLOAD_0_PATCH_VERSION,
+    prerelease = __0019_XDS__DOWNLOAD_0_PRERELEASE_SUFFIX,
+    sdk_name = "xds__download_0",
+    sdk_type = "remote",
+)
+
+
+__0020_XDS__DOWNLOAD_0_DARWIN_AMD64_MAJOR_VERSION = "1"
+__0020_XDS__DOWNLOAD_0_DARWIN_AMD64_MINOR_VERSION = "24"
+__0020_XDS__DOWNLOAD_0_DARWIN_AMD64_PATCH_VERSION = "6"
+__0020_XDS__DOWNLOAD_0_DARWIN_AMD64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0020_xds__download_0_darwin_amd64_",
+    go_toolchain_repo = "@xds__download_0_darwin_amd64",
+    host_goarch = "amd64",
+    host_goos = "darwin",
+    major = __0020_XDS__DOWNLOAD_0_DARWIN_AMD64_MAJOR_VERSION,
+    minor = __0020_XDS__DOWNLOAD_0_DARWIN_AMD64_MINOR_VERSION,
+    patch = __0020_XDS__DOWNLOAD_0_DARWIN_AMD64_PATCH_VERSION,
+    prerelease = __0020_XDS__DOWNLOAD_0_DARWIN_AMD64_PRERELEASE_SUFFIX,
+    sdk_name = "xds__download_0_darwin_amd64",
+    sdk_type = "remote",
+)
+
+
+__0021_XDS__DOWNLOAD_0_DARWIN_ARM64_MAJOR_VERSION = "1"
+__0021_XDS__DOWNLOAD_0_DARWIN_ARM64_MINOR_VERSION = "24"
+__0021_XDS__DOWNLOAD_0_DARWIN_ARM64_PATCH_VERSION = "6"
+__0021_XDS__DOWNLOAD_0_DARWIN_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0021_xds__download_0_darwin_arm64_",
+    go_toolchain_repo = "@xds__download_0_darwin_arm64",
+    host_goarch = "arm64",
+    host_goos = "darwin",
+    major = __0021_XDS__DOWNLOAD_0_DARWIN_ARM64_MAJOR_VERSION,
+    minor = __0021_XDS__DOWNLOAD_0_DARWIN_ARM64_MINOR_VERSION,
+    patch = __0021_XDS__DOWNLOAD_0_DARWIN_ARM64_PATCH_VERSION,
+    prerelease = __0021_XDS__DOWNLOAD_0_DARWIN_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "xds__download_0_darwin_arm64",
+    sdk_type = "remote",
+)
+
+
+__0022_XDS__DOWNLOAD_0_LINUX_ARM64_MAJOR_VERSION = "1"
+__0022_XDS__DOWNLOAD_0_LINUX_ARM64_MINOR_VERSION = "24"
+__0022_XDS__DOWNLOAD_0_LINUX_ARM64_PATCH_VERSION = "6"
+__0022_XDS__DOWNLOAD_0_LINUX_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0022_xds__download_0_linux_arm64_",
+    go_toolchain_repo = "@xds__download_0_linux_arm64",
+    host_goarch = "arm64",
+    host_goos = "linux",
+    major = __0022_XDS__DOWNLOAD_0_LINUX_ARM64_MAJOR_VERSION,
+    minor = __0022_XDS__DOWNLOAD_0_LINUX_ARM64_MINOR_VERSION,
+    patch = __0022_XDS__DOWNLOAD_0_LINUX_ARM64_PATCH_VERSION,
+    prerelease = __0022_XDS__DOWNLOAD_0_LINUX_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "xds__download_0_linux_arm64",
+    sdk_type = "remote",
+)
+
+
+__0023_XDS__DOWNLOAD_0_WINDOWS_AMD64_MAJOR_VERSION = "1"
+__0023_XDS__DOWNLOAD_0_WINDOWS_AMD64_MINOR_VERSION = "24"
+__0023_XDS__DOWNLOAD_0_WINDOWS_AMD64_PATCH_VERSION = "6"
+__0023_XDS__DOWNLOAD_0_WINDOWS_AMD64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0023_xds__download_0_windows_amd64_",
+    go_toolchain_repo = "@xds__download_0_windows_amd64",
+    host_goarch = "amd64",
+    host_goos = "windows",
+    major = __0023_XDS__DOWNLOAD_0_WINDOWS_AMD64_MAJOR_VERSION,
+    minor = __0023_XDS__DOWNLOAD_0_WINDOWS_AMD64_MINOR_VERSION,
+    patch = __0023_XDS__DOWNLOAD_0_WINDOWS_AMD64_PATCH_VERSION,
+    prerelease = __0023_XDS__DOWNLOAD_0_WINDOWS_AMD64_PRERELEASE_SUFFIX,
+    sdk_name = "xds__download_0_windows_amd64",
+    sdk_type = "remote",
+)
+
+
+__0024_XDS__DOWNLOAD_0_WINDOWS_ARM64_MAJOR_VERSION = "1"
+__0024_XDS__DOWNLOAD_0_WINDOWS_ARM64_MINOR_VERSION = "24"
+__0024_XDS__DOWNLOAD_0_WINDOWS_ARM64_PATCH_VERSION = "6"
+__0024_XDS__DOWNLOAD_0_WINDOWS_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0024_xds__download_0_windows_arm64_",
+    go_toolchain_repo = "@xds__download_0_windows_arm64",
+    host_goarch = "arm64",
+    host_goos = "windows",
+    major = __0024_XDS__DOWNLOAD_0_WINDOWS_ARM64_MAJOR_VERSION,
+    minor = __0024_XDS__DOWNLOAD_0_WINDOWS_ARM64_MINOR_VERSION,
+    patch = __0024_XDS__DOWNLOAD_0_WINDOWS_ARM64_PATCH_VERSION,
+    prerelease = __0024_XDS__DOWNLOAD_0_WINDOWS_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "xds__download_0_windows_arm64",
+    sdk_type = "remote",
+)
+
+
+__0025_CEL_SPEC__DOWNLOAD_0_MAJOR_VERSION = "1"
+__0025_CEL_SPEC__DOWNLOAD_0_MINOR_VERSION = "23"
+__0025_CEL_SPEC__DOWNLOAD_0_PATCH_VERSION = "0"
+__0025_CEL_SPEC__DOWNLOAD_0_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0025_cel-spec__download_0_",
+    go_toolchain_repo = "@cel-spec__download_0",
+    host_goarch = "amd64",
+    host_goos = "linux",
+    major = __0025_CEL_SPEC__DOWNLOAD_0_MAJOR_VERSION,
+    minor = __0025_CEL_SPEC__DOWNLOAD_0_MINOR_VERSION,
+    patch = __0025_CEL_SPEC__DOWNLOAD_0_PATCH_VERSION,
+    prerelease = __0025_CEL_SPEC__DOWNLOAD_0_PRERELEASE_SUFFIX,
+    sdk_name = "cel-spec__download_0",
+    sdk_type = "remote",
+)
+
+
+__0026_CEL_SPEC__DOWNLOAD_0_DARWIN_AMD64_MAJOR_VERSION = "1"
+__0026_CEL_SPEC__DOWNLOAD_0_DARWIN_AMD64_MINOR_VERSION = "23"
+__0026_CEL_SPEC__DOWNLOAD_0_DARWIN_AMD64_PATCH_VERSION = "0"
+__0026_CEL_SPEC__DOWNLOAD_0_DARWIN_AMD64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0026_cel-spec__download_0_darwin_amd64_",
+    go_toolchain_repo = "@cel-spec__download_0_darwin_amd64",
+    host_goarch = "amd64",
+    host_goos = "darwin",
+    major = __0026_CEL_SPEC__DOWNLOAD_0_DARWIN_AMD64_MAJOR_VERSION,
+    minor = __0026_CEL_SPEC__DOWNLOAD_0_DARWIN_AMD64_MINOR_VERSION,
+    patch = __0026_CEL_SPEC__DOWNLOAD_0_DARWIN_AMD64_PATCH_VERSION,
+    prerelease = __0026_CEL_SPEC__DOWNLOAD_0_DARWIN_AMD64_PRERELEASE_SUFFIX,
+    sdk_name = "cel-spec__download_0_darwin_amd64",
+    sdk_type = "remote",
+)
+
+
+__0027_CEL_SPEC__DOWNLOAD_0_DARWIN_ARM64_MAJOR_VERSION = "1"
+__0027_CEL_SPEC__DOWNLOAD_0_DARWIN_ARM64_MINOR_VERSION = "23"
+__0027_CEL_SPEC__DOWNLOAD_0_DARWIN_ARM64_PATCH_VERSION = "0"
+__0027_CEL_SPEC__DOWNLOAD_0_DARWIN_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0027_cel-spec__download_0_darwin_arm64_",
+    go_toolchain_repo = "@cel-spec__download_0_darwin_arm64",
+    host_goarch = "arm64",
+    host_goos = "darwin",
+    major = __0027_CEL_SPEC__DOWNLOAD_0_DARWIN_ARM64_MAJOR_VERSION,
+    minor = __0027_CEL_SPEC__DOWNLOAD_0_DARWIN_ARM64_MINOR_VERSION,
+    patch = __0027_CEL_SPEC__DOWNLOAD_0_DARWIN_ARM64_PATCH_VERSION,
+    prerelease = __0027_CEL_SPEC__DOWNLOAD_0_DARWIN_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "cel-spec__download_0_darwin_arm64",
+    sdk_type = "remote",
+)
+
+
+__0028_CEL_SPEC__DOWNLOAD_0_LINUX_ARM64_MAJOR_VERSION = "1"
+__0028_CEL_SPEC__DOWNLOAD_0_LINUX_ARM64_MINOR_VERSION = "23"
+__0028_CEL_SPEC__DOWNLOAD_0_LINUX_ARM64_PATCH_VERSION = "0"
+__0028_CEL_SPEC__DOWNLOAD_0_LINUX_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0028_cel-spec__download_0_linux_arm64_",
+    go_toolchain_repo = "@cel-spec__download_0_linux_arm64",
+    host_goarch = "arm64",
+    host_goos = "linux",
+    major = __0028_CEL_SPEC__DOWNLOAD_0_LINUX_ARM64_MAJOR_VERSION,
+    minor = __0028_CEL_SPEC__DOWNLOAD_0_LINUX_ARM64_MINOR_VERSION,
+    patch = __0028_CEL_SPEC__DOWNLOAD_0_LINUX_ARM64_PATCH_VERSION,
+    prerelease = __0028_CEL_SPEC__DOWNLOAD_0_LINUX_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "cel-spec__download_0_linux_arm64",
+    sdk_type = "remote",
+)
+
+
+__0029_CEL_SPEC__DOWNLOAD_0_WINDOWS_AMD64_MAJOR_VERSION = "1"
+__0029_CEL_SPEC__DOWNLOAD_0_WINDOWS_AMD64_MINOR_VERSION = "23"
+__0029_CEL_SPEC__DOWNLOAD_0_WINDOWS_AMD64_PATCH_VERSION = "0"
+__0029_CEL_SPEC__DOWNLOAD_0_WINDOWS_AMD64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0029_cel-spec__download_0_windows_amd64_",
+    go_toolchain_repo = "@cel-spec__download_0_windows_amd64",
+    host_goarch = "amd64",
+    host_goos = "windows",
+    major = __0029_CEL_SPEC__DOWNLOAD_0_WINDOWS_AMD64_MAJOR_VERSION,
+    minor = __0029_CEL_SPEC__DOWNLOAD_0_WINDOWS_AMD64_MINOR_VERSION,
+    patch = __0029_CEL_SPEC__DOWNLOAD_0_WINDOWS_AMD64_PATCH_VERSION,
+    prerelease = __0029_CEL_SPEC__DOWNLOAD_0_WINDOWS_AMD64_PRERELEASE_SUFFIX,
+    sdk_name = "cel-spec__download_0_windows_amd64",
+    sdk_type = "remote",
+)
+
+
+__0030_CEL_SPEC__DOWNLOAD_0_WINDOWS_ARM64_MAJOR_VERSION = "1"
+__0030_CEL_SPEC__DOWNLOAD_0_WINDOWS_ARM64_MINOR_VERSION = "23"
+__0030_CEL_SPEC__DOWNLOAD_0_WINDOWS_ARM64_PATCH_VERSION = "0"
+__0030_CEL_SPEC__DOWNLOAD_0_WINDOWS_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0030_cel-spec__download_0_windows_arm64_",
+    go_toolchain_repo = "@cel-spec__download_0_windows_arm64",
+    host_goarch = "arm64",
+    host_goos = "windows",
+    major = __0030_CEL_SPEC__DOWNLOAD_0_WINDOWS_ARM64_MAJOR_VERSION,
+    minor = __0030_CEL_SPEC__DOWNLOAD_0_WINDOWS_ARM64_MINOR_VERSION,
+    patch = __0030_CEL_SPEC__DOWNLOAD_0_WINDOWS_ARM64_PATCH_VERSION,
+    prerelease = __0030_CEL_SPEC__DOWNLOAD_0_WINDOWS_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "cel-spec__download_0_windows_arm64",
+    sdk_type = "remote",
+)
+
+
+__0031_RULES_ANDROID__DOWNLOAD_0_MAJOR_VERSION = "1"
+__0031_RULES_ANDROID__DOWNLOAD_0_MINOR_VERSION = "22"
+__0031_RULES_ANDROID__DOWNLOAD_0_PATCH_VERSION = "4"
+__0031_RULES_ANDROID__DOWNLOAD_0_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0031_rules_android__download_0_",
+    go_toolchain_repo = "@rules_android__download_0",
+    host_goarch = "amd64",
+    host_goos = "linux",
+    major = __0031_RULES_ANDROID__DOWNLOAD_0_MAJOR_VERSION,
+    minor = __0031_RULES_ANDROID__DOWNLOAD_0_MINOR_VERSION,
+    patch = __0031_RULES_ANDROID__DOWNLOAD_0_PATCH_VERSION,
+    prerelease = __0031_RULES_ANDROID__DOWNLOAD_0_PRERELEASE_SUFFIX,
+    sdk_name = "rules_android__download_0",
+    sdk_type = "remote",
+)
+
+
+__0032_RULES_ANDROID__DOWNLOAD_0_DARWIN_AMD64_MAJOR_VERSION = "1"
+__0032_RULES_ANDROID__DOWNLOAD_0_DARWIN_AMD64_MINOR_VERSION = "22"
+__0032_RULES_ANDROID__DOWNLOAD_0_DARWIN_AMD64_PATCH_VERSION = "4"
+__0032_RULES_ANDROID__DOWNLOAD_0_DARWIN_AMD64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0032_rules_android__download_0_darwin_amd64_",
+    go_toolchain_repo = "@rules_android__download_0_darwin_amd64",
+    host_goarch = "amd64",
+    host_goos = "darwin",
+    major = __0032_RULES_ANDROID__DOWNLOAD_0_DARWIN_AMD64_MAJOR_VERSION,
+    minor = __0032_RULES_ANDROID__DOWNLOAD_0_DARWIN_AMD64_MINOR_VERSION,
+    patch = __0032_RULES_ANDROID__DOWNLOAD_0_DARWIN_AMD64_PATCH_VERSION,
+    prerelease = __0032_RULES_ANDROID__DOWNLOAD_0_DARWIN_AMD64_PRERELEASE_SUFFIX,
+    sdk_name = "rules_android__download_0_darwin_amd64",
+    sdk_type = "remote",
+)
+
+
+__0033_RULES_ANDROID__DOWNLOAD_0_DARWIN_ARM64_MAJOR_VERSION = "1"
+__0033_RULES_ANDROID__DOWNLOAD_0_DARWIN_ARM64_MINOR_VERSION = "22"
+__0033_RULES_ANDROID__DOWNLOAD_0_DARWIN_ARM64_PATCH_VERSION = "4"
+__0033_RULES_ANDROID__DOWNLOAD_0_DARWIN_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0033_rules_android__download_0_darwin_arm64_",
+    go_toolchain_repo = "@rules_android__download_0_darwin_arm64",
+    host_goarch = "arm64",
+    host_goos = "darwin",
+    major = __0033_RULES_ANDROID__DOWNLOAD_0_DARWIN_ARM64_MAJOR_VERSION,
+    minor = __0033_RULES_ANDROID__DOWNLOAD_0_DARWIN_ARM64_MINOR_VERSION,
+    patch = __0033_RULES_ANDROID__DOWNLOAD_0_DARWIN_ARM64_PATCH_VERSION,
+    prerelease = __0033_RULES_ANDROID__DOWNLOAD_0_DARWIN_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "rules_android__download_0_darwin_arm64",
+    sdk_type = "remote",
+)
+
+
+__0034_RULES_ANDROID__DOWNLOAD_0_LINUX_ARM64_MAJOR_VERSION = "1"
+__0034_RULES_ANDROID__DOWNLOAD_0_LINUX_ARM64_MINOR_VERSION = "22"
+__0034_RULES_ANDROID__DOWNLOAD_0_LINUX_ARM64_PATCH_VERSION = "4"
+__0034_RULES_ANDROID__DOWNLOAD_0_LINUX_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0034_rules_android__download_0_linux_arm64_",
+    go_toolchain_repo = "@rules_android__download_0_linux_arm64",
+    host_goarch = "arm64",
+    host_goos = "linux",
+    major = __0034_RULES_ANDROID__DOWNLOAD_0_LINUX_ARM64_MAJOR_VERSION,
+    minor = __0034_RULES_ANDROID__DOWNLOAD_0_LINUX_ARM64_MINOR_VERSION,
+    patch = __0034_RULES_ANDROID__DOWNLOAD_0_LINUX_ARM64_PATCH_VERSION,
+    prerelease = __0034_RULES_ANDROID__DOWNLOAD_0_LINUX_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "rules_android__download_0_linux_arm64",
+    sdk_type = "remote",
+)
+
+
+__0035_RULES_ANDROID__DOWNLOAD_0_WINDOWS_AMD64_MAJOR_VERSION = "1"
+__0035_RULES_ANDROID__DOWNLOAD_0_WINDOWS_AMD64_MINOR_VERSION = "22"
+__0035_RULES_ANDROID__DOWNLOAD_0_WINDOWS_AMD64_PATCH_VERSION = "4"
+__0035_RULES_ANDROID__DOWNLOAD_0_WINDOWS_AMD64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0035_rules_android__download_0_windows_amd64_",
+    go_toolchain_repo = "@rules_android__download_0_windows_amd64",
+    host_goarch = "amd64",
+    host_goos = "windows",
+    major = __0035_RULES_ANDROID__DOWNLOAD_0_WINDOWS_AMD64_MAJOR_VERSION,
+    minor = __0035_RULES_ANDROID__DOWNLOAD_0_WINDOWS_AMD64_MINOR_VERSION,
+    patch = __0035_RULES_ANDROID__DOWNLOAD_0_WINDOWS_AMD64_PATCH_VERSION,
+    prerelease = __0035_RULES_ANDROID__DOWNLOAD_0_WINDOWS_AMD64_PRERELEASE_SUFFIX,
+    sdk_name = "rules_android__download_0_windows_amd64",
+    sdk_type = "remote",
+)
+
+
+__0036_RULES_ANDROID__DOWNLOAD_0_WINDOWS_ARM64_MAJOR_VERSION = "1"
+__0036_RULES_ANDROID__DOWNLOAD_0_WINDOWS_ARM64_MINOR_VERSION = "22"
+__0036_RULES_ANDROID__DOWNLOAD_0_WINDOWS_ARM64_PATCH_VERSION = "4"
+__0036_RULES_ANDROID__DOWNLOAD_0_WINDOWS_ARM64_PRERELEASE_SUFFIX = ""
+
+declare_bazel_toolchains(
+    prefix = "_0036_rules_android__download_0_windows_arm64_",
+    go_toolchain_repo = "@rules_android__download_0_windows_arm64",
+    host_goarch = "arm64",
+    host_goos = "windows",
+    major = __0036_RULES_ANDROID__DOWNLOAD_0_WINDOWS_ARM64_MAJOR_VERSION,
+    minor = __0036_RULES_ANDROID__DOWNLOAD_0_WINDOWS_ARM64_MINOR_VERSION,
+    patch = __0036_RULES_ANDROID__DOWNLOAD_0_WINDOWS_ARM64_PATCH_VERSION,
+    prerelease = __0036_RULES_ANDROID__DOWNLOAD_0_WINDOWS_ARM64_PRERELEASE_SUFFIX,
+    sdk_name = "rules_android__download_0_windows_arm64",
+    sdk_type = "remote",
+)

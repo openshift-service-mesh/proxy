@@ -1,0 +1,75 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "ssa",
+    srcs = [
+        "block.go",
+        "blockopt.go",
+        "builder.go",
+        "const.go",
+        "create.go",
+        "doc.go",
+        "dom.go",
+        "emit.go",
+        "func.go",
+        "instantiate.go",
+        "lift.go",
+        "lvalue.go",
+        "methods.go",
+        "mode.go",
+        "print.go",
+        "sanity.go",
+        "source.go",
+        "ssa.go",
+        "subst.go",
+        "task.go",
+        "typeset.go",
+        "util.go",
+        "wrappers.go",
+    ],
+    importpath = "golang.org/x/tools/go/ssa",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/types/typeutil",
+        "//internal/aliases",
+        "//internal/typeparams",
+        "//internal/typesinternal",
+        "//internal/versions",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":ssa",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "ssa_test",
+    srcs = [
+        "builder_generic_test.go",
+        "builder_test.go",
+        "const_test.go",
+        "dom_test.go",
+        "example_test.go",
+        "instantiate_test.go",
+        "methods_test.go",
+        "source_test.go",
+        "stdlib_test.go",
+        "subst_test.go",
+        "testutil_test.go",
+    ],
+    embed = [":ssa"],
+    deps = [
+        "//go/analysis/analysistest",
+        "//go/ast/astutil",
+        "//go/loader",
+        "//go/packages",
+        "//go/ssa/ssautil",
+        "//internal/expect",
+        "//internal/testenv",
+        "//internal/testfiles",
+        "//txtar",
+        "@org_golang_x_sync//errgroup",
+    ],
+)

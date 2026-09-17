@@ -1,0 +1,34 @@
+load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+
+esbuild(
+    name = "lib",
+    srcs = [
+        "main.js",
+        "name.js",
+    ],
+    bazel_sandbox_plugin = True,
+    entry_point = "main.js",
+    esbuild_log_level = "verbose",
+    js_log_level = "debug",
+    metafile = True,
+)
+
+build_test(
+    name = "test",
+    targets = [":lib"],
+)
+
+sh_test(
+    name = "metafile_test",
+    size = "small",
+    srcs = [
+        "metafile_test.sh",
+    ],
+    args = [
+        "$(locations :lib)",
+    ],
+    data = [
+        ":lib",
+    ],
+)

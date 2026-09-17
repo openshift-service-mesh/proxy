@@ -1,0 +1,98 @@
+module(
+    name = "sq",
+    version = "1.4.0.envoy",
+    compatibility_level = 1,
+)
+
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "rules_rust", version = "0.69.0.envoy")
+bazel_dep(name = "capnp-cpp", version = "1.4.0")
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2021",
+    versions = ["1.85.0"],
+)
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+# `sequoia-ipc` and `sequoia-keystore` compile `.capnp` schemas in their
+# `build.rs` via the `capnpc` crate, which always shells out to a `capnp`
+# found on `$PATH` unless told otherwise (`capnpc::CompilerCommand` has no
+# way to do that via an environment variable). Patch both `build.rs` files
+# to honour a `CAPNP` env var pointing at the hermetic `capnp-cpp` tool
+# instead of relying on a host-installed binary.
+crate.annotation(
+    crate = "sequoia-ipc",
+    build_script_env = {"CAPNP": "$(execpath @@capnp-cpp+//src/capnp:capnp_tool)"},
+    build_script_tools = ["@@capnp-cpp+//src/capnp:capnp_tool"],
+    patch_args = ["-p1"],
+    patches = ["//crate-patches:sequoia-ipc-hermetic-capnp.patch"],
+)
+crate.annotation(
+    crate = "sequoia-keystore",
+    build_script_env = {"CAPNP": "$(execpath @@capnp-cpp+//src/capnp:capnp_tool)"},
+    build_script_tools = ["@@capnp-cpp+//src/capnp:capnp_tool"],
+    patch_args = ["-p1"],
+    patches = ["//crate-patches:sequoia-keystore-hermetic-capnp.patch"],
+)
+
+# The patched root manifest selects `rusqlite`'s `bundled` feature so
+# `libsqlite3-sys` builds its bundled sqlite3 amalgamation.  Features that add
+# optional dependencies must be selected by Cargo before crate_universe
+# resolves the graph; crate annotations cannot add those dependencies.
+#
+# `libsqlite3-sys`' build script compiles that amalgamation with `cc-rs`,
+# using the flags of the resolved Bazel C++ toolchain. Hermetic toolchains
+# (eg toolchains_llvm) pass execroot-relative `-resource-dir`/`-B` flags,
+# which rules_rust does not absolutise the way it does `--sysroot`. By
+# default the build script runs from the crate's manifest directory, where
+# those relative paths don't resolve and clang can't find its own builtin
+# headers (`stdarg.h`). Run it from the execroot instead, and patch the
+# script's own cwd-relative source paths to resolve via `CARGO_MANIFEST_DIR`.
+crate.annotation(
+    crate = "libsqlite3-sys",
+    build_script_rundir = ".",
+    patch_args = ["-p1"],
+    patches = ["//crate-patches:libsqlite3-sys-manifest-dir.patch"],
+)
+
+# `sequoia-keystore-backend`'s always-compiled `test_framework` module bakes
+# an absolute, build-script-sandbox-specific path into `OUT_DIR` and reads it
+# back via `include_bytes!` when the crate itself is compiled. Under Bazel
+# each action gets its own sandbox, so that absolute path doesn't survive
+# between the build script action and the compile action. Patch it to write
+# a path relative to `CARGO_MANIFEST_DIR`, which rules_rust sets correctly
+# for every action.
+crate.annotation(
+    crate = "sequoia-keystore-backend",
+    patch_args = ["-p1"],
+    patches = ["//crate-patches:sequoia-keystore-backend-hermetic-paths.patch"],
+)
+
+crate.from_cargo(
+    name = "sequoia_sq_crate_index",
+    cargo_lockfile = "//:Cargo.lock",
+    manifests = ["//:Cargo.toml"],
+)
+use_repo(crate, "sequoia_sq_crate_index")
+
+sq_prebuilt = use_extension("//:prebuilt.bzl", "sq_prebuilt")
+use_repo(sq_prebuilt, "sq_prebuilt_linux_x86_64", "sq_prebuilt_linux_aarch64")
+
+# `sq` is used as an *exec*-side tool (it signs things during the build), so
+# toolchain resolution is keyed off the exec platform via
+# `exec_compatible_with`, not `target_compatible_with`. Registration order is
+# the fallback mechanism: prebuilt toolchains are listed first so they win
+# whenever the exec platform is linux/x86_64 or linux/aarch64, and
+# `from_source` is listed last so it only applies where no prebuilt tarball
+# is published (eg macOS). To force the from-source build regardless of exec
+# platform (eg to test it, or if a prebuilt is ever suspect), a consumer can
+# pass `--extra_toolchains=@sq//toolchains:from_source`, which takes
+# precedence over toolchains registered by `register_toolchains`.
+register_toolchains(
+    "//toolchains:prebuilt_linux_x86_64",
+    "//toolchains:prebuilt_linux_aarch64",
+    "//toolchains:from_source",
+)

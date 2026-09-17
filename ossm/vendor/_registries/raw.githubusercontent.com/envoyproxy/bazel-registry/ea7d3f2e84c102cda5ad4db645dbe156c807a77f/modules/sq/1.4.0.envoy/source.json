@@ -1,0 +1,21 @@
+{
+  "url": "https://gitlab.com/sequoia-pgp/sequoia-sq/-/archive/v1.4.0/sequoia-sq-v1.4.0.tar.gz",
+  "integrity": "sha256-yFa/sPDJShuPS3KgSm7/Hh09JMN3ywseSVaI6arYRno=",
+  "strip_prefix": "sequoia-sq-v1.4.0",
+  "patch_strip": 1,
+  "patches": {
+    "sq-default-crypto-rust.patch": "sha256-3agAt9kpKaUGfz/udiK5uZ2gzFX+ya7wnafisYIXr8I=",
+    "sq-rustls-network.patch": "sha256-+DQQI8AatEgg75s+aMGAgUHb0Otwl63TbSOZIClHVnY="
+  },
+  "overlay": {
+    "BUILD.bazel": "sha256-iwihOPe8y81fe6WFrIuZNjHRNn/GD3rvakpKFYh3kgQ=",
+    "crate-patches/BUILD.bazel": "sha256-YlzNmwpgN5l+K1HVurtCInHiu9AmWH7ejEHKRrA7SIU=",
+    "crate-patches/libsqlite3-sys-manifest-dir.patch": "sha256-o28S7fIq2xIMkmqQbbwE2XXnnUXAYK422rj36U4E788=",
+    "crate-patches/sequoia-ipc-hermetic-capnp.patch": "sha256-pxe3DHHOOY71CZO8vc94UGTRhFpu/ccBMs2RqIa/iAQ=",
+    "crate-patches/sequoia-keystore-backend-hermetic-paths.patch": "sha256-XRsRzmFIyLgGUwV1esk26kcVyWgAMiZF8KccWNprkkI=",
+    "crate-patches/sequoia-keystore-hermetic-capnp.patch": "sha256-vuEa3tFNYWR3MTWIzLvB4kJxdpTIQdGaJK8dpi+gV8E=",
+    "defs.bzl": "sha256-X0y2ijwPpWNgAmbIXAqZHIy62zApEtCjemq4Oa0Y544=",
+    "prebuilt.bzl": "sha256-Wb8rJjrIm2JenkJeftqmE8JudcILaJMEL5njiwxiz68=",
+    "toolchains/BUILD.bazel": "sha256-2YYPZm/ZB8XXIqrraRrmcFNU+deIPVHFRaqMGJpGWe8="
+  }
+}

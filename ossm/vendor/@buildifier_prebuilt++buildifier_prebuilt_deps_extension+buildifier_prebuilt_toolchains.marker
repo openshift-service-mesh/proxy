@@ -1,0 +1,3 @@
+d924f7db48d85817707525319b8a2e5f692772c76159553cb8ed736c4f0542a2
+REPO_MAPPING:buildifier_prebuilt+,bazel_skylib bazel_skylib+
+REPO_MAPPING:buildifier_prebuilt+,bazel_tools bazel_tools

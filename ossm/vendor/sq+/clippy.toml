@@ -1,0 +1,8 @@
+ignore-interior-mutability = [
+    # interior mutability is only used for cached properties
+    # which are not considered by PartialEq and Hash impls
+    "sequoia_openpgp::packet::Key",
+    "sequoia_openpgp::packet::Signature",
+    "sequoia_openpgp::packet::UserID",
+]
+

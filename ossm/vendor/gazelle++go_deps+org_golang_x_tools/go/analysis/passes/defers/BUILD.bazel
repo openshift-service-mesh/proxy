@@ -1,0 +1,35 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "defers",
+    srcs = [
+        "defers.go",
+        "doc.go",
+    ],
+    embedsrcs = ["doc.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/defers",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/analysis",
+        "//go/analysis/passes/inspect",
+        "//go/ast/inspector",
+        "//go/types/typeutil",
+        "//internal/analysis/analyzerutil",
+        "//internal/typesinternal",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":defers",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "defers_test",
+    srcs = ["defers_test.go"],
+    deps = [
+        ":defers",
+        "//go/analysis/analysistest",
+    ],
+)

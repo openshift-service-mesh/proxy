@@ -1,0 +1,10 @@
+"""Extra configuration values that are exposed from the hub repository for spoke repositories to access.
+
+NOTE: This is internal `rules_python` API and if you would like to depend on it, please raise an issue
+with your usecase. This may change in between rules_python versions without any notice.
+"""
+
+packages = {
+    "jinja2": None,
+    "markupsafe": None,
+}

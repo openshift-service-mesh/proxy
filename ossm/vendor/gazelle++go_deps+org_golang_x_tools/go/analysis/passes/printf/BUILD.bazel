@@ -1,0 +1,44 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "printf",
+    srcs = [
+        "doc.go",
+        "printf.go",
+        "types.go",
+    ],
+    embedsrcs = ["doc.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/printf",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/analysis",
+        "//go/analysis/passes/inspect",
+        "//go/ast/edge",
+        "//go/ast/inspector",
+        "//go/types/typeutil",
+        "//internal/analysis/analyzerutil",
+        "//internal/astutil",
+        "//internal/fmtstr",
+        "//internal/typeparams",
+        "//internal/typesinternal",
+        "//internal/versions",
+        "//refactor/satisfy",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":printf",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "printf_test",
+    srcs = ["printf_test.go"],
+    deps = [
+        ":printf",
+        "//go/analysis/analysistest",
+        "//internal/testenv",
+        "//internal/testfiles",
+    ],
+)

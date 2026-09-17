@@ -1,0 +1,104 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "ssautil",
+    srcs = [
+        "deprecated.go",
+        "load.go",
+        "switch.go",
+        "visit.go",
+    ],
+    importpath = "golang.org/x/tools/go/ssa/ssautil",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/loader",
+        "//go/packages",
+        "//go/ssa",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":ssautil",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "ssautil_test",
+    srcs = [
+        "deprecated_test.go",
+        "load_test.go",
+        "switch_test.go",
+    ],
+    data = glob(["testdata/**"]),
+    deps = [
+        ":ssautil",
+        "//go/loader",
+        "//go/packages",
+        "//go/ssa",
+        "//internal/packagestest",
+        "//internal/testenv",
+    ] + select({
+        "@io_bazel_rules_go//go/platform:aix": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:darwin": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:dragonfly": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:freebsd": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:illumos": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:ios": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:js": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:linux": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:netbsd": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:openbsd": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:osx": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:plan9": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:qnx": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:solaris": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:windows": [
+            "//internal/testfiles",
+            "//txtar",
+        ],
+        "//conditions:default": [],
+    }),
+)

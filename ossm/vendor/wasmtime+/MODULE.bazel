@@ -1,0 +1,64 @@
+module(
+    name = "wasmtime",
+    version = "45.0.2.envoy",
+    compatibility_level = 0,
+)
+
+bazel_dep(name = "bazel_skylib", version = "1.7.0")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "rules_cc", version = "0.1.5")
+bazel_dep(name = "rules_rust", version = "0.68.1")
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2021",
+    versions = ["1.93.1"],
+)
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
+
+# Wasmtime's own crates are workspace members of the upstream source tree and
+# crate_universe does not render Bazel targets for path/workspace dependencies,
+# so they are resolved from crates.io at the exact version this module wraps.
+# Every other pin (including all transitive dependencies) comes from the
+# `Cargo.lock` shipped in the upstream source archive, which is used as-is - it
+# is never pruned, patched, overlaid or vendored here.
+WASMTIME_VERSION = "=45.0.2"
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.spec(
+    default_features = False,
+    features = [
+        "cranelift",
+        "gc",
+        "runtime",
+        "std",
+    ],
+    package = "wasmtime",
+    version = WASMTIME_VERSION,
+)
+crate.spec(
+    package = "wasmtime-internal-c-api-macros",
+    version = WASMTIME_VERSION,
+)
+crate.spec(
+    package = "anyhow",
+    version = "*",
+)
+crate.spec(
+    package = "log",
+    version = "*",
+)
+crate.spec(
+    package = "once_cell",
+    version = "*",
+)
+crate.spec(
+    package = "tracing",
+    version = "*",
+)
+crate.from_specs(
+    name = "cu",
+    cargo_lockfile = "//:Cargo.lock",
+)
+use_repo(crate, "cu")

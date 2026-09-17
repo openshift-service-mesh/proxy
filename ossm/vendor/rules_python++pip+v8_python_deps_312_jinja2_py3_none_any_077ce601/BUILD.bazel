@@ -1,0 +1,31 @@
+load("@package_metadata//rules:package_metadata.bzl", "package_metadata")
+load("@v8_python_deps//:config.bzl", "packages")
+load("@rules_python//python/private/pypi:whl_library_targets.bzl", "whl_library_targets_from_requires")
+
+package(default_visibility = ["//visibility:public"])
+
+package_metadata(
+    name = "package_metadata",
+    purl = "pkg:pypi/jinja2@3.0.3?repository_url=https://pypi.org/simple/jinja2/&file_name=Jinja2-3.0.3-py3-none-any.whl",
+    visibility = ["//:__subpackages__"],
+)
+
+whl_library_targets_from_requires(
+    data_exclude = [],
+    dep_template = "@v8_python_deps//{name}:{target}",
+    enable_implicit_namespace_pkgs = False,
+    entry_points = {},
+    extras = [],
+    group_deps = [],
+    group_name = "",
+    include = packages,
+    metadata_name = "Jinja2",
+    metadata_version = "3.0.3",
+    name = "Jinja2-3.0.3-py3-none-any.whl",
+    namespace_package_files = [],
+    requires_dist = [
+        "MarkupSafe (>=2.0)",
+        "Babel (>=2.7) ; extra == 'i18n'",
+    ],
+    sdist_filename = None,
+)

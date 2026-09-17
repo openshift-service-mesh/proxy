@@ -1,0 +1,26 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "typeindex",
+    srcs = ["typeindex.go"],
+    importpath = "golang.org/x/tools/internal/analysis/typeindex",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+    deps = [
+        "//go/analysis",
+        "//go/analysis/passes/inspect",
+        "//go/ast/inspector",
+        "//internal/typesinternal/typeindex",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":typeindex",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)

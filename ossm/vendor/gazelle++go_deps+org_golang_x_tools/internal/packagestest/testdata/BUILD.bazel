@@ -1,0 +1,29 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "testdata",
+    srcs = ["test.go"],
+    importpath = "golang.org/x/tools/internal/packagestest/testdata",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":testdata",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "testdata_test",
+    srcs = [
+        "test_test.go",
+        "x_test.go",
+    ],
+    embed = [":testdata"],
+)

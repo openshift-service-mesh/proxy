@@ -1,0 +1,253 @@
+Return-Path: <koo-voting-bounces+justus=sequoia-pgp.org@enigmail.net>
+Delivered-To: teythoon@greip.uberspace.de
+Received: (qmail 4330 invoked by uid 1114); 7 Dec 2024 11:39:08 -0000
+Delivered-To: teythoon-sequoia@teythoon.uber.space
+Received: (qmail 4326 invoked by uid 989); 7 Dec 2024 11:39:08 -0000
+Received: from mailgate02.uberspace.is (mailgate02.uberspace.is [185.26.156.114])
+	by greip.uberspace.de (Haraka/3.0.1) with ESMTPS id 33331A80-0680-4EF8-B5A9-AD4B1F761336.1
+	envelope-from <koo-voting-bounces+justus=sequoia-pgp.org@enigmail.net>
+	tls TLS_AES_256_GCM_SHA384;
+	Sat, 07 Dec 2024 12:39:03 +0100
+Received: from harrington.uberspace.de (harrington.uberspace.de [185.26.156.85])
+	by mailgate02.uberspace.is (Postfix) with ESMTPS id 49991180C31
+	for <sequoia@teythoon.uber.space>; Sat,  7 Dec 2024 12:38:57 +0100 (CET)
+Received: (qmail 9810 invoked by uid 1282); 7 Dec 2024 11:38:57 -0000
+Delivered-To: sequoia-justus@sequoia-pgp.org
+Received: (qmail 9807 invoked by uid 500); 7 Dec 2024 11:38:57 -0000
+Received: from mxout017.mail.hostpoint.ch (mxout017.mail.hostpoint.ch [2a00:d70::e:0:0:0:317])
+	by harrington.uberspace.de (Haraka/3.0.1) with ESMTPS id 29456094-138E-419C-AA73-26AA06896F21.1
+	envelope-from <koo-voting-bounces+justus=sequoia-pgp.org@enigmail.net>
+	tls TLS_AES_256_GCM_SHA384;
+	Sat, 07 Dec 2024 12:38:52 +0100
+Received: from [10.4.5.40] (helo=mailman014.mail.hostpoint.internal)
+	by mxout017.mail.hostpoint.ch with esmtps  (TLS1.3) tls TLS_AES_256_GCM_SHA384
+	(Exim 4.97.1 (FreeBSD))
+	(envelope-from <koo-voting-bounces+justus=sequoia-pgp.org@enigmail.net>)
+	id 1tJt94-00000000Fua-1RfL
+	for justus@sequoia-pgp.org;
+	Sat, 07 Dec 2024 12:38:46 +0100
+Received: from localhost ([127.0.0.1] helo=mailman014.mail.hostpoint.internal)
+	by mailman014.mail.hostpoint.internal with esmtp (Exim 4.97.1 (FreeBSD))
+	(envelope-from <koo-voting-bounces+justus=sequoia-pgp.org@enigmail.net>)
+	id 1tJt94-00000000IlO-21TA
+	for justus@sequoia-pgp.org;
+	Sat, 07 Dec 2024 12:38:46 +0100
+ARC-Seal: i=1; cv=none; a=rsa-sha256; d=lists.hostpoint.ch;
+ s=20231129-mm3-arc; t=1733571526;
+ b=o83uCvK3AGmIl/Jq88Rcf2rV+x6YrvMxfMRBUeStMWue6VB3jNBn6Gw9oY0ozvqli0wRj
+ JJxyJdBhfX8LlxNN5pWdCljQGOuY8P7/GPkbod0TnZso1/XCO32HRulwhuGpAqkM4MrkvZa
+ I9W1KtXX+pIVOn/J/70dhyUwbZ79h21DnOy80L48f0kG2K2t0mgtCdyEoY73l7DNXtUnGPJ
+ DyJ2dcK26DoHsvA4IHQxnzEu+VFHAIZgmxpp9MD4RcYC4aur2qTIGa63oByNh3B/sisUdus
+ u5rcuwqt2YWNtGo1RPyI0mgEiWpg1fhqTg8QUne+wdG94ZmPobkWgM1cZPCw==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed;
+ d=lists.hostpoint.ch; s=20231129-mm3-arc; t=1733571526; h=from :
+ sender : reply-to : subject : date : message-id : to : cc :
+ mime-version : content-type : content-transfer-encoding : content-id :
+ content-description : resent-date : resent-from : resent-sender :
+ resent-to : resent-cc : resent-message-id : in-reply-to : references :
+ list-id : list-help : list-unsubscribe : list-subscribe : list-post :
+ list-owner : list-archive;
+ bh=GMUl6SYy4W3D6v/3Ypil4CQSovLTzQHZdaTgqs5DwR4=;
+ b=T1XSbQ+wu5lj6dH5aPB+JNnp+ebj+47m1QuLqy3Y+YVbT7w8+Jes4OxZN2YaV3XxuD4Tv
+ 06m3U/4Levp0EIUayB65KRBEPrbebGtIIuyRMoTwdwiKHanVT0OegqdjCkZzaIKDOrnNvG+
+ C7rvSCRx7a7Ff+YABTBtseDsDmsgs36w3n9n/skAhlTXhJ507PYUF6fY76oe3hEjjFRxc3C
+ VQxc/pz5Qcxh8I8YiBX4fhXjLnsYevBjELfBPqyjqiE06NdeKqudTdIbP1nZawFVgsUJnUK
+ P4m6GxN7u6ut+c7LwDJPxR+aVPAl0MBtt1vrVxBHYPMoKk5nGAikI0sXjReA==
+ARC-Authentication-Results: i=1; lists.hostpoint.ch;
+ dkim=fail;
+ arc=none;
+ dmarc=none
+Received: from [10.4.2.217] (helo=mxin017.mail.hostpoint.ch)
+	by mailman014.mail.hostpoint.internal with esmtps  (TLS1.3) tls
+ TLS_AES_256_GCM_SHA384
+	(Exim 4.97.1 (FreeBSD))
+	(envelope-from <patrick@enigmail.net>)
+	id 1tJt8w-00000000IlG-11r2
+	for koo-voting@enigmail.net;
+	Sat, 07 Dec 2024 12:38:38 +0100
+Received: from mxout017.mail.hostpoint.ch ([2a00:d70:0:e::317])
+	by mxin017.mail.hostpoint.ch with esmtps  (TLS1.3) tls TLS_AES_256_GCM_SHA384
+	(Exim 4.97.1 (FreeBSD))
+	(envelope-from <patrick@enigmail.net>)
+	id 1tJt8w-000000001wr-1PKe
+	for koo-voting@enigmail.net;
+	Sat, 07 Dec 2024 12:38:38 +0100
+Received: from [10.0.2.45] (helo=asmtp012.mail.hostpoint.ch)
+	by mxout017.mail.hostpoint.ch with esmtps  (TLS1.3) tls
+ TLS_AES_256_GCM_SHA384
+	(Exim 4.97.1 (FreeBSD))
+	(envelope-from <patrick@enigmail.net>)
+	id 1tJt8v-00000000Fne-3ekL
+	for koo-voting@enigmail.net;
+	Sat, 07 Dec 2024 12:38:37 +0100
+Received: from [2a02:1210:165c:ab00:79a0:9438:c2f4:9106]
+	by asmtp012.mail.hostpoint.ch with esmtpsa  (TLS1.3) tls
+ TLS_AES_256_GCM_SHA384
+	(Exim 4.97.1 (FreeBSD))
+	(envelope-from <patrick@enigmail.net>)
+	id 1tJt8v-00000000N9w-3UK4
+	for koo-voting@enigmail.net;
+	Sat, 07 Dec 2024 12:38:37 +0100
+X-Authenticated-Sender-Id: patrick@enigmail.net
+To: koo-voting@enigmail.net
+References: <5f59981c-1bfb-5f8b-93a3-865c33ec1625@enigmail.net>
+From: Patrick Brunschwig <patrick@enigmail.net>
+Autocrypt: addr=patrick@enigmail.net; prefer-encrypt=mutual; keydata=
+ xjMEZmQU3RYJKwYBBAHaRw8BAQdA4/l57O4gUweBOgVW9S1yutfgMHF1iURviG1jcb+/3z7N
+ KVBhdHJpY2sgQnJ1bnNjaHdpZyA8cGF0cmlja0BlbmlnbWFpbC5uZXQ+wpIEEBYKAEQFgmZk
+ FN0FiQlmAYAECwkHCAmQoPyuK0NGVXYDFQgKBBYAAgECGQECmwMCHgEWIQRk9N12hm6miW5K
+ hpug/K4rQ0ZVdgAAM+UA/1brtqyREKa65BRMYaxiySCYTPRObIkOWAWBKjUt/N/7APwNhkV4
+ MzcNdCU1qGJWEJGPQCY8tF3xI7H+Bqg12UuRBM44BGZkFN0SCisGAQQBl1UBBQEBB0B1cnik
+ tl07/9iRJLfy4AzCxM2sxByke0TXivmjKxodXQMBCAfCfgQYFgoAMAWCZmQU3QWJCWYBgAmQ
+ oPyuK0NGVXYCmwwWIQRk9N12hm6miW5Khpug/K4rQ0ZVdgAAYksBAIUetCBOgiegbKKBPhah
+ oONLAjAqbLlkGZZW54HaVTiUAQDbiHnmrXQ6dWpdMfjUeO9xvSgZ2b2Yup7vE4C4k/b7DA==
+Message-ID: <4a373e92-35c0-f91a-2ecc-b9fbd483a2b0@enigmail.net>
+Date: Sat, 7 Dec 2024 12:38:37 +0100
+X-Mailer: Epyrus/2.1.3
+MIME-Version: 1.0
+In-Reply-To: <5f59981c-1bfb-5f8b-93a3-865c33ec1625@enigmail.net>
+X-Whitelisted-By: dnswl.hostpoint.dnslist
+X-Vs-State: 0
+X-Vs-Score: 0
+X-Vs-Cause: gggruggvucftvghtrhhoucdtuddrgeefuddrjedugddvlecutefuodetggdotefrod
+ ftvfcurfhrohhfihhlvgemuchhohhsthhpohhinhhtpdggtfgfnhhsuhgsshgtrhhisggvnecuueg
+ rihhlohhuthemuceftddtnecunecujfgurhepuffvfhfhkfffofggjggtsehgtderofertdejnecu
+ hfhrohhmpefrrghtrhhitghkuceurhhunhhstghhfihighcuoehprghtrhhitghksegvnhhighhmr
+ ghilhdrnhgvtheqnecuggftrfgrthhtvghrnhepveejgeeikeekkeeijeeuveevhfehhefgleeuvd
+ evtefgueetkeevhefghfdttdeinecuffhomhgrihhnpehophgvnhhpghhprdhorhhgpdhgihhtlhg
+ rsgdrtghomhdpmhgvtghhrghnihhsmhdrmhgupdhhohhsthhpohhinhhtrdgthhdpvghnihhgmhgr
+ ihhlrdhnvghtnecukfhppedvrgdtvdemuddvuddtmeduieehtgemrggstddtmeejlegrtdemleegf
+ eekmegtvdhfgeemledutdeinecuvehluhhsthgvrhfuihiivgeptd
+Message-ID-Hash: YWSXITKLXHAQLXK6ZN7D6NLZ2PWPNAQA
+X-Message-ID-Hash: YWSXITKLXHAQLXK6ZN7D6NLZ2PWPNAQA
+X-MailFrom: patrick@enigmail.net
+X-Mailman-Rule-Misses: dmarc-mitigation; no-senders; approved; emergency;
+ loop; banned-address; member-moderation; nonmember-moderation; administrivia;
+ implicit-dest; max-recipients; max-size; news-moderation; no-subject;
+ digests; suspicious-header
+X-Mailman-Version: 3.3.9
+Precedence: list
+Subject: [Koo-voting] Re: Time to vote for the keys.openpgp.org board (2024)
+List-Id: "keys.openpgp.org elections and voting" <koo-voting.enigmail.net>
+Archived-At: 
+ <https://lists.hostpoint.ch/archives/list/koo-voting@enigmail.net/message/YWSXITKLXHAQLXK6ZN7D6NLZ2PWPNAQA/>
+List-Archive: 
+ <https://lists.hostpoint.ch/archives/list/koo-voting@enigmail.net/>
+List-Help: <mailto:koo-voting-request@enigmail.net?subject=help>
+List-Owner: <mailto:koo-voting-owner@enigmail.net>
+List-Post: <mailto:koo-voting@enigmail.net>
+List-Subscribe: <mailto:koo-voting-join@enigmail.net>
+List-Unsubscribe: <mailto:koo-voting-leave@enigmail.net>
+Content-Type: multipart/mixed; boundary="===============0609919876692669446=="
+Original-Authentication-Results: lists.hostpoint.ch; dkim=fail;
+ arc=none (Message is not ARC signed); dmarc=none
+X-Rspamd-Bar: -----
+X-Rspamd-Report: HAS_LIST_UNSUB(-0.01) SIGNED_PGP(-2) MAILLIST(-0.2) MIME_GOOD(-0.2) R_SPF_FAIL(1) ARC_ALLOW(-1) BAYES_HAM(-2.86373)
+X-Rspamd-Score: -5.27373
+
+This is an OpenPGP/MIME signed message (RFC 4880 and 3156)
+--===============0609919876692669446==
+Content-Type: multipart/signed; micalg=pgp-sha512;
+ protocol="application/pgp-signature";
+ boundary="aA1TK4098ErBRZJLdaKpOQyxZ9tW3U22b"
+
+This is an OpenPGP/MIME signed message (RFC 4880 and 3156)
+--aA1TK4098ErBRZJLdaKpOQyxZ9tW3U22b
+Content-Type: multipart/mixed; boundary="il6ByBPinXDj6po6So8Wgc4wQwJwa3Cnx";
+ protected-headers="v1"
+From: Patrick Brunschwig <patrick@enigmail.net>
+To: koo-voting@enigmail.net
+Message-ID: <4a373e92-35c0-f91a-2ecc-b9fbd483a2b0@enigmail.net>
+Subject: Re: [Koo-voting] Time to vote for the keys.openpgp.org board (2024)
+
+--il6ByBPinXDj6po6So8Wgc4wQwJwa3Cnx
+Content-Type: text/plain; charset=utf-8
+Content-Language: de-CH
+Content-Transfer-Encoding: quoted-printable
+
+Hi all
+
+a quick update where we are in the election process:
+15 people already cast ballots!
+
+Just as a reminder: when you send me your ballot, please ensure that the
+specific election header line appears above the list of candidates you
+approve of.
+
+For this election, the specific header line is:
+
+=3D=3D=3D 2024 keys.openpgp.org Board approvals =3D=3D=3D
+
+Regards,
+-Patrick
+
+On 03.12.2024 19:25, Patrick Brunschwig wrote:
+> hey folks
+>=20
+> If you're a member of the keys.openpgp.org voting body, you should have=
+
+> gotten an e-mail from me asking you to vote.  Please follow the
+> suggestions there!  If you think you're a member of the voting body, bu=
+t
+> you haven't gotten an invitation to vote yet, please let me know by
+> replying to this message off-list, and i'll try to figure out what
+> happened to your invitation.
+>=20
+> We're using the same election process as last time, a simple approval
+> vote.  Details are at:
+>=20
+> https://gitlab.com/keys.openpgp.org/governance/-/blob/main/board-electi=
+ons/2024/mechanism.md
+>=20
+> Please do vote even though this isn't a contentious election!
+> Candidates need at least 5 approvals to be seated on the board, and a
+> record of voting is the only formal mechanism the organization uses to
+> ensure that members of the voting body are still active.
+>=20
+>=20
+> -Patrick
+>=20
+>=20
+> PS. The invitation to vote wasn't signed because my mail merge tool
+> doesn't allow me to do that and I was too lazy to write some tooling fo=
+r
+> it ;-)
+>=20
+>=20
+>=20
+> _______________________________________________
+> koo-voting mailing list -- koo-voting@enigmail.net
+> To unsubscribe or make changes to your subscription click here:
+> https://lists.hostpoint.ch/mailman3/lists/koo-voting.enigmail.net/
+>=20
+
+
+
+--il6ByBPinXDj6po6So8Wgc4wQwJwa3Cnx--
+
+--aA1TK4098ErBRZJLdaKpOQyxZ9tW3U22b
+Content-Type: application/pgp-signature; name="signature.asc"
+Content-Description: OpenPGP digital signature
+Content-Disposition: attachment; filename="signature.asc"
+
+-----BEGIN PGP SIGNATURE-----
+
+wnUEARYKACcFgmdUM70JkKD8ritDRlV2FiEEZPTddoZupoluSoaboPyuK0NG
+VXYAAGMzAQD5mUZBxtlNwgAWldCX+wO77QD45KBpc1UHKSIphubcJQEAx83t
+5HlRnQQDdD4o/HII/g6SGIz1b4B19DMDXteVBgI=
+=Spi0
+-----END PGP SIGNATURE-----
+
+--aA1TK4098ErBRZJLdaKpOQyxZ9tW3U22b--
+
+--===============0609919876692669446==
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: inline
+
+_______________________________________________
+koo-voting mailing list -- koo-voting@enigmail.net
+To unsubscribe or make changes to your subscription click here:
+https://lists.hostpoint.ch/mailman3/lists/koo-voting.enigmail.net/
+--===============0609919876692669446==--

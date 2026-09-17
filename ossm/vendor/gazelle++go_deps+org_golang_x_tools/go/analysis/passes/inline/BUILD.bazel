@@ -1,0 +1,47 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "inline",
+    srcs = [
+        "doc.go",
+        "inline.go",
+    ],
+    embedsrcs = ["doc.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/inline",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/analysis",
+        "//go/analysis/passes/inspect",
+        "//go/analysis/passes/internal/gofixdirective",
+        "//go/ast/edge",
+        "//go/ast/inspector",
+        "//go/types/typeutil",
+        "//internal/analysis/analyzerutil",
+        "//internal/analysis/typeindex",
+        "//internal/astutil",
+        "//internal/moreiters",
+        "//internal/packagepath",
+        "//internal/refactor",
+        "//internal/refactor/inline",
+        "//internal/typesinternal",
+        "//internal/typesinternal/typeindex",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":inline",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "inline_test",
+    srcs = ["inline_test.go"],
+    embed = [":inline"],
+    deps = [
+        "//go/analysis/analysistest",
+        "//internal/testenv",
+        "//internal/testfiles",
+        "@com_github_google_go_cmp//cmp",
+    ],
+)

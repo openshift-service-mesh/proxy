@@ -1,0 +1,21 @@
+2060022b6ef319c9b08f6af4ed0086326a43a6f38ee4fb28980aa8db53fd501c
+ENV:RULES_PYTHON_REPO_DEBUG \0
+ENV:RULES_PYTHON_REPO_DEBUG_VERBOSITY \0
+REPO_MAPPING:rules_python+,bazel_skylib bazel_skylib+
+REPO_MAPPING:rules_python+,bazel_tools bazel_tools
+REPO_MAPPING:rules_python+,pypi__build rules_python++config+pypi__build
+REPO_MAPPING:rules_python+,pypi__click rules_python++config+pypi__click
+REPO_MAPPING:rules_python+,pypi__colorama rules_python++config+pypi__colorama
+REPO_MAPPING:rules_python+,pypi__importlib_metadata rules_python++config+pypi__importlib_metadata
+REPO_MAPPING:rules_python+,pypi__installer rules_python++config+pypi__installer
+REPO_MAPPING:rules_python+,pypi__more_itertools rules_python++config+pypi__more_itertools
+REPO_MAPPING:rules_python+,pypi__packaging rules_python++config+pypi__packaging
+REPO_MAPPING:rules_python+,pypi__pep517 rules_python++config+pypi__pep517
+REPO_MAPPING:rules_python+,pypi__pip rules_python++config+pypi__pip
+REPO_MAPPING:rules_python+,pypi__pip_tools rules_python++config+pypi__pip_tools
+REPO_MAPPING:rules_python+,pypi__pyproject_hooks rules_python++config+pypi__pyproject_hooks
+REPO_MAPPING:rules_python+,pypi__setuptools rules_python++config+pypi__setuptools
+REPO_MAPPING:rules_python+,pypi__tomli rules_python++config+pypi__tomli
+REPO_MAPPING:rules_python+,pypi__wheel rules_python++config+pypi__wheel
+REPO_MAPPING:rules_python+,pypi__zipp rules_python++config+pypi__zipp
+REPO_MAPPING:rules_python+,rules_python_internal rules_python++config+rules_python_internal

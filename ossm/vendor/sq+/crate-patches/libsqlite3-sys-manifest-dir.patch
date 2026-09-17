@@ -1,0 +1,47 @@
+diff -ruN a/build.rs b/build.rs
+--- a/build.rs
++++ b/build.rs
+@@ -1,5 +1,5 @@
+ use std::env;
+-use std::path::Path;
++use std::path::{Path, PathBuf};
+ 
+ #[cfg(all(feature = "loadable_extension", feature = "preupdate_hook"))]
+ compile_error!("feature \"loadable_extension\" and feature \"preupdate_hook\" cannot be enabled at the same time");
+@@ -29,12 +29,16 @@
+     env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|v| v == compiler_name)
+ }
+ 
++fn manifest_path(rel: &str) -> PathBuf {
++    Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join(rel)
++}
++
+ /// Copy bindgen file from `dir` to `out_path`.
+ fn copy_bindings<T: AsRef<Path>>(dir: &str, bindgen_name: &str, out_path: T) {
+     let from = if cfg!(feature = "loadable_extension") {
+-        format!("{dir}/{bindgen_name}_ext.rs")
++        manifest_path(&format!("{dir}/{bindgen_name}_ext.rs"))
+     } else {
+-        format!("{dir}/{bindgen_name}.rs")
++        manifest_path(&format!("{dir}/{bindgen_name}.rs"))
+     };
+     std::fs::copy(from, out_path).expect("Could not copy bindings to output directory");
+ }
+@@ -121,7 +125,7 @@
+         println!("cargo:rerun-if-changed={lib_name}/sqlite3.c");
+         println!("cargo:rerun-if-changed=sqlite3/wasm32-wasi-vfs.c");
+         let mut cfg = cc::Build::new();
+-        cfg.file(format!("{lib_name}/sqlite3.c"))
++        cfg.file(super::manifest_path(&format!("{lib_name}/sqlite3.c")))
+             .flag("-DSQLITE_CORE")
+             .flag("-DSQLITE_DEFAULT_FOREIGN_KEYS=1")
+             .flag("-DSQLITE_ENABLE_API_ARMOR")
+@@ -253,7 +257,7 @@
+                 .flag("-D_WASI_EMULATED_PROCESS_CLOCKS");
+ 
+             if cfg!(feature = "wasm32-wasi-vfs") {
+-                cfg.file("sqlite3/wasm32-wasi-vfs.c");
++                cfg.file(super::manifest_path("sqlite3/wasm32-wasi-vfs.c"));
+             }
+         }
+         if cfg!(feature = "unlock_notify") {

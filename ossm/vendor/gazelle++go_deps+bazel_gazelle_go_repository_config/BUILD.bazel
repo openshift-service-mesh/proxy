@@ -1,0 +1,1 @@
+exports_files(['WORKSPACE', 'config.json', 'go_env.bzl', 'go_tools.bzl'])
