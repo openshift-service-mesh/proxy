@@ -1,0 +1,41 @@
+# OSSM: system-OpenSSL replacement for Envoy's `openssl` module.
+#
+# Upstream Envoy depends on `bazel_dep(name = "openssl", version = "3.5.7.envoy")`,
+# a module that downloads the OpenSSL sources and builds them from scratch with
+# rules_foreign_cc. OSSM instead links against the OpenSSL that ships with the
+# host (RHEL/UBI), exactly as the old WORKSPACE build did via:
+#
+#     new_local_repository(
+#         name = "openssl",
+#         path = "/usr/",
+#         build_file = "//:openssl.BUILD",
+#     )
+#
+# Bzlmod has no direct equivalent for shadowing a `bazel_dep` module with a
+# `new_local_repository`, so we replace the whole module with this local one
+# (wired up through `local_path_override(module_name = "openssl", ...)` in the
+# root MODULE.bazel). The module re-exports the same target names Envoy's
+# compat/openssl layer and .bazelrc expect (`:include`, `:libs`, `:crypto`,
+# `:ssl`, `:openssl`, `:parallel_builds`) but backs them with the host's
+# shared libraries and headers under /usr rather than a foreign_cc build.
+module(
+    name = "openssl",
+    version = "3.5.7.envoy",
+    compatibility_level = 1,
+)
+
+bazel_dep(name = "rules_cc", version = "0.2.22")
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+
+# The actual system OpenSSL, rooted at /usr. `system_openssl.BUILD` globs the
+# host headers and shared objects; see the old //:openssl.BUILD it was moved
+# from. Kept as a nested repo (rather than this module's own package) because a
+# package can only glob files that live inside its own repository, and these
+# live under /usr.
+new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
+
+new_local_repository(
+    name = "system_openssl",
+    build_file = "//:system_openssl.BUILD",
+    path = "/usr/",
+)

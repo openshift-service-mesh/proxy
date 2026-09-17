@@ -4,6 +4,24 @@ build --verbose_failures
 
 # Toolchain configuration
 build --repo_env=BAZEL_USE_HOST_SYSROOT=True
+
+# Main C++ compile uses the host clang toolchain (@llvm_host, defined in the
+# root MODULE.bazel with an exec toolchain root of /usr). extra_toolchains
+# outrank the hermetic `@llvm_toolchain` Envoy registers, so this wins for the
+# default host platform -- reproducing the WORKSPACE-era host build.
+build --extra_toolchains=@llvm_host//:all
+
+# Point Envoy's compat/openssl prefixer at the *host* LLVM. This does NOT change
+# the main C++ toolchain (that is @llvm_host above); its effect is that Envoy's
+# @envoy_repo//:compiler.bzl detects a host LLVM and makes bazel/toolchains.bzl
+# select @llvm_toolchain_llvm//:lib64/libclang-cpp.so.<host-version> (+libLLVM)
+# for the prefixer, plus host-shaped -isystem paths. On its own that target
+# would not exist -- @llvm_toolchain_llvm is normally envoy_toolshed's hermetic
+# clang-22 minimal LLVM -- so we also patch envoy_toolshed (see MODULE.bazel) to
+# back @llvm_toolchain_llvm with the host /usr LLVM when this env var is set.
+# Together this reproduces the WORKSPACE-era behavior: the prefixer links the
+# host libclang (matching the host libstdc++) instead of a hermetic clang whose
+# libstdc++ requirements the build container does not satisfy.
 build --repo_env=BAZEL_LLVM_PATH=/usr
 build --config=clang-common
 build --config=libstdc++
@@ -18,6 +36,20 @@ build --extra_toolchains=@rules_python//python:autodetecting_toolchain
 
 build --extra_toolchains=@local_jdk//:all
 build --tool_java_runtime_version=local_jdk
+
+# Use host-installed CMake/Make/Ninja/etc instead of building them from source.
+# extra_toolchains outrank rules_foreign_cc's own built-from-source toolchain
+# registrations, so the built tools are never fetched/built. Mirrors envoy's
+# bazelrc.windows. Requires the direct bazel_dep on rules_foreign_cc in
+# MODULE.bazel so `@rules_foreign_cc` resolves here.
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_autoconf_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_automake_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_cmake_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_m4_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_make_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_meson_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_ninja_toolchain
+build --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_pkgconfig_toolchain
 
 # OpenSSL configuration
 common --config=openssl
@@ -46,4 +78,11 @@ build:ci-config --color=no
 build:ci-config --show_progress_rate_limit=10
 
 # Import vendor flags
-import %workspace%/ossm/bazelrc-vendor
+# TEMPORARY (bzlmod migration): the vendor snapshot under ossm/vendor predates
+# the WORKSPACE->bzlmod merge and its --override_repository entries no longer
+# match the resolved module graph (e.g. platforms 1.1.0 files under a 1.0.0
+# resolution -> missing @package_metadata). Disabled so the online build can be
+# validated; regenerate ossm/vendor with ossm/scripts/update-deps.sh from a
+# green online build, then re-enable this import. Do NOT commit it disabled --
+# CI relies on the vendor.
+#import %workspace%/ossm/bazelrc-vendor
