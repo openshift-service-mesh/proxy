@@ -7,6 +7,7 @@ export CC=clang CXX=clang++
 # Set the bazel flags
 BAZEL_STARTUP_ARGS=${BAZEL_STARTUP_ARGS:-}
 BAZEL_BUILD_ARGS=${BAZEL_BUILD_ARGS:-}
+SKIP=${SKIP:-}
 
 BAZEL_BUILD_ARGS+=" \
 --host_force_python=PY3 \
