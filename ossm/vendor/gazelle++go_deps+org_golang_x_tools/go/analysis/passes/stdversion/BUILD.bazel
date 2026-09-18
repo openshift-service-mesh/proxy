@@ -1,0 +1,33 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "stdversion",
+    srcs = ["stdversion.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/stdversion",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/analysis",
+        "//go/analysis/passes/inspect",
+        "//go/ast/inspector",
+        "//internal/typesinternal",
+        "//internal/versions",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":stdversion",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "stdversion_test",
+    srcs = ["stdversion_test.go"],
+    data = glob(["testdata/**"]),
+    deps = [
+        ":stdversion",
+        "//go/analysis/analysistest",
+        "//internal/testenv",
+        "//internal/testfiles",
+    ],
+)

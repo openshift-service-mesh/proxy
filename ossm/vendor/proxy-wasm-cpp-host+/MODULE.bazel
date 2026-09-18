@@ -1,0 +1,25 @@
+module(
+    name = "proxy-wasm-cpp-host",
+    repo_name = "proxy_wasm_cpp_host",
+    version = "0.0.0-260704-f2db56a.envoy",
+)
+
+bazel_dep(name = "abseil-cpp", version = "20250814.1", repo_name = "com_google_absl")
+bazel_dep(name = "bazel_features", version = "1.21.0")
+bazel_dep(name = "bazel_skylib", version = "1.7.0")
+bazel_dep(name = "boringssl", version = "0.20250514.0")
+bazel_dep(name = "dragonbox", version = "0.0.0-241028-6c7c925.envoy")
+bazel_dep(name = "fast_float", version = "8.0.2")
+bazel_dep(name = "fp16", version = "0.0.0-260704-3d2de18.envoy")
+bazel_dep(name = "highway", version = "1.2.0")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "protobuf", version = "33.2", repo_name = "com_google_protobuf")
+bazel_dep(name = "proxy-wasm-cpp-sdk", version = "0.0.0-250925-e5256b0.envoy", repo_name = "proxy_wasm_cpp_sdk")
+bazel_dep(name = "rules_cc", version = "0.1.5")
+bazel_dep(name = "rules_license", version = "1.0.0")
+bazel_dep(name = "rules_python", version = "1.7.0")
+bazel_dep(name = "rules_rust", version = "0.68.1")
+bazel_dep(name = "simdutf", version = "8.1.0.envoy")
+bazel_dep(name = "v8", version = "14.6.202.10.envoy")
+bazel_dep(name = "wamr", version = "2.4.4.envoy", repo_name = "com_github_bytecodealliance_wasm_micro_runtime")
+bazel_dep(name = "wasmtime", version = "45.0.2.envoy", repo_name = "com_github_wasmtime")

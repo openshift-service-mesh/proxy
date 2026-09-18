@@ -1,0 +1,382 @@
+# Copyright 2016 Google Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+################################################################################
+#
+module(name = "io_istio_proxy")
+
+bazel_dep(name = "googleapis", version = "0.0.0-20251003-2193a2bf")
+bazel_dep(name = "googleurl", version = "0.0.0-221103-dd4080f.envoy")
+
+# grpc is only ever a transitive dependency (pulled in via envoy_api), but
+# envoy.bazelrc sets label flags like `--@grpc//third_party:ssl_lib=...`
+# unconditionally. Bzlmod only resolves an unqualified `@grpc` label
+# against repos the *root* module directly depends on, so without this
+# direct bazel_dep those flags fail with "No repository visible as
+# '@grpc' from main repository". Version must match what envoy_api
+# declares (see external envoy_api's MODULE.bazel) to avoid a second
+# resolution.
+bazel_dep(name = "grpc", version = "1.83.0.envoy")
+
+# Same reasoning as grpc above: only a transitive dep (via envoy), but
+# envoy.bazelrc references it unqualified. Version must match envoy's
+# own MODULE.bazel.
+bazel_dep(name = "librdkafka", version = "2.6.0.envoy")
+
+# Same reasoning as grpc above: only a transitive dep (via envoy), but
+# envoy.bazelrc references it unqualified. Version must match envoy's
+# own MODULE.bazel.
+bazel_dep(name = "libsxg", version = "0.0.0-210708-beaa393.envoy")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "protobuf", version = "35.1.bcr.envoy")
+bazel_dep(name = "protoc-gen-validate", version = "1.3.3.envoy")
+bazel_dep(name = "proxy-wasm-cpp-host", version = "0.0.0-260704-f2db56a.envoy")
+bazel_dep(name = "quiche", version = "0.0.0-260831-5c9cc6b.envoy")
+bazel_dep(name = "re2", version = "2025-08-12.bcr.1")
+bazel_dep(name = "rules_cc", version = "0.2.22")
+bazel_dep(name = "rules_pkg", version = "1.1.0")
+bazel_dep(name = "rules_python", version = "2.2.0")
+bazel_dep(name = "rules_rust", version = "0.69.0.envoy")
+
+# OSSM: rules_foreign_cc, rules_go and rules_java are only ever transitive deps
+# (via envoy), but the OSSM host-toolchain wiring references them by their
+# unqualified apparent names, which bzlmod only resolves against repos the *root*
+# module directly depends on:
+#   - `@rules_foreign_cc` is referenced from ossm/bazelrc
+#     (`--extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_*`), the
+#     same way envoy's own bazelrc.windows does it.
+#   - `@rules_go` is referenced by the `go_sdk` extension in the "OSSM host
+#     toolchains" block below.
+#   - `@rules_java` is used below to create `@local_jdk`, which ossm/bazelrc
+#     references (`--extra_toolchains=@local_jdk//:all`,
+#     `--tool_java_runtime_version=local_jdk`).
+# Versions must match what envoy's own MODULE.bazel declares to avoid a second
+# resolution.
+bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
+bazel_dep(name = "rules_go", version = "0.59.0")
+bazel_dep(name = "rules_java", version = "9.3.0")
+
+# Same reasoning as grpc/librdkafka/libsxg above: only a transitive dep (via
+# envoy), but envoy.bazelrc references it unqualified. Version must match
+# envoy's own MODULE.bazel.
+bazel_dep(name = "zlib-ng", version = "2.3.2.envoy")
+bazel_dep(name = "envoy_toolshed", version = "0.4.15.envoy")
+
+# OSSM: patch envoy_toolshed's minimal-LLVM machinery. The patch does two
+# things (see the patch header):
+#
+#   1. Host LLVM: `envoy_toolshed`'s `llvm_toolchain_alias` extension normally
+#      backs `@llvm_toolchain_llvm` with the *hermetic* clang-22 minimal LLVM.
+#      Envoy's compat/openssl prefixer then links that hermetic `libclang-cpp`,
+#      which needs a newer libstdc++ (GLIBCXX_3.4.30) than RHEL/UBI ships,
+#      failing at runtime. The patch adds a host-mode branch: when
+#      `BAZEL_LLVM_PATH` is set (see ossm/bazelrc) it backs `@llvm_toolchain_llvm`
+#      with the host `/usr` LLVM instead -- reproducing the WORKSPACE-era host
+#      toolchain, so the prefixer links host clang's `libclang-cpp` (matching the
+#      host libstdc++). The repo *name* is unchanged, so the prefixer's
+#      hardcoded `-isystem .../llvm_toolchain_llvm/include` keeps resolving (now
+#      to host `/usr/include`).
+#   2. Sandbox fix: even in hermetic mode, `all_includes` used to stage both the
+#      `include/c++` directory *and* the files beneath it (`exclude_directories =
+#      0`), so sandbox setup failed with `Could not copy inputs into sandbox:
+#      .../llvm_toolchain_llvm/include/c++ (File exists)`. The patch globs the
+#      directory *contents* (`/**`) instead.
+single_version_override(
+    module_name = "envoy_toolshed",
+    patch_strip = 1,
+    patches = ["//ossm/patches:envoy_toolshed-host-llvm.patch"],
+)
+
+# Vendor v8's Python wheels for aarch64 as well as x86_64. v8 (from Envoy's
+# bazel-registry) pins markupsafe, whose wheels are arch-specific. Its pip.parse
+# sets no `target_platforms`, so rules_python resolves wheels for the *host* arch
+# only (see hub_builder.bzl: `target_platforms = pip_attr.target_platforms or
+# ["{os}_{arch}"]`). We vendor on x86_64, so the aarch64 wheel is never fetched
+# and an offline build on an aarch64 host fails downloading it. Patch v8's
+# pip.parse to resolve both arches so `bazel vendor` captures both wheels in one
+# x86_64 pass. (Patching MODULE.bazel via override *does* feed extension
+# resolution in Bazel 8.7 -- verified: both wheel repos get defined and the hub
+# select() gains a cp312_linux_aarch64 branch.) Only x86_64/aarch64 are listed:
+# rules_python's default platform set has no s390x/ppc, and markupsafe ships no
+# wheels for them (those hosts build it from sdist at build time instead).
+single_version_override(
+    module_name = "v8",
+    patch_strip = 1,
+    patches = ["//ossm/patches:v8-pip-target-platforms.patch"],
+)
+
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2", dev_dependency = True)
+
+# 1. Determine SHA256 `wget https://github.com/envoyproxy/envoy/archive/$COMMIT.tar.gz && sha256sum $COMMIT.tar.gz`
+# 2. Update .bazelversion, envoy.bazelrc, ENVOY_VERSION.txt and .bazelrc if needed.
+#
+# Commit date: 2026-09-17
+ENVOY_SHA = "21549bc3d0fefa662aae48f04edd47eb3e59cd2b"
+
+ENVOY_SHA256 = "fbe193e0ff1617b4bac6155fb919d050b191091dff363ca29f76112f22651649"
+
+ENVOY_ORG = "envoyproxy"
+
+ENVOY_REPO = "envoy"
+
+# Envoy has migrated its own build to Bzlmod (envoyproxy/envoy#42910) and is not
+# published to any module registry, so we fetch it the same way its own
+# automation always has -- a pinned GitHub archive -- but via `archive_override`
+# instead of a WORKSPACE `http_archive`. The version below must track
+# ENVOY_VERSION.txt (kept in sync by scripts/update_envoy.sh).
+#
+# To override with a local envoy checkout, pass
+# `--override_module=envoy=/PATH/TO/ENVOY --override_module=envoy_api=/PATH/TO/ENVOY/api`
+# to Bazel or persist the options in `user.bazelrc`. Use `--override_module`,
+# not `--override_repository`: envoy is a bzlmod module, so module resolution
+# still reads the pinned archive's own MODULE.bazel unless the module itself
+# is overridden. Both envoy and envoy_api must be overridden together -- see
+# the envoy_api module below for why it isn't derived from envoy anymore.
+bazel_dep(name = "envoy", version = "1.40.0-dev")
+archive_override(
+    module_name = "envoy",
+    sha256 = ENVOY_SHA256,
+    strip_prefix = ENVOY_REPO + "-" + ENVOY_SHA,
+    urls = ["https://github.com/" + ENVOY_ORG + "/" + ENVOY_REPO + "/archive/" + ENVOY_SHA + ".tar.gz"],
+)
+
+# Envoy's own MODULE.bazel resolves its `api/` subtree as a separate module
+# (envoy_api) via `local_path_override(path = "api")` -- but bzlmod only
+# honors override_* directives declared in the *root* module, and here
+# `envoy` is a dependency, not the root, so that override is silently
+# ignored (confirmed: without this, `bazel mod graph` fails trying to
+# resolve envoy_api from the registries). We re-declare the same override
+# ourselves, pointed at the "api" subdirectory of the identical archive.
+bazel_dep(name = "envoy_api", version = "1.40.0-dev")
+archive_override(
+    module_name = "envoy_api",
+    sha256 = ENVOY_SHA256,
+    strip_prefix = ENVOY_REPO + "-" + ENVOY_SHA + "/api",
+    urls = ["https://github.com/" + ENVOY_ORG + "/" + ENVOY_REPO + "/archive/" + ENVOY_SHA + ".tar.gz"],
+)
+
+envoy_toolchains_ext = use_extension("@envoy//bazel:extensions.bzl", "envoy_toolchains_extension")
+use_repo(envoy_toolchains_ext, "clang_platform")
+
+# Compiler toolchain as dev_dependency - only required when building this
+# module directly, downstream modules provide their own toolchain.
+bazel_dep(name = "toolchains_llvm", version = "1.9.0.envoy", dev_dependency = True)
+
+# Build-time Python uses the *host* interpreter, mirroring the WORKSPACE-era
+# `use_host_tools = True` behavior. Without this, rules_python (registered by
+# both this module and @envoy) downloads a ~300MB hermetic CPython whose two
+# largest files exceed GitHub's 100MB limit and defeat offline vendoring.
+#
+# local_runtime introspects the host python3 (version, headers, ABI) into a
+# full toolchain -- unlike the autodetecting toolchain, it can build C
+# extensions and satisfies pip. register_toolchains() inserts it ahead of the
+# hermetic 3.12 toolchain so the download is never triggered. The host must be
+# CPython 3.12 to match the ABI of the vendored cp312 wheels (base_pip3,
+# fuzzing_pip3, v8_python_deps). Must be a dev_dependency: a local toolchain
+# only makes sense for the root module.
+local_runtime_repo = use_repo_rule(
+    "@rules_python//python/local_toolchains:repos.bzl",
+    "local_runtime_repo",
+)
+local_runtime_toolchains_repo = use_repo_rule(
+    "@rules_python//python/local_toolchains:repos.bzl",
+    "local_runtime_toolchains_repo",
+)
+local_runtime_repo(
+    name = "local_python3",
+    interpreter_path = "python3",
+    on_failure = "fail",
+    dev_dependency = True,
+)
+local_runtime_toolchains_repo(
+    name = "local_python_toolchains",
+    runtimes = ["local_python3"],
+    dev_dependency = True,
+)
+register_toolchains("@local_python_toolchains//:all", dev_dependency = True)
+
+# Named "envoy_build_config" (not e.g. "istio_proxy_envoy_build_config") so
+# it is visible under that exact apparent name both here in the root module
+# (our own root BUILD file does `load("@envoy_build_config//...")`) and via
+# the override_repo below, which redirects whatever the envoy_build_config_ext
+# extension would otherwise produce for @envoy to this same repo.
+build_config = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
+
+build_config(
+    name = "envoy_build_config",
+    path = "bazel/extension_config",
+)
+
+envoy_build_config_ext = use_extension("@envoy//bazel:extensions.bzl", "envoy_build_config_ext")
+
+override_repo(
+    envoy_build_config_ext,
+    envoy_build_config = "envoy_build_config",
+)
+
+# LLVM toolchain configuration
+#
+# Envoy's own MODULE.bazel wires its hermetic Linux Clang toolchain's sysroot
+# to whatever `@sysroot_linux_amd64` / `@sysroot_linux_arm64` resolve to (via
+# `llvm.sysroot(label = "@sysroot_linux_{arch}//:sysroot")`), which come from
+# a bare `sysroot_ext.setup()` call in envoy's own MODULE.bazel -- defaulting
+# to glibc 2.31. scripts/release-binary.sh (EXPECTED_GLIBC) pins released
+# binaries to glibc 2.28, matching the old WORKSPACE-era
+# `envoy_dependencies_extra(glibc_version = "2.28", ...)` pin, so we need
+# envoy's toolchain to actually use a 2.28 sysroot instead of 2.31.
+#
+# The `toolchains_llvm` `llvm` extension scopes a toolchain's `sysroot` tags
+# to whichever module's `toolchain` tag first claims that toolchain's `name`
+# (here "llvm_toolchain", claimed by envoy itself) -- so a
+# `llvm.sysroot(name = "llvm_toolchain", ...)` tag declared from *our* module
+# would silently be ignored. Instead we override the sysroot_extension's own
+# generated repos: ask the same extension (identified by its .bzl file +
+# extension name, shared across the whole module graph regardless of which
+# module's `use_extension()` call is used to reach it) for our own glibc-2.28
+# sysroots under a distinct `name_prefix` (avoiding a repo-name collision
+# with envoy's own default-named ones), then `override_repo` envoy's
+# "sysroot_linux_amd64"/"sysroot_linux_arm64" to resolve to ours -- so
+# envoy's existing `llvm.sysroot(label = "@sysroot_linux_amd64//:sysroot")`
+# wiring picks up our pinned sysroot transparently, with no need to
+# duplicate envoy's llvm.toolchain/toolchain_root/cxx_cross_lib config.
+# duplicate envoy'''s llvm.toolchain/toolchain_root/cxx_cross_lib config.
+sysroot_ext = use_extension("@envoy_toolshed//sysroot:extensions.bzl", "sysroot_extension")
+sysroot_ext.setup(
+    glibc_version = "2.28",
+    name_prefix = "istio",
+)
+use_repo(sysroot_ext, "istio_sysroot_linux_amd64", "istio_sysroot_linux_arm64")
+
+override_repo(
+    sysroot_ext,
+    sysroot_linux_amd64 = "istio_sysroot_linux_amd64",
+    sysroot_linux_arm64 = "istio_sysroot_linux_arm64",
+)
+
+################################################################################
+# OSSM: use OpenSSL instead of BoringSSL
+#
+# WORKSPACE-era equivalent:
+#
+#     new_local_repository(
+#         name = "openssl",
+#         path = "/usr/",
+#         build_file = "//:openssl.BUILD",
+#     )
+#
+# Envoy pulls in `bazel_dep(name = "openssl", version = "3.5.7.envoy")`, a module
+# that builds OpenSSL from source with rules_foreign_cc. Bzlmod cannot shadow a
+# `bazel_dep` module with a plain `new_local_repository`, so we replace the whole
+# module with a local one that re-exports the host's OpenSSL under /usr. See
+# ossm/openssl/ for the replacement module. `--config=openssl` (ossm/bazelrc)
+# then routes Envoy's SSL/crypto through its compat/openssl layer, which links
+# against this `@openssl`.
+local_path_override(
+    module_name = "openssl",
+    path = "ossm/openssl",
+)
+
+################################################################################
+# OSSM host toolchains
+#
+# Reproduces the semantics of the old WORKSPACE calls
+#   envoy_dependencies_extra(..., use_host_tools = True)
+#   envoy_dependency_imports(use_host_tools = True)
+# which made downstream builds use host-installed toolchains instead of the
+# hermetic ones Bazel would otherwise download/build. Those parameters existed
+# only in Envoy's WORKSPACE macros and are gone now that Envoy is Bzlmod-only,
+# so we re-create each of their three effects here.
+#
+# (1) Python: use the host interpreter rather than the hermetic rules_python
+#     one. Handled above via the local_runtime host toolchain (search for
+#     local_runtime_repo), which register_toolchains() ranks ahead of the
+#     hermetic 3.12 toolchain @envoy registers.
+#
+# (2) rules_foreign_cc (CMake/Make/Ninja/etc): prefer the host-installed tools
+#     instead of building them from source. Registered in ossm/bazelrc via
+#     `--extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_*` (the
+#     same approach as envoy's bazelrc.windows); extra_toolchains outrank
+#     rules_foreign_cc's own built-from-source registrations, so the built tools
+#     are never fetched/built. The `@rules_foreign_cc` label there resolves
+#     because of the direct bazel_dep declared above.
+#
+# (3) Go: use the host Go SDK (equivalent to the WORKSPACE `go_version = "host"`).
+#     Envoy registers its own Go SDK only as a dev_dependency, so nothing is
+#     registered when istio/proxy is the root module; we register the host SDK
+#     ourselves. `go_sdk.host()` may only be used from the root module.
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+go_sdk.host()
+use_repo(go_sdk, "go_toolchains", "io_bazel_rules_nogo")
+
+register_toolchains("@go_toolchains//:all")
+
+# (4) Java: use the host JDK via `@local_jdk`. In WORKSPACE mode Bazel created
+#     `@local_jdk` automatically (from JAVA_HOME/PATH); under bzlmod it must be
+#     declared explicitly. The `local_jdk_repo()` inside this extension
+#     autodetects the host JDK the same way. ossm/bazelrc registers it
+#     (`--extra_toolchains=@local_jdk//:all`) and selects it for tools
+#     (`--tool_java_runtime_version=local_jdk`).
+java_toolchains = use_extension("@rules_java//java:extensions.bzl", "toolchains")
+use_repo(java_toolchains, "local_jdk")
+
+################################################################################
+# OSSM: host C++/LLVM toolchain (system clang), instead of Envoy's hermetic one.
+#
+# WORKSPACE-era equivalent: `envoy_toolchains()` + `llvm_register_toolchains()`
+# with `--repo_env=BAZEL_LLVM_PATH=/usr` set, which made toolchains_llvm build a
+# *host* `@llvm_toolchain` rooted at /usr and register it.
+#
+# Under bzlmod, Envoy pins `@llvm_toolchain` to a hermetic download
+# (`llvm.toolchain(name = "llvm_toolchain", llvm_version = "22.1.8", ...)` in
+# envoy's MODULE.bazel) and `register_toolchains("@llvm_toolchain//:all")`s it,
+# so it gets selected for the default host platform -- i.e. the main Envoy
+# compile would silently use hermetic clang 22. We don't want that; OSSM builds
+# with the host clang shipped in the build container.
+#
+# Envoy scopes its toolchain tags to the name "llvm_toolchain", so we can't
+# retarget its root without a collision. Instead we declare our *own*
+# toolchains_llvm toolchain ("llvm_host") whose exec toolchain root is the host
+# LLVM under /usr (`toolchain_root.path`), then register it ahead of Envoy's via
+# `--extra_toolchains=@llvm_host//:all` in ossm/bazelrc (extra_toolchains
+# outrank module-registered ones). libstdc++ vs libc++ and the host sysroot are
+# selected by env that ossm/bazelrc already sets (`BAZEL_USE_LIBSTDCPP=True` via
+# --config=libstdc++, `BAZEL_USE_HOST_SYSROOT=True`).
+#
+# llvm_version only needs a correct *major* (it drives the clang resource-dir
+# lookup, e.g. /usr/lib/clang/21); with a `path` root nothing is downloaded.
+# Keep the major in sync with the clang shipped in the build container.
+# dev_dependency to match the `toolchains_llvm` bazel_dep above (declared dev
+# because downstream modules bring their own toolchain); OSSM only ever builds
+# as the root module, where dev dependencies are always active.
+llvm = use_extension(
+    "@toolchains_llvm//toolchain/extensions:llvm.bzl",
+    "llvm",
+    dev_dependency = True,
+)
+llvm.toolchain(
+    name = "llvm_host",
+    cxx_standard = {"": "c++20"},
+    llvm_version = "21.1.0",
+    # Link the host libstdc++ statically (`-l:libstdc++.a` + `-stdlib=libstdc++`)
+    # instead of toolchains_llvm's default bundled libc++, matching OSSM's
+    # `--config=libstdc++` (WORKSPACE `BAZEL_LINKLIBS=-l%:libstdc++.a`). Requires
+    # the static libstdc++ (libstdc++-static / libstdc++-devel) in the build
+    # container. Use "dynamic-stdc++" here for `-l:libstdc++.so` instead.
+    stdlib = {"": "stdc++"},
+)
+llvm.toolchain_root(
+    name = "llvm_host",
+    path = "/usr",
+)
+use_repo(llvm, "llvm_host")

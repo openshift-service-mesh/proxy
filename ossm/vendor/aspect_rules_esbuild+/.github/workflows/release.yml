@@ -1,0 +1,49 @@
+# Cut a release whenever a new tag is pushed to the repo.
+# You should use an annotated tag, like `git tag -a v1.2.3`
+# and put the release notes into the commit message for the tag.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Mount bazel caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazel-repository-cache
+            ~/.cache/xdg-cache
+          key: bazel-cache-release-${{ hashFiles('.bazelrc', '.bazelversion', '.bazeliskrc', '**/BUILD', '**/BUILD.bazel', '**/*.bzl', 'WORKSPACE', 'WORKSPACE.bazel', 'WORKSPACE.bzlmod', 'MODULE.bazel') }}
+          restore-keys: bazel-cache-release-
+
+      - name: bazel test //...
+        run: |
+          bazel \
+            --bazelrc=${{ github.workspace }}/.aspect/bazelrc/ci.bazelrc \
+            --bazelrc=${{ github.workspace }}/.github/workflows/ci.bazelrc \
+            test \
+            //...
+        env:
+          XDG_CACHE_HOME: ~/.cache/xdg-cache # bazelisk will download bazel to here
+
+      - name: Prepare release
+        run: .github/workflows/release_prep.sh ${{ env.GITHUB_REF_NAME }} > release_notes.txt
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          prerelease: true
+          # Use GH feature to populate the changelog automatically
+          generate_release_notes: true
+          body_path: release_notes.txt
+          fail_on_unmatched_files: true
+          files: rules_esbuild-*.tar.gz

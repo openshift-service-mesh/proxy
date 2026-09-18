@@ -1,0 +1,78 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "mcp",
+    srcs = [
+        "client.go",
+        "cmd.go",
+        "content.go",
+        "features.go",
+        "logging.go",
+        "mcp.go",
+        "prompt.go",
+        "protocol.go",
+        "resource.go",
+        "root.go",
+        "server.go",
+        "shared.go",
+        "sse.go",
+        "streamable.go",
+        "tool.go",
+        "transport.go",
+        "util.go",
+    ],
+    importpath = "golang.org/x/tools/internal/mcp",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+    deps = [
+        "//internal/jsonrpc2_v2",
+        "//internal/mcp/internal/util",
+        "//internal/mcp/jsonschema",
+        "//internal/xcontext",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":mcp",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "mcp_test",
+    srcs = [
+        "client_list_test.go",
+        "client_test.go",
+        "cmd_test.go",
+        "conformance_go125_test.go",
+        "conformance_test.go",
+        "content_test.go",
+        "example_progress_test.go",
+        "features_test.go",
+        "mcp_test.go",
+        "resource_test.go",
+        "server_example_test.go",
+        "server_test.go",
+        "shared_test.go",
+        "sse_example_test.go",
+        "sse_test.go",
+        "streamable_test.go",
+        "tool_test.go",
+        "transport_test.go",
+        "util_test.go",
+    ],
+    data = glob(["testdata/**"]),
+    embed = [":mcp"],
+    deps = [
+        "//internal/jsonrpc2_v2",
+        "//internal/mcp/jsonschema",
+        "//txtar",
+        "@com_github_google_go_cmp//cmp",
+        "@com_github_google_go_cmp//cmp/cmpopts",
+    ],
+)

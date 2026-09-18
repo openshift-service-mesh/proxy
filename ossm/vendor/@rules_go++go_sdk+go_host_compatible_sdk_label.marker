@@ -1,0 +1,6 @@
+e45f6b5e4eedb343a6c07d49196321d654d13c43a51f05f7422d121b2649f3b6
+REPO_MAPPING:bazel_features+,bazel_features_globals bazel_features++version_extension+bazel_features_globals
+REPO_MAPPING:bazel_features+,bazel_features_version bazel_features++version_extension+bazel_features_version
+REPO_MAPPING:rules_go+,bazel_tools bazel_tools
+REPO_MAPPING:rules_go+,io_bazel_rules_go rules_go+
+REPO_MAPPING:rules_go+,io_bazel_rules_go_bazel_features bazel_features+

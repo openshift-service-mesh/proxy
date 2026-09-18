@@ -1,0 +1,5 @@
+# don't include the Dockerfile to avoid poisonning the cache
+Containerfile
+.dockerignore
+.git
+target

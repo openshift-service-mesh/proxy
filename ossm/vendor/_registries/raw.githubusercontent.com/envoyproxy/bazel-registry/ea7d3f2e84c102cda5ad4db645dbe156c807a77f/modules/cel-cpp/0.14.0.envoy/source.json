@@ -1,0 +1,10 @@
+{
+  "url": "https://github.com/google/cel-cpp/archive/refs/tags/v0.14.0.tar.gz",
+  "integrity": "sha256-Ck+aHAvMg2Kesw0cJ4iD0y3sD3Ae/Nq9e+vzP++Nq3E=",
+  "strip_prefix": "cel-cpp-0.14.0",
+  "patches": {
+    "cel-cpp.patch": "sha256-5NNTV4ae/RP3qWkCOsfjnuKqq9PrWD7S9QRNMgdC0/0=",
+    "cel-cpp-protobuf-v35.patch": "sha256-/SxUPowkElnWzVFDeZZBQLqcyAeJe53btUnWaOD86No="
+  },
+  "patch_strip": 1
+}

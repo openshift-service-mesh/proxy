@@ -1,0 +1,5 @@
+67076d2319661207e4abe2b3cad08d5ac2ca3b7c07f8034dd9c022d44e593653
+FILE:@@rules_kotlin+//src/main/starlark/core/repositories/BUILD.kotlin_capabilities.bazel 09730bd380817fc0e0490034c69aac46593ed2829b9541bcebc97fc3b3830a48
+FILE:@@rules_kotlin+//src/main/starlark/core/repositories/kotlin/artifacts.bzl 384e1960ff99d8eda7ab65a8f3d9ad765bde2e2a9b9b63209705ff1676742bf5
+FILE:@@rules_kotlin+//src/main/starlark/core/repositories/kotlin/capabilities_2.3.bzl e0756bbf9433cd929f9769f6f477139ec4f467411c62cae59eee05512faa5994
+REPO_MAPPING:rules_kotlin+,bazel_tools bazel_tools

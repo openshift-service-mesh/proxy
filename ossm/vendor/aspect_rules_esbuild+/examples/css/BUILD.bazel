@@ -1,0 +1,40 @@
+"Example from https://esbuild.github.io/content-types/#css-from-js"
+
+load("@aspect_bazel_lib//lib:write_source_files.bzl", "write_source_files")
+load("@aspect_rules_esbuild//esbuild:defs.bzl", "esbuild")
+
+esbuild(
+    name = "with_css",
+    srcs = ["button.css"],
+    config = {
+        "keepNames": True,
+        "resolveExtensions": [
+            ".jsx",
+        ],
+    },
+    entry_point = "app.jsx",
+    output_css = "with_css.css",
+)
+
+# Make sed replacements for consistency on different platform
+genrule(
+    name = "sed_with_css_js",
+    srcs = [":with_css.js"],
+    outs = ["sed_with_css.js"],
+    cmd = "sed \"s/\\/\\/ .*examples\\//\\/\\/ examples\\//\" $(execpath :with_css.js) > $@",
+)
+
+genrule(
+    name = "sed_with_css_css",
+    srcs = [":with_css.css"],
+    outs = ["sed_with_css.css"],
+    cmd = "sed \"s/\\/\\* .*examples\\//\\/\\* examples\\//\" $(execpath :with_css.css) > $@",
+)
+
+write_source_files(
+    name = "assertions",
+    files = {
+        "css.expected": "sed_with_css.css",
+        "js.expected": "sed_with_css.js",
+    },
+)

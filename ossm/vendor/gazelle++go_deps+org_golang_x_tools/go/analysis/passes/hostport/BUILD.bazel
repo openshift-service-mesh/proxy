@@ -1,0 +1,30 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "hostport",
+    srcs = ["hostport.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/hostport",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/analysis",
+        "//go/analysis/passes/inspect",
+        "//go/types/typeutil",
+        "//internal/analysis/typeindex",
+        "//internal/typesinternal/typeindex",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":hostport",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "hostport_test",
+    srcs = ["hostport_test.go"],
+    deps = [
+        ":hostport",
+        "//go/analysis/analysistest",
+    ],
+)

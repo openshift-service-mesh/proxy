@@ -1,0 +1,23 @@
+{
+    "url": "https://github.com/libevent/libevent/archive/release-2.2.2-alpha.tar.gz",
+    "strip_prefix": "libevent-release-2.2.2-alpha",
+    "integrity": "sha256-8KHq04P7SZLN6S3+qIoZ5D2BmLWSk45FTaH1t9vDnak=",
+    "overlay": {
+        "BUILD.bazel": "sha256-lWl/PD6y/1dPzGgrqKCXlNlE0/L2U6ZdhWk9qMqobWE=",
+        "WIN32-Code/BUILD.bazel": "sha256-7UbnkQwzRqS0Ie6T1yg3lvgPtUwmPhjLUk3AGSylnuE=",
+        "compat/BUILD.bazel": "sha256-26hzdd3vMmV43OSB6m5wRfC88SASt4sSd/V4aOj+RhU=",
+        "evconfig-private.h": "sha256-LIvjuDCAT/2R+g9+y/xC/p0LcLRJ70GkbuXQS/hID2w=",
+        "evconfig-private_android.h": "sha256-ovsormMK+0+PzlSA0cZxC5pm0AA5+ILEyC79UdHyTlY=",
+        "evconfig-private_apple.h": "sha256-3hSGZxKD9JfDy0O1Z2kYZnykPPmfx0bs+mGnvHHb/K8=",
+        "evconfig-private_linux.h": "sha256-VyLJxZ9ek98XQPiCsBUL7jrGsFe/ivo93EXKRmqZ6oY=",
+        "event2-config_android.h": "sha256-Vcnk2XHha7rU/SEdzpq/qp6ebbHp1dOEP8mvfiQJ1RU=",
+        "event2-config_apple.h": "sha256-9zffyBGrYXgNt9cU9LqRFHYQokL/v7MCIxCMY2zWBhM=",
+        "event2-config_common.h": "sha256-PrfSaVf9jSMVd4rnPQT3vbGvQm+6LWBgqXkw5YsFhgY=",
+        "event2-config_linux.h": "sha256-UWyH+aUxEBLF/SlZJinyIWri9gG1NeYE1yioABwGqeM=",
+        "event2-config_msvc.h": "sha256-Fd2I5Myvr8vwetBOEtmQssE2a5ZWbdouF0EsaXsuRg4=",
+        "include/event2/event-config.h": "sha256-HblJnJK+aX/L4Tj2hG3db/riQw5y8tvQQFZ3whbeTmI=",
+        "sample/BUILD.bazel": "sha256-iEZQLW9ACw6pPprSP4In0j7AujzF4rs1as7eOMNypwo=",
+        "test/BUILD.bazel": "sha256-r7UHPBK0y3sH6LS2S+ooITcLM8qM3BC8TrSzC1dTfi0=",
+        "test/test-config.c": "sha256-J7HU5tWi03ockHAzis2Z3UCVm9IBA5iE7K8J4+FzqTg="
+    }
+}

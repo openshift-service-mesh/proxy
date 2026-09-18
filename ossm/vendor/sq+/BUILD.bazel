@@ -1,0 +1,26 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("@sequoia_sq_crate_index//:defs.bzl", "aliases", "all_crate_deps")
+load("//:defs.bzl", "current_sq_toolchain")
+
+package(default_visibility = ["//visibility:public"])
+
+toolchain_type(name = "toolchain_type")
+
+rust_binary(
+    name = "sq_from_source",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    compile_data = ["README.md"],
+    crate_features = [
+        "crypto-rust",
+        "allow-experimental-crypto",
+        "allow-variable-time-crypto",
+    ],
+    crate_root = "src/main.rs",
+    edition = "2021",
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    deps = all_crate_deps(normal = True),
+    version = "1.4.0",
+)
+
+current_sq_toolchain(name = "sq")

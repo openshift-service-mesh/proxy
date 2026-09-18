@@ -1,0 +1,86 @@
+stages:
+  - pre-check
+  - build
+  - test
+  - deploy
+
+
+include:
+  - component: "gitlab.com/sequoia-pgp/common-ci/sequoia-pipeline@main"
+    inputs:
+      extra_features: ",subplot"
+
+variables:
+  SEQUOIA_CRYPTO_POLICY: ""
+
+
+docker-build-push:
+  # Official docker image.
+  image: docker:stable
+  stage: build
+  services:
+    - docker:dind
+  tags:
+    - docker
+    - self-hosted
+  before_script:
+    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
+  script:
+    - >
+      docker build
+      --no-cache
+      --file Containerfile
+      --target sq
+      --tag "$IMAGE":latest
+      .
+    # smoke test
+    - docker run "$IMAGE":latest --help
+    - docker push "$IMAGE":latest
+  after_script: []
+  only:
+    refs:
+      - /docker/i # refs containing 'docker' keyword
+      - tags
+      - web
+      - schedules
+  variables:
+    CI_REGISTRY: "registry.gitlab.com"
+    IMAGE: "$CI_REGISTRY/sequoia-pgp/sequoia-sq"
+    DOCKER_HOST: tcp://docker:2376
+
+pages:
+  stage: build
+  image: jampot.sequoia-pgp.org/sequoia-pgp/build-docker-image/trixie-pandoc:latest
+  script:
+    - ASSET_OUT_DIR=/tmp/assets cargo doc --no-deps -p sequoia-sq
+    - mkdir public
+    - mv -v target/doc public/impl
+
+    # Man pages.
+    - /tmp/assets/man-pages/man2html.sh --generate
+    - mkdir public/man
+    - mv -v $(for f in $(/tmp/assets/man-pages/man2html.sh --html-files); do echo /tmp/assets/man-pages/$f; done) public/man
+    - echo "/sequoia-sq/man /sequoia-sqv/man/$(/tmp/assets/man-pages/man2html.sh --html-root) 302" >> public/_redirects
+
+    - mkdir public/subplot
+    - pandoc -s -o public/subplot/sq-subplot.html sq-subplot.md
+    - pandoc -s -o public/subplot/sq-subplot.pdf sq-subplot.md
+
+    - echo "/sequoia-sq/ /sequoia-sq/man/sq.1.html 302" > public/_redirects
+    - echo "/sequoia-sq/impl /sequoia-sq/impl/sq/index.html 302" >> public/_redirects
+    - echo "/sequoia-sq/subplot /sequoia-sq/subplot/sq-subplot.html 302" >> public/_redirects
+  artifacts:
+    paths:
+      - public
+  pages: false
+
+pages-deploy:
+  stage: deploy
+  image: jampot.sequoia-pgp.org/sequoia-pgp/build-docker-image/trixie-pandoc:latest
+  script: echo "publishing"
+  artifacts:
+    paths:
+      - public
+  pages: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

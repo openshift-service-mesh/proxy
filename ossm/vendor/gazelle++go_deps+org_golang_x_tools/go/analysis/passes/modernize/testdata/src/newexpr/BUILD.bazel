@@ -1,0 +1,17 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "newexpr",
+    srcs = [
+        "newexpr.go",
+        "newexpr_go125.go",
+    ],
+    importpath = "golang.org/x/tools/go/analysis/passes/modernize/testdata/src/newexpr",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":newexpr",
+    visibility = ["//visibility:public"],
+)

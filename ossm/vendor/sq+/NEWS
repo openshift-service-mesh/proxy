@@ -1,0 +1,817 @@
+                                                              -*- org -*-
+#+TITLE: sequoia-sq NEWS – history of user-visible changes
+#+STARTUP: content hidestars
+
+* Changes in 1.4.0
+** New functionality
+   - `sq` now supports post quantum cryptography as defined in
+     RFC 9980.
+   - When directing `sq` to write to a file that already exists, the
+     user had to specify `--overwrite`.  This is no longer required
+     for special files (character devices, block devices, FIFOs and
+     Unix domain sockets).
+   - When writing to a file, `sq` would first write to a temporary
+     file in the same directory to avoid writing anything if the
+     command fails.  If the command succeeds, it would move the file
+     into place.  This would fail when writing to special files
+     (character devices, block devices, FIFOs and Unix domain sockets)
+     like `/dev/null` and when the directory is not writable.  In
+     these cases, `sq` now writes to a temporary file in the user's
+     temporary directory (often under `/tmp`) and then copies the
+     file.
+   - If `sq` outputs sensitive content to a regular file like keys or
+     revocation certificates, it restricts the output file's
+     permissions on Unix-like operating systems so that the group
+     permissions and other permissions don't allow access to the data.
+   - You can use `sq key generate --encryption-algorithm` and `sq key
+     generate --signing-algorithm` to specify the precise algorithm
+     that `sq key generate` will use for encryption-capable keys and
+     signing-capable keys, respectively.
+   - Add the cipher suites Cv448, MLDSA65_Ed25519, and MLDSA87_Ed448,
+     which can be used to control what algorithms `sq key generate`
+     and `sq key subkey add` use.
+   - `sq` no longer panics on a broken pipe.  Instead it acts like
+     other tools and exits with an exit code of 128 + SIGPIPE.
+** Notable fixes
+   - `sq download` no longer freezes if some of the passed URLs return a
+     '404 - not found' error when trying to fetch them.
+
+* Changes in 1.3.1
+  - This is a bugfix release, fixing and improving displayed hints,
+    improving test vectors so that the tests work fine years into the
+    future, improving some documentation.  No new functionality.
+* Changes in 1.3.0
+** New functionality
+   - This release adds support for RFC 9580.
+
+* Changes in 1.2.0
+** New functionality
+   - `sq pki vouch list` lists certifications made by a particular
+     certificate or made on a particular certificate.
+   - `sq pki vouch replay` replays the certifications made by one
+     certificate using another certificate.
+   - `sq key rotate` generates a new certificate based on an existing
+     one.  It also copies links, recreates certifications, and retires
+     the old certificate.
+** Notable fixes
+   - `sq packet dump` no longer duplicates the PKESK or SKESK packet
+     immediately preceding the SEIPD packet.
+   - `sq key export` and `sq key subkey export` no longer export
+     non-exportable signatures and cert components.
+   - `sq --cli-version` was broken.  The check was reversed.  That is,
+     instead of `sq` 1.1.0 saying that `sq --cli-version 1.0.0` is
+     compatible, it said it is incompatible, and instead of saying
+     that `sq --cli-version 1.2.0` is incompatible, it said that it is
+     compatible.  In terms of the API, this should be considered a new
+     feature.
+   - `sq cert lint`, `sq inspect`, `sq packet dump`, and `sq pki link
+     list` didn't check that certificates designated by user ID using
+     e.g., `--cert-email`, are actually authenticated.  They are now
+     correctly checked.
+
+* Changes in 1.1.0
+** New functionality
+   - New argument `--unusable` for `sq cert list`, `sq pki identify`,
+     `sq pki lookup`, and `sq pki authenticate`.  This option causes
+     these commands to also show unusable bindings and certificates
+     (i.e., those that are not valid according to the current policy,
+     are revoked, or are expired).  Requires `--gossip`.
+** Notable changes
+   - Fix `--gossip`.  The `--gossip` option for `sq cert list`, `sq
+     pki identify`, `sq pki lookup`, and `sq pki authenticate` was
+     broken.  It is now fixed, and works as documented.  In terms of
+     the API, this should be considered a new feature, as although the
+     option was present, it did not work.
+   - `sq cert list --cert FPR` incorrectly failed if all of a
+     certificate's bindings are invalid (i.e., the bindings are
+     invalid according to the cryptographic policy, or the user ID is
+     revoked).  `sq cert list --cert FPR` now only considers the
+     validity of the certificate.  Note: this command correctly
+     succeeded when the certificate had no bindings.
+  - `sq cert list` showed certificates with no user IDs, but it should
+    only show authenticated bindings.  Certificates with no user IDs
+    are no only shown when `--gossip` is provided.
+* Changes in 1.0.0
+** New functionality
+   - `sq encrypt --for-self` now adds the certs configured under
+     `encrypt.for-self` to the list of recipients.
+   - `sq sign --signer-self` and `sq encrypt --signer-self` now add
+     the keys configured under `sign.signer-self` to the list of
+     signers.
+   - `sq pki vouch add --certifier-self` and `sq pki vouch authorize
+     --certifier-self` now use the key configured under
+     `pki.vouch.certifier-self` as certification key.
+   - `sq` now automatically imports certificates from GnuPG's
+     certificate store.  Note: we only do this for the default Sequoia
+     and GnuPG state directories.  Further, We don't parse the GnuPG
+     configuration file, we just scan GnuPG's default cert stores.
+
+** Notable changes
+   - `sq pki link add`, `sq pki link authorize`, and `sq pki link
+     retract` gain a new parameter, `--cert-special`, which allows
+     addressing shadow CAs by symbolic names.  For instance, `sq pki
+     link authorize --cert-special keys.openpgp.org --all
+     --unconstrained` can be used to fully trust the keys.openpgp.org
+     key server.  This also creates the shadow CA if it doesn't exist
+     yet.
+   - `sq sign --signature-file` now takes a value specifying where the
+     signature should be written to.  It conflicts with `--output`.
+   - `sq cert list` now takes cert designators, like `--cert-email`
+     instead of `--email`.
+   - `sq encrypt` now requires explicit opt-out for signing in the
+     form of the `--without-signature` flag.
+   - Remove the `--name` argument from `sq key approvals list`, `sq
+     key approvals update`, `sq key userid revoke` and `sq pki path`,
+     and remove the `--name-or-add` argument from `sq key userid
+     revoke`.
+   - The arguments `--userid-or-add`, and `--email-or-add` have
+     respectively been renamed to `--add-userid`, and `--add-email`.
+   - Change `sq pki link add --email` and `sq pki link authorize
+     --email` to use a user ID with just the specified email address,
+     if the email address is part of a self-signed user ID.  That is,
+     if the certificate has the self-signed user ID "Alice
+     <alice@example.org>", then `--email alice@example.org` would have
+     selected "Alice <alice@example.org>" to link, but now it selects
+     "<alice@example.org>".
+   - Add `sq pki link add --userid-by-email`, and `sq pki link
+     authorize --userid-by-email`, which use the self-signed user ID
+     with the specified email address.  That is, if the certificate
+     has the self-signed user ID "Alice <alice@example.org>", then
+     `--userid-by-email alice@example.org` selects "Alice
+     <alice@example.org>" to link.
+   - Add `sq pki link retract --userid-by-email`, which selects a
+     self-signed user ID with the specified email address.
+   - Change `sq pki vouch add --email` and `sq pki vouch authorize
+     --email` to use a user ID with just the specified email address,
+     if the email address is part of a self-signed user ID.  That is,
+     if the certificate has the self-signed user ID "Alice
+     <alice@example.org>", then `--email alice@example.org` would have
+     selected "Alice <alice@example.org>" for certification, but now
+     it selects "<alice@example.org>".
+   - Add `sq pki vouch add --userid-by-email`, and `sq pki vouch
+     authorize --userid-by-email`, which use the self-signed user ID
+     with the specified email address.  That is, if the certificate
+     has the self-signed user ID "Alice <alice@example.org>", then
+     `--userid-by-email alice@example.org` selects "Alice
+     <alice@example.org>" for certification.
+   - Change `sq key userid revoke --email` to use a user ID with just
+     the specified email address, if the email address is part of a
+     self-signed user ID.  That is, if the certificate has the
+     self-signed user ID "Alice <alice@example.org>", then `--email
+     alice@example.org` would have selected "Alice
+     <alice@example.org>" for revocation, but now it selects
+     "<alice@example.org>".
+   - Add `sq key userid revoke --userid-by-email`, which uses the
+     self-signed user ID with the specified email address.  That is,
+     if the certificate has the self-signed user ID "Alice
+     <alice@example.org>", then `--userid-by-email alice@example.org`
+     selects "Alice <alice@example.org>" for revocation.
+   - When writing to a file output, we first write to a temporary
+     file, then rename the file at the end of the operation so that it
+     has its desired name.  There are two benefits: no one sees
+     partially written files, and one can safely use the same file as
+     input and output.
+   - `sq download --signature` is now called `sq download
+     --signature-url`.
+   - `sq download` now requires one of `--signature-url`, `--message`,
+     or `--cleartext` like `sq verify`.
+
+* Changes in 0.40.0
+** New functionality
+   - New subcommand `sq download`, which downloads a file and a
+     signature file, and then authenticates the file.
+** Notable changes
+   - `sq toolbox keyring merge` now supports merging bare revocation
+     certificates.
+   - `sq verify` now deletes the output file on failure.
+   - `sq decrypt` now deletes the output file on failure.
+   - Add a global option, `--policy-as-of`, that selects the
+     cryptographic policy as of the specified time.
+   - `sq key subkey export` takes an additional argument, `--cert`,
+     which is required.  The specified keys must be attached to that
+     certificate.  This ensures that if a key is attached to multiple
+     certificates, the correct certificate is exported.
+   - Add a new argument, `--cli-version`, which requests a particular
+     semver-compatible version of the CLI.  This enables breaking
+     changes to the CLI in the future.
+   - The `help` subcommand has been removed everywhere except at the
+     top-level (`--help` still works).
+   - If designated signers are specified for `sq verify`, `sq
+     decrypt`, and `sq download`, they are now the only certificates
+     that are considered when verifying signatures.  If no signers are
+     specified, the certificate store is consulted.
+   - The argument `sq cert lint --list-keys` has been removed.
+   - `sq key list` now has a DWIM search parameter.
+   - The flag `sq sign --detached` is now called `sq sign
+     --signature-file`.
+   - The flag `sq sign --clearsign` is now called `sq sign
+     --cleartext`.
+   - Both `sq sign` and `sq verify` now require an explicit mode,
+     one of `--signature-file`, `--message`, or `--cleartext`.
+   - The flag `sq --no-cert-store` has been replaced with `sq
+     --cert-store=none`.
+   - The flag `sq --no-key-store` has been replaced with `sq
+     --key-store=none`.
+   - Similarly, `sq --home=none` disables all state, unless explicitly
+     re-enabled using `--cert-store` or `--key-store`.
+   - `sq pki link add`, `sq pki link authorize`, `sq pki vouch
+     certify`, and `sq pki vouch authorize` have a `--userid-or-add`
+     flag.  Replace it with an `--userid-or-add` argument, and an
+     `--email-or-add` argument.
+   - The `--email` and `--email-or-add` arguments to `sq pki link add`,
+     etc. cannot be used to designate a self-signed user ID, if
+     multiple self-signed user IDs include the specified email
+     address.  Previously, the arguments would designate all
+     self-signed user IDs with the specified email address.
+   - The new argument `sq sign --mode` can be used to create text
+     signatures in addition to binary signatures.
+   - The argument `sq network wkd publish --create` has been split
+     into two arguments, `--create` and `--method`, avoiding an
+     ambiguity when parsing the arguments.
+   - `sq key userid revoke` no longer accepts the `--userid-or-add` flag
+     to indicate that a user ID specified using `--userid`, an email
+     specified using `--email`, or a name specified using `--name`
+     should be used even if there is no corresponding self-signed user
+     ID.  This functionality is replaced by the `--userid-or-add`,
+     `--email-or-add` and `--name-or-add` arguments.
+   - `sq pki path` previously interpreted the last positional argument
+     as the user ID to authenticate.  Make it a named argument
+     instead, `--userid`.
+   - Add `sq pki path --email` and `sq pki path --name` as additional
+     ways to specify the user ID to authenticate.
+   - The argument `sq encrypt --set-metadata-time` has been removed.
+   - The argument `sq encrypt --set-metadata-filename` now takes a
+     string that specifies the file name to be set.
+   - `sq pki authenticate`'s positional argument for specifying the
+     certificate to authenticate must now be specified using a named
+     argument, `--cert`.
+   - `sq pki identify`'s positional argument for specifying the
+     certificate to identify must now be specified using a named
+     argument, `--cert`.
+   - Drop `sq cert list --email`'s flag, and replace it with the
+     `--userid` and `--email` positional arguments, which match on
+     user IDs.
+   - Drop `sq pki authenticate --email`'s flag, and replace it with
+     the `--userid` and `--email` positional arguments, which match on
+     user IDs.
+   - Drop `sq pki lookup --email`'s flag, and replace it with the
+     `--userid` and `--email` positional arguments, which match on
+     user IDs.
+   - `sq toolbox keyring` is now just `sq keyring`.
+   - `sq toolbox packet` is now just `sq packet`.
+   - `sq toolbox armor` is now `sq packet armor`.
+   - `sq toolbox dearmor` is now `sq packet dearmor`.
+   - `sq key userid revoke`, `sq pki link add`, `sq pki link
+     authorize`, `sq pki vouch certify`, and `sq pki vouch authorize`
+     now check that user IDs that are not self-signed are in canonical
+     form.  Add a flag, `--allow-non-canonical-userids`, to disable
+     this check.
+   - `sq key approvals update` now requires an action, like
+     `--add-authenticated`.
+   - `sq key approvals --add-authenticated` is now a simple flag, and
+     we always require full authentication.
+   - `sq toolbox strip-userid` has been removed.
+   - All cert designators now use the `--cert-` prefix, e.g.  `sq key
+     export --email` has been changed to `sq key export --cert-email`
+     for consistency reasons, and to free `--name`, `--email`, and
+     `--userid` for user ID designators.
+   - The `--binary` argument has been removed from all commands but
+     those that emit signed and or encrypted messages.
+   - The command `sq toolbox extract-cert` has been removed in favor
+     of `sq key delete` and `sq key subkey delete`.
+   - The command `sq packet split` now writes to stdout by default.
+   - The argument `sq packets split --prefix` is now called
+     `--output-prefix`.
+   - `sq pki vouch certify` is now called `sq pki vouch add`.
+   - We now certify newly generated keys with a per-host shadow CA.
+   - The argument `sq encrypt --signature-notation` has been added.
+   - All arguments to add signature notations have been renamed from
+     `--notation` to `--signature-notation`.
+   - When generating keys, either `--own-key` or `--shared-key` has to
+     be given.  The former marks the key's user IDs as authenticated
+     and makes it a trusted introducer.  The latter marks the key's
+     user IDs as authenticated, and marks the key as a group key.
+   - The argument `sq cert lint --export-secret-keys` has been
+     removed: if a secret key is provided as file input, it will be
+     emitted.
+   - The argument `sq key subkey export --cert-file` has been removed.
+   - `sq` now reads a configuration file that can be used to tweak a
+     number of defaults, like the cipher suite to generate new keys,
+     the set of key servers to query, and the cryptographic policy.
+   - The command `sq keyring filter` is now considered experimental
+     and may change in the future.  To acknowledge this, it has to be
+     invoked with the `--experimental` flag.
+
+* Changes in 0.39.0
+** Notable changes
+   - Subcommand `sq key userid strip` has been moved to `sq toolbox
+     strip-userid`.
+   - `sq key adopt` supports adopting bare keys (i.e., a primary key
+     without any signatures).
+   - `sq key adopt` add options (`--can-sign`, `--cannot-sign`,
+     `--can-authenticate`, `--cannot-authenticate`, `--can-encrypt`,
+     `--cannot-encrypt`) to allow overriding the key flags.
+   - `sq key adopt` now accepts the option `--creation-time` to allow
+     the user to override the key's creation time.
+   - `sq key adopt` sets the key's creation time to the current time
+     (while respecting `--time`) if `--creation-time` is not
+     specified, and the key's time is the Unix epoch.
+   - To select the type of generated DNS resource records a new switch
+     has been introduced.  `sq network dane generate --type generic`
+     replaces the old `--generic` flag.
+   - `sq key adopt` is now called `sq key subkey bind`.
+   - The option to verify a detached signature has been renamed from
+     `--detached` to `--signature-file`: `sq verify --signature-file
+     foo.sig foo.txt`.
+   - `sq key userid revoke` has a new flag `--add-userid` that adds
+     missing user IDs, analogous to the flag in `sq pki certify`.
+     Previously, the global `--force` was used for this.
+   - `sq pki link add` and `sq pki link retract` have a new flag
+     `--recreate` that forces a signature to be created even if it
+     should not be necessary because the parameters did not change.
+     Previously, the global `--force` was used for this.
+   - The global `--force` flag has been renamed to `--overwrite` and
+     now controls whether existing files are overwritten.
+   - The argument `--signer-key` is now just called `--signer`.
+   - The arguments to name recipients for encryption now use the
+     `--for` prefix, as in `sq encrypt --for-email alice@example.org`.
+     Further, `--recipient-cert` is now just called `--for`
+   - The environment variables to override the default cert store and
+     key store location have been renamed from SQ_CERT_STORE to
+     SEQUOIA_CERT_STORE, and SQ_KEY_STORE to SEQUOIA_KEY_STORE,
+     respectively.
+   - `sq toolbox packet split` now requires an explicit output
+     parameter.
+   - `sq pki certify` no longer supports using expired or revoked
+     certificates; the options `--allow-not-alive-certifier` and
+     `--allow-revoked-certifier` have been removed.
+   - `sq toolbox keyring filter --handle` has been made more robust by
+     splitting `--handle` into `--cert` and `--key`, where the former
+     only matches on primary keys, and the latter matches on both
+     primary keys and subkeys.
+   - The argument `sq network keyserver publish --require-all` is the
+     default now and has been removed.
+   - The argument `sq key generate --rev-cert ...` is now mandatory if
+     `--output` has been given.
+   - `sq network fetch` has been renamed to `sq network search` to
+     emphasize that this is key discovery, and may return related or
+     even wrong results.  Likewise for the key server, WKD, and DANE
+     methods.
+   - `sq pki certify`'s positional argument for specifying the user ID
+     to certify must now be specified using a named argument,
+     `--userid`, or `--email`.  The `--email` argument no longer
+     changes the meaning of how `--userid` is interpreted, but takes
+     an email address.  The `--userid` and `--email` arguments may be
+     given multiple times to certify multiple user IDs at once.
+   - `sq pki certify`'s positional argument for specifying the
+     certificate to certify must now be specified using a named
+     argument, `--cert` or `--cert-file`.
+   - Previously `sq pki certify` could create certifications, and mark
+     a certificate as a trusted introducer (when the user set
+     `--depth` to be greater than zero).  The latter functionality has
+     been split off to the new subcommand `sq pki authorize`.
+   - Add the `--domain` argument to `sq pki authorize` so the user
+     doesn't have to manually convert a domain to a regular
+     expression.
+   - `sq pki link add`'s positional argument for specifying the
+     certificate to link must now be specified using a named
+     argument, `--cert`.
+   - `sq pki link retract`'s positional argument for specifying the
+     certificate to unlink must now be specified using a named
+     argument, `--cert`.
+   - Removed `sq pki link add`'s positional argument for specifying a
+     user ID directly or by email address.  Use the named arguments,
+     `--userid` or `--email` instead.
+   - Add `--add-userid` to `sq pki link add`.  This aligns it with `sq
+     pki certify`.
+   - Removed `sq pki link add`'s `--petname` argument.  Use `--userid`
+     in conjunction with `--add-userid` instead.
+   - Previously `sq pki link certify` could create certifications, and
+     mark a certificate as a trusted introducer (when the user set
+     `--depth` to be greater than zero).  The latter functionality has
+     been split off to the new subcommand `sq pki link authorize`.
+   - Move `sq pki certify` to `sq pki vouch certify`.
+   - Move `sq pki authorize` to `sq pki vouch authorize`.
+   - Move `sq pki list` to `sq cert list`.
+   - Add a new flag `--all` to `sq network wkd publish` and `sq
+     network dane generate` that adds all certificates with a user ID
+     in the target domain that can be authenticated.
+   - The argument `sq verify --signer-cert` is now called `--signer`.
+   - The argument `sq network wkd --rsync` which previously had an
+     optional value argument has been split into two arguments, a
+     boolean `--rsync` to enable the use of rsync, and `--rsync-path`,
+     which implies `--rsync`, to specify a path to the local rsync
+     executable.
+   - When exporting certificates selected by user IDs (i.e. --email,
+     --userid, --domain, or --grep), the bindings are authenticated and
+     only those certificates that can be authenticated are exported.
+   - The do-what-I-mean query parameter has been removed from `sq cert
+     export`.
+   - `sq autocrypt import` has been merged into `sq cert import`.
+   - `sq autocrypt decode` and `sq autocrypt encode-sender` are
+     removed without substitute.
+   - `--cert` now only looks up by primary key fingerprint.
+   - The argument `sq key delete --cert-file` has been renamed to
+     `--file`.
+   - The argument `sq key delete --file` now requires `--output`.
+   - The argument `sq cert lint --cert-file` has been renamed to
+     `--file`.
+   - The argument `sq key password --cert-file` has been renamed to
+     `--file`.
+   - The argument `sq key password --file` now requires `--output`.
+   - The argument `sq key expire --cert-file` has been renamed to
+     `--file`.
+   - The argument `sq key expire --file` now requires `--output`.
+   - The argument `sq key revoke --cert-file` has been renamed to
+     `--file`.
+   - The argument `sq key revoke --file` now requires `--output`.
+   - The argument `sq key userid add --cert-file` now requires
+     `--output`.
+   - The argument `sq key userid revoke --cert-file` now requires
+     `--output`.
+   - The argument `sq key subkey add --cert-file` has been renamed to
+     `--file`.
+   - The argument `sq key subkey add --file` now requires `--output`.
+   - The argument `sq key subkey delete --cert-file` has been renamed
+     to `--file`.
+   - The argument `sq key subkey delete --file` now requires
+     `--output`.
+   - The argument `sq key subkey password --cert-file` has been
+     renamed to `--file`.
+   - The argument `sq key subkey password --file` now requires
+     `--output`.
+   - The argument `sq key subkey expire --cert-file` has been renamed
+     to `--file`.
+   - The argument `sq key subkey expire --file` now requires
+     `--output`.
+   - The argument `sq key subkey revoke --cert-file` has been renamed
+     to `--file`.
+   - The argument `sq key subkey revoke --file` now requires
+     `--output`.
+   - The argument `sq key subkey bind --cert-file` has been renamed to
+     `--file`.
+   - The argument `sq key subkey bind --file` now requires `--output`.
+   - The argument `sq key approvals update --cert-file` now requires
+     `--output`.
+   - The pEp store integration has been removed.
+   - Removed `sq pki path`'s `--gossip` argument, it didn't actually do
+     anything.
+   - Changed `sq key subkey expire`'s expiration argument from a
+     positional argument to a named argument, `--expiration`.
+   - Changed `sq key expire`'s expiration argument from a positional
+     argument to a named argument, `--expiration`.
+   - Changed `sq key revoke`'s reason and message arguments from
+     positional arguments to named arguments, `--reason`, and
+     `--message`, respectively.
+   - Changed `sq key subkey revoke`'s reason and message arguments from
+     positional arguments to named arguments, `--reason`, and
+     `--message`, respectively.
+   - Changed `sq key userid revoke`'s reason and message arguments from
+     positional arguments to named arguments, `--reason`, and
+     `--message`, respectively.
+   - `sq cert import` now supports importing bare revocation
+     certificates.
+
+* Changes in 0.38.0
+** Notable changes
+   - New subcommand `sq key subkey delete` to delete secret key
+     material.
+   - New subcommand `sq network wkd publish` that publishes
+     certificates in a WKD over rsync.
+   - Removed now obsolete `sq network wkd generate`.
+   - Removed `sq network wkd url` and `sq network wkd direct-url`.
+   - Renamed subcommand `sq key attest-certifications` to `sq key
+     approvals update` to reflect the new name in the draft, and to
+     make room for introspection commands.
+   - New subcommand `sq key subkey password` to change the password
+     protecting secret key material.
+   - The subcommand `sq network keyserver publish` can now publish
+     certs from the certificate store using the `--cert` parameter.
+   - The subcommands `sq key generate` and `sq key userid add` gained
+     the options `--name` and `--email` as a more user-friendly way to
+     specify user IDs.
+   - All short options with the exception of `-v` have been removed.
+     We will judiciously add some back before releasing 1.0.
+   - The dot output has been removed.  Those relying on it can use the
+     standalone sq-wot tool.
+   - New subcommand `sq key subkey export` to export individual keys.
+     This functionality was split off from `sq key export`.
+   - `sq key generate` and `sq key subkey add` now prompt for a
+     password by default.  This can be disabled by passing
+     `--without-password`.
+   - New subcommand `sq key approvals list` that lists approved
+     third-party certifications and those pending approval.
+   - Remove `sq cert export`'s `--key` argument.  Change `--cert` to
+     match both primary keys and subkeys.
+* Changes in 0.37.0
+** Notable changes
+   - Remove PKS support.
+   - `sq key userid add` can now use the certificate store and the
+     keystore.
+   - `sq key userid add` no longer accepts positional arguments.  The
+     user ID is provided by the `--userid` argument, and the
+     certificate by `--cert` or `--cert-file`.
+   - Drop the `--certificate-file` argument from `sq key revoke`, `sq
+     key subkey revoke`, and `sq key userid revoke` drop the
+     `--certificate-file`.  (The certificate can still be specified
+     using `--cert-file`.)
+   - Rename the `--revocation-file` argument to `--revoker-file` in
+     `sq key revoke`, `sq key subkey revoke`, and `sq key userid
+     revoke`.
+   - `sq key revoke --cert-file`, `sq key revoke --revoker-file` `sq
+     key subkey revoke --cert-file`, `sq key subkey revoke
+     --revoker-file`, `sq key userid revoke --cert-file`, and `sq key
+     userid revoke --revoker-file` now accept `-`, which means to read
+     from stdin.
+   - `sq key revoke`, `sq key subkey revoke`, and `sq key userid
+     revoke` now reads from the certificate store when using `--cert`
+     or --revoker`.  When `--cert` is used, and `--output` is not
+     specified, the resulting revocation certificate is saved to the
+     certificate store.
+   - The user ID argument to `sq key userid revoke` is no longer a
+     positional argument, but must be specified with `--userid`.
+   - Change `sq cert lint` to not read from stdin by default.
+   - In `sq cert lint`, change the certificate file parameter from a
+     positional parameter to a named parameter, `--cert-file`.
+   - `sq cert lint` can now use the certificate store and the
+     keystore.
+   - In `sq key subkey add`, change the certificate file parameter
+     from a positional parameter to a named parameter, `--cert-file`.
+   - `sq key subkey add` now reads from the certificate store when
+     using `--cert`.  When `--cert` is used, and `--output` is not
+     specified, the new subkey is saved to the key store.
+   - In `sq key expire`, change the certificate file parameter from a
+     positional parameter to a named parameter, `--cert-file`.
+   - Split the functionality to update a subkey's expiration time off
+     of `sq key expire` and into `sq key subkey expire`.
+   - Rename `sq key subkey expire`'s `--subkey` argument to `--key`.
+   - `sq key expire` and `sq key subkey expire` can now use the
+     cert store and the key store.
+   - Add the `--password-file` argument to the `sq sign` command to
+     allow the user to prefill the password cache with a password from
+     a file.
+   - In `sq key password`, change the certificate file parameter from a
+     positional parameter to a named parameter, `--cert-file`.
+   - `sq pki certify`'s certifier parameter interprets `-` as meaning
+     it should read the certificate from stdin.
+   - In `sq pki certify`, change the certifier file parameter from a
+     positional parameter to a named parameter, `--certifier-file`.
+   - `sq pki certify` can now use the cert store and the key store.
+   - In `sq key adopt`, change the certificate file parameter from a
+     positional parameter to a named parameter, `--cert-file`.
+   - `sq key adopt` can now use the cert store and the key store.
+   - In `sq key attest-certifications`, change the certificate file
+     parameter from a positional parameter to a named parameter,
+     `--cert-file`.
+   - In `sq key attest-certifications`, don't make `--all` the
+     default, but require the user to specify it (or `--none`)
+     explicitly.
+   - `sq key attest-certifications` can now use the cert store and the
+     key store.
+   - Rename the `--expiry` argument to `--expiration`.
+   - Rename `sq key password`'s `--clear` argument to `--clear-password`.
+   - Add a top-level `--password-file` argument to seed the password
+     cache.  Remove `sq key password`'s `--old-password-file`, and `sq
+     sign`'s `--password-file` local arguments in favor of this
+     argument.
+* Changes in 0.36.0
+ - Missing
+* Changes in 0.35.0
+ - Missing
+* Changes in 0.34.0
+** Notable changes
+   - `sq` now uses `sequoia-keystore` for secret key operations.
+
+     When decrypting a message, `sq` will automatically ask the
+     keystore to decrypt the message.  `sq sign --signer-key` can be
+     used to specify a signing key managed by the key store.
+
+   - New top-level option: `sq --no-key-store`: A new switch to
+     disable the use of the key store.
+
+   - New top-level option: `sq --key-store`: A new option to use an
+     alternate key store.
+
+   - New subcommand `sq key list` to list keys managed by the key
+     store.
+
+   - New subcommand `sq key import` to import a key into the key
+     store.
+
+   - When showing a user ID for a certificate, choose the one that is
+     most authenticated.
+
+   - `sq network wkd publish` publishes and updates WKD hierarchies
+     via rsync.
+* Changes in 0.33.0
+** Notable changes
+   - The command line interface has been restructured.  Please consult
+     the manual pages and review any code and documents using the
+     interface.  Notably:
+
+     - `sq import` and `sq export` have been moved to `sq cert`.
+     - `sq wot` has been renamed to `sq pki`.
+     - `sq link` and `sq certify` have been moved to `sq pki`.
+     - `sq lookup, `sq keyserver`, `sq wkd`, and `sq dane` have been
+       moved to `sq network`.
+     - All commands retrieving certificates from network services are
+       now called `fetch`, e.g. `sq network fetch` and `sq network
+       dane fetch`.  The command for publishing certs on key servers
+       is now called `sq network keyserver publish`.
+     - `sq armor`, `sq dearmor`, and `sq packet` have been moved to
+       `sq toolbox`.
+     - `sq --version` is now `sq version`, and `sq output-versions`
+       has been integrated with that command.
+
+   - The manual page generation has been improved, and manual pages
+     and shell completions are generated during the build process.  To
+     write the assets to a predictable location, set the environment
+     variable `ASSET_OUT_DIR` to a suitable location.
+* Changes in 0.32.0
+** New functionality
+   - Support for password-encrypted keys has been improved.  For
+     example, a newly generated subkey can be password protected.
+
+   - When encrypting a message with a password, or creating a new
+     password-protected key or subkey, or changing passwords on a key,
+     sq now prompts you to repeat the password to catch typos.
+
+   - Literal data metadata can now be set using
+     `--set-metadata-filename` and `--set-metadata-time`.
+
+   - sq now reads the file
+
+       /etc/crypto-policies/back-ends/sequoia.config
+
+     to configure its cryptographic policy.  The file to load can be
+     overridden using the SEQUOIA_CRYPTO_POLICY environment variable.
+     For more information on the format, see:
+
+     https://docs.rs/sequoia-policy-config/latest/sequoia_policy_config/#format
+
+   - New subcommand: `sq dane generate`.
+
+     Generates DANE records for the given domain and certificates.  DANE is a
+     way to distribute OpenPGP certificates via DNS.
+
+     https://www.rfc-editor.org/rfc/rfc7929.html
+
+   - When querying network resources via `sq keyserver get`, `sq wkd
+     get`, or `sq dane get`, multiple queries can be given that are
+     executed simultaneously.
+
+   - When querying key servers via `sq keyserver get` or `sq keyserver
+     send`, multiple servers are queried simultaneously.
+
+   - There are now four default keyservers:
+
+     - hkps://keys.openpgp.org
+     - hkps://mail-api.proton.me
+     - hkps://keys.mailvelope.com
+     - hkps://keyserver.ubuntu.com
+
+   - New subcommand: `sq lookup`.
+
+     Searches for certificates using all supported network services.
+
+** Notable changes
+   - Padding has been disabled to increase compatibility with other
+     implementations.
+
+     The padding method we previously used relies on a compressed data
+     packet to pad the message.  However, some implementations do not
+     gracefully process these padded encryption containers, so until
+     we get proper padding support from the next revision of OpenPGP,
+     we disable padding.
+
+   - Message notarization has been disabled.
+
+     Message notarization and their semantics are not well defined,
+     and there is no consensus on how to do that.
+
+   - When doing a userid, subkey, or third-party certificate
+     revocation, with the cert given to --certificate-file containing
+     secret key material, we previously emitted a revocation
+     certificate containing secret key material.  This has been fixed,
+     and tests have been added to ensure secret key material is only
+     emitted where we expect it to be.
+* Changes in 0.31.0
+** New functionality
+  - `sq key subkey add` allows to create and add a new subkey to an
+    existing certificate.
+  - The functionality of `sq-keyring-linter` is now available as
+    `sq keyring lint`.
+  - The new subcommands `sq key revoke`, `sq key subkey revoke` and
+    `sq key userid revoke`, allow writing to a file using the
+    `--output` option.
+** Notable changes
+  - The `--keyring` option is now global and can be specified anywhere
+    when calling `sq`.
+** Deprecated functionality
+  - The `--expires` and `--expires-in` options used in various
+    subcommands are deprecated in favor of the unifying `--expiry`.
+  - `sq key generate --export FILE` is deprecated in favor of the more
+    generic `sq key generate --output FILE`.
+  - The `sq revoke certificate` command has been renamed to `sq key
+    revoke`.
+  - The `sq revoke subkey` command has been renamed to `sq key subkey
+    revoke`.
+  - The `sq revoke userid` command has been renamed to `sq key userid
+    revoke`.
+* Changes in 0.30.1
+** Notable changes
+   - The `crypto-botan` feature now selects Botan's v3 interface.  Use
+     the new `crypto-botan2` feature to continue using Botan's v2
+     interface.
+** Notable fixes
+   - Several parser bugs were fixed in sequoia-openpgp 1.16.0 and
+     buffered-reader 1.2.0.  These are all low-severity as Rust
+     correctly detects the out of bounds access and panics.  Update
+     Cargo.lock to make sure we use these versions.
+* Changes in 0.30
+** New functionality
+  - `sq key adopt` now honors `--time`.
+  - Add `sq key adopt --expire` to allow setting an adopted key's
+    expiration time.
+  - Add support for using pEp's certificate store.  A pEp certificate
+    store can be used by specifying `sq --pep-cert-store PATH` or
+    setting the environment variable `PEP_CERT_STORE`.
+* Changes in 0.29
+** New functionality
+   - `sq` now supports and implicitly uses a certificate store.  By
+     default, `sq` uses the standard OpenPGP certificate directory.
+     This is located at `$HOME/.local/share/pgp.cert.d` on XDG
+     compliant systems.
+   - `sq --no-cert-store`: A new switch to disable the use of the
+     certificate store.
+   - `sq --cert-store`: A new option to use an alternate certificate
+     store.  Currently, only OpenPGP certificate directories are
+     supported.
+   - `sq import`: A new command to import certificates into the
+     certificate store.
+   - `sq export`: A new command to export certificates from the
+     certificate store.
+   - `sq encrypt --recipient-cert`: A new option to specify a
+     recipient's certificate by fingerprint or key ID, which is then
+     looked up in the certificate store.
+   - `sq verify --signer-cert`: A new option to specify a signer's
+     certificate by fingerprint or key ID, which is then looked up in
+     the certificate store.
+   - `sq verify` now also implicitly looks for missing certificates in
+     the certificate store.  But, unless they are explicitly named
+     using `--signer-cert`, they are not considered authenticated and
+     the verification will always fail.
+   - `sq certify`: If the certificate to certify is a fingerprint or
+     Key ID, then the corresponding certificate is looked up in the
+     certificate store.
+   - Add a global option, `--time`, to set the reference time.  This
+     option replaces the various subcommand's `--time` argument as
+     well as `sq key generate` and `sq key userid add`'s
+     `--creation-time` arguments.
+   - Add top-level option, `--trust-root`, to allow the user to
+     specify trust roots.
+   - Extend `sq encrypt` to allow addressing recipients by User ID
+     (`--recipient-userid`) or email address (`--recipient-email`).
+     Only User IDs that can be fully authenticated are considered.
+   - Extend `sq verify` to verify certificates looked up from the
+     certificate store using the web of trust.  If the signature
+     includes a Signer's User ID packet, and the binding can be fully
+     authenticated, consider the signature to be authenticated.  If
+     there is no Signer's User ID packet, consider the signature to be
+     authenticated if any binding can fully be authenticated.
+   - Add `sq link add`, which uses the local trust root to
+     certify the specified bindings.
+   - Add `sq link retract`, which retracts certifications made by the
+     local trust root on the specified bindings.
+   - Add `sq link list`, which lists the links.
+   - Add a top-level option, `--keyring`, to allow the user to specify
+     additional keyrings to search for certificates.
+   - Import web of trust subcommands from sq-wot.  Specifically, add:
+     - `sq wot authenticate` to authenticate a binding.
+     - `sq wot lookup` to find a certificate with a particular User ID.
+     - `sq wot identify` to list authenticated bindings for a
+       certificate.
+     - `sq wot list` to list authenticated bindings.
+     - `sq wot path` to authenticate and lint a path in a web of trust.
+   - `sq keyserver get`, `sq wkd get`, and `sq dane get` now import any
+     certificates into the certificate store by default instead of
+     exporting them on stdout.  It is still possible to export them
+     using the `--output` option.
+   - When `sq keyserver get` (for verifying key servers), `sq wkd get`,
+     or `sq dane get` saves a certificate to the local certificate
+     store, `sq` certifies the validated User IDs (all returned User
+     IDs in the case of verifying key servers; User IDs that contain
+     the looked up email address in the case of WKD and DANE) using a
+     local service-specific proxy CA.  If the proxy key doesn't exist,
+     it is created, and certified as a minimally trusted CA (trust
+     amount 1 of 120) by the local trust root.  The proxy certificates
+     can be managed in the usual way using `sq link add` and `sq link
+     retract`.
+   - Extend `sq inspect` to inspect certificates from the certificate
+     store using the `--cert` option.
+** Deprecated functionality
+   - `sq key generate --creation-time TIME` is deprecated in favor of
+     `sq key generate --time TIME`.
+   - `sq key user id --creation-time TIME` is deprecated in favor of
+     `sq user id --time TIME`.
+* Started the NEWS file.

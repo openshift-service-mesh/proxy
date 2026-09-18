@@ -1,0 +1,9 @@
+{
+    "url": "https://github.com/bazelbuild/rules_swift/releases/download/2.5.0/rules_swift.2.5.0.tar.gz",
+    "integrity": "sha256-nI6mIv/U45TMGB0zFpHaOlv9PrvkBFRtT0LL3Ntb6hQ=",
+    "strip_prefix": "",
+    "patches": {
+        "rules_swift_remove_toolchain_prints.patch": "sha256-vlQyPTwFNM2J5A44V88HR50V7Mut3cV8LLVtCr+Zc6s="
+    },
+    "patch_strip": 1
+}

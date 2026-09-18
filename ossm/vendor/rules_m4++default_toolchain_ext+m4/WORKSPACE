@@ -1,0 +1,1 @@
+workspace(name = "rules_m4++default_toolchain_ext+m4")

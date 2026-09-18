@@ -1,0 +1,5 @@
+183c197b488f4b516091e82ab319a155b51ceb1130ce624a07411a8a7f7d6826
+REPO_MAPPING:bazel_features+,bazel_features_globals bazel_features++version_extension+bazel_features_globals
+REPO_MAPPING:bazel_features+,bazel_features_version bazel_features++version_extension+bazel_features_version
+REPO_MAPPING:gazelle+,bazel_features bazel_features+
+REPO_MAPPING:gazelle+,bazel_tools bazel_tools

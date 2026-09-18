@@ -1,0 +1,19 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "test_nopackage",
+    srcs = ["test_nopackage.pb.go"],
+    importpath = "google.golang.org/protobuf/internal/testprotos/test/test_nopackage",
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//reflect/protoreflect",
+        "//runtime/protoimpl",
+        "//types/descriptorpb",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":test_nopackage",
+    visibility = ["//:__subpackages__"],
+)

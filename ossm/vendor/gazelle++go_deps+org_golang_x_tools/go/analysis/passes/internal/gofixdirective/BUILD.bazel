@@ -1,0 +1,19 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "gofixdirective",
+    srcs = ["gofixdirective.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/internal/gofixdirective",
+    visibility = ["//go/analysis/passes:__subpackages__"],
+    deps = [
+        "//go/analysis",
+        "//go/ast/inspector",
+        "//internal/astutil",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":gofixdirective",
+    visibility = ["//go/analysis/passes:__subpackages__"],
+)

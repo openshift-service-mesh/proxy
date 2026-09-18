@@ -1,0 +1,24 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "c",
+    srcs = ["c.go"],
+    importpath = "golang.org/x/tools/internal/gcimporter/testdata/aliases/c",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+    deps = [
+        "@org_golang_x_tools//internal/gcimporter/testdata/aliases/c/a",
+        "@org_golang_x_tools//internal/gcimporter/testdata/aliases/c/b",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":c",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
