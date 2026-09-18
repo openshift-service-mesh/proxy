@@ -66,6 +66,21 @@ CROSS_ARCH_HOST_TOOLS=(
   "@@rules_java++toolchains+remote_java_tools_linux_aarch64"
 )
 
+# Target-platform pip wheels for arches other than the vendoring host. v8 pins
+# markupsafe, a C-extension package whose wheels are per-arch; our v8 patch (see
+# MODULE.bazel) makes its pip.parse resolve both linux_x86_64 and linux_aarch64,
+# so the hub *defines* an aarch64 wheel repo. But that repo sits behind a
+# platform select() branch that x86_64 analysis never takes, so `bazel vendor
+# //:envoy` does not fetch it (it fetches only the host-arch wheel), and an
+# offline build on an aarch64 host then fails downloading it. Relying on the
+# arch loop to capture it is fragile -- it depends on analysis quirks and has
+# silently regressed across upstream merges -- so vendor it explicitly by its
+# canonical repo name, like the host tools above. The name embeds markupsafe's
+# wheel-hash prefix (ac07bad8); update it if v8 bumps the markupsafe pin.
+CROSS_ARCH_PIP_WHEELS=(
+  "@@rules_python++pip+v8_python_deps_312_markupsafe_cp312_cp312_manylinux_2_17_aarch64_ac07bad8"
+)
+
 echo ">> Wiping stale snapshot (keeping VENDOR.bazel)"
 if [ -d "${VENDOR_DIR}" ]; then
   find "${VENDOR_DIR}" -mindepth 1 -maxdepth 1 \
@@ -85,7 +100,8 @@ echo ">> Vendoring option-referenced and cross-arch host-tool repos"
 bazel vendor \
   --vendor_dir="${VENDOR_DIR}" \
   "${EXTRA_REPOS[@]/#/--repo=}" \
-  "${CROSS_ARCH_HOST_TOOLS[@]/#/--repo=}"
+  "${CROSS_ARCH_HOST_TOOLS[@]/#/--repo=}" \
+  "${CROSS_ARCH_PIP_WHEELS[@]/#/--repo=}"
 
 echo ">> Recovering files bazel vendor skipped due to repo .gitignore rules"
 # `bazel vendor` does not copy files matched by a repo's own bundled .gitignore
