@@ -8,13 +8,29 @@ on:
 jobs:
   merge-upstream:
     runs-on: ubuntu-latest
+    # Run inside the branch's builder container so `update-deps.sh` (which runs
+    # `bazel vendor //:envoy`) analyzes the build against the same host LLVM/clang
+    # toolchain the real build uses. On a bare ubuntu-latest runner the host clang
+    # version and /usr layout differ, so the host-LLVM alias cannot resolve
+    # @llvm_toolchain_llvm//:lib/libLLVM.so.<ver> and vendoring fails during
+    # analysis (resetting compiler.bzl afterwards can't help -- analysis runs
+    # inside update-deps.sh, before the reset).
+    container: ${{ matrix.image }}
     permissions:
       contents: read
 
     strategy:
       fail-fast: false
       matrix:
-        branch: [release-1.28, release-1.30, master]
+        # image must track each branch's ossm/ci/builder-image (it is evaluated
+        # before checkout, so it cannot be read from the repo at run time).
+        include:
+          - branch: release-1.28
+            image: quay.io/maistra-dev/maistra-builder:3.3
+          - branch: release-1.30
+            image: quay.io/maistra-dev/maistra-builder:3.4
+          - branch: master
+            image: quay.io/maistra-dev/maistra-builder:main
 
     steps:
     - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -24,6 +40,9 @@ jobs:
 
     - name: Merge upstream
       run: |
+        # The workspace is checked out by a different user than the container
+        # runs as; mark it safe so git commands don't abort on dubious ownership.
+        git config --global --add safe.directory "${GITHUB_WORKSPACE}"
         git config user.name "openshift-service-mesh-bot"
         git config user.email "openshiftservicemeshbot@gmail.com"
         git remote add upstream https://github.com/istio/proxy.git
@@ -42,8 +61,6 @@ jobs:
       if: steps.merge.outputs.already-synced != 'true'
       run: |
         ./ossm/scripts/update-deps.sh
-        # Reset the changes to compiler.bzl since we don't want to update it
-        git checkout ossm/vendor/envoy++envoy_repo_extension+envoy_repo/compiler.bzl || true
         git add -A
         git commit -m "Update deps" || true
 
