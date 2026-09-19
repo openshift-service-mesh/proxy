@@ -27,3 +27,18 @@ ignore("@@+_repo_rules+local_python3")
 # is not vendored. Build-time Python runs on the host via the autodetecting
 # toolchain (--extra_toolchains in ossm/bazelrc), matching the WORKSPACE build.
 ignore("@@rules_python++python+python_3_12_x86_64-unknown-linux-gnu")
+
+# gazelle's Go module cache (~234MB, thousands of files). Its repo rule
+# (go_repository_cache.bzl) writes just two files -- go.env and BUILD.bazel --
+# from the *host* Go SDK path, with no network access; the huge tree that
+# `bazel vendor` otherwise sweeps in is transient build scratch (compiled
+# GOCACHE objects and downloaded modules that land in the repo's GOPATH/gocache
+# dirs at build time). That scratch is never consumed by the //:envoy build:
+# the go_deps module sources are supplied via --override_repository (see
+# go_deps_overrides.bazelrc), so gazelle's fetch_repo never runs. The vendored
+# tree is therefore pure churn -- its go.env even bakes in this machine's
+# output-base paths. Ignore it: Bazel re-runs the network-free repo rule at
+# build time. (The sibling tools repo, which builds fetch_repo/gazelle, reads
+# the regenerated go.env and rebuilds from vendored source with GO111MODULE=off,
+# also offline.)
+ignore("@@gazelle++non_module_deps+bazel_gazelle_go_repository_cache")

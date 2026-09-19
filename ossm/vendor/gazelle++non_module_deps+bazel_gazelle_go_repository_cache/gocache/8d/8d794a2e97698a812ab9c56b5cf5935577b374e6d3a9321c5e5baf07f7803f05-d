@@ -1,7 +1,0 @@
-./clean.go
-./copy_tree.go
-./errorscompat.go
-./go_mod_download.go
-./main.go
-./module.go
-./vcs.go
