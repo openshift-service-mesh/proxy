@@ -43,7 +43,7 @@ jobs:
       run: |
         ./ossm/scripts/update-deps.sh
         # Reset the changes to compiler.bzl since we don't want to update it
-        git checkout ossm/vendor/envoy_repo/compiler.bzl || true
+        git checkout ossm/vendor/envoy++envoy_repo_extension+envoy_repo/compiler.bzl || true
         git add -A
         git commit -m "Update deps" || true
 
