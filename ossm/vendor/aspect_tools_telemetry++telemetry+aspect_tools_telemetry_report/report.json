@@ -4,7 +4,7 @@
     "bazel_version": "8.7.0",
     "bazelisk": false,
     "ci": true,
-    "counter": "208",
+    "counter": "209",
     "deps": {
       "aspect_rules_js": "2.5.0",
       "aspect_tools_telemetry": "0.2.8"
