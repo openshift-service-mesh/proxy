@@ -15,4 +15,4 @@ common/**  linguist-vendored
 archive/**  linquist-vendored
 **/vmlinux.h  linquist-vendored
 *.wasm binary -merge
-ossm/vendor/**  linguist-vendored
+ossm/vendor/**  linguist-vendored=true
