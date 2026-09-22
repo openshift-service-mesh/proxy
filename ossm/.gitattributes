@@ -1,0 +1,4 @@
+# OSSM-specific attributes. Kept out of the repo-root .gitattributes so that
+# upstream merges never conflict with our additions. Patterns are relative to
+# this directory, so `vendor/**` matches `ossm/vendor/**`.
+vendor/**  linguist-vendored=true
