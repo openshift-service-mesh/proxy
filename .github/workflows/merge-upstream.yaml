@@ -29,6 +29,8 @@ jobs:
             image: quay.io/maistra-dev/maistra-builder:3.3
           - branch: release-1.30
             image: quay.io/maistra-dev/maistra-builder:3.4
+          - branch: release-1.31
+            image: quay.io/maistra-dev/maistra-builder:3.5
           - branch: master
             image: quay.io/maistra-dev/maistra-builder:main
 
@@ -61,6 +63,13 @@ jobs:
       if: steps.merge.outputs.already-synced != 'true'
       run: |
         ./ossm/scripts/update-deps.sh
+
+        # Reset the changes to compiler.bzl since we don't want to update it
+        # (WORKSPACE mode only, master switched to bazel modules and this is not necessary)
+        if [ "${{ matrix.branch }}" != "master" ]; then
+          git checkout ossm/vendor/envoy_repo/compiler.bzl || true
+        fi
+
         git add -A
         git commit -m "Update deps" || true
 
