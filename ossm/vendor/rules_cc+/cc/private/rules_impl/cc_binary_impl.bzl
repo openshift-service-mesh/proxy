@@ -18,7 +18,7 @@ load("//cc:cc_postmark.bzl", "postmark")
 load("//cc:find_cc_toolchain.bzl", "find_cc_toolchain")
 load("//cc/common:cc_common.bzl", "cc_common")
 load("//cc/common:cc_debug_helper.bzl", "create_debug_packager_actions")
-load("//cc/common:cc_helper.bzl", "cc_helper", "linker_mode")
+load("//cc/common:cc_helper.bzl", "artifact_category", "cc_helper", "linker_mode")
 load("//cc/common:cc_info.bzl", "CcInfo")
 load("//cc/common:debug_package_info.bzl", "DebugPackageInfo")
 load("//cc/common:semantics.bzl", "semantics")
@@ -31,6 +31,10 @@ _CcLauncherInfo = getattr(cc_common, "launcher_provider", None)
 # TODO(blaze-team): cleanup lint target types
 _EXECUTABLE = "executable"
 _DYNAMIC_LIBRARY = "dynamic_library"
+
+_INTERFACE_SHARED_LIBRARY_EXTENSIONS = tuple(cc_helper.extensions.INTERFACE_SHARED_LIBRARY)
+_ALWAYSLINK_LIBRARY_EXTENSIONS = tuple(cc_helper.extensions.ALWAYSLINK_LIBRARY + [".lo.lib"])
+_STATIC_LIBRARY_EXTENSIONS = tuple(cc_helper.extensions.ARCHIVE + [".rlib"])
 
 _IOS_SIMULATOR_TARGET_CPUS = ["ios_x86_64", "ios_i386", "ios_sim_arm64"]
 _IOS_DEVICE_TARGET_CPUS = ["ios_armv6", "ios_arm64", "ios_armv7", "ios_armv7s", "ios_arm64e"]
@@ -332,7 +336,7 @@ def _create_transitive_linking_actions(
     # entries during linking process.
     for libs in precompiled_files[:]:
         for artifact in libs:
-            if (_matches([".so", ".dylib", ".dll", ".pyd", ".ifso", ".tbd", ".lib", ".dll.a"], artifact.basename) or
+            if (artifact.basename.endswith(_INTERFACE_SHARED_LIBRARY_EXTENSIONS) or
                 cc_helper.is_valid_shared_library_artifact(artifact)):
                 library_to_link = cc_common.create_library_to_link(
                     actions = ctx.actions,
@@ -341,7 +345,7 @@ def _create_transitive_linking_actions(
                     dynamic_library = artifact,
                 )
                 libraries_for_current_cc_linking_context.append(library_to_link)
-            elif _matches([".pic.lo", ".lo", ".lo.lib"], artifact.basename):
+            elif artifact.basename.endswith(_ALWAYSLINK_LIBRARY_EXTENSIONS):
                 library_to_link = cc_common.create_library_to_link(
                     actions = ctx.actions,
                     feature_configuration = feature_configuration,
@@ -350,7 +354,7 @@ def _create_transitive_linking_actions(
                     alwayslink = True,
                 )
                 libraries_for_current_cc_linking_context.append(library_to_link)
-            elif _matches([".a", ".lib", ".pic.a", ".rlib"], artifact.basename) and not _matches([".if.lib"], artifact.basename):
+            elif artifact.basename.endswith(_STATIC_LIBRARY_EXTENSIONS) and not artifact.basename.endswith(".if.lib"):
                 library_to_link = cc_common.create_library_to_link(
                     actions = ctx.actions,
                     feature_configuration = feature_configuration,
@@ -423,12 +427,6 @@ def _get_link_staticness(ctx, cpp_config, force_linkstatic, _is_dbg_build):
     else:
         return linker_mode.LINKING_DYNAMIC
 
-def _matches(extensions, target):
-    for extension in extensions:
-        if target.endswith(extension):
-            return True
-    return False
-
 def _is_link_shared(ctx):
     return hasattr(ctx.attr, "linkshared") and ctx.attr.linkshared
 
@@ -466,11 +464,10 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
 
     precompiled_files = cc_helper.build_precompiled_files(ctx)
     link_target_type = _EXECUTABLE
+    linked_artifact_category = artifact_category.EXECUTABLE
     if _is_link_shared(ctx):
         link_target_type = _DYNAMIC_LIBRARY
-    is_dynamic_link_type = True
-    if link_target_type == _EXECUTABLE:
-        is_dynamic_link_type = False
+        linked_artifact_category = artifact_category.DYNAMIC_LIBRARY
     semantics.validate_attributes(ctx)
 
     # TODO(b/198254254): Fill in empty providers if needed.
@@ -480,9 +477,7 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
     # the target name.
     # This is no longer necessary, the toolchain can figure out the correct file extensions.
     target_name = ctx.label.name
-    has_legacy_link_shared_name = (_is_link_shared(ctx) and
-                                   (_matches([".so", ".dylib", ".dll", ".pyd"], target_name) or
-                                    cc_helper.is_valid_shared_library_name(target_name)))
+    has_legacy_link_shared_name = _is_link_shared(ctx) and cc_helper.is_valid_shared_library_name(target_name)
     binary = None
     is_dbg_build = (cc_toolchain._cpp_configuration.compilation_mode() == "dbg")
     if has_legacy_link_shared_name:
@@ -491,7 +486,7 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
         binary = cc_helper.get_linked_artifact(
             ctx = ctx,
             cc_toolchain = cc_toolchain,
-            is_dynamic_link_type = is_dynamic_link_type,
+            linked_artifact_category = linked_artifact_category,
         )
     linking_mode = _get_link_staticness(
         ctx,
@@ -520,14 +515,16 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
     additional_make_variable_substitutions = cc_helper.get_toolchain_global_make_variables(cc_toolchain, feature_configuration)
     additional_make_variable_substitutions.update(cc_helper.get_cc_flags_make_variable(ctx, feature_configuration, cc_toolchain))
 
+    disallowed_copts_infos = getattr(cc_toolchain, "disallowed_copts_infos", [])
+
     (compilation_context, compilation_outputs) = cc_common.compile(
         name = ctx.label.name,
         actions = ctx.actions,
         feature_configuration = feature_configuration,
         cc_toolchain = cc_toolchain,
-        user_compile_flags = runtimes_copts + cc_helper.get_copts(ctx, feature_configuration, additional_make_variable_substitutions, attr = "copts"),
-        conly_flags = cc_helper.get_copts(ctx, feature_configuration, additional_make_variable_substitutions, attr = "conlyopts"),
-        cxx_flags = cc_helper.get_copts(ctx, feature_configuration, additional_make_variable_substitutions, attr = "cxxopts"),
+        user_compile_flags = runtimes_copts + cc_helper.get_copts(ctx, feature_configuration, additional_make_variable_substitutions, attr = "copts", requested_features = features, disallowed_copts_infos = disallowed_copts_infos),
+        conly_flags = cc_helper.get_copts(ctx, feature_configuration, additional_make_variable_substitutions, attr = "conlyopts", requested_features = features, disallowed_copts_infos = disallowed_copts_infos),
+        cxx_flags = cc_helper.get_copts(ctx, feature_configuration, additional_make_variable_substitutions, attr = "cxxopts", requested_features = features, disallowed_copts_infos = disallowed_copts_infos),
         defines = cc_helper.defines(ctx, additional_make_variable_substitutions),
         local_defines = cc_helper.local_defines(ctx, additional_make_variable_substitutions) + cc_helper.get_local_defines_for_runfiles_lookup(ctx, ctx.attr.deps),
         includes = cc_helper.include_dirs(ctx, additional_make_variable_substitutions),
@@ -550,7 +547,7 @@ def cc_binary_impl(ctx, additional_linkopts, force_linkstatic = False):
     link_variables = {}
 
     # Allows the dynamic library generated for code of test targets to be linked separately.
-    link_compile_output_separately = ctx.attr._is_test and linking_mode == linker_mode.LINKING_DYNAMIC and cpp_config.dynamic_mode() == "DEFAULT" and ("dynamic_link_test_srcs" in ctx.features)
+    link_compile_output_separately = ctx.attr._is_test and linking_mode == linker_mode.LINKING_DYNAMIC and cpp_config.dynamic_mode() == "DEFAULT" and ("dynamic_link_test_srcs" in features)
 
     is_windows_enabled = cc_common.is_enabled(feature_configuration = feature_configuration, feature_name = "targets_windows")
 

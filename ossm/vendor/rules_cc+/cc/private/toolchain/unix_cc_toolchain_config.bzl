@@ -13,6 +13,8 @@
 # limitations under the License.
 """A Starlark cc_toolchain configuration rule"""
 
+#buildifier: disable=bzl-visibility
+load("@bazel_features//private:util.bzl", "ge")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
 load(
@@ -34,6 +36,12 @@ load(
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/toolchains:cc_toolchain_config_info.bzl", "CcToolchainConfigInfo")
 load("@rules_cc//cc/toolchains:feature_injection.bzl", "FeatureInfo", "convert_feature")
+
+def _cpp_module_extension(compiler):
+    """Returns the BMI/CMI file extension for cpp_module artifact_name_pattern."""
+    if compiler == "gcc" and ge("9.0.0"):
+        return ".gcm"
+    return ".pcm"
 
 def _target_os_version(ctx):
     xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
@@ -773,6 +781,7 @@ def _impl(ctx):
                     ACTION_NAMES.cpp_compile,
                     ACTION_NAMES.cpp_module_codegen,
                     ACTION_NAMES.cpp20_module_codegen,
+                    ACTION_NAMES.lto_backend,
                 ],
                 flag_groups = [
                     flag_group(
@@ -1884,6 +1893,35 @@ def _impl(ctx):
 
     skip_virtual_includes_feature = feature(name = "skip_virtual_includes")
 
+    # Clang -ftime-trace support
+    trace_feature = feature(
+        name = "trace",
+        provides = ["trace"],
+    )
+
+    clang_trace_feature = feature(
+        name = "clang_trace",
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.cpp20_module_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = ["-ftime-trace"],
+                    ),
+                ],
+            ),
+        ],
+        requires = [feature_set(features = ["trace"])],
+        enabled = True,
+    )
+
     # TODO(#8303): Mac crosstool should also declare every feature.
     if is_linux:
         # Linux artifact name patterns are the default.
@@ -1891,7 +1929,7 @@ def _impl(ctx):
             artifact_name_pattern(
                 category_name = "cpp_module",
                 prefix = "",
-                extension = ".pcm",
+                extension = _cpp_module_extension(ctx.attr.compiler),
             ),
         ]
         features = [
@@ -2032,6 +2070,11 @@ def _impl(ctx):
     extra_rules_based_features = depset(ctx.attr.extra_enabled_features + ctx.attr.extra_known_features)
     features.extend([convert_feature(extra_feature[FeatureInfo], enabled = extra_feature in ctx.attr.extra_enabled_features) for extra_feature in extra_rules_based_features.to_list()])
 
+    features.extend([
+        trace_feature,
+    ])
+    if ctx.attr.compiler == "clang":
+        features.append(clang_trace_feature)
     return cc_common.create_cc_toolchain_config_info(
         ctx = ctx,
         features = features,
@@ -2101,10 +2144,9 @@ This is only offered as a migration bridge for projects transitioning to rule-ba
         "_use_libtool_on_macos": attr.label(
             default = "@rules_cc//cc/toolchains/args/archiver_flags:use_libtool_on_macos",
         ),
-        "_xcode_config": attr.label(default = configuration_field(
-            fragment = "apple",
-            name = "xcode_config_label",
-        )),
+        "_xcode_config": attr.label(
+            default = "@apple_support//xcode:version_config",
+        ),
     },
     fragments = ["cpp"],
     provides = [CcToolchainConfigInfo],

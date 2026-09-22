@@ -88,6 +88,7 @@ cc_binary(
         ":util",
         ":zstd",
     ],
+    local_defines = ["ZSTD_MULTITHREAD"],
 )
 
 cc_library(

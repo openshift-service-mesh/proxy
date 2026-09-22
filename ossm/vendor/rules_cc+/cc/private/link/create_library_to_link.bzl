@@ -19,7 +19,17 @@ load("@bazel_skylib//lib:paths.bzl", "paths")
 load("//cc/common:cc_helper_internal.bzl", "is_versioned_shared_library", "path_contains_up_level_references")
 load("//cc/private:cc_internal.bzl", _cc_internal = "cc_internal")
 load("//cc/private/compile:lto_compilation_context.bzl", _EMPTY_LTO = "EMPTY_LTO_COMPILATION_CONTEXT")
+load("//cc/private/link:dynamic_library_symlink.bzl", "dynamic_library_symlink", "dynamic_library_symlink2")
 load("//cc/private/link:lto_backends.bzl", "create_shared_non_lto_artifacts")
+
+_DYNAMIC_LIBRARY_EXTENSIONS = (".so", ".dylib", ".dll", ".pyd", ".wasm", ".tgt", ".vpi")
+_INTERFACE_LIBRARY_EXTENSIONS = (".ifso", ".tbd", ".lib", ".dll.a")
+_INTERFACE_OR_DYNAMIC_LIBRARY_EXTENSIONS = _INTERFACE_LIBRARY_EXTENSIONS + (".so", ".dylib")
+_STATIC_LIBRARY_EXTENSIONS = (".a", ".lib", ".rlib")
+_ALWAYSLINK_STATIC_LIBRARY_EXTENSIONS = _STATIC_LIBRARY_EXTENSIONS + (".lo",)
+_STATIC_LIBRARY_EXCLUDED_EXTENSIONS = (".lo.lib", ".if.lib")
+_ALWAYSLINK_STATIC_LIBRARY_EXCLUDED_EXTENSIONS = (".pic.lo", ".if.lib")
+_PIC_ALWAYSLINK_STATIC_LIBRARY_EXCLUDED_EXTENSIONS = (".if.lib",)
 
 _warning = """ Don't use this field. It's intended for internal use and will be changed or removed
     without warning."""
@@ -168,34 +178,54 @@ def create_library_to_link(
         _validate_symlink_path("dynamic_library_symlink_path", dynamic_library_symlink_path)
         _validate_ext(
             dynamic_library_symlink_path,
-            [".so", ".dylib", ".dll", ".pyd", ".wasm", ".tgt", ".vpi"],
+            _DYNAMIC_LIBRARY_EXTENSIONS,
             is_versioned_shared_library,
             empty_ext = True,
         )
 
     if interface_library_symlink_path:
         _validate_symlink_path("interface_library_symlink_path", interface_library_symlink_path)
-        _validate_ext(interface_library_symlink_path, [".ifso", ".tbd", ".lib", ".dll.a"])
+        _validate_ext(interface_library_symlink_path, _INTERFACE_LIBRARY_EXTENSIONS)
 
     if static_library:
         if alwayslink:
-            _validate_ext(static_library, [".a", ".lib", ".rlib"] + [".lo"], not_ext = [".pic.lo", ".if.lib"], empty_ext = True)
+            _validate_ext(
+                static_library,
+                _ALWAYSLINK_STATIC_LIBRARY_EXTENSIONS,
+                not_ext = _ALWAYSLINK_STATIC_LIBRARY_EXCLUDED_EXTENSIONS,
+                empty_ext = True,
+            )
         else:
-            _validate_ext(static_library, [".a", ".lib", ".rlib"], not_ext = [".lo.lib", ".if.lib"], empty_ext = True)
+            _validate_ext(
+                static_library,
+                _STATIC_LIBRARY_EXTENSIONS,
+                not_ext = _STATIC_LIBRARY_EXCLUDED_EXTENSIONS,
+                empty_ext = True,
+            )
 
     if pic_static_library:
         if alwayslink:
             # Ideally we'd allow only `.pic.lo` instead of `.lo`, `.pic.a` instead of `.a`, `.lo.lib` instead of `.lib`
             # but in reality pic libs are often called same as no-pic.
-            _validate_ext(pic_static_library, [".a", ".lib", ".rlib"] + [".lo"], not_ext = [".if.lib"], empty_ext = True)
+            _validate_ext(
+                pic_static_library,
+                _ALWAYSLINK_STATIC_LIBRARY_EXTENSIONS,
+                not_ext = _PIC_ALWAYSLINK_STATIC_LIBRARY_EXCLUDED_EXTENSIONS,
+                empty_ext = True,
+            )
         else:
-            _validate_ext(pic_static_library, [".a", ".lib", ".rlib"], not_ext = [".lo.lib", ".if.lib"], empty_ext = True)
+            _validate_ext(
+                pic_static_library,
+                _STATIC_LIBRARY_EXTENSIONS,
+                not_ext = _STATIC_LIBRARY_EXCLUDED_EXTENSIONS,
+                empty_ext = True,
+            )
 
     if dynamic_library:
-        _validate_ext(dynamic_library, [".so", ".dylib", ".dll", ".pyd", ".wasm", ".tgt", ".vpi"], is_versioned_shared_library, empty_ext = True)
+        _validate_ext(dynamic_library, _DYNAMIC_LIBRARY_EXTENSIONS, is_versioned_shared_library, empty_ext = True)
 
     if interface_library:
-        _validate_ext(interface_library, [".ifso", ".tbd", ".lib", ".dll.a", ".so", ".dylib"])
+        _validate_ext(interface_library, _INTERFACE_OR_DYNAMIC_LIBRARY_EXTENSIONS)
 
     if errors:
         fail("\n".join(errors))
@@ -211,9 +241,9 @@ def create_library_to_link(
             if dynamic_library_symlink_path:
                 if dynamic_library.short_path.startswith("_solib_"):
                     fail("dynamic_library must not be a symbolic link in the solib directory. Got '%s'" % dynamic_library.short_path)
-                dynamic_library = _cc_internal.dynamic_library_symlink2(actions, dynamic_library, cc_toolchain._solib_dir, dynamic_library_symlink_path)
+                dynamic_library = dynamic_library_symlink2(actions, dynamic_library, cc_toolchain._solib_dir, dynamic_library_symlink_path)
             else:
-                dynamic_library = _cc_internal.dynamic_library_symlink(actions, dynamic_library, cc_toolchain._solib_dir, True, True)
+                dynamic_library = dynamic_library_symlink(actions, dynamic_library, cc_toolchain._solib_dir, True, True)
 
     resolved_symlink_interface_library = None
     if interface_library:
@@ -226,9 +256,9 @@ def create_library_to_link(
             if interface_library_symlink_path:
                 if interface_library.short_path.startswith("_solib_"):
                     fail("dynamic_library must not be a symbolic link in the solib directory. Got '%s'" % dynamic_library.short_path)
-                interface_library = _cc_internal.dynamic_library_symlink2(actions, interface_library, cc_toolchain._solib_dir, interface_library_symlink_path)
+                interface_library = dynamic_library_symlink2(actions, interface_library, cc_toolchain._solib_dir, interface_library_symlink_path)
             else:
-                interface_library = _cc_internal.dynamic_library_symlink(actions, interface_library, cc_toolchain._solib_dir, True, True)
+                interface_library = dynamic_library_symlink(actions, interface_library, cc_toolchain._solib_dir, True, True)
 
     identifier = static_library or pic_static_library or dynamic_library or interface_library
     if not identifier:
@@ -253,6 +283,20 @@ def create_library_to_link(
         )
     else:
         shared_non_lto_backends = None
+
+    if pic_lto_compilation_context and pic_static_library and pic_objects != None:
+        pic_shared_non_lto_backends = create_shared_non_lto_artifacts(
+            actions,
+            pic_lto_compilation_context,
+            False,
+            feature_configuration,
+            cc_toolchain,
+            True,
+            pic_objects,
+        )
+    else:
+        pic_shared_non_lto_backends = None
+
     lto_compilation_context = lto_compilation_context or _EMPTY_LTO
     pic_lto_compilation_context = pic_lto_compilation_context or _EMPTY_LTO
 
@@ -271,22 +315,63 @@ def create_library_to_link(
         _lto_compilation_context = lto_compilation_context,
         _pic_lto_compilation_context = pic_lto_compilation_context,
         _shared_non_lto_backends = shared_non_lto_backends,
+        _pic_shared_non_lto_backends = pic_shared_non_lto_backends,
         _contains_objects = bool(objects) or bool(pic_objects),
+    )
+
+# buildifier: disable=name-conventions
+_UnboundValueProviderDoNotUse = provider("This provider is used as default value for optional function parameters.", fields = [])
+_UNBOUND = _UnboundValueProviderDoNotUse()
+
+def copy_library_to_link(
+        library,
+        *,
+        static_library = _UNBOUND,
+        pic_static_library = _UNBOUND,
+        dynamic_library = _UNBOUND,
+        interface_library = _UNBOUND,
+        objects = _UNBOUND,
+        pic_objects = _UNBOUND,
+        alwayslink = _UNBOUND,
+        lto_compilation_context = _UNBOUND,
+        pic_lto_compilation_context = _UNBOUND,
+        must_keep_debug = _UNBOUND,
+        resolved_symlink_dynamic_library = _UNBOUND,
+        resolved_symlink_interface_library = _UNBOUND):
+    """Creates a copy of an existing `LibraryToLink` with optional overrides."""
+    new_objects = objects if objects != _UNBOUND else library.objects
+    new_pic_objects = pic_objects if pic_objects != _UNBOUND else library.pic_objects
+    return make_library_to_link(
+        static_library = static_library if static_library != _UNBOUND else library.static_library,
+        pic_static_library = pic_static_library if pic_static_library != _UNBOUND else library.pic_static_library,
+        dynamic_library = dynamic_library if dynamic_library != _UNBOUND else library.dynamic_library,
+        interface_library = interface_library if interface_library != _UNBOUND else library.interface_library,
+        resolved_symlink_dynamic_library = resolved_symlink_dynamic_library if resolved_symlink_dynamic_library != _UNBOUND else library.resolved_symlink_dynamic_library,
+        resolved_symlink_interface_library = resolved_symlink_interface_library if resolved_symlink_interface_library != _UNBOUND else library.resolved_symlink_interface_library,
+        objects = new_objects,
+        pic_objects = new_pic_objects,
+        alwayslink = alwayslink if alwayslink != _UNBOUND else library.alwayslink,
+        _library_identifier = library._library_identifier,
+        _contains_objects = bool(new_objects) or bool(new_pic_objects),
+        _disable_whole_archive = library._disable_whole_archive,
+        _must_keep_debug = must_keep_debug if must_keep_debug != _UNBOUND else library._must_keep_debug,
+        _lto_compilation_context = lto_compilation_context if lto_compilation_context != _UNBOUND else library._lto_compilation_context,
+        _pic_lto_compilation_context = pic_lto_compilation_context if pic_lto_compilation_context != _UNBOUND else library._pic_lto_compilation_context,
+        _shared_non_lto_backends = getattr(library, "_shared_non_lto_backends", {}),
+        _pic_shared_non_lto_backends = getattr(library, "_pic_shared_non_lto_backends", {}),
     )
 
 def _validate_symlink_path(attr, path):
     if not path or paths.is_absolute(path) or path_contains_up_level_references(path):
         fail("%s must be a relative file path. Got '%s" % (attr, path))
 
-def _validate_extension(path, extensions, func = None, not_ext = [], fail = fail, empty_ext = False):
+def _validate_extension(path, extensions, func = None, not_ext = (), fail = fail, empty_ext = False):
     path = getattr(path, "basename", path)  # Handle str|File
     path_lower = path.lower()
-    for ext in not_ext:
-        if path_lower.endswith(ext.lower()):
-            fail("'%s' does not have any of the allowed extensions %s" % (path, ", ".join(extensions)))
-    for ext in extensions:
-        if path_lower.endswith(ext.lower()):
-            return
+    if path_lower.endswith(not_ext):
+        fail("'%s' does not have any of the allowed extensions %s" % (path, ", ".join(extensions)))
+    if path_lower.endswith(extensions):
+        return
     if empty_ext:
         _, actual_ext = paths.split_extension(path)
         if actual_ext == "":

@@ -1,6 +1,22 @@
 load("@buildifier_prebuilt//:toolchain.bzl", "declare_toolchain")
 declare_toolchain(
     tool_name = "buildifier",
+    tool = "@buildifier_windows_amd64//file",
+    os = "windows",
+    arch = "amd64",
+)
+
+
+declare_toolchain(
+    tool_name = "buildifier",
+    tool = "@buildifier_windows_arm64//file",
+    os = "windows",
+    arch = "arm64",
+)
+
+
+declare_toolchain(
+    tool_name = "buildifier",
     tool = "@buildifier_darwin_amd64//file",
     os = "darwin",
     arch = "amd64",
@@ -41,9 +57,25 @@ declare_toolchain(
 
 declare_toolchain(
     tool_name = "buildifier",
-    tool = "@buildifier_windows_amd64//file",
+    tool = "@buildifier_linux_s390x//file",
+    os = "linux",
+    arch = "s390x",
+)
+
+
+declare_toolchain(
+    tool_name = "buildozer",
+    tool = "@buildozer_windows_amd64//file",
     os = "windows",
     arch = "amd64",
+)
+
+
+declare_toolchain(
+    tool_name = "buildozer",
+    tool = "@buildozer_windows_arm64//file",
+    os = "windows",
+    arch = "arm64",
 )
 
 
@@ -89,8 +121,8 @@ declare_toolchain(
 
 declare_toolchain(
     tool_name = "buildozer",
-    tool = "@buildozer_windows_amd64//file",
-    os = "windows",
-    arch = "amd64",
+    tool = "@buildozer_linux_s390x//file",
+    os = "linux",
+    arch = "s390x",
 )
 

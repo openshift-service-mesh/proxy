@@ -7,7 +7,7 @@ load("@bazel_skylib//lib:types.bzl", "types")
 
 _TOOL_NAMES = ["buildifier", "buildozer"]
 _TYPICAL_PLATFORMS = ["windows", "darwin", "linux"]
-_TYPICAL_ARCHES = ["amd64", "arm64", "riscv64"]
+_TYPICAL_ARCHES = ["amd64", "arm64", "riscv64", "s390x"]
 _VALID_TOOL_NAMES = sets.make(_TOOL_NAMES)
 
 def _create_asset(name, platform, arch, version, sha256 = None):
@@ -35,8 +35,6 @@ def _create_asset(name, platform, arch, version, sha256 = None):
         fail("Expected a version.")
     if sha256 == None:
         fail("Expected a sha256.")
-    if arch == "windows" and version == "arm64":
-        fail("arm64 windows executables are not provided by buildifier/buildozer")
     if arch == "windows" and version == "riscv64":
         fail("riscv64 windows executables are not provided by buildifier/buildozer")
     if arch == "darwin" and version == "riscv64":
@@ -137,13 +135,6 @@ def _create_assets(
     for name in names:
         for platform in platforms:
             for arch in arches:
-                if platform == "windows" and arch == "arm64":
-                    continue
-                if platform == "windows" and arch == "riscv64":
-                    continue
-                if platform == "darwin" and arch == "riscv64":
-                    continue
-
                 uniq_name = _create_unique_name(
                     name = name,
                     platform = platform,
@@ -151,7 +142,7 @@ def _create_assets(
                 )
 
                 if uniq_name not in sha256_values:
-                    fail("Missing sha256 value for {}".format(uniq_name))
+                    continue
 
                 assets.append(_create_asset(
                     name = name,
@@ -163,23 +154,27 @@ def _create_assets(
     return assets
 
 _DEFAULT_ASSETS = _create_assets(
-    version = "v8.2.1",
-    names = ["buildifier", "buildozer"],
-    platforms = ["darwin", "linux", "windows"],
-    arches = ["amd64", "arm64", "riscv64"],
+    version = "v10.0.1",
+    names = _TOOL_NAMES,
+    platforms = _TYPICAL_PLATFORMS,
+    arches = _TYPICAL_ARCHES,
     sha256_values = {
-        "buildifier_darwin_amd64": "9f8cffceb82f4e6722a32a021cbc9a5344b386b77b9f79ee095c61d087aaea06",
-        "buildifier_darwin_arm64": "cfab310ae22379e69a3b1810b433c4cd2fc2c8f4a324586dfe4cc199943b8d5a",
-        "buildifier_linux_amd64": "6ceb7b0ab7cf66fceccc56a027d21d9cc557a7f34af37d2101edb56b92fcfa1a",
-        "buildifier_linux_arm64": "3baa1cf7eb41d51f462fdd1fff3a6a4d81d757275d05b2dd5f48671284e9a1a5",
-        "buildifier_linux_riscv64": "5101795c6b90e3aca6d8dc4efe15fd818a8b6053f34284551f6ba7fa57ad8415",
-        "buildifier_windows_amd64": "802104da0bcda0424a397ac5be0004c372665a70289a6d5146e652ee497c0dc6",
-        "buildozer_darwin_amd64": "1284b7416d9ebbb50033645fc648985f9b2e0f38e7f22f79c0398c97d38d146c",
-        "buildozer_darwin_arm64": "a981182561f67ed697b0e810714307c8475bce68c069f819212fe36f12d77872",
-        "buildozer_linux_amd64": "04454a6a89c64c603027cc3371eb1c36e48727e04558e077c20ec37c9c2f831a",
-        "buildozer_linux_arm64": "e55b56861a390cc993402d2974d5b74a097694f64eb08599dc704bdd7dde6484",
-        "buildozer_linux_riscv64": "4efc096f6b23e81db035344706c12daf6795fdff0a1edb7af8d96bc60ea631dc",
-        "buildozer_windows_amd64": "6e3b8520904394adc31a610544fc2f86609c0433e39ae3a5b5f992e20dabb0d3",
+        "buildifier_darwin_amd64": "1d02bb9148cadf2cbee330f9bd657352c765b52b68a03d970e10e47706bdc436",
+        "buildifier_darwin_arm64": "afb78f350319b59cc51d6add3a5f3ba68e63e5d88f68c5a9ea6328a07084d319",
+        "buildifier_linux_amd64": "e0ea28e2d639347724435ebafe0531fd764fbf20eec6a23000c81edd0d58e51d",
+        "buildifier_linux_arm64": "6d7aebd23aa85847a66d517bb6220d95f24a2752e62cce0f089145b680b539c7",
+        "buildifier_linux_riscv64": "760f3811ec408dda83be9ad39c4ceaa6b1c4469335620e483007596903757d62",
+        "buildifier_linux_s390x": "01774063e8751bee931b571b42d66f166cf3d49c2adb33d2fe8552137a1b16e0",
+        "buildifier_windows_amd64": "ac33edf5da6137ec816f14d7a07889c96c45d669a8d58c864e9c3d0a62063fcd",
+        "buildifier_windows_arm64": "cb02bf1d65ddb624dd2c20b7a7ae88bfc5d9bc3e39112888a8bc6b2f6f5faa20",
+        "buildozer_darwin_amd64": "ed5e9acbd551aaa0d153c97999925f99e2310904f73bf01170f58813bf94a915",
+        "buildozer_darwin_arm64": "b5c89fd313d537157c03608addcd1ed72d6ba3ae0af6ab55e3a4c132386b4d22",
+        "buildozer_linux_amd64": "1dcd81b6e6d6fe2124f6196cd8d4288a1c12dda50fad7f1a01131c25498dac33",
+        "buildozer_linux_arm64": "a93fb409201b42e58074e192a0bc7e73787fb7d914bd8ad986f0f10b4f4ee3af",
+        "buildozer_linux_riscv64": "7f07cb1b9075b2a3c0760e931ae503a05b5bb07a1ef20de4a60bcb5ab8742a80",
+        "buildozer_linux_s390x": "6b270a59f563d6225050370e42e74f3a13c50e93f57e7a43831cf56ebb4e6602",
+        "buildozer_windows_amd64": "999efbec1657c5f802512731e4e02413790cf36afc9911299e7f54dccbf0be2c",
+        "buildozer_windows_arm64": "c57e4f4e16a4bab2fecde2575ee1da41d134545cd6205a91ea76ae0f647b1321",
     },
 )
 

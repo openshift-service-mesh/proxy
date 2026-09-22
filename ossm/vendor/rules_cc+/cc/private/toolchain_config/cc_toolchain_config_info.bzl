@@ -33,6 +33,7 @@ CcToolchainConfigInfo, _new_cc_toolchain_config_info = provider(
     fields = [
         "_action_configs_DO_NOT_USE",
         "_artifact_name_patterns_DO_NOT_USE",
+        "_default_features_and_action_configs",
         "_exec_os_DO_NOT_USE",
         "_features_DO_NOT_USE",
         "abi_libc_version",
@@ -40,6 +41,7 @@ CcToolchainConfigInfo, _new_cc_toolchain_config_info = provider(
         "builtin_sysroot",
         "compiler",
         "cxx_builtin_include_directories",
+        "disallowed_copts_infos",
         "make_variables",
         "target_cpu",
         "target_libc",
@@ -56,6 +58,7 @@ def create_cc_toolchain_config_info(
         ctx,
         toolchain_identifier,
         compiler,
+        disallowed_copts_infos = [],
         features = [],
         action_configs = [],
         artifact_name_patterns = [],
@@ -124,9 +127,20 @@ def create_cc_toolchain_config_info(
         features = legacy_features
         action_configs = legacy_action_configs
 
+    default_features_and_action_configs = [
+        feature.name
+        for feature in features
+        if feature.enabled
+    ] + [
+        action_config.action_name
+        for action_config in action_configs
+        if action_config.enabled
+    ]
+
     return _new_cc_toolchain_config_info(
         _action_configs_DO_NOT_USE = action_configs,
         _artifact_name_patterns_DO_NOT_USE = artifact_name_patterns,
+        _default_features_and_action_configs = default_features_and_action_configs,
         _features_DO_NOT_USE = features,
         _exec_os_DO_NOT_USE = _cc_internal.exec_os(ctx),
         abi_libc_version = abi_libc_version or "",
@@ -134,6 +148,7 @@ def create_cc_toolchain_config_info(
         builtin_sysroot = builtin_sysroot or "",
         compiler = compiler,
         cxx_builtin_include_directories = cxx_builtin_include_directories,
+        disallowed_copts_infos = disallowed_copts_infos or [],
         make_variables = make_variables,
         target_cpu = target_cpu or "",
         target_libc = target_libc or "",

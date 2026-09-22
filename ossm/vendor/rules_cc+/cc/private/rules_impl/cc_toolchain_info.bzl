@@ -93,6 +93,7 @@ def _create_cc_toolchain_info(
         objcopy_files,
         aggregate_ddi,
         generate_modmap,
+        disallowed_copts_infos = [],
         extra_cpp_configuration = None):
     cc_toolchain_info = dict(
         needs_pic_for_dynamic_libraries = (lambda *, feature_configuration: True) if cpp_configuration.force_pic() else _needs_pic_for_dynamic_libraries,
@@ -106,6 +107,7 @@ def _create_cc_toolchain_info(
         cpu = toolchain_config_info.target_cpu,
         target_gnu_system_name = toolchain_config_info.target_system_name,
         toolchain_id = toolchain_config_info.toolchain_id,
+        disallowed_copts_infos = disallowed_copts_infos or [],
         dynamic_runtime_solib_dir = dynamic_runtime_solib_dir,
         objcopy_executable = objcopy_executable,
         compiler_executable = compiler_executable,
@@ -137,6 +139,7 @@ def _create_cc_toolchain_info(
         _build_info_files = build_info_files,
         _supports_header_parsing = supports_header_parsing,
         _supports_param_files = supports_param_files,
+        _default_features_and_action_configs = toolchain_config_info._default_features_and_action_configs,
         _toolchain_features = toolchain_features,
         _toolchain_label = toolchain_label,
         _cpp_configuration = cpp_configuration,
@@ -172,6 +175,7 @@ CcToolchainInfo, _ = provider(
             on the C++ toolchain and presence of `--force_pic` Bazel option.""",
         "built_in_include_directories": "Returns the list of built-in directories of the compiler.",
         "all_files": "Returns all toolchain files (so they can be passed to actions using this toolchain as inputs).",
+        "disallowed_copts_infos": "Returns the list of disallowed_copts_info structs for disallowed copts enforcement.",
         "static_runtime_lib": """
             Returns the files from `static_runtime_lib` attribute (so they can be passed to actions
             using this toolchain as inputs). The caller should check whether the
@@ -232,6 +236,7 @@ CcToolchainInfo, _ = provider(
         # Fields still used by native code - will be used by Starlark in the future.
         "_supports_header_parsing": "INTERNAL API, DO NOT USE!",
         "_supports_param_files": "INTERNAL API, DO NOT USE!",
+        "_default_features_and_action_configs": "INTERNAL API, DO NOT USE!",
         "_toolchain_features": "INTERNAL API, DO NOT USE!",
         "_toolchain_label": "INTERNAL API, DO NOT USE!",
         "_cpp_configuration": "INTERNAL API, DO NOT USE!",

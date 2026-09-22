@@ -16,13 +16,17 @@
 
 load("//cc/common:cc_common.bzl", "cc_common")
 
-def _check_toolchain_supports_objc_compile(ctx, cc_toolchain):
+def _check_toolchain_supports_objc_compile(ctx, cc_toolchain, requested_features = None, unsupported_features = None):
+    if requested_features == None:
+        requested_features = ctx.features
+    if unsupported_features == None:
+        unsupported_features = ctx.disabled_features
     feature_configuration = cc_common.configure_features(
         ctx = ctx,
         cc_toolchain = cc_toolchain,
         language = "objc",
-        requested_features = ctx.features,
-        unsupported_features = ctx.disabled_features,
+        requested_features = requested_features,
+        unsupported_features = unsupported_features,
     )
 
     if not cc_common.action_is_enabled(
@@ -31,6 +35,10 @@ def _check_toolchain_supports_objc_compile(ctx, cc_toolchain):
     ):
         fail("Compiling objc_library targets requires the Apple CC toolchain " +
              "which can be found here: https://github.com/bazelbuild/apple_support#toolchain-setup")
+
+def _get_apple_vendor_attr():
+    # TODO(b/528985527): Change to the apple vendor platform constraint if safe.
+    return {}
 
 def _get_licenses_attr():
     # TODO(b/182226065): Change to applicable_licenses
@@ -41,6 +49,7 @@ def _get_repo():
 
 semantics = struct(
     check_toolchain_supports_objc_compile = _check_toolchain_supports_objc_compile,
+    get_apple_vendor_attr = _get_apple_vendor_attr,
     get_repo = _get_repo,
     get_licenses_attr = _get_licenses_attr,
     apple_crosstool_transition = None,

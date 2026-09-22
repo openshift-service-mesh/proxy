@@ -29,9 +29,6 @@ USE_EXEC_ROOT_FOR_VIRTUAL_INCLUDES_SYMLINKS = False
 # TODO: b/142314377 - Cleanup this temporary flag.
 STRIP_INCLUDE_PREFIX_APPLIES_TO_TEXTUAL_HEADERS = True
 
-def _get_proto_aspects():
-    return []
-
 def _validate_attributes(_ctx):
     pass
 
@@ -70,7 +67,10 @@ def _get_def_parser():
     )
 
 def _get_grep_includes():
-    return attr.label()
+    return attr.label(
+        allow_single_file = True,
+        cfg = "exec",
+    )
 
 def _get_runtimes_toolchain():
     return [
@@ -91,7 +91,7 @@ def _get_coverage_attrs():
             cfg = config.exec(exec_group = "test"),
         ),
         "_collect_cc_coverage": attr.label(
-            default = Label("//cc/private/coverage:collect_cc_coverage"),
+            default = Label("//cc/coverage:collect_cc_coverage"),
             executable = True,
             cfg = config.exec(exec_group = "test"),
         ),
@@ -103,10 +103,8 @@ def _get_coverage_env(ctx):
 def _get_implementation_deps_allowed_attr():
     return {}
 
-def _check_can_use_implementation_deps(ctx):
-    experimental_cc_implementation_deps = ctx.fragments.cpp.experimental_cc_implementation_deps()
-    if (not experimental_cc_implementation_deps and ctx.attr.implementation_deps):
-        fail("requires --experimental_cc_implementation_deps", attr = "implementation_deps")
+def _check_can_use_implementation_deps(_):
+    return True
 
 _WINDOWS_PLATFORM = Label("@platforms//os:windows")  # Resolve the label within builtins context
 
@@ -193,7 +191,6 @@ semantics = struct(
     get_cc_runtimes_copts = _get_cc_runtimes_copts,
     get_coverage_attrs = _get_coverage_attrs,
     get_coverage_env = _get_coverage_env,
-    get_proto_aspects = _get_proto_aspects,
     get_nocopts_attr = _get_nocopts_attr,
     get_experimental_link_static_libraries_once = _get_experimental_link_static_libraries_once,
     cpp_modules_tools = _cpp_modules_tools,

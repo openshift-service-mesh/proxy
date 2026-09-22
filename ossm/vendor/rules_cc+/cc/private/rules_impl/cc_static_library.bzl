@@ -146,12 +146,14 @@ def _validate_static_library(*, name, actions, cc_toolchain, feature_configurati
 
     return validation_output
 
+_MAIN_REPOSITORY_LABEL_PREFIXES = ("@@//", "@//")  # buildifier: disable=canonical-repository
+
 def _pretty_label(label):
     s = str(label)
 
     # Emit main repo labels (both with and without --enable_bzlmod) without a
     # repo prefix.
-    if s.startswith("@@//") or s.startswith("@//"):  # buildifier: disable=canonical-repository
+    if s.startswith(_MAIN_REPOSITORY_LABEL_PREFIXES):
         return s.lstrip("@")
     return s
 
@@ -271,8 +273,11 @@ message that lists the duplicate symbols and the object files containing them.</
 
 <h5 id="cc_static_library_symbol_check_toolchain">Toolchain support for <code>symbol_check</code></h5>
 <p>The auto-configured C++ toolchains shipped with Bazel support the
-<code>symbol_check</code> feature on all platforms. Custom toolchains can add support for
-it in one of two ways:</p>
+<code>symbol_check</code> feature on all platforms, except on Windows when the toolchain
+has been switched to clang-cl via <code>USE_CLANG_CL=1</code>: the check relies on a
+<code>lib.exe</code> flag that <code>llvm-lib.exe</code> does not implement, so no duplicate
+symbol check is performed there. Custom toolchains can add support for it in one of two
+ways:</p>
 <ul>
   <li>Implementing the <code>ACTION_NAMES.validate_static_library</code> action and
   enabling it with the <code>symbol_check</code> feature. The tool set in the action is

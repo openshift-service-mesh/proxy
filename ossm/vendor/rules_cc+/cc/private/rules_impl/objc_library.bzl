@@ -55,7 +55,14 @@ def _objc_library_impl(ctx):
     _validate_attributes(srcs = ctx.attr.srcs, non_arc_srcs = ctx.attr.non_arc_srcs, label = ctx.label)
 
     cc_toolchain = find_cc_toolchain(ctx)
-    semantics.check_toolchain_supports_objc_compile(ctx, cc_toolchain)
+    requested_features = ctx.features
+    unsupported_features = ctx.disabled_features
+    semantics.check_toolchain_supports_objc_compile(
+        ctx = ctx,
+        cc_toolchain = cc_toolchain,
+        requested_features = requested_features,
+        unsupported_features = unsupported_features,
+    )
 
     common_variables = compilation_support.build_common_variables(
         ctx = ctx,
@@ -65,6 +72,8 @@ def _objc_library_impl(ctx):
         implementation_deps = ctx.attr.implementation_deps,
         attr_linkopts = ctx.attr.linkopts,
         alwayslink = cc.target_should_alwayslink(ctx),
+        requested_features = requested_features,
+        unsupported_features = unsupported_features,
     )
     files = []
     if common_variables.compilation_artifacts.archive != None:
@@ -90,8 +99,8 @@ def _objc_library_impl(ctx):
     feature_configuration = cc_common.configure_features(
         ctx = ctx,
         cc_toolchain = cc_toolchain,
-        requested_features = ctx.features,
-        unsupported_features = ctx.disabled_features,
+        requested_features = requested_features,
+        unsupported_features = unsupported_features,
     )
     instrumented_files_info = coverage_common.instrumented_files_info(
         ctx = ctx,
@@ -141,7 +150,7 @@ def _objc_library_impl(ctx):
         OutputGroupInfo(**output_groups),
     ]
 
-objc_library = rule(
+OBJC_LIBRARY_RULE_KWARGS = dict(
     implementation = _objc_library_impl,
     initializer = common_attrs.alwayslink_initializer,
     doc = """
@@ -156,6 +165,7 @@ transitive deps) are only used for compilation of this library, and not librarie
 depend on it. Libraries specified with <code>implementation_deps</code> are still linked
 in binary targets that depend on this library."""),
         },
+        common_attrs.APPLE_VENDOR,
         common_attrs.ALWAYSLINK_RULE,
         common_attrs.COMPILING_RULE,
         common_attrs.COMPILE_DEPENDENCY_RULE,
@@ -164,7 +174,11 @@ in binary targets that depend on this library."""),
         common_attrs.SDK_FRAMEWORK_DEPENDER_RULE,
     ),
     fragments = ["objc", "cpp"],
-    cfg = semantics.apple_crosstool_transition,
     toolchains = use_cc_toolchain() + cc_semantics.get_runtimes_toolchain(),
     provides = [CcInfo],
+)
+
+objc_library = rule(
+    cfg = semantics.apple_crosstool_transition,
+    **OBJC_LIBRARY_RULE_KWARGS
 )

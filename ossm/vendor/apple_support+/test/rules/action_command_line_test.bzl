@@ -43,29 +43,21 @@ def _action_command_line_test_impl(ctx):
             ),
         )
         return analysistest.end(env)
+    if len(matching_actions) != 1 and ctx.attr.argv_filter:
+        matching_actions = [
+            action
+            for action in matching_actions
+            if ctx.attr.argv_filter + " " in " ".join(action.argv) + " "
+        ]
     if len(matching_actions) != 1:
-        # This is a hack to avoid CppLink meaning binary linking and static
-        # library archiving https://github.com/bazelbuild/bazel/pull/15060
-        if mnemonic == "CppLink" and len(matching_actions) == 2:
-            matching_actions = [
-                action
-                for action in matching_actions
-                if action.argv[0] not in [
-                    "/usr/bin/ar",
-                    "external/local_config_cc/libtool",
-                    "external/local_config_apple_cc/libtool",
-                ]
-            ]
-        if len(matching_actions) != 1:
-            unittest.fail(
-                env,
-                ("Expected exactly one action with the mnemonic '{}', " +
-                 "but found {}.").format(
-                    mnemonic,
-                    len(matching_actions),
-                ),
-            )
-            return analysistest.end(env)
+        unittest.fail(
+            env,
+            "Expected exactly one action with the mnemonic '{}', but found {}.".format(
+                mnemonic,
+                len(matching_actions),
+            ),
+        )
+        return analysistest.end(env)
 
     action = matching_actions[0]
     message_prefix = "In {} action for target '{}', ".format(
@@ -79,17 +71,25 @@ def _action_command_line_test_impl(ctx):
     # `-foo` in the expected list doesn't match `-foobar`, for example.
     concatenated_args = " ".join(action.argv) + " "
     bin_dir = analysistest.target_bin_dir_path(env)
+    remaining = concatenated_args
     for expected in ctx.attr.expected_argv:
         expected = expected.replace("$(BIN_DIR)", bin_dir).replace("$(WORKSPACE_NAME)", ctx.workspace_name)
-        if expected + " " not in concatenated_args and expected + "=" not in concatenated_args:
+        space_pos = remaining.find(expected + " ")
+        eq_pos = remaining.find(expected + "=")
+        if space_pos == -1 and eq_pos == -1:
             unittest.fail(
                 env,
-                "{}expected argv to contain '{}', but it did not: {}".format(
+                "{}expected argv to contain '{}' (in order), but it was not found in remaining args: {}\nFull args: {}".format(
                     message_prefix,
                     expected,
+                    remaining,
                     concatenated_args,
                 ),
             )
+        elif space_pos != -1 and (eq_pos == -1 or space_pos <= eq_pos):
+            remaining = remaining[space_pos + len(expected) + 1:]
+        else:
+            remaining = remaining[eq_pos + len(expected) + 1:]
     for not_expected in ctx.attr.not_expected_argv:
         not_expected = not_expected.replace("$(BIN_DIR)", bin_dir).replace("$(WORKSPACE_NAME)", ctx.workspace_name)
         if not_expected + " " in concatenated_args or not_expected + "=" in concatenated_args:
@@ -139,6 +139,13 @@ space-delimited string.
                 doc = """\
 The mnemonic of the action to be inspected on the target under test. It is
 expected that there will be exactly one of these.
+""",
+            ),
+            "argv_filter": attr.string(
+                doc = """\
+If set, when multiple actions match the mnemonic, select the action whose
+argv contains this string. Useful when a config like --save_temps produces
+multiple actions with the same mnemonic.
 """,
             ),
         },

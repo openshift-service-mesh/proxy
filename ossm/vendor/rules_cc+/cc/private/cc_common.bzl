@@ -28,10 +28,11 @@ load("//cc/private/compile:compile_build_variables.bzl", "create_compile_variabl
 load("//cc/private/compile:linkstamp_compile.bzl", "register_linkstamp_compile_action")
 load("//cc/private/compile:lto_compilation_context.bzl", "create_lto_compilation_context")
 load("//cc/private/link:create_extra_link_time_library.bzl", "build_libraries", "create_extra_link_time_library")
-load("//cc/private/link:create_library_to_link.bzl", "create_library_to_link")
+load("//cc/private/link:create_library_to_link.bzl", "copy_library_to_link", "create_library_to_link")
 load("//cc/private/link:create_linker_input.bzl", "create_linker_input")
 load("//cc/private/link:create_linking_context_from_compilation_outputs.bzl", "create_linking_context_from_compilation_outputs")
 load("//cc/private/link:create_linkstamp.bzl", "create_linkstamp")
+load("//cc/private/link:dynamic_library_symlink.bzl", "solib_symlink_action")
 load("//cc/private/link:link.bzl", "link")
 load("//cc/private/link:link_build_variables.bzl", "create_link_variables")
 load("//cc/private/link:lto_backends.bzl", "create_lto_backend_artifacts", "setup_common_lto_variables")
@@ -88,10 +89,8 @@ def _link(
         use_shareable_artifact_factory = _UNBOUND,
         build_config = _UNBOUND,
         emit_interface_shared_library = _UNBOUND):
-    if output_type == "archive":
-        _cc_internal.check_private_api(allowlist = _PRIVATE_STARLARKIFICATION_ALLOWLIST)
-
-    if use_test_only_flags != _UNBOUND or \
+    if output_type == "archive" or \
+       use_test_only_flags != _UNBOUND or \
        never_link != _UNBOUND or \
        test_only_target != _UNBOUND or \
        native_deps != _UNBOUND or \
@@ -336,6 +335,8 @@ def _create_compilation_context(
     )
 
 def _legacy_cc_flags_make_variable_do_not_use(*, cc_toolchain):
+    if hasattr(cc_toolchain, "_legacy_cc_flags_make_variable"):
+        return cc_toolchain._legacy_cc_flags_make_variable
     return _cc_common_internal.legacy_cc_flags_make_variable_do_not_use(cc_toolchain = cc_toolchain)
 
 # buildifier: disable=unused-variable
@@ -407,7 +408,10 @@ def _add_go_exec_groups_to_binary_rules():
 
 def _get_tool_requirement_for_action(*, feature_configuration, action_name):
     _cc_internal.check_private_api(allowlist = _PRIVATE_STARLARKIFICATION_ALLOWLIST)
-    return _cc_common_internal.get_tool_requirement_for_action(feature_configuration = feature_configuration, action_name = action_name)
+    return _get_execution_requirements(
+        feature_configuration = feature_configuration,
+        action_name = action_name,
+    )
 
 def _create_extra_link_time_library(*, build_library_func, **kwargs):
     _cc_internal.check_private_api(allowlist = _PRIVATE_STARLARKIFICATION_ALLOWLIST)
@@ -712,12 +716,7 @@ def _cc_toolchain_features(*, toolchain_config_info, tools_directory):
 
 def _solib_symlink_action(*, ctx, artifact, solib_directory, runtime_solib_dir_base):
     _cc_internal.check_private_api(allowlist = _PRIVATE_STARLARKIFICATION_ALLOWLIST)
-    return _cc_internal.solib_symlink_action(
-        ctx = ctx,
-        artifact = artifact,
-        solib_directory = solib_directory,
-        runtime_solib_dir_base = runtime_solib_dir_base,
-    )
+    return solib_symlink_action(ctx, artifact, solib_directory, runtime_solib_dir_base)
 
 def _cc_toolchain_variables(*, vars):
     _cc_internal.check_private_api(allowlist = _PRIVATE_STARLARKIFICATION_ALLOWLIST)
@@ -731,7 +730,7 @@ cc_common = struct(
     # Ideally we would like to get rid of this Java symbol and replace it with Starlark one.
     # And also deprecate this public API.
     CcToolchainInfo = CcToolchainInfo,
-    do_not_use_tools_cpp_compiler_present = _cc_common_internal.do_not_use_tools_cpp_compiler_present,
+    do_not_use_tools_cpp_compiler_present = None,
     configure_features = configure_features,
     get_tool_for_action = _get_tool_for_action,
     get_execution_requirements = _get_execution_requirements,
@@ -743,6 +742,7 @@ cc_common = struct(
     create_link_variables = create_link_variables,
     empty_variables = _empty_variables,
     create_library_to_link = _create_library_to_link,
+    copy_library_to_link = copy_library_to_link,
     create_linker_input = create_linker_input,
     create_linking_context = _create_linking_context,
     merge_cc_infos = merge_cc_infos,

@@ -24,13 +24,13 @@ from pkg.releasing import release_tools
 
 
 def print_notes(org, repo, version, tarball_path, mirror_host=None,
-                deps_method=None, setup_file=None, toolchains_method=None,
-                changelog=''):
+                deps_method=None, release_name=None, setup_file=None,
+		toolchains_method=None, changelog=''):
   file_name = os.path.basename(tarball_path)
   sha256 = release_tools.get_package_sha256(tarball_path)
 
   url = 'https://github.com/%s/%s/releases/download/%s/%s' % (
-      org, repo, version, file_name)
+      org, repo, release_name, file_name)
   mirror_url = 'https://%s/github.com/%s/%s/releases/download/%s/%s' % (
       mirror_host, org, repo, version, file_name) if mirror_host else None
   workspace_stanza = release_tools.workspace_content(
@@ -38,7 +38,6 @@ def print_notes(org, repo, version, tarball_path, mirror_host=None,
       deps_method=deps_method, toolchains_method=toolchains_method)
   relnotes_template = string.Template(textwrap.dedent(
       """
-      ------------------------ snip ----------------------------
       **New Features**
 
       **Incompatible Changes**
@@ -61,8 +60,6 @@ def print_notes(org, repo, version, tarball_path, mirror_host=None,
       **Using the rules**
 
       See [the source](https://github.com/${org}/${repo}/tree/${version}).
-      ------------------------ snip ----------------------------
-
       """).strip())
   print(relnotes_template.substitute({
       'changelog': changelog,
@@ -73,27 +70,33 @@ def print_notes(org, repo, version, tarball_path, mirror_host=None,
   }))
   if mirror_url:
     file = os.path.basename(tarball_path)
-    path = 'github.com/{org}/{repo}/releases/download/{version}/{file}'.format(
+    path = 'github.com/{org}/{repo}/releases/download/{release_name}/{file}'.format(
         org=org,
         repo=repo,
-        version=version,
+        release_name=release_name,
         file=file
     )
-    mirroring_template = string.Template(textwrap.dedent(
-        """
 
-        !!!: Make sure to copy the file to the release notes.
-        If you are using Google Cloud Storage, you might use a command like
-        gsutil cp bazel-bin/distro/${file} gs://bazel-mirror/${path}
-        gsutil setmeta -h "Cache-Control: public, max-age=31536000" "gs://bazel-mirror/${path}"
-        """).strip())
-    print(mirroring_template.substitute({
-        'org': org,
-        'repo': repo,
-        'version': version,
-        'file': file,
-        'path': path,
-    }))
+    if False:
+        # TODO: This matters for the Bazel team at Googel, who can mirror it, but
+        # does not make sense for the rest of the world.  Figure out if we should
+        # keep it or not.
+        mirroring_template = string.Template(textwrap.dedent(
+            """
+
+            !!!: Make sure to copy the file to the release notes.
+            If you are using Google Cloud Storage, you might use a command like
+            gsutil cp bazel-bin/distro/${file} gs://bazel-mirror/${path}
+            gsutil setmeta -h "Cache-Control: public, max-age=31536000" "gs://bazel-mirror/${path}"
+            """).strip())
+
+        print(mirroring_template.substitute({
+            'org': org,
+            'repo': repo,
+            'version': version,
+            'file': file,
+            'path': path,
+        }))
 
 
 def main():
@@ -106,6 +109,8 @@ def main():
       '--repo', default=None, required=True, help='Repo name')
   parser.add_argument(
       '--version', default=None, required=True, help='Release version')
+  parser.add_argument(
+      '--release_name', default=None, required=True, help='The release name: usually submodule-version')
   parser.add_argument(
       '--tarball_path', default=None,
       required=True, help='path to release tarball')
@@ -136,6 +141,7 @@ def main():
               deps_method=options.deps_method,
               changelog=changelog,
               mirror_host=options.mirror_host,
+	      release_name=options.release_name,
               setup_file=options.setup_file,
               toolchains_method=options.toolchains_method)
 

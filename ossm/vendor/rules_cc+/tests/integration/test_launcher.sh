@@ -60,6 +60,7 @@ cat > MODULE.bazel << EOF
 module(name = "test_module")
 
 bazel_dep(name = "rules_cc", version = "0.0.0")
+bazel_dep(name = "rules_shell", version = "0.6.1")
 local_path_override(
     module_name = "rules_cc",
     path = "$rules_cc_dir"

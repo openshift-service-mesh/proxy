@@ -1,0 +1,170 @@
+name: Tests
+
+on:
+  # continuous
+  schedule:
+    # Run every hour
+    - cron: "0 * * * *"
+
+  # postsubmit
+  push:
+    branches:
+      - main
+
+  # presubmit
+  pull_request:
+    branches:
+      - main
+
+  # manual
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Avoid running twice at the same time over the same changes.
+concurrency:
+  group: ${{ github.event_name }}-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ contains(fromJSON('["pull_request", "workflow_dispatch", "schedule"]'), github.event_name) }}
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04${{ matrix.config.arch-suffix }}
+    name: Linux (${{ matrix.config.name || format('{0}{1}', matrix.config.value, matrix.config.arch-suffix) }})
+    container:
+      image: gcr.io/google.com/absl-177019/gloop-linux-latest@sha256:903f3d7733dd615bc1542b548fab4b649cf6e48118251a2c6527ce4e30543c6b
+      # Our images happen to be public today, but use our service account's credentials anyway in
+      # case we decide to lock down access.
+      credentials:
+        username: _json_key
+        # TODO: this has nothing to do with the bazel cache,
+        # we're just reusing a secret to test it. We should either revert to
+        # GAR_SERVICE_ACCOUNT or switch to more appropriately named
+        # credentials after testing.
+        password: ${{ secrets.BAZEL_CACHE_KEY_FOR_B_512558700 }}
+    strategy:
+      fail-fast: false   # Don't cancel all jobs if one fails.
+      matrix:
+        config:
+          - value: opt
+          - value: dbg
+          - value: asan
+          - value: ubsan
+          - value: msan
+          - value: tsan
+          - value: opt
+            arch-suffix: -arm
+          - value: asan
+            arch-suffix: -arm
+          - name: Unsupported libstdc++
+            value: libstdc++
+          - name: Bazel 8
+            value: asan
+            env: USE_BAZEL_VERSION=8.x
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Override environments variables
+        run: |
+          echo "${{ matrix.config.env }}" >> $GITHUB_ENV
+
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-cache: true
+          cache-save: true
+          external-cache: true
+          repository-cache: |
+            - MODULE.bazel
+          # TODO: either revert to GAR_SERVICE_ACCOUNT or switch
+          # to more appropriately named credentials after testing.
+          google-credentials: ${{ secrets.BAZEL_CACHE_KEY_FOR_B_512558700 }}
+          bazelrc: common --config=remote${{ matrix.config.arch-suffix }}
+
+      - name: Run tests
+        run: bazel test ... --config=${{ matrix.config.value }}
+
+      - name: Run example test
+        run: bazel test @examples//... --config=${{ matrix.config.value }}
+
+  non_compilation:
+    name: Check Non-compilation for ${{ matrix.config }}
+    runs-on: ubuntu-latest
+    container:
+      image: gcr.io/google.com/absl-177019/gloop-linux-latest@sha256:903f3d7733dd615bc1542b548fab4b649cf6e48118251a2c6527ce4e30543c6b
+      # Our images happen to be public today, but use our service account's credentials anyway in
+      # case we decide to lock down access.
+      credentials:
+        username: _json_key
+        # TODO: this has nothing to do with the bazel cache,
+        # we're just reusing a secret to test it. We should either revert to
+        # GAR_SERVICE_ACCOUNT or switch to more appropriately named
+        # credentials after testing.
+        password: ${{ secrets.BAZEL_CACHE_KEY_FOR_B_512558700 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - config: C++ less than C++20
+            flags: --cxxopt=-std=c++17
+            expected_error: Gloop requires C++20 or later
+          - config: Build with libstdc++
+            flags: --config=libstdc++-base
+            expected_error: Gloop does not support libstdc++
+          - config: Build with exceptions
+            flags: --copt=-fexceptions
+            expected_error: Gloop does not support exceptions
+          - config: Build with signed char
+            flags: --copt=-fsigned-char
+            expected_error: Gloop does not support signed chars
+          - config: Bazel less than 8.0
+            env: USE_BAZEL_VERSION=7.7.1
+            expected_error: Bazel compatibility check failed
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-cache: true
+          cache-save: true
+          external-cache: true
+          repository-cache: |
+            - MODULE.bazel
+          # TODO: either revert to GAR_SERVICE_ACCOUNT or switch
+          # to more appropriately named credentials after testing.
+          google-credentials: ${{ secrets.BAZEL_CACHE_KEY_FOR_B_512558700 }}
+          bazelrc: common --remote_cache=https://storage.googleapis.com/gloop-bazel-remote-cache
+
+      - name: Run tests
+        run: |
+          # Use of `util/math:mathutil` is arbitrary. Any public gloop cc_library with a `.cc` in its srcs would work, if it breaks switch to something else.
+          if ${{ matrix.env || '' }} bazel build ${{ matrix.flags || '' }} @gloop//gloop/util/math:mathutil > build.log 2>&1; then
+            echo "${{ matrix.config }} compiled successfully, but should have failed."
+            echo "Build output was:"
+            cat build.log
+            exit 1
+          else
+            if ! grep -q "${{ matrix.expected_error }}" build.log; then
+              echo "${{ matrix.config }} compilation failed, but missing expected error message."
+              echo "Expected error message: ${{ matrix.expected_error }}"
+              echo "Actual output was:"
+              cat build.log
+              exit 1
+            fi
+          fi
+
+  all-blocking-tests:
+    name: All Blocking Tests
+    needs: [linux, non_compilation]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for cancellations
+        if: ${{ contains(join(needs.*.result, ' '), 'cancelled') }}
+        run: echo "One or more tests were cancelled.  If this was a presubmit job cancelled by a submit job, you can ignore this." && exit 1
+      - name: Check for failures
+        if: ${{ contains(join(needs.*.result, ' '), 'failure') }}
+        run: echo "One or more tests failed.  Please check the logs above and fix the issues." && exit 1
+    # This workflow must run even if one or more of the dependent workflows
+    # failed.
+    if: always()

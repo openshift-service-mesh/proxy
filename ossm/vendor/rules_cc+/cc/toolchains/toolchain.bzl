@@ -44,6 +44,7 @@ def cc_toolchain(
         legacy_tools = [],
         known_features = [],
         enabled_features = [],
+        grep_includes = None,
         libc_top = None,
         module_map = None,
         dynamic_runtime_lib = None,
@@ -52,6 +53,7 @@ def cc_toolchain(
         supports_param_files = False,
         compiler = "",
         cpu = "",
+        target_libc = None,
         target_system_name = None,
         **kwargs):
     """A C/C++ toolchain configuration.
@@ -114,6 +116,8 @@ def cc_toolchain(
             [features](https://bazel.build/docs/cc-toolchain-config-reference#features)
             to be disabled over the course of a build through other mechanisms. See the
             documentation for `cc_feature` for more information.
+        grep_includes: (Label) Executable used to extract include directives from C/C++ source
+            files.
         libc_top: (Label) A collection of artifacts for libc passed as inputs to compile/linking
             actions. See
             [`cc_toolchain.libc_top`](https://bazel.build/reference/be/c-cpp#cc_toolchain.libc_top)
@@ -148,6 +152,11 @@ def cc_toolchain(
             through the `target_cpu` attribute of the toolchain configuration. We
             should not add new readers of this value, but there are many existing
             ones in the wild.
+        target_libc: (str) The name of the C standard library targeted by this toolchain
+            (e.g. "glibc", "musl"), optionally followed by a version suffix (e.g.
+            "glibc-2.2.2"). The current toolchain's C standard library is exposed to
+            `select()` statements via the config settings in `@rules_cc//cc/libc`. If not provided,
+            a best effort default is selected.
         target_system_name: (str) The target system name for this toolchain. Bazel doesn't use this
             but starlark rules can read this value through `toolchain_info.target_gnu_system_name`.
             This string is commonly the target triple you would pass to `clang -target` (e.g. "x86_64-unknown-linux-gnu").
@@ -172,8 +181,10 @@ def cc_toolchain(
         "//conditions:default": "",
     })
 
-    target_libc = select({
+    target_libc = target_libc or select({
         Label("//cc/settings:apple_constraint"): "macosx",
+        Label("@platforms//os:linux"): "glibc",
+        Label("@platforms//os:windows"): "ucrt",
         "//conditions:default": "",
     })
 
@@ -187,6 +198,7 @@ def cc_toolchain(
             legacy_tools = legacy_tools,
             known_features = known_features,
             enabled_features = enabled_features,
+            grep_includes = grep_includes,
             compiler = compiler,
             target_libc = target_libc,
             cpu = cpu or _CPU,

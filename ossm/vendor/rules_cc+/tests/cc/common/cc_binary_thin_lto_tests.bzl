@@ -7,6 +7,9 @@ load("@rules_testing//lib:util.bzl", "TestingAspectInfo", "util")
 load("//cc:cc_binary.bzl", _actual_cc_binary = "cc_binary")
 load("//cc:cc_library.bzl", "cc_library")
 load("//cc:cc_test.bzl", _actual_cc_test = "cc_test")
+load("//cc/toolchains:fdo_prefetch_hints.bzl", "fdo_prefetch_hints")
+load("//cc/toolchains:fdo_profile.bzl", "fdo_profile")
+load("//cc/toolchains:propeller_optimize.bzl", "propeller_optimize")
 load("//tests/cc/testutil:cc_analysis_test.bzl", "cc_analysis_test")
 load("//tests/cc/testutil:cc_binary_target_subject.bzl", "cc_binary_target_subject")
 
@@ -173,6 +176,32 @@ def _test_thin_lto_action_graph_impl(env, target):
         ),
     )
 
+def _test_thin_lto_merged_object_uses_toolchain_extension(name, **kwargs):
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["hello.cc"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _test_thin_lto_merged_object_uses_toolchain_extension_impl,
+        target = name + "/bin",
+        test_features = ["thin_lto", "supports_start_end_lib"],
+        config_settings = {
+            str(Label("//tests/cc/testutil/toolchains:object_file_extension")): ".obj",
+        },
+        **kwargs
+    )
+
+def _test_thin_lto_merged_object_uses_toolchain_extension_impl(env, target):
+    merged_object = target.label.name.split("/")[-1] + ".lto.merged.obj"
+
+    index_action = env.expect.that_target(target).action_named("CppLTOIndexing")
+    index_action.outputs().contains_predicate(matching.file_basename_equals(merged_object))
+
+    link_action = env.expect.that_target(target).action_named("CppLink")
+    link_action.inputs().contains_predicate(matching.file_basename_equals(merged_object))
+
 def _test_thin_lto_linkshared(name, **kwargs):
     util.helper_target(
         cc_library,
@@ -273,9 +302,9 @@ def _test_thin_lto_no_linkstatic_impl(env, targets):
 
     lib_target_subject = env.expect.that_target(lib_target)
     solib_action = lib_target_subject.action_generating(solib_file.short_path)
-    solib_action.mnemonic().equals("SolibSymlink")
+    solib_action.mnemonic().is_in(["SolibSymlink", "Symlink"])
 
-    # The input to SolibSymlink is the library itself
+    # The input to the solib symlink action is the library itself.
     solib_action_inputs = solib_action.actual.inputs.to_list()
     lib_file = solib_action_inputs[0]
 
@@ -936,11 +965,13 @@ def _test_use_shared_all_linkstatic_impl(env, target):
     backend_action.argv().not_contains("alinkopt")
 
 def _test_assembler_source(name, **kwargs):
-    s_file = util.empty_file(name + "_tracing.S")
     util.helper_target(
         cc_library,
         name = name + "/lib",
-        srcs = ["bye.cc", s_file],
+        srcs = [
+            "bye.cc",
+            name + "_tracing.S",
+        ],
         hdrs = ["bye.h"],
     )
     util.helper_target(
@@ -984,13 +1015,93 @@ def _test_assembler_source_impl(env, targets):
     link_action = binary_target.action_generating("{package}/{name}{binary_extension}")
     link_action.inputs().contains(obj_path)
 
-# Make sure we don't choke on a cc_library without sources and therefore, without bitcode files.
-def _test_no_source_files(name, **kwargs):
-    a_file = util.empty_file(name + "_static.a")
+def _test_assembler_source_with_shared_nonlto_backends(name, **kwargs):
+    # The assembler source (.S file) is compiled to a native object, not bitcode.
+    # This forces the library to contain at least one non-bitcode object, which
+    # triggers the LTO indexing code path for non-bitcode objects when
+    # include_link_static_in_lto_indexing is false.
+    s_file = util.empty_file(name + "_tracing.S")
     util.helper_target(
         cc_library,
         name = name + "/lib",
-        srcs = [a_file],
+        srcs = ["bye.cc", s_file],
+        hdrs = ["bye.h"],
+    )
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["hello.cc"],
+        deps = [":" + name + "/lib"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _test_assembler_source_impl,
+        targets = {
+            "bin": name + "/bin",
+            "lib": name + "/lib",
+        },
+        test_features = [
+            "thin_lto",
+            "supports_pic",
+            "supports_start_end_lib",
+            "thin_lto_all_linkstatic_use_shared_nonlto_backends",
+        ],
+        **kwargs
+    )
+
+def _test_duplicated_static_libraries_in_lto(name, **kwargs):
+    # The static library file (.a) is precompiled.
+    lib_file = util.empty_file(name + "_static.a")
+
+    util.helper_target(
+        cc_library,
+        name = name + "/lib1",
+        srcs = [lib_file],
+    )
+    util.helper_target(
+        cc_library,
+        name = name + "/lib2",
+        srcs = [lib_file],
+    )
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["hello.cc"],
+        deps = [
+            ":" + name + "/lib1",
+            ":" + name + "/lib2",
+        ],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _test_duplicated_static_libraries_in_lto_impl,
+        target = name + "/bin",
+        test_features = ["thin_lto", "supports_pic", "supports_start_end_lib"],
+        **kwargs
+    )
+
+def _test_duplicated_static_libraries_in_lto_impl(env, target):
+    package = target.label.package
+    name = target.label.name
+
+    test_name = name.split("/")[0]
+    lib_file_path = "{package}/{test_name}_static.a".format(
+        package = package,
+        test_name = test_name,
+    )
+
+    binary_target = cc_binary_target_subject.from_target(env, target)
+    link_action = binary_target.action_generating("{package}/{name}{binary_extension}")
+
+    # Verify that the static library is an input to the link action.
+    link_action.inputs().contains(lib_file_path)
+
+# Make sure we don't choke on a cc_library without sources and therefore, without bitcode files.
+def _test_no_source_files(name, **kwargs):
+    util.helper_target(
+        cc_library,
+        name = name + "/lib",
+        srcs = [name + "_static.a"],
     )
     util.helper_target(
         cc_binary,
@@ -1300,6 +1411,914 @@ def _test_link_opt_impl(env, target):
     backend_action.mnemonic().equals("CcLtoBackendCompile")
     backend_action.argv().not_contains("alinkopt")
 
+def _test_autofdo(name, **kwargs):
+    """Tests that ThinLTO is enabled for AFDO with LLVM when thin_lto feature is explicitly requested."""
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+        features = ["thin_lto"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _test_autofdo_impl,
+        target = name + "/bin",
+        test_features = ["thin_lto", "autofdo", "supports_start_end_lib"],
+        config_settings = {
+            "//command_line_option:fdo_optimize": "/pkg/profile.afdo",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_autofdo_impl(env, target):
+    binary_obj_path = "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.o".format(
+        package = target.label.package,
+        name = target.label.name,
+        bindir = target[TestingAspectInfo].bin_path,
+    )
+
+    backend_action = env.expect.that_target(target).action_generating(binary_obj_path)
+    backend_action.mnemonic().equals("CcLtoBackendCompile")
+    backend_action.argv().contains_predicate(matching.str_matches("-fauto-profile=*profile.afdo"))
+    backend_action.inputs().contains_predicate(matching.file_basename_equals("profile.afdo"))
+
+def _make_lto_backend_disabled_test_impl(obj_name):
+    def impl(env, target):
+        binary_obj_path = "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/{obj_name}".format(
+            package = target.label.package,
+            name = target.label.name,
+            bindir = target[TestingAspectInfo].bin_path,
+            obj_name = obj_name,
+        )
+
+        _expect_no_lto_backend_action(env, target, binary_obj_path)
+
+    return impl
+
+def _expect_no_lto_backend_action(env, target, binary_obj_path):
+    found_actions = []
+    for action in target[TestingAspectInfo].actions:
+        for output in action.outputs.to_list():
+            if output.short_path == binary_obj_path:
+                found_actions.append(action)
+                break
+    env.expect.that_collection(found_actions, expr = "LTO backend action exists").is_empty()
+
+def _test_autofdo_no_implicit_thin_lto(name, **kwargs):
+    """Tests that ThinLTO is not enabled for AFDO with LLVM without --features=autofdo_implicit_thinlto."""
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("binfile.o"),
+        target = name + "/bin",
+        with_features = ["thin_lto", "autofdo", "enable_afdo_thinlto", "autofdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = [],
+        config_settings = {
+            "//command_line_option:fdo_optimize": "/pkg/profile.afdo",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_autofdo_implicit_thin_lto(name, **kwargs):
+    """Tests that --features=autofdo_implicit_thinlto enables ThinLTO for AFDO with LLVM."""
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _test_autofdo_implicit_thin_lto_impl,
+        target = name + "/bin",
+        with_features = ["thin_lto", "autofdo", "enable_afdo_thinlto", "autofdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["autofdo_implicit_thinlto"],
+        config_settings = {
+            "//command_line_option:fdo_optimize": "/pkg/profile.afdo",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_autofdo_implicit_thin_lto_impl(env, target):
+    binary_obj_path = "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.o".format(
+        package = target.label.package,
+        name = target.label.name,
+        bindir = target[TestingAspectInfo].bin_path,
+    )
+
+    backend_action = env.expect.that_target(target).action_generating(binary_obj_path)
+    backend_action.mnemonic().equals("CcLtoBackendCompile")
+
+def _test_autofdo_implicit_thin_lto_disabled_option(name, **kwargs):
+    """Tests that --features=-thin_lto overrides --features=autofdo_implicit_thinlto and prevents enabling ThinLTO for AFDO with LLVM."""
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("binfile.o"),
+        target = name + "/bin",
+        with_features = ["thin_lto", "autofdo", "enable_afdo_thinlto", "autofdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["autofdo_implicit_thinlto", "-thin_lto"],
+        config_settings = {
+            "//command_line_option:fdo_optimize": "/pkg/profile.afdo",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_autofdo_implicit_thin_lto_disabled_rule(name, **kwargs):
+    """Tests that features=[-thin_lto] in the build rule overrides --features=autofdo_implicit_thinlto and prevents enabling ThinLTO for AFDO with LLVM."""
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+        features = ["-thin_lto"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("binfile.o"),
+        target = name + "/bin",
+        with_features = ["thin_lto", "autofdo", "enable_afdo_thinlto", "autofdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["autofdo_implicit_thinlto"],
+        config_settings = {
+            "//command_line_option:fdo_optimize": "/pkg/profile.afdo",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_autofdo_implicit_thin_lto_disabled_package(name, **kwargs):
+    """Tests that features=[-thin_lto] in the package overrides --features=autofdo_implicit_thinlto and prevents enabling ThinLTO for AFDO with LLVM."""
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("empty.o"),
+        target = "//tests/cc/common/disabled_package:bin",
+        with_features = ["thin_lto", "autofdo", "enable_afdo_thinlto", "autofdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["autofdo_implicit_thinlto"],
+        config_settings = {
+            "//command_line_option:fdo_optimize": "/pkg/profile.afdo",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_fdo_no_implicit_thin_lto(name, **kwargs):
+    """Tests that ThinLTO is not enabled for FDO with LLVM without --features=fdo_implicit_thinlto."""
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("binfile.o"),
+        target = name + "/bin",
+        with_features = ["thin_lto", "fdo_optimize", "enable_fdo_thinlto", "fdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = [],
+        config_settings = {
+            "//command_line_option:fdo_optimize": "/pkg/profile.zip",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_fdo_implicit_thin_lto(name, **kwargs):
+    """Tests that --features=fdo_implicit_thinlto enables ThinLTO for FDO with LLVM."""
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _test_fdo_implicit_thin_lto_impl,
+        target = name + "/bin",
+        with_features = ["thin_lto", "fdo_optimize", "enable_fdo_thinlto", "fdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["fdo_implicit_thinlto"],
+        config_settings = {
+            "//command_line_option:fdo_optimize": "/pkg/profile.zip",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_fdo_implicit_thin_lto_impl(env, target):
+    binary_obj_path = "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.o".format(
+        package = target.label.package,
+        name = target.label.name,
+        bindir = target[TestingAspectInfo].bin_path,
+    )
+
+    backend_action = env.expect.that_target(target).action_generating(binary_obj_path)
+    backend_action.mnemonic().equals("CcLtoBackendCompile")
+
+def _test_fdo_implicit_thin_lto_disabled_option(name, **kwargs):
+    """ Tests that --features=-thin_lto overrides --features=fdo_implicit_thinlto and prevents enabling ThinLTO for FDO with LLVM."""
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("binfile.o"),
+        target = name + "/bin",
+        with_features = ["thin_lto", "fdo_optimize", "enable_fdo_thinlto", "fdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["fdo_implicit_thinlto", "-thin_lto"],
+        config_settings = {
+            "//command_line_option:fdo_optimize": "/pkg/profile.zip",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_fdo_implicit_thin_lto_disabled_rule(name, **kwargs):
+    """Tests that features=[-thin_lto] in the build rule overrides --features=fdo_implicit_thinlto and prevents enabling ThinLTO for FDO with LLVM."""
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+        features = ["-thin_lto"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("binfile.o"),
+        target = name + "/bin",
+        with_features = ["thin_lto", "fdo_optimize", "enable_fdo_thinlto", "fdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["fdo_implicit_thinlto"],
+        config_settings = {
+            "//command_line_option:fdo_optimize": "/pkg/profile.zip",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_fdo_implicit_thin_lto_disabled_package(name, **kwargs):
+    """Tests that features=[-thin_lto] in the package overrides --features=fdo_implicit_thinlto and prevents enabling ThinLTO for FDO with LLVM."""
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("empty.o"),
+        target = "//tests/cc/common/disabled_package_fdo:bin",
+        with_features = ["thin_lto", "fdo_optimize", "enable_fdo_thinlto", "fdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["fdo_implicit_thinlto"],
+        config_settings = {
+            "//command_line_option:fdo_optimize": "/pkg/profile.zip",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_xbinary_fdo_no_implicit_thin_lto(name, **kwargs):
+    """Tests that ThinLTO is not enabled for XFDO with LLVM without --features=xbinaryfdo_implicit_thinlto."""
+    fdo_profile(
+        name = name + "/out.xfdo",
+        profile = "profiles.xfdo",
+    )
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("binfile.o"),
+        target = name + "/bin",
+        with_features = ["thin_lto", "xbinaryfdo", "enable_xbinaryfdo_thinlto", "xbinaryfdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = [],
+        config_settings = {
+            "//command_line_option:xbinary_fdo": Label(":" + name + "/out.xfdo"),
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_xbinary_fdo_implicit_thin_lto(name, **kwargs):
+    """Tests that --features=xbinaryfdo_implicit_thinlto enables ThinLTO for XFDO with LLVM."""
+    fdo_profile(
+        name = name + "/out.xfdo",
+        profile = "profiles.xfdo",
+    )
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _test_xbinary_fdo_implicit_thin_lto_impl,
+        target = name + "/bin",
+        with_features = ["thin_lto", "xbinaryfdo", "enable_xbinaryfdo_thinlto", "xbinaryfdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["xbinaryfdo_implicit_thinlto"],
+        config_settings = {
+            "//command_line_option:xbinary_fdo": Label(":" + name + "/out.xfdo"),
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_xbinary_fdo_implicit_thin_lto_impl(env, target):
+    binary_obj_path = "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.o".format(
+        package = target.label.package,
+        name = target.label.name,
+        bindir = target[TestingAspectInfo].bin_path,
+    )
+
+    backend_action = env.expect.that_target(target).action_generating(binary_obj_path)
+    backend_action.mnemonic().equals("CcLtoBackendCompile")
+
+def _test_xbinary_fdo_implicit_thin_lto_disabled_option(name, **kwargs):
+    """Tests that --features=-thin_lto overrides --features=xbinaryfdo_implicit_thinlto and prevents enabling ThinLTO for XFDO with LLVM."""
+    fdo_profile(
+        name = name + "/out.xfdo",
+        profile = "profiles.xfdo",
+    )
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("binfile.o"),
+        target = name + "/bin",
+        with_features = ["thin_lto", "xbinaryfdo", "enable_xbinaryfdo_thinlto", "xbinaryfdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["xbinaryfdo_implicit_thinlto", "-thin_lto"],
+        config_settings = {
+            "//command_line_option:xbinary_fdo": Label(":" + name + "/out.xfdo"),
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_xbinary_fdo_implicit_thin_lto_disabled_rule(name, **kwargs):
+    """Tests that features=[-thin_lto] in the build rule overrides --features=xbinaryfdo_implicit_thinlto and prevents enabling ThinLTO for XFDO with LLVM."""
+    fdo_profile(
+        name = name + "/out.xfdo",
+        profile = "profiles.xfdo",
+    )
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+        features = ["-thin_lto"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("binfile.o"),
+        target = name + "/bin",
+        with_features = ["thin_lto", "xbinaryfdo", "enable_xbinaryfdo_thinlto", "xbinaryfdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["xbinaryfdo_implicit_thinlto"],
+        config_settings = {
+            "//command_line_option:xbinary_fdo": Label(":" + name + "/out.xfdo"),
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_xbinary_fdo_implicit_thin_lto_disabled_package(name, **kwargs):
+    """Tests that features=[-thin_lto] in the package overrides --features=xbinaryfdo_implicit_thinlto and prevents enabling ThinLTO for XFDO with LLVM."""
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("empty.o"),
+        target = "//tests/cc/common/disabled_package_xfdo:bin",
+        with_features = ["thin_lto", "xbinaryfdo", "enable_xbinaryfdo_thinlto", "xbinaryfdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["xbinaryfdo_implicit_thinlto"],
+        config_settings = {
+            "//command_line_option:xbinary_fdo": Label("//tests/cc/common/disabled_package_xfdo:out.xfdo"),
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_xbinary_fdo(name, **kwargs):
+    """Tests that -fauto-profile is added to the LtoBackendAction when xbinary_fdo is enabled."""
+    fdo_profile(
+        name = name + "/out.xfdo",
+        profile = "profiles.xfdo",
+    )
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+        features = ["thin_lto"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _test_xbinary_fdo_impl,
+        target = name + "/bin",
+        with_features = ["thin_lto", "xbinaryfdo", "enable_xbinaryfdo_thinlto", "xbinaryfdo_implicit_thinlto", "supports_start_end_lib"],
+        test_features = ["thin_lto"],
+        config_settings = {
+            "//command_line_option:xbinary_fdo": Label(":" + name + "/out.xfdo"),
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_xbinary_fdo_impl(env, target):
+    binary_obj_path = "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.o".format(
+        package = target.label.package,
+        name = target.label.name,
+        bindir = target[TestingAspectInfo].bin_path,
+    )
+
+    backend_action = env.expect.that_target(target).action_generating(binary_obj_path)
+    backend_action.mnemonic().equals("CcLtoBackendCompile")
+    backend_action.argv().contains_predicate(matching.str_matches("-fauto-profile=*profiles.xfdo"))
+    backend_action.inputs().contains_predicate(matching.file_basename_equals("profiles.xfdo"))
+
+def _test_xbinary_fdo_no_autofdo_or_fdo_implicit_thin_lto(name, **kwargs):
+    """Tests that ThinLTO is not enabled for XBINARYFDO with --features=autofdo_implicit_thinlto and --features=fdo_implicit_thinlto."""
+    fdo_profile(
+        name = name + "/out.xfdo",
+        profile = "profiles.xfdo",
+    )
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _make_lto_backend_disabled_test_impl("binfile.o"),
+        target = name + "/bin",
+        with_features = [
+            "thin_lto",
+            "fdo_optimize",
+            "enable_fdo_thinlto",
+            "fdo_implicit_thinlto",
+            "autofdo",
+            "enable_afdo_thinlto",
+            "autofdo_implicit_thinlto",
+            "xbinaryfdo",
+            "supports_start_end_lib",
+        ],
+        test_features = ["autofdo_implicit_thinlto", "fdo_implicit_thinlto"],
+        config_settings = {
+            "//command_line_option:xbinary_fdo": Label(":" + name + "/out.xfdo"),
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_pic_backend_order(name, **kwargs):
+    _create_thin_lto_basic_targets(name)
+    cc_analysis_test(
+        name = name,
+        impl = _test_pic_backend_order_impl,
+        target = name + "/bin",
+        test_features = ["thin_lto", "supports_pic", "supports_start_end_lib"],
+        config_settings = {
+            "//command_line_option:copt": ["-fno-PIE"],
+        },
+        **kwargs
+    )
+
+def _test_pic_backend_order_impl(env, target):
+    backend_action = env.expect.that_target(target).action_generating(
+        "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.pic.o",
+    )
+    backend_action.mnemonic().equals("CcLtoBackendCompile")
+    backend_action.argv().contains_at_least(["-fno-PIE", "-fPIC"]).in_order()
+
+def _test_propeller_optimize_absolute_options(name, **kwargs):
+    _create_thin_lto_basic_targets(name)
+    cc_analysis_test(
+        name = name,
+        impl = _test_propeller_optimize_absolute_options_impl,
+        target = name + "/bin",
+        with_features = ["thin_lto", "autofdo", "supports_start_end_lib", "propeller_optimize"],
+        test_features = ["thin_lto", "supports_start_end_lib", "propeller_optimize"],
+        config_settings = {
+            "//command_line_option:propeller_optimize_absolute_cc_profile": "/tmp/cc_profile.txt",
+            "//command_line_option:propeller_optimize_absolute_ld_profile": "/tmp/ld_profile.txt",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_propeller_optimize_absolute_options_impl(env, target):
+    binary_target = cc_binary_target_subject.from_target(env, target)
+    link_action = binary_target.action_generating("{package}/{name}{binary_extension}")
+
+    link_action.outputs().has_size(1)
+
+    link_action.inputs().contains_predicate(matching.file_basename_equals("ld_profile.txt"))
+    link_action.argv().contains_predicate(matching.str_matches("-Wl,--symbol-ordering-file=*/ld_profile.txt"))
+
+    backend_action = env.expect.that_target(target).action_generating(
+        "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.o",
+    )
+    backend_action.mnemonic().equals("CcLtoBackendCompile")
+
+    backend_action.argv().contains_predicate(matching.str_matches("-fbasic-block-sections=list=*/cc_profile.txt"))
+    backend_action.argv().contains("-DBUILD_PROPELLER_ENABLED=1")
+    backend_action.inputs().contains_predicate(matching.file_basename_equals("cc_profile.txt"))
+
+    index_action = env.expect.that_target(target).action_generating(
+        "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.o.thinlto.bc",
+    )
+    index_action.inputs().not_contains_predicate(matching.file_basename_equals("ld_profile.txt"))
+
+def _test_propeller_cc_compile(name, **kwargs):
+    _create_thin_lto_basic_targets(name)
+    cc_analysis_test(
+        name = name,
+        impl = _test_propeller_cc_compile_impl,
+        target = name + "/bin",
+        with_features = ["thin_lto", "autofdo", "supports_start_end_lib", "propeller_optimize"],
+        test_features = ["thin_lto", "supports_start_end_lib", "propeller_optimize"],
+        config_settings = {
+            "//command_line_option:propeller_optimize_absolute_cc_profile": "/tmp/cc_profile.txt",
+            "//command_line_option:propeller_optimize_absolute_ld_profile": "/tmp/ld_profile.txt",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_propeller_cc_compile_impl(env, target):
+    # We need to find bitcodeAction (CppCompile generating binfile.indexing.o)
+    # It is input to indexAction.
+    # indexAction output is obj_path + ".thinlto.bc"
+    index_action = env.expect.that_target(target).action_generating(
+        "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.o.thinlto.bc",
+    )
+
+    index_action.inputs().contains("{package}/_objs/{name}/binfile.indexing.o")
+
+    bitcode_action = env.expect.that_target(target).action_generating("{package}/_objs/{name}/binfile.indexing.o")
+    bitcode_action.mnemonic().equals("CppCompile")
+
+    bitcode_action.inputs().not_contains_predicate(matching.file_basename_equals("cc_profile.txt"))
+    bitcode_action.argv().not_contains_predicate(matching.str_startswith("-fbasic-block-sections="))
+
+# Check that the temporary opt-out from disabling Propeller profiles for ThinLTO compile actions
+# works.
+#
+# TODO(b/182804945): Remove after making sure that the rollout of the new Propeller profile
+# passing logic didn't break anything.
+def _test_propeller_cc_compile_with_propeller_optimize_thin_lto_compile_actions(name, **kwargs):
+    _create_thin_lto_basic_targets(name)
+    cc_analysis_test(
+        name = name,
+        impl = _test_propeller_cc_compile_with_propeller_optimize_thin_lto_compile_actions_impl,
+        target = name + "/bin",
+        with_features = [
+            "thin_lto",
+            "autofdo",
+            "supports_start_end_lib",
+            "propeller_optimize",
+            "propeller_optimize_thinlto_compile_actions",
+        ],
+        test_features = [
+            "thin_lto",
+            "supports_start_end_lib",
+            "propeller_optimize",
+            "propeller_optimize_thinlto_compile_actions",
+        ],
+        config_settings = {
+            "//command_line_option:propeller_optimize_absolute_cc_profile": "/tmp/cc_profile.txt",
+            "//command_line_option:propeller_optimize_absolute_ld_profile": "/tmp/ld_profile.txt",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_propeller_cc_compile_with_propeller_optimize_thin_lto_compile_actions_impl(env, target):
+    lib_name = target.label.name.removesuffix("/bin") + "/lib"
+
+    index_action = env.expect.that_target(target).action_generating(
+        "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.o.thinlto.bc",
+    )
+
+    index_action.inputs().contains("{package}/_objs/{name}/binfile.indexing.o")
+    index_action.inputs().contains("{package}/_objs/" + lib_name + "/libfile.indexing.o")
+
+    bitcode_action = env.expect.that_target(target).action_generating("{package}/_objs/{name}/binfile.indexing.o")
+    bitcode_action.mnemonic().equals("CppCompile")
+
+    bitcode_action.inputs().contains_predicate(matching.file_basename_equals("cc_profile.txt"))
+    bitcode_action.argv().contains_predicate(matching.str_matches("-fbasic-block-sections=list=*/cc_profile.txt"))
+
+def _propagating_testing_aspect_impl(target, ctx):
+    return [TestingAspectInfo(
+        attrs = ctx.rule.attr,
+        actions = target.actions,
+        vars = ctx.var,
+        bin_path = ctx.bin_dir.path,
+        required_aspects = ctx.aspect_ids[:-1],
+    )]
+
+_propagating_testing_aspect = aspect(
+    implementation = _propagating_testing_aspect_impl,
+    attr_aspects = ["*"],
+)
+
+def _find_target_in_attr_by_suffix(env, target, attr_name, name_suffix):
+    targets = [
+        dep
+        for dep in getattr(target[TestingAspectInfo].attrs, attr_name)
+        if dep.label.name.endswith(name_suffix)
+    ]
+    env.expect.that_collection(targets).has_size(1)
+    return targets[0]
+
+def _test_propeller_cc_compile_with_thin_lto_disabled(name, **kwargs):
+    util.helper_target(
+        cc_library,
+        name = name + "/lib",
+        srcs = ["libfile.cc"],
+        hdrs = ["libfile.h"],
+        linkstamp = "linkstamp.cc",
+        features = ["-thin_lto"],
+    )
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = ["binfile.cc"],
+        deps = [":" + name + "/lib"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _test_propeller_cc_compile_with_thin_lto_disabled_impl,
+        target = name + "/bin",
+        with_features = ["thin_lto", "autofdo", "supports_start_end_lib", "propeller_optimize"],
+        test_features = ["thin_lto", "supports_start_end_lib", "propeller_optimize"],
+        testing_aspect = _propagating_testing_aspect,
+        config_settings = {
+            "//command_line_option:propeller_optimize_absolute_cc_profile": "/tmp/cc_profile.txt",
+            "//command_line_option:propeller_optimize_absolute_ld_profile": "/tmp/ld_profile.txt",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_propeller_cc_compile_with_thin_lto_disabled_impl(env, target):
+    lib_target = _find_target_in_attr_by_suffix(env, target, attr_name = "deps", name_suffix = "/lib")
+    test_name = target.label.name.split("/")[0]
+
+    obj_path = "{package}/_objs/{lib_target_name}/libfile.o".format(
+        package = target.label.package,
+        lib_target_name = test_name + "/lib",
+    )
+
+    compile_action = env.expect.that_target(lib_target).action_generating(obj_path)
+    compile_action.mnemonic().equals("CppCompile")
+
+    compile_action.inputs().contains_predicate(matching.file_basename_equals("cc_profile.txt"))
+    compile_action.argv().contains_predicate(matching.str_matches("-fbasic-block-sections=list=*/cc_profile.txt"))
+
+def _test_propeller_host_builds(name, **kwargs):
+    util.helper_target(
+        cc_binary,
+        name = name + "/gen_lib",
+        srcs = [name + "/gen_lib.cc"],
+    )
+    util.helper_target(
+        native.genrule,
+        name = name + "/lib_genrule",
+        srcs = [],
+        outs = [name + "/libfile.cc"],
+        cmd = "$(location :" + name + "/gen_lib) > \"$@\"",
+        tools = [":" + name + "/gen_lib"],
+    )
+    util.helper_target(
+        cc_library,
+        name = name + "/lib",
+        srcs = [":" + name + "/lib_genrule"],
+        hdrs = [name + "/libfile.h"],
+    )
+    util.helper_target(
+        cc_binary,
+        name = name + "/bin",
+        srcs = [name + "/binfile.cc"],
+        deps = [":" + name + "/lib"],
+    )
+    cc_analysis_test(
+        name = name,
+        impl = _test_propeller_host_builds_impl,
+        target = name + "/bin",
+        with_features = ["thin_lto", "autofdo", "supports_start_end_lib", "propeller_optimize"],
+        test_features = ["thin_lto", "supports_start_end_lib", "propeller_optimize"],
+        testing_aspect = _propagating_testing_aspect,
+        config_settings = {
+            "//command_line_option:propeller_optimize_absolute_cc_profile": "/tmp/cc_profile.txt",
+            "//command_line_option:propeller_optimize_absolute_ld_profile": "/tmp/ld_profile.txt",
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_propeller_host_builds_impl(env, target):
+    # Sanity check: Verify Propeller IS active on the target binary backend action
+    target_backend_action = env.expect.that_target(target).action_generating(
+        "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.o".format(
+            package = target.label.package,
+            name = target.label.name,
+            bindir = target[TestingAspectInfo].bin_path,
+        ),
+    )
+    target_backend_action.mnemonic().equals("CcLtoBackendCompile")
+    target_backend_action.argv().contains_predicate(matching.str_matches("-fbasic-block-sections=list=*/cc_profile.txt"))
+
+    lib_target = _find_target_in_attr_by_suffix(
+        env,
+        target,
+        attr_name = "deps",
+        name_suffix = "/lib",
+    )
+    lib_genrule_target = _find_target_in_attr_by_suffix(
+        env,
+        lib_target,
+        attr_name = "srcs",
+        name_suffix = "/lib_genrule",
+    )
+    gen_lib_target = _find_target_in_attr_by_suffix(
+        env,
+        lib_genrule_target,
+        attr_name = "tools",
+        name_suffix = "/gen_lib",
+    )
+
+    gen_lib_executable = gen_lib_target[DefaultInfo].files_to_run.executable
+    host_link_action = env.expect.that_target(gen_lib_target).action_generating(gen_lib_executable.short_path)
+    host_link_action.mnemonic().equals("CppLink")
+
+    host_link_action.inputs().not_contains_predicate(matching.file_basename_equals("ld_profile.txt"))
+    host_link_action.argv().not_contains_predicate(matching.str_startswith("-Wl,--symbol-ordering-file="))
+
+    host_compile_action = env.expect.that_target(gen_lib_target).action_generating("{package}/_objs/{name}/gen_lib.o")
+    host_compile_action.mnemonic().equals("CppCompile")
+
+    host_compile_action.inputs().not_contains_predicate(matching.file_basename_equals("cc_profile.txt"))
+    host_compile_action.argv().not_contains_predicate(matching.str_startswith("-fbasic-block-sections="))
+
+def _test_propeller_optimize_option_from_label(name, **kwargs):
+    cc_profile = name + "/cc_profile.txt"
+    ld_profile = name + "/ld_profile.txt"
+
+    util.helper_target(
+        propeller_optimize,
+        name = name + "/test_propeller_optimize",
+        cc_profile = cc_profile,
+        ld_profile = ld_profile,
+    )
+
+    _create_thin_lto_basic_targets(name)
+
+    cc_analysis_test(
+        name = name,
+        impl = _test_propeller_optimize_option_from_label_impl,
+        target = name + "/bin",
+        with_features = ["thin_lto", "autofdo", "supports_start_end_lib", "propeller_optimize"],
+        test_features = ["thin_lto", "supports_start_end_lib", "propeller_optimize"],
+        config_settings = {
+            "//command_line_option:propeller_optimize": Label(":" + name + "/test_propeller_optimize"),
+            "//command_line_option:compilation_mode": "opt",
+        },
+        **kwargs
+    )
+
+def _test_propeller_optimize_option_from_label_impl(env, target):
+    binary_target = cc_binary_target_subject.from_target(env, target)
+    link_action = binary_target.action_generating("{package}/{name}{binary_extension}")
+
+    link_action.outputs().has_size(1)
+
+    link_action.inputs().contains_predicate(matching.file_basename_equals("ld_profile.txt"))
+    link_action.argv().contains_predicate(matching.str_matches("-Wl,--symbol-ordering-file=*/ld_profile.txt"))
+
+    backend_action = env.expect.that_target(target).action_generating(
+        "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.o",
+    )
+    backend_action.mnemonic().equals("CcLtoBackendCompile")
+
+    backend_action.argv().contains_predicate(matching.str_matches("-fbasic-block-sections=list=*/cc_profile.txt"))
+    backend_action.argv().contains("-DBUILD_PROPELLER_ENABLED=1")
+
+    backend_action.inputs().contains_predicate(matching.file_basename_equals("cc_profile.txt"))
+    backend_action.inputs().contains_predicate(matching.file_basename_equals("ld_profile.txt"))
+
+def _test_no_use_lto_indexing_bitcode_file(name, **kwargs):
+    _create_thin_lto_basic_targets(name)
+    cc_analysis_test(
+        name = name,
+        impl = _test_no_use_lto_indexing_bitcode_file_impl,
+        target = name + "/bin",
+        test_features = [
+            "thin_lto",
+            "supports_pic",
+            "supports_start_end_lib",
+            "no_use_lto_indexing_bitcode_file",
+        ],
+        **kwargs
+    )
+
+def _test_no_use_lto_indexing_bitcode_file_impl(env, target):
+    test_name = target.label.name.split("/")[0]
+    lib_name = test_name + "/lib"
+
+    binary_obj_path = "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.pic.o".format(
+        package = target.label.package,
+        name = target.label.name,
+        bindir = target[TestingAspectInfo].bin_path,
+    )
+
+    backend_action = env.expect.that_target(target).action_generating(binary_obj_path)
+    backend_action.mnemonic().equals("CcLtoBackendCompile")
+
+    index_action = env.expect.that_target(target).action_generating(binary_obj_path + ".thinlto.bc")
+    index_action.mnemonic().equals("CppLTOIndexing")
+
+    index_action.argv().not_contains("object_suffix_replace")
+
+    binary_normal_obj = "{package}/_objs/{name}/binfile.pic.o".format(
+        package = target.label.package,
+        name = target.label.name,
+    )
+    lib_normal_obj = "{package}/_objs/{lib_name}/libfile.pic.o".format(
+        package = target.label.package,
+        lib_name = lib_name,
+    )
+    index_action.inputs().contains(binary_normal_obj)
+    index_action.inputs().contains(lib_normal_obj)
+
+    bitcode_action = env.expect.that_target(target).action_generating(binary_normal_obj)
+    bitcode_action.mnemonic().equals("CppCompile")
+    bitcode_action.argv().not_contains("lto_indexing_bitcode=")
+
+def _test_fdo_cache_prefetch_llvm_options_to_backend_base(name, extra_config_settings, **kwargs):
+    util.helper_target(
+        fdo_prefetch_hints,
+        name = name + "/test_profile",
+        profile = "prefetch.afdo",
+    )
+    _create_thin_lto_basic_targets(name)
+    config_settings = {
+        "//command_line_option:fdo_prefetch_hints": Label(":" + name + "/test_profile"),
+        "//command_line_option:compilation_mode": "opt",
+    }
+    config_settings.update(extra_config_settings)
+    cc_analysis_test(
+        name = name,
+        impl = _test_fdo_cache_prefetch_llvm_options_to_backend_impl,
+        target = name + "/bin",
+        with_features = ["thin_lto", "autofdo", "supports_start_end_lib", "fdo_prefetch_hints"],
+        test_features = ["thin_lto", "supports_start_end_lib", "fdo_prefetch_hints"],
+        config_settings = config_settings,
+        **kwargs
+    )
+
+def _test_fdo_cache_prefetch_llvm_options_to_backend_impl(env, target):
+    obj_path = "{package}/{name}.lto/{bindir}/{package}/_objs/{name}/binfile.o".format(
+        package = target.label.package,
+        name = target.label.name,
+        bindir = target[TestingAspectInfo].bin_path,
+    )
+
+    backend_action = env.expect.that_target(target).action_generating(obj_path)
+    backend_action.mnemonic().equals("CcLtoBackendCompile")
+
+    backend_action.argv().contains("-mllvm")
+    backend_action.argv().contains_predicate(matching.str_matches("*-prefetch-hints-file=*/prefetch.afdo"))
+    backend_action.inputs().contains_predicate(matching.file_basename_equals("prefetch.afdo"))
+
+def _test_fdo_cache_prefetch_llvm_options_to_backend_from_label(name, **kwargs):
+    _test_fdo_cache_prefetch_llvm_options_to_backend_base(name, [], **kwargs)
+
+def _test_fdo_cache_prefetch_and_fdo_llvm_options_to_backend_from_label(name, **kwargs):
+    _test_fdo_cache_prefetch_llvm_options_to_backend_base(
+        name,
+        [("//command_line_option:fdo_optimize", "/profile.zip")],
+        **kwargs
+    )
+
+def _test_thin_lto_without_supports_start_end_lib_error(name, **kwargs):
+    _create_thin_lto_basic_targets(name)
+    cc_analysis_test(
+        name = name,
+        impl = _test_thin_lto_without_supports_start_end_lib_error_impl,
+        target = name + "/bin",
+        with_features = ["thin_lto"],
+        test_features = ["thin_lto"],
+        expect_failure = True,
+        **kwargs
+    )
+
+def _test_thin_lto_without_supports_start_end_lib_error_impl(env, target):
+    env.expect.that_target(target).failures().contains_predicate(
+        matching.contains("The feature supports_start_end_lib must be enabled."),
+    )
+
 def cc_binary_thin_lto_tests(name):
     """TestSuite for cc_binary with ThinLTO.
 
@@ -1321,9 +2340,38 @@ def cc_binary_thin_lto_tests(name):
     tests.append(_test_copt)
     tests.append(_test_per_file_copt)
     tests.append(_test_per_file_lto_backend_opt)
+    tests.append(_test_autofdo)
+    tests.append(_test_autofdo_no_implicit_thin_lto)
+    tests.append(_test_autofdo_implicit_thin_lto)
+    tests.append(_test_autofdo_implicit_thin_lto_disabled_option)
+    tests.append(_test_autofdo_implicit_thin_lto_disabled_rule)
+    tests.append(_test_autofdo_implicit_thin_lto_disabled_package)
+    tests.append(_test_fdo_no_implicit_thin_lto)
+    tests.append(_test_fdo_implicit_thin_lto)
+    tests.append(_test_fdo_implicit_thin_lto_disabled_option)
+    tests.append(_test_fdo_implicit_thin_lto_disabled_rule)
+    tests.append(_test_fdo_implicit_thin_lto_disabled_package)
+    tests.append(_test_xbinary_fdo_no_implicit_thin_lto)
+    tests.append(_test_xbinary_fdo_implicit_thin_lto)
+    tests.append(_test_xbinary_fdo_implicit_thin_lto_disabled_option)
+    tests.append(_test_xbinary_fdo_implicit_thin_lto_disabled_rule)
+    tests.append(_test_xbinary_fdo_implicit_thin_lto_disabled_package)
+    tests.append(_test_xbinary_fdo)
+    tests.append(_test_xbinary_fdo_no_autofdo_or_fdo_implicit_thin_lto)
+    tests.append(_test_pic_backend_order)
+    tests.append(_test_propeller_optimize_absolute_options)
+    tests.append(_test_propeller_cc_compile)
+    tests.append(_test_propeller_cc_compile_with_propeller_optimize_thin_lto_compile_actions)
+    tests.append(_test_propeller_cc_compile_with_thin_lto_disabled)
+    tests.append(_test_propeller_host_builds)
+    tests.append(_test_no_use_lto_indexing_bitcode_file)
+    tests.append(_test_fdo_cache_prefetch_llvm_options_to_backend_from_label)
+    tests.append(_test_fdo_cache_prefetch_and_fdo_llvm_options_to_backend_from_label)
+    tests.append(_test_thin_lto_without_supports_start_end_lib_error)
 
     # These tests fail on Bazel 7 and 8, run only for Bazel 9+.
     if bazel_features.cc.cc_common_is_in_rules_cc:
+        tests.append(_test_thin_lto_merged_object_uses_toolchain_extension)
         tests.append(_test_thin_lto_linkshared)
         tests.append(_test_thin_lto_backend_env)
         tests.append(_test_linkstatic_cc_test)
@@ -1332,6 +2380,9 @@ def cc_binary_thin_lto_tests(name):
         tests.append(_test_lto_standalone_command_lines)
         tests.append(_test_lto_backend_opt)
         tests.append(_test_link_opt)
+        tests.append(_test_propeller_optimize_option_from_label)
+        tests.append(_test_assembler_source_with_shared_nonlto_backends)
+        tests.append(_test_duplicated_static_libraries_in_lto)
 
     test_suite(
         name = name,

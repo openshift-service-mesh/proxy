@@ -14,7 +14,7 @@
 """Rule for creating Debian packages."""
 
 load("//pkg:providers.bzl", "PackageVariablesInfo")
-load("//pkg/private:util.bzl", "setup_output_files")
+load("//pkg/private:util.bzl", "setup_output_files", "substitute_package_variables")
 
 _tar_filetype = [".tar", ".tar.gz", ".tgz", ".tar.bz2", "tar.xz", "tar.zst"]
 
@@ -34,124 +34,156 @@ def _pkg_deb_impl(ctx):
         package_file_name = package_file_name,
     )
 
-    changes_file = ctx.actions.declare_file(output_name.rsplit(".", 1)[0] + ".changes")
+    out_file_name_base = output_name.rsplit(".", 1)[0]
+    changes_file = ctx.actions.declare_file(out_file_name_base + ".changes")
     outputs.append(changes_file)
 
-    files = [ctx.file.data]
-    args = [
-        "--output=" + output_file.path,
-        "--changes=" + changes_file.path,
-        "--data=" + ctx.file.data.path,
-        "--package=" + ctx.attr.package,
-        "--maintainer=" + ctx.attr.maintainer,
-    ]
+    package = substitute_package_variables(ctx, ctx.attr.package)
 
-    # Version and description can be specified by a file or inlined
+    files = [ctx.file.data]
+    args = ctx.actions.args()
+    args.add("--output", output_file)
+    args.add("--changes", changes_file)
+    args.add("--data", ctx.file.data)
+    args.add("--package", package)
+    args.add("--maintainer", substitute_package_variables(ctx, ctx.attr.maintainer))
+
     if ctx.attr.architecture_file:
         if ctx.attr.architecture != "all":
             fail("Both architecture and architecture_file attributes were specified")
-        args.append("--architecture=@" + ctx.file.architecture_file.path)
+        args.add("--architecture", "@" + ctx.file.architecture_file.path)
         files.append(ctx.file.architecture_file)
     else:
-        args.append("--architecture=" + ctx.attr.architecture)
+        args.add("--architecture", substitute_package_variables(ctx, ctx.attr.architecture))
 
     if ctx.attr.preinst:
-        args.append("--preinst=@" + ctx.file.preinst.path)
+        args.add("--preinst", "@" + ctx.file.preinst.path)
         files.append(ctx.file.preinst)
     if ctx.attr.postinst:
-        args.append("--postinst=@" + ctx.file.postinst.path)
+        args.add("--postinst", "@" + ctx.file.postinst.path)
         files.append(ctx.file.postinst)
     if ctx.attr.prerm:
-        args.append("--prerm=@" + ctx.file.prerm.path)
+        args.add("--prerm", "@" + ctx.file.prerm.path)
         files.append(ctx.file.prerm)
     if ctx.attr.postrm:
-        args.append("--postrm=@" + ctx.file.postrm.path)
+        args.add("--postrm", "@" + ctx.file.postrm.path)
         files.append(ctx.file.postrm)
     if ctx.attr.config:
-        args.append("--config=@" + ctx.file.config.path)
+        args.add("--config", "@" + ctx.file.config.path)
         files.append(ctx.file.config)
     if ctx.attr.templates:
-        args.append("--templates=@" + ctx.file.templates.path)
+        args.add("--templates", "@" + ctx.file.templates.path)
         files.append(ctx.file.templates)
     if ctx.attr.triggers:
-        args.append("--triggers=@" + ctx.file.triggers.path)
+        args.add("--triggers", "@" + ctx.file.triggers.path)
         files.append(ctx.file.triggers)
+    if ctx.attr.md5sums:
+        args.add("--md5sums", "@" + ctx.file.md5sums.path)
+        files.append(ctx.file.md5sums)
 
     # Conffiles can be specified by a file or a string list
     if ctx.attr.conffiles_file:
         if ctx.attr.conffiles:
             fail("Both conffiles and conffiles_file attributes were specified")
-        args.append("--conffile=@" + ctx.file.conffiles_file.path)
+        args.add("--conffile", "@" + ctx.file.conffiles_file.path)
         files.append(ctx.file.conffiles_file)
     elif ctx.attr.conffiles:
-        args += ["--conffile=%s" % cf for cf in ctx.attr.conffiles]
+        for cf in ctx.attr.conffiles:
+            args.add("--conffile", cf)
 
     # Version and description can be specified by a file or inlined
     if ctx.attr.version_file:
         if ctx.attr.version:
             fail("Both version and version_file attributes were specified")
-        args.append("--version=@" + ctx.file.version_file.path)
+        args.add("--version", "@" + ctx.file.version_file.path)
         files.append(ctx.file.version_file)
     elif ctx.attr.version:
-        args.append("--version=" + ctx.attr.version)
+        args.add("--version", substitute_package_variables(ctx, ctx.attr.version))
     else:
         fail("Neither version_file nor version attribute was specified")
 
     if ctx.attr.description_file:
         if ctx.attr.description:
             fail("Both description and description_file attributes were specified")
-        args.append("--description=@" + ctx.file.description_file.path)
+        args.add("--description", "@" + ctx.file.description_file.path)
         files.append(ctx.file.description_file)
     elif ctx.attr.description:
-        args.append("--description=" + ctx.attr.description)
+        desc_file = ctx.actions.declare_file(out_file_name_base + ".description")
+        ctx.actions.write(desc_file, substitute_package_variables(ctx, ctx.attr.description))
+        files.append(desc_file)
+        args.add("--description", "@" + desc_file.path)
     else:
         fail("Neither description_file nor description attribute was specified")
 
     if ctx.attr.changelog:
-        args.append("--changelog=@" + ctx.file.changelog.path)
+        args.add("--changelog", "@" + ctx.file.changelog.path)
         files.append(ctx.file.changelog)
 
     # Built using can also be specified by a file or inlined (but is not mandatory)
     if ctx.attr.built_using_file:
         if ctx.attr.built_using:
             fail("Both build_using and built_using_file attributes were specified")
-        args.append("--built_using=@" + ctx.file.built_using_file.path)
+        args.add("--built_using", "@" + ctx.file.built_using_file.path)
         files.append(ctx.file.built_using_file)
     elif ctx.attr.built_using:
-        args.append("--built_using=" + ctx.attr.built_using)
+        args.add("--built_using", substitute_package_variables(ctx, ctx.attr.built_using))
 
     if ctx.attr.depends_file:
         if ctx.attr.depends:
             fail("Both depends and depends_file attributes were specified")
-        args.append("--depends=@" + ctx.file.depends_file.path)
+        args.add("--depends", "@" + ctx.file.depends_file.path)
         files.append(ctx.file.depends_file)
     elif ctx.attr.depends:
-        args += ["--depends=" + d for d in ctx.attr.depends]
+        for d in ctx.attr.depends:
+            args.add("--depends", substitute_package_variables(ctx, d))
 
     if ctx.attr.priority:
-        args.append("--priority=" + ctx.attr.priority)
+        args.add("--priority", substitute_package_variables(ctx, ctx.attr.priority))
     if ctx.attr.section:
-        args.append("--section=" + ctx.attr.section)
+        args.add("--section", substitute_package_variables(ctx, ctx.attr.section))
     if ctx.attr.homepage:
-        args.append("--homepage=" + ctx.attr.homepage)
+        args.add("--homepage", substitute_package_variables(ctx, ctx.attr.homepage))
     if ctx.attr.license:
-        args.append("--license=" + ctx.attr.license)
+        args.add("--license", substitute_package_variables(ctx, ctx.attr.license))
 
-    args.append("--distribution=" + ctx.attr.distribution)
-    args.append("--urgency=" + ctx.attr.urgency)
-    args += ["--suggests=" + d for d in ctx.attr.suggests]
-    args += ["--enhances=" + d for d in ctx.attr.enhances]
-    args += ["--conflicts=" + d for d in ctx.attr.conflicts]
-    args += ["--breaks=" + d for d in ctx.attr.breaks]
-    args += ["--pre_depends=" + d for d in ctx.attr.predepends]
-    args += ["--recommends=" + d for d in ctx.attr.recommends]
-    args += ["--replaces=" + d for d in ctx.attr.replaces]
-    args += ["--provides=" + d for d in ctx.attr.provides]
+    args.add("--distribution", substitute_package_variables(ctx, ctx.attr.distribution))
+    args.add("--urgency", substitute_package_variables(ctx, ctx.attr.urgency))
+    for d in ctx.attr.suggests:
+        args.add("--suggests", substitute_package_variables(ctx, d))
+    for d in ctx.attr.enhances:
+        args.add("--enhances", substitute_package_variables(ctx, d))
+    for d in ctx.attr.conflicts:
+        args.add("--conflicts", substitute_package_variables(ctx, d))
+    for d in ctx.attr.breaks:
+        args.add("--breaks", substitute_package_variables(ctx, d))
+    for d in ctx.attr.predepends:
+        args.add("--pre_depends", substitute_package_variables(ctx, d))
+    for d in ctx.attr.recommends:
+        args.add("--recommends", substitute_package_variables(ctx, d))
+    if ctx.attr.replaces_file:
+        if ctx.attr.replaces:
+            fail("Both replaces and replaces_file attributes were specified")
+        args.add("--replaces", "@" + ctx.file.replaces_file.path)
+        files.append(ctx.file.replaces_file)
+    elif ctx.attr.replaces:
+        for d in ctx.attr.replaces:
+            args.add("--replaces", substitute_package_variables(ctx, d))
 
+    if ctx.attr.provides_file:
+        if ctx.attr.provides:
+            fail("Both provides and provides_file attributes were specified")
+        args.add("--provides", "@" + ctx.file.provides_file.path)
+        files.append(ctx.file.provides_file)
+    elif ctx.attr.provides:
+        for d in ctx.attr.provides:
+            args.add("--provides", substitute_package_variables(ctx, d))
+
+    args.set_param_file_format("flag_per_line")
+    args.use_param_file("@%s", use_always = True)
     ctx.actions.run(
         mnemonic = "MakeDeb",
         executable = ctx.executable._make_deb,
-        arguments = args,
+        arguments = [args],
         inputs = files,
         outputs = [output_file, changes_file],
         env = {
@@ -276,6 +308,13 @@ pkg_deb_impl = rule(
             See https://wiki.debian.org/DpkgTriggers.""",
             allow_single_file = True,
         ),
+        "md5sums": attr.label(
+            doc = """A file listing md5 checksums of files in the data archive.
+            This file is optional.
+            See https://manpages.debian.org/bookworm/dpkg-dev/deb-md5sums.5.en.html.
+            """,
+            allow_single_file = True,
+        ),
         "built_using": attr.string(
             doc = """The tool that were used to build this package provided either inline (with built_using) or from a file (with built_using_file).""",
         ),
@@ -325,8 +364,13 @@ See https://www.debian.org/doc/debian-policy/ch-files.html#s-config-files.""",
             default = [],
         ),
         "provides": attr.string_list(
-            doc = """See http://www.debian.org/doc/debian-policy/ch-relationships.html#s-binarydeps.""",
+            doc = """See https://www.debian.org/doc/debian-policy/ch-relationships.html#virtual-packages-provides.""",
             default = [],
+        ),
+        "provides_file": attr.label(
+            doc = """File that contains a list of provided packages. Must not be used with `provides`.
+            See https://www.debian.org/doc/debian-policy/ch-relationships.html#virtual-packages-provides.""",
+            allow_single_file = True,
         ),
         "predepends": attr.string_list(
             doc = """See http://www.debian.org/doc/debian-policy/ch-relationships.html#s-binarydeps.""",
@@ -337,8 +381,13 @@ See https://www.debian.org/doc/debian-policy/ch-files.html#s-config-files.""",
             default = [],
         ),
         "replaces": attr.string_list(
-            doc = """See http://www.debian.org/doc/debian-policy/ch-relationships.html#s-binarydeps.""",
+            doc = """See https://www.debian.org/doc/debian-policy/ch-relationships.html#overwriting-files-and-replacing-packages-replaces.""",
             default = [],
+        ),
+        "replaces_file": attr.label(
+            doc = """File that contains a list of replaced packages. Must not be used with `replaces`.
+            See https://www.debian.org/doc/debian-policy/ch-relationships.html#overwriting-files-and-replacing-packages-replaces.""",
+            allow_single_file = True,
         ),
         "suggests": attr.string_list(
             doc = """See http://www.debian.org/doc/debian-policy/ch-relationships.html#s-binarydeps.""",

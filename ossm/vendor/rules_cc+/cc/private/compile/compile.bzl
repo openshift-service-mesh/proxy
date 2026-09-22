@@ -36,6 +36,8 @@ load(
     "create_cc_compilation_context_with_cpp20_modules",
     "create_compilation_context_with_extra_header_tokens",
     "create_separate_module_map",
+    "get_module_map_label",
+    "get_module_map_name",
 )
 load("//cc/private:cc_internal.bzl", _cc_internal = "cc_internal")
 load("//cc/private/compile:cc_compilation_helper.bzl", "cc_compilation_helper", "dotd_files_enabled", "serialized_diagnostics_file_enabled")
@@ -347,6 +349,8 @@ def compile(
         "lto_compilation_context": {},
         "gcno_files": [],
         "pic_gcno_files": [],
+        "trace_files": [],
+        "pic_trace_files": [],
         "dwo_files": [],
         "pic_dwo_files": [],
         "cpp_module_files": [],
@@ -543,13 +547,10 @@ def _create_scan_deps_action(
             ),
         )
     specific_compile_build_variables = get_specific_compile_build_variables(
-        feature_configuration,
         use_pic = use_pic,
         source_file = source_artifact,
         output_file = ddi_file,
         dotd_file = dotd_file,
-        cpp_module_map = cc_compilation_context._module_map,
-        direct_module_maps = cc_compilation_context._direct_module_maps,
         user_compile_flags = get_copts(
             language = language,
             cpp_configuration = cpp_configuration,
@@ -578,6 +579,7 @@ def _create_scan_deps_action(
         dotd_file = dotd_file,
         compile_build_variables = compile_variables,
         action_name = ACTION_NAMES.cpp_module_deps_scanning,
+        needs_include_validation = _starlark_cc_semantics.needs_include_validation(language),
         toolchain_type = _starlark_cc_semantics.toolchain,
         progress_message_prefix = progress_message_prefix,
     )
@@ -672,6 +674,17 @@ def _create_cc_compile_actions_with_cpp20_module_helper(
     direct_module_files = []
     source_to_module_file_map = {}
     source_to_ddi_file_map = {}
+
+    # The modules info file must be distinct between PIC and non-PIC builds,
+    # otherwise the PIC and non-PIC aggregate-ddi actions would both write to
+    # the same output, causing a conflicting-actions error.
+    modules_info_output_name = label.name
+    if use_pic:
+        modules_info_output_name = _cc_internal.get_artifact_name_for_category(
+            cc_toolchain = cc_toolchain,
+            category = artifact_category.PIC_FILE,
+            output_name = modules_info_output_name,
+        )
     modules_info_file = _get_compile_output_file(
         action_construction_context,
         label,
@@ -679,7 +692,7 @@ def _create_cc_compile_actions_with_cpp20_module_helper(
         output_name = _cc_internal.get_artifact_name_for_category(
             cc_toolchain = cc_toolchain,
             category = artifact_category.CPP_MODULES_INFO,
-            output_name = label.name,
+            output_name = modules_info_output_name,
         ),
     )
     if use_pic:
@@ -834,7 +847,6 @@ def _create_cc_compile_actions_with_cpp20_module_helper(
             common_compile_variables = common_compile_build_variables,
             fdo_build_variables = fdo_build_variables,
             output_category = artifact_category.CLIF_OUTPUT_PROTO if cpp_source.type == CPP_SOURCE_TYPE_CLIF_INPUT_PROTO else artifact_category.OBJECT_FILE,
-            cpp_module_map = cc_compilation_context._module_map,
             add_object = True,
             enable_coverage = is_code_coverage_enabled,
             generate_dwo = should_create_per_object_debug_info(feature_configuration, cpp_configuration),
@@ -982,7 +994,6 @@ def _create_cc_compile_actions_with_cpp20_module_helper(
             common_compile_variables = common_compile_build_variables,
             fdo_build_variables = fdo_build_variables,
             output_category = artifact_category.CLIF_OUTPUT_PROTO if cpp_source.type == CPP_SOURCE_TYPE_CLIF_INPUT_PROTO else artifact_category.OBJECT_FILE,
-            cpp_module_map = cc_compilation_context._module_map,
             add_object = True,
             enable_coverage = is_code_coverage_enabled,
             generate_dwo = should_create_per_object_debug_info(feature_configuration, cpp_configuration),
@@ -1153,7 +1164,7 @@ def _create_cc_compile_actions(
 
     if _should_provide_header_modules(feature_configuration, private_headers, public_headers):
         cpp_module_map = cc_compilation_context._module_map
-        module_map_label = Label(cpp_module_map.name)
+        module_map_label = get_module_map_label(cpp_module_map)
         modules = _create_module_action(
             action_construction_context = action_construction_context,
             cc_compilation_context = cc_compilation_context,
@@ -1199,6 +1210,7 @@ def _create_cc_compile_actions(
                 fdo_build_variables = fdo_build_variables,
                 outputs = outputs,
                 cpp_module_map = separate_cpp_module_map,
+                module_name = get_module_map_name(separate_cpp_module_map),
                 language = language,
                 additional_compilation_inputs = [],
                 additional_include_scanning_roots = [],
@@ -1265,7 +1277,6 @@ def _create_cc_compile_actions(
                 common_compile_variables = common_compile_build_variables,
                 fdo_build_variables = fdo_build_variables,
                 output_category = (artifact_category.CLIF_OUTPUT_PROTO if source_type == CPP_SOURCE_TYPE_CLIF_INPUT_PROTO else artifact_category.OBJECT_FILE),
-                cpp_module_map = cc_compilation_context._module_map,
                 add_object = True,
                 enable_coverage = is_code_coverage_enabled,
                 generate_dwo = should_create_per_object_debug_info(feature_configuration, cpp_configuration),
@@ -1352,14 +1363,11 @@ def _create_cc_compile_actions(
             ),
         ) if serialized_diagnostics_file_enabled(feature_configuration) else None
         specific_compile_build_variables = get_specific_compile_build_variables(
-            feature_configuration,
             use_pic = generate_pic_action,
             source_file = source_file,
             output_file = output_file,
             dotd_file = dotd_file,
             diagnostics_file = diagnostics_file,
-            cpp_module_map = cc_compilation_context._module_map,
-            direct_module_maps = cc_compilation_context._direct_module_maps,
             user_compile_flags = get_copts(
                 language = language,
                 cpp_configuration = cpp_configuration,
@@ -1417,7 +1425,6 @@ def _create_pic_nopic_compile_source_actions(
         common_compile_variables,
         fdo_build_variables,
         output_category,
-        cpp_module_map,
         add_object,
         enable_coverage,
         generate_dwo,
@@ -1429,7 +1436,8 @@ def _create_pic_nopic_compile_source_actions(
         generate_pic_action,
         generate_no_pic_action,
         enable_dotd_files,
-        progress_message_prefix):
+        progress_message_prefix,
+        module_name = None):
     results = []
     if generate_pic_action:
         pic_object = _create_compile_source_action(
@@ -1451,7 +1459,7 @@ def _create_pic_nopic_compile_source_actions(
             common_compile_variables = common_compile_variables,
             fdo_build_variables = fdo_build_variables,
             output_category = output_category,
-            cpp_module_map = cpp_module_map,
+            module_name = module_name,
             add_object = add_object,
             enable_coverage = enable_coverage,
             generate_dwo = generate_dwo,
@@ -1488,7 +1496,7 @@ def _create_pic_nopic_compile_source_actions(
             common_compile_variables = common_compile_variables,
             fdo_build_variables = fdo_build_variables,
             output_category = output_category,
-            cpp_module_map = cpp_module_map,
+            module_name = module_name,
             add_object = add_object,
             enable_coverage = enable_coverage,
             generate_dwo = generate_dwo,
@@ -1526,7 +1534,6 @@ def _create_compile_source_action(
         common_compile_variables,
         fdo_build_variables,
         output_category,
-        cpp_module_map,
         add_object,
         enable_coverage,
         generate_dwo,
@@ -1537,6 +1544,7 @@ def _create_compile_source_action(
         additional_include_scanning_roots,
         use_pic,
         enable_dotd_files,
+        module_name = None,
         additional_build_variables = {},
         action_name = None,
         additional_outputs = [],
@@ -1593,6 +1601,14 @@ def _create_compile_source_action(
         enable_coverage = enable_coverage,
     )
 
+    # Assembly files do not support -ftime-trace; skip trace output
+    _is_assembly = "." + source_artifact.extension in (extensions.ASSEMBLER + extensions.ASSEMBLER_WITH_C_PREPROCESSOR)
+    trace_file = _maybe_declare_trace_file(
+        ctx = action_construction_context,
+        enable_trace = feature_configuration.is_enabled("clang_trace") and not _is_assembly,
+        object_file = object_file,
+    )
+
     dwo_file = None
     if generate_dwo and not bitcode_output:
         dwo_file_name = paths.replace_extension(paths.basename(object_file.path), ".dwo")
@@ -1639,9 +1655,7 @@ def _create_compile_source_action(
         dotd_file = dotd_file,
         diagnostics_file = diagnostics_file,
         use_pic = use_pic,
-        cpp_module_map = cpp_module_map,
-        feature_configuration = feature_configuration,
-        direct_module_maps = cc_compilation_context._direct_module_maps,
+        module_name = module_name,
         fdo_build_variables = fdo_build_variables,
         additional_build_variables = additional_build_variables,
     )
@@ -1680,14 +1694,20 @@ def _create_compile_source_action(
     if add_object and fdo_context_has_artifacts:
         additional_inputs = additional_compilation_inputs + auxiliary_fdo_inputs.to_list()
 
+    all_additional_outputs = list(additional_outputs)
+    if trace_file:
+        all_additional_outputs.append(trace_file)
+
     # Provide these args conditionally as they require a recent version of Bazel.
     if modmap_file:
         module_args = {
-            "additional_outputs": additional_outputs,
+            "additional_outputs": all_additional_outputs,
             "module_files": module_files,
             "modmap_file": modmap_file,
             "modmap_input_file": modmap_input_file,
         }
+    elif all_additional_outputs:
+        module_args = {"additional_outputs": all_additional_outputs}
     else:
         module_args = {}
 
@@ -1736,6 +1756,11 @@ def _create_compile_source_action(
             outputs["pic_gcno_files"].append(gcno_file)
         else:
             outputs["gcno_files"].append(gcno_file)
+    if trace_file:
+        if use_pic:
+            outputs["pic_trace_files"].append(trace_file)
+        else:
+            outputs["trace_files"].append(trace_file)
     return object_file
 
 def _create_temps_action(
@@ -1852,9 +1877,6 @@ def _create_temps_action(
         dotd_file = preprocess_dotd_file,
         diagnostics_file = preprocess_diagnostics_file,
         use_pic = use_pic,
-        cpp_module_map = cc_compilation_context._module_map,
-        direct_module_maps = cc_compilation_context._direct_module_maps,
-        feature_configuration = feature_configuration,
         fdo_build_variables = fdo_build_variables,
         additional_build_variables = {"output_preprocess_file": preprocess_object_file.path},
     )
@@ -1871,9 +1893,6 @@ def _create_temps_action(
         dotd_file = assembly_dotd_file,
         diagnostics_file = assembly_diagnostics_file,
         use_pic = use_pic,
-        cpp_module_map = cc_compilation_context._module_map,
-        direct_module_maps = cc_compilation_context._direct_module_maps,
-        feature_configuration = feature_configuration,
         fdo_build_variables = fdo_build_variables,
         additional_build_variables = {"output_assembly_file": assembly_object_file.path},
     )
@@ -2036,9 +2055,6 @@ def _create_module_codegen_action(
         dotd_file = dotd_file,
         diagnostics_file = diagnostics_file,
         use_pic = use_pic,
-        cpp_module_map = cc_compilation_context._module_map,
-        feature_configuration = feature_configuration,
-        direct_module_maps = cc_compilation_context._direct_module_maps,
         fdo_build_variables = fdo_build_variables,
         additional_build_variables = {},
     )
@@ -2080,6 +2096,7 @@ def _create_module_codegen_action(
         needs_include_validation = _starlark_cc_semantics.needs_include_validation(language),
         toolchain_type = _starlark_cc_semantics.toolchain,
         progress_message_prefix = progress_message_prefix,
+        use_pic = use_pic,
     )
     if use_pic:
         outputs["pic_objects"].append(object_file)
@@ -2108,8 +2125,9 @@ def _create_module_action(
         additional_compilation_inputs,
         additional_include_scanning_roots,
         outputs,
-        progress_message_prefix):
-    module_map_label = Label(cpp_module_map.name)
+        progress_message_prefix,
+        module_name = None):
+    module_map_label = get_module_map_label(cpp_module_map)
     return _create_pic_nopic_compile_source_actions(
         action_construction_context = action_construction_context,
         cc_compilation_context = cc_compilation_context,
@@ -2133,7 +2151,7 @@ def _create_module_action(
         source_artifact = cpp_module_map.file,
         language = language,
         output_category = artifact_category.CPP_MODULE,
-        cpp_module_map = cpp_module_map,
+        module_name = module_name,
         add_object = False,
         enable_coverage = False,
         generate_dwo = False,
@@ -2304,6 +2322,18 @@ def _maybe_declare_gcno_file(
         )
     return gcno_file
 
+def _maybe_declare_trace_file(
+        ctx,
+        enable_trace,
+        object_file):
+    if not enable_trace:
+        return None
+    return _cc_internal.declare_other_output_file(
+        ctx = ctx,
+        output_name = paths.replace_extension(paths.basename(object_file.path), ".json"),
+        object_file = object_file,
+    )
+
 def _create_compile_action(
         *,
         action_construction_context = None,
@@ -2327,6 +2357,10 @@ def _create_compile_action(
         source = None,
         toolchain_type = None,
         use_pic = False,
+        additional_outputs = [],
+        module_files = None,
+        modmap_file = None,
+        modmap_input_file = None,
         **kwargs):
     # TODO(bgorshenev): use bazel_features checks
     if progress_message_prefix:
@@ -2352,5 +2386,9 @@ def _create_compile_action(
         source = source,
         toolchain_type = toolchain_type,
         use_pic = use_pic,
+        additional_outputs = additional_outputs,
+        module_files = module_files,
+        modmap_file = modmap_file,
+        modmap_input_file = modmap_input_file,
         **kwargs
     )

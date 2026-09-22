@@ -24,7 +24,7 @@ load(
     "create_mapping_context_from_ctx",
     "write_manifest",
 )
-load("//pkg/private:util.bzl", "setup_output_files", "substitute_package_variables")
+load("//pkg/private:util.bzl", "get_stamp_detect", "setup_output_files", "substitute_package_variables")
 
 # TODO(aiuto): Figure  out how to get this from the python toolchain.
 # See check for lzma in archive.py for a hint at a method.
@@ -38,7 +38,6 @@ SUPPORTED_TAR_COMPRESSIONS = (
     ["", "gz", "bz2", "xz"] if HAS_XZ_SUPPORT else ["", "gz", "bz2"]
 )
 _DEFAULT_MTIME = -1
-_stamp_condition = Label("//pkg/private:private_stamp_detect")
 
 def _remap(remap_paths, path):
     """If path starts with a key in remap_paths, rewrite it."""
@@ -114,8 +113,8 @@ def _pkg_tar_impl(ctx):
                 "--owner_names",
                 "%s=%s" % (_quote(key), ctx.attr.ownernames[key]),
             )
-    if ctx.attr.compression_level:
-        args.add("--compression_level", ctx.attr.compression_level)
+    if ctx.attr.compression_level >= 0:
+        args.add("--compression_level", str(ctx.attr.compression_level))
 
     # Now we begin processing the files.
     path_mapper = None
@@ -138,10 +137,10 @@ def _pkg_tar_impl(ctx):
     # The files attribute is a map of labels to destinations. We can add them
     # directly to the content map.
     for target, f_dest_path in ctx.attr.files.items():
-        target_files = target.files.to_list()
+        target_files = target[DefaultInfo].files.to_list()
         if len(target_files) != 1:
             fail("Each input must describe exactly one file.", attr = "files")
-        mapping_context.file_deps.append(depset([target_files[0]]))
+        mapping_context.file_deps_direct.append(target_files[0])
         add_single_file(
             mapping_context,
             f_dest_path,
@@ -181,9 +180,15 @@ def _pkg_tar_impl(ctx):
     if ctx.attr.allow_duplicates_from_deps:
         args.add("--allow_dups_from_deps")
 
+    if ctx.attr.preserve_mode:
+        args.add("--preserve_mode")
+
+    if ctx.attr.preserve_mtime:
+        args.add("--preserve_mtime")
+
     inputs = depset(
-        direct = ctx.files.deps + files,
-        transitive = mapping_context.file_deps,
+        direct = mapping_context.file_deps_direct + ctx.files.deps + files,
+        transitive = mapping_context.file_deps_transitive,
     )
 
     ctx.actions.run(
@@ -255,12 +260,18 @@ pkg_tar_impl = rule(
         "ownername": attr.string(default = "."),
         "owners": attr.string_dict(),
         "ownernames": attr.string_dict(),
-        "extension": attr.string(default = "tar"),
+        "extension": attr.string(
+            default = "tar",
+            doc = """The extension of the generated file. If `"gz"`, `"bz2"`, or `"xz"`, the
+tarball will also be compressed using that tool, and is mutually exclusive with `compressor`.
+Note that `xz` may not be supported based on the Python toolchain.
+""",
+        ),
         "symlinks": attr.string_dict(),
         "empty_files": attr.string_list(),
         "include_runfiles": attr.bool(
             doc = ("""Include runfiles for executables. These appear as they would in bazel-bin.""" +
-                   """For example: 'path/to/myprog.runfiles/path/to/my_data.txt'."""),
+                   """ For example: 'path/to/myprog.runfiles/path/to/my_data.txt'."""),
         ),
         "empty_dirs": attr.string_list(),
         "remap_paths": attr.string_dict(),
@@ -293,6 +304,14 @@ pkg_tar_impl = rule(
 Such behaviour is always incorrect, but we provide a flag to support it in case old
 builds were accidentally doing it. Never explicitly set this to true for new code.
 """,
+        ),
+        "preserve_mode": attr.bool(
+            default = False,
+            doc = """If true, will add file to archive with preserved file permissions.""",
+        ),
+        "preserve_mtime": attr.bool(
+            default = False,
+            doc = """If true, will add file to archive with preserved file mtime.""",
         ),
         "stamp": attr.int(
             doc = """Enable file time stamping.  Possible values:
@@ -342,9 +361,6 @@ def pkg_tar(name, **kwargs):
     pkg_tar_impl(
         name = name,
         out = kwargs.pop("out", None) or (name + "." + extension),
-        private_stamp_detect = select({
-            _stamp_condition: True,
-            "//conditions:default": False,
-        }),
+        private_stamp_detect = get_stamp_detect(kwargs.get("stamp", 0)),
         **kwargs
     )

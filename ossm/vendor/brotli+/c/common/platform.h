@@ -564,7 +564,8 @@ BROTLI_COMMON_API void BrotliDefaultFreeFunc(void* opaque, void* address);
 static BROTLI_INLINE uint16_t BrotliRotateRight16(uint16_t const value,
                                              size_t count) {
   count &= 0x0F; /* for fickle pattern recognition */
-  return (value >> count) | (uint16_t)(value << ((0U - count) & 0x0F));
+  return (uint16_t)((value >> count) |
+                    (uint16_t)(value << ((0U - count) & 0x0F)));
 }
 static BROTLI_INLINE uint32_t BrotliRotateRight32(uint32_t const value,
                                              size_t count) {

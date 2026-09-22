@@ -1,5 +1,5 @@
 9f13f9708930a5c7487cce30c46260c5207ce28aeac48dec8863e6cd9c96efbf
-FILE:@@gazelle++non_module_deps+bazel_gazelle_go_repository_cache//go.env f9935aa453b22a0c2aac75d039559f787dfebe51cb60297a2263b619b4dd4814
+FILE:@@gazelle++non_module_deps+bazel_gazelle_go_repository_cache//go.env f89a9aa4b35682c27ecb401dcfece3af3eba3deea27c7c392d6c6a85a5934b0e
 FILE:@@gazelle+//BUILD.bazel eda52fca39edfb09f3c35adf12ad3bde86f4f92a7586b59eebfd3aeaefe587ff
 FILE:@@gazelle+//cmd/BUILD.bazel 0b1f5424e8520004203e387c1becbb1e104f965ba6f41309f1456773878bc3e7
 FILE:@@gazelle+//cmd/autogazelle/BUILD.bazel c72a2b41acd743380cd2e3cdbf313621eb5e25374d20231d9d5dbd48c222b783

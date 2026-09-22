@@ -38,7 +38,7 @@ _MAKE_VARIABLE_ATTR = attr.string(
 
 _SCOPE_ATTR = attr.string(
     doc = "The scope indicates where a flag can propagate to",
-    default = "universal",
+    default = "target",
 )
 
 def _is_valid_make_variable_char(c):
@@ -140,6 +140,8 @@ string_list_setting = rule(
 def _no_at_str(label):
     """Strips any leading '@'s for labels in the main repo, so that the error string is more friendly."""
     s = str(label)
+
+    # buildifier: disable=canonical-repository
     if s.startswith("@@//"):
         return s[2:]
     if s.startswith("@//"):
