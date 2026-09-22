@@ -25,11 +25,10 @@ load(
 )
 load(
     "//pkg/private:util.bzl",
+    "get_stamp_detect",
     "setup_output_files",
     "substitute_package_variables",
 )
-
-_stamp_condition = Label("//pkg/private:private_stamp_detect")
 
 def _pkg_zip_impl(ctx):
     outputs, output_file, _ = setup_output_files(ctx)
@@ -63,7 +62,10 @@ def _pkg_zip_impl(ctx):
     args.set_param_file_format("multiline")
     args.use_param_file("@%s")
 
-    all_inputs = depset(direct = inputs, transitive = mapping_context.file_deps)
+    all_inputs = depset(
+        direct = mapping_context.file_deps_direct + inputs,
+        transitive = mapping_context.file_deps_transitive,
+    )
 
     ctx.actions.run(
         mnemonic = "PackageZip",
@@ -183,9 +185,6 @@ def pkg_zip(name, out = None, **kwargs):
     pkg_zip_impl(
         name = name,
         out = out,
-        private_stamp_detect = select({
-            _stamp_condition: True,
-            "//conditions:default": False,
-        }),
+        private_stamp_detect = get_stamp_detect(kwargs.get("stamp", 0)),
         **kwargs
     )

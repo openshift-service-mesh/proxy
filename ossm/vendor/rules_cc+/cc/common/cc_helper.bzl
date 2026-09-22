@@ -50,6 +50,14 @@ cpp_file_types = struct(
 artifact_category = _artifact_category
 extensions = _extensions
 
+_SHARED_LIBRARY_SUFFIXES = tuple(extensions.SHARED_LIBRARY)
+_OBJECT_FILE_EXTENSIONS = tuple(extensions.OBJECT_FILE)
+_PIC_OBJECT_FILE_EXTENSIONS = tuple(extensions.PIC_OBJECT_FILE)
+_PIC_ARCHIVE_EXTENSIONS = tuple(extensions.PIC_ARCHIVE)
+_ARCHIVE_EXTENSIONS = tuple(extensions.ARCHIVE)
+_ALWAYSLINK_PIC_LIBRARY_EXTENSIONS = tuple(extensions.ALWAYSLINK_PIC_LIBRARY)
+_ALWAYSLINK_LIBRARY_EXTENSIONS = tuple(extensions.ALWAYSLINK_LIBRARY)
+
 def _rule_error(msg):
     fail(msg)
 
@@ -62,19 +70,11 @@ def _libraries_from_linking_context(linking_context):
         libraries.extend(linker_input.libraries)
     return depset(libraries, order = "topological")
 
-# NOTE: Prefer to use _is_valid_shared_library_artifact() instead of this method since
-# it has better performance (checking for extension in a short list rather than multiple
-# string.endswith() checks)
+# NOTE: Prefer _is_valid_shared_library_artifact() when a File is available because
+# it checks File.extension directly.
 def _is_valid_shared_library_name(shared_library_name):
-    if (shared_library_name.endswith(".so") or
-        shared_library_name.endswith(".dll") or
-        shared_library_name.endswith(".dylib") or
-        shared_library_name.endswith(".pyd") or
-        shared_library_name.endswith(".wasm") or
-        shared_library_name.endswith(".xll")):
-        return True
-
-    return is_versioned_shared_library_extension_valid(shared_library_name)
+    return shared_library_name.endswith(_SHARED_LIBRARY_SUFFIXES) or \
+           is_versioned_shared_library_extension_valid(shared_library_name)
 
 def _replace_name(name, new_name):
     last_slash = name.rfind("/")
@@ -88,18 +88,13 @@ def _get_base_name(name):
         return name
     return name[last_slash + 1:]
 
-def _get_artifact_name_for_category(cc_toolchain, is_dynamic_link_type, output_name):
-    linked_artifact_category = None
-    if is_dynamic_link_type:
-        linked_artifact_category = artifact_category.DYNAMIC_LIBRARY
-    else:
-        linked_artifact_category = artifact_category.EXECUTABLE
-
-    return cc_common.get_artifact_name_for_category(cc_toolchain = cc_toolchain, category = linked_artifact_category, output_name = output_name)
-
-def _get_linked_artifact(ctx, cc_toolchain, is_dynamic_link_type):
+def _get_linked_artifact(ctx, cc_toolchain, linked_artifact_category):
     name = ctx.label.name
-    new_name = _get_artifact_name_for_category(cc_toolchain, is_dynamic_link_type, _get_base_name(name))
+    new_name = cc_common.get_artifact_name_for_category(
+        cc_toolchain = cc_toolchain,
+        category = linked_artifact_category,
+        output_name = _get_base_name(name),
+    )
     name = _replace_name(name, new_name)
 
     return ctx.actions.declare_file(name)
@@ -209,6 +204,13 @@ def _build_output_groups_for_emitting_compile_providers(
         output_groups_builder["module_files"] = depset(compilation_outputs.module_files())
     else:
         output_groups_builder["module_files"] = depset(compilation_outputs._module_files)
+
+    # Add trace JSON files to output groups
+    if hasattr(compilation_outputs, "_trace_files") and compilation_outputs._trace_files:
+        output_groups_builder["trace_files"] = depset(compilation_outputs._trace_files)
+    if hasattr(compilation_outputs, "_pic_trace_files") and compilation_outputs._pic_trace_files:
+        pic_trace_group = output_groups_builder.get("trace_files", depset())
+        output_groups_builder["trace_files"] = depset(transitive = [pic_trace_group, depset(compilation_outputs._pic_trace_files)])
 
     if generate_hidden_top_level_group:
         output_groups_builder["_hidden_top_level_INTERNAL_"] = _collect_library_hidden_top_level_artifacts(
@@ -331,21 +333,21 @@ def _build_precompiled_files(ctx):
         # end with ".nopic.o". (The ".nopic.o" extension is an undocumented
         # feature to give users at least some control over this.) Note that
         # some target platforms do not require shared library code to be PIC.
-        if _matches_extension(short_path, extensions.OBJECT_FILE):
+        if short_path.endswith(_OBJECT_FILE_EXTENSIONS):
             objects.append(src)
             if not short_path.endswith(".nopic.o"):
                 pic_objects.append(src)
 
-            if _matches_extension(short_path, extensions.PIC_OBJECT_FILE):
+            if short_path.endswith(_PIC_OBJECT_FILE_EXTENSIONS):
                 pic_objects.append(src)
 
-        elif _matches_extension(short_path, extensions.PIC_ARCHIVE):
+        elif short_path.endswith(_PIC_ARCHIVE_EXTENSIONS):
             pic_static_libraries.append(src)
-        elif _matches_extension(short_path, extensions.ARCHIVE):
+        elif short_path.endswith(_ARCHIVE_EXTENSIONS):
             static_libraries.append(src)
-        elif _matches_extension(short_path, extensions.ALWAYSLINK_PIC_LIBRARY):
+        elif short_path.endswith(_ALWAYSLINK_PIC_LIBRARY_EXTENSIONS):
             pic_alwayslink_static_libraries.append(src)
-        elif _matches_extension(short_path, extensions.ALWAYSLINK_LIBRARY):
+        elif short_path.endswith(_ALWAYSLINK_LIBRARY_EXTENSIONS):
             alwayslink_static_libraries.append(src)
         elif _is_valid_shared_library_artifact(src):
             shared_libraries.append(src)
@@ -361,9 +363,8 @@ def _build_precompiled_files(ctx):
 
 def _check_file_extension(file, allowed_extensions, allow_versioned_shared_libraries):
     extension = "." + file.extension
-    if _matches_extension(extension, allowed_extensions) or (allow_versioned_shared_libraries and is_versioned_shared_library_extension_valid(file.path)):
-        return True
-    return False
+    return extension in allowed_extensions or \
+           (allow_versioned_shared_libraries and is_versioned_shared_library_extension_valid(file.path))
 
 def _check_file_extensions(attr_values, allowed_extensions, attr_name, label, rule_name, allow_versioned_shared_libraries):
     for attr_value in attr_values:
@@ -388,12 +389,6 @@ def _check_file_extensions(attr_values, allowed_extensions, attr_name, label, ru
 
 def _check_srcs_extensions(ctx, allowed_extensions, rule_name, allow_versioned_shared_libraries):
     _check_file_extensions(ctx.attr.srcs, allowed_extensions, "srcs", ctx.label, rule_name, allow_versioned_shared_libraries)
-
-def _matches_extension(extension, patterns):
-    for pattern in patterns:
-        if extension.endswith(pattern):
-            return True
-    return False
 
 def _gen_empty_def_file(ctx):
     trivial_def_file = ctx.actions.declare_file(ctx.label.name + ".gen.empty.def")
@@ -501,52 +496,39 @@ def _get_compilation_contexts_from_deps(deps):
             compilation_contexts.append(dep[CcInfo].compilation_context)
     return compilation_contexts
 
-def _tool_path(cc_toolchain, tool, feature_configuration = None, action_name = None):
-    tool = cc_toolchain._tool_paths.get(tool, None)
-    if tool:
-        return tool
+def _tool_path(tool_paths, tool, feature_configuration = None, action_name = None, default = ""):
+    path = tool_paths.get(tool, None)
+    if path:
+        return path
     if feature_configuration != None and action_name != None:
         if not cc_common.action_is_enabled(
             feature_configuration = feature_configuration,
             action_name = action_name,
         ):
-            return None
+            return default
 
         return cc_common.get_tool_for_action(
             feature_configuration = feature_configuration,
             action_name = action_name,
-        )
-    return None
-
-def _tool_path_for_action(cc_toolchain, tool, feature_configuration, action_name):
-    path = cc_toolchain._tool_paths.get(tool, None)
-    if path:
-        return path
-    if action_name != None and cc_common.action_is_enabled(
-        feature_configuration = feature_configuration,
-        action_name = action_name,
-    ):
-        return cc_common.get_tool_for_action(
-            feature_configuration = feature_configuration,
-            action_name = action_name,
-        ) or ""
-    return ""
+        ) or default
+    return default
 
 def _get_toolchain_global_make_variables(cc_toolchain, feature_configuration):
+    tool_paths = cc_toolchain._tool_paths
     result = {
-        "CC": _tool_path_for_action(cc_toolchain, "gcc", feature_configuration, ACTION_NAMES.c_compile),
-        "AR": _tool_path_for_action(cc_toolchain, "ar", feature_configuration, ACTION_NAMES.cpp_link_static_library),
-        "NM": _tool_path_for_action(cc_toolchain, "nm", feature_configuration, None),
-        "LD": _tool_path_for_action(cc_toolchain, "ld", feature_configuration, ACTION_NAMES.cpp_link_executable),
-        "STRIP": _tool_path_for_action(cc_toolchain, "strip", feature_configuration, ACTION_NAMES.strip),
+        "CC": _tool_path(tool_paths, "gcc", feature_configuration, ACTION_NAMES.c_compile),
+        "AR": _tool_path(tool_paths, "ar", feature_configuration, ACTION_NAMES.cpp_link_static_library),
+        "NM": _tool_path(tool_paths, "nm", feature_configuration, None),
+        "LD": _tool_path(tool_paths, "ld", feature_configuration, ACTION_NAMES.cpp_link_executable),
+        "STRIP": _tool_path(tool_paths, "strip", feature_configuration, ACTION_NAMES.strip),
         "C_COMPILER": cc_toolchain.compiler,
     }  # buildifier: disable=unsorted-dict-items
 
-    obj_copy_tool = _tool_path_for_action(cc_toolchain, "objcopy", feature_configuration, ACTION_NAMES.objcopy_embed_data)
+    obj_copy_tool = _tool_path(tool_paths, "objcopy", feature_configuration, ACTION_NAMES.objcopy_embed_data)
     if obj_copy_tool != None:
         # objcopy is optional in Crostool.
         result["OBJCOPY"] = obj_copy_tool
-    gcov_tool = _tool_path_for_action(cc_toolchain, "gcov-tool", feature_configuration, None)
+    gcov_tool = _tool_path(tool_paths, "gcov-tool", feature_configuration, None)
     if gcov_tool:
         # gcovtool is optional in Crostool.
         result["GCOVTOOL"] = gcov_tool
@@ -879,15 +861,11 @@ def _include_dirs(ctx, additional_make_variable_substitutions, attr = "includes"
     for include in getattr(ctx.attr, attr):
         includes_attr = _expand(ctx, include, additional_make_variable_substitutions)
         if is_path_absolute(includes_attr):
-            continue
+            fail("The path '" + includes_attr + "' is absolute, but only relative paths are allowed.", attr = attr)
         includes_path = get_relative_path(package_exec_path, includes_attr)
         if not sibling_repository_layout and path_contains_up_level_references(includes_path):
             fail("Path references a path above the execution root.", attr = "includes")
 
-        if includes_path == ".":
-            fail("'" + includes_attr + "' resolves to the workspace root, which would allow this rule and all of its " +
-                 "transitive dependents to include any file in your workspace. Please include only" +
-                 " what you need", attr = "includes")
         result.append(includes_path)
 
         # We don't need to perform the above checks against out_includes_path again since any errors
@@ -930,12 +908,90 @@ def _expand_make_variables_for_copts(ctx, tokenization, unexpanded_tokens, addit
                 tokens.append(_expand(ctx, token, additional_make_variable_substitutions, targets = targets))
     return tokens
 
-def _get_copts(ctx, feature_configuration, additional_make_variable_substitutions, attr = "copts"):
+def _verify_no_disallowed_copts(
+        ctx,
+        copts,
+        attr_name,
+        disallowed_copts_infos = []):
+    """Fails the build if copts contain any disallowed compiler flags."""
+    if not disallowed_copts_infos:
+        return
+
+    violations = []
+    for info in disallowed_copts_infos:
+        if not hasattr(info, "flags") or not info.flags:
+            continue
+
+        # Check if target is exempt under this policy's allowlist
+        allowlist = getattr(info, "allowlist", None)
+        if allowlist != None and allowlist.contains(ctx.label):
+            continue
+
+        allowlist_target_label = getattr(info, "allowlist_target_label", None)
+        error_message = getattr(info, "error_message", None)
+
+        # Check each expanded flag against disallowed rules
+        for flag in copts:
+            for disallowed in info.flags:
+                if flag == disallowed or (
+                    disallowed.endswith("=") and flag.startswith(disallowed)
+                ):
+                    violations.append((flag, allowlist_target_label, error_message))
+
+    if violations:
+        formatted_violations = []
+        for flag, allowlist_target_label, error_message in violations:
+            allowlist_clause = (
+                " (target is not in the allowlist '{}')".format(
+                    allowlist_target_label,
+                ) if allowlist_target_label else ""
+            )
+            error_clause = (
+                ": {}".format(error_message) if error_message else ""
+            )
+            formatted_violations.append(
+                "- Flag '{}'{}{}".format(
+                    flag,
+                    allowlist_clause,
+                    error_clause,
+                ),
+            )
+        fail(
+            """
+[DISALLOWED COPTS ERROR] Target '{}' specifies disallowed compiler flag(s) in attribute '{}':
+  {}
+""".format(
+                ctx.label,
+                attr_name,
+                "\n  ".join(formatted_violations),
+            ),
+        )
+
+def _get_copts(
+        ctx,
+        feature_configuration,
+        additional_make_variable_substitutions,
+        attr = "copts",
+        requested_features = None,
+        disallowed_copts_infos = []):
     if not hasattr(ctx.attr, attr):
         fail("could not find rule attribute named: '{}'".format(attr))
+    if requested_features == None:
+        requested_features = ctx.features
     attribute_copts = getattr(ctx.attr, attr)
-    tokenization = not (cc_common.is_enabled(feature_configuration = feature_configuration, feature_name = "no_copts_tokenization") or "no_copts_tokenization" in ctx.features)
+
+    # If we wanted to include command-line specified flags, we could add
+    # ctx.fragments.cpp.copts (and cxxopts/conlyopts) here.
+    tokenization = not (cc_common.is_enabled(feature_configuration = feature_configuration, feature_name = "no_copts_tokenization") or "no_copts_tokenization" in requested_features)
     expanded_attribute_copts = _expand_make_variables_for_copts(ctx, tokenization, attribute_copts, additional_make_variable_substitutions)
+
+    _verify_no_disallowed_copts(
+        ctx,
+        expanded_attribute_copts,
+        attr,
+        disallowed_copts_infos = disallowed_copts_infos,
+    )
+
     return expanded_attribute_copts
 
 # Tries to expand a single make variable from token.
@@ -1066,9 +1122,9 @@ def _get_coverage_environment(ctx, cc_config, cc_toolchain, feature_configuratio
 
     # buildifier: disable=unsorted-dict-items
     env = {
-        "COVERAGE_GCOV_PATH": _tool_path(cc_toolchain, "gcov", feature_configuration, ACTION_NAMES.gcov),
-        "LLVM_COV": _tool_path(cc_toolchain, "llvm-cov", feature_configuration, ACTION_NAMES.llvm_cov),
-        "LLVM_PROFDATA": _tool_path(cc_toolchain, "llvm-profdata", feature_configuration, ACTION_NAMES.llvm_profdata),
+        "COVERAGE_GCOV_PATH": _tool_path(cc_toolchain._tool_paths, "gcov", feature_configuration, ACTION_NAMES.gcov, default = None),
+        "LLVM_COV": _tool_path(cc_toolchain._tool_paths, "llvm-cov", feature_configuration, ACTION_NAMES.llvm_cov, default = None),
+        "LLVM_PROFDATA": _tool_path(cc_toolchain._tool_paths, "llvm-profdata", feature_configuration, ACTION_NAMES.llvm_profdata, default = None),
         "GENERATE_LLVM_LCOV": "1" if cc_config.generate_llvm_lcov() else "0",
     }
     for k in list(env.keys()):
@@ -1138,6 +1194,7 @@ cc_helper = struct(
     tokenize = _tokenize,
     is_valid_shared_library_artifact = _is_valid_shared_library_artifact,
     is_valid_shared_library_name = _is_valid_shared_library_name,
+    tool_path = _tool_path,
     get_toolchain_global_make_variables = _get_toolchain_global_make_variables,
     get_cc_flags_make_variable = _get_cc_flags_make_variable,
     get_compilation_contexts_from_deps = _get_compilation_contexts_from_deps,

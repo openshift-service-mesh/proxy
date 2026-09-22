@@ -264,6 +264,18 @@ def _is_vs_2017_or_newer(repository_ctx, vc_path):
     # For VS 2017 and later, a `Tools` directory should exist under `BAZEL_VC`
     return repository_ctx.path(vc_path).get_child("Tools").exists
 
+def _is_vs_2026_or_newer(repository_ctx, vc_path):
+    """Check if the installed VS version is Visual Studio 2026 or newer."""
+
+    if not _is_vs_2017_or_newer(repository_ctx, vc_path):
+        return False
+
+    full_version = _get_vc_full_version(repository_ctx, vc_path)
+
+    # 14.50.0 is the first version of VS 2026.
+    # See: https://learn.microsoft.com/en-us/cpp/overview/compiler-versions?view=msvc-170
+    return [int(i) for i in full_version.split(".")] >= [14, 50, 0]
+
 def _is_msbuildtools(vc_path):
     """Check if the installed VC version is from MSBuildTools."""
 
@@ -716,6 +728,11 @@ def _get_msvc_vars(repository_ctx, paths, target_arch = "x64", msvc_vars_x64 = N
 
         build_tools["CL"] = find_llvm_tool(repository_ctx, llvm_path, "clang-cl.exe")
         build_tools["ML"] = find_msvc_tool(repository_ctx, vc_path, "ml64.exe", "x64")
+
+        # LLVM has no dumpbin.exe equivalent that the MSVC toolchain shape can
+        # use, so source it from MSVC. _find_missing_vc_tools above already
+        # verified it exists for this target architecture.
+        build_tools["DUMPBIN"] = find_msvc_tool(repository_ctx, vc_path, "dumpbin.exe", target_arch)
         build_tools["LINK"] = find_llvm_tool(repository_ctx, llvm_path, "lld-link.exe")
         if not build_tools["LINK"]:
             build_tools["LINK"] = find_msvc_tool(repository_ctx, vc_path, "link.exe", "x64")
@@ -747,6 +764,13 @@ Header pruning has been disabled since Bazel failed to recognize the output of /
 This can result in unnecessary recompilation.
 Fix this by installing the English language pack for the Visual Studio installation at {} and run 'bazel sync --configure'.""".format(vc_path))
 
+    # /DEBUG:FASTLINK was removed in VS 2026.
+    # See: https://learn.microsoft.com/en-us/cpp/build/reference/debug-generate-debug-info?view=msvc-170
+    if _is_vs_2026_or_newer(repository_ctx, vc_path):
+        fastbuild_mode_debug_flag = "/DEBUG:FULL"
+    else:
+        fastbuild_mode_debug_flag = "/DEBUG:FASTLINK"
+
     msvc_vars = {
         "%{msvc_env_tmp_" + target_arch + "}": escaped_tmp_dir,
         "%{msvc_env_include_" + target_arch + "}": escaped_include_paths,
@@ -760,7 +784,7 @@ Fix this by installing the English language pack for the Visual Studio installat
         "%{msvc_dumpbin_path_" + target_arch + "}": build_tools["DUMPBIN"],
         "%{msvc_parse_showincludes_" + target_arch + "}": repr(support_parse_showincludes),
         "%{dbg_mode_debug_flag_" + target_arch + "}": "/DEBUG:FULL" if support_debug_fastlink else "/DEBUG",
-        "%{fastbuild_mode_debug_flag_" + target_arch + "}": "/DEBUG:FASTLINK" if support_debug_fastlink else "/DEBUG",
+        "%{fastbuild_mode_debug_flag_" + target_arch + "}": fastbuild_mode_debug_flag if support_debug_fastlink else "/DEBUG",
     }
     return msvc_vars
 
@@ -923,6 +947,13 @@ def configure_windows_toolchain(repository_ctx):
     )
 
     template_vars = dict()
+
+    # USE_CLANG_CL=1 keeps the MSVC toolchain shape but swaps in clang-cl, so
+    # all four msvc_* configs must report what actually runs -- otherwise
+    # select()ing on //cc/compiler:msvc-cl feeds cl.exe flags to clang-cl.
+    # Set outside _get_msvc_vars so the error-stub configs it returns early for
+    # are labelled the same as the working ones.
+    template_vars["%{compiler}"] = "clang-cl" if _use_clang_cl(repository_ctx) else "msvc-cl"
     msvc_vars_x64 = _get_msvc_vars(repository_ctx, paths, "x64")
     template_vars.update(msvc_vars_x64)
     template_vars.update(_get_clang_cl_vars(repository_ctx, paths, msvc_vars_x64, "x64"))

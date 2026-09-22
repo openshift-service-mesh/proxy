@@ -1,11 +1,14 @@
-load("@bazel_skylib//rules:common_settings.bzl", "string_list_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag", "string_list_flag")
 load("//cc:cc_library.bzl", "cc_library")
 load("//cc/toolchains:cc_toolchain.bzl", "cc_toolchain")
 load("//cc/toolchains:cc_toolchain_alias.bzl", "cc_toolchain_alias")
 load(":additional_toolchains.bzl", "mock_additional_toolchains")
 load(":cc_toolchain_config.bzl", "cc_toolchain_config")
 
-package(default_visibility = ["//tests:__subpackages__"])
+package(default_visibility = [
+    "//tests:__subpackages__",
+    "//tools/build_defs/cc/tests:__subpackages__",
+])
 
 platform(
     name = "linux_x86_64",
@@ -33,13 +36,28 @@ cc_toolchain_alias(name = "current_cc_toolchain")
 # See features.bzl for values.
 string_list_flag(
     name = "with_features",
-    build_setting_default = [],
+    build_setting_default = ["debug_variables"],
 )
 
 # Sets the mock toolchain's action configs.
 string_list_flag(
     name = "with_action_configs",
     build_setting_default = [],
+)
+
+string_flag(
+    name = "object_file_extension",
+    build_setting_default = "",
+)
+
+# "everything" is a filegroup that the implementation of --grte_top (more specifically, the
+# LibcTopLabelConverter in
+# third_party/bazel/src/main/java/com/google/devtools/build/lib/rules/cpp/CppOptions.java)
+# requires to be present in the package pointed to by --grte_top.
+# The following mock "everything" makes this package work as mock grte_top for tests in
+# compile_build_variables_tests.bzl.
+filegroup(
+    name = "everything",
 )
 
 filegroup(
@@ -286,7 +304,7 @@ cc_toolchain_config(
     name = "k8-compiler_config",
     abi_libc_version = "local",
     abi_version = "local",
-    action_configs = [],
+    action_configs = ["c++-header-analysis"],
     artifact_name_patterns = {},
     builtin_sysroot = "/usr/grte/v1",
     cc_target_os = "",
@@ -296,7 +314,7 @@ cc_toolchain_config(
     feature_names = [],
     host_system_name = "local",
     make_variables = {},
-    target_libc = "local",
+    target_libc = "glibc",
     target_system_name = "local",
     tool_paths = {},
     toolchain_identifier = "mock-toolchain-k8",
@@ -313,7 +331,7 @@ cc_toolchain_config(
     name = "macos-compiler_config",
     abi_libc_version = "local",
     abi_version = "local",
-    action_configs = [],
+    action_configs = ["c++-header-analysis"],
     artifact_name_patterns = {},
     builtin_sysroot = "/usr/grte/v1",
     cc_target_os = "macos",
@@ -392,4 +410,111 @@ filegroup(
 filegroup(
     name = "generate-modmap",
     srcs = ["generate-modmap.sh"],
+)
+
+package_group(
+    name = "mock_allowlist",
+    packages = [
+        "//tests/cc/common",
+    ],
+)
+
+package_group(
+    name = "empty_mock_allowlist",
+    packages = [],
+)
+
+cc_toolchain_config(
+    name = "k8-compiler_config_with_allowlist",
+    abi_libc_version = "local",
+    abi_version = "local",
+    action_configs = ["c++-header-analysis"],
+    allowlist_provider = ":mock_allowlist",
+    allowlist_target_label = "//custom:toolchain_allowlist",
+    artifact_name_patterns = {},
+    builtin_sysroot = "/usr/grte/v1",
+    cc_target_os = "",
+    compiler = "compiler",
+    cpu = "k8",
+    cxx_builtin_include_directories = [],
+    feature_names = [],
+    host_system_name = "local",
+    make_variables = {},
+    target_libc = "local",
+    target_system_name = "local",
+    tool_paths = {},
+    toolchain_identifier = "mock-toolchain-k8",
+)
+
+cc_toolchain(
+    name = "cc-compiler-k8-with-allowlist",
+    all_files = ":every-file",
+    ar_files = "ar-k8",
+    as_files = "as-k8",
+    compiler_files = "compile-k8",
+    coverage_files = "coverage-file",
+    dwp_files = "dwp-k8",
+    licenses = ["unencumbered"],
+    linker_files = "link-k8",
+    module_map = "crosstool.cppmap",
+    objcopy_files = "objcopy-k8",
+    output_licenses = ["unencumbered"],
+    strip_files = ":every-file",
+    supports_header_parsing = 1,
+    toolchain_config = ":k8-compiler_config_with_allowlist",
+    toolchain_identifier = "mock-toolchain-k8",
+)
+
+toolchain(
+    name = "cc-toolchain-k8-with-allowlist",
+    toolchain = ":cc-compiler-k8-with-allowlist",
+    toolchain_type = "//cc:toolchain_type",
+)
+
+cc_toolchain_config(
+    name = "k8-compiler_config_with_empty_allowlist",
+    abi_libc_version = "local",
+    abi_version = "local",
+    action_configs = ["c++-header-analysis"],
+    allowlist_provider = ":empty_mock_allowlist",
+    allowlist_target_label = "//custom:toolchain_allowlist",
+    artifact_name_patterns = {},
+    builtin_sysroot = "/usr/grte/v1",
+    cc_target_os = "",
+    compiler = "compiler",
+    cpu = "k8",
+    cxx_builtin_include_directories = [],
+    error_message = "Custom warning policy guidance.",
+    feature_names = [],
+    host_system_name = "local",
+    make_variables = {},
+    target_libc = "local",
+    target_system_name = "local",
+    tool_paths = {},
+    toolchain_identifier = "mock-toolchain-k8",
+)
+
+cc_toolchain(
+    name = "cc-compiler-k8-with-empty-allowlist",
+    all_files = ":every-file",
+    ar_files = "ar-k8",
+    as_files = "as-k8",
+    compiler_files = "compile-k8",
+    coverage_files = "coverage-file",
+    dwp_files = "dwp-k8",
+    licenses = ["unencumbered"],
+    linker_files = "link-k8",
+    module_map = "crosstool.cppmap",
+    objcopy_files = "objcopy-k8",
+    output_licenses = ["unencumbered"],
+    strip_files = ":every-file",
+    supports_header_parsing = 1,
+    toolchain_config = ":k8-compiler_config_with_empty_allowlist",
+    toolchain_identifier = "mock-toolchain-k8",
+)
+
+toolchain(
+    name = "cc-toolchain-k8-with-empty-allowlist",
+    toolchain = ":cc-compiler-k8-with-empty-allowlist",
+    toolchain_type = "//cc:toolchain_type",
 )

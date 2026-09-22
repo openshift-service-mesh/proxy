@@ -182,6 +182,11 @@ class ZipWriter(object):
       # Set directory bits
       entry_info.external_attr |= (UNIX_SYMLINK_BIT << 16)
       self.zip_file.writestr(entry_info, src.encode('utf-8'))
+    elif entry_type == manifest.ENTRY_IS_RAW_LINK:
+      entry_info.compress_type = zipfile.ZIP_STORED
+      # Set directory bits
+      entry_info.external_attr |= (UNIX_SYMLINK_BIT << 16)
+      self.zip_file.writestr(entry_info, os.readlink(src).encode('utf-8'))
     elif entry_type == manifest.ENTRY_IS_TREE:
       self.add_tree(src, dst_path, mode)
     elif entry_type == manifest.ENTRY_IS_EMPTY_FILE:
@@ -257,7 +262,7 @@ class ZipWriter(object):
 def _load_manifest(prefix, manifest_path):
   manifest_map = {}
 
-  for entry in manifest.read_entries_from_file(manifest_path):
+  for entry in manifest.read_entries_from(manifest_path):
     entry.dest = _combine_paths(prefix, entry.dest)
     manifest_map[entry.dest] = entry
 

@@ -34,7 +34,7 @@ constraint_value(
 # Constraint indicating if the platform belongs to an "Apple" platform (iOS, watchOS, tvOS, etc.)
 constraint_setting(
     name = "target_vendor",
-    default_constraint_value = ":apple",
+    default_constraint_value = ":other",
     visibility = ["//visibility:private"],
 )
 
@@ -43,10 +43,21 @@ constraint_value(
     constraint_setting = ":target_vendor",
 )
 
-# Consumed by bazel tests.
-filegroup(
-    name = "for_bazel_tests",
-    testonly = True,
-    srcs = glob(["**"]),
-    visibility = ["//:__pkg__"],
+constraint_value(
+    name = "other",
+    constraint_setting = ":target_vendor",
+)
+
+# A constraint to indicate whether the platform supports Apple's pointer
+# authentication.
+constraint_setting(
+    name = "pointer_authentication_setting",
+    visibility = ["//visibility:private"],
+)
+
+# If a platform has this constraint_value, it supports Apple's pointer
+# authentication.
+constraint_value(
+    name = "pointer_authentication",
+    constraint_setting = ":pointer_authentication_setting",
 )

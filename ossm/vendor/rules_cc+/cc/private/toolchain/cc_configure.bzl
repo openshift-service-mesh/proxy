@@ -13,6 +13,7 @@
 # limitations under the License.
 """Rules for configuring the C++ toolchain (experimental)."""
 
+load("@bazel_features//:features.bzl", "bazel_features")
 load(
     ":lib_cc_configure.bzl",
     "get_cpu_value",
@@ -24,15 +25,27 @@ load(":windows_cc_configure.bzl", "configure_windows_toolchain")
 def _should_disable_toolchain(repository_ctx):
     """Returns true if the toolchain should be disabled based on environment variables."""
     env = repository_ctx.os.environ
-    disabled_via_env = "BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN" in env and env["BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN"] == "1"
-    macos_legacy_support = env.get("BAZEL_USE_LEGACY_MACOS_TOOLCHAIN", "1") == "1"
-    return disabled_via_env or (repository_ctx.os.name.startswith("mac os") and not macos_legacy_support)
+    if env.get("BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN") == "1":
+        return True
+
+    # Keep macOS toolchain before bazel 9.x
+    if not bazel_features.cc.cc_common_is_in_rules_cc:
+        return False
+
+    macos_legacy_support = env.get("BAZEL_USE_LEGACY_MACOS_TOOLCHAIN", "0") == "1"
+    if repository_ctx.os.name.startswith("mac os") and not macos_legacy_support:
+        return True
+
+    return False
 
 def cc_autoconf_toolchains_impl(repository_ctx):
     """Generate BUILD file with 'toolchain' targets for the local host C++ toolchain.
 
     Args:
       repository_ctx: repository context
+
+    Returns:
+      repo_metadata consumed by bazel
     """
     if not _should_disable_toolchain(repository_ctx):
         if repository_ctx.os.name.lower().find("windows") != -1:
@@ -51,6 +64,10 @@ def cc_autoconf_toolchains_impl(repository_ctx):
     else:
         repository_ctx.file("BUILD", "# C++ toolchain autoconfiguration was disabled by BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1 or BAZEL_USE_LEGACY_MACOS_TOOLCHAIN=0.")
 
+    if hasattr(repository_ctx, "repo_metadata"):
+        return repository_ctx.repo_metadata(reproducible = True)
+    return None
+
 cc_autoconf_toolchains = repository_rule(
     environ = [
         "BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN",
@@ -66,6 +83,9 @@ def cc_autoconf_impl(repository_ctx, overriden_tools = dict()):
     Args:
        repository_ctx: repository context
        overriden_tools: dict of tool paths to use instead of autoconfigured tools
+
+    Returns:
+      repo_metadata consumed by bazel
     """
     cpu_value = get_cpu_value(repository_ctx)
     if _should_disable_toolchain(repository_ctx):
@@ -80,6 +100,7 @@ def cc_autoconf_impl(repository_ctx, overriden_tools = dict()):
     elif cpu_value == "freebsd" or cpu_value == "openbsd":
         paths = resolve_labels(repository_ctx, [
             "@rules_cc//cc/private/toolchain:BUILD.static.bsd",
+            "@rules_cc//cc/private/toolchain:armeabi_cc_toolchain_config.bzl",
             "@rules_cc//cc/private/toolchain:bsd_cc_toolchain_config.bzl",
         ])
 
@@ -87,6 +108,7 @@ def cc_autoconf_impl(repository_ctx, overriden_tools = dict()):
         # autoconfigure this platform too. Theoretically, FreeBSD and OpenBSD
         # should be straightforward to add but we cannot run them in a Docker
         # container so skipping until we have proper tests for these platforms.
+        repository_ctx.symlink(paths["@rules_cc//cc/private/toolchain:armeabi_cc_toolchain_config.bzl"], "armeabi_cc_toolchain_config.bzl")
         repository_ctx.symlink(paths["@rules_cc//cc/private/toolchain:bsd_cc_toolchain_config.bzl"], "cc_toolchain_config.bzl")
         repository_ctx.symlink(paths["@rules_cc//cc/private/toolchain:BUILD.static.bsd"], "BUILD")
     elif cpu_value in ["x64_windows", "arm64_windows"]:
@@ -95,6 +117,10 @@ def cc_autoconf_impl(repository_ctx, overriden_tools = dict()):
         configure_windows_toolchain(repository_ctx)
     else:
         configure_unix_toolchain(repository_ctx, cpu_value, overriden_tools)
+
+    if hasattr(repository_ctx, "repo_metadata"):
+        return repository_ctx.repo_metadata(reproducible = False)
+    return None
 
 MSVC_ENVVARS = [
     "BAZEL_VC",

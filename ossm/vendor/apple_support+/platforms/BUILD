@@ -9,7 +9,9 @@ package(default_visibility = ["//visibility:public"])
 [
     platform(
         name = cpu,
-        constraint_values = constraints,
+        constraint_values = constraints + [
+            "@apple_support//constraints:apple",
+        ],
     )
     for cpu, constraints in APPLE_PLATFORMS_CONSTRAINTS.items()
 ]
@@ -36,11 +38,3 @@ alias(
     )
     for platform in CPU_TO_DEFAULT_PLATFORM_NAME.values()
 ]
-
-# Consumed by bazel tests.
-filegroup(
-    name = "for_bazel_tests",
-    testonly = True,
-    srcs = glob(["**"]),
-    visibility = ["//:__pkg__"],
-)

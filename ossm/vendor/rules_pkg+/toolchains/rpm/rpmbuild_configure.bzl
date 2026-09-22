@@ -57,6 +57,9 @@ def _parse_release_info(release_info):
 
     return os_name, os_version
 
+DEBUGINFO_TYPE_AUTODETECT = "default"
+
+# The below are also defined in `pkg/make_rpm.py`
 DEBUGINFO_TYPE_NONE = "none"
 DEBUGINFO_TYPE_CENTOS = "centos"
 DEBUGINFO_TYPE_FEDORA = "fedora"
@@ -67,11 +70,16 @@ DEBUGINFO_TYPE_BY_OS_RELEASE = {
     "fedora": DEBUGINFO_TYPE_FEDORA,
 }
 
+DEBUGINFO_VALID_VALUES = [
+    DEBUGINFO_TYPE_FEDORA,
+    DEBUGINFO_TYPE_CENTOS,
+    DEBUGINFO_TYPE_NONE,
+    DEBUGINFO_TYPE_AUTODETECT,
+]
+
 def _build_repo_for_rpmbuild_toolchain_impl(rctx):
-    debuginfo_type = DEBUGINFO_TYPE_NONE
-    if rctx.path(RELEASE_PATH).exists:
-        os_name, _ = _parse_release_info(rctx.read(RELEASE_PATH))
-        debuginfo_type = DEBUGINFO_TYPE_BY_OS_RELEASE.get(os_name, debuginfo_type)
+    if rctx.attr.debuginfo_type not in DEBUGINFO_VALID_VALUES:
+        fail("debuginfo_type must be one of", DEBUGINFO_VALID_VALUES)
 
     rpmbuild_path = rctx.which("rpmbuild")
     if rctx.attr.verbose:
@@ -80,17 +88,33 @@ def _build_repo_for_rpmbuild_toolchain_impl(rctx):
         else:
             print("No system rpmbuild found.")  # buildifier: disable=print
 
-    if rctx.attr.debuginfo_type not in ["centos7", "fedora40", "none"]:
-        fail("debuginfo_type must be one of centos7, fedora40, or none")
-
     version = "unknown"
     if rpmbuild_path:
+        rctx.watch(rpmbuild_path)
         res = rctx.execute([rpmbuild_path, "--version"])
         if res.return_code == 0:
             # expect stdout like: RPM version 4.16.1.2
             parts = res.stdout.strip().split(" ")
             if parts[0] == "RPM" and parts[1] == "version":
                 version = parts[2]
+
+    debuginfo_type = rctx.attr.debuginfo_type
+    if debuginfo_type == DEBUGINFO_TYPE_AUTODETECT:
+        version_parts = version.split(".")
+        if len(version_parts) > 1 and version_parts[0].isdigit() and version_parts[1].isdigit():
+            major = int(version_parts[0])
+            minor = int(version_parts[1])
+            if major < 4 or (major == 4 and minor < 18):
+                debuginfo_type = DEBUGINFO_TYPE_CENTOS
+            else:
+                # https://rpm.org/wiki/Releases/4.18.0: "Make %{buildsubdir} settable outside %setup"
+                debuginfo_type = DEBUGINFO_TYPE_FEDORA
+        elif rctx.path(RELEASE_PATH).exists:
+            rctx.watch(RELEASE_PATH)
+            os_name, _ = _parse_release_info(rctx.read(RELEASE_PATH))
+            debuginfo_type = DEBUGINFO_TYPE_BY_OS_RELEASE.get(os_name, debuginfo_type)
+        else:
+            debuginfo_type = DEBUGINFO_TYPE_NONE
 
     _write_build(
         rctx = rctx,
@@ -112,9 +136,13 @@ build_repo_for_rpmbuild_toolchain = repository_rule(
             doc = """
             The underlying debuginfo configuration for the system rpmbuild.
 
-            One of `centos`, `fedora`, and `none`
+            One of:
+            - `centos` (RPM < 4.18),
+            - `fedora` (RPM >= 4.18),
+            - `none`,
+            - `default` (detects from `rpmbuild` version if available, otherwise looks up `/etc/os-release`)
             """,
-            default = "none",
+            default = DEBUGINFO_TYPE_AUTODETECT,
         ),
     },
 )

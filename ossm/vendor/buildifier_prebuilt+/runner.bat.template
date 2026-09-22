@@ -1,71 +1,91 @@
 @echo off
-setlocal EnableDelayedExpansion
+setlocal DisableDelayedExpansion
 
-set BUILDIFIER_SHORT_PATH=@@BUILDIFIER_SHORT_PATH@@
-set EXTRA_ARGS=@@ARGS@@
-set WORKSPACE=@@WORKSPACE@@
+set "BUILDIFIER_SHORT_PATH={BUILDIFIER_SHORT_PATH}"
 
 REM When --enable_runfiles, we should be able to locate buildifier directly through symlink.
-for %%I in (%BUILDIFIER_SHORT_PATH%) do set "buildifier_short_path=%%~fI"
+set "buildifier_path=%BUILDIFIER_SHORT_PATH:/=\%"
 
-REM If we can't find it, then parse the MANIFEST file to find buildifier.
-if not exist !buildifier_short_path! (
-    if not exist MANIFEST (
-        echo Runfiles are not enabled, yet a MANIFEST file cannot be found
-        exit /b 1
-    )
-    type MANIFEST
-    for /F "tokens=1" %%F IN ('findstr /L /C:buildifier.exe MANIFEST') DO (
-        set "buildifier_short_path=%%~fF"
-    )
+REM Find the runfiles manifest. Tests also use it to resolve the workspace.
+set "manifest_path="
+for %%M in ("%RUNFILES_MANIFEST_FILE%" "%~f0.runfiles_manifest" "%~f0.exe.runfiles_manifest" "MANIFEST" "..\MANIFEST") do (
+    if not defined manifest_path if exist "%%~M" set "manifest_path=%%~M"
 )
 
-if not exist !buildifier_short_path! (
-    echo Failed to find buildifier at !buildifier_short_path!
+REM Otherwise, locate the buildifier through the runfiles manifest.
+if exist "%buildifier_path%" goto buildifier_found
+if not defined manifest_path (
+    echo A MANIFEST file cannot be found
+    exit /b 1
+)
+for /F "tokens=1,* delims= " %%F IN ('findstr /l /c:"buildifier.exe" "%manifest_path%"') DO set "buildifier_path=%%G"
+
+:buildifier_found
+for %%I in ("%buildifier_path%") do set "buildifier_path=%%~fsI"
+if not exist "%buildifier_path%" (
+    echo Failed to find buildifier at "%buildifier_path%"
     exit /b 1
 )
 
-if defined TEST_WORKSPACE (
-    if not defined BUILD_WORKSPACE_DIRECTORY (
-        if defined WORKSPACE (
-            cd "%WORKSPACE%"
-        ) else (
-            set follow_links=1
-        )
-    )
-) else (
-    cd "%BUILD_WORKSPACE_DIRECTORY%"
+REM find the workspace directory in manifest.
+REM No good way in bat to read path of a symlink's target
+set "workspace_dir="
+if defined manifest_path for /F "tokens=1,* delims= " %%F IN ('findstr /l /c:"WORKSPACE" "%manifest_path%"') DO set "workspace_dir=%%~dpG"
+
+if defined BUILD_WORKSPACE_DIRECTORY goto build_workspace
+if defined TEST_WORKSPACE goto test_workspace
+echo Failed to find workspace to check
+exit /b 1
+
+:build_workspace
+REM Either a build, or a run/build inside a test.
+cd /d "%BUILD_WORKSPACE_DIRECTORY%" || exit /b 1
+goto workspace_found
+
+:test_workspace
+if not defined workspace_dir (
+    set "include_reparse_points=1"
+    goto workspace_found
 )
+cd /d "%workspace_dir%" || exit /b 1
 
-call :collectFiles .
-
-!buildifier_short_path! %EXTRA_ARGS% !files_to_analyze!
-
-exit /b !ERRORLEVEL!
-
-REM Utility function to collect all wanted files.
-REM Exclude patterns are not supported by `dir.exe`.
-:collectFiles
-
-REM First, non-symlinked files
-pushd %~1
-FOR /F %%f IN ('dir /b/a:-d-l-h *.bzl *.sky *.bazel *.BUILD BUILD BUILD.*.oss WORKSPACE WORKSPACE.bzlmod WORKSPACE.oss WORKSPACE.*.oss 2^>nul') DO (
-    REM echo File %~1\%%f
-    set files_to_analyze=!files_to_analyze! %~1\%%f
-)
-popd
-
-REM Next, directories.
-REM
-REM Interestingly, turning on the exclude hidden files option (-h) excludes the
-REM `.git` directory but not other directories starting with a `.` like
-REM `.github` or `.bcr`. I don't know why it works this way, but hey it works.
-if defined follow_links (
-    FOR /F %%d IN ('dir /b/a:d-h %~1 2^>nul') DO (
-        call :collectFiles "%~1\%%d"
-    )
-) else (
-    FOR /F %%d IN ('dir /b/a:d-l-h %~1 2^>nul') DO (
-        call :collectFiles "%~1\%%d"
-    )
-)
+:workspace_found
+REM Keep discovered paths inside PowerShell so cmd.exe never reparses them.
+REM Process files in batches to stay below CreateProcess' command-line limit,
+REM merging per-batch diagnostics when JSON output is requested.
+set "BUILDIFIER_EXECUTABLE=%buildifier_path%"
+powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
+    "$ErrorActionPreference = 'Stop';" ^
+    "$buildifierArgs = @({POWERSHELL_ARGS});" ^
+    "$files = @({SOURCE_FILES});" ^
+    "if ({SCAN_WORKSPACE}) {" ^
+        "$workspacePrefix = (Get-Location).Path.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar;" ^
+        "$files = @(Get-ChildItem -LiteralPath . -Recurse -File | Where-Object {" ^
+            "($env:include_reparse_points -or -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) -and" ^
+            "$_.Name -cmatch '^(BUILD|WORKSPACE|WORKSPACE\.bzlmod|WORKSPACE\.oss|BUILD\..*\.oss|WORKSPACE\..*\.oss)$|\.(bzl|sky|star|bazel|BUILD)$'" ^
+        "} | ForEach-Object { $_.FullName.Substring($workspacePrefix.Length) });" ^
+    "};" ^
+    "if ($files.Count -eq 0) { Write-Error 'Failed to find files to analyze'; exit 1 };" ^
+    "$jsonOutput = '{FORMAT}' -eq 'json';" ^
+    "$exitCode = 0;" ^
+    "$jsonSuccess = $true;" ^
+    "$jsonFiles = @();" ^
+    "for ($i = 0; $i -lt $files.Count; $i += 100) {" ^
+        "$batch = @($files[$i..([Math]::Min($i + 99, $files.Count - 1))]);" ^
+        "if ($jsonOutput) {" ^
+            "$batchOutput = & $env:BUILDIFIER_EXECUTABLE @buildifierArgs @batch;" ^
+            "if ($LASTEXITCODE -eq 0) {" ^
+                "$batchReport = ($batchOutput -join [Environment]::NewLine) | ConvertFrom-Json;" ^
+                "$jsonSuccess = $jsonSuccess -and [bool]$batchReport.success;" ^
+                "$jsonFiles += @($batchReport.files);" ^
+            "}" ^
+        "} else {" ^
+            "& $env:BUILDIFIER_EXECUTABLE @buildifierArgs @batch;" ^
+        "};" ^
+        "if ($exitCode -eq 0) { $exitCode = $LASTEXITCODE };" ^
+    "};" ^
+    "if ($jsonOutput -and $exitCode -eq 0) {" ^
+        "[ordered]@{ success = $jsonSuccess; files = [object[]]$jsonFiles } | ConvertTo-Json -Depth 10 -Compress:('{VERBOSE}' -ne 'true');" ^
+    "};" ^
+    "exit $exitCode"
+exit /b %ERRORLEVEL%

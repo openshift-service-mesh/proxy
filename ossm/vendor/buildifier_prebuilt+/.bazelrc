@@ -1,3 +1,12 @@
+common --enable_platform_specific_config
+
+common --check_direct_dependencies=off
+
+common:linux --repo_env=CC=clang
+common:windows --enable_runfiles
+build:windows --deleted_packages=examples/bzlmod,examples/bzlmod_specify_assets,examples/simple,examples/specify_assets,release
+query:windows --deleted_packages=examples/bzlmod,examples/bzlmod_specify_assets,examples/simple,examples/specify_assets,release
+
 # Avoid https://github.com/bazelbuild/bazel/issues/14459 since we don't need Xcode
 common --repo_env=BAZEL_USE_CPP_ONLY_TOOLCHAIN=1
 
@@ -23,3 +32,6 @@ test --test_output=errors --test_summary=terse
 
 # Use bzlmod
 common --enable_bzlmod
+
+# Enable symlinks on windows
+startup --windows_enable_symlinks

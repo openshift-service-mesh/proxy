@@ -3,7 +3,6 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
-load("@rules_cc//cc/common:objc_info.bzl", "ObjcInfo")
 load("@rules_cc//cc/private/rules_impl:objc_compilation_support.bzl", "compilation_support")  # buildifier: disable=bzl-visibility
 load(":cc_toolchain_forwarder.bzl", "CcWrapperInfo", "TestApplePlatformInfo")
 
@@ -365,10 +364,6 @@ def _register_configuration_specific_link_actions_with_objc_variables(
     )
 
     extensions = user_variable_extensions | {
-        "framework_paths": [],
-        "framework_names": [],
-        "weak_framework_names": [],
-        "library_names": [],
         "filelist": input_file_list.path,
         "linked_binary": binary.path,
         # artifacts to be passed to the linker with `-force_load`
@@ -719,16 +714,10 @@ def link_multi_arch_static_library(*, ctx, cc_toolchains):
             deps = split_deps[split_transition_key],
         )
 
-        avoid_objc_providers = []
-        avoid_cc_providers = []
         avoid_cc_linking_contexts = []
-
         if len(split_avoid_deps.keys()):
             for dep in split_avoid_deps[split_transition_key]:
-                if ObjcInfo in dep:
-                    avoid_objc_providers.append(dep[ObjcInfo])
                 if CcInfo in dep:
-                    avoid_cc_providers.append(dep[CcInfo])
                     avoid_cc_linking_contexts.append(dep[CcInfo].linking_context)
 
         name = ctx.label.name + "-" + cc_toolchain.target_gnu_system_name + "-fl"

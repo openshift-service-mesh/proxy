@@ -40,56 +40,13 @@ bazel run -- @buildifier_prebuilt//:buildifier ARGS
 
 ## Installation
 
-### Bzlmod: Add `bazel_dep` to `MODULE.bazel` file
-
-<!-- BEGIN MODULE SNIPPET -->
-```python
-bazel_dep(
-    name = "buildifier_prebuilt",
-    version = "8.2.1",
-    dev_dependency = True,
-)
-```
-<!-- END MODULE SNIPPET -->
-
-
-### Legacy: Add declarations to `WORKSPACE` file
-
-Add the following to your `WORKSPACE` file.
-
-<!-- BEGIN WORKSPACE SNIPPET -->
-```python
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-
-http_archive(
-    name = "buildifier_prebuilt",
-    sha256 = "b0434d14d8ca6eb87ae1d0e71911aeb83ffa3096c6b81db7e26c1698fd980d42",
-    strip_prefix = "buildifier-prebuilt-8.2.1",
-    urls = [
-        "http://github.com/keith/buildifier-prebuilt/archive/8.2.1.tar.gz",
-    ],
-)
-
-load("@buildifier_prebuilt//:deps.bzl", "buildifier_prebuilt_deps")
-
-buildifier_prebuilt_deps()
-
-load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
-
-bazel_skylib_workspace()
-
-load("@buildifier_prebuilt//:defs.bzl", "buildifier_prebuilt_register_toolchains")
-
-buildifier_prebuilt_register_toolchains()
-```
-<!-- END WORKSPACE SNIPPET -->
-
+Check [the releases](releases) page for the latest snippet.
 
 ## Specify Version of Buildtools
 
-By default releases of these rules hardcode the most up to date versions of the tools at release
-time. If you would like to specify a specific version of buildtools to use, you can do one of the
-following.
+By default these rules use the buildifier and buildozer versions that
+match the release version on this repo. If you want to use a custom
+version, you can use one of the options below.
 
 ### Option 1: Manually Add SHA256 Values
 
@@ -197,6 +154,3 @@ buildifier_prebuilt_register_toolchains(
     ),
 )
 ```
-
-NOTE: The utility uses the [GitHub CLI](https://cli.github.com/). If you haven't already done so,
-install it.

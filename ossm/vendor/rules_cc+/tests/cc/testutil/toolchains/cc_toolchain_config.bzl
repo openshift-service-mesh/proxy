@@ -2,6 +2,7 @@
 
 """ A rule that mocks cc_toolchain configuration."""
 
+load("@bazel_features//:features.bzl", "bazel_features")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load(
     "@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl",
@@ -157,7 +158,8 @@ _simple_header_modules_feature = feature(
 
 _header_modules_feature = feature(
     name = FEATURE_NAMES.header_modules,
-    implies = ["use_header_modules", "header_module_compile"],
+    implies = ["header_module_compile"],
+    requires = [feature_set(features = ["use_header_modules"])],
 )
 
 _header_module_compile_feature = feature(
@@ -216,6 +218,7 @@ _module_maps_feature = feature(
 
 _use_header_modules_feature = feature(
     name = FEATURE_NAMES.use_header_modules,
+    enabled = True,
     flag_sets = [
         flag_set(
             actions = [
@@ -565,6 +568,17 @@ _memprof_optimize_feature = feature(
                 ),
             ],
         ),
+        flag_set(
+            actions = [
+                ACTION_NAMES.linkstamp_compile,
+            ],
+            flag_groups = [
+                flag_group(
+                    expand_if_available = "is_using_memprof",
+                    flags = ["-DBUILD_PGHO_TYPE=\"opt\""],
+                ),
+            ],
+        ),
     ],
 )
 
@@ -882,6 +896,21 @@ _llvm_profdata_env_feature = feature(
         ),
     ],
 )
+_dwp_env_feature = feature(
+    name = FEATURE_NAMES.dwp_env,
+    enabled = True,
+    env_sets = [
+        env_set(
+            actions = [ACTION_NAMES.dwp],
+            env_entries = [
+                env_entry(
+                    key = "DWP_ENV_KEY",
+                    value = "DWP_ENV_VALUE",
+                ),
+            ],
+        ),
+    ],
+)
 
 _link_env_feature = feature(
     name = FEATURE_NAMES.link_env,
@@ -1006,6 +1035,64 @@ _compile_header_modules_feature_configuration = [
     _module_maps_feature,
     feature(name = "use_header_modules"),
 ]
+
+_debug_variables_feature = feature(
+    name = FEATURE_NAMES.debug_variables,
+    enabled = True,
+    flag_sets = [
+        flag_set(
+            actions = [
+                ACTION_NAMES.c_compile,
+                ACTION_NAMES.cpp_compile,
+                ACTION_NAMES.assemble,
+                ACTION_NAMES.preprocess_assemble,
+                ACTION_NAMES.cpp_module_codegen,
+                ACTION_NAMES.lto_backend,
+            ],
+            flag_groups = [
+                flag_group(
+                    expand_if_available = "source_file",
+                    flags = ["--debug-var:source_file=%{source_file}"],
+                ),
+                flag_group(
+                    expand_if_available = "output_file",
+                    flags = ["--debug-var:output_file=%{output_file}"],
+                ),
+                flag_group(
+                    expand_if_available = "minimum_os_version",
+                    flags = ["--debug-var:minimum_os_version=%{minimum_os_version}"],
+                ),
+                flag_group(
+                    expand_if_available = "sysroot",
+                    flags = ["--debug-var:sysroot=%{sysroot}"],
+                ),
+                flag_group(
+                    expand_if_available = "is_using_fission",
+                    flags = ["--debug-var:is_using_fission=%{is_using_fission}"],
+                ),
+                flag_group(
+                    expand_if_available = "per_object_debug_info_file",
+                    flags = ["--debug-var:per_object_debug_info_file=%{per_object_debug_info_file}"],
+                ),
+                flag_group(
+                    iterate_over = "user_compile_flags",
+                    expand_if_available = "user_compile_flags",
+                    flags = ["--debug-var:user_compile_flags=%{user_compile_flags}"],
+                ),
+                flag_group(
+                    iterate_over = "legacy_compile_flags",
+                    expand_if_available = "legacy_compile_flags",
+                    flags = ["--debug-var:legacy_compile_flags=%{legacy_compile_flags}"],
+                ),
+                flag_group(
+                    iterate_over = "external_include_paths",
+                    expand_if_available = "external_include_paths",
+                    flags = ["--debug-var:external_include_paths=%{external_include_paths}"],
+                ),
+            ],
+        ),
+    ],
+)
 
 _fission_flags_for_lto_backend_feature = feature(
     name = FEATURE_NAMES.fission_flags_for_lto_backend,
@@ -1240,6 +1327,160 @@ _uses_ifso_variables_feature = feature(
     ],
 )
 
+_uses_output_execpath_feature = feature(
+    name = FEATURE_NAMES.uses_output_execpath,
+    enabled = True,
+    flag_sets = [
+        flag_set(
+            actions = [
+                ACTION_NAMES.cpp_link_dynamic_library,
+                ACTION_NAMES.cpp_link_nodeps_dynamic_library,
+                ACTION_NAMES.cpp_link_executable,
+                "lto-index-for-executable",
+                "lto-index-for-dynamic-library",
+                "lto-index-for-nodeps-dynamic-library",
+            ],
+            flag_groups = [
+                flag_group(
+                    expand_if_available = "output_execpath",
+                    flags = ["--output-execpath=%{output_execpath}"],
+                ),
+            ],
+        ),
+    ],
+)
+
+_uses_is_cc_test_feature = feature(
+    name = FEATURE_NAMES.uses_is_cc_test,
+    enabled = True,
+    flag_sets = [
+        flag_set(
+            actions = [
+                ACTION_NAMES.cpp_link_executable,
+            ],
+            flag_groups = [
+                flag_group(
+                    expand_if_true = "is_cc_test",
+                    flags = ["--linkopt-is-cc-test"],
+                ),
+                flag_group(
+                    expand_if_false = "is_cc_test",
+                    flags = ["--linkopt-is-not-cc-test"],
+                ),
+            ],
+        ),
+    ],
+)
+
+_uses_strip_debug_symbols_feature = feature(
+    name = FEATURE_NAMES.uses_strip_debug_symbols,
+    enabled = True,
+    flag_sets = [
+        flag_set(
+            actions = [
+                ACTION_NAMES.cpp_link_executable,
+            ],
+            flag_groups = [
+                flag_group(
+                    expand_if_available = "strip_debug_symbols",
+                    flags = ["--strip-debug-symbols"],
+                ),
+            ],
+        ),
+    ],
+)
+
+_uses_is_using_fission_feature = feature(
+    name = FEATURE_NAMES.uses_is_using_fission,
+    enabled = True,
+    flag_sets = [
+        flag_set(
+            actions = [
+                ACTION_NAMES.cpp_link_executable,
+            ],
+            flag_groups = [
+                flag_group(
+                    expand_if_available = "is_using_fission",
+                    flags = ["--is-using-fission"],
+                ),
+            ],
+        ),
+    ],
+)
+
+_uses_sysroot_feature = feature(
+    name = FEATURE_NAMES.uses_sysroot,
+    enabled = True,
+    flag_sets = [
+        flag_set(
+            actions = [
+                ACTION_NAMES.cpp_link_executable,
+            ],
+            flag_groups = [
+                flag_group(
+                    expand_if_available = "sysroot",
+                    flags = ["--sysroot=%{sysroot}"],
+                ),
+            ],
+        ),
+    ],
+)
+
+_uses_user_link_flags_feature = feature(
+    name = FEATURE_NAMES.uses_user_link_flags,
+    enabled = True,
+    flag_sets = [
+        flag_set(
+            actions = [
+                ACTION_NAMES.cpp_link_executable,
+            ],
+            flag_groups = [
+                flag_group(
+                    iterate_over = "user_link_flags",
+                    expand_if_available = "user_link_flags",
+                    flags = ["%{user_link_flags}"],
+                ),
+            ],
+        ),
+    ],
+)
+
+_uses_whole_archive_feature = feature(
+    name = FEATURE_NAMES.uses_whole_archive,
+    enabled = True,
+    flag_sets = [
+        flag_set(
+            actions = [
+                ACTION_NAMES.cpp_link_executable,
+                ACTION_NAMES.cpp_link_dynamic_library,
+                ACTION_NAMES.cpp_link_nodeps_dynamic_library,
+            ],
+            flag_groups = [
+                flag_group(
+                    flag_groups = [
+                        flag_group(
+                            expand_if_true = "libraries_to_link.is_whole_archive",
+                            flags = ["-Wl,-whole-archive"],
+                        ),
+                        flag_group(
+                            flags = ["%{libraries_to_link.object_files}"],
+                            iterate_over = "libraries_to_link.object_files",
+                            expand_if_equal = variable_with_value(
+                                name = "libraries_to_link.type",
+                                value = "static_library",
+                            ),
+                        ),
+                        flag_group(
+                            expand_if_true = "libraries_to_link.is_whole_archive",
+                            flags = ["-Wl,-nowhole-archive"],
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ],
+)
+
 _def_feature = feature(
     name = FEATURE_NAMES.def_feature,
     enabled = True,
@@ -1272,10 +1513,14 @@ _strip_debug_symbols_feature = feature(
     ],
 )
 
+_proto_disable_services_feature = feature(name = "proto_disable_services")
+_proto_force_lite_runtime_feature = feature(name = "proto_force_lite_runtime", implies = ["proto_disable_services"])
+_proto_one_output_per_message_feature = feature(name = "proto_one_output_per_message", implies = ["proto_force_lite_runtime"])
+
 _portable_overrides_configuration = [
-    feature(name = "proto_force_lite_runtime", implies = ["proto_disable_services"]),
-    feature(name = "proto_disable_services"),
-    feature(name = "proto_one_output_per_message", implies = ["proto_force_lite_runtime"]),
+    _proto_force_lite_runtime_feature,
+    _proto_disable_services_feature,
+    _proto_one_output_per_message_feature,
     feature(
         name = "proto_enable_portable_overrides",
         implies = [
@@ -1442,9 +1687,68 @@ _libraries_to_link_feature = feature(
     ],
 )
 
+_disable_cpp_link_path_mapping_feature = feature(
+    name = FEATURE_NAMES.disable_cpp_link_path_mapping,
+    enabled = False,
+)
+
+_propeller_optimize_feature = feature(
+    name = FEATURE_NAMES.propeller_optimize,
+    flag_sets = [
+        flag_set(
+            actions = [
+                ACTION_NAMES.c_compile,
+                ACTION_NAMES.cpp_compile,
+                ACTION_NAMES.lto_backend,
+            ],
+            flag_groups = [flag_group(
+                expand_if_available = "propeller_optimize_cc_path",
+                flags = [
+                    "-fbasic-block-sections=list=%{propeller_optimize_cc_path}",
+                    "-DBUILD_PROPELLER_ENABLED=1",
+                ],
+            )],
+        ),
+        flag_set(
+            actions = [ACTION_NAMES.cpp_link_executable],
+            flag_groups = [flag_group(
+                expand_if_true = "propeller_optimize_ld_path",
+                flags = ["-Wl,--symbol-ordering-file=%{propeller_optimize_ld_path}"],
+            )],
+        ),
+    ],
+)
+
+_propeller_optimize_thinlto_compile_actions_feature = feature(
+    name = FEATURE_NAMES.propeller_optimize_thinlto_compile_actions,
+)
+_fdo_prefetch_hints_feature = feature(
+    name = FEATURE_NAMES.fdo_prefetch_hints,
+    flag_sets = [
+        flag_set(
+            actions = [
+                ACTION_NAMES.c_compile,
+                ACTION_NAMES.cpp_compile,
+                ACTION_NAMES.lto_backend,
+            ],
+            flag_groups = [
+                flag_group(
+                    flags = [
+                        "-mllvm",
+                        "-prefetch-hints-file=%{fdo_prefetch_hints_path}",
+                    ],
+                    expand_if_available = "fdo_prefetch_hints_path",
+                ),
+            ],
+        ),
+    ],
+)
 _feature_name_to_feature = {
     FEATURE_NAMES.force_pic_flags: _force_pic_flags_feature,
     FEATURE_NAMES.libraries_to_link: _libraries_to_link_feature,
+    FEATURE_NAMES.fdo_prefetch_hints: _fdo_prefetch_hints_feature,
+    FEATURE_NAMES.propeller_optimize: _propeller_optimize_feature,
+    FEATURE_NAMES.propeller_optimize_thinlto_compile_actions: _propeller_optimize_thinlto_compile_actions_feature,
     FEATURE_NAMES.cpp_modules: _cpp_modules_feature,
     FEATURE_NAMES.no_legacy_features: _no_legacy_features_feature,
     FEATURE_NAMES.do_not_split_linking_cmdline: _do_not_split_linking_cmdline_feature,
@@ -1497,11 +1801,13 @@ _feature_name_to_feature = {
     FEATURE_NAMES.compiler_param_file: _compiler_param_file_feature,
     FEATURE_NAMES.gcc_quoting_for_param_files: _gcc_quoting_for_param_files_feature,
     FEATURE_NAMES.module_maps: _module_maps_feature,
+    FEATURE_NAMES.use_header_modules: _use_header_modules_feature,
     FEATURE_NAMES.static_link_cpp_runtimes: _static_link_cpp_runtimes_feature,
     FEATURE_NAMES.simple_compile_feature: _simple_compile_feature,
     FEATURE_NAMES.simple_link_feature: _simple_link_feature,
     FEATURE_NAMES.link_env: _link_env_feature,
     FEATURE_NAMES.llvm_profdata_env: _llvm_profdata_env_feature,
+    FEATURE_NAMES.dwp_env: _dwp_env_feature,
     FEATURE_NAMES.static_linking_mode: _static_linking_mode_feature,
     FEATURE_NAMES.dynamic_linking_mode: _dynamic_linking_mode_feature,
     FEATURE_NAMES.objcopy_embed_flags: _objcopy_embed_flags_feature,
@@ -1520,6 +1826,13 @@ _feature_name_to_feature = {
     FEATURE_NAMES.runtime_library_search_directories: _runtime_library_search_directories_feature,
     FEATURE_NAMES.generate_submodules: _generate_submodules_feature,
     FEATURE_NAMES.uses_ifso_variables: _uses_ifso_variables_feature,
+    FEATURE_NAMES.uses_output_execpath: _uses_output_execpath_feature,
+    FEATURE_NAMES.uses_is_cc_test: _uses_is_cc_test_feature,
+    FEATURE_NAMES.uses_strip_debug_symbols: _uses_strip_debug_symbols_feature,
+    FEATURE_NAMES.uses_is_using_fission: _uses_is_using_fission_feature,
+    FEATURE_NAMES.uses_sysroot: _uses_sysroot_feature,
+    FEATURE_NAMES.uses_user_link_flags: _uses_user_link_flags_feature,
+    FEATURE_NAMES.uses_whole_archive: _uses_whole_archive_feature,
     FEATURE_NAMES.def_feature: _def_feature,
     FEATURE_NAMES.strip_debug_symbols: _strip_debug_symbols_feature,
     FEATURE_NAMES.disable_pbh: _disable_pbh_feature,
@@ -1541,6 +1854,9 @@ _feature_name_to_feature = {
     "simple_module_maps": _simple_module_maps_feature,
     "simple_header_modules": _simple_header_modules_feature,
     "portable_overrides_configuration": _portable_overrides_configuration,
+    "proto_force_lite_runtime": _proto_force_lite_runtime_feature,
+    "proto_disable_services": _proto_disable_services_feature,
+    "proto_one_output_per_message": _proto_one_output_per_message_feature,
     "disable_whole_archive_for_static_lib_configuration": _disable_whole_archive_for_static_lib_configuration,
     "same_symbol_provided_configuration": _same_symbol_provided_configuration,
     "simple_thin_lto": _simple_thin_lto_feature,
@@ -1548,6 +1864,8 @@ _feature_name_to_feature = {
     "layering_check_module_maps_header_modules_simple_features": _layering_check_module_maps_header_modules_simple_features,
     FEATURE_NAMES.env_feature: _env_feature,
     FEATURE_NAMES.static_env_feature: _static_env_feature,
+    FEATURE_NAMES.debug_variables: _debug_variables_feature,
+    FEATURE_NAMES.disable_cpp_link_path_mapping: _disable_cpp_link_path_mapping_feature,
 }
 
 _cc_flags_action_config_foo_bar_baz_config = action_config(
@@ -1596,6 +1914,17 @@ def _get_features_for_configuration(name):
         return f
     else:
         return [f]
+
+def _flatten_nested_lists(elements):
+    # Sometimes a feature list may contain lists of features.
+    # Use this to flatten it into a single list of features.
+    result = []
+    for element in elements:
+        if type(element) == type([]):
+            result.extend(element)
+        else:
+            result.append(element)
+    return result
 
 def _get_action_config(name, path):
     return action_config(
@@ -1690,10 +2019,13 @@ def _impl(ctx):
         default_link_flags_feature,
         sanitize_pwd_feature,
     ]
-    cmdline_registered_features = [
-        _feature_name_to_feature[f]
-        for f in ctx.attr._with_features[BuildSettingInfo].value
-    ]
+    cmdline_registered_features = []
+    for f in ctx.attr._with_features[BuildSettingInfo].value:
+        feature_or_list = _feature_name_to_feature[f]
+        if type(feature_or_list) == type([]):
+            cmdline_registered_features.extend(feature_or_list)
+        else:
+            cmdline_registered_features.append(feature_or_list)
     features = hard_coded_default_features + cmdline_registered_features
 
     should_add_multiple_tools_action_config = False
@@ -1707,6 +2039,12 @@ def _impl(ctx):
 
         features.extend(_get_features_for_configuration(name))
 
+    unique_features = []
+    for f in features:
+        if f not in unique_features:
+            unique_features.append(f)
+    features = unique_features
+
     cxx_builtin_include_directories = ["/usr/lib/gcc/", "/usr/local/include", "/usr/include"]
 
     for directory in ctx.attr.cxx_builtin_include_directories:
@@ -1716,6 +2054,9 @@ def _impl(ctx):
 
     for category, values in ctx.attr.artifact_name_patterns.items():
         artifact_name_patterns.append(_get_artifact_name_pattern(category, values[0], values[1]))
+    object_file_extension = ctx.attr._object_file_extension[BuildSettingInfo].value
+    if object_file_extension:
+        artifact_name_patterns.append(_get_artifact_name_pattern("object_file", "", object_file_extension))
 
     action_configs = []
 
@@ -1761,6 +2102,18 @@ def _impl(ctx):
 
     out = ctx.actions.declare_file(ctx.label.name)
     ctx.actions.write(out, "Fake executable")
+    features = _flatten_nested_lists(features)
+    extra_args = {}
+    if bazel_features.cc.cc_common_is_in_rules_cc:
+        allowlist = ctx.attr.allowlist_provider[PackageSpecificationInfo] if ctx.attr.allowlist_provider != None else None
+        allowlist_target_label = ctx.attr.allowlist_target_label or (str(ctx.attr.allowlist_provider.label) if ctx.attr.allowlist_provider else None)
+        extra_args["disallowed_copts_infos"] = [struct(
+            flags = ctx.attr.disallowed_copts,
+            allowlist = allowlist,
+            allowlist_target_label = allowlist_target_label,
+            error_message = ctx.attr.error_message or None,
+        )]
+
     return [
         cc_common.create_cc_toolchain_config_info(
             ctx = ctx,
@@ -1780,6 +2133,7 @@ def _impl(ctx):
             make_variables = make_variables,
             builtin_sysroot = builtin_sysroot,
             cc_target_os = cc_target_os,
+            **extra_args
         ),
         DefaultInfo(
             executable = out,
@@ -1794,12 +2148,16 @@ cc_toolchain_config = rule(
         "toolchain_identifier": attr.string(default = "mock-llvm-toolchain-k8"),
         "host_system_name": attr.string(default = "local"),
         "target_system_name": attr.string(default = "local"),
-        "target_libc": attr.string(default = "local"),
+        "target_libc": attr.string(default = "unknown"),
         "abi_version": attr.string(default = "local"),
         "abi_libc_version": attr.string(default = "local"),
         "feature_names": attr.string_list(),
         "action_configs": attr.string_list(),
         "artifact_name_patterns": attr.string_list_dict(),
+        "disallowed_copts": attr.string_list(default = ["-w", "-Wno-error"]),
+        "allowlist_provider": attr.label(providers = [PackageSpecificationInfo]),
+        "allowlist_target_label": attr.string(),
+        "error_message": attr.string(),
         "cc_target_os": attr.string(),
         "builtin_sysroot": attr.string(default = "/usr/grte/v1"),
         "tool_paths": attr.string_dict(),
@@ -1807,6 +2165,7 @@ cc_toolchain_config = rule(
         "make_variables": attr.string_dict(),
         "_with_features": attr.label(default = Label("//tests/cc/testutil/toolchains:with_features")),
         "_with_action_configs": attr.label(default = Label("//tests/cc/testutil/toolchains:with_action_configs")),
+        "_object_file_extension": attr.label(default = Label("//tests/cc/testutil/toolchains:object_file_extension")),
     },
     provides = [CcToolchainConfigInfo],
     executable = True,

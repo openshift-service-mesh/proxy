@@ -21,7 +21,7 @@ load(
     "repository_exec_path",
 )
 load("//cc/common:semantics.bzl", "STRIP_INCLUDE_PREFIX_APPLIES_TO_TEXTUAL_HEADERS", "USE_EXEC_ROOT_FOR_VIRTUAL_INCLUDES_SYMLINKS")
-load("//cc/private:cc_info.bzl", "create_compilation_context", "create_module_map")
+load("//cc/private:cc_info.bzl", "create_compilation_context", "create_module_map", "get_module_map_name", "module_map_name_for_label")
 load("//cc/private:cc_internal.bzl", _cc_internal = "cc_internal")
 
 _VIRTUAL_INCLUDES_DIR = "_virtual_includes"
@@ -32,6 +32,8 @@ def _include_dir(directory, repo_path, sibling_repo_layout):
     else:
         return get_relative_path(directory, repo_path)
 
+_EXTERNAL_REPOSITORY_PREFIXES = ("external/", "../")
+
 def _repo_relative_path(artifact):
     relative_path = artifact.path
     if artifact.is_source:
@@ -40,8 +42,8 @@ def _repo_relative_path(artifact):
     else:
         relative_path = paths.relativize(relative_path, artifact.root.path)
 
-    if (artifact.owner.workspace_root.startswith("external/") or artifact.owner.workspace_root.startswith("../")) and \
-       relative_path.startswith("external"):
+    if artifact.owner.workspace_root.startswith(_EXTERNAL_REPOSITORY_PREFIXES) and \
+       relative_path.startswith("external/"):
         relative_path = "/".join(relative_path.split("/")[2:])
 
     return relative_path
@@ -252,7 +254,8 @@ _ModuleMapInfo = provider(
 def _module_map_struct_to_module_map_content(parameters, tree_expander):
     lines = []
     module_map = parameters.module_map
-    lines.append("module \"%s\" {" % module_map.name)
+    module_name = get_module_map_name(module_map)
+    lines.append("module \"%s\" {" % module_name)
     lines.append("  export *")
 
     def expanded(artifacts):
@@ -310,7 +313,7 @@ def _module_map_struct_to_module_map_content(parameters, tree_expander):
         add_header(path = header.path, visibility = "", can_compile = False)
         added_paths.add(header.path)
 
-    for header in parameters.public_textual_headers:
+    for header in expanded(parameters.public_textual_headers):
         if header.path in added_paths:
             continue
         add_header(path = header.path, visibility = "", can_compile = False)
@@ -324,10 +327,10 @@ def _module_map_struct_to_module_map_content(parameters, tree_expander):
 
     dependency_module_maps = parameters.dependency_module_maps.to_list()
     for dep in dependency_module_maps:
-        lines.append("  use \"" + dep.name + "\"")
+        lines.append("  use \"" + get_module_map_name(dep) + "\"")
 
     if parameters.separate_module_headers:
-        separate_name = module_map.name + ".sep"
+        separate_name = module_name + ".sep"
         lines.append("  use \"" + separate_name + "\"")
         lines.append("}")
         lines.append("module \"" + separate_name + "\" {")
@@ -341,14 +344,14 @@ def _module_map_struct_to_module_map_content(parameters, tree_expander):
             added_paths.add(header.path)
 
         for dep in dependency_module_maps:
-            lines.append("  use \"" + dep.name + "\"")
+            lines.append("  use \"" + get_module_map_name(dep) + "\"")
 
     lines.append("}")
 
     if parameters.extern_dependencies:
         for dep in dependency_module_maps:
             lines.append(
-                "extern module \"" + dep.name + "\" \"" +
+                "extern module \"" + get_module_map_name(dep) + "\" \"" +
                 parameters.leading_periods + dep.file.path + "\"",
             )
 
@@ -400,6 +403,7 @@ def _create_module_map_action(
     tree_artifacts = [h for h in private_headers if h.is_directory]
     tree_artifacts += [h for h in public_headers if h.is_directory]
     tree_artifacts += [h for h in textual_headers if h.is_directory]
+    tree_artifacts += [h for h in public_textual_headers if h.is_directory]
     content.add_all(tree_artifacts, map_each = lambda x: None, allow_closure = True)
 
     actions.write(module_map.file, content = content, is_executable = True, mnemonic = "CppModuleMap")
@@ -496,6 +500,8 @@ def _init_cc_compilation_context(
     if public_headers.virtual_include_path:
         if external:
             external_include_dirs.append(public_headers.virtual_include_path)
+        elif feature_configuration.is_requested("system_include_paths"):
+            system_include_dirs_for_context.append(public_headers.virtual_include_path)
         else:
             include_dirs_for_context.append(public_headers.virtual_include_path)
 
@@ -514,8 +520,10 @@ def _init_cc_compilation_context(
         must_use_strip_prefix = False,
     )
     if textual_headers.virtual_include_path:
-        if external or feature_configuration.is_requested("system_include_paths"):
+        if external:
             external_include_dirs.append(textual_headers.virtual_include_path)
+        elif feature_configuration.is_requested("system_include_paths"):
+            system_include_dirs_for_context.append(textual_headers.virtual_include_path)
         else:
             include_dirs_for_context.append(textual_headers.virtual_include_path)
 
@@ -559,10 +567,14 @@ def _init_cc_compilation_context(
     header_module = None
     if _enabled(feature_configuration, "module_maps"):
         if not module_map:
-            module_map = create_module_map(
-                file = actions.declare_file(label.name + ".cppmap"),
-                name = label.workspace_name + "//" + label.package + ":" + label.name,
-            )
+            file = actions.declare_file(label.name + ".cppmap")
+
+            # If compile() is called with a name that differs from the
+            # declaring target's name (e.g. by an aspect), the module name
+            # cannot be derived from the file's owner and has to be stored
+            # explicitly.
+            name = None if file.owner == label else module_map_name_for_label(label)
+            module_map = create_module_map(file = file, name = name)
 
         # There are different modes for module compilation:
         # 1. We create the module map and compile the module so that libraries depending on us can

@@ -18,44 +18,24 @@ load(
     "@bazel_tools//tools/cpp:lib_cc_configure.bzl",
     "escape_string",
 )
-load("@bazel_tools//tools/osx:xcode_configure.bzl", "run_xcode_locator")
+load("//xcode:xcode_configure.bzl", "run_xcode_locator")
 
-def get_env_var(repository_ctx, name, default = None, enable_warning = True):
-    """Find an environment variable in system path. Doesn't %-escape the value!
+def _get_copts_env_var(repository_ctx, name, default = ""):
+    """Get an environment variable and split it on ":" to be used as copts.
 
     Args:
       repository_ctx: The repository context.
       name: Name of the environment variable.
-      default: Default value to be used when such environment variable is not present.
-      enable_warning: Show warning if the variable is not present.
+      default: Default value to be used when the environment variable is not present.
     Returns:
-      value of the environment variable or default.
+      Escaped value of the environment variable or default.
     """
 
     if name in repository_ctx.os.environ:
-        return repository_ctx.os.environ[name]
-    if default != None:
-        if enable_warning:
-            auto_configure_warning("'%s' environment variable is not set, using '%s' as default" % (name, default))
-        return default
-    auto_configure_fail("'%s' environment variable is not set" % name)
-    return None
+        return _split_escaped(repository_ctx.os.environ[name], ":")
+    return _split_escaped(default, ":")
 
-def auto_configure_fail(msg):
-    """Output failure message when auto configuration fails."""
-    red = "\033[0;31m"
-    no_color = "\033[0m"
-    fail("\n%sAuto-Configuration Error:%s %s\n" % (red, no_color, msg))
-
-def auto_configure_warning(msg):
-    """Output warning message during auto configuration."""
-    yellow = "\033[1;33m"
-    no_color = "\033[0m"
-
-    # buildifier: disable=print
-    print("\n%sAuto-Configuration Warning:%s %s\n" % (yellow, no_color, msg))
-
-def split_escaped(string, delimiter):
+def _split_escaped(string, delimiter):
     """Split string on the delimiter unless %-escaped.
 
     Examples:
@@ -116,7 +96,7 @@ def split_escaped(string, delimiter):
     result.append("".join(accumulator))
     return result
 
-def get_starlark_list(values):
+def _get_starlark_list(values):
     """Convert a list of string into a string that can be passed to a rule attribute."""
     if not values:
         return ""
@@ -135,14 +115,14 @@ def _get_escaped_xcode_cxx_inc_directories(repository_ctx, xcode_toolchains):
     # Assume that everything is managed by Xcode / toolchain installations
     include_dirs = [
         "/Applications/",
-        "/Library/",
+        "/Library/",  # Global installation of CLT
     ]
 
     user = repository_ctx.os.environ.get("USER")
     if user:
         include_dirs.extend([
-            "/Users/{}/Applications/".format(user),
-            "/Users/{}/Library/".format(user),
+            "/Users/{}/Applications/".format(user),  # User only installation of Xcode
+            "/Users/{}/Library/Developer/".format(user),  # Custom Swift toolchains, user only installation of CLT
         ])
 
     # Include extra Xcode paths in case they're installed on other volumes
@@ -182,8 +162,8 @@ def configure_osx_toolchain(repository_ctx):
     # https://github.com/bazelbuild/bazel/blob/ab71a1002c9c53a8061336e40f91204a2a32c38e/tools/cpp/lib_cc_configure.bzl#L17-L38
     # for more info
     xcode_locator = Label("@bazel_tools//tools/osx:xcode_locator.m")
-    cc_toolchain_config = Label("@build_bazel_apple_support//crosstool:cc_toolchain_config.bzl")
-    build_template = Label("@build_bazel_apple_support//crosstool:BUILD.tpl")
+    cc_toolchain_config = Label("@apple_support//crosstool:cc_toolchain_config.bzl")
+    build_template = Label("@apple_support//crosstool:BUILD.tpl")
 
     xcode_toolchains = []
     xcodeloc_err = ""
@@ -195,7 +175,7 @@ def configure_osx_toolchain(repository_ctx):
 
     _copy_file(repository_ctx, cc_toolchain_config, "cc_toolchain_config.bzl")
 
-    enable_layering_check = repository_ctx.os.environ.get("APPLE_SUPPORT_LAYERING_CHECK_BETA") == "1"
+    enable_layering_check = repository_ctx.os.environ.get("APPLE_SUPPORT_LAYERING_CHECK_BETA") != "0"
 
     tool_paths = {}
     gcov_path = repository_ctx.os.environ.get("GCOV")
@@ -207,6 +187,8 @@ def configure_osx_toolchain(repository_ctx):
     features = []
     if _succeeds(repository_ctx, "ld", "-no_warn_duplicate_libraries", "-v"):
         features.append("no_warn_duplicate_libraries")
+    if _succeeds(repository_ctx, "ld", "-reproducible", "-v"):
+        features.append("reproducible_linker_flag")
 
     escaped_include_paths = _get_escaped_xcode_cxx_inc_directories(repository_ctx, xcode_toolchains)
     escaped_cxx_include_directories = []
@@ -215,43 +197,23 @@ def configure_osx_toolchain(repository_ctx):
     if xcodeloc_err:
         escaped_cxx_include_directories.append("            # Error: " + xcodeloc_err)
 
-    conly_opts = split_escaped(get_env_var(
-        repository_ctx,
-        "BAZEL_CONLYOPTS",
-        "",
-        False,
-    ), ":")
-    c_opts = split_escaped(get_env_var(
-        repository_ctx,
-        "BAZEL_COPTS",
-        "",
-        False,
-    ), ":")
-    cxx_opts = split_escaped(get_env_var(
-        repository_ctx,
-        "BAZEL_CXXOPTS",
-        "-std=c++17",
-        False,
-    ), ":")
-    link_opts = split_escaped(get_env_var(
-        repository_ctx,
-        "BAZEL_LINKOPTS",
-        "",
-        False,
-    ), ":")
+    conly_opts = _get_copts_env_var(repository_ctx, "BAZEL_CONLYOPTS")
+    c_opts = _get_copts_env_var(repository_ctx, "BAZEL_COPTS")
+    cxx_opts = _get_copts_env_var(repository_ctx, "BAZEL_CXXOPTS", default = "-std=c++17")
+    link_opts = _get_copts_env_var(repository_ctx, "BAZEL_LINKOPTS")
 
     repository_ctx.template(
         "BUILD",
         build_template,
         {
-            "%{c_flags}": get_starlark_list(c_opts),
-            "%{conly_flags}": get_starlark_list(conly_opts),
+            "%{c_flags}": _get_starlark_list(c_opts),
+            "%{conly_flags}": _get_starlark_list(conly_opts),
             "%{cxx_builtin_include_directories}": "\n".join(escaped_cxx_include_directories),
-            "%{cxx_flags}": get_starlark_list(cxx_opts),
-            "%{features}": "\n".join(['"{}"'.format(x) for x in features]),
-            "%{layering_check_modulemap}": "\"@build_bazel_apple_support//crosstool:generate_layering_check_modulemap\"," if enable_layering_check else "",
-            "%{link_flags}": get_starlark_list(link_opts),
-            "%{placeholder_modulemap}": "\"@build_bazel_apple_support//crosstool:module.modulemap\"" if enable_layering_check else "None",
+            "%{cxx_flags}": _get_starlark_list(cxx_opts),
+            "%{features}": "\n".join(['            "{}",'.format(x) for x in features]),
+            "%{layering_check_modulemap}": "\"@apple_support//crosstool:exec_layering_check_modulemap\"," if enable_layering_check else "",
+            "%{link_flags}": _get_starlark_list(link_opts),
+            "%{placeholder_modulemap}": "\"@apple_support//crosstool:module.modulemap\"" if enable_layering_check else "None",
             "%{tool_paths_overrides}": ",\n            ".join(
                 ['"%s": "%s"' % (k, v) for k, v in tool_paths.items()],
             ),

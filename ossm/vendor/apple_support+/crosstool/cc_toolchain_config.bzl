@@ -13,6 +13,7 @@
 # limitations under the License.
 """A C++ toolchain configuration rule for macOS."""
 
+load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_features//:features.bzl", "bazel_features")
 load(
     "@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl",
@@ -30,7 +31,6 @@ load(
     "variable_with_value",
     "with_feature_set",
 )
-load("@build_bazel_apple_support//lib:apple_support.bzl", "apple_support")
 load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES", "ACTION_NAME_GROUPS")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/toolchains:cc_toolchain_config_info.bzl", "CcToolchainConfigInfo")
@@ -44,6 +44,9 @@ _CPP_DYNAMIC_LINK_ACTIONS = [
     ACTION_NAMES.cpp_link_executable,
     ACTION_NAMES.cpp_link_dynamic_library,
 ]
+
+_COMPILE_ACTIONS_WITHOUT_HEADER_PARSING = list(ACTION_NAME_GROUPS.all_cc_compile_actions)
+_COMPILE_ACTIONS_WITHOUT_HEADER_PARSING.remove(ACTION_NAMES.cpp_header_parsing)
 
 def _sdk_version_for_platform(xcode_config, platform_type):
     if platform_type == apple_common.platform_type.ios:
@@ -116,8 +119,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         target_system_name = "arm64_32-apple-watchos{}".format(target_os_version)
     elif (ctx.attr.cpu == "ios_arm64e"):
         target_system_name = "arm64e-apple-ios{}".format(target_os_version)
-    elif (ctx.attr.cpu == "watchos_armv7k"):
-        target_system_name = "armv7k-apple-watchos{}".format(target_os_version)
     elif (ctx.attr.cpu == "ios_x86_64"):
         target_system_name = "x86_64-apple-ios{}-simulator".format(target_os_version)
         is_simulator = True
@@ -177,8 +178,15 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     strip_action = action_config(
         action_name = ACTION_NAMES.strip,
+        tools = [tool(path = "/usr/bin/strip")],
+    )
+
+    strip_args_feature = feature(
+        name = "__strip_args",
+        enabled = True,
         flag_sets = [
             flag_set(
+                actions = [ACTION_NAMES.strip],
                 flag_groups = [
                     flag_group(flags = ["-S", "-o", "%{output_file}"]),
                     flag_group(
@@ -189,11 +197,37 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                 ],
             ),
         ],
-        tools = [tool(path = "/usr/bin/strip")],
     )
 
-    header_parsing_env_feature = feature(
-        name = "header_parsing_env",
+    header_parsing_flags_feature = feature(
+        name = "__header_parsing_flags",
+        enabled = True,
+        flag_sets = [
+            flag_set(
+                actions = [ACTION_NAMES.cpp_header_parsing],
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-xc++-header",
+                            "-fsyntax-only",
+                        ],
+                    ),
+                ],
+                with_features = [with_feature_set(not_features = ["parse_headers_as_c"])],
+            ),
+            flag_set(
+                actions = [ACTION_NAMES.cpp_header_parsing],
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-xc-header",
+                            "-fsyntax-only",
+                        ],
+                    ),
+                ],
+                with_features = [with_feature_set(features = ["parse_headers_as_c"])],
+            ),
+        ],
         env_sets = [
             env_set(
                 actions = [ACTION_NAMES.cpp_header_parsing],
@@ -209,32 +243,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     cpp_header_parsing_action = action_config(
         action_name = ACTION_NAMES.cpp_header_parsing,
-        implies = [
-            "preprocessor_defines",
-            "include_system_dirs",
-            "objc_arc",
-            "no_objc_arc",
-            "user_compile_flags",
-            "unfiltered_compile_flags",
-            "compiler_output_flags",
-            "header_parsing_env",
-        ],
-        flag_sets = [
-            flag_set(
-                flag_groups = [
-                    flag_group(
-                        flags = [
-                            # Note: This treats all headers as C++ headers, which may lead to
-                            # parsing failures for C headers that are not valid C++.
-                            # For such headers, use features = ["-parse_headers"] to selectively
-                            # disable parsing.
-                            "-xc++-header",
-                            "-fsyntax-only",
-                        ],
-                    ),
-                ],
-            ),
-        ],
         tools = [
             tool(
                 tool = ctx.file.wrapped_clang,
@@ -246,19 +254,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     objc_compile_action = action_config(
         action_name = ACTION_NAMES.objc_compile,
         enabled = True,
-        implies = [
-            "compiler_output_flags",
-            "apply_default_compiler_flags",
-            "apply_default_warnings",
-            "framework_paths",
-            "preprocessor_defines",
-            "include_system_dirs",
-            "objc_arc",
-            "no_objc_arc",
-            "user_compile_flags",
-            "unfiltered_compile_flags",
-            "apply_simulator_compiler_flags",
-        ],
         tools = [
             tool(
                 tool = ctx.file.wrapped_clang,
@@ -281,19 +276,9 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     cpp_link_dynamic_library_action = action_config(
         action_name = ACTION_NAMES.cpp_link_dynamic_library,
-        implies = [
-            "has_configured_linker_path",
-            "shared_flag",
-            "linkstamps",
-            "output_execpath_flags",
-            "runtime_root_flags",
-            "input_param_flags",
-            "strip_debug_symbols",
-            "linker_param_file",
-        ],
         tools = [
             tool(
-                tool = ctx.file.cc_wrapper,
+                tool = ctx.file.wrapped_clang,
                 execution_requirements = xcode_execution_requirements,
             ),
         ],
@@ -301,12 +286,20 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     cpp_link_static_library_action = action_config(
         action_name = ACTION_NAMES.cpp_link_static_library,
-        implies = [
-            "input_param_flags",
-            "linker_param_file",
+        tools = [
+            tool(
+                tool = ctx.file.libtool,
+                execution_requirements = xcode_execution_requirements,
+            ),
         ],
+    )
+
+    cpp_link_static_library_feature = feature(
+        name = "__cpp_link_static_library",
+        enabled = True,
         flag_sets = [
             flag_set(
+                actions = [ACTION_NAMES.cpp_link_static_library],
                 flag_groups = [
                     flag_group(
                         flags = [
@@ -321,25 +314,10 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                 ],
             ),
         ],
-        tools = [
-            tool(
-                tool = ctx.file.libtool,
-                execution_requirements = xcode_execution_requirements,
-            ),
-        ],
     )
 
     c_compile_action = action_config(
         action_name = ACTION_NAMES.c_compile,
-        implies = [
-            "preprocessor_defines",
-            "include_system_dirs",
-            "objc_arc",
-            "no_objc_arc",
-            "user_compile_flags",
-            "unfiltered_compile_flags",
-            "compiler_output_flags",
-        ],
         tools = [
             tool(
                 tool = ctx.file.wrapped_clang,
@@ -350,15 +328,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     cpp_compile_action = action_config(
         action_name = ACTION_NAMES.cpp_compile,
-        implies = [
-            "preprocessor_defines",
-            "include_system_dirs",
-            "objc_arc",
-            "no_objc_arc",
-            "user_compile_flags",
-            "unfiltered_compile_flags",
-            "compiler_output_flags",
-        ],
         tools = [
             tool(
                 tool = ctx.file.wrapped_clang_pp,
@@ -369,31 +338,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     objcpp_compile_action = action_config(
         action_name = ACTION_NAMES.objcpp_compile,
-        flag_sets = [
-            flag_set(
-                flag_groups = [
-                    flag_group(
-                        flags = [
-                            "-stdlib=libc++",
-                            "-std=gnu++17",
-                        ],
-                    ),
-                ],
-            ),
-        ],
-        implies = [
-            "compiler_output_flags",
-            "apply_default_compiler_flags",
-            "apply_default_warnings",
-            "framework_paths",
-            "preprocessor_defines",
-            "include_system_dirs",
-            "objc_arc",
-            "no_objc_arc",
-            "user_compile_flags",
-            "unfiltered_compile_flags",
-            "apply_simulator_compiler_flags",
-        ],
         tools = [
             tool(
                 tool = ctx.file.wrapped_clang_pp,
@@ -404,14 +348,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     assemble_action = action_config(
         action_name = ACTION_NAMES.assemble,
-        implies = [
-            "objc_arc",
-            "no_objc_arc",
-            "include_system_dirs",
-            "user_compile_flags",
-            "unfiltered_compile_flags",
-            "compiler_output_flags",
-        ],
         tools = [
             tool(
                 tool = ctx.file.wrapped_clang,
@@ -422,15 +358,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     preprocess_assemble_action = action_config(
         action_name = ACTION_NAMES.preprocess_assemble,
-        implies = [
-            "preprocessor_defines",
-            "include_system_dirs",
-            "objc_arc",
-            "no_objc_arc",
-            "user_compile_flags",
-            "unfiltered_compile_flags",
-            "compiler_output_flags",
-        ],
         tools = [
             tool(
                 tool = ctx.file.wrapped_clang,
@@ -441,26 +368,21 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     objc_executable_action = action_config(
         action_name = ACTION_NAMES.objc_executable,
+        tools = [
+            tool(
+                tool = ctx.file.wrapped_clang,
+                execution_requirements = xcode_execution_requirements,
+            ),
+        ],
+    )
+
+    objc_executable_feature = feature(
+        name = "__objc_executable",
+        enabled = True,
         flag_sets = [
             flag_set(
+                actions = [ACTION_NAMES.objc_executable],
                 flag_groups = [
-                    flag_group(
-                        flags = [
-                            "-Xlinker",
-                            "-objc_abi_version",
-                            "-Xlinker",
-                            "2",
-                        ],
-                    ),
-                ],
-                with_features = [with_feature_set(not_features = ["kernel_extension"])],
-            ),
-            flag_set(
-                flag_groups = [
-                    flag_group(
-                        flags = ["-l%{library_names}"],
-                        iterate_over = "library_names",
-                    ),
                     flag_group(flags = ["-filelist", "%{filelist}"]),
                     flag_group(flags = ["-o", "%{linked_binary}", "LINKED_BINARY=%{linked_binary}"]),
                     flag_group(
@@ -478,11 +400,10 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                 ],
             ),
         ],
-        implies = [
-            "include_system_dirs",
-            "framework_paths",
-            "strip_debug_symbols",
-        ],
+    )
+
+    cpp_link_executable_action = action_config(
+        action_name = ACTION_NAMES.cpp_link_executable,
         tools = [
             tool(
                 tool = ctx.file.wrapped_clang,
@@ -491,36 +412,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         ],
     )
 
-    cpp_link_executable_action = action_config(
-        action_name = ACTION_NAMES.cpp_link_executable,
-        implies = [
-            "linkstamps",
-            "output_execpath_flags",
-            "runtime_root_flags",
-            "input_param_flags",
-            "force_pic_flags",
-            "strip_debug_symbols",
-            "linker_param_file",
-        ],
-        tools = [
-            tool(
-                tool = ctx.file.cc_wrapper,
-                execution_requirements = xcode_execution_requirements,
-            ),
-        ],
-    )
-
     linkstamp_compile_action = action_config(
         action_name = ACTION_NAMES.linkstamp_compile,
-        implies = [
-            "preprocessor_defines",
-            "include_system_dirs",
-            "objc_arc",
-            "no_objc_arc",
-            "user_compile_flags",
-            "unfiltered_compile_flags",
-            "compiler_output_flags",
-        ],
         tools = [
             tool(
                 tool = ctx.file.wrapped_clang,
@@ -531,15 +424,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     cpp_module_compile_action = action_config(
         action_name = ACTION_NAMES.cpp_module_compile,
-        implies = [
-            "preprocessor_defines",
-            "include_system_dirs",
-            "objc_arc",
-            "no_objc_arc",
-            "user_compile_flags",
-            "unfiltered_compile_flags",
-            "compiler_output_flags",
-        ],
         tools = [
             tool(
                 tool = ctx.file.wrapped_clang,
@@ -550,8 +434,20 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     objc_fully_link_action = action_config(
         action_name = ACTION_NAMES.objc_fully_link,
+        tools = [
+            tool(
+                tool = ctx.file.libtool,
+                execution_requirements = xcode_execution_requirements,
+            ),
+        ],
+    )
+
+    objc_fully_link_feature = feature(
+        name = "__objc_fully_link",
+        enabled = True,
         flag_sets = [
             flag_set(
+                actions = [ACTION_NAMES.objc_fully_link],
                 flag_groups = [
                     flag_group(
                         flags = [
@@ -560,8 +456,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                             "-static",
                             "-arch_only",
                             arch,
-                            "-syslibroot",
-                            "__BAZEL_XCODE_SDKROOT__",
                             "-o",
                             "%{fully_linked_archive_path}",
                         ],
@@ -579,12 +473,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                         iterate_over = "imported_library_exec_paths",
                     ),
                 ],
-            ),
-        ],
-        tools = [
-            tool(
-                tool = ctx.file.libtool,
-                execution_requirements = xcode_execution_requirements,
             ),
         ],
     )
@@ -614,11 +502,11 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         ctx.attr.cpu == "watchos_arm64_32" or
         ctx.attr.cpu == "watchos_device_arm64" or
         ctx.attr.cpu == "watchos_device_arm64e" or
-        ctx.attr.cpu == "watchos_armv7k" or
         ctx.attr.cpu == "watchos_x86_64" or
         ctx.attr.cpu == "watchos_arm64"):
         apply_default_compiler_flags_feature = feature(
-            name = "apply_default_compiler_flags",
+            name = "__apply_default_compiler_flags",
+            enabled = True,
             flag_sets = [
                 flag_set(
                     actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
@@ -630,7 +518,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
           ctx.attr.cpu == "darwin_arm64" or
           ctx.attr.cpu == "darwin_arm64e"):
         apply_default_compiler_flags_feature = feature(
-            name = "apply_default_compiler_flags",
+            name = "__apply_default_compiler_flags",
+            enabled = True,
             flag_sets = [
                 flag_set(
                     actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
@@ -642,7 +531,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
           ctx.attr.cpu == "tvos_x86_64" or
           ctx.attr.cpu == "tvos_sim_arm64"):
         apply_default_compiler_flags_feature = feature(
-            name = "apply_default_compiler_flags",
+            name = "__apply_default_compiler_flags",
+            enabled = True,
             flag_sets = [
                 flag_set(
                     actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
@@ -655,7 +545,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         ctx.attr.cpu == "visionos_sim_arm64"
     ):
         apply_default_compiler_flags_feature = feature(
-            name = "apply_default_compiler_flags",
+            name = "__apply_default_compiler_flags",
+            enabled = True,
             flag_sets = [
                 flag_set(
                     actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
@@ -672,10 +563,14 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 """.format(cpu = ctx.attr.cpu))
 
     runtime_root_flags_feature = feature(
-        name = "runtime_root_flags",
+        name = "__runtime_root_flags",
+        enabled = True,
         flag_sets = [
             flag_set(
-                actions = _CPP_DYNAMIC_LINK_ACTIONS,
+                actions = [
+                    ACTION_NAMES.cpp_link_dynamic_library,
+                    ACTION_NAMES.cpp_link_executable,
+                ],
                 flag_groups = [
                     flag_group(
                         flags = [
@@ -693,7 +588,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     )
 
     objc_arc_feature = feature(
-        name = "objc_arc",
+        name = "__objc_arc",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [
@@ -721,10 +617,19 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         enabled = True,
         flag_sets = [
             flag_set(
-                actions = ACTION_NAME_GROUPS.all_cc_compile_actions,
+                actions = _COMPILE_ACTIONS_WITHOUT_HEADER_PARSING,
                 flag_groups = [
                     flag_group(
                         flags = ["-c", "%{source_file}"],
+                        expand_if_available = "source_file",
+                    ),
+                ],
+            ),
+            flag_set(
+                actions = [ACTION_NAMES.cpp_header_parsing],
+                flag_groups = [
+                    flag_group(
+                        flags = ["%{source_file}"],
                         expand_if_available = "source_file",
                     ),
                 ],
@@ -758,10 +663,15 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     )
 
     strip_debug_symbols_feature = feature(
-        name = "strip_debug_symbols",
+        name = "__strip_debug_symbols",
+        enabled = True,
         flag_sets = [
             flag_set(
-                actions = _DYNAMIC_LINK_ACTIONS,
+                actions = [
+                    ACTION_NAMES.cpp_link_dynamic_library,
+                    ACTION_NAMES.cpp_link_executable,
+                    ACTION_NAMES.objc_executable,
+                ],
                 flag_groups = [
                     flag_group(
                         flags = ["STRIP_DEBUG_SYMBOLS"],
@@ -773,7 +683,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     )
 
     shared_flag_feature = feature(
-        name = "shared_flag",
+        name = "__shared_flag",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [
@@ -786,7 +697,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     if is_simulator:
         apply_simulator_compiler_flags_feature = feature(
-            name = "apply_simulator_compiler_flags",
+            name = "__apply_simulator_compiler_flags",
+            enabled = True,
             flag_sets = [
                 flag_set(
                     actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
@@ -804,7 +716,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             ],
         )
     else:
-        apply_simulator_compiler_flags_feature = feature(name = "apply_simulator_compiler_flags")
+        apply_simulator_compiler_flags_feature = feature(name = "__apply_simulator_compiler_flags")
 
     user_link_flags_feature = feature(
         name = "user_link_flags",
@@ -925,7 +837,9 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         ],
         env_sets = [
             env_set(
-                actions = ACTION_NAME_GROUPS.all_cc_compile_actions + _DYNAMIC_LINK_ACTIONS + _STATIC_LINK_ACTIONS,
+                actions = ACTION_NAME_GROUPS.all_cc_compile_actions + _DYNAMIC_LINK_ACTIONS + _STATIC_LINK_ACTIONS + [
+                    ACTION_NAMES.strip,
+                ],
                 env_entries = [
                     env_entry(key = key, value = value)
                     for key, value in (apple_env | ctx.attr.extra_env).items()
@@ -941,11 +855,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
             flag_set(
                 actions = _DYNAMIC_LINK_ACTIONS,
                 flag_groups = [flag_group(flags = ["-fobjc-link-runtime"])],
-            ),
-            flag_set(
-                actions = _DYNAMIC_LINK_ACTIONS,
-                flag_groups = [flag_group(flags = ["-dead_strip"])],
-                with_features = [with_feature_set(features = ["opt"])],
+                with_features = [with_feature_set(not_features = ["kernel_extension"])],
             ),
         ],
     )
@@ -1005,6 +915,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     output_execpath_flags_feature = feature(
         name = "output_execpath_flags",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = _DYNAMIC_LINK_ACTIONS,
@@ -1038,7 +949,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     )
 
     framework_paths_feature = feature(
-        name = "framework_paths",
+        name = "__framework_paths",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [
@@ -1057,28 +969,12 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                     ),
                 ],
             ),
-            flag_set(
-                actions = [ACTION_NAMES.objc_executable],
-                flag_groups = [
-                    flag_group(
-                        flags = ["-F%{framework_paths}"],
-                        iterate_over = "framework_paths",
-                    ),
-                    flag_group(
-                        flags = ["-framework", "%{framework_names}"],
-                        iterate_over = "framework_names",
-                    ),
-                    flag_group(
-                        flags = ["-weak_framework", "%{weak_framework_names}"],
-                        iterate_over = "weak_framework_names",
-                    ),
-                ],
-            ),
         ],
     )
 
     compiler_output_flags_feature = feature(
         name = "compiler_output_flags",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [
@@ -1111,7 +1007,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     )
 
     pch_feature = feature(
-        name = "pch",
+        name = "__pch",
         enabled = True,
         flag_sets = [
             flag_set(
@@ -1135,7 +1031,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     )
 
     include_system_dirs_feature = feature(
-        name = "include_system_dirs",
+        name = "__include_system_dirs",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [
@@ -1164,7 +1061,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     )
 
     input_param_flags_feature = feature(
-        name = "input_param_flags",
+        name = "__input_param_flags",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = _CPP_DYNAMIC_LINK_ACTIONS,
@@ -1173,16 +1071,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                         flags = ["-L%{library_search_directories}"],
                         iterate_over = "library_search_directories",
                         expand_if_available = "library_search_directories",
-                    ),
-                ],
-            ),
-            flag_set(
-                actions = _CPP_DYNAMIC_LINK_ACTIONS,
-                flag_groups = [
-                    flag_group(
-                        flags = ["-Wl,-force_load,%{whole_archive_linker_params}"],
-                        iterate_over = "whole_archive_linker_params",
-                        expand_if_available = "whole_archive_linker_params",
                     ),
                 ],
             ),
@@ -1293,21 +1181,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         ],
     )
 
-    lipo_feature = feature(
-        name = "lipo",
-        flag_sets = [
-            flag_set(
-                actions = [ACTION_NAMES.c_compile, ACTION_NAMES.cpp_compile],
-                flag_groups = [flag_group(flags = ["-fripa"])],
-            ),
-        ],
-        requires = [
-            feature_set(features = ["autofdo"]),
-            feature_set(features = ["fdo_optimize"]),
-            feature_set(features = ["fdo_instrument"]),
-        ],
-    )
-
     if (ctx.attr.cpu == "ios_arm64" or
         ctx.attr.cpu == "ios_arm64e" or
         ctx.attr.cpu == "ios_x86_64" or
@@ -1320,7 +1193,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         ctx.attr.cpu == "watchos_arm64_32" or
         ctx.attr.cpu == "watchos_device_arm64" or
         ctx.attr.cpu == "watchos_device_arm64e" or
-        ctx.attr.cpu == "watchos_armv7k" or
         ctx.attr.cpu == "watchos_x86_64" or
         ctx.attr.cpu == "watchos_arm64"):
         apply_implicit_frameworks_feature = feature(
@@ -1334,6 +1206,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                             flags = ["-framework", "Foundation", "-framework", "UIKit"],
                         ),
                     ],
+                    with_features = [with_feature_set(not_features = ["kernel_extension"])],
                 ),
             ],
         )
@@ -1455,6 +1328,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     force_pic_flags_feature = feature(
         name = "force_pic_flags",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [ACTION_NAMES.cpp_link_executable],
@@ -1500,7 +1374,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     )
 
     unfiltered_compile_flags_feature = feature(
-        name = "unfiltered_compile_flags",
+        name = "unfiltered_compile_flags",  # NOTE: Name matters
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = ACTION_NAME_GROUPS.all_cc_compile_actions,
@@ -1519,7 +1394,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     )
 
     linker_param_file_feature = feature(
-        name = "linker_param_file",
+        name = "__linker_param_file",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = _DYNAMIC_LINK_ACTIONS + _STATIC_LINK_ACTIONS,
@@ -1555,7 +1431,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     )
 
     no_objc_arc_feature = feature(
-        name = "no_objc_arc",
+        name = "__no_objc_arc",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [
@@ -1622,22 +1499,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         ],
     )
 
-    linkstamps_feature = feature(
-        name = "linkstamps",
-        flag_sets = [
-            flag_set(
-                actions = _CPP_DYNAMIC_LINK_ACTIONS,
-                flag_groups = [
-                    flag_group(
-                        flags = ["%{linkstamp_paths}"],
-                        iterate_over = "linkstamp_paths",
-                        expand_if_available = "linkstamp_paths",
-                    ),
-                ],
-            ),
-        ],
-    )
-
     include_paths_feature = feature(
         name = "include_paths",
         enabled = True,
@@ -1675,6 +1536,19 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         name = "default_compile_flags",
         enabled = True,
         flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-stdlib=libc++",
+                            "-std=gnu++17",
+                        ],
+                    ),
+                ],
+            ),
             flag_set(
                 actions = [
                     ACTION_NAMES.assemble,
@@ -1771,7 +1645,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
                 ],
-                flag_groups = [flag_group(flags = ["-g"])],
+                flag_groups = [flag_group(flags = ["-O0", "-DDEBUG", "-g"])],
                 with_features = [with_feature_set(features = ["dbg"])],
             ),
         ],
@@ -1801,6 +1675,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     dead_strip_feature = feature(
         name = "dead_strip",
+        enabled = ctx.var["COMPILATION_MODE"] == "opt",
         flag_sets = [
             flag_set(
                 actions = _DYNAMIC_LINK_ACTIONS,
@@ -1850,7 +1725,12 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     # Kernel extensions for Apple Silicon are arm64e.
     if (ctx.attr.cpu == "darwin_x86_64" or
-        ctx.attr.cpu == "darwin_arm64e"):
+        ctx.attr.cpu == "darwin_arm64e" or
+        ctx.attr.cpu.startswith("ios")):
+        kext_flags = ["-nostdlib", "-Xlinker", "-kext", "-lcc_kext"]
+        if not ctx.attr.cpu.startswith("ios"):
+            kext_flags.extend(["-lkmod", "-lkmodc++"])
+
         kernel_extension_feature = feature(
             name = "kernel_extension",
             flag_sets = [
@@ -1858,14 +1738,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                     actions = [ACTION_NAMES.objc_executable],
                     flag_groups = [
                         flag_group(
-                            flags = [
-                                "-nostdlib",
-                                "-lkmod",
-                                "-lkmodc++",
-                                "-lcc_kext",
-                                "-Xlinker",
-                                "-kext",
-                            ],
+                            flags = kext_flags,
                         ),
                     ],
                 ),
@@ -1875,7 +1748,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         kernel_extension_feature = feature(name = "kernel_extension")
 
     apply_default_warnings_feature = feature(
-        name = "apply_default_warnings",
+        name = "__apply_default_warnings",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [ACTION_NAMES.objc_compile, ACTION_NAMES.objcpp_compile],
@@ -1953,7 +1827,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     )
 
     preprocessor_defines_feature = feature(
-        name = "preprocessor_defines",
+        name = "__preprocessor_defines",
         enabled = True,
         flag_sets = [
             flag_set(
@@ -2017,7 +1891,8 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         link_cocoa_feature = feature(name = "link_cocoa")
 
     user_compile_flags_feature = feature(
-        name = "user_compile_flags",
+        name = "__user_compile_flags",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [
@@ -2046,10 +1921,18 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                 ] if ctx.attr.conly_flags else []),
             ),
             flag_set(
+                actions = [ACTION_NAMES.cpp_header_parsing],
+                flag_groups = ([
+                    flag_group(
+                        flags = ctx.attr.conly_flags,
+                    ),
+                ] if ctx.attr.conly_flags else []),
+                with_features = [with_feature_set(features = ["parse_headers_as_c"])],
+            ),
+            flag_set(
                 actions = [
                     ACTION_NAMES.linkstamp_compile,
                     ACTION_NAMES.cpp_compile,
-                    ACTION_NAMES.cpp_header_parsing,
                     ACTION_NAMES.cpp_module_compile,
                 ],
                 flag_groups = ([
@@ -2057,6 +1940,15 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                         flags = ctx.attr.cxx_flags,
                     ),
                 ] if ctx.attr.cxx_flags else []),
+            ),
+            flag_set(
+                actions = [ACTION_NAMES.cpp_header_parsing],
+                flag_groups = ([
+                    flag_group(
+                        flags = ctx.attr.cxx_flags,
+                    ),
+                ] if ctx.attr.cxx_flags else []),
+                with_features = [with_feature_set(not_features = ["parse_headers_as_c"])],
             ),
             flag_set(
                 actions = [
@@ -2124,7 +2016,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
 
     set_install_name = feature(
         name = "set_install_name",
-        enabled = getattr(ctx.fragments.cpp, "do_not_use_macos_set_install_name", True),
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [
@@ -2243,15 +2135,21 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                     ACTION_NAMES.objc_compile,
                     ACTION_NAMES.objcpp_compile,
                 ],
-                flag_groups = [
-                    flag_group(
-                        flags = [
-                            "-gline-tables-only",
-                            "-fno-omit-frame-pointer",
-                            "-fno-sanitize-recover=all",
-                        ],
-                    ),
+                flag_groups = [flag_group(flags = ["-gline-tables-only"])],
+                with_features = [
+                    with_feature_set(features = ["asan", "fastbuild"]),
+                    with_feature_set(features = ["tsan", "fastbuild"]),
+                    with_feature_set(features = ["ubsan", "fastbuild"]),
                 ],
+            ),
+            flag_set(
+                actions = [
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                flag_groups = [flag_group(flags = ["-fno-sanitize-recover=all"])],
                 with_features = [
                     with_feature_set(features = ["asan"]),
                     with_feature_set(features = ["tsan"]),
@@ -2298,9 +2196,14 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     # As of Xcode 15, linker warnings are emitted if duplicate `-l` options are
     # present. Until such linkopts can be deduped by bazel itself, we disable
     # these warnings.
+    is_15_or_above = False
+    if xcode_config.xcode_version():
+        is_15_or_above = xcode_config.xcode_version() >= apple_common.dotted_version("15.0")
     no_warn_duplicate_libraries_feature = feature(
         name = "no_warn_duplicate_libraries",
-        enabled = "no_warn_duplicate_libraries" in ctx.features,
+        enabled = "no_warn_duplicate_libraries" in ctx.features or
+                  (is_15_or_above and
+                   "no_warn_duplicate_libraries" not in ctx.disabled_features),
         flag_sets = [
             flag_set(
                 actions = _DYNAMIC_LINK_ACTIONS,
@@ -2311,6 +2214,22 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                         ],
                     ),
                 ],
+            ),
+        ],
+    )
+
+    is_26_or_above = False
+    if xcode_config.xcode_version():
+        is_26_or_above = xcode_config.xcode_version() >= apple_common.dotted_version("26.0")
+
+    reproducible_linker_flag_feature = feature(
+        name = "reproducible_linker_flag",
+        enabled = "reproducible_linker_flag" in ctx.features or
+                  (is_26_or_above and "reproducible_linker_flag" not in ctx.disabled_features),
+        flag_sets = [
+            flag_set(
+                actions = _DYNAMIC_LINK_ACTIONS,
+                flag_groups = [flag_group(flags = ["-Wl,-reproducible"])],
             ),
         ],
     )
@@ -2365,7 +2284,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
                     env_entries = [
                         env_entry(
                             key = "APPLE_SUPPORT_MODULEMAP",
-                            value = modulemaps[0].path,
+                            value = "%{{path:{}}}".format(modulemaps[0].path) if bazel_features.cc.supports_path_variable_patterns else modulemaps[0].path,
                         ),
                     ],
                 ),
@@ -2378,20 +2297,29 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         # Marker features
         feature(name = "archive_param_file", enabled = True),
         feature(name = "compiler_param_file"),
+        feature(name = "compiler_param_file_on_demand"),
         feature(name = "compile_all_modules"),
         feature(name = "coverage"),
         feature(name = "dbg"),
         feature(name = "exclude_private_headers_in_module_maps"),
         feature(name = "fastbuild"),
-        feature(name = "has_configured_linker_path"),
         feature(name = "module_maps", enabled = True),
+        feature(name = "module_map_without_extern_module", enabled = True),
         feature(name = "no_legacy_features"),
         feature(name = "only_doth_headers_in_module_maps"),
         feature(name = "opt"),
         feature(name = "parse_headers"),
+        feature(name = "parse_headers_as_c"),
         feature(name = "no_dotd_file"),
+        feature(name = "sanitize_pwd", enabled = True),
+        feature(name = "set_soname", enabled = True),
 
         # Features with more configuration
+        strip_args_feature,
+        cpp_link_static_library_feature,
+        objc_executable_feature,
+        objc_fully_link_feature,
+        header_parsing_flags_feature,  # NOTE: Must come before input files
         link_libcpp_feature,
         default_compile_flags_feature,
         ns_block_assertions_feature,
@@ -2403,7 +2331,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         strip_debug_symbols_feature,
         shared_flag_feature,
         kernel_extension_feature,
-        linkstamps_feature,
         output_execpath_flags_feature,
         runtime_root_flags_feature,
         input_param_flags_feature,
@@ -2421,7 +2348,6 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         fdo_instrument_feature,
         fdo_optimize_feature,
         autofdo_feature,
-        lipo_feature,
         lto_object_path_feature,
         llvm_coverage_map_format_feature,
         gcc_coverage_map_format_feature,
@@ -2441,22 +2367,22 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
         apply_implicit_frameworks_feature,
         link_cocoa_feature,
         apply_simulator_compiler_flags_feature,
+        asan_feature,
+        tsan_feature,
+        ubsan_feature,
+        default_sanitizer_flags_feature,
         user_compile_flags_feature,
         unfiltered_compile_flags_feature,
         linker_param_file_feature,
         compiler_input_flags_feature,
         compiler_output_flags_feature,
         set_install_name,
-        asan_feature,
-        tsan_feature,
-        ubsan_feature,
-        default_sanitizer_flags_feature,
         suppress_warnings_feature,
         treat_warnings_as_errors_feature,
         no_warn_duplicate_libraries_feature,
+        reproducible_linker_flag_feature,
         layering_check_feature,
         external_include_paths_feature,
-        header_parsing_env_feature,
     ]
 
     if (ctx.attr.cpu == "darwin_x86_64" or
@@ -2484,8 +2410,7 @@ please file an issue at https://github.com/bazelbuild/apple_support/issues/new
     tool_paths = {
         "ar": ctx.file.libtool.path,
         "cpp": "/usr/bin/cpp",
-        "dwp": "/usr/bin/dwp",
-        "gcc": ctx.file.cc_wrapper.path,
+        "gcc": ctx.file.wrapped_clang.path,
         "gcov": "/usr/bin/gcov",
         "ld": "/usr/bin/ld",
         "nm": "/usr/bin/nm",
@@ -2520,10 +2445,6 @@ cc_toolchain_config = rule(
     implementation = _impl,
     attrs = {
         "c_flags": attr.string_list(),
-        "cc_wrapper": attr.label(
-            allow_single_file = True,
-            mandatory = True,
-        ),
         "conly_flags": attr.string_list(),
         "cpu": attr.string(mandatory = True),
         "cxx_builtin_include_directories": attr.string_list(),

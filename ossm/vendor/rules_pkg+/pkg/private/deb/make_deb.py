@@ -180,7 +180,10 @@ def CreateDebControl(extrafiles=None, **kwargs):
       if extrafiles:
         for name, (data, mode) in extrafiles.items():
           tarinfo = tarfile.TarInfo('./' + name)
-          data_encoded = data.encode('utf-8')
+          if type(data) == type(b''):
+            data_encoded = data
+          else:
+            data_encoded = data.encode('utf-8')
           tarinfo.size = len(data_encoded)
           tarinfo.mode = mode
           f.addfile(tarinfo, fileobj=io.BytesIO(data_encoded))
@@ -198,6 +201,7 @@ def CreateDeb(output,
               config=None,
               templates=None,
               triggers=None,
+              md5sums=None,
               conffiles=None,
               changelog=None,
               **kwargs):
@@ -217,6 +221,8 @@ def CreateDeb(output,
     extrafiles['templates'] = (templates, 0o644)
   if triggers:
     extrafiles['triggers'] = (triggers, 0o644)
+  if md5sums:
+    extrafiles['md5sums'] = (md5sums, 0o644)
   if conffiles:
     extrafiles['conffiles'] = ('\n'.join(conffiles) + '\n', 0o644)
   if changelog:
@@ -337,7 +343,8 @@ def GetFlagValues(flagvalues):
 
 def main():
   parser = argparse.ArgumentParser(
-      description='Helper for building deb packages')
+      description='Helper for building deb packages',
+      fromfile_prefix_chars='@')
 
   parser.add_argument('--output', required=True,
                       help='The output file, mandatory')
@@ -366,6 +373,9 @@ def main():
   parser.add_argument(
       '--triggers',
       help='The triggers file (prefix with @ to provide a path).')
+  parser.add_argument(
+      '--md5sums',
+      help='The md5sums file (prefix with @ to provide a path).')
   # see
   # https://www.debian.org/doc/manuals/debian-faq/ch-pkg_basics.en.html#s-conffile
   parser.add_argument(
@@ -387,6 +397,7 @@ def main():
       config=helpers.GetFlagValue(options.config, False),
       templates=helpers.GetFlagValue(options.templates, False),
       triggers=helpers.GetFlagValue(options.triggers, False),
+      md5sums=helpers.GetFlagValue(options.md5sums, False),
       conffiles=GetFlagValues(options.conffile),
       changelog=helpers.GetFlagValue(options.changelog, False),
       package=options.package,
@@ -400,8 +411,8 @@ def main():
       enhances=options.enhances,
       preDepends=options.pre_depends,
       recommends=options.recommends,
-      replaces=options.replaces,
-      provides=options.provides,
+      replaces=GetFlagValues(options.replaces),
+      provides=GetFlagValues(options.provides),
       homepage=helpers.GetFlagValue(options.homepage),
       license=helpers.GetFlagValue(options.license),
       builtUsing=helpers.GetFlagValue(options.built_using),

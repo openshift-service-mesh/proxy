@@ -77,8 +77,11 @@ filegroup(
         "**/BUILD",
     ]) + [
         "//cc/common:srcs",
+        "//cc/compiler:srcs",
+        "//cc/coverage:srcs",
         "//cc/private:srcs",
         "//cc/proto:srcs",
+        "//cc/runfiles:srcs",
         "//cc/settings:srcs",
         "//cc/toolchains:srcs",
         "@bazel_skylib//:test_deps",
@@ -208,6 +211,15 @@ bzl_library(
         ":build_settings_bzl",
         ":cc_postmark_bzl",
         "//cc/toolchains:toolchain_rules",
+        "@cc_compatibility_proxy//:proxy_bzl",
+    ],
+)
+
+bzl_library(
+    name = "cc_rules_extension_support",
+    srcs = ["cc_rules_extension_support.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
         "@cc_compatibility_proxy//:proxy_bzl",
     ],
 )
