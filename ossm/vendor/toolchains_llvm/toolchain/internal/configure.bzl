@@ -401,6 +401,7 @@ def _cc_toolchain_str(
         "darwin-aarch64": "aarch64-apple-macosx",
         "linux-aarch64": "aarch64-unknown-linux-gnu",
         "linux-armv7": "armv7-unknown-linux-gnueabihf",
+        "linux-ppc64le": "powerpc64le-unknown-linux-gnu",
         "linux-x86_64": "x86_64-unknown-linux-gnu",
         "linux-riscv64": "riscv64-unknown-linux-gnu",
         "none-riscv32": "riscv32-unknown-none-elf",

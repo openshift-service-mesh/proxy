@@ -405,6 +405,8 @@ class CompilationDatabase : public clang::tooling::CompilationDatabase
     std::vector<clang::tooling::CompileCommand> getCompileCommands(llvm::StringRef file) const override {
       std::vector<std::string> cmdline = {
           "dummy",
+          // Distro libclang injects its resource dir; that duplicates --include and trips #include_next.
+          "-nobuiltininc",
           std::string("-I") + opt::incdir().string(),
       };
       for (const auto &inc : opt::includes) {
