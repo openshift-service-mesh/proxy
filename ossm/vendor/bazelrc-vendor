@@ -92,6 +92,7 @@ common --override_repository=proto-converter+=%workspace%/ossm/vendor/proto-conv
 common --override_repository=proto-field-extraction+=%workspace%/ossm/vendor/proto-field-extraction+
 common --override_repository=protobuf++protobuf+protobuf_deps=%workspace%/ossm/vendor/protobuf++protobuf+protobuf_deps
 common --override_repository=protobuf++protoc+prebuilt_protoc.linux_aarch_64=%workspace%/ossm/vendor/protobuf++protoc+prebuilt_protoc.linux_aarch_64
+common --override_repository=protobuf++protoc+prebuilt_protoc.linux_ppcle_64=%workspace%/ossm/vendor/protobuf++protoc+prebuilt_protoc.linux_ppcle_64
 common --override_repository=protobuf++protoc+prebuilt_protoc.linux_x86_64=%workspace%/ossm/vendor/protobuf++protoc+prebuilt_protoc.linux_x86_64
 common --override_repository=protobuf+=%workspace%/ossm/vendor/protobuf+
 common --override_repository=protoc-gen-validate+=%workspace%/ossm/vendor/protoc-gen-validate+
