@@ -34,6 +34,7 @@ build --override_repository=com_google_googleapis=%workspace%/ossm/vendor/com_go
 build --override_repository=com_google_googleapis_imports=%workspace%/ossm/vendor/com_google_googleapis_imports
 build --override_repository=com_google_protobuf=%workspace%/ossm/vendor/com_google_protobuf
 build --override_repository=com_google_protobuf_protoc_linux_aarch_64=%workspace%/ossm/vendor/com_google_protobuf_protoc_linux_aarch_64
+build --override_repository=com_google_protobuf_protoc_linux_ppcle_64=%workspace%/ossm/vendor/com_google_protobuf_protoc_linux_ppcle_64
 build --override_repository=com_google_protobuf_protoc_linux_x86_64=%workspace%/ossm/vendor/com_google_protobuf_protoc_linux_x86_64
 build --override_repository=compatibility_proxy=%workspace%/ossm/vendor/compatibility_proxy
 build --override_repository=copy_directory_toolchains=%workspace%/ossm/vendor/copy_directory_toolchains
@@ -68,6 +69,7 @@ build --override_repository=libcircllhist=%workspace%/ossm/vendor/libcircllhist
 build --override_repository=libevent=%workspace%/ossm/vendor/libevent
 build --override_repository=liburing=%workspace%/ossm/vendor/liburing
 build --override_repository=luajit=%workspace%/ossm/vendor/luajit
+build --override_repository=luajit2=%workspace%/ossm/vendor/luajit2
 build --override_repository=msgpack-cxx=%workspace%/ossm/vendor/msgpack-cxx
 build --override_repository=nghttp2=%workspace%/ossm/vendor/nghttp2
 build --override_repository=nlohmann_json=%workspace%/ossm/vendor/nlohmann_json
