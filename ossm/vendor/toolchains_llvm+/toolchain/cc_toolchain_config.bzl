@@ -141,6 +141,15 @@ def cc_toolchain_config(
             "glibc_unknown",
             "arm-linux-gnueabihf",
         ),
+        "linux-ppc64le": (
+            "clang-ppc64le-linux",
+            "ppc64le",
+            "glibc_unknown",
+            "clang",
+            "clang",
+            "glibc_unknown",
+            "powerpc64le-linux-gnu",
+        ),
         "linux-riscv64": (
             "clang-riscv64-linux",
             "riscv64",

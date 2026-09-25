@@ -64,6 +64,7 @@ EXTRA_REPOS=(
 # only aarch64 needs to be captured here.)
 CROSS_ARCH_HOST_TOOLS=(
   "@@protobuf++protoc+prebuilt_protoc.linux_aarch_64"
+  "@@protobuf++protoc+prebuilt_protoc.linux_ppcle_64"
   "@@rules_java++toolchains+remote_java_tools_linux_aarch64"
 )
 
@@ -126,6 +127,15 @@ if [ -d "${CACHE_DIR}" ]; then
     rsync -a --ignore-existing "${CACHE_DIR}/${repo}/" "${VENDOR_DIR}/${repo}/"
   done
 fi
+
+echo ">> Applying PPC source patches"
+for p in \
+  v8-maglev-ppc64le.patch \
+  toolchains-llvm-ppc64le.patch
+do
+  git apply --check "ossm/patches/ppc64le/${p}"
+  git apply "ossm/patches/ppc64le/${p}"
+done
 
 echo ">> Applying OSSM source patches to the vendored Envoy tree"
 # Patch the freshly vendored Envoy sources in place. This is done here as a
