@@ -16,6 +16,7 @@ SUPPORTED_TARGETS = [
     ("linux", "x86_64"),
     ("linux", "aarch64"),
     ("linux", "armv7"),
+    ("linux", "ppc64le"),
     ("linux", "riscv64"),
     ("darwin", "x86_64"),
     ("darwin", "aarch64"),

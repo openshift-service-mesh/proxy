@@ -110,11 +110,12 @@ function run_bazel() {
   # because these are execution-platform tools, not target-platform tools)
   bazel --output_base="${OUTPUT_BASE}" fetch @remote_java_tools_linux_aarch64//:all
   bazel --output_base="${OUTPUT_BASE}" fetch @com_google_protobuf_protoc_linux_aarch_64//:all
+  bazel --output_base="${OUTPUT_BASE}" fetch @com_google_protobuf_protoc_linux_ppcle_64//:all
 
   bazel --output_base="${OUTPUT_BASE}" fetch @gperftools//:all
 
   # Fetch luajit2 explicitly - needed for s390x/ppc64le builds
-  # bazel --output_base="${OUTPUT_BASE}" fetch @luajit2//:all || true
+  bazel --output_base="${OUTPUT_BASE}" fetch @luajit2//:all || true
 
   # Fetch all the rest and check everything using "build --nobuild "option
   # Note: The envoy repository is automatically patched via patches = [...] in WORKSPACE
@@ -148,7 +149,7 @@ function main() {
   run_bazel
   copy_files
   #patch_s390x
-  #patch_ppc64le
+  patch_ppc64le
 
   echo
   echo "Done. Inspect the result with git status"
