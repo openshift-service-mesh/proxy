@@ -1,4 +1,5 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 package(default_visibility = ["//tools/worker:__pkg__"])
 
@@ -10,8 +11,7 @@ cc_library(
     hdrs = ["bazel_substitutions.h"],
     copts = select({
         "//tools:clang-cl": [
-            "-Xclang",
-            "-fno-split-cold-code",
+            "-Xclang=-fno-split-cold-code",
             "/std:c++17",
         ],
         "//tools:msvc": [
@@ -41,6 +41,62 @@ cc_library(
 )
 
 cc_library(
+    name = "color",
+    hdrs = ["color.h"],
+    copts = selects.with_or({
+        ("//tools:clang-cl", "//tools:msvc"): [
+            "/std:c++17",
+        ],
+        "//conditions:default": [
+            "-std=c++17",
+        ],
+    }),
+    deps = [
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "file_system",
+    srcs = ["file_system.cc"],
+    hdrs = ["file_system.h"],
+    copts = selects.with_or({
+        ("//tools:clang-cl", "//tools:msvc"): [
+            "/std:c++17",
+        ],
+        "//conditions:default": [
+            "-std=c++17",
+        ],
+    }),
+    deps = [
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "path_utils",
+    srcs = ["path_utils.cc"],
+    hdrs = ["path_utils.h"],
+    copts = selects.with_or({
+        ("//tools:clang-cl", "//tools:msvc"): [
+            "/std:c++17",
+        ],
+        "//conditions:default": [
+            "-std=c++17",
+        ],
+    }),
+    deps = [
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "target_triple",
+    hdrs = ["target_triple.h"],
+    deps = ["@abseil-cpp//absl/strings"],
+)
+
+cc_library(
     name = "temp_file",
     hdrs = ["temp_file.h"],
     copts = selects.with_or({
@@ -51,14 +107,4 @@ cc_library(
             "-std=c++17",
         ],
     }),
-)
-
-# Consumed by Bazel integration tests.
-filegroup(
-    name = "for_bazel_tests",
-    testonly = 1,
-    srcs = glob(["**"]),
-    visibility = [
-        "//tools:__pkg__",
-    ],
 )

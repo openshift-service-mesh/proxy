@@ -25,6 +25,7 @@
 #include "common/decl.h"
 #include "common/type.h"
 #include "common/value.h"
+#include "compiler/compiler.h"
 #include "eval/public/cel_function_registry.h"
 #include "eval/public/cel_options.h"
 #include "internal/status_macros.h"
@@ -59,7 +60,7 @@ absl::StatusOr<Value> Base64Encode(
     google::protobuf::Arena* absl_nonnull arena) {
   std::string in;
   std::string out;
-  absl::Base64Escape(value.NativeString(in), &out);
+  out = absl::Base64Escape(value.NativeString(in));
   return StringValue(arena, std::move(out));
 }
 
@@ -109,6 +110,10 @@ absl::Status RegisterEncodersFunctions(
 
 CheckerLibrary EncodersCheckerLibrary() {
   return {"cel.lib.ext.encoders", &RegisterEncodersDecls};
+}
+
+CompilerLibrary EncodersCompilerLibrary() {
+  return CompilerLibrary::FromCheckerLibrary(EncodersCheckerLibrary());
 }
 
 }  // namespace cel::extensions

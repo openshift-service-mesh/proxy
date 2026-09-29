@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "absl/base/nullability.h"
+#include "absl/container/btree_set.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
@@ -28,9 +29,11 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "checker/checker_options.h"
+#include "checker/internal/proto_type_mask.h"
 #include "checker/internal/type_check_env.h"
 #include "checker/type_checker.h"
 #include "checker/type_checker_builder.h"
+#include "common/container.h"
 #include "common/decl.h"
 #include "common/type.h"
 #include "common/type_introspector.h"
@@ -38,8 +41,6 @@
 #include "google/protobuf/descriptor.h"
 
 namespace cel::checker_internal {
-
-class TypeCheckerBuilderImpl;
 
 // Builder for TypeChecker instances.
 class TypeCheckerBuilderImpl : public TypeCheckerBuilder {
@@ -50,7 +51,18 @@ class TypeCheckerBuilderImpl : public TypeCheckerBuilder {
       const CheckerOptions& options)
       : options_(options),
         target_config_(&default_config_),
-        descriptor_pool_(std::move(descriptor_pool)) {}
+        template_env_(std::move(descriptor_pool)) {}
+
+  // Constructor for building an extended TypeChecker.
+  explicit TypeCheckerBuilderImpl(const CheckerOptions& options,
+                                  const TypeCheckEnv& template_env)
+      : options_(options),
+        target_config_(&default_config_),
+        template_env_(template_env) {
+    if (auto arena = template_env_.arena(); arena != nullptr) {
+      type_arena_ = std::move(arena);
+    }
+  }
 
   // Move only.
   TypeCheckerBuilderImpl(const TypeCheckerBuilderImpl&) = delete;
@@ -66,6 +78,8 @@ class TypeCheckerBuilderImpl : public TypeCheckerBuilder {
   absl::Status AddVariable(const VariableDecl& decl) override;
   absl::Status AddOrReplaceVariable(const VariableDecl& decl) override;
   absl::Status AddContextDeclaration(absl::string_view type) override;
+  absl::Status AddContextDeclarationWithProtoTypeMask(
+      absl::string_view type, std::vector<std::string> field_paths) override;
 
   absl::Status AddFunction(const FunctionDecl& decl) override;
   absl::Status MergeFunction(const FunctionDecl& decl) override;
@@ -76,17 +90,20 @@ class TypeCheckerBuilderImpl : public TypeCheckerBuilder {
 
   void set_container(absl::string_view container) override;
 
+  void SetExpressionContainer(
+      ExpressionContainer expression_container) override;
+
   const CheckerOptions& options() const override { return options_; }
 
   google::protobuf::Arena* absl_nonnull arena() override {
-    if (arena_ == nullptr) {
-      arena_ = std::make_shared<google::protobuf::Arena>();
+    if (type_arena_ == nullptr) {
+      type_arena_ = std::make_shared<google::protobuf::Arena>();
     }
-    return arena_.get();
+    return type_arena_.get();
   }
 
   const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool() const override {
-    return descriptor_pool_.get();
+    return template_env_.descriptor_pool();
   }
 
  private:
@@ -117,6 +134,11 @@ class TypeCheckerBuilderImpl : public TypeCheckerBuilder {
     std::vector<FunctionDeclRecord> functions;
     std::vector<std::shared_ptr<const TypeIntrospector>> type_providers;
     std::vector<const google::protobuf::Descriptor*> context_types;
+    // Maps context type names to fields names to add as variables.
+    // Only includes context types that are defined with proto type masks.
+    absl::flat_hash_map<absl::string_view, absl::btree_set<absl::string_view>>
+        context_type_fields;
+    std::vector<ProtoTypeMask> proto_type_masks;
   };
 
   absl::Status BuildLibraryConfig(const CheckerLibrary& library,
@@ -125,6 +147,8 @@ class TypeCheckerBuilderImpl : public TypeCheckerBuilder {
   absl::Status ApplyConfig(ConfigRecord config, const TypeCheckerSubset* subset,
                            TypeCheckEnv& env);
 
+  absl::Status ConfigureTypeCheckEnv(TypeCheckEnv& env);
+
   CheckerOptions options_;
   // Default target for configuration changes. Used for direct calls to
   // AddVariable, AddFunction, etc.
@@ -132,12 +156,12 @@ class TypeCheckerBuilderImpl : public TypeCheckerBuilder {
   // Active target for configuration changes.
   // This is used to track which library the change is made on behalf of.
   ConfigRecord* absl_nonnull target_config_;
-  std::shared_ptr<const google::protobuf::DescriptorPool> descriptor_pool_;
-  std::shared_ptr<google::protobuf::Arena> arena_;
+  TypeCheckEnv template_env_;
+  std::shared_ptr<google::protobuf::Arena> type_arena_;
   std::vector<CheckerLibrary> libraries_;
   absl::flat_hash_map<std::string, TypeCheckerSubset> subsets_;
   absl::flat_hash_set<std::string> library_ids_;
-  std::string container_;
+  absl::optional<ExpressionContainer> expression_container_;
   absl::optional<Type> expected_type_;
 };
 

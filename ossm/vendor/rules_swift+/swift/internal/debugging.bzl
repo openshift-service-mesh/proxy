@@ -15,6 +15,7 @@
 """Functions relating to debugging support during compilation and linking."""
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load(":action_names.bzl", "SWIFT_ACTION_MODULEWRAP")
 load(
     ":actions.bzl",
@@ -34,7 +35,8 @@ def ensure_swiftmodule_is_embedded(
         feature_configuration,
         label,
         swiftmodule,
-        swift_toolchain):
+        toolchains,
+        toolchain_type):
     """Ensures that a `.swiftmodule` file is embedded in a library or binary.
 
     This function handles the distinctions between how different object file
@@ -46,7 +48,11 @@ def ensure_swiftmodule_is_embedded(
         feature_configuration: The Swift feature configuration.
         label: The `Label` of the target being built.
         swiftmodule: The `.swiftmodule` file to be wrapped.
-        swift_toolchain: The `SwiftToolchainInfo` provider of the toolchain.
+        toolchains: The struct containing the Swift and C++ toolchain providers,
+            as returned by `swift_common.find_all_toolchains()`.
+        toolchain_type: The toolchain type of the `swift_toolchain` which is
+            used for the proper selection of the execution platform inside
+            `run_toolchain_action`.
 
     Returns:
         A `LinkerInput` containing any flags and/or input files that should be
@@ -55,7 +61,7 @@ def ensure_swiftmodule_is_embedded(
     """
     if is_action_enabled(
         action_name = SWIFT_ACTION_MODULEWRAP,
-        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
     ):
         # For ELF-format binaries, we need to invoke a Swift modulewrap action
         # to wrap the .swiftmodule file in a .o file that gets propagated to the
@@ -77,7 +83,8 @@ def ensure_swiftmodule_is_embedded(
             progress_message = (
                 "Wrapping {} for debugging".format(swiftmodule.short_path)
             ),
-            swift_toolchain = swift_toolchain,
+            swift_toolchain = toolchains.swift,
+            toolchain_type = toolchain_type,
         )
 
         # Passing the `.o` file directly to the linker ensures that it links to
@@ -92,9 +99,7 @@ def ensure_swiftmodule_is_embedded(
     # use the `-add_ast_path` linker flag.
     return cc_common.create_linker_input(
         owner = label,
-        user_link_flags = depset([
-            "-Wl,-add_ast_path,{}".format(swiftmodule.path),
-        ]),
+        user_link_flags = depset(["-Wl,-add_ast_path,{}".format(swiftmodule.path)]),
         additional_inputs = depset([swiftmodule]),
     )
 

@@ -15,29 +15,31 @@
 #include "codelab/exercise4.h"
 
 #include <memory>
+#include <utility>
 
-#include "cel/expr/checked.pb.h"
 #include "google/rpc/context/attribute_context.pb.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
-#include "codelab/cel_compiler.h"
+#include "checker/type_checker_builder.h"
+#include "checker/validation_result.h"
+#include "common/ast.h"
 #include "common/decl.h"
 #include "common/type.h"
+#include "common/value.h"
 #include "compiler/compiler.h"
 #include "compiler/compiler_factory.h"
 #include "compiler/standard_library.h"
-#include "eval/public/activation.h"
-#include "eval/public/activation_bind_helper.h"
-#include "eval/public/builtin_func_registrar.h"
-#include "eval/public/cel_expr_builder_factory.h"
-#include "eval/public/cel_expression.h"
-#include "eval/public/cel_function_adapter.h"
-#include "eval/public/cel_options.h"
-#include "eval/public/cel_value.h"
 #include "internal/status_macros.h"
+#include "runtime/activation.h"
+#include "runtime/bind_proto_to_activation.h"
+#include "runtime/function_adapter.h"
+#include "runtime/runtime.h"
+#include "runtime/runtime_builder.h"
+#include "runtime/runtime_options.h"
+#include "runtime/standard_runtime_builder_factory.h"
 #include "google/protobuf/arena.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/message.h"
@@ -45,40 +47,24 @@
 namespace cel_codelab {
 namespace {
 
-using ::cel::expr::CheckedExpr;
-using ::google::api::expr::runtime::Activation;
-using ::google::api::expr::runtime::BindProtoToActivation;
-using ::google::api::expr::runtime::CelError;
-using ::google::api::expr::runtime::CelExpressionBuilder;
-using ::google::api::expr::runtime::CelMap;
-using ::google::api::expr::runtime::CelValue;
-using ::google::api::expr::runtime::CreateCelExpressionBuilder;
-using ::google::api::expr::runtime::FunctionAdapter;
-using ::google::api::expr::runtime::InterpreterOptions;
-using ::google::api::expr::runtime::RegisterBuiltinFunctions;
 using ::google::rpc::context::AttributeContext;
 
-// Handle the parametric type overload with a single generic CelValue overload.
-absl::StatusOr<bool> ContainsExtensionFunction(google::protobuf::Arena* arena,
-                                               const CelMap* map,
-                                               CelValue::StringHolder key,
-                                               const CelValue& value) {
-  absl::optional<CelValue> entry = (*map)[CelValue::CreateString(key)];
+absl::StatusOr<bool> ContainsExtensionFunction(
+    const cel::MapValue& map, const cel::StringValue& key,
+    const cel::Value& value, const google::protobuf::DescriptorPool* descriptor_pool,
+    google::protobuf::MessageFactory* message_factory, google::protobuf::Arena* arena) {
+  CEL_ASSIGN_OR_RETURN(absl::optional<cel::Value> entry,
+                       map.Find(key, descriptor_pool, message_factory, arena));
   if (!entry.has_value()) {
     return false;
   }
-  if (value.IsInt64() && entry->IsInt64()) {
-    return value.Int64OrDie() == entry->Int64OrDie();
-  } else if (value.IsString() && entry->IsString()) {
-    return value.StringOrDie().value() == entry->StringOrDie().value();
-  }
-  return false;
+  CEL_ASSIGN_OR_RETURN(cel::Value equal, entry->Equal(value, descriptor_pool,
+                                                      message_factory, arena));
+  return equal.IsBool() && equal.GetBool().NativeValue();
 }
 
 absl::StatusOr<std::unique_ptr<cel::Compiler>> MakeConfiguredCompiler() {
-  // Setup for handling for protobuf types.
-  // Using the generated descriptor pool is simpler to configure, but often
-  // adds more types than necessary.
+  // Setup for handling protobuf types.
   google::protobuf::LinkMessageReflection<AttributeContext>();
   CEL_ASSIGN_OR_RETURN(
       std::unique_ptr<cel::CompilerBuilder> builder,
@@ -99,59 +85,66 @@ absl::StatusOr<std::unique_ptr<cel::Compiler>> MakeConfiguredCompiler() {
       cel::MakeFunctionDecl(
           "contains",
           cel::MakeMemberOverloadDecl(
-              "map_contains_string_string", cel::BoolType(),
+              "map_contains_string_value", cel::BoolType(),
               cel::MapType(checker_builder.arena(), cel::StringType(),
                            cel::TypeParamType("V")),
               cel::StringType(), cel::TypeParamType("V"))));
   // Note: we use MergeFunction instead of AddFunction because we are adding
   // an overload to an already declared function with the same name.
   CEL_RETURN_IF_ERROR(checker_builder.MergeFunction(decl));
-  return builder->Build();
+  return std::move(builder)->Build();
 }
 
 class Evaluator {
  public:
-  Evaluator() {
-    builder_ = CreateCelExpressionBuilder(
-        google::protobuf::DescriptorPool::generated_pool(),
-        google::protobuf::MessageFactory::generated_factory(), options_);
-  }
+  Evaluator() = default;
 
   absl::Status SetupEvaluatorEnvironment() {
-    CEL_RETURN_IF_ERROR(RegisterBuiltinFunctions(builder_->GetRegistry()));
+    cel::RuntimeOptions options;
+    CEL_ASSIGN_OR_RETURN(
+        cel::RuntimeBuilder runtime_builder,
+        cel::CreateStandardRuntimeBuilder(
+            google::protobuf::DescriptorPool::generated_pool(), options));
     // Codelab part 2:
-    // Register the map.contains(string, string) function.
-    // Hint: use `FunctionAdapter::CreateAndRegister` to adapt from a free
-    // function ContainsExtensionFunction.
-    using AdapterT = FunctionAdapter<absl::StatusOr<bool>, const CelMap*,
-                                     CelValue::StringHolder, CelValue>;
-    CEL_RETURN_IF_ERROR(AdapterT::CreateAndRegister(
-        "contains", /*receiver_style=*/true, &ContainsExtensionFunction,
-        builder_->GetRegistry()));
+    // Register the map.contains(string, value) function.
+    // Hint: use `TernaryFunctionAdapter::RegisterMemberOverload` to adapt
+    // from a free function ContainsExtensionFunction.
+    using AdapterT =
+        cel::TernaryFunctionAdapter<absl::StatusOr<bool>, const cel::MapValue&,
+                                    const cel::StringValue&, const cel::Value&>;
+    CEL_RETURN_IF_ERROR(
+        AdapterT::RegisterMemberOverload("contains", &ContainsExtensionFunction,
+                                         runtime_builder.function_registry()));
+    CEL_ASSIGN_OR_RETURN(runtime_, std::move(runtime_builder).Build());
     return absl::OkStatus();
   }
 
-  absl::StatusOr<bool> Evaluate(const CheckedExpr& expr,
+  absl::StatusOr<bool> Evaluate(std::unique_ptr<cel::Ast> ast,
                                 const AttributeContext& context) {
-    Activation activation;
-    CEL_RETURN_IF_ERROR(BindProtoToActivation(&context, &arena_, &activation));
-    CEL_ASSIGN_OR_RETURN(auto plan, builder_->CreateExpression(&expr));
-    CEL_ASSIGN_OR_RETURN(CelValue result, plan->Evaluate(activation, &arena_));
+    cel::Activation activation;
+    CEL_RETURN_IF_ERROR(cel::BindProtoToActivation(
+        context, cel::BindProtoUnsetFieldBehavior::kBindDefaultValue,
+        google::protobuf::DescriptorPool::generated_pool(),
+        google::protobuf::MessageFactory::generated_factory(), &arena_, &activation));
 
-    if (bool value; result.GetValue(&value)) {
-      return value;
-    } else if (const CelError* value; result.GetValue(&value)) {
-      return *value;
-    } else {
-      return absl::InvalidArgumentError(
-          absl::StrCat("unexpected return type: ", result.DebugString()));
+    CEL_ASSIGN_OR_RETURN(std::unique_ptr<cel::Program> program,
+                         runtime_->CreateProgram(std::move(ast)));
+    CEL_ASSIGN_OR_RETURN(cel::Value result,
+                         program->Evaluate(&arena_, activation));
+
+    if (result.IsBool()) {
+      return result.GetBool().NativeValue();
     }
+    if (result.IsError()) {
+      return result.GetError().ToStatus();
+    }
+    return absl::InvalidArgumentError(
+        absl::StrCat("unexpected return type: ", result.GetTypeName()));
   }
 
  private:
   google::protobuf::Arena arena_;
-  std::unique_ptr<CelExpressionBuilder> builder_;
-  InterpreterOptions options_;
+  std::unique_ptr<cel::Runtime> runtime_;
 };
 
 }  // namespace
@@ -161,15 +154,20 @@ absl::StatusOr<bool> EvaluateWithExtensionFunction(
   // Prepare a checked expression.
   CEL_ASSIGN_OR_RETURN(std::unique_ptr<cel::Compiler> compiler,
                        MakeConfiguredCompiler());
-  CEL_ASSIGN_OR_RETURN(auto checked_expr,
-                       CompileToCheckedExpr(*compiler, expr));
+  CEL_ASSIGN_OR_RETURN(cel::ValidationResult validation_result,
+                       compiler->Compile(expr));
+  if (!validation_result.IsValid()) {
+    return absl::InvalidArgumentError(validation_result.FormatError());
+  }
 
   // Prepare an evaluation environment.
   Evaluator evaluator;
   CEL_RETURN_IF_ERROR(evaluator.SetupEvaluatorEnvironment());
 
-  // Evaluate a checked expression against a particular activation
-  return evaluator.Evaluate(checked_expr, context);
+  // Evaluate the checked AST against a particular activation.
+  CEL_ASSIGN_OR_RETURN(std::unique_ptr<cel::Ast> ast,
+                       validation_result.ReleaseAst());
+  return evaluator.Evaluate(std::move(ast), context);
 }
 
 }  // namespace cel_codelab

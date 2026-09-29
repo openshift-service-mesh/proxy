@@ -1,6 +1,6 @@
 # Swift Rules for [Bazel](https://bazel.build)
 
-[![Build status](https://badge.buildkite.com/d562b11425e192a8f6ba9c43715bc8364985bccf54e4b9194a.svg?branch=master)](https://buildkite.com/bazel/rules-swift-swift)
+[![Build status](https://badge.buildkite.com/d562b11425e192a8f6ba9c43715bc8364985bccf54e4b9194a.svg?branch=main)](https://buildkite.com/bazel/rules-swift-swift)
 
 This repository contains rules for [Bazel](https://bazel.build) that can be
 used to build Swift libraries, tests, and executables for macOS and Linux.
@@ -17,7 +17,7 @@ If you run into any problems with these rules, please
 Create a simple CLI that can run on macOS, Linux, or Windows:
 
 ```bzl
-load("@build_bazel_rules_swift//swift:swift_binary.bzl", "swift_binary")
+load("@rules_swift//swift:swift_binary.bzl", "swift_binary")
 
 swift_binary(
     name = "cli",
@@ -29,7 +29,7 @@ Create a single library target that can be used by other targets in your
 build:
 
 ```bzl
-load("@build_bazel_rules_swift//swift:swift_library.bzl", "swift_library")
+load("@rules_swift//swift:swift_library.bzl", "swift_library")
 
 swift_library(
     name = "MyLibrary",
@@ -40,7 +40,7 @@ swift_library(
 
 ## Reference Documentation
 
-[Click here](https://github.com/bazelbuild/rules_swift/tree/master/doc)
+[Click here](https://github.com/bazelbuild/rules_swift/tree/main/doc)
 for the reference documentation for the rules and other definitions in this
 repository.
 
@@ -62,8 +62,7 @@ also ensure that the Swift compiler is available on your system path.
 
 ### 2. Configure your workspace
 
-Copy the `WORKSPACE` snippet from [the releases
-page](https://github.com/bazelbuild/rules_swift/releases).
+Copy the `MODULE.bazel` snippet from [the releases page](https://github.com/bazelbuild/rules_swift/releases).
 
 ### 3. Additional configuration (Linux only)
 
@@ -75,6 +74,13 @@ environment variable `CC=clang` when invoking Bazel.
 
 This step is not necessary for macOS users because the Xcode toolchain always
 uses `clang`.
+
+## Building with a Standalone Swift Toolchain
+
+As an alternative to the host's Swift install, `rules_swift` can download
+and register a hermetic Swift toolchain from swift.org. See
+[doc/standalone_toolchain.md](doc/standalone_toolchain.md) for setup
+instructions.
 
 ## Building with Custom Toolchains
 
@@ -92,7 +98,7 @@ toolchain's Info.plist file.
 To list the available toolchains and their bundle identifiers, you can run:
 
 ```command
-bazel run @build_bazel_rules_swift//tools/dump_toolchains
+bazel run @rules_swift//tools/dump_toolchains
 ```
 
 **Linux hosts:** At this time, Bazel uses whichever `swift` executable is
@@ -124,9 +130,11 @@ as best as we can since the 1.0.0 release.
 
 | Bazel release | Minimum supported rules version | Final supported rules version|
 |:-------------------:|:-------------------:|:-------------------------:|
-| 8.x (most recent rolling) | 0.27.0 | current |
-| 7.x | 0.27.0 | current |
-| 6.x | 0.27.0 | current |
+| 10.x (most recent rolling) | 3.5.0 | current |
+| 9.x | 3.5.0 | current |
+| 8.x | 1.14.0 | current |
+| 7.x | 1.8.0 | 3.6.1 |
+| 6.x | 0.27.0 | 2.8.2 |
 | 5.x | 0.25.0 | 1.14.0 |
 | 4.x | 0.19.0 | 0.24.0 |
 | 3.x | 0.14.0 | 0.18.0 |

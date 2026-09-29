@@ -19,6 +19,7 @@
 #include <string>
 #include <utility>
 
+#include "absl/base/nullability.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
@@ -26,8 +27,11 @@
 #include "checker/type_checker.h"
 #include "checker/type_checker_builder.h"
 #include "checker/validation_result.h"
+#include "common/source.h"
 #include "parser/options.h"
 #include "parser/parser_interface.h"
+#include "validator/validator.h"
+#include "google/protobuf/arena.h"
 
 namespace cel {
 
@@ -94,12 +98,14 @@ struct CompilerLibrarySubset {
 struct CompilerOptions {
   ParserOptions parser_options;
   CheckerOptions checker_options;
+  // If true, parse errors will be adapted to issues where possible.
+  bool adapt_parser_errors = false;
 };
 
 // Interface for CEL CompilerBuilder objects.
 //
-// Builder implementations are thread hostile, but should create
-// thread-compatible Compiler instances.
+// Builder implementations do not provide any synchronization themselves,
+// but create thread-compatible Compiler instances.
 class CompilerBuilder {
  public:
   virtual ~CompilerBuilder() = default;
@@ -109,6 +115,7 @@ class CompilerBuilder {
 
   virtual TypeCheckerBuilder& GetCheckerBuilder() = 0;
   virtual ParserBuilder& GetParserBuilder() = 0;
+  virtual Validator& GetValidator() = 0;
 
   virtual absl::StatusOr<std::unique_ptr<Compiler>> Build() = 0;
 };
@@ -123,11 +130,26 @@ class Compiler {
  public:
   virtual ~Compiler() = default;
 
-  virtual absl::StatusOr<ValidationResult> Compile(
-      absl::string_view source, absl::string_view description) const = 0;
+  absl::StatusOr<ValidationResult> Compile(
+      const Source& source, google::protobuf::Arena* absl_nullable arena) const {
+    return CompileImpl(source, arena);
+  }
+
+  absl::StatusOr<ValidationResult> Compile(const Source& source) const {
+    return CompileImpl(source, nullptr);
+  }
+
+  absl::StatusOr<ValidationResult> Compile(
+      absl::string_view source, absl::string_view description,
+      google::protobuf::Arena* absl_nullable arena) const;
 
   absl::StatusOr<ValidationResult> Compile(absl::string_view source) const {
-    return Compile(source, "<input>");
+    return Compile(source, "<input>", nullptr);
+  }
+
+  absl::StatusOr<ValidationResult> Compile(
+      absl::string_view source, absl::string_view description) const {
+    return Compile(source, description, nullptr);
   }
 
   // Accessor for the underlying type checker.
@@ -135,7 +157,38 @@ class Compiler {
 
   // Accessor for the underlying parser.
   virtual const Parser& GetParser() const = 0;
+
+  // Accessor for the underlying validator.
+  virtual const Validator& GetValidator() const = 0;
+
+  // Returns a builder initialized with the configuration of this compiler.
+  //
+  // The returned builder is a copy of the validated environment and may
+  // behave differently than the builder that created this compiler.
+  //
+  // The returned builder does not share state with the compiler and may be
+  // modified independently.
+  virtual std::unique_ptr<CompilerBuilder> ToBuilder() const = 0;
+
+ protected:
+  virtual absl::StatusOr<ValidationResult> CompileImpl(
+      const Source& source, google::protobuf::Arena* absl_nullable arena) const = 0;
 };
+
+inline absl::StatusOr<ValidationResult> Compiler::Compile(
+    absl::string_view source, absl::string_view description,
+    google::protobuf::Arena* absl_nullable arena) const {
+  absl::StatusOr<std::unique_ptr<Source>> source_obj =
+      GetParser().PrepareSource(source, description);
+  if (!source_obj.ok()) {
+    return source_obj.status();
+  }
+  absl::StatusOr<ValidationResult> result = CompileImpl(**source_obj, arena);
+  if (result.ok()) {
+    result->SetSource(std::move(*source_obj));
+  }
+  return result;
+}
 
 }  // namespace cel
 

@@ -82,33 +82,28 @@ def _swift_info_init(
         *,
         direct_swift_infos = [],
         modules = [],
-        swift_infos = [],
-        # TODO: Remove as part of rules_swift 3.0
-        direct_modules = [],
-        transitive_modules = []):
-    if direct_modules or transitive_modules:
-        # buildifier: disable=print
-        print("Using 'direct_modules' and 'transitive_modules' is deprecated " +
-              "and will be removed in a future rules_swift release; use " +
-              "'direct_swift_infos', 'modules', and 'swift_infos' instead.")
-        if direct_modules and (direct_swift_infos or modules or swift_infos):
-            fail("Can't use legacy 'direct_modules' attribute with new " +
-                 "'direct_swift_infos', 'modules', and 'swift_infos' " +
-                 "attributes.")
-        if transitive_modules and (direct_swift_infos or modules or swift_infos):
-            fail("Can't use legacy 'transitive_modules' attribute with new " +
-                 "'direct_swift_infos', 'modules', and 'swift_infos' " +
-                 "attributes.")
-    else:
-        direct_modules = modules + [
-            module
-            for provider in direct_swift_infos
-            for module in provider.direct_modules
-        ]
-        transitive_modules = [
-            provider.transitive_modules
-            for provider in direct_swift_infos + swift_infos
-        ]
+        swift_infos = []):
+    """Creates a `SwiftInfo` provider from the given arguments.
+
+    Args:
+        direct_swift_infos: A list of `SwiftInfo` providers from dependencies
+            whose direct modules should be treated as direct modules in the resulting
+            provider, in addition to their transitive modules being merged.
+        modules: A list of values (as returned by `create_swift_module_context()`)
+            that represent Clang and/or Swift module artifacts that are direct outputs
+            of the target being built.
+        swift_infos: A list of `SwiftInfo` providers from dependencies whose
+            transitive modules should be merged into the resulting provider.
+    """
+    direct_modules = modules + [
+        module
+        for provider in direct_swift_infos
+        for module in provider.direct_modules
+    ]
+    transitive_modules = [
+        provider.transitive_modules
+        for provider in direct_swift_infos + swift_infos
+    ]
 
     return {
         "direct_modules": direct_modules,
@@ -160,6 +155,21 @@ this provider and all of its dependencies.
 """,
     },
     init = _swift_info_init,
+)
+
+SwiftOverlayInfo = provider(
+    doc = """\
+Contains additional artifacts from the Swift overlay for a C/Objective-C module
+that also need to be propagated to clients of the module for it to work
+properly.
+""",
+    fields = {
+        "linking_context": """\
+`CcLinkingContext`. A linking context that contain object files, linker flags,
+and additional linker inputs for Swift code that was compiled as an overlay for
+a C/Objective-C target.
+""",
+    },
 )
 
 SwiftPackageConfigurationInfo = provider(
@@ -271,6 +281,31 @@ has the same fields as documented in `direct_symbol_graphs`.
     },
 )
 
+SwiftSynthesizedInterfaceInfo = provider(
+    doc = "Propagates synthesized Swift interfaces for modules.",
+    fields = {
+        "direct_modules": """\
+`List` of `struct`s representing the synthesized interfaces for the modules in
+the target that propagated this provider. This list will be empty if propagated
+by a target that does not contain any modules that Swift can synthesize an
+interface for (i.e., C, or Swift itself), but its `transitive_modules` may be
+non-empty if it has dependencies for which interfaces can be synthesized.
+
+Each `struct` has the following fields:
+
+*   `module_name`: A string denoting the name of the module whose interface is
+    synthesized.
+
+*   `synthesized_interface`: A `File` containing the synthesized interface.
+""",
+        "transitive_modules": """\
+`Depset` of `struct`s representing the synthesized interfaces for the modules in
+the target that propagated this provider and all of its dependencies. Each
+`struct` has the same fields as documented in `direct_modules`.
+""",
+    },
+)
+
 SwiftToolchainInfo = provider(
     doc = """
 Propagates information about a Swift toolchain to compilation and linking rules
@@ -295,9 +330,6 @@ C/Objective-C modules:
 
 *   `cc_infos`: A list of `CcInfo` providers from targets specified as the
     toolchain's implicit dependencies.
-
-*   `objc_infos`: A list of `apple_common.Objc` providers from targets specified
-    as the toolchain's implicit dependencies.
 
 *   `swift_infos`: A list of `SwiftInfo` providers from targets specified as the
     toolchain's implicit dependencies.
@@ -364,9 +396,6 @@ module for the generated Objective-C header of a Swift module:
 *   `cc_infos`: A list of `CcInfo` providers from targets specified as the
     toolchain's implicit dependencies.
 
-*   `objc_infos`: A list of `apple_common.Objc` providers from targets specified
-    as the toolchain's implicit dependencies.
-
 *   `swift_infos`: A list of `SwiftInfo` providers from targets specified as the
     toolchain's implicit dependencies.
 
@@ -383,9 +412,6 @@ linking target (but not to precompiled explicit C/Objective-C modules):
 
 *   `cc_infos`: A list of `CcInfo` providers from targets specified as the
     toolchain's implicit dependencies.
-
-*   `objc_infos`: A list of `apple_common.Objc` providers from targets specified
-    as the toolchain's implicit dependencies.
 
 *   `swift_infos`: A list of `SwiftInfo` providers from targets specified as the
     toolchain's implicit dependencies.
@@ -412,16 +438,49 @@ These features determine various compilation and debugging behaviors of the
 Swift build rules, and they are also passed to the C++ APIs used when linking
 (so features defined in CROSSTOOL may be used here).
 """,
+        "dynamic_runtime_cc_info": """\
+The `CcInfo` that selects the toolchain's ordinary dynamic Swift runtime, or
+`None` if the toolchain supplies its runtime through implicit dependencies.
+Final links select this provider unless `swift.static_stdlib` is enabled; it is
+not propagated by libraries.
+""",
         "root_dir": """\
 `String`. The workspace-relative root directory of the toolchain.
+""",
+        "static_runtime_cc_info": """\
+A `CcInfo` that selects the static Swift runtime, or `None` if the toolchain
+does not support static Swift runtime linking. Final links select this provider
+when `swift.static_stdlib` is enabled; it is not propagated by libraries.
 """,
         "swift_worker": """\
 `File`. The executable representing the worker executable used to invoke the
 compiler and other Swift tools (for both incremental and non-incremental
 compiles).
 """,
+        "system_modules": """\
+A `struct` with the following fields, which represent providers from targets
+that should be added as implicit dependencies of any compilation or
+linking target:
+
+*   `cc_infos`: A list of `CcInfo` providers from targets specified as the
+    toolchain's implicit dependencies.
+
+*   `swift_infos`: A list of `SwiftInfo` providers from targets specified as the
+    toolchain's implicit dependencies.
+
+For ease of use, this field is never `None`; it will always be a valid `struct`
+containing the fields described above, even if those lists are empty.
+""",
+        "implicit_system_modules": """\
+A `struct` with in the same shape as `system_modules` for the system modules
+that every Swift compilation implicitly requires.
+""",
         "test_configuration": """\
 `Struct` containing the following fields:
+
+*   `binary_name`: A template string used to compute the name of the output
+    binary for `swift_test` rules. Any occurrences of the string `"{name}"` will
+    be substituted by the name of the target.
 
 *   `env`: A `dict` of environment variables to be set when running tests
     that were built with this toolchain.
@@ -429,8 +488,11 @@ compiles).
 *   `execution_requirements`: A `dict` of execution requirements for tests
     that were built with this toolchain.
 
-*   `uses_xctest_bundles`: A Boolean value indicating whether test targets
-    should emit `.xctest` bundles that are launched with the `xctest` tool.
+*   `objc_test_discovery`: A Boolean value indicating whether test targets
+    should discover tests dynamically using the Objective-C runtime.
+
+*   `test_linking_contexts`: A list of `CcLinkingContext`s that provide
+    additional flags to use when linking test binaries.
 
 This is used, for example, with Xcode-based toolchains to ensure that the
 `xctest` helper and coverage tools are found in the correct developer
@@ -448,6 +510,36 @@ command line flag.
 These features determine various compilation and debugging behaviors of the
 Swift build rules, and they are also passed to the C++ APIs used when linking
 (so features defined in CROSSTOOL may be used here).
+""",
+    },
+)
+
+SwiftToolsInfo = provider(
+    doc = """\
+Propagates information about Swift toolchain tools that can be specified as
+labels to pull them into the input root.
+
+This provider allows users to specify Swift toolchain executables as explicit
+dependencies, ensuring they are available in the execution environment.
+""",
+    fields = {
+        "swift_driver": """\
+`File`. The Swift driver executable that orchestrates compilation and linking
+operations. This is the main entry point for invoking the Swift compiler
+toolchain.
+""",
+        "swift_autolink_extract": """\
+`File`. The executable that extracts autolink information from object files.
+This tool is used to determine which libraries need to be linked based on
+import statements in Swift code.
+""",
+        "swift_symbolgraph_extract": """\
+`File`. The executable that extracts symbol graph information from Swift
+modules. This tool generates structured data about APIs, which can be used
+for documentation generation and other tooling purposes.
+""",
+        "additional_inputs": """\
+`List` of `File`s. Additional files to add to the action input root when calling these tools.
 """,
     },
 )
@@ -474,6 +566,7 @@ def create_swift_module_context(
         compilation_context = None,
         is_framework = False,
         is_system = False,
+        label = None,
         swift = None):
     """Creates a value containing Clang/Swift module artifacts of a dependency.
 
@@ -522,6 +615,9 @@ def create_swift_module_context(
             Therefore, it is assumed that any module with `is_system == True`
             must be able to be found using import search paths in order for
             implicit module builds to succeed.
+        label: The Bazel label of the target that owns the module. This is used
+            to produce actionable diagnostics for Swift layering violations.
+            May be `None` for modules that are not owned by a Bazel target.
         swift: A value returned by `create_swift_module_inputs` that
             contains artifacts related to Swift modules, such as the
             `.swiftmodule`, `.swiftdoc`, and/or `.swiftinterface` files emitted
@@ -537,6 +633,7 @@ def create_swift_module_context(
         compilation_context = compilation_context,
         is_framework = is_framework,
         is_system = is_system,
+        label = label,
         name = name,
         swift = swift,
     )
@@ -621,7 +718,8 @@ def create_swift_module_inputs(
         swiftinterface: The `.swiftinterface` file emitted by the compiler for
             this module. May be `None` if no module interface file was emitted.
         swiftmodule: The `.swiftmodule` file emitted by the compiler for this
-            module.
+            module, or a string path to a system-provided prebuilt
+            `.swiftmodule` file.
         swiftsourceinfo: The `.swiftsourceinfo` file emitted by the compiler for
             this module. May be `None` if no source info file was emitted.
 

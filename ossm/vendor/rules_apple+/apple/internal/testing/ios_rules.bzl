@@ -15,6 +15,10 @@
 """Implementation of iOS test rules."""
 
 load(
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
+load(
     "//apple:providers.bzl",
     "AppleBundleInfo",
     "IosApplicationBundleInfo",
@@ -107,6 +111,7 @@ _ios_internal_ui_test_bundle = rule_factory.create_apple_rule(
     implementation = _ios_ui_test_bundle_impl,
     predeclared_outputs = {"archive": "%{name}.zip"},
     attrs = [
+        apple_support.platform_constraint_attrs(),
         rule_attrs.binary_linking_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
             extra_deps_aspects = [
@@ -114,7 +119,6 @@ _ios_internal_ui_test_bundle = rule_factory.create_apple_rule(
                 framework_provider_aspect,
             ],
             is_test_supporting_rule = True,
-            requires_legacy_cc_toolchain = True,
         ),
         rule_attrs.common_bundle_attrs(deps_cfg = transition_support.apple_platform_split_transition),
         rule_attrs.common_tool_attrs(),
@@ -149,7 +153,7 @@ _ios_internal_ui_test_bundle = rule_factory.create_apple_rule(
                 providers = [[AppleBundleInfo, IosFrameworkBundleInfo]],
                 doc = """
 A list of framework targets (see
-[`ios_framework`](https://github.com/bazelbuild/rules_apple/blob/master/doc/rules-ios.md#ios_framework))
+[`ios_framework`](https://github.com/bazelbuild/rules_apple/blob/main/doc/rules-ios.md#ios_framework))
 that this target depends on.
 """,
             ),
@@ -185,6 +189,7 @@ _ios_internal_unit_test_bundle = rule_factory.create_apple_rule(
     implementation = _ios_unit_test_bundle_impl,
     predeclared_outputs = {"archive": "%{name}.zip"},
     attrs = [
+        apple_support.platform_constraint_attrs(),
         rule_attrs.binary_linking_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
             extra_deps_aspects = [
@@ -192,7 +197,6 @@ _ios_internal_unit_test_bundle = rule_factory.create_apple_rule(
                 framework_provider_aspect,
             ],
             is_test_supporting_rule = True,
-            requires_legacy_cc_toolchain = True,
         ),
         rule_attrs.common_bundle_attrs(deps_cfg = transition_support.apple_platform_split_transition),
         rule_attrs.common_tool_attrs(),
@@ -225,7 +229,7 @@ _ios_internal_unit_test_bundle = rule_factory.create_apple_rule(
                 providers = [[AppleBundleInfo, IosFrameworkBundleInfo]],
                 doc = """
 A list of framework targets (see
-[`ios_framework`](https://github.com/bazelbuild/rules_apple/blob/master/doc/rules-ios.md#ios_framework))
+[`ios_framework`](https://github.com/bazelbuild/rules_apple/blob/main/doc/rules-ios.md#ios_framework))
 that this target depends on.
 """,
             ),

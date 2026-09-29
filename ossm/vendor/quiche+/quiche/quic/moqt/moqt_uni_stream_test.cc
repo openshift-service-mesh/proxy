@@ -15,6 +15,7 @@
 #include "absl/types/span.h"
 #include "quiche/quic/core/quic_alarm_factory.h"
 #include "quiche/quic/core/quic_time.h"
+#include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/moqt/moqt_error.h"
 #include "quiche/quic/moqt/moqt_fetch_task.h"
 #include "quiche/quic/moqt/moqt_framer.h"
@@ -41,6 +42,7 @@ namespace moqt::test {
 
 namespace {
 
+using ::testing::IsNull;
 using ::testing::Optional;
 using ::testing::Return;
 using ::testing::ReturnRef;
@@ -125,7 +127,7 @@ class OutgoingSubgroupStreamTest : public quic::test::QuicTest {
   std::shared_ptr<StrictMock<MockTrackPublisher>> track_publisher_;
   StrictMock<MockLivePublisherInterface> visitor_;
   MoqtTraceRecorder trace_recorder_;
-  TrackExtensions track_extensions_;
+  TrackProperties track_properties_;
   quic::MockClock mock_clock_;
   quic::test::MockAlarmFactory alarm_factory_;
   std::unique_ptr<OutgoingSubgroupStream> stream_;
@@ -160,8 +162,8 @@ TEST_F(OutgoingSubgroupStreamTest, OnCanWriteCompleteFlow) {
       .WillOnce(Return(quic::QuicTimeDelta::FromSeconds(1)));
   EXPECT_CALL(visitor_, alternate_delivery_timeout()).WillOnce(Return(false));
   EXPECT_CALL(visitor_, clock()).WillOnce(Return(&mock_clock_));
-  EXPECT_CALL(*track_publisher_, extensions())
-      .WillRepeatedly(ReturnRef(track_extensions_));
+  EXPECT_CALL(*track_publisher_, properties())
+      .WillRepeatedly(ReturnRef(track_properties_));
   EXPECT_CALL(mock_stream_, Writev).WillOnce(Return(absl::OkStatus()));
   EXPECT_CALL(visitor_, OnObjectSent(Location(0, 0)));
   stream_->OnCanWrite();
@@ -204,8 +206,8 @@ TEST_F(OutgoingSubgroupStreamTest, OnCanWriteWriteError) {
       .WillOnce(Return(quic::QuicTimeDelta::FromSeconds(1)));
   EXPECT_CALL(visitor_, alternate_delivery_timeout()).WillOnce(Return(false));
   EXPECT_CALL(visitor_, clock).WillOnce(Return(&mock_clock_));
-  EXPECT_CALL(*track_publisher_, extensions())
-      .WillRepeatedly(ReturnRef(track_extensions_));
+  EXPECT_CALL(*track_publisher_, properties())
+      .WillRepeatedly(ReturnRef(track_properties_));
   EXPECT_CALL(mock_stream_, Writev)
       .WillOnce(Return(absl::InternalError("error")));
   EXPECT_CALL(mock_stream_, ResetWithUserCode(kResetCodeInternalError));
@@ -230,8 +232,8 @@ TEST_F(OutgoingSubgroupStreamTest, OnCanWriteSetsAlarm) {
       .WillRepeatedly(Return(false));
   EXPECT_CALL(visitor_, clock).WillOnce(Return(&mock_clock_));
 
-  EXPECT_CALL(*track_publisher_, extensions())
-      .WillRepeatedly(ReturnRef(track_extensions_));
+  EXPECT_CALL(*track_publisher_, properties())
+      .WillRepeatedly(ReturnRef(track_properties_));
   EXPECT_CALL(mock_stream_, Writev)
       .WillOnce([&](absl::Span<quiche::QuicheMemSlice> data,
                     const webtransport::StreamWriteOptions& options) {
@@ -294,8 +296,8 @@ TEST_F(OutgoingSubgroupStreamTest, SendFragmentedObject) {
   EXPECT_CALL(visitor_, alternate_delivery_timeout())
       .WillRepeatedly(Return(false));
   EXPECT_CALL(visitor_, clock()).WillRepeatedly(Return(&mock_clock_));
-  EXPECT_CALL(*track_publisher_, extensions())
-      .WillRepeatedly(ReturnRef(track_extensions_));
+  EXPECT_CALL(*track_publisher_, properties())
+      .WillRepeatedly(ReturnRef(track_properties_));
   EXPECT_CALL(mock_stream_, Writev)
       .WillOnce([&](absl::Span<quiche::QuicheMemSlice> data,
                     const webtransport::StreamWriteOptions& options) {
@@ -339,8 +341,10 @@ class OutgoingFetchStreamTest : public quic::test::QuicTest {
     EXPECT_CALL(mock_stream_, SetPriority);
     stream_ = std::make_unique<OutgoingFetchStream>(
         framer_, &mock_stream_, 10, webtransport::StreamPriority(),
-        std::move(task_), [this]() { close_callback_called_ = true; },
+        std::move(task_),
+        [this](absl::Status) { close_callback_called_ = true; },
         &trace_recorder_);
+    stream_->Init();
   }
   ~OutgoingFetchStreamTest() override {
     stream_.reset();
@@ -433,9 +437,7 @@ TEST_F(OutgoingFetchStreamTest, OnCanWriteError) {
       .WillOnce(Return(MoqtFetchTask::kError));
   EXPECT_CALL(*task_ptr_, GetStatus())
       .WillOnce(Return(absl::InternalError("error")));
-  EXPECT_CALL(
-      mock_stream_,
-      ResetWithUserCode(static_cast<uint64_t>(absl::StatusCode::kInternal)));
+  EXPECT_CALL(mock_stream_, ResetWithUserCode(kResetCodeInternalError));
   stream_->OnCanWrite();
 }
 
@@ -460,25 +462,28 @@ MoqtObject kDefaultObject = {
     0,     // group_id
     0,     // object_id
     0x80,  // publisher_priority
-    "",    // extension_headers
+    "",    // properties
     MoqtObjectStatus::kNormal,
     0,     // subgroup_id
     true,  // first_object_in_subgroup
     0,     // payload_length
 };
 
-class MockSessionToUniStreamInterface : public SessionToUniStreamInterface {
+class MockObjectSubscriber : public ObjectSubscriber {
  public:
-  MockSessionToUniStreamInterface() = default;
-  ~MockSessionToUniStreamInterface() override = default;
+  MockObjectSubscriber()
+      : ObjectSubscriber(FullTrackName(), 0, MessageParameters(), nullptr) {
+    ON_CALL(*this, is_fetch).WillByDefault(Return(true));
+    ON_CALL(*this, InWindow).WillByDefault(Return(true));
+  }
 
-  MOCK_METHOD(bool, deliver_partial_objects, (), (const, override));
-  MOCK_METHOD(void, OnMalformedTrack, (ObjectSubscriber*), (override));
-  MOCK_METHOD(quiche::QuicheWeakPtr<ObjectSubscriber>, GetSubscribe, (uint64_t),
+  MOCK_METHOD(void, OnStreamOpened, (webtransport::StreamVisitor * stream),
               (override));
-  MOCK_METHOD(quiche::QuicheWeakPtr<ObjectSubscriber>, GetFetch, (uint64_t),
+  MOCK_METHOD(void, OnStreamClosed,
+              (absl::Status status, std::optional<DataStreamIndex> index),
               (override));
-  MOCK_METHOD(void, Error, (MoqtError, absl::string_view), (override));
+  MOCK_METHOD(bool, InWindow, (Location sequence), (const, override));
+  MOCK_METHOD(bool, is_fetch, (), (const, override));
 };
 
 class IncomingDataStreamTest : public quic::test::QuicTest {
@@ -515,6 +520,8 @@ class IncomingDataStreamTest : public quic::test::QuicTest {
 
   webtransport::test::InMemoryStream mock_stream_;
   testing::NiceMock<MockSessionToUniStreamInterface> session_;
+  MockObjectSubscriber mock_control_stream_;
+  MockUpstreamFetchTask mock_fetch_task_;
   quic::MockClock mock_clock_;
   FullTrackName ftn_;
   MoqtSubscribe subscribe_message_;
@@ -535,7 +542,7 @@ TEST_F(IncomingDataStreamTest, DestructorAfterObject) {
   EXPECT_CALL(visitor_, OnObjectFragment);
   stream_->OnObjectMessage(kDefaultObject, "", true);
   EXPECT_CALL(visitor_, OnStreamReset);
-  stream_.reset();
+  stream_->OnResetStreamReceived(kResetCodeCancelled);
 }
 
 TEST_F(IncomingDataStreamTest, DestructorAfterFin) {
@@ -543,9 +550,8 @@ TEST_F(IncomingDataStreamTest, DestructorAfterFin) {
   ProcessAlias(2);
   EXPECT_CALL(visitor_, OnObjectFragment);
   stream_->OnObjectMessage(kDefaultObject, "", true);
-  stream_->OnFin();
   EXPECT_CALL(visitor_, OnStreamFin);
-  stream_.reset();
+  stream_->OnFin();
 }
 
 TEST_F(IncomingDataStreamTest, OnParsingError) {
@@ -572,7 +578,7 @@ TEST_F(IncomingDataStreamTest, OnObjectMessage) {
         EXPECT_EQ(track_name, ftn_);
         EXPECT_EQ(metadata.location, Location(0, 0));
         EXPECT_EQ(metadata.subgroup, 0);
-        EXPECT_EQ(metadata.extensions, "");
+        EXPECT_EQ(metadata.properties, "");
         EXPECT_EQ(metadata.status, MoqtObjectStatus::kNormal);
         EXPECT_EQ(metadata.publisher_priority, 0x80);
         EXPECT_EQ(metadata.payload_length, 8);
@@ -640,58 +646,70 @@ TEST_F(IncomingDataStreamTest, OnObjectMessageDontBufferPartialObject) {
 
 TEST_F(IncomingDataStreamTest, PartialObjectFetch) {
   EXPECT_CALL(session_, deliver_partial_objects()).WillRepeatedly(Return(true));
-  MoqtFetch fetch;
-  fetch.request_id = 3;
-  StandaloneFetch standalone(ftn_, Location(0, 0), Location(0, 9));
-  int objects_available_callbacks = 0;
-  std::unique_ptr<MoqtFetchTask> fetch_task;
-  auto upstream_fetch = std::make_unique<UpstreamFetch>(
-      fetch, standalone,
-      [&](std::unique_ptr<MoqtFetchTask> t) { fetch_task = std::move(t); },
-      []() {});
-  upstream_fetch->OnFetchResult(Location(0, 9), absl::OkStatus(), []() {});
-  UpstreamFetch::UpstreamFetchTask* task = upstream_fetch->task();
-  task->SetObjectAvailableCallback([&]() { ++objects_available_callbacks; });
 
   uint8_t stream_header[] = {0x05, 0x03};
   mock_stream_.Receive(
       absl::string_view(reinterpret_cast<const char*>(stream_header), 2),
       false);
   EXPECT_CALL(session_, GetFetch(3))
-      .WillOnce(Return(upstream_fetch->weak_ptr()));
+      .WillOnce(Return(mock_control_stream_.weak_ptr()));
+  EXPECT_CALL(mock_control_stream_, OnStreamOpened(stream_.get()))
+      .WillOnce([&](webtransport::StreamVisitor* visitor) {
+        EXPECT_EQ(visitor, stream_.get());
+        stream_->set_fetch_task(&mock_fetch_task_);
+      });
+  TaskDestroyedCallback task_destroyed_callback;
+  CanReadCallback can_read_callback;
+  EXPECT_CALL(mock_fetch_task_, set_task_destroyed_callback)
+      .WillOnce([&](TaskDestroyedCallback callback) {
+        task_destroyed_callback = std::move(callback);
+      });
+  EXPECT_CALL(mock_fetch_task_, set_can_read_callback)
+      .WillOnce([&](CanReadCallback callback) {
+        can_read_callback = std::move(callback);
+      });
   stream_->OnCanRead();
 
-  MoqtObject sent_object = MoqtObject(
+  const MoqtObject sent_object = MoqtObject(
       /*request_id=*/0, /*group_id=*/0,
-      /*object_id=*/0, /*publisher_priority=*/0x80, /*extension_headers=*/"",
+      /*object_id=*/0, /*publisher_priority=*/0x80, /*properties=*/"",
       MoqtObjectStatus::kNormal, /*subgroup_id=*/0,
       /*first_object_in_subgroup=*/true, /*payload_length=*/12);
+  EXPECT_CALL(mock_fetch_task_, HasObject).WillOnce(Return(false));
+  EXPECT_CALL(mock_fetch_task_, NewObject)
+      .WillOnce([&](const MoqtObject& message) {
+        EXPECT_EQ(message.group_id, sent_object.group_id);
+        EXPECT_EQ(message.object_id, sent_object.object_id);
+        EXPECT_EQ(message.publisher_priority, sent_object.publisher_priority);
+        EXPECT_EQ(message.properties, sent_object.properties);
+        EXPECT_EQ(message.object_status, sent_object.object_status);
+        EXPECT_EQ(message.subgroup_id, sent_object.subgroup_id);
+        EXPECT_EQ(message.first_object_in_subgroup,
+                  sent_object.first_object_in_subgroup);
+        EXPECT_EQ(message.payload_length, sent_object.payload_length);
+      });
+  EXPECT_CALL(mock_fetch_task_, NeedsMorePayload).WillOnce(Return(true));
+  EXPECT_CALL(mock_fetch_task_, AppendPayloadToObject("foo"));
   stream_->OnObjectMessage(sent_object, "foo", false);
-  task->NotifyNewObject();
-  EXPECT_EQ(objects_available_callbacks, 1);
-  PublishedObject received_object;
-  EXPECT_EQ(task->GetNextObject(received_object),
-            MoqtFetchTask::GetNextObjectResult::kSuccess);
-  EXPECT_EQ(task->GetNextObject(received_object),
-            MoqtFetchTask::GetNextObjectResult::kPending);
-  EXPECT_EQ(sent_object.object_id, received_object.metadata.location.object);
-  EXPECT_EQ("foo", received_object.payload[0].AsStringView());
+
   // Second and third fragments.
+  EXPECT_CALL(mock_fetch_task_, HasObject).WillOnce(Return(true));
+  EXPECT_CALL(mock_fetch_task_, NeedsMorePayload).WillOnce(Return(true));
+  EXPECT_CALL(mock_fetch_task_, AppendPayloadToObject("bar"));
   stream_->OnObjectMessage(sent_object, "bar", false);
-  task->NotifyNewObject();
-  EXPECT_EQ(objects_available_callbacks, 2);
+  EXPECT_CALL(mock_fetch_task_, HasObject).WillOnce(Return(true));
+  EXPECT_CALL(mock_fetch_task_, NeedsMorePayload).WillOnce(Return(true));
+  EXPECT_CALL(mock_fetch_task_, AppendPayloadToObject("baz"));
   stream_->OnObjectMessage(sent_object, "baz", false);
-  task->NotifyNewObject();
-  EXPECT_EQ(objects_available_callbacks, 2);
-  received_object.payload.clear();
-  EXPECT_EQ(task->GetNextObject(received_object),
-            MoqtFetchTask::GetNextObjectResult::kSuccess);
-  EXPECT_EQ(task->GetNextObject(received_object),
-            MoqtFetchTask::GetNextObjectResult::kPending);
-  EXPECT_EQ(sent_object.object_id, received_object.metadata.location.object);
-  ASSERT_EQ(received_object.payload.size(), 2);
-  EXPECT_EQ("bar", received_object.payload[0].AsStringView());
-  EXPECT_EQ("baz", received_object.payload[1].AsStringView());
+
+  // Cleanup
+  EXPECT_CALL(mock_fetch_task_,
+              OnStreamAndFetchClosed(absl::CancelledError("stream destroyed")));
+  EXPECT_CALL(mock_fetch_task_, set_task_destroyed_callback(IsNull()));
+  EXPECT_CALL(mock_fetch_task_, set_can_read_callback(IsNull()));
+  EXPECT_CALL(mock_control_stream_,
+              OnStreamClosed(absl::CancelledError("stream destroyed"),
+                             std::optional<DataStreamIndex>()));
 }
 
 TEST_F(IncomingDataStreamTest, OnObjectMessageInvalidTrack) {
@@ -769,14 +787,9 @@ TEST_F(IncomingDataStreamTest, OnCanReadFetchNewTrackAliasInvalidFetch) {
 }
 
 TEST_F(IncomingDataStreamTest, OnCanReadFetchNewTrackAliasSuccess) {
-  MoqtFetch fetch;
-  fetch.request_id = 3;
-  StandaloneFetch standalone(ftn_, Location(0, 0), Location(0, 9));
-  auto upstream_fetch = std::make_unique<UpstreamFetch>(
-      fetch, standalone, [](std::unique_ptr<MoqtFetchTask>) {}, []() {});
-  upstream_fetch->OnFetchResult(Location(0, 0), absl::OkStatus(), []() {});
   EXPECT_CALL(session_, GetFetch(3))
-      .WillOnce(Return(upstream_fetch->weak_ptr()));
+      .WillOnce(Return(mock_control_stream_.weak_ptr()));
+  EXPECT_CALL(mock_control_stream_, OnStreamOpened(stream_.get()));
   char fetch_bytes[] = {0x05, 0x03};
   mock_stream_.Receive(absl::string_view(fetch_bytes, 2), false);
   stream_->OnCanRead();

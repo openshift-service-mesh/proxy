@@ -16,11 +16,7 @@
 
 load("@bazel_skylib//lib:types.bzl", "types")
 load("//swift/toolchains/config:action_config.bzl", "ConfigResultInfo")
-load(":features.bzl", "are_all_features_enabled")
-
-# This is a proxy for being on bazel 7.x which has
-# --incompatible_merge_fixed_and_default_shell_env enabled by default
-USE_DEFAULT_SHELL_ENV = not hasattr(apple_common, "apple_crosstool_transition")
+load(":features.bzl", "are_all_features_enabled", "gather_toolchains")
 
 def _apply_action_configs(
         action_name,
@@ -113,17 +109,30 @@ def _apply_action_configs(
         transitive_inputs = transitive_inputs,
     )
 
-def is_action_enabled(action_name, swift_toolchain):
+def is_action_enabled(action_name, swift_toolchain = None, toolchains = None):
     """Returns True if the given action is enabled in the Swift toolchain.
 
+    This function should be used before invoking APIs that invoke actions that
+    might not be available depending on the version of the Swift toolchain. For
+    example, `SwiftSynthesizeInterface` actions (created by calling
+    `swift_common.synthesize_interface`) are only available starting from Swift
+    6.1.
+
     Args:
-        action_name: The name of the action.
+        action_name: The name of the action, which corresponds to the action's
+            mnemonic (for example, `SwiftSynthesizeInterface`).
         swift_toolchain: The Swift toolchain being used to build.
+        toolchains: The struct containing the Swift and C++ toolchain providers,
+            as returned by `swift_common.find_all_toolchains()`.
 
     Returns:
         True if the action is enabled, or False if it is not.
     """
-    tool_config = swift_toolchain.tool_configs.get(action_name)
+    toolchains = gather_toolchains(
+        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
+    )
+    tool_config = toolchains.swift.tool_configs.get(action_name)
     return bool(tool_config)
 
 def run_toolchain_action(
@@ -135,6 +144,7 @@ def run_toolchain_action(
         prerequisites,
         swift_toolchain,
         mnemonic = None,
+        toolchain_type,
         **kwargs):
     """Runs an action using the toolchain's tool and action configurations.
 
@@ -152,6 +162,9 @@ def run_toolchain_action(
             by the action configurators to add files and other dependent data to
             the command line.
         swift_toolchain: The Swift toolchain being used to build.
+        toolchain_type: A toolchain type of the `swift_toolchain` which is used
+            for the proper selection of the execution platform inside
+            `run_toolchain_action`.
         **kwargs: Additional arguments passed directly to `actions.run`.
     """
     tool_config = swift_toolchain.tool_configs.get(action_name)
@@ -219,6 +232,7 @@ def run_toolchain_action(
         env = tool_config.env,
         exec_group = exec_group,
         executable = executable,
+        toolchain = toolchain_type,
         execution_requirements = execution_requirements,
         inputs = depset(
             action_inputs.inputs,
@@ -230,6 +244,6 @@ def run_toolchain_action(
             tools,
             transitive = action_inputs.additional_tools,
         ),
-        use_default_shell_env = USE_DEFAULT_SHELL_ENV,
+        use_default_shell_env = True,
         **kwargs
     )

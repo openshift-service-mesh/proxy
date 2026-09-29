@@ -25,6 +25,7 @@
 #include "absl/log/absl_check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
@@ -38,7 +39,14 @@ namespace cel {
 
 namespace {
 
+constexpr absl::string_view kOptionalMapVar = "@target";
+
 using google::api::expr::common::CelOperator;
+
+bool IsSimpleIdentifier(const Expr& expr) {
+  return expr.has_ident_expr() && !expr.ident_expr().name().empty() &&
+         !absl::StartsWith(expr.ident_expr().name(), ".");
+}
 
 inline MacroExpander ToMacroExpander(GlobalMacroExpander expander) {
   ABSL_DCHECK(expander);
@@ -87,14 +95,14 @@ absl::optional<Expr> ExpandAllMacro(MacroExprFactory& factory, Expr& target,
   if (args.size() != 2) {
     return factory.ReportError("all() requires 2 arguments");
   }
-  if (!args[0].has_ident_expr() || args[0].ident_expr().name().empty()) {
+  if (!IsSimpleIdentifier(args[0])) {
     return factory.ReportErrorAt(
         args[0], "all() variable name must be a simple identifier");
   }
-  if (args[0].ident_expr().name() == kAccumulatorVariableName) {
-    return factory.ReportErrorAt(args[1],
-                                 absl::StrCat("all() variable name cannot be ",
-                                              kAccumulatorVariableName));
+  if (args[0].ident_expr().name() == kDeprecatedAccumulatorVariableName) {
+    return factory.ReportErrorAt(
+        args[1], absl::StrCat("all() variable name cannot be ",
+                              kDeprecatedAccumulatorVariableName));
   }
   auto init = factory.NewBoolConst(true);
   auto condition =
@@ -119,14 +127,14 @@ absl::optional<Expr> ExpandExistsMacro(MacroExprFactory& factory, Expr& target,
   if (args.size() != 2) {
     return factory.ReportError("exists() requires 2 arguments");
   }
-  if (!args[0].has_ident_expr() || args[0].ident_expr().name().empty()) {
+  if (!IsSimpleIdentifier(args[0])) {
     return factory.ReportErrorAt(
         args[0], "exists() variable name must be a simple identifier");
   }
-  if (args[0].ident_expr().name() == kAccumulatorVariableName) {
+  if (args[0].ident_expr().name() == kDeprecatedAccumulatorVariableName) {
     return factory.ReportErrorAt(
         args[1], absl::StrCat("exists() variable name cannot be ",
-                              kAccumulatorVariableName));
+                              kDeprecatedAccumulatorVariableName));
   }
   auto init = factory.NewBoolConst(false);
   auto condition = factory.NewCall(
@@ -153,14 +161,14 @@ absl::optional<Expr> ExpandExistsOneMacro(MacroExprFactory& factory,
   if (args.size() != 2) {
     return factory.ReportError("exists_one() requires 2 arguments");
   }
-  if (!args[0].has_ident_expr() || args[0].ident_expr().name().empty()) {
+  if (!IsSimpleIdentifier(args[0])) {
     return factory.ReportErrorAt(
         args[0], "exists_one() variable name must be a simple identifier");
   }
-  if (args[0].ident_expr().name() == kAccumulatorVariableName) {
+  if (args[0].ident_expr().name() == kDeprecatedAccumulatorVariableName) {
     return factory.ReportErrorAt(
         args[1], absl::StrCat("exists_one() variable name cannot be ",
-                              kAccumulatorVariableName));
+                              kDeprecatedAccumulatorVariableName));
   }
   auto init = factory.NewIntConst(0);
   auto condition = factory.NewBoolConst(true);
@@ -192,14 +200,14 @@ absl::optional<Expr> ExpandMap2Macro(MacroExprFactory& factory, Expr& target,
   if (args.size() != 2) {
     return factory.ReportError("map() requires 2 arguments");
   }
-  if (!args[0].has_ident_expr() || args[0].ident_expr().name().empty()) {
+  if (!IsSimpleIdentifier(args[0])) {
     return factory.ReportErrorAt(
         args[0], "map() variable name must be a simple identifier");
   }
-  if (args[0].ident_expr().name() == kAccumulatorVariableName) {
-    return factory.ReportErrorAt(args[1],
-                                 absl::StrCat("map() variable name cannot be ",
-                                              kAccumulatorVariableName));
+  if (args[0].ident_expr().name() == kDeprecatedAccumulatorVariableName) {
+    return factory.ReportErrorAt(
+        args[1], absl::StrCat("map() variable name cannot be ",
+                              kDeprecatedAccumulatorVariableName));
   }
   auto init = factory.NewList();
   auto condition = factory.NewBoolConst(true);
@@ -225,14 +233,14 @@ absl::optional<Expr> ExpandMap3Macro(MacroExprFactory& factory, Expr& target,
   if (args.size() != 3) {
     return factory.ReportError("map() requires 3 arguments");
   }
-  if (!args[0].has_ident_expr() || args[0].ident_expr().name().empty()) {
+  if (!IsSimpleIdentifier(args[0])) {
     return factory.ReportErrorAt(
         args[0], "map() variable name must be a simple identifier");
   }
-  if (args[0].ident_expr().name() == kAccumulatorVariableName) {
-    return factory.ReportErrorAt(args[1],
-                                 absl::StrCat("map() variable name cannot be ",
-                                              kAccumulatorVariableName));
+  if (args[0].ident_expr().name() == kDeprecatedAccumulatorVariableName) {
+    return factory.ReportErrorAt(
+        args[1], absl::StrCat("map() variable name cannot be ",
+                              kDeprecatedAccumulatorVariableName));
   }
   auto init = factory.NewList();
   auto condition = factory.NewBoolConst(true);
@@ -260,14 +268,14 @@ absl::optional<Expr> ExpandFilterMacro(MacroExprFactory& factory, Expr& target,
   if (args.size() != 2) {
     return factory.ReportError("filter() requires 2 arguments");
   }
-  if (!args[0].has_ident_expr() || args[0].ident_expr().name().empty()) {
+  if (!IsSimpleIdentifier(args[0])) {
     return factory.ReportErrorAt(
         args[0], "filter() variable name must be a simple identifier");
   }
-  if (args[0].ident_expr().name() == kAccumulatorVariableName) {
+  if (args[0].ident_expr().name() == kDeprecatedAccumulatorVariableName) {
     return factory.ReportErrorAt(
         args[1], absl::StrCat("filter() variable name cannot be ",
-                              kAccumulatorVariableName));
+                              kDeprecatedAccumulatorVariableName));
   }
   auto name = args[0].ident_expr().name();
 
@@ -298,31 +306,61 @@ absl::optional<Expr> ExpandOptMapMacro(MacroExprFactory& factory, Expr& target,
   if (args.size() != 2) {
     return factory.ReportError("optMap() requires 2 arguments");
   }
-  if (!args[0].has_ident_expr() || args[0].ident_expr().name().empty()) {
+  if (!IsSimpleIdentifier(args[0])) {
     return factory.ReportErrorAt(
         args[0], "optMap() variable name must be a simple identifier");
   }
-  if (args[0].ident_expr().name() == kAccumulatorVariableName) {
+  if (args[0].ident_expr().name() == kDeprecatedAccumulatorVariableName) {
     return factory.ReportErrorAt(
         args[1], absl::StrCat("optMap() variable name cannot be ",
-                              kAccumulatorVariableName));
+                              kDeprecatedAccumulatorVariableName));
   }
   auto var_name = args[0].ident_expr().name();
 
-  auto target_copy = factory.Copy(target);
-  std::vector<Expr> call_args;
-  call_args.reserve(3);
-  call_args.push_back(factory.NewMemberCall("hasValue", std::move(target)));
+  if (target.has_ident_expr()) {
+    auto target_copy = factory.Copy(target);
+    std::vector<Expr> call_args;
+    call_args.reserve(3);
+    call_args.push_back(factory.NewMemberCall("hasValue", std::move(target)));
+    auto iter_range = factory.NewList();
+    auto accu_init = factory.NewMemberCall("value", std::move(target_copy));
+    auto condition = factory.NewBoolConst(false);
+    auto fold = factory.NewComprehension(
+        "#unused", std::move(iter_range), std::move(var_name),
+        std::move(accu_init), std::move(condition), std::move(args[0]),
+        std::move(args[1]));
+    call_args.push_back(factory.NewCall("optional.of", std::move(fold)));
+    call_args.push_back(factory.NewCall("optional.none"));
+    return factory.NewCall(CelOperator::CONDITIONAL, std::move(call_args));
+  }
+
+  // If the target is complex, use an internal bind expression to avoid
+  // repeating it and blowing up the AST in the expansion
+  auto tmp = factory.NewIdent(kOptionalMapVar);
+  auto tmp_copy = factory.Copy(tmp);
+
   auto iter_range = factory.NewList();
-  auto accu_init = factory.NewMemberCall("value", std::move(target_copy));
+  auto accu_init = factory.NewMemberCall("value", std::move(tmp_copy));
   auto condition = factory.NewBoolConst(false);
+  auto loop_step = std::move(args[0]);
   auto fold = factory.NewComprehension(
       "#unused", std::move(iter_range), std::move(var_name),
-      std::move(accu_init), std::move(condition), std::move(args[0]),
+      std::move(accu_init), std::move(condition), std::move(loop_step),
       std::move(args[1]));
+  std::vector<Expr> call_args;
+  call_args.reserve(3);
+  call_args.push_back(factory.NewMemberCall("hasValue", std::move(tmp)));
   call_args.push_back(factory.NewCall("optional.of", std::move(fold)));
   call_args.push_back(factory.NewCall("optional.none"));
-  return factory.NewCall(CelOperator::CONDITIONAL, std::move(call_args));
+  auto result = factory.NewCall(CelOperator::CONDITIONAL, std::move(call_args));
+
+  iter_range = factory.NewList();
+  accu_init = std::move(target);
+  condition = factory.NewBoolConst(false);
+  loop_step = factory.NewIdent(kOptionalMapVar);
+  return factory.NewComprehension(
+      "#unused", std::move(iter_range), kOptionalMapVar, std::move(accu_init),
+      std::move(condition), loop_step, std::move(result));
 }
 
 Macro MakeOptMapMacro() {
@@ -337,30 +375,58 @@ absl::optional<Expr> ExpandOptFlatMapMacro(MacroExprFactory& factory,
   if (args.size() != 2) {
     return factory.ReportError("optFlatMap() requires 2 arguments");
   }
-  if (!args[0].has_ident_expr() || args[0].ident_expr().name().empty()) {
+  if (!IsSimpleIdentifier(args[0])) {
     return factory.ReportErrorAt(
         args[0], "optFlatMap() variable name must be a simple identifier");
   }
-  if (args[0].ident_expr().name() == kAccumulatorVariableName) {
+  if (args[0].ident_expr().name() == kDeprecatedAccumulatorVariableName) {
     return factory.ReportErrorAt(
         args[1], absl::StrCat("optFlatMap() variable name cannot be ",
-                              kAccumulatorVariableName));
+                              kDeprecatedAccumulatorVariableName));
   }
   auto var_name = args[0].ident_expr().name();
 
-  auto target_copy = factory.Copy(target);
+  if (target.has_ident_expr()) {
+    auto target_copy = factory.Copy(target);
+    std::vector<Expr> call_args;
+    call_args.reserve(3);
+    call_args.push_back(factory.NewMemberCall("hasValue", std::move(target)));
+    auto iter_range = factory.NewList();
+    auto accu_init = factory.NewMemberCall("value", std::move(target_copy));
+    auto condition = factory.NewBoolConst(false);
+    call_args.push_back(factory.NewComprehension(
+        "#unused", std::move(iter_range), std::move(var_name),
+        std::move(accu_init), std::move(condition), std::move(args[0]),
+        std::move(args[1])));
+    call_args.push_back(factory.NewCall("optional.none"));
+    return factory.NewCall(CelOperator::CONDITIONAL, std::move(call_args));
+  }
+
+  auto tmp = factory.NewIdent(kOptionalMapVar);
+  auto tmp_copy = factory.Copy(tmp);
+
+  auto iter_range = factory.NewList();
+  auto accu_init = factory.NewMemberCall("value", std::move(tmp_copy));
+  auto condition = factory.NewBoolConst(false);
+  auto loop_step = std::move(args[0]);
+  auto inner = factory.NewComprehension(
+      "#unused", std::move(iter_range), std::move(var_name),
+      std::move(accu_init), std::move(condition), std::move(loop_step),
+      std::move(args[1]));
   std::vector<Expr> call_args;
   call_args.reserve(3);
-  call_args.push_back(factory.NewMemberCall("hasValue", std::move(target)));
-  auto iter_range = factory.NewList();
-  auto accu_init = factory.NewMemberCall("value", std::move(target_copy));
-  auto condition = factory.NewBoolConst(false);
-  call_args.push_back(factory.NewComprehension(
-      "#unused", std::move(iter_range), std::move(var_name),
-      std::move(accu_init), std::move(condition), std::move(args[0]),
-      std::move(args[1])));
+  call_args.push_back(factory.NewMemberCall("hasValue", std::move(tmp)));
+  call_args.push_back(std::move(inner));
   call_args.push_back(factory.NewCall("optional.none"));
-  return factory.NewCall(CelOperator::CONDITIONAL, std::move(call_args));
+  auto result = factory.NewCall(CelOperator::CONDITIONAL, std::move(call_args));
+
+  iter_range = factory.NewList();
+  accu_init = std::move(target);
+  condition = factory.NewBoolConst(false);
+  loop_step = factory.NewIdent(kOptionalMapVar);
+  return factory.NewComprehension(
+      "#unused", std::move(iter_range), kOptionalMapVar, std::move(accu_init),
+      std::move(condition), loop_step, std::move(result));
 }
 
 Macro MakeOptFlatMapMacro() {

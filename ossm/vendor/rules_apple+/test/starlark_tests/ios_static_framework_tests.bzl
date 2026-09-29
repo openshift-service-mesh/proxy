@@ -15,10 +15,6 @@
 """ios_static_framework Starlark tests."""
 
 load(
-    "//test/starlark_tests/rules:analysis_failure_message_test.bzl",
-    "analysis_failure_message_test",
-)
-load(
     "//test/starlark_tests/rules:common_verification_tests.bzl",
     "archive_contents_test",
 )
@@ -34,22 +30,7 @@ def ios_static_framework_test_suite(name):
       name: the base name to be used in things created by this macro
     """
 
-    # Tests Swift ios_static_framework builds correctly for sim_arm64, and x86_64 cpu's.
-    archive_contents_test(
-        name = "{}_swift_sim_arm64_builds_using_cpu".format(name),
-        build_type = "simulator",
-        target_under_test = "//test/starlark_tests/targets_under_test/ios:swift_ios_static_framework",
-        apple_cpu = "ios_sim_arm64",
-        cpus = {
-            "ios_multi_cpus": [],
-        },
-        binary_test_file = "$BUNDLE_ROOT/SwiftFmwk",
-        binary_test_architecture = "arm64",
-        macho_load_commands_contain = ["cmd LC_BUILD_VERSION", "minos " + common.min_os_ios.arm_sim_support, "platform IOSSIMULATOR"],
-        macho_load_commands_not_contain = ["cmd LC_VERSION_MIN_IPHONEOS"],
-        tags = [name],
-    )
-
+    # Tests Swift ios_static_framework builds correctly for sim_arm64 and x86_64 cpus.
     archive_contents_test(
         name = "{}_swift_sim_arm64_builds_using_ios_multi_cpus".format(name),
         build_type = "simulator",
@@ -77,15 +58,15 @@ def ios_static_framework_test_suite(name):
         tags = [name],
     )
 
-    # Tests Swift ios_static_framework builds correctly for apple_platforms.
+    # Tests Swift ios_static_framework builds correctly for platforms.
     archive_contents_test(
-        name = "{}_swift_sim_arm64_builds_using_apple_platforms".format(name),
-        apple_platforms = [
-            "@build_bazel_apple_support//platforms:ios_sim_arm64",
-            "@build_bazel_apple_support//platforms:ios_x86_64",
-        ],
+        name = "{}_swift_sim_arm64_builds_using_platform".format(name),
         build_type = "simulator",
         target_under_test = "//test/starlark_tests/targets_under_test/ios:swift_ios_static_framework",
+        cpus = {
+            "platforms": ["@apple_support//platforms:ios_sim_arm64"],
+            "ios_multi_cpus": [],
+        },
         binary_test_file = "$BUNDLE_ROOT/SwiftFmwk",
         binary_test_architecture = "arm64",
         macho_load_commands_contain = ["cmd LC_BUILD_VERSION", "platform IOSSIMULATOR"],
@@ -93,14 +74,14 @@ def ios_static_framework_test_suite(name):
         tags = [name],
     )
     archive_contents_test(
-        name = "{}_swift_x86_64_builds_using_apple_platforms".format(name),
-        apple_platforms = [
-            "@build_bazel_apple_support//platforms:ios_sim_arm64",
-            "@build_bazel_apple_support//platforms:ios_x86_64",
-        ],
+        name = "{}_swift_x86_64_builds_using_platform".format(name),
         build_type = "simulator",
         binary_test_file = "$BUNDLE_ROOT/SwiftFmwk",
         target_under_test = "//test/starlark_tests/targets_under_test/ios:swift_ios_static_framework",
+        cpus = {
+            "platforms": ["@apple_support//platforms:ios_x86_64"],
+            "ios_multi_cpus": [],
+        },
         binary_test_architecture = "x86_64",
         macho_load_commands_contain = ["cmd LC_BUILD_VERSION", "platform IOSSIMULATOR"],
         macho_load_commands_not_contain = ["cmd LC_VERSION_MIN_IPHONEOS"],
@@ -120,7 +101,6 @@ def ios_static_framework_test_suite(name):
         target_under_test = "//test/starlark_tests/targets_under_test/ios:static_fmwk_with_swift_and_avoid_deps",
         contains = [
             "$BUNDLE_ROOT/Modules/SwiftFmwkUpperLib.swiftmodule/x86_64.swiftdoc",
-            "$BUNDLE_ROOT/Modules/SwiftFmwkUpperLib.swiftmodule/x86_64.swiftinterface",
         ],
         binary_test_file = "$BUNDLE_ROOT/SwiftFmwkUpperLib",
         binary_test_architecture = "x86_64",
@@ -188,17 +168,7 @@ def ios_static_framework_test_suite(name):
             "$BUNDLE_ROOT/Headers/SwiftStaticFmwkWithGenHeader.h",
             "$BUNDLE_ROOT/Modules/module.modulemap",
             "$BUNDLE_ROOT/Modules/SwiftStaticFmwkWithGenHeader.swiftmodule/x86_64.swiftdoc",
-            "$BUNDLE_ROOT/Modules/SwiftStaticFmwkWithGenHeader.swiftmodule/x86_64.swiftinterface",
         ],
-        tags = [name],
-    )
-
-    # Test that an actionable error is produced for the user when a header to
-    # bundle conflicts with the generated umbrella header.
-    analysis_failure_message_test(
-        name = "{}_umbrella_header_conflict_test".format(name),
-        target_under_test = "//test/starlark_tests/targets_under_test/ios:static_framework_with_umbrella_header_conflict",
-        expected_error = "Found imported header file(s) which conflict(s) with the name \"UmbrellaHeaderConflict.h\" of the generated umbrella header for this target. Check input files:\ntest/starlark_tests/resources/UmbrellaHeaderConflict.h\n\nPlease remove the references to these files from your rule's list of headers to import or rename the headers if necessary.",
         tags = [name],
     )
 

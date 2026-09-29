@@ -24,6 +24,7 @@
 #include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "base/builtins.h"
@@ -38,6 +39,7 @@
 #include "eval/eval/evaluator_core.h"
 #include "eval/eval/regex_match_step.h"
 #include "internal/casts.h"
+#include "internal/re2_options.h"
 #include "internal/status_macros.h"
 #include "re2/re2.h"
 
@@ -104,14 +106,9 @@ class RegexProgramBuilder final {
       }
       programs_.erase(existing);
     }
-    auto program = std::make_shared<RE2>(pattern);
-    if (max_program_size_ > 0 && program->ProgramSize() > max_program_size_) {
-      return absl::InvalidArgumentError("exceeded RE2 max program size");
-    }
-    if (!program->ok()) {
-      return absl::InvalidArgumentError(
-          "invalid_argument unsupported RE2 pattern for matches");
-    }
+    auto program =
+        std::make_shared<RE2>(pattern, cel::internal::MakeRE2Options());
+    CEL_RETURN_IF_ERROR(cel::internal::CheckRE2(*program, max_program_size_));
     programs_.insert({std::move(pattern), program});
     return program;
   }
@@ -148,7 +145,7 @@ class RegexPrecompilationOptimization : public ProgramOptimizer {
 
     // Try to check if the regex is valid, whether or not we can actually update
     // the plan.
-    absl::optional<std::string> pattern =
+    std::optional<std::string> pattern =
         GetConstantString(context, subexpression, node, pattern_expr);
     if (!pattern.has_value()) {
       return absl::OkStatus();
@@ -171,7 +168,7 @@ class RegexPrecompilationOptimization : public ProgramOptimizer {
   }
 
  private:
-  absl::optional<std::string> GetConstantString(
+  std::optional<std::string> GetConstantString(
       PlannerContext& context,
       ProgramBuilder::Subexpression* absl_nullable subexpression,
       const Expr& call_expr, const Expr& re_expr) const {
@@ -181,9 +178,9 @@ class RegexPrecompilationOptimization : public ProgramOptimizer {
 
     if (subexpression == nullptr || subexpression->IsFlattened()) {
       // Already modified, can't recover the input pattern.
-      return absl::nullopt;
+      return std::nullopt;
     }
-    absl::optional<Value> constant;
+    std::optional<Value> constant;
     if (subexpression->IsRecursive()) {
       const auto& program = subexpression->recursive_program();
       auto deps = program.step->GetDependencies();
@@ -209,7 +206,7 @@ class RegexPrecompilationOptimization : public ProgramOptimizer {
       return Cast<StringValue>(*constant).ToString();
     }
 
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   absl::Status RewritePlan(

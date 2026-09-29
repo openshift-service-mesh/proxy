@@ -15,6 +15,10 @@
 """Partial implementation for Swift dylib processing for bundles."""
 
 load(
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
+load(
     "@bazel_skylib//lib:partial.bzl",
     "partial",
 )
@@ -23,16 +27,16 @@ load(
     "paths",
 )
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
-)
-load(
     "//apple/internal:intermediates.bzl",
     "intermediates",
 )
 load(
     "//apple/internal:processor.bzl",
     "processor",
+)
+load(
+    "//apple/internal:shared_environment.bzl",
+    "shared_environment",
 )
 load(
     "//apple/internal/utils:defines.bzl",
@@ -57,27 +61,28 @@ File object that represents a directory containing the Swift dylibs to package f
     },
 )
 
-# Minimum OS versions for which we no longer need to potentially bundle any
-# Swift dylibs with the application. The first cutoff point was when the
-# platforms bundled the standard libraries, the second was when they started
-# bundling the Concurrency library. There may be future libraries that require
-# us to continue bumping these values. The tool is smart enough only to bundle
-# those libraries required by the minimum OS version of the scanned binaries.
+# For each platform, the minimum OS version at which we no longer need to bundle
+# any Swift dylibs with the application -- either the pre-ABI-stable runtime or
+# back-deployed runtimes (e.g., Concurrency and Span). We do not need to
+# consider each of these cases individually; `swift-stdlib-tool` will only
+# bundle the libraries required based on the minimum OS version of the scanned
+# binaries.
 #
-# Values are the first version where bundling is no longer required and should
-# correspond with the Swift compilers values for these which is the source of
-# truth https://github.com/apple/swift/blob/998d3518938bd7229e7c5e7b66088d0501c02051/lib/Basic/Platform.cpp#L82-L105
+# These values should be kept in sync with the values in
+# `swift::tripleRequiresRPathForSwiftLibrariesInOS` defined in:
+# https://github.com/apple/swift/blob/main/lib/Basic/Platform.cpp.
 _MIN_OS_PLATFORM_SWIFT_PRESENCE = {
-    "ios": apple_common.dotted_version("15.0"),
-    "macos": apple_common.dotted_version("12.0"),
-    "tvos": apple_common.dotted_version("15.0"),
-    "visionos": apple_common.dotted_version("1.0"),
-    "watchos": apple_common.dotted_version("8.0"),
+    "ios": apple_common.dotted_version("26.0"),
+    "macos": apple_common.dotted_version("26.0"),
+    "tvos": apple_common.dotted_version("26.0"),
+    "visionos": apple_common.dotted_version("26.0"),
+    "watchos": apple_common.dotted_version("26.0"),
 }
 
 def _swift_dylib_action(
         *,
         actions,
+        mac_exec_group,
         binary_files,
         output_dir,
         platform_name,
@@ -85,25 +90,27 @@ def _swift_dylib_action(
         strip_bitcode,
         swift_stdlib_tool):
     """Registers a swift-stlib-tool action to gather Swift dylibs to bundle."""
-    swift_stdlib_tool_args = [
-        "--platform",
-        platform_name,
-        "--output_path",
-        output_dir.path,
-    ]
-    for x in binary_files:
-        swift_stdlib_tool_args.extend([
-            "--binary",
-            x.path,
-        ])
+
+    swift_stdlib_tool_args = actions.args()
+    swift_stdlib_tool_args.add("--platform", platform_name)
+    swift_stdlib_tool_args.add("--output_path", output_dir.path)
+    swift_stdlib_tool_args.add_all(
+        binary_files,
+        before_each = "--binary",
+    )
 
     if strip_bitcode:
-        swift_stdlib_tool_args.append("--strip_bitcode")
+        swift_stdlib_tool_args.add("--strip_bitcode")
+
+    if platform_prerequisites.build_settings.disable_swift_stdlib_binary_thinning:
+        swift_stdlib_tool_args.add("--disable_binary_thinning")
 
     apple_support.run(
         actions = actions,
         apple_fragment = platform_prerequisites.apple_fragment,
-        arguments = swift_stdlib_tool_args,
+        arguments = [swift_stdlib_tool_args],
+        env = shared_environment.default_env,
+        exec_group = mac_exec_group,
         executable = swift_stdlib_tool,
         inputs = binary_files,
         mnemonic = "SwiftStdlibCopy",
@@ -114,6 +121,7 @@ def _swift_dylib_action(
 def _swift_dylibs_partial_impl(
         *,
         actions,
+        mac_exec_group,
         apple_mac_toolchain_info,
         binary_artifact,
         bundle_dylibs,
@@ -154,7 +162,7 @@ def _swift_dylibs_partial_impl(
     swift_support_requested = defines.bool_value(
         config_vars = platform_prerequisites.config_vars,
         define_name = "apple.package_swift_support",
-        default = True,
+        default = platform_prerequisites.build_settings.package_swift_support,
     )
     needs_swift_support = platform_prerequisites.platform.is_device and swift_support_requested
 
@@ -173,6 +181,7 @@ def _swift_dylibs_partial_impl(
             _swift_dylib_action(
                 actions = actions,
                 binary_files = binaries_to_check,
+                mac_exec_group = mac_exec_group,
                 output_dir = output_dir,
                 platform_name = platform_name,
                 platform_prerequisites = platform_prerequisites,
@@ -195,6 +204,7 @@ def _swift_dylibs_partial_impl(
                 _swift_dylib_action(
                     actions = actions,
                     binary_files = binaries_to_check,
+                    mac_exec_group = mac_exec_group,
                     output_dir = swift_support_output_dir,
                     platform_name = platform_name,
                     platform_prerequisites = platform_prerequisites,
@@ -234,6 +244,7 @@ def _swift_dylibs_partial_impl(
 def swift_dylibs_partial(
         *,
         actions,
+        mac_exec_group,
         apple_mac_toolchain_info,
         binary_artifact,
         bundle_dylibs = False,
@@ -255,6 +266,7 @@ def swift_dylibs_partial(
       dependency_targets: List of targets that should be checked for binaries that might contain
         Swift, so that the Swift dylibs can be collected.
       label_name: Name of the target being built.
+      mac_exec_group: The execution group for Mac tools.
       output_discriminator: A string to differentiate between different target intermediate files
           or `None`.
       package_swift_support_if_needed: Whether the partial should also bundle the Swift dylib for
@@ -274,6 +286,7 @@ def swift_dylibs_partial(
         bundle_dylibs = bundle_dylibs,
         dependency_targets = dependency_targets,
         label_name = label_name,
+        mac_exec_group = mac_exec_group,
         output_discriminator = output_discriminator,
         package_swift_support_if_needed = package_swift_support_if_needed,
         platform_prerequisites = platform_prerequisites,

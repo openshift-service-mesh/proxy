@@ -14,6 +14,7 @@
 
 #include "eval/public/ast_traverse.h"
 
+#include <memory>
 #include <stack>
 
 #include "cel/expr/syntax.pb.h"
@@ -67,7 +68,7 @@ struct ExprRecord {
 };
 
 using StackRecordKind =
-    absl::variant<ExprRecord, ArgRecord, ComprehensionRecord>;
+    std::variant<ExprRecord, ArgRecord, ComprehensionRecord>;
 
 struct StackRecord {
  public:
@@ -343,6 +344,47 @@ void PushDependencies(const StackRecord& record, std::stack<StackRecord>& stack,
 }
 
 }  // namespace
+
+namespace internal {
+struct AstTraversalState {
+  std::stack<StackRecord> stack;
+};
+}  // namespace internal
+
+AstTraversal AstTraversal::Create(const Expr* expr,
+                                  const SourceInfo* source_info,
+                                  TraversalOptions options) {
+  AstTraversal instance(options);
+  instance.state_ = std::make_unique<internal::AstTraversalState>();
+  instance.state_->stack.push(StackRecord(expr, source_info));
+  return instance;
+}
+
+AstTraversal::AstTraversal(TraversalOptions options) : options_(options) {}
+
+AstTraversal::~AstTraversal() = default;
+
+bool AstTraversal::Step(AstVisitor* visitor) {
+  if (IsDone()) {
+    return false;
+  }
+  auto& stack = state_->stack;
+  StackRecord& record = stack.top();
+  if (!record.visited) {
+    PreVisit(record, visitor);
+    PushDependencies(record, stack, options_);
+    record.visited = true;
+  } else {
+    PostVisit(record, visitor);
+    stack.pop();
+  }
+
+  return !stack.empty();
+}
+
+bool AstTraversal::IsDone() {
+  return state_ == nullptr || state_->stack.empty();
+}
 
 void AstTraverse(const Expr* expr, const SourceInfo* source_info,
                  AstVisitor* visitor, TraversalOptions options) {

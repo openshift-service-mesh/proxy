@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,17 +24,21 @@
 #include "absl/base/no_destructor.h"
 #include "absl/base/nullability.h"
 #include "absl/cleanup/cleanup.h"
+#include "absl/container/btree_set.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/log/absl_log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
+#include "checker/internal/proto_type_mask.h"
 #include "checker/internal/type_check_env.h"
 #include "checker/internal/type_checker_impl.h"
 #include "checker/type_checker.h"
 #include "checker/type_checker_builder.h"
+#include "common/container.h"
 #include "common/decl.h"
 #include "common/type.h"
 #include "common/type_introspector.h"
@@ -84,19 +89,75 @@ absl::Status CheckStdMacroOverlap(const FunctionDecl& decl) {
   return absl::OkStatus();
 }
 
-absl::Status AddContextDeclarationVariables(
-    const google::protobuf::Descriptor* absl_nonnull descriptor, TypeCheckEnv& env) {
-  for (int i = 0; i < descriptor->field_count(); i++) {
-    const google::protobuf::FieldDescriptor* proto_field = descriptor->field(i);
-    MessageTypeField cel_field(proto_field);
-    Type field_type = cel_field.GetType();
-    if (field_type.IsEnum()) {
-      field_type = IntType();
+absl::Status AddWellKnownContextDeclarationVariables(
+    const google::protobuf::Descriptor* absl_nonnull descriptor,
+    const absl::flat_hash_map<absl::string_view,
+                              absl::btree_set<absl::string_view>>&
+        context_type_fields,
+    TypeCheckEnv& env, bool use_json_name) {
+  for (int i = 0; i < descriptor->field_count(); ++i) {
+    const google::protobuf::FieldDescriptor* field = descriptor->field(i);
+    // Skip fields that are hidden because of a proto type mask.
+    auto map_iterator = context_type_fields.find(descriptor->full_name());
+    if (map_iterator != context_type_fields.end() &&
+        !map_iterator->second.contains(field->name())) {
+      continue;
     }
-    if (!env.InsertVariableIfAbsent(
-            MakeVariableDecl(cel_field.name(), field_type))) {
+    Type type = MessageTypeField(field).GetType();
+    if (type.IsEnum()) {
+      type = IntType();
+    }
+    absl::string_view name = field->name();
+    if (use_json_name) {
+      name = field->json_name();
+    }
+    if (!env.InsertVariableIfAbsent(MakeVariableDecl(name, type))) {
       return absl::AlreadyExistsError(
-          absl::StrCat("variable '", cel_field.name(),
+          absl::StrCat("variable '", name,
+                       "' declared multiple times (from context declaration: '",
+                       descriptor->full_name(), "')"));
+    }
+  }
+  return absl::OkStatus();
+}
+
+absl::Status AddContextDeclarationVariables(
+    const google::protobuf::Descriptor* absl_nonnull descriptor,
+    const absl::flat_hash_map<absl::string_view,
+                              absl::btree_set<absl::string_view>>&
+        context_type_fields,
+    TypeCheckEnv& env) {
+  const bool use_json_name = env.proto_type_introspector().use_json_name();
+  if (IsWellKnownMessageType(descriptor)) {
+    return AddWellKnownContextDeclarationVariables(
+        descriptor, context_type_fields, env, use_json_name);
+  }
+  CEL_ASSIGN_OR_RETURN(auto fields,
+                       env.proto_type_introspector().ListFieldsForStructType(
+                           descriptor->full_name()));
+  if (!fields.has_value()) {
+    return absl::InternalError(absl::StrCat("context declaration '",
+                                            descriptor->full_name(),
+                                            "' not found, but was expected"));
+  }
+  for (const auto& field_entry : *fields) {
+    Type type = field_entry.field.GetType();
+    if (type.IsEnum()) {
+      type = IntType();
+    }
+
+    absl::string_view name = field_entry.name;
+
+    // Skip fields that are hidden because of a proto type mask.
+    auto map_iterator = context_type_fields.find(descriptor->full_name());
+    if (map_iterator != context_type_fields.end() &&
+        !map_iterator->second.contains(name)) {
+      continue;
+    }
+
+    if (!env.InsertVariableIfAbsent(MakeVariableDecl(name, type))) {
+      return absl::AlreadyExistsError(
+          absl::StrCat("variable '", name,
                        "' declared multiple times (from context declaration: '",
                        descriptor->full_name(), "')"));
     }
@@ -121,13 +182,13 @@ absl::StatusOr<FunctionDecl> MergeFunctionDecls(
   return merged_decl;
 }
 
-absl::optional<FunctionDecl> FilterDecl(FunctionDecl decl,
-                                        const TypeCheckerSubset& subset) {
+std::optional<FunctionDecl> FilterDecl(FunctionDecl decl,
+                                       const TypeCheckerSubset& subset) {
   FunctionDecl filtered;
   std::string name = decl.release_name();
   std::vector<OverloadDecl> overloads = decl.release_overloads();
-  for (const auto& ovl : overloads) {
-    if (subset.should_include_overload(name, ovl.id())) {
+  for (auto& ovl : overloads) {
+    if (subset.should_include_overload(name, ovl)) {
       absl::Status s = filtered.AddOverload(std::move(ovl));
       if (!s.ok()) {
         // Should not be possible to construct the original decl in a way that
@@ -137,7 +198,7 @@ absl::optional<FunctionDecl> FilterDecl(FunctionDecl decl,
     }
   }
   if (filtered.overloads().empty()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   filtered.set_name(std::move(name));
   return filtered;
@@ -246,7 +307,7 @@ absl::Status TypeCheckerBuilderImpl::ApplyConfig(
   for (FunctionDeclRecord& fn : config.functions) {
     FunctionDecl decl = std::move(fn.decl);
     if (subset != nullptr) {
-      absl::optional<FunctionDecl> filtered =
+      std::optional<FunctionDecl> filtered =
           FilterDecl(std::move(decl), *subset);
       if (!filtered.has_value()) {
         continue;
@@ -280,7 +341,8 @@ absl::Status TypeCheckerBuilderImpl::ApplyConfig(
   }
 
   for (const google::protobuf::Descriptor* context_type : config.context_types) {
-    CEL_RETURN_IF_ERROR(AddContextDeclarationVariables(context_type, env));
+    CEL_RETURN_IF_ERROR(AddContextDeclarationVariables(
+        context_type, config.context_type_fields, env));
   }
 
   for (VariableDeclRecord& var : config.variables) {
@@ -302,12 +364,22 @@ absl::Status TypeCheckerBuilderImpl::ApplyConfig(
     }
   }
 
+  CEL_RETURN_IF_ERROR(env.CreateProtoTypeMaskRegistry(config.proto_type_masks));
+
   return absl::OkStatus();
 }
 
 absl::StatusOr<std::unique_ptr<TypeChecker>> TypeCheckerBuilderImpl::Build() {
-  TypeCheckEnv env(descriptor_pool_, arena_);
-  env.set_container(container_);
+  TypeCheckEnv env(template_env_);
+  CEL_RETURN_IF_ERROR(ConfigureTypeCheckEnv(env));
+  return std::make_unique<checker_internal::TypeCheckerImpl>(std::move(env),
+                                                             options_);
+}
+
+absl::Status TypeCheckerBuilderImpl::ConfigureTypeCheckEnv(TypeCheckEnv& env) {
+  if (expression_container_.has_value()) {
+    env.set_container(*expression_container_);
+  }
   if (expected_type_.has_value()) {
     env.set_expected_type(*expected_type_);
   }
@@ -324,6 +396,9 @@ absl::StatusOr<std::unique_ptr<TypeChecker>> TypeCheckerBuilderImpl::Build() {
     CEL_RETURN_IF_ERROR(BuildLibraryConfig(library, config));
   }
 
+  env.proto_type_introspector().set_use_json_name(
+      options_.use_json_field_names);
+
   for (const ConfigRecord& config : configs) {
     TypeCheckerSubset* subset = nullptr;
     if (!config.id.empty()) {
@@ -338,10 +413,10 @@ absl::StatusOr<std::unique_ptr<TypeChecker>> TypeCheckerBuilderImpl::Build() {
                                   /*subset=*/nullptr, env));
 
   CEL_RETURN_IF_ERROR(ApplyConfig(default_config_, /*subset=*/nullptr, env));
-
-  auto checker = std::make_unique<checker_internal::TypeCheckerImpl>(
-      std::move(env), options_);
-  return checker;
+  if (type_arena_ != nullptr) {
+    env.set_arena(type_arena_);
+  }
+  return absl::OkStatus();
 }
 
 absl::Status TypeCheckerBuilderImpl::AddLibrary(CheckerLibrary library) {
@@ -391,7 +466,7 @@ absl::Status TypeCheckerBuilderImpl::AddOrReplaceVariable(
 absl::Status TypeCheckerBuilderImpl::AddContextDeclaration(
     absl::string_view type) {
   const google::protobuf::Descriptor* desc =
-      descriptor_pool_->FindMessageTypeByName(type);
+      template_env_.descriptor_pool()->FindMessageTypeByName(type);
   if (desc == nullptr) {
     return absl::NotFoundError(
         absl::StrCat("context declaration '", type, "' not found"));
@@ -411,6 +486,23 @@ absl::Status TypeCheckerBuilderImpl::AddContextDeclaration(
   }
 
   target_config_->context_types.push_back(desc);
+  return absl::OkStatus();
+}
+
+absl::Status TypeCheckerBuilderImpl::AddContextDeclarationWithProtoTypeMask(
+    absl::string_view type, std::vector<std::string> field_paths) {
+  if (field_paths.empty()) {
+    return absl::InvalidArgumentError("field paths cannot be the empty set");
+  }
+
+  ProtoTypeMask proto_type_mask(std::string(type), field_paths);
+  target_config_->proto_type_masks.push_back(proto_type_mask);
+
+  CEL_RETURN_IF_ERROR(AddContextDeclaration(type));
+  CEL_ASSIGN_OR_RETURN(
+      absl::btree_set<absl::string_view> field_names,
+      proto_type_mask.GetFieldNames(template_env_.descriptor_pool()));
+  target_config_->context_type_fields.insert({type, std::move(field_names)});
   return absl::OkStatus();
 }
 
@@ -438,7 +530,15 @@ void TypeCheckerBuilderImpl::AddTypeProvider(
 }
 
 void TypeCheckerBuilderImpl::set_container(absl::string_view container) {
-  container_ = container;
+  if (!expression_container_.has_value()) {
+    expression_container_.emplace();
+  }
+  expression_container_->SetContainer(container).IgnoreError();
+}
+
+void TypeCheckerBuilderImpl::SetExpressionContainer(
+    ExpressionContainer container) {
+  expression_container_ = std::move(container);
 }
 
 void TypeCheckerBuilderImpl::SetExpectedType(const Type& type) {

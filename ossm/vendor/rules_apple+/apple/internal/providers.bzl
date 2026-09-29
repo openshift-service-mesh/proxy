@@ -229,7 +229,7 @@ dependencies of the given target if any were generated.
     init = _make_banned_init(provider_name = "AppleDsymBundleInfo"),
 )
 
-_AppleDynamicFrameworkInfo = provider(
+AppleDynamicFrameworkInfo, new_appledynamicframeworkinfo = provider(
     doc = "Contains information about an Apple dynamic framework.",
     fields = {
         "framework_dirs": """\
@@ -246,37 +246,15 @@ A `CcInfo` which contains information about the transitive dependencies linked
 into the binary.
 """,
     },
+    init = _make_banned_init(provider_name = "AppleDynamicFrameworkInfo"),
 )
 
-# TODO: Remove when we drop 7.x
-AppleDynamicFrameworkInfo = getattr(
-    apple_common,
-    "AppleDynamicFramework",
-    _AppleDynamicFrameworkInfo,
-)
-
-# TODO: Remove when we drop 7.x
-def new_appledynamicframeworkinfo(**kwargs):
-    legacy_initializer = getattr(
-        apple_common,
-        "new_dynamic_framework_provider",
-        None,
-    )
-    if legacy_initializer:
-        return legacy_initializer(**kwargs)
-
-    return AppleDynamicFrameworkInfo(**kwargs)
-
-_AppleExecutableBinaryInfo = provider(
+AppleExecutableBinaryInfo, new_appleexecutablebinaryinfo = provider(
     doc = """
 Contains the executable binary output that was built using
 `link_multi_arch_binary` with the `executable` binary type.
 """,
     fields = {
-        # TODO: Remove when we drop 7.x
-        "objc": """\
-apple_common.Objc provider used for legacy linking behavior.
-""",
         "binary": """\
 The executable binary artifact output by `link_multi_arch_binary`.
 """,
@@ -285,17 +263,8 @@ A `CcInfo` which contains information about the transitive dependencies linked
 into the binary.
 """,
     },
+    init = _make_banned_init(provider_name = "AppleExecutableBinaryInfo"),
 )
-
-AppleExecutableBinaryInfo = getattr(apple_common, "AppleExecutableBinary", _AppleExecutableBinaryInfo)
-
-# TODO: Use common init pattern when we drop 7.x
-def new_appleexecutablebinaryinfo(**kwargs):
-    legacy_initializer = getattr(apple_common, "new_executable_binary_provider", None)
-    if legacy_initializer:
-        return legacy_initializer(**kwargs)
-
-    return AppleExecutableBinaryInfo(**kwargs)
 
 AppleExtraOutputsInfo, new_appleextraoutputsinfo = provider(
     doc = """
@@ -392,14 +361,17 @@ def merge_apple_framework_import_info(apple_framework_import_infos):
 ApplePlatformInfo, new_appleplatforminfo = provider(
     doc = "Provides information for the currently selected Apple platforms.",
     fields = {
-        "target_os": """
-`String` representing the selected Apple OS.
-""",
         "target_arch": """
 `String` representing the selected target architecture or cpu type.
 """,
+        "target_build_config": """
+'configuration' representing the selected target's build configuration.
+""",
         "target_environment": """
 `String` representing the selected target environment (e.g. "device", "simulator").
+""",
+        "target_os": """
+`String` representing the selected Apple OS.
 """,
     },
     init = _make_banned_init(provider_name = "ApplePlatformInfo"),
@@ -427,19 +399,21 @@ AppleResourceInfo, new_appleresourceinfo = provider(
         "asset_catalogs": "Resources that need to be embedded into Assets.car.",
         "datamodels": "Datamodel files.",
         "framework": "Apple framework bundle from `ios_framework` and `tvos_framework` targets.",
-        "infoplists": """Plist files to be merged and processed. Plist files that should not be
-merged into the root Info.plist should be propagated in `plists`. Because of this, infoplists should
-only be bucketed with the `bucketize_typed` method.""",
+        "infoplists": """Plist files to be merged and processed. Plist files that should not be \
+merged into the root Info.plist should be propagated in `plists`. Because of this, infoplists \
+should only be bucketed with the `bucketize_typed` method.""",
         "metals": """Metal Shading Language source files to be compiled into a single .metallib file
 and bundled at the top level.""",
         "mlmodels": "Core ML model files that should be processed and bundled at the top level.",
         "plists": "Resource Plist files that should not be merged into Info.plist",
-        "pngs": "PNG images which are not bundled in an .xcassets folder.",
+        "pngs": """PNG images which are not bundled in an .xcassets folder or an .icon folder in \
+Xcode 26+.""",
         "processed": "Typed resources that have already been processed.",
         "storyboards": "Storyboard files.",
         "strings": "Localization strings files.",
         "texture_atlases": "Texture atlas files.",
         "unprocessed": "Generic resources not mapped to the other types.",
+        "xcstrings": "String catalog files.",
         "xibs": "XIB Interface files.",
         "owners": """`depset` of (resource, owner) pairs.""",
         "processed_origins": """`depset` of (processed resource, resource list) pairs.""",
@@ -475,47 +449,11 @@ requirement.
 AppleTestInfo, new_appletestinfo = provider(
     doc = """
 Provider that test targets propagate to be used for IDE integration.
-
-This includes information regarding test source files, transitive include paths,
-transitive module maps, and transitive Swift modules. Test source files are
-considered to be all of which belong to the first-level dependencies on the test
-target.
 """,
     fields = {
-        "includes": """
-`depset` of `String`s representing transitive include paths which are needed by
-IDEs to be used for indexing the test sources.
-""",
-        "module_maps": """
-`depset` of `File`s representing module maps which are needed by IDEs to be used
-for indexing the test sources.
-""",
-        "module_name": """
-`String` representing the module name used by the test's sources. This is only
-set if the test only contains a single top-level Swift dependency. This may be
-used by an IDE to identify the Swift module (if any) used by the test's sources.
-""",
-        "non_arc_sources": """
-`depset` of `File`s containing non-ARC sources from the test's immediate
-deps.
-""",
-        "sources": """
-`depset` of `File`s containing sources and headers from the test's immediate deps.
-""",
-        "swift_modules": """
-`depset` of `File`s representing transitive swift modules which are needed by
-IDEs to be used for indexing the test sources.
-""",
         "test_bundle": "The artifact representing the XCTest bundle for the test target.",
         "test_host": """
 The artifact representing the test host for the test target, if the test requires a test host.
-""",
-        "deps": """
-`depset` of `String`s representing the labels of all immediate deps of the test.
-Only source files from these deps will be present in `sources`. This may be used
-by IDEs to differentiate a test target's transitive module maps from its direct
-module maps, as including the direct module maps may break indexing for the
-source files of the immediate deps.
 """,
     },
     init = _make_banned_init(provider_name = "AppleTestInfo"),
@@ -686,6 +624,20 @@ that requirement.
 """,
     fields = {},
     init = _make_banned_init(provider_name = "IosImessageExtensionBundleInfo"),
+)
+
+IosKernelExtensionBundleInfo, new_ioskernelextensionbundleinfo = provider(
+    doc = """
+Denotes that a target is an iOS kernel extension.
+
+This provider does not contain any fields of its own at this time but is used as
+a "marker" to indicate that a target is specifically an iOS kernel extension
+bundle (and not some other Apple bundle). Rule authors who wish to require that
+a dependency is an iOS kernel extension should use this provider to describe that
+requirement.
+""",
+    fields = {},
+    init = _make_banned_init(provider_name = "IosKernelExtensionBundleInfo"),
 )
 
 IosXcTestBundleInfo, new_iosxctestbundleinfo = provider(

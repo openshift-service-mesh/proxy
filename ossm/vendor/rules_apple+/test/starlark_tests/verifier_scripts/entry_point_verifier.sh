@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -eu
+set -euo pipefail
 
 saw_text_segment=0
 saw_vmaddr=0
@@ -64,7 +64,7 @@ entry_addr=$(/usr/bin/env python3 -c "print(hex(int('${text_vmaddr}', 16) + ${en
 # "0x", but regular symbol hex addresses are not. In either case, we allow
 # an arbitrary number of leading zeroes so that we don't need to have the Python
 # snippet above match the objdump output exactly.
-TEMP_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/entry_point_output.XXXXXX")"
+TEMP_OUTPUT="$(mktemp "${TMPDIR:-${TEST_TMPDIR:-/tmp}}/entry_point_output.XXXXXX")"
 xcrun llvm-objdump --macho --syms --indirect-symbols "$BINARY" > "$TEMP_OUTPUT"
 
 if ! grep "^\(0x\)\?0*${entry_addr}[[:space:]].*[[:space:]]${ENTRY_POINT}$" "$TEMP_OUTPUT" ; then

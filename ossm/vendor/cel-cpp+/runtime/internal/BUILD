@@ -174,6 +174,7 @@ cc_library(
         "//internal:testing_message_factory",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/log:die_if_null",
         "@com_google_protobuf//:protobuf",
     ],
 )
@@ -193,8 +194,10 @@ cc_library(
     srcs = ["runtime_type_provider.cc"],
     hdrs = ["runtime_type_provider.h"],
     deps = [
+        "//common:descriptor_pool_type_introspector",
         "//common:type",
         "//common:value",
+        "//internal:status_macros",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",

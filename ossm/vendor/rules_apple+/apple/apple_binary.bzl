@@ -15,6 +15,10 @@
 """Starlark implementation of `apple_binary` to transition from native Bazel."""
 
 load(
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
+load(
     "//apple/internal:linking_support.bzl",
     "linking_support",
 )
@@ -65,6 +69,7 @@ Resolved Xcode is version {xcode_version}.
 
     binary_type = ctx.attr.binary_type
     bundle_loader = ctx.attr.bundle_loader
+    cc_toolchain_forwarder = ctx.split_attr._cc_toolchain_forwarder
 
     extra_linkopts = []
 
@@ -91,6 +96,7 @@ Resolved Xcode is version {xcode_version}.
 
     link_result = linking_support.register_binary_linking_action(
         ctx,
+        cc_toolchains = cc_toolchain_forwarder,
         bundle_loader = bundle_loader,
         exported_symbols_lists = ctx.files.exported_symbols_lists,
         extra_linkopts = extra_linkopts,
@@ -145,10 +151,10 @@ implementation of `apple_binary` in Bazel core so that it can be removed.
 """,
     implementation = _apple_binary_impl,
     attrs = [
+        apple_support.platform_constraint_attrs(),
         rule_attrs.binary_linking_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
             is_test_supporting_rule = False,
-            requires_legacy_cc_toolchain = True,
         ),
         rule_attrs.platform_attrs(),
         {

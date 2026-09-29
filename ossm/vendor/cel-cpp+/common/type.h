@@ -1140,6 +1140,7 @@ class StructTypeField final {
   }
 
   absl::optional<MessageTypeField> AsMessage() const;
+  MessageTypeField GetMessage() const;
 
   explicit operator MessageTypeField() const;
 

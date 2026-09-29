@@ -1,8 +1,8 @@
 toolchain(
-    name = "rust_analyzer_1.93.1",
+    name = "rust_analyzer_1.98.0",
     exec_compatible_with = [],
     target_compatible_with = [],
-    toolchain = "@rust_analyzer_1.93.1_tools//:rust_analyzer_toolchain",
+    toolchain = "@rust_analyzer_1.98.0_tools//:rust_analyzer_toolchain",
     toolchain_type = "@rules_rust//rust/rust_analyzer:toolchain_type",
     # target_settings = []
 )
@@ -543,6 +543,150 @@ toolchain(
     exec_compatible_with = ["@platforms//cpu:ppc64le","@platforms//os:linux"],
     target_compatible_with = ["@platforms//cpu:wasm32","@platforms//os:wasi","@rules_rust//rust/platform:wasi_preview_2"],
     toolchain = "@rust_linux_powerpc64le__wasm32-wasip2__nightly_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__riscv64gc-unknown-linux-gnu__stable",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    toolchain = "@rust_linux_riscv64__riscv64gc-unknown-linux-gnu__stable_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:stable"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__riscv64gc-unknown-linux-gnu__nightly",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    toolchain = "@rust_linux_riscv64__riscv64gc-unknown-linux-gnu__nightly_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__aarch64-apple-darwin__stable",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:aarch64","@platforms//os:osx"],
+    toolchain = "@rust_linux_riscv64__aarch64-apple-darwin__stable_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:stable"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__aarch64-apple-darwin__nightly",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:aarch64","@platforms//os:osx"],
+    toolchain = "@rust_linux_riscv64__aarch64-apple-darwin__nightly_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__aarch64-unknown-linux-gnu__stable",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:aarch64","@platforms//os:linux"],
+    toolchain = "@rust_linux_riscv64__aarch64-unknown-linux-gnu__stable_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:stable"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__aarch64-unknown-linux-gnu__nightly",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:aarch64","@platforms//os:linux"],
+    toolchain = "@rust_linux_riscv64__aarch64-unknown-linux-gnu__nightly_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__x86_64-apple-darwin__stable",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:x86_64","@platforms//os:osx"],
+    toolchain = "@rust_linux_riscv64__x86_64-apple-darwin__stable_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:stable"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__x86_64-apple-darwin__nightly",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:x86_64","@platforms//os:osx"],
+    toolchain = "@rust_linux_riscv64__x86_64-apple-darwin__nightly_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__x86_64-unknown-linux-gnu__stable",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:x86_64","@platforms//os:linux"],
+    toolchain = "@rust_linux_riscv64__x86_64-unknown-linux-gnu__stable_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:stable"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__x86_64-unknown-linux-gnu__nightly",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:x86_64","@platforms//os:linux"],
+    toolchain = "@rust_linux_riscv64__x86_64-unknown-linux-gnu__nightly_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__wasm32-unknown-unknown__stable",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:wasm32","@platforms//os:none"],
+    toolchain = "@rust_linux_riscv64__wasm32-unknown-unknown__stable_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:stable"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__wasm32-unknown-unknown__nightly",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:wasm32","@platforms//os:none"],
+    toolchain = "@rust_linux_riscv64__wasm32-unknown-unknown__nightly_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__wasm32-wasip1__stable",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:wasm32","@platforms//os:wasi","@rules_rust//rust/platform:wasi_preview_1"],
+    toolchain = "@rust_linux_riscv64__wasm32-wasip1__stable_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:stable"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__wasm32-wasip1__nightly",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:wasm32","@platforms//os:wasi","@rules_rust//rust/platform:wasi_preview_1"],
+    toolchain = "@rust_linux_riscv64__wasm32-wasip1__nightly_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__wasm32-wasip2__stable",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:wasm32","@platforms//os:wasi","@rules_rust//rust/platform:wasi_preview_2"],
+    toolchain = "@rust_linux_riscv64__wasm32-wasip2__stable_tools//:rust_toolchain",
+    toolchain_type = "@rules_rust//rust:toolchain",
+    target_settings = ["@rules_rust//rust/toolchain/channel:stable"],
+)
+
+toolchain(
+    name = "rust_linux_riscv64__wasm32-wasip2__nightly",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = ["@platforms//cpu:wasm32","@platforms//os:wasi","@rules_rust//rust/platform:wasi_preview_2"],
+    toolchain = "@rust_linux_riscv64__wasm32-wasip2__nightly_tools//:rust_toolchain",
     toolchain_type = "@rules_rust//rust:toolchain",
     target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
 )
@@ -1232,82 +1376,91 @@ toolchain(
 )
 
 toolchain(
-    name = "rustfmt_nightly-2026-02-12__aarch64-apple-darwin",
+    name = "rustfmt_nightly-2026-08-20__aarch64-apple-darwin",
     exec_compatible_with = ["@platforms//cpu:aarch64","@platforms//os:osx"],
     target_compatible_with = [],
-    toolchain = "@rustfmt_nightly-2026-02-12__aarch64-apple-darwin_tools//:rustfmt_toolchain",
+    toolchain = "@rustfmt_nightly-2026-08-20__aarch64-apple-darwin_tools//:rustfmt_toolchain",
     toolchain_type = "@rules_rust//rust/rustfmt:toolchain_type",
     # target_settings = []
 )
 
 toolchain(
-    name = "rustfmt_nightly-2026-02-12__aarch64-pc-windows-msvc",
+    name = "rustfmt_nightly-2026-08-20__aarch64-pc-windows-msvc",
     exec_compatible_with = ["@platforms//cpu:aarch64","@platforms//os:windows"],
     target_compatible_with = [],
-    toolchain = "@rustfmt_nightly-2026-02-12__aarch64-pc-windows-msvc_tools//:rustfmt_toolchain",
+    toolchain = "@rustfmt_nightly-2026-08-20__aarch64-pc-windows-msvc_tools//:rustfmt_toolchain",
     toolchain_type = "@rules_rust//rust/rustfmt:toolchain_type",
     # target_settings = []
 )
 
 toolchain(
-    name = "rustfmt_nightly-2026-02-12__aarch64-unknown-linux-gnu",
+    name = "rustfmt_nightly-2026-08-20__aarch64-unknown-linux-gnu",
     exec_compatible_with = ["@platforms//cpu:aarch64","@platforms//os:linux"],
     target_compatible_with = [],
-    toolchain = "@rustfmt_nightly-2026-02-12__aarch64-unknown-linux-gnu_tools//:rustfmt_toolchain",
+    toolchain = "@rustfmt_nightly-2026-08-20__aarch64-unknown-linux-gnu_tools//:rustfmt_toolchain",
     toolchain_type = "@rules_rust//rust/rustfmt:toolchain_type",
     # target_settings = []
 )
 
 toolchain(
-    name = "rustfmt_nightly-2026-02-12__powerpc64le-unknown-linux-gnu",
+    name = "rustfmt_nightly-2026-08-20__powerpc64le-unknown-linux-gnu",
     exec_compatible_with = ["@platforms//cpu:ppc64le","@platforms//os:linux"],
     target_compatible_with = [],
-    toolchain = "@rustfmt_nightly-2026-02-12__powerpc64le-unknown-linux-gnu_tools//:rustfmt_toolchain",
+    toolchain = "@rustfmt_nightly-2026-08-20__powerpc64le-unknown-linux-gnu_tools//:rustfmt_toolchain",
     toolchain_type = "@rules_rust//rust/rustfmt:toolchain_type",
     # target_settings = []
 )
 
 toolchain(
-    name = "rustfmt_nightly-2026-02-12__s390x-unknown-linux-gnu",
+    name = "rustfmt_nightly-2026-08-20__riscv64gc-unknown-linux-gnu",
+    exec_compatible_with = ["@platforms//cpu:riscv64","@platforms//os:linux"],
+    target_compatible_with = [],
+    toolchain = "@rustfmt_nightly-2026-08-20__riscv64gc-unknown-linux-gnu_tools//:rustfmt_toolchain",
+    toolchain_type = "@rules_rust//rust/rustfmt:toolchain_type",
+    # target_settings = []
+)
+
+toolchain(
+    name = "rustfmt_nightly-2026-08-20__s390x-unknown-linux-gnu",
     exec_compatible_with = ["@platforms//cpu:s390x","@platforms//os:linux"],
     target_compatible_with = [],
-    toolchain = "@rustfmt_nightly-2026-02-12__s390x-unknown-linux-gnu_tools//:rustfmt_toolchain",
+    toolchain = "@rustfmt_nightly-2026-08-20__s390x-unknown-linux-gnu_tools//:rustfmt_toolchain",
     toolchain_type = "@rules_rust//rust/rustfmt:toolchain_type",
     # target_settings = []
 )
 
 toolchain(
-    name = "rustfmt_nightly-2026-02-12__x86_64-apple-darwin",
+    name = "rustfmt_nightly-2026-08-20__x86_64-apple-darwin",
     exec_compatible_with = ["@platforms//cpu:x86_64","@platforms//os:osx"],
     target_compatible_with = [],
-    toolchain = "@rustfmt_nightly-2026-02-12__x86_64-apple-darwin_tools//:rustfmt_toolchain",
+    toolchain = "@rustfmt_nightly-2026-08-20__x86_64-apple-darwin_tools//:rustfmt_toolchain",
     toolchain_type = "@rules_rust//rust/rustfmt:toolchain_type",
     # target_settings = []
 )
 
 toolchain(
-    name = "rustfmt_nightly-2026-02-12__x86_64-pc-windows-msvc",
+    name = "rustfmt_nightly-2026-08-20__x86_64-pc-windows-msvc",
     exec_compatible_with = ["@platforms//cpu:x86_64","@platforms//os:windows"],
     target_compatible_with = [],
-    toolchain = "@rustfmt_nightly-2026-02-12__x86_64-pc-windows-msvc_tools//:rustfmt_toolchain",
+    toolchain = "@rustfmt_nightly-2026-08-20__x86_64-pc-windows-msvc_tools//:rustfmt_toolchain",
     toolchain_type = "@rules_rust//rust/rustfmt:toolchain_type",
     # target_settings = []
 )
 
 toolchain(
-    name = "rustfmt_nightly-2026-02-12__x86_64-unknown-freebsd",
+    name = "rustfmt_nightly-2026-08-20__x86_64-unknown-freebsd",
     exec_compatible_with = ["@platforms//cpu:x86_64","@platforms//os:freebsd"],
     target_compatible_with = [],
-    toolchain = "@rustfmt_nightly-2026-02-12__x86_64-unknown-freebsd_tools//:rustfmt_toolchain",
+    toolchain = "@rustfmt_nightly-2026-08-20__x86_64-unknown-freebsd_tools//:rustfmt_toolchain",
     toolchain_type = "@rules_rust//rust/rustfmt:toolchain_type",
     # target_settings = []
 )
 
 toolchain(
-    name = "rustfmt_nightly-2026-02-12__x86_64-unknown-linux-gnu",
+    name = "rustfmt_nightly-2026-08-20__x86_64-unknown-linux-gnu",
     exec_compatible_with = ["@platforms//cpu:x86_64","@platforms//os:linux"],
     target_compatible_with = [],
-    toolchain = "@rustfmt_nightly-2026-02-12__x86_64-unknown-linux-gnu_tools//:rustfmt_toolchain",
+    toolchain = "@rustfmt_nightly-2026-08-20__x86_64-unknown-linux-gnu_tools//:rustfmt_toolchain",
     toolchain_type = "@rules_rust//rust/rustfmt:toolchain_type",
     # target_settings = []
 )

@@ -1,14 +1,163 @@
-"Public API for calling yq"
+"""
+Load in your `BUILD` file:
 
+```starlark
+load("@yq.bzl", "yq")
+```
+
+Examples
+--------
+
+Remove fields:
+```starlark
+yq(
+    name = "safe-config",
+    srcs = ["config.yaml"],
+    expression = "del(.credentials)",
+)
+```
+
+Load an expression from a file:
+```starlark
+yq(
+    name = "safe-config-from-file",
+    srcs = ["config.yaml"],
+    expression_file = "remove-credentials.yq",
+)
+```
+
+Merge two yaml documents:
+```starlark
+yq(
+    name = "ab",
+    srcs = [
+        "a.yaml",
+        "b.yaml",
+    ],
+    expression = ". as $item ireduce ({}; . * $item )",
+)
+```
+
+Split a yaml file into several files:
+```starlark
+yq(
+    name = "split",
+    srcs = ["multidoc.yaml"],
+    outs = [
+        "first.yml",
+        "second.yml",
+    ],
+    args = [
+        "-s '.a'",  # Split expression
+        "--no-doc", # Exclude document separator --
+    ],
+)
+```
+
+Convert a yaml file to json:
+```starlark
+yq(
+    name = "convert-to-json",
+    srcs = ["foo.yaml"],
+    args = ["-o=json"],
+    outs = ["foo.json"],
+)
+```
+
+Convert a json file to yaml:
+```starlark
+yq(
+    name = "convert-to-yaml",
+    srcs = ["bar.json"],
+    args = ["-P"],
+    outs = ["bar.yaml"],
+)
+```
+
+Call yq in a genrule:
+```starlark
+genrule(
+    name = "generate",
+    srcs = ["farm.yaml"],
+    outs = ["genrule_output.yaml"],
+    cmd = "$(YQ_BIN) '.moo = \"cow\"' $(location farm.yaml) > $@",
+    toolchains = ["@yq_toolchains//:resolved_toolchain"],
+)
+```
+
+With --stamp, causes properties to be replaced by version control info.
+```starlark
+yq(
+    name = "stamped",
+    srcs = ["package.yaml"],
+    expression = "|".join([
+        "load(strenv(STAMP)) as $stamp",
+        # Provide a default using the "alternative operator" in case $stamp is empty dict.
+        ".version = ($stamp.BUILD_EMBED_LABEL // "<unstamped>")",
+    ]),
+)
+```
+"""
+
+load("@bazel_lib//lib:diff_test.bzl", "diff_test")
 load("//yq/private:yq.bzl", _is_split_operation = "is_split_operation", _yq_lib = "yq_lib")
 
 _yq_rule = rule(
     attrs = _yq_lib.attrs,
     implementation = _yq_lib.implementation,
-    toolchains = ["@aspect_bazel_lib//lib:yq_toolchain_type"],
+    toolchains = ["@yq.bzl//yq/toolchain:type"],
 )
 
-def yq(name, srcs, expression = ".", args = [], outs = None, **kwargs):
+def yq_test(name, file1, file2, filter1 = ".", filter2 = ".", **kwargs):
+    """Assert that the given YAML files have the same semantic content.
+
+    Uses yq to filter each file, recursively sort mapping keys, and serialize
+    the results as compact JSON before comparing them. The default filter of
+    `"."` compares each whole file.
+
+    Args:
+        name: Name of the resulting diff_test target.
+        file1: A YAML file, or `None` to evaluate `filter1` with null input.
+        file2: Another YAML file, or `None` to evaluate `filter2` with null input.
+        filter1: A yq expression to apply to file1.
+        filter2: A yq expression to apply to file2.
+        **kwargs: Additional named arguments for the resulting diff_test.
+    """
+    name1 = "{}_yq1".format(name)
+    name2 = "{}_yq2".format(name)
+    normalize_args = [
+        "--output-format=json",
+        "--indent=0",
+    ]
+    _yq_rule(
+        name = name1,
+        srcs = [file1] if file1 != None else [],
+        expression = "({}) | sort_keys(..)".format(filter1),
+        args = normalize_args,
+        outs = [name1 + ".json"],
+    )
+    _yq_rule(
+        name = name2,
+        srcs = [file2] if file2 != None else [],
+        expression = "({}) | sort_keys(..)".format(filter2),
+        args = normalize_args,
+        outs = [name2 + ".json"],
+    )
+
+    diff_test(
+        name = name,
+        file1 = name1,
+        file2 = name2,
+        failure_message = "'{}' from {} doesn't match '{}' from {}".format(
+            filter1,
+            file1,
+            filter2,
+            file2,
+        ),
+        **kwargs
+    )
+
+def yq(name, srcs, expression = None, args = [], outs = None, expression_file = None, **kwargs):
     """Invoke yq with an expression on a set of input files.
 
     yq is capable of parsing and outputting to other formats. See their [docs](https://mikefarah.gitbook.io/yq) for more examples.
@@ -16,29 +165,32 @@ def yq(name, srcs, expression = ".", args = [], outs = None, **kwargs):
     Args:
         name: Name of the rule
         srcs: List of input file labels
-        expression: yq expression (https://mikefarah.gitbook.io/yq/commands/evaluate).
+        expression: yq expression (https://mikefarah.gitbook.io/yq/commands/evaluate). Cannot be used with `expression_file`.
 
-            Defaults to the identity
-            expression ".". Subject to stamp variable replacements, see [Stamping](./stamping.md).
+            Defaults to the identity expression ".".
+            Subject to stamp variable replacements, see [Stamping](./stamping.md).
             When stamping is enabled, an environment variable named "STAMP" will be available in the expression.
 
             Be careful to write the filter so that it handles unstamped builds, as in the example above.
 
+        expression_file: File containing a yq expression (alternative to `expression`).
+
         args: Additional args to pass to yq.
 
-            Note that you do not need to pass _eval_ or _eval-all_ as this
-            is handled automatically based on the number `srcs`. Passing the output format or the parse format
-            is optional as these can be guessed based on the file extensions in `srcs` and `outs`.
+            Note that you do not need to pass _eval_ or _eval-all_ as this is handled automatically based on the number `srcs`.
+            Passing the output format or the parse format is optional as these can be guessed based on the file extensions in `srcs` and `outs`.
 
         outs: Name of the output files.
 
-            Defaults to a single output with the name plus a ".yaml" extension, or
-            the extension corresponding to a passed output argument (e.g., "-o=json"). For split operations you
-            must declare all outputs as the name of the output files depends on the expression.
+            Defaults to a single output with the name plus a ".yaml" extension, or the extension corresponding to a passed output argument such as `"-o=json"`.
+            For split operations you must declare all outputs, as the name of the output files depends on the expression.
 
         **kwargs: Other common named parameters such as `tags` or `visibility`
     """
     args = args[:]
+
+    if expression == None and expression_file == None:
+        expression = "."
 
     if not _is_split_operation(args):
         # For split operations we can't predeclare outs because the name of the resulting files
@@ -71,17 +223,21 @@ def yq(name, srcs, expression = ".", args = [], outs = None, **kwargs):
             elif outs[0].endswith(".tsv") and "-o=t" not in args and "--outputformat=tsv" not in args:
                 args.append("-o=t")
 
-    # If the input files are json or xml, set the parse flag if it isn't already set
-    if len(srcs) > 0:
-        if srcs[0].endswith(".json") and "-P" not in args:
+    # If the input files are json or xml, set the parse flag if it isn't already set.
+    # Select statements can't be inspected by macros, so if you're using configurable
+    # attributes, you'll need to add the -P or -p=xml arguments yourself as needed.
+    if type(srcs) != "select" and len(srcs) > 0:
+        first_label = native.package_relative_label(srcs[0])
+        if first_label.name.endswith(".json") and "-P" not in args:
             args.append("-P")
-        elif srcs[0].endswith(".xml") and "-p=xml" not in args:
+        elif first_label.name.endswith(".xml") and "-p=xml" not in args:
             args.append("-p=xml")
 
     _yq_rule(
         name = name,
         srcs = srcs,
         expression = expression,
+        expression_file = expression_file,
         args = args,
         outs = outs,
         **kwargs

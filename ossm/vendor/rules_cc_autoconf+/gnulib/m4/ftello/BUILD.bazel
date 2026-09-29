@@ -1,0 +1,167 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/ftello.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks", "utils")
+
+# Shared AC_CHECK_DECL(ftello) cache var + HAVE_DECL_FTELLO subst override.
+# Used by both gl_FUNC_FTELLO and gl_FUNC_FTELLO_FOR_FTELL.
+autoconf(
+    name = "gl_HAVE_DECL_FTELLO",
+    checks = [
+        # AC_CHECK_DECLS_ONCE([ftello]) - line 14
+        checks.AC_CHECK_DECL(
+            "ftello",
+            define = "HAVE_DECL_FTELLO",
+            includes = ["#include <stdio.h>"],
+        ),
+        # M4: if test $ac_cv_have_decl_ftello = no; then HAVE_DECL_FTELLO=0
+        # Override the gl_STDIO_H_DEFAULTS toolchain default when not declared.
+        checks.AC_SUBST(
+            "HAVE_DECL_FTELLO",
+            condition = "ac_cv_have_decl_ftello",
+            if_false = "0",
+            if_true = "1",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+# Shared gl_cv_func_ftello link probe. Used by gl_FUNC_FTELLO and
+# gl_PREREQ_FTELLO so each can read the same cache variable.
+autoconf(
+    name = "gl_cv_func_ftello",
+    checks = [
+        # AC_LINK_IFELSE for ftello - lines 18-24
+        checks.AC_TRY_LINK(
+            name = "gl_cv_func_ftello",
+            code = utils.AC_LANG_PROGRAM(
+                ["#include <stdio.h>"],
+                "ftello (stdin);",
+            ),
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+# Shared REPLACE_FTELLO subst (used by gl_FUNC_FTELLO and gl_FUNC_FTELLO_FOR_FTELL).
+# M4 sets REPLACE_FTELLO=1 inside the "ftello exists" arm if ANY of:
+#   (a) WINDOWS_64_BIT_OFF_T==1 (Windows; line 32-34)
+#   (b) gl_cv_var_stdin_large_offset == no (line 35-37)
+#   (c) host_os matches mingw|windows (line 40-49)
+#   (d) gl_cv_func_ftello_works != yes (Solaris bug; runtime - line 51-144)
+#   (e) gl_ftello_broken_after_ungetc == yes (macOS bug; runtime - line 146-153)
+# (a) and (c) collapse to "on Windows" via the WINDOWS_64_BIT_OFF_T subst.
+# (b) is a real cache variable. (d) and (e) are runtime probes not portable
+# to cross-compile and are not modeled here.
+autoconf(
+    name = "gl_REPLACE_FTELLO_SUBST",
+    checks = [
+        checks.AC_SUBST(
+            "REPLACE_FTELLO",
+            condition = "gl_cv_func_ftello==1 && (WINDOWS_64_BIT_OFF_T==1 || !gl_cv_var_stdin_large_offset)",
+            if_false = "0",
+            if_true = "1",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_cv_func_ftello",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/fseeko:gl_STDIN_LARGE_OFFSET",
+        # Provides WINDOWS_64_BIT_OFF_T subst.
+        "//gnulib/m4/largefile:gl_LARGEFILE",
+    ],
+)
+
+# gl_FUNC_FTELLO - lines 9-156
+autoconf(
+    name = "gl_FUNC_FTELLO",
+    checks = [
+        # M4: if test $gl_cv_func_ftello = no; then HAVE_FTELLO=0; fi
+        # Override the gl_STDIO_H_DEFAULTS toolchain default when ftello is absent.
+        checks.AC_SUBST(
+            "HAVE_FTELLO",
+            condition = "gl_cv_func_ftello",
+            if_false = "0",
+            if_true = "1",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        # AC_REQUIRE([gl_STDIO_H_DEFAULTS]) is satisfied by the toolchain.
+        # AC_REQUIRE([gl_STDIN_LARGE_OFFSET]) - line 12
+        "//gnulib/m4/fseeko:gl_STDIN_LARGE_OFFSET",
+        # AC_REQUIRE([gl_SYS_TYPES_H]) - line 13
+        "//gnulib/m4/sys_types_h",
+        # AC_REQUIRE([AC_USE_SYSTEM_EXTENSIONS]) - line 16
+        "//gnulib/m4/extensions",
+        # AC_REQUIRE([AC_CANONICAL_HOST]) - line 38
+        "//autoconf/macros/AC_CANONICAL_HOST",
+        # AC_CHECK_DECLS_ONCE([ftello]) + HAVE_DECL_FTELLO subst.
+        ":gl_HAVE_DECL_FTELLO",
+        # gl_cv_func_ftello link probe.
+        ":gl_cv_func_ftello",
+        # REPLACE_FTELLO subst (incl. WINDOWS_64_BIT_OFF_T + stdin offset logic).
+        ":gl_REPLACE_FTELLO_SUBST",
+        # gl_FUNC_UNGETC_WORKS - line 148 (runtime macOS bug check; not modeled).
+        "//gnulib/m4/ungetc",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+# gl_PREREQ_FTELLO - lines 158-168
+autoconf(
+    name = "gl_PREREQ_FTELLO",
+    checks = [
+        # M4: if test $gl_cv_func_ftello != no; then AC_DEFINE([HAVE_FTELLO], [1])
+        # Creates the config.h define when the link probe succeeded.
+        checks.AC_DEFINE(
+            "HAVE_FTELLO",
+            requires = ["gl_cv_func_ftello==1"],
+        ),
+        # AC_CHECK_FUNCS([_ftelli64]) - line 166
+        checks.AC_CHECK_FUNC(
+            "_ftelli64",
+            define = "HAVE__FTELLI64",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_cv_func_ftello",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+# Package-level aggregator (matches package name). No checks - deps on the
+# AC_DEFUN targets.
+autoconf(
+    name = "ftello",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_FTELLO",
+        ":gl_PREREQ_FTELLO",
+    ],
+)
+
+# Convenience target for modules like ftell that need ftello's subst variables
+# and declaration but not the HAVE_FTELLO config.h define.
+autoconf(
+    name = "gl_FUNC_FTELLO_FOR_FTELL",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_HAVE_DECL_FTELLO",
+        ":gl_REPLACE_FTELLO_SUBST",
+        ":gl_cv_func_ftello",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/extensions",
+        "//gnulib/m4/fseeko:gl_STDIN_LARGE_OFFSET",
+        "//gnulib/m4/sys_types_h",
+        "//gnulib/m4/ungetc",
+    ],
+)

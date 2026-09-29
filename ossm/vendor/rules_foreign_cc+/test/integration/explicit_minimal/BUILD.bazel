@@ -1,0 +1,43 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+
+cmake(
+    name = "hello_cmake",
+    lib_source = ":all_srcs",
+    # MSVC names the static lib hello.lib; everyone else libhello.a.
+    out_static_libs = select({
+        "@platforms//os:windows": ["hello.lib"],
+        "//conditions:default": ["libhello.a"],
+    }),
+)
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(
+        include = ["**"],
+        exclude = [
+            ".bazelignore",
+            ".bazelrc",
+            ".bazelversion",
+            "BUILD",
+            "BUILD.bazel",
+            "MODULE.bazel",
+            "MODULE.bazel.lock",
+            "WORKSPACE",
+            "WORKSPACE.bazel",
+            "bazel-*/**",
+        ],
+    ),
+)
+
+# One target the runner can build that covers both halves of this scenario:
+# //:hello_cmake exercises the explicit cmake+ninja binary path end to end, and
+# @make//:make builds the tool behind the source-make tag, which registers no
+# toolchain //:hello_cmake uses -- without this the make half goes unexercised.
+# That the tag reached the hub is the scenario's cquery's job, not this one's.
+filegroup(
+    name = "explicit_probe",
+    srcs = [
+        ":hello_cmake",
+        "@make",
+    ],
+)

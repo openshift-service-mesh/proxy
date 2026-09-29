@@ -1,5 +1,13 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 
+filegroup(
+    name = "distribution",
+    srcs = glob(["**"]) + [
+        "//foreign_cc/built_tools/private:distribution",
+    ],
+    visibility = ["//:__subpackages__"],
+)
+
 bzl_library(
     name = "cmake_build",
     srcs = ["cmake_build.bzl"],
@@ -23,8 +31,12 @@ bzl_library(
     name = "meson_build",
     srcs = ["meson_build.bzl"],
     visibility = ["//visibility:public"],
-    deps = ["@rules_python//python:defs_bzl"],
+    deps = [
+        "@rules_python//python:defs_bzl",
+    ],
 )
+
+exports_files(["meson_tool_wrapper.py"])
 
 bzl_library(
     name = "ninja_build",

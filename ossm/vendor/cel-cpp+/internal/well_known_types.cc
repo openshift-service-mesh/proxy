@@ -71,6 +71,17 @@ using ::google::protobuf::util::TimeUtil;
 
 using CppStringType = ::google::protobuf::FieldDescriptor::CppStringType;
 
+FieldDescriptor::Label GetFieldLabel(
+    const FieldDescriptor* absl_nonnull field) {
+  if (field->is_required()) {
+    return FieldDescriptor::LABEL_REQUIRED;
+  } else if (field->is_repeated()) {
+    return FieldDescriptor::LABEL_REPEATED;
+  } else {
+    return FieldDescriptor::LABEL_OPTIONAL;
+  }
+}
+
 absl::string_view FlatStringValue(
     const StringValue& value ABSL_ATTRIBUTE_LIFETIME_BOUND,
     std::string& scratch ABSL_ATTRIBUTE_LIFETIME_BOUND) {
@@ -249,16 +260,26 @@ absl::Status CheckFieldCppType(const FieldDescriptor* absl_nonnull field,
   return absl::OkStatus();
 }
 
+absl::string_view LabelToString(FieldDescriptor::Label label) {
+  switch (label) {
+    case FieldDescriptor::LABEL_REPEATED:
+      return "REPEATED";
+    case FieldDescriptor::LABEL_REQUIRED:
+      return "REQUIRED";
+    case FieldDescriptor::LABEL_OPTIONAL:
+      return "OPTIONAL";
+    default:
+      return "ERROR";
+  }
+}
+
 absl::Status CheckFieldCardinality(const FieldDescriptor* absl_nonnull field,
                                    FieldDescriptor::Label label) {
-  bool matches = (label == FieldDescriptor::LABEL_REPEATED)
-                     ? field->is_repeated()
-                     : !field->is_repeated();
-  if (ABSL_PREDICT_FALSE(!matches)) {
+  if (ABSL_PREDICT_FALSE(GetFieldLabel(field) != label)) {
     return absl::InvalidArgumentError(absl::StrCat(
         "unexpected field cardinality for protocol buffer message "
         "well known type: ",
-        field->full_name()));
+        field->full_name(), " ", LabelToString(GetFieldLabel(field))));
   }
   return absl::OkStatus();
 }
@@ -1622,20 +1643,20 @@ int StructReflection::FieldsSize(const google::protobuf::Message& message) const
                                                      message, *fields_field_);
 }
 
-google::protobuf::MapIterator StructReflection::BeginFields(
+google::protobuf::ConstMapIterator StructReflection::BeginFields(
     const google::protobuf::Message& message) const {
   ABSL_DCHECK(IsInitialized());
   ABSL_DCHECK_EQ(message.GetDescriptor(), descriptor_);
-  return cel::extensions::protobuf_internal::MapBegin(*message.GetReflection(),
-                                                      message, *fields_field_);
+  return cel::extensions::protobuf_internal::ConstMapBegin(
+      *message.GetReflection(), message, *fields_field_);
 }
 
-google::protobuf::MapIterator StructReflection::EndFields(
+google::protobuf::ConstMapIterator StructReflection::EndFields(
     const google::protobuf::Message& message) const {
   ABSL_DCHECK(IsInitialized());
   ABSL_DCHECK_EQ(message.GetDescriptor(), descriptor_);
-  return cel::extensions::protobuf_internal::MapEnd(*message.GetReflection(),
-                                                    message, *fields_field_);
+  return cel::extensions::protobuf_internal::ConstMapEnd(
+      *message.GetReflection(), message, *fields_field_);
 }
 
 bool StructReflection::ContainsField(const google::protobuf::Message& message,
@@ -2153,7 +2174,7 @@ absl::StatusOr<well_known_types::Value> AdaptFromMessage(
       if (adapted) {
         return adapted;
       }
-      return absl::monostate{};
+      return std::monostate{};
   }
 }
 

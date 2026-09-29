@@ -1,0 +1,9 @@
+{
+  "url": "https://github.com/cel-expr/cel-cpp/archive/refs/tags/v0.16.1.tar.gz",
+  "integrity": "sha256-aFcoLGgYTkLCLNtsqzMEOuU9+4e6mRJ97V9ZQxZm8z0=",
+  "strip_prefix": "cel-cpp-0.16.1",
+  "patches": {
+    "cel-cpp.patch": "sha256-kb8PIoUXXucKbY9hS51N6VnsuagaePWVozRyJDIcUjk="
+  },
+  "patch_strip": 1
+}

@@ -1,0 +1,24 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/atan2.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "atan2",
+    checks = [
+        # Equivalent to gl_FUNC_ATAN2 macro from atan2.m4
+        checks.AC_CHECK_FUNC(
+            "atan2",
+            define = "HAVE_ATAN2",
+        ),
+        # Set ATAN2_LIBM to empty string (subst-only)
+        # gl_COMMON_DOUBLE_MATHFUNC sets these based on whether the function needs libm
+        # On macOS, atan2 is in libc, so ATAN2_LIBM=""
+        # Note: POW_LIBM is already provided by mathfunc dependency
+        checks.AC_SUBST("ATAN2_LIBM", ""),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/mathfunc",  # Uses gl_COMMON_DOUBLE_MATHFUNC([atan2])
+    ],
+)

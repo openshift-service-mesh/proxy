@@ -1,5 +1,6 @@
-load("@build_bazel_apple_support//rules:toolchain_substitution.bzl", "toolchain_substitution")
-load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("@apple_support//rules:toolchain_substitution.bzl", "toolchain_substitution")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
 
 licenses(["notice"])
 
@@ -34,7 +35,7 @@ toolchain_substitution(
 # Consumed by bazel tests.
 filegroup(
     name = "for_bazel_tests",
-    testonly = 1,
+    testonly = True,
     srcs = glob(["**"]),
     visibility = [
         "//tools:__pkg__",

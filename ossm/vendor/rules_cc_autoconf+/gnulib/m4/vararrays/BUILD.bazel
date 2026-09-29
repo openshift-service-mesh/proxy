@@ -1,0 +1,19 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/vararrays.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "vararrays",
+    checks = [
+        checks.AC_DEFINE("HAVE_C_VARARRAYS", "1"),
+    ] + select({
+        # On macOS, VLAs are supported by clang
+        "@platforms//os:macos": [],
+        # On older compilers/systems, VLAs may not be supported
+        "//conditions:default": [
+            checks.AC_DEFINE("__STDC_NO_VLA__", "1"),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+)

@@ -27,6 +27,7 @@ use crate::{check_lib_error, errors::PkiError, ffi::slice_into_ffi_raw_parts};
 bssl_enum! {
     /// Trust settings for certificate verification.
     #[derive(Clone, Copy, PartialEq, Eq)]
+    #[non_exhaustive]
     pub enum Trust: i8 {
         /// Compatibility mode.
         Compat = bssl_sys::X509_TRUST_COMPAT as i8,
@@ -46,6 +47,7 @@ bssl_enum! {
 bssl_enum! {
     /// Purpose settings for certificate verification.
     #[derive(Clone, Copy, PartialEq, Eq)]
+    #[non_exhaustive]
     pub enum Purpose: i8 {
         /// SSL client.
         SslClient = bssl_sys::X509_PURPOSE_SSL_CLIENT as i8,
@@ -154,7 +156,7 @@ impl CertificateVerificationParams {
     ///
     /// The handle **must** outlive the use sites.
     /// Verify the callsite contract to honour the lifetime contracts.
-    pub unsafe fn as_raw(&self) -> *mut bssl_sys::X509_VERIFY_PARAM {
+    pub unsafe fn as_ptr(&self) -> *mut bssl_sys::X509_VERIFY_PARAM {
         self.ptr()
     }
 

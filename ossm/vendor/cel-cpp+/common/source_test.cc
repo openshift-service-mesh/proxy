@@ -14,8 +14,11 @@
 
 #include "common/source.h"
 
+#include <cstdint>
+#include <optional>
+
+#include "absl/status/status.h"
 #include "absl/strings/cord.h"
-#include "absl/types/optional.h"
 #include "internal/testing.h"
 
 namespace cel {
@@ -81,37 +84,37 @@ TEST(StringSource, PositionAndLocation) {
               Optional(Eq(SourceLocation{int32_t{1}, int32_t{2}})));
   EXPECT_THAT(source->GetLocation(*end),
               Optional(Eq(SourceLocation{int32_t{3}, int32_t{2}})));
-  EXPECT_THAT(source->GetLocation(-1), Eq(absl::nullopt));
+  EXPECT_THAT(source->GetLocation(-1), Eq(std::nullopt));
 
   EXPECT_THAT(source->content().ToString(*start, *end),
               Eq("d &&\n\t b.c.arg(10) &&\n\t "));
 
   EXPECT_THAT(source->GetPosition(SourceLocation{int32_t{0}, int32_t{0}}),
-              Eq(absl::nullopt));
+              Eq(std::nullopt));
   EXPECT_THAT(source->GetPosition(SourceLocation{int32_t{1}, int32_t{-1}}),
-              Eq(absl::nullopt));
+              Eq(std::nullopt));
   EXPECT_THAT(source->GetPosition(SourceLocation{int32_t{4}, int32_t{0}}),
-              Eq(absl::nullopt));
+              Eq(std::nullopt));
 }
 
 TEST(StringSource, SnippetSingle) {
   ASSERT_OK_AND_ASSIGN(auto source, NewSource("hello, world", "one-line-test"));
 
   EXPECT_THAT(source->Snippet(1), Optional(Eq("hello, world")));
-  EXPECT_THAT(source->Snippet(2), Eq(absl::nullopt));
+  EXPECT_THAT(source->Snippet(2), Eq(std::nullopt));
 }
 
 TEST(StringSource, SnippetMulti) {
   ASSERT_OK_AND_ASSIGN(auto source,
                        NewSource("hello\nworld\nmy\nbub\n", "four-line-test"));
 
-  EXPECT_THAT(source->Snippet(0), Eq(absl::nullopt));
+  EXPECT_THAT(source->Snippet(0), Eq(std::nullopt));
   EXPECT_THAT(source->Snippet(1), Optional(Eq("hello")));
   EXPECT_THAT(source->Snippet(2), Optional(Eq("world")));
   EXPECT_THAT(source->Snippet(3), Optional(Eq("my")));
   EXPECT_THAT(source->Snippet(4), Optional(Eq("bub")));
   EXPECT_THAT(source->Snippet(5), Optional(Eq("")));
-  EXPECT_THAT(source->Snippet(6), Eq(absl::nullopt));
+  EXPECT_THAT(source->Snippet(6), Eq(std::nullopt));
 }
 
 TEST(CordSource, Description) {
@@ -150,17 +153,17 @@ TEST(CordSource, PositionAndLocation) {
               Optional(Eq(SourceLocation{int32_t{1}, int32_t{2}})));
   EXPECT_THAT(source->GetLocation(*end),
               Optional(Eq(SourceLocation{int32_t{3}, int32_t{2}})));
-  EXPECT_THAT(source->GetLocation(-1), Eq(absl::nullopt));
+  EXPECT_THAT(source->GetLocation(-1), Eq(std::nullopt));
 
   EXPECT_THAT(source->content().ToString(*start, *end),
               Eq("d &&\n\t b.c.arg(10) &&\n\t "));
 
   EXPECT_THAT(source->GetPosition(SourceLocation{int32_t{0}, int32_t{0}}),
-              Eq(absl::nullopt));
+              Eq(std::nullopt));
   EXPECT_THAT(source->GetPosition(SourceLocation{int32_t{1}, int32_t{-1}}),
-              Eq(absl::nullopt));
+              Eq(std::nullopt));
   EXPECT_THAT(source->GetPosition(SourceLocation{int32_t{4}, int32_t{0}}),
-              Eq(absl::nullopt));
+              Eq(std::nullopt));
 }
 
 TEST(CordSource, SnippetSingle) {
@@ -168,7 +171,7 @@ TEST(CordSource, SnippetSingle) {
                        NewSource(absl::Cord("hello, world"), "one-line-test"));
 
   EXPECT_THAT(source->Snippet(1), Optional(Eq("hello, world")));
-  EXPECT_THAT(source->Snippet(2), Eq(absl::nullopt));
+  EXPECT_THAT(source->Snippet(2), Eq(std::nullopt));
 }
 
 TEST(CordSource, SnippetMulti) {
@@ -176,13 +179,13 @@ TEST(CordSource, SnippetMulti) {
       auto source,
       NewSource(absl::Cord("hello\nworld\nmy\nbub\n"), "four-line-test"));
 
-  EXPECT_THAT(source->Snippet(0), Eq(absl::nullopt));
+  EXPECT_THAT(source->Snippet(0), Eq(std::nullopt));
   EXPECT_THAT(source->Snippet(1), Optional(Eq("hello")));
   EXPECT_THAT(source->Snippet(2), Optional(Eq("world")));
   EXPECT_THAT(source->Snippet(3), Optional(Eq("my")));
   EXPECT_THAT(source->Snippet(4), Optional(Eq("bub")));
   EXPECT_THAT(source->Snippet(5), Optional(Eq("")));
-  EXPECT_THAT(source->Snippet(6), Eq(absl::nullopt));
+  EXPECT_THAT(source->Snippet(6), Eq(std::nullopt));
 }
 
 TEST(Source, DisplayErrorLocationBasic) {
@@ -221,6 +224,91 @@ TEST(Source, DisplayErrorLocationFullWidth) {
   EXPECT_EQ(source->DisplayErrorLocation(location),
             "\n | 'Ｈｅｌｌｏ'"
             "\n | .．＾");
+}
+
+TEST(SourceSubrange, Description) {
+  ASSERT_OK_AND_ASSIGN(auto source, NewSource("hello world", "subrange-test"));
+  SourceSubrange subrange(*source, SourceRange{0, 5});
+  EXPECT_THAT(subrange.description(), Eq("subrange-test"));
+}
+
+TEST(SourceSubrange, Content) {
+  ASSERT_OK_AND_ASSIGN(auto source, NewSource("hello world", "subrange-test"));
+  SourceSubrange subrange(*source, SourceRange{6, 11});
+  EXPECT_THAT(subrange.content().ToString(), Eq("world"));
+}
+
+TEST(SourceSubrange, ContentEmpty) {
+  ASSERT_OK_AND_ASSIGN(auto source, NewSource("hello world", "subrange-test"));
+  SourceSubrange subrange(*source, SourceRange{5, 5});
+  EXPECT_THAT(subrange.content().ToString(), Eq(""));
+}
+
+TEST(SourceSubrange, LineOffsetsNoNewlines) {
+  ASSERT_OK_AND_ASSIGN(auto source,
+                       NewSource("hello\nworld\n", "subrange-test"));
+  SourceSubrange subrange(*source, SourceRange{0, 5});
+  EXPECT_THAT(subrange.line_offsets(), ElementsAre(6));
+}
+
+TEST(SourceSubrange, LineOffsetsWithNewlines) {
+  ASSERT_OK_AND_ASSIGN(auto source,
+                       NewSource("hello\nworld\ncel", "subrange-test"));
+  SourceSubrange subrange(*source, SourceRange{0, 11});
+  EXPECT_THAT(subrange.line_offsets(), ElementsAre(6, 12));
+}
+
+TEST(SourceSubrange, LineOffsetsMiddleSubrange) {
+  ASSERT_OK_AND_ASSIGN(auto source,
+                       NewSource("hello\nworld\ncel\ncpp", "subrange-test"));
+  SourceSubrange subrange(*source, SourceRange{6, 15});
+  EXPECT_THAT(subrange.line_offsets(), ElementsAre(6, 10));
+}
+
+TEST(StringSource, CodepointLimitExceeded) {
+  SourceOptions options;
+  options.max_codepoint_size = 5;
+
+  EXPECT_THAT(
+      NewSource("123456", "test", options),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInvalidArgument,
+          ::testing::HasSubstr("expression is larger than codepoint limit 5")));
+
+  ASSERT_OK_AND_ASSIGN(auto source, NewSource("12345", "test", options));
+  EXPECT_THAT(source->content().ToString(), ::testing::Eq("12345"));
+}
+
+TEST(StringSource, CodepointLimitMultibyteUtf8) {
+  SourceOptions options;
+  options.max_codepoint_size = 5;
+
+  // "Ｈｅｌｌｏ" consists of 5 full-width Unicode characters (15 bytes in
+  // UTF-8).
+  ASSERT_OK_AND_ASSIGN(auto source, NewSource("Ｈｅｌｌｏ", "test", options));
+  EXPECT_THAT(source->content().ToString(), ::testing::Eq("Ｈｅｌｌｏ"));
+
+  options.max_codepoint_size = 4;
+  EXPECT_THAT(
+      NewSource("Ｈｅｌｌｏ", "test", options),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInvalidArgument,
+          ::testing::HasSubstr("expression is larger than codepoint limit 4")));
+}
+
+TEST(CordSource, CodepointLimitExceeded) {
+  SourceOptions options;
+  options.max_codepoint_size = 5;
+
+  EXPECT_THAT(
+      NewSource(absl::Cord("123456"), "test", options),
+      ::absl_testing::StatusIs(
+          absl::StatusCode::kInvalidArgument,
+          ::testing::HasSubstr("expression is larger than codepoint limit 5")));
+
+  ASSERT_OK_AND_ASSIGN(auto source,
+                       NewSource(absl::Cord("12345"), "test", options));
+  EXPECT_THAT(source->content().ToString(), ::testing::Eq("12345"));
 }
 
 }  // namespace

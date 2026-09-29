@@ -25,11 +25,45 @@ cc_library(
     hdrs = ["ast.h"],
     deps = [
         ":expr",
+        ":source",
         "//common/ast:metadata",
         "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_library(
+    name = "expr_printer",
+    srcs = ["expr_printer.cc"],
+    hdrs = ["expr_printer.h"],
+    deps = [
+        ":ast",
+        ":ast_proto",
+        ":constant",
+        ":expr",
+        "//internal:strings",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/log:absl_log",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
+    ],
+)
+
+cc_test(
+    name = "expr_printer_test",
+    srcs = ["expr_printer_test.cc"],
+    deps = [
+        ":expr",
+        ":expr_printer",
+        "//internal:testing",
+        "//parser",
+        "//parser:options",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -39,8 +73,113 @@ cc_test(
     deps = [
         ":ast",
         ":expr",
+        ":source",
         "//internal:testing",
         "@com_google_absl//absl/container:flat_hash_map",
+    ],
+)
+
+cc_library(
+    name = "type_spec_resolver",
+    srcs = ["type_spec_resolver.cc"],
+    hdrs = ["type_spec_resolver.h"],
+    deps = [
+        ":ast",
+        ":descriptor_pool_type_introspector",
+        ":type",
+        ":type_kind",
+        "//internal:status_macros",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "type_spec_resolver_test",
+    srcs = ["type_spec_resolver_test.cc"],
+    deps = [
+        ":ast",
+        ":type",
+        ":type_kind",
+        ":type_spec_resolver",
+        "//internal:testing",
+        "//internal:testing_descriptor_pool",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_library(
+    name = "descriptor_pool_type_introspector",
+    srcs = ["descriptor_pool_type_introspector.cc"],
+    hdrs = ["descriptor_pool_type_introspector.h"],
+    deps = [
+        ":type",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "descriptor_pool_type_introspector_test",
+    srcs = ["descriptor_pool_type_introspector_test.cc"],
+    deps = [
+        ":descriptor_pool_type_introspector",
+        ":type",
+        "//internal:testing",
+        "//internal:testing_descriptor_pool",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:optional",
+    ],
+)
+
+cc_library(
+    name = "signature",
+    srcs = ["signature.cc"],
+    hdrs = ["signature.h"],
+    deps = [
+        ":ast",
+        ":type",
+        ":type_spec_resolver",
+        "//internal:status_macros",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "signature_test",
+    srcs = ["signature_test.cc"],
+    deps = [
+        ":ast",
+        ":signature",
+        ":type",
+        ":type_kind",
+        ":type_spec_resolver",
+        "//internal:testing",
+        "//internal:testing_descriptor_pool",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_protobuf//:protobuf",
     ],
 )
 
@@ -54,8 +193,8 @@ cc_library(
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/functional:overload",
+        "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/strings:string_view",
-        "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
         "@com_google_absl//absl/types:variant",
     ],
@@ -110,14 +249,14 @@ cc_library(
     hdrs = ["decl.h"],
     deps = [
         ":constant",
+        ":signature",
         ":type",
         ":type_kind",
         "//internal:status_macros",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/hash",
-        "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -135,6 +274,8 @@ cc_test(
         ":decl",
         ":type",
         "//internal:testing",
+        "//internal:testing_descriptor_pool",
+        "@com_google_absl//absl/log:die_if_null",
         "@com_google_absl//absl/status",
         "@com_google_protobuf//:protobuf",
     ],
@@ -365,7 +506,6 @@ cc_library(
         ":allocator",
         ":arena",
         ":data",
-        ":native_type",
         ":reference_count",
         "//common/internal:metadata",
         "//common/internal:reference_count",
@@ -387,13 +527,9 @@ cc_test(
         ":allocator",
         ":data",
         ":memory",
-        ":native_type",
         "//common/internal:reference_count",
         "//internal:testing",
         "@com_google_absl//absl/base:nullability",
-        "@com_google_absl//absl/debugging:leak_check",
-        "@com_google_absl//absl/log:absl_check",
-        "@com_google_absl//absl/types:optional",
         "@com_google_protobuf//:protobuf",
         "@com_google_protobuf//:struct_cc_proto",
     ],
@@ -504,8 +640,8 @@ cc_test(
     deps = [
         ":source",
         "//internal:testing",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings:cord",
-        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -539,12 +675,9 @@ cc_library(
         ],
     ) + [
         "type.h",
-        "type_factory.h",
         "type_introspector.h",
-        "type_manager.h",
     ],
     deps = [
-        ":memory",
         ":type_kind",
         "//internal:string_pool",
         "@com_google_absl//absl/algorithm:container",
@@ -571,6 +704,17 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "format_type_name",
+    srcs = ["format_type_name.cc"],
+    hdrs = ["format_type_name.h"],
+    deps = [
+        ":type",
+        ":type_kind",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
 cc_test(
     name = "type_test",
     srcs = glob([
@@ -589,6 +733,18 @@ cc_test(
         "@com_google_absl//absl/hash:hash_testing",
         "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/log:die_if_null",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "format_type_name_test",
+    srcs = ["format_type_name_test.cc"],
+    deps = [
+        ":format_type_name",
+        ":type",
+        "//internal:testing",
+        "@com_google_cel_spec//proto/cel/expr/conformance/proto2:test_all_types_cc_proto",
         "@com_google_protobuf//:protobuf",
     ],
 )
@@ -846,6 +1002,7 @@ cc_test(
         "arena_string_test.cc",
         "arena_string_view_test.cc",
     ],
+    tags = ["no_test_msvc"],
     deps = [
         ":arena_string",
         "//internal:testing",
@@ -875,6 +1032,7 @@ cc_library(
 cc_test(
     name = "arena_string_pool_test",
     srcs = ["arena_string_pool_test.cc"],
+    tags = ["no_test_msvc"],
     deps = [
         ":arena_string_pool",
         "//internal:testing",
@@ -987,9 +1145,6 @@ cc_library(
     deps = [
         ":decl",
         ":decl_proto",
-        ":type",
-        ":type_proto",
-        "//internal:status_macros",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -1134,5 +1289,28 @@ cc_test(
         "//internal:testing",
         "@com_google_absl//absl/hash:hash_testing",
         "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "container",
+    srcs = ["container.cc"],
+    hdrs = ["container.h"],
+    deps = [
+        "//internal:lexis",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "container_test",
+    srcs = ["container_test.cc"],
+    deps = [
+        ":container",
+        "//internal:testing",
+        "@com_google_absl//absl/status",
     ],
 )

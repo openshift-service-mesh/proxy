@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -27,12 +28,12 @@
 #include "absl/log/absl_check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/types/optional.h"
 #include "common/value.h"
 #include "common/values/values.h"
 #include "extensions/protobuf/internal/map_reflection.h"
 #include "internal/json.h"
 #include "internal/message_equality.h"
+#include "internal/number.h"
 #include "internal/status_macros.h"
 #include "internal/well_known_types.h"
 #include "google/protobuf/arena.h"
@@ -187,7 +188,7 @@ size_t ParsedMapFieldValue::Size() const {
 
 namespace {
 
-absl::optional<int32_t> ValueAsInt32(const Value& value) {
+std::optional<int32_t> ValueAsInt32(const Value& value) {
   if (auto int_value = value.AsInt();
       int_value &&
       int_value->NativeValue() >= std::numeric_limits<int32_t>::min() &&
@@ -197,32 +198,36 @@ absl::optional<int32_t> ValueAsInt32(const Value& value) {
              uint_value &&
              uint_value->NativeValue() <= std::numeric_limits<int32_t>::max()) {
     return static_cast<int32_t>(uint_value->NativeValue());
-  } else if (auto double_value = value.AsDouble();
-             double_value &&
-             static_cast<double>(static_cast<int32_t>(
-                 double_value->NativeValue())) == double_value->NativeValue()) {
-    return static_cast<int32_t>(double_value->NativeValue());
+  } else if (auto double_value = value.AsDouble(); double_value) {
+    auto number = internal::Number::FromDouble(double_value->NativeValue());
+    if (number.LosslessConvertibleToInt()) {
+      int64_t wide_value = number.AsInt();
+      if (wide_value >= std::numeric_limits<int32_t>::min() &&
+          wide_value <= std::numeric_limits<int32_t>::max()) {
+        return static_cast<int32_t>(wide_value);
+      }
+    }
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
-absl::optional<int64_t> ValueAsInt64(const Value& value) {
+std::optional<int64_t> ValueAsInt64(const Value& value) {
   if (auto int_value = value.AsInt(); int_value) {
     return int_value->NativeValue();
   } else if (auto uint_value = value.AsUint();
              uint_value &&
              uint_value->NativeValue() <= std::numeric_limits<int64_t>::max()) {
     return static_cast<int64_t>(uint_value->NativeValue());
-  } else if (auto double_value = value.AsDouble();
-             double_value &&
-             static_cast<double>(static_cast<int64_t>(
-                 double_value->NativeValue())) == double_value->NativeValue()) {
-    return static_cast<int64_t>(double_value->NativeValue());
+  } else if (auto double_value = value.AsDouble(); double_value) {
+    auto number = internal::Number::FromDouble(double_value->NativeValue());
+    if (number.LosslessConvertibleToInt()) {
+      return number.AsInt();
+    }
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
-absl::optional<uint32_t> ValueAsUInt32(const Value& value) {
+std::optional<uint32_t> ValueAsUInt32(const Value& value) {
   if (auto int_value = value.AsInt();
       int_value && int_value->NativeValue() >= 0 &&
       int_value->NativeValue() <= std::numeric_limits<uint32_t>::max()) {
@@ -231,28 +236,31 @@ absl::optional<uint32_t> ValueAsUInt32(const Value& value) {
              uint_value && uint_value->NativeValue() <=
                                std::numeric_limits<uint32_t>::max()) {
     return static_cast<uint32_t>(uint_value->NativeValue());
-  } else if (auto double_value = value.AsDouble();
-             double_value &&
-             static_cast<double>(static_cast<uint32_t>(
-                 double_value->NativeValue())) == double_value->NativeValue()) {
-    return static_cast<uint32_t>(double_value->NativeValue());
+  } else if (auto double_value = value.AsDouble(); double_value) {
+    auto number = internal::Number::FromDouble(double_value->NativeValue());
+    if (number.LosslessConvertibleToUint()) {
+      uint64_t wide_value = number.AsUint();
+      if (wide_value <= std::numeric_limits<uint32_t>::max()) {
+        return static_cast<uint32_t>(wide_value);
+      }
+    }
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
-absl::optional<uint64_t> ValueAsUInt64(const Value& value) {
+std::optional<uint64_t> ValueAsUInt64(const Value& value) {
   if (auto int_value = value.AsInt();
       int_value && int_value->NativeValue() >= 0) {
     return static_cast<uint64_t>(int_value->NativeValue());
   } else if (auto uint_value = value.AsUint(); uint_value) {
     return uint_value->NativeValue();
-  } else if (auto double_value = value.AsDouble();
-             double_value &&
-             static_cast<double>(static_cast<uint64_t>(
-                 double_value->NativeValue())) == double_value->NativeValue()) {
-    return static_cast<uint64_t>(double_value->NativeValue());
+  } else if (auto double_value = value.AsDouble(); double_value) {
+    auto number = internal::Number::FromDouble(double_value->NativeValue());
+    if (number.LosslessConvertibleToUint()) {
+      return number.AsUint();
+    }
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 bool ValueToProtoMapKey(const Value& key,
@@ -415,10 +423,10 @@ absl::Status ParsedMapFieldValue::ListKeys(
                            field_->message_type()->map_key()));
   auto builder = NewListValueBuilder(arena);
   builder->Reserve(Size());
-  auto begin =
-      extensions::protobuf_internal::MapBegin(*reflection, *message_, *field_);
-  const auto end =
-      extensions::protobuf_internal::MapEnd(*reflection, *message_, *field_);
+  auto begin = extensions::protobuf_internal::ConstMapBegin(*reflection,
+                                                            *message_, *field_);
+  const auto end = extensions::protobuf_internal::ConstMapEnd(
+      *reflection, *message_, *field_);
   for (; begin != end; ++begin) {
     Value scratch;
     (*key_accessor)(begin.GetKey(), message_, arena, &scratch);
@@ -446,10 +454,10 @@ absl::Status ParsedMapFieldValue::ForEach(
     CEL_ASSIGN_OR_RETURN(
         auto value_accessor,
         common_internal::MapFieldValueAccessorFor(value_field));
-    auto begin = extensions::protobuf_internal::MapBegin(*reflection, *message_,
-                                                         *field_);
-    const auto end =
-        extensions::protobuf_internal::MapEnd(*reflection, *message_, *field_);
+    auto begin = extensions::protobuf_internal::ConstMapBegin(
+        *reflection, *message_, *field_);
+    const auto end = extensions::protobuf_internal::ConstMapEnd(
+        *reflection, *message_, *field_);
     Value key_scratch;
     Value value_scratch;
     for (; begin != end; ++begin) {
@@ -479,10 +487,10 @@ class ParsedMapFieldValueIterator final : public ValueIterator {
         value_field_(field->message_type()->map_value()),
         key_accessor_(key_accessor),
         value_accessor_(value_accessor),
-        begin_(extensions::protobuf_internal::MapBegin(
+        begin_(extensions::protobuf_internal::ConstMapBegin(
             *message_->GetReflection(), *message_, *field)),
-        end_(extensions::protobuf_internal::MapEnd(*message_->GetReflection(),
-                                                   *message_, *field)) {}
+        end_(extensions::protobuf_internal::ConstMapEnd(
+            *message_->GetReflection(), *message_, *field)) {}
 
   bool HasNext() override { return begin_ != end_; }
 
@@ -545,8 +553,8 @@ class ParsedMapFieldValueIterator final : public ValueIterator {
   const google::protobuf::FieldDescriptor* absl_nonnull const value_field_;
   const absl_nonnull common_internal::MapFieldKeyAccessor key_accessor_;
   const absl_nonnull common_internal::MapFieldValueAccessor value_accessor_;
-  google::protobuf::MapIterator begin_;
-  const google::protobuf::MapIterator end_;
+  google::protobuf::ConstMapIterator begin_;
+  const google::protobuf::ConstMapIterator end_;
 };
 
 }  // namespace

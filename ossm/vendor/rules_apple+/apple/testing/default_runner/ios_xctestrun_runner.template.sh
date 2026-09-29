@@ -4,9 +4,8 @@
 
 set -euo pipefail
 
-if [[ -z "${DEVELOPER_DIR:-}" ]]; then
-  echo "error: Missing \$DEVELOPER_DIR" >&2
-  exit 1
+if [[ -n "${TEST_PREMATURE_EXIT_FILE:-}" ]]; then
+  touch "$TEST_PREMATURE_EXIT_FILE"
 fi
 
 if [[ -n "${DEBUG_XCTESTRUNNER:-}" ]]; then
@@ -19,17 +18,14 @@ if [[ -n "${CREATE_XCRESULT_BUNDLE:-}" ]]; then
 fi
 
 custom_xcodebuild_args=(%(xcodebuild_args)s)
-simulator_name=""
 device_id=""
 command_line_args=(%(command_line_args)s)
 attachment_lifetime="%(attachment_lifetime)s"
+screen_capture_format="%(screen_capture_format)s"
 destination_timeout="%(destination_timeout)s"
 while [[ $# -gt 0 ]]; do
   arg="$1"
   case $arg in
-    --simulator_name=*)
-      simulator_name="${arg##*=}"
-      ;;
     --xcodebuild_args=*)
       xcodebuild_arg="${arg#--xcodebuild_args=}" # Strip "--xcodebuild_args=" prefix
       custom_xcodebuild_args+=("$xcodebuild_arg")
@@ -42,6 +38,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --xctestrun_attachment_lifetime=*)
       attachment_lifetime="${arg##*=}"
+      ;;
+    --xctestrun_screen_capture_format=*)
+      screen_capture_format="${arg##*=}"
       ;;
     *)
       echo "error: Unsupported argument '${arg}'" >&2
@@ -58,7 +57,7 @@ basename_without_extension() {
   echo "${filename%.*}"
 }
 
-test_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/test_tmp_dir.XXXXXX")"
+test_tmp_dir="$(mktemp -d "${TEST_TMPDIR:-${TMPDIR:-/tmp}}/test_tmp_dir.XXXXXX")"
 if [[ -z "${NO_CLEAN:-}" ]]; then
   trap 'rm -rf "${test_tmp_dir}"' EXIT
 else
@@ -134,8 +133,24 @@ fi
 
 # Add the test environment variables into the xctestrun file to propagate them
 # to the test runner
-default_test_env="TEST_SRCDIR=$TEST_SRCDIR,TEST_UNDECLARED_OUTPUTS_DIR=$TEST_UNDECLARED_OUTPUTS_DIR,XML_OUTPUT_FILE=$XML_OUTPUT_FILE"
+default_test_env="TEST_PREMATURE_EXIT_FILE=$TEST_PREMATURE_EXIT_FILE,TEST_SRCDIR=$TEST_SRCDIR,TEST_UNDECLARED_OUTPUTS_DIR=$TEST_UNDECLARED_OUTPUTS_DIR,XML_OUTPUT_FILE=$XML_OUTPUT_FILE"
 test_env="%(test_env)s"
+env_inherit=%(test_env_inherit)s
+for env_var in "${env_inherit[@]:-}"; do
+  # If the environment variable is set, add it to the test environment
+  if declare -p "$env_var" &>/dev/null; then
+    if [[ -n "$test_env" ]]; then
+      test_env="$test_env,$env_var=${!env_var}"
+    else
+      test_env="$env_var=${!env_var}"
+    fi
+  fi
+done
+
+if [[ -n "$device_id" ]]; then
+  default_test_env="$default_test_env,BAZEL_DEVICE_UDID=$device_id"
+fi
+
 if [[ -n "$test_env" ]]; then
   test_env="$test_env,$default_test_env"
 else
@@ -153,6 +168,8 @@ for test_env_key_value in ${test_env}; do
 done
 IFS=$saved_IFS
 
+declare -r sed_delim=$'\001'
+
 xcrun_target_app_path=""
 xcrun_test_host_bundle_identifier=""
 xcrun_test_bundle_path="__TESTROOT__/$test_bundle_name.xctest"
@@ -160,12 +177,14 @@ xcrun_is_xctrunner_hosted_bundle="false"
 xcrun_is_ui_test_bundle="false"
 test_type="%(test_type)s"
 if [[ -n "$test_host_path" ]]; then
+  developer_dir=$(xcode-select -p)
+
   xctestrun_test_host_path="__TESTROOT__/$test_host_name.app"
   xctestrun_test_host_based=true
   # If this is set in the case there is no test host, some tests hang indefinitely
   xctestrun_env+="<key>XCInjectBundleInto</key><string>$(escape "__TESTHOST__/$test_host_name.app/$test_host_name")</string>"
 
-  developer_path="$(xcode-select -p)/Platforms/$test_execution_platform/Developer"
+  developer_path="$developer_dir/Platforms/$test_execution_platform/Developer"
   libraries_path="$developer_path/Library"
 
   # Added in Xcode 16.0
@@ -195,25 +214,27 @@ if [[ -n "$test_host_path" ]]; then
     # We need this dylib for 14.x OSes. This intentionally doesn't use `test_execution_platform`
     # since this file isn't present in the `iPhoneSimulator.platform`.
     # No longer necessary starting in Xcode 15 - hence the `-f` file existence check
-    libswift_concurrency_path="$(xcode-select -p)/Platforms/iPhoneOS.platform/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS.simruntime/Contents/Resources/RuntimeRoot/usr/lib/swift/libswift_Concurrency.dylib"
+    libswift_concurrency_path="$developer_dir/Platforms/iPhoneOS.platform/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS.simruntime/Contents/Resources/RuntimeRoot/usr/lib/swift/libswift_Concurrency.dylib"
     if [[ -f "$libswift_concurrency_path" ]]; then
       cp "$libswift_concurrency_path" "$plugins_path/$test_bundle_name.xctest/Frameworks/libswift_Concurrency.dylib"
     fi
     xcrun_test_bundle_path="__TESTHOST__/PlugIns/$test_bundle_name.xctest"
 
+    runner_app_infoplist="$runner_app_destination/Info.plist"
+    /usr/bin/plutil -convert xml1 "$runner_app_infoplist"
     /usr/bin/sed \
-      -e "s@\$(WRAPPEDPRODUCTNAME)@XCTRunner@g"\
-      -e "s@WRAPPEDPRODUCTNAME@XCTRunner@g"\
-      -e "s@\$(WRAPPEDPRODUCTBUNDLEIDENTIFIER)@$xcrun_test_host_bundle_identifier@g"\
-      -e "s@WRAPPEDPRODUCTBUNDLEIDENTIFIER@$xcrun_test_host_bundle_identifier@g"\
+      -e "s${sed_delim}\$(WRAPPEDPRODUCTNAME)${sed_delim}XCTRunner${sed_delim}g"\
+      -e "s${sed_delim}WRAPPEDPRODUCTNAME${sed_delim}XCTRunner${sed_delim}g"\
+      -e "s${sed_delim}\$(WRAPPEDPRODUCTBUNDLEIDENTIFIER)${sed_delim}$xcrun_test_host_bundle_identifier${sed_delim}g"\
+      -e "s${sed_delim}WRAPPEDPRODUCTBUNDLEIDENTIFIER${sed_delim}$xcrun_test_host_bundle_identifier${sed_delim}g"\
       -i "" \
-      "$runner_app_destination/Info.plist"
+      "$runner_app_infoplist"
+    /usr/bin/plutil -convert binary1 "$runner_app_infoplist"
 
     readonly runner_app_frameworks_destination="$runner_app_destination/Frameworks"
     mkdir -p "$runner_app_frameworks_destination"
     cp -R "$libraries_path/Frameworks/XCTest.framework" "$runner_app_frameworks_destination/XCTest.framework"
     cp -R "$libraries_path/PrivateFrameworks/XCTestCore.framework" "$runner_app_frameworks_destination/XCTestCore.framework"
-    cp -R "$libraries_path/PrivateFrameworks/XCUIAutomation.framework" "$runner_app_frameworks_destination/XCUIAutomation.framework"
     cp -R "$libraries_path/PrivateFrameworks/XCTAutomationSupport.framework" "$runner_app_frameworks_destination/XCTAutomationSupport.framework"
     cp -R "$libraries_path/PrivateFrameworks/XCUnit.framework" "$runner_app_frameworks_destination/XCUnit.framework"
     cp "$developer_path/usr/lib/libXCTestSwiftSupport.dylib" "$runner_app_frameworks_destination/libXCTestSwiftSupport.dylib"
@@ -227,6 +248,14 @@ if [[ -n "$test_host_path" ]]; then
     if [[ -d "$testing_framework_path" ]]; then
       cp -R "$testing_framework_path" "$runner_app_frameworks_destination/Testing.framework"
     fi
+
+    # On Xcode 16.3 and later, XCUIAutomation is not private anymore
+    xcuiautomation_path="$libraries_path/Frameworks/XCUIAutomation.framework"
+    if [[ ! -d "$xcuiautomation_path" ]]; then
+        xcuiautomation_path="$libraries_path/PrivateFrameworks/XCUIAutomation.framework"
+    fi
+    cp -R "$xcuiautomation_path" "$runner_app_frameworks_destination/XCUIAutomation.framework"
+
     if [[ "$build_for_device" == true ]]; then
       # XCTRunner is multi-archs. When launching XCTRunner on arm64e device, it
       # will be launched as arm64e process by default. If the test bundle is arm64
@@ -244,8 +273,8 @@ if [[ -n "$test_host_path" ]]; then
       codesigning_team_identifier=$(codesign -dvv "$test_host_binary_path"  2>&1 >/dev/null | /usr/bin/sed -n  -E 's/TeamIdentifier=(.*)/\1/p')
       codesigning_authority=$(codesign -dvv "$test_host_binary_path"  2>&1 >/dev/null | /usr/bin/sed -n  -E 's/^Authority=(.*)/\1/p'| head -n 1)
       /usr/bin/sed \
-        -e "s@BAZEL_CODESIGNING_TEAM_IDENTIFIER@$codesigning_team_identifier@g" \
-        -e "s@BAZEL_TEST_HOST_BUNDLE_IDENTIFIER@$xcrun_test_host_bundle_identifier@g" \
+        -e "s${sed_delim}BAZEL_CODESIGNING_TEAM_IDENTIFIER${sed_delim}$codesigning_team_identifier${sed_delim}g" \
+        -e "s${sed_delim}BAZEL_TEST_HOST_BUNDLE_IDENTIFIER${sed_delim}$xcrun_test_host_bundle_identifier${sed_delim}g" \
         "%(xctrunner_entitlements_template)s" > "$xctrunner_entitlements"
       codesign -f \
         --entitlements "$xctrunner_entitlements" \
@@ -310,6 +339,105 @@ if [[ -n "$main_thread_checker_dyld_env" ]]; then
   fi
 fi
 
+# Emits the inner body of a `[Skip|Only]TestingIdentifiers` <dict> for the given
+# "Class/method" identifiers: a `suites` bucket (Swift Testing) and an
+# `xctestClasses` bucket (XCTest), grouping every method under a single entry per
+# class. Each identifier is placed in both buckets; the bucket that doesn't match
+# the test's framework is a no-op at runtime.
+#
+# Example: `testing_identifiers_dict_body FooTests/testA FooTests/testB` emits
+#
+#       <key>suites</key>
+#       <array>
+#         <dict>
+#           <key>name</key>
+#           <string>FooTests</string>
+#           <key>testFunctions</key>
+#           <array>
+#             <string>testA</string>
+#             <string>testB</string>
+#           </array>
+#         </dict>
+#       </array>
+#       <key>xctestClasses</key>
+#       <array>
+#         <dict>
+#           <key>name</key>
+#           <string>FooTests</string>
+#           <key>xctestMethods</key>
+#           <array>
+#             <string>testA</string>
+#             <string>testB</string>
+#           </array>
+#         </dict>
+#       </array>
+function testing_identifiers_dict_body() {
+  local -a class_names=()    # ordered, unique class names
+  local -a class_methods=()  # parallel: newline-joined methods per class
+  local identifier class method index i
+
+  # Group the test identifiers into the class names array and the parallel class methods array
+  for identifier in "$@"; do
+    if [[ -z "$identifier" ]]; then
+      continue;
+    fi
+
+    if [[ "$identifier" == */* ]]; then
+      class="${identifier%%/*}"
+      method="${identifier#*/}"
+    else
+      class="$identifier"
+      method=""
+    fi
+
+    # Find this class's index, or append a new slot.
+    index=-1
+    for (( i = 0; i < ${#class_names[@]}; i++ )); do
+      if [[ "${class_names[$i]}" == "$class" ]]; then
+        index=$i
+        break
+      fi
+    done
+    if (( index < 0 )); then
+      class_names+=("$class")
+      class_methods+=("")
+      index=$(( ${#class_names[@]} - 1 ))
+    fi
+
+    # Append the method to this class's list.
+    if [[ -n "$method" ]]; then
+      class_methods[$index]="${class_methods[$index]}${method}"$'\n'
+    fi
+  done
+
+  # Render the shared list of <dict> entries once. The two buckets are identical
+  # apart from the per-method key name, so emit it as a placeholder here and
+  # substitute the real key when wrapping each bucket below.
+  local dicts=""
+  local -a method_names
+  for (( i = 0; i < ${#class_names[@]}; i++ )); do
+    dicts="${dicts}        <dict>\n          <key>name</key>\n          <string>${class_names[$i]}</string>\n"
+    if [[ -n "${class_methods[$i]}" ]]; then
+      # Split this class's newline-joined methods into an array so they can be
+      # printed with a single printf.
+      local saved_IFS=$IFS
+      IFS=$'\n'
+      method_names=(${class_methods[$i]})
+      IFS=$saved_IFS
+
+      dicts="${dicts}          <key>@METHOD_KEY@</key>\n          <array>\n"
+      dicts="${dicts}$(printf '            <string>%s</string>\\n' "${method_names[@]}")"
+      dicts="${dicts}          </array>\n"
+    fi
+    dicts="${dicts}        </dict>\n"
+  done
+
+  # Wrap the shared entries in each bucket, substituting the per-method key
+  printf '%s' \
+    "      <key>suites</key>\n      <array>\n${dicts//@METHOD_KEY@/testFunctions}      </array>\n" \
+    "      <key>xctestClasses</key>\n      <array>\n${dicts//@METHOD_KEY@/xctestMethods}      </array>\n"
+}
+
 TEST_FILTER="%(test_filter)s"
 xctestrun_skip_test_section=""
 xctestrun_only_test_section=""
@@ -328,62 +456,49 @@ if [[ -n "${TESTBRIDGE_TEST_ONLY:-}" || -n "${TEST_FILTER:-}" ]]; then
     ALL_TESTS="$TEST_FILTER"
   fi
 
+  SKIP_TESTS_ARRAY=()
+  ONLY_TESTS_ARRAY=()
   saved_IFS=$IFS
   IFS=","; for TEST in $ALL_TESTS; do
     if [[ $TEST == -* ]]; then
-      if [[ -n "${SKIP_TESTS:-}" ]]; then
-        SKIP_TESTS+=",${TEST:1}"
-      else
-        SKIP_TESTS="${TEST:1}"
-      fi
+      SKIP_TESTS_ARRAY+=("${TEST:1}")
     else
-      if [[ -n "${ONLY_TESTS:-}" ]]; then
-          ONLY_TESTS+=",$TEST"
-      else
-          ONLY_TESTS="$TEST"
-      fi
+      ONLY_TESTS_ARRAY+=("$TEST")
     fi
   done
-
   IFS=$saved_IFS
 
-  if [[ -n "${SKIP_TESTS:-}" ]]; then
-    xctestrun_skip_test_section="\n"
-    for skip_test in ${SKIP_TESTS//,/ }; do
-      xctestrun_skip_test_section+="      <string>$skip_test</string>\n"
-    done
-    xctestrun_skip_test_section="    <key>SkipTestIdentifiers</key>\n    <array>$xctestrun_skip_test_section    </array>"
+  # Starting with Xcode 26.4, Swift Testing tests are only filtered when using the
+  # newer `[Skip|Only]TestingIdentifiers` dicts. Emit both the newer format and
+  # the legacy `[Skip|Only]TestIdentifiers` arrays. When the dictionary entries
+  # are present, Xcode ignores the legacy flat arrays.
+  if (( ${#SKIP_TESTS_ARRAY[@]} )); then
+    xctestrun_skip_test_section="    <key>SkipTestIdentifiers</key>\n    <array>\n$(printf '      <string>%s</string>\\n' "${SKIP_TESTS_ARRAY[@]}")    </array>"
+    xctestrun_skip_test_section="$xctestrun_skip_test_section\n    <key>SkipTestingIdentifiers</key>\n    <dict>\n$(testing_identifiers_dict_body "${SKIP_TESTS_ARRAY[@]}")    </dict>"
   fi
 
-  if [[ -n "${ONLY_TESTS:-}" ]]; then
-    xctestrun_only_test_section="\n"
-    for only_test in ${ONLY_TESTS//,/ }; do
-      xctestrun_only_test_section+="      <string>$only_test</string>\n"
-    done
-    xctestrun_only_test_section="    <key>OnlyTestIdentifiers</key>\n    <array>$xctestrun_only_test_section    </array>"
+  if (( ${#ONLY_TESTS_ARRAY[@]} )); then
+    xctestrun_only_test_section="    <key>OnlyTestIdentifiers</key>\n    <array>\n$(printf '      <string>%s</string>\\n' "${ONLY_TESTS_ARRAY[@]}")    </array>"
+    xctestrun_only_test_section="$xctestrun_only_test_section\n    <key>OnlyTestingIdentifiers</key>\n    <dict>\n$(testing_identifiers_dict_body "${ONLY_TESTS_ARRAY[@]}")    </dict>"
   fi
 fi
 
 readonly profraw="$test_tmp_dir/coverage.profraw"
 
-simulator_creator_args=(
-  "%(os_version)s" \
-  "%(device_type)s" \
-  --name "$simulator_name"
-)
-
-reuse_simulator=%(reuse_simulator)s
-if [[ "$reuse_simulator" == true ]]; then
-  simulator_creator_args+=(--reuse-simulator)
+if [[ "%(reuse_simulator)s" == true ]]; then
+  reuse_simulator=1
 else
-  simulator_creator_args+=(--no-reuse-simulator)
+  reuse_simulator=
 fi
 
 simulator_id="unused"
 if [[ "$build_for_device" == false ]]; then
-  simulator_id="$("./%(simulator_creator.py)s" \
-    "${simulator_creator_args[@]}"
-  )"
+  if [[ -z "%(device_type)s" ]]; then
+    echo "error: to create a simulator; the device type must always be set on the test runner or with the ios_simulator_device build setting" >&2
+    exit 1
+  fi
+
+  simulator_id="$(SIMULATOR_DEVICE_TYPE="%(device_type)s" SIMULATOR_OS_VERSION="%(os_version)s" SIMULATOR_REUSE_SIMULATOR="${reuse_simulator:-}" SIMULATOR_SDK_VERSION="%(sdk_version)s" XCTESTRUN_RUNNER_PID="${BASHPID:-$$}" "%(create_simulator_action_binary)s")"
 fi
 
 test_exit_code=0
@@ -427,7 +542,18 @@ if (( ${#custom_xcodebuild_args[@]} )); then
   echo "note: Using 'xcodebuild' because '--xcodebuild_args' was provided"
   should_use_xcodebuild=true
 fi
+if [[ -n "$screen_capture_format" ]]; then
+  echo "note: Using 'xcodebuild' because a screen capture format was requested"
+  should_use_xcodebuild=true
+  # The capture is only observable in the XCResult bundle, so force one.
+  create_xcresult_bundle=true
+  if [[ "$attachment_lifetime" == "keepNever" ]]; then
+    echo "error: 'screen_capture_format' requires 'attachment_lifetime' to be 'keepAlways' or 'deleteOnSuccess'; with 'keepNever' the capture would be discarded before it reaches the .xcresult bundle" >&2
+    exit 1
+  fi
+fi
 
+# Run a pre-action binary, if provided.
 pre_action_binary=%(pre_action_binary)s
 SIMULATOR_UDID="$simulator_id" \
   "$pre_action_binary"
@@ -444,30 +570,39 @@ if [[ "$should_use_xcodebuild" == true ]]; then
   xctestrun_attachment_lifetime_section+="    <key>UserAttachmentLifetime</key>\n"
   xctestrun_attachment_lifetime_section+="    <string>$attachment_lifetime</string>"
 
+  # Set the preferred screen capture format (Xcode 15+). Left empty when the
+  # attribute is unset so we don't override Xcode's platform default.
+  xctestrun_screen_capture_format_section=""
+  if [[ -n "$screen_capture_format" ]]; then
+    xctestrun_screen_capture_format_section+="    <key>PreferredScreenCaptureFormat</key>\n"
+    xctestrun_screen_capture_format_section+="    <string>$screen_capture_format</string>"
+  fi
+
   readonly xctestrun_file="$test_tmp_dir/tests.xctestrun"
   /usr/bin/sed \
-    -e "s@BAZEL_INSERT_LIBRARIES@$xctestrun_libraries@g" \
-    -e "s@BAZEL_TEST_BUNDLE_PATH@$xcrun_test_bundle_path@g" \
-    -e "s@BAZEL_TEST_ENVIRONMENT@$xctestrun_env@g" \
-    -e "s@BAZEL_TEST_HOST_BASED@$xctestrun_test_host_based@g" \
-    -e "s@BAZEL_TEST_HOST_PATH@$xctestrun_test_host_path@g" \
-    -e "s@BAZEL_TEST_HOST_BUNDLE_IDENTIFIER@$xcrun_test_host_bundle_identifier@g" \
-    -e "s@BAZEL_TEST_PRODUCT_MODULE_NAME@${test_bundle_name//-/_}@g" \
-    -e "s@BAZEL_IS_XCTRUNNER_HOSTED_BUNDLE@$xcrun_is_xctrunner_hosted_bundle@g" \
-    -e "s@BAZEL_IS_UI_TEST_BUNDLE@$xcrun_is_ui_test_bundle@g" \
-    -e "s@BAZEL_TARGET_APP_PATH@$xcrun_target_app_path@g" \
-    -e "s@BAZEL_TEST_ORDER_STRING@%(test_order)s@g" \
-    -e "s@BAZEL_DYLD_LIBRARY_PATH@__PLATFORMS__/$test_execution_platform/Developer/usr/lib@g" \
-    -e "s@BAZEL_COVERAGE_OUTPUT_DIR@$test_tmp_dir@g" \
-    -e "s@BAZEL_COMMAND_LINE_ARGS_SECTION@$xctestrun_cmd_line_args_section@g" \
-    -e "s@BAZEL_ATTACHMENT_LIFETIME_SECTION@$xctestrun_attachment_lifetime_section@g" \
-    -e "s@BAZEL_SKIP_TEST_SECTION@$xctestrun_skip_test_section@g" \
-    -e "s@BAZEL_ONLY_TEST_SECTION@$xctestrun_only_test_section@g" \
-    -e "s@BAZEL_ARCHITECTURE@$architecture@g" \
-    -e "s@BAZEL_TEST_BUNDLE_NAME@$test_bundle_name.xctest@g" \
-    -e "s@BAZEL_PRODUCT_PATH@$xcrun_test_bundle_path@g" \
-    "%(xctestrun_template)s" > "$xctestrun_file"
-
+    -e "s${sed_delim}BAZEL_INSERT_LIBRARIES${sed_delim}$xctestrun_libraries${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_TEST_BUNDLE_PATH${sed_delim}$xcrun_test_bundle_path${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_TEST_ENVIRONMENT${sed_delim}$xctestrun_env${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_TEST_HOST_BASED${sed_delim}$xctestrun_test_host_based${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_TEST_HOST_PATH${sed_delim}$xctestrun_test_host_path${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_TEST_HOST_BUNDLE_IDENTIFIER${sed_delim}$xcrun_test_host_bundle_identifier${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_TEST_PRODUCT_MODULE_NAME${sed_delim}${test_bundle_name//-/_}${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_IS_XCTRUNNER_HOSTED_BUNDLE${sed_delim}$xcrun_is_xctrunner_hosted_bundle${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_IS_UI_TEST_BUNDLE${sed_delim}$xcrun_is_ui_test_bundle${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_TARGET_APP_PATH${sed_delim}$xcrun_target_app_path${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_TEST_ORDER_STRING${sed_delim}%(test_order)s${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_DYLD_LIBRARY_PATH${sed_delim}__PLATFORMS__/$test_execution_platform/Developer/usr/lib${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_COVERAGE_OUTPUT_DIR${sed_delim}$test_tmp_dir${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_COMMAND_LINE_ARGS_SECTION${sed_delim}$xctestrun_cmd_line_args_section${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_ATTACHMENT_LIFETIME_SECTION${sed_delim}$xctestrun_attachment_lifetime_section${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_SCREEN_CAPTURE_FORMAT_SECTION${sed_delim}$xctestrun_screen_capture_format_section${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_SKIP_TEST_SECTION${sed_delim}$xctestrun_skip_test_section${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_ONLY_TEST_SECTION${sed_delim}$xctestrun_only_test_section${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_ARCHITECTURE${sed_delim}$architecture${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_TEST_BUNDLE_NAME${sed_delim}$test_bundle_name.xctest${sed_delim}g" \
+    -e "s${sed_delim}BAZEL_PRODUCT_PATH${sed_delim}$xcrun_test_bundle_path${sed_delim}g" \
+    "%(xctestrun_template)s" \
+    > "$xctestrun_file"
 
   if [[ -n "${DEBUG_XCTESTRUNNER:-}" ]]; then
     echo
@@ -479,6 +614,16 @@ if [[ "$should_use_xcodebuild" == true ]]; then
   args=(
     -xctestrun "$xctestrun_file" \
   )
+
+  # Contain everything xcodebuild writes to disk. Without -derivedDataPath,
+  # every invocation creates a ~/Library/Developer/Xcode/DerivedData/
+  # temporary-<hash>/ directory that nothing ever deletes: when no result
+  # bundle path is passed it receives a full .xcresult of the run, and even
+  # with one it still leaks a bookkeeping directory per run. Pointing derived
+  # data into the test's temp dir routes all of it somewhere the runner
+  # already deletes on exit. An explicit -resultBundlePath (below, or via
+  # xcodebuild_args) still wins for the result bundle itself.
+  args+=(-derivedDataPath "$test_tmp_dir/derived_data")
 
   if [[ -n "$destination_timeout" ]]; then
     args+=(-destination-timeout "$destination_timeout")
@@ -502,10 +647,10 @@ if [[ "$should_use_xcodebuild" == true ]]; then
   fi
 
   xcodebuild test-without-building "${args[@]}" \
-    2>&1 | tee -i "$testlog" | (grep -v "One of the two will be used" || true) \
-    || test_exit_code=$?
+    2>&1 | tee -i "$testlog" || test_exit_code=$?
 else
-  platform_developer_dir="$(xcode-select -p)/Platforms/$test_execution_platform/Developer"
+  developer_dir=$(xcode-select -p)
+  platform_developer_dir="$developer_dir/Platforms/$test_execution_platform/Developer"
   xctest_binary="$platform_developer_dir/Library/Xcode/Agents/xctest"
   test_file=$(file "$test_tmp_dir/$test_bundle_name.xctest/$test_bundle_name")
   if [[ "$intel_simulator_hack" == true ]]; then
@@ -525,19 +670,7 @@ else
     "$xctest_binary" \
     -XCTest All \
     "$test_tmp_dir/$test_bundle_name.xctest" \
-    2>&1 | tee -i "$testlog" | (grep -v "One of the two will be used" || true) \
-    || test_exit_code=$?
-fi
-
-post_action_binary=%(post_action_binary)s
-TEST_EXIT_CODE=$test_exit_code \
-  TEST_LOG_FILE="$testlog" \
-  SIMULATOR_UDID="$simulator_id" \
-  "$post_action_binary"
-
-if [[ "$reuse_simulator" == false ]]; then
-  # Delete will shutdown down the simulator if it's still currently running.
-  xcrun simctl delete "$simulator_id"
+    2>&1 | tee -i "$testlog" || test_exit_code=$?
 fi
 
 profdata="$test_tmp_dir/$simulator_id/Coverage.profdata"
@@ -549,9 +682,121 @@ if [[ "${COLLECT_PROFDATA:-0}" == "1" && -f "$profdata" ]]; then
   cp -R "$profdata" "$TEST_UNDECLARED_OUTPUTS_DIR"
 fi
 
-if [[ "$test_exit_code" -ne 0 ]]; then
-  echo "error: tests exited with '$test_exit_code'" >&2
-  exit "$test_exit_code"
+if [[ "${COVERAGE:-}" -eq 1 && "${APPLE_COVERAGE:-}" -eq 1 ]]; then
+  if [[ "$should_use_xcodebuild" == false ]]; then
+    xcrun llvm-profdata merge "$profraw" --output "$profdata"
+  fi
+
+  lcov_args=(
+    -instr-profile "$profdata"
+    -ignore-filename-regex='.*external/.+'
+    -path-equivalence=".,$PWD"
+  )
+  has_binary=false
+  IFS=";"
+  arch=$(uname -m)
+  for binary in $TEST_BINARIES_FOR_LLVM_COV; do
+    if [[ "$has_binary" == false ]]; then
+      lcov_args+=("${binary}")
+      has_binary=true
+      if ! file "$binary" | grep -q "$arch"; then
+        arch=x86_64
+      fi
+    else
+      lcov_args+=(-object "${binary}")
+    fi
+
+    lcov_args+=("-arch=$arch")
+  done
+
+  llvm_coverage_manifest="$COVERAGE_MANIFEST"
+  readonly provided_coverage_manifest="%(test_coverage_manifest)s"
+  if [[ -s "${provided_coverage_manifest:-}" ]]; then
+    llvm_coverage_manifest="$provided_coverage_manifest"
+  fi
+
+  readonly error_file="$test_tmp_dir/llvm-cov-error.txt"
+  llvm_cov_status=0
+  xcrun llvm-cov \
+    export \
+    -format lcov \
+    "${lcov_args[@]}" \
+    @"$llvm_coverage_manifest" \
+    > "$COVERAGE_OUTPUT_FILE" \
+    2> "$error_file" \
+    || llvm_cov_status=$?
+
+  # Error ourselves if lcov outputs warnings, such as if we misconfigure
+  # something and the file path of one of the covered files doesn't exist
+  if [[ -s "$error_file" || "$llvm_cov_status" -ne 0 ]]; then
+    echo "error: while exporting coverage report" >&2
+    cat "$error_file" >&2
+  fi
+
+  if [[ -n "${COVERAGE_PRODUCE_JSON:-}" ]]; then
+    llvm_cov_json_export_status=0
+    xcrun llvm-cov \
+      export \
+      -format text \
+      "${lcov_args[@]}" \
+      @"$llvm_coverage_manifest" \
+      > "$TEST_UNDECLARED_OUTPUTS_DIR/coverage.json" \
+      2> "$error_file" \
+      || llvm_cov_json_export_status=$?
+    if [[ -s "$error_file" || "$llvm_cov_json_export_status" -ne 0 ]]; then
+      echo "error: while exporting json coverage report" >&2
+      cat "$error_file" >&2
+    fi
+  fi
+fi
+
+# Run a post-action binary, if provided.
+post_action_binary=%(post_action_binary)s
+post_action_determines_exit_code="%(post_action_determines_exit_code)s"
+post_action_exit_code=0
+if [[ -n "${result_bundle_path:-}" ]]; then
+  TEST_EXIT_CODE=$test_exit_code \
+    TEST_LOG_FILE="$testlog" \
+    SIMULATOR_UDID="$simulator_id" \
+    TEST_XCRESULT_BUNDLE_PATH="$result_bundle_path" \
+    LLVM_COV_EXIT_CODE="${llvm_cov_status:-0}" \
+    LLVM_COV_JSON_EXPORT_EXIT_CODE="${llvm_cov_json_export_status:-0}" \
+    "$post_action_binary" || post_action_exit_code=$?
+else
+  TEST_EXIT_CODE=$test_exit_code \
+    TEST_LOG_FILE="$testlog" \
+    SIMULATOR_UDID="$simulator_id" \
+    "$post_action_binary" || post_action_exit_code=$?
+fi
+
+if [[ "$post_action_determines_exit_code" == true ]]; then
+  if [[ "$post_action_exit_code" -ne 0 ]]; then
+    echo "error: post_action exited with '$post_action_exit_code'" >&2
+    exit "$post_action_exit_code"
+  fi
+fi
+
+if [[
+  "$test_exit_code" -eq 0 &&
+  "$create_xcresult_bundle" == true &&
+  "${KEEP_XCRESULT_ON_SUCCESS:-1}" != "1"
+]]; then
+  # Reduce download size by removing the xcresult bundle if the test run was successful
+  rm -r "$result_bundle_path"
+fi
+
+SIMULATOR_UDID="$simulator_id" SIMULATOR_REUSE_SIMULATOR="${reuse_simulator:-}" XCTESTRUN_RUNNER_PID="${BASHPID:-$$}" "%(clean_up_simulator_action_binary)s"
+
+if [[ "$post_action_determines_exit_code" == true ]]; then
+  if [[ "$post_action_exit_code" -ne 0 ]]; then
+    echo "error: post_action exited with '$post_action_exit_code'" >&2
+    exit "$post_action_exit_code"
+  fi
+else
+  if [[ "$test_exit_code" -ne 0 ]]; then
+    echo "error: tests exited with '$test_exit_code'" >&2
+    exit "$test_exit_code"
+  fi
 fi
 
 if [[ "${ERROR_ON_NO_TESTS_RAN:-1}" == "1" ]]; then
@@ -608,75 +853,16 @@ then
   exit 1
 fi
 
-if [[ "${COVERAGE:-}" -ne 1 ]]; then
-  # Normal tests run without coverage
-  exit 0
+if [[ "${llvm_cov_status:-0}" -ne 0 ]]; then
+  echo "error: exporting coverage report failed" >&2
+  exit "$llvm_cov_status"
 fi
 
-if [[ "$should_use_xcodebuild" == false ]]; then
-  xcrun llvm-profdata merge "$profraw" --output "$profdata"
+if [[ "${llvm_cov_json_export_status:-0}" -ne 0 ]]; then
+  echo "error: exporting json coverage report failed" >&2
+  exit "$llvm_cov_json_export_status"
 fi
 
-lcov_args=(
-  -instr-profile "$profdata"
-  -ignore-filename-regex='.*external/.+'
-  -path-equivalence=".,$PWD"
-)
-has_binary=false
-IFS=";"
-arch=$(uname -m)
-for binary in $TEST_BINARIES_FOR_LLVM_COV; do
-  if [[ "$has_binary" == false ]]; then
-    lcov_args+=("${binary}")
-    has_binary=true
-    if ! file "$binary" | grep -q "$arch"; then
-      arch=x86_64
-    fi
-  else
-    lcov_args+=(-object "${binary}")
-  fi
-
-  lcov_args+=("-arch=$arch")
-done
-
-llvm_coverage_manifest="$COVERAGE_MANIFEST"
-readonly provided_coverage_manifest="%(test_coverage_manifest)s"
-if [[ -s "${provided_coverage_manifest:-}" ]]; then
-  llvm_coverage_manifest="$provided_coverage_manifest"
-fi
-
-readonly error_file="$test_tmp_dir/llvm-cov-error.txt"
-llvm_cov_status=0
-xcrun llvm-cov \
-  export \
-  -format lcov \
-  "${lcov_args[@]}" \
-  @"$llvm_coverage_manifest" \
-  > "$COVERAGE_OUTPUT_FILE" \
-  2> "$error_file" \
-  || llvm_cov_status=$?
-
-# Error ourselves if lcov outputs warnings, such as if we misconfigure
-# something and the file path of one of the covered files doesn't exist
-if [[ -s "$error_file" || "$llvm_cov_status" -ne 0 ]]; then
-  echo "error: while exporting coverage report" >&2
-  cat "$error_file" >&2
-  exit 1
-fi
-
-if [[ -n "${COVERAGE_PRODUCE_JSON:-}" ]]; then
-  llvm_cov_json_export_status=0
-  xcrun llvm-cov \
-    export \
-    -format text \
-    "${lcov_args[@]}" \
-    @"$llvm_coverage_manifest" \
-    > "$TEST_UNDECLARED_OUTPUTS_DIR/coverage.json" \
-    2> "$error_file" \
-    || llvm_cov_json_export_status=$?
-  if [[ -s "$error_file" || "$llvm_cov_json_export_status" -ne 0 ]]; then
-    echo "error: while exporting json coverage report" >&2
-    cat "$error_file" >&2
-    exit 1
-  fi
+if [[ -f "${TEST_PREMATURE_EXIT_FILE:-}" ]]; then
+  rm -f "$TEST_PREMATURE_EXIT_FILE"
 fi

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef THIRD_PARTY_CEL_CPP_CODELAB_EXERCISE1_H_
-#define THIRD_PARTY_CEL_CPP_CODELAB_EXERCISE1_H_
+#ifndef THIRD_PARTY_CEL_CPP_CODELAB_EXERCISE2_H_
+#define THIRD_PARTY_CEL_CPP_CODELAB_EXERCISE2_H_
 
 #include "google/rpc/context/attribute_context.pb.h"
 #include "absl/status/statusor.h"
@@ -37,4 +37,4 @@ absl::StatusOr<bool> CompileAndEvaluateWithContext(
 
 }  // namespace cel_codelab
 
-#endif  // THIRD_PARTY_CEL_CPP_CODELAB_EXERCISE1_H_
+#endif  // THIRD_PARTY_CEL_CPP_CODELAB_EXERCISE2_H_

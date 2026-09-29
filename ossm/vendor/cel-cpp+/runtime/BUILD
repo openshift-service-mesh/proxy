@@ -111,6 +111,42 @@ cc_test(
 )
 
 cc_library(
+    name = "bind_proto_to_activation",
+    srcs = ["bind_proto_to_activation.cc"],
+    hdrs = ["bind_proto_to_activation.h"],
+    deps = [
+        ":activation",
+        "//common:value",
+        "//internal:status_macros",
+        "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "bind_proto_to_activation_test",
+    srcs = ["bind_proto_to_activation_test.cc"],
+    deps = [
+        ":activation",
+        ":bind_proto_to_activation",
+        "//common:casting",
+        "//common:value",
+        "//common:value_testing",
+        "//internal:testing",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_cel_spec//proto/cel/expr/conformance/proto2:test_all_types_cc_proto",
+        "@com_google_protobuf//:protobuf",
+        "@com_google_protobuf//:wrappers_cc_proto",
+    ],
+)
+
+cc_library(
     name = "register_function_helper",
     hdrs = ["register_function_helper.h"],
     deps =
@@ -156,10 +192,11 @@ cc_test(
         ":function_registry",
         "//common:function_descriptor",
         "//common:kind",
+        "//common:value",
         "//internal:testing",
-        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/status",
-        "@com_google_protobuf//:protobuf",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -343,14 +380,11 @@ cc_test(
     deps = [
         ":activation",
         ":constant_folding",
-        ":function",
-        ":register_function_helper",
         ":runtime_builder",
         ":runtime_options",
         ":standard_runtime_builder_factory",
         "//base:function_adapter",
         "//common:function_descriptor",
-        "//common:kind",
         "//common:value",
         "//extensions/protobuf:runtime_adapter",
         "//internal:testing",
@@ -505,13 +539,11 @@ cc_library(
         ":function",
         ":register_function_helper",
         "//common:function_descriptor",
-        "//common:kind",
         "//common:value",
         "//internal:status_macros",
         "//runtime/internal:function_adapter",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/functional:bind_front",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -588,7 +620,6 @@ cc_test(
         "//parser",
         "//parser:options",
         "//runtime/internal:runtime_impl",
-        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/status:statusor",
@@ -605,6 +636,7 @@ cc_library(
     ],
     deps = [
         "//common:value",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
@@ -619,6 +651,7 @@ cc_test(
         ":activation",
         ":constant_folding",
         ":function_adapter",
+        ":optional_types",
         ":reference_resolver",
         ":regex_precompilation",
         ":runtime",
@@ -642,10 +675,34 @@ cc_test(
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:variant",
         "@com_google_cel_spec//proto/cel/expr/conformance/proto3:test_all_types_cc_proto",
         "@com_google_protobuf//:any_cc_proto",
         "@com_google_protobuf//:differencer",
         "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_library(
+    name = "embedder_context",
+    hdrs = ["embedder_context.h"],
+    deps = [
+        "//common:typeinfo",
+        "//common:value",
+        "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/types:optional",
+    ],
+)
+
+cc_test(
+    name = "embedder_context_test",
+    srcs = ["embedder_context_test.cc"],
+    deps = [
+        ":embedder_context",
+        "//common:typeinfo",
+        "//internal:testing",
+        "@com_google_absl//absl/types:optional",
     ],
 )

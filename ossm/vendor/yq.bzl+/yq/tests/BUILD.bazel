@@ -1,14 +1,42 @@
-load("@aspect_bazel_lib//lib:copy_file.bzl", "copy_file")
-load("@aspect_bazel_lib//lib:diff_test.bzl", "diff_test")
-load("@aspect_bazel_lib//lib:testing.bzl", "assert_contains")
+load("@bazel_lib//lib:copy_file.bzl", "copy_file")
+load("@bazel_lib//lib:diff_test.bzl", "diff_test")
+load("@bazel_lib//lib:testing.bzl", "assert_contains")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("//yq:yq.bzl", "yq")
+load("//yq:yq.bzl", "yq", "yq_test")
 
 exports_files(
     [
         "a.yaml",
     ],
     visibility = ["//visibility:public"],
+)
+
+yq_test(
+    name = "case_yq_test_semantic_yaml",
+    file1 = "a.yaml",
+    file2 = "a-reordered.yaml",
+)
+
+yq_test(
+    name = "case_yq_test_filters",
+    file1 = "a.yaml",
+    file2 = "a-reordered.yaml",
+    filter1 = ".moo",
+    filter2 = ".moo",
+)
+
+yq_test(
+    name = "case_yq_test_null_input",
+    file1 = None,
+    file2 = "generated-from-expression.yaml",
+    filter1 = ".a.b.c = \"cat\"",
+)
+
+yq_test(
+    name = "case_yq_test_null_input_file2",
+    file1 = "generated-from-expression.yaml",
+    file2 = None,
+    filter2 = ".a.b.c = \"cat\"",
 )
 
 # TODO(alex): fix these tests
@@ -40,6 +68,58 @@ diff_test(
     name = "case_dot_expression_test",
     file1 = "a.yaml",
     file2 = ":case_dot_expression",
+)
+
+# Expression loaded from a file
+yq(
+    name = "case_expression_file",
+    srcs = ["a.yaml"],
+    expression_file = "expression.yq",
+)
+
+diff_test(
+    name = "case_expression_file_test",
+    file1 = "generated-from-expression-file.yaml",
+    file2 = ":case_expression_file",
+)
+
+# Expression file supports null input
+yq(
+    name = "case_expression_file_no_sources",
+    srcs = [],
+    expression_file = "expression.yq",
+)
+
+diff_test(
+    name = "case_expression_file_no_sources_test",
+    file1 = "generated-from-expression-file-no-sources.yaml",
+    file2 = ":case_expression_file_no_sources",
+)
+
+# srcs could be select() statements
+yq(
+    name = "case_select_srcs",
+    srcs = select({"//conditions:default": ["a.yaml"]}),
+    expression = ".",
+)
+
+diff_test(
+    name = "case_select_srcs_test",
+    file1 = "a.yaml",
+    file2 = ":case_select_srcs",
+)
+
+# srcs could contain Label objects
+yq(
+    name = "case_label_srcs",
+    srcs = [package_relative_label("a.yaml")],
+    expression = ".",
+)
+
+diff_test(
+    name = "case_label_srcs_test",
+    file1 = "a.yaml",
+    file2 = ":case_label_srcs",
 )
 
 yq(
@@ -122,8 +202,8 @@ diff_test(
 # Convert json to yaml
 yq(
     name = "case_convert_json_to_yaml",
-    srcs = ["//yq/tests:a_pretty.json"],
-    args = ["-P"],
+    srcs = [":a_pretty.json"],
+    args = ["-p=json"],
     expression = ".",
 )
 
@@ -143,7 +223,7 @@ yq(
 diff_test(
     name = "case_convert_json_to_yaml_otherextension_test",
     file1 = "a.yaml",
-    file2 = ":case_convert_json_to_yaml",
+    file2 = ":case_convert_json_to_yaml_otherextension",
 )
 
 # No srcs, output is a generated expression
@@ -377,7 +457,7 @@ yq(
         "//yq/tests:a.json",
         "//yq/tests:b.json",
     ],
-    args = ["-P"],
+    args = ["-p=json"],
     expression = ". as $item ireduce ({}; . * $item )",
 )
 

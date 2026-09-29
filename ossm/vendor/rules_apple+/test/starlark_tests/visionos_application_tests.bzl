@@ -19,8 +19,14 @@ load(
     "analysis_output_group_info_files_test",
 )
 load(
+    "//test/starlark_tests/rules:analysis_target_actions_test.bzl",
+    "analysis_target_actions_test",
+    "make_analysis_target_actions_test",
+)
+load(
     "//test/starlark_tests/rules:analysis_target_outputs_test.bzl",
     "analysis_target_outputs_test",
+    "analysis_target_tree_artifacts_outputs_test",
 )
 load(
     "//test/starlark_tests/rules:apple_codesigning_dossier_info_provider_test.bzl",
@@ -48,6 +54,30 @@ load(
 )
 
 visibility("private")
+
+_analysis_visionos_strip_enabled_opt_test = make_analysis_target_actions_test(
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:visionos_cpus": "sim_arm64",
+        "//command_line_option:objc_enable_binary_stripping": True,
+    },
+)
+
+_analysis_visionos_strip_disabled_opt_test = make_analysis_target_actions_test(
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:visionos_cpus": "sim_arm64",
+        "//command_line_option:objc_enable_binary_stripping": False,
+    },
+)
+
+_analysis_visionos_strip_disabled_dbg_test = make_analysis_target_actions_test(
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        "//command_line_option:visionos_cpus": "sim_arm64",
+        "//command_line_option:objc_enable_binary_stripping": True,
+    },
+)
 
 def visionos_application_test_suite(name):
     """Test suite for visionos_application.
@@ -94,6 +124,38 @@ def visionos_application_test_suite(name):
         ],
     )
 
+    # Tests that strip action is registered when building in opt mode with binary stripping enabled.
+    _analysis_visionos_strip_enabled_opt_test(
+        name = "{}_binary_strip_action_enabled_in_opt_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/visionos:app",
+        target_mnemonic = "ObjcBinarySymbolStrip",
+        tags = [
+            name,
+        ],
+    )
+
+    # Tests that strip action is not registered when in opt mode but stripping is disabled.
+    _analysis_visionos_strip_disabled_opt_test(
+        name = "{}_binary_strip_action_disabled_without_flag_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/visionos:app",
+        target_mnemonic = "ObjcLink",
+        not_expected_mnemonic = ["ObjcBinarySymbolStrip"],
+        tags = [
+            name,
+        ],
+    )
+
+    # Tests that strip action is not registered in dbg mode even if stripping is enabled.
+    _analysis_visionos_strip_disabled_dbg_test(
+        name = "{}_binary_strip_action_disabled_in_dbg_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/visionos:app",
+        target_mnemonic = "ObjcLink",
+        not_expected_mnemonic = ["ObjcBinarySymbolStrip"],
+        tags = [
+            name,
+        ],
+    )
+
     archive_contents_test(
         name = "{}_binary_contents_arm_simulator_platform_test".format(name),
         build_type = "simulator",
@@ -103,7 +165,7 @@ def visionos_application_test_suite(name):
         },
         binary_test_file = "$BINARY",
         binary_test_architecture = "arm64",
-        macho_load_commands_contain = ["cmd LC_BUILD_VERSION", "minos " + common.min_os_visionos.baseline, "platform XROSSIMULATOR"],
+        macho_load_commands_contain = ["cmd LC_BUILD_VERSION", "minos " + common.min_os_visionos.baseline, "platform VISIONOSSIMULATOR"],
         tags = [
             name,
         ],
@@ -326,6 +388,15 @@ def visionos_application_test_suite(name):
         ],
     )
 
+    # Test that visionOS apps include the --app-icon argument in actool command.
+    analysis_target_actions_test(
+        name = "{}_includes_app_icon_in_actool_command".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/visionos:app",
+        target_mnemonic = "AssetCatalogCompile",
+        expected_argv = ["--app-icon AppIcon"],
+        tags = [name],
+    )
+
     # TODO(b/288582842): Support an IPA output via this output group. This will require some changes
     # to bundling, as the bundle-first build goes through a different set of Python tooling.
     #output_group_zip_contents_test(
@@ -344,6 +415,25 @@ def visionos_application_test_suite(name):
     #        "needs-xcode-latest-beta",
     #    ],
     #)
+
+    # Test that visionos_application works without explicit infoplists
+    analysis_target_tree_artifacts_outputs_test(
+        name = "{}_no_infoplist_builds_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/visionos:app_minimal_no_infoplist",
+        expected_outputs = ["app_minimal_no_infoplist.app"],
+        tags = [name],
+    )
+
+    infoplist_contents_test(
+        name = "{}_no_infoplist_has_default_values_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/visionos:app_minimal_no_infoplist",
+        expected_values = {
+            "CFBundleIdentifier": "com.google.example",
+            "CFBundleName": "app_minimal_no_infoplist",
+            "CFBundlePackageType": "APPL",
+        },
+        tags = [name],
+    )
 
     native.test_suite(
         name = name,

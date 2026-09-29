@@ -35,6 +35,7 @@ cc_library(
 cc_test(
     name = "align_test",
     srcs = ["align_test.cc"],
+    tags = ["no_test_msvc"],
     deps = [
         ":align",
         ":testing",
@@ -73,6 +74,28 @@ cc_library(
 cc_library(
     name = "casts",
     hdrs = ["casts.h"],
+)
+
+cc_library(
+    name = "re2_options",
+    hdrs = ["re2_options.h"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_googlesource_code_re2//:re2",
+    ],
+)
+
+cc_library(
+    name = "runfiles",
+    srcs = ["runfiles.cc"],
+    hdrs = ["runfiles.h"],
+    deps = [
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@rules_cc//cc/runfiles",
+    ],
 )
 
 cc_library(
@@ -285,6 +308,7 @@ cc_library(
     deps = [
         ":status_macros",
         "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -301,6 +325,7 @@ cc_library(
     deps = [
         ":status_macros",
         "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -512,6 +537,7 @@ cel_proto_transitive_descriptor_set(
     deps = [
         "//eval/testutil:test_extensions_proto",
         "//eval/testutil:test_message_proto",
+        "//testutil:test_json_names_proto",
         "@com_google_cel_spec//proto/cel/expr:checked_proto",
         "@com_google_cel_spec//proto/cel/expr:expr_proto",
         "@com_google_cel_spec//proto/cel/expr:syntax_proto",
@@ -783,6 +809,7 @@ cc_library(
 cc_test(
     name = "message_equality_test",
     srcs = ["message_equality_test.cc"],
+    tags = ["no_test_msvc"],
     deps = [
         ":message_equality",
         ":message_type_name",

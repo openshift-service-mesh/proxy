@@ -23,10 +23,12 @@
 #include "absl/strings/string_view.h"
 #include "checker/checker_options.h"
 #include "checker/internal/test_ast_helpers.h"
+#include "checker/optional.h"
 #include "checker/standard_library.h"
 #include "checker/type_checker.h"
 #include "checker/type_checker_builder.h"
 #include "checker/validation_result.h"
+#include "common/ast.h"
 #include "common/decl.h"
 #include "common/type.h"
 #include "internal/status_macros.h"
@@ -233,8 +235,8 @@ TEST(TypeCheckerBuilderTest, AddLibraryIncludeSubset) {
   ASSERT_THAT(
       builder->AddLibrarySubset(
           {"testlib",
-           [](absl::string_view /*function*/, absl::string_view overload_id) {
-             return (overload_id == "add_int" || overload_id == "sub_int");
+           [](absl::string_view /*function*/, const OverloadDecl& overload) {
+             return (overload.id() == "add_int" || overload.id() == "sub_int");
            }}),
       IsOk());
   ASSERT_OK_AND_ASSIGN(auto checker, builder->Build());
@@ -272,9 +274,8 @@ TEST(TypeCheckerBuilderTest, AddLibraryExcludeSubset) {
   ASSERT_THAT(
       builder->AddLibrarySubset(
           {"testlib",
-           [](absl::string_view /*function*/, absl::string_view overload_id) {
-             return (overload_id != "add_int" && overload_id != "sub_int");
-             ;
+           [](absl::string_view /*function*/, const OverloadDecl& overload) {
+             return (overload.id() != "add_int" && overload.id() != "sub_int");
            }}),
       IsOk());
   ASSERT_OK_AND_ASSIGN(auto checker, builder->Build());
@@ -311,7 +312,7 @@ TEST(TypeCheckerBuilderTest, AddLibrarySubsetRemoveAllOvl) {
   ASSERT_THAT(builder->AddLibrary(SubsetTestlib()), IsOk());
   ASSERT_THAT(builder->AddLibrarySubset({"testlib",
                                          [](absl::string_view function,
-                                            absl::string_view /*overload_id*/) {
+                                            const OverloadDecl& /*overload*/) {
                                            return function != "add";
                                          }}),
               IsOk());
@@ -350,12 +351,12 @@ TEST(TypeCheckerBuilderTest, AddLibraryOneSubsetPerLibraryId) {
   ASSERT_THAT(
       builder->AddLibrarySubset(
           {"testlib", [](absl::string_view function,
-                         absl::string_view /*overload_id*/) { return true; }}),
+                         const OverloadDecl& /*overload*/) { return true; }}),
       IsOk());
   EXPECT_THAT(
       builder->AddLibrarySubset(
           {"testlib", [](absl::string_view function,
-                         absl::string_view /*overload_id*/) { return true; }}),
+                         const OverloadDecl& /*overload*/) { return true; }}),
       StatusIs(absl::StatusCode::kAlreadyExists));
 }
 
@@ -367,7 +368,7 @@ TEST(TypeCheckerBuilderTest, AddLibrarySubsetLibraryIdRequireds) {
   ASSERT_THAT(builder->AddLibrary(SubsetTestlib()), IsOk());
   EXPECT_THAT(builder->AddLibrarySubset({"",
                                          [](absl::string_view function,
-                                            absl::string_view /*overload_id*/) {
+                                            const OverloadDecl& /*overload*/) {
                                            return function == "add";
                                          }}),
               StatusIs(absl::StatusCode::kInvalidArgument));
@@ -385,6 +386,27 @@ TEST(TypeCheckerBuilderTest, AddContextDeclaration) {
 
   ASSERT_THAT(builder->AddContextDeclaration(
                   "cel.expr.conformance.proto3.TestAllTypes"),
+              IsOk());
+  ASSERT_THAT(builder->AddFunction(fn_decl), IsOk());
+
+  ASSERT_OK_AND_ASSIGN(auto checker, builder->Build());
+  ASSERT_OK_AND_ASSIGN(auto ast, MakeTestParsedAst("increment(single_int64)"));
+  ASSERT_OK_AND_ASSIGN(ValidationResult result, checker->Check(std::move(ast)));
+  EXPECT_TRUE(result.IsValid());
+}
+
+TEST(TypeCheckerBuilderTest, AddContextDeclarationWithProtoTypeMask) {
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<TypeCheckerBuilder> builder,
+      CreateTypeCheckerBuilder(GetSharedTestingDescriptorPool()));
+
+  ASSERT_OK_AND_ASSIGN(
+      auto fn_decl,
+      MakeFunctionDecl("increment", MakeOverloadDecl("increment_int", IntType(),
+                                                     IntType())));
+
+  ASSERT_THAT(builder->AddContextDeclarationWithProtoTypeMask(
+                  "cel.expr.conformance.proto3.TestAllTypes", {"single_int64"}),
               IsOk());
   ASSERT_THAT(builder->AddFunction(fn_decl), IsOk());
 
@@ -426,6 +448,32 @@ TEST(TypeCheckerBuilderTest, AllowWellKnownTypeContextDeclaration) {
   ASSERT_TRUE(result.IsValid());
 }
 
+TEST(TypeCheckerBuilderTest,
+     AllowWellKnownTypeContextDeclarationWithProtoTypeMask) {
+  CheckerOptions options;
+  options.allow_well_known_type_context_declarations = true;
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<TypeCheckerBuilder> builder,
+      CreateTypeCheckerBuilder(GetSharedTestingDescriptorPool(), options));
+
+  ASSERT_THAT(builder->AddContextDeclarationWithProtoTypeMask(
+                  "google.protobuf.Any", {"value"}),
+              IsOk());
+  ASSERT_THAT(builder->AddLibrary(StandardCheckerLibrary()), IsOk());
+
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<TypeChecker> type_checker,
+                       builder->Build());
+  // Visible field: value
+  ASSERT_OK_AND_ASSIGN(auto ast, MakeTestParsedAst("value"));
+  ASSERT_OK_AND_ASSIGN(ValidationResult result,
+                       type_checker->Check(std::move(ast)));
+  ASSERT_TRUE(result.IsValid());
+  // Not visible field: type_url
+  ASSERT_OK_AND_ASSIGN(ast, MakeTestParsedAst("type_url"));
+  ASSERT_OK_AND_ASSIGN(result, type_checker->Check(std::move(ast)));
+  ASSERT_FALSE(result.IsValid());
+}
+
 TEST(TypeCheckerBuilderTest, AllowWellKnownTypeContextDeclarationStruct) {
   CheckerOptions options;
   options.allow_well_known_type_context_declarations = true;
@@ -464,7 +512,7 @@ TEST(TypeCheckerBuilderTest, AllowWellKnownTypeContextDeclarationValue) {
                     // Note: one of fields are all added with safe traversal, so
                     // we lose the union discriminator information.
                     R"cel(
-            null_value == null &&
+            null_value == 0 &&
             number_value == 0.0 &&
             string_value == '' &&
             list_value == [] &&
@@ -494,6 +542,113 @@ TEST(TypeCheckerBuilderTest, AllowWellKnownTypeContextDeclarationInt64Value) {
                        type_checker->Check(std::move(ast)));
 
   ASSERT_TRUE(result.IsValid());
+}
+
+TEST(TypeCheckerBuilderTest, ContextDeclarationWithJsonName) {
+  CheckerOptions options;
+  options.use_json_field_names = true;
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<TypeCheckerBuilder> builder,
+      CreateTypeCheckerBuilder(GetSharedTestingDescriptorPool(), options));
+
+  ASSERT_THAT(builder->AddContextDeclaration("cel.cpp.testutil.TestJsonNames"),
+              IsOk());
+  ASSERT_THAT(builder->AddLibrary(StandardCheckerLibrary()), IsOk());
+
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<TypeChecker> type_checker,
+                       builder->Build());
+  ASSERT_OK_AND_ASSIGN(auto ast, MakeTestParsedAst(
+                                     R"cel(int32_snake_case_json_name == 1 &&
+        int64CamelCaseJsonName == 2 &&
+        uint32DefaultJsonName == 3u &&
+        // `uint64-custom-json-name` == 4u &&
+        single_string == 'shadows' &&
+        singleString == 'shadowed')cel"));
+  ASSERT_OK_AND_ASSIGN(ValidationResult result,
+                       type_checker->Check(std::move(ast)));
+
+  ASSERT_TRUE(result.IsValid());
+  ASSERT_OK_AND_ASSIGN(auto checked_ast, result.ReleaseAst());
+  EXPECT_EQ(checked_ast->GetReturnType(), TypeSpec(PrimitiveType::kBool));
+  EXPECT_THAT(
+      checked_ast->source_info().extensions(),
+      ElementsAre(cel::ExtensionSpec(
+          "json_name", std::make_unique<cel::ExtensionSpec::Version>(1, 1),
+          {cel::ExtensionSpec::Component::kRuntime})));
+}
+
+TEST(TypeCheckerBuilderTest, JsonFieldNameOptionStructCreation) {
+  CheckerOptions options;
+  options.use_json_field_names = true;
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<TypeCheckerBuilder> builder,
+      CreateTypeCheckerBuilder(GetSharedTestingDescriptorPool(), options));
+  ASSERT_THAT(builder->AddLibrary(StandardCheckerLibrary()), IsOk());
+
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<TypeChecker> type_checker,
+                       builder->Build());
+  ASSERT_OK_AND_ASSIGN(auto ast, MakeTestParsedAst(
+                                     R"cel(cel.cpp.testutil.TestJsonNames{
+        int32_snake_case_json_name: 1,
+        int64CamelCaseJsonName: 2,
+        uint32DefaultJsonName: 3u,
+        `uint64-custom-json-name`: 4u,
+        single_string: 'shadows',
+        singleString: 'shadowed'
+      })cel"));
+  ASSERT_OK_AND_ASSIGN(ValidationResult result,
+                       type_checker->Check(std::move(ast)));
+
+  ASSERT_TRUE(result.IsValid());
+
+  ASSERT_OK_AND_ASSIGN(auto checked_ast, result.ReleaseAst());
+  EXPECT_EQ(checked_ast->GetReturnType(),
+            TypeSpec(MessageTypeSpec("cel.cpp.testutil.TestJsonNames")));
+  EXPECT_THAT(
+      checked_ast->source_info().extensions(),
+      ElementsAre(cel::ExtensionSpec(
+          "json_name", std::make_unique<cel::ExtensionSpec::Version>(1, 1),
+          {cel::ExtensionSpec::Component::kRuntime})));
+}
+
+TEST(TypeCheckerBuilderTest, JsonFieldNameOptionFieldAccess) {
+  CheckerOptions options;
+  options.use_json_field_names = true;
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<TypeCheckerBuilder> builder,
+      CreateTypeCheckerBuilder(GetSharedTestingDescriptorPool(), options));
+  ASSERT_THAT(builder->AddLibrary(StandardCheckerLibrary()), IsOk());
+  ASSERT_THAT(
+      builder->AddVariable(MakeVariableDecl(
+          "jsonObj",
+          cel::MessageType(builder->descriptor_pool()->FindMessageTypeByName(
+              "cel.cpp.testutil.TestJsonNames")))),
+      IsOk());
+
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<TypeChecker> type_checker,
+                       builder->Build());
+  ASSERT_OK_AND_ASSIGN(auto ast, MakeTestParsedAst(
+                                     R"cel(
+        jsonObj.int32_snake_case_json_name == 1 &&
+        jsonObj.int64CamelCaseJsonName == 2 &&
+        jsonObj.uint32DefaultJsonName == 3u &&
+        jsonObj.`uint64-custom-json-name` == 4u &&
+        jsonObj.single_string == 'shadows' &&
+        jsonObj.singleString == 'shadowed' &&
+        jsonObj.`cel.cpp.testutil.int32_snake_case_ext` == 5 &&
+        jsonObj.`cel.cpp.testutil.int64CamelCaseExt` == 6
+        )cel"));
+  ASSERT_OK_AND_ASSIGN(ValidationResult result,
+                       type_checker->Check(std::move(ast)));
+
+  ASSERT_TRUE(result.IsValid()) << result.FormatError();
+  ASSERT_OK_AND_ASSIGN(auto checked_ast, result.ReleaseAst());
+  EXPECT_EQ(checked_ast->GetReturnType(), TypeSpec(PrimitiveType::kBool));
+  EXPECT_THAT(
+      checked_ast->source_info().extensions(),
+      ElementsAre(cel::ExtensionSpec(
+          "json_name", std::make_unique<cel::ExtensionSpec::Version>(1, 1),
+          {cel::ExtensionSpec::Component::kRuntime})));
 }
 
 TEST(TypeCheckerBuilderTest, AddLibraryRedeclaredError) {
@@ -633,6 +788,64 @@ TEST(TypeCheckerBuilderTest, AddFunctionNoOverlapWithStdMacroError) {
                                                      DynType(), StringType())));
 
   EXPECT_THAT(builder->AddFunction(fn_decl), IsOk());
+}
+
+TEST(TypeCheckerBuilderTest, ToBuilderIndependenceAndInheritance) {
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<TypeCheckerBuilder> builder,
+      CreateTypeCheckerBuilder(GetSharedTestingDescriptorPool()));
+
+  ASSERT_THAT(builder->AddVariable(MakeVariableDecl("x", IntType())), IsOk());
+  ASSERT_OK_AND_ASSIGN(
+      auto fn_decl,
+      MakeFunctionDecl("addOne",
+                       MakeOverloadDecl("addOne_int", IntType(), IntType())));
+  ASSERT_THAT(builder->AddFunction(fn_decl), IsOk());
+  ASSERT_THAT(builder->AddLibrary(StandardCheckerLibrary()), IsOk());
+
+  ASSERT_OK_AND_ASSIGN(auto checker1, builder->Build());
+
+  // Exercise checker1.
+  {
+    ASSERT_OK_AND_ASSIGN(auto ast, MakeTestParsedAst("addOne(x)"));
+    ASSERT_OK_AND_ASSIGN(ValidationResult result1,
+                         checker1->Check(std::move(ast)));
+    EXPECT_TRUE(result1.IsValid());
+  }
+
+  // Start new builder via ToBuilder.
+  auto builder2 = checker1->ToBuilder();
+  ASSERT_THAT(builder2->AddVariable(MakeVariableDecl("y", IntType())), IsOk());
+  ASSERT_THAT(builder2->AddLibrary(OptionalCheckerLibrary()), IsOk());
+  builder2->SetExpectedType(IntType());
+
+  ASSERT_OK_AND_ASSIGN(auto checker2, builder2->Build());
+
+  {
+    ASSERT_OK_AND_ASSIGN(
+        auto ast, MakeTestParsedAst("optional.of(addOne(x)).orValue(0) + y"));
+    ASSERT_OK_AND_ASSIGN(ValidationResult result2,
+                         checker2->Check(std::move(ast)));
+    EXPECT_TRUE(result2.IsValid());
+  }
+
+  // Demonstrate checker1 is unmodified and independent (still does not know
+  // about y).
+  {
+    ASSERT_OK_AND_ASSIGN(auto ast, MakeTestParsedAst("y"));
+    ASSERT_OK_AND_ASSIGN(ValidationResult result_y_checker1_again,
+                         checker1->Check(std::move(ast)));
+    EXPECT_FALSE(result_y_checker1_again.IsValid());
+  }
+
+  // Same for optional library functions.
+  {
+    ASSERT_OK_AND_ASSIGN(auto ast,
+                         MakeTestParsedAst("optional.none().orValue(x)"));
+    ASSERT_OK_AND_ASSIGN(ValidationResult result,
+                         checker1->Check(std::move(ast)));
+    EXPECT_FALSE(result.IsValid());
+  }
 }
 
 }  // namespace

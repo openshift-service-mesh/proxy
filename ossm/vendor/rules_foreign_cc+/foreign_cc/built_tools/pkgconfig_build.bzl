@@ -1,4 +1,16 @@
-""" Rule for building pkg-config from source. """
+"""Rule for building pkg-config from source.
+
+Kept for the same reason as `make_tool` -- see the note in `make_build.bzl`.
+Source-mode pkg-config comes from `@pkgconf//:pkg-config`, its Bazel Central
+Registry module; this rule is unused by rfcc and retained only as public API.
+
+Its MSVC branch names `@glib_dev`, `@glib_src` and `@gettext_runtime`, which
+rfcc still declares under both dependency models solely so this macro loads:
+the `Label()` calls below run on every platform (the `select` only picks
+between two already-built variants) and resolve against rfcc's own repo
+mapping, which a consumer cannot extend. Nothing downloads unless an MSVC build
+reaches them. See `pkgconfig_msvc_companions` in `//toolchains/private`.
+"""
 
 load("//foreign_cc:defs.bzl", "make_variant", "runnable_binary")
 load(
@@ -8,8 +20,7 @@ load(
     "FOREIGN_CC_BUILT_TOOLS_HOST_FRAGMENTS",
     "absolutize",
     "built_tool_rule_impl",
-    "extract_non_sysroot_flags",
-    "extract_sysroot_flags",
+    "split_system_include_flags",
 )
 load(
     "//foreign_cc/private:cc_toolchain_util.bzl",
@@ -34,23 +45,21 @@ def _pkgconfig_tool_impl(ctx):
     frozen_arflags = flags_info.cxx_linker_static
 
     cc_path = tools_info.cc
-    cflags = flags_info.cc + ["-Wno-int-conversion"]  # Fix building with clang 15+
-    sysroot_cflags = extract_sysroot_flags(cflags)
-    non_sysroot_cflags = extract_non_sysroot_flags(cflags)
+    cflags = flags_info.cc + ["-Wno-int-conversion", "-std=gnu90"]  # Fix building with clang 15+
+    system_include_cflags, non_system_include_cflags = split_system_include_flags(cflags)
 
     ld_path = tools_info.cxx_linker_executable
     ldflags = flags_info.cxx_linker_executable
-    sysroot_ldflags = extract_sysroot_flags(ldflags)
-    non_sysroot_ldflags = extract_non_sysroot_flags(ldflags)
+    system_include_ldflags, non_system_include_ldflags = split_system_include_flags(ldflags)
 
     # Make's build script does not forward CFLAGS to all compiler and linker
-    # invocations, so we append --sysroot flags directly to CC and LD.
+    # invocations, so we append --sysroot and -isystem flags directly to CC and LD.
     absolute_cc = absolutize(ctx.workspace_name, cc_path, True)
-    if sysroot_cflags:
-        absolute_cc += " " + _join_flags_list(ctx.workspace_name, sysroot_cflags)
+    if system_include_cflags:
+        absolute_cc += " " + _join_flags_list(ctx.workspace_name, system_include_cflags)
     absolute_ld = absolutize(ctx.workspace_name, ld_path, True)
-    if sysroot_ldflags:
-        absolute_ld += " " + _join_flags_list(ctx.workspace_name, sysroot_ldflags)
+    if system_include_ldflags:
+        absolute_ld += " " + _join_flags_list(ctx.workspace_name, system_include_ldflags)
 
     # If libtool is used as AR, the output file has to be prefixed with
     # "-o". Since the make Makefile only uses ar-style invocations, the
@@ -60,7 +69,7 @@ def _pkgconfig_tool_impl(ctx):
 
     if os_name(ctx) == "macos":
         absolute_ar = ""
-        non_sysroot_ldflags += ["-undefined", "error"]
+        non_system_include_ldflags += ["-undefined", "error"]
 
     arflags = [e for e in frozen_arflags]
     if absolute_ar == "libtool" or absolute_ar.endswith("/libtool"):
@@ -81,9 +90,9 @@ def _pkgconfig_tool_impl(ctx):
         "AR": absolute_ar,
         "ARFLAGS": _join_flags_list(ctx.workspace_name, arflags),
         "CC": absolute_cc,
-        "CFLAGS": _join_flags_list(ctx.workspace_name, non_sysroot_cflags),
+        "CFLAGS": _join_flags_list(ctx.workspace_name, non_system_include_cflags),
         "LD": absolute_ld,
-        "LDFLAGS": _join_flags_list(ctx.workspace_name, non_sysroot_ldflags),
+        "LDFLAGS": _join_flags_list(ctx.workspace_name, non_system_include_ldflags),
         "MAKE": make_data.path,
     })
 
@@ -132,17 +141,10 @@ def pkgconfig_tool(name, srcs, **kwargs):
     """
     tags = ["manual"] + kwargs.pop("tags", [])
 
-    native.config_setting(
-        name = "msvc_compiler",
-        flag_values = {
-            "@bazel_tools//tools/cpp:compiler": "msvc-cl",
-        },
-    )
-
     native.alias(
         name = name,
         actual = select({
-            ":msvc_compiler": "{}_msvc".format(name),
+            "@rules_cc//cc/compiler:msvc-cl": "{}_msvc".format(name),
             "//conditions:default": "{}_default".format(name),
         }),
     )
@@ -160,10 +162,10 @@ def pkgconfig_tool(name, srcs, **kwargs):
         args = [
             "-f Makefile.vc",
             "CFG=release",
-            "GLIB_PREFIX=\"$$EXT_BUILD_ROOT/external/glib_dev\"",
+            "GLIB_PREFIX=\"$$EXT_BUILD_ROOT/external/%s\"" % Label("@glib_dev").workspace_name,
         ],
         out_binaries = ["pkg-config.exe"],
-        env = {"INCLUDE": "$$EXT_BUILD_ROOT/external/glib_src"},
+        env = {"INCLUDE": "$$EXT_BUILD_ROOT/external/%s" % Label("@glib_src").workspace_name},
         out_static_libs = [],
         out_shared_libs = [],
         deps = [
@@ -175,7 +177,7 @@ def pkgconfig_tool(name, srcs, **kwargs):
             "@platforms//os:windows": "cp release/x64/pkg-config.exe $$INSTALLDIR/bin",
             "//conditions:default": "",
         }),
-        toolchain = str(Label("//toolchains:preinstalled_nmake_toolchain")),
+        toolchain = Label("//toolchains:preinstalled_nmake_toolchain"),
         tags = tags,
         **kwargs
     )

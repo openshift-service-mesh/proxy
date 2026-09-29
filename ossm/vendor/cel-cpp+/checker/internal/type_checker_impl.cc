@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,8 +25,10 @@
 #include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/absl_check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
@@ -33,11 +36,12 @@
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
 #include "checker/checker_options.h"
-#include "checker/internal/format_type_name.h"
 #include "checker/internal/namespace_generator.h"
 #include "checker/internal/type_check_env.h"
+#include "checker/internal/type_checker_builder_impl.h"
 #include "checker/internal/type_inference_context.h"
 #include "checker/type_check_issue.h"
+#include "checker/type_checker_builder.h"
 #include "checker/validation_result.h"
 #include "common/ast.h"
 #include "common/ast_rewrite.h"
@@ -47,7 +51,8 @@
 #include "common/constant.h"
 #include "common/decl.h"
 #include "common/expr.h"
-#include "common/source.h"
+#include "common/format_type_name.h"
+#include "common/standard_definitions.h"
 #include "common/type.h"
 #include "common/type_kind.h"
 #include "internal/status_macros.h"
@@ -56,6 +61,15 @@
 namespace cel::checker_internal {
 namespace {
 
+bool MatchesBlock(const Expr& expr) {
+  if (!expr.has_call_expr()) {
+    return false;
+  }
+  const auto& call = expr.call_expr();
+  return call.function() == "cel.@block" && call.args().size() == 2 &&
+         call.args()[0].has_list_expr();
+}
+
 using AstType = cel::TypeSpec;
 using Severity = TypeCheckIssue::Severity;
 
@@ -63,58 +77,6 @@ constexpr const char kOptionalSelect[] = "_?._";
 
 std::string FormatCandidate(absl::Span<const std::string> qualifiers) {
   return absl::StrJoin(qualifiers, ".");
-}
-
-SourceLocation ComputeSourceLocation(const Ast& ast, int64_t expr_id) {
-  const auto& source_info = ast.source_info();
-  auto iter = source_info.positions().find(expr_id);
-  if (iter == source_info.positions().end()) {
-    return SourceLocation{};
-  }
-  int32_t absolute_position = iter->second;
-  if (absolute_position < 0) {
-    return SourceLocation{};
-  }
-
-  // Find the first line offset that is greater than the absolute position.
-  int32_t line_idx = -1;
-  int32_t offset = 0;
-  for (int32_t i = 0; i < source_info.line_offsets().size(); ++i) {
-    int32_t next_offset = source_info.line_offsets()[i];
-    if (next_offset <= offset) {
-      // Line offset is not monotonically increasing, so line information is
-      // invalid.
-      return SourceLocation{};
-    }
-    if (absolute_position < next_offset) {
-      line_idx = i;
-      break;
-    }
-    offset = next_offset;
-  }
-
-  if (line_idx < 0 || line_idx >= source_info.line_offsets().size()) {
-    return SourceLocation{};
-  }
-
-  int32_t rel_position = absolute_position - offset;
-
-  return SourceLocation{line_idx + 1, rel_position};
-}
-
-// Special case for protobuf null fields.
-bool IsPbNullFieldAssignable(const Type& value, const Type& field) {
-  if (field.IsNull()) {
-    return value.IsInt() || value.IsNull();
-  }
-
-  if (field.IsOptional() && value.IsOptional() &&
-      field.AsOptional()->GetParameter().IsNull()) {
-    auto value_param = value.AsOptional()->GetParameter();
-    return value_param.IsInt() || value_param.IsNull();
-  }
-
-  return false;
 }
 
 // Flatten the type to the AST type representation to remove any lifecycle
@@ -234,29 +196,43 @@ class ResolveVisitor : public AstVisitorBase {
     bool namespace_rewrite;
   };
 
-  ResolveVisitor(absl::string_view container,
-                 NamespaceGenerator namespace_generator,
+  struct AttributeResolution {
+    const VariableDecl* decl;
+    bool requires_disambiguation;
+    bool local;
+  };
+
+  ResolveVisitor(NamespaceGenerator namespace_generator,
                  const TypeCheckEnv& env, const Ast& ast,
                  TypeInferenceContext& inference_context,
                  std::vector<TypeCheckIssue>& issues,
                  google::protobuf::Arena* absl_nonnull arena)
-      : container_(container),
-        namespace_generator_(std::move(namespace_generator)),
+      : namespace_generator_(std::move(namespace_generator)),
         env_(&env),
         inference_context_(&inference_context),
         issues_(&issues),
         ast_(&ast),
-        root_scope_(env.MakeVariableScope()),
+        root_scope_(),
         arena_(arena),
         current_scope_(&root_scope_) {}
 
-  void PreVisitExpr(const Expr& expr) override { expr_stack_.push_back(&expr); }
+  void PreVisitExpr(const Expr& expr) override {
+    expr_stack_.push_back(&expr);
+    if (expr_stack_.size() == 1 && MatchesBlock(expr)) {
+      ABSL_DCHECK_EQ(expr.call_expr().args().size(), 2);
+      ABSL_DCHECK(block_init_list_ == nullptr);
+      block_init_list_ = &expr.call_expr().args()[0];
+    }
+  }
 
   void PostVisitExpr(const Expr& expr) override {
     if (expr_stack_.empty()) {
       return;
     }
     expr_stack_.pop_back();
+    if (expr_stack_.size() == 2 && expr_stack_.back() == block_init_list_) {
+      HandleBlockIndex(&expr);
+    }
   }
 
   void PostVisitConst(const Expr& expr, const Constant& constant) override;
@@ -294,7 +270,7 @@ class ResolveVisitor : public AstVisitorBase {
     return functions_;
   }
 
-  const absl::flat_hash_map<const Expr*, const VariableDecl*>& attributes()
+  const absl::flat_hash_map<const Expr*, AttributeResolution>& attributes()
       const {
     return attributes_;
   }
@@ -344,9 +320,13 @@ class ResolveVisitor : public AstVisitorBase {
                                                absl::string_view function_name,
                                                int arg_count, bool is_receiver);
 
-  // Resolves the function call shape (i.e. the number of arguments and call
-  // style) for the given function call.
-  const VariableDecl* absl_nullable LookupIdentifier(absl::string_view name);
+  // Resolves a global identifier (i.e. declared in the CEL environment).
+  const VariableDecl* absl_nullable LookupGlobalIdentifier(
+      absl::string_view name);
+
+  // Resolves a local identifier (i.e. a bind or comprehension var).
+  const VariableDecl* absl_nullable LookupLocalIdentifier(
+      absl::string_view name);
 
   // Resolves the applicable function overloads for the given function call.
   //
@@ -367,15 +347,15 @@ class ResolveVisitor : public AstVisitorBase {
 
   void ReportMissingReference(const Expr& expr, absl::string_view name) {
     ReportIssue(TypeCheckIssue::CreateError(
-        ComputeSourceLocation(*ast_, expr.id()),
+        ast_->ComputeSourceLocation(expr.id()),
         absl::StrCat("undeclared reference to '", name, "' (in container '",
-                     container_, "')")));
+                     env_->container().container(), "')")));
   }
 
   void ReportUndefinedField(int64_t expr_id, absl::string_view field_name,
                             absl::string_view struct_name) {
     ReportIssue(TypeCheckIssue::CreateError(
-        ComputeSourceLocation(*ast_, expr_id),
+        ast_->ComputeSourceLocation(expr_id),
         absl::StrCat("undefined field '", field_name, "' not found in struct '",
                      struct_name, "'")));
   }
@@ -383,7 +363,7 @@ class ResolveVisitor : public AstVisitorBase {
   void ReportTypeMismatch(int64_t expr_id, const Type& expected,
                           const Type& actual) {
     ReportIssue(TypeCheckIssue::CreateError(
-        ComputeSourceLocation(*ast_, expr_id),
+        ast_->ComputeSourceLocation(expr_id),
         absl::StrCat("expected type '",
                      FormatTypeName(inference_context_->FinalizeType(expected)),
                      "' but found '",
@@ -401,7 +381,7 @@ class ResolveVisitor : public AstVisitorBase {
 
       // Lookup message type by name to support WellKnownType creation.
       CEL_ASSIGN_OR_RETURN(
-          absl::optional<StructTypeField> field_info,
+          std::optional<StructTypeField> field_info,
           env_->LookupStructField(resolved_name, field.name()));
       if (!field_info.has_value()) {
         ReportUndefinedField(field.id(), field.name(), resolved_name);
@@ -411,10 +391,9 @@ class ResolveVisitor : public AstVisitorBase {
       if (field.optional()) {
         field_type = OptionalType(arena_, field_type);
       }
-      if (!inference_context_->IsAssignable(value_type, field_type) &&
-          !IsPbNullFieldAssignable(value_type, field_type)) {
+      if (!inference_context_->IsAssignable(value_type, field_type)) {
         ReportIssue(TypeCheckIssue::CreateError(
-            ComputeSourceLocation(*ast_, field.id()),
+            ast_->ComputeSourceLocation(field.id()),
             absl::StrCat(
                 "expected type of field '", field_info->name(), "' is '",
                 FormatTypeName(inference_context_->FinalizeType(field_type)),
@@ -428,10 +407,11 @@ class ResolveVisitor : public AstVisitorBase {
     return absl::OkStatus();
   }
 
-  absl::optional<Type> CheckFieldType(int64_t expr_id, const Type& operand_type,
-                                      absl::string_view field_name);
+  std::optional<Type> CheckFieldType(int64_t expr_id, const Type& operand_type,
+                                     absl::string_view field_name);
 
   void HandleOptSelect(const Expr& expr);
+  void HandleBlockIndex(const Expr* expr);
 
   // Get the assigned type of the given subexpression. Should only be called if
   // the given subexpression is expected to have already been checked.
@@ -451,7 +431,6 @@ class ResolveVisitor : public AstVisitorBase {
     return DynType();
   }
 
-  absl::string_view container_;
   NamespaceGenerator namespace_generator_;
   const TypeCheckEnv* absl_nonnull env_;
   TypeInferenceContext* absl_nonnull inference_context_;
@@ -465,6 +444,7 @@ class ResolveVisitor : public AstVisitorBase {
   std::vector<const Expr*> expr_stack_;
   absl::flat_hash_map<const Expr*, std::vector<std::string>>
       maybe_namespaced_functions_;
+  const Expr* block_init_list_ = nullptr;
   // Select operations that need to be resolved outside of the traversal.
   // These are handled separately to disambiguate between namespaces and field
   // accesses
@@ -476,7 +456,7 @@ class ResolveVisitor : public AstVisitorBase {
 
   // References that were resolved and may require AST rewrites.
   absl::flat_hash_map<const Expr*, FunctionResolution> functions_;
-  absl::flat_hash_map<const Expr*, const VariableDecl*> attributes_;
+  absl::flat_hash_map<const Expr*, AttributeResolution> attributes_;
   absl::flat_hash_map<const Expr*, std::string> struct_types_;
 
   absl::flat_hash_map<const Expr*, Type> types_;
@@ -559,7 +539,7 @@ void ResolveVisitor::PostVisitConst(const Expr& expr,
       break;
     default:
       ReportIssue(TypeCheckIssue::CreateError(
-          ComputeSourceLocation(*ast_, expr.id()),
+          ast_->ComputeSourceLocation(expr.id()),
           absl::StrCat("unsupported constant type: ",
                        constant.kind().index())));
       types_[&expr] = ErrorType();
@@ -611,7 +591,7 @@ void ResolveVisitor::PostVisitMap(const Expr& expr, const MapExpr& map) {
       // To match the Go implementation, we just warn here, but in the future
       // we should consider making this an error.
       ReportIssue(TypeCheckIssue(
-          Severity::kWarning, ComputeSourceLocation(*ast_, key->id()),
+          Severity::kWarning, ast_->ComputeSourceLocation(key->id()),
           absl::StrCat(
               "unsupported map key type: ",
               FormatTypeName(inference_context_->FinalizeType(key_type)))));
@@ -653,8 +633,15 @@ void ResolveVisitor::PostVisitMap(const Expr& expr, const MapExpr& map) {
 }
 
 void ResolveVisitor::PostVisitList(const Expr& expr, const ListExpr& list) {
-  // Follows list type inferencing behavior in Go (see map comments above).
+  if (&expr == block_init_list_) {
+    // Don't try to coalesce list type here because it can influence the
+    // resolved type of the list elements. cel.@block is always list<dyn> and
+    // the elements are treated independently at runtime.
+    types_[&expr] = ListType();
+    return;
+  }
 
+  // Follows list type inferencing behavior in Go (see map comments above).
   Type overall_elem_type =
       inference_context_->InstantiateTypeParams(TypeParamType("E"));
   auto assignability_context = inference_context_->CreateAssignabilityContext();
@@ -717,7 +704,7 @@ void ResolveVisitor::PostVisitStruct(const Expr& expr,
   if (resolved_type.kind() != TypeKind::kStruct &&
       !IsWellKnownMessageType(resolved_name)) {
     ReportIssue(TypeCheckIssue::CreateError(
-        ComputeSourceLocation(*ast_, expr.id()),
+        ast_->ComputeSourceLocation(expr.id()),
         absl::StrCat("type '", resolved_name,
                      "' does not support message creation")));
     types_[&expr] = ErrorType();
@@ -868,7 +855,7 @@ void ResolveVisitor::PostVisitComprehensionSubexpression(
           break;
         default:
           ReportIssue(TypeCheckIssue::CreateError(
-              ComputeSourceLocation(*ast_, comprehension.iter_range().id()),
+              ast_->ComputeSourceLocation(comprehension.iter_range().id()),
               absl::StrCat(
                   "expression of type '",
                   FormatTypeName(inference_context_->FinalizeType(range_type)),
@@ -909,8 +896,12 @@ const FunctionDecl* ResolveVisitor::ResolveFunctionCallShape(
         if (decl == nullptr) {
           return true;
         }
+        bool is_logical_op = (candidate == cel::StandardFunctions::kAnd ||
+                              candidate == cel::StandardFunctions::kOr) &&
+                             arg_count >= 2;
         for (const auto& ovl : decl->overloads()) {
-          if (ovl.member() == is_receiver && ovl.args().size() == arg_count) {
+          if (ovl.member() == is_receiver &&
+              (ovl.args().size() == arg_count || is_logical_op)) {
             return false;
           }
         }
@@ -934,12 +925,12 @@ void ResolveVisitor::ResolveFunctionOverloads(const Expr& expr,
     arg_types.push_back(GetDeducedType(&expr.call_expr().args()[i]));
   }
 
-  absl::optional<TypeInferenceContext::OverloadResolution> resolution =
+  std::optional<TypeInferenceContext::OverloadResolution> resolution =
       inference_context_->ResolveOverload(decl, arg_types, is_receiver);
 
   if (!resolution.has_value()) {
     ReportIssue(TypeCheckIssue::CreateError(
-        ComputeSourceLocation(*ast_, expr.id()),
+        ast_->ComputeSourceLocation(expr.id()),
         absl::StrCat("found no matching overload for '", decl.name(),
                      "' applied to '(",
                      absl::StrJoin(arg_types, ", ",
@@ -967,13 +958,22 @@ void ResolveVisitor::ResolveFunctionOverloads(const Expr& expr,
   types_[&expr] = resolution->result_type;
 }
 
-const VariableDecl* absl_nullable ResolveVisitor::LookupIdentifier(
+const VariableDecl* absl_nullable ResolveVisitor::LookupLocalIdentifier(
     absl::string_view name) {
-  if (const VariableDecl* decl = current_scope_->LookupVariable(name);
-      decl != nullptr) {
+  if (absl::StartsWith(name, ".")) {
+    // Should not happen for normally parsed CEL, but prevent lookup in case
+    // of hand-crafted ASTs.
+    return nullptr;
+  }
+  return current_scope_->LookupLocalVariable(name);
+}
+
+const VariableDecl* absl_nullable ResolveVisitor::LookupGlobalIdentifier(
+    absl::string_view name) {
+  if (const VariableDecl* decl = env_->LookupVariable(name); decl != nullptr) {
     return decl;
   }
-  absl::StatusOr<absl::optional<VariableDecl>> constant =
+  absl::StatusOr<std::optional<VariableDecl>> constant =
       env_->LookupTypeConstant(arena_, name);
 
   if (!constant.ok()) {
@@ -996,22 +996,40 @@ const VariableDecl* absl_nullable ResolveVisitor::LookupIdentifier(
 
 void ResolveVisitor::ResolveSimpleIdentifier(const Expr& expr,
                                              absl::string_view name) {
+  // Local variables (comprehension, bind) are simple identifiers so we can
+  // skip generating the different namespace-qualified candidates.
+  if (!absl::StartsWith(name, ".")) {
+    const VariableDecl* local_decl = LookupLocalIdentifier(name);
+    if (local_decl != nullptr) {
+      attributes_[&expr] = {local_decl, /*requires_disambiguation=*/false,
+                            /*local=*/true};
+      types_[&expr] =
+          inference_context_->InstantiateTypeParams(local_decl->type());
+      return;
+    }
+  }
+
   const VariableDecl* decl = nullptr;
   namespace_generator_.GenerateCandidates(
       name, [&decl, this](absl::string_view candidate) {
-        decl = LookupIdentifier(candidate);
+        decl = LookupGlobalIdentifier(candidate);
         // continue searching.
         return decl == nullptr;
       });
 
-  if (decl == nullptr) {
-    ReportMissingReference(expr, name);
-    types_[&expr] = ErrorType();
+  bool requires_disambiguation = false;
+  if (absl::StartsWith(name, ".")) {
+    requires_disambiguation = LookupLocalIdentifier(name.substr(1)) != nullptr;
+  }
+
+  if (decl != nullptr) {
+    attributes_[&expr] = {decl, requires_disambiguation, /*local=*/false};
+    types_[&expr] = inference_context_->InstantiateTypeParams(decl->type());
     return;
   }
 
-  attributes_[&expr] = decl;
-  types_[&expr] = inference_context_->InstantiateTypeParams(decl->type());
+  ReportMissingReference(expr, name);
+  types_[&expr] = ErrorType();
 }
 
 void ResolveVisitor::ResolveQualifiedIdentifier(
@@ -1021,14 +1039,28 @@ void ResolveVisitor::ResolveQualifiedIdentifier(
     return;
   }
 
-  const VariableDecl* absl_nullable decl = nullptr;
-  int segment_index_out = -1;
+  int matched_segment_index = -1;
+  const VariableDecl* decl = nullptr;
+  bool requires_disambiguation = false;
+  bool is_local = false;
+  // Local variables (comprehension, bind) are simple identifiers so we can
+  // skip generating the different namespace-qualified candidates.
+  if (!absl::StartsWith(qualifiers[0], ".")) {
+    const VariableDecl* local_decl = LookupLocalIdentifier(qualifiers[0]);
+    if (local_decl != nullptr) {
+      decl = local_decl;
+      matched_segment_index = 0;
+      is_local = true;
+      goto resolve_select_trail;
+    }
+  }
+
   namespace_generator_.GenerateCandidates(
-      qualifiers, [&decl, &segment_index_out, this](absl::string_view candidate,
-                                                    int segment_index) {
-        decl = LookupIdentifier(candidate);
+      qualifiers, [&decl, &matched_segment_index, this](
+                      absl::string_view candidate, int segment_index) {
+        decl = LookupGlobalIdentifier(candidate);
         if (decl != nullptr) {
-          segment_index_out = segment_index;
+          matched_segment_index = segment_index;
           return false;
         }
         return true;
@@ -1040,7 +1072,18 @@ void ResolveVisitor::ResolveQualifiedIdentifier(
     return;
   }
 
-  const int num_select_opts = qualifiers.size() - segment_index_out - 1;
+  if (absl::StartsWith(qualifiers[0], ".")) {
+    const VariableDecl* local_decl =
+        LookupLocalIdentifier(qualifiers[0].substr(1));
+    if (local_decl != nullptr) {
+      requires_disambiguation = true;
+    }
+  }
+
+resolve_select_trail:
+
+  const int num_select_opts = qualifiers.size() - matched_segment_index - 1;
+
   const Expr* root = &expr;
   std::vector<const Expr*> select_opts;
   select_opts.reserve(num_select_opts);
@@ -1049,7 +1092,7 @@ void ResolveVisitor::ResolveQualifiedIdentifier(
     root = &root->select_expr().operand();
   }
 
-  attributes_[root] = decl;
+  attributes_[root] = {decl, requires_disambiguation, is_local};
   types_[root] = inference_context_->InstantiateTypeParams(decl->type());
 
   // fix-up select operations that were deferred.
@@ -1059,9 +1102,9 @@ void ResolveVisitor::ResolveQualifiedIdentifier(
   }
 }
 
-absl::optional<Type> ResolveVisitor::CheckFieldType(int64_t id,
-                                                    const Type& operand_type,
-                                                    absl::string_view field) {
+std::optional<Type> ResolveVisitor::CheckFieldType(int64_t id,
+                                                   const Type& operand_type,
+                                                   absl::string_view field) {
   if (operand_type.kind() == TypeKind::kDyn ||
       operand_type.kind() == TypeKind::kAny) {
     return DynType();
@@ -1073,11 +1116,11 @@ absl::optional<Type> ResolveVisitor::CheckFieldType(int64_t id,
       auto field_info = env_->LookupStructField(struct_type.name(), field);
       if (!field_info.ok()) {
         status_.Update(field_info.status());
-        return absl::nullopt;
+        return std::nullopt;
       }
       if (!field_info->has_value()) {
         ReportUndefinedField(id, field, struct_type.name());
-        return absl::nullopt;
+        return std::nullopt;
       }
       auto type = field_info->value().GetType();
       if (type.kind() == TypeKind::kEnum) {
@@ -1104,12 +1147,12 @@ absl::optional<Type> ResolveVisitor::CheckFieldType(int64_t id,
   }
 
   ReportIssue(TypeCheckIssue::CreateError(
-      ComputeSourceLocation(*ast_, id),
+      ast_->ComputeSourceLocation(id),
       absl::StrCat(
           "expression of type '",
           FormatTypeName(inference_context_->FinalizeType(operand_type)),
           "' cannot be the operand of a select operation")));
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 void ResolveVisitor::ResolveSelectOperation(const Expr& expr,
@@ -1117,7 +1160,7 @@ void ResolveVisitor::ResolveSelectOperation(const Expr& expr,
                                             const Expr& operand) {
   const Type& operand_type = GetDeducedType(&operand);
 
-  absl::optional<Type> result_type;
+  std::optional<Type> result_type;
   int64_t id = expr.id();
   // Support short-hand optional chaining.
   if (operand_type.IsOptional()) {
@@ -1164,7 +1207,7 @@ void ResolveVisitor::HandleOptSelect(const Expr& expr) {
     operand_type = operand_type.GetOptional().GetParameter();
   }
 
-  absl::optional<Type> field_type = CheckFieldType(
+  std::optional<Type> field_type = CheckFieldType(
       expr.id(), operand_type, field->const_expr().string_value());
   if (!field_type.has_value()) {
     types_[&expr] = ErrorType();
@@ -1181,37 +1224,83 @@ void ResolveVisitor::HandleOptSelect(const Expr& expr) {
   }
 }
 
+void ResolveVisitor::HandleBlockIndex(const Expr* expr) {
+  ABSL_DCHECK(block_init_list_ != nullptr);
+  ABSL_DCHECK(block_init_list_->has_list_expr());
+  const auto& elements = block_init_list_->list_expr().elements();
+  int index = -1;
+  for (size_t i = 0; i < elements.size(); ++i) {
+    if (&elements[i].expr() == expr) {
+      index = i;
+      break;
+    }
+  }
+  if (index < 0) {
+    status_.Update(absl::InternalError(
+        "could not resolve expression as a cel.@block subexpression"));
+    return;
+  }
+  std::string var_name = absl::StrCat("@index", index);
+
+  // Block is typically manually assembled from logically separate
+  // expressions so fix the type instead of inferring any remaining free type
+  // params as for normal subexpressions.
+  auto type = inference_context_->FinalizeType(GetDeducedType(expr));
+
+  VariableDecl decl = MakeVariableDecl(var_name, std::move(type));
+
+  // The C++ runtime requires that the indexes are topologically ordered.
+  // They just come into scope in order as we walk the AST so we don't need
+  // to do any additional work to check references to other initializers in
+  // an init expr.
+  //
+  // TODO(uncreated-issue/90): This is slightly inconsistent with the java
+  // runtime implementation which just requires the references to be acyclic.
+  auto* scope =
+      comprehension_vars_.emplace_back(current_scope_->MakeNestedScope()).get();
+  scope->InsertVariableIfAbsent(std::move(decl));
+  current_scope_ = scope;
+}
+
 class ResolveRewriter : public AstRewriterBase {
  public:
   explicit ResolveRewriter(const ResolveVisitor& visitor,
                            const TypeInferenceContext& inference_context,
                            const CheckerOptions& options,
-                           Ast::ReferenceMap& references, Ast::TypeMap& types)
+                           Ast::ReferenceMap& references, Ast::TypeMap& types,
+                           ValidationResult::TypeMap& resolved_types)
       : visitor_(visitor),
         inference_context_(inference_context),
         reference_map_(references),
         type_map_(types),
+        resolved_types_(resolved_types),
         options_(options) {}
   bool PostVisitRewrite(Expr& expr) override {
     bool rewritten = false;
     if (auto iter = visitor_.attributes().find(&expr);
         iter != visitor_.attributes().end()) {
-      const VariableDecl* decl = iter->second;
+      const VariableDecl* decl = iter->second.decl;
       auto& ast_ref = reference_map_[expr.id()];
-      ast_ref.set_name(decl->name());
+      std::string name = decl->name();
+      if (iter->second.requires_disambiguation &&
+          !absl::StartsWith(name, ".")) {
+        name = absl::StrCat(".", name);
+      }
+      ast_ref.set_name(name);
       if (decl->has_value()) {
         ast_ref.set_value(decl->value());
       }
-      expr.mutable_ident_expr().set_name(decl->name());
+      expr.mutable_ident_expr().set_name(std::move(name));
       rewritten = true;
     } else if (auto iter = visitor_.functions().find(&expr);
                iter != visitor_.functions().end()) {
       const FunctionDecl* decl = iter->second.decl;
       const bool needs_rewrite = iter->second.namespace_rewrite;
       auto& ast_ref = reference_map_[expr.id()];
-      ast_ref.set_name(decl->name());
+      if (options_.enable_function_name_in_reference) {
+        ast_ref.set_name(decl->name());
+      }
       for (const auto& overload : decl->overloads()) {
-        // TODO(uncreated-issue/72): narrow based on type inferences and shape.
         ast_ref.mutable_overload_id().push_back(overload.id());
       }
       expr.mutable_call_expr().set_function(decl->name());
@@ -1231,14 +1320,15 @@ class ResolveRewriter : public AstRewriterBase {
 
     if (auto iter = visitor_.types().find(&expr);
         iter != visitor_.types().end()) {
-      auto flattened_type =
-          FlattenType(inference_context_.FinalizeType(iter->second));
+      cel::Type finalized_type = inference_context_.FinalizeType(iter->second);
+      auto flattened_type = FlattenType(finalized_type);
 
       if (!flattened_type.ok()) {
         status_.Update(flattened_type.status());
         return rewritten;
       }
       type_map_[expr.id()] = *std::move(flattened_type);
+      resolved_types_[expr.id()] = finalized_type;
       rewritten = true;
     }
 
@@ -1253,23 +1343,28 @@ class ResolveRewriter : public AstRewriterBase {
   const TypeInferenceContext& inference_context_;
   Ast::ReferenceMap& reference_map_;
   Ast::TypeMap& type_map_;
+  ValidationResult::TypeMap& resolved_types_;
   const CheckerOptions& options_;
 };
 
 }  // namespace
 
-absl::StatusOr<ValidationResult> TypeCheckerImpl::Check(
-    std::unique_ptr<Ast> ast) const {
-  google::protobuf::Arena type_arena;
+absl::StatusOr<ValidationResult> TypeCheckerImpl::CheckImpl(
+    std::unique_ptr<Ast> ast, google::protobuf::Arena* arena) const {
+  std::optional<google::protobuf::Arena> type_arena;
+  if (arena == nullptr) {
+    type_arena.emplace();
+    arena = &(*type_arena);
+  }
 
   std::vector<TypeCheckIssue> issues;
   CEL_ASSIGN_OR_RETURN(auto generator,
                        NamespaceGenerator::Create(env_.container()));
 
   TypeInferenceContext type_inference_context(
-      &type_arena, options_.enable_legacy_null_assignment);
-  ResolveVisitor visitor(env_.container(), std::move(generator), env_, *ast,
-                         type_inference_context, issues, &type_arena);
+      arena, options_.enable_legacy_null_assignment);
+  ResolveVisitor visitor(std::move(generator), env_, *ast,
+                         type_inference_context, issues, arena);
 
   TraversalOptions opts;
   opts.use_comprehension_callbacks = true;
@@ -1314,16 +1409,35 @@ absl::StatusOr<ValidationResult> TypeCheckerImpl::Check(
   // Apply updates as needed.
   // Happens in a second pass to simplify validating that pointers haven't
   // been invalidated by other updates.
+  ValidationResult::TypeMap resolved_types;
   ResolveRewriter rewriter(visitor, type_inference_context, options_,
                            ast->mutable_reference_map(),
-                           ast->mutable_type_map());
+                           ast->mutable_type_map(), resolved_types);
   AstRewrite(ast->mutable_root_expr(), rewriter);
 
   CEL_RETURN_IF_ERROR(rewriter.status());
 
   ast->set_is_checked(true);
+  if (options_.use_json_field_names) {
+    ast->mutable_source_info().mutable_extensions().push_back(
+        cel::ExtensionSpec("json_name",
+                           std::make_unique<cel::ExtensionSpec::Version>(1, 1),
+                           {cel::ExtensionSpec::Component::kRuntime}));
+  }
 
-  return ValidationResult(std::move(ast), std::move(issues));
+  auto result = ValidationResult(std::move(ast), std::move(issues));
+  if (!type_arena.has_value()) {
+    // cel::Type values will expire after this function returns when the local
+    // arena is destructed. Only set the resolved type map if we're using the
+    // caller's arena.
+    result.SetResolvedTypeMap(std::move(resolved_types));
+  }
+
+  return result;
+}
+
+std::unique_ptr<TypeCheckerBuilder> TypeCheckerImpl::ToBuilder() const {
+  return std::make_unique<TypeCheckerBuilderImpl>(options_, env_);
 }
 
 }  // namespace cel::checker_internal

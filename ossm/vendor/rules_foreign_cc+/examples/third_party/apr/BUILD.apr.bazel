@@ -10,18 +10,10 @@ filegroup(
     ),
 )
 
-config_setting(
-    name = "msvc_compiler",
-    flag_values = {
-        "@bazel_tools//tools/cpp:compiler": "msvc-cl",
-    },
-    visibility = ["//visibility:public"],
-)
-
 alias(
     name = "apr",
     actual = select({
-        ":msvc_compiler": "apr_msvc",
+        "@rules_cc//cc/compiler:msvc-cl": "apr_msvc",
         "//conditions:default": "apr_default",
     }),
     visibility = ["//visibility:public"],
@@ -36,6 +28,10 @@ make_variant(
     lib_name = LIB_NAME,
     lib_source = ":all_srcs",
     out_static_libs = ["apr-1.lib"],
+    target_compatible_with = select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     targets = [
         "buildall",
         "install",
@@ -61,5 +57,9 @@ configure_make(
     lib_name = LIB_NAME,
     lib_source = ":all_srcs",
     out_static_libs = ["libapr-1.a"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
 )

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -43,7 +44,7 @@ const google::protobuf::FileDescriptorSet* GetMinimumFileDescriptorSet() {
   static google::protobuf::FileDescriptorSet* const file_desc_set = []() {
     google::protobuf::FileDescriptorSet* file_desc_set = new google::protobuf::FileDescriptorSet();
     ABSL_CHECK(file_desc_set->ParseFromArray(  // Crash OK
-       kMinimalDescriptorSet, ABSL_ARRAYSIZE(kMinimalDescriptorSet)));
+       kMinimalDescriptorSet, std::size(kMinimalDescriptorSet)));
     return file_desc_set;
   }();
   return file_desc_set;

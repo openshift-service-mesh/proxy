@@ -23,15 +23,22 @@
 #include "absl/base/attributes.h"
 #include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/log/absl_check.h"
 #include "absl/memory/memory.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
+#include "checker/internal/proto_type_mask.h"
+#include "checker/internal/proto_type_mask_registry.h"
 #include "common/constant.h"
+#include "common/container.h"
 #include "common/decl.h"
+#include "common/descriptor_pool_type_introspector.h"
 #include "common/type.h"
 #include "common/type_introspector.h"
+#include "internal/status_macros.h"
 #include "google/protobuf/arena.h"
 #include "google/protobuf/descriptor.h"
 
@@ -42,13 +49,11 @@ class TypeCheckEnv;
 // Helper class for managing nested scopes and the local variables they
 // implicitly declare.
 //
-// Nested scopes have a lifetime dependency on any parent scopes and the
-// parent Type environment. Nested scopes should generally be managed by
-// unique_ptrs.
+// Nested scopes have a lifetime dependency on any parent scopes and should
+// generally be managed by unique_ptrs.
 class VariableScope {
  public:
-  explicit VariableScope(const TypeCheckEnv& env ABSL_ATTRIBUTE_LIFETIME_BOUND)
-      : env_(&env), parent_(nullptr) {}
+  explicit VariableScope() : parent_(nullptr) {}
 
   VariableScope(const VariableScope&) = delete;
   VariableScope& operator=(const VariableScope&) = delete;
@@ -61,18 +66,17 @@ class VariableScope {
 
   std::unique_ptr<VariableScope> MakeNestedScope() const
       ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return absl::WrapUnique(new VariableScope(*env_, this));
+    return absl::WrapUnique(new VariableScope(this));
   }
 
-  const VariableDecl* absl_nullable LookupVariable(
+  const VariableDecl* absl_nullable LookupLocalVariable(
       absl::string_view name) const;
 
  private:
-  VariableScope(const TypeCheckEnv& env ABSL_ATTRIBUTE_LIFETIME_BOUND,
-                const VariableScope* parent ABSL_ATTRIBUTE_LIFETIME_BOUND)
-      : env_(&env), parent_(parent) {}
+  explicit VariableScope(
+      const VariableScope* parent ABSL_ATTRIBUTE_LIFETIME_BOUND)
+      : parent_(parent) {}
 
-  const TypeCheckEnv* absl_nonnull env_;
   const VariableScope* absl_nullable parent_;
   absl::flat_hash_map<std::string, VariableDecl> variables_;
 };
@@ -93,25 +97,30 @@ class TypeCheckEnv {
       absl_nonnull std::shared_ptr<const google::protobuf::DescriptorPool>
           descriptor_pool)
       : descriptor_pool_(std::move(descriptor_pool)),
-        container_(""),
-        parent_(nullptr) {}
+        proto_type_introspector_(
+            std::make_shared<DescriptorPoolTypeIntrospector>(
+                descriptor_pool_.get())) {
+    type_providers_.push_back(
+        std::make_shared<cel::WellKnownTypeIntrospector>());
+    type_providers_.push_back(proto_type_introspector_);
+  }
 
-  TypeCheckEnv(absl_nonnull std::shared_ptr<const google::protobuf::DescriptorPool>
-                   descriptor_pool,
-               std::shared_ptr<google::protobuf::Arena> arena)
-      : descriptor_pool_(std::move(descriptor_pool)),
-        arena_(std::move(arena)),
-        container_(""),
-        parent_(nullptr) {}
-
-  // Move-only.
+  TypeCheckEnv(const TypeCheckEnv&) = default;
+  TypeCheckEnv& operator=(const TypeCheckEnv&) = default;
   TypeCheckEnv(TypeCheckEnv&&) = default;
   TypeCheckEnv& operator=(TypeCheckEnv&&) = default;
 
-  const std::string& container() const { return container_; }
+  const ExpressionContainer& container() const { return container_; }
 
-  void set_container(std::string container) {
+  void set_container(ExpressionContainer container) {
     container_ = std::move(container);
+  }
+
+  const DescriptorPoolTypeIntrospector& proto_type_introspector() const {
+    return *proto_type_introspector_;
+  }
+  DescriptorPoolTypeIntrospector& proto_type_introspector() {
+    return *proto_type_introspector_;
   }
 
   void set_expected_type(const Type& type) { expected_type_ = std::move(type); }
@@ -149,6 +158,14 @@ class TypeCheckEnv {
     variables_[decl.name()] = std::move(decl);
   }
 
+  absl::Status CreateProtoTypeMaskRegistry(
+      const std::vector<ProtoTypeMask>& proto_type_masks) {
+    CEL_ASSIGN_OR_RETURN(proto_type_mask_registry_,
+                         ProtoTypeMaskRegistry::Create(descriptor_pool_.get(),
+                                                       proto_type_masks));
+    return absl::OkStatus();
+  }
+
   const absl::flat_hash_map<std::string, FunctionDecl>& functions() const {
     return functions_;
   }
@@ -165,9 +182,6 @@ class TypeCheckEnv {
   void InsertOrReplaceFunction(FunctionDecl decl) {
     functions_[decl.name()] = std::move(decl);
   }
-
-  const TypeCheckEnv* absl_nullable parent() const { return parent_; }
-  void set_parent(TypeCheckEnv* parent) { parent_ = parent; }
 
   // Returns the declaration for the given name if it is found in the current
   // or any parent scope.
@@ -187,35 +201,42 @@ class TypeCheckEnv {
   absl::StatusOr<absl::optional<VariableDecl>> LookupTypeConstant(
       google::protobuf::Arena* absl_nonnull arena, absl::string_view type_name) const;
 
-  TypeCheckEnv MakeExtendedEnvironment() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return TypeCheckEnv(this);
-  }
-  VariableScope MakeVariableScope() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return VariableScope(*this);
-  }
-
   const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool() const {
     return descriptor_pool_.get();
   }
 
- private:
-  explicit TypeCheckEnv(const TypeCheckEnv* absl_nonnull parent)
-      : descriptor_pool_(parent->descriptor_pool_),
-        container_(parent != nullptr ? parent->container() : ""),
-        parent_(parent) {}
+  // Used to keep an arena alive if one was needed to allocate types.
+  //
+  // Expected to be called exactly once if at all.
+  void set_arena(std::shared_ptr<google::protobuf::Arena> arena) {
+    ABSL_DCHECK(arena_ == nullptr || arena == arena_);
+    arena_ = std::move(arena);
+  }
 
+  // Returns the arena if one was set, nullptr otherwise.
+  std::shared_ptr<google::protobuf::Arena> arena() const { return arena_; }
+
+ private:
   absl::StatusOr<absl::optional<VariableDecl>> LookupEnumConstant(
       absl::string_view type, absl::string_view value) const;
 
   absl_nonnull std::shared_ptr<const google::protobuf::DescriptorPool> descriptor_pool_;
+
   // If set, an arena was needed to allocate types in the environment.
-  absl_nullable std::shared_ptr<const google::protobuf::Arena> arena_;
-  std::string container_;
-  const TypeCheckEnv* absl_nullable parent_;
+  //
+  // The TypeCheckEnv does not otherwise use the arena, though it may be used by
+  // derived TypeCheckerBuilders.
+  absl_nullable std::shared_ptr<google::protobuf::Arena> arena_;
+  ExpressionContainer container_;
+
+  // Used to resolve fields on message types.
+  std::shared_ptr<DescriptorPoolTypeIntrospector> proto_type_introspector_;
 
   // Maps fully qualified names to declarations.
   absl::flat_hash_map<std::string, VariableDecl> variables_;
   absl::flat_hash_map<std::string, FunctionDecl> functions_;
+
+  std::shared_ptr<ProtoTypeMaskRegistry> proto_type_mask_registry_;
 
   // Type providers for custom types.
   std::vector<std::shared_ptr<const TypeIntrospector>> type_providers_;

@@ -68,7 +68,10 @@ def compile_splicing_manifest(splicing_config, manifests, cargo_config_path, pac
 def _no_at_label(label):
     """Strips leading '@'s for stringified labels in the main repository for backwards-compatibility reasons."""
     s = str(label)
-    if s.startswith("@@//"):
+    if s.startswith(
+        # buildifier: disable=canonical-repository
+        "@@//",
+    ):
         return s[2:]
     if s.startswith("@//"):
         return s[1:]
@@ -143,7 +146,10 @@ def splice_workspace_manifest(
         debug_workspace_dir (path): The location in which to save splicing outputs for future review.
 
     Returns:
-        path: The path to a Cargo metadata json file found in the spliced workspace root.
+        struct: A struct describing the spliced workspace outputs with the following fields:
+            - `metadata` (path): The path to the Cargo `metadata.json` in the spliced workspace root.
+            - `cargo_lock` (path): The path to the spliced `Cargo.lock` file.
+            - `extra_paths_to_track` (list of str): Additional paths (one per line) reported by the splicer that should be tracked for repin invalidation.
     """
 
     # Generate a workspace root which contains all workspace members

@@ -1,5 +1,11 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 
+filegroup(
+    name = "distribution",
+    srcs = glob(["**"]),
+    visibility = ["//:__subpackages__"],
+)
+
 bzl_library(
     name = "built_tools_framework",
     srcs = ["built_tools_framework.bzl"],
@@ -8,6 +14,7 @@ bzl_library(
         "//foreign_cc/private:cc_toolchain_util",
         "//foreign_cc/private:detect_root",
         "//foreign_cc/private:framework",
+        "//foreign_cc/private:resource_sets",
         "//foreign_cc/private/framework:helpers",
         "@bazel_tools//tools/cpp:toolchain_utils.bzl",
     ],

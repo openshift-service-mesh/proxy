@@ -27,7 +27,9 @@
 #include "common/value.h"
 #include "eval/public/cel_value.h"
 #include "internal/status_macros.h"
+#include "runtime/runtime_options.h"
 #include "google/protobuf/arena.h"
+#include "google/protobuf/descriptor.h"
 
 namespace cel {
 
@@ -58,6 +60,19 @@ google::api::expr::runtime::CelValue UnsafeLegacyValue(
 }  // namespace cel
 
 namespace cel::interop_internal {
+
+// Returns the underlying `google::protobuf::Message` of a `cel::Value` if it is a legacy
+// message with the default type info, or `nullptr` otherwise.
+const google::protobuf::Message* absl_nullable GetLegacyMessage(const Value& value);
+
+// Access a field on a legacy message value, writing the result to `out`.
+// Prefers wrapping legacy values instead of using the modern value
+// representation.
+absl::Status WrapLegacyMessageField(
+    const google::protobuf::Message* absl_nonnull message,
+    const google::protobuf::FieldDescriptor* absl_nonnull field_descriptor,
+    ProtoWrapperTypeOptions unboxing_option, google::protobuf::Arena* arena,
+    Value* absl_nonnull out);
 
 absl::StatusOr<Value> FromLegacyValue(
     google::protobuf::Arena* arena,

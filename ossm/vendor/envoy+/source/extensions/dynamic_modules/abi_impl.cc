@@ -1417,6 +1417,10 @@ WEAK_STUB_VOID(envoy_dynamic_module_callback_access_logger_get_bytes_info,
                envoy_dynamic_module_type_access_logger_envoy_ptr,
                envoy_dynamic_module_type_bytes_info*)
 
+WEAK_STUB_VOID(envoy_dynamic_module_callback_access_logger_get_downstream_wire_bytes,
+               envoy_dynamic_module_type_access_logger_envoy_ptr,
+               envoy_dynamic_module_type_downstream_wire_bytes*)
+
 WEAK_STUB(uint64_t, envoy_dynamic_module_callback_access_logger_get_connection_id, 0,
           envoy_dynamic_module_type_access_logger_envoy_ptr)
 
@@ -2561,6 +2565,17 @@ WEAK_STUB(bool, envoy_dynamic_module_callback_stat_sink_snapshot_get_histogram_b
           envoy_dynamic_module_type_stat_sink_snapshot_envoy_ptr, size_t, size_t, double*,
           uint64_t*)
 
+WEAK_STUB(bool, envoy_dynamic_module_callback_stat_sink_snapshot_get_histogram_tag_extracted_name,
+          false, envoy_dynamic_module_type_stat_sink_snapshot_envoy_ptr, size_t, char*, size_t,
+          size_t*)
+
+WEAK_STUB(bool, envoy_dynamic_module_callback_stat_sink_snapshot_get_histogram_tag_count, false,
+          envoy_dynamic_module_type_stat_sink_snapshot_envoy_ptr, size_t, size_t*)
+
+WEAK_STUB(bool, envoy_dynamic_module_callback_stat_sink_snapshot_get_histogram_tag, false,
+          envoy_dynamic_module_type_stat_sink_snapshot_envoy_ptr, size_t, size_t, char*, size_t,
+          size_t*, char*, size_t, size_t*)
+
 WEAK_STUB(bool, envoy_dynamic_module_callback_stat_sink_snapshot_get_counter_tag_count, false,
           envoy_dynamic_module_type_stat_sink_snapshot_envoy_ptr, size_t, size_t*)
 
@@ -2888,6 +2903,10 @@ WEAK_STUB(bool, envoy_dynamic_module_callback_http_filter_get_attribute_int, fal
 WEAK_STUB(bool, envoy_dynamic_module_callback_http_filter_get_attribute_bool, false,
           envoy_dynamic_module_type_http_filter_envoy_ptr, envoy_dynamic_module_type_attribute_id,
           bool*)
+
+WEAK_STUB_VOID(envoy_dynamic_module_callback_http_get_timing_info,
+               envoy_dynamic_module_type_http_filter_envoy_ptr,
+               envoy_dynamic_module_type_timing_info*)
 
 WEAK_STUB(bool, envoy_dynamic_module_callback_network_filter_get_attribute_string, false,
           envoy_dynamic_module_type_network_filter_envoy_ptr,

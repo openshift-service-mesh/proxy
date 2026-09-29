@@ -17,20 +17,26 @@
 load("//swift:providers.bzl", "SwiftInfo")
 load(":action_names.bzl", "SWIFT_ACTION_SYMBOL_GRAPH_EXTRACT")
 load(":actions.bzl", "run_toolchain_action")
-load(":utils.bzl", "merge_compilation_contexts")
+load(":compiling.bzl", "transitive_swift_dependency_inputs")
+load(":features.bzl", "gather_toolchains")
+load(":toolchain_utils.bzl", "SWIFT_TOOLCHAIN_TYPE")
+load(":utils.bzl", "get_swift_implicit_deps", "merge_compilation_contexts")
 
 def extract_symbol_graph(
         *,
         actions,
         compilation_contexts,
         emit_extension_block_symbols = None,
+        exec_group = None,
         feature_configuration,
         include_dev_srch_paths,
         minimum_access_level = None,
         module_name,
         output_dir,
         swift_infos,
-        swift_toolchain):
+        swift_toolchain = None,
+        toolchains = None,
+        toolchain_type = SWIFT_TOOLCHAIN_TYPE):
     """Extracts the symbol graph from a Swift module.
 
     Args:
@@ -42,6 +48,8 @@ def extract_symbol_graph(
             a target's dependencies.
         emit_extension_block_symbols: A `bool` that indicates whether `extension` block
             information should be included in the symbol graph.
+        exec_group: Runs the Swift compilation action under the given execution
+            group's context. If `None`, the default execution group is used.
         feature_configuration: The Swift feature configuration.
         include_dev_srch_paths: A `bool` that indicates whether the developer
             framework search paths will be added to the compilation command.
@@ -62,17 +70,29 @@ def extract_symbol_graph(
             target being compiled. This should include both propagated and
             non-propagated (implementation-only) dependencies.
         swift_toolchain: The `SwiftToolchainInfo` provider of the toolchain.
+        toolchains: The struct containing the Swift and C++ toolchain providers,
+            as returned by `swift_common.find_all_toolchains()`.
+        toolchain_type: The toolchain type of the `swift_toolchain` which is
+            used for the proper selection of the execution platform inside
+            `run_toolchain_action`.
     """
+    toolchains = gather_toolchains(
+        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
+    )
+
+    implicit_swift_infos, implicit_cc_infos = get_swift_implicit_deps(
+        feature_configuration = feature_configuration,
+        swift_toolchain = toolchains.swift,
+    )
     merged_compilation_context = merge_compilation_contexts(
         transitive_compilation_contexts = compilation_contexts + [
             cc_info.compilation_context
-            for cc_info in swift_toolchain.implicit_deps_providers.cc_infos
+            for cc_info in implicit_cc_infos
         ],
     )
     merged_swift_info = SwiftInfo(
-        swift_infos = (
-            swift_infos + swift_toolchain.implicit_deps_providers.swift_infos
-        ),
+        swift_infos = swift_infos + implicit_swift_infos,
     )
 
     # Flattening this `depset` is necessary because we need to extract the
@@ -81,18 +101,20 @@ def extract_symbol_graph(
     transitive_modules = merged_swift_info.transitive_modules.to_list()
 
     direct_swiftdocs = []
-    transitive_swiftmodules = []
     for module in transitive_modules:
         swift_module = module.swift
         if swift_module:
-            transitive_swiftmodules.append(swift_module.swiftmodule)
             if module.name == module_name and swift_module.swiftdoc:
                 direct_swiftdocs.append(swift_module.swiftdoc)
+    transitive_swift_dependency_inputs_list = transitive_swift_dependency_inputs(
+        transitive_modules,
+    )
 
     prerequisites = struct(
+        additional_inputs = toolchains.cc.all_files.to_list(),
         bin_dir = feature_configuration._bin_dir,
         cc_compilation_context = merged_compilation_context,
-        developer_dirs = swift_toolchain.developer_dirs,
+        developer_dirs = toolchains.swift.developer_dirs,
         direct_swiftdocs = direct_swiftdocs,
         emit_extension_block_symbols = emit_extension_block_symbols,
         genfiles_dir = feature_configuration._genfiles_dir,
@@ -103,17 +125,19 @@ def extract_symbol_graph(
         output_dir = output_dir,
         target_label = feature_configuration._label,
         transitive_modules = transitive_modules,
-        transitive_swiftmodules = transitive_swiftmodules,
+        transitive_swift_dependency_inputs = transitive_swift_dependency_inputs_list,
     )
 
     run_toolchain_action(
         actions = actions,
         action_name = SWIFT_ACTION_SYMBOL_GRAPH_EXTRACT,
+        exec_group = exec_group,
         feature_configuration = feature_configuration,
         outputs = [output_dir],
         prerequisites = prerequisites,
         progress_message = (
             "Extracting symbol graph for {}".format(module_name)
         ),
-        swift_toolchain = swift_toolchain,
+        swift_toolchain = toolchains.swift,
+        toolchain_type = toolchain_type,
     )

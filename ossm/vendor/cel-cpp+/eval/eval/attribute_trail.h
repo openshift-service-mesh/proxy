@@ -47,6 +47,7 @@ class AttributeTrail {
 
   // Creates AttributeTrail with attribute path incremented by "qualifier".
   AttributeTrail Step(const std::string* qualifier) const {
+    if (empty()) return AttributeTrail();
     return Step(cel::AttributeQualifier::OfString(*qualifier));
   }
 

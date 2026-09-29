@@ -12,7 +12,14 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/node_hash_set.h"
 #include "absl/flags/flag.h"
+#include "absl/status/status_matchers.h"
 #include "absl/strings/match.h"
+#include "common/ast_proto.h"
+#include "common/decl.h"
+#include "common/type.h"
+#include "compiler/compiler.h"
+#include "compiler/compiler_factory.h"
+#include "compiler/standard_library.h"
 #include "eval/public/activation.h"
 #include "eval/public/builtin_func_registrar.h"
 #include "eval/public/cel_expr_builder_factory.h"
@@ -31,6 +38,7 @@
 
 ABSL_FLAG(bool, enable_optimizations, false, "enable const folding opt");
 ABSL_FLAG(bool, enable_recursive_planning, false, "enable recursive planning");
+ABSL_FLAG(bool, enable_typed_field_access, false, "enable typed field access");
 
 namespace google {
 namespace api {
@@ -39,6 +47,7 @@ namespace runtime {
 
 namespace {
 
+using ::absl_testing::IsOk;
 using ::cel::expr::Expr;
 using ::cel::expr::ParsedExpr;
 using ::cel::expr::SourceInfo;
@@ -56,6 +65,10 @@ InterpreterOptions GetOptions(google::protobuf::Arena& arena) {
     options.max_recursion_depth = -1;
   }
 
+  if (absl::GetFlag(FLAGS_enable_typed_field_access)) {
+    options.enable_typed_field_access = true;
+  }
+
   return options;
 }
 
@@ -67,7 +80,8 @@ static void BM_Eval(benchmark::State& state) {
   InterpreterOptions options = GetOptions(arena);
 
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
   int len = state.range(0);
 
@@ -113,7 +127,8 @@ static void BM_Eval_Trace(benchmark::State& state) {
   options.enable_recursive_tracing = true;
 
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
   int len = state.range(0);
 
@@ -155,7 +170,8 @@ static void BM_EvalString(benchmark::State& state) {
   InterpreterOptions options = GetOptions(arena);
 
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
   int len = state.range(0);
 
@@ -198,7 +214,8 @@ static void BM_EvalString_Trace(benchmark::State& state) {
   options.enable_recursive_tracing = true;
 
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
   int len = state.range(0);
 
@@ -295,7 +312,8 @@ void BM_PolicySymbolic(benchmark::State& state) {
   options.constant_arena = &arena;
 
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
   SourceInfo source_info;
   ASSERT_OK_AND_ASSIGN(auto cel_expr, builder->CreateExpression(
@@ -317,7 +335,7 @@ BENCHMARK(BM_PolicySymbolic);
 
 class RequestMap : public CelMap {
  public:
-  absl::optional<CelValue> operator[](CelValue key) const override {
+  std::optional<CelValue> operator[](CelValue key) const override {
     if (!key.IsString()) {
       return {};
     }
@@ -351,7 +369,8 @@ void BM_PolicySymbolicMap(benchmark::State& state) {
   InterpreterOptions options = GetOptions(arena);
 
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
   SourceInfo source_info;
   ASSERT_OK_AND_ASSIGN(auto cel_expr, builder->CreateExpression(
@@ -373,22 +392,37 @@ BENCHMARK(BM_PolicySymbolicMap);
 // Uses a protobuf container for "ip", "path", and "token".
 void BM_PolicySymbolicProto(benchmark::State& state) {
   google::protobuf::Arena arena;
-  ASSERT_OK_AND_ASSIGN(ParsedExpr parsed_expr, parser::Parse(R"cel(
+  ASSERT_OK_AND_ASSIGN(
+      auto compiler_builder,
+      cel::NewCompilerBuilder(google::protobuf::DescriptorPool::generated_pool()));
+  ASSERT_THAT(compiler_builder->AddLibrary(cel::StandardCompilerLibrary()),
+              IsOk());
+  ASSERT_THAT(
+      compiler_builder->GetCheckerBuilder().AddVariable(cel::MakeVariableDecl(
+          "request", cel::MessageType(RequestContext::descriptor()))),
+      IsOk());
+  ASSERT_OK_AND_ASSIGN(auto compiler, compiler_builder->Build());
+
+  ASSERT_OK_AND_ASSIGN(auto validation_result, compiler->Compile(R"cel(
    !(request.ip in ["10.0.1.4", "10.0.1.5", "10.0.1.6"]) &&
    ((request.path.startsWith("v1") && request.token in ["v1", "v2", "admin"]) ||
     (request.path.startsWith("v2") && request.token in ["v2", "admin"]) ||
     (request.path.startsWith("/admin") && request.token == "admin" &&
      request.ip in ["10.0.1.1",  "10.0.1.2", "10.0.1.3"])
    ))cel"));
+  ASSERT_TRUE(validation_result.IsValid());
+  ASSERT_OK_AND_ASSIGN(auto ast, validation_result.ReleaseAst());
+
+  cel::expr::CheckedExpr checked_expr;
+  ASSERT_THAT(cel::AstToCheckedExpr(*ast, &checked_expr), IsOk());
 
   InterpreterOptions options = GetOptions(arena);
 
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
-  SourceInfo source_info;
-  ASSERT_OK_AND_ASSIGN(auto cel_expr, builder->CreateExpression(
-                                          &parsed_expr.expr(), &source_info));
+  ASSERT_OK_AND_ASSIGN(auto cel_expr, builder->CreateExpression(&checked_expr));
 
   Activation activation;
   RequestContext request;
@@ -475,7 +509,8 @@ void BM_Comprehension(benchmark::State& state) {
   InterpreterOptions options = GetOptions(arena);
   options.comprehension_max_iterations = 10000000;
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
   ASSERT_OK_AND_ASSIGN(auto cel_expr,
                        builder->CreateExpression(&expr, nullptr));
@@ -509,7 +544,8 @@ void BM_Comprehension_Trace(benchmark::State& state) {
 
   options.comprehension_max_iterations = 10000000;
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
   ASSERT_OK_AND_ASSIGN(auto cel_expr,
                        builder->CreateExpression(&expr, nullptr));
@@ -531,7 +567,8 @@ void BM_HasMap(benchmark::State& state) {
 
   InterpreterOptions options = GetOptions(arena);
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
   ASSERT_OK_AND_ASSIGN(auto cel_expr,
                        builder->CreateExpression(&parsed_expr.expr(), nullptr));
@@ -555,16 +592,34 @@ BENCHMARK(BM_HasMap);
 
 void BM_HasProto(benchmark::State& state) {
   google::protobuf::Arena arena;
-  Activation activation;
-  ASSERT_OK_AND_ASSIGN(ParsedExpr parsed_expr,
-                       parser::Parse("has(request.path) && !has(request.ip)"));
+  ASSERT_OK_AND_ASSIGN(
+      auto compiler_builder,
+      cel::NewCompilerBuilder(google::protobuf::DescriptorPool::generated_pool()));
+  ASSERT_THAT(compiler_builder->AddLibrary(cel::StandardCompilerLibrary()),
+              IsOk());
+  ASSERT_THAT(
+      compiler_builder->GetCheckerBuilder().AddVariable(cel::MakeVariableDecl(
+          "request", cel::MessageType(RequestContext::descriptor()))),
+      IsOk());
+  ASSERT_OK_AND_ASSIGN(auto compiler, compiler_builder->Build());
+
+  ASSERT_OK_AND_ASSIGN(
+      auto validation_result,
+      compiler->Compile("has(request.path) && !has(request.ip)"));
+  ASSERT_TRUE(validation_result.IsValid());
+  ASSERT_OK_AND_ASSIGN(auto ast, validation_result.ReleaseAst());
+
+  cel::expr::CheckedExpr checked_expr;
+  ASSERT_THAT(cel::AstToCheckedExpr(*ast, &checked_expr), IsOk());
+
   InterpreterOptions options = GetOptions(arena);
   auto builder = CreateCelExpressionBuilder(options);
-  auto reg_status = RegisterBuiltinFunctions(builder->GetRegistry(), options);
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
-  ASSERT_OK_AND_ASSIGN(auto cel_expr,
-                       builder->CreateExpression(&parsed_expr.expr(), nullptr));
+  ASSERT_OK_AND_ASSIGN(auto cel_expr, builder->CreateExpression(&checked_expr));
 
+  Activation activation;
   RequestContext request;
   request.set_path(kPath);
   request.set_token(kToken);
@@ -583,17 +638,34 @@ BENCHMARK(BM_HasProto);
 
 void BM_HasProtoMap(benchmark::State& state) {
   google::protobuf::Arena arena;
-  Activation activation;
-  ASSERT_OK_AND_ASSIGN(ParsedExpr parsed_expr,
-                       parser::Parse("has(request.headers.create_time) && "
-                                     "!has(request.headers.update_time)"));
+  ASSERT_OK_AND_ASSIGN(
+      auto compiler_builder,
+      cel::NewCompilerBuilder(google::protobuf::DescriptorPool::generated_pool()));
+  ASSERT_THAT(compiler_builder->AddLibrary(cel::StandardCompilerLibrary()),
+              IsOk());
+  ASSERT_THAT(
+      compiler_builder->GetCheckerBuilder().AddVariable(cel::MakeVariableDecl(
+          "request", cel::MessageType(RequestContext::descriptor()))),
+      IsOk());
+  ASSERT_OK_AND_ASSIGN(auto compiler, compiler_builder->Build());
+
+  ASSERT_OK_AND_ASSIGN(auto validation_result,
+                       compiler->Compile("has(request.headers.create_time) && "
+                                         "!has(request.headers.update_time)"));
+  ASSERT_TRUE(validation_result.IsValid());
+  ASSERT_OK_AND_ASSIGN(auto ast, validation_result.ReleaseAst());
+
+  cel::expr::CheckedExpr checked_expr;
+  ASSERT_THAT(cel::AstToCheckedExpr(*ast, &checked_expr), IsOk());
+
   InterpreterOptions options = GetOptions(arena);
   auto builder = CreateCelExpressionBuilder(options);
-  auto reg_status = RegisterBuiltinFunctions(builder->GetRegistry(), options);
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
-  ASSERT_OK_AND_ASSIGN(auto cel_expr,
-                       builder->CreateExpression(&parsed_expr.expr(), nullptr));
+  ASSERT_OK_AND_ASSIGN(auto cel_expr, builder->CreateExpression(&checked_expr));
 
+  Activation activation;
   RequestContext request;
   request.mutable_headers()->insert({"create_time", "2021-01-01"});
   activation.InsertValue("request",
@@ -611,17 +683,34 @@ BENCHMARK(BM_HasProtoMap);
 
 void BM_ReadProtoMap(benchmark::State& state) {
   google::protobuf::Arena arena;
-  Activation activation;
-  ASSERT_OK_AND_ASSIGN(ParsedExpr parsed_expr, parser::Parse(R"cel(
+  ASSERT_OK_AND_ASSIGN(
+      auto compiler_builder,
+      cel::NewCompilerBuilder(google::protobuf::DescriptorPool::generated_pool()));
+  ASSERT_THAT(compiler_builder->AddLibrary(cel::StandardCompilerLibrary()),
+              IsOk());
+  ASSERT_THAT(
+      compiler_builder->GetCheckerBuilder().AddVariable(cel::MakeVariableDecl(
+          "request", cel::MessageType(RequestContext::descriptor()))),
+      IsOk());
+  ASSERT_OK_AND_ASSIGN(auto compiler, compiler_builder->Build());
+
+  ASSERT_OK_AND_ASSIGN(auto validation_result, compiler->Compile(R"cel(
      request.headers.create_time == "2021-01-01"
    )cel"));
+  ASSERT_TRUE(validation_result.IsValid());
+  ASSERT_OK_AND_ASSIGN(auto ast, validation_result.ReleaseAst());
+
+  cel::expr::CheckedExpr checked_expr;
+  ASSERT_THAT(cel::AstToCheckedExpr(*ast, &checked_expr), IsOk());
+
   InterpreterOptions options = GetOptions(arena);
   auto builder = CreateCelExpressionBuilder(options);
-  auto reg_status = RegisterBuiltinFunctions(builder->GetRegistry(), options);
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
-  ASSERT_OK_AND_ASSIGN(auto cel_expr,
-                       builder->CreateExpression(&parsed_expr.expr(), nullptr));
+  ASSERT_OK_AND_ASSIGN(auto cel_expr, builder->CreateExpression(&checked_expr));
 
+  Activation activation;
   RequestContext request;
   request.mutable_headers()->insert({"create_time", "2021-01-01"});
   activation.InsertValue("request",
@@ -639,17 +728,34 @@ BENCHMARK(BM_ReadProtoMap);
 
 void BM_NestedProtoFieldRead(benchmark::State& state) {
   google::protobuf::Arena arena;
-  Activation activation;
-  ASSERT_OK_AND_ASSIGN(ParsedExpr parsed_expr, parser::Parse(R"cel(
+  ASSERT_OK_AND_ASSIGN(
+      auto compiler_builder,
+      cel::NewCompilerBuilder(google::protobuf::DescriptorPool::generated_pool()));
+  ASSERT_THAT(compiler_builder->AddLibrary(cel::StandardCompilerLibrary()),
+              IsOk());
+  ASSERT_THAT(
+      compiler_builder->GetCheckerBuilder().AddVariable(cel::MakeVariableDecl(
+          "request", cel::MessageType(RequestContext::descriptor()))),
+      IsOk());
+  ASSERT_OK_AND_ASSIGN(auto compiler, compiler_builder->Build());
+
+  ASSERT_OK_AND_ASSIGN(auto validation_result, compiler->Compile(R"cel(
       !request.a.b.c.d.e
    )cel"));
+  ASSERT_TRUE(validation_result.IsValid());
+  ASSERT_OK_AND_ASSIGN(auto ast, validation_result.ReleaseAst());
+
+  cel::expr::CheckedExpr checked_expr;
+  ASSERT_THAT(cel::AstToCheckedExpr(*ast, &checked_expr), IsOk());
+
   InterpreterOptions options = GetOptions(arena);
   auto builder = CreateCelExpressionBuilder(options);
-  auto reg_status = RegisterBuiltinFunctions(builder->GetRegistry(), options);
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
-  ASSERT_OK_AND_ASSIGN(auto cel_expr,
-                       builder->CreateExpression(&parsed_expr.expr(), nullptr));
+  ASSERT_OK_AND_ASSIGN(auto cel_expr, builder->CreateExpression(&checked_expr));
 
+  Activation activation;
   RequestContext request;
   request.mutable_a()->mutable_b()->mutable_c()->mutable_d()->set_e(false);
   activation.InsertValue("request",
@@ -667,17 +773,34 @@ BENCHMARK(BM_NestedProtoFieldRead);
 
 void BM_NestedProtoFieldReadDefaults(benchmark::State& state) {
   google::protobuf::Arena arena;
-  Activation activation;
-  ASSERT_OK_AND_ASSIGN(ParsedExpr parsed_expr, parser::Parse(R"cel(
+  ASSERT_OK_AND_ASSIGN(
+      auto compiler_builder,
+      cel::NewCompilerBuilder(google::protobuf::DescriptorPool::generated_pool()));
+  ASSERT_THAT(compiler_builder->AddLibrary(cel::StandardCompilerLibrary()),
+              IsOk());
+  ASSERT_THAT(
+      compiler_builder->GetCheckerBuilder().AddVariable(cel::MakeVariableDecl(
+          "request", cel::MessageType(RequestContext::descriptor()))),
+      IsOk());
+  ASSERT_OK_AND_ASSIGN(auto compiler, compiler_builder->Build());
+
+  ASSERT_OK_AND_ASSIGN(auto validation_result, compiler->Compile(R"cel(
       !request.a.b.c.d.e
    )cel"));
+  ASSERT_TRUE(validation_result.IsValid());
+  ASSERT_OK_AND_ASSIGN(auto ast, validation_result.ReleaseAst());
+
+  cel::expr::CheckedExpr checked_expr;
+  ASSERT_THAT(cel::AstToCheckedExpr(*ast, &checked_expr), IsOk());
+
   InterpreterOptions options = GetOptions(arena);
   auto builder = CreateCelExpressionBuilder(options);
-  auto reg_status = RegisterBuiltinFunctions(builder->GetRegistry(), options);
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
-  ASSERT_OK_AND_ASSIGN(auto cel_expr,
-                       builder->CreateExpression(&parsed_expr.expr(), nullptr));
+  ASSERT_OK_AND_ASSIGN(auto cel_expr, builder->CreateExpression(&checked_expr));
 
+  Activation activation;
   RequestContext request;
   activation.InsertValue("request",
                          CelProtoWrapper::CreateMessage(&request, &arena));
@@ -694,17 +817,35 @@ BENCHMARK(BM_NestedProtoFieldReadDefaults);
 
 void BM_ProtoStructAccess(benchmark::State& state) {
   google::protobuf::Arena arena;
-  Activation activation;
-  ASSERT_OK_AND_ASSIGN(ParsedExpr parsed_expr, parser::Parse(R"cel(
+  ASSERT_OK_AND_ASSIGN(
+      auto compiler_builder,
+      cel::NewCompilerBuilder(google::protobuf::DescriptorPool::generated_pool()));
+  ASSERT_THAT(compiler_builder->AddLibrary(cel::StandardCompilerLibrary()),
+              IsOk());
+  ASSERT_THAT(
+      compiler_builder->GetCheckerBuilder().AddVariable(cel::MakeVariableDecl(
+          "request",
+          cel::MessageType(AttributeContext::Request::descriptor()))),
+      IsOk());
+  ASSERT_OK_AND_ASSIGN(auto compiler, compiler_builder->Build());
+
+  ASSERT_OK_AND_ASSIGN(auto validation_result, compiler->Compile(R"cel(
       has(request.auth.claims.iss) && request.auth.claims.iss == 'accounts.google.com'
    )cel"));
+  ASSERT_TRUE(validation_result.IsValid());
+  ASSERT_OK_AND_ASSIGN(auto ast, validation_result.ReleaseAst());
+
+  cel::expr::CheckedExpr checked_expr;
+  ASSERT_THAT(cel::AstToCheckedExpr(*ast, &checked_expr), IsOk());
+
   InterpreterOptions options = GetOptions(arena);
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
-  ASSERT_OK_AND_ASSIGN(auto cel_expr,
-                       builder->CreateExpression(&parsed_expr.expr(), nullptr));
+  ASSERT_OK_AND_ASSIGN(auto cel_expr, builder->CreateExpression(&checked_expr));
 
+  Activation activation;
   AttributeContext::Request request;
   auto* auth = request.mutable_auth();
   (*auth->mutable_claims()->mutable_fields())["iss"].set_string_value(
@@ -724,17 +865,35 @@ BENCHMARK(BM_ProtoStructAccess);
 
 void BM_ProtoListAccess(benchmark::State& state) {
   google::protobuf::Arena arena;
-  Activation activation;
-  ASSERT_OK_AND_ASSIGN(ParsedExpr parsed_expr, parser::Parse(R"cel(
+  ASSERT_OK_AND_ASSIGN(
+      auto compiler_builder,
+      cel::NewCompilerBuilder(google::protobuf::DescriptorPool::generated_pool()));
+  ASSERT_THAT(compiler_builder->AddLibrary(cel::StandardCompilerLibrary()),
+              IsOk());
+  ASSERT_THAT(
+      compiler_builder->GetCheckerBuilder().AddVariable(cel::MakeVariableDecl(
+          "request",
+          cel::MessageType(AttributeContext::Request::descriptor()))),
+      IsOk());
+  ASSERT_OK_AND_ASSIGN(auto compiler, compiler_builder->Build());
+
+  ASSERT_OK_AND_ASSIGN(auto validation_result, compiler->Compile(R"cel(
       "//.../accessLevels/MY_LEVEL_4" in request.auth.access_levels
    )cel"));
+  ASSERT_TRUE(validation_result.IsValid());
+  ASSERT_OK_AND_ASSIGN(auto ast, validation_result.ReleaseAst());
+
+  cel::expr::CheckedExpr checked_expr;
+  ASSERT_THAT(cel::AstToCheckedExpr(*ast, &checked_expr), IsOk());
+
   InterpreterOptions options = GetOptions(arena);
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
-  ASSERT_OK_AND_ASSIGN(auto cel_expr,
-                       builder->CreateExpression(&parsed_expr.expr(), nullptr));
+  ASSERT_OK_AND_ASSIGN(auto cel_expr, builder->CreateExpression(&checked_expr));
 
+  Activation activation;
   AttributeContext::Request request;
   auto* auth = request.mutable_auth();
   auth->add_access_levels("//.../accessLevels/MY_LEVEL_0");
@@ -867,7 +1026,8 @@ void BM_NestedComprehension(benchmark::State& state) {
   InterpreterOptions options = GetOptions(arena);
   options.comprehension_max_iterations = 10000000;
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
 
   ASSERT_OK_AND_ASSIGN(auto cel_expr,
                        builder->CreateExpression(&expr, nullptr));
@@ -903,7 +1063,8 @@ void BM_NestedComprehension_Trace(benchmark::State& state) {
   options.enable_recursive_tracing = true;
 
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
   ASSERT_OK_AND_ASSIGN(auto cel_expr,
                        builder->CreateExpression(&expr, nullptr));
 
@@ -936,7 +1097,8 @@ void BM_ListComprehension(benchmark::State& state) {
   options.comprehension_max_iterations = 10000000;
   options.enable_comprehension_list_append = true;
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
   ASSERT_OK_AND_ASSIGN(
       auto cel_expr, builder->CreateExpression(&(parsed_expr.expr()), nullptr));
 
@@ -971,7 +1133,8 @@ void BM_ListComprehension_Trace(benchmark::State& state) {
   options.enable_recursive_tracing = true;
 
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry(), options),
+              IsOk());
   ASSERT_OK_AND_ASSIGN(
       auto cel_expr, builder->CreateExpression(&(parsed_expr.expr()), nullptr));
 
@@ -1006,7 +1169,7 @@ void BM_ListComprehension_Opt(benchmark::State& state) {
   options.comprehension_max_iterations = 10000000;
   options.enable_comprehension_list_append = true;
   auto builder = CreateCelExpressionBuilder(options);
-  ASSERT_OK(RegisterBuiltinFunctions(builder->GetRegistry()));
+  ASSERT_THAT(RegisterBuiltinFunctions(builder->GetRegistry()), IsOk());
   ASSERT_OK_AND_ASSIGN(
       auto cel_expr, builder->CreateExpression(&(parsed_expr.expr()), nullptr));
 

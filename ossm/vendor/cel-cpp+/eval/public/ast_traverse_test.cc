@@ -465,6 +465,51 @@ TEST(AstCrawlerTest, CheckExprHandlers) {
   AstTraverse(&expr, &source_info, &handler);
 }
 
+TEST(AstTraversal, Interrupt) {
+  SourceInfo source_info;
+  MockAstVisitor handler;
+
+  Expr expr;
+  auto* select_expr = expr.mutable_select_expr();
+  auto* operand = select_expr->mutable_operand();
+  auto* ident_expr = operand->mutable_ident_expr();
+
+  testing::InSequence seq;
+
+  auto traversal = AstTraversal::Create(&expr, &source_info);
+
+  EXPECT_CALL(handler, PreVisitExpr(_, _)).Times(2);
+
+  EXPECT_CALL(handler, PostVisitIdent(ident_expr, operand, _)).Times(1);
+  EXPECT_CALL(handler, PostVisitSelect(select_expr, &expr, _)).Times(0);
+
+  EXPECT_TRUE(traversal.Step(&handler));
+  EXPECT_TRUE(traversal.Step(&handler));
+  EXPECT_TRUE(traversal.Step(&handler));
+
+  EXPECT_FALSE(traversal.IsDone());
+}
+
+TEST(AstTraversal, NoInterrupt) {
+  SourceInfo source_info;
+  MockAstVisitor handler;
+
+  Expr expr;
+  auto* select_expr = expr.mutable_select_expr();
+  auto* operand = select_expr->mutable_operand();
+  auto* ident_expr = operand->mutable_ident_expr();
+
+  testing::InSequence seq;
+
+  auto traversal = AstTraversal::Create(&expr, &source_info);
+
+  EXPECT_CALL(handler, PostVisitIdent(ident_expr, operand, _)).Times(1);
+  EXPECT_CALL(handler, PostVisitSelect(select_expr, &expr, _)).Times(1);
+
+  while (traversal.Step(&handler)) continue;
+  EXPECT_TRUE(traversal.IsDone());
+}
+
 }  // namespace
 
 }  // namespace google::api::expr::runtime

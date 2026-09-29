@@ -59,6 +59,7 @@ load(
 def _compile_datamodels(
         *,
         actions,
+        mac_exec_group,
         datamodel_groups,
         label_name,
         output_discriminator,
@@ -98,6 +99,7 @@ def _compile_datamodels(
             actions = actions,
             datamodel_path = datamodel_path,
             input_files = input_files,
+            mac_exec_group = mac_exec_group,
             module_name = module_name,
             output_file = output_file,
             platform_prerequisites = platform_prerequisites,
@@ -112,6 +114,7 @@ def _compile_datamodels(
 def _compile_mappingmodels(
         *,
         actions,
+        mac_exec_group,
         label_name,
         mappingmodel_groups,
         output_discriminator,
@@ -136,6 +139,7 @@ def _compile_mappingmodels(
         resource_actions.compile_mappingmodel(
             actions = actions,
             input_files = input_files,
+            mac_exec_group = mac_exec_group,
             mappingmodel_path = mappingmodel_path,
             output_file = output_file,
             platform_prerequisites = platform_prerequisites,
@@ -151,6 +155,7 @@ def _compile_mappingmodels(
 def _asset_catalogs(
         *,
         actions,
+        mac_exec_group,
         apple_mac_toolchain_info,
         bundle_id,
         files,
@@ -163,6 +168,34 @@ def _asset_catalogs(
         **_kwargs):
     """Processes asset catalog files."""
     processed_origins = {}
+
+    all_asset_files = files.to_list()
+
+    # A list of all known asset catalog types besides Icon Composer icons can be found at this link
+    # within the Apple legacy documentation archive:
+    # https://developer.apple.com/library/archive/documentation/Xcode/Reference/xcode_ref-Asset_Catalog_Format/AssetTypes.html#//apple_ref/doc/uid/TP40015170-CH30-SW1
+    #
+    # Check for empty asset catalogs; these will waste time and resources executing actool.
+    contains_assets_to_compile = False
+    for file in all_asset_files:
+        # Skip directories and Contents.json files outside of .colorset folders.
+        #
+        # Contents.json files *inside* of .colorset folders are transformed into compiled asset
+        # catalogs with color sets, and do not require any other files to generate these color sets.
+        if (file.is_directory or (
+            file.basename == "Contents.json" and not file.dirname.endswith(".colorset")
+        )):
+            continue
+        contains_assets_to_compile = True
+        break
+    if not contains_assets_to_compile:
+        # There is no other way to issue a warning, so print is the only way to message.
+        # buildifier: disable=print
+        print("""
+WARNING: No assets to compile for {rule_label} even though an asset catalog (.xcassets directory) \
+was declared. Skipping asset catalog compilation.
+""".format(rule_label = str(rule_label)))
+        return struct(files = [], infoplists = [])
 
     # Only merge the resulting plist for the top level bundle. For resource
     # bundles, skip generating the plist.
@@ -188,7 +221,7 @@ def _asset_catalogs(
     # Separate alternate icons from regular assets
     alternate_icons = []
     asset_files = []
-    for f in files.to_list():
+    for f in all_asset_files:
         if ".alticon/" in f.path:
             if f.extension != "png":
                 fail("Alternate icons must be .png files packaged in a .alticon folder. Not: {}".format(f.path))
@@ -205,6 +238,7 @@ def _asset_catalogs(
             resource_actions.copy_png(
                 actions = actions,
                 input_file = f,
+                mac_exec_group = mac_exec_group,
                 output_file = png_file,
                 platform_prerequisites = platform_prerequisites,
             )
@@ -217,7 +251,9 @@ def _asset_catalogs(
         alternate_icons = alternate_icons,
         alticonstool = apple_mac_toolchain_info.alticonstool,
         asset_files = asset_files,
+        build_settings = platform_prerequisites.build_settings,
         bundle_id = bundle_id,
+        mac_exec_group = mac_exec_group,
         output_dir = assets_dir,
         output_plist = assets_plist,
         platform_prerequisites = platform_prerequisites,
@@ -247,6 +283,7 @@ def _asset_catalogs(
 def _datamodels(
         *,
         actions,
+        mac_exec_group,
         apple_mac_toolchain_info,
         files,
         output_discriminator,
@@ -300,6 +337,7 @@ def _datamodels(
         actions = actions,
         datamodel_groups = datamodel_groups,
         label_name = rule_label.name,
+        mac_exec_group = mac_exec_group,
         output_discriminator = output_discriminator,
         parent_dir = parent_dir,
         platform_prerequisites = platform_prerequisites,
@@ -315,6 +353,7 @@ def _datamodels(
         label_name = rule_label.name,
         output_discriminator = output_discriminator,
         parent_dir = parent_dir,
+        mac_exec_group = mac_exec_group,
         mappingmodel_groups = mappingmodel_groups,
         platform_prerequisites = platform_prerequisites,
         xctoolrunner = apple_mac_toolchain_info.xctoolrunner,
@@ -331,6 +370,7 @@ def _datamodels(
 def _infoplists(
         *,
         actions,
+        mac_exec_group,
         apple_mac_toolchain_info,
         bundle_id,
         files,
@@ -351,6 +391,7 @@ def _infoplists(
         apple_mac_toolchain_info: `struct` of tools from the shared Apple toolchain.
         bundle_id: The bundle ID to use when templating plist files.
         files: The infoplist files to process.
+        mac_exec_group: The execution group for Mac tools.
         output_discriminator: A string to differentiate between different target intermediate files
             or `None`.
         parent_dir: The path under which the merged Info.plist should be placed for resource bundles.
@@ -377,6 +418,7 @@ def _infoplists(
             bundle_id = bundle_id,
             bundle_name_with_extension = paths.basename(parent_dir),
             input_files = input_files,
+            mac_exec_group = mac_exec_group,
             output_discriminator = output_discriminator,
             output_plist = out_plist,
             platform_prerequisites = platform_prerequisites,
@@ -399,6 +441,7 @@ def _infoplists(
 def _metals(
         *,
         actions,
+        mac_exec_group,
         rule_label,
         parent_dir,
         platform_prerequisites,
@@ -411,6 +454,7 @@ def _metals(
 
     Args:
         actions: The actions provider from `ctx.actions`.
+        mac_exec_group: The execution group for Mac tools.
         rule_label: The label of the target being analyzed.
         parent_dir: The path under which the library should be placed.
         platform_prerequisites: Struct containing information on the platform being targeted.
@@ -434,6 +478,7 @@ def _metals(
     resource_actions.compile_metals(
         actions = actions,
         input_files = input_files,
+        mac_exec_group = mac_exec_group,
         output_file = metallib_file,
         platform_prerequisites = platform_prerequisites,
     )
@@ -450,6 +495,7 @@ def _metals(
 def _mlmodels(
         *,
         actions,
+        mac_exec_group,
         apple_mac_toolchain_info,
         files,
         output_discriminator,
@@ -471,6 +517,8 @@ def _mlmodels(
             output_discriminator = output_discriminator,
             dir_name = paths.join(parent_dir or "", paths.replace_extension(basename, ".mlmodelc")),
         )
+        processed_origins[output_bundle.short_path] = [file.short_path]
+
         output_plist = intermediates.file(
             actions = actions,
             target_name = rule_label.name,
@@ -482,6 +530,7 @@ def _mlmodels(
         resource_actions.compile_mlmodel(
             actions = actions,
             input_file = file,
+            mac_exec_group = mac_exec_group,
             output_bundle = output_bundle,
             output_plist = output_plist,
             platform_prerequisites = platform_prerequisites,
@@ -506,6 +555,7 @@ def _mlmodels(
 def _plists_and_strings(
         *,
         actions,
+        mac_exec_group,
         files,
         force_binary = False,
         output_discriminator,
@@ -524,6 +574,7 @@ def _plists_and_strings(
         files: The plist or string files to process.
         force_binary: If true, files will be converted to binary independently of the compilation
             mode.
+        mac_exec_group: The execution group for Mac tools.
         output_discriminator: A string to differentiate between different target intermediate files
             or `None`.
         parent_dir: The path under which the files should be placed.
@@ -555,6 +606,7 @@ def _plists_and_strings(
         resource_actions.compile_plist(
             actions = actions,
             input_file = file,
+            mac_exec_group = mac_exec_group,
             output_file = plist_file,
             platform_prerequisites = platform_prerequisites,
         )
@@ -570,6 +622,7 @@ def _plists_and_strings(
 def _pngs(
         *,
         actions,
+        mac_exec_group,
         files,
         output_discriminator,
         parent_dir,
@@ -583,6 +636,7 @@ def _pngs(
     Args:
         actions: The actions provider from `ctx.actions`.
         files: The PNG files to process.
+        mac_exec_group: The execution group for Mac tools.
         output_discriminator: A string to differentiate between different target intermediate files
             or `None`.
         parent_dir: The path under which the images should be placed.
@@ -607,6 +661,7 @@ def _pngs(
         resource_actions.copy_png(
             actions = actions,
             input_file = file,
+            mac_exec_group = mac_exec_group,
             output_file = png_file,
             platform_prerequisites = platform_prerequisites,
         )
@@ -622,6 +677,7 @@ def _pngs(
 def _storyboards(
         *,
         actions,
+        mac_exec_group,
         apple_mac_toolchain_info,
         files,
         output_discriminator,
@@ -656,6 +712,7 @@ def _storyboards(
         resource_actions.compile_storyboard(
             actions = actions,
             input_file = storyboard,
+            mac_exec_group = mac_exec_group,
             output_dir = storyboardc_dir,
             platform_prerequisites = platform_prerequisites,
             swift_module = swift_module,
@@ -673,6 +730,7 @@ def _storyboards(
     )
     resource_actions.link_storyboards(
         actions = actions,
+        mac_exec_group = mac_exec_group,
         output_dir = linked_storyboard_dir,
         platform_prerequisites = platform_prerequisites,
         storyboardc_dirs = compiled_storyboardcs,
@@ -690,6 +748,7 @@ def _storyboards(
 def _texture_atlases(
         *,
         actions,
+        mac_exec_group,
         files,
         output_discriminator,
         parent_dir,
@@ -722,6 +781,7 @@ def _texture_atlases(
             actions = actions,
             input_files = input_files,
             input_path = atlas_path,
+            mac_exec_group = mac_exec_group,
             output_dir = atlasc_dir,
             platform_prerequisites = platform_prerequisites,
         )
@@ -737,6 +797,7 @@ def _texture_atlases(
 def _xibs(
         *,
         actions,
+        mac_exec_group,
         apple_mac_toolchain_info,
         files,
         output_discriminator,
@@ -762,6 +823,7 @@ def _xibs(
         resource_actions.compile_xib(
             actions = actions,
             input_file = file,
+            mac_exec_group = mac_exec_group,
             output_dir = out_dir,
             platform_prerequisites = platform_prerequisites,
             swift_module = swift_module,
@@ -771,6 +833,45 @@ def _xibs(
 
     return struct(
         files = [(processor.location.resource, parent_dir, depset(direct = nib_files))],
+        processed_origins = processed_origins,
+    )
+
+def _xcstrings(
+        *,
+        actions,
+        mac_exec_group,
+        apple_mac_toolchain_info,
+        files,
+        output_discriminator,
+        parent_dir,
+        platform_prerequisites,
+        rule_label,
+        **_kwargs):
+    """Process xcstrings files."""
+    lproj_files = []
+    processed_origins = {}
+    for file in files.to_list():
+        basename = paths.replace_extension(file.basename, "")
+        out_path = paths.join("xcstrings", parent_dir or "", basename)
+        out_dir = intermediates.directory(
+            actions = actions,
+            target_name = rule_label.name,
+            output_discriminator = output_discriminator,
+            dir_name = out_path,
+        )
+        processed_origins[out_dir.short_path] = [file.short_path]
+        resource_actions.compile_xcstrings(
+            actions = actions,
+            input_file = file,
+            mac_exec_group = mac_exec_group,
+            output_dir = out_dir,
+            platform_prerequisites = platform_prerequisites,
+            xctoolrunner = apple_mac_toolchain_info.xctoolrunner,
+        )
+        lproj_files.append(out_dir)
+
+    return struct(
+        files = [(processor.location.resource, parent_dir, depset(lproj_files))],
         processed_origins = processed_origins,
     )
 
@@ -834,5 +935,6 @@ PROVIDER_TO_FIELD_ACTION = {
     "strings": (_plists_and_strings, False),
     "texture_atlases": (_texture_atlases, False),
     "unprocessed": (_noop, False),
+    "xcstrings": (_xcstrings, False),
     "xibs": (_xibs, True),
 }

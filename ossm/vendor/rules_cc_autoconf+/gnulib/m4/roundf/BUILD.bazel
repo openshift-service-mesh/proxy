@@ -1,0 +1,22 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/roundf.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "roundf",
+    checks = [
+        checks.AC_CHECK_DECL(
+            "roundf",
+            includes = ["#include <math.h>"],
+        ),
+        # gl_MATHFUNC sets ROUNDF_LIBM; golden expects ""
+        checks.AC_SUBST("ROUNDF_LIBM", ""),
+        # Autoconf detects REPLACE_ROUNDF=0 on Linux (roundf works correctly)
+        checks.AC_SUBST("REPLACE_ROUNDF", 0),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/extensions",
+    ],
+)

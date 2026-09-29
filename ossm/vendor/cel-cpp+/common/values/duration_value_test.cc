@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "common/values/duration_value.h"
+
 #include <sstream>
 #include <utility>
 
+#include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/time/time.h"
 #include "common/native_type.h"
@@ -64,6 +67,16 @@ TEST_F(DurationValueTest, ConvertToJson) {
                                             message_factory(), message),
               IsOk());
   EXPECT_THAT(*message, EqualsValueTextProto(R"pb(string_value: "0s")pb"));
+}
+
+TEST_F(DurationValueTest, ConvertToJsonOutOfBounds) {
+  auto* message = NewArenaValueMessage();
+  EXPECT_THAT(UnsafeDurationValue(absl::InfiniteDuration())
+                  .ConvertToJson(descriptor_pool(), message_factory(), message),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+  EXPECT_THAT(UnsafeDurationValue(-absl::InfiniteDuration())
+                  .ConvertToJson(descriptor_pool(), message_factory(), message),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
 }
 
 TEST_F(DurationValueTest, NativeTypeId) {

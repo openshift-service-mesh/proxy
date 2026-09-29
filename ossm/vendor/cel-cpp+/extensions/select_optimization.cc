@@ -53,6 +53,7 @@
 #include "eval/eval/evaluator_core.h"
 #include "eval/eval/expression_step_base.h"
 #include "internal/casts.h"
+#include "internal/number.h"
 #include "internal/status_macros.h"
 #include "runtime/internal/errors.h"
 #include "runtime/internal/runtime_friend_access.h"
@@ -91,7 +92,7 @@ struct SelectInstruction {
 // Represents a single qualifier in a traversal path.
 // TODO(uncreated-issue/51): support variable indexes.
 using QualifierInstruction =
-    absl::variant<SelectInstruction, std::string, int64_t, uint64_t, bool>;
+    std::variant<SelectInstruction, std::string, int64_t, uint64_t, bool>;
 
 struct SelectPath {
   Expr* operand;
@@ -152,16 +153,16 @@ Expr MakeSelectPathExpr(
 // Returns a single select operation based on the inferred type of the operand
 // and the field name. If the operand type doesn't define the field, returns
 // nullopt.
-absl::optional<SelectInstruction> GetSelectInstruction(
+std::optional<SelectInstruction> GetSelectInstruction(
     const StructType& runtime_type, PlannerContext& planner_context,
     absl::string_view field_name) {
   auto field_or = planner_context.type_reflector()
                       .FindStructTypeFieldByName(runtime_type, field_name)
-                      .value_or(absl::nullopt);
+                      .value_or(std::nullopt);
   if (field_or.has_value()) {
     return SelectInstruction{field_or->number(), std::string(field_or->name())};
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::StatusOr<SelectQualifier> SelectQualifierFromList(const ListExpr& list) {
@@ -188,34 +189,45 @@ absl::StatusOr<SelectQualifier> SelectQualifierFromList(const ListExpr& list) {
                         field_name.const_expr().string_value()};
 }
 
+// Returns a qualifier instruction derived from a unoptimized ast.
 absl::StatusOr<QualifierInstruction> SelectInstructionFromConstant(
     const Constant& constant) {
-  if (constant.has_int64_value()) {
-    return QualifierInstruction(constant.int64_value());
-  } else if (constant.has_uint64_value()) {
-    return QualifierInstruction(constant.uint64_value());
+  if (constant.has_int_value()) {
+    return QualifierInstruction(constant.int_value());
+  } else if (constant.has_uint_value()) {
+    return QualifierInstruction(constant.uint_value());
   } else if (constant.has_bool_value()) {
     return QualifierInstruction(constant.bool_value());
   } else if (constant.has_string_value()) {
     return QualifierInstruction(constant.string_value());
+  } else if (constant.has_double_value()) {
+    cel::internal::Number number(constant.double_value());
+    if (number.LosslessConvertibleToInt()) {
+      return QualifierInstruction(number.AsInt());
+    } else if (number.LosslessConvertibleToUint()) {
+      return QualifierInstruction(number.AsUint());
+    }
   }
 
-  return absl::InvalidArgumentError("Invalid cel.attribute constant");
+  return absl::InvalidArgumentError("invalid index constant for cel.attribute");
 }
 
 absl::StatusOr<SelectQualifier> SelectQualifierFromConstant(
     const Constant& constant) {
-  if (constant.has_int64_value()) {
-    return AttributeQualifier::OfInt(constant.int64_value());
-  } else if (constant.has_uint64_value()) {
-    return AttributeQualifier::OfUint(constant.uint64_value());
+  if (constant.has_int_value()) {
+    return AttributeQualifier::OfInt(constant.int_value());
+  } else if (constant.has_uint_value()) {
+    return AttributeQualifier::OfUint(constant.uint_value());
   } else if (constant.has_bool_value()) {
     return AttributeQualifier::OfBool(constant.bool_value());
   } else if (constant.has_string_value()) {
     return AttributeQualifier::OfString(constant.string_value());
   }
+  // TODO(uncreated-issue/51): double keys could possibly be valid selectors, but
+  // the other stacks don't implement the optimization yet and we normalize the
+  // key to a uint or int if we do the late AST rewrite during planning.
 
-  return absl::InvalidArgumentError("Invalid cel.attribute constant");
+  return absl::InvalidArgumentError("invalid cel.attribute constant");
 }
 
 absl::StatusOr<size_t> ListIndexFromQualifier(const AttributeQualifier& qual) {
@@ -248,7 +260,7 @@ absl::StatusOr<Value> MapKeyFromQualifier(const AttributeQualifier& qual,
     case Kind::kBool:
       return cel::BoolValue(*qual.GetBoolKey());
     case Kind::kString:
-      return cel::StringValue(arena, *qual.GetStringKey());
+      return StringValue::From(*qual.GetStringKey(), arena);
     default:
       return runtime_internal::CreateNoMatchingOverloadError(
           cel::builtin::kIndex);
@@ -395,13 +407,13 @@ class RewriterImpl : public AstRewriterBase {
     // support message traversal.
     const TypeSpec checker_type = ast_.GetTypeOrDyn(operand.id());
 
-    absl::optional<Type> rt_type =
+    std::optional<Type> rt_type =
         (checker_type.has_message_type())
             ? GetRuntimeType(checker_type.message_type().type())
-            : absl::nullopt;
+            : std::nullopt;
     if (rt_type.has_value() && (*rt_type).Is<StructType>()) {
       const StructType& runtime_type = rt_type->GetStruct();
-      absl::optional<SelectInstruction> field_or =
+      std::optional<SelectInstruction> field_or =
           GetSelectInstruction(runtime_type, planner_context_, field_name);
       if (field_or.has_value()) {
         candidates_[&expr] = std::move(field_or).value();
@@ -424,7 +436,8 @@ class RewriterImpl : public AstRewriterBase {
       auto qualifier_or =
           SelectInstructionFromConstant(qualifier_expr.const_expr());
       if (!qualifier_or.ok()) {
-        SetProgressStatus(qualifier_or.status());
+        // TODO(uncreated-issue/54): should warn, but by default warnings fail overall
+        // program planning.
         return;
       }
       candidates_[&expr] = std::move(qualifier_or).value();
@@ -525,9 +538,9 @@ class RewriterImpl : public AstRewriterBase {
     return candidates_.find(operand) != candidates_.end();
   }
 
-  absl::optional<Type> GetRuntimeType(absl::string_view type_name) {
+  std::optional<Type> GetRuntimeType(absl::string_view type_name) {
     return planner_context_.type_reflector().FindType(type_name).value_or(
-        absl::nullopt);
+        std::nullopt);
   }
 
   void SetProgressStatus(const absl::Status& status) {
@@ -569,14 +582,14 @@ class OptimizedSelectImpl {
 
   AttributeTrail GetAttributeTrail(const AttributeTrail& operand_trail) const;
 
-  absl::optional<Attribute> attribute() const { return attribute_; }
+  std::optional<Attribute> attribute() const { return attribute_; }
 
   const std::vector<AttributeQualifier>& qualifiers() const {
     return qualifiers_;
   }
 
  private:
-  absl::optional<Attribute> attribute_;
+  std::optional<Attribute> attribute_;
   std::vector<SelectQualifier> select_path_;
   std::vector<AttributeQualifier> qualifiers_;
   bool presence_test_;
@@ -584,10 +597,10 @@ class OptimizedSelectImpl {
 };
 
 // Check for unknowns or missing attributes.
-absl::StatusOr<absl::optional<Value>> CheckForMarkedAttributes(
+absl::StatusOr<std::optional<Value>> CheckForMarkedAttributes(
     ExecutionFrameBase& frame, const AttributeTrail& attribute_trail) {
   if (attribute_trail.empty()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   if (frame.unknown_processing_enabled() &&
@@ -611,7 +624,7 @@ absl::StatusOr<absl::optional<Value>> CheckForMarkedAttributes(
         attribute_trail.attribute());
   }
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::StatusOr<Value> OptimizedSelectImpl::ApplySelect(
@@ -702,7 +715,7 @@ absl::Status StackMachineImpl::Evaluate(ExecutionFrame* frame) const {
     // select arguments.
     // TODO(uncreated-issue/51): add support variable qualifiers
     attribute_trail = GetAttributeTrail(frame);
-    CEL_ASSIGN_OR_RETURN(absl::optional<Value> value,
+    CEL_ASSIGN_OR_RETURN(std::optional<Value> value,
                          CheckForMarkedAttributes(*frame, attribute_trail));
     if (value.has_value()) {
       frame->value_stack().Pop(kStackInputs);

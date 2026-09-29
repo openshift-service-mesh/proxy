@@ -24,15 +24,15 @@ MoqtObjectStatus IntegerToObjectStatus(uint64_t integer) {
   return static_cast<MoqtObjectStatus>(integer);
 }
 
-MoqtError SetupParametersAllowedByMessage(const SetupParameters& parameters,
-                                          quic::Perspective sender_perspective,
-                                          bool webtrans) {
+MoqtError SetupOptionsAllowedByMessage(const SetupOptions& options,
+                                       quic::Perspective sender_perspective,
+                                       bool webtrans) {
   bool should_have_path_and_authority =
       !webtrans && sender_perspective == quic::Perspective::IS_CLIENT;
-  if (should_have_path_and_authority != parameters.path.has_value()) {
+  if (should_have_path_and_authority != options.path.has_value()) {
     return MoqtError::kInvalidPath;
   }
-  if (should_have_path_and_authority != parameters.authority.has_value()) {
+  if (should_have_path_and_authority != options.authority.has_value()) {
     return MoqtError::kInvalidAuthority;
   }
   return MoqtError::kNoError;
@@ -99,18 +99,12 @@ std::string MoqtMessageTypeToString(const MoqtMessageType message_type) {
       return "SUBSCRIBE_NAMESPACE";
     case MoqtMessageType::kSubscribeTracks:
       return "SUBSCRIBE_TRACKS";
-    case MoqtMessageType::kMaxRequestId:
-      return "MAX_REQUEST_ID";
     case MoqtMessageType::kPublish:
       return "PUBLISH";
     case MoqtMessageType::kFetch:
       return "FETCH";
-    case MoqtMessageType::kFetchCancel:
-      return "FETCH_CANCEL";
     case MoqtMessageType::kFetchOk:
       return "FETCH_OK";
-    case MoqtMessageType::kRequestsBlocked:
-      return "REQUESTS_BLOCKED";
     case MoqtMessageType::kObjectAck:
       return "OBJECT_ACK";
   }
@@ -128,7 +122,7 @@ std::string MoqtDataStreamTypeToString(MoqtDataStreamType type) {
 
 std::string MoqtDatagramTypeToString(MoqtDatagramType type) {
   return absl::StrCat("DATAGRAM", type.has_status() ? "_STATUS" : "",
-                      type.has_extension() ? "_EXTENSION" : "");
+                      type.has_properties() ? "_PROPERTIES" : "");
 }
 
 std::string MoqtFetchSerializationToString(MoqtFetchSerialization type) {

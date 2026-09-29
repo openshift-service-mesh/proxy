@@ -1,0 +1,101 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#ifndef THIRD_PARTY_CEL_CPP_COMMON_SIGNATURE_H_
+#define THIRD_PARTY_CEL_CPP_COMMON_SIGNATURE_H_
+
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "absl/status/statusor.h"
+#include "common/ast.h"
+#include "common/type.h"
+#include "google/protobuf/arena.h"
+#include "google/protobuf/descriptor.h"
+
+namespace cel {
+
+// Generates a signature for a `cel::Type`, which is a string representation of
+// the type.
+//
+// Examples:
+//
+//  - `int`
+//  - `list<int>`
+//  - `list<my_type<~A>>`
+absl::StatusOr<std::string> MakeTypeSignature(const Type& type);
+
+// Generates a signature for a `cel::TypeSpec`, which is a string
+// representation of the type.
+//
+// Examples:
+//
+//  - `int`
+//  - `list<int>`
+//  - `list<my_type<~A>>`
+absl::StatusOr<std::string> MakeTypeSpecSignature(const TypeSpec& type_spec);
+
+// Generates a signature for a function overload based on the function name
+// and the types of the arguments.  If `is_member` is true, the first argument
+// type is used as the receiver and is prepended to the function name, followed
+// by a dollar sign.
+//
+// Examples:
+//
+//  - `foo()`
+//  - `foo(int)`
+//  - `bar.foo(int)`
+//  - `foo(int,string)`
+//  - `foo(list<int>,list<string>)`
+//  - `bar.foo(list<int>,list<my_type<~A>>)`
+//
+// If the function name contains a period, it is escaped with a backslash, e.g.
+// `foo.bar` becomes `foo\.bar`. This allows to disambiguate between a member
+// function and qualified target type name.
+//
+absl::StatusOr<std::string> MakeOverloadSignature(
+    std::string_view function_name, const std::vector<Type>& args,
+    bool is_member);
+
+// Generates a signature for a function overload based on the function name
+// and the type specs of the arguments. See above for more details.
+absl::StatusOr<std::string> MakeOverloadSignature(
+    std::string_view function_name, const std::vector<TypeSpec>& args,
+    bool is_member);
+
+// Parses a string type signature directly into a `cel::TypeSpec`.
+absl::StatusOr<TypeSpec> ParseTypeSpec(std::string_view signature);
+
+// Parses a string type signature directly into a `cel::Type`.
+absl::StatusOr<Type> ParseType(std::string_view signature, google::protobuf::Arena* arena,
+                               const google::protobuf::DescriptorPool& pool);
+
+// A parsed function overload signature with the function name, flag for member
+// function, and the function signature type.
+struct ParsedFunctionOverload {
+  std::string function_name;
+  bool is_member = false;
+  // The function signature type, configured as a `FunctionTypeSpec`.
+  TypeSpec signature_type;
+};
+
+// Parses a string function overload signature directly into a
+// `cel::TypeSpec` configured as a `FunctionTypeSpec`.
+absl::StatusOr<ParsedFunctionOverload> ParseFunctionSignature(
+    std::string_view signature);
+
+}  // namespace cel
+
+#endif  // THIRD_PARTY_CEL_CPP_COMMON_SIGNATURE_H_

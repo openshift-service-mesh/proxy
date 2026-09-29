@@ -142,28 +142,6 @@ absl::StatusOr<bool> HasFieldImpl(const google::protobuf::Message* message,
   return CelFieldIsPresent(message, field_desc, reflection);
 }
 
-absl::StatusOr<CelValue> CreateCelValueFromField(
-    const google::protobuf::Message* message, const google::protobuf::FieldDescriptor* field_desc,
-    ProtoWrapperTypeOptions unboxing_option, google::protobuf::Arena* arena) {
-  if (field_desc->is_map()) {
-    auto* map = google::protobuf::Arena::Create<internal::FieldBackedMapImpl>(
-        arena, message, field_desc, &MessageCelValueFactory, arena);
-
-    return CelValue::CreateMap(map);
-  }
-  if (field_desc->is_repeated()) {
-    auto* list = google::protobuf::Arena::Create<internal::FieldBackedListImpl>(
-        arena, message, field_desc, &MessageCelValueFactory, arena);
-    return CelValue::CreateList(list);
-  }
-
-  CEL_ASSIGN_OR_RETURN(
-      CelValue result,
-      internal::CreateValueFromSingleField(message, field_desc, unboxing_option,
-                                           &MessageCelValueFactory, arena));
-  return result;
-}
-
 // Shared implementation for GetField.
 // Handles list or map specific behavior before calling reflection helpers.
 absl::StatusOr<CelValue> GetFieldImpl(const google::protobuf::Message* message,
@@ -441,6 +419,28 @@ CelValue MessageCelValueFactory(const google::protobuf::Message* message) {
 
 }  // namespace
 
+absl::StatusOr<CelValue> CreateCelValueFromField(
+    const google::protobuf::Message* message, const google::protobuf::FieldDescriptor* field_desc,
+    ProtoWrapperTypeOptions unboxing_option, google::protobuf::Arena* arena) {
+  if (field_desc->is_map()) {
+    auto* map = google::protobuf::Arena::Create<internal::FieldBackedMapImpl>(
+        arena, message, field_desc, &MessageCelValueFactory, arena);
+
+    return CelValue::CreateMap(map);
+  }
+  if (field_desc->is_repeated()) {
+    auto* list = google::protobuf::Arena::Create<internal::FieldBackedListImpl>(
+        arena, message, field_desc, &MessageCelValueFactory, arena);
+    return CelValue::CreateList(list);
+  }
+
+  CEL_ASSIGN_OR_RETURN(
+      CelValue result,
+      internal::CreateValueFromSingleField(message, field_desc, unboxing_option,
+                                           &MessageCelValueFactory, arena));
+  return result;
+}
+
 std::string ProtoMessageTypeAdapter::DebugString(
     const MessageWrapper& wrapped_message) const {
   if (!wrapped_message.HasFullProto() ||
@@ -472,14 +472,14 @@ const LegacyTypeAccessApis* ProtoMessageTypeAdapter::GetAccessApis(
 absl::optional<LegacyTypeInfoApis::FieldDescription>
 ProtoMessageTypeAdapter::FindFieldByName(absl::string_view field_name) const {
   if (descriptor_ == nullptr) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   const google::protobuf::FieldDescriptor* field_descriptor =
       descriptor_->FindFieldByName(field_name);
 
   if (field_descriptor == nullptr) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   return LegacyTypeInfoApis::FieldDescription{field_descriptor->number(),
@@ -582,6 +582,19 @@ absl::Status ProtoMessageTypeAdapter::SetField(
         ValidateSetFieldOp(value_field_descriptor != nullptr, field->name(),
                            "failed to find value field descriptor"));
 
+    bool prune_when_null = false;
+    if (value_field_descriptor->cpp_type() ==
+        google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+      auto well_known_type =
+          value_field_descriptor->message_type()->well_known_type();
+      if (well_known_type != google::protobuf::Descriptor::WELLKNOWNTYPE_ANY &&
+          well_known_type != google::protobuf::Descriptor::WELLKNOWNTYPE_VALUE &&
+          well_known_type != google::protobuf::Descriptor::WELLKNOWNTYPE_LISTVALUE &&
+          well_known_type != google::protobuf::Descriptor::WELLKNOWNTYPE_STRUCT) {
+        prune_when_null = true;
+      }
+    }
+
     CEL_ASSIGN_OR_RETURN(const CelList* key_list, cel_map->ListKeys(arena));
     for (int i = 0; i < key_list->size(); i++) {
       CelValue key = (*key_list).Get(arena, i);
@@ -589,6 +602,9 @@ absl::Status ProtoMessageTypeAdapter::SetField(
       auto value = (*cel_map).Get(arena, key);
       CEL_RETURN_IF_ERROR(ValidateSetFieldOp(value.has_value(), field->name(),
                                              "error serializing CelMap"));
+      if (prune_when_null && value->IsNull()) {
+        continue;
+      }
       Message* entry_msg = message->GetReflection()->AddMessage(message, field);
       CEL_RETURN_IF_ERROR(internal::SetValueToSingleField(
           key, key_field_descriptor, entry_msg, arena));

@@ -1,7 +1,6 @@
 # See CONTRIBUTING.md for instructions.
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
-
 # Commitizen runs in commit-msg stage
 # but we don't want to run the other hooks on commit messages
 default_stages: [commit]
@@ -15,7 +14,7 @@ repos:
       - id: check-hooks-apply
       - id: check-useless-excludes
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: check-executables-have-shebangs
       - id: check-shebang-scripts-are-executable
@@ -24,20 +23,16 @@ repos:
       - id: destroyed-symlinks
       - id: detect-private-key
       - id: end-of-file-fixer
-        exclude: |
-          (?x)^(
-            docs/
-          )
       - id: trailing-whitespace
   # Check formatting and lint for starlark code
   - repo: https://github.com/keith/pre-commit-buildifier
-    rev: 7.3.1.1
+    rev: 8.2.1
     hooks:
       - id: buildifier
       - id: buildifier-lint
   # Enforce that commit messages allow for later changelog generation
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v4.4.1
+    rev: v4.9.1
     hooks:
       # Requires that commitizen is already installed
       - id: commitizen
@@ -47,10 +42,10 @@ repos:
     hooks:
       - id: prettier
   - repo: https://github.com/google/yamlfmt
-    rev: v0.14.0
+    rev: v0.17.2
     hooks:
       - id: yamlfmt
   - repo: https://github.com/crate-ci/typos
-    rev: v1.28.4
+    rev: v1.37.0
     hooks:
       - id: typos

@@ -71,14 +71,15 @@ namespace cel {
 
 namespace {
 
-using google::api::expr::runtime::CelList;
-using google::api::expr::runtime::CelMap;
-using google::api::expr::runtime::CelValue;
-using google::api::expr::runtime::FieldBackedListImpl;
-using google::api::expr::runtime::FieldBackedMapImpl;
-using google::api::expr::runtime::GetGenericProtoTypeInfoInstance;
-using google::api::expr::runtime::LegacyTypeInfoApis;
-using google::api::expr::runtime::MessageWrapper;
+using ::google::api::expr::runtime::CelList;
+using ::google::api::expr::runtime::CelMap;
+using ::google::api::expr::runtime::CelValue;
+using ::google::api::expr::runtime::CreateCelValueFromField;
+using ::google::api::expr::runtime::FieldBackedListImpl;
+using ::google::api::expr::runtime::FieldBackedMapImpl;
+using ::google::api::expr::runtime::GetGenericProtoTypeInfoInstance;
+using ::google::api::expr::runtime::LegacyTypeInfoApis;
+using ::google::api::expr::runtime::MessageWrapper;
 using ::google::api::expr::runtime::internal::MaybeWrapValueToMessage;
 
 absl::Status InvalidMapKeyTypeError(ValueKind kind) {
@@ -700,7 +701,8 @@ absl::Status LegacyMapValue::Get(
     case ValueKind::kString:
       break;
     default:
-      return InvalidMapKeyTypeError(key.kind());
+      *result = ErrorValue(InvalidMapKeyTypeError(key.kind()));
+      return absl::OkStatus();
   }
   CEL_ASSIGN_OR_RETURN(auto cel_key, LegacyValue(arena, key));
   auto cel_value = impl_->Get(arena, cel_key);
@@ -732,7 +734,7 @@ absl::StatusOr<bool> LegacyMapValue::Find(
     case ValueKind::kString:
       break;
     default:
-      return InvalidMapKeyTypeError(key.kind());
+      *result = ErrorValue(InvalidMapKeyTypeError(key.kind()));
   }
   CEL_ASSIGN_OR_RETURN(auto cel_key, LegacyValue(arena, key));
   auto cel_value = impl_->Get(arena, cel_key);
@@ -764,11 +766,17 @@ absl::Status LegacyMapValue::Has(
     case ValueKind::kString:
       break;
     default:
-      return InvalidMapKeyTypeError(key.kind());
+      *result = ErrorValue(InvalidMapKeyTypeError(key.kind()));
+      return absl::OkStatus();
   }
   CEL_ASSIGN_OR_RETURN(auto cel_key, LegacyValue(arena, key));
-  CEL_ASSIGN_OR_RETURN(auto has, impl_->Has(cel_key));
-  *result = BoolValue{has};
+  absl::StatusOr<bool> has = impl_->Has(cel_key);
+  if (!has.ok()) {
+    *result = ErrorValue(std::move(has).status());
+    return absl::OkStatus();
+  }
+
+  *result = BoolValue(*has);
   return absl::OkStatus();
 }
 
@@ -1279,6 +1287,36 @@ google::api::expr::runtime::CelValue ModernValueToLegacyValueOrDie(
 TypeValue CreateTypeValueFromView(google::protobuf::Arena* arena,
                                   absl::string_view input) {
   return TypeValue(common_internal::LegacyRuntimeType(input));
+}
+
+const google::protobuf::Message* absl_nullable GetLegacyMessage(const Value& value) {
+  if (!common_internal::IsLegacyStructValue(value)) {
+    return nullptr;
+  }
+
+  auto legacy = common_internal::GetLegacyStructValue(value);
+  const auto* legacy_type_info = legacy.legacy_type_info();
+  if (legacy_type_info == nullptr) {
+    return nullptr;
+  }
+  if (legacy_type_info != &GetGenericProtoTypeInfoInstance()) {
+    return nullptr;
+  }
+  if (IsWellKnownMessageType(legacy.message_ptr()->GetDescriptor())) {
+    return nullptr;
+  }
+  return legacy.message_ptr();
+}
+
+absl::Status WrapLegacyMessageField(
+    const google::protobuf::Message* absl_nonnull message,
+    const google::protobuf::FieldDescriptor* absl_nonnull field_descriptor,
+    ProtoWrapperTypeOptions unboxing_option, google::protobuf::Arena* arena,
+    Value* absl_nonnull out) {
+  CEL_ASSIGN_OR_RETURN(CelValue result,
+                       CreateCelValueFromField(message, field_descriptor,
+                                               unboxing_option, arena));
+  return ModernValue(arena, result, *out);
 }
 
 }  // namespace interop_internal

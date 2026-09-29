@@ -165,8 +165,8 @@ const char* CelOperator::IN = "@in";
 const absl::string_view CelOperator::OPT_INDEX = "_[?_]";
 const absl::string_view CelOperator::OPT_SELECT = "_?._";
 
-int LookupPrecedence(const std::string& op) {
-  auto precs = Precedences();
+int LookupPrecedence(absl::string_view op) {
+  const auto& precs = Precedences();
   auto p = precs.find(op);
   if (p != precs.end()) {
     return p->second;
@@ -174,8 +174,8 @@ int LookupPrecedence(const std::string& op) {
   return 0;
 }
 
-absl::optional<std::string> LookupUnaryOperator(const std::string& op) {
-  auto unary_ops = UnaryOperators();
+absl::optional<std::string> LookupUnaryOperator(absl::string_view op) {
+  const auto& unary_ops = UnaryOperators();
   auto o = unary_ops.find(op);
   if (o == unary_ops.end()) {
     return absl::optional<std::string>();
@@ -183,8 +183,8 @@ absl::optional<std::string> LookupUnaryOperator(const std::string& op) {
   return o->second;
 }
 
-absl::optional<std::string> LookupBinaryOperator(const std::string& op) {
-  auto bin_ops = BinaryOperators();
+absl::optional<std::string> LookupBinaryOperator(absl::string_view op) {
+  const auto& bin_ops = BinaryOperators();
   auto o = bin_ops.find(op);
   if (o == bin_ops.end()) {
     return absl::optional<std::string>();
@@ -192,8 +192,8 @@ absl::optional<std::string> LookupBinaryOperator(const std::string& op) {
   return o->second;
 }
 
-absl::optional<std::string> LookupOperator(const std::string& op) {
-  auto ops = Operators();
+absl::optional<std::string> LookupOperator(absl::string_view op) {
+  const auto& ops = Operators();
   auto o = ops.find(op);
   if (o == ops.end()) {
     return absl::optional<std::string>();
@@ -201,8 +201,8 @@ absl::optional<std::string> LookupOperator(const std::string& op) {
   return o->second;
 }
 
-absl::optional<std::string> ReverseLookupOperator(const std::string& op) {
-  auto rev_ops = ReverseOperators();
+absl::optional<std::string> ReverseLookupOperator(absl::string_view op) {
+  const auto& rev_ops = ReverseOperators();
   auto o = rev_ops.find(op);
   if (o == rev_ops.end()) {
     return absl::optional<std::string>();
@@ -210,7 +210,7 @@ absl::optional<std::string> ReverseLookupOperator(const std::string& op) {
   return o->second;
 }
 
-bool IsOperatorSamePrecedence(const std::string& op,
+bool IsOperatorSamePrecedence(absl::string_view op,
                               const cel::expr::Expr& expr) {
   if (!expr.has_call_expr()) {
     return false;
@@ -218,7 +218,7 @@ bool IsOperatorSamePrecedence(const std::string& op,
   return LookupPrecedence(op) == LookupPrecedence(expr.call_expr().function());
 }
 
-bool IsOperatorLowerPrecedence(const std::string& op,
+bool IsOperatorLowerPrecedence(absl::string_view op,
                                const cel::expr::Expr& expr) {
   if (!expr.has_call_expr()) {
     return false;
@@ -226,7 +226,7 @@ bool IsOperatorLowerPrecedence(const std::string& op,
   return LookupPrecedence(op) < LookupPrecedence(expr.call_expr().function());
 }
 
-bool IsOperatorLeftRecursive(const std::string& op) {
+bool IsOperatorLeftRecursive(absl::string_view op) {
   return op != CelOperator::LOGICAL_AND && op != CelOperator::LOGICAL_OR;
 }
 

@@ -99,10 +99,8 @@ class ParsedMessageValue final
     return *value_;
   }
 
-  const google::protobuf::Message* absl_nonnull operator->() const
-      ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return value_;
-  }
+  const google::protobuf::Message* absl_nonnull operator->() const { return value_; }
+  const google::protobuf::Message* absl_nonnull message() const { return value_; }
 
   bool IsZeroValue() const;
 
@@ -175,6 +173,15 @@ class ParsedMessageValue final
     swap(lhs.arena_, rhs.arena_);
   }
 
+  absl::Status GetField(
+      const google::protobuf::FieldDescriptor* absl_nonnull field,
+      ProtoWrapperTypeOptions unboxing_options,
+      const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool,
+      google::protobuf::MessageFactory* absl_nonnull message_factory,
+      google::protobuf::Arena* absl_nonnull arena, Value* absl_nonnull result) const;
+
+  bool HasField(const google::protobuf::FieldDescriptor* absl_nonnull field) const;
+
  private:
   friend std::pointer_traits<ParsedMessageValue>;
   friend class StructValue;
@@ -202,15 +209,6 @@ class ParsedMessageValue final
     }
     return absl::OkStatus();
   }
-
-  absl::Status GetField(
-      const google::protobuf::FieldDescriptor* absl_nonnull field,
-      ProtoWrapperTypeOptions unboxing_options,
-      const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool,
-      google::protobuf::MessageFactory* absl_nonnull message_factory,
-      google::protobuf::Arena* absl_nonnull arena, Value* absl_nonnull result) const;
-
-  bool HasField(const google::protobuf::FieldDescriptor* absl_nonnull field) const;
 
   const google::protobuf::Message* absl_nonnull value_;
   // Arena that is attributed as owning the value. May be null to indicate that

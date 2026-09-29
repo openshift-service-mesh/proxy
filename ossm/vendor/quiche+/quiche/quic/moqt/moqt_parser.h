@@ -171,14 +171,8 @@ class MoqtControlMessageParser {
       absl::string_view data) const;
   absl::StatusOr<MoqtSubscribeTracks> ProcessSubscribeTracks(
       absl::string_view data) const;
-  absl::StatusOr<MoqtMaxRequestId> ProcessMaxRequestId(
-      absl::string_view data) const;
   absl::StatusOr<MoqtFetch> ProcessFetch(absl::string_view data) const;
-  absl::StatusOr<MoqtFetchCancel> ProcessFetchCancel(
-      absl::string_view data) const;
   absl::StatusOr<MoqtFetchOk> ProcessFetchOk(absl::string_view data) const;
-  absl::StatusOr<MoqtRequestsBlocked> ProcessRequestsBlocked(
-      absl::string_view data) const;
   absl::StatusOr<MoqtPublish> ProcessPublish(absl::string_view data) const;
   absl::StatusOr<MoqtObjectAck> ProcessObjectAck(absl::string_view data) const;
 
@@ -226,16 +220,10 @@ class MoqtControlMessageParser {
         return parse(&MoqtControlMessageParser::ProcessSubscribeNamespace);
       case MoqtMessageType::kSubscribeTracks:
         return parse(&MoqtControlMessageParser::ProcessSubscribeTracks);
-      case MoqtMessageType::kMaxRequestId:
-        return parse(&MoqtControlMessageParser::ProcessMaxRequestId);
       case MoqtMessageType::kFetch:
         return parse(&MoqtControlMessageParser::ProcessFetch);
-      case MoqtMessageType::kFetchCancel:
-        return parse(&MoqtControlMessageParser::ProcessFetchCancel);
       case MoqtMessageType::kFetchOk:
         return parse(&MoqtControlMessageParser::ProcessFetchOk);
-      case MoqtMessageType::kRequestsBlocked:
-        return parse(&MoqtControlMessageParser::ProcessRequestsBlocked);
       case MoqtMessageType::kPublish:
         return parse(&MoqtControlMessageParser::ProcessPublish);
       case MoqtMessageType::kObjectAck:
@@ -256,8 +244,8 @@ class MoqtControlMessageParser {
   // large. Sets a ParseError if the name is malformed.
   absl::Status ReadFullTrackName(quic::QuicDataReader& reader,
                                  FullTrackName& full_track_name) const;
-  absl::Status FillAndValidateSetupParameters(const KeyValuePairList& in,
-                                              SetupParameters& out) const;
+  absl::Status FillAndValidateSetupOptions(const KeyValuePairList& in,
+                                           SetupOptions& out) const;
   // |reader| points to the beginning of a KeyValuePairList. Returns false if
   // there is any sort of error. (The function calls ParseError(), so the
   // caller has no need to do so.)
@@ -329,8 +317,8 @@ class QUICHE_EXPORT MoqtDataParser {
     kSubgroupId,
     kPublisherPriority,
     kObjectId,
-    kExtensionSize,
-    kExtensionBody,
+    kPropertiesSize,
+    kPropertiesBody,
     kObjectPayloadLength,
     kStatus,
     kData,

@@ -16,21 +16,18 @@
 Defines a rule that generates a Swift library from protocol buffer sources.
 """
 
-load(
-    "@bazel_skylib//lib:dicts.bzl",
-    "dicts",
-)
-load(
-    "@rules_proto//proto:defs.bzl",
-    "ProtoInfo",
-)
+load("@bazel_skylib//lib:dicts.bzl", "dicts")
+load("@protobuf//bazel/common:proto_info.bzl", "ProtoInfo")
 load("//swift:module_name.bzl", "derive_swift_module_name")
 load("//swift:providers.bzl", "SwiftProtoCompilerInfo")
 load("//swift:swift_clang_module_aspect.bzl", "swift_clang_module_aspect")
-load("//swift:swift_common.bzl", "swift_common")
 
 # buildifier: disable=bzl-visibility
-load("//swift/internal:attrs.bzl", "swift_deps_attr")
+load(
+    "//swift/internal:attrs.bzl",
+    "swift_deps_attr",
+    "swift_library_rule_attrs",
+)
 
 # buildifier: disable=bzl-visibility
 load("//swift/internal:toolchain_utils.bzl", "use_swift_toolchain")
@@ -100,13 +97,12 @@ def _swift_proto_library_impl(ctx):
         direct_output_group_info,
         direct_swift_info,
         direct_swift_proto_cc_info.cc_info,
-        direct_swift_proto_cc_info.objc_info,
         direct_swift_proto_info,
     ]
 
 swift_proto_library = rule(
     attrs = dicts.add(
-        swift_common.library_rule_attrs(
+        swift_library_rule_attrs(
             additional_deps_aspects = [
                 swift_clang_module_aspect,
             ],
@@ -152,7 +148,7 @@ on which fields are accepted and how they are used.
 Generates a Swift static library from one or more targets producing `ProtoInfo`.
 
 ```python
-load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
 load("//proto:swift_proto_library.bzl", "swift_proto_library")
 
 proto_library(
@@ -170,7 +166,7 @@ If your protos depend on protos from other targets, add dependencies between the
 swift_proto_library targets which mirror the dependencies between the proto targets.
 
 ```python
-load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
 load("//proto:swift_proto_library.bzl", "swift_proto_library")
 
 proto_library(

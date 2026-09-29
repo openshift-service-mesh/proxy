@@ -176,9 +176,6 @@ cc_library(
 
 cc_library(
     name = "const_value_step",
-    srcs = [
-        "const_value_step.cc",
-    ],
     hdrs = [
         "const_value_step.h",
     ],
@@ -186,11 +183,7 @@ cc_library(
         ":compiler_constant_step",
         ":direct_expression_step",
         ":evaluator_core",
-        "//common:allocator",
-        "//common:constant",
         "//common:value",
-        "//internal:status_macros",
-        "//runtime/internal:convert_constant",
         "@com_google_absl//absl/status:statusor",
     ],
 )
@@ -298,6 +291,7 @@ cc_library(
         "//runtime:function_overload_reference",
         "//runtime:function_provider",
         "//runtime:function_registry",
+        "//runtime/internal:errors",
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -320,13 +314,11 @@ cc_library(
         ":direct_expression_step",
         ":evaluator_core",
         ":expression_step_base",
-        "//common:expr",
+        "//common:type",
         "//common:value",
         "//common:value_kind",
-        "//eval/internal:errors",
         "//internal:status_macros",
         "//runtime:runtime_options",
-        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/log:absl_log",
         "@com_google_absl//absl/status",
@@ -424,7 +416,6 @@ cc_library(
         "//common:value",
         "//eval/internal:errors",
         "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:optional",
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
     ],
@@ -611,36 +602,6 @@ cc_test(
 )
 
 cc_test(
-    name = "const_value_step_test",
-    size = "small",
-    srcs = [
-        "const_value_step_test.cc",
-    ],
-    deps = [
-        ":cel_expression_flat_impl",
-        ":const_value_step",
-        ":evaluator_core",
-        "//base:data",
-        "//common:constant",
-        "//common:expr",
-        "//eval/internal:errors",
-        "//eval/public:activation",
-        "//eval/public:cel_value",
-        "//eval/public/testing:matchers",
-        "//internal:status_macros",
-        "//internal:testing",
-        "//runtime:runtime_options",
-        "//runtime/internal:runtime_env",
-        "//runtime/internal:runtime_env_testing",
-        "@com_google_absl//absl/base:nullability",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/time",
-        "@com_google_protobuf//:protobuf",
-    ],
-)
-
-cc_test(
     name = "container_access_step_test",
     size = "small",
     srcs = [
@@ -714,11 +675,11 @@ cc_test(
         ":ident_step",
         "//base:data",
         "//common:casting",
-        "//common:expr",
         "//common:memory",
         "//common:value",
         "//eval/public:activation",
         "//eval/public:cel_attribute",
+        "//eval/public:cel_value",
         "//internal:testing",
         "//internal:testing_descriptor_pool",
         "//internal:testing_message_factory",
@@ -828,7 +789,9 @@ cc_test(
     deps = [
         ":attribute_trail",
         ":cel_expression_flat_impl",
+        ":compiler_constant_step",
         ":const_value_step",
+        ":create_map_step",
         ":evaluator_core",
         ":ident_step",
         ":select_step",
@@ -837,11 +800,14 @@ cc_test(
         "//common:casting",
         "//common:expr",
         "//common:legacy_value",
+        "//common:type",
         "//common:value",
         "//common:value_testing",
         "//eval/public:activation",
         "//eval/public:cel_attribute",
         "//eval/public:cel_value",
+        "//eval/public:unknown_attribute_set",
+        "//eval/public:unknown_set",
         "//eval/public/containers:container_backed_map_impl",
         "//eval/public/structs:cel_proto_wrapper",
         "//eval/public/structs:legacy_type_adapter",
@@ -868,6 +834,7 @@ cc_test(
         "@com_google_absl//absl/strings",
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
         "@com_google_cel_spec//proto/cel/expr/conformance/proto3:test_all_types_cc_proto",
+        "@com_google_protobuf//:protobuf",
         "@com_google_protobuf//:wrappers_cc_proto",
     ],
 )
@@ -1135,6 +1102,7 @@ cc_library(
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
     ],
 )
 

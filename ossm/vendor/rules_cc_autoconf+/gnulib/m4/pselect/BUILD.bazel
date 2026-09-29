@@ -1,0 +1,24 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/pselect.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "pselect",
+    checks = [
+        # gl_FUNC_PSELECT checks for pselect function
+        # On macOS, pselect is available
+        checks.AC_CHECK_FUNC(
+            "pselect",
+            define = "HAVE_PSELECT",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/sys_select_h",
+        "//gnulib/m4/sys_socket_h:gl_SYS_SOCKET_H",
+        "//autoconf/macros/AC_CANONICAL_HOST",  # AC_REQUIRE([AC_CANONICAL_HOST])
+        # For test compatibility - need basic header defines
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)

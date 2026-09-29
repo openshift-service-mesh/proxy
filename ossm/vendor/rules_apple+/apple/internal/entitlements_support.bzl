@@ -15,7 +15,7 @@
 """Actions that manipulate entitlements and provisioning profiles."""
 
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
+    "@apple_support//lib:apple_support.bzl",
     "apple_support",
 )
 load(
@@ -33,6 +33,10 @@ load(
 load(
     "//apple/internal:resource_actions.bzl",
     "resource_actions",
+)
+load(
+    "//apple/internal:shared_environment.bzl",
+    "shared_environment",
 )
 load(
     "//apple/internal/utils:defines.bzl",
@@ -100,6 +104,11 @@ def _include_debug_entitlements(*, platform_prerequisites):
     )
     if add_debugger_entitlement != None:
         return add_debugger_entitlement
+
+    build_settings = platform_prerequisites.build_settings
+    if build_settings and build_settings.add_debugger_entitlement:
+        return True
+
     if not platform_prerequisites.objc_fragment.uses_device_debug_entitlements:
         return False
     return True
@@ -118,6 +127,7 @@ def _include_app_clip_entitlements(*, product_type):
 def _extract_signing_info(
         *,
         actions,
+        mac_exec_group,
         entitlements,
         platform_prerequisites,
         provisioning_profile,
@@ -128,6 +138,7 @@ def _extract_signing_info(
     Args:
       actions: The actions provider from `ctx.actions`.
       entitlements: The entitlements file to sign with. Can be `None` if one was not provided.
+      mac_exec_group: The execution group for Mac tools.
       platform_prerequisites: Struct containing information on the platform being targeted.
       provisioning_profile: File for the provisioning profile.
       provisioning_profile_tool: A files_to_run for a tool used to extract info from a provisioning
@@ -176,6 +187,8 @@ def _extract_signing_info(
             actions = actions,
             apple_fragment = platform_prerequisites.apple_fragment,
             arguments = [control_file.path],
+            env = shared_environment.default_env,
+            exec_group = mac_exec_group,
             executable = provisioning_profile_tool,
             # Since the tools spawns openssl and/or security tool, it doesn't
             # support being sandboxed.
@@ -200,7 +213,9 @@ def _process_entitlements(
         product_type,
         provisioning_profile,
         rule_label,
-        validation_mode):
+        validation_mode,
+        *,
+        mac_exec_group):
     """Processes the entitlements for a binary or bundle.
 
     Entitlements are generated based on a plist-format entitlements file passed
@@ -226,6 +241,7 @@ def _process_entitlements(
         bundle_id: The bundle identifier.
         entitlements_file: The `File` containing the unprocessed entitlements
             (or `None` if none were provided).
+        mac_exec_group: The execution group for Mac tools.
         platform_prerequisites: The platform prerequisites.
         product_type: The product type being built.
         provisioning_profile: The `File` representing the provisioning profile,
@@ -248,6 +264,7 @@ def _process_entitlements(
     signing_info = _extract_signing_info(
         actions = actions,
         entitlements = entitlements_file,
+        mac_exec_group = mac_exec_group,
         platform_prerequisites = platform_prerequisites,
         provisioning_profile = provisioning_profile,
         provisioning_profile_tool = apple_mac_toolchain_info.provisioning_profile_tool,
@@ -307,13 +324,14 @@ def _process_entitlements(
         actions = actions,
         control_file = control_file,
         inputs = inputs,
+        mac_exec_group = mac_exec_group,
         mnemonic = "ProcessEntitlementsFiles",
         outputs = [final_entitlements],
         platform_prerequisites = platform_prerequisites,
         plisttool = apple_mac_toolchain_info.plisttool,
     )
 
-    if platform_prerequisites.platform.is_device:
+    if platform_prerequisites.platform.is_device and product_type != apple_product_type.kernel_extension:
         return struct(
             bundle = final_entitlements,
             codesigning = final_entitlements,
@@ -346,6 +364,7 @@ def _process_entitlements(
             actions = actions,
             control_file = simulator_control_file,
             inputs = inputs,
+            mac_exec_group = mac_exec_group,
             mnemonic = "ProcessSimulatorEntitlementsFile",
             outputs = [simulator_entitlements],
             platform_prerequisites = platform_prerequisites,
@@ -361,6 +380,7 @@ def _process_entitlements(
 def _generate_der_entitlements(
         *,
         actions,
+        mac_exec_group,
         apple_fragment,
         entitlements,
         label_name,
@@ -377,6 +397,7 @@ def _generate_der_entitlements(
       apple_fragment: An Apple fragment (ctx.fragments.apple).
       entitlements: The entitlements file to sign with.
       label_name: The name of the target being built.
+      mac_exec_group: The execution group for Mac tools.
       xcode_version_config: The `apple_common.XcodeVersionConfig` provider from the current context.
 
     Returns:
@@ -399,6 +420,8 @@ def _generate_der_entitlements(
             der_entitlements.path,
             "--raw",
         ],
+        env = shared_environment.default_env,
+        exec_group = mac_exec_group,
         executable = "/usr/bin/derq",
         inputs = [entitlements],
         mnemonic = "ProcessDEREntitlements",

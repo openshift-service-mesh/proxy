@@ -26,6 +26,7 @@
 #include "eval/public/cel_value.h"
 #include "eval/public/structs/legacy_type_adapter.h"
 #include "eval/public/structs/legacy_type_info_apis.h"
+#include "google/protobuf/arena.h"
 #include "google/protobuf/descriptor.h"
 
 namespace google::api::expr::runtime {
@@ -52,7 +53,7 @@ class ProtoMessageTypeAdapter : public LegacyTypeInfoApis,
       const MessageWrapper& wrapped_message) const override;
 
   const google::protobuf::Descriptor* absl_nullable GetDescriptor(
-      const MessageWrapper& wrapped_message) const override {
+      const MessageWrapper& wrapped_message [[maybe_unused]]) const override {
     return descriptor_;
   }
 
@@ -118,6 +119,13 @@ class ProtoMessageTypeAdapter : public LegacyTypeInfoApis,
   google::protobuf::MessageFactory* message_factory_;
   const google::protobuf::Descriptor* descriptor_;
 };
+
+// Creates a CelValue from the given field on the proto message. This is the
+// shared implementation for ProtoMessageTypeAdapter and
+// DucktypedMessageAdapter.
+absl::StatusOr<CelValue> CreateCelValueFromField(
+    const google::protobuf::Message* message, const google::protobuf::FieldDescriptor* field_desc,
+    ProtoWrapperTypeOptions unboxing_option, google::protobuf::Arena* arena);
 
 // Returns a TypeInfo provider representing an arbitrary message.
 // This allows for the legacy duck-typed behavior of messages on field access

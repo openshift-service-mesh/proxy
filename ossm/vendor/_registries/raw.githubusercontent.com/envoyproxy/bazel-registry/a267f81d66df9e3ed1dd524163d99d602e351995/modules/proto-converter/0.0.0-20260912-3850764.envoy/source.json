@@ -1,0 +1,10 @@
+{
+    "url": "https://github.com/grpc-ecosystem/proto-converter/archive/385076472517e4e006cfb7a2c5401b918c233d7d.zip",
+    "integrity": "sha256-jD/cehvorrD7X7pGcuVhgjD25ZJ3AE6P7PRIxxErAm8=",
+    "strip_prefix": "proto-converter-385076472517e4e006cfb7a2c5401b918c233d7d",
+    "patch_strip": 1,
+    "patches": {
+        "proto-converter.patch": "sha256-z0nB02XELrS0yL1GjKw/ML06kEWyh0qdIxzCOAa7OPg=",
+        "module_dot_bazel.patch": "sha256-6LU7ZUBYGyEf8KO73YiB0S+u+9JW0rbAqxWrmo34jkg="
+    }
+}

@@ -87,7 +87,10 @@ def bazel_base_binary_impl(ctx, is_test_rule_class):
                  "rule or add a 'test_class' attribute.")
         jvm_flags.extend([
             "-ea",
-            "-Dbazel.test_suite=" + helper.shell_escape(test_class),
+            "-D{prop_name}={prop_value}".format(
+                prop_name = semantics.TEST_SUITE_PROPERTY_NAME,
+                prop_value = helper.shell_escape(test_class),
+            ),
         ])
 
     java_attrs = providers["InternalDeployJarInfo"].java_attrs
@@ -278,6 +281,7 @@ def _format_classpath_entry(runfiles_enabled, workspace_prefix, file):
     return "$(rlocation " + paths.normalize(workspace_prefix + file.short_path) + ")"
 
 def _create_windows_exe_launcher(ctx, java_executable, classpath, main_class, jvm_flags_for_launcher, runfiles_enabled, coverage_enabled, executable, coverage_main_class):
+    java_runtime_toolchain = semantics.find_java_runtime_toolchain(ctx)
     launch_info = ctx.actions.args().use_param_file("%s", use_always = True).set_param_file_format("multiline")
     launch_info.add("binary_type=Java")
     launch_info.add(ctx.workspace_name, format = "workspace_name=%s")
@@ -288,7 +292,8 @@ def _create_windows_exe_launcher(ctx, java_executable, classpath, main_class, jv
         launch_info.add(coverage_main_class, format = "jacoco_main_class=%s")
     launch_info.add_joined(classpath, map_each = _short_path, join_with = ";", format_joined = "classpath=%s", omit_if_empty = False)
     launch_info.add_joined(jvm_flags_for_launcher, join_with = "\t", format_joined = "jvm_flags=%s", omit_if_empty = False)
-    launch_info.add(semantics.find_java_runtime_toolchain(ctx).java_home_runfiles_path, format = "jar_bin_path=%s/bin/jar.exe")
+    launch_info.add(java_runtime_toolchain.java_home_runfiles_path, format = "jar_bin_path=%s/bin/jar.exe")
+    launch_info.add(java_runtime_toolchain.version, format = "java_version=%s")
 
     # TODO(b/295221112): Change to use the "launcher" attribute (only windows use a fixed _launcher attribute)
     launcher_artifact = ctx.executable._launcher

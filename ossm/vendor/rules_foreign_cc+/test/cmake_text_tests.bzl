@@ -1,5 +1,6 @@
 """ Unit tests for CMake script creation """
 
+load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 
 # buildifier: disable=bzl-visibility
@@ -87,17 +88,18 @@ def _fill_crossfile_from_toolchain_test(ctx):
         "unknown": (["shared1", "shared2"], ["shared1", "shared2"]),
     }
 
-    for target_os, inputs in cases.items():
+    for inputs in cases.values():
         flags = CxxFlagsInfo(
             cc = ["-cc-flag", "-gcc_toolchain", "cc-toolchain"],
             cxx = ["--quoted=\"abc def\"", "--sysroot=/abc/sysroot", "--gcc_toolchain", "cxx-toolchain"],
             cxx_linker_shared = inputs[0],
+            cxx_linker_dynamic_module = inputs[1],
             cxx_linker_static = ["static"],
             cxx_linker_executable = ["executable"],
             assemble = ["assemble"],
         )
 
-        res = export_for_test.fill_crossfile_from_toolchain("ws", tools, flags, target_os)
+        res = export_for_test.fill_crossfile_from_toolchain("ws", tools, flags)
 
         expected = {
             "CMAKE_AR": "/cxx_linker_static",
@@ -112,6 +114,7 @@ def _fill_crossfile_from_toolchain_test(ctx):
             "CMAKE_C_FLAGS_INIT": "-cc-flag -gcc_toolchain cc-toolchain",
             "CMAKE_EXE_LINKER_FLAGS_INIT": "executable",
             "CMAKE_MODULE_LINKER_FLAGS_INIT": " ".join(inputs[1]),
+            "CMAKE_OSX_SYSROOT": "/abc/sysroot",
             "CMAKE_SHARED_LINKER_FLAGS_INIT": " ".join(inputs[0]),
             "CMAKE_SYSROOT": "/abc/sysroot",
         }
@@ -240,6 +243,7 @@ def _merge_flag_values_no_toolchain_file_test(ctx):
         cc = [],
         cxx = ['foo="bar"'],
         cxx_linker_shared = [],
+        cxx_linker_dynamic_module = [],
         cxx_linker_static = [],
         cxx_linker_executable = [],
         assemble = [],
@@ -253,10 +257,10 @@ def _merge_flag_values_no_toolchain_file_test(ctx):
     script = create_cmake_script(
         "ws",
         ctx.label,
-        "unknown",
-        "unknown",
-        "unknown",
-        "unknown",
+        "linux",
+        "x86_64",
+        "linux",
+        "x86_64",
         "Unix Makefiles",
         "cmake",
         tools,
@@ -296,6 +300,7 @@ def _create_min_cmake_script_no_toolchain_file_test(ctx):
         cc = ["-U_FORTIFY_SOURCE", "-fstack-protector", "-Wall"],
         cxx = ["-U_FORTIFY_SOURCE", "-fstack-protector", "-Wall"],
         cxx_linker_shared = ["-shared", "-fuse-ld=gold"],
+        cxx_linker_dynamic_module = ["-shared", "-fuse-ld=gold"],
         cxx_linker_static = ["static"],
         cxx_linker_executable = ["-fuse-ld=gold", "-Wl", "-no-as-needed"],
         assemble = ["-U_FORTIFY_SOURCE", "-fstack-protector", "-Wall"],
@@ -309,10 +314,10 @@ def _create_min_cmake_script_no_toolchain_file_test(ctx):
     script = create_cmake_script(
         "ws",
         ctx.label,
-        "unknown",
-        "unknown",
-        "unknown",
-        "unknown",
+        "linux",
+        "x86_64",
+        "linux",
+        "x86_64",
         "Ninja",
         "cmake",
         tools,
@@ -353,6 +358,7 @@ def _create_min_cmake_script_wipe_toolchain_test(ctx):
         cc = ["-U_FORTIFY_SOURCE", "-fstack-protector", "-Wall"],
         cxx = ["-U_FORTIFY_SOURCE", "-fstack-protector", "-Wall"],
         cxx_linker_shared = ["-shared", "-fuse-ld=gold"],
+        cxx_linker_dynamic_module = ["-shared", "-fuse-ld=gold"],
         cxx_linker_static = ["static"],
         cxx_linker_executable = ["-fuse-ld=gold", "-Wl", "-no-as-needed"],
         assemble = ["-U_FORTIFY_SOURCE", "-fstack-protector", "-Wall"],
@@ -372,10 +378,10 @@ def _create_min_cmake_script_wipe_toolchain_test(ctx):
     script = create_cmake_script(
         "ws",
         ctx.label,
-        "unknown",
-        "unknown",
-        "unknown",
-        "unknown",
+        "linux",
+        "x86_64",
+        "linux",
+        "x86_64",
         "Ninja",
         "cmake",
         tools,
@@ -416,6 +422,7 @@ def _create_min_cmake_script_toolchain_file_test(ctx):
         cc = ["-U_FORTIFY_SOURCE", "-fstack-protector", "-Wall"],
         cxx = ["-U_FORTIFY_SOURCE", "-fstack-protector", "-Wall"],
         cxx_linker_shared = ["-shared", "-fuse-ld=gold"],
+        cxx_linker_dynamic_module = ["-shared", "-fuse-ld=gold"],
         cxx_linker_static = ["static"],
         cxx_linker_executable = ["-fuse-ld=gold", "-Wl", "-no-as-needed"],
         assemble = ["-U_FORTIFY_SOURCE", "-fstack-protector", "-Wall"],
@@ -428,10 +435,10 @@ def _create_min_cmake_script_toolchain_file_test(ctx):
     script = create_cmake_script(
         "ws",
         ctx.label,
-        "unknown",
-        "unknown",
-        "unknown",
-        "unknown",
+        "linux",
+        "x86_64",
+        "linux",
+        "x86_64",
         "Ninja",
         "cmake",
         tools,
@@ -493,6 +500,7 @@ def _create_cmake_script_no_toolchain_file_test(ctx):
             "cxx-toolchain",
         ],
         cxx_linker_shared = ["shared1", "shared2"],
+        cxx_linker_dynamic_module = ["shared1", "shared2"],
         cxx_linker_static = ["static"],
         cxx_linker_executable = ["executable"],
         assemble = ["assemble"],
@@ -514,10 +522,10 @@ def _create_cmake_script_no_toolchain_file_test(ctx):
     script = create_cmake_script(
         "ws",
         ctx.label,
-        "unknown",
-        "unknown",
-        "unknown",
-        "unknown",
+        "linux",
+        "x86_64",
+        "linux",
+        "x86_64",
         "Ninja",
         "cmake",
         tools,
@@ -564,6 +572,7 @@ def _create_cmake_script_android_test(ctx):
             "cxx-toolchain",
         ],
         cxx_linker_shared = ["shared1", "shared2"],
+        cxx_linker_dynamic_module = ["shared1", "shared2"],
         cxx_linker_static = ["static"],
         cxx_linker_executable = ["executable"],
         assemble = ["assemble"],
@@ -587,8 +596,8 @@ def _create_cmake_script_android_test(ctx):
         ctx.label,
         "android",
         "x86_64",
-        "unknown",
-        "unknown",
+        "linux",
+        "x86_64",
         "Ninja",
         "cmake",
         tools,
@@ -635,6 +644,7 @@ def _create_cmake_script_linux_test(ctx):
             "cxx-toolchain",
         ],
         cxx_linker_shared = ["shared1", "shared2"],
+        cxx_linker_dynamic_module = ["shared1", "shared2"],
         cxx_linker_static = ["static"],
         cxx_linker_executable = ["executable"],
         assemble = ["assemble"],
@@ -658,8 +668,8 @@ def _create_cmake_script_linux_test(ctx):
         ctx.label,
         "linux",
         "aarch64",
-        "unknown",
-        "unknown",
+        "linux",
+        "x86_64",
         "Ninja",
         "cmake",
         tools,
@@ -688,6 +698,154 @@ cmake -DCMAKE_AR="/cxx_linker_static" -DCMAKE_CXX_LINK_EXECUTABLE="became" -DCMA
 
     return unittest.end(env)
 
+def _cmake_target_params_test(ctx):
+    env = unittest.begin(ctx)
+
+    # format: (target_os, target_arch): expected CMAKE_SYSTEM_PROCESSOR
+    cases = {
+        ("android", "armv7"): "armv7-a",
+        ("android", "x86_32"): "i686",
+        ("linux", "aarch64"): "aarch64",
+        ("linux", "armv7"): "armv7l",
+        ("linux", "x86_32"): "i686",
+        ("linux", "x86_64"): "x86_64",
+    }
+
+    for (target_os, target_arch), expected_processor in cases.items():
+        params = export_for_test.cmake_target_params(ctx.label, target_os, target_arch)
+        asserts.equals(env, expected_processor, params["CMAKE_SYSTEM_PROCESSOR"])
+
+    return unittest.end(env)
+
+def _create_cmake_script_windows_no_toolchain_file_test(ctx):
+    env = unittest.begin(ctx)
+
+    tools = CxxToolsInfo(
+        cc = "C:/toolchain/cl.exe",
+        cxx = "C:/toolchain/cl.exe",
+        cxx_linker_static = "C:/toolchain/lib.exe",
+        cxx_linker_executable = "C:/toolchain/cl.exe",
+    )
+    flags = CxxFlagsInfo(
+        cc = ["/Z7"],
+        cxx = ["/Z7"],
+        cxx_linker_shared = [],
+        cxx_linker_dynamic_module = [],
+        cxx_linker_static = [],
+        cxx_linker_executable = [],
+        assemble = [],
+    )
+
+    script = create_cmake_script(
+        "ws",
+        ctx.label,
+        "windows",
+        "x86_64",
+        "windows",
+        "x86_64",
+        "Ninja",
+        "cmake",
+        tools,
+        flags,
+        "test_rule",
+        "external/test_rule",
+        True,
+        {},
+        {},
+        [],
+        cmake_commands = [],
+    )
+    expected = r"""export CC="C:/toolchain/cl.exe"
+export CXX="C:/toolchain/cl.exe"
+export CFLAGS="/Z7"
+export CXXFLAGS="/Z7"
+##define_absolute_paths## $$EXT_BUILD_DEPS$$ $$EXT_BUILD_DEPS$$
+##define_sandbox_paths## $$EXT_BUILD_DEPS$$ $$EXT_BUILD_ROOT$$
+##enable_tracing##
+cmake -DCMAKE_AR="C:/toolchain/lib.exe" -DCMAKE_BUILD_TYPE="Debug" -DCMAKE_INSTALL_PREFIX="test_rule" -DCMAKE_PREFIX_PATH="$$EXT_BUILD_DEPS$$" -DPKG_CONFIG_ARGN="--define-variable=EXT_BUILD_DEPS=$$EXT_BUILD_DEPS$$" -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT="Embedded" -DCMAKE_RANLIB=""  -G 'Ninja' $$EXT_BUILD_ROOT$$/external/test_rule
+##disable_tracing##
+"""
+    asserts.equals(env, expected.splitlines(), script)
+
+    return unittest.end(env)
+
+def _create_cmake_script_windows_toolchain_file_test(ctx):
+    env = unittest.begin(ctx)
+
+    tools = CxxToolsInfo(
+        cc = "C:/toolchain/cl.exe",
+        cxx = "C:/toolchain/cl.exe",
+        cxx_linker_static = "C:/toolchain/lib.exe",
+        cxx_linker_executable = "C:/toolchain/cl.exe",
+    )
+    flags = CxxFlagsInfo(
+        cc = ["/Z7"],
+        cxx = ["/Z7"],
+        cxx_linker_shared = [],
+        cxx_linker_dynamic_module = [],
+        cxx_linker_static = [],
+        cxx_linker_executable = [],
+        assemble = [],
+    )
+
+    script = create_cmake_script(
+        "ws",
+        ctx.label,
+        "windows",
+        "x86_64",
+        "windows",
+        "x86_64",
+        "Ninja",
+        "cmake",
+        tools,
+        flags,
+        "test_rule",
+        "external/test_rule",
+        False,
+        {},
+        {},
+        [],
+        cmake_commands = [],
+    )
+    expected = r"""__var_CMAKE_AR="C:/toolchain/lib.exe"
+__var_CMAKE_CXX_COMPILER="C:/toolchain/cl.exe"
+__var_CMAKE_CXX_FLAGS_INIT="/Z7"
+__var_CMAKE_C_COMPILER="C:/toolchain/cl.exe"
+__var_CMAKE_C_FLAGS_INIT="/Z7"
+cat > crosstool_bazel.cmake << EOF
+set(CMAKE_AR "$$__var_CMAKE_AR$$" CACHE FILEPATH "Archiver")
+set(CMAKE_CXX_COMPILER "$$__var_CMAKE_CXX_COMPILER$$")
+set(CMAKE_CXX_FLAGS_INIT "$$__var_CMAKE_CXX_FLAGS_INIT$$")
+set(CMAKE_C_COMPILER "$$__var_CMAKE_C_COMPILER$$")
+set(CMAKE_C_FLAGS_INIT "$$__var_CMAKE_C_FLAGS_INIT$$")
+set(_CMAKE_C_FLAGS_DEBUG "\${CMAKE_C_FLAGS_DEBUG}")
+string(REPLACE "/Zi" "/Z7" CMAKE_C_FLAGS_DEBUG_INIT "\${CMAKE_C_FLAGS_DEBUG_INIT}")
+string(REPLACE "/Zi" "/Z7" _CMAKE_C_FLAGS_DEBUG "\${_CMAKE_C_FLAGS_DEBUG}")
+set(CMAKE_C_FLAGS_DEBUG "\${_CMAKE_C_FLAGS_DEBUG}" CACHE STRING "" FORCE)
+set(_CMAKE_CXX_FLAGS_DEBUG "\${CMAKE_CXX_FLAGS_DEBUG}")
+string(REPLACE "/Zi" "/Z7" CMAKE_CXX_FLAGS_DEBUG_INIT "\${CMAKE_CXX_FLAGS_DEBUG_INIT}")
+string(REPLACE "/Zi" "/Z7" _CMAKE_CXX_FLAGS_DEBUG "\${_CMAKE_CXX_FLAGS_DEBUG}")
+set(CMAKE_CXX_FLAGS_DEBUG "\${_CMAKE_CXX_FLAGS_DEBUG}" CACHE STRING "" FORCE)
+set(_CMAKE_C_FLAGS_RELWITHDEBINFO "\${CMAKE_C_FLAGS_RELWITHDEBINFO}")
+string(REPLACE "/Zi" "/Z7" CMAKE_C_FLAGS_RELWITHDEBINFO_INIT "\${CMAKE_C_FLAGS_RELWITHDEBINFO_INIT}")
+string(REPLACE "/Zi" "/Z7" _CMAKE_C_FLAGS_RELWITHDEBINFO "\${_CMAKE_C_FLAGS_RELWITHDEBINFO}")
+set(CMAKE_C_FLAGS_RELWITHDEBINFO "\${_CMAKE_C_FLAGS_RELWITHDEBINFO}" CACHE STRING "" FORCE)
+set(_CMAKE_CXX_FLAGS_RELWITHDEBINFO "\${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+string(REPLACE "/Zi" "/Z7" CMAKE_CXX_FLAGS_RELWITHDEBINFO_INIT "\${CMAKE_CXX_FLAGS_RELWITHDEBINFO_INIT}")
+string(REPLACE "/Zi" "/Z7" _CMAKE_CXX_FLAGS_RELWITHDEBINFO "\${_CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "\${_CMAKE_CXX_FLAGS_RELWITHDEBINFO}" CACHE STRING "" FORCE)
+EOF
+
+##define_absolute_paths## $$EXT_BUILD_DEPS$$ $$EXT_BUILD_DEPS$$
+##define_sandbox_paths## $$EXT_BUILD_DEPS$$ $$EXT_BUILD_ROOT$$
+##enable_tracing##
+cmake -DCMAKE_TOOLCHAIN_FILE="$$BUILD_TMPDIR$$/crosstool_bazel.cmake" -DCMAKE_BUILD_TYPE="Debug" -DCMAKE_INSTALL_PREFIX="test_rule" -DCMAKE_PREFIX_PATH="$$EXT_BUILD_DEPS$$" -DPKG_CONFIG_ARGN="--define-variable=EXT_BUILD_DEPS=$$EXT_BUILD_DEPS$$" -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT="Embedded" -DCMAKE_RANLIB=""  -G 'Ninja' $$EXT_BUILD_ROOT$$/external/test_rule
+##disable_tracing##
+"""
+    asserts.equals(env, expected.splitlines(), script)
+
+    return unittest.end(env)
+
 def _create_cmake_script_toolchain_file_test(ctx):
     env = unittest.begin(ctx)
 
@@ -706,6 +864,7 @@ def _create_cmake_script_toolchain_file_test(ctx):
             "cxx-toolchain",
         ],
         cxx_linker_shared = ["shared1", "shared2"],
+        cxx_linker_dynamic_module = ["shared1", "shared2"],
         cxx_linker_static = ["static"],
         cxx_linker_executable = ["executable"],
         assemble = ["assemble"],
@@ -726,10 +885,10 @@ def _create_cmake_script_toolchain_file_test(ctx):
     script = create_cmake_script(
         "ws",
         ctx.label,
-        "unknown",
-        "unknown",
-        "unknown",
-        "unknown",
+        "linux",
+        "x86_64",
+        "linux",
+        "x86_64",
         "Ninja",
         "cmake",
         tools,
@@ -753,6 +912,7 @@ __var_CMAKE_C_COMPILER_EXTERNAL_TOOLCHAIN="cc-toolchain"
 __var_CMAKE_C_FLAGS_INIT="-cc-flag -gcc_toolchain cc-toolchain --from-env --additional-flag"
 __var_CMAKE_EXE_LINKER_FLAGS_INIT="executable"
 __var_CMAKE_MODULE_LINKER_FLAGS_INIT="shared1 shared2"
+__var_CMAKE_OSX_SYSROOT="/abc/sysroot"
 __var_CMAKE_SHARED_LINKER_FLAGS_INIT="shared1 shared2"
 __var_CMAKE_SYSROOT="/abc/sysroot"
 cat > crosstool_bazel.cmake << EOF
@@ -767,6 +927,7 @@ set(CMAKE_C_COMPILER_EXTERNAL_TOOLCHAIN "$$__var_CMAKE_C_COMPILER_EXTERNAL_TOOLC
 set(CMAKE_C_FLAGS_INIT "$$__var_CMAKE_C_FLAGS_INIT$$")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "$$__var_CMAKE_EXE_LINKER_FLAGS_INIT$$")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "$$__var_CMAKE_MODULE_LINKER_FLAGS_INIT$$")
+set(CMAKE_OSX_SYSROOT "$$__var_CMAKE_OSX_SYSROOT$$")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "$$__var_CMAKE_SHARED_LINKER_FLAGS_INIT$$")
 set(CMAKE_SYSROOT "$$__var_CMAKE_SYSROOT$$")
 EOF
@@ -795,25 +956,31 @@ create_cmake_script_no_toolchain_file_test = unittest.make(_create_cmake_script_
 create_cmake_script_toolchain_file_test = unittest.make(_create_cmake_script_toolchain_file_test)
 create_cmake_script_android_test = unittest.make(_create_cmake_script_android_test)
 create_cmake_script_linux_test = unittest.make(_create_cmake_script_linux_test)
+cmake_target_params_test = unittest.make(_cmake_target_params_test)
+create_cmake_script_windows_no_toolchain_file_test = unittest.make(_create_cmake_script_windows_no_toolchain_file_test)
+create_cmake_script_windows_toolchain_file_test = unittest.make(_create_cmake_script_windows_toolchain_file_test)
 merge_flag_values_no_toolchain_file_test = unittest.make(_merge_flag_values_no_toolchain_file_test)
 create_min_cmake_script_wipe_toolchain_test = unittest.make(_create_min_cmake_script_wipe_toolchain_test)
 
 def cmake_script_test_suite():
     unittest.suite(
         "cmake_script_test_suite",
-        absolutize_test,
-        tail_extraction_test,
-        find_flag_value_test,
-        fill_crossfile_from_toolchain_test,
-        move_dict_values_test,
-        reverse_descriptor_dict_test,
-        merge_toolchain_and_user_values_test,
-        create_min_cmake_script_no_toolchain_file_test,
-        create_min_cmake_script_toolchain_file_test,
-        create_cmake_script_no_toolchain_file_test,
-        create_cmake_script_toolchain_file_test,
-        create_cmake_script_android_test,
-        create_cmake_script_linux_test,
-        merge_flag_values_no_toolchain_file_test,
-        create_min_cmake_script_wipe_toolchain_test,
+        partial.make(absolutize_test, size = "small"),
+        partial.make(tail_extraction_test, size = "small"),
+        partial.make(find_flag_value_test, size = "small"),
+        partial.make(fill_crossfile_from_toolchain_test, size = "small"),
+        partial.make(move_dict_values_test, size = "small"),
+        partial.make(reverse_descriptor_dict_test, size = "small"),
+        partial.make(merge_toolchain_and_user_values_test, size = "small"),
+        partial.make(create_min_cmake_script_no_toolchain_file_test, size = "small"),
+        partial.make(create_min_cmake_script_toolchain_file_test, size = "small"),
+        partial.make(create_cmake_script_no_toolchain_file_test, size = "small"),
+        partial.make(create_cmake_script_toolchain_file_test, size = "small"),
+        partial.make(create_cmake_script_android_test, size = "small"),
+        partial.make(create_cmake_script_linux_test, size = "small"),
+        partial.make(cmake_target_params_test, size = "small"),
+        partial.make(create_cmake_script_windows_no_toolchain_file_test, size = "small"),
+        partial.make(create_cmake_script_windows_toolchain_file_test, size = "small"),
+        partial.make(merge_flag_values_no_toolchain_file_test, size = "small"),
+        partial.make(create_min_cmake_script_wipe_toolchain_test, size = "small"),
     )

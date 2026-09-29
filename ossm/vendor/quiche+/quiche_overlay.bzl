@@ -16,7 +16,7 @@ quiche_copts = [
 
 _EXTERNAL_DEPS = {
     "nghttp2": ["@nghttp2//:nghttp2"],
-    "ssl": ["//:ssl_lib"],
+    "ssl": ["@quiche_deps//:ssl_lib"],
 }
 
 # QUIC/HTTP3-specific library targets. Under --define=quiche_disable_http3=true

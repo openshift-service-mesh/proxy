@@ -15,19 +15,23 @@
 """Implementation of the `swift_import` rule."""
 
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
-load("//swift/internal:attrs.bzl", "swift_common_rule_attrs")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load(
+    "//swift/internal:attrs.bzl",
+    "swift_common_rule_attrs",
+)
 load("//swift/internal:compiling.bzl", "compile_module_interface")
 load(
     "//swift/internal:features.bzl",
     "configure_features",
     "get_cc_feature_configuration",
 )
-load("//swift/internal:linking.bzl", "new_objc_provider")
 load("//swift/internal:providers.bzl", "SwiftCompilerPluginInfo")
 load(
     "//swift/internal:toolchain_utils.bzl",
-    "get_swift_toolchain",
-    "use_swift_toolchain",
+    "find_all_toolchains",
+    "use_all_toolchains",
 )
 load(
     "//swift/internal:utils.bzl",
@@ -42,6 +46,7 @@ load(
     "create_swift_module_context",
     "create_swift_module_inputs",
 )
+load(":swift_clang_module_aspect.bzl", "swift_clang_module_aspect")
 
 def _swift_import_impl(ctx):
     archives = ctx.files.archives
@@ -58,10 +63,10 @@ def _swift_import_impl(ctx):
         fail("'swiftinterface' may not be specified when " +
              "'swiftmodule' is specified.")
 
-    swift_toolchain = get_swift_toolchain(ctx)
+    toolchains = find_all_toolchains(ctx)
     feature_configuration = configure_features(
         ctx = ctx,
-        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
         requested_features = ctx.features,
         unsupported_features = ctx.disabled_features,
     )
@@ -70,7 +75,7 @@ def _swift_import_impl(ctx):
         cc_common.create_library_to_link(
             actions = ctx.actions,
             alwayslink = True,
-            cc_toolchain = swift_toolchain.cc_toolchain_info,
+            cc_toolchain = toolchains.cc,
             feature_configuration = get_cc_feature_configuration(
                 feature_configuration,
             ),
@@ -93,16 +98,17 @@ def _swift_import_impl(ctx):
     swift_infos = get_providers(deps, SwiftInfo)
 
     if swiftinterface:
-        module_context = compile_module_interface(
+        compile_result = compile_module_interface(
             actions = ctx.actions,
             compilation_contexts = get_compilation_contexts(ctx.attr.deps),
             feature_configuration = feature_configuration,
             module_name = ctx.attr.module_name,
             swiftinterface_file = swiftinterface,
             swift_infos = swift_infos,
-            swift_toolchain = swift_toolchain,
             target_name = ctx.attr.name,
+            toolchains = toolchains,
         )
+        module_context = compile_result.module_context
         swift_outputs = [
             module_context.swift.swiftmodule,
         ] + compact([module_context.swift.swiftdoc])
@@ -113,6 +119,7 @@ def _swift_import_impl(ctx):
                 compilation_context = cc_info.compilation_context,
                 module_map = None,
             ),
+            label = ctx.label,
             swift = create_swift_module_inputs(
                 plugins = [
                     plugin[SwiftCompilerPluginInfo]
@@ -126,7 +133,7 @@ def _swift_import_impl(ctx):
         )
         swift_outputs = [swiftmodule] + compact([swiftdoc])
 
-    providers = [
+    return [
         DefaultInfo(
             files = depset(archives + swift_outputs),
             runfiles = ctx.runfiles(
@@ -140,27 +147,13 @@ def _swift_import_impl(ctx):
             swift_infos = swift_infos,
         ),
         cc_info,
-        # Propagate an `Objc` provider so that Apple-specific rules like
-        # apple_binary` will link the imported library properly. Typically we'd
-        # want to only propagate this if the toolchain reports that it supports
-        # Objective-C interop, but we would hit the same cyclic dependency
-        # mentioned above, so we propagate it unconditionally; it will be
-        # ignored on non-Apple platforms anyway.
-        new_objc_provider(
-            deps = deps,
-            feature_configuration = None,
-            is_test = ctx.attr.testonly,
-            libraries_to_link = libraries_to_link,
-            module_context = module_context,
-            swift_toolchain = swift_toolchain,
-        ),
     ]
-
-    return providers
 
 swift_import = rule(
     attrs = dicts.add(
-        swift_common_rule_attrs(),
+        swift_common_rule_attrs(
+            additional_deps_aspects = [swift_clang_module_aspect],
+        ),
         {
             "archives": attr.label_list(
                 allow_empty = True,
@@ -179,7 +172,9 @@ target.
                 cfg = "exec",
                 doc = """\
 A list of `swift_compiler_plugin` targets that should be loaded by the compiler
-when compiling any modules that directly depend on this target.
+when compiling any modules that depend on this target. Enable the
+`swift.load_plugins_from_direct_dependencies` feature to load them only for
+modules that directly depend on this target.
 """,
                 providers = [[SwiftCompilerPluginInfo]],
             ),
@@ -206,8 +201,6 @@ May not be specified if `swiftinterface` is specified.
 """,
                 mandatory = False,
             ),
-            # TODO(b/301253335): Enable AEGs and add `toolchain` param once this rule starts using toolchain resolution.
-            "_use_auto_exec_groups": attr.bool(default = False),
         },
     ),
     doc = """\
@@ -230,5 +223,5 @@ uses the API marked with `@_spi`.
 """,
     fragments = ["cpp"],
     implementation = _swift_import_impl,
-    toolchains = use_swift_toolchain(),
+    toolchains = use_all_toolchains(),
 )

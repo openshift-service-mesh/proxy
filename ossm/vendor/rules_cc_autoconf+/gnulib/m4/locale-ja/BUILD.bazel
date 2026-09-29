@@ -1,0 +1,46 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/locale-ja.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# gt_LOCALE_JA - lines 13-end
+# Determines the name of a Japanese locale with EUC-JP encoding.
+# Uses select() for platform-specific values instead of runtime checks.
+autoconf(
+    name = "gt_LOCALE_JA",
+    checks = select({
+        # Linux: Autoconf runtime checks may detect locale as unavailable in minimal containers
+        # The golden files from Docker show "none" since Japanese locales aren't installed
+        "@platforms//os:linux": [
+            checks.AC_SUBST("LOCALE_JA", "none"),
+        ],
+        # macOS: Uses ja_JP.eucJP (HP-UX, NetBSD style name)
+        "@platforms//os:macos": [
+            checks.AC_SUBST("LOCALE_JA", "ja_JP.eucJP"),
+        ],
+        # Windows: CP932 is very different from EUC-JP, cannot be used
+        "@platforms//os:windows": [
+            checks.AC_SUBST("LOCALE_JA", "none"),
+        ],
+        # Other Unix-like systems: typically ja_JP.eucJP or ja_JP.EUC-JP
+        "//conditions:default": [
+            checks.AC_SUBST("LOCALE_JA", "ja_JP.eucJP"),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CANONICAL_HOST",
+        # Note: This provides HAVE_LANGINFO_CODESET as a define, not subst
+        "//gnulib/m4/codeset:AM_LANGINFO_CODESET",
+    ],
+)
+
+# Package-level aggregator target (matches package name)
+# No checks - just deps on all other targets
+autoconf(
+    name = "locale-ja",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gt_LOCALE_JA",
+    ],
+)

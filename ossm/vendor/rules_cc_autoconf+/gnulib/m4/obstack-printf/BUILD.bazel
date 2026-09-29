@@ -1,0 +1,75 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/obstack-printf.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "gl_FUNC_OBSTACK_PRINTF",
+    checks = [
+        # gl_FUNC_OBSTACK_PRINTF checks for obstack_printf function
+        checks.AC_CHECK_FUNC(
+            "obstack_printf",
+            define = "HAVE_OBSTACK_PRINTF",
+        ),
+        # gl_DECL_OBSTACK_PRINTF checks for obstack_printf declaration
+        checks.AC_CHECK_DECL(
+            "obstack_printf",
+            name = "_gl_cv_have_decl_obstack_printf",
+            includes = ["#include <stdio.h>"],
+        ),
+    ] + select({
+        # On Linux: obstack_printf is declared in stdio.h (glibc)
+        "@platforms//os:linux": [
+            checks.AC_DEFINE(
+                "HAVE_DECL_OBSTACK_PRINTF",
+                "1",
+                subst = True,
+            ),
+            checks.AC_SUBST("REPLACE_OBSTACK_PRINTF", "1"),
+        ],
+        # On macOS: obstack_printf is not declared
+        "//conditions:default": [
+            checks.AC_DEFINE(
+                "HAVE_DECL_OBSTACK_PRINTF",
+                "0",
+                subst = True,
+            ),
+            checks.AC_SUBST("REPLACE_OBSTACK_PRINTF", "0"),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/obstack:gl_FUNC_OBSTACK",  # AC_REQUIRE([gl_FUNC_OBSTACK])
+        "//gnulib/m4/extensions",  # AC_REQUIRE([AC_USE_SYSTEM_EXTENSIONS])
+        # Transitive deps from vasnprintf/printf chain
+        "//gnulib/m4/inttypes_h",  # HAVE_INTTYPES_H_WITH_UINTMAX
+        "//gnulib/m4/stdint_h",  # HAVE_STDINT_H_WITH_UINTMAX
+        "//gnulib/m4/math_h:long-double-vs-double",  # HAVE_SAME_LONG_DOUBLE_AS_DOUBLE
+        "//gnulib/m4/multiarch",  # APPLE_UNIVERSAL_BUILD
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+autoconf(
+    name = "gl_REPLACE_OBSTACK_PRINTF",
+    checks = [
+    ],
+    visibility = ["//visibility:public"],
+)
+
+autoconf(
+    name = "gl_DECL_OBSTACK_PRINTF",
+    checks = [
+    ],
+    visibility = ["//visibility:public"],
+)
+
+autoconf(
+    name = "obstack-printf",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_DECL_OBSTACK_PRINTF",
+        ":gl_FUNC_OBSTACK_PRINTF",
+        ":gl_REPLACE_OBSTACK_PRINTF",
+    ],
+)

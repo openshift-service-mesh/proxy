@@ -1,0 +1,36 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/sysexits.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+load("//gnulib:macros.bzl", gl_macros = "macros")
+
+autoconf(
+    name = "sysexits",
+    checks = gl_macros.GL_CHECK_NEXT_HEADERS(["sysexits.h"]) + [
+        checks.AC_CHECK_HEADER(
+            "sysexits.h",
+            define = "HAVE_SYSEXITS_H",
+        ),
+        checks.AC_SUBST(
+            "HAVE_SYSEXITS_H",
+            condition = "ac_cv_header_sysexits_h",
+            if_false = "0",
+            if_true = "1",
+        ),
+        # GL_GENERATE_SYSEXITS_H: upstream sets this true when sysexits.h is
+        # missing or lacks the standard EX_* constants.  On Linux and macOS
+        # the header is present and complete, so the wrapper is only
+        # generated when the header itself is absent.
+        checks.M4_VARIABLE(
+            "GL_GENERATE_SYSEXITS_H",
+            condition = "ac_cv_header_sysexits_h",
+            if_false = "true",
+            if_true = "false",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/include_next",
+    ],
+)

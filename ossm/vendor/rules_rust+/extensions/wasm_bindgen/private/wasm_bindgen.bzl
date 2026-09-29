@@ -13,8 +13,8 @@ def rust_wasm_bindgen_action(*, ctx, toolchain, wasm_file, target_output, flags 
     Args:
         ctx (ctx): The rule's context object.
         toolchain (ToolchainInfo): The current `rust_wasm_bindgen_toolchain`.
-        wasm_file (Target): The target representing the `.wasm` file.
-        target_output (str): _description_
+        wasm_file (list of Target): A single-element list containing the target representing the `.wasm` file. The attribute is a `list` because it is behind `wasm_bindgen_transition`.
+        target_output (str): The wasm-bindgen `--target` output type (e.g. `bundler`, `web`, `nodejs`, `no-modules`, `deno`).
         flags (list, optional): Flags to pass to `wasm-bindgen`.
 
     Returns:
@@ -77,6 +77,9 @@ def rust_wasm_bindgen_action(*, ctx, toolchain, wasm_file, target_output, flags 
     outputs = [bindgen_wasm_module, snippets] + js_out + ts_out
 
     args = ctx.actions.args()
+    args.add(bindgen_bin.path)
+    args.add(snippets.path)
+    args.add("--")
     args.add("--target", target_output)
     args.add("--out-dir", bindgen_wasm_module.dirname)
     args.add("--out-name", out_name)
@@ -84,7 +87,8 @@ def rust_wasm_bindgen_action(*, ctx, toolchain, wasm_file, target_output, flags 
     args.add(input_file)
 
     ctx.actions.run(
-        executable = bindgen_bin,
+        executable = ctx.executable._process_wrapper,
+        tools = [bindgen_bin],
         inputs = [input_file],
         outputs = outputs,
         mnemonic = "RustWasmBindgen",
@@ -112,12 +116,15 @@ def _rust_wasm_bindgen_impl(ctx):
         flags = ctx.attr.bindgen_flags,
     )
 
+    wasm_target = ctx.attr.wasm_file[0]
+
     providers = [
         DefaultInfo(
             files = depset(
                 [info.wasm, info.snippets],
                 transitive = [info.js, info.ts],
             ),
+            runfiles = wasm_target[DefaultInfo].default_runfiles,
         ),
         info,
     ]
@@ -176,7 +183,13 @@ WASM_BINDGEN_ATTR = {
         mandatory = True,
     ),
     "_allowlist_function_transition": attr.label(
-        default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
+        default = Label("@bazel_tools//tools/allowlists/function_transition_allowlist"),
+    ),
+    "_process_wrapper": attr.label(
+        doc = "A process wrapper for ensuring tree artifacts are non-empty.",
+        default = Label("//private:wasm_bindgen_wrapper"),
+        executable = True,
+        cfg = "exec",
     ),
 }
 

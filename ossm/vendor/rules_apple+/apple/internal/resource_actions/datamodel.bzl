@@ -15,8 +15,12 @@
 """Datamodel related actions."""
 
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
+    "@apple_support//lib:apple_support.bzl",
     "apple_support",
+)
+load(
+    "//apple/internal:shared_environment.bzl",
+    "shared_environment",
 )
 load(
     "//apple/internal/utils:xctoolrunner.bzl",
@@ -26,6 +30,7 @@ load(
 def compile_datamodels(
         *,
         actions,
+        mac_exec_group,
         datamodel_path,
         input_files,
         module_name,
@@ -38,6 +43,7 @@ def compile_datamodels(
         actions: The actions provider from `ctx.actions`.
         datamodel_path: The path to the directory containing the datamodels.
         input_files: The list of files to process for the given datamodel.
+        mac_exec_group: The execution group for Mac tools.
         module_name: The module name to use when compiling the datamodels.
         output_file: The file reference to the compiled datamodel.
         platform_prerequisites: Struct containing information on the platform being targeted.
@@ -61,6 +67,8 @@ def compile_datamodels(
         actions = actions,
         apple_fragment = platform_prerequisites.apple_fragment,
         arguments = args,
+        env = shared_environment.default_env,
+        exec_group = mac_exec_group,
         executable = xctoolrunner,
         inputs = input_files,
         mnemonic = "MomCompile",
@@ -71,6 +79,7 @@ def compile_datamodels(
 def compile_mappingmodel(
         *,
         actions,
+        mac_exec_group,
         input_files,
         mappingmodel_path,
         output_file,
@@ -81,21 +90,23 @@ def compile_mappingmodel(
     Args:
         actions: The actions provider from `ctx.actions`.
         input_files: The list of files to process for the given mapping model.
+        mac_exec_group: The execution group for Mac tools.
         mappingmodel_path: The path to the directory containing the mapping model.
         output_file: The file reference to the compiled mapping model.
         platform_prerequisites: Struct containing information on the platform being targeted.
         xctoolrunner: A files_to_run for the wrapper around the "xcrun" tool.
     """
-    args = [
-        "mapc",
-        xctoolrunner_support.prefixed_path(mappingmodel_path),
-        xctoolrunner_support.prefixed_path(output_file.path),
-    ]
+    args = actions.args()
+    args.add("mapc")
+    args.add(xctoolrunner_support.prefixed_path(mappingmodel_path))
+    args.add(xctoolrunner_support.prefixed_path(output_file.path))
 
     apple_support.run(
         actions = actions,
-        arguments = args,
+        arguments = [args],
         apple_fragment = platform_prerequisites.apple_fragment,
+        env = shared_environment.default_env,
+        exec_group = mac_exec_group,
         executable = xctoolrunner,
         inputs = input_files,
         mnemonic = "MappingModelCompile",
@@ -106,9 +117,11 @@ def compile_mappingmodel(
 def generate_datamodels(
         *,
         actions,
+        mac_exec_group,
         datamodel_path,
         input_files,
         output_dir,
+        outputs,
         platform_prerequisites,
         xctoolrunner,
         swift_version = None):
@@ -116,9 +129,11 @@ def generate_datamodels(
 
     Args:
         actions: The actions provider from `ctx.actions`.
+        mac_exec_group: The execution group for Mac tools.
         datamodel_path: The path to the directory containing the datamodels.
         input_files: The list of files to process for the given datamodel.
         output_dir: The output directory reference where generated datamodel classes will be.
+        outputs: The list of generated datamodel files or the directory containing those files.
         platform_prerequisites: Struct containing information on the platform being targeted.
         xctoolrunner: A files_to_run for the wrapper around the "xcrun" tool.
         swift_version: (optional) Target Swift version for generated datamodel classes.
@@ -136,17 +151,19 @@ def generate_datamodels(
         args.add("--swift-version", swift_version)
 
     args.add(xctoolrunner_support.prefixed_path(datamodel_path))
-    args.add(xctoolrunner_support.prefixed_path(output_dir.path))
+    args.add(xctoolrunner_support.prefixed_path(output_dir))
 
-    args.add("--xctoolrunner_assert_nonempty_dir", output_dir.path)
+    args.add("--xctoolrunner_assert_nonempty_dir", output_dir)
 
     apple_support.run(
         actions = actions,
         apple_fragment = platform_prerequisites.apple_fragment,
         arguments = [args],
+        env = shared_environment.default_env,
+        exec_group = mac_exec_group,
         executable = xctoolrunner,
         inputs = input_files,
         mnemonic = "MomGenerate",
-        outputs = [output_dir],
+        outputs = outputs,
         xcode_config = platform_prerequisites.xcode_version_config,
     )

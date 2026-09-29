@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <type_traits>
@@ -55,6 +56,8 @@
 #include "google/protobuf/arena.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/message.h"
+
+#undef GetMessage
 
 namespace cel {
 namespace {
@@ -113,7 +116,7 @@ Type Value::GetRuntimeType() const {
 namespace {
 
 template <typename T>
-struct IsMonostate : std::is_same<absl::remove_cvref_t<T>, absl::monostate> {};
+struct IsMonostate : std::is_same<absl::remove_cvref_t<T>, std::monostate> {};
 
 }  // namespace
 
@@ -169,7 +172,7 @@ absl::Status Value::ConvertToJsonArray(
                  google::protobuf::Descriptor::WELLKNOWNTYPE_LISTVALUE);
 
   return variant_.Visit(absl::Overload(
-      [](absl::monostate) -> absl::Status {
+      [](std::monostate) -> absl::Status {
         return absl::InternalError("use of invalid Value");
       },
       [descriptor_pool, message_factory, json](
@@ -210,7 +213,7 @@ absl::Status Value::ConvertToJsonObject(
                  google::protobuf::Descriptor::WELLKNOWNTYPE_STRUCT);
 
   return variant_.Visit(absl::Overload(
-      [](absl::monostate) -> absl::Status {
+      [](std::monostate) -> absl::Status {
         return absl::InternalError("use of invalid Value");
       },
       [descriptor_pool, message_factory, json](
@@ -1123,36 +1126,33 @@ absl::StatusOr<RepeatedFieldAccessor> RepeatedFieldAccessorFor(
 
 namespace {
 
-// WellKnownTypesValueVisitor is the base visitor for `well_known_types::Value`
-// which handles the primitive values which require no special handling based on
-// allocators.
-struct WellKnownTypesValueVisitor {
-  Value operator()(std::nullptr_t) const { return NullValue(); }
+// Overloads for `well_known_types::Value` which handles the primitive values
+// which require no special handling based on allocators.
+Value VistWellKnownTypeValue(std::nullptr_t) { return NullValue(); }
 
-  Value operator()(bool value) const { return BoolValue(value); }
+Value VistWellKnownTypeValue(bool value) { return BoolValue(value); }
 
-  Value operator()(int32_t value) const { return IntValue(value); }
+Value VistWellKnownTypeValue(int32_t value) { return IntValue(value); }
 
-  Value operator()(int64_t value) const { return IntValue(value); }
+Value VistWellKnownTypeValue(int64_t value) { return IntValue(value); }
 
-  Value operator()(uint32_t value) const { return UintValue(value); }
+Value VistWellKnownTypeValue(uint32_t value) { return UintValue(value); }
 
-  Value operator()(uint64_t value) const { return UintValue(value); }
+Value VistWellKnownTypeValue(uint64_t value) { return UintValue(value); }
 
-  Value operator()(float value) const { return DoubleValue(value); }
+Value VistWellKnownTypeValue(float value) { return DoubleValue(value); }
 
-  Value operator()(double value) const { return DoubleValue(value); }
+Value VistWellKnownTypeValue(double value) { return DoubleValue(value); }
 
-  Value operator()(absl::Duration value) const { return DurationValue(value); }
+Value VistWellKnownTypeValue(absl::Duration value) {
+  return DurationValue(value);
+}
 
-  Value operator()(absl::Time value) const { return TimestampValue(value); }
-};
+Value VistWellKnownTypeValue(absl::Time value) { return TimestampValue(value); }
 
-struct OwningWellKnownTypesValueVisitor : public WellKnownTypesValueVisitor {
+struct OwningWellKnownTypesValueVisitor {
   google::protobuf::Arena* absl_nullable arena;
   std::string* absl_nonnull scratch;
-
-  using WellKnownTypesValueVisitor::operator();
 
   Value operator()(well_known_types::BytesValue&& value) const {
     return absl::visit(absl::Overload(
@@ -1242,14 +1242,17 @@ struct OwningWellKnownTypesValueVisitor : public WellKnownTypesValueVisitor {
     }
     return ParsedMessageValue(value.release(), arena);
   }
+
+  template <typename T>
+  Value operator()(T t) const {
+    return VistWellKnownTypeValue(t);
+  }
 };
 
-struct BorrowingWellKnownTypesValueVisitor : public WellKnownTypesValueVisitor {
+struct BorrowingWellKnownTypesValueVisitor {
   const google::protobuf::Message* absl_nonnull message;
   google::protobuf::Arena* absl_nonnull arena;
   std::string* absl_nonnull scratch;
-
-  using WellKnownTypesValueVisitor::operator();
 
   Value operator()(well_known_types::BytesValue&& value) const {
     return absl::visit(
@@ -1332,6 +1335,11 @@ struct BorrowingWellKnownTypesValueVisitor : public WellKnownTypesValueVisitor {
     }
     return ParsedMessageValue(value.release(), arena);
   }
+
+  template <typename T>
+  Value operator()(T t) const {
+    return VistWellKnownTypeValue(t);
+  }
 };
 
 }  // namespace
@@ -1354,13 +1362,13 @@ Value Value::FromMessage(
     return ErrorValue(std::move(status_or_adapted).status());
   }
   return absl::visit(
-      absl::Overload(
-          OwningWellKnownTypesValueVisitor{.arena = arena, .scratch = &scratch},
-          [&](absl::monostate) -> Value {
-            auto* cloned = message.New(arena);
-            cloned->CopyFrom(message);
-            return ParsedMessageValue(cloned, arena);
-          }),
+      absl::Overload(OwningWellKnownTypesValueVisitor{
+                         /* .arena = */ arena, /* .scratch = */ &scratch},
+                     [&](std::monostate) -> Value {
+                       auto* cloned = message.New(arena);
+                       cloned->CopyFrom(message);
+                       return ParsedMessageValue(cloned, arena);
+                     }),
       std::move(status_or_adapted).value());
 }
 
@@ -1382,13 +1390,13 @@ Value Value::FromMessage(
     return ErrorValue(std::move(status_or_adapted).status());
   }
   return absl::visit(
-      absl::Overload(
-          OwningWellKnownTypesValueVisitor{.arena = arena, .scratch = &scratch},
-          [&](absl::monostate) -> Value {
-            auto* cloned = message.New(arena);
-            cloned->GetReflection()->Swap(cloned, &message);
-            return ParsedMessageValue(cloned, arena);
-          }),
+      absl::Overload(OwningWellKnownTypesValueVisitor{
+                         /* .arena = */ arena, /* .scratch = */ &scratch},
+                     [&](std::monostate) -> Value {
+                       auto* cloned = message.New(arena);
+                       cloned->GetReflection()->Swap(cloned, &message);
+                       return ParsedMessageValue(cloned, arena);
+                     }),
       std::move(status_or_adapted).value());
 }
 
@@ -1412,17 +1420,17 @@ Value Value::WrapMessage(
     return ErrorValue(std::move(adapted_value).status());
   }
   return absl::visit(
-      absl::Overload(
-          BorrowingWellKnownTypesValueVisitor{
-              .message = message, .arena = arena, .scratch = &scratch},
-          [&](absl::monostate) -> Value {
-            if (message->GetArena() != arena) {
-              auto* cloned = message->New(arena);
-              cloned->CopyFrom(*message);
-              return ParsedMessageValue(cloned, arena);
-            }
-            return ParsedMessageValue(message, arena);
-          }),
+      absl::Overload(BorrowingWellKnownTypesValueVisitor{
+                         /* .message = */ message, /* .arena = */ arena,
+                         /* .scratch = */ &scratch},
+                     [&](std::monostate) -> Value {
+                       if (message->GetArena() != arena) {
+                         auto* cloned = message->New(arena);
+                         cloned->CopyFrom(*message);
+                         return ParsedMessageValue(cloned, arena);
+                       }
+                       return ParsedMessageValue(message, arena);
+                     }),
       std::move(adapted_value).value());
 }
 
@@ -1446,15 +1454,15 @@ Value Value::WrapMessageUnsafe(
     return ErrorValue(std::move(adapted_value).status());
   }
   return absl::visit(
-      absl::Overload(
-          BorrowingWellKnownTypesValueVisitor{
-              .message = message, .arena = arena, .scratch = &scratch},
-          [&](absl::monostate) -> Value {
-            if (message->GetArena() != arena) {
-              return UnsafeParsedMessageValue(message);
-            }
-            return ParsedMessageValue(message, arena);
-          }),
+      absl::Overload(BorrowingWellKnownTypesValueVisitor{
+                         /* .message = */ message, /* .arena = */ arena,
+                         /* .scratch = */ &scratch},
+                     [&](std::monostate) -> Value {
+                       if (message->GetArena() != arena) {
+                         return UnsafeParsedMessageValue(message);
+                       }
+                       return ParsedMessageValue(message, arena);
+                     }),
       std::move(adapted_value).value());
 }
 
@@ -1551,6 +1559,9 @@ Value WrapFieldImpl(
                 if (string.data() == scratch.data() &&
                     string.size() == scratch.size()) {
                   return StringValue(arena, std::move(scratch));
+                }
+                if constexpr (Unsafe::value) {
+                  return StringValue::WrapUnsafe(string);
                 } else {
                   return StringValue(
                       Borrower::Arena(MessageArenaOr(message, arena)), string);
@@ -1586,6 +1597,9 @@ Value WrapFieldImpl(
                 if (string.data() == scratch.data() &&
                     string.size() == scratch.size()) {
                   return BytesValue(arena, std::move(scratch));
+                }
+                if constexpr (Unsafe::value) {
+                  return BytesValue::WrapUnsafe(string);
                 } else {
                   return BytesValue(
                       Borrower::Arena(MessageArenaOr(message, arena)), string);
@@ -1674,6 +1688,9 @@ Value WrapRepeatedFieldImpl(
                 if (string.data() == scratch.data() &&
                     string.size() == scratch.size()) {
                   return StringValue(arena, std::move(scratch));
+                }
+                if constexpr (Unsafe::value) {
+                  return StringValue::WrapUnsafe(string);
                 } else {
                   return StringValue(
                       Borrower::Arena(MessageArenaOr(message, arena)), string);
@@ -1705,6 +1722,9 @@ Value WrapRepeatedFieldImpl(
                 if (string.data() == scratch.data() &&
                     string.size() == scratch.size()) {
                   return BytesValue(arena, std::move(scratch));
+                }
+                if constexpr (Unsafe::value) {
+                  return BytesValue::WrapUnsafe(string);
                 } else {
                   return BytesValue(
                       Borrower::Arena(MessageArenaOr(message, arena)), string);
@@ -1774,8 +1794,12 @@ Value WrapMapFieldValueImpl(
     case google::protobuf::FieldDescriptor::TYPE_BOOL:
       return BoolValue(value.GetBoolValue());
     case google::protobuf::FieldDescriptor::TYPE_STRING:
-      return StringValue(Borrower::Arena(MessageArenaOr(message, arena)),
-                         value.GetStringValue());
+      if constexpr (Unsafe::value) {
+        return StringValue::WrapUnsafe(value.GetStringValue());
+      } else {
+        return StringValue(Borrower::Arena(MessageArenaOr(message, arena)),
+                           value.GetStringValue());
+      }
     case google::protobuf::FieldDescriptor::TYPE_GROUP:
       ABSL_FALLTHROUGH_INTENDED;
     case google::protobuf::FieldDescriptor::TYPE_MESSAGE:
@@ -1787,8 +1811,12 @@ Value WrapMapFieldValueImpl(
                                   message_factory, arena);
       }
     case google::protobuf::FieldDescriptor::TYPE_BYTES:
-      return BytesValue(Borrower::Arena(MessageArenaOr(message, arena)),
-                        value.GetStringValue());
+      if constexpr (Unsafe::value) {
+        return BytesValue::WrapUnsafe(value.GetStringValue());
+      } else {
+        return BytesValue(Borrower::Arena(MessageArenaOr(message, arena)),
+                          value.GetStringValue());
+      }
     case google::protobuf::FieldDescriptor::TYPE_FIXED32:
       ABSL_FALLTHROUGH_INTENDED;
     case google::protobuf::FieldDescriptor::TYPE_UINT32:
@@ -1914,14 +1942,14 @@ optional_ref<const BytesValue> Value::AsBytes() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<BytesValue> Value::AsBytes() && {
   if (auto* alternative = variant_.As<BytesValue>(); alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<DoubleValue> Value::AsDouble() const {
@@ -1929,7 +1957,7 @@ absl::optional<DoubleValue> Value::AsDouble() const {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<DurationValue> Value::AsDuration() const {
@@ -1937,7 +1965,7 @@ absl::optional<DurationValue> Value::AsDuration() const {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const ErrorValue> Value::AsError() const& {
@@ -1945,14 +1973,14 @@ optional_ref<const ErrorValue> Value::AsError() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<ErrorValue> Value::AsError() && {
   if (auto* alternative = variant_.As<ErrorValue>(); alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<IntValue> Value::AsInt() const {
@@ -1960,7 +1988,7 @@ absl::optional<IntValue> Value::AsInt() const {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<ListValue> Value::AsList() const& {
@@ -1980,7 +2008,7 @@ absl::optional<ListValue> Value::AsList() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<ListValue> Value::AsList() && {
@@ -2000,7 +2028,7 @@ absl::optional<ListValue> Value::AsList() && {
       alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<MapValue> Value::AsMap() const& {
@@ -2020,7 +2048,7 @@ absl::optional<MapValue> Value::AsMap() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<MapValue> Value::AsMap() && {
@@ -2040,7 +2068,7 @@ absl::optional<MapValue> Value::AsMap() && {
       alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<MessageValue> Value::AsMessage() const& {
@@ -2048,7 +2076,7 @@ absl::optional<MessageValue> Value::AsMessage() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<MessageValue> Value::AsMessage() && {
@@ -2056,7 +2084,7 @@ absl::optional<MessageValue> Value::AsMessage() && {
       alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<NullValue> Value::AsNull() const {
@@ -2064,7 +2092,7 @@ absl::optional<NullValue> Value::AsNull() const {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const OpaqueValue> Value::AsOpaque() const& {
@@ -2072,14 +2100,14 @@ optional_ref<const OpaqueValue> Value::AsOpaque() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<OpaqueValue> Value::AsOpaque() && {
   if (auto* alternative = variant_.As<OpaqueValue>(); alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const OptionalValue> Value::AsOptional() const& {
@@ -2087,7 +2115,7 @@ optional_ref<const OptionalValue> Value::AsOptional() const& {
       alternative != nullptr && alternative->IsOptional()) {
     return static_cast<const OptionalValue&>(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<OptionalValue> Value::AsOptional() && {
@@ -2095,7 +2123,7 @@ absl::optional<OptionalValue> Value::AsOptional() && {
       alternative != nullptr && alternative->IsOptional()) {
     return static_cast<OptionalValue&&>(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const ParsedJsonListValue> Value::AsParsedJsonList() const& {
@@ -2103,7 +2131,7 @@ optional_ref<const ParsedJsonListValue> Value::AsParsedJsonList() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<ParsedJsonListValue> Value::AsParsedJsonList() && {
@@ -2111,7 +2139,7 @@ absl::optional<ParsedJsonListValue> Value::AsParsedJsonList() && {
       alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const ParsedJsonMapValue> Value::AsParsedJsonMap() const& {
@@ -2119,7 +2147,7 @@ optional_ref<const ParsedJsonMapValue> Value::AsParsedJsonMap() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<ParsedJsonMapValue> Value::AsParsedJsonMap() && {
@@ -2127,7 +2155,7 @@ absl::optional<ParsedJsonMapValue> Value::AsParsedJsonMap() && {
       alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const CustomListValue> Value::AsCustomList() const& {
@@ -2135,7 +2163,7 @@ optional_ref<const CustomListValue> Value::AsCustomList() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<CustomListValue> Value::AsCustomList() && {
@@ -2143,7 +2171,7 @@ absl::optional<CustomListValue> Value::AsCustomList() && {
       alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const CustomMapValue> Value::AsCustomMap() const& {
@@ -2151,7 +2179,7 @@ optional_ref<const CustomMapValue> Value::AsCustomMap() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<CustomMapValue> Value::AsCustomMap() && {
@@ -2159,7 +2187,7 @@ absl::optional<CustomMapValue> Value::AsCustomMap() && {
       alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const ParsedMapFieldValue> Value::AsParsedMapField() const& {
@@ -2167,7 +2195,7 @@ optional_ref<const ParsedMapFieldValue> Value::AsParsedMapField() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<ParsedMapFieldValue> Value::AsParsedMapField() && {
@@ -2175,7 +2203,7 @@ absl::optional<ParsedMapFieldValue> Value::AsParsedMapField() && {
       alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const ParsedMessageValue> Value::AsParsedMessage() const& {
@@ -2183,7 +2211,7 @@ optional_ref<const ParsedMessageValue> Value::AsParsedMessage() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<ParsedMessageValue> Value::AsParsedMessage() && {
@@ -2191,7 +2219,7 @@ absl::optional<ParsedMessageValue> Value::AsParsedMessage() && {
       alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const ParsedRepeatedFieldValue> Value::AsParsedRepeatedField()
@@ -2200,7 +2228,7 @@ optional_ref<const ParsedRepeatedFieldValue> Value::AsParsedRepeatedField()
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<ParsedRepeatedFieldValue> Value::AsParsedRepeatedField() && {
@@ -2208,7 +2236,7 @@ absl::optional<ParsedRepeatedFieldValue> Value::AsParsedRepeatedField() && {
       alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const CustomStructValue> Value::AsCustomStruct() const& {
@@ -2216,7 +2244,7 @@ optional_ref<const CustomStructValue> Value::AsCustomStruct() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<CustomStructValue> Value::AsCustomStruct() && {
@@ -2224,7 +2252,7 @@ absl::optional<CustomStructValue> Value::AsCustomStruct() && {
       alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const StringValue> Value::AsString() const& {
@@ -2232,14 +2260,14 @@ optional_ref<const StringValue> Value::AsString() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<StringValue> Value::AsString() && {
   if (auto* alternative = variant_.As<StringValue>(); alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<StructValue> Value::AsStruct() const& {
@@ -2256,7 +2284,7 @@ absl::optional<StructValue> Value::AsStruct() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<StructValue> Value::AsStruct() && {
@@ -2272,7 +2300,7 @@ absl::optional<StructValue> Value::AsStruct() && {
       alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<TimestampValue> Value::AsTimestamp() const {
@@ -2280,7 +2308,7 @@ absl::optional<TimestampValue> Value::AsTimestamp() const {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const TypeValue> Value::AsType() const& {
@@ -2288,14 +2316,14 @@ optional_ref<const TypeValue> Value::AsType() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<TypeValue> Value::AsType() && {
   if (auto* alternative = variant_.As<TypeValue>(); alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<UintValue> Value::AsUint() const {
@@ -2303,7 +2331,7 @@ absl::optional<UintValue> Value::AsUint() const {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 optional_ref<const UnknownValue> Value::AsUnknown() const& {
@@ -2311,14 +2339,14 @@ optional_ref<const UnknownValue> Value::AsUnknown() const& {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<UnknownValue> Value::AsUnknown() && {
   if (auto* alternative = variant_.As<UnknownValue>(); alternative != nullptr) {
     return std::move(*alternative);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 const BytesValue& Value::GetBytes() const& {

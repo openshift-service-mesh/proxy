@@ -15,12 +15,18 @@
 """apple_bundle_version Starlark tests."""
 
 load(
+    "//apple/build_settings:build_settings.bzl",
+    "build_settings_labels",
+)
+load(
     "//test/starlark_tests/rules:analysis_failure_message_test.bzl",
     "analysis_failure_message_test",
+    "make_analysis_failure_message_test",
 )
 load(
     "//test/starlark_tests/rules:analysis_target_actions_test.bzl",
     "analysis_target_actions_test",
+    "make_analysis_target_actions_test",
 )
 load(
     "//test/starlark_tests/rules:common_verification_tests.bzl",
@@ -29,6 +35,20 @@ load(
 load(
     ":common.bzl",
     "common",
+)
+
+_locales_excludes_includes_conflict_test = make_analysis_failure_message_test(
+    config_settings = {
+        build_settings_labels.locales_to_exclude: "fr",
+        build_settings_labels.locales_to_include: "fr,it",
+    },
+)
+
+_analysis_asset_catalog_thinning_test = make_analysis_target_actions_test(
+    config_settings = {
+        build_settings_labels.thin_for_device_model: "iPhone14,6",
+        build_settings_labels.thin_for_os_version: "15.0",
+    },
 )
 
 def ios_application_resources_test_suite(name):
@@ -92,6 +112,18 @@ def ios_application_resources_test_suite(name):
         tags = [name],
     )
 
+    archive_contents_test(
+        name = "{}_empty_xcstrings_files_test".format(name),
+        build_type = "device",
+        compilation_mode = "opt",
+        # xcstringstool produces no strings for empty catalogs
+        not_contains = [
+            "$BUNDLE_ROOT/empty.strings",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_xcstrings",
+        tags = [name],
+    )
+
     # Tests bundling a Resources folder as top level should fail with a nice message.
     analysis_failure_message_test(
         name = "{}_invalid_top_level_directory_fail_test".format(name),
@@ -128,6 +160,28 @@ def ios_application_resources_test_suite(name):
         tags = [name],
     )
 
+    analysis_failure_message_test(
+        name = "{}_different_files_mapped_to_the_same_target_path_fails_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_resources_mapped_to_same_path",
+        expected_error = "foo.txt\" in the bundle, which is not allowed",
+        tags = [name],
+    )
+
+    # Tests that the bundled application contains the compiled texture atlas.
+    archive_contents_test(
+        name = "{}_texture_atlas_bundled_with_app_test".format(name),
+        assert_directory_file_count = {
+            "$BUNDLE_ROOT/star.atlasc": 2,
+        },
+        build_type = "device",
+        contains = [
+            "$BUNDLE_ROOT/star.atlasc/star.1.png",
+            "$BUNDLE_ROOT/star.atlasc/star.plist",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_texture_atlas",
+        tags = [name],
+    )
+
     # Tests that various localized resource types are bundled correctly with the
     # application (preserving their parent .lproj directory).
     archive_contents_test(
@@ -150,6 +204,101 @@ def ios_application_resources_test_suite(name):
         tags = [name],
     )
 
+    archive_contents_test(
+        name = "{}_localized_resources_with_xcstrings_test".format(name),
+        build_type = "device",
+        compilation_mode = "opt",
+        contains = [
+            "$BUNDLE_ROOT/en.lproj/greetings.strings",
+            "$BUNDLE_ROOT/fr.lproj/greetings.strings",
+            "$BUNDLE_ROOT/it.lproj/greetings.strings",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_xcstrings",
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_localization_excludes_test".format(name),
+        build_settings = {
+            build_settings_labels.locales_to_exclude: "fr",
+        },
+        build_type = "device",
+        contains = [
+            "$BUNDLE_ROOT/it.lproj/localized.strings",
+        ],
+        not_contains = [
+            "$BUNDLE_ROOT/fr.lproj/localized.strings",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_fr_and_it_localized_strings",
+        tags = [name],
+    )
+
+    _locales_excludes_includes_conflict_test(
+        name = "{}_localization_excludes_includes_conflict_test".format(name),
+        expected_error = "dropping [\"fr\"] as they are explicitly excluded but also explicitly included. Please verify apple.locales_to_include and apple.locales_to_exclude are defined properly.",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_fr_and_it_localized_strings",
+        tags = [name],
+    )
+
+    # Tests that generic flattened but unprocessed resources are bundled correctly
+    # (preserving their .lproj directory). Structured resources do not apply here,
+    # because they are never treated as localizable.
+    archive_contents_test(
+        name = "{}_localized_unprocessed_resources_test".format(name),
+        build_type = "device",
+        contains = [
+            "$BUNDLE_ROOT/it.lproj/localized.txt",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_localized_unprocessed_resources",
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_localized_unprocessed_resources_filter_all_test".format(name),
+        build_settings = {
+            build_settings_labels.locales_to_include: "sw",
+        },
+        build_type = "device",
+        not_contains = [
+            "$BUNDLE_ROOT/fr.lproj/localized.txt",
+            "$BUNDLE_ROOT/it.lproj/localized.txt",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_localized_unprocessed_resources",
+        tags = [name],
+    )
+
+    # Should not generate a warning because although 'fr' doesn't match
+    # anything nothing was filtered away (i.e. - no harm if it was a typo).
+    # Warning isn't validated but at least it doesn't fail to build.
+    archive_contents_test(
+        name = "{}_localized_unprocessed_resources_filter_mixed_test".format(name),
+        build_settings = {
+            build_settings_labels.locales_to_include: "fr,it",
+        },
+        build_type = "device",
+        contains = [
+            "$BUNDLE_ROOT/it.lproj/localized.txt",
+        ],
+        not_contains = [
+            "$BUNDLE_ROOT/fr.lproj/localized.txt",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_localized_unprocessed_resources_without_fr",
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_localized_unprocessed_resources_filter_with_attribute_test".format(name),
+        build_type = "device",
+        contains = [
+            "$BUNDLE_ROOT/it.lproj/localized.txt",
+        ],
+        not_contains = [
+            "$BUNDLE_ROOT/fr.lproj/localized.txt",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_localized_unprocessed_resources_filtered_by_attribute",
+        tags = [name],
+    )
+
     # Tests that the app icons and launch images are bundled with the application
     # and that the partial Info.plist produced by actool is merged into the final
     # plist.
@@ -169,6 +318,77 @@ def ios_application_resources_test_suite(name):
             "UILaunchImages:0:UILaunchImageOrientation": "Portrait",
             "UILaunchImages:0:UILaunchImageSize": "{320, 480}",
         },
+        tags = [name],
+    )
+
+    # Tests the new icon composer bundles for Xcode 26.
+    archive_contents_test(
+        name = "{}_icon_composer_app_icons_plist_test".format(name),
+        build_type = "device",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_icon_bundle",
+        contains = [
+            "$BUNDLE_ROOT/Assets.car",
+        ],
+        plist_test_file = "$CONTENT_ROOT/Info.plist",
+        plist_test_values = {
+            "CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName": "app_icon",
+        },
+        tags = [name] + common.fixture_tags,
+    )
+
+    # Test a failure when the new icon composer bundles for Xcode 26 are mixed with a set of asset \
+    # catalog icons.
+    analysis_failure_message_test(
+        name = "{}_icon_composer_and_asset_catalog_app_icons_failure_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_icon_bundle_and_xcassets_app_icons",
+        expected_error = """
+            Found .appiconset files among the assigned app_icons, which are ignored when Icon \
+            Composer .icon bundles are present.
+            """,
+        tags = [name],
+    )
+
+    # Tests that icon bundles alone will generate legacy assets when the minimum_os_version is lower
+    # than 26.0.
+    archive_contents_test(
+        name = "{}_icon_bundles_for_minimum_os_version_below_26_test".format(name),
+        build_type = "device",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_icon_bundle_only_for_low_minimum_os_version",
+        contains = [
+            "$BUNDLE_ROOT/Assets.car",
+            "$BUNDLE_ROOT/app_icon76x76@2x~ipad.png",
+            "$BUNDLE_ROOT/app_icon60x60@2x.png",
+        ],
+        plist_test_file = "$CONTENT_ROOT/Info.plist",
+        plist_test_values = {
+            "CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles:0": "app_icon60x60",
+            "CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName": "app_icon",
+        },
+        tags = [name] + common.fixture_tags,
+    )
+
+    # Tests that icon composer icons must be provided when the minimum_os_version is 26.0 or higher.
+    analysis_failure_message_test(
+        name = "{}_legacy_app_icons_for_minimum_os_version_26_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_xcassets_for_ios_26",
+        expected_error = """
+Legacy .appiconset files should not be used on iOS/macOS/watchOS 26+.
+
+These platforms prefer Icon Composer .icon bundles. .appiconset files are only needed for rendering icons in iOS/macOS/watchOS prior to 26.
+
+Found the following legacy .appiconset files: """,
+        tags = [name],
+    )
+
+    # Test a failure when new icon composer bundles for Xcode 26 are mixed with a set of asset
+    # catalog icons in an iOS app that provides alternate app icons.
+    analysis_failure_message_test(
+        name = "{}_icon_composer_and_asset_catalog_app_icons_with_alternate_app_icons_failure_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_alternate_app_icons_with_full_icon_bundle_coverage",
+        expected_error = """
+            Found .appiconset files among the assigned app_icons, which are ignored when Icon \
+            Composer .icon bundles are present.
+            """,
         tags = [name],
     )
 
@@ -218,15 +438,38 @@ def ios_application_resources_test_suite(name):
         expected_error = """
 Found multiple app icons among the asset catalogs with no primary_app_icon assigned.
 
-If you intend to assign multiple app icons to this target, please declare which of these is intended
-to be the primary app icon with the primary_app_icon attribute on the rule itself.
-
-app_icons was assigned the following: [
-  test/testdata/resources/app_icons_with_alts_ios.xcassets/app_icon-bazel.appiconset,
-  test/testdata/resources/app_icons_with_alts_ios.xcassets/app_icon.appiconset
-]
-""",
+If you intend to assign multiple app icons to this target, please declare which of these is \
+intended to be the primary app icon with the primary_app_icon attribute on the rule itself.""",
         tags = [name],
+    )
+
+    # Test that when the primary app icon has dark mode and tinted variants, that the legacy icons
+    # are still bundled in expected locations with the app, that the legacy icons are embedded
+    # within the plist referencing their file names, and that they are also bundled within the asset
+    # catalog for the application.
+    archive_contents_test(
+        name = "{}_dark_and_tinted_app_icons_test".format(name),
+        build_type = "device",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_dark_and_tinted_app_icons",
+        contains = [
+            "$BUNDLE_ROOT/app_icon60x60@2x.png",
+            "$BUNDLE_ROOT/app_icon76x76@2x~ipad.png",
+        ],
+        plist_test_file = "$CONTENT_ROOT/Info.plist",
+        plist_test_values = {
+            "CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles:0": "app_icon",
+        },
+        text_test_file = "$BUNDLE_ROOT/Assets.car",
+        text_test_values = [
+            "Bazel_logo.png",
+            "Bazel_dark_logo.png",
+            "Bazel_tinted_logo.png",
+            "UIAppearanceDark",
+            "ISAppearanceTintable",
+        ],
+        tags = [
+            name,
+        ],
     )
 
     # Tests that apple_bundle_import files are bundled correctly with the application.
@@ -407,6 +650,16 @@ app_icons was assigned the following: [
         tags = [name],
     )
 
+    archive_contents_test(
+        name = "{}_core_ml_precompiled_resource_bundle_test".format(name),
+        build_type = "simulator",
+        contains = [
+            "$BUNDLE_ROOT/App_Resources.bundle/sample.mlmodelc/",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_core_ml_precompiled_resource_bundle",
+        tags = [name],
+    )
+
     # Tests that structured processed generated strings have correct values.
     archive_contents_test(
         name = "{}_generated_strings_test".format(name),
@@ -416,6 +669,17 @@ app_icons was assigned the following: [
             "generated_structured_string": "I like turtles too!",
         },
         target_under_test = "//test/starlark_tests/targets_under_test/ios:app",
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_generated_xcstrings_test".format(name),
+        build_type = "simulator",
+        plist_test_file = "$CONTENT_ROOT/bundle_library_xcstrings.bundle/structured/en.lproj/generated.strings",
+        plist_test_values = {
+            "generated_structured_string": "I like turtles too!",
+        },
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_xcstrings",
         tags = [name],
     )
 
@@ -448,6 +712,25 @@ app_icons was assigned the following: [
         tags = [name],
     )
 
+    # Tests that the localizations in the Settings.bundle that are not in the base
+    # of the app are not included in the output when apple.trim_lproj_locales=1.
+    archive_contents_test(
+        name = "{}_settings_bundle_localization_strip_test".format(name),
+        build_settings = {
+            build_settings_labels.trim_lproj_locales: "True",
+        },
+        build_type = "device",
+        contains = [
+            "$BUNDLE_ROOT/Settings.bundle/Base.lproj/Root.strings",
+        ],
+        not_contains = [
+            "$BUNDLE_ROOT/Settings.bundle/fr.lproj/Root.strings",
+            "$BUNDLE_ROOT/Settings.bundle/it.lproj/Root.strings",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_settings_bundle_only",
+        tags = [name],
+    )
+
     # Tests that resources generated by a genrule, which produces a separate copy
     # for each split configuration, are properly deduped before being processed.
     archive_contents_test(
@@ -458,6 +741,17 @@ app_icons was assigned the following: [
             "generated_string": "I like turtles!",
         },
         target_under_test = "//test/starlark_tests/targets_under_test/ios:app",
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_deduplicate_generated_xcstrings_test".format(name),
+        build_type = "simulator",
+        plist_test_file = "$CONTENT_ROOT/bundle_library_xcstrings.bundle/en.lproj/generated.strings",
+        plist_test_values = {
+            "generated_string": "I like turtles!",
+        },
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_xcstrings",
         tags = [name],
     )
 
@@ -891,6 +1185,17 @@ app_icons was assigned the following: [
         tags = [name],
     )
 
+    _analysis_asset_catalog_thinning_test(
+        name = "{}_xcasset_actool_thinning_argv".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app",
+        target_mnemonic = "AssetCatalogCompile",
+        expected_argv = [
+            "--filter-for-device-model iPhone14,6",
+            "--filter-for-device-os-version 15.0",
+        ],
+        tags = [name],
+    )
+
     archive_contents_test(
         name = "{}_contains_resources_from_swift_library_test".format(name),
         build_type = "simulator",
@@ -947,6 +1252,17 @@ app_icons was assigned the following: [
             "$BUNDLE_ROOT/it.lproj/localized.txt",
         ],
         target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_transitive_swift_library_scoped_resources",
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_nested_private_and_implementation_deps_bundled_with_app_test".format(name),
+        build_type = "device",
+        contains = [
+            "$BUNDLE_ROOT/sample.png",
+            "$BUNDLE_ROOT/view_ios.nib",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_nested_private_and_implementation_dep_resources",
         tags = [name],
     )
 

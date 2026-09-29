@@ -15,21 +15,16 @@
 """Implementation of Apple CoreML library rule."""
 
 load(
-    "@bazel_skylib//lib:dicts.bzl",
-    "dicts",
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
 )
+load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load(
     "@bazel_skylib//lib:paths.bzl",
     "paths",
 )
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
-)
-load(
     "//apple/internal:apple_toolchains.bzl",
-    "AppleMacToolsToolchainInfo",
-    "AppleXPlatToolsToolchainInfo",
     "apple_toolchain_utils",
 )
 load(
@@ -56,7 +51,7 @@ load(
 def _apple_core_ml_library_impl(ctx):
     """Implementation of the apple_core_ml_library."""
     actions = ctx.actions
-    apple_xplat_toolchain_info = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo]
+    apple_xplat_toolchain_info = apple_toolchain_utils.get_xplat_toolchain(ctx)
     basename = paths.replace_extension(ctx.file.mlmodel.basename, "")
 
     is_swift = ctx.attr.language == "Swift"
@@ -90,6 +85,7 @@ def _apple_core_ml_library_impl(ctx):
     # portable platform information.
     platform_prerequisites = platform_support.platform_prerequisites(
         apple_fragment = ctx.fragments.apple,
+        apple_platform_info = platform_support.apple_platform_info_from_rule_ctx(ctx),
         build_settings = apple_xplat_toolchain_info.build_settings,
         config_vars = ctx.var,
         device_families = None,
@@ -97,12 +93,11 @@ def _apple_core_ml_library_impl(ctx):
         explicit_minimum_os = None,
         features = features,
         objc_fragment = None,
-        platform_type_string = str(ctx.fragments.apple.single_arch_platform.platform_type),
         uses_swift = uses_swift,
         xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
     )
 
-    apple_mac_toolchain_info = ctx.attr._mac_toolchain[AppleMacToolsToolchainInfo]
+    apple_mac_toolchain_info = apple_toolchain_utils.get_mac_toolchain(ctx)
 
     # coremlc doesn't have any configuration on the name of the generated source files, it uses the
     # basename of the mlmodel file instead, so we need to expect those files as outputs.
@@ -112,6 +107,7 @@ def _apple_core_ml_library_impl(ctx):
         input_file = ctx.file.mlmodel,
         swift_output_src = swift_output_src,
         objc_output_src = objc_output_src,
+        mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
         objc_output_hdr = objc_output_hdr,
         platform_prerequisites = platform_prerequisites,
         xctoolrunner = apple_mac_toolchain_info.xctoolrunner,
@@ -141,9 +137,10 @@ def _apple_core_ml_library_impl(ctx):
 
 apple_core_ml_library = rule(
     implementation = _apple_core_ml_library_impl,
+    exec_groups = apple_toolchain_utils.use_apple_exec_group_toolchain(),
     attrs = dicts.add(
         apple_support.action_required_attrs(),
-        apple_toolchain_utils.shared_attrs(),
+        apple_support.platform_constraint_attrs(),
         rule_attrs.common_tool_attrs(),
         {
             "mlmodel": attr.label(

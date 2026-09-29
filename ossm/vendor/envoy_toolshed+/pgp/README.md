@@ -140,18 +140,16 @@ The default implementation is a thin wrapper around Sequoia PGP's
 home directory or keyring state, used as the OpenPGP backend for `rpm` on
 Fedora/RHEL and as `sqv` in apt >= 3.0.
 
-The default signer uses `@sq//:sq` from the Envoy Bazel registry:
+By default, toolshed registers prebuilt `sq` toolchains published in the
+`bins-v*` GitHub release. `@envoy_toolshed//pgp:toolchain_type` therefore
+resolves a prebuilt signer on Linux x86_64 and arm64 without adding the
+source-only `sq` module to downstream module graphs.
 
-```starlark
-bazel_dep(name = "sq", version = "1.4.0.envoy")
-```
+### Behaviour change
 
-Toolshed builds and publishes `sq-<version>-<Platform>.tar.zst` in the
-`bins-v*` GitHub release. The registry `sq` module consumes that archive as
-its prebuilt toolchain and falls back to a source build when no matching
-archive is available. Registry-side wiring (adding the `bins` URL and SHA to
-`modules/sq/<version>/...` in `envoyproxy/bazel-registry`) happens after the
-first release containing `sq` and is out of scope here.
+Non-Linux exec platforms such as macOS no longer get an automatic toolshed
+source fallback for `@envoy_toolshed//pgp:toolchain_type`. They must opt into a
+source-built signer explicitly as documented below.
 
 Swapping in a different signer (for example a purpose-built Rust signer) is a
 matter of registering another toolchain - the rules do not change:
@@ -168,6 +166,25 @@ toolchain(
     toolchain_type = "@envoy_toolshed//pgp:toolchain_type",
 )
 ```
+
+## Opting into a source-built signer downstream
+
+Downstreams should normally use the default prebuilt signer registered via
+`sq_prebuilt_extension`. A source-built signer is only needed when a downstream
+wants to build `sq` itself (for example on an unsupported exec platform).
+
+```starlark
+bazel_dep(name = "sq", version = "1.4.0.envoy", dev_dependency = True)
+
+sq_source = use_extension("@envoy_toolshed//pgp:extensions.bzl", "sq_source_extension", dev_dependency = True)
+sq_source.setup(sq = "@sq//:sq_from_source")
+use_repo(sq_source, "envoy_toolshed_sq_source")
+register_toolchains("@envoy_toolshed_sq_source//:source_toolchain", dev_dependency = True)
+```
+
+The generated `@envoy_toolshed_sq_source` repo also owns the source packaging
+targets; toolshed re-exports them at stable `bazel-bin/pgp/sq-*.tar.zst` paths
+for its own release CI.
 
 ## Auditing your own targets
 

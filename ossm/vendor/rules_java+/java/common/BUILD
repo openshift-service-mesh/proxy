@@ -37,7 +37,8 @@ bzl_library(
     srcs = ["java_semantics.bzl"],
     visibility = ["//visibility:public"],
     deps = [
-        "@rules_cc//cc/common",
+        "@bazel_features//:features",
+        "@rules_cc//cc/common:cc_helper_bzl",
     ],
 )
 

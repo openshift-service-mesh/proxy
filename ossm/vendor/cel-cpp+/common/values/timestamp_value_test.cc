@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "common/values/timestamp_value.h"
+
 #include <sstream>
 
+#include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/time/time.h"
 #include "common/native_type.h"
@@ -54,6 +57,16 @@ TEST_F(TimestampValueTest, ConvertToJson) {
               IsOk());
   EXPECT_THAT(*message, EqualsValueTextProto(
                             R"pb(string_value: "1970-01-01T00:00:00Z")pb"));
+}
+
+TEST_F(TimestampValueTest, ConvertToJsonOutOfBounds) {
+  auto* message = NewArenaValueMessage();
+  EXPECT_THAT(UnsafeTimestampValue(absl::InfiniteFuture())
+                  .ConvertToJson(descriptor_pool(), message_factory(), message),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+  EXPECT_THAT(UnsafeTimestampValue(absl::InfinitePast())
+                  .ConvertToJson(descriptor_pool(), message_factory(), message),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
 }
 
 TEST_F(TimestampValueTest, NativeTypeId) {

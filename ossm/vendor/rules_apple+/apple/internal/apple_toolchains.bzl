@@ -74,6 +74,12 @@ substitution, merging, and conversion of plist files to binary format.
 The files_to_run for a tool that extracts entitlements from a
 provisioning profile.
 """,
+        "simulator_cleanup": """\
+A `Target` providing the simulator cleanup executable and its runfiles.
+""",
+        "simulator_creator": """\
+A `Target` providing the simulator creation executable and its runfiles.
+""",
         "swift_stdlib_tool": """\
 The files_to_run for a tool that copies and lipos Swift stdlibs required
 for the target to run.
@@ -107,49 +113,37 @@ target name and values are retrieved from the BuildSettingInfo provider for each
 e.g. apple_xplat_tools_toolchaininfo.build_settings.signing_certificate_name
 """,
         "bundletool": """\
-A files_to_run for a tool to create an Apple bundle by taking a list of
+A tool to create an Apple bundle by taking a list of
 files/ZIPs and destinations paths to build the directory structure for those files.
 """,
         "versiontool": """\
-A files_to_run for a tool that acts as a wrapper for xcrun actions.
+A tool that acts as a wrapper for xcrun actions.
 """,
     },
 )
 
-def _shared_attrs():
-    """Private attributes on every rule to provide access to bundling tools and other file deps."""
-    return {
-        "_mac_toolchain": attr.label(
-            default = Label("//apple/internal:mac_tools_toolchain"),
-            providers = [[AppleMacToolsToolchainInfo]],
-            cfg = "exec",
-        ),
-        "_xplat_toolchain": attr.label(
-            default = Label("//apple/internal:xplat_tools_toolchain"),
-            providers = [[AppleXPlatToolsToolchainInfo]],
-            cfg = "exec",
-        ),
-    }
-
 def _apple_mac_tools_toolchain_impl(ctx):
+    mac_tools_info = AppleMacToolsToolchainInfo(
+        dsym_info_plist_template = ctx.file.dsym_info_plist_template,
+        process_and_sign_template = ctx.file.process_and_sign_template,
+        alticonstool = ctx.attr.alticonstool.files_to_run,
+        bundletool_experimental = ctx.attr.bundletool_experimental.files_to_run,
+        codesigningtool = ctx.attr.codesigningtool.files_to_run,
+        dossier_codesigningtool = ctx.attr.dossier_codesigningtool.files_to_run,
+        clangrttool = ctx.attr.clangrttool.files_to_run,
+        main_thread_checker_tool = ctx.attr.main_thread_checker_tool.files_to_run,
+        environment_plist_tool = ctx.attr.environment_plist_tool.files_to_run,
+        imported_dynamic_framework_processor = ctx.attr.imported_dynamic_framework_processor.files_to_run,
+        plisttool = ctx.attr.plisttool.files_to_run,
+        provisioning_profile_tool = ctx.attr.provisioning_profile_tool.files_to_run,
+        simulator_cleanup = ctx.attr.simulator_cleanup,
+        simulator_creator = ctx.attr.simulator_creator,
+        swift_stdlib_tool = ctx.attr.swift_stdlib_tool.files_to_run,
+        xcframework_processor_tool = ctx.attr.xcframework_processor_tool.files_to_run,
+        xctoolrunner = ctx.attr.xctoolrunner.files_to_run,
+    )
     return [
-        AppleMacToolsToolchainInfo(
-            dsym_info_plist_template = ctx.file.dsym_info_plist_template,
-            process_and_sign_template = ctx.file.process_and_sign_template,
-            alticonstool = ctx.attr.alticonstool.files_to_run,
-            bundletool_experimental = ctx.attr.bundletool_experimental.files_to_run,
-            codesigningtool = ctx.attr.codesigningtool.files_to_run,
-            dossier_codesigningtool = ctx.attr.dossier_codesigningtool.files_to_run,
-            clangrttool = ctx.attr.clangrttool.files_to_run,
-            main_thread_checker_tool = ctx.attr.main_thread_checker_tool.files_to_run,
-            environment_plist_tool = ctx.attr.environment_plist_tool.files_to_run,
-            imported_dynamic_framework_processor = ctx.attr.imported_dynamic_framework_processor.files_to_run,
-            plisttool = ctx.attr.plisttool.files_to_run,
-            provisioning_profile_tool = ctx.attr.provisioning_profile_tool.files_to_run,
-            swift_stdlib_tool = ctx.attr.swift_stdlib_tool.files_to_run,
-            xcframework_processor_tool = ctx.attr.xcframework_processor_tool.files_to_run,
-            xctoolrunner = ctx.attr.xctoolrunner.files_to_run,
-        ),
+        platform_common.ToolchainInfo(mac_tools_info = mac_tools_info),
         DefaultInfo(),
     ]
 
@@ -163,7 +157,7 @@ A `File` referencing a tool to insert alternate icons entries in the app bundle'
 """,
         ),
         "bundletool_experimental": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = """
 A `File` referencing an experimental tool to create an Apple bundle by combining the bundling,
@@ -171,17 +165,17 @@ post-processing, and signing steps into a single action that eliminates the arch
 """,
         ),
         "clangrttool": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = "A `File` referencing a tool to find all Clang runtime libs linked to a binary.",
         ),
         "codesigningtool": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = "A `File` referencing a tool to assist in signing bundles.",
         ),
         "dossier_codesigningtool": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = "A `File` referencing a tool to assist in generating signing dossiers.",
         ),
@@ -191,7 +185,7 @@ post-processing, and signing steps into a single action that eliminates the arch
             doc = "A `File` referencing a plist template for dSYM bundles.",
         ),
         "environment_plist_tool": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = """
 A `File` referencing a tool to collect data from the development environment to be record into
@@ -199,7 +193,7 @@ final bundles.
 """,
         ),
         "imported_dynamic_framework_processor": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = """
 A `File` referencing a tool to process an imported dynamic framework such that the given framework
@@ -209,12 +203,12 @@ artifact.
 """,
         ),
         "main_thread_checker_tool": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = "A `File` referencing a tool to find libMainThreadChecker.dylib linked to a binary.",
         ),
         "plisttool": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = """
 A `File` referencing a tool to perform plist operations such as variable substitution, merging, and
@@ -226,21 +220,31 @@ conversion of plist files to binary format.
             doc = "A `File` referencing a template for a shell script to process and sign.",
         ),
         "provisioning_profile_tool": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = """
 A `File` referencing a tool that extracts entitlements from a provisioning profile.
 """,
         ),
+        "simulator_cleanup": attr.label(
+            cfg = "exec",
+            executable = True,
+            doc = "A `Target` providing the simulator cleanup executable and its runfiles.",
+        ),
+        "simulator_creator": attr.label(
+            cfg = "exec",
+            executable = True,
+            doc = "A `Target` providing the simulator creation executable and its runfiles.",
+        ),
         "swift_stdlib_tool": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = """
 A `File` referencing a tool that copies and lipos Swift stdlibs required for the target to run.
 """,
         ),
         "xcframework_processor_tool": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = """
 A `File` referencing a tool that extracts and copies an XCFramework library for a given target
@@ -248,7 +252,7 @@ triplet.
 """,
         ),
         "xctoolrunner": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = "A `File` referencing a tool that acts as a wrapper for xcrun actions.",
         ),
@@ -257,18 +261,25 @@ triplet.
     implementation = _apple_mac_tools_toolchain_impl,
 )
 
+APPLE_XPLAT_TOOLCHAIN_TYPE = "//apple/internal:apple_xplat_toolchain_type"
+APPLE_XPLAT_EXEC_GROUP = "_xplat_tool_group"
+APPLE_MAC_TOOLCHAIN_TYPE = "//apple/internal:mac_tools_toolchain_type"
+APPLE_MAC_EXEC_GROUP = "_mac_tool_group"
+
 def _apple_xplat_tools_toolchain_impl(ctx):
-    return [
-        AppleXPlatToolsToolchainInfo(
-            build_settings = struct(
-                **{
-                    build_setting.label.name: build_setting[BuildSettingInfo].value
-                    for build_setting in ctx.attr.build_settings
-                }
-            ),
-            bundletool = ctx.attr.bundletool.files_to_run,
-            versiontool = ctx.attr.versiontool.files_to_run,
+    xplat_info = AppleXPlatToolsToolchainInfo(
+        build_settings = struct(
+            **{
+                build_setting.label.name: build_setting[BuildSettingInfo].value
+                for build_setting in ctx.attr.build_settings
+            }
         ),
+        bundletool = ctx.attr.bundletool,
+        versiontool = ctx.attr.versiontool,
+    )
+
+    return [
+        platform_common.ToolchainInfo(xplat_tools_info = xplat_info),
         DefaultInfo(),
     ]
 
@@ -282,7 +293,7 @@ List of `Label`s referencing custom build settings for all Apple rules.
 """,
         ),
         "bundletool": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = """
 A `File` referencing a tool to create an Apple bundle by taking a list of files/ZIPs and destination
@@ -290,7 +301,7 @@ paths to build the directory structure for those files.
 """,
         ),
         "versiontool": attr.label(
-            cfg = "target",
+            cfg = "exec",
             executable = True,
             doc = """
 A `File` referencing a tool for extracting version info from builds.
@@ -301,7 +312,49 @@ A `File` referencing a tool for extracting version info from builds.
     implementation = _apple_xplat_tools_toolchain_impl,
 )
 
+def _get_mac_toolchain(ctx):
+    return ctx.exec_groups[APPLE_MAC_EXEC_GROUP].toolchains[APPLE_MAC_TOOLCHAIN_TYPE].mac_tools_info
+
+def _get_mac_exec_group(_ctx):
+    return APPLE_MAC_EXEC_GROUP
+
+def _get_xplat_toolchain(ctx):
+    return ctx.exec_groups[APPLE_XPLAT_EXEC_GROUP].toolchains[APPLE_XPLAT_TOOLCHAIN_TYPE].xplat_tools_info
+
+def _get_xplat_exec_group(_ctx):
+    return APPLE_XPLAT_EXEC_GROUP
+
+def _use_apple_exec_group_toolchain():
+    """
+    Helper to depend on the All Apple toolchains through exec_groups.
+
+    Usage:
+    ```
+    my_rule = rule(
+        exec_groups = {other exec_groups} |
+                      apple_toolchain_utils.use_apple_exec_group_toolchain(),
+    )
+    ```
+    Returns:
+      A dict that can be used as the value for `rule.exec_groups`.
+    """
+    groups = {
+        APPLE_XPLAT_EXEC_GROUP: exec_group(
+            toolchains = [config_common.toolchain_type(APPLE_XPLAT_TOOLCHAIN_TYPE)],
+        ),
+        APPLE_MAC_EXEC_GROUP: exec_group(
+            exec_compatible_with = ["@platforms//os:macos"],
+            toolchains = [config_common.toolchain_type(APPLE_MAC_TOOLCHAIN_TYPE)],
+        ),
+    }
+
+    return groups
+
 # Define the loadable module that lists the exported symbols in this file.
 apple_toolchain_utils = struct(
-    shared_attrs = _shared_attrs,
+    get_mac_toolchain = _get_mac_toolchain,
+    get_mac_exec_group = _get_mac_exec_group,
+    get_xplat_toolchain = _get_xplat_toolchain,
+    get_xplat_exec_group = _get_xplat_exec_group,
+    use_apple_exec_group_toolchain = _use_apple_exec_group_toolchain,
 )

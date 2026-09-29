@@ -15,13 +15,18 @@
 """Texture atlas related actions."""
 
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
+    "@apple_support//lib:apple_support.bzl",
     "apple_support",
+)
+load(
+    "//apple/internal:shared_environment.bzl",
+    "shared_environment",
 )
 
 def compile_texture_atlas(
         *,
         actions,
+        mac_exec_group,
         input_files,
         input_path,
         output_dir,
@@ -32,17 +37,20 @@ def compile_texture_atlas(
       actions: The actions provider from `ctx.actions`.
       input_files: The atlas file inputs that will be compiled.
       input_path: The path to the .atlas directory to compile.
+      mac_exec_group: The execution group for Mac tools.
       output_dir: The file reference for the compiled output directory.
       platform_prerequisites: Struct containing information on the platform being targeted.
     """
     apple_support.run(
         actions = actions,
         apple_fragment = platform_prerequisites.apple_fragment,
+        env = shared_environment.default_env,
         arguments = [
             "TextureAtlas",
             input_path,
             output_dir.path,
         ],
+        exec_group = mac_exec_group,
         executable = "/usr/bin/xcrun",
         inputs = input_files,
         mnemonic = "CompileTextureAtlas",

@@ -26,7 +26,6 @@ enum QUICHE_EXPORT MoqtError : uint64_t {
   kInvalidRequestId = 0x4,
   kDuplicateTrackAlias = 0x5,
   kKeyValueFormattingError = 0x6,
-  kTooManyRequests = 0x7,
   kInvalidPath = 0x8,
   kMalformedPath = 0x9,
   kGoawayTimeout = 0x10,
@@ -76,6 +75,7 @@ enum class QUICHE_EXPORT RequestErrorCode : uint64_t {
   kNamespacePrefixUnknown = 0x21,
   kPrefixOverlap = 0x30,
   kInvalidJoiningRequestId = 0x32,
+  kUnsupportedExtension = 0x33,
 };
 
 enum class QUICHE_EXPORT PublishDoneCode : uint64_t {
@@ -101,9 +101,11 @@ RequestErrorCode StatusToRequestErrorCode(absl::Status status);
 absl::StatusCode RequestErrorCodeToStatusCode(RequestErrorCode error_code);
 absl::Status RequestErrorCodeToStatus(RequestErrorCode error_code,
                                       absl::string_view reason_phrase);
+MoqtRequestErrorInfo StatusToMoqtRequestError(absl::Status status);
 
 absl::Status MoqtStreamErrorToStatus(webtransport::StreamErrorCode error_code,
                                      absl::string_view reason_phrase);
+webtransport::StreamErrorCode StatusToMoqtStreamError(absl::Status status);
 
 }  // namespace moqt
 

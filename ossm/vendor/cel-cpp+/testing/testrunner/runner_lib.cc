@@ -23,7 +23,6 @@
 #include "cel/expr/eval.pb.h"
 #include "absl/functional/overload.h"
 #include "absl/status/status.h"
-#include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
@@ -39,6 +38,7 @@
 #include "internal/status_macros.h"
 #include "internal/testing.h"
 #include "runtime/activation.h"
+#include "runtime/activation_interface.h"
 #include "runtime/runtime.h"
 #include "testing/testrunner/cel_expression_source.h"
 #include "testing/testrunner/cel_test_context.h"
@@ -120,7 +120,7 @@ google::protobuf::MessageFactory* GetMessageFactory(const CelTestContext& contex
 
 absl::StatusOr<cel::Value> EvalWithModernBindings(
     const CheckedExpr& checked_expr, const CelTestContext& context,
-    const cel::Activation& activation, google::protobuf::Arena* arena) {
+    const cel::ActivationInterface& activation, google::protobuf::Arena* arena) {
   CEL_ASSIGN_OR_RETURN(std::unique_ptr<cel::Program> program,
                        Plan(checked_expr, context.runtime()));
   return program->Evaluate(arena, activation);
@@ -205,25 +205,37 @@ absl::Status AddTestCaseBindingsToModernActivation(
   return absl::OkStatus();
 }
 
-absl::StatusOr<cel::Activation> GetActivation(const CelTestContext& context,
-                                              const TestCase& test_case,
-                                              google::protobuf::Arena* arena) {
+absl::StatusOr<std::unique_ptr<cel::ActivationInterface>> GetActivation(
+    const CelTestContext& context, const TestCase& test_case,
+    google::protobuf::Arena* arena) {
   if (context.activation_factory() != nullptr) {
     return context.activation_factory()(test_case, arena);
   }
-  return cel::Activation();
+  return std::make_unique<cel::Activation>();
 }
 
-absl::StatusOr<cel::Activation> CreateModernActivationFromBindings(
-    const TestCase& test_case, const CelTestContext& context,
-    google::protobuf::Arena* arena) {
-  CEL_ASSIGN_OR_RETURN(cel::Activation activation,
+absl::StatusOr<std::unique_ptr<cel::ActivationInterface>>
+CreateModernActivationFromBindings(const TestCase& test_case,
+                                   const CelTestContext& context,
+                                   google::protobuf::Arena* arena) {
+  CEL_ASSIGN_OR_RETURN(std::unique_ptr<cel::ActivationInterface> activation,
                        GetActivation(context, test_case, arena));
-  CEL_RETURN_IF_ERROR(
-      AddCustomBindingsToModernActivation(context, activation, arena));
 
-  CEL_RETURN_IF_ERROR(AddTestCaseBindingsToModernActivation(test_case, context,
-                                                            activation, arena));
+  const bool has_custom_bindings =
+      !context.custom_bindings().empty() || !test_case.input().empty();
+  if (has_custom_bindings) {
+    auto* cel_activation = dynamic_cast<cel::Activation*>(activation.get());
+    if (cel_activation == nullptr) {
+      return absl::InvalidArgumentError(
+          "Custom bindings or test case input bindings cannot be combined with "
+          "a custom cel::ActivationInterface implementation returned by "
+          "activation_factory.");
+    }
+    CEL_RETURN_IF_ERROR(
+        AddCustomBindingsToModernActivation(context, *cel_activation, arena));
+    CEL_RETURN_IF_ERROR(AddTestCaseBindingsToModernActivation(
+        test_case, context, *cel_activation, arena));
+  }
 
   return activation;
 }
@@ -362,9 +374,9 @@ absl::StatusOr<cel::Value> TestRunner::EvalWithRuntime(
     const CheckedExpr& checked_expr, const TestCase& test_case,
     google::protobuf::Arena* arena) {
   CEL_ASSIGN_OR_RETURN(
-      cel::Activation activation,
+      std::unique_ptr<cel::ActivationInterface> activation,
       CreateModernActivationFromBindings(test_case, *test_context_, arena));
-  return EvalWithModernBindings(checked_expr, *test_context_, activation,
+  return EvalWithModernBindings(checked_expr, *test_context_, *activation,
                                 arena);
 }
 

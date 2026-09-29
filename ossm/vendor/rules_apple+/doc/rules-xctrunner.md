@@ -8,6 +8,8 @@ platform and architectures as the given `tests` bundles.
 ## xctrunner
 
 <pre>
+load("@rules_apple//apple:xctrunner.bzl", "xctrunner")
+
 xctrunner(<a href="#xctrunner-name">name</a>, <a href="#xctrunner-tests">tests</a>, <a href="#xctrunner-verbose">verbose</a>)
 </pre>
 
@@ -22,7 +24,7 @@ load("//apple:xctrunner.bzl", "xctrunner")
 ios_ui_test(
     name = "HelloWorldSwiftUITests",
     minimum_os_version = "15.0",
-    runner = "@build_bazel_rules_apple//apple/testing/default_runner:ios_xctestrun_ordered_runner",
+    runner = "@rules_apple//apple/testing/default_runner:ios_xctestrun_ordered_runner",
     test_host = ":HelloWorldSwift",
     deps = [":UITests"],
 )

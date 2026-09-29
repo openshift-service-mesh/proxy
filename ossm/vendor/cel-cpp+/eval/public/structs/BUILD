@@ -325,6 +325,7 @@ cc_test(
         ":proto_message_type_adapter",
         "//base:attributes",
         "//common:value",
+        "//common:value_testing",
         "//eval/public:cel_value",
         "//eval/public:message_wrapper",
         "//eval/public/containers:container_backed_list_impl",
@@ -365,10 +366,15 @@ cc_test(
     deps = [
         ":legacy_type_info_apis",
         ":protobuf_descriptor_type_provider",
+        "//common:type",
         "//eval/public:cel_value",
         "//eval/public/testing:matchers",
         "//extensions/protobuf:memory_manager",
         "//internal:testing",
+        "//internal:testing_descriptor_pool",
+        "//internal:testing_message_factory",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_cel_spec//proto/cel/expr/conformance/proto3:test_all_types_cc_proto",
         "@com_google_protobuf//:protobuf",
         "@com_google_protobuf//:wrappers_cc_proto",
     ],
@@ -414,7 +420,9 @@ cc_test(
     deps = [
         ":legacy_type_info_apis",
         ":legacy_type_provider",
+        "//common:type",
         "//internal:testing",
+        "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/strings:string_view",
     ],
 )
@@ -439,6 +447,26 @@ cc_test(
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
         "@com_google_cel_spec//proto/cel/expr/conformance/proto3:test_all_types_cc_proto",
         "@com_google_protobuf//:differencer",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "field_access_impl_benchmark_test",
+    srcs = ["field_access_impl_benchmark_test.cc"],
+    tags = [
+        "benchmark",
+        "manual",
+    ],
+    deps = [
+        ":cel_proto_wrapper",
+        ":field_access_impl",
+        "//eval/public:cel_options",
+        "//eval/public:cel_value",
+        "//extensions/protobuf/internal:map_reflection",
+        "//internal:benchmark",
+        "//internal:testing",
+        "@com_google_cel_spec//proto/cel/expr/conformance/proto3:test_all_types_cc_proto",
         "@com_google_protobuf//:protobuf",
     ],
 )

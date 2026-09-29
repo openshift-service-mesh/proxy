@@ -92,13 +92,32 @@ TEST_F(MoqtSubscribeRequestStreamTest, ReceiveSubscribeOk) {
   EXPECT_CALL(mock_add_callback_, Call(stream_->track()))
       .WillOnce(Return(true));
   EXPECT_CALL(mock_subscribe_visitor_, OnReply(track_name_, _));
-  MoqtSubscribeOk subscribe_ok;
-  subscribe_ok.request_id = kRequestId;
-  subscribe_ok.track_alias = kTrackAlias;
+  MoqtSubscribeOk subscribe_ok(kTrackAlias);
   QUICHE_EXPECT_OK(stream_->OnControlMessage(subscribe_ok));
   EXPECT_EQ(stream_->track()->track_alias(), kTrackAlias);
   // Test cleanup.
   EXPECT_CALL(mock_remove_callback_, Call);
+}
+
+TEST_F(MoqtSubscribeRequestStreamTest,
+       ReceiveSubscribeOkWithUnknownMandatoryProperty) {
+  EXPECT_CALL(mock_stream_,
+              Writev(ControlMessageOfType(MoqtMessageType::kSubscribe), _))
+      .WillOnce(Return(absl::OkStatus()));
+  stream_->BindStream(&mock_stream_);
+  EXPECT_CALL(mock_add_callback_, Call).Times(0);
+  EXPECT_CALL(mock_stream_, ResetWithUserCode(kResetCodeCancelled));
+  EXPECT_CALL(mock_remove_callback_, Call);
+  EXPECT_CALL(
+      mock_subscribe_visitor_,
+      OnReply(track_name_,
+              testing::VariantWith<MoqtRequestErrorInfo>(
+                  MoqtRequestErrorInfo{RequestErrorCode::kUnsupportedExtension,
+                                       /*retry_interval=*/std::nullopt,
+                                       "Unknown mandatory property: 0x4000"})));
+  MoqtSubscribeOk subscribe_ok(kTrackAlias);
+  subscribe_ok.properties.insert(kMinMandatoryTrackProperty, 1ULL);
+  QUICHE_EXPECT_OK(stream_->OnControlMessage(subscribe_ok));
 }
 
 TEST_F(MoqtSubscribeRequestStreamTest, ReceiveSubscribeOkAliasDuplicate) {
@@ -109,9 +128,7 @@ TEST_F(MoqtSubscribeRequestStreamTest, ReceiveSubscribeOkAliasDuplicate) {
   EXPECT_CALL(mock_add_callback_, Call(stream_->track()))
       .WillOnce(Return(false));
   EXPECT_CALL(error_callback_, Call(MoqtError::kDuplicateTrackAlias, _));
-  MoqtSubscribeOk subscribe_ok;
-  subscribe_ok.request_id = kRequestId;
-  subscribe_ok.track_alias = kTrackAlias;
+  MoqtSubscribeOk subscribe_ok(kTrackAlias);
   QUICHE_EXPECT_OK(stream_->OnControlMessage(subscribe_ok));
   // Test cleanup.
   EXPECT_CALL(mock_remove_callback_, Call);
@@ -124,8 +141,27 @@ TEST_F(MoqtSubscribeRequestStreamTest, RequestOkBeforeSubscribeOk) {
   stream_->BindStream(&mock_stream_);
   EXPECT_CALL(error_callback_, Call(MoqtError::kProtocolViolation, _));
   MoqtRequestOk request_ok;
-  request_ok.request_id = kRequestId;
   request_ok.parameters.expires = quic::QuicTimeDelta::FromSeconds(30);
+  QUICHE_EXPECT_OK(stream_->OnControlMessage(request_ok));
+  // Test cleanup.
+  EXPECT_CALL(mock_remove_callback_, Call);
+}
+
+TEST_F(MoqtSubscribeRequestStreamTest, RequestOkWithProperties) {
+  EXPECT_CALL(mock_stream_,
+              Writev(ControlMessageOfType(MoqtMessageType::kSubscribe), _))
+      .WillOnce(Return(absl::OkStatus()));
+  stream_->BindStream(&mock_stream_);
+  EXPECT_CALL(mock_add_callback_, Call(stream_->track()))
+      .WillOnce(Return(true));
+  EXPECT_CALL(mock_subscribe_visitor_, OnReply(track_name_, _));
+  MoqtSubscribeOk subscribe_ok(kTrackAlias);
+  QUICHE_EXPECT_OK(stream_->OnControlMessage(subscribe_ok));
+  EXPECT_CALL(error_callback_, Call(MoqtError::kProtocolViolation, _));
+  MoqtRequestOk request_ok(
+      MessageParameters(),
+      TrackProperties(quic::QuicTimeDelta::FromSeconds(5), std::nullopt,
+                      std::nullopt, std::nullopt, std::nullopt, std::nullopt));
   QUICHE_EXPECT_OK(stream_->OnControlMessage(request_ok));
   // Test cleanup.
   EXPECT_CALL(mock_remove_callback_, Call);
@@ -140,9 +176,7 @@ TEST_F(MoqtSubscribeRequestStreamTest, ReceiveRequestOk) {
   EXPECT_CALL(mock_add_callback_, Call(stream_->track()))
       .WillOnce(Return(true));
   EXPECT_CALL(mock_subscribe_visitor_, OnReply(track_name_, _));
-  MoqtSubscribeOk subscribe_ok;
-  subscribe_ok.request_id = kRequestId;
-  subscribe_ok.track_alias = kTrackAlias;
+  MoqtSubscribeOk subscribe_ok(kTrackAlias);
   QUICHE_EXPECT_OK(stream_->OnControlMessage(subscribe_ok));
   // REQUEST_UPDATE.
   EXPECT_CALL(mock_stream_,
@@ -163,7 +197,6 @@ TEST_F(MoqtSubscribeRequestStreamTest, ReceiveRequestOk) {
   EXPECT_EQ(stream_->track()->const_parameters().subscriber_priority,
             std::nullopt);
   MoqtRequestOk request_ok;
-  request_ok.request_id = kRequestId;
   request_ok.parameters.expires = quic::QuicTimeDelta::FromSeconds(30);
   QUICHE_EXPECT_OK(stream_->OnControlMessage(request_ok));
   EXPECT_EQ(stream_->track()->const_parameters().subscriber_priority, 20);
@@ -179,21 +212,19 @@ TEST_F(MoqtSubscribeRequestStreamTest, ReceiveRequestError) {
               Writev(ControlMessageOfType(MoqtMessageType::kSubscribe), _))
       .WillOnce(Return(absl::OkStatus()));
   stream_->BindStream(&mock_stream_);
+  MoqtRequestError request_error(RequestErrorCode::kUnauthorized, std::nullopt,
+                                 "unauthorized");
   EXPECT_CALL(mock_subscribe_visitor_, OnReply(track_name_, _))
-      .WillOnce(
-          [](const FullTrackName&,
-             const std::variant<SubscribeOkData, MoqtRequestErrorInfo>& reply) {
-            ASSERT_TRUE(std::holds_alternative<MoqtRequestErrorInfo>(reply));
-            EXPECT_EQ(std::get<MoqtRequestErrorInfo>(reply).error_code,
-                      RequestErrorCode::kUnauthorized);
-          });
+      .WillOnce([err = request_error](
+                    const FullTrackName&,
+                    const std::variant<SubscribeOkData, MoqtRequestErrorInfo>&
+                        reply) {
+        ASSERT_TRUE(std::holds_alternative<MoqtRequestErrorInfo>(reply));
+        EXPECT_EQ(std::get<MoqtRequestErrorInfo>(reply), err);
+      });
   EXPECT_CALL(mock_stream_, Writev(testing::IsEmpty(), _))
       .WillOnce(Return(absl::OkStatus()));
   EXPECT_CALL(mock_remove_callback_, Call);
-  MoqtRequestError request_error;
-  request_error.request_id = kRequestId;
-  request_error.error_code = RequestErrorCode::kUnauthorized;
-  request_error.reason_phrase = "unauthorized";
   QUICHE_EXPECT_OK(stream_->OnControlMessage(request_error));
 }
 

@@ -240,12 +240,15 @@ cc_library(
         "//internal:status_macros",
         "//internal:time",
         "//internal:utf8",
+        "//runtime:function",
         "//runtime:function_registry",
         "//runtime:runtime_options",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
+        "@com_google_protobuf//:protobuf",
     ],
 )
 
@@ -368,6 +371,7 @@ cc_library(
         "//base:builtins",
         "//base:function_adapter",
         "//common:value",
+        "//internal:re2_options",
         "//internal:status_macros",
         "//runtime:function_registry",
         "//runtime:runtime_options",

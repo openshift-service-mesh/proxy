@@ -76,20 +76,9 @@ You only need this in the case you want to setup fallback profiles, otherwise
 it can be ommitted when using bzlmod.
 
 ```bzl
-provisioning_profile_repository = use_extension("@build_bazel_rules_apple//apple:apple.bzl", "provisioning_profile_repository_extension")
+provisioning_profile_repository = use_extension("@rules_apple//apple:apple.bzl", "provisioning_profile_repository_extension")
 provisioning_profile_repository.setup(
     fallback_profiles = "//path/to/some:filegroup", # Profiles to use if one isn't found locally
-)
-```
-
-### In your `WORKSPACE` file:
-
-```starlark
-load("//apple:apple.bzl", "provisioning_profile_repository")
-
-provisioning_profile_repository(
-    name = "local_provisioning_profiles",
-    fallback_profiles = "//path/to/some:filegroup", # Optional profiles to use if one isn't found locally
 )
 ```
 
@@ -131,6 +120,8 @@ def _provisioning_profile_repository_extension(module_ctx):
         name = "local_provisioning_profiles",
         **kwargs
     )
+
+    return module_ctx.extension_metadata(reproducible = True)
 
 provisioning_profile_repository_extension = module_extension(
     implementation = _provisioning_profile_repository_extension,

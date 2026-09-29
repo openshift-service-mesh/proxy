@@ -14,14 +14,54 @@
 
 """List of Bazel's rules_apple build settings."""
 
-# List of all registered build settings at `rules_apple/apple/build_settings/BUILD`.
-build_settings = {
+load("@bazel_skylib//lib:dicts.bzl", "dicts")
+
+# List of all registered build settings with command line flags at
+# `rules_apple/apple/build_settings/BUILD`.
+build_flags = {
     "parse_xcframework_info_plist": struct(
         doc = """
 Configuration for enabling XCFramework import rules use the xcframework_processor_tool to
 parse the XCFramework bundle Info.plist file. See apple/internal/apple_xcframework_import.bzl
 """,
         default = False,
+    ),
+    "disable_swift_stdlib_binary_thinning": struct(
+        doc = """
+Disables binary thinning for Swift stdlib binaries, matching the most recent Xcode handling for
+Swift support dylibs.
+""",
+        default = False,
+    ),
+    "package_swift_support": struct(
+        doc = """
+Packages Swift support dylibs into device application archives.
+""",
+        default = True,
+    ),
+    "locales_to_exclude": struct(
+        doc = """
+Comma-separated locales to exclude from Apple bundle resources.
+""",
+        default = "",
+    ),
+    "locales_to_include": struct(
+        doc = """
+Comma-separated locales to include in Apple bundle resources.
+""",
+        default = "",
+    ),
+    "thin_for_device_model": struct(
+        doc = """
+A target device model string (e.g. 'iPhone14,6') used to thin the application via actool.
+""",
+        default = "",
+    ),
+    "thin_for_os_version": struct(
+        doc = """
+A target OS version string (e.g. '15.0') used to thin the application via actool.
+""",
+        default = "",
     ),
     # TODO(b/252873771): Clean up all usages of --ios_signing_cert_name and replace them with this
     # new custom build setting.
@@ -38,24 +78,70 @@ Enables Bazel's tree artifacts for Apple bundle rules (instead of archives).
 """,
         default = False,
     ),
+    "trim_lproj_locales": struct(
+        doc = """
+Trims nested .lproj localizations based on the top-level bundle localizations.
+""",
+        default = False,
+    ),
     "ios_device": struct(
         doc = """
 The identifier, ECID, serial number, UDID, user-provided name, or DNS name
 of the device for running an iOS application.
-You can get a list of devices by running 'xcrun devicectl list devices`.
+
+You can get a list of devices by running `xcrun devicectl list devices` (for
+physical devices) or `xcrun simctl list devices` (for simulators).
 """,
         default = "",
     ),
+    "ios_simulator_device": struct(
+        doc = """
+The device type to use when running an iOS application or test in the simulator.
+""",
+        default = "",
+    ),
+    "ios_simulator_version": struct(
+        doc = """
+The version of iOS to run on the simulator when running or testing.
+""",
+        default = "",
+    ),
+    "add_debugger_entitlement": struct(
+        doc = """
+Controls whether debug entitlements are added to non-macOS targets.
+""",
+        default = False,
+    ),
 }
 
-_BUILD_SETTING_LABELS = {
-    build_setting_name: str(Label("//apple/build_settings:{target_name}".format(
-        target_name = build_setting_name,
-    )))
-    for build_setting_name in build_settings
+# List of all registered build settings without command line flags at
+# `rules_apple/apple/build_settings/BUILD`.
+build_settings = {
+    "enable_wip_features": struct(
+        doc = """
+Enables functionality that is still a work in progress, with interfaces and output that can change
+at any time, that is only ready for automated testing now.
+
+This could indicate functionality intended for a future release of the Apple BUILD rules, or
+functionality that is never intended to be production-ready but is required of automated testing.
+""",
+        default = False,
+    ),
 }
+
+_all_build_settings = dicts.add(build_settings, build_flags)
 
 build_settings_labels = struct(
-    all_labels = _BUILD_SETTING_LABELS.values(),
-    **_BUILD_SETTING_LABELS
+    all_labels = [
+        str(Label("//apple/build_settings:{target_name}".format(
+            target_name = build_setting_name,
+        )))
+        for build_setting_name in _all_build_settings
+    ],
+    **{
+        build_setting_name: str(Label("//apple/build_settings:{target_name}".format(
+            target_name = build_setting_name,
+        )))
+        for build_setting_name in _all_build_settings
+    }
 )
