@@ -1,4 +1,5 @@
 # Sourced by build.sh / release.sh; not meant to be executed directly.
+# CI validation
 
 # Validate SOURCE_REPO is a github.com HTTPS URL (prevents shell injection and SSRF)
 if [[ ! "${SOURCE_REPO}" =~ ^https://github\.com/[a-zA-Z0-9_.\-]+/[a-zA-Z0-9_.\-]+\.git$ ]]; then
