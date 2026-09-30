@@ -6,6 +6,7 @@ load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -18,9 +19,19 @@ cc_test(
     srcs = [
         "benchmark_test.cc",
     ],
-    tags = ["benchmark"],
+    copts = CEL_COPTS,
+    tags = [
+        "benchmark",
+        "manual",
+    ],
     deps = [
         ":request_context_cc_proto",
+        "//common:ast_proto",
+        "//common:decl",
+        "//common:type",
+        "//compiler",
+        "//compiler:compiler_factory",
+        "//compiler:standard_library",
         "//eval/public:activation",
         "//eval/public:builtin_func_registrar",
         "//eval/public:cel_expr_builder_factory",
@@ -39,6 +50,7 @@ cc_test(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:node_hash_set",
         "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/strings",
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
         "@com_google_googleapis//google/rpc/context:attribute_context_cc_proto",
@@ -52,25 +64,31 @@ cc_test(
     srcs = [
         "modern_benchmark_test.cc",
     ],
-    tags = ["benchmark"],
+    copts = CEL_COPTS,
+    tags = [
+        "benchmark",
+        "manual",
+    ],
     deps = [
         ":request_context_cc_proto",
+        "//checker:validation_result",
         "//common:allocator",
         "//common:casting",
+        "//common:decl",
         "//common:legacy_value",
-        "//common:memory",
         "//common:native_type",
+        "//common:type",
         "//common:value",
+        "//compiler",
+        "//compiler:compiler_factory",
+        "//compiler:standard_library",
         "//extensions:comprehensions_v2_functions",
         "//extensions:comprehensions_v2_macros",
         "//extensions/protobuf:runtime_adapter",
-        "//extensions/protobuf:value",
         "//internal:benchmark",
         "//internal:testing",
         "//internal:testing_descriptor_pool",
-        "//internal:testing_message_factory",
         "//parser",
-        "//parser:macro",
         "//parser:macro_registry",
         "//runtime",
         "//runtime:activation",
@@ -88,7 +106,6 @@ cc_test(
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:optional",
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
         "@com_google_googleapis//google/rpc/context:attribute_context_cc_proto",
         "@com_google_protobuf//:protobuf",
@@ -102,7 +119,11 @@ cc_test(
     srcs = [
         "allocation_benchmark_test.cc",
     ],
-    tags = ["benchmark"],
+    copts = CEL_COPTS,
+    tags = [
+        "benchmark",
+        "manual",
+    ],
     deps = [
         ":request_context_cc_proto",
         "//eval/public:activation",
@@ -126,6 +147,7 @@ cc_test(
     srcs = [
         "memory_safety_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public:activation",
         "//eval/public:builtin_func_registrar",
@@ -151,7 +173,11 @@ cc_test(
     srcs = [
         "expression_builder_benchmark_test.cc",
     ],
-    tags = ["benchmark"],
+    copts = CEL_COPTS,
+    tags = [
+        "benchmark",
+        "manual",
+    ],
     deps = [
         ":request_context_cc_proto",
         "//common:minimal_descriptor_pool",
@@ -179,6 +205,7 @@ cc_test(
     srcs = [
         "end_to_end_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public:activation",
         "//eval/public:builtin_func_registrar",
@@ -203,6 +230,7 @@ cc_test(
     srcs = [
         "unknowns_end_to_end_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//base:attributes",
         "//base:function_result",
@@ -250,6 +278,7 @@ cc_library(
     name = "mock_cel_expression",
     testonly = 1,
     hdrs = ["mock_cel_expression.h"],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public:base_activation",
         "//eval/public:cel_expression",

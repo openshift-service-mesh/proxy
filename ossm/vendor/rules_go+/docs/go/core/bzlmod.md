@@ -34,6 +34,9 @@ go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
 # platforms, using the version given from the `go.mod` file.
 go_sdk.from_file(go_mod = "//:go.mod")
 
+# Alternatively, use the version from a `go.work` file.
+go_sdk.from_file(go_work = "//:go.work")
+
 # Download an SDK for the host OS & architecture as well as common remote execution
 # platforms, with a specific version.
 go_sdk.download(version = "1.23.1")
@@ -52,6 +55,10 @@ go_sdk.host()
 Nota bene: The use of `go_sdk.host()` [may break builds](https://github.com/enola-dev/enola/issues/713) whenever the host Go version is upgraded
 (because many OS package managers, such as Debian/Ubuntu's `apt`, distribute Go into a directory which contains the version, such as `/usr/lib/go-1.22/`).
 As package upgrades happen outside of Bazel's control, this will lead to non-reproducible builds. Due to this, use of `go_sdk.host()` is discouraged.
+
+When using `go_sdk.from_file()`, exactly one of `go_mod` or `go_work` must be specified.
+Version extraction follows the same precedence for both file types: the `toolchain` directive takes precedence
+over the `go` directive. If neither directive is present, rules_go selects its minimum supported SDK, Go 1.20.
 
 You can register multiple Go SDKs and select which one to use on a per-target basis using [`go_cross_binary`](rules.md#go_cross_binary).
 As long as you specify the `version` of an SDK, it will be downloaded lazily, that is, only when it is actually needed during a particular build.
@@ -191,7 +198,32 @@ Limitations:
 -   `go.work` is supported exclusively in the root module.
 -   Dependencies that are indirect and depend on a go module specified in `go.work` will have that dependency diverge from the one in `go.work`. More details can be found here: https://github.com/bazelbuild/bazel-gazelle/issues/1797.
 
-#### Depending on tools
+#### Depending on tools (Go 1.24+)
+
+Go 1.24 introduced the [`tool` directive](https://tip.golang.org/doc/go1.24#tools), allowing you to specify tool dependencies directly in your `go.mod` like so:
+```sh
+bazel run @rules_go//go -- get -tool golang.org/x/tools/cmd/stringer
+```
+
+This will add a `tool` section in your `go.mod`:
+```
+tool golang.org/x/tools/cmd/stringer
+```
+as well as adding that tool as a dependency.
+
+If you are using Gazelle >=0.47.0, then the tools you have added are exported as a dictionary named `GO_TOOLS` from `@gazelle//:go_tools.bzl`. This dictionary is in a suitable format for use by [`bazel_env.bzl`](https://github.com/buildbuddy-io/bazel_env.bzl), so you should be able to do the following to get all your repository’s tools into a `bazel_env` target:
+```starlark
+load("@bazel_env.bzl", "bazel_env")
+load("@gazelle//:go_tools.bzl", "GO_TOOLS")
+bazel_env(
+    name = "env",
+    tools = {
+        // […]
+    } | GO_TOOLS,
+)
+```
+
+#### Depending on tools (pre Go 1.24)
 
 If you need to depend on Go modules that are only used as tools, you can use the [`tools.go` technique](https://github.com/golang/go/issues/25922#issuecomment-1038394599):
 

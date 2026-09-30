@@ -877,9 +877,4 @@ PNPM_VERSIONS = {
     "10.11.1": "sha512-5Rm592OYadyNXDxd/vc7PwkQlLCgBtcxc1PHKxJOgOGv1ClzLihwWta/oe6HnB/ORsEozOvTGSEB9D3WfGZ5Eg==",
     "10.12.0": "sha512-OrbaYGa3sU1ulgmjHXgBkUhLjoX40ORYHvMzv02Gl5mTf15Xy7jT2iAjAZ9tSGmprMOBRX/LHYbhX8RL/U62pA==",
     "10.12.1": "sha512-8N2oWA8O6UgcXHmh2Se5Fk8sR46QmSrSaLuyRlpzaYQ5HWMz0sMnkTV4soBK8zR0ylVLopwEqLEwYKcXZ1rjrA==",
-    "10.12.2": "sha512-oyVAGFuWTuMLtOl55AWtxq9ZImtDjuTMGfnodzZnpm0wL1v+5go508rGnjXkuW5winHdACt+k1nEESoXIqwyPw==",
-    "10.12.3": "sha512-Rn3yxYYFYWVYCtbftUzqrZTFow+AiT697FpExapzwgWuSlu51e1ruE6nwkns54ZkK7tJ0GowffIY0D2kHDF0Fw==",
-    "10.12.4": "sha512-Xqiw3u2U7WhpHJutTJVUknBcXuuKh++GvGLHSiawN7CP+VcPEIsuTb0d0akYb+qSXlJ/FBxkjoWvRWMQdGgBhA==",
-    "10.13.0": "sha512-4Iy/pdDEfhSNnZKWVROvPQakL/mbbg6Cp9EFEoWND7aAoDweZ3LTaaIwXHkwbJJXmJo1drcFfWh3RpyaHHVj8A==",
-    "10.13.1": "sha512-N+vxpcejDV+r4MXfRO6NpMllygxa89urKMOhaBtwolYhjQXIHJwNz3Z+9rhVHrW5YAQrntQwDFkkIzY3fgHPrQ==",
 }

@@ -28,8 +28,9 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
-#include "checker/internal/format_type_name.h"
 #include "common/decl.h"
+#include "common/format_type_name.h"
+#include "common/standard_definitions.h"
 #include "common/type.h"
 #include "common/type_kind.h"
 
@@ -133,7 +134,7 @@ FunctionOverloadInstance InstantiateFunctionOverload(
 
 // Converts a wrapper type to its corresponding primitive type.
 // Returns nullopt if the type is not a wrapper type.
-absl::optional<Type> WrapperToPrimitive(const Type& t) {
+std::optional<Type> WrapperToPrimitive(const Type& t) {
   switch (t.kind()) {
     case TypeKind::kBoolWrapper:
       return BoolType();
@@ -148,7 +149,7 @@ absl::optional<Type> WrapperToPrimitive(const Type& t) {
     case TypeKind::kUintWrapper:
       return UintType();
     default:
-      return absl::nullopt;
+      return std::nullopt;
   }
 }
 
@@ -286,7 +287,7 @@ bool TypeInferenceContext::IsAssignableInternal(
   }
 
   // Type is as concrete as it can be under current substitutions.
-  if (absl::optional<Type> wrapped_type = WrapperToPrimitive(to_subs);
+  if (std::optional<Type> wrapped_type = WrapperToPrimitive(to_subs);
       wrapped_type.has_value()) {
     return from_subs.IsNull() ||
            IsAssignableInternal(*wrapped_type, from_subs,
@@ -531,27 +532,34 @@ bool TypeInferenceContext::IsAssignableWithConstraints(
   return false;
 }
 
-absl::optional<TypeInferenceContext::OverloadResolution>
+std::optional<TypeInferenceContext::OverloadResolution>
 TypeInferenceContext::ResolveOverload(const FunctionDecl& decl,
                                       absl::Span<const Type> argument_types,
                                       bool is_receiver) {
-  absl::optional<Type> result_type;
+  std::optional<Type> result_type;
+
+  bool is_logical_op = (decl.name() == cel::StandardFunctions::kAnd ||
+                        decl.name() == cel::StandardFunctions::kOr) &&
+                       argument_types.size() >= 2;
 
   std::vector<OverloadDecl> matching_overloads;
   for (const auto& ovl : decl.overloads()) {
     if (ovl.member() != is_receiver ||
-        argument_types.size() != ovl.args().size()) {
+        (!is_logical_op && argument_types.size() != ovl.args().size())) {
       continue;
     }
 
     auto call_type_instance = InstantiateFunctionOverload(*this, ovl);
-    ABSL_DCHECK_EQ(argument_types.size(),
-                   call_type_instance.param_types.size());
+    if (!is_logical_op) {
+      ABSL_DCHECK_EQ(argument_types.size(),
+                     call_type_instance.param_types.size());
+    }
     bool is_match = true;
     AssignabilityContext assignability_context = CreateAssignabilityContext();
     for (int i = 0; i < argument_types.size(); ++i) {
+      int param_index = is_logical_op ? 0 : i;
       if (!assignability_context.IsAssignable(
-              argument_types[i], call_type_instance.param_types[i])) {
+              argument_types[i], call_type_instance.param_types[param_index])) {
         is_match = false;
         break;
       }
@@ -571,7 +579,7 @@ TypeInferenceContext::ResolveOverload(const FunctionDecl& decl,
   }
 
   if (!result_type.has_value() || matching_overloads.empty()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return OverloadResolution{
       .result_type = FullySubstitute(*result_type, /*free_to_dyn=*/false),
@@ -649,14 +657,14 @@ bool TypeInferenceContext::AssignabilityContext::IsAssignable(const Type& from,
 std::string TypeInferenceContext::DebugString() const {
   return absl::StrCat(
       "type_parameter_bindings: ",
-      absl::StrJoin(
-          type_parameter_bindings_, "\n ",
-          [](std::string* out, const auto& binding) {
-            absl::StrAppend(
-                out, binding.first, " (", binding.second.name, ") -> ",
-                checker_internal::FormatTypeName(
-                    binding.second.type.value_or(Type(TypeParamType("none")))));
-          }));
+      absl::StrJoin(type_parameter_bindings_, "\n ",
+                    [](std::string* out, const auto& binding) {
+                      absl::StrAppend(
+                          out, binding.first, " (", binding.second.name,
+                          ") -> ",
+                          cel::FormatTypeName(binding.second.type.value_or(
+                              Type(TypeParamType("none")))));
+                    }));
 }
 
 void TypeInferenceContext::AssignabilityContext::

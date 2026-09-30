@@ -17,6 +17,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "gtest/gtest-spi.h"
 #include "absl/container/flat_hash_map.h"
@@ -25,6 +26,8 @@
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
+#include "base/attribute.h"
 #include "checker/type_checker_builder.h"
 #include "checker/validation_result.h"
 #include "common/ast_proto.h"
@@ -41,6 +44,8 @@
 #include "internal/testing.h"
 #include "internal/testing_descriptor_pool.h"
 #include "runtime/activation.h"
+#include "runtime/activation_interface.h"
+#include "runtime/function_overload_reference.h"
 #include "runtime/runtime.h"
 #include "runtime/runtime_builder.h"
 #include "runtime/standard_runtime_builder_factory.h"
@@ -625,11 +630,11 @@ TEST(TestRunnerStandaloneTest, BasicTestWithActivationFactorySucceeds) {
   std::unique_ptr<CelTestContext> context =
       CelTestContext::CreateFromRuntime(std::move(runtime));
   context->SetActivationFactory(
-      [](const TestCase& test_case,
-         google::protobuf::Arena* arena) -> absl::StatusOr<cel::Activation> {
-        cel::Activation activation;
-        activation.InsertOrAssignValue("x", cel::IntValue(10));
-        activation.InsertOrAssignValue("y", cel::IntValue(5));
+      [](const TestCase& test_case, google::protobuf::Arena* arena)
+          -> absl::StatusOr<std::unique_ptr<cel::ActivationInterface>> {
+        auto activation = std::make_unique<cel::Activation>();
+        activation->InsertOrAssignValue("x", cel::IntValue(10));
+        activation->InsertOrAssignValue("y", cel::IntValue(5));
         return activation;
       });
   context->SetExpressionSource(
@@ -650,6 +655,100 @@ TEST(TestRunnerStandaloneTest, BasicTestWithActivationFactorySucceeds) {
     output { result_value { int64_value: 9 } }
   )pb");
   EXPECT_NO_FATAL_FAILURE(test_runner.RunTest(test_case));
+}
+
+namespace {
+class TestCustomActivation : public cel::ActivationInterface {
+ public:
+  absl::StatusOr<bool> FindVariable(
+      absl::string_view name, const google::protobuf::DescriptorPool* descriptor_pool,
+      google::protobuf::MessageFactory* message_factory, google::protobuf::Arena* arena,
+      cel::Value* result) const override {
+    if (name == "x") {
+      *result = cel::IntValue(100);
+      return true;
+    }
+    if (name == "y") {
+      *result = cel::IntValue(200);
+      return true;
+    }
+    return false;
+  }
+
+  std::vector<cel::FunctionOverloadReference> FindFunctionOverloads(
+      absl::string_view name) const override {
+    return {};
+  }
+
+  absl::Span<const cel::AttributePattern> GetUnknownAttributes()
+      const override {
+    return {};
+  }
+
+  absl::Span<const cel::AttributePattern> GetMissingAttributes()
+      const override {
+    return {};
+  }
+};
+}  // namespace
+
+TEST(TestRunnerStandaloneTest, CustomActivationInterfaceFactorySucceeds) {
+  ASSERT_OK_AND_ASSIGN(cel::ValidationResult validation_result,
+                       DefaultCompiler().Compile("x + y"));
+  CheckedExpr checked_expr;
+  ASSERT_THAT(cel::AstToCheckedExpr(*validation_result.GetAst(), &checked_expr),
+              absl_testing::IsOk());
+
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<const cel::Runtime> runtime,
+                       CreateTestRuntime());
+  std::unique_ptr<CelTestContext> context =
+      CelTestContext::CreateFromRuntime(std::move(runtime));
+  context->SetActivationFactory(
+      [](const TestCase& test_case, google::protobuf::Arena* arena)
+          -> absl::StatusOr<std::unique_ptr<cel::ActivationInterface>> {
+        return std::make_unique<TestCustomActivation>();
+      });
+  context->SetExpressionSource(
+      CelExpressionSource::FromCheckedExpr(std::move(checked_expr)));
+
+  TestCase test_case = ParseTextProtoOrDie<TestCase>(R"pb(
+    output { result_value { int64_value: 300 } }
+  )pb");
+  TestRunner test_runner(std::move(context));
+  EXPECT_NO_FATAL_FAILURE(test_runner.RunTest(test_case));
+}
+
+TEST(TestRunnerStandaloneTest,
+     CustomActivationInterfaceWithInputsReturnsError) {
+  ASSERT_OK_AND_ASSIGN(cel::ValidationResult validation_result,
+                       DefaultCompiler().Compile("x + y"));
+  CheckedExpr checked_expr;
+  ASSERT_THAT(cel::AstToCheckedExpr(*validation_result.GetAst(), &checked_expr),
+              absl_testing::IsOk());
+
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<const cel::Runtime> runtime,
+                       CreateTestRuntime());
+  std::unique_ptr<CelTestContext> context =
+      CelTestContext::CreateFromRuntime(std::move(runtime));
+  context->SetActivationFactory(
+      [](const TestCase& test_case, google::protobuf::Arena* arena)
+          -> absl::StatusOr<std::unique_ptr<cel::ActivationInterface>> {
+        return std::make_unique<TestCustomActivation>();
+      });
+  context->SetExpressionSource(
+      CelExpressionSource::FromCheckedExpr(std::move(checked_expr)));
+
+  static auto* test_case_ptr = new TestCase(ParseTextProtoOrDie<TestCase>(R"pb(
+    input {
+      key: "x"
+      value { value { int64_value: 4 } }
+    }
+    output { result_value { int64_value: 300 } }
+  )pb"));
+  static auto* test_runner_ptr = new TestRunner(std::move(context));
+  EXPECT_FATAL_FAILURE(
+      test_runner_ptr->RunTest(*test_case_ptr),
+      "Custom bindings or test case input bindings cannot be combined");
 }
 
 TEST(TestRunnerStandaloneTest, CustomAssertFnIsUsed) {

@@ -16,6 +16,9 @@ limitations under the License.
 package golang
 
 import (
+	"bufio"
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -236,6 +239,20 @@ func TestFileNameInfo(t *testing.T) {
 			},
 		},
 		{
+			"pgo (default) file",
+			"default.pgo",
+			fileInfo{
+				ext: pgoExt,
+			},
+		},
+		{
+			"pgo (other) file",
+			"notDefault.pgo",
+			fileInfo{
+				ext: pgoExt,
+			},
+		},
+		{
 			"ignored test file",
 			"foo_test.py",
 			fileInfo{
@@ -364,6 +381,27 @@ package main`,
 			},
 		},
 		{
+			"comment without space",
+			"//+build foo\n\n",
+			&buildTags{
+				expr:    mustParseBuildTag(t, "foo"),
+				rawTags: []string{"foo"},
+			},
+		},
+		{
+			"CRLF",
+			"// +build foo\r\n\r\npackage main\r\n",
+			&buildTags{
+				expr:    mustParseBuildTag(t, "foo"),
+				rawTags: []string{"foo"},
+			},
+		},
+		{
+			"similar non-constraint",
+			"// +buildsomething foo\n\n",
+			nil,
+		},
+		{
 			"slash star comment",
 			"/* +build foo */\n\n",
 			nil,
@@ -386,7 +424,69 @@ package main`,
 			} else if diff := cmp.Diff(tc.want, got, fileInfoCmpOption); diff != "" {
 				t.Errorf("(-want, +got): %s", diff)
 			}
+
+			if got, err := readTagsFromContent([]byte(tc.source)); err != nil {
+				t.Fatal(err)
+			} else if diff := cmp.Diff(tc.want, got, fileInfoCmpOption); diff != "" {
+				t.Errorf("readTagsFromContent (-want, +got): %s", diff)
+			}
 		})
+	}
+}
+
+func TestReadTagsLongLine(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		lineLength int
+		lineEnding string
+		wantErr    bool
+	}{
+		{"LF below limit", bufio.MaxScanTokenSize - 1, "\n\n", false},
+		{"LF at limit", bufio.MaxScanTokenSize, "\n\n", true},
+		{"CRLF below limit", bufio.MaxScanTokenSize - 1, "\r\n\r\n", false},
+		{"CRLF at limit", bufio.MaxScanTokenSize, "\r\n\r\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "foo.go")
+			lineLength := tc.lineLength
+			if tc.lineEnding[0] == '\r' {
+				lineLength--
+			}
+			source := append([]byte("//"), bytes.Repeat([]byte{'x'}, lineLength-2)...)
+			source = append(source, tc.lineEnding...)
+			if err := os.WriteFile(path, source, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := readTags(path)
+			if tc.wantErr && !errors.Is(err, bufio.ErrTooLong) {
+				t.Fatalf("readTags error: %v; want %v", err, bufio.ErrTooLong)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("readTags error: %v", err)
+			}
+		})
+	}
+}
+
+func TestReadTagsFromContentErrors(t *testing.T) {
+	for _, source := range []string{
+		"//go:build linux\n//go:build darwin\n\npackage foo\n",
+		"//go:build linux &&\n\npackage foo\n",
+	} {
+		path := filepath.Join(t.TempDir(), "foo.go")
+		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		_, pathErr := readTags(path)
+		_, contentErr := readTagsFromContent([]byte(source))
+		if pathErr == nil || contentErr == nil {
+			t.Fatalf("readTags error: %v; readTagsFromContent error: %v", pathErr, contentErr)
+		}
+		if pathErr.Error() != contentErr.Error() {
+			t.Errorf("readTags error %q; readTagsFromContent error %q", pathErr, contentErr)
+		}
 	}
 }
 

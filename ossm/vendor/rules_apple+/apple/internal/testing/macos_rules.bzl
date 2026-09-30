@@ -15,6 +15,10 @@
 """Implementation of macOS test rules."""
 
 load(
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
+load(
     "//apple:providers.bzl",
     "AppleBundleInfo",
     "MacosApplicationBundleInfo",
@@ -107,6 +111,7 @@ _macos_internal_ui_test_bundle = rule_factory.create_apple_rule(
     implementation = _macos_ui_test_bundle_impl,
     predeclared_outputs = {"archive": "%{name}.zip"},
     attrs = [
+        apple_support.platform_constraint_attrs(),
         rule_attrs.binary_linking_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
             extra_deps_aspects = [
@@ -114,7 +119,6 @@ _macos_internal_ui_test_bundle = rule_factory.create_apple_rule(
                 framework_provider_aspect,
             ],
             is_test_supporting_rule = True,
-            requires_legacy_cc_toolchain = True,
         ),
         rule_attrs.common_bundle_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
@@ -161,7 +165,7 @@ desired Contents subdirectory.
                 providers = [[AppleBundleInfo, MacosFrameworkBundleInfo]],
                 doc = """
 A list of framework targets (see
-[`macos_framework`](https://github.com/bazelbuild/rules_apple/blob/master/doc/rules-macos.md#macos_framework))
+[`macos_framework`](https://github.com/bazelbuild/rules_apple/blob/main/doc/rules-macos.md#macos_framework))
 that this target depends on.
 """,
             ),
@@ -187,6 +191,7 @@ _macos_internal_unit_test_bundle = rule_factory.create_apple_rule(
     implementation = _macos_unit_test_bundle_impl,
     predeclared_outputs = {"archive": "%{name}.zip"},
     attrs = [
+        apple_support.platform_constraint_attrs(),
         rule_attrs.binary_linking_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
             extra_deps_aspects = [
@@ -194,7 +199,6 @@ _macos_internal_unit_test_bundle = rule_factory.create_apple_rule(
                 framework_provider_aspect,
             ],
             is_test_supporting_rule = True,
-            requires_legacy_cc_toolchain = True,
         ),
         rule_attrs.common_bundle_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
@@ -240,7 +244,7 @@ desired Contents subdirectory.
                 providers = [[AppleBundleInfo, MacosFrameworkBundleInfo]],
                 doc = """
 A list of framework targets (see
-[`macos_framework`](https://github.com/bazelbuild/rules_apple/blob/master/doc/rules-macos.md#macos_framework))
+[`macos_framework`](https://github.com/bazelbuild/rules_apple/blob/main/doc/rules-macos.md#macos_framework))
 that this target depends on.
 """,
             ),

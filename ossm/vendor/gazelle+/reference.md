@@ -31,16 +31,19 @@ gazelle(<a href="#gazelle-name">name</a>, <a href="#gazelle-testonly">testonly</
 <pre>
 load("@gazelle//:def.bzl", "gazelle_binary")
 
-gazelle_binary(<a href="#gazelle_binary-kwargs">**kwargs</a>)
+gazelle_binary(<a href="#gazelle_binary-name">name</a>, <a href="#gazelle_binary-languages">languages</a>, <a href="#gazelle_binary-version">version</a>, <a href="#gazelle_binary-kwargs">**kwargs</a>)
 </pre>
 
-
+Builds a Gazelle binary with the requested language extensions.
 
 **PARAMETERS**
 
 
 | Name  | Description | Default Value |
 | :------------- | :------------- | :------------- |
+| <a id="gazelle_binary-name"></a>name |  <p align="center"> - </p>   |  none |
+| <a id="gazelle_binary-languages"></a>languages |  <p align="center"> - </p>   |  none |
+| <a id="gazelle_binary-version"></a>version |  <p align="center"> - </p>   |  `0` |
 | <a id="gazelle_binary-kwargs"></a>kwargs |  <p align="center"> - </p>   |  none |
 
 
@@ -87,7 +90,7 @@ To update the expected files, run `UPDATE_SNAPSHOTS=true bazel run //path/to:the
 | <a id="gazelle_generation_test-test_data"></a>test_data |  A list of target of the test data files you will pass to the test. This can be a https://bazel.build/reference/be/general#filegroup.   |  none |
 | <a id="gazelle_generation_test-build_in_suffix"></a>build_in_suffix |  The suffix for the input BUILD.bazel files. Defaults to .in. By default, will use files named BUILD.in as the BUILD files before running gazelle.   |  `".in"` |
 | <a id="gazelle_generation_test-build_out_suffix"></a>build_out_suffix |  The suffix for the expected BUILD.bazel files after running gazelle. Defaults to .out. By default, will use files named check the results of the gazelle run against files named BUILD.out.   |  `".out"` |
-| <a id="gazelle_generation_test-gazelle_timeout_seconds"></a>gazelle_timeout_seconds |  Number of seconds to allow the gazelle process to run before killing.   |  `2` |
+| <a id="gazelle_generation_test-gazelle_timeout_seconds"></a>gazelle_timeout_seconds |  Deprecated and removed. Set the builtin 'timeout' attribute instead.   |  `None` |
 | <a id="gazelle_generation_test-size"></a>size |  Specifies a test target's "heaviness": how much time/resources it needs to run.   |  `None` |
 | <a id="gazelle_generation_test-kwargs"></a>kwargs |  Attributes that are passed directly to the test declaration.   |  none |
 
@@ -180,13 +183,15 @@ go_repository(<a href="#go_repository-name">name</a>, <a href="#go_repository-au
 if they are not already present. This is the simplest way to depend on
 external Go projects.
 
-When `go_repository` is in module mode, it saves downloaded modules in a shared,
-internal cache within Bazel's cache. It may be cleared with `bazel clean --expunge`.
-By setting the environment variable `GO_REPOSITORY_USE_HOST_CACHE=1`, you can
-force `go_repository` to use the module cache on the host system in the location
-returned by `go env GOPATH`. Alternatively, by setting the environment variable
-`GO_REPOSITORY_USE_HOST_MODCACHE=1`, you can force `go_repository` to use only
-the module cache on the host system in the location returned by `go env GOMODCACHE`.
+In module mode, `go_repository` writes to a shared internal cache that can be
+cleared with `bazel clean --expunge`. The following environment variables
+redirect that cache:
+
+- `GO_REPOSITORY_USE_HOST_CACHE=1` — use the host cache at `go env GOPATH`.
+- `GO_REPOSITORY_USE_HOST_MODCACHE=1` — use the host cache at `go env GOMODCACHE`.
+- `GO_REPOSITORY_EPHEMERAL_MODCACHE=1` — use a per-invocation tempdir; reclaims
+  disk at the cost of re-fetching modules when the repo cache is invalidated
+  (e.g. on a Gazelle upgrade).
 
 **Example**
 

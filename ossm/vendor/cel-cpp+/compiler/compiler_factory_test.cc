@@ -29,12 +29,15 @@
 #include "common/source.h"
 #include "common/type.h"
 #include "compiler/compiler.h"
+#include "compiler/optional.h"
 #include "compiler/standard_library.h"
 #include "internal/testing.h"
 #include "internal/testing_descriptor_pool.h"
 #include "parser/macro.h"
 #include "parser/parser_interface.h"
 #include "testutil/baseline_tests.h"
+#include "validator/timestamp_literal_validator.h"
+#include "google/protobuf/arena.h"
 #include "google/protobuf/descriptor.h"
 
 namespace cel {
@@ -287,6 +290,23 @@ TEST(CompilerFactoryTest, DisableStandardMacrosWithStdlib) {
   EXPECT_TRUE(result.IsValid());
 }
 
+TEST(CompilerFactoryTest, AddValidator) {
+  ASSERT_OK_AND_ASSIGN(
+      auto builder,
+      NewCompilerBuilder(cel::internal::GetSharedTestingDescriptorPool()));
+
+  ASSERT_THAT(builder->AddLibrary(StandardCompilerLibrary()), IsOk());
+  builder->GetValidator().AddValidation(TimestampLiteralValidator());
+
+  ASSERT_OK_AND_ASSIGN(auto compiler, builder->Build());
+  ASSERT_OK_AND_ASSIGN(ValidationResult result,
+                       compiler->Compile("timestamp('invalid')"));
+  EXPECT_FALSE(result.IsValid());
+  ASSERT_OK_AND_ASSIGN(result,
+                       compiler->Compile("timestamp('2024-01-01T00:00:00Z')"));
+  EXPECT_TRUE(result.IsValid());
+}
+
 TEST(CompilerFactoryTest, FailsIfLibraryAddedTwice) {
   ASSERT_OK_AND_ASSIGN(
       auto builder,
@@ -344,6 +364,100 @@ TEST(CompilerFactoryTest, FailsIfNullDescriptorPool) {
       NewCompilerBuilder(std::move(pool)),
       absl_testing::StatusIs(absl::StatusCode::kInvalidArgument,
                              HasSubstr("descriptor_pool must not be null")));
+}
+
+TEST(CompilerFactoryTest, ToBuilderWorks) {
+  ASSERT_OK_AND_ASSIGN(
+      auto builder,
+      NewCompilerBuilder(cel::internal::GetSharedTestingDescriptorPool()));
+
+  ASSERT_THAT(builder->AddLibrary(StandardCompilerLibrary()), IsOk());
+
+  ASSERT_THAT(builder->GetCheckerBuilder().AddVariable(
+                  MakeVariableDecl("a", MapType())),
+              IsOk());
+
+  ASSERT_OK_AND_ASSIGN(auto compiler, builder->Build());
+
+  auto derived_builder = compiler->ToBuilder();
+
+  ASSERT_THAT(derived_builder->AddLibrary(OptionalCompilerLibrary()), IsOk());
+
+  ASSERT_OK_AND_ASSIGN(auto derived_compiler, derived_builder->Build());
+
+  ASSERT_OK_AND_ASSIGN(
+      ValidationResult result,
+      derived_compiler->Compile("has(a.b) && a.?b.orValue('foo') == 'foo'"));
+  EXPECT_TRUE(result.IsValid());
+}
+
+TEST(CompilerFactoryTest, SpecifyArenaKeepsResolvedTypes) {
+  ASSERT_OK_AND_ASSIGN(
+      auto builder,
+      NewCompilerBuilder(cel::internal::GetSharedTestingDescriptorPool()));
+
+  ASSERT_THAT(builder->AddLibrary(StandardCompilerLibrary()), IsOk());
+  ASSERT_THAT(builder->AddLibrary(OptionalCompilerLibrary()), IsOk());
+
+  ASSERT_OK_AND_ASSIGN(auto compiler, builder->Build());
+
+  google::protobuf::Arena arena;
+  ASSERT_OK_AND_ASSIGN(ValidationResult result,
+                       compiler->Compile("[[1, 2, 3]][?0]", "<input>", &arena));
+  ASSERT_OK_AND_ASSIGN(auto ast, result.ReleaseAst());
+  auto it = result.GetResolvedTypeMap().find(ast->root_expr().id());
+  ASSERT_TRUE(it != result.GetResolvedTypeMap().end());
+  EXPECT_TRUE(
+      it->second.IsOptional() &&
+      it->second.GetOptional().GetParameter().IsList() &&
+      it->second.GetOptional().GetParameter().GetList().GetElement().IsInt());
+}
+
+TEST(CompilerFactoryTest, ReturnsIssuesFromParser) {
+  CompilerOptions opts;
+  opts.adapt_parser_errors = true;
+  ASSERT_OK_AND_ASSIGN(
+      auto builder, NewCompilerBuilder(
+                        cel::internal::GetSharedTestingDescriptorPool(), opts));
+
+  ASSERT_OK_AND_ASSIGN(auto compiler, builder->Build());
+
+  ASSERT_OK_AND_ASSIGN(ValidationResult result, compiler->Compile("a +"));
+  EXPECT_FALSE(result.IsValid());
+  EXPECT_THAT(result.GetIssues(), testing::Not(testing::IsEmpty()));
+}
+
+TEST(CompilerFactoryTest, CompileSourceOverload) {
+  ASSERT_OK_AND_ASSIGN(
+      auto builder,
+      NewCompilerBuilder(cel::internal::GetSharedTestingDescriptorPool()));
+
+  ASSERT_THAT(builder->AddLibrary(StandardCompilerLibrary()), IsOk());
+  ASSERT_OK_AND_ASSIGN(auto compiler, builder->Build());
+
+  ASSERT_OK_AND_ASSIGN(auto source, cel::NewSource("1 + 2"));
+  ASSERT_OK_AND_ASSIGN(ValidationResult result, compiler->Compile(*source));
+
+  EXPECT_TRUE(result.IsValid());
+}
+
+TEST(CompilerFactoryTest, CodepointLimitExceeded) {
+  CompilerOptions options;
+  options.parser_options.expression_size_codepoint_limit = 10;
+  ASSERT_OK_AND_ASSIGN(
+      auto builder,
+      NewCompilerBuilder(cel::internal::GetSharedTestingDescriptorPool(),
+                         options));
+  ASSERT_OK_AND_ASSIGN(auto compiler, builder->Build());
+
+  EXPECT_THAT(
+      compiler->Compile("123456789012345", "test.cel"),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               HasSubstr("expression is larger than codepoint limit 10")));
+
+  ASSERT_OK_AND_ASSIGN(ValidationResult result,
+                       compiler->Compile("1234567890", "test.cel"));
+  EXPECT_TRUE(result.IsValid());
 }
 
 }  // namespace

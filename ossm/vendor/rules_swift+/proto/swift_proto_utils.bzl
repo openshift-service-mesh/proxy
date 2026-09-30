@@ -20,6 +20,8 @@ load(
     "@bazel_skylib//lib:paths.bzl",
     "paths",
 )
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(
     "//swift:providers.bzl",
     "SwiftInfo",
@@ -30,12 +32,6 @@ load("//swift:swift_common.bzl", "swift_common")
 
 # buildifier: disable=bzl-visibility
 load(
-    "//swift/internal:linking.bzl",
-    "new_objc_provider",
-)
-
-# buildifier: disable=bzl-visibility
-load(
     "//swift/internal:output_groups.bzl",
     "supplemental_compilation_output_groups",
 )
@@ -43,6 +39,8 @@ load(
 # buildifier: disable=bzl-visibility
 load(
     "//swift/internal:utils.bzl",
+    "expand_locations",
+    "expand_make_variables",
     "get_providers",
     "include_developer_search_paths",
 )
@@ -189,7 +187,6 @@ This provider is an implementation detail not meant to be used by clients.
 """,
     fields = {
         "cc_info": "The underlying `CcInfo` provider.",
-        "objc_info": "The underlying `apple_common.Objc` provider.",
     },
 )
 
@@ -199,6 +196,7 @@ def compile_swift_protos_for_target(
         additional_swift_proto_compiler_info,
         attr,
         ctx,
+        exec_group = None,
         module_name,
         proto_infos,
         swift_proto_compilers,
@@ -211,6 +209,8 @@ def compile_swift_protos_for_target(
         additional_compiler_deps: Additional dependencies passed directly to the Swift compiler.
         attr: The attributes of the target for which the module is being compiled.
         ctx: The context of the aspect or rule.
+        exec_group: Runs the Swift compilation action under the given execution
+            group's context. If `None`, the default execution group is used.
         module_name: The name of the Swift module that should be compiled from the protos.
         proto_infos: List of `ProtoInfo` providers to compile into Swift source files.
         swift_proto_compilers: List of targets propagating `SwiftProtoCompiler` providers.
@@ -265,16 +265,24 @@ def compile_swift_protos_for_target(
         unsupported_features = ctx.disabled_features,
     )
 
+    additional_inputs = getattr(ctx.files, "swiftc_inputs", [])
+    swiftc_inputs = getattr(attr, "swiftc_inputs", [])
+    copts = expand_locations(ctx, getattr(attr, "copts", []), swiftc_inputs)
+    copts = expand_make_variables(ctx, copts, "copts")
+    linkopts = expand_locations(ctx, getattr(attr, "linkopts", []), swiftc_inputs)
+    linkopts = expand_make_variables(ctx, linkopts, "linkopts")
+
     # Compile the generated Swift source files as a module:
     include_dev_srch_paths = include_developer_search_paths(attr)
     compile_result = swift_common.compile(
         actions = ctx.actions,
+        additional_inputs = additional_inputs,
         cc_infos = get_providers(compiler_deps, CcInfo),
-        copts = ["-parse-as-library"] + getattr(attr, "copts", []),
+        copts = ["-parse-as-library"] + copts,
+        exec_group = exec_group,
         feature_configuration = feature_configuration,
         include_dev_srch_paths = include_dev_srch_paths,
         module_name = module_name,
-        objc_infos = get_providers(compiler_deps, apple_common.Objc),
         package_name = getattr(attr, "package_name", None),
         srcs = generated_swift_srcs,
         swift_toolchain = swift_toolchain,
@@ -288,7 +296,7 @@ def compile_swift_protos_for_target(
     supplemental_outputs = compile_result.supplemental_outputs
 
     # Create the linking context from the compilation outputs:
-    linking_context, linking_output = (
+    linking_context, _ = (
         swift_common.create_linking_context_from_compilation_outputs(
             actions = ctx.actions,
             compilation_outputs = compilation_outputs,
@@ -302,16 +310,8 @@ def compile_swift_protos_for_target(
             ],
             module_context = module_context,
             swift_toolchain = swift_toolchain,
+            user_link_flags = linkopts,
         )
-    )
-
-    # Extract the swift toolchain and configure the features:
-    swift_toolchain = swift_common.get_toolchain(ctx)
-    feature_configuration = swift_common.configure_features(
-        ctx = ctx,
-        requested_features = ctx.features,
-        swift_toolchain = swift_toolchain,
-        unsupported_features = ctx.disabled_features,
     )
 
     # Gather the transitive cc info providers:
@@ -320,13 +320,6 @@ def compile_swift_protos_for_target(
         SwiftProtoCcInfo,
         lambda proto_cc_info: proto_cc_info.cc_info,
     ) + get_providers(compiler_deps, CcInfo)
-
-    # Gather the transitive objc info providers:
-    transitive_objc_infos = get_providers(
-        compiler_deps,
-        SwiftProtoCcInfo,
-        lambda proto_cc_info: proto_cc_info.objc_info,
-    ) + get_providers(compiler_deps, apple_common.Objc)
 
     # Gather the transitive swift info providers:
     transitive_swift_infos = get_providers(
@@ -351,20 +344,6 @@ def compile_swift_protos_for_target(
         cc_infos = transitive_cc_infos,
     )
 
-    # Create the direct objc info provider:
-    direct_objc_info = new_objc_provider(
-        additional_objc_infos = (
-            transitive_objc_infos +
-            swift_toolchain.implicit_deps_providers.objc_infos
-        ),
-        deps = [],
-        feature_configuration = feature_configuration,
-        is_test = False,
-        module_context = module_context,
-        libraries_to_link = [linking_output.library_to_link],
-        swift_toolchain = swift_toolchain,
-    )
-
     # Create the direct swift info provider:
     direct_swift_info = SwiftInfo(
         modules = [module_context],
@@ -381,7 +360,6 @@ def compile_swift_protos_for_target(
     # Create the direct swift proto cc info provider:
     direct_swift_proto_cc_info = SwiftProtoCcInfo(
         cc_info = direct_cc_info,
-        objc_info = direct_objc_info,
     )
 
     # Create the direct swift proto info:

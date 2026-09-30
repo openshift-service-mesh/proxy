@@ -30,6 +30,8 @@
 # 1. Installs and launches the application on a device corresponding to `device_identifier`.
 # 2. Displays the application's output on the console
 
+import re
+
 import collections.abc
 import contextlib
 import json
@@ -39,11 +41,24 @@ import os.path
 import pathlib
 import platform
 import plistlib
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
 from typing import Any, Dict, Optional
+from uuid import uuid4
 import zipfile
+
+_RUN_MODE_ENV_VAR = "BAZEL_APPLE_RUN_MODE"
+_RUN_MODE_INSTALL_AND_RUN = "install_and_run"
+_RUN_MODE_INSTALL_WITHOUT_RUNNING = "install_without_running"
+_RUN_MODE_RUN_WITHOUT_INSTALLING = "run_without_installing"
+_VALID_RUN_MODES = frozenset((
+    _RUN_MODE_INSTALL_AND_RUN,
+    _RUN_MODE_INSTALL_WITHOUT_RUNNING,
+    _RUN_MODE_RUN_WITHOUT_INSTALLING,
+))
 
 
 logging.basicConfig(
@@ -92,15 +107,15 @@ class Device(collections.abc.Mapping):
 
   @property
   def udid(self) -> str:
-    return self.hardware_properties["udid"]
+    return self.hardware_properties.get("udid", "unknown")
 
   @property
   def device_type(self) -> str:
-    return self.hardware_properties["deviceType"]
+    return self.hardware_properties.get("deviceType", "unknown")
 
   @property
   def os_version_number(self) -> str:
-    return self.device_properties["osVersionNumber"]
+    return self.device_properties.get("osVersionNumber", "unknown")
 
   @property
   def is_apple_tv(self) -> bool:
@@ -128,11 +143,11 @@ class Device(collections.abc.Mapping):
 
   @property
   def is_booted(self):
-    return self.device_properties["bootState"] == "Booted"
+    return self.device_properties.get("bootState", "unknown") == "Booted"
 
   @property
   def is_paired(self):
-    return self.device_properties["pairingState"] == "paired"
+    return self.device_properties.get("pairingState", "unknown") == "paired"
 
   def __getitem__(self, name):
     return self.device[name]
@@ -186,8 +201,11 @@ def os_version_number_to_int(version: str) -> int:
     An integer in the form 0xAABBCC, where AA is the major version, BB is
     the minor version, and CC is the micro version.
   """
-  # Pad the version to major.minor.micro.
-  version_components = (version.split(".") + ["0"] * 3)[:3]
+  # Strip non-numeric suffixes (e.g. Rapid Security Response "(a)") from each
+  # component, then pad to major.minor.micro.
+  version_components = (
+      [re.sub(r"[^0-9].*", "", c) or "0" for c in version.split(".")] + ["0"] * 3
+  )[:3]
   result = 0
   for component in version_components:
     result = (result << 8) | int(component)
@@ -300,8 +318,15 @@ def extracted_app(
     # fail with `Unhandled error domain NSPOSIXErrorDomain, code 13`.
     dst_dir = os.path.join(tempfile.gettempdir(), "bazel_temp_" + app_name)
     os.makedirs(dst_dir, exist_ok=True)
+
+    # NOTE: use `which` to find the path to `rsync`.
+    # In macOS 15.4, the system `rsync` is using `openrsync` which contains some permission issues.
+    # This allows users to workaround the issue by overriding the system `rsync` with a working version.
+    # Remove this once we no longer support macOS versions with broken `rsync`.
+    rsync_path = shutil.which("rsync")
+
     rsync_command = [
-        "/usr/bin/rsync",
+        rsync_path,
         "--archive",
         "--delete",
         "--checksum",
@@ -336,7 +361,18 @@ def extracted_app(
       )
       with zipfile.ZipFile(application_output_path) as ipa_zipfile:
         ipa_zipfile.extractall(temp_dir)
-        yield os.path.join(temp_dir, "Payload", app_name + ".app")
+        # iOS/tvOS apps use Payload/ directory structure, while watchOS apps
+        # have the .app bundle at the root of the archive.
+        payload_path = os.path.join(temp_dir, "Payload", app_name + ".app")
+        root_path = os.path.join(temp_dir, app_name + ".app")
+        if os.path.isdir(payload_path):
+          yield payload_path
+        elif os.path.isdir(root_path):
+          yield root_path
+        else:
+          raise FileNotFoundError(
+              f"Couldn't find {app_name}.app in the archive."
+          )
 
 
 def bundle_id(bundle_path: str) -> str:
@@ -347,14 +383,16 @@ def bundle_id(bundle_path: str) -> str:
     return plist["CFBundleIdentifier"]
 
 
-def devicectl_launch_environ() -> Dict[str, str]:
+def devicectl_launch_environ(device_identifier: str) -> Dict[str, str]:
   """Calculates an environment dictionary for running `devicectl device process launch`."""
   # Pass environment variables prefixed with "IOS_" to the device, replace
   # the prefix with "DEVICECTL_CHILD_". bazel adds "IOS_" to the env vars which
   # will be passed to the app as prefix to differentiate from other env vars. We
   # replace the prefix "IOS_" with "DEVICECTL_CHILD_" here, because "devicectl" only
   # pass the env vars prefixed with "DEVICECTL_CHILD_" to the app.
-  result = {}
+  result = {
+    "DEVICECTL_CHILD_BAZEL_DEVICE_UDID": device_identifier,
+  }
   for k, v in os.environ.items():
     if not k.startswith("IOS_"):
       continue
@@ -367,6 +405,37 @@ def devicectl_launch_environ() -> Dict[str, str]:
   return result
 
 
+def app_run_mode() -> str:
+  """Returns the configured app run mode."""
+  run_mode = os.environ.get(_RUN_MODE_ENV_VAR, _RUN_MODE_INSTALL_AND_RUN)
+  if run_mode not in _VALID_RUN_MODES:
+    valid_modes = ", ".join(sorted(_VALID_RUN_MODES))
+    raise ValueError(
+        f"Invalid {_RUN_MODE_ENV_VAR} value {run_mode!r}; "
+        f"expected one of: {valid_modes}"
+    )
+  return run_mode
+
+
+def clear_launch_info_path() -> None:
+  """Deletes any stale launch info file written by a prior run."""
+  launch_info_path = os.environ.get("BAZEL_APPLE_LAUNCH_INFO_PATH")
+  if not launch_info_path:
+    return
+
+  try:
+    os.remove(launch_info_path)
+  except FileNotFoundError:
+    pass
+
+
+def ensure_devicectl_terminate_existing(launch_args: list[str]) -> list[str]:
+  """Ensures `devicectl launch` terminates any existing app instance first."""
+  if "--terminate-existing" in launch_args:
+    return launch_args
+  return launch_args + ["--terminate-existing"]
+
+
 def run_app(
     *,
     device_identifier: str,
@@ -374,7 +443,7 @@ def run_app(
     application_output_path: str,
     app_name: str,
 ) -> None:
-  """Installs and runs an app on the specified device.
+  """Installs and/or runs an app on the specified device.
 
   Args:
     device_identifier: The identifier of the device.
@@ -384,37 +453,137 @@ def run_app(
   """
   root_dir = os.path.dirname(application_output_path)
   register_dsyms(root_dir)
+  run_mode = app_run_mode()
   with extracted_app(application_output_path, app_name) as app_path:
-    logger.info("Installing app %s to device %s", app_path, device_identifier)
-    subprocess.run(
-        [
-          devicectl_path,
-          "device",
-          "install",
-          "app",
-          "--device",
-          device_identifier,
-          app_path
-        ],
-        check=True
-    )
+    if run_mode != _RUN_MODE_RUN_WITHOUT_INSTALLING:
+      logger.info("Installing app %s to device %s", app_path, device_identifier)
+      subprocess.run(
+          [
+            devicectl_path,
+            "device",
+            "install",
+            "app",
+            "--device",
+            device_identifier,
+            app_path,
+          ],
+          check=True,
+      )
+
+    if run_mode == _RUN_MODE_INSTALL_WITHOUT_RUNNING:
+      clear_launch_info_path()
+      return
+
     app_bundle_id = bundle_id(app_path)
+    launch_args = shlex.split(
+      os.environ.get(
+        "BAZEL_DEVICECTL_LAUNCH_FLAGS",
+        # Attaches the application to the console and waits for it to exit.
+        "--console",
+      ),
+    )
     logger.info(
         "Launching app %s on %s", app_bundle_id, device_identifier
     )
-    args = [
+    launch_args = [
         devicectl_path,
         "device",
         "process",
         "launch",
-        "--console",  # Attaches the application to the console and waits for it to exit.
+        *launch_args,
         "--device",
         device_identifier,
-        app_bundle_id,
     ]
+    launch_args = ensure_devicectl_terminate_existing(launch_args)
     # Append optional launch arguments.
-    args.extend(sys.argv[1:])
-    subprocess.run(args, env=devicectl_launch_environ(), check=False)
+    # devicectl keeps parsing dash-prefixed values as command options even
+    # after the bundle identifier. Terminate option parsing before app args.
+    app_args = ["--", app_bundle_id] + sys.argv[1:]
+    launch_app(
+        launch_args=launch_args,
+        app_args=app_args,
+        env=devicectl_launch_environ(device_identifier=device_identifier),
+        device_identifier=device_identifier,
+    )
+
+
+def launch_app(
+    *,
+    launch_args: list[str],
+    app_args: list[str],
+    env: Dict[str, str],
+    device_identifier: str,
+) -> None:
+  """Launches an app in a simulator.
+
+  Args:
+    launch_args: The arguments to pass to simctl to launch the app, excluding
+      the bundle id and app arguments.
+    app_args: The bundle id and app arguments to pass to simctl to launch the
+      app.
+    env: The environment variables to pass to simctl.
+    device_identifier: The identifier of the device.
+  """
+  launch_info_path = os.environ.get("BAZEL_APPLE_LAUNCH_INFO_PATH")
+  if not launch_info_path:
+    subprocess.run(launch_args + app_args, env=env, check=True)
+    return
+
+  if "--json-output" in launch_args:
+    idx = launch_args.index("--json-output")
+    json_output_path = launch_args[idx + 1]
+    delete_json_output = False
+  else:
+    json_output_path = os.path.join(
+        tempfile.gettempdir(), f"devicectl_launch_{uuid4().hex}.json",
+    )
+    launch_args = launch_args + ["--json-output", json_output_path]
+    delete_json_output = True
+  args = launch_args + app_args
+
+  proc = subprocess.Popen(
+      args,
+      env=env,
+  )
+
+  exit_code = proc.wait()
+
+  # `devicectl` only writes to `--json-output` after the process has exited. We
+  # use `subprocess.Popen()` instead of `subprocess.run()` to allow us to write
+  # the launch info before reporting process exit.
+  try:
+    with open(json_output_path, "r", encoding="utf-8") as f:
+      data = json.load(f)
+      pid = (
+          data.get("result", {}).get("process", {}).get("processIdentifier")
+      )
+      if pid:
+        os.makedirs(os.path.dirname(launch_info_path), exist_ok=True)
+        with open(launch_info_path, "w", encoding="utf-8") as f:
+          f.write(json.dumps(
+              {
+                  "platform": "device",
+                  "udid": device_identifier,
+                  "pid": pid,
+              },
+              indent=2,
+          ))
+        logger.info(
+          "Successfully written launch info to: %s", launch_info_path
+        )
+      else:
+          logger.error("Failed to find PID in JSON output")
+  except Exception as e:
+    logger.error("Failed to write launch info to file: %s", e)
+
+  if delete_json_output:
+    try:
+      os.remove(json_output_path)
+    except Exception:
+      pass
+
+  if exit_code != 0:
+    raise subprocess.CalledProcessError(exit_code, args)
 
 
 def main(
@@ -442,6 +611,7 @@ def main(
   )
   developer_path = xcode_select_result.stdout.rstrip()
   devicectl_path = os.path.join(developer_path, "usr", "bin", "devicectl")
+  device_identifier = os.environ.get("BAZEL_APPLE_DEVICE_UDID", device_identifier)
 
   if not device_identifier:
     logger.info(
@@ -490,5 +660,6 @@ if __name__ == "__main__":
     )
   except subprocess.CalledProcessError as e:
     logger.error("%s exited with error code %d", e.cmd, e.returncode)
+    sys.exit(e.returncode)
   except KeyboardInterrupt:
-    pass
+    sys.exit(1)

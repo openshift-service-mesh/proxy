@@ -22,11 +22,10 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/base/attributes.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/hash/hash.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
@@ -210,6 +209,21 @@ inline bool operator!=(const OverloadDecl& lhs, const OverloadDecl& rhs) {
 }
 
 template <typename... Args>
+OverloadDecl MakeOverloadDecl(Type result, Args&&... args) {
+  OverloadDecl overload_decl;
+  overload_decl.set_result(std::move(result));
+  overload_decl.set_member(false);
+  auto& mutable_args = overload_decl.mutable_args();
+  mutable_args.reserve(sizeof...(Args));
+  (mutable_args.push_back(std::forward<Args>(args)), ...);
+  return overload_decl;
+}
+
+// Prefer the version of `MakeOverloadDecl` that does not specify the id.
+// This version is less robust than the version that automatically generates a
+// descriptive overload id at the time the overload is added to the function
+// declaration.
+template <typename... Args>
 OverloadDecl MakeOverloadDecl(absl::string_view id, Type result,
                               Args&&... args) {
   OverloadDecl overload_decl;
@@ -223,6 +237,20 @@ OverloadDecl MakeOverloadDecl(absl::string_view id, Type result,
 }
 
 template <typename... Args>
+OverloadDecl MakeMemberOverloadDecl(Type result, Args&&... args) {
+  OverloadDecl overload_decl;
+  overload_decl.set_result(std::move(result));
+  overload_decl.set_member(true);
+  auto& mutable_args = overload_decl.mutable_args();
+  mutable_args.reserve(sizeof...(Args));
+  (mutable_args.push_back(std::forward<Args>(args)), ...);
+  return overload_decl;
+}
+
+// Avoid this version of `MakeMemberOverloadDecl`, it is less robust than the
+// version that automatically generates a descriptive overload id at the time
+// the overload is added to the function declaration.
+template <typename... Args>
 OverloadDecl MakeMemberOverloadDecl(absl::string_view id, Type result,
                                     Args&&... args) {
   OverloadDecl overload_decl;
@@ -234,39 +262,6 @@ OverloadDecl MakeMemberOverloadDecl(absl::string_view id, Type result,
   (mutable_args.push_back(std::forward<Args>(args)), ...);
   return overload_decl;
 }
-
-struct OverloadDeclHash {
-  using is_transparent = void;
-
-  size_t operator()(const OverloadDecl& overload_decl) const {
-    return (*this)(overload_decl.id());
-  }
-
-  size_t operator()(absl::string_view id) const { return absl::HashOf(id); }
-};
-
-struct OverloadDeclEqualTo {
-  using is_transparent = void;
-
-  bool operator()(const OverloadDecl& lhs, const OverloadDecl& rhs) const {
-    return (*this)(lhs.id(), rhs.id());
-  }
-
-  bool operator()(const OverloadDecl& lhs, absl::string_view rhs) const {
-    return (*this)(lhs.id(), rhs);
-  }
-
-  bool operator()(absl::string_view lhs, const OverloadDecl& rhs) const {
-    return (*this)(lhs, rhs.id());
-  }
-
-  bool operator()(absl::string_view lhs, absl::string_view rhs) const {
-    return lhs == rhs;
-  }
-};
-
-using OverloadDeclHashSet =
-    absl::flat_hash_set<OverloadDecl, OverloadDeclHash, OverloadDeclEqualTo>;
 
 template <typename... Overloads>
 absl::StatusOr<FunctionDecl> MakeFunctionDecl(std::string name,
@@ -317,21 +312,27 @@ class FunctionDecl final {
     return overloads_.insertion_order;
   }
 
+  ABSL_MUST_USE_RESULT const OverloadDecl* FindOverloadById(
+      absl::string_view id) const;
+
   std::vector<OverloadDecl> release_overloads() {
     std::vector<OverloadDecl> released = std::move(overloads_.insertion_order);
     overloads_.insertion_order.clear();
-    overloads_.set.clear();
+    overloads_.by_id.clear();
+    overloads_.by_signature.clear();
     return released;
   }
 
  private:
   struct Overloads {
     std::vector<OverloadDecl> insertion_order;
-    OverloadDeclHashSet set;
+    absl::flat_hash_map<std::string, size_t> by_id;
+    absl::flat_hash_map<std::string, size_t> by_signature;
 
     void Reserve(size_t size) {
       insertion_order.reserve(size);
-      set.reserve(size);
+      by_id.reserve(size);
+      by_signature.reserve(size);
     }
   };
 
@@ -375,6 +376,70 @@ namespace common_internal {
 bool TypeIsAssignable(const Type& to, const Type& from);
 
 }  // namespace common_internal
+
+struct VariableDeclEqualTo {
+  using is_transparent = void;
+
+  bool operator()(const cel::VariableDecl& lhs,
+                  const cel::VariableDecl& rhs) const {
+    return lhs.name() == rhs.name();
+  }
+
+  bool operator()(const cel::VariableDecl& lhs, std::string_view rhs) const {
+    return lhs.name() == rhs;
+  }
+
+  bool operator()(std::string_view lhs, const cel::VariableDecl& rhs) const {
+    return lhs == rhs.name();
+  }
+};
+
+struct VariableDeclHash {
+  using is_transparent = void;
+
+  size_t operator()(const cel::VariableDecl& decl) const {
+    return (*this)(decl.name());
+  }
+
+  size_t operator()(std::string_view name) const { return absl::HashOf(name); }
+};
+
+using VariableDeclSet = absl::flat_hash_set<cel::VariableDecl, VariableDeclHash,
+                                            VariableDeclEqualTo>;
+
+struct FunctionDeclEqualTo {
+  using is_transparent = void;
+
+  bool operator()(const cel::FunctionDecl& lhs,
+                  const cel::FunctionDecl& rhs) const {
+    return (*this)(lhs.name(), rhs.name());
+  }
+
+  bool operator()(const cel::FunctionDecl& lhs, std::string_view rhs) const {
+    return (*this)(lhs.name(), rhs);
+  }
+
+  bool operator()(std::string_view lhs, const cel::FunctionDecl& rhs) const {
+    return (*this)(lhs, rhs.name());
+  }
+
+  bool operator()(std::string_view lhs, std::string_view rhs) const {
+    return lhs == rhs;
+  }
+};
+
+struct FunctionDeclHash {
+  using is_transparent = void;
+
+  size_t operator()(const cel::FunctionDecl& decl) const {
+    return absl::HashOf(decl.name());
+  }
+
+  size_t operator()(std::string_view name) const { return absl::HashOf(name); }
+};
+
+using FunctionDeclSet = absl::flat_hash_set<cel::FunctionDecl, FunctionDeclHash,
+                                            FunctionDeclEqualTo>;
 
 }  // namespace cel
 

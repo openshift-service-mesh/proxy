@@ -2,22 +2,18 @@
 
 module(
     name = "aspect_rules_js",
+    version = "2.3.8",
     bazel_compatibility = [">=6.0.0"],
     compatibility_level = 1,
-    version = "2.5.0",
 )
 
 # Lower-bounds (minimum) versions for direct runtime dependencies.
 # Do not bump these unless rules_js requires a newer version to function.
 bazel_dep(name = "aspect_bazel_lib", version = "2.14.0")
-bazel_dep(name = "aspect_tools_telemetry", version = "0.2.8")
 bazel_dep(name = "bazel_features", version = "1.9.0")
 bazel_dep(name = "bazel_skylib", version = "1.5.0")
 bazel_dep(name = "platforms", version = "0.0.5")
 bazel_dep(name = "rules_nodejs", version = "6.3.0")
-
-tel = use_extension("@aspect_tools_telemetry//:extension.bzl", "telemetry")
-use_repo(tel, "aspect_tools_telemetry_report")
 
 node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
 use_repo(node, "nodejs_toolchains")
@@ -51,7 +47,6 @@ use_repo(bazel_lib_toolchains, "bsd_tar_toolchains")
 
 ####### Dev dependencies ########
 
-bazel_dep(name = "bazelrc-preset.bzl", version = "1.0.1", dev_dependency = True)
 bazel_dep(name = "aspect_rules_lint", version = "1.1.0", dev_dependency = True)
 bazel_dep(name = "buildifier_prebuilt", version = "8.0.1", dev_dependency = True)
 
@@ -158,6 +153,9 @@ npm.npm_translate_lock(
         "//npm/private/test/vendored/is-odd:package.json",
         "//npm/private/test/vendored/semver-max:package.json",
     ],
+    exclude_package_contents = {
+        "chalk": ["**/README*"],
+    },
     generate_bzl_library_targets = True,
     lifecycle_hooks = {
         # We fetch @kubernetes/client-node from source and it has a `prepare` lifecycle hook that needs to be run
@@ -216,12 +214,6 @@ npm.npm_translate_lock(
     update_pnpm_lock = True,
     verify_node_modules_ignored = "//:.bazelignore",
     verify_patches = "//examples/npm_deps/patches:patches",
-)
-
-# Configure package exclusions using tag class
-npm.npm_exclude_package_contents(
-    package = "chalk",
-    patterns = ["**/README*"],
 )
 use_repo(
     npm,

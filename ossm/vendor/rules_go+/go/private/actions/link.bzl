@@ -44,7 +44,8 @@ def emit_link(
         executable = None,
         gc_linkopts = [],
         version_file = None,
-        info_file = None):
+        info_file = None,
+        exec_group = None):
     """See go/toolchains.rst#link for full documentation."""
 
     if archive == None:
@@ -124,7 +125,18 @@ def emit_link(
     else:
         arcs = depset(test_archives, transitive = [d.transitive for d in archive.direct])
 
+    package_metadata_files = depset(
+        direct = [
+            metadata
+            for archive_data in test_archives
+            for metadata in [getattr(archive_data, "_package_metadata", None)]
+            if metadata
+        ],
+        transitive = [getattr(d, "_package_metadata_files", depset()) for d in archive.direct],
+    )
+
     builder_args.add_all(arcs, before_each = "-arc", map_each = _format_archive)
+    builder_args.add_all(package_metadata_files, before_each = "-package_metadata")
     builder_args.add("-package_list", go.sdk.package_list)
 
     # Build a list of rpaths for dynamic libraries we need to find.
@@ -166,6 +178,7 @@ def emit_link(
 
     builder_args.add("-o", executable)
     builder_args.add("-main", archive.data.file)
+    builder_args.add("-main_package_path", archive.data.importpath)
     builder_args.add("-p", archive.data.importmap)
     tool_args.add_all(gc_linkopts)
     tool_args.add_all(go.toolchain.flags.link)
@@ -182,9 +195,12 @@ def emit_link(
     inputs_transitive = [
         archive.libs,
         archive.cgo_deps,
+        archive.cgo_link_inputs,
+        go.stdlib.cgo_link_inputs,
         go.cc_toolchain_files,
         go.sdk.tools,
         go.stdlib.libs,
+        package_metadata_files,
     ]
     inputs = depset(direct = inputs_direct, transitive = inputs_transitive)
 
@@ -196,6 +212,7 @@ def emit_link(
         arguments = [builder_args, "--", tool_args],
         env = go.env,
         toolchain = GO_TOOLCHAIN_LABEL,
+        exec_group = exec_group,
     )
 
 def _extract_extldflags(gc_linkopts, extldflags):

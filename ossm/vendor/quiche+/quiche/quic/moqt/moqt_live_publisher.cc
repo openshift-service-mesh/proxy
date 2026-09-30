@@ -73,8 +73,9 @@ LivePublisher::~LivePublisher() {
 }
 
 void LivePublisher::Update(const MessageParameters& parameters) {
-  // TODO(martinduke): If there are auth tokens, this probably has to go to the
-  // application.
+  if (!track_publisher_->UpdateObjectListener(this, parameters).ok()) {
+    return;
+  }
   // TODO(martinduke): If the subscribe window has shrunk, close any streams
   // that are now outside the window. Also send PUBLISH_DONE if now done.
   MoqtPriority old_priority =
@@ -98,13 +99,13 @@ void LivePublisher::Update(const MessageParameters& parameters) {
     // Tell the session that pending stream priority has changed.
     MoqtPriority publisher_priority =
         pending_streams_.rbegin()->second.publisher_priority.value_or(
-            track_publisher_->extensions().default_publisher_priority());
+            track_publisher_->properties().default_publisher_priority());
     MoqtTrackPriority old_track_priority = {old_priority, publisher_priority};
     if (visitor() == nullptr) {
       return;
     }
     visitor()->UpdateTrackPriority(
-        request_id_, old_track_priority,
+        track_publisher_->GetTrackName(), old_track_priority,
         MoqtTrackPriority{new_priority, publisher_priority});
     // Don't bother to update all the pending stream send orders.
   }
@@ -133,19 +134,18 @@ void LivePublisher::OnSubscribeAccepted() {
         parameters_.largest_object);
   }
   MoqtSubscribeOk subscribe_ok;
-  subscribe_ok.request_id = request_id_;
   subscribe_ok.track_alias = track_alias_;
   subscribe_ok.parameters.expires = track_publisher_->expiration();
   subscribe_ok.parameters.largest_object = parameters_.largest_object;
-  subscribe_ok.extensions = track_publisher_->extensions();
+  subscribe_ok.properties = track_publisher_->properties();
   if (!parameters_.group_order.has_value()) {
     parameters_.group_order =
-        subscribe_ok.extensions.default_publisher_group_order();
+        subscribe_ok.properties.default_publisher_group_order();
   }
   // TODO(martinduke): Support sending DELIVERY_TIMEOUT parameter as the
   // publisher.
   default_publisher_priority_ =
-      subscribe_ok.extensions.default_publisher_priority();
+      subscribe_ok.properties.default_publisher_priority();
   bidi_stream_->SendOrBufferMessageOrFatal(
       framer_.SerializeSubscribeOk(subscribe_ok));
   // TODO(martinduke): If we buffer objects that arrived previously, the arrival
@@ -154,8 +154,7 @@ void LivePublisher::OnSubscribeAccepted() {
 }
 
 void LivePublisher::OnSubscribeRejected(MoqtRequestErrorInfo info) {
-  bidi_stream_->CheckStatus(bidi_stream_->SendRequestError(request_id_, info,
-                                                           /*fin=*/true));
+  bidi_stream_->CheckStatus(bidi_stream_->SendRequestError(info));
   // Sending FIN will delete the class.
 }
 
@@ -244,7 +243,7 @@ void LivePublisher::OnNewObjectAvailable(Location location,
     StreamRank rank = StreamRankFor(parameters);
     if (pending_streams_.empty() || rank > pending_streams_.rbegin()->first) {
       session_info->UpdateTrackPriority(
-          request_id_,
+          track_publisher_->GetTrackName(),
           /*old_priority=*/pending_streams_.empty()
               ? std::optional<MoqtTrackPriority>()
               : std::make_optional(
@@ -349,7 +348,7 @@ void LivePublisher::SendDatagram(Location sequence) {
   header.group_id = object->metadata.location.group;
   header.object_id = object->metadata.location.object;
   header.publisher_priority = object->metadata.publisher_priority;
-  header.extension_headers = object->metadata.extensions;
+  header.properties = object->metadata.properties;
   header.object_status = object->metadata.status;
   header.subgroup_id = std::nullopt;
   header.payload_length = object->metadata.payload_length;
@@ -450,7 +449,7 @@ void LivePublisher::OnCanCreateNewUniStream() {
     pending_streams_.erase(--(it.base()));
     if (!pending_streams_.empty()) {
       session_info->UpdateTrackPriority(
-          request_id_, std::nullopt,
+          track_publisher_->GetTrackName(), std::nullopt,
           MoqtTrackPriority{
               subscriber_priority(),
               pending_streams_.rbegin()->second.publisher_priority.value_or(

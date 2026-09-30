@@ -1,0 +1,17 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("//tools/cxxopts:cxxopts.bzl", "cxxopts", "linkopts")
+
+cc_binary(
+    name = "src_gen",
+    srcs = [
+        "main.cc",
+    ],
+    cxxopts = cxxopts(),
+    linkopts = linkopts(),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/private/checker:condition_evaluator",
+        "//autoconf/private/common:file_util",
+        "//tools/json",
+    ],
+)

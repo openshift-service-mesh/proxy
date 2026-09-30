@@ -30,49 +30,21 @@ config_setting(
     flag_values = {":grpc_use_openssl": "true"},
 )
 
-label_flag(
-    name = "ssl_lib",
-    build_setting_default = ":_default_ssl",
-    visibility = ["//visibility:public"],
-)
-
-label_flag(
-    name = "crypto_lib",
-    build_setting_default = ":_default_crypto",
-    visibility = ["//visibility:public"],
-)
-
-alias(
-    name = "_default_ssl",
-    actual = select({
-        ":grpc_use_openssl_setting": "@openssl//:ssl",
-        "//conditions:default": "@boringssl//:ssl",
-    }),
-)
-
-alias(
-    name = "_default_crypto",
-    actual = select({
-        ":grpc_use_openssl_setting": "@openssl//:crypto",
-        "//conditions:default": "@boringssl//:crypto",
-    }),
-)
-
 alias(
     name = "libssl",
-    actual = ":ssl_lib",
+    actual = "@grpc_deps//:ssl",
     tags = ["manual"],
 )
 
 alias(
     name = "libcrypto",
-    actual = ":crypto_lib",
+    actual = "@grpc_deps//:crypto",
     tags = ["manual"],
 )
 
 alias(
     name = "madler_zlib",
-    actual = "@zlib//:zlib",
+    actual = "@grpc_deps//:zlib",
     tags = ["manual"],
 )
 

@@ -14,6 +14,7 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -27,6 +28,7 @@ cc_library(
     hdrs = [
         "cel_proto_wrapper.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_proto_wrap_util",
         ":proto_message_type_adapter",
@@ -45,6 +47,7 @@ cc_library(
     hdrs = [
         "protobuf_value_factory.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public:cel_value",
         "@com_google_protobuf//:protobuf",
@@ -59,6 +62,7 @@ cc_library(
     hdrs = [
         "cel_proto_wrap_util.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":protobuf_value_factory",
         "//eval/public:cel_value",
@@ -94,6 +98,7 @@ cc_test(
     srcs = [
         "cel_proto_wrap_util_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_proto_wrap_util",
         ":protobuf_value_factory",
@@ -128,6 +133,7 @@ cc_library(
     hdrs = [
         "field_access_impl.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_proto_wrap_util",
         ":protobuf_value_factory",
@@ -149,6 +155,7 @@ cc_library(
 cc_test(
     name = "field_access_impl_test",
     srcs = ["field_access_impl_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_proto_wrapper",
         ":field_access_impl",
@@ -170,6 +177,7 @@ cc_library(
     name = "cel_proto_descriptor_pool_builder",
     srcs = ["cel_proto_descriptor_pool_builder.cc"],
     hdrs = ["cel_proto_descriptor_pool_builder.h"],
+    copts = CEL_COPTS,
     deps = [
         "//internal:proto_util",
         "//internal:status_macros",
@@ -189,6 +197,7 @@ cc_library(
 cc_test(
     name = "cel_proto_descriptor_pool_builder_test",
     srcs = ["cel_proto_descriptor_pool_builder_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_proto_descriptor_pool_builder",
         "//eval/testutil:test_message_cc_proto",
@@ -204,6 +213,7 @@ cc_test(
     srcs = [
         "cel_proto_wrapper_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_proto_wrapper",
         "//eval/public:cel_value",
@@ -231,6 +241,7 @@ cc_library(
     name = "legacy_type_provider",
     srcs = ["legacy_type_provider.cc"],
     hdrs = ["legacy_type_provider.h"],
+    copts = CEL_COPTS,
     deps = [
         ":legacy_type_adapter",
         ":legacy_type_info_apis",
@@ -255,6 +266,7 @@ cc_library(
 cc_library(
     name = "legacy_type_adapter",
     hdrs = ["legacy_type_adapter.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:attributes",
         "//common:memory",
@@ -270,6 +282,7 @@ cc_library(
 cc_test(
     name = "legacy_type_adapter_test",
     srcs = ["legacy_type_adapter_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":legacy_type_adapter",
         ":trivial_legacy_type_info",
@@ -287,6 +300,7 @@ cc_library(
     name = "proto_message_type_adapter",
     srcs = ["proto_message_type_adapter.cc"],
     hdrs = ["proto_message_type_adapter.h"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_proto_wrap_util",
         ":field_access_impl",
@@ -319,12 +333,14 @@ cc_library(
 cc_test(
     name = "proto_message_type_adapter_test",
     srcs = ["proto_message_type_adapter_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":legacy_type_adapter",
         ":legacy_type_info_apis",
         ":proto_message_type_adapter",
         "//base:attributes",
         "//common:value",
+        "//common:value_testing",
         "//eval/public:cel_value",
         "//eval/public:message_wrapper",
         "//eval/public/containers:container_backed_list_impl",
@@ -345,6 +361,7 @@ cc_library(
     name = "protobuf_descriptor_type_provider",
     srcs = ["protobuf_descriptor_type_provider.cc"],
     hdrs = ["protobuf_descriptor_type_provider.h"],
+    copts = CEL_COPTS,
     deps = [
         ":legacy_type_adapter",
         ":legacy_type_info_apis",
@@ -362,13 +379,19 @@ cc_library(
 cc_test(
     name = "protobuf_descriptor_type_provider_test",
     srcs = ["protobuf_descriptor_type_provider_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":legacy_type_info_apis",
         ":protobuf_descriptor_type_provider",
+        "//common:type",
         "//eval/public:cel_value",
         "//eval/public/testing:matchers",
         "//extensions/protobuf:memory_manager",
         "//internal:testing",
+        "//internal:testing_descriptor_pool",
+        "//internal:testing_message_factory",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_cel_spec//proto/cel/expr/conformance/proto3:test_all_types_cc_proto",
         "@com_google_protobuf//:protobuf",
         "@com_google_protobuf//:wrappers_cc_proto",
     ],
@@ -377,6 +400,7 @@ cc_test(
 cc_library(
     name = "legacy_type_info_apis",
     hdrs = ["legacy_type_info_apis.h"],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public:message_wrapper",
         "@com_google_absl//absl/base:nullability",
@@ -390,6 +414,7 @@ cc_library(
     name = "trivial_legacy_type_info",
     testonly = True,
     hdrs = ["trivial_legacy_type_info.h"],
+    copts = CEL_COPTS,
     deps = [
         ":legacy_type_info_apis",
         "//eval/public:message_wrapper",
@@ -401,6 +426,7 @@ cc_library(
 cc_test(
     name = "trivial_legacy_type_info_test",
     srcs = ["trivial_legacy_type_info_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":trivial_legacy_type_info",
         "//eval/public:message_wrapper",
@@ -411,10 +437,13 @@ cc_test(
 cc_test(
     name = "legacy_type_provider_test",
     srcs = ["legacy_type_provider_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":legacy_type_info_apis",
         ":legacy_type_provider",
+        "//common:type",
         "//internal:testing",
+        "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/strings:string_view",
     ],
 )
@@ -422,6 +451,7 @@ cc_test(
 cc_test(
     name = "dynamic_descriptor_pool_end_to_end_test",
     srcs = ["dynamic_descriptor_pool_end_to_end_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_proto_descriptor_pool_builder",
         ":cel_proto_wrapper",
@@ -439,6 +469,27 @@ cc_test(
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
         "@com_google_cel_spec//proto/cel/expr/conformance/proto3:test_all_types_cc_proto",
         "@com_google_protobuf//:differencer",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "field_access_impl_benchmark_test",
+    srcs = ["field_access_impl_benchmark_test.cc"],
+    copts = CEL_COPTS,
+    tags = [
+        "benchmark",
+        "manual",
+    ],
+    deps = [
+        ":cel_proto_wrapper",
+        ":field_access_impl",
+        "//eval/public:cel_options",
+        "//eval/public:cel_value",
+        "//extensions/protobuf/internal:map_reflection",
+        "//internal:benchmark",
+        "//internal:testing",
+        "@com_google_cel_spec//proto/cel/expr/conformance/proto3:test_all_types_cc_proto",
         "@com_google_protobuf//:protobuf",
     ],
 )

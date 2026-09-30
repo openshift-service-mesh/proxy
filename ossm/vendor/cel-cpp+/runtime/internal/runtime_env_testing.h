@@ -18,11 +18,42 @@
 #include <memory>
 
 #include "absl/base/nullability.h"
+#include "absl/log/absl_check.h"
+#include "absl/log/die_if_null.h"
+#include "internal/testing_descriptor_pool.h"
+#include "internal/testing_message_factory.h"
 #include "runtime/internal/runtime_env.h"
+#include "google/protobuf/arena.h"
+#include "google/protobuf/descriptor.h"
+#include "google/protobuf/message.h"
 
 namespace cel::runtime_internal {
 
 absl_nonnull std::shared_ptr<RuntimeEnv> NewTestingRuntimeEnv();
+
+template <typename T>
+const google::protobuf::Descriptor* absl_nonnull GetTestingEnvDescriptor() {
+  const google::protobuf::Descriptor* descriptor =
+      internal::GetTestingDescriptorPool()->FindMessageTypeByName(
+          T::descriptor()->full_name());
+  ABSL_CHECK(descriptor != nullptr)
+      << "Could not find CEL test env descriptor for type "
+      << T::descriptor()->full_name();
+  return descriptor;
+}
+
+template <typename T>
+google::protobuf::Message* absl_nonnull MakeTestingEnvDynamicProto(
+    const T& in, google::protobuf::Arena* absl_nonnull arena) {
+  const google::protobuf::Descriptor* descriptor = GetTestingEnvDescriptor<T>();
+  google::protobuf::Message* out =
+      ABSL_DIE_IF_NULL(
+          internal::GetTestingMessageFactory()->GetPrototype(descriptor))
+          ->New(arena);
+
+  ABSL_CHECK(out->MergeFromString(in.SerializeAsString()));
+  return out;
+}
 
 }  // namespace cel::runtime_internal
 

@@ -174,4 +174,10 @@ GRPC_DEFAULT_COPTS = select({
     "//:use_strict_warning": GRPC_LLVM_WARNING_FLAGS + ["-DUSE_STRICT_WARNING=1"],
     "//:use_strict_warning_windows": GRPC_LLVM_WINDOWS_WARNING_FLAGS + ["-DUSE_STRICT_WARNING=1"],
     "//conditions:default": [],
+}) + select({
+    "//:windows": [],
+    "//conditions:default": ["-Wno-deprecated-declarations"],
+}) + select({
+    "//:clang_compiler": ["-Wno-unneeded-internal-declaration"],
+    "//conditions:default": [],
 })

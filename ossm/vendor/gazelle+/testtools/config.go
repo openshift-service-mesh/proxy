@@ -29,6 +29,8 @@ import (
 // but it may be convenient to keep them separate). args is a list of
 // command line arguments to apply. NewTestConfig calls t.Fatal if any
 // error is encountered while processing flags.
+//
+// Deprecated: Use github.com/bazel-contrib/bazel-gazelle/v2/testtools.NewTestConfig instead.
 func NewTestConfig(t *testing.T, cexts []config.Configurer, langs []language.Language, args []string) *config.Config {
 	c := config.New()
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)

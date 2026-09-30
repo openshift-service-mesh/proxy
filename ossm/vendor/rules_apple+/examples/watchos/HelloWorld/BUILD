@@ -1,4 +1,5 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load(
     "//apple:ios.bzl",
     "ios_application",
@@ -52,6 +53,7 @@ objc_library(
         "WatchApp2Sources/ExtensionDelegate.h",
         "WatchApp2Sources/ExtensionDelegate.m",
     ],
+    tags = ["manual"],
     deps = [":WatchSharedSources"],
 )
 
@@ -62,6 +64,7 @@ objc_library(
         "SingleTargetWatchSources/AppDelegate.m",
         "SingleTargetWatchSources/main.m",
     ],
+    tags = ["manual"],
     deps = [":WatchSharedSources"],
 )
 

@@ -19,12 +19,16 @@ visibility([
     "//swift/...",
 ])
 
-def supplemental_compilation_output_groups(*supplemental_outputs):
+def supplemental_compilation_output_groups(
+        *supplemental_outputs,
+        additional_indexstore_files = []):
     """Computes output groups from supplemental compilation outputs.
 
     Args:
         *supplemental_outputs: Zero or more supplemental outputs `struct`s
             returned from calls to `compile`.
+        additional_indexstore_files: An optional `list` of additional indexstore
+            artifacts to be included in the `indexstore` output group.
 
     Returns:
         A dictionary whose keys are output group names and whose values are
@@ -33,7 +37,8 @@ def supplemental_compilation_output_groups(*supplemental_outputs):
     """
     ast_files = []
     const_values_files = []
-    indexstore_files = []
+    indexstore_files = list(additional_indexstore_files)
+    localized_strings_files = []
     macro_expansions_files = []
 
     for outputs in supplemental_outputs:
@@ -43,6 +48,8 @@ def supplemental_compilation_output_groups(*supplemental_outputs):
             const_values_files.extend(outputs.const_values_files)
         if outputs.indexstore_directory:
             indexstore_files.append(outputs.indexstore_directory)
+        if outputs.localized_strings_directory:
+            localized_strings_files.append(outputs.localized_strings_directory)
         if outputs.macro_expansion_directory:
             macro_expansions_files.append(outputs.macro_expansion_directory)
 
@@ -53,6 +60,8 @@ def supplemental_compilation_output_groups(*supplemental_outputs):
         output_groups["const_values"] = depset(const_values_files)
     if indexstore_files:
         output_groups["swift_index_store"] = depset(indexstore_files)
+    if localized_strings_files:
+        output_groups["swift_localized_strings"] = depset(localized_strings_files)
     if macro_expansions_files:
         output_groups["macro_expansions"] = depset(macro_expansions_files)
     return output_groups

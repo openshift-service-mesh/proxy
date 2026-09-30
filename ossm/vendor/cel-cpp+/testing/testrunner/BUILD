@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(
     default_testonly = True,
@@ -11,6 +12,7 @@ licenses(["notice"])
 cc_library(
     name = "cel_test_context",
     hdrs = ["cel_test_context.h"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_source",
         "//common:value",
@@ -18,6 +20,7 @@ cc_library(
         "//eval/public:cel_expression",
         "//runtime",
         "//runtime:activation",
+        "//runtime:activation_interface",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/memory",
@@ -33,6 +36,7 @@ cc_library(
     name = "runner_lib",
     srcs = ["runner_lib.cc"],
     hdrs = ["runner_lib.h"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_source",
         ":cel_test_context",
@@ -51,6 +55,7 @@ cc_library(
         "//internal:testing_no_main",
         "//runtime",
         "//runtime:activation",
+        "//runtime:activation_interface",
         "@com_google_absl//absl/functional:overload",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
@@ -67,6 +72,7 @@ cc_library(
 cc_library(
     name = "cel_test_factories",
     hdrs = ["cel_test_factories.h"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_test_context",
         "@com_google_absl//absl/base:no_destructor",
@@ -82,6 +88,7 @@ cc_test(
     args = [
         "--test_cel_file_path=$(location //testing/testrunner/resources:test.cel)",
     ],
+    copts = CEL_COPTS,
     data = [
         "//testing/testrunner/resources:test.cel",
     ],
@@ -90,6 +97,7 @@ cc_test(
         ":cel_test_context",
         ":coverage_index",
         ":runner_lib",
+        "//base:attributes",
         "//checker:type_checker_builder",
         "//checker:validation_result",
         "//common:ast_proto",
@@ -107,6 +115,8 @@ cc_test(
         "//internal:testing_descriptor_pool",
         "//runtime",
         "//runtime:activation",
+        "//runtime:activation_interface",
+        "//runtime:function_overload_reference",
         "//runtime:runtime_builder",
         "//runtime:standard_runtime_builder_factory",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -115,6 +125,7 @@ cc_test(
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
         "@com_google_cel_spec//proto/cel/expr/conformance/proto3:test_all_types_cc_proto",
         "@com_google_cel_spec//proto/cel/expr/conformance/test:suite_cc_proto",
         "@com_google_protobuf//:protobuf",
@@ -125,6 +136,7 @@ cc_library(
     name = "coverage_reporting",
     srcs = ["coverage_reporting.cc"],
     hdrs = ["coverage_reporting.h"],
+    copts = CEL_COPTS,
     deps = [
         ":coverage_index",
         "//internal:testing_no_main",
@@ -137,6 +149,7 @@ cc_library(
 cc_library(
     name = "runner",
     srcs = ["runner_bin.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_source",
         ":cel_test_context",
@@ -164,6 +177,7 @@ cc_library(
 cc_library(
     name = "cel_expression_source",
     hdrs = ["cel_expression_source.h"],
+    copts = CEL_COPTS,
     deps = ["@com_google_cel_spec//proto/cel/expr:checked_cc_proto"],
 )
 
@@ -171,6 +185,7 @@ cc_library(
     name = "coverage_index",
     srcs = ["coverage_index.cc"],
     hdrs = ["coverage_index.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:ast",
         "//common:value",
@@ -195,6 +210,7 @@ cc_library(
 cc_test(
     name = "coverage_index_test",
     srcs = ["coverage_index_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":coverage_index",
         "//checker:type_checker_builder",
@@ -216,6 +232,7 @@ cc_test(
         "//runtime:standard_runtime_builder_factory",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
         "@com_google_protobuf//:protobuf",

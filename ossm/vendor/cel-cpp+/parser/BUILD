@@ -14,6 +14,7 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -29,6 +30,9 @@ cc_library(
     ],
     copts = [
         "-fexceptions",
+    ] + CEL_COPTS,
+    defines = [
+        "ANTLR4CPP_STATIC",
     ],
     deps = [
         ":macro",
@@ -39,6 +43,7 @@ cc_library(
         ":source_factory",
         "//common:ast",
         "//common:constant",
+        "//common:expr",
         "//common:expr_factory",
         "//common:operators",
         "//common:source",
@@ -47,8 +52,8 @@ cc_library(
         "//internal:lexis",
         "//internal:status_macros",
         "//internal:strings",
-        "//internal:utf8",
         "//parser/internal:cel_cc_parser",
+        "//parser/internal:pratt_parser",
         "@antlr4-cpp-runtime",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/cleanup",
@@ -57,6 +62,7 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/functional:overload",
         "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -77,6 +83,7 @@ cc_library(
     hdrs = [
         "macro.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":macro_expr_factory",
         "//common:expr",
@@ -102,6 +109,7 @@ cc_library(
     hdrs = [
         "macro_registry.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":macro",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -115,6 +123,7 @@ cc_library(
 cc_test(
     name = "macro_registry_test",
     srcs = ["macro_registry_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":macro",
         ":macro_registry",
@@ -128,6 +137,7 @@ cc_library(
     name = "macro_expr_factory",
     srcs = ["macro_expr_factory.cc"],
     hdrs = ["macro_expr_factory.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:constant",
         "//common:expr",
@@ -144,6 +154,7 @@ cc_library(
 cc_test(
     name = "macro_expr_factory_test",
     srcs = ["macro_expr_factory_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":macro_expr_factory",
         "//common:expr",
@@ -159,11 +170,13 @@ cc_library(
     hdrs = [
         "source_factory.h",
     ],
+    copts = CEL_COPTS,
 )
 
 cc_library(
     name = "options",
     hdrs = ["options.h"],
+    copts = CEL_COPTS,
     deps = [
         "//parser/internal:options",
         "@com_google_absl//absl/base:core_headers",
@@ -173,6 +186,7 @@ cc_library(
 cc_test(
     name = "parser_test",
     srcs = ["parser_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":macro",
         ":options",
@@ -181,9 +195,9 @@ cc_test(
         ":source_factory",
         "//common:constant",
         "//common:expr",
+        "//common:expr_printer",
         "//common:source",
         "//internal:testing",
-        "//testutil:expr_printer",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
@@ -197,6 +211,7 @@ cc_test(
 cc_test(
     name = "parser_benchmarks",
     srcs = ["parser_benchmarks.cc"],
+    copts = CEL_COPTS,
     tags = ["benchmark"],
     deps = [
         ":macro",
@@ -205,10 +220,10 @@ cc_test(
         ":source_factory",
         "//common:constant",
         "//common:expr",
+        "//common:expr_printer",
         "//common:source",
         "//internal:benchmark",
         "//internal:testing",
-        "//testutil:expr_printer",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/status",
@@ -224,6 +239,7 @@ cc_library(
     name = "standard_macros",
     srcs = ["standard_macros.cc"],
     hdrs = ["standard_macros.h"],
+    copts = CEL_COPTS,
     deps = [
         ":macro",
         ":macro_registry",
@@ -236,14 +252,17 @@ cc_library(
 cc_library(
     name = "parser_interface",
     hdrs = ["parser_interface.h"],
+    copts = CEL_COPTS,
     deps = [
         ":macro",
         ":options",
         "//common:ast",
         "//common:source",
+        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/functional:any_invocable",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
     ],
 )
 
@@ -251,6 +270,7 @@ cc_library(
     name = "parser_subset_factory",
     srcs = ["parser_subset_factory.cc"],
     hdrs = ["parser_subset_factory.h"],
+    copts = CEL_COPTS,
     deps = [
         ":macro",
         ":parser_interface",
@@ -263,6 +283,7 @@ cc_library(
 cc_test(
     name = "standard_macros_test",
     srcs = ["standard_macros_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":macro_registry",
         ":options",

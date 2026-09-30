@@ -58,16 +58,17 @@ load(
     "runfiles_root_path",
 )
 load(":common_labels.bzl", "labels")
-load(":flags.bzl", "BootstrapImplFlag", "VenvsUseDeclareSymlinkFlag", "read_possibly_native_flag")
+load(":flags.bzl", "BootstrapImplFlag", "ValidateTestMainFlag", "VenvsUseDeclareSymlinkFlag", "read_possibly_native_flag")
 load(":precompile.bzl", "maybe_precompile")
 load(":py_cc_link_params_info.bzl", "PyCcLinkParamsInfo")
 load(":py_executable_info.bzl", "PyExecutableInfo")
 load(":py_info.bzl", "PyInfo", "VenvSymlinkKind")
 load(":py_internal.bzl", "py_internal")
+load(":py_interpreter_program.bzl", "PyInterpreterProgramInfo")
 load(":py_runtime_info.bzl", "DEFAULT_STUB_SHEBANG")
 load(":reexports.bzl", "BuiltinPyInfo", "BuiltinPyRuntimeInfo")
 load(":rule_builders.bzl", "ruleb")
-load(":toolchain_types.bzl", "EXEC_TOOLS_TOOLCHAIN_TYPE", "LAUNCHER_MAKER_TOOLCHAIN_TYPE", TOOLCHAIN_TYPE = "TARGET_TOOLCHAIN_TYPE")
+load(":toolchain_types.bzl", "CC_TOOLCHAIN_TYPE", "EXEC_TOOLS_TOOLCHAIN_TYPE", "LAUNCHER_MAKER_TOOLCHAIN_TYPE", TOOLCHAIN_TYPE = "TARGET_TOOLCHAIN_TYPE")
 load(":transition_labels.bzl", "TRANSITION_LABELS")
 load(":venv_runfiles.bzl", "create_venv_app_files")
 
@@ -97,7 +98,7 @@ EXECUTABLE_ATTRS = dicts.add(
 Arguments that are only applicable to the interpreter.
 
 The args an interpreter supports are specific to the interpreter. For
-CPython, see https://docs.python.org/3/using/cmdline.html.
+CPython, see <https://docs.python.org/3/using/cmdline.html>.
 
 :::{note}
 Only supported for {obj}`--bootstrap_impl=script`. Ignored otherwise.
@@ -114,15 +115,20 @@ The {any}`RULES_PYTHON_ADDITIONAL_INTERPRETER_ARGS` environment variable
         "legacy_create_init": lambda: attrb.Int(
             default = -1,
             values = [-1, 0, 1],
-            doc = """\
+            doc = """
 Whether to implicitly create empty `__init__.py` files in the runfiles tree.
 These are created in every directory containing Python source code or shared
 libraries, and every parent directory of those directories, excluding the repo
 root directory. The default, `-1` (auto), means true unless
-`--incompatible_default_to_explicit_init_py` is used. If false, the user is
-responsible for creating (possibly empty) `__init__.py` files and adding them to
-the `srcs` of Python targets as required.
-                                       """,
+`--incompatible_default_to_explicit_init_py` or the `explicit_init_py`
+module configuration option are used. If false, the user is responsible for
+creating (possibly empty) `__init__.py` files and adding them to the `srcs` of
+Python targets as required.
+
+:::{versionchanged} 2.3.0
+Now checks module-level `explicit_init_py` configuration before CLI flags.
+:::
+""",
         ),
         # TODO(b/203567235): In the Java impl, any file is allowed. While marked
         # label, it is more treated as a string, and doesn't have to refer to
@@ -146,7 +152,7 @@ Module name to execute as the main program.
 When set, `srcs` is not required, and it is assumed the module is
 provided by a dependency.
 
-See https://docs.python.org/3/using/cmdline.html#cmdoption-m for more
+See <https://docs.python.org/3/using/cmdline.html#cmdoption-m> for more
 information about running modules as the main program.
 
 This is mutually exclusive with {obj}`main`.
@@ -283,10 +289,22 @@ def create_binary_semantics():
     )
 
 def _should_create_init_files(ctx):
-    if ctx.attr.legacy_create_init == -1:
-        return not read_possibly_native_flag(ctx, "default_to_explicit_init_py")
-    else:
+    # Each target has the first say in this setting.
+    if ctx.attr.legacy_create_init != -1:
         return bool(ctx.attr.legacy_create_init)
+
+    # Check if it's configured by a module extension.
+    canonical_name = ctx.label.repo_name
+    for sep in ("+", "~"):
+        if canonical_name.startswith(sep):
+            canonical_name = ""
+        module_name = canonical_name.rstrip(sep) if sep not in canonical_name else canonical_name.split(sep)[0]
+        module_configured_explicit_initpy = rp_config.modules_using_explicit_initpy.get(module_name, None)
+        if module_configured_explicit_initpy != None:
+            return not module_configured_explicit_initpy
+
+    # Fall back to CLI setting.
+    return not read_possibly_native_flag(ctx, "default_to_explicit_init_py")
 
 def _create_executable(
         ctx,
@@ -1176,6 +1194,11 @@ def py_executable_base_impl(ctx, *, semantics, is_test, inherited_environment = 
         main_py = determine_main(ctx)
     else:
         main_py = None
+
+    # Keep a reference to the main source file (before it may be replaced with a
+    # precompiled pyc below) so the test-main validation can statically analyze
+    # the original source.
+    main_py_source = main_py
     direct_sources = filter_to_py_srcs(ctx.files.srcs)
     precompile_result = maybe_precompile(ctx, direct_sources)
 
@@ -1294,9 +1317,83 @@ def py_executable_base_impl(ctx, *, semantics, is_test, inherited_environment = 
         implicit_pyc_source_files = implicit_pyc_source_files,
         imports = imports,
     )
-    _add_provider_output_group_info(providers, py_info, exec_result.output_groups)
+    output_groups = dict(exec_result.output_groups)
+    if is_test:
+        _maybe_add_test_main_validation(ctx, main_py_source, output_groups)
+    _add_provider_output_group_info(providers, py_info, output_groups)
 
     return providers
+
+def _maybe_add_test_main_validation(ctx, main_py, output_groups):
+    """Adds a validation action that checks the test main actually runs tests.
+
+    This is a safeguard against the common pitfall of defining test classes or
+    functions but forgetting to invoke a test runner, which causes the test to
+    silently pass without running anything. See the
+    `//python/config_settings:validate_test_main` flag.
+
+    Args:
+        ctx: Rule ctx.
+        main_py: File or None; the main entry point source file. None when the
+            target uses `main_module` (which can't be statically analyzed here).
+        output_groups: dict[str, depset[File]]; mutated in place to add the
+            `_validation` output group when a validation action is created.
+    """
+    if not ValidateTestMainFlag.is_enabled(ctx):
+        return
+
+    # `main_module` targets execute a module by name; there's no single source
+    # file to statically analyze, so the check doesn't apply.
+    if main_py == None:
+        return
+
+    exec_tools_toolchain = ctx.toolchains[EXEC_TOOLS_TOOLCHAIN_TYPE]
+    if exec_tools_toolchain == None or exec_tools_toolchain.exec_tools.exec_interpreter == None:
+        fail(
+            "Validating py_test main modules requires the exec tools toolchain " +
+            "with an exec interpreter, but none was found. Either register one " +
+            "or set --@rules_python//python/config_settings:validate_test_main=disabled.",
+        )
+
+    exec_tools = exec_tools_toolchain.exec_tools
+    validator = ctx.attr._validate_test_main
+    program_info = validator[PyInterpreterProgramInfo]
+    interpreter = exec_tools.exec_interpreter[DefaultInfo].files_to_run
+    validator_files_to_run = validator[DefaultInfo].files_to_run
+
+    validation_output = ctx.actions.declare_file(ctx.label.name + "_validate_test_main.txt")
+
+    args = ctx.actions.args()
+    args.add_all(program_info.interpreter_args)
+    args.add(validator_files_to_run.executable)
+    args.add("--src", main_py)
+    args.add("--src_name", main_py.short_path)
+    args.add("--label", str(ctx.label))
+    args.add("--output", validation_output)
+
+    execution_requirements = {}
+    if testing.ExecutionInfo in validator:
+        execution_requirements = validator[testing.ExecutionInfo].requirements
+
+    ctx.actions.run(
+        executable = interpreter,
+        arguments = [args],
+        inputs = [main_py],
+        outputs = [validation_output],
+        tools = [validator_files_to_run],
+        mnemonic = "PyValidateTestMain",
+        progress_message = "Validating py_test main %{label}",
+        env = program_info.env | {
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONSAFEPATH": "1",
+        },
+        execution_requirements = execution_requirements,
+        toolchain = EXEC_TOOLS_TOOLCHAIN_TYPE,
+    )
+    if "_validation" in output_groups:
+        output_groups["_validation"] = depset([validation_output], transitive = [output_groups["_validation"]])
+    else:
+        output_groups["_validation"] = depset([validation_output])
 
 def _get_build_info(ctx, cc_toolchain):
     build_info_files = py_internal.cc_toolchain_build_info_files(cc_toolchain)
@@ -1506,9 +1603,17 @@ WARNING: Target {} is using implicit __init__.py creation.
   Ensure all __init__.py files are explicitly created and
   added to the srcs or deps of your targets.
 
-  Disable implicit creation by setting:
+  Disable implicit creation for your module in MODULE.bazel:
+
+    rules_python_config = use_extension("@rules_python//python/extensions:config.bzl", "config")
+    rules_python_config.explicit_init_py(default = True)
+
+  Or for a specific target by setting:
+
     legacy_create_init = 0
-  on the target, or globally by setting:
+
+  Or globally with the following Bazel flag:
+
     --incompatible_default_to_explicit_init_py
 ======================================================================
             """.rstrip().format(ctx.label),
@@ -2124,7 +2229,7 @@ def create_executable_rule_builder(implementation, **kwargs):
         toolchains = [
             ruleb.ToolchainType(TOOLCHAIN_TYPE),
             ruleb.ToolchainType(EXEC_TOOLS_TOOLCHAIN_TYPE, mandatory = False),
-            ruleb.ToolchainType("@bazel_tools//tools/cpp:toolchain_type", mandatory = False),
+            ruleb.ToolchainType(CC_TOOLCHAIN_TYPE, mandatory = False),
         ] + ([ruleb.ToolchainType(LAUNCHER_MAKER_TOOLCHAIN_TYPE)] if rp_config.bazel_9_or_later else []),
         cfg = dict(
             implementation = _transition_executable_impl,

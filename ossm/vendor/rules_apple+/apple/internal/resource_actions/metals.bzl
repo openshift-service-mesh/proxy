@@ -15,12 +15,12 @@
 """Metal related actions."""
 
 load(
-    "@bazel_skylib//lib:paths.bzl",
-    "paths",
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
 )
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
+    "@bazel_skylib//lib:paths.bzl",
+    "paths",
 )
 
 def _metal_apple_target_triple(platform_prerequisites):
@@ -33,7 +33,7 @@ def _metal_apple_target_triple(platform_prerequisites):
     """
     target_os_version = platform_prerequisites.minimum_os
 
-    platform = platform_prerequisites.apple_fragment.single_arch_platform
+    platform = platform_prerequisites.platform
     platform_string = str(platform.platform_type)
     if platform_string == "macos":
         platform_string = "macosx"
@@ -46,11 +46,12 @@ def _metal_apple_target_triple(platform_prerequisites):
         version = target_os_version,
     )
 
-def compile_metals(*, actions, input_files, output_file, platform_prerequisites, **_kwargs):
+def compile_metals(*, actions, mac_exec_group, input_files, output_file, platform_prerequisites, **_kwargs):
     """Creates actions that compile .metal files into a single .metallib file.
 
     Args:
         actions: The actions provider from `ctx.actions`.
+        mac_exec_group: The execution group for Mac tools.
         platform_prerequisites: Struct containing information on the platform being targeted.
         input_files: The input metal files.
         output_file: The output metallib file.
@@ -89,6 +90,7 @@ def compile_metals(*, actions, input_files, output_file, platform_prerequisites,
 
         apple_support.run(
             actions = actions,
+            exec_group = mac_exec_group,
             executable = "/usr/bin/xcrun",
             inputs = [input_metal] + hdrs,
             outputs = [air_file],
@@ -107,6 +109,7 @@ def compile_metals(*, actions, input_files, output_file, platform_prerequisites,
 
     apple_support.run(
         actions = actions,
+        exec_group = mac_exec_group,
         executable = "/usr/bin/xcrun",
         inputs = air_files,
         outputs = [output_file],

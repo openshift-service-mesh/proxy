@@ -1,0 +1,10 @@
+load("@rules_cc_autoconf//autoconf:autoconf.bzl", "autoconf")
+load("@rules_cc_autoconf//autoconf:checks.bzl", "macros")
+
+autoconf(
+    name = "autoconf",
+    checks = macros.AC_CHECK_HEADERS([
+        "stdint.h",
+    ]),
+    visibility = ["//:__subpackages__"],
+)

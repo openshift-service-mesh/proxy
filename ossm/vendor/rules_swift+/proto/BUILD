@@ -8,8 +8,12 @@ bzl_library(
     name = "swift_proto_utils",
     srcs = ["swift_proto_utils.bzl"],
     deps = [
+        "//swift:providers",
+        "//swift:swift_common",
         "//swift/internal:output_groups",
+        "//swift/internal:utils",
         "@bazel_skylib//lib:paths",
+        "@rules_cc//cc/common",
     ],
 )
 
@@ -23,8 +27,11 @@ bzl_library(
     name = "swift_proto_compiler",
     srcs = ["swift_proto_compiler.bzl"],
     deps = [
+        ":swift_proto_common",
         ":swift_proto_utils",
+        "//swift:providers",
         "@bazel_skylib//lib:paths",
+        "@protobuf//bazel/common:proto_common_bzl",
     ],
 )
 
@@ -39,7 +46,7 @@ bzl_library(
         "//swift/internal:toolchain_utils",
         "//swift/internal:utils",
         "@bazel_skylib//lib:dicts",
-        "@rules_proto//proto:defs",
+        "@protobuf//bazel/common:proto_info_bzl",
     ],
 )
 
@@ -56,11 +63,10 @@ bzl_library(
         ":swift_proto_utils",
         "//swift:module_name",
         "//swift:providers",
-        "//swift:swift_common",
         "//swift/internal:toolchain_utils",
         "//swift/internal:utils",
         "@bazel_skylib//lib:dicts",
-        "@rules_proto//proto:defs",
+        "@protobuf//bazel/common:proto_info_bzl",
     ],
 )
 
@@ -72,6 +78,6 @@ bzl_library(
         ":swift_proto_compiler",
         ":swift_proto_library",
         ":swift_proto_library_group",
-        "//swift:providers.bzl",
+        "//swift:providers",
     ],
 )

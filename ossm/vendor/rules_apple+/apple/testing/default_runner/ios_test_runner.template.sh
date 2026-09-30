@@ -16,6 +16,10 @@
 
 set -e
 
+if [[ -n "${TEST_PREMATURE_EXIT_FILE:-}" ]]; then
+  touch "$TEST_PREMATURE_EXIT_FILE"
+fi
+
 basename_without_extension() {
   local full_path="$1"
   local filename
@@ -48,7 +52,7 @@ done
 # Enable verbose output in test runner.
 runner_flags=("-v")
 
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/test_runner_work_dir.XXXXXX")"
+TMP_DIR="$(mktemp -d "${TEST_TMPDIR:-${TMPDIR:-/tmp}}/test_runner_work_dir.XXXXXX")"
 trap 'rm -rf "${TMP_DIR}"' ERR EXIT
 runner_flags+=("--work_dir=${TMP_DIR}")
 
@@ -99,11 +103,23 @@ if [[ -n "${TEST_TYPE}" ]]; then
   runner_flags+=("--test_type=${TEST_TYPE}")
 fi
 
+DEFAULT_ENV="TEST_PREMATURE_EXIT_FILE=$TEST_PREMATURE_EXIT_FILE,TEST_SRCDIR=$TEST_SRCDIR,TEST_UNDECLARED_OUTPUTS_DIR=$TEST_UNDECLARED_OUTPUTS_DIR,XML_OUTPUT_FILE=$XML_OUTPUT_FILE"
 TEST_ENV="%(test_env)s"
+ENV_INHERIT=%(test_env_inherit)s
+for env_var in "${ENV_INHERIT[@]:-}"; do
+  # If the environment variable is set, add it to the test environment
+  if declare -p "$env_var" &>/dev/null; then
+    if [[ -n "$test_env" ]]; then
+      TEST_ENV="$test_env,$env_var=${!env_var}"
+    else
+      TEST_ENV="$env_var=${!env_var}"
+    fi
+  fi
+done
 if [[ -n "$TEST_ENV" ]]; then
-  TEST_ENV="$TEST_ENV,TEST_SRCDIR=$TEST_SRCDIR,XML_OUTPUT_FILE=$XML_OUTPUT_FILE"
+  TEST_ENV="$TEST_ENV,$DEFAULT_ENV"
 else
-  TEST_ENV="TEST_SRCDIR=$TEST_SRCDIR,XML_OUTPUT_FILE=$XML_OUTPUT_FILE"
+  TEST_ENV="$DEFAULT_ENV"
 fi
 
 sanitizer_dyld_env=""
@@ -227,17 +243,12 @@ if [[ -n "${REUSE_GLOBAL_SIMULATOR:-}" ]]; then
     exit 1
   fi
 
-  if [[ -z "%(os_version)s" ]]; then
-    echo "error: to create a re-useable simulator the OS version must always be set on the test runner or with '--ios_simulator_version'" >&2
-    exit 1
-  fi
-
   if [[ -z "%(device_type)s" ]]; then
-    echo "error: to create a re-useable simulator the device type must always be set on the test runner or with '--ios_simulator_device'" >&2
+    echo "error: to create a re-useable simulator; the device type must always be set on the test runner or with the ios_simulator_device build setting" >&2
     exit 1
   fi
 
-  id="$("./%(simulator_creator)s" "%(os_version)s" "%(device_type)s")"
+  id="$(SIMULATOR_DEVICE_TYPE="%(device_type)s" SIMULATOR_OS_VERSION="%(os_version)s" SIMULATOR_SDK_VERSION="%(sdk_version)s" "%(create_simulator_action_binary)s")"
   target_flags=(
     "test"
     "--platform=ios_simulator"
@@ -257,6 +268,7 @@ else
   )
 fi
 
+# Run a pre-action binary, if provided.
 pre_action_binary=%(pre_action_binary)s
 "$pre_action_binary"
 
@@ -267,17 +279,31 @@ cmd=("%(testrunner_binary)s"
   "${custom_xctestrunner_args[@]}")
 "${cmd[@]}" 2>&1 || test_exit_code=$?
 
+# Run a post-action binary, if provided.
 post_action_binary=%(post_action_binary)s
+post_action_determines_exit_code="%(post_action_determines_exit_code)s"
+post_action_exit_code=0
 TEST_EXIT_CODE=$test_exit_code \
-  "$post_action_binary"
+  "$post_action_binary" || post_action_exit_code=$?
 
-if [[ "$test_exit_code" -ne 0 ]]; then
-  echo "error: tests exited with '$test_exit_code'" >&2
-  exit "$test_exit_code"
+if [[ "$post_action_determines_exit_code" == true ]]; then
+  if [[ "$post_action_exit_code" -ne 0 ]]; then
+    echo "error: post_action exited with '$post_action_exit_code'" >&2
+    exit "$post_action_exit_code"
+  fi
+else
+  if [[ "$test_exit_code" -ne 0 ]]; then
+    echo "error: tests exited with '$test_exit_code'" >&2
+    exit "$test_exit_code"
+  fi
 fi
 
-if [[ "${COVERAGE:-}" -ne 1 ]]; then
+if [[ "${COVERAGE:-}" -ne 1 || "${APPLE_COVERAGE:-}" -ne 1 ]]; then
   # Normal tests run without coverage
+  if [[ -f "${TEST_PREMATURE_EXIT_FILE:-}" ]]; then
+    rm -f "$TEST_PREMATURE_EXIT_FILE"
+  fi
+
   exit 0
 fi
 
@@ -346,4 +372,8 @@ if [[ -n "${COVERAGE_PRODUCE_JSON:-}" ]]; then
     cat "$error_file" >&2
     exit 1
   fi
+fi
+
+if [[ -f "${TEST_PREMATURE_EXIT_FILE:-}" ]]; then
+  rm -f "$TEST_PREMATURE_EXIT_FILE"
 fi

@@ -1,0 +1,100 @@
+alias(
+    name = "zlib",
+    actual = "@@envoy+//bazel:zlib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "ssl_lib",
+    actual = "@@envoy+//bazel:ssl",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "quic_base_impl_lib",
+    actual = "@@envoy+//source/common/quic/platform:quic_base_impl_lib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "quiche_export_impl_lib",
+    actual = "@@envoy+//source/common/quic/platform:quiche_export_impl_lib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "quiche_flags_impl_lib",
+    actual = "@@envoy+//source/common/quic/platform:quiche_flags_impl_lib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "quiche_logging_impl_lib",
+    actual = "@@envoy+//source/common/quic/platform:quiche_logging_impl_lib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "quiche_lower_case_string_impl_lib",
+    actual = "@@envoy+//source/common/quic/platform:quiche_lower_case_string_impl_lib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "quiche_platform_iovec_impl_lib",
+    actual = "@@envoy+//source/common/quic/platform:quiche_platform_iovec_impl_lib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "quiche_stack_trace_impl_lib",
+    actual = "@@envoy+//source/common/quic/platform:quiche_stack_trace_impl_lib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "quiche_time_utils_impl_lib",
+    actual = "@@envoy+//source/common/quic/platform:quiche_time_utils_impl_lib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "mobile_quiche_bug_tracker_impl_lib",
+    actual = "@@quiche+//:empty_impl",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "quiche_expect_bug_impl_lib",
+    actual = "@@quiche+//:empty_impl",
+    visibility = ["//visibility:public"],
+    testonly = True,
+)
+
+alias(
+    name = "quiche_test_helpers_impl_lib",
+    actual = "@@quiche+//:empty_impl",
+    visibility = ["//visibility:public"],
+    testonly = True,
+)
+
+alias(
+    name = "quiche_test_impl_lib",
+    actual = "@@quiche+//:empty_impl",
+    visibility = ["//visibility:public"],
+    testonly = True,
+)
+
+alias(
+    name = "quiche_test_output_impl_lib",
+    actual = "@@quiche+//:empty_impl",
+    visibility = ["//visibility:public"],
+    testonly = True,
+)
+
+alias(
+    name = "quiche_thread_impl_lib",
+    actual = "@@quiche+//:empty_impl",
+    visibility = ["//visibility:public"],
+    testonly = True,
+)

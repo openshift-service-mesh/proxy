@@ -49,6 +49,7 @@ go_test(
         "client_list_test.go",
         "client_test.go",
         "cmd_test.go",
+        "conformance_go124_test.go",
         "conformance_go125_test.go",
         "conformance_test.go",
         "content_test.go",

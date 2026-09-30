@@ -61,6 +61,30 @@ luci.project(
 
 luci.bucket(name = "ci")
 
+# "Shadow" version of the "ci" bucket, for use with led.
+luci.bucket(
+    name = "ci.shadow",
+    shadows = "ci",
+    dynamic = True,
+    acls = [
+        acl.entry(
+            roles = acl.BUILDBUCKET_TRIGGERER,
+            groups = [
+                "project-boringssl-tryjob-access",
+                "service-account-cq",
+            ],
+        ),
+    ],
+    bindings = [
+        luci.binding(
+            roles = "role/buildbucket.creator",
+            groups = [
+                "project-boringssl-tryjob-access",
+            ],
+        ),
+    ],
+)
+
 luci.bucket(
     name = "try",
     acls = [
@@ -70,6 +94,29 @@ luci.bucket(
             groups = [
                 "project-boringssl-tryjob-access",
                 "service-account-cq",
+            ],
+        ),
+    ],
+)
+
+# "Shadow" version of the "ci" bucket, for use with led.
+luci.bucket(
+    name = "try.shadow",
+    shadows = "try",
+    dynamic = True,
+    constraints = luci.bucket_constraints(
+        pools = [
+            "luci.flex.try",
+        ],
+        service_accounts = [
+            "boringssl-try-builder@chops-service-accounts.iam.gserviceaccount.com",
+        ],
+    ),
+    bindings = [
+        luci.binding(
+            roles = "role/buildbucket.creator",
+            groups = [
+                "project-boringssl-tryjob-access",
             ],
         ),
     ],
@@ -100,32 +147,32 @@ cq_group = luci.cq_group(
     watch = cq.refset(REPO_URL, refs = ["refs/heads/.+"]),
     retry_config = cq.RETRY_ALL_FAILURES,
     post_actions = [
-      # Vote +1 on Presubmit-BoringSSL-Verified for successful dry runs.
-      cq.post_action_gerrit_label_votes(
-        name = "presubmit-verification-success",
-        conditions = [
-          cq.post_action_triggering_condition(
-            mode = cq.MODE_DRY_RUN,
-            statuses = [cq.STATUS_SUCCEEDED],
-          )
-        ],
-        labels = {
-          "Presubmit-BoringSSL-Verified": 1,
-        },
-      ),
-      # Vote -1 on Presubmit-BoringSSL-Verified for failed dry runs.
-      cq.post_action_gerrit_label_votes(
-        name = "presubmit-verification-failure",
-        conditions = [
-          cq.post_action_triggering_condition(
-            mode = cq.MODE_DRY_RUN,
-            statuses = [cq.STATUS_FAILED],
-          )
-        ],
-        labels = {
-          "Presubmit-BoringSSL-Verified": -1,
-        },
-      ),
+        # Vote +1 on Presubmit-BoringSSL-Verified for successful dry runs.
+        cq.post_action_gerrit_label_votes(
+            name = "presubmit-verification-success",
+            conditions = [
+                cq.post_action_triggering_condition(
+                    mode = cq.MODE_DRY_RUN,
+                    statuses = [cq.STATUS_SUCCEEDED],
+                ),
+            ],
+            labels = {
+                "Presubmit-BoringSSL-Verified": 1,
+            },
+        ),
+        # Vote -1 on Presubmit-BoringSSL-Verified for failed dry runs.
+        cq.post_action_gerrit_label_votes(
+            name = "presubmit-verification-failure",
+            conditions = [
+                cq.post_action_triggering_condition(
+                    mode = cq.MODE_DRY_RUN,
+                    statuses = [cq.STATUS_FAILED],
+                ),
+            ],
+            labels = {
+                "Presubmit-BoringSSL-Verified": -1,
+            },
+        ),
     ],
 )
 
@@ -144,12 +191,22 @@ notifier = luci.notifier(
     name = "all",
     on_occurrence = ["FAILURE", "INFRA_FAILURE"],
     on_new_status = ["SUCCESS"],
-    notify_emails = ["boringssl@google.com"],
+    notify_emails = ["boringssl-interrupts@rotations.google.com"],
 )
 
 DEFAULT_TIMEOUT = 30 * time.minute
 
 def get_category(name, host, properties):
+    """Derives the category for a builder.
+
+    Args:
+      name: The name of the builder.
+      host: The host configuration.
+      properties: The properties passed to the recipe.
+
+    Returns:
+      A string representing the category.
+    """
     cmake_args = properties.get("cmake_args", {})
 
     # Android and iOS are always cross compiles.
@@ -157,7 +214,6 @@ def get_category(name, host, properties):
         os = "android"
     elif cmake_args.get("CMAKE_OSX_SYSROOT") == "iphoneos":
         os = "ios"
-    # Otherwise same as host.
     elif "Mac" in host["dimensions"]["os"]:
         os = "mac"
     elif "Windows" in host["dimensions"]["os"]:
@@ -189,18 +245,14 @@ def get_category(name, host, properties):
         arch = "arm64"
     elif cmake_args.get("ANDROID_ABI") == "riscv64":
         arch = "riscv64"
-    # macOS: arch comes from CMAKE_OSX_ARCHITECTURES.
     elif cmake_args.get("CMAKE_OSX_ARCHITECTURES") == "arm64":
         arch = "arm64"
-    # Linux: arch comes from CMAKE_SYSTEM_PROCESSOR, or current running.
     elif cmake_args.get("CMAKE_SYSTEM_PROCESSOR") == "x86":
         arch = "x86"
-    # Windows: arch comes from msvc_target.
     elif properties.get("msvc_target") == "x86":
         arch = "x86"
     elif properties.get("msvc_target") == "arm64":
         arch = "arm64"
-    # Otherwise: same as host.
     elif host["dimensions"]["cpu"] == "arm64":
         arch = "arm64"
     else:
@@ -214,7 +266,16 @@ def get_category(name, host, properties):
 
     return category
 
-def get_short_name(name, host, properties):
+def get_short_name(name, properties):
+    """Derives the short name for a builder.
+
+    Args:
+      name: The name of the builder.
+      properties: The properties passed to the recipe.
+
+    Returns:
+      A string representing the short name.
+    """
     cmake_args = properties.get("cmake_args", {})
     tags = []
     untags = []  # Redundant tags to not include.
@@ -270,7 +331,7 @@ def get_short_name(name, host, properties):
 
     # Optimization.
     if not "Rel" in cmake_args.get("CMAKE_BUILD_TYPE", ""):
-        tags.append("dbg");
+        tags.append("dbg")
 
     for t in untags:
         if t not in tags:
@@ -279,7 +340,6 @@ def get_short_name(name, host, properties):
     if not tags:
         return "rel"
     return "".join(tags)
-
 
 ci_catnames_seen = {}
 
@@ -308,7 +368,7 @@ def ci_builder(
     if category == None:
         category = get_category(name, host, properties)
     if short_name == None:
-        short_name = get_short_name(name, host, properties)
+        short_name = get_short_name(name, properties)
     combined = (category if category else "") + "|" + short_name
     if combined in ci_catnames_seen:
         fail(name + ": same category " + category + " and short name " + short_name + " as build " + ci_catnames_seen[combined])
@@ -339,6 +399,8 @@ def ci_builder(
         notifies = [notifier],
         triggered_by = [poller],
         properties = properties,
+        shadow_service_account = "boringssl-try-builder@chops-service-accounts.iam.gserviceaccount.com",
+        shadow_pool = "luci.flex.try",
     )
     luci.console_view_entry(
         builder = builder,
@@ -450,7 +512,8 @@ def cq_builders(
             recipe = recipe,
             cq_enabled = cq_enabled,
             execution_timeout = execution_timeout,
-            properties = compile_only(properties))
+            properties = compile_only(properties),
+        )
 
 def both_builders(
         name,
@@ -499,7 +562,8 @@ def both_builders(
         cq_enabled = cq_enabled,
         cq_compile_only = cq_compile_only,
         execution_timeout = execution_timeout,
-        properties = properties)
+        properties = properties,
+    )
 
 LINUX_HOST = {
     "dimensions": {
@@ -553,6 +617,51 @@ WALLEYE_HOST = {
 # SDE tests take longer to run.
 SDE_TIMEOUT = 3 * 60 * time.minute
 
+def finished_output_files(exe_suffix, lib_prefix, lib_suffix):
+    """Calculates the list of patterns for useful finished output files.
+
+    Args:
+      exe_suffix: the file suffix of executables (with period if any).
+      lib_prefix: the file prefix of libraries.
+      lib_suffix: the file suffix of libraries (with period if any).
+
+    Returns:
+      A list of wildcard patterns for all files to return.
+    """
+    is_static = lib_suffix in ("a", "lib")
+    outputs = []
+    for name in [
+        "*_bench",
+        "*_test",
+        "bssl",
+        "generate_*",
+        "jitter_deltas",
+        "ssl/test/bssl_shim",
+        "test_*",
+    ]:
+        outputs.append("{0}{1}".format(name, exe_suffix))
+    if lib_suffix in (".a", ".lib"):
+        # When building static libs, only export the actually interesting ones.
+        for name in [
+            "crypto",
+            "decrepit",
+            "pki",
+            "ssl",
+        ]:
+            outputs.append("{1}{0}{2}".format(name, lib_prefix, lib_suffix))
+    else:
+        # When building dynamic libs, export all, as they are required for
+        # running the binaries.
+        outputs.append("**/{0}*{1}".format(lib_prefix, lib_suffix))
+    return outputs
+
+FINISHED_OUTPUT_FILES_LINUX_STATIC = finished_output_files("", "lib", ".a")
+FINISHED_OUTPUT_FILES_LINUX_SHARED = finished_output_files("", "lib", ".so*")
+FINISHED_OUTPUT_FILES_WIN_STATIC = finished_output_files(".exe", "", ".lib")
+FINISHED_OUTPUT_FILES_WIN_SHARED = finished_output_files(".exe", "", ".dll")
+FINISHED_OUTPUT_FILES_MAC_STATIC = finished_output_files("", "lib", ".a")
+FINISHED_OUTPUT_FILES_MAC_SHARED = finished_output_files("", "lib", ".dylib")
+
 # TODO(davidben): Switch the BoringSSL recipe to specify most flags in
 # properties rather than parsing names. Then we can add new configurations
 # without having to touch multiple repositories.
@@ -578,6 +687,7 @@ both_builders(
             "ANDROID_ABI": "arm64-v8a",
             "ANDROID_PLATFORM": "android-24",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -592,6 +702,7 @@ both_builders(
             "ANDROID_PLATFORM": "android-24",
             "CMAKE_BUILD_TYPE": "Release",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -609,6 +720,7 @@ both_builders(
             "CMAKE_BUILD_TYPE": "RelWithAsserts",
             "FIPS": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_SHARED,
     },
 )
 
@@ -628,6 +740,7 @@ both_builders(
             "CMAKE_BUILD_TYPE": "RelWithAsserts",
             "FIPS": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_SHARED,
     },
 )
 
@@ -647,6 +760,7 @@ both_builders(
             "CMAKE_BUILD_TYPE": "RelWithAsserts",
             "FIPS": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 
@@ -663,6 +777,8 @@ both_builders(
             "ANDROID_PLATFORM": "android-24",
         },
         "prefixed_symbols": True,
+        "check_prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     }),
 )
 
@@ -676,6 +792,7 @@ both_builders(
             "ANDROID_ABI": "armeabi-v7a",
             "ANDROID_PLATFORM": "android-24",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -696,6 +813,7 @@ both_builders(
             "CMAKE_C_FLAGS": "-DOPENSSL_NO_STATIC_NEON_FOR_TESTING=1",
             "CMAKE_CXX_FLAGS": "-DOPENSSL_NO_STATIC_NEON_FOR_TESTING=1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -713,6 +831,7 @@ both_builders(
             "CMAKE_BUILD_TYPE": "RelWithAsserts",
             "FIPS": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_SHARED,
     },
 )
 both_builders(
@@ -725,6 +844,7 @@ both_builders(
             "ANDROID_PLATFORM": "android-24",
         },
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     }),
 )
 
@@ -740,6 +860,7 @@ both_builders(
             "ANDROID_PLATFORM": "android-24",
             "CMAKE_BUILD_TYPE": "Release",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -753,6 +874,7 @@ both_builders(
             "ANDROID_PLATFORM": "android-24",
         },
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     }),
 )
 both_builders(
@@ -765,6 +887,7 @@ both_builders(
             "ANDROID_PLATFORM": "android-35",
             "CMAKE_BUILD_TYPE": "Release",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     }),
 )
 both_builders(
@@ -778,11 +901,13 @@ both_builders(
             "ANDROID_PLATFORM": "android-24",
         },
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     }),
 )
 
 both_builders(
-    "docs", LINUX_HOST,
+    "docs",
+    LINUX_HOST,
     recipe = "boringssl_docs",
     category = "doc",
     short_name = "doc",
@@ -799,6 +924,7 @@ both_builders(
             "CMAKE_OSX_ARCHITECTURES": "arm64",
             "CMAKE_OSX_SYSROOT": "iphoneos",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_MAC_STATIC,
     }),
 )
 both_builders(
@@ -813,6 +939,8 @@ both_builders(
             "CMAKE_OSX_SYSROOT": "iphoneos",
         },
         "prefixed_symbols": True,
+        "check_prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_MAC_STATIC,
     }),
 )
 
@@ -829,6 +957,7 @@ both_builders(
         },
         # Also build and test the Rust code.
         "rust": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -838,6 +967,7 @@ both_builders(
         "cmake_args": {
             "CMAKE_BUILD_TYPE": "Release",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -851,6 +981,7 @@ both_builders(
         "prefixed_symbols": True,
         # Also build and test the Rust code.
         "rust": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     }),
 )
 both_builders(
@@ -866,6 +997,7 @@ both_builders(
             "CMAKE_CXX_FLAGS": "-m32 -msse2",
             "CMAKE_C_FLAGS": "-m32 -msse2",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -881,6 +1013,7 @@ both_builders(
             "CMAKE_C_FLAGS": "-m32 -msse2",
             "CMAKE_CXX_FLAGS": "-m32 -msse2",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -900,6 +1033,7 @@ both_builders(
         },
         "run_ssl_tests": False,
         "sde": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -916,6 +1050,7 @@ both_builders(
             "CMAKE_C_FLAGS": "-m32 -msse2",
             "CMAKE_CXX_FLAGS": "-m32 -msse2",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -932,6 +1067,7 @@ both_builders(
             "CMAKE_C_FLAGS": "-m32 -msse2",
         },
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     }),
 )
 both_builders(
@@ -943,6 +1079,7 @@ both_builders(
         "cmake_args": {
             "CFI": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -953,6 +1090,7 @@ both_builders(
         "cmake_args": {
             "CMAKE_BUILD_TYPE": "Release",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -969,6 +1107,7 @@ both_builders(
         "gclient_vars": {
             "checkout_libcxx": True,
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -989,6 +1128,7 @@ both_builders(
         # SSL tests are all single-threaded, so running them under TSan is a
         # waste of time.
         "run_ssl_tests": False,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1001,6 +1141,7 @@ both_builders(
             "CMAKE_BUILD_TYPE": "RelWithAsserts",
             "UBSAN": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1010,6 +1151,7 @@ both_builders(
         "cmake_args": {
             "FIPS": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1020,6 +1162,7 @@ both_builders(
             "CMAKE_BUILD_TYPE": "Release",
             "FIPS": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1030,6 +1173,7 @@ both_builders(
         "cmake_args": {
             "FIPS": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1041,6 +1185,7 @@ both_builders(
             "CMAKE_BUILD_TYPE": "Release",
             "FIPS": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1053,6 +1198,7 @@ both_builders(
             "FIPS": "1",
             "OPENSSL_NO_ASM": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1067,6 +1213,7 @@ both_builders(
         "gclient_vars": {
             "checkout_fuzzer": True,
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1078,6 +1225,7 @@ both_builders(
             "ASAN": "1",
             "OPENSSL_NO_ASM": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1089,6 +1237,8 @@ both_builders(
     properties = compile_only({
         "clang": True,
         "prefixed_symbols": True,
+        "check_prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     }),
 )
 
@@ -1100,6 +1250,7 @@ both_builders(
             "CMAKE_C_FLAGS": "-DOPENSSL_NO_THREADS_CORRUPT_MEMORY_AND_LEAK_SECRETS_IF_THREADED=1",
             "CMAKE_CXX_FLAGS": "-DOPENSSL_NO_THREADS_CORRUPT_MEMORY_AND_LEAK_SECRETS_IF_THREADED=1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1113,6 +1264,7 @@ both_builders(
         },
         "run_ssl_tests": False,
         "sde": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1122,9 +1274,7 @@ both_builders(
         "cmake_args": {
             "BUILD_SHARED_LIBS": "1",
         },
-        # The default Linux build may not depend on the C++ runtime. This is
-        # easy to check when building shared libraries.
-        "check_imported_libraries": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_SHARED,
     },
 )
 both_builders(
@@ -1135,6 +1285,7 @@ both_builders(
             "CMAKE_C_FLAGS": "-DOPENSSL_SMALL=1",
             "CMAKE_CXX_FLAGS": "-DOPENSSL_SMALL=1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1145,6 +1296,7 @@ both_builders(
             "OPENSSL_NO_ASM": "1",
             "OPENSSL_NO_SSE2_FOR_TESTING": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     },
 )
 both_builders(
@@ -1156,8 +1308,10 @@ both_builders(
             "OPENSSL_NO_SSE2_FOR_TESTING": "1",
         },
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_LINUX_STATIC,
     }),
 )
+
 both_builders(
     "linux_bazel",
     LINUX_HOST,
@@ -1173,6 +1327,7 @@ both_builders(
         },
         # Also build and test the Rust code.
         "rust": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_MAC_STATIC,
     },
 )
 both_builders(
@@ -1181,7 +1336,10 @@ both_builders(
     properties = {
         "cmake_args": {
             "CMAKE_BUILD_TYPE": "Release",
+            "CMAKE_EXE_LINKER_FLAGS": "-Wl,-dead_strip",
+            "CMAKE_SHARED_LINKER_FLAGS": "-Wl,-dead_strip",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_MAC_STATIC,
     },
 )
 both_builders(
@@ -1192,6 +1350,7 @@ both_builders(
             "CMAKE_C_FLAGS": "-DOPENSSL_SMALL=1",
             "CMAKE_CXX_FLAGS": "-DOPENSSL_SMALL=1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_MAC_STATIC,
     },
 )
 both_builders(
@@ -1202,6 +1361,8 @@ both_builders(
     cq_enabled = False,
     properties = compile_only({
         "prefixed_symbols": True,
+        "check_prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_MAC_STATIC,
     }),
 )
 both_builders(
@@ -1209,10 +1370,13 @@ both_builders(
     MAC_ARM64_HOST,
     properties = {
         "cmake_args": {
+            "CMAKE_EXE_LINKER_FLAGS": "-Wl,-dead_strip",
+            "CMAKE_SHARED_LINKER_FLAGS": "-Wl,-dead_strip",
             "RUST_BINDINGS": "aarch64-apple-darwin",
         },
         # Also build and test the Rust code.
         "rust": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_MAC_STATIC,
     },
 )
 both_builders(
@@ -1220,6 +1384,7 @@ both_builders(
     MAC_ARM64_HOST,
     properties = compile_only({
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_MAC_STATIC,
     }),
 )
 both_builders(
@@ -1234,6 +1399,21 @@ both_builders(
     cq_compile_only = WIN_HOST,  # Reduce CQ cycle times.
     properties = {
         "msvc_target": "x86",
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
+    },
+)
+
+both_builders(
+    "win32_vs2022",
+    WIN_HOST,
+    cq_enabled = False,
+    short_name = "vs22",
+    properties = {
+        "msvc_target": "x86",
+        "gclient_vars": {
+            "windows_sdk_version": "uploaded:2024-01-11",
+        },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     },
 )
 both_builders(
@@ -1244,6 +1424,7 @@ both_builders(
             "CMAKE_BUILD_TYPE": "Release",
         },
         "msvc_target": "x86",
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     },
 )
 both_builders(
@@ -1258,6 +1439,7 @@ both_builders(
         "msvc_target": "x86",
         "run_ssl_tests": False,
         "sde": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     },
 )
 both_builders(
@@ -1266,6 +1448,7 @@ both_builders(
     properties = compile_only({
         "msvc_target": "x86",
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     }),
 )
 both_builders(
@@ -1277,6 +1460,7 @@ both_builders(
         "cmake_args": {
             "BUILD_SHARED_LIBS": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_SHARED,
     },
 )
 both_builders(
@@ -1289,6 +1473,7 @@ both_builders(
             "BUILD_SHARED_LIBS": "1",
         },
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_SHARED,
     },
 )
 both_builders(
@@ -1304,6 +1489,7 @@ both_builders(
             "CMAKE_CXX_FLAGS": "/DWIN32 /D_WINDOWS /EHsc /DOPENSSL_SMALL=1",
         },
         "msvc_target": "x86",
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     },
 )
 
@@ -1323,6 +1509,7 @@ both_builders(
             "CMAKE_C_FLAGS": "-m32 -msse2",
             "CMAKE_CXX_FLAGS": "-m32 -msse2",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     },
 )
 both_builders(
@@ -1341,6 +1528,7 @@ both_builders(
             "CMAKE_CXX_FLAGS": "-m32 -msse2",
         },
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     }),
 )
 
@@ -1350,6 +1538,21 @@ both_builders(
     cq_compile_only = WIN_HOST,  # Reduce CQ cycle times.
     properties = {
         "msvc_target": "x64",
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
+    },
+)
+
+both_builders(
+    "win64_vs2022",
+    WIN_HOST,
+    cq_enabled = False,
+    short_name = "vs22",
+    properties = {
+        "msvc_target": "x64",
+        "gclient_vars": {
+            "windows_sdk_version": "uploaded:2024-01-11",
+        },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     },
 )
 
@@ -1364,6 +1567,7 @@ both_builders(
         "msvc_target": "x64",
         # Also build and test the Rust code.
         "rust": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     },
 )
 both_builders(
@@ -1378,6 +1582,7 @@ both_builders(
         "msvc_target": "x64",
         "run_ssl_tests": False,
         "sde": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     },
 )
 both_builders(
@@ -1386,6 +1591,7 @@ both_builders(
     properties = compile_only({
         "msvc_target": "x64",
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     }),
 )
 both_builders(
@@ -1397,6 +1603,7 @@ both_builders(
         "cmake_args": {
             "BUILD_SHARED_LIBS": "1",
         },
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_SHARED,
     },
 )
 both_builders(
@@ -1409,6 +1616,7 @@ both_builders(
             "BUILD_SHARED_LIBS": "1",
         },
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_SHARED,
     },
 )
 both_builders(
@@ -1424,6 +1632,7 @@ both_builders(
             "CMAKE_CXX_FLAGS": "/DWIN32 /D_WINDOWS /EHsc /DOPENSSL_SMALL=1",
         },
         "msvc_target": "x64",
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     },
 )
 
@@ -1434,6 +1643,7 @@ both_builders(
     properties = {
         "clang": True,
         "msvc_target": "x64",
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     },
 )
 both_builders(
@@ -1443,6 +1653,7 @@ both_builders(
         "clang": True,
         "msvc_target": "x64",
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     }),
 )
 
@@ -1464,6 +1675,7 @@ both_builders(
             "checkout_nasm": False,
         },
         "msvc_target": "arm64",
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     }),
 )
 both_builders(
@@ -1485,6 +1697,7 @@ both_builders(
         },
         "msvc_target": "arm64",
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     }),
 )
 
@@ -1504,6 +1717,7 @@ both_builders(
             "checkout_nasm": False,
         },
         "msvc_target": "arm64",
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     }),
 )
 both_builders(
@@ -1523,5 +1737,6 @@ both_builders(
         },
         "msvc_target": "arm64",
         "prefixed_symbols": True,
+        "upload_to_cas": FINISHED_OUTPUT_FILES_WIN_STATIC,
     }),
 )

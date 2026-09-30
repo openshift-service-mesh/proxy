@@ -17,7 +17,7 @@ import (
 	"math/big"
 	"slices"
 
-	"boringssl.googlesource.com/boringssl.git/ssl/test/runner/kyber"
+	"golang.org/x/crypto/cryptobyte"
 )
 
 type keyType int
@@ -54,13 +54,13 @@ func (ka *rsaKeyAgreement) generateServerKeyExchange(config *Config, cert *Crede
 	}
 	ka.exportKey = key
 
-	modulus := key.N.Bytes()
-	exponent := big.NewInt(int64(key.E)).Bytes()
-	serverRSAParams := make([]byte, 0, 2+len(modulus)+2+len(exponent))
-	serverRSAParams = append(serverRSAParams, byte(len(modulus)>>8), byte(len(modulus)))
-	serverRSAParams = append(serverRSAParams, modulus...)
-	serverRSAParams = append(serverRSAParams, byte(len(exponent)>>8), byte(len(exponent)))
-	serverRSAParams = append(serverRSAParams, exponent...)
+	bb := cryptobyte.NewBuilder(nil)
+	addUint16LengthPrefixedBytes(bb, key.N.Bytes())
+	addUint16LengthPrefixedBytes(bb, big.NewInt(int64(key.E)).Bytes())
+	serverRSAParams, err := bb.Bytes()
+	if err != nil {
+		return nil, err
+	}
 
 	var sigAlg signatureAlgorithm
 	if ka.version.protocolVersion() >= VersionTLS12 {
@@ -76,21 +76,16 @@ func (ka *rsaKeyAgreement) generateServerKeyExchange(config *Config, cert *Crede
 	}
 
 	skx := new(serverKeyExchangeMsg)
-	sigAlgsLen := 0
+	bb = cryptobyte.NewBuilder(nil)
+	bb.AddBytes(serverRSAParams)
 	if ka.version.protocolVersion() >= VersionTLS12 {
-		sigAlgsLen = 2
+		bb.AddUint16(uint16(sigAlg))
 	}
-	skx.key = make([]byte, len(serverRSAParams)+sigAlgsLen+2+len(sig))
-	copy(skx.key, serverRSAParams)
-	k := skx.key[len(serverRSAParams):]
-	if ka.version.protocolVersion() >= VersionTLS12 {
-		k[0] = byte(sigAlg >> 8)
-		k[1] = byte(sigAlg)
-		k = k[2:]
+	addUint16LengthPrefixedBytes(bb, sig)
+	skx.key, err = bb.Bytes()
+	if err != nil {
+		return nil, err
 	}
-	k[0] = byte(len(sig) >> 8)
-	k[1] = byte(len(sig))
-	copy(k[2:], sig)
 
 	return skx, nil
 }
@@ -333,57 +328,6 @@ func (e *ecdhKEM) decap(config *Config, ciphertext []byte) (secret []byte, err e
 	return e.privateKey.ECDH(peerKey)
 }
 
-// kyberKEM implements Kyber-768
-type kyberKEM struct {
-	kyberPrivateKey *kyber.PrivateKey
-}
-
-func (e *kyberKEM) encapsulationKeySize() int {
-	return kyber.PublicKeySize
-}
-
-func (e *kyberKEM) ciphertextSize() int {
-	return kyber.CiphertextSize
-}
-
-func (e *kyberKEM) generate(config *Config) (publicKey []byte, err error) {
-	var kyberEntropy [64]byte
-	if _, err := io.ReadFull(config.rand(), kyberEntropy[:]); err != nil {
-		return nil, err
-	}
-	var kyberPublic *[kyber.PublicKeySize]byte
-	e.kyberPrivateKey, kyberPublic = kyber.NewPrivateKey(&kyberEntropy)
-	return kyberPublic[:], nil
-}
-
-func (e *kyberKEM) encap(config *Config, peerKey []byte) (ciphertext []byte, secret []byte, err error) {
-	if len(peerKey) != kyber.PublicKeySize {
-		return nil, nil, errors.New("tls: bad length Kyber offer")
-	}
-
-	kyberPublicKey, ok := kyber.UnmarshalPublicKey((*[kyber.PublicKeySize]byte)(peerKey))
-	if !ok {
-		return nil, nil, errors.New("tls: bad Kyber offer")
-	}
-
-	var kyberShared, kyberEntropy [32]byte
-	if _, err := io.ReadFull(config.rand(), kyberEntropy[:]); err != nil {
-		return nil, nil, err
-	}
-	kyberCiphertext := kyberPublicKey.Encap(kyberShared[:], &kyberEntropy)
-	return kyberCiphertext[:], kyberShared[:], nil
-}
-
-func (e *kyberKEM) decap(config *Config, ciphertext []byte) (secret []byte, err error) {
-	if len(ciphertext) != kyber.CiphertextSize {
-		return nil, errors.New("tls: bad length Kyber reply")
-	}
-
-	var kyberShared [32]byte
-	e.kyberPrivateKey.Decap(kyberShared[:], (*[kyber.CiphertextSize]byte)(ciphertext))
-	return kyberShared[:], nil
-}
-
 // mlkem768KEM implements ML-KEM-768
 type mlkem768KEM struct {
 	decapKey *mlkem.DecapsulationKey768
@@ -569,11 +513,8 @@ func kemForCurveID(id CurveID, config *Config) (kemImplementation, bool) {
 		kem = &ecdhKEM{curve: ecdh.P521()}
 	case CurveX25519:
 		kem = &ecdhKEM{curve: ecdh.X25519()}
-	case CurveX25519Kyber768:
-		// draft-tls-westerbaan-xyber768d00-03
-		kem = &concatKEM{kem1: &ecdhKEM{curve: ecdh.X25519()}, kem2: &kyberKEM{}}
 	case CurveX25519MLKEM768:
-		// draft-ietf-tls-ecdhe-mlkem-00
+		// RFC 10024
 		kem = &concatKEM{kem1: &mlkem768KEM{}, kem2: &ecdhKEM{curve: ecdh.X25519()}}
 	case CurveMLKEM1024:
 		// draft-ietf-tls-mlkem-04
@@ -648,21 +589,16 @@ func (ka *signedKeyAgreement) signParameters(config *Config, cert *Credential, c
 	if config.Bugs.UnauthenticatedECDH {
 		skx.key = params
 	} else {
-		sigAlgsLen := 0
+		bb := cryptobyte.NewBuilder(nil)
+		bb.AddBytes(params)
 		if ka.version.protocolVersion() >= VersionTLS12 {
-			sigAlgsLen = 2
+			bb.AddUint16(uint16(sigAlg))
 		}
-		skx.key = make([]byte, len(params)+sigAlgsLen+2+len(sig))
-		copy(skx.key, params)
-		k := skx.key[len(params):]
-		if ka.version.protocolVersion() >= VersionTLS12 {
-			k[0] = byte(sigAlg >> 8)
-			k[1] = byte(sigAlg)
-			k = k[2:]
+		addUint16LengthPrefixedBytes(bb, sig)
+		skx.key, err = bb.Bytes()
+		if err != nil {
+			return nil, err
 		}
-		k[0] = byte(len(sig) >> 8)
-		k[1] = byte(len(sig))
-		copy(k[2:], sig)
 	}
 
 	return skx, nil
@@ -716,7 +652,7 @@ func (ka *signedKeyAgreement) verifyParameters(config *Config, clientHello *clie
 }
 
 // ecdheKeyAgreement implements a TLS key agreement where the server
-// generates a ephemeral EC public/private key pair and signs it. The
+// generates an ephemeral EC public/private key pair and signs it. The
 // pre-master secret is then calculated using ECDH. The signature may
 // either be ECDSA or RSA.
 type ecdheKeyAgreement struct {
@@ -757,15 +693,17 @@ func (ka *ecdheKeyAgreement) generateServerKeyExchange(config *Config, cert *Cre
 	}
 
 	// http://tools.ietf.org/html/rfc4492#section-5.4
-	serverECDHParams := make([]byte, 1+2+1+len(publicKey))
-	serverECDHParams[0] = 3 // named curve
+	bb := cryptobyte.NewBuilder(nil)
+	bb.AddUint8(3) // named curve
 	if config.Bugs.SendCurve != 0 {
 		curveID = config.Bugs.SendCurve
 	}
-	serverECDHParams[1] = byte(curveID >> 8)
-	serverECDHParams[2] = byte(curveID)
-	serverECDHParams[3] = byte(len(publicKey))
-	copy(serverECDHParams[4:], publicKey)
+	bb.AddUint16(uint16(curveID))
+	addUint8LengthPrefixedBytes(bb, publicKey)
+	serverECDHParams, err := bb.Bytes()
+	if err != nil {
+		return nil, err
+	}
 
 	return ka.auth.signParameters(config, cert, clientHello, hello, serverECDHParams)
 }

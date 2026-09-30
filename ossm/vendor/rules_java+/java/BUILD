@@ -61,11 +61,18 @@ bzl_library(
     visibility = ["//visibility:public"],
 )
 
+exports_files(
+    ["java_single_jar.bzl"],
+    visibility = ["//test:__pkg__"],
+)
+
 bzl_library(
     name = "java_single_jar",
     srcs = ["java_single_jar.bzl"],
     visibility = ["//visibility:public"],
-    deps = ["//java/common"],
+    deps = [
+        "//java/bazel/rules:java_single_jar_bzl",  # copybara-use-repo-external-label
+    ],
 )
 
 bzl_library(

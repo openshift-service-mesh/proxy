@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -7,11 +8,13 @@ cc_library(
     name = "encoders",
     srcs = ["encoders.cc"],
     hdrs = ["encoders.h"],
+    copts = CEL_COPTS,
     deps = [
         "//checker:type_checker_builder",
         "//common:decl",
         "//common:type",
         "//common:value",
+        "//compiler",
         "//eval/public:cel_function_registry",
         "//eval/public:cel_options",
         "//internal:status_macros",
@@ -29,6 +32,7 @@ cc_library(
 cc_test(
     name = "encoders_test",
     srcs = ["encoders_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":encoders",
         "//checker:standard_library",
@@ -50,6 +54,7 @@ cc_library(
     name = "proto_ext",
     srcs = ["proto_ext.cc"],
     hdrs = ["proto_ext.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:expr",
         "//compiler",
@@ -73,7 +78,9 @@ cc_library(
     name = "math_ext",
     srcs = ["math_ext.cc"],
     hdrs = ["math_ext.h"],
+    copts = CEL_COPTS,
     deps = [
+        ":math_ext_decls",
         "//common:casting",
         "//common:value",
         "//eval/public:cel_function_registry",
@@ -97,6 +104,7 @@ cc_library(
     name = "math_ext_macros",
     srcs = ["math_ext_macros.cc"],
     hdrs = ["math_ext_macros.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:ast",
         "//common:constant",
@@ -119,6 +127,7 @@ cc_library(
     name = "math_ext_decls",
     srcs = ["math_ext_decls.cc"],
     hdrs = ["math_ext_decls.h"],
+    copts = CEL_COPTS,
     deps = [
         ":math_ext_macros",
         "//checker:type_checker_builder",
@@ -138,15 +147,20 @@ cc_library(
 cc_test(
     name = "math_ext_test",
     srcs = ["math_ext_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":math_ext",
         ":math_ext_decls",
         ":math_ext_macros",
         "//checker:standard_library",
+        "//checker:type_check_issue",
         "//checker:validation_result",
         "//common:decl",
         "//common:function_descriptor",
+        "//common:type",
+        "//compiler",
         "//compiler:compiler_factory",
+        "//compiler:standard_library",
         "//eval/public:activation",
         "//eval/public:builtin_func_registrar",
         "//eval/public:cel_expr_builder_factory",
@@ -162,6 +176,7 @@ cc_test(
         "//runtime:activation",
         "//runtime:runtime_options",
         "//runtime:standard_runtime_builder_factory",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/strings",
@@ -178,6 +193,7 @@ cc_library(
     name = "regex_functions",
     srcs = ["regex_functions.cc"],
     hdrs = ["regex_functions.h"],
+    copts = CEL_COPTS,
     deps = [
         "//checker:type_checker_builder",
         "//checker/internal:builtins_arena",
@@ -186,6 +202,7 @@ cc_library(
         "//common:value",
         "//eval/public:cel_function_registry",
         "//eval/public:cel_options",
+        "//internal:re2_options",
         "//internal:status_macros",
         "//runtime:function_adapter",
         "//runtime:function_registry",
@@ -193,6 +210,7 @@ cc_library(
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/functional:bind_front",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
@@ -205,8 +223,12 @@ cc_library(
     name = "bindings_ext",
     srcs = ["bindings_ext.cc"],
     hdrs = ["bindings_ext.h"],
+    copts = CEL_COPTS,
     deps = [
-        "//common:ast",
+        "//checker:type_checker_builder",
+        "//common:decl",
+        "//common:expr",
+        "//common:type",
         "//compiler",
         "//internal:status_macros",
         "//parser:macro",
@@ -226,6 +248,7 @@ cc_test(
     srcs = [
         "regex_functions_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":regex_functions",
         "//checker:standard_library",
@@ -256,6 +279,7 @@ cc_test(
 cc_test(
     name = "bindings_ext_test",
     srcs = ["bindings_ext_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":bindings_ext",
         "//base:attributes",
@@ -284,6 +308,7 @@ cc_test(
 cc_test(
     name = "bindings_ext_benchmark_test",
     srcs = ["bindings_ext_benchmark_test.cc"],
+    copts = CEL_COPTS,
     tags = ["benchmark"],
     deps = [
         ":bindings_ext",
@@ -309,6 +334,7 @@ cc_library(
     name = "select_optimization",
     srcs = ["select_optimization.cc"],
     hdrs = ["select_optimization.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:attributes",
         "//base:builtins",
@@ -329,6 +355,7 @@ cc_library(
         "//eval/eval:evaluator_core",
         "//eval/eval:expression_step_base",
         "//internal:casts",
+        "//internal:number",
         "//internal:status_macros",
         "//runtime:runtime_builder",
         "//runtime/internal:errors",
@@ -349,10 +376,75 @@ cc_library(
     ],
 )
 
+cc_test(
+    name = "select_optimization_test",
+    srcs = ["select_optimization_test.cc"],
+    copts = CEL_COPTS,
+    deps = [
+        ":select_optimization",
+        "//base:ast",
+        "//base:attributes",
+        "//base:builtins",
+        "//checker:type_checker_builder",
+        "//checker:validation_result",
+        "//common:ast",
+        "//common:decl",
+        "//common:decl_proto",
+        "//common:expr",
+        "//common:kind",
+        "//common:memory",
+        "//common:value",
+        "//compiler",
+        "//compiler:compiler_factory",
+        "//compiler:optional",
+        "//compiler:standard_library",
+        "//eval/compiler:flat_expr_builder",
+        "//eval/compiler:flat_expr_builder_extensions",
+        "//eval/compiler:resolver",
+        "//eval/eval:evaluator_core",
+        "//eval/internal:interop",
+        "//eval/public:cel_type_registry",
+        "//eval/public:cel_value",
+        "//eval/public/structs:cel_proto_wrapper",
+        "//eval/public/structs:legacy_type_adapter",
+        "//eval/public/structs:legacy_type_info_apis",
+        "//extensions/protobuf:ast_converters",
+        "//internal:number",
+        "//internal:status_macros",
+        "//internal:testing",
+        "//parser",
+        "//runtime:activation",
+        "//runtime:function_adapter",
+        "//runtime:function_registry",
+        "//runtime:runtime_issue",
+        "//runtime:runtime_options",
+        "//runtime:type_registry",
+        "//runtime/internal:issue_collector",
+        "//runtime/internal:runtime_env",
+        "//runtime/internal:runtime_env_testing",
+        "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
+        "@com_google_cel_spec//proto/cel/expr:checked_cc_proto",
+        "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
+        "@com_google_cel_spec//proto/cel/expr/conformance/proto2:test_all_types_cc_proto",
+        "@com_google_protobuf//:empty_cc_proto",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
 cc_library(
     name = "lists_functions",
     srcs = ["lists_functions.cc"],
     hdrs = ["lists_functions.h"],
+    copts = CEL_COPTS,
     deps = [
         "//checker:type_checker_builder",
         "//checker/internal:builtins_arena",
@@ -390,9 +482,12 @@ cc_library(
 cc_test(
     name = "lists_functions_test",
     srcs = ["lists_functions_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":lists_functions",
+        "//checker:type_check_issue",
         "//checker:validation_result",
+        "//common:ast",
         "//common:source",
         "//common:value",
         "//common:value_testing",
@@ -412,6 +507,7 @@ cc_test(
         "//runtime:runtime_builder",
         "//runtime:runtime_options",
         "//runtime:standard_runtime_builder_factory",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/strings:string_view",
@@ -424,6 +520,7 @@ cc_library(
     name = "sets_functions",
     srcs = ["sets_functions.cc"],
     hdrs = ["sets_functions.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:function_adapter",
         "//checker:type_checker_builder",
@@ -446,6 +543,7 @@ cc_library(
 cc_test(
     name = "sets_functions_test",
     srcs = ["sets_functions_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":sets_functions",
         "//checker:standard_library",
@@ -471,6 +569,7 @@ cc_test(
 cc_test(
     name = "sets_functions_benchmark_test",
     srcs = ["sets_functions_benchmark_test.cc"],
+    copts = CEL_COPTS,
     tags = ["benchmark"],
     deps = [
         ":sets_functions",
@@ -500,6 +599,7 @@ cc_library(
     name = "strings",
     srcs = ["strings.cc"],
     hdrs = ["strings.h"],
+    copts = CEL_COPTS,
     deps = [
         ":formatting",
         "//checker:type_checker_builder",
@@ -528,14 +628,18 @@ cc_library(
 cc_test(
     name = "strings_test",
     srcs = ["strings_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":strings",
         "//checker:standard_library",
+        "//checker:type_check_issue",
         "//checker:type_checker_builder",
         "//checker:validation_result",
+        "//common:ast",
         "//common:decl",
         "//common:type",
         "//common:value",
+        "//compiler",
         "//compiler:compiler_factory",
         "//compiler:standard_library",
         "//extensions/protobuf:runtime_adapter",
@@ -549,6 +653,7 @@ cc_test(
         "//runtime:runtime_options",
         "//runtime:standard_runtime_builder_factory",
         "//testutil:baseline_tests",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
@@ -560,6 +665,7 @@ cc_library(
     name = "comprehensions_v2_functions",
     srcs = ["comprehensions_v2_functions.cc"],
     hdrs = ["comprehensions_v2_functions.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:value",
         "//eval/public:cel_function_registry",
@@ -579,6 +685,7 @@ cc_library(
     name = "comprehensions_v2_macros",
     srcs = ["comprehensions_v2_macros.cc"],
     hdrs = ["comprehensions_v2_macros.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:expr",
         "//common:operators",
@@ -602,6 +709,7 @@ cc_library(
     name = "comprehensions_v2",
     srcs = ["comprehensions_v2.cc"],
     hdrs = ["comprehensions_v2.h"],
+    copts = CEL_COPTS,
     deps = [
         ":comprehensions_v2_functions",
         ":comprehensions_v2_macros",
@@ -622,6 +730,7 @@ cc_library(
 cc_test(
     name = "comprehensions_v2_test",
     srcs = ["comprehensions_v2_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":bindings_ext",
         ":comprehensions_v2",
@@ -652,6 +761,7 @@ cc_library(
     name = "formatting",
     srcs = ["formatting.cc"],
     hdrs = ["formatting.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:value",
         "//common:value_kind",
@@ -678,6 +788,7 @@ cc_library(
     name = "regex_ext",
     srcs = ["regex_ext.cc"],
     hdrs = ["regex_ext.h"],
+    copts = CEL_COPTS,
     deps = [
         "//checker:type_checker_builder",
         "//checker/internal:builtins_arena",
@@ -688,14 +799,18 @@ cc_library(
         "//eval/public:cel_function_registry",
         "//eval/public:cel_options",
         "//internal:casts",
+        "//internal:re2_options",
         "//internal:status_macros",
         "//runtime:function_adapter",
         "//runtime:function_registry",
         "//runtime:runtime_builder",
         "//runtime/internal:runtime_friend_access",
         "//runtime/internal:runtime_impl",
+        "//validator",
+        "//validator:regex_validator",
         "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/functional:bind_front",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:str_format",
@@ -708,6 +823,7 @@ cc_library(
 cc_test(
     name = "regex_ext_test",
     srcs = ["regex_ext_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":regex_ext",
         "//checker:standard_library",
@@ -733,6 +849,7 @@ cc_test(
         "//runtime:reference_resolver",
         "//runtime:runtime_options",
         "//runtime:standard_runtime_builder_factory",
+        "//validator",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/status:statusor",
@@ -744,6 +861,7 @@ cc_test(
 cc_test(
     name = "formatting_test",
     srcs = ["formatting_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":formatting",
         "//common:value",

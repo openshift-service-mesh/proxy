@@ -13,6 +13,7 @@
 # limitations under the License.
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -23,6 +24,7 @@ cc_library(
     testonly = True,
     srcs = ["memory_manager_testing.cc"],
     hdrs = ["memory_manager_testing.h"],
+    copts = CEL_COPTS,
     deps = [
         "//internal:testing",
     ],
@@ -31,11 +33,13 @@ cc_library(
 cc_library(
     name = "message_wrapper",
     hdrs = ["message_wrapper.h"],
+    copts = CEL_COPTS,
 )
 
 cc_library(
     name = "operators",
     hdrs = ["operators.h"],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_absl//absl/strings",
     ],
@@ -45,6 +49,7 @@ cc_library(
     name = "unknown_set",
     srcs = ["unknown_set.cc"],
     hdrs = ["unknown_set.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:attributes",
         "//base:function_result_set",

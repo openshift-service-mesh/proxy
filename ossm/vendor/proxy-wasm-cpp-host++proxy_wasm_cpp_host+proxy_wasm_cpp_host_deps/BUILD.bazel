@@ -1,0 +1,35 @@
+alias(
+    name = "crypto_lib",
+    actual = "@@envoy+//bazel:crypto",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "wamr_lib",
+    actual = "@com_github_bytecodealliance_wasm_micro_runtime//:wamr_lib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "wasmtime_lib",
+    actual = "@com_github_wasmtime//:wasmtime_lib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "prefixed_wasmtime_lib",
+    actual = "@com_github_wasmtime//:prefixed_wasmtime_lib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "wasmedge_lib",
+    actual = "@@proxy-wasm-cpp-host+//bazel:default_wasmedge_lib",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "v8_engine",
+    actual = "@@proxy-wasm-cpp-host+//bazel:wee8_no_pointer_compression",
+    visibility = ["//visibility:public"],
+)

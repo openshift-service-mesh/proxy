@@ -14,18 +14,14 @@
 
 """Helper methods for implementing the test bundles."""
 
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(
-    "@bazel_skylib//lib:types.bzl",
-    "types",
-)
-load(
-    "@build_bazel_rules_swift//swift:swift.bzl",
+    "@rules_swift//swift:swift.bzl",
     "SwiftInfo",
 )
 load(
     "//apple:providers.bzl",
     "AppleBundleInfo",
-    "AppleTestInfo",
 )
 load(
     "//apple/internal:apple_product_type.bzl",
@@ -33,8 +29,7 @@ load(
 )
 load(
     "//apple/internal:apple_toolchains.bzl",
-    "AppleMacToolsToolchainInfo",
-    "AppleXPlatToolsToolchainInfo",
+    "apple_toolchain_utils",
 )
 load(
     "//apple/internal:bundling_support.bzl",
@@ -103,19 +98,6 @@ load(
 # a bundle ID.
 _DEFAULT_TEST_BUNDLE_ID = "com.bazelbuild.rulesapple.Tests"
 
-def _collect_files(rule_attr, attr_names):
-    """Collects files from given attr_names (when present) into a depset."""
-    transitive_files = []
-
-    for attr_name in attr_names:
-        attr_val = getattr(rule_attr, attr_name, None)
-        if not attr_val:
-            continue
-        attr_val_as_list = attr_val if types.is_list(attr_val) else [attr_val]
-        transitive_files.extend([f.files for f in attr_val_as_list])
-
-    return depset(transitive = transitive_files)
-
 def _is_swift_target(target):
     """Returns whether a target directly exports a Swift module."""
     if SwiftInfo not in target:
@@ -128,131 +110,6 @@ def _is_swift_target(target):
             return True
 
     return False
-
-def _apple_test_info_aspect_impl(target, ctx):
-    """See `test_info_aspect` for full documentation."""
-    includes = []
-    module_maps = []
-    swift_modules = []
-
-    # Not all deps (i.e. source files) will have an AppleTestInfo provider. If the
-    # dep doesn't, just filter it out.
-    test_infos = [
-        x[AppleTestInfo]
-        for x in getattr(ctx.rule.attr, "deps", [])
-        if AppleTestInfo in x
-    ]
-
-    # Collect transitive information from deps.
-    for test_info in test_infos:
-        includes.append(test_info.includes)
-        module_maps.append(test_info.module_maps)
-        swift_modules.append(test_info.swift_modules)
-
-    if apple_common.Objc in target:
-        objc_provider = target[apple_common.Objc]
-        includes.append(objc_provider.strict_include)
-
-    if CcInfo in target:
-        cc_info = target[CcInfo]
-        includes.append(cc_info.compilation_context.includes)
-        includes.append(cc_info.compilation_context.quote_includes)
-        includes.append(cc_info.compilation_context.system_includes)
-
-    if _is_swift_target(target):
-        all_modules = target[SwiftInfo].transitive_modules.to_list()
-
-        module_swiftmodules = [
-            module.swift.swiftmodule
-            for module in all_modules
-            if module.swift
-        ]
-        swift_modules.append(depset(module_swiftmodules))
-
-        module_module_maps = [
-            module.clang.module_map
-            for module in all_modules
-            if module.clang and type(module.clang.module_map) == "File"
-        ]
-        module_maps.append(depset(module_module_maps))
-
-    # Collect sources from the current target. Note that we do not propagate
-    # sources transitively as we intentionally only show test sources from the
-    # test's first-level of dependencies instead of all transitive dependencies.
-    #
-    # Group the transitively exported headers into `sources` since we have no
-    # need to differentiate between internal headers and transitively exported
-    # headers.
-    non_arc_sources = _collect_files(ctx.rule.attr, ["non_arc_srcs"])
-    sources = _collect_files(ctx.rule.attr, ["srcs", "hdrs", "textual_hdrs"])
-
-    return [new_appletestinfo(
-        includes = depset(transitive = includes),
-        module_maps = depset(transitive = module_maps),
-        non_arc_sources = non_arc_sources,
-        sources = sources,
-        swift_modules = depset(transitive = swift_modules),
-    )]
-
-apple_test_info_aspect = aspect(
-    attr_aspects = [
-        "deps",
-    ],
-    doc = """
-This aspect walks the dependency graph through the `deps` attribute and collects sources, transitive
-includes, transitive module maps, and transitive Swift modules.
-
-This aspect propagates an `AppleTestInfo` provider.
-""",
-    implementation = _apple_test_info_aspect_impl,
-)
-
-def _apple_test_info_provider(deps, test_bundle, test_host):
-    """Returns an AppleTestInfo provider by collecting the relevant data from dependencies."""
-    dep_labels = []
-    swift_infos = []
-
-    transitive_includes = []
-    transitive_module_maps = []
-    transitive_non_arc_sources = []
-    transitive_sources = []
-    transitive_swift_modules = []
-
-    for dep in deps:
-        dep_labels.append(str(dep.label))
-
-        if SwiftInfo in dep:
-            swift_infos.append(dep[SwiftInfo])
-
-        test_info = dep[AppleTestInfo]
-
-        transitive_includes.append(test_info.includes)
-        transitive_module_maps.append(test_info.module_maps)
-        transitive_non_arc_sources.append(test_info.non_arc_sources)
-        transitive_sources.append(test_info.sources)
-        transitive_swift_modules.append(test_info.swift_modules)
-
-    # Set module_name only for test targets with a single Swift dependency that
-    # contains a single Swift module. This is not used if there are multiple
-    # Swift dependencies/modules, as it will not be possible to reduce them into
-    # a single Swift module and picking an arbitrary one is fragile.
-    module_name = None
-    if len(swift_infos) == 1:
-        module_names = [x.name for x in swift_infos[0].direct_modules if x.swift]
-        if len(module_names) == 1:
-            module_name = module_names[0]
-
-    return new_appletestinfo(
-        deps = depset(dep_labels),
-        includes = depset(transitive = transitive_includes),
-        module_maps = depset(transitive = transitive_module_maps),
-        module_name = module_name,
-        non_arc_sources = depset(transitive = transitive_non_arc_sources),
-        sources = depset(transitive = transitive_sources),
-        swift_modules = depset(transitive = transitive_swift_modules),
-        test_bundle = test_bundle,
-        test_host = test_host,
-    )
 
 def _computed_test_bundle_id(test_host_bundle_id):
     """Compute a test bundle ID from the test host, or a default if not given."""
@@ -302,8 +159,9 @@ def _apple_test_bundle_impl(*, ctx, product_type):
              "them.")
 
     actions = ctx.actions
-    apple_mac_toolchain_info = ctx.attr._mac_toolchain[AppleMacToolsToolchainInfo]
-    apple_xplat_toolchain_info = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo]
+    apple_mac_toolchain_info = apple_toolchain_utils.get_mac_toolchain(ctx)
+    apple_xplat_toolchain_info = apple_toolchain_utils.get_xplat_toolchain(ctx)
+    cc_toolchain_forwarder = ctx.split_attr._cc_toolchain_forwarder
     executable_name = ctx.attr.executable_name
     features = features_support.compute_enabled_features(
         requested_features = ctx.features,
@@ -312,6 +170,7 @@ def _apple_test_bundle_impl(*, ctx, product_type):
     label = ctx.label
     platform_prerequisites = platform_support.platform_prerequisites(
         apple_fragment = ctx.fragments.apple,
+        apple_platform_info = platform_support.apple_platform_info_from_rule_ctx(ctx),
         build_settings = apple_xplat_toolchain_info.build_settings,
         config_vars = ctx.var,
         cpp_fragment = ctx.fragments.cpp,
@@ -322,7 +181,6 @@ def _apple_test_bundle_impl(*, ctx, product_type):
         explicit_minimum_os = ctx.attr.minimum_os_version,
         features = features,
         objc_fragment = ctx.fragments.objc,
-        platform_type_string = ctx.attr.platform_type,
         uses_swift = swift_support.uses_swift(ctx.attr.deps),
         xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
     )
@@ -352,10 +210,22 @@ def _apple_test_bundle_impl(*, ctx, product_type):
         bundle_loader = None
 
     extra_linkopts = [
+        "-Xlinker",
+        "-needed_framework",
+        "-Xlinker",
+        "XCTest",
         "-framework",
         "XCTest",
         "-bundle",
     ]
+
+    if any([_is_swift_target(dep) for dep in ctx.attr.deps]):
+        extra_linkopts.extend([
+            "-Xlinker",
+            "-needed-lXCTestSwiftSupport",
+            "-lXCTestSwiftSupport",
+        ])
+
     extra_link_inputs = []
 
     if "apple.swizzle_absolute_xcttestsourcelocation" in features:
@@ -376,6 +246,7 @@ def _apple_test_bundle_impl(*, ctx, product_type):
 
     link_result = linking_support.register_binary_linking_action(
         ctx,
+        cc_toolchains = cc_toolchain_forwarder,
         avoid_deps = getattr(ctx.attr, "frameworks", []),
         bundle_loader = bundle_loader,
         # Unit/UI tests do not use entitlements.
@@ -398,9 +269,12 @@ def _apple_test_bundle_impl(*, ctx, product_type):
         debug_dependencies.append(test_host)
 
     if hasattr(ctx.attr, "frameworks"):
-        targets_to_avoid = list(ctx.attr.frameworks)
+        frameworks = list(ctx.attr.frameworks)
+        targets_to_avoid = frameworks
+        debug_dependencies.extend(frameworks)
     else:
         targets_to_avoid = []
+
     if bundle_loader:
         targets_to_avoid.append(bundle_loader)
 
@@ -432,6 +306,7 @@ def _apple_test_bundle_impl(*, ctx, product_type):
             binary_artifact = binary_artifact,
             features = features,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
@@ -439,10 +314,12 @@ def _apple_test_bundle_impl(*, ctx, product_type):
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
             apple_xplat_toolchain_info = apple_xplat_toolchain_info,
+            xplat_exec_group = apple_toolchain_utils.get_xplat_exec_group(ctx),
             bundle_extension = bundle_extension,
             bundle_name = bundle_name,
             entitlements = None,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             predeclared_outputs = predeclared_outputs,
             provisioning_profile = provisioning_profile,
@@ -454,6 +331,7 @@ def _apple_test_bundle_impl(*, ctx, product_type):
             binary_artifact = binary_artifact,
             features = features,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
         ),
@@ -467,6 +345,7 @@ def _apple_test_bundle_impl(*, ctx, product_type):
             executable_name = executable_name,
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
@@ -482,6 +361,7 @@ def _apple_test_bundle_impl(*, ctx, product_type):
             apple_mac_toolchain_info = apple_mac_toolchain_info,
             features = features,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             provisioning_profile = provisioning_profile,
             rule_descriptor = rule_descriptor,
@@ -497,6 +377,7 @@ def _apple_test_bundle_impl(*, ctx, product_type):
             environment_plist = ctx.file._environment_plist,
             executable_name = executable_name,
             launch_storyboard = getattr(ctx.file, "launch_storyboard", None),
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             resource_deps = resource_deps,
             rule_descriptor = rule_descriptor,
@@ -513,6 +394,7 @@ def _apple_test_bundle_impl(*, ctx, product_type):
             binary_artifact = binary_artifact,
             bundle_dylibs = True,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
         ),
     ]
@@ -528,12 +410,14 @@ def _apple_test_bundle_impl(*, ctx, product_type):
         actions = actions,
         apple_mac_toolchain_info = apple_mac_toolchain_info,
         apple_xplat_toolchain_info = apple_xplat_toolchain_info,
+        xplat_exec_group = apple_toolchain_utils.get_xplat_exec_group(ctx),
         bundle_extension = bundle_extension,
         bundle_name = bundle_name,
         codesign_inputs = ctx.files.codesign_inputs,
         codesignopts = codesigning_support.codesignopts_from_rule_ctx(ctx),
         features = features,
         ipa_post_processor = ctx.executable.ipa_post_processor,
+        mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
         partials = processor_partials,
         platform_prerequisites = platform_prerequisites,
         predeclared_outputs = predeclared_outputs,
@@ -585,8 +469,7 @@ def _apple_test_bundle_impl(*, ctx, product_type):
     if test_host:
         test_host_archive = test_host[AppleBundleInfo].archive
     providers.extend([
-        _apple_test_info_provider(
-            deps = ctx.attr.deps,
+        new_appletestinfo(
             test_bundle = test_runner_bundle_output,
             test_host = test_host_archive,
         ),

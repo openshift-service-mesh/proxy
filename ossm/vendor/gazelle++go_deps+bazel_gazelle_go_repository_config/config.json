@@ -1,4 +1,7 @@
 {
 	"dep_files": [],
-	"go_env": {}
+	"go_env": {
+		"GOROOT": "@@rules_go++go_sdk+main___host_0//:ROOT",
+		"GOTOOLCHAIN": "local"
+	}
 }

@@ -17,18 +17,11 @@ package golang
 
 import (
 	"fmt"
+
 	"github.com/bazelbuild/bazel-gazelle/rule"
 )
 
 var goKinds = map[string]rule.KindInfo{
-	"alias": {
-		NonEmptyAttrs:  map[string]bool{"actual": true},
-		MergeableAttrs: map[string]bool{"actual": true},
-	},
-	"filegroup": {
-		NonEmptyAttrs:  map[string]bool{"srcs": true},
-		MergeableAttrs: map[string]bool{"srcs": true},
-	},
 	"go_binary": {
 		MatchAny: true,
 		NonEmptyAttrs: map[string]bool{
@@ -38,14 +31,17 @@ var goKinds = map[string]rule.KindInfo{
 		},
 		SubstituteAttrs: map[string]bool{"embed": true},
 		MergeableAttrs: map[string]bool{
-			"cgo":       true,
-			"clinkopts": true,
-			"cppopts":   true,
-			"copts":     true,
-			"cxxopts":   true,
-			"embed":     true,
-			"embedsrcs": true,
-			"srcs":      true,
+			"cgo":         true,
+			"clinkopts":   true,
+			"cppopts":     true,
+			"copts":       true,
+			"cxxopts":     true,
+			"embed":       true,
+			"embedsrcs":   true,
+			"gc_goopts":   true,
+			"gc_linkopts": true,
+			"pgoprofile":  true,
+			"srcs":        true,
 		},
 		ResolveAttrs: map[string]bool{"deps": true},
 	},
@@ -67,6 +63,7 @@ var goKinds = map[string]rule.KindInfo{
 			"cxxopts":    true,
 			"embed":      true,
 			"embedsrcs":  true,
+			"gc_goopts":  true,
 			"importmap":  true,
 			"importpath": true,
 			"srcs":       true,
@@ -127,14 +124,16 @@ var goKinds = map[string]rule.KindInfo{
 			"srcs":  true,
 		},
 		MergeableAttrs: map[string]bool{
-			"cgo":       true,
-			"clinkopts": true,
-			"cppopts":   true,
-			"copts":     true,
-			"cxxopts":   true,
-			"embed":     true,
-			"embedsrcs": true,
-			"srcs":      true,
+			"cgo":         true,
+			"clinkopts":   true,
+			"cppopts":     true,
+			"copts":       true,
+			"cxxopts":     true,
+			"embed":       true,
+			"embedsrcs":   true,
+			"gc_goopts":   true,
+			"gc_linkopts": true,
+			"srcs":        true,
 		},
 		ResolveAttrs: map[string]bool{"deps": true},
 	},

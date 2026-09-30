@@ -75,6 +75,8 @@ absl::Status TimestampValue::ConvertToJson(
   ABSL_DCHECK_EQ(json->GetDescriptor()->well_known_type(),
                  google::protobuf::Descriptor::WELLKNOWNTYPE_VALUE);
 
+  CEL_RETURN_IF_ERROR(cel::internal::ValidateTimestamp(NativeValue()));
+
   ValueReflection value_reflection;
   CEL_RETURN_IF_ERROR(value_reflection.Initialize(json->GetDescriptor()));
   value_reflection.SetStringValueFromTimestamp(json, NativeValue());

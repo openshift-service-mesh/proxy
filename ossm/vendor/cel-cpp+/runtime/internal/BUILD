@@ -14,6 +14,7 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(
     # Internals for cel/runtime.
@@ -25,6 +26,7 @@ licenses(["notice"])
 cc_library(
     name = "runtime_friend_access",
     hdrs = ["runtime_friend_access.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:native_type",
         "//runtime",
@@ -36,6 +38,7 @@ cc_library(
     name = "runtime_env",
     srcs = ["runtime_env.cc"],
     hdrs = ["runtime_env.h"],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public:cel_function_registry",
         "//eval/public:cel_type_registry",
@@ -55,6 +58,7 @@ cc_library(
     name = "runtime_impl",
     srcs = ["runtime_impl.cc"],
     hdrs = ["runtime_impl.h"],
+    copts = CEL_COPTS,
     deps = [
         ":runtime_env",
         "//base:ast",
@@ -86,6 +90,7 @@ cc_library(
     name = "convert_constant",
     srcs = ["convert_constant.cc"],
     hdrs = ["convert_constant.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:allocator",
         "//common:ast",
@@ -103,6 +108,7 @@ cc_library(
     name = "errors",
     srcs = ["errors.cc"],
     hdrs = ["errors.h"],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
@@ -114,6 +120,7 @@ cc_library(
 cc_library(
     name = "issue_collector",
     hdrs = ["issue_collector.h"],
+    copts = CEL_COPTS,
     deps = [
         "//runtime:runtime_issue",
         "@com_google_absl//absl/status",
@@ -124,6 +131,7 @@ cc_library(
 cc_test(
     name = "issue_collector_test",
     srcs = ["issue_collector_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":issue_collector",
         "//internal:testing",
@@ -137,6 +145,7 @@ cc_library(
     hdrs = [
         "function_adapter.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//common:casting",
         "//common:kind",
@@ -150,6 +159,7 @@ cc_library(
 cc_test(
     name = "function_adapter_test",
     srcs = ["function_adapter_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":function_adapter",
         "//common:kind",
@@ -167,6 +177,7 @@ cc_library(
     testonly = True,
     srcs = ["runtime_env_testing.cc"],
     hdrs = ["runtime_env_testing.h"],
+    copts = CEL_COPTS,
     deps = [
         ":runtime_env",
         "//internal:noop_delete",
@@ -174,6 +185,7 @@ cc_library(
         "//internal:testing_message_factory",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/log:die_if_null",
         "@com_google_protobuf//:protobuf",
     ],
 )
@@ -181,6 +193,7 @@ cc_library(
 cc_library(
     name = "legacy_runtime_type_provider",
     hdrs = ["legacy_runtime_type_provider.h"],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public/structs:protobuf_descriptor_type_provider",
         "@com_google_absl//absl/base:nullability",
@@ -192,9 +205,12 @@ cc_library(
     name = "runtime_type_provider",
     srcs = ["runtime_type_provider.cc"],
     hdrs = ["runtime_type_provider.h"],
+    copts = CEL_COPTS,
     deps = [
+        "//common:descriptor_pool_type_introspector",
         "//common:type",
         "//common:value",
+        "//internal:status_macros",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",
@@ -209,6 +225,7 @@ cc_library(
 cc_library(
     name = "attribute_matcher",
     hdrs = ["attribute_matcher.h"],
+    copts = CEL_COPTS,
     deps = ["//base:attributes"],
 )
 
@@ -216,6 +233,7 @@ cc_library(
     name = "activation_attribute_matcher_access",
     srcs = ["activation_attribute_matcher_access.cc"],
     hdrs = ["activation_attribute_matcher_access.h"],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_matcher",
         "//eval/public:activation",

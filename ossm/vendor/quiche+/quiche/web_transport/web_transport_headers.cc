@@ -30,6 +30,7 @@ using ::quiche::structured_headers::Dictionary;
 using ::quiche::structured_headers::DictionaryMember;
 using ::quiche::structured_headers::Item;
 using ::quiche::structured_headers::ItemTypeToString;
+using ::quiche::structured_headers::ItemView;
 using ::quiche::structured_headers::List;
 using ::quiche::structured_headers::ParameterizedItem;
 using ::quiche::structured_headers::ParameterizedMember;
@@ -59,15 +60,15 @@ auto GetItem(auto&& item) -> absl::StatusOr<
 
 template <Item::ItemType kExpectedType>
 auto GetMember(auto&& member) {
-  auto item = member.GetWithParamsIfItem();
-  using ReturnType = decltype(GetItem<kExpectedType>(item->first));
+  auto item = member.GetIfItem();
+  using ReturnType = decltype(GetItem<kExpectedType>(item->item));
 
-  if (!item.has_value()) {
+  if (!item) {
     return ReturnType(absl::InvalidArgumentError(absl::StrCat(
         "Expected all members to be of type", ItemTypeToString(kExpectedType),
         ", found a nested list instead")));
   }
-  return GetItem<kExpectedType>(item->first);
+  return GetItem<kExpectedType>(item->item);
 }
 
 ABSL_CONST_INIT std::array kInitHeaderFields{
@@ -100,7 +101,7 @@ absl::StatusOr<std::string> SerializeSubprotocolRequestHeader(
   quiche::structured_headers::List list;
   list.reserve(subprotocols.size());
   for (const std::string& subprotocol : subprotocols) {
-    list.push_back(ParameterizedMember(Item(subprotocol), {}));
+    list.emplace_back(Item(Item::string, subprotocol));
   }
 
   std::optional<std::string> serialized =
@@ -123,9 +124,9 @@ absl::StatusOr<std::string> ParseSubprotocolResponseHeader(
 
 absl::StatusOr<std::string> SerializeSubprotocolResponseHeader(
     absl::string_view subprotocol) {
-  Item item(std::string(subprotocol), Item::kStringType);
   std::optional<std::string> serialized =
-      quiche::structured_headers::SerializeItem(item);
+      quiche::structured_headers::SerializeItem(
+          ItemView(ItemView::string, subprotocol));
   if (!serialized.has_value()) {
     return absl::InvalidArgumentError("Invalid subprotocol name supplied");
   }
@@ -189,9 +190,8 @@ absl::StatusOr<std::string> SerializeInitHeader(
   std::vector<DictionaryMember> members;
   members.reserve(kInitHeaderFields.size());
   for (const auto& [field_name, field_accessor] : kInitHeaderFields) {
-    Item item(static_cast<int64_t>(header.*field_accessor));
-    members.push_back(std::make_pair(
-        field_name, ParameterizedMember(item, /*parameters=*/{})));
+    members.emplace_back(field_name,
+                         Item(static_cast<int64_t>(header.*field_accessor)));
   }
   std::optional<std::string> result =
       quiche::structured_headers::SerializeDictionary(

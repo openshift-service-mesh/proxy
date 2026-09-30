@@ -14,6 +14,7 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -34,6 +35,7 @@ cc_library(
     hdrs = [
         "message_wrapper.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//base/internal:message_wrapper",
         "@com_google_absl//absl/base:core_headers",
@@ -47,6 +49,7 @@ cc_test(
     srcs = [
         "message_wrapper_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":message_wrapper",
         "//eval/public/structs:trivial_legacy_type_info",
@@ -62,6 +65,7 @@ cc_library(
     hdrs = [
         "cel_value_internal.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":message_wrapper",
         "//internal:casts",
@@ -80,6 +84,7 @@ cc_library(
     hdrs = [
         "cel_value.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_value_internal",
         ":message_wrapper",
@@ -115,6 +120,7 @@ cc_library(
     hdrs = [
         "cel_attribute.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_value",
         "//base:attributes",
@@ -131,6 +137,7 @@ cc_library(
     hdrs = [
         "cel_value_producer.h",
     ],
+    copts = CEL_COPTS,
     deps = [":cel_value"],
 )
 
@@ -139,6 +146,7 @@ cc_library(
     hdrs = [
         "unknown_attribute_set.h",
     ],
+    copts = CEL_COPTS,
     deps = ["//base:attributes"],
 )
 
@@ -150,6 +158,7 @@ cc_library(
     hdrs = [
         "activation.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":base_activation",
         ":cel_attribute",
@@ -174,6 +183,7 @@ cc_library(
     hdrs = [
         "activation_bind_helper.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         "//eval/public/containers:field_access",
@@ -191,6 +201,7 @@ cc_library(
     hdrs = [
         "cel_function.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_value",
         "//common:function_descriptor",
@@ -198,7 +209,6 @@ cc_library(
         "//eval/internal:interop",
         "//internal:status_macros",
         "//runtime:function",
-        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
@@ -211,6 +221,7 @@ cc_library(
     hdrs = [
         "cel_function_adapter_impl.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_function",
         ":cel_function_registry",
@@ -227,6 +238,7 @@ cc_library(
     hdrs = [
         "cel_function_adapter.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_function_adapter_impl",
         ":cel_value",
@@ -241,6 +253,7 @@ cc_library(
     hdrs = [
         "portable_cel_function_adapter.h",
     ],
+    copts = CEL_COPTS,
     deps = [":cel_function_adapter"],
 )
 
@@ -249,6 +262,7 @@ cc_library(
     hdrs = [
         "cel_builtins.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//base:builtins",
     ],
@@ -262,6 +276,7 @@ cc_library(
     hdrs = [
         "builtin_func_registrar.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_function_registry",
         ":cel_options",
@@ -290,6 +305,7 @@ cc_library(
     hdrs = [
         "comparison_functions.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_function_registry",
         ":cel_options",
@@ -306,6 +322,7 @@ cc_test(
     srcs = [
         "comparison_functions_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":cel_expr_builder_factory",
@@ -335,6 +352,7 @@ cc_library(
     hdrs = [
         "equality_function_registrar.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_function_registry",
         ":cel_options",
@@ -351,6 +369,7 @@ cc_test(
     srcs = [
         "equality_function_registrar_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":cel_builtins",
@@ -393,6 +412,7 @@ cc_library(
     hdrs = [
         "container_function_registrar.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_function_registry",
         ":cel_options",
@@ -408,6 +428,7 @@ cc_test(
     srcs = [
         "container_function_registrar_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":cel_expr_builder_factory",
@@ -430,6 +451,7 @@ cc_library(
     hdrs = [
         "logical_function_registrar.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_function_registry",
         ":cel_options",
@@ -444,6 +466,7 @@ cc_test(
     srcs = [
         "logical_function_registrar_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":cel_expr_builder_factory",
@@ -472,6 +495,7 @@ cc_library(
     hdrs = [
         "extension_func_registrar.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_function",
         ":cel_function_adapter",
@@ -490,6 +514,7 @@ cc_library(
     hdrs = [
         "cel_expression.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":base_activation",
         ":cel_function_registry",
@@ -507,6 +532,7 @@ cc_library(
     name = "source_position",
     srcs = ["source_position.cc"],
     hdrs = ["source_position.h"],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
     ],
@@ -517,6 +543,7 @@ cc_library(
     hdrs = [
         "ast_visitor.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":source_position",
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
@@ -528,6 +555,7 @@ cc_library(
     hdrs = [
         "ast_visitor_base.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":ast_visitor",
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
@@ -542,6 +570,7 @@ cc_library(
     hdrs = [
         "ast_traverse.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":ast_visitor",
         ":source_position",
@@ -559,6 +588,7 @@ cc_library(
     hdrs = [
         "cel_options.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//runtime:runtime_options",
         "@com_google_absl//absl/base:core_headers",
@@ -574,6 +604,7 @@ cc_library(
     hdrs = [
         "cel_expr_builder_factory.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression",
         ":cel_function",
@@ -606,6 +637,7 @@ cc_library(
     hdrs = [
         "value_export_util.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_value",
         "//internal:proto_time_encoding",
@@ -622,6 +654,7 @@ cc_library(
     name = "cel_function_registry",
     srcs = ["cel_function_registry.cc"],
     hdrs = ["cel_function_registry.h"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_function",
         ":cel_options",
@@ -651,6 +684,7 @@ cc_test(
     srcs = [
         "cel_value_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_value",
         ":unknown_set",
@@ -677,14 +711,17 @@ cc_test(
     srcs = [
         "cel_attribute_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_attribute",
         ":cel_value",
         "//eval/public/structs:cel_proto_wrapper",
-        "//internal:status_macros",
         "//internal:testing",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
         "@com_google_protobuf//:protobuf",
     ],
 )
@@ -695,6 +732,7 @@ cc_test(
     srcs = [
         "activation_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":cel_attribute",
@@ -713,6 +751,7 @@ cc_test(
     srcs = [
         "ast_traverse_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":ast_traverse",
         ":ast_visitor",
@@ -728,6 +767,7 @@ cc_library(
     hdrs = [
         "ast_rewrite.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":ast_visitor",
         ":source_position",
@@ -743,6 +783,7 @@ cc_test(
     srcs = [
         "ast_rewrite_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":ast_rewrite",
         ":ast_visitor",
@@ -760,6 +801,7 @@ cc_test(
     srcs = [
         "activation_bind_helper_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":activation_bind_helper",
@@ -776,6 +818,7 @@ cc_test(
     srcs = [
         "cel_function_registry_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":cel_function",
@@ -795,6 +838,7 @@ cc_test(
     srcs = [
         "cel_function_adapter_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_function_adapter",
         "//internal:status_macros",
@@ -806,10 +850,10 @@ cc_library(
     name = "cel_type_registry",
     srcs = ["cel_type_registry.cc"],
     hdrs = ["cel_type_registry.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:data",
         "//eval/public/structs:legacy_type_adapter",
-        "//eval/public/structs:legacy_type_info_apis",
         "//eval/public/structs:legacy_type_provider",
         "//eval/public/structs:protobuf_descriptor_type_provider",
         "//runtime:type_registry",
@@ -825,6 +869,7 @@ cc_library(
 cc_test(
     name = "cel_type_registry_test",
     srcs = ["cel_type_registry_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_type_registry",
         "//base:data",
@@ -841,6 +886,7 @@ cc_test(
 cc_test(
     name = "cel_type_registry_protobuf_reflection_test",
     srcs = ["cel_type_registry_protobuf_reflection_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_type_registry",
         "//common:memory",
@@ -859,6 +905,7 @@ cc_test(
     srcs = [
         "builtin_func_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":builtin_func_registrar",
@@ -885,6 +932,7 @@ cc_test(
     srcs = [
         "extension_func_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":builtin_func_registrar",
         ":cel_expr_builder_factory",
@@ -910,6 +958,7 @@ cc_test(
     srcs = [
         "source_position_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":source_position",
         "//internal:testing",
@@ -923,6 +972,7 @@ cc_test(
     srcs = [
         "unknown_attribute_set_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_attribute",
         ":cel_value",
@@ -937,6 +987,7 @@ cc_test(
     srcs = [
         "value_export_util_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":value_export_util",
         "//eval/public/containers:container_backed_list_impl",
@@ -954,6 +1005,7 @@ cc_library(
     name = "unknown_function_result_set",
     srcs = ["unknown_function_result_set.cc"],
     hdrs = ["unknown_function_result_set.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:function_result",
         "//base:function_result_set",
@@ -966,6 +1018,7 @@ cc_test(
     srcs = [
         "unknown_function_result_set_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_function",
         ":cel_value",
@@ -987,6 +1040,7 @@ cc_test(
 cc_library(
     name = "unknown_set",
     hdrs = ["unknown_set.h"],
+    copts = CEL_COPTS,
     deps = [
         ":unknown_attribute_set",
         ":unknown_function_result_set",
@@ -997,6 +1051,7 @@ cc_library(
 cc_test(
     name = "unknown_set_test",
     srcs = ["unknown_set_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_attribute",
         ":cel_function",
@@ -1017,6 +1072,7 @@ cc_library(
     hdrs = [
         "transform_utility.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_value",
         "//eval/public/containers:container_backed_list_impl",
@@ -1039,12 +1095,14 @@ cc_library(
     name = "set_util",
     srcs = ["set_util.cc"],
     hdrs = ["set_util.h"],
+    copts = CEL_COPTS,
     deps = [":cel_value"],
 )
 
 cc_library(
     name = "base_activation",
     hdrs = ["base_activation.h"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_attribute",
         ":cel_function",
@@ -1062,6 +1120,7 @@ cc_test(
     srcs = [
         "set_util_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_value",
         ":set_util",
@@ -1081,6 +1140,7 @@ cc_test(
 cc_test(
     name = "builtin_func_registrar_test",
     srcs = ["builtin_func_registrar_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":builtin_func_registrar",
@@ -1106,6 +1166,7 @@ cc_library(
     name = "cel_number",
     srcs = ["cel_number.cc"],
     hdrs = ["cel_number.h"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_value",
         "//internal:number",
@@ -1116,6 +1177,7 @@ cc_library(
 cc_test(
     name = "cel_number_test",
     srcs = ["cel_number_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_number",
         ":cel_value",
@@ -1128,6 +1190,7 @@ cc_library(
     name = "string_extension_func_registrar",
     srcs = ["string_extension_func_registrar.cc"],
     hdrs = ["string_extension_func_registrar.h"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_function_registry",
         ":cel_options",
@@ -1139,6 +1202,7 @@ cc_library(
 cc_test(
     name = "string_extension_func_registrar_test",
     srcs = ["string_extension_func_registrar_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":builtin_func_registrar",
         ":cel_function_registry",

@@ -20,7 +20,6 @@ load("@sphinxdocs//sphinxdocs:sphinx_stardoc.bzl", "sphinx_stardoc", "sphinx_sta
 load("//python:defs.bzl", "py_binary")
 load("//python/private:bzlmod_enabled.bzl", "BZLMOD_ENABLED")  # buildifier: disable=bzl-visibility
 load("//python/private:common_labels.bzl", "labels")  # buildifier: disable=bzl-visibility
-load("//python/uv:lock.bzl", "lock")  # buildifier: disable=bzl-visibility
 
 package(default_visibility = ["//:__subpackages__"])
 
@@ -129,6 +128,7 @@ sphinx_stardocs(
         "//python/api:rule_builders",
         "//python/cc:py_cc_toolchain",
         "//python/cc:py_cc_toolchain_info",
+        "//python/cc:py_extension",
         "//python/entry_points:py_console_script_binary",
         "//python/extensions:config",
         "//python/extensions:python",
@@ -146,7 +146,9 @@ sphinx_stardocs(
         "//python/private/api:py_common_api",
         "//python/private/pypi:config_settings",
         "//python/private/pypi:env_marker_info",
+        "//python/private/pypi:pip_archive",
         "//python/private/pypi:pkg_aliases",
+        "//python/private/pypi:whl_archive",
         "//python/private/pypi:whl_config_setting",
         "//python/private/pypi:whl_library",
         "//python/private/zipapp:py_zipapp_rule",
@@ -198,6 +200,7 @@ sphinx_build_binary(
     target_compatible_with = _TARGET_COMPATIBLE_WITH,
     deps = [
         "@dev_pip//myst_parser",
+        "@dev_pip//pytest",
         "@dev_pip//readthedocs_sphinx_ext",
         "@dev_pip//sphinx",
         "@dev_pip//sphinx_autodoc2",
@@ -206,29 +209,4 @@ sphinx_build_binary(
         "@dev_pip//typing_extensions",
         "@sphinxdocs//sphinxdocs/src/sphinx_bzl",
     ],
-)
-
-# Run bazel run //docs:requirements.update
-lock(
-    name = "requirements",
-    srcs = ["pyproject.toml"],
-    out = "requirements.txt",
-    args = [
-        "--emit-index-url",
-        "--universal",
-        "--upgrade",
-    ],
-    # NOTE @aignas 2025-08-17: here we select the lowest actively supported version so that the
-    # requirements file is generated to be compatible with Python version 3.9 or greater.
-    python_version = "3.9",
-    visibility = ["//:__subpackages__"],
-)
-
-# Run bazel run //docs:uv_lock.update
-lock(
-    name = "uv_lock",
-    srcs = ["pyproject.toml"],
-    out = "uv.lock",
-    python_version = "3.9",
-    visibility = ["//:__subpackages__"],
 )

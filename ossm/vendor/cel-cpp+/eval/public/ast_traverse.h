@@ -17,15 +17,58 @@
 #ifndef THIRD_PARTY_CEL_CPP_EVAL_PUBLIC_AST_TRAVERSE_H_
 #define THIRD_PARTY_CEL_CPP_EVAL_PUBLIC_AST_TRAVERSE_H_
 
+#include <memory>
+
 #include "cel/expr/syntax.pb.h"
 #include "eval/public/ast_visitor.h"
 
 namespace google::api::expr::runtime {
 
+namespace internal {
+struct AstTraversalState;
+}  // namespace internal
+
 struct TraversalOptions {
   bool use_comprehension_callbacks;
 
   TraversalOptions() : use_comprehension_callbacks(false) {}
+};
+
+// Helper class for managing the traversal of the AST.
+// Allows caller to step through the traversal.
+//
+// Usage:
+//
+// AstTraversal traversal = AstTraversal::Create(expr, source_info);
+//
+// MyVisitor visitor();
+// while (!traversal.IsDone()) {
+//   traversal.Step(&visitor);
+// }
+class AstTraversal {
+ public:
+  static AstTraversal Create(const cel::expr::Expr* expr,
+                             const cel::expr::SourceInfo* source_info,
+                             TraversalOptions options = TraversalOptions());
+
+  ~AstTraversal();
+
+  AstTraversal(const AstTraversal&) = delete;
+  AstTraversal& operator=(const AstTraversal&) = delete;
+  AstTraversal(AstTraversal&&) = default;
+  AstTraversal& operator=(AstTraversal&&) = default;
+
+  // Advances the traversal. Returns true if there is more work to do. This is a
+  // no-op if the traversal is done and IsDone() is true.
+  bool Step(AstVisitor* visitor);
+
+  // Returns true if there is no work left to do.
+  bool IsDone();
+
+ private:
+  explicit AstTraversal(TraversalOptions options);
+  TraversalOptions options_;
+  std::unique_ptr<internal::AstTraversalState> state_;
 };
 
 // Traverses the AST representation in an expr proto.

@@ -5,21 +5,20 @@
 #include <string>
 #include <utility>
 
-#include "absl/base/nullability.h"
 #include "absl/log/absl_check.h"
 #include "absl/log/absl_log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
-#include "common/expr.h"
+#include "common/legacy_value.h"
+#include "common/type.h"
 #include "common/value.h"
 #include "common/value_kind.h"
 #include "eval/eval/attribute_trail.h"
 #include "eval/eval/direct_expression_step.h"
 #include "eval/eval/evaluator_core.h"
 #include "eval/eval/expression_step_base.h"
-#include "eval/internal/errors.h"
 #include "internal/status_macros.h"
 #include "runtime/runtime_options.h"
 #include "google/protobuf/arena.h"
@@ -33,7 +32,6 @@ namespace {
 using ::cel::BoolValue;
 using ::cel::ErrorValue;
 using ::cel::MapValue;
-using ::cel::NullValue;
 using ::cel::OptionalValue;
 using ::cel::ProtoWrapperTypeOptions;
 using ::cel::StringValue;
@@ -73,38 +71,100 @@ absl::optional<Value> CheckForMarkedAttributes(const AttributeTrail& trail,
     return cel::ErrorValue(std::move(result).status());
   }
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
-void TestOnlySelect(const StructValue& msg, const std::string& field,
-                    const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool,
-                    google::protobuf::MessageFactory* absl_nonnull message_factory,
-                    google::protobuf::Arena* absl_nonnull arena,
-                    Value* absl_nonnull result) {
-  absl::StatusOr<bool> has_field = msg.HasFieldByName(field);
-
-  if (!has_field.ok()) {
-    *result = ErrorValue(std::move(has_field).status());
-    return;
+absl::Status PerformHas(const Value& target, absl::string_view field,
+                        const StringValue& field_value,
+                        const google::protobuf::DescriptorPool* descriptor_pool,
+                        google::protobuf::MessageFactory* message_factory,
+                        google::protobuf::Arena* arena, Value& result) {
+  switch (target.kind()) {
+    case ValueKind::kMap: {
+      CEL_RETURN_IF_ERROR(target.GetMap().Has(field_value, descriptor_pool,
+                                              message_factory, arena, &result));
+      return absl::OkStatus();
+    }
+    case ValueKind::kStruct: {
+      auto has_field = target.GetStruct().HasFieldByName(field);
+      if (!has_field.ok()) {
+        result = ErrorValue(std::move(has_field).status());
+      } else {
+        result = BoolValue{*has_field};
+      }
+      return absl::OkStatus();
+    }
+    default:
+      return InvalidSelectTargetError();
   }
-  *result = BoolValue{*has_field};
 }
 
-void TestOnlySelect(const MapValue& map, const StringValue& field_name,
-                    const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool,
-                    google::protobuf::MessageFactory* absl_nonnull message_factory,
-                    google::protobuf::Arena* absl_nonnull arena,
-                    Value* absl_nonnull result) {
-  // Field presence only supports string keys containing valid identifier
-  // characters.
-  absl::Status presence =
-      map.Has(field_name, descriptor_pool, message_factory, arena, result);
-
-  if (!presence.ok()) {
-    *result = ErrorValue(std::move(presence));
-    return;
+absl::Status PerformGet(const Value& target, absl::string_view field,
+                        const StringValue& field_value,
+                        ProtoWrapperTypeOptions unboxing_option,
+                        const google::protobuf::DescriptorPool* descriptor_pool,
+                        google::protobuf::MessageFactory* message_factory,
+                        google::protobuf::Arena* arena, Value& result) {
+  switch (target.kind()) {
+    case ValueKind::kMap: {
+      auto status = target.GetMap().Get(field_value, descriptor_pool,
+                                        message_factory, arena, &result);
+      if (!status.ok()) {
+        result = ErrorValue(std::move(status));
+      }
+      return absl::OkStatus();
+    }
+    case ValueKind::kStruct: {
+      auto status = target.GetStruct().GetFieldByName(
+          field, unboxing_option, descriptor_pool, message_factory, arena,
+          &result);
+      if (!status.ok()) {
+        result = ErrorValue(std::move(status));
+      }
+      return absl::OkStatus();
+    }
+    default:
+      return InvalidSelectTargetError();
   }
-  ABSL_DCHECK(!result->IsUnknown());
+}
+
+absl::Status PerformOptionalGet(const Value& target, absl::string_view field,
+                                const StringValue& field_value,
+                                ProtoWrapperTypeOptions unboxing_option,
+                                const google::protobuf::DescriptorPool* descriptor_pool,
+                                google::protobuf::MessageFactory* message_factory,
+                                google::protobuf::Arena* arena, Value& result) {
+  switch (target.kind()) {
+    case ValueKind::kMap: {
+      CEL_ASSIGN_OR_RETURN(
+          bool found, target.GetMap().Find(field_value, descriptor_pool,
+                                           message_factory, arena, &result));
+      if (!found) {
+        result = OptionalValue::None();
+        return absl::OkStatus();
+      }
+      ABSL_DCHECK(!result.IsUnknown());
+      result = OptionalValue::Of(std::move(result), arena);
+      return absl::OkStatus();
+    }
+    case ValueKind::kStruct: {
+      CEL_ASSIGN_OR_RETURN(bool found,
+                           target.GetStruct().HasFieldByName(field));
+      if (!found) {
+        result = OptionalValue::None();
+        return absl::OkStatus();
+      }
+      CEL_RETURN_IF_ERROR(target.GetStruct().GetFieldByName(
+          field, unboxing_option, descriptor_pool, message_factory, arena,
+          &result));
+
+      ABSL_DCHECK(!result.IsUnknown());
+      result = OptionalValue::Of(std::move(result), arena);
+      return absl::OkStatus();
+    }
+    default:
+      return InvalidSelectTargetError();
+  }
 }
 
 // SelectStep performs message field access specified by Expr::Select
@@ -124,12 +184,7 @@ class SelectStep : public ExpressionStepBase {
 
   absl::Status Evaluate(ExecutionFrame* frame) const override;
 
- private:
-  absl::Status PerformTestOnlySelect(ExecutionFrame* frame,
-                                     const Value& arg) const;
-  absl::StatusOr<bool> PerformSelect(ExecutionFrame* frame, const Value& arg,
-                                     Value& result) const;
-
+ protected:
   cel::StringValue field_value_;
   std::string field_;
   bool test_field_presence_;
@@ -154,15 +209,8 @@ absl::Status SelectStep::Evaluate(ExecutionFrame* frame) const {
   AttributeTrail result_trail;
 
   // Handle unknown resolution.
-  if (frame->enable_unknowns() || frame->enable_missing_attribute_errors()) {
+  if (frame->attribute_tracking_enabled()) {
     result_trail = trail.Step(&field_);
-  }
-
-  if (arg->Is<NullValue>()) {
-    frame->value_stack().PopAndPush(
-        cel::ErrorValue(cel::runtime_internal::CreateError("Message is NULL")),
-        std::move(result_trail));
-    return absl::OkStatus();
   }
 
   absl::optional<OptionalValue> optional_arg;
@@ -185,128 +233,48 @@ absl::Status SelectStep::Evaluate(ExecutionFrame* frame) const {
     return absl::OkStatus();
   }
 
-  // Handle test only Select.
+  Value result;
   if (test_field_presence_) {
+    const Value* target = &arg;
     if (optional_arg) {
       if (!optional_arg->HasValue()) {
-        frame->value_stack().PopAndPush(cel::BoolValue{false});
+        frame->value_stack().PopAndPush(cel::BoolValue{false},
+                                        std::move(result_trail));
         return absl::OkStatus();
       }
-      Value value;
-      optional_arg->Value(&value);
-      return PerformTestOnlySelect(frame, value);
+      optional_arg->Value(&result);
+      target = &result;
     }
-    return PerformTestOnlySelect(frame, arg);
-  }
-
-  // Normal select path.
-  // Select steps can be applied to either maps or messages
-  if (optional_arg) {
-    if (!optional_arg->HasValue()) {
-      // Leave optional_arg at the top of the stack. Its empty.
-      return absl::OkStatus();
-    }
-    Value value;
-    Value result;
-    bool ok;
-    optional_arg->Value(&value);
-    CEL_ASSIGN_OR_RETURN(ok, PerformSelect(frame, value, result));
-    if (!ok) {
-      frame->value_stack().PopAndPush(cel::OptionalValue::None(),
-                                      std::move(result_trail));
-      return absl::OkStatus();
-    }
-    frame->value_stack().PopAndPush(
-        cel::OptionalValue::Of(std::move(result), frame->arena()),
-        std::move(result_trail));
+    CEL_RETURN_IF_ERROR(
+        PerformHas(*target, field_, field_value_, frame->descriptor_pool(),
+                   frame->message_factory(), frame->arena(), result));
+    frame->value_stack().PopAndPush(std::move(result), std::move(result_trail));
     return absl::OkStatus();
   }
 
-  // Normal select path.
-  // Select steps can be applied to either maps or messages
-  switch (arg.kind()) {
-    case ValueKind::kStruct: {
-      Value result;
-      auto status = arg.GetStruct().GetFieldByName(
-          field_, unboxing_option_, frame->descriptor_pool(),
-          frame->message_factory(), frame->arena(), &result);
-      if (!status.ok()) {
-        result = ErrorValue(std::move(status));
-      }
-      frame->value_stack().PopAndPush(std::move(result),
+  if (optional_arg) {
+    if (!optional_arg->HasValue()) {
+      frame->value_stack().PopAndPush(OptionalValue::None(),
                                       std::move(result_trail));
       return absl::OkStatus();
     }
-    case ValueKind::kMap: {
-      Value result;
-      auto status =
-          arg.GetMap().Get(field_value_, frame->descriptor_pool(),
-                           frame->message_factory(), frame->arena(), &result);
-      if (!status.ok()) {
-        result = ErrorValue(std::move(status));
-      }
-      frame->value_stack().PopAndPush(std::move(result),
-                                      std::move(result_trail));
-      return absl::OkStatus();
+    Value value;
+    optional_arg->Value(&value);
+    auto status = PerformOptionalGet(
+        value, field_, field_value_, unboxing_option_, frame->descriptor_pool(),
+        frame->message_factory(), frame->arena(), result);
+    if (!status.ok()) {
+      result = ErrorValue(std::move(status));
     }
-    default:
-      // Control flow should have returned earlier.
-      return InvalidSelectTargetError();
+    frame->value_stack().PopAndPush(std::move(result), std::move(result_trail));
+    return absl::OkStatus();
   }
-}
 
-absl::Status SelectStep::PerformTestOnlySelect(ExecutionFrame* frame,
-                                               const Value& arg) const {
-  switch (arg.kind()) {
-    case ValueKind::kMap: {
-      Value result;
-      TestOnlySelect(arg.GetMap(), field_value_, frame->descriptor_pool(),
-                     frame->message_factory(), frame->arena(), &result);
-      frame->value_stack().PopAndPush(std::move(result));
-      return absl::OkStatus();
-    }
-    case ValueKind::kMessage: {
-      Value result;
-      TestOnlySelect(arg.GetStruct(), field_, frame->descriptor_pool(),
-                     frame->message_factory(), frame->arena(), &result);
-      frame->value_stack().PopAndPush(std::move(result));
-      return absl::OkStatus();
-    }
-    default:
-      // Control flow should have returned earlier.
-      return InvalidSelectTargetError();
-  }
-}
-
-absl::StatusOr<bool> SelectStep::PerformSelect(ExecutionFrame* frame,
-                                               const Value& arg,
-                                               Value& result) const {
-  switch (arg->kind()) {
-    case ValueKind::kStruct: {
-      const auto& struct_value = arg.GetStruct();
-      CEL_ASSIGN_OR_RETURN(auto ok, struct_value.HasFieldByName(field_));
-      if (!ok) {
-        result = NullValue{};
-        return false;
-      }
-      CEL_RETURN_IF_ERROR(struct_value.GetFieldByName(
-          field_, unboxing_option_, frame->descriptor_pool(),
-          frame->message_factory(), frame->arena(), &result));
-      ABSL_DCHECK(!result.IsUnknown());
-      return true;
-    }
-    case ValueKind::kMap: {
-      CEL_ASSIGN_OR_RETURN(
-          auto found,
-          arg.GetMap().Find(field_value_, frame->descriptor_pool(),
-                            frame->message_factory(), frame->arena(), &result));
-      ABSL_DCHECK(!found || !result.IsUnknown());
-      return found;
-    }
-    default:
-      // Control flow should have returned earlier.
-      return InvalidSelectTargetError();
-  }
+  CEL_RETURN_IF_ERROR(PerformGet(
+      arg, field_, field_value_, unboxing_option_, frame->descriptor_pool(),
+      frame->message_factory(), frame->arena(), result));
+  frame->value_stack().PopAndPush(std::move(result), std::move(result_trail));
+  return absl::OkStatus();
 }
 
 class DirectSelectStep : public DirectExpressionStep {
@@ -354,10 +322,6 @@ class DirectSelectStep : public DirectExpressionStep {
       case ValueKind::kStruct:
       case ValueKind::kMap:
         break;
-      case ValueKind::kNull:
-        result = cel::ErrorValue(
-            cel::runtime_internal::CreateError("Message is NULL"));
-        return absl::OkStatus();
       default:
         if (optional_arg) {
           break;
@@ -374,11 +338,11 @@ class DirectSelectStep : public DirectExpressionStep {
         }
         Value value;
         optional_arg->Value(&value);
-        PerformTestOnlySelect(frame, value, result);
-        return absl::OkStatus();
+        return PerformHas(value, field_, field_value_, frame.descriptor_pool(),
+                          frame.message_factory(), frame.arena(), result);
       }
-      PerformTestOnlySelect(frame, result, result);
-      return absl::OkStatus();
+      return PerformHas(result, field_, field_value_, frame.descriptor_pool(),
+                        frame.message_factory(), frame.arena(), result);
     }
 
     if (optional_arg) {
@@ -388,25 +352,23 @@ class DirectSelectStep : public DirectExpressionStep {
       }
       Value value;
       optional_arg->Value(&value);
-      return PerformOptionalSelect(frame, value, result);
+      auto status =
+          PerformOptionalGet(value, field_, field_value_, unboxing_option_,
+                             frame.descriptor_pool(), frame.message_factory(),
+                             frame.arena(), result);
+      if (!status.ok()) {
+        result = ErrorValue(std::move(status));
+      }
+      return absl::OkStatus();
     }
 
-    auto status = PerformSelect(frame, result, result);
-    if (!status.ok()) {
-      result = ErrorValue(std::move(status));
-    }
-    return absl::OkStatus();
+    return PerformGet(result, field_, field_value_, unboxing_option_,
+                      frame.descriptor_pool(), frame.message_factory(),
+                      frame.arena(), result);
   }
 
  private:
   std::unique_ptr<DirectExpressionStep> operand_;
-
-  void PerformTestOnlySelect(ExecutionFrameBase& frame, const Value& value,
-                             Value& result) const;
-  absl::Status PerformOptionalSelect(ExecutionFrameBase& frame,
-                                     const Value& value, Value& result) const;
-  absl::Status PerformSelect(ExecutionFrameBase& frame, const Value& value,
-                             Value& result) const;
 
   // Field name in formats supported by each of the map and struct field access
   // APIs.
@@ -422,82 +384,147 @@ class DirectSelectStep : public DirectExpressionStep {
   bool enable_optional_types_;
 };
 
-void DirectSelectStep::PerformTestOnlySelect(ExecutionFrameBase& frame,
-                                             const cel::Value& value,
-                                             Value& result) const {
-  switch (value.kind()) {
-    case ValueKind::kMap:
-      TestOnlySelect(value.GetMap(), field_value_, frame.descriptor_pool(),
-                     frame.message_factory(), frame.arena(), &result);
-      return;
-    case ValueKind::kMessage:
-      TestOnlySelect(value.GetStruct(), field_, frame.descriptor_pool(),
-                     frame.message_factory(), frame.arena(), &result);
-      return;
-    default:
-      // Control flow should have returned earlier.
-      result = cel::ErrorValue(InvalidSelectTargetError());
-      return;
+class ProtoSelectStep : public SelectStep {
+ public:
+  ProtoSelectStep(StringValue value, int64_t expr_id,
+                  bool enable_wrapper_type_null_unboxing,
+                  bool enable_optional_types,
+                  const google::protobuf::Descriptor* descriptor,
+                  const google::protobuf::FieldDescriptor* field_descriptor)
+      : SelectStep(std::move(value), /*test_field_presence=*/false, expr_id,
+                   enable_wrapper_type_null_unboxing, enable_optional_types),
+        descriptor_(descriptor),
+        field_descriptor_(field_descriptor) {
+    ABSL_DCHECK(descriptor_ != nullptr);
+    ABSL_DCHECK(field_descriptor_ != nullptr);
   }
+
+  absl::Status Evaluate(ExecutionFrame* frame) const override {
+    if (!frame->value_stack().HasEnough(1)) {
+      return absl::InternalError(
+          "No arguments supplied for Select-type expression");
+    }
+
+    const Value& arg = frame->value_stack().Peek();
+    if (auto unwrapped = arg.AsParsedMessage();
+        unwrapped.has_value() && unwrapped->GetDescriptor() == descriptor_) {
+      return EvaluateModernMessageGetField(frame, *unwrapped);
+    } else if (const google::protobuf::Message* legacy_message =
+                   cel::interop_internal::GetLegacyMessage(arg);
+               legacy_message != nullptr &&
+               legacy_message->GetDescriptor() == descriptor_) {
+      // A little unfortunate, but need to special case for legacy values so we
+      // can minimize back and forth interop conversions.
+      return EvaluateLegacyMessageGetField(frame, legacy_message);
+    }
+    // If we get an unexpected value type, fall back to the generic
+    // implementation.
+    return SelectStep::Evaluate(frame);
+  }
+
+ private:
+  absl::Status EvaluateModernMessageGetField(
+      ExecutionFrame* frame,
+      const cel::ParsedMessageValue& parsed_message) const;
+  absl::Status EvaluateLegacyMessageGetField(
+      ExecutionFrame* frame, const google::protobuf::Message* legacy_message) const;
+
+  const google::protobuf::Descriptor* descriptor_;
+  const google::protobuf::FieldDescriptor* field_descriptor_;
+};
+
+bool CheckAttributeTrail(const std::string& field, ExecutionFrame* frame) {
+  if (!frame->attribute_tracking_enabled()) {
+    return false;
+  }
+  AttributeTrail& attr = frame->value_stack().PeekAttribute();
+  attr = attr.Step(&field);
+
+  absl::optional<Value> marked_attribute_check =
+      CheckForMarkedAttributes(attr, *frame);
+  if (marked_attribute_check.has_value()) {
+    frame->value_stack().Peek() = std::move(marked_attribute_check).value();
+    return true;
+  }
+
+  return false;
 }
 
-absl::Status DirectSelectStep::PerformOptionalSelect(ExecutionFrameBase& frame,
-                                                     const Value& value,
-                                                     Value& result) const {
-  switch (value.kind()) {
-    case ValueKind::kStruct: {
-      auto struct_value = value.GetStruct();
-      CEL_ASSIGN_OR_RETURN(auto ok, struct_value.HasFieldByName(field_));
-      if (!ok) {
-        result = OptionalValue::None();
-        return absl::OkStatus();
-      }
-      CEL_RETURN_IF_ERROR(struct_value.GetFieldByName(
-          field_, unboxing_option_, frame.descriptor_pool(),
-          frame.message_factory(), frame.arena(), &result));
-      ABSL_DCHECK(!result.IsUnknown());
-      result = OptionalValue::Of(std::move(result), frame.arena());
-      return absl::OkStatus();
-    }
-    case ValueKind::kMap: {
-      CEL_ASSIGN_OR_RETURN(
-          auto found,
-          value.GetMap().Find(field_value_, frame.descriptor_pool(),
-                              frame.message_factory(), frame.arena(), &result));
-      if (!found) {
-        result = OptionalValue::None();
-        return absl::OkStatus();
-      }
-      ABSL_DCHECK(!result.IsUnknown());
-      result = OptionalValue::Of(std::move(result), frame.arena());
-      return absl::OkStatus();
-    }
-    default:
-      // Control flow should have returned earlier.
-      return InvalidSelectTargetError();
+absl::Status ProtoSelectStep::EvaluateModernMessageGetField(
+    ExecutionFrame* frame,
+    const cel::ParsedMessageValue& parsed_message) const {
+  if (CheckAttributeTrail(field_, frame)) {
+    return absl::OkStatus();
   }
+  return parsed_message.GetField(
+      field_descriptor_, unboxing_option_, frame->descriptor_pool(),
+      frame->message_factory(), frame->arena(), &frame->value_stack().Peek());
 }
 
-absl::Status DirectSelectStep::PerformSelect(ExecutionFrameBase& frame,
-                                             const cel::Value& value,
-                                             Value& result) const {
-  switch (value.kind()) {
-    case ValueKind::kStruct:
-      CEL_RETURN_IF_ERROR(value.GetStruct().GetFieldByName(
-          field_, unboxing_option_, frame.descriptor_pool(),
-          frame.message_factory(), frame.arena(), &result));
-      ABSL_DCHECK(!result.IsUnknown());
-      return absl::OkStatus();
-    case ValueKind::kMap:
-      CEL_RETURN_IF_ERROR(
-          value.GetMap().Get(field_value_, frame.descriptor_pool(),
-                             frame.message_factory(), frame.arena(), &result));
-      ABSL_DCHECK(!result.IsUnknown());
-      return absl::OkStatus();
-    default:
-      // Control flow should have returned earlier.
-      return InvalidSelectTargetError();
+absl::Status ProtoSelectStep::EvaluateLegacyMessageGetField(
+    ExecutionFrame* frame, const google::protobuf::Message* legacy_message) const {
+  if (CheckAttributeTrail(field_, frame)) {
+    return absl::OkStatus();
   }
+  return cel::interop_internal::WrapLegacyMessageField(
+      legacy_message, field_descriptor_, unboxing_option_, frame->arena(),
+      &frame->value_stack().Peek());
+}
+
+class ProtoHasStep : public SelectStep {
+ public:
+  ProtoHasStep(StringValue value, int64_t expr_id,
+               bool enable_wrapper_type_null_unboxing,
+               bool enable_optional_types, const google::protobuf::Descriptor* descriptor,
+               const google::protobuf::FieldDescriptor* field_descriptor)
+      : SelectStep(std::move(value), /*test_field_presence=*/true, expr_id,
+                   enable_wrapper_type_null_unboxing, enable_optional_types),
+        descriptor_(descriptor),
+        field_descriptor_(field_descriptor) {
+    ABSL_DCHECK(descriptor_ != nullptr);
+    ABSL_DCHECK(field_descriptor_ != nullptr);
+  }
+
+  absl::Status Evaluate(ExecutionFrame* frame) const override {
+    if (!frame->value_stack().HasEnough(1)) {
+      return absl::InternalError(
+          "No arguments supplied for Select-type expression");
+    }
+
+    const Value& arg = frame->value_stack().Peek();
+    if (auto unwrapped = arg.AsParsedMessage();
+        unwrapped.has_value() && unwrapped->GetDescriptor() == descriptor_) {
+      return EvaluateHas(frame, *unwrapped);
+    } else if (const google::protobuf::Message* legacy_message =
+                   cel::interop_internal::GetLegacyMessage(arg);
+               legacy_message != nullptr &&
+               legacy_message->GetDescriptor() == descriptor_) {
+      cel::ParsedMessageValue parsed_message =
+          cel::UnsafeParsedMessageValue(legacy_message);
+      return EvaluateHas(frame, parsed_message);
+    }
+    // If we get an unexpected value type, fall back to the generic
+    // implementation.
+    return SelectStep::Evaluate(frame);
+  }
+
+ private:
+  absl::Status EvaluateHas(ExecutionFrame* frame,
+                           const cel::ParsedMessageValue& parsed_message) const;
+
+  const google::protobuf::Descriptor* descriptor_;
+  const google::protobuf::FieldDescriptor* field_descriptor_;
+};
+
+absl::Status ProtoHasStep::EvaluateHas(
+    ExecutionFrame* frame,
+    const cel::ParsedMessageValue& parsed_message) const {
+  if (CheckAttributeTrail(field_, frame)) {
+    return absl::OkStatus();
+  }
+  frame->value_stack().Peek() =
+      BoolValue{parsed_message.HasField(field_descriptor_)};
+  return absl::OkStatus();
 }
 
 }  // namespace
@@ -513,11 +540,42 @@ std::unique_ptr<DirectExpressionStep> CreateDirectSelectStep(
 
 // Factory method for Select - based Execution step
 absl::StatusOr<std::unique_ptr<ExpressionStep>> CreateSelectStep(
-    const cel::SelectExpr& select_expr, int64_t expr_id,
+    cel::StringValue field, bool test_only, int64_t expr_id,
     bool enable_wrapper_type_null_unboxing, bool enable_optional_types) {
-  return std::make_unique<SelectStep>(
-      cel::StringValue(select_expr.field()), select_expr.test_only(), expr_id,
-      enable_wrapper_type_null_unboxing, enable_optional_types);
+  return std::make_unique<SelectStep>(std::move(field), test_only, expr_id,
+                                      enable_wrapper_type_null_unboxing,
+                                      enable_optional_types);
+}
+
+// Factory method for Select - based Execution step
+absl::StatusOr<std::unique_ptr<ExpressionStep>> CreateTypedSelectStep(
+    cel::StringValue field, cel::StructType resolved_operand_type,
+    cel::StructTypeField resolved_field, bool test_only, int64_t expr_id,
+    bool enable_wrapper_type_null_unboxing, bool enable_optional_types) {
+  if (!resolved_operand_type.IsMessage()) {
+    // The specialization only supports messages. Fallback to the generic
+    // implementation for other types.
+    // TODO(uncreated-issue/89): support optional select and chaining.
+    return CreateSelectStep(std::move(field), test_only, expr_id,
+                            enable_wrapper_type_null_unboxing,
+                            enable_optional_types);
+  }
+  const google::protobuf::Descriptor* descriptor =
+      resolved_operand_type.GetMessage().descriptor();
+
+  ABSL_DCHECK(resolved_field.IsMessage());
+  const google::protobuf::FieldDescriptor* field_descriptor =
+      resolved_field.GetMessage().descriptor();
+
+  if (test_only) {
+    return std::make_unique<ProtoHasStep>(
+        std::move(field), expr_id, enable_wrapper_type_null_unboxing,
+        enable_optional_types, descriptor, field_descriptor);
+  }
+
+  return std::make_unique<ProtoSelectStep>(
+      std::move(field), expr_id, enable_wrapper_type_null_unboxing,
+      enable_optional_types, descriptor, field_descriptor);
 }
 
 }  // namespace google::api::expr::runtime

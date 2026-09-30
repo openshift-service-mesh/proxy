@@ -4,12 +4,6 @@ package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])  # Apache-2.0
 
-label_flag(
-    name = "crypto_lib",
-    build_setting_default = "@boringssl//:crypto",
-    visibility = ["//visibility:public"],
-)
-
 cc_library(
     name = "libsxg",
     srcs = [
@@ -36,6 +30,6 @@ cc_library(
     ],
     includes = ["include"],
     deps = [
-        ":crypto_lib",
+        "@libsxg_deps//:crypto_lib",
     ],
 )

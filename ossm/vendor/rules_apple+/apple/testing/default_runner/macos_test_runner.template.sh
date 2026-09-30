@@ -1,4 +1,6 @@
-#!/bin/bash -eu
+#!/bin/bash
+
+set -euo pipefail
 
 # Copyright 2017 The Bazel Authors. All rights reserved.
 #
@@ -17,13 +19,37 @@
 # This template uses the `%(key)s` format for values that are
 # substituted by the ios_unit_test and ios_ui_test rules before this script
 # is executed. Check
-# https://github.com/bazelbuild/rules_apple/blob/master/apple/testing/apple_test_rules.bzl
+# https://github.com/bazelbuild/rules_apple/blob/main/apple/testing/apple_test_rules.bzl
 # for more info.
+
+if [[ -n "${TEST_PREMATURE_EXIT_FILE:-}" ]]; then
+  touch "$TEST_PREMATURE_EXIT_FILE"
+fi
 
 if [[ "%(test_type)s" = "XCUITEST" ]]; then
   echo "This runner only works with macos_unit_test (b/63707899)."
   exit 1
 fi
+
+# Parse command line arguments
+xcodebuild_args=()
+command_line_args=()
+while [[ $# -gt 0 ]]; do
+  arg="$1"
+  case $arg in
+    --xcodebuild_args=*)
+      xcodebuild_args+=("${arg##*=}")
+      ;;
+    --command_line_args=*)
+      command_line_args+=("${arg##*=}")
+      ;;
+    *)
+      echo "error: Unsupported argument '${arg}'" >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
 
 # Retrieve the basename of a file or folder with an extension.
 basename_without_extension() {
@@ -41,7 +67,7 @@ BAZEL_XCTESTRUN_TEMPLATE=%(xctestrun_template)s
 
 # Create a temporary folder that will contain the test bundle and potentially
 # the test host bundle as well.
-TEST_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/test_tmp_dir.XXXXXX")"
+TEST_TMP_DIR="$(mktemp -d "${TEST_TMPDIR:-${TMPDIR:-/tmp}}/test_tmp_dir.XXXXXX")"
 trap 'rm -rf "${TEST_TMP_DIR}"' ERR EXIT
 
 TEST_BUNDLE_PATH="%(test_bundle_path)s"
@@ -93,6 +119,45 @@ fi
 XCTESTRUN="$TEST_TMP_DIR/tests.xctestrun"
 cp -f "$BAZEL_XCTESTRUN_TEMPLATE" "$XCTESTRUN"
 
+TEST_FILTER="%(test_filter)s"
+xctestrun_skip_test_section=""
+xctestrun_only_test_section=""
+
+# Use the 'TESTBRIDGE_TEST_ONLY' environment variable set by Bazel's
+# '--test_filter' flag to set the xctestrun's skip/only parameters.
+#
+# Any test prefixed with '-' will be passed to 'SkipTestIdentifiers'. Otherwise
+# the tests is passed to 'OnlyTestIdentifiers',
+if [[ -n "${TESTBRIDGE_TEST_ONLY:-}" || -n "${TEST_FILTER:-}" ]]; then
+  if [[ -n "${TESTBRIDGE_TEST_ONLY:-}" && -n "${TEST_FILTER:-}" ]]; then
+    ALL_TESTS="$TESTBRIDGE_TEST_ONLY,$TEST_FILTER"
+  elif [[ -n "${TESTBRIDGE_TEST_ONLY:-}" ]]; then
+    ALL_TESTS="$TESTBRIDGE_TEST_ONLY"
+  else
+    ALL_TESTS="$TEST_FILTER"
+  fi
+
+  SKIP_TESTS_ARRAY=()
+  ONLY_TESTS_ARRAY=()
+  saved_IFS=$IFS
+  IFS=","; for TEST in $ALL_TESTS; do
+    if [[ $TEST == -* ]]; then
+      SKIP_TESTS_ARRAY+=("${TEST:1}")
+    else
+      ONLY_TESTS_ARRAY+=("$TEST")
+    fi
+  done
+  IFS=$saved_IFS
+
+  if (( ${#SKIP_TESTS_ARRAY[@]} )); then
+    xctestrun_skip_test_section="    <key>SkipTestIdentifiers</key>\n    <array>\n$(printf '      <string>%s</string>\\n' "${SKIP_TESTS_ARRAY[@]}")    </array>"
+  fi
+
+  if (( ${#ONLY_TESTS_ARRAY[@]} )); then
+    xctestrun_only_test_section="    <key>OnlyTestIdentifiers</key>\n    <array>\n$(printf '      <string>%s</string>\\n' "${ONLY_TESTS_ARRAY[@]}")    </array>"
+  fi
+fi
+
 # Basic XML character escaping for environment variable substitution.
 function escape() {
   escaped=${1//&/&amp;}
@@ -104,29 +169,53 @@ function escape() {
 
 # Add the test environment variables into the xctestrun file to propagate them
 # to the test runner
+DEFAULT_ENV="TEST_PREMATURE_EXIT_FILE=$TEST_PREMATURE_EXIT_FILE,TEST_SRCDIR=$TEST_SRCDIR,TEST_UNDECLARED_OUTPUTS_DIR=$TEST_UNDECLARED_OUTPUTS_DIR,XML_OUTPUT_FILE=$XML_OUTPUT_FILE"
 TEST_ENV="%(test_env)s"
+if [[ -n "$TEST_ENV" ]]; then
+  TEST_ENV="$TEST_ENV,$DEFAULT_ENV"
+else
+  TEST_ENV="$DEFAULT_ENV"
+fi
+
 readonly profraw="$TEST_TMP_DIR/coverage.profraw"
 if [[ "${COVERAGE:-}" -eq 1 ]]; then
   readonly profile_env="LLVM_PROFILE_FILE=$profraw"
-  if [[ -n "$TEST_ENV" ]]; then
-    TEST_ENV="$TEST_ENV,$profile_env"
-  else
-    TEST_ENV="$profile_env"
-  fi
+  TEST_ENV="$TEST_ENV,$profile_env"
 fi
 
 XCTESTRUN_ENV=""
-for SINGLE_TEST_ENV in ${TEST_ENV//,/ }; do
+IFS=',' read -ra ENV_PAIRS <<< "$TEST_ENV"
+for SINGLE_TEST_ENV in "${ENV_PAIRS[@]}"; do
   IFS== read key value <<< "$SINGLE_TEST_ENV"
   XCTESTRUN_ENV+="<key>$(escape "$key")</key><string>$(escape "$value")</string>"
 done
 
+xctestrun_cmd_line_args_section=""
+if [[ -n "${command_line_args:-}" ]]; then
+  xctestrun_cmd_line_args_section="\n"
+  saved_IFS=$IFS
+  IFS=","
+  for cmd_line_arg in ${command_line_args[@]}; do
+    xctestrun_cmd_line_args_section+="      <string>$cmd_line_arg</string>\n"
+  done
+  IFS=$saved_IFS
+  xctestrun_cmd_line_args_section="    <key>CommandLineArguments</key>\n    <array>$xctestrun_cmd_line_args_section    </array>"
+fi
+
+declare -r sed_delim=$'\001'
+
 # Replace the substitution values into the xctestrun file.
-/usr/bin/sed -i '' 's@BAZEL_TEST_BUNDLE_PATH@'"$XCTESTRUN_TEST_BUNDLE_PATH"'@g' "$XCTESTRUN"
-/usr/bin/sed -i '' 's@BAZEL_TEST_HOST_BASED@'"$XCTESTRUN_TEST_HOST_BASED"'@g' "$XCTESTRUN"
-/usr/bin/sed -i '' 's@BAZEL_TEST_HOST_BINARY@'"$XCTESTRUN_TEST_HOST_BINARY"'@g' "$XCTESTRUN"
-/usr/bin/sed -i '' 's@BAZEL_TEST_HOST_PATH@'"$XCTESTRUN_TEST_HOST_PATH"'@g' "$XCTESTRUN"
-/usr/bin/sed -i '' 's@BAZEL_TEST_ENVIRONMENT@'"$XCTESTRUN_ENV"'@g' "$XCTESTRUN"
+/usr/bin/sed \
+  -e "s${sed_delim}BAZEL_TEST_BUNDLE_PATH${sed_delim}$XCTESTRUN_TEST_BUNDLE_PATH${sed_delim}g" \
+  -e "s${sed_delim}BAZEL_TEST_HOST_BASED${sed_delim}$XCTESTRUN_TEST_HOST_BASED${sed_delim}g" \
+  -e "s${sed_delim}BAZEL_TEST_HOST_BINARY${sed_delim}$XCTESTRUN_TEST_HOST_BINARY${sed_delim}g" \
+  -e "s${sed_delim}BAZEL_TEST_HOST_PATH${sed_delim}$XCTESTRUN_TEST_HOST_PATH${sed_delim}g" \
+  -e "s${sed_delim}BAZEL_TEST_ENVIRONMENT${sed_delim}$XCTESTRUN_ENV${sed_delim}g" \
+  -e "s${sed_delim}BAZEL_COMMAND_LINE_ARGS${sed_delim}$xctestrun_cmd_line_args_section${sed_delim}g" \
+  -e "s${sed_delim}BAZEL_SKIP_TEST_SECTION${sed_delim}$xctestrun_skip_test_section${sed_delim}g" \
+  -e "s${sed_delim}BAZEL_ONLY_TEST_SECTION${sed_delim}$xctestrun_only_test_section${sed_delim}g" \
+  -i "" \
+  "$XCTESTRUN"
 
 # If XML_OUTPUT_FILE is not an absolute path, make it absolute with regards of
 # where this script is being run.
@@ -134,38 +223,103 @@ if [[ "$XML_OUTPUT_FILE" != /* ]]; then
   export XML_OUTPUT_FILE="$PWD/$XML_OUTPUT_FILE"
 fi
 
+
+# Run a pre-action binary, if provided.
 pre_action_binary=%(pre_action_binary)s
 "$pre_action_binary"
 
+readonly result_bundle_path="$TEST_UNDECLARED_OUTPUTS_DIR/tests.xcresult"
+# TEST_UNDECLARED_OUTPUTS_DIR isn't cleaned up with multiple retries of flaky tests
+rm -rf "$result_bundle_path"
+
 test_exit_code=0
+readonly testlog="$TEST_TMP_DIR/test.log"
+
 # Run xcodebuild with the xctestrun file just created. If the test failed, this
 # command will return non-zero, which is enough to tell bazel that the test
 # failed.
-rm -rf "$TEST_UNDECLARED_OUTPUTS_DIR/tests.xcresult"
-xcodebuild test-without-building \
-    -destination "platform=macOS" \
-    -resultBundlePath "$TEST_UNDECLARED_OUTPUTS_DIR/tests.xcresult" \
-    -xctestrun "$XCTESTRUN" \
+args=(
+    -destination "platform=macOS,variant=macos,arch=$(uname -m)"
+    -resultBundlePath "$result_bundle_path"
+    -xctestrun "$XCTESTRUN"
+)
+
+if (( ${#xcodebuild_args[@]} )); then
+    args+=("${xcodebuild_args[@]}")
+fi
+
+xcodebuild test-without-building "${args[@]}" \
+    2>&1 | tee -i "$testlog" \
     || test_exit_code=$?
 
-post_action_binary=%(post_action_binary)s
-TEST_EXIT_CODE=$test_exit_code \
-  "$post_action_binary"
+parallel_testing_enabled=false
+if grep -q "-parallel-testing-enabled YES" "$testlog"; then
+  parallel_testing_enabled=true
+fi
 
-if [[ "$test_exit_code" -ne 0 ]]; then
-  echo "error: tests exited with '$test_exit_code'" >&2
-  exit "$test_exit_code"
+no_tests_ran=false
+if [[ $parallel_testing_enabled == true ]]; then
+  echo "Parallel testing is enabled" >&2
+  test_execution_count=$(grep -c -e "Test suite '.*' started.*" "$testlog" || true)
+  if [[ "$test_execution_count" == "0" ]]; then
+    no_tests_ran=true
+  fi
+else
+  echo "Testing is serialized" >&2
+  xctest_target_execution_count=$(grep -e "Executed [[:digit:]]\{1,\} test.*," "$testlog" | tail -n1 || true)
+  swift_testing_target_execution_count=$(grep -e "Test run with [[:digit:]]\{1,\} test.*" "$testlog" | tail -n1 || true)
+  if echo "$xctest_target_execution_count" | grep -q -e "Executed 0 tests, with 0 failures" && \
+    [ -z "$swift_testing_target_execution_count" ] ; then
+    echo "No tests ran -> no count lines found" >&2
+    no_tests_ran=true
+  fi
+
+  if echo "$xctest_target_execution_count" | grep -q -e "Executed 0 tests, with 0 failures" && \
+    echo "$swift_testing_target_execution_count" | grep -q -e "Test run with 0 tests" ; then
+    echo "No tests ran -> count lines were 0" >&2
+    no_tests_ran=true
+  fi
+fi
+
+if [[ $no_tests_ran == true ]]; then
+  echo "error: no tests were executed, is the test bundle empty?" >&2
+  exit 1
+fi
+
+# Run a post-action binary, if provided.
+post_action_binary=%(post_action_binary)s
+post_action_determines_exit_code="%(post_action_determines_exit_code)s"
+post_action_exit_code=0
+TEST_EXIT_CODE=$test_exit_code \
+  TEST_LOG_FILE="$testlog" \
+  TEST_XCRESULT_BUNDLE_PATH="$result_bundle_path" \
+  "$post_action_binary" || post_action_exit_code=$?
+
+if [[ "$post_action_determines_exit_code" == true ]]; then
+  if [[ "$post_action_exit_code" -ne 0 ]]; then
+    echo "error: post_action exited with '$post_action_exit_code'" >&2
+    exit "$post_action_exit_code"
+  fi
+else
+  if [[ "$test_exit_code" -ne 0 ]]; then
+    echo "error: tests exited with '$test_exit_code'" >&2
+    exit "$test_exit_code"
+  fi
 fi
 
 if [[ "${COVERAGE:-}" -ne 1 ]]; then
   # Normal tests run without coverage
+  if [[ -f "${TEST_PREMATURE_EXIT_FILE:-}" ]]; then
+    rm -f "$TEST_PREMATURE_EXIT_FILE"
+  fi
+
   exit 0
 fi
 
 llvm_coverage_manifest="$COVERAGE_MANIFEST"
-readonly provided_llvm_coverage_manifest="%(test_llvm_coverage_manifest)s"
-if [[ -s "${provided_llvm_coverage_manifest:-}" ]]; then
-  llvm_coverage_manifest="$provided_llvm_coverage_manifest"
+readonly provided_coverage_manifest="%(test_coverage_manifest)s"
+if [[ -s "${provided_coverage_manifest:-}" ]]; then
+  llvm_coverage_manifest="$provided_coverage_manifest"
 fi
 
 readonly profdata="$TEST_TMP_DIR/coverage.profdata"
@@ -212,4 +366,8 @@ if [[ -n "${COVERAGE_PRODUCE_JSON:-}" ]]; then
     cat "$export_error_file" >&2
     exit 1
   fi
+fi
+
+if [[ -f "${TEST_PREMATURE_EXIT_FILE:-}" ]]; then
+  rm -f "$TEST_PREMATURE_EXIT_FILE"
 fi

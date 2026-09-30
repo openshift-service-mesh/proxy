@@ -14,9 +14,15 @@
 
 """Implementation of tvOS rules."""
 
-load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 load(
-    "@build_bazel_rules_swift//swift:swift.bzl",
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
+load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cc_toolchain")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load(
+    "@rules_swift//swift:swift.bzl",
     "SwiftInfo",
 )
 load(
@@ -32,8 +38,7 @@ load(
 )
 load(
     "//apple/internal:apple_toolchains.bzl",
-    "AppleMacToolsToolchainInfo",
-    "AppleXPlatToolsToolchainInfo",
+    "apple_toolchain_utils",
 )
 load(
     "//apple/internal:bundling_support.bzl",
@@ -147,8 +152,8 @@ def _tvos_application_impl(ctx):
     )
 
     actions = ctx.actions
-    apple_mac_toolchain_info = ctx.attr._mac_toolchain[AppleMacToolsToolchainInfo]
-    apple_xplat_toolchain_info = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo]
+    apple_mac_toolchain_info = apple_toolchain_utils.get_mac_toolchain(ctx)
+    apple_xplat_toolchain_info = apple_toolchain_utils.get_xplat_toolchain(ctx)
     bundle_name, bundle_extension = bundling_support.bundle_full_name(
         custom_bundle_name = ctx.attr.bundle_name,
         label_name = ctx.label.name,
@@ -172,6 +177,7 @@ def _tvos_application_impl(ctx):
     label = ctx.label
     platform_prerequisites = platform_support.platform_prerequisites(
         apple_fragment = ctx.fragments.apple,
+        apple_platform_info = platform_support.apple_platform_info_from_rule_ctx(ctx),
         build_settings = apple_xplat_toolchain_info.build_settings,
         config_vars = ctx.var,
         cpp_fragment = ctx.fragments.cpp,
@@ -180,7 +186,6 @@ def _tvos_application_impl(ctx):
         explicit_minimum_os = ctx.attr.minimum_os_version,
         features = features,
         objc_fragment = ctx.fragments.objc,
-        platform_type_string = ctx.attr.platform_type,
         uses_swift = swift_support.uses_swift(ctx.attr.deps),
         xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
     )
@@ -208,6 +213,7 @@ def _tvos_application_impl(ctx):
         apple_mac_toolchain_info = apple_mac_toolchain_info,
         bundle_id = bundle_id,
         entitlements_file = ctx.file.entitlements,
+        mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
         platform_prerequisites = platform_prerequisites,
         product_type = rule_descriptor.product_type,
         provisioning_profile = provisioning_profile,
@@ -217,6 +223,7 @@ def _tvos_application_impl(ctx):
 
     link_result = linking_support.register_binary_linking_action(
         ctx,
+        cc_toolchains = cc_toolchain_forwarder,
         avoid_deps = ctx.attr.frameworks,
         entitlements = entitlements.linking,
         exported_symbols_lists = ctx.files.exported_symbols_lists,
@@ -237,12 +244,11 @@ def _tvos_application_impl(ctx):
         partials.app_intents_metadata_bundle_partial(
             actions = actions,
             cc_toolchains = cc_toolchain_forwarder,
-            ctx = ctx,
             deps = ctx.split_attr.app_intents,
-            disabled_features = ctx.disabled_features,
-            features = features,
             label = label,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
+            json_tool = ctx.attr._json_tool.files_to_run,
         ),
         partials.apple_bundle_info_partial(
             actions = actions,
@@ -270,6 +276,7 @@ def _tvos_application_impl(ctx):
             binary_artifact = binary_artifact,
             features = features,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
@@ -279,6 +286,7 @@ def _tvos_application_impl(ctx):
             binary_artifact = binary_artifact,
             features = features,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
         ),
@@ -286,11 +294,13 @@ def _tvos_application_impl(ctx):
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
             apple_xplat_toolchain_info = apple_xplat_toolchain_info,
+            xplat_exec_group = apple_toolchain_utils.get_xplat_exec_group(ctx),
             bundle_extension = bundle_extension,
             bundle_name = bundle_name,
             embedded_targets = embeddable_targets,
             entitlements = entitlements.codesigning,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             predeclared_outputs = predeclared_outputs,
             provisioning_profile = provisioning_profile,
@@ -306,6 +316,7 @@ def _tvos_application_impl(ctx):
             executable_name = executable_name,
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
@@ -321,6 +332,7 @@ def _tvos_application_impl(ctx):
             apple_mac_toolchain_info = apple_mac_toolchain_info,
             features = features,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             provisioning_profile = provisioning_profile,
             rule_descriptor = rule_descriptor,
@@ -337,6 +349,7 @@ def _tvos_application_impl(ctx):
             environment_plist = ctx.file._environment_plist,
             launch_storyboard = ctx.file.launch_storyboard,
             locales_to_include = ctx.attr.locales_to_include,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             primary_icon_name = ctx.attr.primary_app_icon,
             resource_deps = resource_deps,
@@ -360,6 +373,7 @@ def _tvos_application_impl(ctx):
             bundle_dylibs = True,
             dependency_targets = swift_dylib_dependencies,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             package_swift_support_if_needed = True,
             platform_prerequisites = platform_prerequisites,
         ),
@@ -370,6 +384,7 @@ def _tvos_application_impl(ctx):
             dsym_binaries = debug_outputs.dsym_binaries,
             label_name = label.name,
             include_symbols_in_bundle = False,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
         ),
     ]
@@ -387,6 +402,7 @@ def _tvos_application_impl(ctx):
         actions = actions,
         apple_mac_toolchain_info = apple_mac_toolchain_info,
         apple_xplat_toolchain_info = apple_xplat_toolchain_info,
+        xplat_exec_group = apple_toolchain_utils.get_xplat_exec_group(ctx),
         bundle_extension = bundle_extension,
         bundle_name = bundle_name,
         codesign_inputs = ctx.files.codesign_inputs,
@@ -395,6 +411,7 @@ def _tvos_application_impl(ctx):
         features = features,
         ipa_post_processor = ctx.executable.ipa_post_processor,
         locales_to_include = ctx.attr.locales_to_include,
+        mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
         partials = processor_partials,
         platform_prerequisites = platform_prerequisites,
         predeclared_outputs = predeclared_outputs,
@@ -486,8 +503,8 @@ def _tvos_dynamic_framework_impl(ctx):
     binary_target = ctx.attr.deps[0]
 
     actions = ctx.actions
-    apple_mac_toolchain_info = ctx.attr._mac_toolchain[AppleMacToolsToolchainInfo]
-    apple_xplat_toolchain_info = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo]
+    apple_mac_toolchain_info = apple_toolchain_utils.get_mac_toolchain(ctx)
+    apple_xplat_toolchain_info = apple_toolchain_utils.get_xplat_toolchain(ctx)
     bin_root_path = ctx.bin_dir.path
     bundle_id = ctx.attr.bundle_id
     bundle_name, bundle_extension = bundling_support.bundle_full_name(
@@ -496,7 +513,8 @@ def _tvos_dynamic_framework_impl(ctx):
         rule_descriptor = rule_descriptor,
     )
     executable_name = ctx.attr.executable_name
-    cc_toolchain = find_cpp_toolchain(ctx)
+    cc_toolchain = find_cc_toolchain(ctx)
+    cc_toolchain_forwarder = ctx.split_attr._cc_toolchain_forwarder
     cc_features = cc_common.configure_features(
         ctx = ctx,
         cc_toolchain = cc_toolchain,
@@ -511,6 +529,7 @@ def _tvos_dynamic_framework_impl(ctx):
     label = ctx.label
     platform_prerequisites = platform_support.platform_prerequisites(
         apple_fragment = ctx.fragments.apple,
+        apple_platform_info = platform_support.apple_platform_info_from_rule_ctx(ctx),
         build_settings = apple_xplat_toolchain_info.build_settings,
         config_vars = ctx.var,
         cpp_fragment = ctx.fragments.cpp,
@@ -519,7 +538,6 @@ def _tvos_dynamic_framework_impl(ctx):
         explicit_minimum_os = ctx.attr.minimum_os_version,
         features = features,
         objc_fragment = ctx.fragments.objc,
-        platform_type_string = ctx.attr.platform_type,
         uses_swift = swift_support.uses_swift(ctx.attr.deps),
         xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
     )
@@ -550,6 +568,7 @@ def _tvos_dynamic_framework_impl(ctx):
 
     link_result = linking_support.register_binary_linking_action(
         ctx,
+        cc_toolchains = cc_toolchain_forwarder,
         avoid_deps = ctx.attr.frameworks,
         # Frameworks do not have entitlements.
         entitlements = None,
@@ -603,12 +622,14 @@ def _tvos_dynamic_framework_impl(ctx):
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
             apple_xplat_toolchain_info = apple_xplat_toolchain_info,
+            xplat_exec_group = apple_toolchain_utils.get_xplat_exec_group(ctx),
             bundle_extension = bundle_extension,
             bundle_location = processor.location.framework,
             bundle_name = bundle_name,
             embed_target_dossiers = False,
             embedded_targets = ctx.attr.frameworks,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             predeclared_outputs = predeclared_outputs,
             provisioning_profile = provisioning_profile,
@@ -620,6 +641,7 @@ def _tvos_dynamic_framework_impl(ctx):
             binary_artifact = binary_artifact,
             features = features,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
@@ -629,6 +651,7 @@ def _tvos_dynamic_framework_impl(ctx):
             binary_artifact = binary_artifact,
             features = features,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
         ),
@@ -642,6 +665,7 @@ def _tvos_dynamic_framework_impl(ctx):
             executable_name = executable_name,
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
@@ -678,6 +702,7 @@ def _tvos_dynamic_framework_impl(ctx):
             environment_plist = ctx.file._environment_plist,
             executable_name = executable_name,
             launch_storyboard = None,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             resource_deps = resource_deps,
             rule_descriptor = rule_descriptor,
@@ -694,6 +719,7 @@ def _tvos_dynamic_framework_impl(ctx):
             binary_artifact = binary_artifact,
             dependency_targets = ctx.attr.frameworks,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
         ),
         partials.swift_dynamic_framework_partial(
@@ -708,12 +734,14 @@ def _tvos_dynamic_framework_impl(ctx):
         actions = actions,
         apple_mac_toolchain_info = apple_mac_toolchain_info,
         apple_xplat_toolchain_info = apple_xplat_toolchain_info,
+        xplat_exec_group = apple_toolchain_utils.get_xplat_exec_group(ctx),
         bundle_extension = bundle_extension,
         bundle_name = bundle_name,
         codesign_inputs = ctx.files.codesign_inputs,
         codesignopts = codesigning_support.codesignopts_from_rule_ctx(ctx),
         features = features,
         ipa_post_processor = ctx.executable.ipa_post_processor,
+        mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
         partials = processor_partials,
         platform_prerequisites = platform_prerequisites,
         predeclared_outputs = predeclared_outputs,
@@ -771,8 +799,8 @@ def _tvos_framework_impl(ctx):
     )
 
     actions = ctx.actions
-    apple_mac_toolchain_info = ctx.attr._mac_toolchain[AppleMacToolsToolchainInfo]
-    apple_xplat_toolchain_info = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo]
+    apple_mac_toolchain_info = apple_toolchain_utils.get_mac_toolchain(ctx)
+    apple_xplat_toolchain_info = apple_toolchain_utils.get_xplat_toolchain(ctx)
     bin_root_path = ctx.bin_dir.path
     bundle_name, bundle_extension = bundling_support.bundle_full_name(
         custom_bundle_name = ctx.attr.bundle_name,
@@ -786,7 +814,8 @@ def _tvos_framework_impl(ctx):
         bundle_name = bundle_name,
         suffix_default = ctx.attr._bundle_id_suffix_default,
     )
-    cc_toolchain = find_cpp_toolchain(ctx)
+    cc_toolchain = find_cc_toolchain(ctx)
+    cc_toolchain_forwarder = ctx.split_attr._cc_toolchain_forwarder
     cc_features = cc_common.configure_features(
         ctx = ctx,
         cc_toolchain = cc_toolchain,
@@ -802,6 +831,7 @@ def _tvos_framework_impl(ctx):
     label = ctx.label
     platform_prerequisites = platform_support.platform_prerequisites(
         apple_fragment = ctx.fragments.apple,
+        apple_platform_info = platform_support.apple_platform_info_from_rule_ctx(ctx),
         build_settings = apple_xplat_toolchain_info.build_settings,
         config_vars = ctx.var,
         cpp_fragment = ctx.fragments.cpp,
@@ -810,7 +840,6 @@ def _tvos_framework_impl(ctx):
         explicit_minimum_deployment_os = ctx.attr.minimum_deployment_os_version,
         explicit_minimum_os = ctx.attr.minimum_os_version,
         objc_fragment = ctx.fragments.objc,
-        platform_type_string = ctx.attr.platform_type,
         uses_swift = swift_support.uses_swift(ctx.attr.deps),
         xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
     )
@@ -835,6 +864,7 @@ def _tvos_framework_impl(ctx):
 
     link_result = linking_support.register_binary_linking_action(
         ctx,
+        cc_toolchains = cc_toolchain_forwarder,
         avoid_deps = ctx.attr.frameworks,
         # Frameworks do not have entitlements.
         entitlements = None,
@@ -892,6 +922,7 @@ def _tvos_framework_impl(ctx):
             binary_artifact = binary_artifact,
             features = features,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
@@ -901,6 +932,7 @@ def _tvos_framework_impl(ctx):
             binary_artifact = binary_artifact,
             features = features,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
         ),
@@ -908,12 +940,14 @@ def _tvos_framework_impl(ctx):
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
             apple_xplat_toolchain_info = apple_xplat_toolchain_info,
+            xplat_exec_group = apple_toolchain_utils.get_xplat_exec_group(ctx),
             bundle_extension = bundle_extension,
             bundle_location = processor.location.framework,
             bundle_name = bundle_name,
             embed_target_dossiers = False,
             embedded_targets = ctx.attr.frameworks,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             predeclared_outputs = predeclared_outputs,
             provisioning_profile = provisioning_profile,
@@ -929,6 +963,7 @@ def _tvos_framework_impl(ctx):
             executable_name = executable_name,
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
@@ -966,6 +1001,7 @@ def _tvos_framework_impl(ctx):
             environment_plist = ctx.file._environment_plist,
             executable_name = executable_name,
             launch_storyboard = None,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             resource_deps = resource_deps,
             rule_descriptor = rule_descriptor,
@@ -982,6 +1018,7 @@ def _tvos_framework_impl(ctx):
             binary_artifact = binary_artifact,
             dependency_targets = ctx.attr.frameworks,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
         ),
         partials.apple_symbols_file_partial(
@@ -991,6 +1028,7 @@ def _tvos_framework_impl(ctx):
             dsym_binaries = debug_outputs.dsym_binaries,
             label_name = label.name,
             include_symbols_in_bundle = False,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
         ),
     ]
@@ -999,12 +1037,14 @@ def _tvos_framework_impl(ctx):
         actions = actions,
         apple_mac_toolchain_info = apple_mac_toolchain_info,
         apple_xplat_toolchain_info = apple_xplat_toolchain_info,
+        xplat_exec_group = apple_toolchain_utils.get_xplat_exec_group(ctx),
         bundle_extension = bundle_extension,
         bundle_name = bundle_name,
         codesign_inputs = ctx.files.codesign_inputs,
         codesignopts = codesigning_support.codesignopts_from_rule_ctx(ctx),
         features = features,
         ipa_post_processor = ctx.executable.ipa_post_processor,
+        mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
         partials = processor_partials,
         platform_prerequisites = platform_prerequisites,
         predeclared_outputs = predeclared_outputs,
@@ -1041,8 +1081,8 @@ def _tvos_extension_impl(ctx):
     )
 
     actions = ctx.actions
-    apple_mac_toolchain_info = ctx.attr._mac_toolchain[AppleMacToolsToolchainInfo]
-    apple_xplat_toolchain_info = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo]
+    apple_mac_toolchain_info = apple_toolchain_utils.get_mac_toolchain(ctx)
+    apple_xplat_toolchain_info = apple_toolchain_utils.get_xplat_toolchain(ctx)
     bundle_name, bundle_extension = bundling_support.bundle_full_name(
         custom_bundle_name = ctx.attr.bundle_name,
         label_name = ctx.label.name,
@@ -1055,6 +1095,7 @@ def _tvos_extension_impl(ctx):
         suffix_default = ctx.attr._bundle_id_suffix_default,
         shared_capabilities = ctx.attr.shared_capabilities,
     )
+    cc_toolchain_forwarder = ctx.split_attr._cc_toolchain_forwarder
     executable_name = ctx.attr.executable_name
     features = features_support.compute_enabled_features(
         requested_features = ctx.features,
@@ -1063,6 +1104,7 @@ def _tvos_extension_impl(ctx):
     label = ctx.label
     platform_prerequisites = platform_support.platform_prerequisites(
         apple_fragment = ctx.fragments.apple,
+        apple_platform_info = platform_support.apple_platform_info_from_rule_ctx(ctx),
         build_settings = apple_xplat_toolchain_info.build_settings,
         config_vars = ctx.var,
         cpp_fragment = ctx.fragments.cpp,
@@ -1071,7 +1113,6 @@ def _tvos_extension_impl(ctx):
         explicit_minimum_os = ctx.attr.minimum_os_version,
         features = features,
         objc_fragment = ctx.fragments.objc,
-        platform_type_string = ctx.attr.platform_type,
         uses_swift = swift_support.uses_swift(ctx.attr.deps),
         xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
     )
@@ -1096,6 +1137,7 @@ def _tvos_extension_impl(ctx):
         apple_mac_toolchain_info = apple_mac_toolchain_info,
         bundle_id = bundle_id,
         entitlements_file = ctx.file.entitlements,
+        mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
         platform_prerequisites = platform_prerequisites,
         product_type = rule_descriptor.product_type,
         provisioning_profile = provisioning_profile,
@@ -1103,9 +1145,14 @@ def _tvos_extension_impl(ctx):
         validation_mode = ctx.attr.entitlements_validation,
     )
 
+    # Modern tvOS extensions use the NSExtensionMain entry point. Extensions prior to
+    # tvOS 13 used the TVExtensionMain entry point, which can be enabled by setting
+    # legacy_entry_point=True.
+    entry_point = "_TVExtensionMain" if ctx.attr.legacy_entry_point else "_NSExtensionMain"
+
     extra_linkopts = [
         "-e",
-        "_TVExtensionMain",
+        entry_point,
         "-fapplication-extension",
         "-framework",
         "TVServices",
@@ -1113,6 +1160,7 @@ def _tvos_extension_impl(ctx):
 
     link_result = linking_support.register_binary_linking_action(
         ctx,
+        cc_toolchains = cc_toolchain_forwarder,
         avoid_deps = ctx.attr.frameworks,
         entitlements = entitlements.linking,
         exported_symbols_lists = ctx.files.exported_symbols_lists,
@@ -1170,6 +1218,7 @@ def _tvos_extension_impl(ctx):
             binary_artifact = binary_artifact,
             features = features,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             dylibs = clang_rt_dylibs.get_from_toolchain(ctx),
         ),
@@ -1179,6 +1228,7 @@ def _tvos_extension_impl(ctx):
             binary_artifact = binary_artifact,
             features = features,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             dylibs = main_thread_checker_dylibs.get_from_toolchain(ctx),
         ),
@@ -1186,6 +1236,7 @@ def _tvos_extension_impl(ctx):
             actions = actions,
             apple_mac_toolchain_info = apple_mac_toolchain_info,
             apple_xplat_toolchain_info = apple_xplat_toolchain_info,
+            xplat_exec_group = apple_toolchain_utils.get_xplat_exec_group(ctx),
             bundle_extension = bundle_extension,
             bundle_location = processor.location.plugin,
             bundle_name = bundle_name,
@@ -1193,6 +1244,7 @@ def _tvos_extension_impl(ctx):
             embedded_targets = ctx.attr.frameworks,
             entitlements = entitlements.codesigning,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             predeclared_outputs = predeclared_outputs,
             provisioning_profile = provisioning_profile,
@@ -1208,6 +1260,7 @@ def _tvos_extension_impl(ctx):
             executable_name = executable_name,
             label_name = label.name,
             linkmaps = debug_outputs.linkmaps,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             plisttool = apple_mac_toolchain_info.plisttool,
             rule_label = label,
@@ -1234,6 +1287,7 @@ def _tvos_extension_impl(ctx):
             extensionkit_keys_required = ctx.attr.extensionkit_extension,
             launch_storyboard = None,
             locales_to_include = ctx.attr.locales_to_include,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             resource_deps = resource_deps,
             rule_descriptor = rule_descriptor,
@@ -1249,6 +1303,7 @@ def _tvos_extension_impl(ctx):
             binary_artifact = binary_artifact,
             dependency_targets = ctx.attr.frameworks,
             label_name = label.name,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
         ),
         partials.apple_symbols_file_partial(
@@ -1258,6 +1313,7 @@ def _tvos_extension_impl(ctx):
             dsym_binaries = debug_outputs.dsym_binaries,
             label_name = label.name,
             include_symbols_in_bundle = False,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
         ),
     ]
@@ -1275,6 +1331,7 @@ def _tvos_extension_impl(ctx):
         actions = actions,
         apple_mac_toolchain_info = apple_mac_toolchain_info,
         apple_xplat_toolchain_info = apple_xplat_toolchain_info,
+        xplat_exec_group = apple_toolchain_utils.get_xplat_exec_group(ctx),
         bundle_extension = bundle_extension,
         bundle_name = bundle_name,
         codesign_inputs = ctx.files.codesign_inputs,
@@ -1283,6 +1340,7 @@ def _tvos_extension_impl(ctx):
         features = features,
         ipa_post_processor = ctx.executable.ipa_post_processor,
         locales_to_include = ctx.attr.locales_to_include,
+        mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
         partials = processor_partials,
         platform_prerequisites = platform_prerequisites,
         predeclared_outputs = predeclared_outputs,
@@ -1319,8 +1377,8 @@ def _tvos_static_framework_impl(ctx):
     )
 
     actions = ctx.actions
-    apple_mac_toolchain_info = ctx.attr._mac_toolchain[AppleMacToolsToolchainInfo]
-    apple_xplat_toolchain_info = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo]
+    apple_mac_toolchain_info = apple_toolchain_utils.get_mac_toolchain(ctx)
+    apple_xplat_toolchain_info = apple_toolchain_utils.get_xplat_toolchain(ctx)
     avoid_deps = ctx.attr.avoid_deps
     cc_toolchain_forwarder = ctx.split_attr._cc_toolchain_forwarder
     deps = ctx.attr.deps
@@ -1339,6 +1397,7 @@ def _tvos_static_framework_impl(ctx):
     )
     platform_prerequisites = platform_support.platform_prerequisites(
         apple_fragment = ctx.fragments.apple,
+        apple_platform_info = platform_support.apple_platform_info_from_rule_ctx(ctx),
         build_settings = apple_xplat_toolchain_info.build_settings,
         config_vars = ctx.var,
         cpp_fragment = ctx.fragments.cpp,
@@ -1347,14 +1406,16 @@ def _tvos_static_framework_impl(ctx):
         explicit_minimum_os = ctx.attr.minimum_os_version,
         features = features,
         objc_fragment = ctx.fragments.objc,
-        platform_type_string = ctx.attr.platform_type,
         uses_swift = swift_support.uses_swift(ctx.attr.deps),
         xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
     )
     resource_deps = ctx.attr.deps + ctx.attr.resources
 
-    link_result = linking_support.register_static_library_linking_action(ctx = ctx)
-    binary_artifact = link_result.library
+    archive_result = linking_support.register_static_library_archive_action(
+        ctx = ctx,
+        cc_toolchains = cc_toolchain_forwarder,
+    )
+    binary_artifact = archive_result.library
 
     processor_partials = [
         partials.apple_bundle_info_partial(
@@ -1419,6 +1480,7 @@ def _tvos_static_framework_impl(ctx):
             environment_plist = ctx.file._environment_plist,
             executable_name = executable_name,
             launch_storyboard = None,
+            mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
             platform_prerequisites = platform_prerequisites,
             resource_deps = resource_deps,
             rule_descriptor = rule_descriptor,
@@ -1430,12 +1492,14 @@ def _tvos_static_framework_impl(ctx):
         actions = actions,
         apple_mac_toolchain_info = apple_mac_toolchain_info,
         apple_xplat_toolchain_info = apple_xplat_toolchain_info,
+        xplat_exec_group = apple_toolchain_utils.get_xplat_exec_group(ctx),
         bundle_extension = bundle_extension,
         bundle_name = bundle_name,
         codesign_inputs = ctx.files.codesign_inputs,
         codesignopts = codesigning_support.codesignopts_from_rule_ctx(ctx),
         features = features,
         ipa_post_processor = ctx.executable.ipa_post_processor,
+        mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
         partials = processor_partials,
         platform_prerequisites = platform_prerequisites,
         predeclared_outputs = predeclared_outputs,
@@ -1456,9 +1520,11 @@ tvos_application = rule_factory.create_apple_rule(
     is_executable = True,
     predeclared_outputs = {"archive": "%{name}.ipa"},
     attrs = [
+        apple_support.platform_constraint_attrs(),
         rule_attrs.app_icon_attrs(
             supports_alternate_icons = True,
         ),
+        apple_support.platform_constraint_attrs(),
         rule_attrs.app_intents_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
         ),
@@ -1469,10 +1535,6 @@ tvos_application = rule_factory.create_apple_rule(
                 framework_provider_aspect,
             ],
             is_test_supporting_rule = False,
-            requires_legacy_cc_toolchain = True,
-        ),
-        rule_attrs.cc_toolchain_forwarder_attrs(
-            deps_cfg = transition_support.apple_platform_split_transition,
         ),
         rule_attrs.common_bundle_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
@@ -1482,7 +1544,9 @@ tvos_application = rule_factory.create_apple_rule(
             allowed_families = rule_attrs.defaults.allowed_families.tvos,
         ),
         rule_attrs.device_runner_template_attr(),
-        rule_attrs.infoplist_attrs(),
+        rule_attrs.infoplist_attrs(
+            default_infoplist = rule_attrs.defaults.tvos_application_infoplist,
+        ),
         rule_attrs.ipa_post_processor_attrs(),
         rule_attrs.locales_to_include_attrs(),
         rule_attrs.launch_images_attrs(),
@@ -1499,7 +1563,7 @@ tvos_application = rule_factory.create_apple_rule(
                 providers = [[AppleBundleInfo, TvosFrameworkBundleInfo]],
                 doc = """
 A list of framework targets (see
-[`tvos_framework`](https://github.com/bazelbuild/rules_apple/blob/master/doc/rules-tvos.md#tvos_framework))
+[`tvos_framework`](https://github.com/bazelbuild/rules_apple/blob/main/doc/rules-tvos.md#tvos_framework))
 that this target depends on.
 """,
             ),
@@ -1525,6 +1589,7 @@ tvos_dynamic_framework = rule_factory.create_apple_rule(
     implementation = _tvos_dynamic_framework_impl,
     predeclared_outputs = {"archive": "%{name}.zip"},
     attrs = [
+        apple_support.platform_constraint_attrs(),
         rule_attrs.binary_linking_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
             extra_deps_aspects = [
@@ -1533,7 +1598,6 @@ tvos_dynamic_framework = rule_factory.create_apple_rule(
                 swift_dynamic_framework_aspect,
             ],
             is_test_supporting_rule = False,
-            requires_legacy_cc_toolchain = True,
         ),
         rule_attrs.common_bundle_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
@@ -1571,7 +1635,7 @@ use only extension-safe APIs.
                 providers = [[AppleBundleInfo, TvosFrameworkBundleInfo]],
                 doc = """
 A list of framework targets (see
-[`tvos_framework`](https://github.com/bazelbuild/rules_apple/blob/master/doc/rules-tvos.md#tvos_framework))
+[`tvos_framework`](https://github.com/bazelbuild/rules_apple/blob/main/doc/rules-tvos.md#tvos_framework))
 that this target depends on.
 """,
             ),
@@ -1588,6 +1652,7 @@ tvos_extension = rule_factory.create_apple_rule(
     implementation = _tvos_extension_impl,
     predeclared_outputs = {"archive": "%{name}.zip"},
     attrs = [
+        apple_support.platform_constraint_attrs(),
         rule_attrs.binary_linking_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
             extra_deps_aspects = [
@@ -1595,7 +1660,6 @@ tvos_extension = rule_factory.create_apple_rule(
                 framework_provider_aspect,
             ],
             is_test_supporting_rule = False,
-            requires_legacy_cc_toolchain = True,
         ),
         rule_attrs.common_bundle_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
@@ -1620,8 +1684,16 @@ tvos_extension = rule_factory.create_apple_rule(
                 providers = [[AppleBundleInfo, TvosFrameworkBundleInfo]],
                 doc = """
 A list of framework targets (see
-[`tvos_framework`](https://github.com/bazelbuild/rules_apple/blob/master/doc/rules-tvos.md#tvos_framework))
+[`tvos_framework`](https://github.com/bazelbuild/rules_apple/blob/main/doc/rules-tvos.md#tvos_framework))
 that this target depends on.
+""",
+            ),
+            "legacy_entry_point": attr.bool(
+                default = False,
+                doc = """
+If `True`, the extension uses the legacy tvOS extension entry point (`_TVExtensionMain`) used
+by extensions prior to tvOS 13. If `False` (the default), the extension uses the modern
+NSExtension entry point (`_NSExtensionMain`).
 """,
             ),
         },
@@ -1637,6 +1709,7 @@ To use this framework for your app and extensions, list it in the frameworks att
     implementation = _tvos_framework_impl,
     predeclared_outputs = {"archive": "%{name}.zip"},
     attrs = [
+        apple_support.platform_constraint_attrs(),
         rule_attrs.binary_linking_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
             extra_deps_aspects = [
@@ -1644,7 +1717,6 @@ To use this framework for your app and extensions, list it in the frameworks att
                 framework_provider_aspect,
             ],
             is_test_supporting_rule = False,
-            requires_legacy_cc_toolchain = True,
         ),
         rule_attrs.common_bundle_attrs(
             deps_cfg = transition_support.apple_platform_split_transition,
@@ -1682,7 +1754,7 @@ use only extension-safe APIs.
                 providers = [[AppleBundleInfo, TvosFrameworkBundleInfo]],
                 doc = """
 A list of framework targets (see
-[`tvos_framework`](https://github.com/bazelbuild/rules_apple/blob/master/doc/rules-tvos.md#tvos_framework))
+[`tvos_framework`](https://github.com/bazelbuild/rules_apple/blob/main/doc/rules-tvos.md#tvos_framework))
 that this target depends on.
 """,
             ),
@@ -1697,7 +1769,7 @@ that this target depends on.
 _STATIC_FRAMEWORK_DEPS_CFG = transition_support.apple_platform_split_transition
 
 tvos_static_framework = rule_factory.create_apple_rule(
-    cfg = transition_support.apple_platforms_rule_base_transition,
+    cfg = transition_support.apple_rule_transition,
     doc = """
 Builds and bundles an tvOS static framework for third-party distribution.
 
@@ -1740,6 +1812,7 @@ i.e. `--features=-swift.no_generated_header`).
     implementation = _tvos_static_framework_impl,
     predeclared_outputs = {"archive": "%{name}.zip"},
     attrs = [
+        apple_support.platform_constraint_attrs(),
         rule_attrs.binary_linking_attrs(
             deps_cfg = _STATIC_FRAMEWORK_DEPS_CFG,
             extra_deps_aspects = [
@@ -1747,10 +1820,6 @@ i.e. `--features=-swift.no_generated_header`).
                 framework_provider_aspect,
             ],
             is_test_supporting_rule = False,
-            requires_legacy_cc_toolchain = True,
-        ),
-        rule_attrs.cc_toolchain_forwarder_attrs(
-            deps_cfg = _STATIC_FRAMEWORK_DEPS_CFG,
         ),
         rule_attrs.common_bundle_attrs(
             deps_cfg = _STATIC_FRAMEWORK_DEPS_CFG,

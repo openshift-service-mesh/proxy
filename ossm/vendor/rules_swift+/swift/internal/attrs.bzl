@@ -15,7 +15,8 @@
 """Common attributes used by multiple Swift build rules."""
 
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
-load("//swift:providers.bzl", "SwiftInfo")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("//swift:providers.bzl", "SwiftInfo", "SwiftToolsInfo")
 load(":providers.bzl", "SwiftCompilerPluginInfo")
 
 def swift_common_rule_attrs(
@@ -141,10 +142,12 @@ Swift 5.9+.
 """,
             ),
             "plugins": attr.label_list(
-                cfg = "exec",
+                cfg = config.exec(exec_group = "swift_plugins"),
                 doc = """\
 A list of `swift_compiler_plugin` targets that should be loaded by the compiler
-when compiling this module and any modules that directly depend on it.
+when compiling this module and any modules that depend on it. Enable the
+`swift.load_plugins_from_direct_dependencies` feature to load them only for
+this module and modules that directly depend on it.
 """,
                 providers = [SwiftCompilerPluginInfo],
             ),
@@ -153,6 +156,12 @@ when compiling this module and any modules that directly depend on it.
                 allow_files = ["swift"],
                 doc = """\
 A list of `.swift` source files that will be compiled into the library.
+
+Except in very rare circumstances, a Swift source file should only appear in a
+single `swift_*` target. Adding the same source file to multiple `swift_*`
+targets can lead to binary bloat and/or symbol collisions. If specific sources
+need to be shared by multiple targets, consider factoring them out into their
+own `swift_library` instead.
 """,
                 flags = ["DIRECT_COMPILE_TIME_INPUT"],
                 mandatory = requires_srcs,
@@ -186,12 +195,6 @@ def swift_config_attrs():
         configuration settings.
     """
     return {
-        "_config_emit_private_swiftinterface": attr.label(
-            default = Label("//swift:emit_private_swiftinterface"),
-        ),
-        "_config_emit_swiftinterface": attr.label(
-            default = Label("//swift:emit_swiftinterface"),
-        ),
         "_per_module_swiftcopt": attr.label(
             default = Label("//swift:per_module_swiftcopt"),
         ),
@@ -201,7 +204,7 @@ def swift_deps_attr(*, additional_deps_providers = [], doc, **kwargs):
     """Returns an attribute suitable for representing Swift rule dependencies.
 
     The returned attribute will be configured to accept targets that propagate
-    `CcInfo`, `SwiftInfo`, or `apple_common.Objc` providers.
+    `CcInfo` or `SwiftInfo` providers.
 
     Args:
         additional_deps_providers: A list of lists representing additional
@@ -223,18 +226,9 @@ Allowed kinds of dependencies are:
 
 *   `swift_library` (or anything propagating `SwiftInfo`)
 
-*   `cc_library` (or anything propagating `CcInfo`)
-
-Additionally, on platforms that support Objective-C interop, `objc_library`
-targets (or anything propagating the `apple_common.Objc` provider) are allowed
-as dependencies. On platforms that do not support Objective-C interop (such as
-Linux), those dependencies will be **ignored.**
+*   `cc_library` and `objc_library` (or anything propagating `CcInfo`)
 """,
-        providers = [
-            [CcInfo],
-            [SwiftInfo],
-            [apple_common.Objc],
-        ] + additional_deps_providers,
+        providers = [[CcInfo], [SwiftInfo]] + additional_deps_providers,
         **kwargs
     )
 
@@ -305,15 +299,32 @@ and emit a `.swiftinterface` file as one of the compilation outputs.
                 mandatory = False,
             ),
             "alwayslink": attr.bool(
-                default = False,
+                default = True,
                 doc = """\
-If true, any binary that depends (directly or indirectly) on this Swift module
-will link in all the object files for the files listed in `srcs`, even if some
-contain no symbols referenced by the binary. This is useful if your code isn't
-explicitly called by code in the binary; for example, if you rely on runtime
-checks for protocol conformances added in extensions in the library but do not
-directly reference any other symbols in the object file that adds that
-conformance.
+If `False`, any binary that depends (directly or indirectly) on this Swift module
+will only link in all the object files for the files listed in `srcs` when there
+is a direct symbol reference.
+
+Swift protocol conformances don't create linker references. Likewise, if the
+Swift code has Objective-C classes/methods, their usage does not always result in
+linker references.
+
+_"All the object files"_ for this module is also somewhat fuzzy. Unlike C, C++,
+and Objective-C, where each source file results in a `.o` file; for Swift the
+number of .o files depends on the compiler options
+(`-wmo`/`-whole-module-optimization`, `-num-threads`). That makes relying on
+linker reference more fragile, and any individual .swift file in `srcs` may/may
+not get picked up based on the linker references to other files that happen to
+get batched into a single `.o` by the compiler options used.
+
+Swift Package Manager always passes the individual `.o` files to the linker
+instead of using intermediate static libraries, so it effectively is the same
+as `alwayslink = True`.
+
+Note that by default, this value will default to True. But if the
+swift.enable_embedded feature is on, this value will be automatically overridden
+to False, as the swift features that cause -force_load to be required (such as
+reflection) are not available in that mode.
 """,
             ),
             "generated_header_name": attr.string(
@@ -365,56 +376,15 @@ potentially avoid a PLT relocation).  Set to `False` to build a `.so` or `.dll`.
         },
     )
 
-def swift_toolchain_attrs(toolchain_attr_name = "_toolchain"):
-    """Returns an attribute dictionary for toolchain users.
-
-    The returned dictionary contains a key with the name specified by the
-    argument `toolchain_attr_name` (which defaults to the value `"_toolchain"`),
-    the value of which is a BUILD API `attr.label` that references the default
-    Swift toolchain. Users who are authoring custom rules can add this
-    dictionary to the attributes of their own rule in order to depend on the
-    toolchain and access its `SwiftToolchainInfo` provider to pass it to other
-    `swift_common` functions.
-
-    There is a hierarchy to the attribute sets offered by the `swift_common`
-    API:
-
-    1.  If you only need access to the toolchain for its tools and libraries but
-        are not doing any compilation, use `toolchain_attrs`.
-    2.  If you need to invoke compilation actions but are not making the
-        resulting object files into a static or shared library, use
-        `compilation_attrs`.
-    3.  If you want to provide a rule interface that is suitable as a drop-in
-        replacement for `swift_library`, use `library_rule_attrs`.
-
-    Each of the attribute functions in the list above also contains the
-    attributes from the earlier items in the list.
-
-    Args:
-        toolchain_attr_name: The name of the attribute that should be created
-            that points to the toolchain. This defaults to `_toolchain`, which
-            is sufficient for most rules; it is customizable for certain aspects
-            where having an attribute with the same name but different values
-            applied to a particular target causes a build crash.
-
-    Returns:
-        A new attribute dictionary that can be added to the attributes of a
-        custom build rule to provide access to the Swift toolchain.
-    """
-    return {
-        toolchain_attr_name: attr.label(
-            default = Label("@build_bazel_rules_swift_local_config//:toolchain"),
-        ),
-    }
-
 def swift_toolchain_driver_attrs():
     """Returns attributes used to attach custom drivers to toolchains.
 
-    These attributes are useful for compiler development alongside Bazel. The
-    public attribute (`swift_executable`) lets a custom driver be permanently
-    associated with a particular toolchain instance. If not specified, the
-    private default is associated with a command-line option that can be used to
-    provide a custom driver at build time.
+    `swift_tools` is useful when using a standalone hermetic toolchain, while
+    `swift_executable` and `_default_swift_executable` can be convenient for
+    compiler development alongside Bazel.
+    `swift_tools` is mutually exclusive with `swift_executable`. If neither is
+    specified, the private default is associated with a command-line option
+    that can be used to provide a custom driver at build time.
 
     Returns:
         A dictionary of attributes that should be added to a toolchain rule.
@@ -430,7 +400,18 @@ If this is empty, the default Swift driver in the toolchain will be used.
 Otherwise, this binary will be used and `--driver-mode` will be passed to ensure
 that it is invoked in the correct mode (i.e., `swift`, `swiftc`,
 `swift-autolink-extract`, etc.).
+ """,
+        ),
+        "swift_tools": attr.label(
+            cfg = "exec",
+            doc = """\
+A label to a target providing a SwiftToolsInfo provider (such as `swift_tools`)
+
+When using a hermetic toolchain, tools must be pulled into the sandbox based on the action type.
+This field can be used to let bazel know which tool should be added to the input tree for a given
+action.
 """,
+            providers = [SwiftToolsInfo],
         ),
         "_default_swift_executable": attr.label(
             allow_files = True,

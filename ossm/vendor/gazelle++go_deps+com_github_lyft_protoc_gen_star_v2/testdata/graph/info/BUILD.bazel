@@ -1,6 +1,6 @@
+load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
 load("@io_bazel_rules_go//go:def.bzl", "go_library")
 load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
-load("@rules_proto//proto:defs.bzl", "proto_library")
 
 proto_library(
     name = "graph_info_proto",
@@ -10,7 +10,10 @@ proto_library(
 
 go_proto_library(
     name = "graph_info_go_proto",
-    compilers = ["@io_bazel_rules_go//proto:go_grpc_v2"],
+    compilers = [
+        "@io_bazel_rules_go//proto:go_proto",
+        "@io_bazel_rules_go//proto:go_grpc_v2",
+    ],
     importpath = "github.com/lyft/protoc-gen-star/v2/testdata/graph/info",
     importpath_aliases = ["github.com/lyft/protoc-gen-star/testdata/graph/info"],
     proto = ":graph_info_proto",

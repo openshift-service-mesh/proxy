@@ -18,6 +18,8 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 # Provides registrars for CEL standard definitions.
 # TODO(uncreated-issue/41): CEL users shouldn't need to use these directly, instead they should prefer to
 # use RegisterBuiltins when available.
+load("//bazel:copts.bzl", "CEL_COPTS")
+
 package(
     # Under active development, not yet being released.
     default_visibility = ["//visibility:public"],
@@ -31,6 +33,7 @@ cc_library(
     hdrs = [
         "comparison_functions.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//base:builtins",
         "//base:function_adapter",
@@ -50,6 +53,7 @@ cc_test(
     srcs = [
         "comparison_functions_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":comparison_functions",
         "//base:builtins",
@@ -67,6 +71,7 @@ cc_library(
     hdrs = [
         "container_membership_functions.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//base:builtins",
         "//base:function_adapter",
@@ -90,6 +95,7 @@ cc_test(
     srcs = [
         "container_membership_functions_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":container_membership_functions",
         "//base:builtins",
@@ -106,6 +112,7 @@ cc_library(
     name = "equality_functions",
     srcs = ["equality_functions.cc"],
     hdrs = ["equality_functions.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:builtins",
         "//base:function_adapter",
@@ -134,6 +141,7 @@ cc_test(
     srcs = [
         "equality_functions_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":equality_functions",
         "//base:builtins",
@@ -154,6 +162,7 @@ cc_library(
     hdrs = [
         "logical_functions.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//base:builtins",
         "//base:function_adapter",
@@ -174,6 +183,7 @@ cc_test(
     srcs = [
         "logical_functions_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":logical_functions",
         "//base:builtins",
@@ -200,6 +210,7 @@ cc_library(
     name = "container_functions",
     srcs = ["container_functions.cc"],
     hdrs = ["container_functions.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:builtins",
         "//base:function_adapter",
@@ -220,6 +231,7 @@ cc_test(
     srcs = [
         "container_functions_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":container_functions",
         "//base:builtins",
@@ -232,6 +244,7 @@ cc_library(
     name = "type_conversion_functions",
     srcs = ["type_conversion_functions.cc"],
     hdrs = ["type_conversion_functions.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:builtins",
         "//base:function_adapter",
@@ -240,12 +253,15 @@ cc_library(
         "//internal:status_macros",
         "//internal:time",
         "//internal:utf8",
+        "//runtime:function",
         "//runtime:function_registry",
         "//runtime:runtime_options",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
+        "@com_google_protobuf//:protobuf",
     ],
 )
 
@@ -255,6 +271,7 @@ cc_test(
     srcs = [
         "type_conversion_functions_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":type_conversion_functions",
         "//base:builtins",
@@ -267,6 +284,7 @@ cc_library(
     name = "arithmetic_functions",
     srcs = ["arithmetic_functions.cc"],
     hdrs = ["arithmetic_functions.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:builtins",
         "//base:function_adapter",
@@ -286,6 +304,7 @@ cc_test(
     srcs = [
         "arithmetic_functions_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":arithmetic_functions",
         "//base:builtins",
@@ -298,6 +317,7 @@ cc_library(
     name = "time_functions",
     srcs = ["time_functions.cc"],
     hdrs = ["time_functions.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:builtins",
         "//base:function_adapter",
@@ -319,6 +339,7 @@ cc_test(
     srcs = [
         "time_functions_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":time_functions",
         "//base:builtins",
@@ -331,6 +352,7 @@ cc_library(
     name = "string_functions",
     srcs = ["string_functions.cc"],
     hdrs = ["string_functions.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:builtins",
         "//base:function_adapter",
@@ -352,6 +374,7 @@ cc_test(
     srcs = [
         "string_functions_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":string_functions",
         "//base:builtins",
@@ -364,10 +387,12 @@ cc_library(
     name = "regex_functions",
     srcs = ["regex_functions.cc"],
     hdrs = ["regex_functions.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:builtins",
         "//base:function_adapter",
         "//common:value",
+        "//internal:re2_options",
         "//internal:status_macros",
         "//runtime:function_registry",
         "//runtime:runtime_options",
@@ -380,6 +405,7 @@ cc_library(
 cc_test(
     name = "regex_functions_test",
     srcs = ["regex_functions_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":regex_functions",
         "//base:builtins",

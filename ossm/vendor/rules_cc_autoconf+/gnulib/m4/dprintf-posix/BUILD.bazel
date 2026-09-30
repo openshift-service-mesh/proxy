@@ -1,0 +1,25 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/dprintf-posix.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+
+# This module checks if dprintf is POSIX compliant and replaces it if not.
+# The m4 file has a complex check (gl_FUNC_DPRINTF_IS_POSIX) that checks many
+# printf features. Based on golden files, on macOS dprintf is not POSIX compliant,
+# so we need to replace it.
+autoconf(
+    name = "dprintf-posix",
+    checks = [
+        # gl_FUNC_DPRINTF_POSIX checks if dprintf is POSIX compliant.
+        # If not (macOS), it conditionally calls gl_REPLACE_DPRINTF.
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/dprintf",
+        "//gnulib/m4/vasnprintf",
+    ] + select({
+        # On macOS, dprintf is not POSIX compliant → gl_REPLACE_DPRINTF is invoked
+        "@platforms//os:linux": [],
+        "//conditions:default": ["//gnulib/m4/dprintf:gl_REPLACE_DPRINTF"],
+    }),
+)

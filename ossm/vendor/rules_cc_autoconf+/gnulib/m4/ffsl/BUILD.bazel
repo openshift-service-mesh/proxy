@@ -1,0 +1,44 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/ffsl.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "ffsl",
+    checks = [
+        # Note: gl_STRING_H_DEFAULTS is a _DEFAULTS function, so we ignore it per user's instruction
+
+        # Uses AC_LINK_IFELSE instead of AC_CHECK_FUNC because ffsl() may be
+        # We use AC_TRY_LINK to ensure it's linkable
+        checks.AC_TRY_LINK(
+            name = "_gl_cv_func_ffsl",
+            code = """\
+#include <string.h>
+#include <strings.h>
+
+int main(void) {
+    long x = 0;
+    int (*func) (long) = ffsl;
+    return func(x);
+}
+""",
+            language = "c",
+        ),
+
+        # Note: HAVE_FFSL is NOT defined as a #define in config.h
+        # If ffsl not found, set HAVE_FFSL=0
+        # Set as substitution variable
+        checks.AC_SUBST(
+            "HAVE_FFSL",
+            condition = "_gl_cv_func_ffsl",
+            if_false = 0,
+            if_true = 1,
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/extensions",
+        # Note: AC_CHECK_INCLUDES_DEFAULT is added for test compatibility
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)

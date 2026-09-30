@@ -1,5 +1,6 @@
+load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load(
-    "@build_bazel_rules_swift//swift:swift.bzl",
+    "@rules_swift//swift:swift.bzl",
     "swift_library",
 )
 load(
@@ -47,7 +48,7 @@ load("//test/testdata/rules:substitution.bzl", "substitution")
 licenses(["notice"])
 
 package(
-    default_testonly = 1,
+    default_testonly = True,
     default_visibility = ["//test/starlark_tests:__subpackages__"],
 )
 
@@ -113,6 +114,135 @@ macos_application(
     ],
     minimum_os_version = common.min_os_macos.baseline,
     provisioning_profile = "//test/testdata/provisioning:integration_testing_macos.provisionprofile",
+    tags = common.fixture_tags,
+    deps = [
+        ":main_lib",
+    ],
+)
+
+macos_application(
+    name = "app_minimal_no_infoplist",
+    bundle_id = "com.google.example",
+    minimum_os_version = common.min_os_macos.baseline,
+    provisioning_profile = "//test/testdata/provisioning:integration_testing_macos.provisionprofile",
+    tags = common.fixture_tags,
+    deps = [
+        ":main_lib",
+    ],
+)
+
+macos_application(
+    name = "app_missing_version",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info-extension-missing-version.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        ":main_lib",
+    ],
+)
+
+macos_application(
+    name = "app_missing_short_version",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info-extension-missing-short-version.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        ":main_lib",
+    ],
+)
+
+# Test that user-provided infoplist values override default values
+genrule(
+    name = "custom_version_infoplist",
+    outs = ["CustomVersionInfo.plist"],
+    cmd = """
+cat > $@ << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleVersion</key>
+	<string>2.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>2.0</string>
+</dict>
+</plist>
+EOF
+""",
+    tags = common.fixture_tags,
+)
+
+macos_application(
+    name = "app_with_custom_infoplist_values",
+    bundle_id = "com.google.example",
+    infoplists = [":custom_version_infoplist"],
+    minimum_os_version = common.min_os_macos.baseline,
+    provisioning_profile = "//test/testdata/provisioning:integration_testing_macos.provisionprofile",
+    tags = common.fixture_tags,
+    deps = [
+        ":main_lib",
+    ],
+)
+
+macos_application(
+    name = "app_with_ipa_post_processor",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    ipa_post_processor = "//test/starlark_tests/targets_under_test/apple:ipa_post_processor_insert_file",
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        ":main_lib",
+    ],
+)
+
+macos_application(
+    name = "nested_first_app",
+    bundle_id = "com.google.example.first",
+    bundle_name = "first",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        ":main_lib",
+    ],
+)
+
+macos_application(
+    name = "nested_second_app",
+    bundle_id = "com.google.example.second",
+    bundle_name = "second",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        ":main_lib",
+    ],
+)
+
+macos_application(
+    name = "app_with_nested_app_bundles",
+    additional_contents = {
+        ":nested_first_app": "Library",
+        ":nested_second_app": "Library",
+    },
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
     tags = common.fixture_tags,
     deps = [
         ":main_lib",
@@ -515,18 +645,6 @@ macos_static_framework(
 )
 
 macos_static_framework(
-    name = "static_framework_with_umbrella_header_conflict",
-    hdrs = [
-        "//test/starlark_tests/resources:UmbrellaHeaderConflict.h",
-        "//test/starlark_tests/resources:shared.h",
-    ],
-    bundle_name = "UmbrellaHeaderConflict",
-    minimum_os_version = common.min_os_macos.baseline,
-    tags = common.fixture_tags,
-    deps = [":shared_lib"],
-)
-
-macos_static_framework(
     name = "static_framework_from_objc_library",
     minimum_os_version = common.min_os_macos.baseline,
     deps = [":objc_library_with_sdk_dylib_and_framework"],
@@ -656,7 +774,7 @@ objc_library(
     ],
     tags = common.fixture_tags,
     deps = [":framework_dependent_lib_with_resource"],
-    alwayslink = 1,
+    alwayslink = True,
 )
 
 objc_library(
@@ -890,7 +1008,7 @@ macos_framework(
     name = "fmwk_min_os_baseline",
     hdrs = ["//test/starlark_tests/resources:common.h"],
     bundle_id = "com.google.example.framework",
-    extension_safe = 1,
+    extension_safe = True,
     infoplists = [
         "//test/starlark_tests/resources:Info.plist",
     ],
@@ -950,6 +1068,116 @@ macos_application(
 )
 
 macos_application(
+    name = "app_with_asan_linkopt",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        ":objc_lib_with_asan_linkopt",
+    ],
+)
+
+objc_library(
+    name = "objc_lib_with_asan_linkopt",
+    srcs = ["//test/starlark_tests/resources:main.m"],
+    linkopts = ["-fsanitize=address"],
+    tags = common.fixture_tags,
+)
+
+macos_application(
+    name = "app_with_tsan_linkopt",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        ":objc_lib_with_tsan_linkopt",
+    ],
+)
+
+objc_library(
+    name = "objc_lib_with_tsan_linkopt",
+    srcs = ["//test/starlark_tests/resources:main.m"],
+    linkopts = ["-fsanitize=thread"],
+    tags = common.fixture_tags,
+)
+
+macos_application(
+    name = "app_with_ubsan_linkopt",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        ":objc_lib_with_ubsan_linkopt",
+    ],
+)
+
+objc_library(
+    name = "objc_lib_with_ubsan_linkopt",
+    srcs = ["//test/starlark_tests/resources:main.m"],
+    linkopts = ["-fsanitize=undefined"],
+    tags = common.fixture_tags,
+)
+
+macos_application(
+    name = "app_with_localized_unprocessed_resources",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    resources = [
+        "//test/starlark_tests/resources:localized_generic_resources",
+    ],
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_main_lib",
+    ],
+)
+
+macos_application(
+    name = "app_with_bundle_localization_resources",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    resources = [
+        "//test/starlark_tests/resources:bundle_library_macos",
+        "//test/starlark_tests/resources:fr.lproj/localized.strings",
+    ],
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_main_lib",
+    ],
+)
+
+macos_application(
+    name = "app_with_fr_and_it_localized_strings",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    resources = [
+        "//test/starlark_tests/resources:fr.lproj/localized.strings",
+        "//test/starlark_tests/resources:it.lproj/localized.strings",
+    ],
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_main_lib",
+    ],
+)
+
+macos_application(
     name = "app_basic_swift",
     bundle_id = "com.google.example",
     entitlements = "//test/starlark_tests/resources:entitlements.plist",
@@ -960,6 +1188,51 @@ macos_application(
     tags = common.fixture_tags,
     deps = [
         "//test/starlark_tests/resources:swift_main_lib",
+    ],
+)
+
+macos_application(
+    name = "app_with_icon_bundle",
+    app_icons = ["//test/starlark_tests/resources:icon_bundle_assets"],
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.icon_bundle_required,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_main_lib",
+    ],
+)
+
+macos_application(
+    name = "app_with_icon_bundle_only_for_low_minimum_os_version",
+    app_icons = ["//test/starlark_tests/resources:icon_bundle_assets"],
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_main_lib",
+    ],
+)
+
+macos_application(
+    name = "app_with_icon_bundle_and_xcassets_app_icons",
+    app_icons = [
+        "//test/starlark_tests/resources:MacAppIcon.xcassets",
+        "//test/starlark_tests/resources:icon_bundle_assets",
+    ],
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_main_lib",
     ],
 )
 
@@ -1679,7 +1952,7 @@ macos_framework(
 macos_framework(
     name = "fmwk_with_provisioning",
     bundle_id = "com.google.example.framework",
-    extension_safe = 1,
+    extension_safe = True,
     infoplists = [
         "//test/starlark_tests/resources:Info.plist",
     ],
@@ -2068,7 +2341,7 @@ macos_static_framework(
     minimum_os_version = common.min_os_macos.baseline,
     tags = common.fixture_tags,
     deps = [
-        "//test/starlark_tests/resources:swift_framework_lib",
+        "//test/starlark_tests/resources:swift_framework_lib_with_swiftinterface",
     ],
 )
 
@@ -2133,6 +2406,20 @@ macos_application(
         "//test/starlark_tests/resources:Info.plist",
     ],
     ipa_post_processor = "//test/starlark_tests/targets_under_test/apple:ipa_post_processor_verify_codesigning",
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        ":dynamic_versioned_fmwk_depending_lib",
+        "//test/starlark_tests/resources:objc_main_lib",
+    ],
+)
+
+macos_application(
+    name = "app_with_imported_versioned_fmwk_tree_artifacts",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
     minimum_os_version = common.min_os_macos.baseline,
     tags = common.fixture_tags,
     deps = [
@@ -2228,6 +2515,20 @@ macos_application(
     ],
 )
 
+macos_application(
+    name = "app_with_imported_dynamic_versioned_xcframework_tree_artifacts",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        ":dynamic_versioned_xcframework_depending_lib",
+        "//test/starlark_tests/resources:objc_main_lib",
+    ],
+)
+
 objc_library(
     name = "dynamic_versioned_xcframework_depending_lib",
     tags = common.fixture_tags,
@@ -2272,6 +2573,46 @@ macos_bundle(
     infoplists = [
         "//test/starlark_tests/resources:Info.plist",
     ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_shared_lib",
+    ],
+)
+
+macos_bundle(
+    name = "bundle_missing_version",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info-extension-missing-version.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_shared_lib",
+    ],
+)
+
+macos_bundle(
+    name = "bundle_missing_short_version",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info-extension-missing-short-version.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_shared_lib",
+    ],
+)
+
+macos_bundle(
+    name = "bundle_with_ipa_post_processor",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    ipa_post_processor = "//test/starlark_tests/targets_under_test/apple:ipa_post_processor_insert_file",
     minimum_os_version = common.min_os_macos.baseline,
     tags = common.fixture_tags,
     deps = [
@@ -2499,6 +2840,21 @@ macos_kernel_extension(
 )
 
 macos_kernel_extension(
+    name = "kext_with_entitlements",
+    bundle_id = "com.google.kext",
+    entitlements = "//test/starlark_tests/resources:entitlements.plist",
+    families = ["macos"],
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources/kext_resources:kext_lib",
+    ],
+)
+
+macos_kernel_extension(
     name = "kext_dead_stripped",
     bundle_id = "com.google.kext",
     exported_symbols_lists = [
@@ -2528,6 +2884,46 @@ macos_quick_look_plugin(
     infoplists = [
         "//test/starlark_tests/resources:Info.plist",
     ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_main_lib",
+    ],
+)
+
+macos_quick_look_plugin(
+    name = "ql_plugin_missing_version",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info-extension-missing-version.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_main_lib",
+    ],
+)
+
+macos_quick_look_plugin(
+    name = "ql_plugin_missing_short_version",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info-extension-missing-short-version.plist",
+    ],
+    minimum_os_version = common.min_os_macos.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_main_lib",
+    ],
+)
+
+macos_quick_look_plugin(
+    name = "ql_plugin_with_ipa_post_processor",
+    bundle_id = "com.google.example",
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    ipa_post_processor = "//test/starlark_tests/targets_under_test/apple:ipa_post_processor_insert_file",
     minimum_os_version = common.min_os_macos.baseline,
     tags = common.fixture_tags,
     deps = [

@@ -1,0 +1,42 @@
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("@rules_cc_autoconf//autoconf:autoconf.bzl", "autoconf")
+load("@rules_cc_autoconf//autoconf:autoconf_hdr.bzl", "autoconf_hdr")
+load("@rules_cc_autoconf//autoconf:checks.bzl", "macros")
+load("@rules_cc_autoconf//autoconf:package_info.bzl", "package_info")
+
+package_info(
+    name = "package",
+    module_bazel = "//:MODULE.bazel",
+)
+
+autoconf(
+    name = "autoconf",
+    # Plural forms (AC_CHECK_FUNCS, AC_CHECK_HEADERS) automatically create
+    # HAVE_* defines matching GNU autoconf conventions.
+    checks = macros.AC_CHECK_FUNCS([
+        "malloc",
+        "free",
+    ]) + macros.AC_CHECK_HEADERS([
+        "stdio.h",
+        "stdlib.h",
+        "string.h",
+    ]),
+    visibility = ["//visibility:public"],
+    deps = [":package"],
+)
+
+autoconf_hdr(
+    name = "config",
+    out = "config.h",
+    template = "config.h.in",
+    deps = [":autoconf"],
+)
+
+cc_test(
+    name = "simple_test",
+    srcs = [
+        "simple_test.c",
+        ":config.h",
+    ],
+    deps = ["@rules_cc_autoconf_example_submodule//package:lib"],
+)

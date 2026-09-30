@@ -14,6 +14,7 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -22,6 +23,7 @@ licenses(["notice"])
 cc_library(
     name = "interop",
     hdrs = ["interop.h"],
+    copts = CEL_COPTS,
     deps = ["//common:legacy_value"],
 )
 
@@ -29,6 +31,7 @@ cc_library(
     name = "cel_value_equal",
     srcs = ["cel_value_equal.cc"],
     hdrs = ["cel_value_equal.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:kind",
         "//eval/public:cel_number",
@@ -46,6 +49,7 @@ cc_library(
 cc_test(
     name = "cel_value_equal_test",
     srcs = ["cel_value_equal_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_value_equal",
         "//eval/public:cel_value",
@@ -71,6 +75,7 @@ cc_library(
     name = "errors",
     srcs = ["errors.cc"],
     hdrs = ["errors.h"],
+    copts = CEL_COPTS,
     deps = [
         "//runtime/internal:errors",
         "@com_google_absl//absl/status",
@@ -83,6 +88,7 @@ cc_library(
     name = "adapter_activation_impl",
     srcs = ["adapter_activation_impl.cc"],
     hdrs = ["adapter_activation_impl.h"],
+    copts = CEL_COPTS,
     deps = [
         ":interop",
         "//base:attributes",

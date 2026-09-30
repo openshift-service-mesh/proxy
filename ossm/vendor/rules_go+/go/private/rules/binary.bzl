@@ -26,10 +26,10 @@ load(
 )
 load(
     "//go/private:context.bzl",
-    "CGO_ATTRS",
-    "CGO_FRAGMENTS",
     "CGO_TOOLCHAINS",
     "go_context",
+    "go_rule",
+    "maybe_needs_cc_toolchain",
     "new_go_info",
 )
 load(
@@ -126,10 +126,10 @@ def _go_binary_impl(ctx):
     """go_binary_impl emits actions for compiling and linking a go executable."""
     go = go_context(
         ctx,
-        include_deprecated_properties = False,
         importpath = ctx.attr.importpath,
         embed = ctx.attr.embed,
         go_context_data = ctx.attr._go_context_data,
+        maybe_needs_cc_toolchain = maybe_needs_cc_toolchain(ctx.attr, go_infos = ctx.attr.deps),
         goos = ctx.attr.goos,
         goarch = ctx.attr.goarch,
     )
@@ -171,6 +171,7 @@ def _go_binary_impl(ctx):
         gc_linkopts = gc_linkopts(ctx),
         version_file = ctx.version_file,
         info_file = ctx.info_file,
+        link_exec_group = "go_link",
         executable = executable,
     )
     validation_output = archive.data._validation_output
@@ -255,6 +256,7 @@ def _go_binary_kwargs(go_cc_aspects = []):
     return {
         "cfg": go_transition,
         "implementation": _go_binary_impl,
+        "provides": [GoArchive],
         "attrs": {
             "srcs": attr.label_list(
                 allow_files = go_exts + asm_exts + cgo_exts + syso_exts,
@@ -459,9 +461,9 @@ def _go_binary_kwargs(go_cc_aspects = []):
                 values = ["auto"] + LINKMODES,
                 doc = """Determines how the binary should be built and linked. This accepts some of
                 the same values as `go build -buildmode` and works the same way.
-                <br><br>
+
                 <ul>
-                <li>`auto` (default): Controlled by `//go/config:linkmode`, which defaults to `normal`.</li>
+                <li>`auto` (default): Controlled by `//go/config:linkmode`, which defaults to `pie` on supported platforms and `normal` elsewhere.</li>
                 <li>`normal`: Builds a normal executable with position-dependent code.</li>
                 <li>`pie`: Builds a position-independent executable.</li>
                 <li>`plugin`: Builds a shared library that can be loaded as a Go plugin. Only supported on platforms that support plugins.</li>
@@ -480,6 +482,10 @@ def _go_binary_kwargs(go_cc_aspects = []):
                 default = "//go/config:empty",
             ),
             "_go_context_data": attr.label(default = "//:go_context_data"),
+            "_nogo": attr.label(
+                default = Label("@io_bazel_rules_nogo//:nogo"),
+                cfg = "exec",
+            ),
             "_allowlist_function_transition": attr.label(
                 default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
             ),
@@ -490,22 +496,25 @@ def _go_binary_kwargs(go_cc_aspects = []):
             "_bincov": attr.label(
                 default = "//go/tools/bzltestutil/bincov",
             ),
-        } | CGO_ATTRS,
-        "fragments": CGO_FRAGMENTS,
-        "toolchains": [GO_TOOLCHAIN] + CGO_TOOLCHAINS,
+        },
+        "exec_groups": {
+            "go_link": exec_group(
+                toolchains = [GO_TOOLCHAIN] + CGO_TOOLCHAINS,
+            ),
+        },
         "doc": """This builds an executable from a set of source files,
         which must all be in the `main` package. You can run the binary with
-        `bazel run`, or you can build it with `bazel build` and run it directly.<br><br>
-        ***Note:*** `name` should be the same as the desired name of the generated binary.<br><br>
+        `bazel run`, or you can build it with `bazel build` and run it directly.
+
+        ***Note:*** `name` should be the same as the desired name of the generated binary.
+
         **Providers:**
-        <ul>
-          <li>[GoArchive]</li>
-        </ul>
+        - [GoArchive]
         """,
     }
 
-go_binary = rule(executable = True, **_go_binary_kwargs())
-go_non_executable_binary = rule(executable = False, **_go_binary_kwargs(
+go_binary = go_rule(executable = True, **_go_binary_kwargs())
+go_non_executable_binary = go_rule(executable = False, **_go_binary_kwargs(
     go_cc_aspects = [_go_cc_aspect],
 ))
 

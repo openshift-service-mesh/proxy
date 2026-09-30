@@ -2,7 +2,7 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//rust/platform:triple.bzl", "triple")
-load("//rust/platform:triple_mappings.bzl", "SUPPORTED_PLATFORM_TRIPLES")
+load("//rust/platform:triple_mappings.bzl", "SUPPORTED_PLATFORM_TRIPLES", "system_to_staticlib_ext")
 
 def _construct_platform_triple_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -120,10 +120,16 @@ def _construct_known_triples_test_impl(ctx):
     env = unittest.begin(ctx)
 
     _assert_parts(env, triple("aarch64-apple-darwin"), "aarch64", "apple", "macos", None)
+    _assert_parts(env, triple("aarch64-apple-ios-macabi"), "aarch64", "apple", "ios", "macabi")
     _assert_parts(env, triple("aarch64-fuchsia"), "aarch64", "unknown", "fuchsia", None)
     _assert_parts(env, triple("aarch64-unknown-linux-musl"), "aarch64", "unknown", "linux", "musl")
     _assert_parts(env, triple("thumbv7em-none-eabi"), "thumbv7em", None, "none", "eabi")
+    _assert_parts(env, triple("thumbv7em-none-eabihf"), "thumbv7em", None, "none", "eabihf")
     _assert_parts(env, triple("thumbv8m.main-none-eabi"), "thumbv8m.main", None, "none", "eabi")
+
+    # BPF targets
+    _assert_parts(env, triple("bpfeb-unknown-none"), "bpfeb", "unknown", "none", None)
+    _assert_parts(env, triple("bpfel-unknown-none"), "bpfel", "unknown", "none", None)
 
     # Test all WASM32 targets
     _assert_parts(env, triple("wasm32-unknown-unknown"), "wasm32", "unknown", "unknown", None)
@@ -142,7 +148,34 @@ def _construct_known_triples_test_impl(ctx):
     # WebAssembly MVP target
     _assert_parts(env, triple("wasm32v1-none"), "wasm32", "v1", "none", None)
 
+    # AVR bare-metal target
+    _assert_parts(env, triple("avr-none"), "avr", None, "none", None)
+
     _assert_parts(env, triple("x86_64-fuchsia"), "x86_64", "unknown", "fuchsia", None)
+    _assert_parts(env, triple("x86_64-apple-ios-macabi"), "x86_64", "apple", "ios", "macabi")
+
+    return unittest.end(env)
+
+def _wasm_staticlib_ext_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    for system in ["threads", "unknown", "wasi", "wasip1", "wasip2"]:
+        asserts.equals(
+            env,
+            ".a",
+            system_to_staticlib_ext(system),
+            "{} should use a static archive extension".format(system),
+        )
+
+    return unittest.end(env)
+
+def _windows_staticlib_ext_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    asserts.equals(env, ".a", system_to_staticlib_ext("windows", "gnu"))
+    asserts.equals(env, ".a", system_to_staticlib_ext("windows", "gnullvm"))
+    asserts.equals(env, ".lib", system_to_staticlib_ext("windows", "msvc"))
+    asserts.equals(env, ".lib", system_to_staticlib_ext("windows"))
 
     return unittest.end(env)
 
@@ -150,6 +183,8 @@ construct_platform_triple_test = unittest.make(_construct_platform_triple_test_i
 construct_minimal_platform_triple_test = unittest.make(_construct_minimal_platform_triple_test_impl)
 supported_platform_triples_test = unittest.make(_supported_platform_triples_test_impl)
 construct_known_triples_test = unittest.make(_construct_known_triples_test_impl)
+wasm_staticlib_ext_test = unittest.make(_wasm_staticlib_ext_test_impl)
+windows_staticlib_ext_test = unittest.make(_windows_staticlib_ext_test_impl)
 
 def platform_triple_test_suite(name, **kwargs):
     """Define a test suite for testing the `triple` constructor
@@ -170,6 +205,12 @@ def platform_triple_test_suite(name, **kwargs):
     construct_known_triples_test(
         name = "construct_known_triples_test",
     )
+    wasm_staticlib_ext_test(
+        name = "wasm_staticlib_ext_test",
+    )
+    windows_staticlib_ext_test(
+        name = "windows_staticlib_ext_test",
+    )
 
     native.test_suite(
         name = name,
@@ -178,6 +219,8 @@ def platform_triple_test_suite(name, **kwargs):
             ":construct_minimal_platform_triple_test",
             ":supported_platform_triples_test",
             ":construct_known_triples_test",
+            ":wasm_staticlib_ext_test",
+            ":windows_staticlib_ext_test",
         ],
         **kwargs
     )

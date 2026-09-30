@@ -15,17 +15,16 @@
 """# Rules related to Apple bundle versioning."""
 
 load(
-    "@bazel_skylib//lib:dicts.bzl",
-    "dicts",
-)
-load(
     "//apple/internal:apple_toolchains.bzl",
-    "AppleXPlatToolsToolchainInfo",
     "apple_toolchain_utils",
 )
 load(
     "//apple/internal:providers.bzl",
     "new_applebundleversioninfo",
+)
+load(
+    "//apple/internal:shared_environment.bzl",
+    "shared_environment",
 )
 
 def _collect_group_names(s):
@@ -133,14 +132,16 @@ def _apple_bundle_version_impl(ctx):
     )
     inputs.append(control_file)
 
-    versiontool = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo].versiontool
+    versiontool = apple_toolchain_utils.get_xplat_toolchain(ctx).versiontool
 
     ctx.actions.run(
-        executable = versiontool,
+        executable = versiontool.files_to_run,
         arguments = [control_file.path, bundle_version_file.path],
+        env = shared_environment.default_env,
         inputs = inputs,
         outputs = [bundle_version_file],
         mnemonic = "AppleBundleVersion",
+        exec_group = apple_toolchain_utils.get_xplat_exec_group(ctx),
     )
 
     return [
@@ -152,55 +153,53 @@ def _apple_bundle_version_impl(ctx):
 
 apple_bundle_version = rule(
     _apple_bundle_version_impl,
-    attrs = dicts.add(
-        apple_toolchain_utils.shared_attrs(),
-        {
-            "build_label_pattern": attr.string(
-                mandatory = False,
-                doc = """
+    attrs = {
+        "build_label_pattern": attr.string(
+            mandatory = False,
+            doc = """
 A pattern that should contain placeholders inside curly braces (e.g.,
 `"foo_{version}_bar"`) that is used to parse the build label that is generated
 in the build info file with the `--embed_label` option passed to Bazel. Each of
 the placeholders is expected to match one of the keys in the `capture_groups`
 attribute.
 """,
-            ),
-            "build_version": attr.string(
-                mandatory = True,
-                doc = """
+        ),
+        "build_version": attr.string(
+            mandatory = True,
+            doc = """
 A string that will be used as the value for the `CFBundleVersion` key in a
 depending bundle's Info.plist. If this string contains placeholders, then they
 will be replaced by strings captured out of `build_label_pattern`.
 """,
-            ),
-            "capture_groups": attr.string_dict(
-                mandatory = False,
-                doc = """
+        ),
+        "capture_groups": attr.string_dict(
+            mandatory = False,
+            doc = """
 A dictionary where each key is the name of a placeholder found in
 `build_label_pattern` and the corresponding value is the regular expression that
 should match that placeholder. If this attribute is provided, then
 `build_label_pattern` must also be provided.
 """,
-            ),
-            "fallback_build_label": attr.string(
-                mandatory = False,
-                doc = """
+        ),
+        "fallback_build_label": attr.string(
+            mandatory = False,
+            doc = """
 A build label to use when the no `--embed_label` was provided on the build. Used
 to provide a version that will be used during development.
 """,
-            ),
-            "short_version_string": attr.string(
-                mandatory = False,
-                doc = """
+        ),
+        "short_version_string": attr.string(
+            mandatory = False,
+            doc = """
 A string that will be used as the value for the `CFBundleShortVersionString` key
 in a depending bundle's Info.plist. If this string contains placeholders, then
 they will be replaced by strings captured out of `build_label_pattern`. This
 attribute is optional; if it is omitted, then the value of `build_version` will
 be used for this key as well.
 """,
-            ),
-        },
-    ),
+        ),
+    },
+    exec_groups = apple_toolchain_utils.use_apple_exec_group_toolchain(),
     doc = """
 Produces a target that contains versioning information for an Apple bundle.
 

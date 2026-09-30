@@ -18,12 +18,15 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 # Internal AST implementation and utilities
 # These are needed by various parts of the CEL-C++ library, but are not intended for public use at
 # this time.
+load("//bazel:copts.bzl", "CEL_COPTS")
+
 package(default_visibility = ["//visibility:public"])
 
 cc_library(
     name = "constant_proto",
     srcs = ["constant_proto.cc"],
     hdrs = ["constant_proto.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:constant",
         "//internal:proto_time_encoding",
@@ -42,6 +45,7 @@ cc_library(
     name = "expr_proto",
     srcs = ["expr_proto.cc"],
     hdrs = ["expr_proto.h"],
+    copts = CEL_COPTS,
     deps = [
         ":constant_proto",
         "//common:constant",
@@ -61,6 +65,7 @@ cc_library(
 cc_test(
     name = "expr_proto_test",
     srcs = ["expr_proto_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":expr_proto",
         "//common:expr",
@@ -77,6 +82,7 @@ cc_library(
     name = "source_info_proto",
     srcs = ["source_info_proto.cc"],
     hdrs = ["source_info_proto.h"],
+    copts = CEL_COPTS,
     deps = [
         ":expr_proto",
         "//common:ast",
@@ -95,13 +101,17 @@ cc_library(
     name = "metadata",
     srcs = ["metadata.cc"],
     hdrs = ["metadata.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:constant",
         "//common:expr",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/functional:overload",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:variant",
     ],
@@ -110,6 +120,7 @@ cc_library(
 cc_test(
     name = "metadata_test",
     srcs = ["metadata_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":metadata",
         "//common:expr",
@@ -125,6 +136,7 @@ cc_library(
         "navigable_ast_internal.h",
         "navigable_ast_kinds.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -138,6 +150,7 @@ cc_library(
 cc_test(
     name = "navigable_ast_internal_test",
     srcs = ["navigable_ast_internal_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":navigable_ast_internal",
         "//internal:testing",

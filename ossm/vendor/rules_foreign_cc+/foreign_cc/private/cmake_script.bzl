@@ -18,41 +18,80 @@ def _escape_dquote_bash_crosstool(text):
     # We use a starlark raw string to prevent the need to escape backslashes for starlark as well.
     return text.replace('"', r'\\\\\\\"')
 
-_TARGET_OS_PARAMS = {
-    "android": {
-        "ANDROID": "YES",
-        "CMAKE_SYSTEM_NAME": "Linux",
-    },
-    "emscripten": {
-        "CMAKE_SYSTEM_NAME": "Emscripten",
-    },
-    "linux": {
-        "CMAKE_SYSTEM_NAME": "Linux",
-    },
+_CMAKE_SYSTEM_NAME = {
+    "android": "Linux",
+    "emscripten": "Emscripten",
+    "ios": "iOS",
+    "linux": "Linux",
+    "macos": "Darwin",
+    "tvos": "tvOS",
+    "watchos": "watchOS",
 }
 
-_TARGET_ARCH_PARAMS = {
-    "aarch64": {
-        "CMAKE_SYSTEM_PROCESSOR": "aarch64",
-    },
-    "ppc64le": {
-        "CMAKE_SYSTEM_PROCESSOR": "ppc64le",
-    },
-    "s390x": {
-        "CMAKE_SYSTEM_PROCESSOR": "s390x",
-    },
+# CMAKE_SYSTEM_PROCESSOR values for architectures whose value does not depend on
+# the target OS. Architectures that need an OS-dependent value (e.g. armv7) are
+# intentionally absent and handled as exceptions in `_cmake_target_params`.
+_CMAKE_SYSTEM_PROCESSOR = {
+    "aarch64": "aarch64",
+    "ppc64le": "ppc64le",
+    "s390x": "s390x",
     # Emscripten configures CMAKE_SYSTEM_PROCESSOR as follows for compatibility with libraries such as OpenCV
     # https://github.com/emscripten-core/emscripten/blob/79ee3d1/cmake/Modules/Platform/Emscripten.cmake#L23-L30
-    "wasm32": {
-        "CMAKE_SYSTEM_PROCESSOR": "x86",
-    },
-    "wasm64": {
-        "CMAKE_SYSTEM_PROCESSOR": "x86_64",
-    },
-    "x86_64": {
-        "CMAKE_SYSTEM_PROCESSOR": "x86_64",
-    },
+    "wasm32": "x86",
+    "wasm64": "x86_64",
+    # CMAKE_SYSTEM_PROCESSOR should match `uname -m`
+    # (https://cmake.org/cmake/help/latest/variable/CMAKE_HOST_SYSTEM_PROCESSOR.html),
+    # which is `i686` on 32-bit x86: the kernel starts the machine string as
+    # `i386` and rewrites the family digit to the (capped) CPU family
+    # (https://github.com/torvalds/linux/blob/v6.14/arch/x86/kernel/cpu/common.c#L2379-L2380).
+    "x86_32": "i686",
+    "x86_64": "x86_64",
 }
+
+def _cmake_target_params(current_label, target_os, target_arch):
+    """Return the CMake cross-compile params for a target (os, arch) pair.
+
+    Most architectures map to a single processor name regardless of OS (see
+    `_CMAKE_SYSTEM_PROCESSOR`); the exceptions are handled inline. Fails with a
+    specific diagnostic if the OS or arch is unsupported.
+
+    Args:
+        current_label: The label of the target currently being built
+        target_os: The normalized target OS name
+        target_arch: The normalized target arch name
+
+    Returns:
+        dict: CMake cache/toolchain values for the target platform
+    """
+    if target_os not in _CMAKE_SYSTEM_NAME:
+        fail("target_os", target_os, "is not supported, please update foreign_cc/private/cmake_script.bzl; triggered by", current_label)
+
+    params = {}
+    if target_os == "android":
+        params["ANDROID"] = "YES"
+    params["CMAKE_SYSTEM_NAME"] = _CMAKE_SYSTEM_NAME[target_os]
+
+    if target_arch == "armv7":
+        # CMAKE_SYSTEM_PROCESSOR should match `uname -m`
+        # (https://cmake.org/cmake/help/latest/variable/CMAKE_HOST_SYSTEM_PROCESSOR.html),
+        # which is `armv7l` on Linux: the kernel builds the machine string from
+        # the arch name `armv7`
+        # (https://github.com/torvalds/linux/blob/v6.14/arch/arm/mm/proc-v7.S#L644)
+        # plus the endianness char `l`
+        # (https://github.com/torvalds/linux/blob/v6.14/arch/arm/kernel/setup.c#L723-L724).
+        # On Android it is instead `armv7-a`, the NDK's canonical proc value for
+        # the armeabi-v7a ABI, which CMake's NDK support rejects any deviation from
+        # (https://android.googlesource.com/platform/ndk/+/refs/tags/ndk-r28c/meta/abis.json).
+        if target_os == "android":
+            params["CMAKE_SYSTEM_PROCESSOR"] = "armv7-a"
+        else:
+            params["CMAKE_SYSTEM_PROCESSOR"] = "armv7l"
+    elif target_arch in _CMAKE_SYSTEM_PROCESSOR:
+        params["CMAKE_SYSTEM_PROCESSOR"] = _CMAKE_SYSTEM_PROCESSOR[target_arch]
+    else:
+        fail("target_arch", target_arch, "is not supported, please update foreign_cc/private/cmake_script.bzl; triggered by", current_label)
+
+    return params
 
 def create_cmake_script(
         workspace_name,
@@ -107,7 +146,7 @@ def create_cmake_script(
 
     merged_prefix_path = _merge_prefix_path(user_cache, include_dirs, ext_build_dirs)
 
-    toolchain_dict = _fill_crossfile_from_toolchain(workspace_name, tools, flags, target_os)
+    toolchain_dict = _fill_crossfile_from_toolchain(workspace_name, tools, flags)
     params = None
 
     # Avoid CMake passing the wrong linker flags when cross compiling
@@ -118,21 +157,20 @@ def create_cmake_script(
     # cache, and CMAKE_SYSTEM_PROCESSOR is ignored unless CMAKE_SYSTEM_NAME is
     # also set.
     if target_os == "unknown":
-        # buildifier: disable=print
-        print("target_os is unknown, please update foreign_cc/private/framework/platform.bzl and foreign_cc/private/cmake_script.bzl; triggered by", current_label)
+        fail("target_os is unknown, please update foreign_cc/private/framework/platform.bzl and foreign_cc/private/cmake_script.bzl; triggered by", current_label)
     elif target_arch == "unknown":
-        # buildifier: disable=print
-        print("target_arch is unknown, please update foreign_cc/private/framework/platform.bzl and foreign_cc/private/cmake_script.bzl; triggered by", current_label)
+        fail("target_arch is unknown, please update foreign_cc/private/framework/platform.bzl and foreign_cc/private/cmake_script.bzl; triggered by", current_label)
     elif target_os != host_os or target_arch != host_arch:
-        toolchain_dict.update(_TARGET_OS_PARAMS.get(target_os, {}))
-        toolchain_dict.update(_TARGET_ARCH_PARAMS.get(target_arch, {}))
+        # if we don't have a value here, it will end up attempting a native
+        # compile, even if that's not right, so emit a warning
+        toolchain_dict.update(_cmake_target_params(current_label, target_os, target_arch))
 
     keys_with_empty_values_in_user_cache = [key for key in user_cache if user_cache.get(key) == ""]
 
     if no_toolchain_file:
         params = _create_cache_entries_env_vars(toolchain_dict, user_cache, user_env)
     else:
-        params = _create_crosstool_file_text(toolchain_dict, user_cache, user_env)
+        params = _create_crosstool_file_text(toolchain_dict, user_cache, user_env, target_os)
 
     build_type = params.cache.get(
         "CMAKE_BUILD_TYPE",
@@ -144,6 +182,13 @@ def create_cmake_script(
         "CMAKE_PREFIX_PATH": merged_prefix_path,
         "PKG_CONFIG_ARGN": "--define-variable=EXT_BUILD_DEPS=$$EXT_BUILD_DEPS$$",
     })
+
+    # On Windows, default to embedded debug info (`/Z7`) so newer CMake versions
+    # do not force Program Database output (`/Zi`), which is more prone to flaky
+    # PDB failures. Older CMake versions may ignore this and rely on the fallback
+    # flag rewrite in the generated toolchain file instead.
+    if target_os == "windows" and params.cache.get("CMAKE_MSVC_DEBUG_INFORMATION_FORMAT") == None:
+        params.cache["CMAKE_MSVC_DEBUG_INFORMATION_FORMAT"] = "Embedded"
 
     # Give user the ability to suppress some value, taken from Bazel's toolchain,
     # or to suppress calculated CMAKE_BUILD_TYPE
@@ -237,7 +282,7 @@ _CMAKE_CACHE_ENTRIES_CROSSTOOL = {
     "CMAKE_SYSTEM_PROCESSOR": struct(value = "CMAKE_SYSTEM_PROCESSOR", replace = False),
 }
 
-def _create_crosstool_file_text(toolchain_dict, user_cache, user_env):
+def _create_crosstool_file_text(toolchain_dict, user_cache, user_env, target_os):
     cache_entries = _dict_copy(user_cache)
     env_vars = _dict_copy(user_env)
     _move_dict_values(toolchain_dict, env_vars, _CMAKE_ENV_VARS_FOR_CROSSTOOL)
@@ -266,8 +311,35 @@ def _create_crosstool_file_text(toolchain_dict, user_cache, user_env):
     cache_entries.update({
         "CMAKE_TOOLCHAIN_FILE": "$$BUILD_TMPDIR$$/crosstool_bazel.cmake",
     })
+
+    # When targeting Windows, CMake's default CMAKE_{C,CXX}_FLAGS_{DEBUG,RELWITHDEBINFO}
+    # include /Zi which uses a shared PDB file via mspdbsrv.exe. This causes
+    # "PDB API call failed" errors (C1090) when multiple targets build in parallel.
+    # Apply the fallback rewrite unconditionally for Windows because the toolchain
+    # file is evaluated before CMake has set MSVC=TRUE.
+    msvc_debug_fix_lines = []
+    if target_os == "windows":
+        msvc_debug_fix_lines = [
+            'set(_CMAKE_C_FLAGS_DEBUG "\\${CMAKE_C_FLAGS_DEBUG}")',
+            'string(REPLACE "/Zi" "/Z7" CMAKE_C_FLAGS_DEBUG_INIT "\\${CMAKE_C_FLAGS_DEBUG_INIT}")',
+            'string(REPLACE "/Zi" "/Z7" _CMAKE_C_FLAGS_DEBUG "\\${_CMAKE_C_FLAGS_DEBUG}")',
+            'set(CMAKE_C_FLAGS_DEBUG "\\${_CMAKE_C_FLAGS_DEBUG}" CACHE STRING "" FORCE)',
+            'set(_CMAKE_CXX_FLAGS_DEBUG "\\${CMAKE_CXX_FLAGS_DEBUG}")',
+            'string(REPLACE "/Zi" "/Z7" CMAKE_CXX_FLAGS_DEBUG_INIT "\\${CMAKE_CXX_FLAGS_DEBUG_INIT}")',
+            'string(REPLACE "/Zi" "/Z7" _CMAKE_CXX_FLAGS_DEBUG "\\${_CMAKE_CXX_FLAGS_DEBUG}")',
+            'set(CMAKE_CXX_FLAGS_DEBUG "\\${_CMAKE_CXX_FLAGS_DEBUG}" CACHE STRING "" FORCE)',
+            'set(_CMAKE_C_FLAGS_RELWITHDEBINFO "\\${CMAKE_C_FLAGS_RELWITHDEBINFO}")',
+            'string(REPLACE "/Zi" "/Z7" CMAKE_C_FLAGS_RELWITHDEBINFO_INIT "\\${CMAKE_C_FLAGS_RELWITHDEBINFO_INIT}")',
+            'string(REPLACE "/Zi" "/Z7" _CMAKE_C_FLAGS_RELWITHDEBINFO "\\${_CMAKE_C_FLAGS_RELWITHDEBINFO}")',
+            'set(CMAKE_C_FLAGS_RELWITHDEBINFO "\\${_CMAKE_C_FLAGS_RELWITHDEBINFO}" CACHE STRING "" FORCE)',
+            'set(_CMAKE_CXX_FLAGS_RELWITHDEBINFO "\\${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")',
+            'string(REPLACE "/Zi" "/Z7" CMAKE_CXX_FLAGS_RELWITHDEBINFO_INIT "\\${CMAKE_CXX_FLAGS_RELWITHDEBINFO_INIT}")',
+            'string(REPLACE "/Zi" "/Z7" _CMAKE_CXX_FLAGS_RELWITHDEBINFO "\\${_CMAKE_CXX_FLAGS_RELWITHDEBINFO}")',
+            'set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "\\${_CMAKE_CXX_FLAGS_RELWITHDEBINFO}" CACHE STRING "" FORCE)',
+        ]
+
     return struct(
-        commands = sorted(crosstool_vars) + ["cat > crosstool_bazel.cmake << EOF"] + sorted(lines) + ["EOF", ""],
+        commands = sorted(crosstool_vars) + ["cat > crosstool_bazel.cmake << EOF"] + sorted(lines) + msvc_debug_fix_lines + ["EOF", ""],
         env = env_vars,
         cache = cache_entries,
     )
@@ -336,12 +408,13 @@ def _move_dict_values(target, source, descriptor_map):
             else:
                 target[existing.value] = target[existing.value] + " " + value
 
-def _fill_crossfile_from_toolchain(workspace_name, tools, flags, target_os):
+def _fill_crossfile_from_toolchain(workspace_name, tools, flags):
     dict = {}
 
     _sysroot = _find_in_cc_or_cxx(flags, "sysroot")
     if _sysroot:
         dict["CMAKE_SYSROOT"] = _absolutize(workspace_name, _sysroot)
+        dict["CMAKE_OSX_SYSROOT"] = _absolutize(workspace_name, _sysroot)
 
     _ext_toolchain_cc = _find_flag_value(flags.cc, "gcc_toolchain")
     if _ext_toolchain_cc:
@@ -390,16 +463,8 @@ def _fill_crossfile_from_toolchain(workspace_name, tools, flags, target_os):
     if flags.cxx_linker_shared:
         dict["CMAKE_SHARED_LINKER_FLAGS_INIT"] = _join_flags_list(workspace_name, flags.cxx_linker_shared)
 
-        # cxx_linker_shared will contain '-shared' or '-dynamiclib' on macos. This flag conflicts with "-bundle"
-        # that is set by CMAKE based on platform. e.g.
-        # https://gitlab.kitware.com/cmake/cmake/-/blob/master/Modules/Platform/Apple-Intel.cmake#L11
-        # Therefore, for modules aka bundles we want to remove these flags.
-        module_linker_flags = []
-        if target_os == "macos":
-            module_linker_flags = [flag for flag in flags.cxx_linker_shared if flag not in ["-shared", "-dynamiclib"]]
-        else:
-            module_linker_flags = flags.cxx_linker_shared
-        dict["CMAKE_MODULE_LINKER_FLAGS_INIT"] = _join_flags_list(workspace_name, module_linker_flags)
+    if flags.cxx_linker_dynamic_module:
+        dict["CMAKE_MODULE_LINKER_FLAGS_INIT"] = _join_flags_list(workspace_name, flags.cxx_linker_dynamic_module)
     if flags.cxx_linker_executable:
         dict["CMAKE_EXE_LINKER_FLAGS_INIT"] = _join_flags_list(workspace_name, flags.cxx_linker_executable)
 
@@ -482,6 +547,7 @@ export_for_test = struct(
     move_dict_values = _move_dict_values,
     reverse_descriptor_dict = _reverse_descriptor_dict,
     merge_toolchain_and_user_values = _merge_toolchain_and_user_values,
+    cmake_target_params = _cmake_target_params,
     CMAKE_ENV_VARS_FOR_CROSSTOOL = _CMAKE_ENV_VARS_FOR_CROSSTOOL,
     CMAKE_CACHE_ENTRIES_CROSSTOOL = _CMAKE_CACHE_ENTRIES_CROSSTOOL,
 )

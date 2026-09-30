@@ -16,6 +16,7 @@ package runner
 
 import (
 	"fmt"
+	"strconv"
 )
 
 func addExtensionTests() {
@@ -137,7 +138,7 @@ func addExtensionTests() {
 				flags:         []string{"-expect-server-name", "example.com"},
 				resumeSession: true,
 				expectations: connectionExpectations{
-					serverNameAck: ptrTo(true),
+					serverNameAck: new(true),
 				},
 			})
 			testCases = append(testCases, testCase{
@@ -154,7 +155,7 @@ func addExtensionTests() {
 				},
 				resumeSession: true,
 				expectations: connectionExpectations{
-					serverNameAck: ptrTo(false),
+					serverNameAck: new(false),
 				},
 			})
 
@@ -1880,6 +1881,40 @@ func addExtensionTests() {
 				expectedLocalError: "remote error: error decoding message",
 			})
 
+			// The certificate authorities extension cannot be empty. The sender should
+			// have omitted if empty.
+			if ver.version >= VersionTLS13 {
+				testCases = append(testCases, testCase{
+					protocol: protocol,
+					testType: clientTest,
+					name:     "RejectEmptyCertificateAuthorities-Client-" + suffix,
+					config: Config{
+						MaxVersion: ver.version,
+						ClientAuth: RequireAnyClientCert,
+						Bugs: ProtocolBugs{
+							SendEmptyCertificateAuthorities: true,
+						},
+					},
+					shouldFail:         true,
+					expectedError:      ":ERROR_PARSING_EXTENSION:",
+					expectedLocalError: "remote error: error decoding message",
+				})
+				testCases = append(testCases, testCase{
+					protocol: protocol,
+					testType: serverTest,
+					name:     "RejectEmptyCertificateAuthorities-Server-" + suffix,
+					config: Config{
+						MaxVersion: ver.version,
+						Bugs: ProtocolBugs{
+							SendEmptyCertificateAuthorities: true,
+						},
+					},
+					shouldFail:         true,
+					expectedError:      ":ERROR_PARSING_EXTENSION:",
+					expectedLocalError: "remote error: error decoding message",
+				})
+			}
+
 			// Extension permutation should interact correctly with other extensions,
 			// HelloVerifyRequest, HelloRetryRequest, and ECH. SSLTest.PermuteExtensions
 			// in ssl_test.cc tests that the extensions are actually permuted. This
@@ -1964,10 +1999,13 @@ func addExtensionTests() {
 				RequireClientHelloSize: 512,
 			},
 		},
-		// This hostname just needs to be long enough to push the
-		// ClientHello into F5's danger zone between 256 and 511 bytes
-		// long.
-		flags: []string{"-host-name", "01234567890123456789012345678901234567890123456789012345678901234567890123456789.com"},
+		flags: []string{
+			// This hostname just needs to be long enough to push the
+			// ClientHello into F5's danger zone between 256 and 511 bytes long.
+			"-host-name", "01234567890123456789012345678901234567890123456789012345678901234567890123456789.com",
+			// Curve chosen to make handshakes short enough to end up in the danger zone.
+			"-curves", strconv.Itoa(int(CurveX25519)),
+		},
 	})
 
 	// Test that illegal extensions in TLS 1.3 are rejected by the client if
@@ -2369,5 +2407,153 @@ func addOmitExtensionsTests() {
 				},
 			},
 		})
+	}
+}
+
+// Test that our extension parsers consistently reject trailing data.
+// TODO(crbug.com/505803427): Test other extensions.
+func addExtensionTrailingDataTests() {
+	for _, protocol := range []protocol{tls, dtls, quic} {
+		for _, ver := range allVersions(protocol) {
+			suffix := fmt.Sprintf("%s-%s", protocol.String(), ver.name)
+
+			testCases = append(testCases, testCase{
+				protocol: protocol,
+				testType: clientTest,
+				name:     "ExtensionTrailingData-ServerName-Client-" + suffix,
+				config: Config{
+					MaxVersion: ver.version,
+					Bugs: ProtocolBugs{
+						SendServerNameAck:          true,
+						ExtensionsWithTrailingData: []uint16{extensionServerName},
+					},
+				},
+				flags:              []string{"-host-name", "example.com"},
+				shouldFail:         true,
+				expectedError:      ":ERROR_PARSING_EXTENSION:",
+				expectedLocalError: "remote error: error decoding message",
+			})
+			testCases = append(testCases, testCase{
+				protocol: protocol,
+				testType: serverTest,
+				name:     "ExtensionTrailingData-ServerName-Server-" + suffix,
+				config: Config{
+					MaxVersion: ver.version,
+					ServerName: "example.com",
+					Bugs: ProtocolBugs{
+						ExtensionsWithTrailingData: []uint16{extensionServerName},
+					},
+				},
+				shouldFail:         true,
+				expectedError:      ":ERROR_PARSING_EXTENSION:",
+				expectedLocalError: "remote error: error decoding message",
+			})
+
+			ocspError := ":ERROR_PARSING_EXTENSION:"
+			if ver.version >= VersionTLS13 {
+				ocspError = ":DECODE_ERROR:"
+			}
+			testCases = append(testCases, testCase{
+				protocol: protocol,
+				testType: clientTest,
+				name:     "ExtensionTrailingData-StatusRequest-Client-" + suffix,
+				config: Config{
+					MaxVersion: ver.version,
+					Credential: rsaCertificate.WithOCSP(testOCSPResponse),
+					Bugs: ProtocolBugs{
+						ExtensionsWithTrailingData: []uint16{extensionStatusRequest},
+					},
+				},
+				flags:              []string{"-enable-ocsp-stapling"},
+				shouldFail:         true,
+				expectedError:      ocspError,
+				expectedLocalError: "remote error: error decoding message",
+			})
+			// Skip the server test. BoringSSL does not currently parse most of the
+			// ClientHello status_request extension.
+
+			if ver.version >= VersionTLS13 {
+				testCases = append(testCases, testCase{
+					protocol: protocol,
+					testType: clientTest,
+					name:     "ExtensionTrailingData-CertificateAuthorities-Client-" + suffix,
+					config: Config{
+						MaxVersion: ver.version,
+						ClientAuth: RequireAnyClientCert,
+						ClientCAs:  makeCertPoolFromRoots(&rsaChainCertificate, &ecdsaP384Certificate),
+						Bugs: ProtocolBugs{
+							ExtensionsWithTrailingData: []uint16{extensionCertificateAuthorities},
+						},
+					},
+					shouldFail:         true,
+					expectedError:      ":ERROR_PARSING_EXTENSION:",
+					expectedLocalError: "remote error: error decoding message",
+				})
+				testCases = append(testCases, testCase{
+					protocol: protocol,
+					testType: serverTest,
+					name:     "ExtensionTrailingData-CertificateAuthorities-Server-" + suffix,
+					config: Config{
+						MaxVersion:  ver.version,
+						RootCAs:     makeCertPoolFromRoots(&rsaChainCertificate, &ecdsaP384Certificate),
+						SendRootCAs: true,
+						Bugs: ProtocolBugs{
+							ExtensionsWithTrailingData: []uint16{extensionCertificateAuthorities},
+						},
+					},
+					shouldFail:         true,
+					expectedError:      ":ERROR_PARSING_EXTENSION:",
+					expectedLocalError: "remote error: error decoding message",
+				})
+
+				testCases = append(testCases, testCase{
+					protocol: protocol,
+					testType: clientTest,
+					name:     "ExtensionTrailingData-TrustAnchors-EncryptedExtensions-Client-" + suffix,
+					config: Config{
+						MaxVersion:            ver.version,
+						AvailableTrustAnchors: [][]byte{{1}},
+						Bugs: ProtocolBugs{
+							ExtensionsWithTrailingData: []uint16{extensionTrustAnchors},
+						},
+					},
+					flags:              []string{"-requested-trust-anchors", trustAnchorListFlagValue([]byte{2})},
+					shouldFail:         true,
+					expectedError:      ":ERROR_PARSING_EXTENSION:",
+					expectedLocalError: "remote error: error decoding message",
+				})
+				testCases = append(testCases, testCase{
+					protocol: protocol,
+					testType: clientTest,
+					name:     "ExtensionTrailingData-TrustAnchors-Certificate-Client-" + suffix,
+					config: Config{
+						MaxVersion: ver.version,
+						Bugs: ProtocolBugs{
+							AlwaysMatchTrustAnchorID:   true,
+							ExtensionsWithTrailingData: []uint16{extensionTrustAnchors},
+						},
+					},
+					flags:              []string{"-requested-trust-anchors", trustAnchorListFlagValue([]byte{2})},
+					shouldFail:         true,
+					expectedError:      ":ERROR_PARSING_EXTENSION:",
+					expectedLocalError: "remote error: error decoding message",
+				})
+				testCases = append(testCases, testCase{
+					protocol: protocol,
+					testType: serverTest,
+					name:     "ExtensionTrailingData-TrustAnchors-ClientHello-Server-" + suffix,
+					config: Config{
+						MaxVersion:          ver.version,
+						RequestTrustAnchors: [][]byte{{1}},
+						Bugs: ProtocolBugs{
+							ExtensionsWithTrailingData: []uint16{extensionTrustAnchors},
+						},
+					},
+					shouldFail:         true,
+					expectedError:      ":ERROR_PARSING_EXTENSION:",
+					expectedLocalError: "remote error: error decoding message",
+				})
+			}
+		}
 	}
 }

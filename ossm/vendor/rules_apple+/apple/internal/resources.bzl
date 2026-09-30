@@ -250,6 +250,8 @@ def _bucketize_data(
                 bucket_name = "framework"
             elif resource_short_path.endswith(".strings") or resource_short_path.endswith(".stringsdict"):
                 bucket_name = "strings"
+            elif resource_short_path.endswith(".xcstrings"):
+                bucket_name = "xcstrings"
             elif resource_short_path.endswith(".storyboard"):
                 bucket_name = "storyboards"
                 resource_swift_module = swift_module
@@ -258,7 +260,9 @@ def _bucketize_data(
                 resource_swift_module = swift_module
             elif ".alticon/" in resource_short_path:
                 bucket_name = "asset_catalogs"
-            elif ".xcassets/" in resource_short_path or ".xcstickers/" in resource_short_path:
+            elif (".icon/" in resource_short_path or
+                  ".xcassets/" in resource_short_path or
+                  ".xcstickers/" in resource_short_path):
                 bucket_name = "asset_catalogs"
             elif ".xcdatamodel" in resource_short_path or ".xcmappingmodel/" in resource_short_path:
                 bucket_name = "datamodels"
@@ -436,6 +440,7 @@ def _bucketize_typed(resources, bucket_type, *, owner = None, parent_dir_param =
 def _process_bucketized_data(
         *,
         actions,
+        mac_exec_group,
         apple_mac_toolchain_info,
         bucketized_owners = [],
         buckets,
@@ -464,6 +469,7 @@ def _process_bucketized_data(
         buckets: A dictionary with bucketized resources organized by resource
             type.
         bundle_id: The bundle ID to configure for this target.
+        mac_exec_group: The execution group for Mac tools.
         output_discriminator: A string to differentiate between different target
             intermediate files or `None`.
         platform_prerequisites: Struct containing information on the platform
@@ -503,6 +509,7 @@ def _process_bucketized_data(
                 "apple_mac_toolchain_info": apple_mac_toolchain_info,
                 "bundle_id": bundle_id,
                 "files": files,
+                "mac_exec_group": mac_exec_group,
                 "output_discriminator": output_discriminator,
                 "parent_dir": parent_dir,
                 "platform_prerequisites": platform_prerequisites,
@@ -522,7 +529,7 @@ def _process_bucketized_data(
 
             # Store each origin as a tuple in an array, to keep this knowledge as a low-memory
             # reference within a depset.
-            for processed_resource, processed_origin in result.processed_origins.items():
+            for processed_resource, processed_origin in getattr(result, "processed_origins", {}).items():
                 processed_origins.append((processed_resource, tuple(processed_origin)))
 
             processed_field = {}

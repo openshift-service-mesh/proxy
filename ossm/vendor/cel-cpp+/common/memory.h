@@ -599,6 +599,11 @@ class ABSL_ATTRIBUTE_TRIVIAL_ABI [[nodiscard]] Unique final {
   friend struct std::pointer_traits<Unique<T>>;
   friend struct ArenaTraits<Unique<T>>;
 
+  static constexpr bool kNeedsArenaDestructor =
+      !std::is_trivially_destructible_v<T> &&
+      !google::protobuf::Arena::is_destructor_skippable<T>::value &&
+      !std::is_base_of_v<google::protobuf::MessageLite, T>;
+
   Unique(T* ptr, uintptr_t arena) noexcept : ptr_(ptr), arena_(arena) {}
 
   Unique(T* ptr, google::protobuf::Arena* arena, bool unowned = false) noexcept
@@ -619,8 +624,7 @@ class ABSL_ATTRIBUTE_TRIVIAL_ABI [[nodiscard]] Unique final {
         if ((arena_ & common_internal::kUniqueArenaBits) ==
             common_internal::kUniqueArenaUnownedBit) {
           // We never registered the destructor, call it if necessary.
-          if constexpr (!std::is_trivially_destructible_v<T> &&
-                        !google::protobuf::Arena::is_destructor_skippable<T>::value) {
+          if constexpr (kNeedsArenaDestructor) {
             std::destroy_at(ptr_);
           }
         }
@@ -631,8 +635,7 @@ class ABSL_ATTRIBUTE_TRIVIAL_ABI [[nodiscard]] Unique final {
   }
 
   void PreRelease() noexcept {
-    if constexpr (!std::is_trivially_destructible_v<T> &&
-                  !google::protobuf::Arena::is_destructor_skippable<T>::value) {
+    if constexpr (kNeedsArenaDestructor) {
       if (static_cast<bool>(*this) &&
           (arena_ & common_internal::kUniqueArenaBits) ==
               common_internal::kUniqueArenaUnownedBit) {

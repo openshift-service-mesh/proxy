@@ -81,9 +81,9 @@ bool OverloadExists(const Resolver& resolver, absl::string_view name,
 
 // Return the qualified name of the most qualified matching overload, or
 // nullopt if no matches are found.
-absl::optional<std::string> BestOverloadMatch(const Resolver& resolver,
-                                              absl::string_view base_name,
-                                              int argument_count) {
+std::optional<std::string> BestOverloadMatch(const Resolver& resolver,
+                                             absl::string_view base_name,
+                                             int argument_count) {
   if (IsSpecialFunction(base_name)) {
     return std::string(base_name);
   }
@@ -99,7 +99,7 @@ absl::optional<std::string> BestOverloadMatch(const Resolver& resolver,
       return *name;
     }
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 // Rewriter visitor for resolving references.
@@ -135,8 +135,17 @@ class ReferenceResolver : public cel::AstRewriterBase {
         expr.mutable_const_expr().set_int64_value(
             reference->value().int64_value());
         return true;
+      } else if (expr.has_ident_expr()) {
+        // "google.protobuf.NullValue.NULL_VALUE" is a special case: sometimes
+        // it is interpreted as null value and sometimes as an enum constant.
+        if (reference->value().has_null_value() &&
+            expr.ident_expr().name() ==
+                "google.protobuf.NullValue.NULL_VALUE") {
+          return false;
+        }
+        expr.set_const_expr(reference->value());
+        return true;
       } else {
-        // No update if the constant reference isn't an int (an enum value).
         return false;
       }
     }
@@ -253,27 +262,27 @@ class ReferenceResolver : public cel::AstRewriterBase {
   // Convert a select expr sub tree into a namespace name if possible.
   // If any operand of the top element is a not a select or an ident node,
   // return nullopt.
-  absl::optional<std::string> ToNamespace(const Expr& expr) {
-    absl::optional<std::string> maybe_parent_namespace;
+  std::optional<std::string> ToNamespace(const Expr& expr) {
+    std::optional<std::string> maybe_parent_namespace;
     if (rewritten_reference_.find(expr.id()) != rewritten_reference_.end()) {
       // The target expr matches a reference (resolved to an ident decl).
       // This should not be treated as a function qualifier.
-      return absl::nullopt;
+      return std::nullopt;
     }
     if (expr.has_ident_expr()) {
       return expr.ident_expr().name();
     } else if (expr.has_select_expr()) {
       if (expr.select_expr().test_only()) {
-        return absl::nullopt;
+        return std::nullopt;
       }
       maybe_parent_namespace = ToNamespace(expr.select_expr().operand());
       if (!maybe_parent_namespace.has_value()) {
-        return absl::nullopt;
+        return std::nullopt;
       }
       return absl::StrCat(*maybe_parent_namespace, ".",
                           expr.select_expr().field());
     } else {
-      return absl::nullopt;
+      return std::nullopt;
     }
   }
 

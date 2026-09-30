@@ -17,16 +17,25 @@
 #include <optional>
 
 #include "google/protobuf/wrappers.pb.h"
+#include "absl/status/status_matchers.h"
+#include "common/type.h"
 #include "eval/public/cel_value.h"
 #include "eval/public/structs/legacy_type_info_apis.h"
 #include "eval/public/testing/matchers.h"
 #include "extensions/protobuf/memory_manager.h"
 #include "internal/testing.h"
+#include "internal/testing_descriptor_pool.h"
+#include "internal/testing_message_factory.h"
+#include "cel/expr/conformance/proto3/test_all_types.pb.h"
 #include "google/protobuf/arena.h"
+#include "google/protobuf/descriptor.h"
+#include "google/protobuf/message.h"
 
 namespace google::api::expr::runtime {
 namespace {
 
+using ::absl_testing::IsOk;
+using ::cel::expr::conformance::proto3::TestAllTypes;
 using ::cel::extensions::ProtoMemoryManager;
 
 TEST(ProtobufDescriptorProvider, Basic) {
@@ -36,7 +45,7 @@ TEST(ProtobufDescriptorProvider, Basic) {
   google::protobuf::Arena arena;
   auto manager = ProtoMemoryManager(&arena);
   auto type_adapter = provider.ProvideLegacyType("google.protobuf.Int64Value");
-  absl::optional<const LegacyTypeInfoApis*> type_info =
+  std::optional<const LegacyTypeInfoApis*> type_info =
       provider.ProvideLegacyTypeInfo("google.protobuf.Int64Value");
 
   ASSERT_TRUE(type_adapter.has_value());
@@ -53,8 +62,9 @@ TEST(ProtobufDescriptorProvider, Basic) {
   ASSERT_OK_AND_ASSIGN(CelValue::MessageWrapper::Builder value,
                        type_adapter->mutation_apis()->NewInstance(manager));
 
-  ASSERT_OK(type_adapter->mutation_apis()->SetField(
-      "value", CelValue::CreateInt64(10), manager, value));
+  ASSERT_THAT(type_adapter->mutation_apis()->SetField(
+                  "value", CelValue::CreateInt64(10), manager, value),
+              IsOk());
 
   ASSERT_OK_AND_ASSIGN(
       CelValue adapted,
@@ -89,6 +99,61 @@ TEST(ProtobufDescriptorProvider, NotFound) {
 
   ASSERT_FALSE(type_adapter.has_value());
   ASSERT_FALSE(type_info.has_value());
+}
+
+TEST(ProtobufDescriptorProvider, FindType) {
+  ProtobufDescriptorProvider provider(
+      cel::internal::GetTestingDescriptorPool(),
+      cel::internal::GetTestingMessageFactory());
+  ASSERT_OK_AND_ASSIGN(std::optional<cel::Type> wrapper_type,
+                       provider.FindType("google.protobuf.Int64Value"));
+  ASSERT_TRUE(wrapper_type.has_value());
+  EXPECT_TRUE(wrapper_type->Is<cel::IntWrapperType>());
+  EXPECT_EQ(wrapper_type->name(), "google.protobuf.Int64Value");
+
+  ASSERT_OK_AND_ASSIGN(
+      std::optional<cel::Type> msg_type,
+      provider.FindType("cel.expr.conformance.proto3.TestAllTypes"));
+  ASSERT_TRUE(msg_type.has_value());
+  EXPECT_TRUE(msg_type->Is<cel::MessageType>());
+  EXPECT_EQ(msg_type->name(), "cel.expr.conformance.proto3.TestAllTypes");
+}
+
+TEST(ProtobufDescriptorProvider, FindStructTypeFieldByName) {
+  ProtobufDescriptorProvider provider(
+      google::protobuf::DescriptorPool::generated_pool(),
+      google::protobuf::MessageFactory::generated_factory());
+  ASSERT_OK_AND_ASSIGN(std::optional<cel::StructTypeField> field,
+                       provider.FindStructTypeFieldByName(
+                           "google.protobuf.Int64Value", "value"));
+  ASSERT_TRUE(field.has_value());
+  EXPECT_EQ(field->name(), "value");
+  EXPECT_EQ(field->number(), 1);
+  EXPECT_EQ(field->GetType(), cel::IntType());
+}
+
+TEST(ProtobufDescriptorProvider, FindTypeNotFound) {
+  ProtobufDescriptorProvider provider(
+      google::protobuf::DescriptorPool::generated_pool(),
+      google::protobuf::MessageFactory::generated_factory());
+  ASSERT_OK_AND_ASSIGN(std::optional<cel::Type> type,
+                       provider.FindType("UnknownType"));
+  EXPECT_FALSE(type.has_value());
+}
+
+TEST(ProtobufDescriptorProvider, FindStructTypeFieldByNameNotFound) {
+  ProtobufDescriptorProvider provider(
+      google::protobuf::DescriptorPool::generated_pool(),
+      google::protobuf::MessageFactory::generated_factory());
+  ASSERT_OK_AND_ASSIGN(std::optional<cel::StructTypeField> field,
+                       provider.FindStructTypeFieldByName(
+                           "google.protobuf.Int64Value", "unknown_field"));
+  EXPECT_FALSE(field.has_value());
+
+  ASSERT_OK_AND_ASSIGN(
+      std::optional<cel::StructTypeField> field2,
+      provider.FindStructTypeFieldByName("UnknownType", "value"));
+  EXPECT_FALSE(field2.has_value());
 }
 
 }  // namespace

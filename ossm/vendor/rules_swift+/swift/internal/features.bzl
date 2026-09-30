@@ -15,22 +15,17 @@
 """Helper functions for working with Bazel features."""
 
 load("@bazel_skylib//lib:new_sets.bzl", "sets")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load(
     ":feature_names.bzl",
     "SWIFT_FEATURE_CACHEABLE_SWIFTMODULES",
-    "SWIFT_FEATURE_CHECKED_EXCLUSIVITY",
     "SWIFT_FEATURE_COVERAGE",
     "SWIFT_FEATURE_COVERAGE_PREFIX_MAP",
-    "SWIFT_FEATURE_DEBUG_PREFIX_MAP",
-    "SWIFT_FEATURE_DECLARE_SWIFTSOURCEINFO",
-    "SWIFT_FEATURE_DISABLE_CLANG_SPI",
     "SWIFT_FEATURE_DISABLE_SYSTEM_INDEX",
     "SWIFT_FEATURE_EMIT_SWIFTDOC",
-    "SWIFT_FEATURE_ENABLE_BARE_SLASH_REGEX",
     "SWIFT_FEATURE_ENABLE_BATCH_MODE",
     "SWIFT_FEATURE_ENABLE_SKIP_FUNCTION_BODIES",
     "SWIFT_FEATURE_ENABLE_TESTING",
-    "SWIFT_FEATURE_ENABLE_V6",
     "SWIFT_FEATURE_FILE_PREFIX_MAP",
     "SWIFT_FEATURE_FULL_DEBUG_INFO",
     "SWIFT_FEATURE_INTERNALIZE_AT_LINK",
@@ -38,9 +33,8 @@ load(
     "SWIFT_FEATURE_OBJC_LINK_FLAGS",
     "SWIFT_FEATURE_OPT_USES_WMO",
     "SWIFT_FEATURE_REMAP_XCODE_PATH",
+    "SWIFT_FEATURE_STATIC_STDLIB",
     "SWIFT_FEATURE_USE_GLOBAL_MODULE_CACHE",
-    "SWIFT_FEATURE__FORCE_ALWAYSLINK_TRUE",
-    "SWIFT_FEATURE__SUPPORTS_V6",
 )
 load(":package_specs.bzl", "label_matches_package_specs")
 load(":target_triples.bzl", "target_triples")
@@ -65,9 +59,43 @@ def are_all_features_enabled(feature_configuration, feature_names):
             return False
     return True
 
+# TODO: b/415809235 - Remove this function and its callers once all build API
+# clients have been migrated to `toolchains`.
+def gather_toolchains(swift_toolchain = None, toolchains = None):
+    """Returns a `struct` containing the Swift and C++ toolchains.
+
+    This function exists solely as a migration helper for the internal build API
+    logic, which needs to temporarily handle being passed _either_ the new
+    `toolchains` struct or the old `swift_toolchain` provider. Once the
+    migration is complete, this function can be removed.
+
+    Args:
+        swift_toolchain: The `SwiftToolchainInfo` provider of the toolchain
+            being used to build.
+        toolchains: The toolchains that are used to determine which features are
+            enabled by default or unsupported.
+
+    Returns:
+        A `struct` containing the Swift and C++ toolchain providers. If
+        `toolchains` is provided, it will be returned directly. Otherwise, a
+        `struct` containing the `swift_toolchain` provider will be returned and
+        its nested C++ toolchain provider will be returned in the `cc` field.
+    """
+    if toolchains:
+        return toolchains
+
+    if swift_toolchain:
+        return struct(
+            cc = swift_toolchain.cc_toolchain_info,
+            swift = swift_toolchain,
+        )
+
+    fail("either `toolchains` or `swift_toolchain` must be provided")
+
 def configure_features(
         ctx,
-        swift_toolchain,
+        swift_toolchain = None,
+        toolchains = None,
         *,
         requested_features = [],
         unsupported_features = []):
@@ -86,6 +114,9 @@ def configure_features(
             enabled by default or unsupported by the toolchain, and the C++
             toolchain associated with the Swift toolchain is used to create the
             underlying C++ feature configuration.
+        toolchains: The toolchains that are used to determine which features are
+            enabled by default or unsupported. This is typically obtained using
+            `swift_common.find_all_toolchains()`.
         requested_features: The list of features to be enabled. This is
             typically obtained using the `ctx.features` field in a rule
             implementation function.
@@ -98,16 +129,23 @@ def configure_features(
         passed to other `swift_common` functions. Note that the structure of
         this value should otherwise not be relied on or inspected directly.
     """
+    toolchains = gather_toolchains(
+        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
+    )
 
-    # Always disable these two features so that any `cc_common` APIs called by
+    requested_features = list(requested_features)
+    unsupported_features = list(unsupported_features)
+
+    # Always disable this feature so that any `cc_common` APIs called by
     # `swift_common` APIs don't cause certain actions to be created (for
     # example, when using `cc_common.compile` to create the compilation context
     # for a generated header).
     unsupported_features = list(unsupported_features)
-    unsupported_features.extend([
-        "cc_include_scanning",
-        "parse_headers",
-    ])
+    unsupported_features.append("cc_include_scanning")
+
+    if ctx.coverage_instrumented():
+        requested_features.append(SWIFT_FEATURE_COVERAGE)
 
     # HACK: This is the only way today to check whether the caller is inside an
     # aspect. We have to do this because accessing `ctx.aspect_ids` halts the
@@ -124,9 +162,9 @@ def configure_features(
     else:
         aspect_id = None
 
-    if swift_toolchain.feature_allowlists:
+    if toolchains.swift.feature_allowlists:
         _check_allowlists(
-            allowlists = swift_toolchain.feature_allowlists,
+            allowlists = toolchains.swift.feature_allowlists,
             aspect_id = aspect_id,
             label = ctx.label,
             requested_features = requested_features,
@@ -136,18 +174,34 @@ def configure_features(
     all_requestable_features, all_unsupported_features = _compute_features(
         label = ctx.label,
         requested_features = requested_features,
-        swift_toolchain = swift_toolchain,
+        swift_toolchain = toolchains.swift,
         unsupported_features = unsupported_features,
     )
     cc_feature_configuration = cc_common.configure_features(
         ctx = ctx,
-        cc_toolchain = swift_toolchain.cc_toolchain_info,
-        language = swift_toolchain.cc_language,
+        cc_toolchain = toolchains.cc,
+        language = toolchains.swift.cc_language,
         requested_features = all_requestable_features,
         unsupported_features = all_unsupported_features,
     )
+
+    # Swift generated Objective-C headers are not compatible with
+    # `parse_headers` actions. But, we don't want to disable `parse_headers` for
+    # all actions performed by the toolchain, only the one that compiles the
+    # generated header into an explicit module. So, we (lazily) create a second
+    # feature configuration that will be used by that specific action.
+    def cc_feature_configuration_no_parse_headers():
+        return cc_common.configure_features(
+            ctx = ctx,
+            cc_toolchain = swift_toolchain.cc_toolchain_info,
+            language = swift_toolchain.cc_language,
+            requested_features = all_requestable_features,
+            unsupported_features = all_unsupported_features + ["parse_headers"],
+        )
+
     return struct(
         _cc_feature_configuration = cc_feature_configuration,
+        _cc_feature_configuration_no_parse_headers = cc_feature_configuration_no_parse_headers,
         _enabled_features = all_requestable_features,
         # This is naughty, but APIs like `cc_common.compile` do far worse and
         # "cheat" by accessing the full rule context through a back-reference in
@@ -182,8 +236,6 @@ def features_for_build_modes(ctx, cpp_fragment = None):
     compilation_mode = ctx.var["COMPILATION_MODE"]
     features = []
     features.append("swift.{}".format(compilation_mode))
-    if ctx.configuration.coverage_enabled:
-        features.append(SWIFT_FEATURE_COVERAGE)
     if compilation_mode in ("dbg", "fastbuild"):
         features.append(SWIFT_FEATURE_ENABLE_TESTING)
     if cpp_fragment and cpp_fragment.apple_generate_dsym:
@@ -229,7 +281,7 @@ def is_feature_enabled(feature_configuration, feature_name):
             feature_name = feature_name,
         )
 
-def default_features_for_toolchain(ctx, target_triple):
+def default_features_for_toolchain(target_triple):
     """Enables a common set of swift features based on build configuration.
 
     We have a common set of features we'd like to enable for both
@@ -238,7 +290,6 @@ def default_features_for_toolchain(ctx, target_triple):
     what platform we're targetting (linux, macos, ios, etc.).
 
     Args:
-        ctx: Context of the swift toolchain rule building this list of features.
         target_triple: Target triple configured for our toolchain.
 
     Returns:
@@ -248,20 +299,21 @@ def default_features_for_toolchain(ctx, target_triple):
     # Common features we turn on regardless of target.
     features = [
         SWIFT_FEATURE_CACHEABLE_SWIFTMODULES,
-        SWIFT_FEATURE_CHECKED_EXCLUSIVITY,
         SWIFT_FEATURE_COVERAGE_PREFIX_MAP,
-        SWIFT_FEATURE_DEBUG_PREFIX_MAP,
-        SWIFT_FEATURE_DECLARE_SWIFTSOURCEINFO,
-        SWIFT_FEATURE_DISABLE_CLANG_SPI,
         SWIFT_FEATURE_DISABLE_SYSTEM_INDEX,
         SWIFT_FEATURE_EMIT_SWIFTDOC,
-        SWIFT_FEATURE_ENABLE_BARE_SLASH_REGEX,
         SWIFT_FEATURE_ENABLE_BATCH_MODE,
         SWIFT_FEATURE_ENABLE_SKIP_FUNCTION_BODIES,
         SWIFT_FEATURE_FILE_PREFIX_MAP,
         SWIFT_FEATURE_INTERNALIZE_AT_LINK,
         SWIFT_FEATURE_OPT_USES_WMO,
         SWIFT_FEATURE_USE_GLOBAL_MODULE_CACHE,
+
+        # Allow users to start using access levels on `import`s by default. Note
+        # that this does *not* change the default access level for `import`s to
+        # `internal`; that is controlled by the upcoming feature flag
+        # `InternalImportsByDefault`.
+        "swift.experimental.AccessLevelOnImport",
     ]
 
     # Apple specific features
@@ -271,14 +323,11 @@ def default_features_for_toolchain(ctx, target_triple):
             SWIFT_FEATURE_REMAP_XCODE_PATH,
         ])
 
-        if getattr(ctx.fragments.objc, "alwayslink_by_default", False):
-            features.append(SWIFT_FEATURE__FORCE_ALWAYSLINK_TRUE)
-
     # Linux specific features
     if target_triples.unversioned_os(target_triple) == "linux":
         features.extend([
-            SWIFT_FEATURE__FORCE_ALWAYSLINK_TRUE,
             SWIFT_FEATURE_NO_GENERATED_MODULE_MAP,
+            SWIFT_FEATURE_STATIC_STDLIB,
         ])
 
     return features
@@ -483,56 +532,5 @@ def _compute_features(
     feature_updater.update_features([], swift_toolchain.unsupported_features)
 
     all_disabled_features = feature_updater.disabled_features()
-    all_requested_features = _compute_implied_features(
-        requested_features = feature_updater.requested_features(),
-        unsupported_features = all_disabled_features,
-    )
+    all_requested_features = feature_updater.requested_features()
     return (all_requested_features, all_disabled_features)
-
-def _compute_implied_features(requested_features, unsupported_features):
-    """Compute additional features that should be implied by combinations.
-
-    To avoid an explosion of generalized complexity, this is being done only for
-    features related to language mode support, instead of building it out as a
-    feature for use elsewhere in the toolchain.
-    """
-
-    # If a user requests Swift language mode 6 on a compiler that doesn't
-    # support `-swift-version 6`, we instead enable all of the upcoming features
-    # that will be on by default in Swift 6 mode. This provides an early
-    # migration path for those users.
-    if (SWIFT_FEATURE_ENABLE_V6 in requested_features and
-        SWIFT_FEATURE__SUPPORTS_V6 not in requested_features):
-        for feature in _SWIFT_6_EQUIVALENT_FEATURES:
-            # Only add it if the user did not explicitly ask for it to be
-            # suppressed.
-            if feature not in unsupported_features:
-                requested_features.append(feature)
-
-    return requested_features
-
-# The list below is taken from the feature definitions in the compiler, at
-# https://github.com/apple/swift/blob/release/6.0/include/swift/Basic/Features.def#L180-L193.
-# TODO: b/336996662 - Confirm that this is the final set of features enabled by
-# default in Swift 6 language mode when the compiler is released.
-_SWIFT_6_EQUIVALENT_FEATURES = [
-    "swift.upcoming.ConciseMagicFile",  # SE-0274
-    "swift.upcoming.ForwardTrailingClosures",  # SE-0286
-    "swift.upcoming.StrictConcurrency",  # SE-0337
-    "swift.experimental.StrictConcurrency=complete",  # same as above on older compilers
-    "swift.upcoming.BareSlashRegexLiterals",  # SE-0354
-    "swift.upcoming.DeprecateApplicationMain",  # SE-0383
-    "swift.upcoming.ImportObjcForwardDeclarations",  # SE-0384
-    "swift.upcoming.DisableOutwardActorInference",  # SE-0401
-    "swift.upcoming.IsolatedDefaultValues",  # SE-0411
-    "swift.upcoming.GlobalConcurrency",  # SE-0412
-    "swift.upcoming.InferSendableFromCaptures",  # SE-0418
-    "swift.upcoming.ImplicitOpenExistentials",  # SE-0352
-    "swift.upcoming.RegionBasedIsolation",  # SE-0414
-    "swift.upcoming.DynamicActorIsolation",  # SE-0423
-
-    # The upcoming feature flags only emit warnings about things that will
-    # become errors in Swift 6. We want the `swift.enable_v6` flag specifically
-    # to enforce the same error behavior.
-    "swift.werror.error_in_future_swift_version",
-]

@@ -66,7 +66,7 @@ absl::StatusOr<bool> Activation::ProvideValue(
     const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool,
     google::protobuf::MessageFactory* absl_nonnull message_factory,
     google::protobuf::Arena* absl_nonnull arena, Value* absl_nonnull result) const {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   auto iter = values_.find(name);
   ABSL_ASSERT(iter != values_.end());
   ValueEntry& entry = iter->second;
@@ -102,14 +102,14 @@ std::vector<FunctionOverloadReference> Activation::FindFunctionOverloads(
 
 bool Activation::InsertOrAssignValue(absl::string_view name, Value value) {
   return values_
-      .insert_or_assign(name, ValueEntry{std::move(value), absl::nullopt})
+      .insert_or_assign(name, ValueEntry{std::move(value), std::nullopt})
       .second;
 }
 
 bool Activation::InsertOrAssignValueProvider(absl::string_view name,
                                              ValueProvider provider) {
   return values_
-      .insert_or_assign(name, ValueEntry{absl::nullopt, std::move(provider)})
+      .insert_or_assign(name, ValueEntry{std::nullopt, std::move(provider)})
       .second;
 }
 

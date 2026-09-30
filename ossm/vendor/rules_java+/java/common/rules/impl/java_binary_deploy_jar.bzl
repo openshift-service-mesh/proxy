@@ -19,15 +19,6 @@ load(":java_helper.bzl", "helper")
 
 # copybara: default visibility
 
-def _get_build_info(ctx, stamp):
-    if helper.is_stamping_enabled(ctx, stamp):
-        # Makes the target depend on BUILD_INFO_KEY, which helps to discover stamped targets
-        # See b/326620485 for more details.
-        ctx.version_file  # buildifier: disable=no-effect
-        return ctx.attr._build_info_translator[OutputGroupInfo].non_redacted_build_info_files.to_list()
-    else:
-        return ctx.attr._build_info_translator[OutputGroupInfo].redacted_build_info_files.to_list()
-
 def create_deploy_archives(
         ctx,
         java_attrs,
@@ -70,7 +61,7 @@ def create_deploy_archives(
         order = "preorder",
     )
     multi_release = ctx.fragments.java.multi_release_deploy_jars
-    build_info_files = _get_build_info(ctx, ctx.attr.stamp)
+    build_info_files = helper.get_build_info(ctx, ctx.attr.stamp)
     build_target = str(ctx.label)
     manifest_lines = ctx.attr.deploy_manifest_lines + extra_manifest_lines
     create_deploy_archive(
@@ -78,7 +69,6 @@ def create_deploy_archives(
         launcher_info.launcher,
         main_class,
         coverage_main_class,
-        java_attrs.resources,
         classpath_resources,
         runtime_classpath,
         manifest_lines,
@@ -100,7 +90,6 @@ def create_deploy_archives(
             launcher_info.unstripped_launcher,
             main_class,
             coverage_main_class,
-            java_attrs.resources,
             classpath_resources,
             runtime_classpath,
             manifest_lines,
@@ -121,7 +110,6 @@ def create_deploy_archive(
         launcher,
         main_class,
         coverage_main_class,
-        resources,
         classpath_resources,
         runtime_classpath,
         manifest_lines,
@@ -144,7 +132,6 @@ def create_deploy_archive(
         launcher: (File) the launcher artifact
         main_class: (String) FQN of the entry point for execution
         coverage_main_class: (String) FQN of the entry point for coverage collection
-        resources: (Depset) resource inputs
         classpath_resources: (Depset) classpath resource inputs
         runtime_classpath: (Depset) source files to add to the jar
         build_target: (String) Name of the build target for stamping
@@ -164,7 +151,6 @@ def create_deploy_archive(
     input_files.extend(build_info_files)
 
     transitive_input_files = [
-        resources,
         classpath_resources,
         runtime_classpath,
     ]
@@ -182,6 +168,7 @@ def create_deploy_archive(
     args.add("--build_target", build_target)
     args.add("--normalize")
     args.add("--compression")
+    args.add("--nocompress_suffixes", "protobuf.meta")
     if main_class:
         args.add("--main_class", main_class)
     args.add_all("--deploy_manifest_lines", manifest_lines)

@@ -14,6 +14,7 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(
     # Under active development, not yet being released.
@@ -25,6 +26,7 @@ licenses(["notice"])
 cc_library(
     name = "activation_interface",
     hdrs = ["activation_interface.h"],
+    copts = CEL_COPTS,
     deps = [
         ":function_overload_reference",
         "//base:attributes",
@@ -43,6 +45,7 @@ cc_library(
 cc_library(
     name = "function_overload_reference",
     hdrs = ["function_overload_reference.h"],
+    copts = CEL_COPTS,
     deps = [
         ":function",
         "//common:function_descriptor",
@@ -52,6 +55,7 @@ cc_library(
 cc_library(
     name = "function_provider",
     hdrs = ["function_provider.h"],
+    copts = CEL_COPTS,
     deps = [
         ":activation_interface",
         ":function_overload_reference",
@@ -64,6 +68,7 @@ cc_library(
     name = "activation",
     srcs = ["activation.cc"],
     hdrs = ["activation.h"],
+    copts = CEL_COPTS,
     deps = [
         ":activation_interface",
         ":function",
@@ -90,6 +95,7 @@ cc_library(
 cc_test(
     name = "activation_test",
     srcs = ["activation_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":function",
@@ -111,8 +117,47 @@ cc_test(
 )
 
 cc_library(
+    name = "bind_proto_to_activation",
+    srcs = ["bind_proto_to_activation.cc"],
+    hdrs = ["bind_proto_to_activation.h"],
+    copts = CEL_COPTS,
+    deps = [
+        ":activation",
+        "//common:value",
+        "//internal:status_macros",
+        "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "bind_proto_to_activation_test",
+    srcs = ["bind_proto_to_activation_test.cc"],
+    copts = CEL_COPTS,
+    deps = [
+        ":activation",
+        ":bind_proto_to_activation",
+        "//common:casting",
+        "//common:value",
+        "//common:value_testing",
+        "//internal:testing",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_cel_spec//proto/cel/expr/conformance/proto2:test_all_types_cc_proto",
+        "@com_google_protobuf//:protobuf",
+        "@com_google_protobuf//:wrappers_cc_proto",
+    ],
+)
+
+cc_library(
     name = "register_function_helper",
     hdrs = ["register_function_helper.h"],
+    copts = CEL_COPTS,
     deps =
         [
             ":function_registry",
@@ -126,6 +171,7 @@ cc_library(
     name = "function_registry",
     srcs = ["function_registry.cc"],
     hdrs = ["function_registry.h"],
+    copts = CEL_COPTS,
     deps =
         [
             ":activation_interface",
@@ -147,6 +193,7 @@ cc_library(
 cc_test(
     name = "function_registry_test",
     srcs = ["function_registry_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":function",
@@ -156,16 +203,18 @@ cc_test(
         ":function_registry",
         "//common:function_descriptor",
         "//common:kind",
+        "//common:value",
         "//internal:testing",
-        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/status",
-        "@com_google_protobuf//:protobuf",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
     ],
 )
 
 cc_library(
     name = "runtime_options",
     hdrs = ["runtime_options.h"],
+    copts = CEL_COPTS,
     deps = ["@com_google_absl//absl/base:core_headers"],
 )
 
@@ -173,6 +222,7 @@ cc_library(
     name = "type_registry",
     srcs = ["type_registry.cc"],
     hdrs = ["type_registry.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:data",
         "//common:type",
@@ -192,6 +242,7 @@ cc_library(
 cc_library(
     name = "runtime",
     hdrs = ["runtime.h"],
+    copts = CEL_COPTS,
     deps = [
         ":activation_interface",
         ":runtime_issue",
@@ -211,6 +262,7 @@ cc_library(
 cc_library(
     name = "runtime_builder",
     hdrs = ["runtime_builder.h"],
+    copts = CEL_COPTS,
     deps = [
         ":function_registry",
         ":runtime",
@@ -227,6 +279,7 @@ cc_library(
     name = "runtime_builder_factory",
     srcs = ["runtime_builder_factory.cc"],
     hdrs = ["runtime_builder_factory.h"],
+    copts = CEL_COPTS,
     deps = [
         ":runtime_builder",
         ":runtime_options",
@@ -246,6 +299,7 @@ cc_library(
     name = "standard_runtime_builder_factory",
     srcs = ["standard_runtime_builder_factory.cc"],
     hdrs = ["standard_runtime_builder_factory.h"],
+    copts = CEL_COPTS,
     deps = [
         ":runtime_builder",
         ":runtime_builder_factory",
@@ -264,6 +318,7 @@ cc_library(
 cc_test(
     name = "standard_runtime_builder_factory_test",
     srcs = ["standard_runtime_builder_factory_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":runtime",
@@ -296,6 +351,7 @@ cc_library(
     name = "standard_functions",
     srcs = ["standard_functions.cc"],
     hdrs = ["standard_functions.h"],
+    copts = CEL_COPTS,
     deps = [
         ":function_registry",
         ":runtime_options",
@@ -318,6 +374,7 @@ cc_library(
     name = "constant_folding",
     srcs = ["constant_folding.cc"],
     hdrs = ["constant_folding.h"],
+    copts = CEL_COPTS,
     deps = [
         ":runtime",
         ":runtime_builder",
@@ -340,17 +397,15 @@ cc_library(
 cc_test(
     name = "constant_folding_test",
     srcs = ["constant_folding_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":constant_folding",
-        ":function",
-        ":register_function_helper",
         ":runtime_builder",
         ":runtime_options",
         ":standard_runtime_builder_factory",
         "//base:function_adapter",
         "//common:function_descriptor",
-        "//common:kind",
         "//common:value",
         "//extensions/protobuf:runtime_adapter",
         "//internal:testing",
@@ -369,6 +424,7 @@ cc_library(
     name = "regex_precompilation",
     srcs = ["regex_precompilation.cc"],
     hdrs = ["regex_precompilation.h"],
+    copts = CEL_COPTS,
     deps = [
         ":runtime",
         ":runtime_builder",
@@ -387,6 +443,7 @@ cc_library(
 cc_test(
     name = "regex_precompilation_test",
     srcs = ["regex_precompilation_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":constant_folding",
@@ -414,6 +471,7 @@ cc_library(
     name = "reference_resolver",
     srcs = ["reference_resolver.cc"],
     hdrs = ["reference_resolver.h"],
+    copts = CEL_COPTS,
     deps = [
         ":runtime",
         ":runtime_builder",
@@ -433,6 +491,7 @@ cc_library(
 cc_test(
     name = "reference_resolver_test",
     srcs = ["reference_resolver_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":reference_resolver",
@@ -457,6 +516,7 @@ cc_test(
 cc_library(
     name = "runtime_issue",
     hdrs = ["runtime_issue.h"],
+    copts = CEL_COPTS,
     deps = ["@com_google_absl//absl/status"],
 )
 
@@ -464,6 +524,7 @@ cc_library(
     name = "comprehension_vulnerability_check",
     srcs = ["comprehension_vulnerability_check.cc"],
     hdrs = ["comprehension_vulnerability_check.h"],
+    copts = CEL_COPTS,
     deps = [
         ":runtime",
         ":runtime_builder",
@@ -482,6 +543,7 @@ cc_library(
 cc_test(
     name = "comprehension_vulnerability_check_test",
     srcs = ["comprehension_vulnerability_check_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":comprehension_vulnerability_check",
         ":runtime_builder",
@@ -501,17 +563,16 @@ cc_test(
 cc_library(
     name = "function_adapter",
     hdrs = ["function_adapter.h"],
+    copts = CEL_COPTS,
     deps = [
         ":function",
         ":register_function_helper",
         "//common:function_descriptor",
-        "//common:kind",
         "//common:value",
         "//internal:status_macros",
         "//runtime/internal:function_adapter",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/functional:any_invocable",
-        "@com_google_absl//absl/functional:bind_front",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -523,6 +584,7 @@ cc_library(
 cc_test(
     name = "function_adapter_test",
     srcs = ["function_adapter_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":function",
         ":function_adapter",
@@ -542,6 +604,7 @@ cc_library(
     name = "optional_types",
     srcs = ["optional_types.cc"],
     hdrs = ["optional_types.h"],
+    copts = CEL_COPTS,
     deps = [
         ":function_registry",
         ":runtime_builder",
@@ -569,6 +632,7 @@ cc_library(
 cc_test(
     name = "optional_types_test",
     srcs = ["optional_types_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":function",
@@ -588,7 +652,6 @@ cc_test(
         "//parser",
         "//parser:options",
         "//runtime/internal:runtime_impl",
-        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
         "@com_google_absl//absl/status:statusor",
@@ -603,8 +666,10 @@ cc_library(
     hdrs = [
         "function.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//common:value",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:span",
@@ -615,10 +680,12 @@ cc_library(
 cc_test(
     name = "memory_safety_test",
     srcs = ["memory_safety_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":activation",
         ":constant_folding",
         ":function_adapter",
+        ":optional_types",
         ":reference_resolver",
         ":regex_precompilation",
         ":runtime",
@@ -642,10 +709,36 @@ cc_test(
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/types:variant",
         "@com_google_cel_spec//proto/cel/expr/conformance/proto3:test_all_types_cc_proto",
         "@com_google_protobuf//:any_cc_proto",
         "@com_google_protobuf//:differencer",
         "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_library(
+    name = "embedder_context",
+    hdrs = ["embedder_context.h"],
+    copts = CEL_COPTS,
+    deps = [
+        "//common:typeinfo",
+        "//common:value",
+        "@com_google_absl//absl/container:inlined_vector",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/types:optional",
+    ],
+)
+
+cc_test(
+    name = "embedder_context_test",
+    srcs = ["embedder_context_test.cc"],
+    copts = CEL_COPTS,
+    deps = [
+        ":embedder_context",
+        "//common:typeinfo",
+        "//internal:testing",
+        "@com_google_absl//absl/types:optional",
     ],
 )

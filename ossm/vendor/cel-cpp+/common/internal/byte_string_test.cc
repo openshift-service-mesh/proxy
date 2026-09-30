@@ -322,6 +322,29 @@ TEST_P(ByteStringTest, CopyConstruct) {
   EXPECT_EQ(ByteString(large_byte_string), large_byte_string);
 }
 
+TEST_P(ByteStringTest, CopyConstructFromExternal) {
+  ByteString small_byte_string = ByteString::FromExternal(GetSmallStringView());
+  ByteString medium_byte_string =
+      ByteString::FromExternal(GetMediumStringView());
+
+  EXPECT_EQ(ByteString(NewDeleteAllocator(), small_byte_string),
+            small_byte_string);
+  EXPECT_EQ(ByteString(NewDeleteAllocator(), medium_byte_string),
+            medium_byte_string);
+
+  google::protobuf::Arena arena;
+  EXPECT_EQ(ByteString(ArenaAllocator(&arena), small_byte_string),
+            small_byte_string);
+  EXPECT_EQ(ByteString(ArenaAllocator(&arena), medium_byte_string),
+            medium_byte_string);
+
+  EXPECT_EQ(ByteString(GetAllocator(), small_byte_string), small_byte_string);
+  EXPECT_EQ(ByteString(GetAllocator(), medium_byte_string), medium_byte_string);
+
+  EXPECT_EQ(ByteString(small_byte_string), small_byte_string);
+  EXPECT_EQ(ByteString(medium_byte_string), medium_byte_string);
+}
+
 TEST_P(ByteStringTest, MoveConstruct) {
   const auto& small_byte_string = [this]() {
     return ByteString(GetAllocator(), GetSmallStringView());
@@ -358,6 +381,34 @@ TEST_P(ByteStringTest, MoveConstruct) {
   EXPECT_EQ(ByteString(small_byte_string()), small_byte_string());
   EXPECT_EQ(ByteString(medium_byte_string()), medium_byte_string());
   EXPECT_EQ(ByteString(large_byte_string()), large_byte_string());
+}
+
+TEST_P(ByteStringTest, MoveConstructFromExternal) {
+  const auto& small_byte_string = []() {
+    return ByteString::FromExternal(GetSmallStringView());
+  };
+  const auto& medium_byte_string = []() {
+    return ByteString::FromExternal(GetMediumStringView());
+  };
+
+  EXPECT_EQ(ByteString(NewDeleteAllocator(), small_byte_string()),
+            small_byte_string());
+  EXPECT_EQ(ByteString(NewDeleteAllocator(), medium_byte_string()),
+            medium_byte_string());
+
+  google::protobuf::Arena arena;
+  EXPECT_EQ(ByteString(ArenaAllocator(&arena), small_byte_string()),
+            small_byte_string());
+  EXPECT_EQ(ByteString(ArenaAllocator(&arena), medium_byte_string()),
+            medium_byte_string());
+
+  EXPECT_EQ(ByteString(GetAllocator(), small_byte_string()),
+            small_byte_string());
+  EXPECT_EQ(ByteString(GetAllocator(), medium_byte_string()),
+            medium_byte_string());
+
+  EXPECT_EQ(ByteString(small_byte_string()), small_byte_string());
+  EXPECT_EQ(ByteString(medium_byte_string()), medium_byte_string());
 }
 
 TEST_P(ByteStringTest, CopyFromByteString) {
@@ -715,7 +766,7 @@ TEST_P(ByteStringTest, TryFlatLarge) {
   ByteString byte_string =
       ByteString(GetAllocator(), GetMediumOrLargeFragmentedCord());
   EXPECT_EQ(GetKind(byte_string), ByteStringKind::kLarge);
-  EXPECT_THAT(byte_string.TryFlat(), Eq(absl::nullopt));
+  EXPECT_THAT(byte_string.TryFlat(), Eq(std::nullopt));
   EXPECT_EQ(GetKind(byte_string), ByteStringKind::kLarge);
 }
 
@@ -755,10 +806,10 @@ TEST_P(ByteStringTest, Find) {
   EXPECT_THAT(
       byte_string.Find("small string optimization!"),
       Optional(GetMediumStringView().find("small string optimization!")));
-  EXPECT_THAT(byte_string.Find("not found"), Eq(absl::nullopt));
+  EXPECT_THAT(byte_string.Find("not found"), Eq(std::nullopt));
   EXPECT_THAT(byte_string.Find(""), Optional(0));
   EXPECT_THAT(byte_string.Find("", 3), Optional(3));
-  EXPECT_THAT(byte_string.Find("A string", 1), Eq(absl::nullopt));
+  EXPECT_THAT(byte_string.Find("A string", 1), Eq(std::nullopt));
 
   // Find cord
   EXPECT_THAT(byte_string.Find(absl::Cord("A string")), Optional(0));
@@ -769,25 +820,25 @@ TEST_P(ByteStringTest, Find) {
       byte_string.Find(absl::MakeFragmentedCord(
           {"A string", " that is too large for the small string optimization!",
            " extra"})),
-      Eq(absl::nullopt));
+      Eq(std::nullopt));
   EXPECT_THAT(byte_string.Find(GetMediumOrLargeFragmentedCord()), Optional(0));
-  EXPECT_THAT(byte_string.Find(absl::Cord("not found")), Eq(absl::nullopt));
+  EXPECT_THAT(byte_string.Find(absl::Cord("not found")), Eq(std::nullopt));
   EXPECT_THAT(byte_string.Find(absl::Cord("")), Optional(0));
   EXPECT_THAT(byte_string.Find(absl::Cord(""), 3), Optional(3));
 }
 
 TEST_P(ByteStringTest, FindEdgeCases) {
   ByteString empty_byte_string(GetAllocator(), "");
-  EXPECT_THAT(empty_byte_string.Find("a"), Eq(absl::nullopt));
+  EXPECT_THAT(empty_byte_string.Find("a"), Eq(std::nullopt));
   EXPECT_THAT(empty_byte_string.Find(""), Optional(0));
   ByteString cord_byte_string =
       ByteString(GetAllocator(), GetMediumOrLargeCord());
-  EXPECT_THAT(cord_byte_string.Find("not found"), Eq(absl::nullopt));
+  EXPECT_THAT(cord_byte_string.Find("not found"), Eq(std::nullopt));
   ByteString byte_string = ByteString(GetAllocator(), GetMediumStringView());
 
   // Needle longer than haystack.
   EXPECT_THAT(byte_string.Find(std::string(byte_string.size() + 1, 'a')),
-              Eq(absl::nullopt));
+              Eq(std::nullopt));
 
   // Needle at the end.
   absl::string_view suffix = "optimization!";
@@ -795,7 +846,7 @@ TEST_P(ByteStringTest, FindEdgeCases) {
               Optional(byte_string.size() - suffix.size()));
 
   // pos at the end.
-  EXPECT_THAT(byte_string.Find("a", byte_string.size()), Eq(absl::nullopt));
+  EXPECT_THAT(byte_string.Find("a", byte_string.size()), Eq(std::nullopt));
   EXPECT_THAT(byte_string.Find("", byte_string.size()),
               Optional(byte_string.size()));
 
@@ -826,7 +877,7 @@ TEST_P(ByteStringTest, FindEdgeCases) {
   // enough space for the rest.
   ByteString short_haystack(GetAllocator(), "abcdefg");
   absl::Cord needle_too_long = absl::MakeFragmentedCord({"ef", "gh"});
-  EXPECT_THAT(short_haystack.Find(needle_too_long), Eq(absl::nullopt));
+  EXPECT_THAT(short_haystack.Find(needle_too_long), Eq(std::nullopt));
 
   // Search with a fragmented empty cord.
   absl::Cord fragmented_empty_cord = absl::MakeFragmentedCord({"", ""});

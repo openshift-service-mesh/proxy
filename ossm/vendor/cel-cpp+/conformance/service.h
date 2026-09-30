@@ -45,6 +45,9 @@ struct ConformanceServiceOptions {
   bool modern;
   bool arena;
   bool recursive;
+  bool select_optimization;
+  bool enable_variadic_logical_operators = false;
+  bool enable_pratt_parser = true;
 };
 
 absl::StatusOr<std::unique_ptr<ConformanceServiceInterface>>

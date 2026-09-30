@@ -10,7 +10,7 @@ config_setting(
 
 bool_flag(
     name = "system_icu",
-    build_setting_default = True,
+    build_setting_default = False,
     visibility = ["//visibility:public"],
 )
 

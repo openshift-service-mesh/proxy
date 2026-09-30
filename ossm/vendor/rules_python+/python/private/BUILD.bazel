@@ -18,9 +18,11 @@ load("//python:py_binary.bzl", "py_binary")
 load("//python:py_library.bzl", "py_library")
 load(":bazel_config_mode.bzl", "bazel_config_mode")
 load(":py_exec_tools_toolchain.bzl", "current_interpreter_executable")
+load(":py_interpreter_program.bzl", "py_interpreter_program")
 load(":sentinel_impl.bzl", "sentinel")
 load(":stamp_impl.bzl", "stamp_build_setting")
 load(":uncachable_version_file.bzl", "define_uncachable_version_file")
+load(":visibility.bzl", "NOT_ACTUALLY_PUBLIC")
 
 package(
     default_visibility = [
@@ -68,10 +70,16 @@ alias(
         "@platforms//os:windows": ":build_data_writer.ps1",
         "//conditions:default": ":build_data_writer.sh",
     }),
+    # Not actually public. Only public because it's an implicit dependency of
+    # rules built via py_binary_rule_builder() / py_test_rule_builder().
+    visibility = ["//visibility:public"],
 )
 
 define_uncachable_version_file(
     name = "uncachable_version_file",
+    # Not actually public. Only public because it's an implicit dependency of
+    # rules built via py_binary_rule_builder() / py_test_rule_builder().
+    visibility = ["//visibility:public"],
 )
 
 # Needed to define bzl_library targets for docgen. (We don't define the
@@ -94,7 +102,7 @@ exports_files(
     ["python_bootstrap_template.txt"],
     # Not actually public. Only public because it's an implicit dependency of
     # py_runtime.
-    visibility = ["//visibility:public"],
+    visibility = NOT_ACTUALLY_PUBLIC,
 )
 
 filegroup(
@@ -102,7 +110,7 @@ filegroup(
     srcs = ["stage1_bootstrap_template.sh"],
     # Not actually public. Only public because it's an implicit dependency of
     # py_runtime.
-    visibility = ["//visibility:public"],
+    visibility = NOT_ACTUALLY_PUBLIC,
 )
 
 filegroup(
@@ -110,7 +118,7 @@ filegroup(
     srcs = ["stage2_bootstrap_template.py"],
     # Not actually public. Only public because it's an implicit dependency of
     # py_runtime.
-    visibility = ["//visibility:public"],
+    visibility = NOT_ACTUALLY_PUBLIC,
 )
 
 filegroup(
@@ -118,7 +126,7 @@ filegroup(
     srcs = ["site_init_template.py"],
     # Not actually public. Only public because it's an implicit dependency of
     # py_runtime.
-    visibility = ["//visibility:public"],
+    visibility = NOT_ACTUALLY_PUBLIC,
 )
 
 # NOTE: Windows builds don't use this bootstrap. Instead, a native Windows
@@ -132,7 +140,7 @@ alias(
     }),
     # Not actually public. Only public because it's an implicit dependency of
     # py_runtime.
-    visibility = ["//visibility:public"],
+    visibility = NOT_ACTUALLY_PUBLIC,
 )
 
 # Used to determine the use of `--stamp` in Starlark rules
@@ -158,6 +166,9 @@ alias(
         ":is_bazel_config_mode_target": "//python/config_settings:debugger",
         "//conditions:default": "//python/private:empty",
     }),
+    # Not actually public. Only public because it's an implicit dependency of
+    # rules built via py_binary_rule_builder() / py_test_rule_builder().
+    visibility = ["//visibility:public"],
 )
 
 bazel_config_mode(name = "bazel_config_mode")
@@ -168,7 +179,7 @@ bool_flag(
     name = "visible_for_testing",
     build_setting_default = False,
     # This is only because it is an implicit dependency by the toolchains.
-    visibility = ["//visibility:public"],
+    visibility = NOT_ACTUALLY_PUBLIC,
 )
 
 # Used for py_console_script_gen rule
@@ -202,21 +213,48 @@ current_interpreter_executable(
     name = "current_interpreter_executable",
     # Not actually public. Only public because it's an implicit dependency of
     # py_exec_tools_toolchain.
-    visibility = ["//visibility:public"],
+    visibility = NOT_ACTUALLY_PUBLIC,
 )
 
 py_library(
     name = "empty",
+    # Not actually public. Only public because it's the resolved default of
+    # debugger_if_target_config, an implicit dependency of rules built via
+    # py_binary_rule_builder() / py_test_rule_builder().
+    visibility = ["//visibility:public"],
 )
 
 sentinel(
     name = "sentinel",
+    # Not actually public. Only public because it's the resolved default of
+    # uncachable_version_file, an implicit dependency of rules built via
+    # py_binary_rule_builder() / py_test_rule_builder().
+    visibility = ["//visibility:public"],
 )
 
 py_binary(
     name = "sync_runtimes_manifest_workspace",
     srcs = ["tools/sync_runtimes_manifest_workspace.py"],
     visibility = ["//:__subpackages__"],
+)
+
+# Tool used by py_test's validation action to statically check that the main
+# module actually runs tests. See the validate_test_main config setting.
+py_interpreter_program(
+    name = "py_test_main_validator",
+    main = "py_test_main_validator.py",
+    # Not actually public. Only public because it's an implicit dependency of
+    # the py_test rule.
+    visibility = NOT_ACTUALLY_PUBLIC,
+)
+
+py_library(
+    name = "py_test_main_validator_lib",
+    srcs = ["py_test_main_validator.py"],
+    imports = ["../.."],
+    visibility = [
+        "//tests/validate_test_main:__pkg__",
+    ],
 )
 
 bzl_library(
@@ -310,6 +348,7 @@ bzl_library(
     deps = [
         ":text_util",
         ":version",
+        ":visibility",
         "@bazel_skylib//lib:selects",
         "@bazel_skylib//rules:common_settings",
     ],
@@ -319,7 +358,6 @@ bzl_library(
     name = "coverage_deps",
     srcs = ["coverage_deps.bzl"],
     deps = [
-        ":repo_utils",
         ":version_label",
         "//python/private:bazel_tools",
     ],
@@ -468,6 +506,7 @@ bzl_library(
     deps = [
         ":py_cc_toolchain_rule",
         ":util",
+        "//python/private/pypi:pep508_env",
     ],
 )
 
@@ -476,6 +515,7 @@ bzl_library(
     srcs = ["py_cc_toolchain_rule.bzl"],
     deps = [
         ":common_labels",
+        ":flags",
         ":py_cc_toolchain_info",
         ":sentinel_impl",
         "@bazel_skylib//rules:common_settings",
@@ -709,6 +749,7 @@ bzl_library(
         ":full_version",
         ":pbs_manifest",
         ":platform_info",
+        ":pyproject_utils",
         ":python_register_toolchains",
         ":pythons_hub",
         ":repo_utils",
@@ -736,7 +777,6 @@ bzl_library(
         ":coverage_deps",
         ":full_version",
         ":python_repository",
-        ":repo_utils",
         ":toolchains_repo",
         "//python:versions",
     ],
@@ -877,6 +917,21 @@ bzl_library(
 )
 
 bzl_library(
+    name = "pyproject_utils",
+    srcs = ["pyproject_utils.bzl"],
+    deps = [
+        ":version",
+        "@toml.bzl//:toml",
+    ],
+)
+
+bzl_library(
+    name = "stamp_impl",
+    srcs = ["stamp_impl.bzl"],
+    deps = [":visibility"],
+)
+
+bzl_library(
     name = "bzlmod_enabled",
     srcs = ["bzlmod_enabled.bzl"],
 )
@@ -954,11 +1009,6 @@ bzl_library(
 bzl_library(
     name = "sentinel_impl",
     srcs = ["sentinel_impl.bzl"],
-)
-
-bzl_library(
-    name = "stamp_impl",
-    srcs = ["stamp_impl.bzl"],
 )
 
 bzl_library(

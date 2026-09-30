@@ -67,12 +67,15 @@ func main() {
 		}
 
 		base := filepath.Base(path)
-		if base == "bcr_tests" || base == "docs" || base == "vendor" || base == "third_party" || base == "testdata" || base == ".ijwb" || base == ".bazelbsp" {
+		switch base {
+		case "bcr_tests", "docs", "vendor", "third_party", "testdata", "tools", ".ijwb", ".bazelbsp", ".claude":
 			return filepath.SkipDir
 		}
 		if !info.IsDir() &&
 			(strings.HasSuffix(base, ".go") && !strings.HasSuffix(base, "_test.go") ||
-				base == "BUILD.bazel" || base == "BUILD") {
+				base == "BUILD.bazel" || base == "BUILD" ||
+				base == "go.mod" || base == "go.sum" ||
+				base == "go.work" || base == "go.work.sum") {
 			label := filepath.ToSlash(path)
 			if i := strings.LastIndexByte(label, '/'); i >= 0 {
 				label = fmt.Sprintf(`Label("//%s:%s")`, label[:i], label[i+1:])

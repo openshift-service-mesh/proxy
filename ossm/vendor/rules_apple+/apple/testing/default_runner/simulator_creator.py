@@ -15,16 +15,18 @@
 
 import argparse
 import json
+import os
 import random
 import string
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from typing import List, Optional
 
 
 def _simctl(extra_args: List[str]) -> str:
-    return subprocess.check_output(["xcrun", "simctl"] + extra_args).decode()
+    return subprocess.check_output(["xcrun", "simctl", *extra_args], text=True)
 
 
 def _boot_simulator(simulator_id: str) -> None:
@@ -81,41 +83,77 @@ def _boot_simulator(simulator_id: str) -> None:
     time.sleep(3)
 
 
-def _device_name(device_type: str, os_version: str) -> str:
+@dataclass
+class _Runtime:
+    identifier: str
+    platform: str
+    version: str
+
+
+def _selected_simulator_runtime(
+    os_version: Optional[str], sdk_version: Optional[str]
+) -> _Runtime:
+    runtimes = json.loads(_simctl(["list", "runtimes", "-j"]))["runtimes"]
+    available_runtimes = [
+        runtime
+        for runtime in runtimes
+        if runtime["platform"] == "iOS" and runtime["isAvailable"]
+    ]
+    if not available_runtimes:
+        raise RuntimeError("no available runtimes found")
+    sdk_runtime_match = None
+    if sdk_version:
+        sdk_name = f"iphoneos{sdk_version}"
+        sdk_runtime_matches = json.loads(_simctl(["runtime", "match", "list", "-j"]))
+        if sdk_name not in sdk_runtime_matches:
+            raise RuntimeError(
+                f"no sdk build to runtime mapping found matching {sdk_name}"
+            )
+        sdk_runtime_match = sdk_runtime_matches[sdk_name]
+    for runtime in available_runtimes:
+        if os_version and runtime["version"] == os_version:
+            return _Runtime(
+                identifier=runtime["identifier"],
+                platform=runtime["platform"],
+                version=runtime["version"],
+            )
+        elif (
+            sdk_runtime_match
+            and runtime["buildversion"] == sdk_runtime_match["chosenRuntimeBuild"]
+        ):
+            return _Runtime(
+                identifier=runtime["identifier"],
+                platform=runtime["platform"],
+                version=runtime["version"],
+            )
+    if sdk_version:
+        # `chosenRuntimeBuild` is a preference and is not guaranteed to be
+        # installed. Simulator runtimes can be patched independently from
+        # Xcode, which changes their build and patch version while preserving
+        # the SDK's OS version.
+        for runtime in available_runtimes:
+            runtime_version = runtime["version"]
+            if runtime_version == sdk_version or runtime_version.startswith(f"{sdk_version}."):
+                return _Runtime(
+                    identifier=runtime["identifier"],
+                    platform=runtime["platform"],
+                    version=runtime["version"],
+                )
+    raise RuntimeError("no matching runtimes found")
+
+
+def _default_device_name(device_type: str, os_version: str) -> str:
     return f"BAZEL_TEST_{device_type}_{os_version}"
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "os_version", help="The iOS version to run the tests on, ex: 12.1"
-    )
-    parser.add_argument(
-        "device_type", help="The iOS device to run the tests on, ex: iPhone X"
-    )
-    parser.add_argument(
-        "--name",
-        required=False,
-        default=None,
-        help="The name to use for the device; default is 'BAZEL_TEST_[device_type]_[os_version]'",
-    )
-    parser.add_argument(
-        "--reuse-simulator",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Toggle simulator reuse; default is True",
-    )
-    return parser
-
-
-def _main(os_version: str, device_type: str, name: Optional[str], reuse_simulator: bool) -> None:
+def _create_and_boot_simulator(
+    device_name: str,
+    device_type: str,
+    runtime_identifier: str,
+    reuse_simulator: bool,
+) -> str:
     devices = json.loads(_simctl(["list", "devices", "-j"]))["devices"]
-    device_name = name or _device_name(device_type, os_version)
-    runtime_identifier = "com.apple.CoreSimulator.SimRuntime.iOS-{}".format(
-        os_version.replace(".", "-")
-    )
-
-    existing_device=None
+    existing_device = None
 
     if reuse_simulator:
         devices_for_os = devices.get(runtime_identifier) or []
@@ -146,9 +184,82 @@ def _main(os_version: str, device_type: str, name: Optional[str], reuse_simulato
         print(f"Created new simulator '{device_name}' ({simulator_id})", file=sys.stderr)
         _boot_simulator(simulator_id)
 
+    return simulator_id.strip()
+
+
+class Namespace(argparse.Namespace):
+    os_version: Optional[str]
+    sdk_version: Optional[str]
+    device_type: Optional[str]
+    simulator_name: Optional[str]
+    reuse_simulator: bool
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--os-version",
+        required=False,
+        default=None,
+        help="The OS version to run the tests on, ex: 12.1",
+    )
+    parser.add_argument(
+        "--sdk-version",
+        required=False,
+        default=None,
+        help="The SDK version the tests were built for, ex: 12.1",
+    )
+    parser.add_argument(
+        "--device-type",
+        required=False,
+        default=None,
+        help="The iOS device to run the tests on, ex: iPhone 15",
+    )
+    parser.add_argument(
+        "--name",
+        required=False,
+        default=None,
+        help="The name to use for the device; default is 'BAZEL_TEST_[device_type]_[os_version]'",
+    )
+    parser.add_argument(
+        "--reuse-simulator",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Toggle simulator reuse; default is True",
+    )
+    return parser
+
+
+def _main() -> None:
+    parser = _build_parser()
+
+    args = parser.parse_args(namespace=Namespace())
+
+    device_type = args.device_type or os.getenv("SIMULATOR_DEVICE_TYPE")
+    if not device_type:
+        parser.error(
+            "Device type must be provided either as an argument or through the SIMULATOR_DEVICE_TYPE environment variable"
+        )
+
+    os_version = args.os_version or os.getenv("SIMULATOR_OS_VERSION")
+    sdk_version = args.sdk_version or os.getenv("SIMULATOR_SDK_VERSION")
+    reuse_simulator: bool = args.reuse_simulator or (
+        os.getenv("SIMULATOR_REUSE_SIMULATOR") is not None
+    )
+
+    selected_runtime = _selected_simulator_runtime(os_version, sdk_version)
+    device_name = args.name or _default_device_name(
+        device_type, selected_runtime.version
+    )
+
+    print("Selected simulator runtime", selected_runtime.identifier, file=sys.stderr)
+
+    simulator_id = _create_and_boot_simulator(
+        device_name, device_type, selected_runtime.identifier, reuse_simulator
+    )
+
     print(simulator_id.strip())
 
 
 if __name__ == "__main__":
-    args = _build_parser().parse_args()
-    _main(args.os_version, args.device_type, args.name, args.reuse_simulator)
+    _main()

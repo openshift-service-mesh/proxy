@@ -1,4 +1,5 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//bazel:copts.bzl", "CEL_COPTS")
 load("//testing/testrunner:cel_cc_test.bzl", "cel_cc_test")
 
 package(default_visibility = ["//visibility:public"])
@@ -7,6 +8,7 @@ cc_library(
     name = "simple_user_test",
     testonly = True,
     srcs = ["simple.cc"],
+    copts = CEL_COPTS,
     deps = [
         "//checker:type_checker_builder",
         "//checker:validation_result",
@@ -38,6 +40,7 @@ cc_library(
     name = "raw_expression_user_test",
     testonly = True,
     srcs = ["raw_expression_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         "//checker:type_checker_builder",
         "//common:decl",
@@ -59,12 +62,14 @@ cc_library(
         "@com_google_cel_spec//proto/cel/expr/conformance/test:suite_cc_proto",
         "@com_google_protobuf//:protobuf",
     ],
+    alwayslink = True,
 )
 
 cc_library(
     name = "raw_expr_and_cel_file_test",
     testonly = True,
     srcs = ["raw_expr_and_cel_file_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         "//checker:type_checker_builder",
         "//common:decl",
@@ -93,6 +98,7 @@ cc_library(
     name = "checked_expr_user_test",
     testonly = True,
     srcs = ["checked_expr_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         "//internal:status_macros",
         "//internal:testing_descriptor_pool",

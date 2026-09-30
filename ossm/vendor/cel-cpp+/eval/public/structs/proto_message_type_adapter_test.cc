@@ -20,7 +20,9 @@
 #include "google/protobuf/descriptor.pb.h"
 #include "absl/status/status.h"
 #include "base/attribute.h"
+#include "common/legacy_value.h"
 #include "common/value.h"
+#include "common/value_testing.h"
 #include "eval/public/cel_value.h"
 #include "eval/public/containers/container_backed_list_impl.h"
 #include "eval/public/containers/container_backed_map_impl.h"
@@ -36,10 +38,12 @@
 #include "google/protobuf/arena.h"
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/message.h"
+#include "google/protobuf/message_lite.h"
 
 namespace google::api::expr::runtime {
 namespace {
 
+using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
 using ::cel::ProtoWrapperTypeOptions;
@@ -69,8 +73,8 @@ class ProtoMessageTypeAccessorTest : public testing::TestWithParam<bool> {
     bool use_generic_instance = GetParam();
     if (use_generic_instance) {
       // implementation detail: in general, type info implementations may
-      // return a different accessor object based on the messsage instance, but
-      // this implemenation returns the same one no matter the message.
+      // return a different accessor object based on the message instance, but
+      // this implementation returns the same one no matter the message.
       return *GetGenericProtoTypeInfoInstance().GetAccessApis(dummy_);
 
     } else {
@@ -709,7 +713,7 @@ TEST(ProtoMesssageTypeAdapter, FindFieldNotFound) {
           "google.api.expr.runtime.TestMessage"),
       google::protobuf::MessageFactory::generated_factory());
 
-  EXPECT_EQ(adapter.FindFieldByName("foo_not_a_field"), absl::nullopt);
+  EXPECT_EQ(adapter.FindFieldByName("foo_not_a_field"), std::nullopt);
 }
 
 TEST(ProtoMesssageTypeAdapter, TypeInfoMutator) {
@@ -725,7 +729,8 @@ TEST(ProtoMesssageTypeAdapter, TypeInfoMutator) {
 
   ASSERT_OK_AND_ASSIGN(MessageWrapper::Builder builder,
                        api->NewInstance(manager));
-  EXPECT_NE(dynamic_cast<TestMessage*>(builder.message_ptr()), nullptr);
+  EXPECT_NE(google::protobuf::DynamicCastMessage<TestMessage>(builder.message_ptr()),
+            nullptr);
 }
 
 TEST(ProtoMesssageTypeAdapter, TypeInfoAccesor) {
@@ -1403,6 +1408,58 @@ TEST(ProtoMesssageTypeAdapter, QualifyMapIndexLeafWrongType) {
                                  test::IsCelError(StatusIs(
                                      absl::StatusCode::kInvalidArgument,
                                      HasSubstr("Invalid map key type"))))));
+}
+
+TEST(ProtoMesssageTypeAdapter, InteropUnwrappingNotGeneric) {
+  google::protobuf::Arena arena;
+  ProtoMessageTypeAdapter adapter(
+      google::protobuf::DescriptorPool::generated_pool()->FindMessageTypeByName(
+          "google.api.expr.runtime.TestMessage"),
+      google::protobuf::MessageFactory::generated_factory());
+
+  TestMessage message;
+  message.set_string_value("hello");
+  auto legacy_value = CelValue::CreateMessageWrapper(
+      CelValue::MessageWrapper(&message, &adapter));
+  cel::Value modern_value;
+  ASSERT_THAT(cel::ModernValue(&arena, legacy_value, modern_value), IsOk());
+  auto unwrapped = cel::interop_internal::GetLegacyMessage(modern_value);
+
+  // Can't unwrap a non-generic MessageWrapper -- we test by identity to
+  // be sure we're not dropping a custom adapter.
+  ASSERT_EQ(unwrapped, nullptr);
+}
+
+TEST(ProtoMesssageTypeAdapter, InteropUnwrappingGeneric) {
+  google::protobuf::Arena arena;
+
+  TestMessage message;
+  message.set_string_value("hello");
+  auto legacy_value = CelValue::CreateMessageWrapper(
+      CelValue::MessageWrapper(&message, &GetGenericProtoTypeInfoInstance()));
+  cel::Value modern_value;
+  ASSERT_THAT(cel::ModernValue(&arena, legacy_value, modern_value), IsOk());
+  auto unwrapped = cel::interop_internal::GetLegacyMessage(modern_value);
+
+  ASSERT_EQ(unwrapped, &message);
+}
+
+TEST(ProtoMesssageTypeAdapter, InteropFieldAccess) {
+  google::protobuf::Arena arena;
+
+  TestMessage message;
+  message.set_string_value("hello");
+
+  const google::protobuf::FieldDescriptor* field =
+      message.GetDescriptor()->FindFieldByName("string_value");
+  ASSERT_NE(field, nullptr);
+  cel::Value field_value;
+  ASSERT_THAT(cel::interop_internal::WrapLegacyMessageField(
+                  &message, field, ProtoWrapperTypeOptions::kUnsetNull, &arena,
+                  &field_value),
+              IsOk());
+
+  EXPECT_THAT(field_value, cel::test::StringValueIs("hello"));
 }
 
 }  // namespace

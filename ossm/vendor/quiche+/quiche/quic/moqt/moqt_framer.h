@@ -66,12 +66,8 @@ class QUICHE_EXPORT MoqtFramer {
       const MoqtSubscribeNamespace& message);
   quiche::QuicheBuffer SerializeSubscribeTracks(
       const MoqtSubscribeTracks& message);
-  quiche::QuicheBuffer SerializeMaxRequestId(const MoqtMaxRequestId& message);
   quiche::QuicheBuffer SerializeFetch(const MoqtFetch& message);
-  quiche::QuicheBuffer SerializeFetchCancel(const MoqtFetchCancel& message);
   quiche::QuicheBuffer SerializeFetchOk(const MoqtFetchOk& message);
-  quiche::QuicheBuffer SerializeRequestsBlocked(
-      const MoqtRequestsBlocked& message);
   quiche::QuicheBuffer SerializePublish(const MoqtPublish& message);
   quiche::QuicheBuffer SerializeObjectAck(const MoqtObjectAck& message);
 
@@ -79,8 +75,8 @@ class QUICHE_EXPORT MoqtFramer {
 
  private:
   // Returns true if the parameters are valid for the message type.
-  bool FillAndValidateSetupParameters(const SetupParameters& parameters,
-                                      KeyValuePairList& out);
+  bool FillAndValidateSetupOptions(const SetupOptions& options,
+                                   KeyValuePairList& out);
   // Returns true if the metadata is internally consistent.
   static bool ValidateObjectMetadata(const MoqtObject& object);
   const bool using_webtrans_;

@@ -16,17 +16,22 @@
 
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("//swift/internal:binary_attrs.bzl", "binary_rule_attrs")
 load("//swift/internal:compiling.bzl", "compile")
 load(
     "//swift/internal:feature_names.bzl",
     "SWIFT_FEATURE_ADD_TARGET_NAME_TO_OUTPUT",
+    "SWIFT_FEATURE_NO_ENTRY_POINT_RENAME",
+    "SWIFT_FEATURE_STATIC_STDLIB",
 )
 load("//swift/internal:features.bzl", "is_feature_enabled")
 load(
     "//swift/internal:linking.bzl",
-    "binary_rule_attrs",
     "configure_features_for_binary",
     "create_linking_context_from_compilation_outputs",
+    "entry_point_function_name",
     "malloc_linking_context",
     "register_link_binary_action",
 )
@@ -37,8 +42,8 @@ load(
 load("//swift/internal:providers.bzl", "SwiftCompilerPluginInfo")
 load(
     "//swift/internal:toolchain_utils.bzl",
-    "get_swift_toolchain",
-    "use_swift_toolchain",
+    "find_all_toolchains",
+    "use_all_toolchains",
 )
 load(
     "//swift/internal:utils.bzl",
@@ -51,6 +56,7 @@ load(
     ":providers.bzl",
     "SwiftBinaryInfo",
     "SwiftInfo",
+    "SwiftOverlayInfo",
     "create_swift_module_context",
 )
 
@@ -73,14 +79,32 @@ def _maybe_parse_as_library_copts(srcs):
                            srcs[0].basename != "main.swift"
     return ["-parse-as-library"] if use_parse_as_library else []
 
-def _swift_binary_impl(ctx):
-    swift_toolchain = get_swift_toolchain(ctx)
+def _is_wasm(ctx):
+    """Returns True if the target platform is WebAssembly."""
+    return ctx.target_platform_has_constraint(
+        ctx.attr._wasi_os_constraint[platform_common.ConstraintValueInfo],
+    )
 
+def _swift_binary_impl(ctx):
+    toolchains = find_all_toolchains(ctx)
     feature_configuration = configure_features_for_binary(
         ctx = ctx,
         requested_features = ctx.features,
-        swift_toolchain = swift_toolchain,
-        unsupported_features = ctx.disabled_features,
+        toolchains = toolchains,
+        unsupported_features = ctx.disabled_features + (
+            [SWIFT_FEATURE_STATIC_STDLIB] if ctx.attr.linkshared else []
+        ),
+    )
+
+    is_wasm = _is_wasm(ctx)
+
+    # A binary linked as a shared object (`linkshared`) or a WebAssembly
+    # reactor has no `main`, so the entry-point rename (and the matching
+    # `--defsym main=...` at link time) must be skipped, just as it is when the
+    # toolchain requests it via `swift.no_entry_point_rename`.
+    skip_entry_point = ctx.attr.linkshared or is_feature_enabled(
+        feature_configuration = feature_configuration,
+        feature_name = SWIFT_FEATURE_NO_ENTRY_POINT_RENAME,
     )
 
     srcs = ctx.files.srcs
@@ -93,8 +117,25 @@ def _swift_binary_impl(ctx):
     if srcs:
         module_name = ctx.attr.module_name
         if not module_name:
-            module_name = derive_swift_module_name(ctx.label)
-        entry_point_function_name = "{}_main".format(module_name)
+            module_name = derive_swift_module_name(
+                ctx.label,
+                feature_configuration = feature_configuration,
+            )
+
+        if skip_entry_point:
+            entry_point_name = None
+            entry_point_copts = []
+        else:
+            # Use a custom entry point name so that the binary's code can
+            # also be linked into another process (like a test executable)
+            # without having its main function collide.
+            entry_point_name = entry_point_function_name(module_name)
+            entry_point_copts = [
+                "-Xfrontend",
+                "-entry-point-function-name",
+                "-Xfrontend",
+                entry_point_name,
+            ]
 
         include_dev_srch_paths = include_developer_search_paths(ctx.attr)
 
@@ -106,25 +147,16 @@ def _swift_binary_impl(ctx):
                 ctx,
                 ctx.attr.copts,
                 ctx.attr.swiftc_inputs,
-            ) + _maybe_parse_as_library_copts(srcs) + [
-                # Use a custom entry point name so that the binary's code can
-                # also be linked into another process (like a test executable)
-                # without having its main function collide.
-                "-Xfrontend",
-                "-entry-point-function-name",
-                "-Xfrontend",
-                entry_point_function_name,
-            ],
+            ) + _maybe_parse_as_library_copts(srcs) + entry_point_copts,
             defines = ctx.attr.defines,
             feature_configuration = feature_configuration,
             include_dev_srch_paths = include_dev_srch_paths,
             module_name = module_name,
-            objc_infos = get_providers(ctx.attr.deps, apple_common.Objc),
             package_name = ctx.attr.package_name,
             plugins = get_providers(ctx.attr.plugins, SwiftCompilerPluginInfo),
             srcs = srcs,
             swift_infos = get_providers(ctx.attr.deps, SwiftInfo),
-            swift_toolchain = swift_toolchain,
+            toolchains = toolchains,
             target_name = ctx.label.name,
             workspace_name = ctx.workspace_name,
         )
@@ -136,14 +168,14 @@ def _swift_binary_impl(ctx):
         )
     else:
         compile_result = None
-        entry_point_function_name = None
+        entry_point_name = None
         compilation_outputs = cc_common.create_compilation_outputs()
 
     additional_linking_contexts.append(malloc_linking_context(ctx))
 
     # Apply the optional debugging outputs extension if the toolchain defines
     # one.
-    debug_outputs_provider = swift_toolchain.debug_outputs_provider
+    debug_outputs_provider = toolchains.swift.debug_outputs_provider
     if debug_outputs_provider:
         debug_extension = debug_outputs_provider(ctx = ctx)
         additional_debug_outputs = debug_extension.additional_outputs
@@ -155,13 +187,13 @@ def _swift_binary_impl(ctx):
     binary_link_flags = expand_locations(
         ctx,
         ctx.attr.linkopts,
-        ctx.attr.swiftc_inputs,
+        ctx.attr.additional_linker_inputs,
     ) + ctx.fragments.cpp.linkopts
 
     # When linking the binary, make sure we use the correct entry point name.
-    if entry_point_function_name:
-        entry_point_linkopts = swift_toolchain.entry_point_linkopts_provider(
-            entry_point_name = entry_point_function_name,
+    if entry_point_name:
+        entry_point_linkopts = toolchains.swift.entry_point_linkopts_provider(
+            entry_point_name = entry_point_name,
         ).linkopts
     else:
         entry_point_linkopts = []
@@ -174,29 +206,54 @@ def _swift_binary_impl(ctx):
     else:
         name = ctx.label.name
 
+    # On WebAssembly a `linkshared` binary is a "reactor": an executable-shaped
+    # wasm module linked with `-mexec-model=reactor` (no `main`; it exports
+    # functions for a host to call). Everywhere else `linkshared` produces a
+    # real dynamic library, matching `cc_binary`.
+    shared_link_flags = []
+    if ctx.attr.linkshared and not is_wasm:
+        output_type = "dynamic_library"
+    else:
+        output_type = "executable"
+        if ctx.attr.linkshared and is_wasm:
+            shared_link_flags = ["-mexec-model=reactor"]
+
+        # Give WebAssembly outputs the conventional `.wasm` extension.
+        if is_wasm:
+            name = name + ".wasm"
+
     linking_outputs = register_link_binary_action(
         actions = ctx.actions,
-        additional_inputs = ctx.files.swiftc_inputs,
+        additional_inputs = ctx.files.additional_linker_inputs,
         additional_linking_contexts = additional_linking_contexts,
         additional_outputs = additional_debug_outputs,
         feature_configuration = feature_configuration,
         compilation_outputs = compilation_outputs,
         deps = ctx.attr.deps,
+        label = ctx.label,
         module_contexts = module_contexts,
         name = name,
-        output_type = "executable",
-        owner = ctx.label,
+        output_type = output_type,
         stamp = ctx.attr.stamp,
-        swift_toolchain = swift_toolchain,
-        user_link_flags = binary_link_flags + entry_point_linkopts,
+        toolchains = toolchains,
+        user_link_flags = binary_link_flags + entry_point_linkopts + shared_link_flags,
         variables_extension = variables_extension,
     )
 
+    if output_type == "dynamic_library":
+        library_to_link = linking_outputs.library_to_link
+        output_file = (
+            library_to_link.resolved_symlink_dynamic_library or
+            library_to_link.dynamic_library
+        )
+    else:
+        output_file = linking_outputs.executable
+
     providers = [
         DefaultInfo(
-            executable = linking_outputs.executable,
+            executable = output_file,
             files = depset(
-                [linking_outputs.executable] + additional_debug_outputs,
+                [output_file] + additional_debug_outputs,
             ),
             runfiles = ctx.runfiles(
                 collect_data = True,
@@ -204,17 +261,31 @@ def _swift_binary_impl(ctx):
                 files = ctx.files.data,
             ),
         ),
+        coverage_common.instrumented_files_info(
+            ctx,
+            dependency_attributes = ["deps"],
+            extensions = ["swift"],
+            source_attributes = ["srcs"],
+        ),
         OutputGroupInfo(**output_groups),
         SwiftInfo(
             modules = [
                 create_swift_module_context(
                     name = module_context.name,
                     compilation_context = module_context.compilation_context,
+                    label = getattr(module_context, "label", None),
                     # The rest of the fields are intentionally ommited, as we
                     # only want to expose the compilation_context
                 )
                 for module_context in module_contexts
             ],
+        ),
+        RunEnvironmentInfo(
+            environment = expand_locations(
+                ctx,
+                ctx.attr.env,
+                ctx.attr.swiftc_inputs + ctx.attr.additional_linker_inputs,
+            ),
         ),
     ]
 
@@ -225,7 +296,7 @@ def _swift_binary_impl(ctx):
         linking_context, _ = (
             create_linking_context_from_compilation_outputs(
                 actions = ctx.actions,
-                additional_inputs = ctx.files.swiftc_inputs,
+                additional_inputs = ctx.files.additional_linker_inputs,
                 alwayslink = True,
                 compilation_outputs = compilation_outputs,
                 feature_configuration = feature_configuration,
@@ -234,9 +305,13 @@ def _swift_binary_impl(ctx):
                     dep[CcInfo].linking_context
                     for dep in ctx.attr.deps
                     if CcInfo in dep
+                ] + [
+                    dep[SwiftOverlayInfo].linking_context
+                    for dep in ctx.attr.deps
+                    if SwiftOverlayInfo in dep
                 ],
                 module_context = compile_result.module_context,
-                swift_toolchain = swift_toolchain,
+                toolchains = toolchains,
                 # Exclude the entry point linkopts from this linking context,
                 # because it is meant to be used by other binary rules that
                 # provide their own entry point while linking this "binary" in
@@ -263,8 +338,29 @@ swift_binary = rule(
             stamp_default = -1,
         ),
         {
-            # TODO(b/301253335): Enable AEGs and switch from `swift` exec_group to swift `toolchain` param.
-            "_use_auto_exec_groups": attr.bool(default = False),
+            "linkshared": attr.bool(
+                default = False,
+                doc = """\
+If `True`, link the target as a shared library / loadable module instead of an
+executable, similar to `cc_binary`'s `linkshared`. The binary has no `main`
+entry point and the renamed-entry-point machinery is disabled.
+
+On most platforms this produces a dynamic library named `lib<name>.so`
+(`.dylib` on Apple platforms) suitable for loading with `dlopen` /
+`System.loadLibrary` (e.g. an Android JNI library; export functions with
+`@_cdecl`).
+
+When targeting WebAssembly it instead produces a "reactor" module
+(`<name>.wasm`, linked with `-mexec-model=reactor`): the module has no
+`_start`, runs its initializers via the exported `_initialize`, and exposes
+the functions a host instantiates and calls. Force-export those functions by
+passing `-Xlinker --export=<symbol>` (or `-Wl,--export=<symbol>`) flags in
+`linkopts`.
+""",
+            ),
+            "_wasi_os_constraint": attr.label(
+                default = Label("@platforms//os:wasi"),
+            ),
         },
     ),
     doc = """\
@@ -274,16 +370,31 @@ On Linux, this rule produces an executable binary for the desired target
 architecture.
 
 On Apple platforms, this rule produces a _single-architecture_ binary; it does
-not produce fat binaries. As such, this rule is mainly useful for creating Swift
-tools intended to run on the local build machine.
+not produce universal binaries. As such, this rule is mainly useful for
+creating Swift tools intended to run on the local build machine.
 
 If you want to create a multi-architecture binary or a bundled application,
 please use one of the platform-specific application rules in
 [rules_apple](https://github.com/bazelbuild/rules_apple) instead of
 `swift_binary`.
+
+Setting `linkshared = True` links a shared library or (on WebAssembly) a
+reactor module instead of an executable; see the `linkshared` attribute.
 """,
+    exec_groups = {
+        # The `plugins` attribute associates its `exec` transition with this
+        # execution group. Even though the group is otherwise not used in this
+        # rule, we must resolve the Swift toolchain in this execution group so
+        # that the execution platform of the plugins will have the same
+        # constraints as the execution platform as the other uses of the same
+        # toolchain, ensuring that they don't get built for mismatched
+        # platforms.
+        "swift_plugins": exec_group(
+            toolchains = use_all_toolchains(),
+        ),
+    },
     executable = True,
     fragments = ["cpp"],
     implementation = _swift_binary_impl,
-    toolchains = use_swift_toolchain(),
+    toolchains = use_all_toolchains(),
 )

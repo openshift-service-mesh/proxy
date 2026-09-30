@@ -71,6 +71,9 @@
 /* Define if your system supports the epoll system calls */
 /* #undef EVENT__HAVE_EPOLL */
 
+/* Define if your system supports the wepoll module */
+#define EVENT__HAVE_WEPOLL 1
+
 /* Define to 1 if you have the `epoll_create1' function. */
 /* #undef EVENT__HAVE_EPOLL_CREATE1 */
 

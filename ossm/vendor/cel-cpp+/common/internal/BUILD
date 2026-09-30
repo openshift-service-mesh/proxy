@@ -14,17 +14,17 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
 cc_library(
     name = "casting",
     hdrs = ["casting.h"],
+    copts = CEL_COPTS,
     deps = [
-        "//common:native_type",
         "//internal:casts",
         "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/meta:type_traits",
         "@com_google_absl//absl/types:optional",
     ],
@@ -34,6 +34,7 @@ cc_library(
     name = "reference_count",
     srcs = ["reference_count.cc"],
     hdrs = ["reference_count.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:data",
         "//internal:new",
@@ -48,6 +49,7 @@ cc_library(
 cc_test(
     name = "reference_count_test",
     srcs = ["reference_count_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":reference_count",
         "//common:data",
@@ -61,6 +63,7 @@ cc_test(
 cc_library(
     name = "metadata",
     hdrs = ["metadata.h"],
+    copts = CEL_COPTS,
     deps = ["@com_google_protobuf//:protobuf"],
 )
 
@@ -68,6 +71,7 @@ cc_library(
     name = "byte_string",
     srcs = ["byte_string.cc"],
     hdrs = ["byte_string.h"],
+    copts = CEL_COPTS,
     deps = [
         ":metadata",
         ":reference_count",
@@ -90,6 +94,7 @@ cc_library(
 cc_test(
     name = "byte_string_test",
     srcs = ["byte_string_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":byte_string",
         ":reference_count",
@@ -110,6 +115,7 @@ cc_library(
     name = "value_conversion",
     srcs = ["value_conversion.cc"],
     hdrs = ["value_conversion.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:any",
         "//common:value",

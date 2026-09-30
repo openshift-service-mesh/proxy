@@ -7,22 +7,6 @@ MKL_YELLOW?=	\033[033m
 MKL_BLUE?=	\033[034m
 MKL_CLR_RESET?=	\033[0m
 
-AR ?= ar
-RANLIB ?= ranlib
-
-ifdef EXT_BUILD_ROOT
-    ifneq ($(findstring /,$(AR)),)
-        ifeq ($(filter /%,$(AR)),)
-            AR := $(EXT_BUILD_ROOT)/$(AR)
-        endif
-    endif
-    ifneq ($(findstring /,$(RANLIB)),)
-        ifeq ($(filter /%,$(RANLIB)),)
-            RANLIB := $(EXT_BUILD_ROOT)/$(RANLIB)
-        endif
-    endif
-endif
-
 DEPS=		$(OBJS:%.o=%.d)
 
 # TOPDIR is "TOPDIR/mklove/../" i.e., TOPDIR.

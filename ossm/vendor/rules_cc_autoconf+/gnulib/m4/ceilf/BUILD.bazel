@@ -1,0 +1,25 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/ceilf.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "ceilf",
+    checks = [
+        checks.AC_CHECK_DECL(
+            "ceilf",
+            define = "HAVE_DECL_CEILF",
+            includes = ["#include <math.h>"],
+            subst = True,
+        ),
+        # gl_MATHFUNC sets CEILF_LIBM based on whether ceilf needs -lm
+        # On macOS/Linux, ceilf is in libc, so CEILF_LIBM is empty
+        checks.AC_SUBST("CEILF_LIBM", ""),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/extensions",
+        "//gnulib/m4/math_h",
+    ],
+)

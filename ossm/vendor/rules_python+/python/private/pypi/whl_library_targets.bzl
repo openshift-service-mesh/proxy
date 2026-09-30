@@ -26,6 +26,8 @@ load(
     "EXTRACTED_WHEEL_FILES",
     "PY_LIBRARY_IMPL_LABEL",
     "PY_LIBRARY_PUBLIC_LABEL",
+    "PY_SRCS_LABEL",
+    "WHEEL_FILE",
     "WHEEL_FILE_IMPL_LABEL",
     "WHEEL_FILE_PUBLIC_LABEL",
 )
@@ -47,23 +49,33 @@ _BAZEL_REPO_FILE_GLOBS = [
 _IS_VENV_SITE_PACKAGES_YES = Label("//python/config_settings:_is_venvs_site_packages_yes")
 _VENV_SITE_PACKAGES_FLAG = Label("//python/config_settings:venvs_site_packages")
 
-def whl_library_targets_from_requires(
+def whl_library_targets(
         *,
         name,
         metadata_name = "",
-        metadata_version = "",
         requires_dist = [],
         extras = [],
         entry_points = {},
         include = [],
         group_deps = [],
+        group_name = None,
+        dep_template = None,
+        data_exclude = [],
+        enable_implicit_namespace_pkgs = False,
+        sdist_filename = None,
+        namespace_package_files = [],
+        filegroups = None,
+        copy_files = {},
+        copy_executables = {},
+        srcs_exclude = [],
+        data = [],
+        visibility = ["//visibility:public"],
         **kwargs):
     """The macro to create whl targets from the METADATA.
 
     Args:
         name: {type}`str` The wheel filename
         metadata_name: {type}`str` The package name as written in wheel `METADATA`.
-        metadata_version: {type}`str` The package version as written in wheel `METADATA`.
         group_deps: {type}`list[str]` names of fellow members of the group (if
             any). These will be excluded from generated deps lists so as to avoid
             direct cycles. These dependencies will be provided at runtime by the
@@ -73,62 +85,74 @@ def whl_library_targets_from_requires(
         extras: {type}`list[str]` The list of requested extras. This essentially includes extra transitive dependencies in the final targets depending on the wheel `METADATA`.
         entry_points: {type}`list[dict]` A list of parsed entry point definitions.
         include: {type}`list[str]` The list of packages to include.
-        **kwargs: Extra args passed to the {obj}`whl_library_targets`
+        group_name: {type}`str | None` name of the dependency group (if any).
+        dep_template: {type}`str | None` The dep_template to use.
+        data_exclude: {type}`list[str]` The globs for data attribute exclusion.
+        enable_implicit_namespace_pkgs: {type}`boolean` generate __init__.py files for namespace pkgs.
+        sdist_filename: {type}`str | None` The filename of the sdist.
+        namespace_package_files: {type}`list[str]` A list of labels of files whose directories are namespace packages.
+        filegroups: {type}`dict[str, list[str]] | None` A dictionary of the target names and the glob matches.
+        copy_files: {type}`dict[str, str]` The mapping between src and dest locations.
+        copy_executables: {type}`dict[str, str]` The mapping between src and dest locations for executables.
+        srcs_exclude: {type}`list[str]` The globs for srcs attribute exclusion.
+        data: {type}`list[str]` A list of labels to include as part of the `data` attribute.
+        visibility: {type}`list[str]` The visibility of the targets.
+        **kwargs: Extra args passed to the {obj}`whl_library_deps_targets` and {obj}`whl_library_srcs`.
     """
-    package_deps = _parse_requires_dist(
-        name = metadata_name,
-        requires_dist = requires_dist,
-        excludes = group_deps,
-        extras = extras,
-        include = include,
-    )
-
-    whl_library_targets(
+    create_extra_targets = bool(requires_dist or group_name) and dep_template
+    whl_library_srcs(
         name = name,
-        dependencies = package_deps.deps,
-        dependencies_with_markers = package_deps.deps_select,
+        sdist_filename = sdist_filename,
+        data_exclude = data_exclude,
+        srcs_exclude = srcs_exclude,
+        filegroups = filegroups,
         entry_points = entry_points,
-        tags = [
-            "pypi_name={}".format(metadata_name),
-            "pypi_version={}".format(metadata_version),
-        ],
+        visibility = visibility,
+        data = data,
+        copy_files = copy_files,
+        copy_executables = copy_executables,
+        enable_implicit_namespace_pkgs = enable_implicit_namespace_pkgs,
+        namespace_package_files = namespace_package_files,
+        # If there are no dependencies, then let's create the targets with public labels.
+        # Note, we are not supporting grouping the packages in this case, but that is fine.
+        whl_name = WHEEL_FILE if create_extra_targets else WHEEL_FILE_PUBLIC_LABEL,
+        pkg_name = PY_SRCS_LABEL if create_extra_targets else PY_LIBRARY_PUBLIC_LABEL,
         **kwargs
     )
 
-def _parse_requires_dist(
-        *,
-        name,
-        requires_dist,
-        excludes,
-        include,
-        extras):
-    return deps(
-        name = normalize_name(name),
-        requires_dist = requires_dist,
-        excludes = excludes,
-        include = include,
-        extras = extras,
-    )
+    if create_extra_targets:
+        whl_library_deps_targets(
+            name = name,
+            metadata_name = metadata_name,
+            requires_dist = requires_dist,
+            group_deps = group_deps,  # only needed if requires_dist is present
+            extras = extras,  # only needed if requires_dist is present
+            include = include,  # only needed if requires_dist is present
+            group_name = group_name,  # only needed if requires_dist is present
+            dep_template = dep_template,  # only needed if requires_dist is present
+            repo = None,  # set aliases in the same repo
+            aliases = {},
+            **kwargs
+        )
 
-def whl_library_targets(
+def whl_library_srcs(
         *,
         name,
-        dep_template,
         sdist_filename = None,
         data_exclude = [],
         srcs_exclude = [],
         tags = [],
-        dependencies = [],
         filegroups = None,
-        dependencies_with_markers = {},
         entry_points = {},
-        group_name = "",
         data = [],
         copy_files = {},
         copy_executables = {},
         native = native,
         enable_implicit_namespace_pkgs = False,
         namespace_package_files = [],
+        whl_name = WHEEL_FILE,
+        pkg_name = PY_SRCS_LABEL,
+        visibility = ["//visibility:public"],
         rules = struct(
             copy_file = copy_file,
             py_binary = py_binary,
@@ -143,21 +167,13 @@ def whl_library_targets(
     Args:
         name: {type}`str` The file to match for including it into the `whl`
             filegroup. This may be also parsed to generate extra metadata.
-        dep_template: {type}`str` The dep_template to use for dependency
-            interpolation.
         sdist_filename: {type}`str | None` If the wheel was built from an sdist,
             the filename of the sdist.
+        visibility: {type}`list[str]` The visibility of the source targets.
         tags: {type}`list[str]` The tags set on the `py_library`.
-        dependencies: {type}`list[str]` A list of dependencies.
-        dependencies_with_markers: {type}`dict[str, str]` A marker to evaluate
-            in order for the dep to be included.
         entry_points: {type}`list[dict]` A list of parsed entry point definitions.
         filegroups: {type}`dict[str, list[str]] | None` A dictionary of the target
             names and the glob matches. If `None`, defaults will be used.
-        group_name: {type}`str` name of the dependency group (if any) which
-            contains this library. If set, this library will behave as a shim
-            to group implementation rules which will provide simultaneously
-            installed dependencies which would otherwise form a cycle.
         copy_executables: {type}`dict[str, str]` The mapping between src and
             dest locations for the targets.
         copy_files: {type}`dict[str, str]` The mapping between src and
@@ -169,12 +185,13 @@ def whl_library_targets(
         data: {type}`list[str]` A list of labels to include as part of the `data` attribute in `py_library`.
         enable_implicit_namespace_pkgs: {type}`boolean` generate __init__.py
             files for namespace pkgs.
-        native: {type}`native` The native struct for overriding in tests.
         namespace_package_files: {type}`list[str]` A list of labels of files whose
             directories are namespace packages.
+        whl_name: {type}`str` The label name to use for the wheel filegroup target.
+        pkg_name: {type}`str` The label name to use for the py_library target.
+        native: {type}`native` The native struct for overriding in tests.
         rules: {type}`struct` A struct with references to rules for creating targets.
     """
-    dependencies = sorted([normalize_name(d) for d in dependencies])
     tags = sorted(tags)
     data = [] + data
 
@@ -212,8 +229,9 @@ def whl_library_targets(
         filegroups = {
             EXTRACTED_WHEEL_FILES: dict(
                 include = ["**"],
-                exclude = (
-                    _BAZEL_REPO_FILE_GLOBS +
+                # The Bazel repo files are always excluded; only the sdist
+                # filename is conditional on `sdist_filename`.
+                exclude = _BAZEL_REPO_FILE_GLOBS + (
                     [sdist_filename] if sdist_filename else []
                 ),
             ),
@@ -233,7 +251,7 @@ def whl_library_targets(
         native.filegroup(
             name = filegroup_name,
             srcs = srcs,
-            visibility = ["//visibility:public"],
+            visibility = visibility,
         )
 
     for src, dest in copy_files.items():
@@ -241,7 +259,7 @@ def whl_library_targets(
             name = dest + ".copy",
             src = src,
             out = dest,
-            visibility = ["//visibility:public"],
+            visibility = visibility,
         )
         data.append(dest)
     for src, dest in copy_executables.items():
@@ -250,78 +268,15 @@ def whl_library_targets(
             src = src,
             out = dest,
             is_executable = True,
-            visibility = ["//visibility:public"],
+            visibility = visibility,
         )
         data.append(dest)
 
-    _config_settings(
-        dependencies_with_markers = dependencies_with_markers,
-        rules = rules,
-        visibility = ["//visibility:private"],
-    )
-    deps_conditional = {
-        d: "is_include_{}_true".format(d)
-        for d in dependencies_with_markers
-    }
-
-    # If this library is a member of a group, its public label aliases need to
-    # point to the group implementation rule not the implementation rules. We
-    # also need to mark the implementation rules as visible to the group
-    # implementation.
-    if group_name and "//:" in dep_template:
-        # This is the legacy behaviour where the group library is outside the hub repo
-        #
-        # It is expected to disappear when we drop WORKSPACE or drop the vendoring of
-        # pip_parse `requirements.bzl` in WORKSPACE. The alternative would be to add
-        # another argument to the macro, but it is already full of arguments.
-        label_tmpl = dep_template.format(
-            name = "_config",
-            target = normalize_name(group_name) + "_{}",
-        ).replace(
-            "//:",
-            "//_groups:",
-        )
-        impl_vis = [dep_template.format(
-            name = "_config",
-            target = "__pkg__",
-        ).replace(
-            "//:",
-            "//_groups:",
-        )]
-
-        native.alias(
-            name = PY_LIBRARY_PUBLIC_LABEL,
-            actual = label_tmpl.format(PY_LIBRARY_PUBLIC_LABEL),
-            visibility = ["//visibility:public"],
-        )
-        native.alias(
-            name = WHEEL_FILE_PUBLIC_LABEL,
-            actual = label_tmpl.format(WHEEL_FILE_PUBLIC_LABEL),
-            visibility = ["//visibility:public"],
-        )
-        py_library_label = PY_LIBRARY_IMPL_LABEL
-        whl_file_label = WHEEL_FILE_IMPL_LABEL
-
-    elif group_name:
-        py_library_label = PY_LIBRARY_PUBLIC_LABEL
-        whl_file_label = WHEEL_FILE_PUBLIC_LABEL
-        impl_vis = [dep_template.format(name = "", target = "__subpackages__")]
-
-    else:
-        py_library_label = PY_LIBRARY_PUBLIC_LABEL
-        whl_file_label = WHEEL_FILE_PUBLIC_LABEL
-        impl_vis = ["//visibility:public"]
-
     if hasattr(native, "filegroup"):
         native.filegroup(
-            name = whl_file_label,
+            name = whl_name,
             srcs = [name],
-            data = _deps(
-                deps = dependencies,
-                deps_conditional = deps_conditional,
-                tmpl = dep_template.format(name = "{}", target = WHEEL_FILE_PUBLIC_LABEL),
-            ),
-            visibility = impl_vis,
+            visibility = visibility,
         )
 
     if hasattr(rules, "py_library"):
@@ -375,23 +330,193 @@ def whl_library_targets(
         data = data + [DATA_LABEL]
 
         rules.py_library(
-            name = py_library_label,
+            name = pkg_name,
             srcs = srcs,
             pyi_srcs = pyi_srcs,
             data = data,
             # This makes this directory a top-level in the python import
             # search path for anything that depends on this.
             imports = ["site-packages"],
+            tags = tags,
+            visibility = visibility,
+            experimental_venvs_site_packages = _VENV_SITE_PACKAGES_FLAG,
+            namespace_package_files = namespace_package_files,
+        )
+
+def whl_library_deps_targets(
+        *,
+        name = None,
+        repo,
+        aliases = None,
+        metadata_name,
+        requires_dist,
+        extras,
+        include = [],
+        group_deps = [],
+        group_name = None,
+        dep_template,
+        tags = [],
+        visibility = ["//visibility:public"],
+        native = native,
+        rules = struct(
+            copy_file = copy_file,
+            py_binary = py_binary,
+            py_library = py_library,
+            venv_entry_point = venv_entry_point,
+            venv_rewrite_shebang = venv_rewrite_shebang,
+            env_marker_setting = env_marker_setting,
+            create_inits = _create_inits,
+        )):
+    """Create all of the whl_library targets.
+
+    Args:
+        name: {type}`str` The wheel filename
+        metadata_name: {type}`str` The package name as written in wheel `METADATA`.
+        group_deps: {type}`list[str]` names of fellow members of the group (if
+            any). These will be excluded from generated deps lists so as to avoid
+            direct cycles. These dependencies will be provided at runtime by the
+            group rules which wrap this library and its fellows together.
+        requires_dist: {type}`list[str]` The list of `Requires-Dist` values from
+            the whl `METADATA`.
+        extras: {type}`list[str]` The list of requested extras. This essentially includes extra transitive dependencies in the final targets depending on the wheel `METADATA`.
+        include: {type}`list[str]` The list of packages to include.
+        group_name: {type}`str | None` name of the dependency group (if any).
+        dep_template: {type}`str | None` The dep_template to use.
+        tags: {type}`list[str]` The tags set on the targets.
+        repo: {type}`str | Label | None` The BUILD.bazel label to the parent repo that has the
+            sources. If none, then will take the targets from the current dir.
+        aliases: {type}`dict[str, str] | None` The list of aliases to create in the parent repo. If None, will create
+            the default values. Empty list means no aliases.
+        visibility: {type}`list[str]` The visibility of the targets.
+        native: {type}`native` The native struct for overriding in tests.
+        rules: {type}`struct` A struct with references to rules for creating targets.
+    """
+    repo_label = Label(repo).same_package_label if repo else (lambda x: x)
+    if aliases == None:
+        aliases = {
+            EXTRACTED_WHEEL_FILES: repo_label(EXTRACTED_WHEEL_FILES),
+            DIST_INFO_LABEL: repo_label(DIST_INFO_LABEL),
+            DATA_LABEL: repo_label(DATA_LABEL),
+        }
+
+    # If this library is a member of a group, its public label aliases need to
+    # point to the group implementation rule not the implementation rules. We
+    # also need to mark the implementation rules as visible to the group
+    # implementation.
+    if group_name and "//:" in dep_template:
+        # This is the legacy behaviour where the group library is outside the hub repo
+        #
+        # It is expected to disappear when we drop WORKSPACE or drop the vendoring of
+        # pip_parse `requirements.bzl` in WORKSPACE. The alternative would be to add
+        # another argument to the macro, but it is already full of arguments.
+        label_tmpl = dep_template.format(
+            name = "_config",
+            target = normalize_name(group_name) + "_{}",
+        ).replace(
+            "//:",
+            "//_groups:",
+        )
+        aliases = aliases | {
+            PY_LIBRARY_PUBLIC_LABEL: label_tmpl.format(PY_LIBRARY_PUBLIC_LABEL),
+            WHEEL_FILE_PUBLIC_LABEL: label_tmpl.format(WHEEL_FILE_PUBLIC_LABEL),
+        }
+        impl_vis = [dep_template.format(
+            name = "_config",
+            target = "__pkg__",
+        ).replace(
+            "//:",
+            "//_groups:",
+        )]
+
+        py_library_label = PY_LIBRARY_IMPL_LABEL
+        whl_file_label = WHEEL_FILE_IMPL_LABEL
+    else:
+        py_library_label = PY_LIBRARY_PUBLIC_LABEL
+        whl_file_label = WHEEL_FILE_PUBLIC_LABEL
+        if group_name:
+            impl_vis = [dep_template.format(name = "", target = "__subpackages__")]
+        else:
+            impl_vis = visibility
+
+    if not requires_dist:
+        # If the package is in a group but has no deps, we still need the public labels to
+        # point at the srcs targets so that the group implementation can use them. We don't
+        # need any of the extra targets, so just create the aliases.
+        aliases = aliases | {
+            py_library_label: repo_label(PY_SRCS_LABEL),
+            whl_file_label: repo_label(WHEEL_FILE),
+        }
+
+    for alias, actual in aliases.items():
+        native.alias(
+            name = alias,
+            actual = actual,
+            visibility = visibility,
+        )
+
+    if not requires_dist:
+        # If there are extras, then they will be visible in requires_dist.
+        return
+
+    package_deps = _parse_requires_dist(
+        name = metadata_name,
+        requires_dist = requires_dist,
+        excludes = group_deps,
+        extras = extras,
+        include = include,
+    )
+
+    _config_settings(
+        dependencies_with_markers = package_deps.deps_select,
+        rules = rules,
+        visibility = ["//visibility:private"],
+    )
+
+    if hasattr(native, "filegroup"):
+        # We include the whl file as srcs so that `$(location :whl)` expands to the whl file.
+        # The transitive dependencies are available via the `data` attribute.
+        native.filegroup(
+            name = whl_file_label,
+            srcs = [repo_label(WHEEL_FILE)],
+            data = _deps(
+                deps = [],
+                package_deps = package_deps,
+                tmpl = dep_template.format(name = "{}", target = WHEEL_FILE_PUBLIC_LABEL),
+            ),
+            visibility = impl_vis,
+        )
+
+    if hasattr(rules, "py_library"):
+        rules.py_library(
+            name = py_library_label,
+            # We include as srcs to ensure that the (locations :pkg) works as expected.
+            srcs = [repo_label(PY_SRCS_LABEL)],
             deps = _deps(
-                deps = dependencies,
-                deps_conditional = deps_conditional,
+                # We include as deps, so that `PyInfo` and friends (e.g. `pyi_srcs`) get
+                # propagated. Just passing the target as `srcs` is not enough to propagate
+                # `pyi_srcs`, see `tests/base_rules/py_library`.
+                deps = [repo_label(PY_SRCS_LABEL)],
+                package_deps = package_deps,
                 tmpl = dep_template.format(name = "{}", target = PY_LIBRARY_PUBLIC_LABEL),
             ),
             tags = tags,
             visibility = impl_vis,
-            experimental_venvs_site_packages = _VENV_SITE_PACKAGES_FLAG,
-            namespace_package_files = namespace_package_files,
         )
+
+def _parse_requires_dist(
+        *,
+        name,
+        requires_dist,
+        excludes,
+        include,
+        extras):
+    return deps(
+        name = normalize_name(name),
+        requires_dist = requires_dist,
+        excludes = excludes,
+        include = include,
+        extras = extras,
+    )
 
 def _config_settings(dependencies_with_markers, rules, **kwargs):
     """Generate config settings for the targets.
@@ -409,12 +534,12 @@ def _config_settings(dependencies_with_markers, rules, **kwargs):
             **kwargs
         )
 
-def _deps(deps, deps_conditional, tmpl):
-    deps = [tmpl.format(d) for d in sorted(deps)]
+def _deps(deps, package_deps, tmpl):
+    deps = [] + deps + [tmpl.format(d) for d in sorted(package_deps.deps)]
 
-    for dep, setting in deps_conditional.items():
+    for dep in package_deps.deps_select:
         deps = deps + select({
-            ":{}".format(setting): [tmpl.format(dep)],
+            ":is_include_{}_true".format(dep): [tmpl.format(dep)],
             "//conditions:default": [],
         })
 

@@ -4,6 +4,11 @@ quiche_copts = [
     # hpack_huffman_decoder.cc overloads operator<<.
     "-Wno-unused-function",
     "-Wno-old-style-cast",
+    "-Wno-deprecated-declarations",
+    # quiche mixes absl::Nonnull/Nullable-annotated and unannotated pointers in the
+    # same headers (e.g. common/stable_block_list.h); clang then warns on every
+    # unannotated pointer. Upstream builds with this off too.
+    "-Wno-nullability-completeness",
     # Envoy build should not fail if a dependency has a warning.
     "-Wno-error",
 ] + select({
@@ -16,7 +21,7 @@ quiche_copts = [
 
 _EXTERNAL_DEPS = {
     "nghttp2": ["@nghttp2//:nghttp2"],
-    "ssl": ["//:ssl_lib"],
+    "ssl": ["@quiche_deps//:ssl_lib"],
 }
 
 # QUIC/HTTP3-specific library targets. Under --define=quiche_disable_http3=true

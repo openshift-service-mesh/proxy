@@ -131,7 +131,6 @@ TEST_F(MoqtPublishRequestStreamTest, ReceiveRequestOk) {
   stream_->BindStream(&mock_stream_);  // Calls OnStreamBound
 
   MoqtRequestOk request_ok;
-  request_ok.request_id = kRequestId;
   request_ok.parameters.delivery_timeout = quic::QuicTimeDelta::FromSeconds(2);
   request_ok.parameters.group_order = MoqtDeliveryOrder::kDescending;
   QUICHE_EXPECT_OK(stream_->OnControlMessage(request_ok));
@@ -158,21 +157,15 @@ TEST_F(MoqtPublishRequestStreamTest, ReceiveRequestError) {
               Writev(ControlMessageOfType(MoqtMessageType::kPublish), _))
       .WillOnce(Return(absl::OkStatus()));
   stream_->BindStream(&mock_stream_);  // Calls OnStreamBound
-
-  MoqtRequestError request_error;
-  request_error.request_id = kRequestId;
-  request_error.error_code = RequestErrorCode::kUnauthorized;
-  request_error.retry_interval = quic::QuicTimeDelta::FromSeconds(5);
-  request_error.reason_phrase = "Unauthorized";
+  MoqtRequestError request_error(RequestErrorCode::kUnauthorized,
+                                 quic::QuicTimeDelta::FromSeconds(5),
+                                 "Unauthorized");
   QUICHE_EXPECT_OK(stream_->OnControlMessage(request_error));
 
   // Verify response callback was called with error.
   ASSERT_TRUE(response_.has_value());
   ASSERT_TRUE(std::holds_alternative<MoqtRequestErrorInfo>(*response_));
-  MoqtRequestErrorInfo resp_error = std::get<MoqtRequestErrorInfo>(*response_);
-  EXPECT_EQ(resp_error.error_code, request_error.error_code);
-  EXPECT_EQ(resp_error.retry_interval, request_error.retry_interval);
-  EXPECT_EQ(resp_error.reason_phrase, request_error.reason_phrase);
+  EXPECT_EQ(std::get<MoqtRequestErrorInfo>(*response_), request_error);
 }
 
 TEST_F(MoqtPublishRequestStreamTest, ReceiveRequestUpdate) {
@@ -181,7 +174,7 @@ TEST_F(MoqtPublishRequestStreamTest, ReceiveRequestUpdate) {
       .WillOnce(Return(absl::OkStatus()));
   stream_->BindStream(&mock_stream_);
 
-  QUICHE_EXPECT_OK(stream_->OnControlMessage(MoqtRequestOk{kRequestId}));
+  QUICHE_EXPECT_OK(stream_->OnControlMessage(MoqtRequestOk()));
   // Set largest location on publisher
   track_publisher_->AddObject(Location(1, 2), 0, "payload", true);
 
@@ -257,7 +250,7 @@ class MoqtPublishResponseStreamTest : public quiche::test::QuicheTest {
 
   MoqtPublish DefaultPublish() {
     return MoqtPublish{kRequestId, kTrackName, kTrackAlias, MessageParameters(),
-                       TrackExtensions()};
+                       TrackProperties()};
   }
 
   MoqtFramer framer_;
@@ -268,7 +261,7 @@ class MoqtPublishResponseStreamTest : public quiche::test::QuicheTest {
       error_callback_;
 
   testing::MockFunction<SubscribeVisitor*(
-      const FullTrackName&, const MessageParameters&, const TrackExtensions&,
+      const FullTrackName&, const MessageParameters&, const TrackProperties&,
       MoqtResponseCallback)>
       incoming_publish_callback_mock_;
   MoqtIncomingPublishCallback incoming_publish_callback_;
@@ -291,7 +284,7 @@ TEST_F(MoqtPublishResponseStreamTest, ReceivePublishAndAccept) {
           });
   EXPECT_CALL(incoming_publish_callback_mock_, Call(kTrackName, _, _, _))
       .WillOnce([this](const FullTrackName&, const MessageParameters&,
-                       const TrackExtensions&, MoqtResponseCallback callback) {
+                       const TrackProperties&, MoqtResponseCallback callback) {
         captured_response_callback_ = std::move(callback);
         return &mock_subscribe_visitor_;
       });
@@ -310,19 +303,80 @@ TEST_F(MoqtPublishResponseStreamTest, ReceivePublishAndAccept) {
   EXPECT_EQ(captured_subscriber->track_alias(), kTrackAlias);
   EXPECT_EQ(captured_subscriber->visitor(), &mock_subscribe_visitor_);
 
-  // Verify REQUEST_OK response was sent.
-  EXPECT_CALL(mock_stream_,
-              Writev(ControlMessageOfType(MoqtMessageType::kRequestOk), _))
+  // Verify REQUEST_OK response was sent with new_group_request filtered out
+  // because DYNAMIC_GROUPS is absent/false.
+  MoqtRequestOk expected_ok;
+  expected_ok.parameters.delivery_timeout = quic::QuicTimeDelta::FromSeconds(2);
+  EXPECT_CALL(mock_stream_, Writev(SerializedControlMessage(expected_ok), _))
       .WillOnce(Return(absl::OkStatus()));
-  MessageParameters response_parameters;
-  response_parameters.delivery_timeout = quic::QuicTimeDelta::FromSeconds(2);
+  MessageParameters response_parameters = expected_ok.parameters;
+  response_parameters.new_group_request = 0;
   std::move(captured_response_callback_)(response_parameters);
 
-  // Verify subscriber parameters were updated.
+  // Verify subscriber parameters were updated and new_group_request was
+  // filtered out.
   const MessageParameters& sub_params =
       LiveSubscriberPeer::parameters(*captured_subscriber);
   EXPECT_EQ(sub_params.delivery_timeout, response_parameters.delivery_timeout);
+  EXPECT_EQ(sub_params.new_group_request, std::nullopt);
   EXPECT_CALL(mock_subscribe_visitor_, OnPublishDone);
+}
+
+TEST_F(MoqtPublishResponseStreamTest, ReceivePublishWithDynamicGroups) {
+  EXPECT_CALL(mock_subscribe_visitor_, OnReply(kTrackName, _))
+      .WillOnce(
+          [](const FullTrackName&,
+             const std::variant<SubscribeOkData, MoqtRequestErrorInfo>& reply) {
+            EXPECT_TRUE(std::holds_alternative<SubscribeOkData>(reply));
+          });
+  EXPECT_CALL(incoming_publish_callback_mock_, Call(kTrackName, _, _, _))
+      .WillOnce([this](const FullTrackName&, const MessageParameters&,
+                       const TrackProperties&, MoqtResponseCallback callback) {
+        captured_response_callback_ = std::move(callback);
+        return &mock_subscribe_visitor_;
+      });
+  LiveSubscriber* captured_subscriber = nullptr;
+  EXPECT_CALL(mock_add_callback_, Call(NotNull()))
+      .WillOnce([&](LiveSubscriber* subscriber) {
+        captured_subscriber = subscriber;
+        return true;
+      });
+  MoqtPublish publish = DefaultPublish();
+  publish.properties = TrackProperties(
+      /*delivery_timeout=*/std::nullopt,
+      /*max_cache_duration=*/std::nullopt,
+      /*publisher_priority=*/std::nullopt,
+      /*group_order=*/std::nullopt,
+      /*dynamic_groups=*/true,
+      /*immutable_extensions=*/std::nullopt);
+  QUICHE_EXPECT_OK(stream_->OnControlMessage(publish));
+  ASSERT_NE(captured_subscriber, nullptr);
+
+  // Verify REQUEST_OK response preserves new_group_request when DYNAMIC_GROUPS
+  // is true.
+  MoqtRequestOk expected_ok;
+  expected_ok.parameters.new_group_request = 0;
+  EXPECT_CALL(mock_stream_, Writev(SerializedControlMessage(expected_ok), _))
+      .WillOnce(Return(absl::OkStatus()));
+  std::move(captured_response_callback_)(expected_ok.parameters);
+  const MessageParameters& sub_params =
+      LiveSubscriberPeer::parameters(*captured_subscriber);
+  EXPECT_EQ(sub_params.new_group_request, 0);
+  EXPECT_CALL(mock_subscribe_visitor_, OnPublishDone);
+}
+
+TEST_F(MoqtPublishResponseStreamTest,
+       ReceivePublishWithUnknownMandatoryProperty) {
+  MoqtPublish publish = DefaultPublish();
+  publish.properties.insert(kMinMandatoryTrackProperty, 1ULL);
+  EXPECT_CALL(incoming_publish_callback_mock_, Call).Times(0);
+  EXPECT_CALL(mock_add_callback_, Call).Times(0);
+  MoqtRequestError expected_error{RequestErrorCode::kUnsupportedExtension,
+                                  /*retry_interval=*/std::nullopt,
+                                  "Unknown mandatory property: 0x4000"};
+  EXPECT_CALL(mock_stream_, Writev(SerializedControlMessage(expected_error), _))
+      .WillOnce(Return(absl::OkStatus()));
+  QUICHE_EXPECT_OK(stream_->OnControlMessage(publish));
 }
 
 TEST_F(MoqtPublishResponseStreamTest, ReceivePublishAndReject) {
@@ -445,7 +499,7 @@ TEST_F(MoqtPublishResponseStreamTest, ReceivePublishAndRejectCallback) {
   MoqtPublish publish = DefaultPublish();
   EXPECT_CALL(incoming_publish_callback_mock_, Call(kTrackName, _, _, _))
       .WillOnce([this](const FullTrackName&, const MessageParameters&,
-                       const TrackExtensions&, MoqtResponseCallback callback) {
+                       const TrackProperties&, MoqtResponseCallback callback) {
         captured_response_callback_ = std::move(callback);
         return &mock_subscribe_visitor_;
       });
@@ -531,7 +585,7 @@ TEST_F(MoqtPublishResponseStreamTest, DuplicatePublishOnDifferentStreams) {
   testing::MockFunction<bool(LiveSubscriber*)> mock_add_callback2;
   testing::MockFunction<void(LiveSubscriber*)> mock_remove_callback2;
   testing::MockFunction<SubscribeVisitor*(
-      const FullTrackName&, const MessageParameters&, const TrackExtensions&,
+      const FullTrackName&, const MessageParameters&, const TrackProperties&,
       MoqtResponseCallback)>
       incoming_publish_callback_mock2;
   MoqtIncomingPublishCallback incoming_publish_callback2 =

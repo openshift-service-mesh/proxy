@@ -14,20 +14,22 @@
 
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "patch", "read_user_netrc", "use_netrc")
 load("//internal:common.bzl", "env_execute", "executable_extension", "watch")
-load("//internal:go_repository_cache.bzl", "read_cache_env")
+load("//internal:env.bzl", "read_go_env_file")
 
 _DOC = """
 `go_repository` downloads a Go project and generates build files with Gazelle
 if they are not already present. This is the simplest way to depend on
 external Go projects.
 
-When `go_repository` is in module mode, it saves downloaded modules in a shared,
-internal cache within Bazel's cache. It may be cleared with `bazel clean --expunge`.
-By setting the environment variable `GO_REPOSITORY_USE_HOST_CACHE=1`, you can
-force `go_repository` to use the module cache on the host system in the location
-returned by `go env GOPATH`. Alternatively, by setting the environment variable
-`GO_REPOSITORY_USE_HOST_MODCACHE=1`, you can force `go_repository` to use only
-the module cache on the host system in the location returned by `go env GOMODCACHE`.
+In module mode, `go_repository` writes to a shared internal cache that can be
+cleared with `bazel clean --expunge`. The following environment variables
+redirect that cache:
+
+- `GO_REPOSITORY_USE_HOST_CACHE=1` — use the host cache at `go env GOPATH`.
+- `GO_REPOSITORY_USE_HOST_MODCACHE=1` — use the host cache at `go env GOMODCACHE`.
+- `GO_REPOSITORY_EPHEMERAL_MODCACHE=1` — use a per-invocation tempdir; reclaims
+  disk at the cost of re-fetching modules when the repo cache is invalidated
+  (e.g. on a Gazelle upgrade).
 
 **Example**
 
@@ -125,10 +127,26 @@ def _go_repository_impl(ctx):
 
     is_module_extension_repo = bool(ctx.attr.internal_only_do_not_use_apparent_name)
 
-    # Explicitly watch label dependencies as they are only used as execute arguments.
-    # https://bazel.build/extending/repo#when_is_the_implementation_function_executed
-    go_env_cache = str(ctx.path(Label("@bazel_gazelle_go_repository_cache//:go.env")))
+    # Load the environment.
+    if is_module_extension_repo:
+        # In module mode, load go.env from the instance of go_repository_config that is
+        # a sibling of this repository. There may be multiple isolated instances of
+        # go_deps, which each allow the environment to be configured with
+        # go_deps.config.go_env and go_env_inherit. We want go_repository instances
+        # to use the appropriate environment within each go_deps, and
+        # "@bazel_gazelle_go_repository_config" does not necessarily refer to the right
+        # one. So we use this ugly hack to compute the correct canonical repo name.
+        extension_repo_prefix = ctx.attr.name[:-len(ctx.attr.internal_only_do_not_use_apparent_name)]
+        go_env_label = Label("@@" + extension_repo_prefix + "bazel_gazelle_go_repository_config//:go.env")
+    else:
+        # In WORKSPACE mode, load from @bazel_gazelle_go_repository_cache//:go.env.
+        # This is configured via gazelle_dependencies go_env and go_env_inherit.
+        go_env_label = Label("@bazel_gazelle_go_repository_cache//:go.env")
+    go_env_cache = str(ctx.path(go_env_label))
     watch(ctx, go_env_cache)
+    go_repository_cache_go_env = Label("@bazel_gazelle_go_repository_cache//:go.env")
+    watch(ctx, str(ctx.path(go_repository_cache_go_env)))
+
     fetch_repo = str(ctx.path(Label("@bazel_gazelle_go_repository_tools//:bin/fetch_repo{}".format(executable_extension(ctx)))))
     watch(ctx, fetch_repo)
     generate = ctx.attr.build_file_generation in ["on", "clean"]
@@ -216,7 +234,14 @@ def _go_repository_impl(ctx):
     else:
         fail("one of urls, commit, tag, or version must be specified")
 
-    env = read_cache_env(ctx, go_env_cache)
+    if is_module_extension_repo:
+        env = read_go_env_file(
+            ctx,
+            go_env_cache,
+            cache_dir_file = go_repository_cache_go_env,
+        )
+    else:
+        env = read_go_env_file(ctx, go_env_cache)
     env_keys = [
         # keep sorted
 
@@ -225,6 +250,7 @@ def _go_repository_impl(ctx):
         # not go out to the network at all. This means *the build*
         # goes out to the network. We tolerate this for downloading
         # archives, but finding module roots is a bit much.
+        "GOAUTH",
         "GONOPROXY",
         "GONOSUMDB",
         "GOPRIVATE",
@@ -287,12 +313,22 @@ def _go_repository_impl(ctx):
     # Override external GO111MODULE, because it is needed by module mode, no-op in repository mode
     fetch_repo_env["GO111MODULE"] = "on"
 
+    ephemeral_modcache = None
+    if ctx.attr.version:
+        if "GOMODCACHE" not in env and ctx.getenv("GO_REPOSITORY_EPHEMERAL_MODCACHE") == "1":
+            ephemeral_modcache = ctx.path("_gomodcache_tmp")
+            fetch_repo_env["GOMODCACHE"] = str(ephemeral_modcache)
+
     result = env_execute(
         ctx,
         [fetch_repo] + fetch_repo_args,
         environment = fetch_repo_env,
         timeout = _GO_REPOSITORY_TIMEOUT,
     )
+
+    if ephemeral_modcache != None:
+        ctx.delete(ephemeral_modcache)
+
     if result.return_code:
         fail("%s: %s" % (ctx.name, result.stderr))
 
@@ -301,7 +337,10 @@ def _go_repository_impl(ctx):
     existing_build_file = ""
     for name in build_file_names:
         path = ctx.path(name)
-        if path.exists and not env_execute(ctx, ["test", "-f", path]).return_code:
+
+        # The is_dir check matters on case-insensitive file systems, where e.g.
+        # a `build` directory is found when looking up `BUILD`.
+        if path.exists and not path.is_dir:
             existing_build_file = name
             break
 
@@ -375,37 +414,36 @@ def _go_repository_impl(ctx):
     # Apply patches if necessary.
     patch(ctx)
 
-    if generate:
-        # Do not override a REPO.bazel patched in by users. This also provides a
-        # way for users to opt out of Gazelle-generated package_info.
-        repo_file = ctx.path("REPO.bazel")
-        if not repo_file.exists:
-            ctx.file("REPO.bazel", """\
+    # Do not override a REPO.bazel patched in by users. This also provides a
+    # way for users to opt out of Gazelle-generated package_info.
+    repo_file = ctx.path("REPO.bazel")
+    if not repo_file.exists:
+        ctx.file("REPO.bazel", """\
 repo(
     default_package_metadata = [
-        "//:gazelle_generated_package_info",
-        "//:package_metadata",
+        "//_gazelle_generated:package_info",
+        "//_gazelle_generated:package_metadata",
     ],
 )
 """)
 
-            # Modify the top-level build file after patches have been applied as the
-            # patches may otherwise conflict with our generated content.
-            build_file = ctx.path(build_file_name)
-            if build_file.exists:
-                build_file_content = ctx.read(build_file)
-            else:
-                build_file_content = ""
-            build_file_content += _generate_package_info(
+        # Write the generated targets to a dedicated package to avoid name collisions
+        # with targets already defined in the top-level build file.
+        ctx.file(
+            "_gazelle_generated/BUILD.bazel",
+            _generate_package_info(
                 importpath = ctx.attr.importpath,
                 version = ctx.attr.version,
-            )
-            ctx.file(build_file_name, build_file_content)
+                sum = ctx.attr.sum,
+            ),
+        )
 
     if reproducible and hasattr(ctx, "repo_metadata"):
         return ctx.repo_metadata(reproducible = True)
+    else:
+        return None
 
-def _generate_package_info(*, importpath, version):
+def _generate_package_info(*, importpath, version, sum):
     package_name = importpath
 
     # TODO: Consider adding support for custom remotes.
@@ -420,6 +458,15 @@ def _generate_package_info(*, importpath, version):
             namespace_and_name = importpath,
             version = version,
         )
+
+        # sum may only be set when version is.
+        if sum:
+            # TODO(rdesgroppes): Use @package_metadata//purl:purl.bzl's `purl.builder()` once
+            # WORKSPACE support is dropped. Until then, using it here would require extending the
+            # WORKSPACE stanza with a `package_metadata` declaration before loading
+            # `gazelle_dependencies`, so the interim solution below only percent-encodes the
+            # characters in a go.sum `h1:` digest that must be escaped in a PURL qualifier value.
+            purl += "?checksum=" + sum.replace("+", "%2B").replace("/", "%2F").replace("=", "%3D")
     else:
         purl = "pkg:golang/{namespace_and_name}".format(
             namespace_and_name = importpath,
@@ -438,7 +485,7 @@ package_metadata(
 )
 
 package_info(
-    name = "gazelle_generated_package_info",
+    name = "package_info",
     package_name = {package_name},
     package_url = {package_url},
     package_version = {package_version},

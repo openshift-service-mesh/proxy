@@ -21,10 +21,8 @@ and then needs to compile them. This module provides that lower-level interface.
 """
 
 load(
-    "//swift/internal:attrs.bzl",
-    "swift_compilation_attrs",
-    "swift_library_rule_attrs",
-    "swift_toolchain_attrs",
+    "//swift/internal:actions.bzl",
+    "is_action_enabled",
 )
 load(
     "//swift/internal:compiling.bzl",
@@ -40,6 +38,10 @@ load(
     "is_feature_enabled",
 )
 load(
+    "//swift/internal:interface_synthesizing.bzl",
+    "synthesize_interface",
+)
+load(
     "//swift/internal:linking.bzl",
     "create_linking_context_from_compilation_outputs",
 )
@@ -49,52 +51,31 @@ load(
 )
 load(
     "//swift/internal:toolchain_utils.bzl",
+    "find_all_toolchains",
     "get_swift_toolchain",
+    "use_all_toolchains",
     "use_swift_toolchain",
 )
-load(":module_name.bzl", "derive_swift_module_name")
-load(
-    ":providers.bzl",
-    "SwiftInfo",
-    "create_clang_module_inputs",
-    "create_swift_module_context",
-    "create_swift_module_inputs",
-)
-load(":swift_interop_info.bzl", "create_swift_interop_info")
 
 # The exported `swift_common` module, which defines the public API for directly
 # invoking actions that compile Swift code from other rules.
 swift_common = struct(
     cc_feature_configuration = get_cc_feature_configuration,
-    compilation_attrs = swift_compilation_attrs,
     compile = compile,
     compile_module_interface = compile_module_interface,
     configure_features = configure_features,
-    # TODO(b/261445197): Remove this after everyone is migrated to the free
-    # function.
-    create_clang_module = create_clang_module_inputs,
     create_compilation_context = create_compilation_context,
     create_linking_context_from_compilation_outputs = create_linking_context_from_compilation_outputs,
-    # TODO(b/261445197): Remove this after everyone is migrated to the free
-    # function.
-    create_module = create_swift_module_context,
-    # TODO(b/261445197): Remove this after everyone is migrated to the free
-    # function.
-    create_swift_info = SwiftInfo,
-    # TODO(b/261445197): Remove this after everyone is migrated to the free
-    # function.
-    create_swift_interop_info = create_swift_interop_info,
-    # TODO(b/261445197): Remove this after everyone is migrated to the free
-    # function.
-    create_swift_module = create_swift_module_inputs,
-    # TODO(b/261444771): Remove this after everyone is migrated to the free
-    # function.
-    derive_module_name = derive_swift_module_name,
     extract_symbol_graph = extract_symbol_graph,
-    get_toolchain = get_swift_toolchain,
+    find_all_toolchains = find_all_toolchains,
+    is_action_enabled = is_action_enabled,
     is_enabled = is_feature_enabled,
-    library_rule_attrs = swift_library_rule_attrs,
     precompile_clang_module = precompile_clang_module,
-    toolchain_attrs = swift_toolchain_attrs,
+    synthesize_interface = synthesize_interface,
+    use_all_toolchains = use_all_toolchains,
+
+    # TODO: b/415809235 - These functions are deprecated and should be removed
+    # after migrating to the new APIs.
+    get_toolchain = get_swift_toolchain,
     use_toolchain = use_swift_toolchain,
 )

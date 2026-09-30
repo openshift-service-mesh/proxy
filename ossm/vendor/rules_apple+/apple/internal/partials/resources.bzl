@@ -65,6 +65,7 @@ load(
 def _merge_root_infoplists(
         *,
         actions,
+        mac_exec_group,
         out_infoplist,
         output_discriminator,
         rule_descriptor,
@@ -74,6 +75,7 @@ def _merge_root_infoplists(
 
     Args:
       actions: The actions provider from `ctx.actions`.
+      mac_exec_group: The execution group for Mac tools.
       out_infoplist: Reference to the output Info plist.
       output_discriminator: A string to differentiate between different target intermediate files
           or `None`.
@@ -99,6 +101,7 @@ def _merge_root_infoplists(
 
     resource_actions.merge_root_infoplists(
         actions = actions,
+        mac_exec_group = mac_exec_group,
         output_discriminator = output_discriminator,
         output_plist = out_infoplist,
         output_pkginfo = out_pkginfo,
@@ -109,13 +112,15 @@ def _merge_root_infoplists(
 
     return [(processor.location.content, None, depset(direct = files))]
 
-def _locales_requested(*, locales_to_include, config_vars):
+def _locales_requested(*, build_setting_locales_to_include, locales_to_include, config_vars):
     """Determines which locales to include when resource actions.
 
     If the user has specified "apple.locales_to_include" we use those. Otherwise we don't filter.
     'Base' is included by default to any given list of locales to include.
 
     Args:
+        build_setting_locales_to_include: Comma-separated locales to bundle from the Starlark
+            build setting.
         config_vars: A dictionary (String to String) of config variables. Typically from `ctx.var`.
         locales_to_include: A string list of locales to bundle.
 
@@ -126,9 +131,10 @@ def _locales_requested(*, locales_to_include, config_vars):
     requested_locales = None
     if locales_to_include:
         requested_locales = locales_to_include
-    else:
-        config_locals_to_include = config_vars.get("apple.locales_to_include")
-        requested_locales = config_locals_to_include.split(",") if config_locals_to_include else None
+    elif config_locals_to_include:
+        requested_locales = config_locals_to_include.split(",")
+    elif build_setting_locales_to_include:
+        requested_locales = build_setting_locales_to_include.split(",")
 
     if requested_locales != None:
         return sets.make(["Base"] + [x.strip() for x in requested_locales])
@@ -157,19 +163,21 @@ def _validate_processed_locales(*, label, locales_dropped, locales_included, loc
                      sets.str(conflicting_locales) + " as they are explicitly excluded but also explicitly included. Please verify " +
                      "apple.locales_to_include and apple.locales_to_exclude are defined properly.")
 
-def _locales_excluded(*, config_vars):
+def _locales_excluded(*, build_setting_locales_to_exclude, config_vars):
     """Determines which locales to exclude when resource actions.
 
     If the user has specified "apple.locales_to_exclude" we use those.
 
     Args:
+        build_setting_locales_to_exclude: Comma-separated locales to exclude from the Starlark
+            build setting.
         config_vars: A dictionary (String to String) of config variables. Typically from `ctx.var`.
 
     Returns:
         A set of locales to exclude or None if no locale exclude is requested.
     """
-    excluded_locales = config_vars.get("apple.locales_to_exclude")
-    if excluded_locales != None:
+    excluded_locales = config_vars.get("apple.locales_to_exclude") or build_setting_locales_to_exclude
+    if excluded_locales:
         return sets.make([x.strip() for x in excluded_locales.split(",")])
     else:
         return None
@@ -177,6 +185,7 @@ def _locales_excluded(*, config_vars):
 def _resources_partial_impl(
         *,
         actions,
+        mac_exec_group,
         apple_mac_toolchain_info,
         bundle_extension,
         bundle_id,
@@ -249,8 +258,15 @@ def _resources_partial_impl(
 
     infoplists = []
 
-    locales_requested = _locales_requested(locales_to_include = locales_to_include, config_vars = platform_prerequisites.config_vars)
-    locales_excluded = _locales_excluded(config_vars = platform_prerequisites.config_vars)
+    locales_requested = _locales_requested(
+        build_setting_locales_to_include = platform_prerequisites.build_settings.locales_to_include,
+        config_vars = platform_prerequisites.config_vars,
+        locales_to_include = locales_to_include,
+    )
+    locales_excluded = _locales_excluded(
+        build_setting_locales_to_exclude = platform_prerequisites.build_settings.locales_to_exclude,
+        config_vars = platform_prerequisites.config_vars,
+    )
     locales_included = sets.make(["Base"])
     locales_dropped = sets.make()
 
@@ -275,6 +291,7 @@ def _resources_partial_impl(
                 "apple_mac_toolchain_info": apple_mac_toolchain_info,
                 "bundle_id": bundle_id,
                 "files": files,
+                "mac_exec_group": mac_exec_group,
                 "output_discriminator": output_discriminator,
                 "parent_dir": parent_dir,
                 "platform_prerequisites": platform_prerequisites,
@@ -348,6 +365,7 @@ def _resources_partial_impl(
                 extensionkit_keys_required = extensionkit_keys_required,
                 input_plists = infoplists,
                 launch_storyboard = launch_storyboard,
+                mac_exec_group = mac_exec_group,
                 out_infoplist = out_infoplist,
                 output_discriminator = output_discriminator,
                 platform_prerequisites = platform_prerequisites,
@@ -368,6 +386,7 @@ def _resources_partial_impl(
 def resources_partial(
         *,
         actions,
+        mac_exec_group,
         apple_mac_toolchain_info,
         bundle_extension,
         bundle_id = None,
@@ -398,6 +417,7 @@ def resources_partial(
 
     Args:
         actions: The actions provider from `ctx.actions`.
+        mac_exec_group: The execution group for Mac tools.
         apple_mac_toolchain_info: `struct` of tools from the shared Apple toolchain.
         bundle_extension: The extension for the bundle.
         bundle_id: Optional bundle ID to use when processing resources. If no bundle ID is given,
@@ -455,6 +475,7 @@ def resources_partial(
         extensionkit_keys_required = extensionkit_keys_required,
         launch_storyboard = launch_storyboard,
         locales_to_include = locales_to_include,
+        mac_exec_group = mac_exec_group,
         output_discriminator = output_discriminator,
         platform_prerequisites = platform_prerequisites,
         primary_icon_name = primary_icon_name,

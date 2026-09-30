@@ -1,6 +1,10 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
+# This package contains code
+# that compiles Expr object into evaluatable CelExpression
+load("//bazel:copts.bzl", "CEL_COPTS")
+
 DEFAULT_VISIBILITY = [
     "//eval:__subpackages__",
     "//runtime:__subpackages__",
@@ -8,8 +12,6 @@ DEFAULT_VISIBILITY = [
     "//testing:__subpackages__",
 ]
 
-# This package contains code
-# that compiles Expr object into evaluatable CelExpression
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
@@ -27,6 +29,7 @@ cc_library(
     name = "flat_expr_builder_extensions",
     srcs = ["flat_expr_builder_extensions.cc"],
     hdrs = ["flat_expr_builder_extensions.h"],
+    copts = CEL_COPTS,
     deps = [
         ":resolver",
         "//base:ast",
@@ -59,6 +62,7 @@ cc_library(
 cc_test(
     name = "flat_expr_builder_extensions_test",
     srcs = ["flat_expr_builder_extensions_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":flat_expr_builder_extensions",
         ":resolver",
@@ -94,7 +98,9 @@ cc_library(
     hdrs = [
         "flat_expr_builder.h",
     ],
+    copts = CEL_COPTS,
     deps = [
+        ":check_ast_extensions",
         ":flat_expr_builder_extensions",
         ":resolver",
         "//base:ast",
@@ -108,6 +114,7 @@ cc_library(
         "//common:expr",
         "//common:kind",
         "//common:type",
+        "//common:type_spec_resolver",
         "//common:value",
         "//eval/eval:comprehension_step",
         "//eval/eval:const_value_step",
@@ -160,6 +167,7 @@ cc_test(
     srcs = [
         "flat_expr_builder_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_builder_flat_impl",
         ":constant_folding",
@@ -167,6 +175,7 @@ cc_test(
         ":qualified_reference_resolver",
         "//base:builtins",
         "//common:function_descriptor",
+        "//common:kind",
         "//common:value",
         "//eval/public:activation",
         "//eval/public:builtin_func_registrar",
@@ -174,6 +183,7 @@ cc_test(
         "//eval/public:cel_builtins",
         "//eval/public:cel_expr_builder_factory",
         "//eval/public:cel_expression",
+        "//eval/public:cel_function",
         "//eval/public:cel_function_adapter",
         "//eval/public:cel_function_registry",
         "//eval/public:cel_options",
@@ -190,15 +200,20 @@ cc_test(
         "//internal:status_macros",
         "//internal:testing",
         "//parser",
+        "//parser:options",
         "//runtime:function",
         "//runtime:function_adapter",
         "//runtime:runtime_options",
+        "//runtime:standard_functions",
         "//runtime/internal:runtime_env_testing",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
         "@com_google_cel_spec//proto/cel/expr:checked_cc_proto",
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
@@ -213,6 +228,7 @@ cc_test(
     srcs = [
         "flat_expr_builder_comprehensions_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_builder_flat_impl",
         ":comprehension_vulnerability_check",
@@ -246,6 +262,7 @@ cc_library(
     hdrs = [
         "cel_expression_builder_flat_impl.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":flat_expr_builder",
         "//base:ast",
@@ -278,6 +295,7 @@ cc_test(
     srcs = [
         "cel_expression_builder_flat_impl_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_builder_flat_impl",
         ":constant_folding",
@@ -319,6 +337,7 @@ cc_library(
     hdrs = [
         "constant_folding.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":flat_expr_builder_extensions",
         ":resolver",
@@ -346,6 +365,7 @@ cc_test(
     srcs = [
         "constant_folding_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":constant_folding",
         ":flat_expr_builder_extensions",
@@ -386,6 +406,7 @@ cc_library(
     hdrs = [
         "qualified_reference_resolver.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":flat_expr_builder_extensions",
         ":resolver",
@@ -407,9 +428,39 @@ cc_library(
 )
 
 cc_library(
+    name = "check_ast_extensions",
+    srcs = ["check_ast_extensions.cc"],
+    hdrs = ["check_ast_extensions.h"],
+    copts = CEL_COPTS,
+    deps = [
+        "//common:ast",
+        "//common/ast:metadata",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "check_ast_extensions_test",
+    srcs = ["check_ast_extensions_test.cc"],
+    copts = CEL_COPTS,
+    deps = [
+        ":check_ast_extensions",
+        "//common:ast",
+        "//common:expr",
+        "//common/ast:metadata",
+        "//internal:testing",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+cc_library(
     name = "resolver",
     srcs = ["resolver.cc"],
     hdrs = ["resolver.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:kind",
         "//common:type",
@@ -432,6 +483,7 @@ cc_test(
     srcs = [
         "qualified_reference_resolver_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":qualified_reference_resolver",
         ":resolver",
@@ -464,9 +516,9 @@ cc_test(
     srcs = [
         "flat_expr_builder_short_circuiting_conformance_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_builder_flat_impl",
-        "//base:builtins",
         "//eval/public:activation",
         "//eval/public:cel_attribute",
         "//eval/public:cel_expression",
@@ -474,8 +526,11 @@ cc_test(
         "//eval/public:unknown_attribute_set",
         "//eval/public:unknown_set",
         "//internal:testing",
+        "//parser",
+        "//parser:options",
         "//runtime:runtime_options",
         "//runtime/internal:runtime_env_testing",
+        "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_protobuf//:protobuf",
@@ -486,6 +541,7 @@ cc_test(
     name = "resolver_test",
     size = "small",
     srcs = ["resolver_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":resolver",
         "//common:value",
@@ -505,6 +561,7 @@ cc_library(
     name = "regex_precompilation_optimization",
     srcs = ["regex_precompilation_optimization.cc"],
     hdrs = ["regex_precompilation_optimization.h"],
+    copts = CEL_COPTS,
     deps = [
         ":flat_expr_builder_extensions",
         "//base:builtins",
@@ -518,10 +575,12 @@ cc_library(
         "//eval/eval:evaluator_core",
         "//eval/eval:regex_match_step",
         "//internal:casts",
+        "//internal:re2_options",
         "//internal:status_macros",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
         "@com_googlesource_code_re2//:re2",
@@ -531,6 +590,7 @@ cc_library(
 cc_test(
     name = "regex_precompilation_optimization_test",
     srcs = ["regex_precompilation_optimization_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_builder_flat_impl",
         ":constant_folding",
@@ -566,6 +626,7 @@ cc_library(
     name = "comprehension_vulnerability_check",
     srcs = ["comprehension_vulnerability_check.cc"],
     hdrs = ["comprehension_vulnerability_check.h"],
+    copts = CEL_COPTS,
     deps = [
         ":flat_expr_builder_extensions",
         "//base:builtins",
@@ -582,6 +643,7 @@ cc_library(
     name = "instrumentation",
     srcs = ["instrumentation.cc"],
     hdrs = ["instrumentation.h"],
+    copts = CEL_COPTS,
     deps = [
         ":flat_expr_builder_extensions",
         "//common:ast",
@@ -598,6 +660,7 @@ cc_library(
 cc_test(
     name = "instrumentation_test",
     srcs = ["instrumentation_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":constant_folding",
         ":flat_expr_builder",

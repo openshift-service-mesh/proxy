@@ -89,6 +89,9 @@ class ABSL_SCOPED_LOCKABLE MutexLock {
   explicit MutexLock(Mutex* mu) ABSL_EXCLUSIVE_LOCK_FUNCTION(mu) : mu_(mu) {
     mu_->Lock();
   }
+  explicit MutexLock(Mutex& mu) ABSL_EXCLUSIVE_LOCK_FUNCTION(mu) : mu_(&mu) {
+    mu_->Lock();
+  }
   ~MutexLock() ABSL_UNLOCK_FUNCTION() { mu_->Unlock(); }
 
   MutexLock(const MutexLock&) = delete;
@@ -102,6 +105,10 @@ class ABSL_SCOPED_LOCKABLE ReleasableMutexLock {
  public:
   explicit ReleasableMutexLock(Mutex* mu) ABSL_EXCLUSIVE_LOCK_FUNCTION(mu)
       : mu_(mu) {
+    mu_->Lock();
+  }
+  explicit ReleasableMutexLock(Mutex& mu) ABSL_EXCLUSIVE_LOCK_FUNCTION(mu)
+      : mu_(&mu) {
     mu_->Lock();
   }
   ~ReleasableMutexLock() ABSL_UNLOCK_FUNCTION() {

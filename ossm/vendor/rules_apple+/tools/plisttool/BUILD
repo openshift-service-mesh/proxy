@@ -1,4 +1,6 @@
-load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 
 licenses(["notice"])
 
@@ -9,6 +11,7 @@ py_binary(
     srcs_version = "PY3",
     visibility = [
         "//apple/internal:__pkg__",
+        "//test/starlark_tests:__subpackages__",
     ],
     deps = [":plisttool_lib"],
 )
@@ -16,6 +19,7 @@ py_binary(
 py_library(
     name = "plisttool_lib",
     srcs = [
+        "__init__.py",
         "plisttool.py",
     ],
     srcs_version = "PY3",
@@ -26,16 +30,13 @@ py_test(
     srcs = ["plisttool_unittest.py"],
     python_version = "PY3",
     tags = ["requires-darwin"],
-    deps = [
-        ":plisttool_lib",
-        "//:py_init_shim",
-    ],
+    deps = [":plisttool_lib"],
 )
 
 # Consumed by bazel tests.
 filegroup(
     name = "for_bazel_tests",
-    testonly = 1,
+    testonly = True,
     srcs = glob(["**"]),
     visibility = [
         "//tools:__pkg__",

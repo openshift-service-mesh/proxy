@@ -15,6 +15,7 @@
 #include "internal/empty_descriptors.h"
 
 #include <cstdint>
+#include <iterator>
 
 #include "google/protobuf/descriptor.pb.h"
 #include "absl/base/attributes.h"
@@ -39,7 +40,7 @@ const google::protobuf::DescriptorPool* absl_nonnull GetEmptyDescriptorPool() {
   static const google::protobuf::DescriptorPool* absl_nonnull const pool = []() {
     google::protobuf::FileDescriptorSet file_desc_set;
     ABSL_CHECK(file_desc_set.ParseFromArray(  // Crash OK
-       kEmptyDescriptorSet, ABSL_ARRAYSIZE(kEmptyDescriptorSet)));
+       kEmptyDescriptorSet, std::size(kEmptyDescriptorSet)));
     auto* pool = new google::protobuf::DescriptorPool();
     for (const auto& file_desc : file_desc_set.file()) {
       ABSL_CHECK(pool->BuildFile(file_desc) != nullptr);  // Crash OK

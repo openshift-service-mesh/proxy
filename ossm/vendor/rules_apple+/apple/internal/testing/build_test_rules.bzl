@@ -106,6 +106,7 @@ number (for example, `"9.0"`).
 """,
             ),
             "targets": attr.label_list(
+                allow_empty = False,
                 cfg = transition_support.apple_platform_split_transition,
                 doc = "The targets to check for successful build.",
             ),
@@ -115,14 +116,11 @@ number (for example, `"9.0"`).
             # the user has not modified it.
             "platform_type": attr.string(default = platform_type),
             "_platform_type": attr.string(default = platform_type),
-            "_allowlist_function_transition": attr.label(
-                default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
-            ),
         },
         doc = doc,
-        exec_compatible_with = [
-            "@platforms//os:macos",
-        ],
+        exec_groups = {
+            "test": exec_group(),
+        },
         implementation = _apple_build_test_rule_impl,
         test = True,
         cfg = transition_support.apple_rule_transition,

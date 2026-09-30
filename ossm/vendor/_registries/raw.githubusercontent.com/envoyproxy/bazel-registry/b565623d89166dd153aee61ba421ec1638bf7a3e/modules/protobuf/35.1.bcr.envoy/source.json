@@ -1,0 +1,10 @@
+{
+    "integrity": "sha256-8LaDjnUiqNqWEm1IcGjJWbxiSSY2jzAkrI/QOr0KGsQ=",
+    "strip_prefix": "protobuf-35.1",
+    "url": "https://github.com/protocolbuffers/protobuf/releases/download/v35.1/protobuf-35.1.tar.gz",
+    "patches": {
+        "envoy.patch": "sha256-zTUQSwbbxbFOSnRLqCnojz4CWnE6wt0FTiEFtJc+EWk=",
+        "warnings.patch": "sha256-g/UWw4kRL4F5pCI+z8Zn0otq/Wa6cCLeLWe0Q0hiXB8="
+    },
+    "patch_strip": 1
+}

@@ -36,6 +36,14 @@ config_setting(
     ],
 )
 
+config_setting(
+    name = "windows_x86_64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+)
+
 ##############################################################################
 # Stage 1: Build minilua (host tool)
 ##############################################################################
@@ -185,6 +193,17 @@ genrule(
 )
 
 genrule(
+    name = "lj_vm_obj",
+    outs = ["lj_vm.obj"],
+    cmd = select({
+        ":windows_x86_64": "$(location :buildvm_x64) -m peobj -o $@",
+    }),
+    tools = select({
+        ":windows_x86_64": [":buildvm_x64"],
+    }),
+)
+
+genrule(
     name = "lj_bcdef_h",
     srcs = LJLIB_C,
     outs = ["lj_bcdef.h"],
@@ -193,12 +212,14 @@ genrule(
         ":linux_arm64": "$(location :buildvm_arm64) -m bcdef -o $@ $(SRCS)",
         ":macos_x86_64": "$(location :buildvm_x64) -m bcdef -o $@ $(SRCS)",
         ":macos_arm64": "$(location :buildvm_arm64) -m bcdef -o $@ $(SRCS)",
+        ":windows_x86_64": "$(location :buildvm_x64) -m bcdef -o $@ $(SRCS)",
     }),
     tools = select({
         ":linux_x86_64": [":buildvm_x64"],
         ":linux_arm64": [":buildvm_arm64"],
         ":macos_x86_64": [":buildvm_x64"],
         ":macos_arm64": [":buildvm_arm64"],
+        ":windows_x86_64": [":buildvm_x64"],
     }),
 )
 
@@ -211,12 +232,14 @@ genrule(
         ":linux_arm64": "$(location :buildvm_arm64) -m ffdef -o $@ $(SRCS)",
         ":macos_x86_64": "$(location :buildvm_x64) -m ffdef -o $@ $(SRCS)",
         ":macos_arm64": "$(location :buildvm_arm64) -m ffdef -o $@ $(SRCS)",
+        ":windows_x86_64": "$(location :buildvm_x64) -m ffdef -o $@ $(SRCS)",
     }),
     tools = select({
         ":linux_x86_64": [":buildvm_x64"],
         ":linux_arm64": [":buildvm_arm64"],
         ":macos_x86_64": [":buildvm_x64"],
         ":macos_arm64": [":buildvm_arm64"],
+        ":windows_x86_64": [":buildvm_x64"],
     }),
 )
 
@@ -229,12 +252,14 @@ genrule(
         ":linux_arm64": "$(location :buildvm_arm64) -m libdef -o $@ $(SRCS)",
         ":macos_x86_64": "$(location :buildvm_x64) -m libdef -o $@ $(SRCS)",
         ":macos_arm64": "$(location :buildvm_arm64) -m libdef -o $@ $(SRCS)",
+        ":windows_x86_64": "$(location :buildvm_x64) -m libdef -o $@ $(SRCS)",
     }),
     tools = select({
         ":linux_x86_64": [":buildvm_x64"],
         ":linux_arm64": [":buildvm_arm64"],
         ":macos_x86_64": [":buildvm_x64"],
         ":macos_arm64": [":buildvm_arm64"],
+        ":windows_x86_64": [":buildvm_x64"],
     }),
 )
 
@@ -247,12 +272,14 @@ genrule(
         ":linux_arm64": "$(location :buildvm_arm64) -m recdef -o $@ $(SRCS)",
         ":macos_x86_64": "$(location :buildvm_x64) -m recdef -o $@ $(SRCS)",
         ":macos_arm64": "$(location :buildvm_arm64) -m recdef -o $@ $(SRCS)",
+        ":windows_x86_64": "$(location :buildvm_x64) -m recdef -o $@ $(SRCS)",
     }),
     tools = select({
         ":linux_x86_64": [":buildvm_x64"],
         ":linux_arm64": [":buildvm_arm64"],
         ":macos_x86_64": [":buildvm_x64"],
         ":macos_arm64": [":buildvm_arm64"],
+        ":windows_x86_64": [":buildvm_x64"],
     }),
 )
 
@@ -265,12 +292,14 @@ genrule(
         ":linux_arm64": "$(location :buildvm_arm64) -m folddef -o $@ $(SRCS)",
         ":macos_x86_64": "$(location :buildvm_x64) -m folddef -o $@ $(SRCS)",
         ":macos_arm64": "$(location :buildvm_arm64) -m folddef -o $@ $(SRCS)",
+        ":windows_x86_64": "$(location :buildvm_x64) -m folddef -o $@ $(SRCS)",
     }),
     tools = select({
         ":linux_x86_64": [":buildvm_x64"],
         ":linux_arm64": [":buildvm_arm64"],
         ":macos_x86_64": [":buildvm_x64"],
         ":macos_arm64": [":buildvm_arm64"],
+        ":windows_x86_64": [":buildvm_x64"],
     }),
 )
 
@@ -352,12 +381,14 @@ cc_library(
         "src/lib_ffi.c",
         "src/lib_buffer.c",
         "src/lib_init.c",
-        # Generated VM assembly
-        ":lj_vm_s",
         # All lj_*.h headers (as private headers)
     ] + glob([
         "src/lj_*.h",
-    ]),
+    ]) + select({
+        # Generated VM assembly
+        ":windows_x86_64": [],
+        "//conditions:default": [":lj_vm_s"],
+    }),
     hdrs = [
         "src/lua.h",
         "src/lua.hpp",
@@ -372,6 +403,11 @@ cc_library(
         ":lj_recdef_h",
         ":lj_folddef_h",
     ],
+    deps = select({
+        # Generated VM assembly on Windows is an .obj file
+        ":windows_x86_64": [":lj_vm_obj"],
+        "//conditions:default": [],
+    }),
     copts = [
         "-O2",
         "-fomit-frame-pointer",

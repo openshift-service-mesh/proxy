@@ -62,12 +62,31 @@ absl::Status MoqtSubscribeRequestStream::OnRawControlMessage(
 
 absl::Status MoqtSubscribeRequestStream::OnControlMessage(
     const MoqtSubscribeOk& message) {
-  if (message.request_id != track_->request_id()) {
-    return absl::InvalidArgumentError("SUBSCRIBE_OK request ID mismatch");
-  }
   if (add_callback_ == nullptr) {
     return absl::InvalidArgumentError(
         "Multiple SUBSCRIBE_OK on the same stream");
+  }
+  absl::Status mandatory_property_status =
+      message.properties.CheckForUnknownMandatoryProperty();
+  if (!mandatory_property_status.ok()) {
+    add_callback_ = nullptr;
+    // Save everything before Reset() destroys track_.
+    bool error_allowed = track_->ErrorIsAllowed();
+    SubscribeVisitor* visitor = track_->visitor();
+    FullTrackName track_name = track_->full_track_name();
+    Reset(kResetCodeCancelled);
+    if (!error_allowed) {
+      QUICHE_BUG(moqt_bug_object_before_subscribe_ok)
+          << "An object was delivered before SUBSCRIBE_OK provided the track "
+             "alias";
+      return absl::OkStatus();
+    }
+    if (visitor != nullptr) {
+      // It's too late to deliver REQUEST_ERROR if an object already arrived
+      visitor->OnReply(track_name,
+                       StatusToMoqtRequestError(mandatory_property_status));
+    }
+    return absl::OkStatus();
   }
   track_->set_track_alias(message.track_alias);
   if (!std::move(add_callback_)(track_.get())) {
@@ -77,7 +96,7 @@ absl::Status MoqtSubscribeRequestStream::OnControlMessage(
   }
   add_callback_ = nullptr;
 
-  track_->OnObjectOrOk(SubscribeOkData(message.parameters, message.extensions));
+  track_->OnObjectOrOk(SubscribeOkData(message.parameters, message.properties));
   return absl::OkStatus();
 }
 
@@ -87,6 +106,11 @@ absl::Status MoqtSubscribeRequestStream::OnControlMessage(
     // Not yet established.
     OnFatalError(
         absl::InvalidArgumentError("REQUEST_OK received before SUBSCRIBE_OK"));
+    return absl::OkStatus();
+  }
+  if (!message.properties.empty()) {
+    OnFatalError(absl::InvalidArgumentError(
+        "REQUEST_UPDATE_OK received with properties"));
     return absl::OkStatus();
   }
   absl::StatusOr<MessageParameters> old_parameters =
@@ -184,8 +208,8 @@ absl::Status MoqtSubscribeResponseStream::OnControlMessage(
   if (track_publisher == nullptr) {
     QUIC_DLOG(INFO) << "SUBSCRIBE for " << message.full_track_name
                     << " rejected by the application: does not exist";
-    return SendRequestError(message.request_id, RequestErrorCode::kDoesNotExist,
-                            std::nullopt, "not found", /*fin=*/true);
+    return SendRequestError(RequestErrorCode::kDoesNotExist, std::nullopt,
+                            "not found");
   }
   subscription_ = std::make_unique<LivePublisher>(
       *framer(), track_publisher, this, message.request_id, track_alias_,
@@ -194,14 +218,12 @@ absl::Status MoqtSubscribeResponseStream::OnControlMessage(
     bool result = std::move(add_callback_)(subscription_.get());
     add_callback_ = nullptr;
     if (!result) {
-      return SendRequestError(message.request_id,
-                              RequestErrorCode::kDuplicateSubscription,
-                              std::nullopt, "duplicate subscription",
-                              /*fin=*/true);
+      return SendRequestError(RequestErrorCode::kDuplicateSubscription,
+                              std::nullopt, "duplicate subscription");
     }
   }
   // Don't add the publisher until we know it's successful.
-  track_publisher->AddObjectListener(subscription_.get());
+  track_publisher->AddObjectListener(subscription_.get(), message.parameters);
   return absl::OkStatus();
 }
 
@@ -209,12 +231,11 @@ absl::Status MoqtSubscribeResponseStream::OnControlMessage(
     const MoqtRequestUpdate& message) {
   if (subscription_ == nullptr) {
     QUICHE_BUG(INFO) << "Received REQUEST_UPDATE, no subscription state";
-    return SendRequestError(message.request_id,
-                            RequestErrorCode::kInternalError, std::nullopt,
-                            "no subscription", /*fin=*/true);
+    return SendRequestError(RequestErrorCode::kInternalError, std::nullopt,
+                            "no subscription");
   }
   subscription_->Update(message.parameters);
-  return SendRequestOk(message.request_id, MessageParameters());
+  return SendRequestOk(MessageParameters());
 }
 
 void MoqtSubscribeResponseStream::Detach() {

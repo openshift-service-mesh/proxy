@@ -1,0 +1,20 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/wcsspn.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "wcsspn",
+    checks = [
+        checks.AC_CHECK_FUNC(
+            "wcsspn",
+            define = "HAVE_WCSSPN",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        # Note: wchar_h provides HAVE_DECL_WCSDUP, but golden file expects it undefined
+        # "//gnulib/m4/wchar_h",  # AC_REQUIRE([gl_WCHAR_H_DEFAULTS]) - but pulls in HAVE_DECL_WCSDUP
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)

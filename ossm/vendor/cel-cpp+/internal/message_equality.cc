@@ -44,13 +44,15 @@
 #include "google/protobuf/message.h"
 #include "google/protobuf/util/message_differencer.h"
 
+#undef GetMessage
+
 namespace cel::internal {
 
 namespace {
 
+using ::cel::extensions::protobuf_internal::ConstMapBegin;
+using ::cel::extensions::protobuf_internal::ConstMapEnd;
 using ::cel::extensions::protobuf_internal::LookupMapValue;
-using ::cel::extensions::protobuf_internal::MapBegin;
-using ::cel::extensions::protobuf_internal::MapEnd;
 using ::cel::extensions::protobuf_internal::MapSize;
 using ::google::protobuf::Descriptor;
 using ::google::protobuf::DescriptorPool;
@@ -84,10 +86,10 @@ class EquatableMessage final
 };
 
 using EquatableValue =
-    absl::variant<std::nullptr_t, bool, int64_t, uint64_t, double,
-                  well_known_types::BytesValue, well_known_types::StringValue,
-                  absl::Duration, absl::Time, EquatableListValue,
-                  EquatableStruct, EquatableAny, EquatableMessage>;
+    std::variant<std::nullptr_t, bool, int64_t, uint64_t, double,
+                 well_known_types::BytesValue, well_known_types::StringValue,
+                 absl::Duration, absl::Time, EquatableListValue,
+                 EquatableStruct, EquatableAny, EquatableMessage>;
 
 struct NullValueEqualer {
   bool operator()(std::nullptr_t, std::nullptr_t) const { return true; }
@@ -902,8 +904,8 @@ class MessageEqualsState final {
         MapSize(*rhs_reflection, rhs, *rhs_field)) {
       return false;
     }
-    auto lhs_begin = MapBegin(*lhs_reflection, lhs, *lhs_field);
-    const auto lhs_end = MapEnd(*lhs_reflection, lhs, *lhs_field);
+    auto lhs_begin = ConstMapBegin(*lhs_reflection, lhs, *lhs_field);
+    const auto lhs_end = ConstMapEnd(*lhs_reflection, lhs, *lhs_field);
     Unique<Message> lhs_unpacked;
     EquatableValue lhs_value;
     Unique<Message> rhs_unpacked;

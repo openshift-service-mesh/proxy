@@ -15,13 +15,13 @@
 #include "quiche/quic/core/quic_time.h"
 #include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/moqt/moqt_error.h"
-#include "quiche/quic/moqt/moqt_fetch_task.h"
 #include "quiche/quic/moqt/moqt_framer.h"
 #include "quiche/quic/moqt/moqt_key_value_pair.h"
 #include "quiche/quic/moqt/moqt_messages.h"
 #include "quiche/quic/moqt/moqt_names.h"
 #include "quiche/quic/moqt/moqt_parser.h"
 #include "quiche/quic/moqt/moqt_publisher.h"
+#include "quiche/quic/moqt/moqt_session_callbacks.h"
 #include "quiche/quic/moqt/moqt_session_interface.h"
 #include "quiche/quic/moqt/moqt_types.h"
 #include "quiche/quic/moqt/test_tools/mock_moqt_session.h"
@@ -67,7 +67,7 @@ class MoqtTrackStatusRequestStreamTest : public quiche::test::QuicheTest {
   StrictMock<testing::MockFunction<void(MoqtError, absl::string_view)>>
       session_error_callback_;
   StrictMock<testing::MockFunction<void(
-      std::variant<MessageParameters, MoqtRequestErrorInfo>)>>
+      std::variant<TrackStatusOkData, MoqtRequestErrorInfo>)>>
       response_callback_;
   StrictMock<webtransport::test::MockStream> mock_stream_;
 };
@@ -78,7 +78,7 @@ TEST_F(MoqtTrackStatusRequestStreamTest, SendRequestOnStreamBound) {
   EXPECT_CALL(mock_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kTrackStatus), _));
   EXPECT_CALL(response_callback_, Call)
-      .WillOnce([&](std::variant<MessageParameters, MoqtRequestErrorInfo> v) {
+      .WillOnce([&](std::variant<TrackStatusOkData, MoqtRequestErrorInfo> v) {
         ASSERT_TRUE(std::holds_alternative<MoqtRequestErrorInfo>(v));
         auto info = std::get<MoqtRequestErrorInfo>(v);
         EXPECT_EQ(info.error_code, RequestErrorCode::kInternalError);
@@ -99,7 +99,7 @@ TEST_F(MoqtTrackStatusRequestStreamTest, SendRequestWithParameters) {
   EXPECT_CALL(mock_stream_,
               Writev(SerializedControlMessage(expected_message), _));
   EXPECT_CALL(response_callback_, Call)
-      .WillOnce([&](std::variant<MessageParameters, MoqtRequestErrorInfo> v) {
+      .WillOnce([&](std::variant<TrackStatusOkData, MoqtRequestErrorInfo> v) {
         ASSERT_TRUE(std::holds_alternative<MoqtRequestErrorInfo>(v));
         auto info = std::get<MoqtRequestErrorInfo>(v);
         EXPECT_EQ(info.error_code, RequestErrorCode::kInternalError);
@@ -115,23 +115,20 @@ TEST_F(MoqtTrackStatusRequestStreamTest, ReceiveOkResponse) {
               Writev(ControlMessageOfType(MoqtMessageType::kTrackStatus), _));
   stream.BindStream(&mock_stream_);
 
-  MessageParameters parameters;
-  parameters.expires = quic::QuicTimeDelta::FromSeconds(10);
-  parameters.largest_object = Location(1, 2);
-
+  MoqtRequestOk ok(
+      MessageParameters(),
+      TrackProperties(quic::QuicTimeDelta::FromSeconds(5),
+                      quic::QuicTimeDelta::FromSeconds(10), std::nullopt,
+                      std::nullopt, std::nullopt, std::nullopt));
+  ok.parameters.expires = quic::QuicTimeDelta::FromSeconds(10);
+  ok.parameters.largest_object = Location(1, 2);
   EXPECT_CALL(response_callback_, Call)
-      .WillOnce([&](std::variant<MessageParameters, MoqtRequestErrorInfo> v) {
-        ASSERT_TRUE(std::holds_alternative<MessageParameters>(v));
-        auto params = std::get<MessageParameters>(v);
-        EXPECT_EQ(params.expires, parameters.expires);
-        EXPECT_EQ(params.largest_object, parameters.largest_object);
+      .WillOnce([&](std::variant<TrackStatusOkData, MoqtRequestErrorInfo> v) {
+        ASSERT_TRUE(std::holds_alternative<TrackStatusOkData>(v));
+        auto data = std::get<TrackStatusOkData>(v);
+        EXPECT_EQ(data, ok);
       });
   EXPECT_CALL(mock_stream_, Writev(testing::IsEmpty(), _));
-
-  MoqtRequestOk ok;
-  ok.request_id = kRequestId;
-  ok.parameters = parameters;
-
   QUICHE_EXPECT_OK(
       stream.OnRawControlMessage(GenericMessageToRawControlMessage(ok)));
 }
@@ -142,24 +139,17 @@ TEST_F(MoqtTrackStatusRequestStreamTest, ReceiveErrorResponse) {
   EXPECT_CALL(mock_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kTrackStatus), _));
   stream.BindStream(&mock_stream_);
-
+  MoqtRequestError error(RequestErrorCode::kDoesNotExist, std::nullopt,
+                         "Track does not exist");
   EXPECT_CALL(response_callback_, Call)
-      .WillOnce([&](std::variant<MessageParameters, MoqtRequestErrorInfo> v) {
+      .WillOnce([&](std::variant<TrackStatusOkData, MoqtRequestErrorInfo> v) {
         ASSERT_TRUE(std::holds_alternative<MoqtRequestErrorInfo>(v));
-        auto info = std::get<MoqtRequestErrorInfo>(v);
-        EXPECT_EQ(info.error_code, RequestErrorCode::kDoesNotExist);
-        EXPECT_EQ(info.reason_phrase, "Track does not exist");
+        EXPECT_EQ(std::get<MoqtRequestErrorInfo>(v), error);
       });
   EXPECT_CALL(
       mock_stream_,
       Writev(IsEmpty(),
              Property(&webtransport::StreamWriteOptions::send_fin, true)));
-
-  MoqtRequestError error;
-  error.request_id = kRequestId;
-  error.error_code = RequestErrorCode::kDoesNotExist;
-  error.reason_phrase = "Track does not exist";
-
   QUICHE_EXPECT_OK(
       stream.OnRawControlMessage(GenericMessageToRawControlMessage(error)));
 }
@@ -175,11 +165,8 @@ TEST_F(MoqtTrackStatusRequestStreamTest, DuplicateRequestOk) {
   EXPECT_CALL(mock_stream_, Writev(testing::IsEmpty(), _));
 
   MoqtRequestOk ok;
-  ok.request_id = kRequestId;
-
   QUICHE_EXPECT_OK(
       stream.OnRawControlMessage(GenericMessageToRawControlMessage(ok)));
-
   EXPECT_THAT(
       stream.OnRawControlMessage(GenericMessageToRawControlMessage(ok)),
       StatusIs(absl::StatusCode::kInvalidArgument, "Duplicate REQUEST_OK"));
@@ -191,21 +178,15 @@ TEST_F(MoqtTrackStatusRequestStreamTest, DuplicateRequestError) {
   EXPECT_CALL(mock_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kTrackStatus), _));
   stream.BindStream(&mock_stream_);
-
+  MoqtRequestError error(RequestErrorCode::kDoesNotExist, std::nullopt,
+                         "Track does not exist");
   EXPECT_CALL(response_callback_, Call);
   EXPECT_CALL(
       mock_stream_,
       Writev(IsEmpty(),
              Property(&webtransport::StreamWriteOptions::send_fin, true)));
-
-  MoqtRequestError error;
-  error.request_id = kRequestId;
-  error.error_code = RequestErrorCode::kDoesNotExist;
-  error.reason_phrase = "Track does not exist";
-
   QUICHE_EXPECT_OK(
       stream.OnRawControlMessage(GenericMessageToRawControlMessage(error)));
-
   EXPECT_THAT(
       stream.OnRawControlMessage(GenericMessageToRawControlMessage(error)),
       StatusIs(absl::StatusCode::kInvalidArgument, "Duplicate REQUEST_ERROR"));

@@ -3,16 +3,24 @@ load("@build_bazel_rules_apple//apple:apple_binary.bzl", "apple_binary")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 cc_test(
-    name = "test_c_ares",
+    name = "test",
+    size = "small",
     srcs = ["c-ares-test.cpp"],
+    local_defines = select({
+        "@platforms//os:windows": ["CARES_STATICLIB"],
+        "//conditions:default": [],
+    }),
     visibility = ["//:__pkg__"],
     deps = ["@cares"],
 )
 
 cc_library(
-    name = "ios_lib",
+    name = "lib",
     srcs = ["c-ares-test.cpp"],
-    tags = ["manual"],
+    local_defines = select({
+        "@platforms//os:windows": ["CARES_STATICLIB"],
+        "//conditions:default": [],
+    }),
     deps = ["@cares"],
 )
 
@@ -20,13 +28,16 @@ apple_binary(
     name = "ios_binary",
     minimum_os_version = "12.0",
     platform_type = "ios",
-    deps = [":ios_lib"],
+    tags = ["manual"],
+    deps = [":lib"],
 )
 
 build_test(
-    name = "test_c_ares_ios",
-    tags = ["manual"],
+    name = "test_ios",
     target_compatible_with = ["@platforms//os:macos"],
     targets = ["ios_binary"],
-    visibility = ["//:__pkg__"],
+)
+
+test_suite(
+    name = "all_tests",
 )

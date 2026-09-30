@@ -27,7 +27,6 @@ var testCurves = []struct {
 	{"P-384", CurveP384},
 	{"P-521", CurveP521},
 	{"X25519", CurveX25519},
-	{"Kyber", CurveX25519Kyber768},
 	{"X25519MLKEM768", CurveX25519MLKEM768},
 	{"MLKEM1024", CurveMLKEM1024},
 }
@@ -37,7 +36,7 @@ const bogusCurve = 0x1234
 const curveEqualPreferenceWithNextFlag = 0x01
 
 func isPqGroup(r CurveID) bool {
-	return r == CurveX25519Kyber768 || isMLKEMGroup(r)
+	return isMLKEMGroup(r)
 }
 
 func isMLKEMGroup(r CurveID) bool {
@@ -49,7 +48,7 @@ func isECDHGroup(r CurveID) bool {
 }
 
 func isX25519Group(r CurveID) bool {
-	return r == CurveX25519 || r == CurveX25519Kyber768 || r == CurveX25519MLKEM768
+	return r == CurveX25519 || r == CurveX25519MLKEM768
 }
 
 func addCurveTests() {
@@ -271,8 +270,9 @@ func addCurveTests() {
 				NoSupportedCurves: true,
 			},
 		},
-		shouldFail:    true,
-		expectedError: ":NO_SHARED_GROUP:",
+		shouldFail:         true,
+		expectedError:      ":NO_SHARED_GROUP:",
+		expectedLocalError: "remote error: missing extension",
 	})
 
 	// The server must fall back to another cipher when there are no
@@ -581,14 +581,13 @@ func addCurveTests() {
 		})
 	}
 
-	// ML-KEM and Kyber should not be offered by default as a client.
+	// ML-KEM should be offered by default as a client.
 	testCases = append(testCases, testCase{
-		name: "PostQuantumNotEnabledByDefaultInClients",
+		name: "PostQuantumEnabledByDefaultInClients",
 		config: Config{
-			MinVersion: VersionTLS13,
-			Bugs: ProtocolBugs{
-				FailIfPostQuantumOffered: true,
-			},
+			MinVersion:       VersionTLS13,
+			CurvePreferences: []CurveID{CurveX25519MLKEM768},
+			Bugs:             ProtocolBugs{},
 		},
 	})
 
@@ -663,10 +662,14 @@ func addCurveTests() {
 			},
 		})
 
-		// If both ML-KEM and Kyber are configured, only the preferred one's
+		// If multiple PQ groups are configured, only the preferred one's
 		// key share should be sent.
+		otherMLKEM := CurveMLKEM1024
+		if curve.id == CurveMLKEM1024 {
+			otherMLKEM = CurveX25519MLKEM768
+		}
 		testCases = append(testCases, testCase{
-			name: "BothMLKEMAndKyber-" + curve.name,
+			name: "MultiplePQGroups-" + curve.name,
 			config: Config{
 				MinVersion: VersionTLS13,
 				Bugs: ProtocolBugs{
@@ -675,24 +678,23 @@ func addCurveTests() {
 			},
 			flags: []string{
 				"-curves", strconv.Itoa(int(curve.id)),
-				"-curves", strconv.Itoa(int(CurveX25519Kyber768)),
+				"-curves", strconv.Itoa(int(otherMLKEM)),
 				"-expect-curve-id", strconv.Itoa(int(curve.id)),
 			},
 		})
 	}
 
-	// As a server, ML-KEMs and Kyber are not yet supported by default.
 	testCases = append(testCases, testCase{
 		testType: serverTest,
-		name:     "PostQuantumNotEnabledByDefaultForAServer",
+		name:     "PostQuantumEnabledByDefaultForAServer",
 		config: Config{
 			MinVersion:       VersionTLS13,
-			CurvePreferences: []CurveID{CurveX25519MLKEM768, CurveMLKEM1024, CurveX25519Kyber768, CurveX25519},
-			DefaultCurves:    []CurveID{CurveX25519MLKEM768, CurveMLKEM1024, CurveX25519Kyber768},
+			CurvePreferences: []CurveID{CurveX25519MLKEM768},
+			DefaultCurves:    []CurveID{CurveX25519MLKEM768},
 		},
 		flags: []string{
 			"-server-preference",
-			"-expect-curve-id", strconv.Itoa(int(CurveX25519)),
+			"-expect-curve-id", strconv.Itoa(int(CurveX25519MLKEM768)),
 		},
 	})
 

@@ -1,0 +1,56 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/openat.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "gl_FUNC_OPENAT",
+    checks = [
+        checks.AC_CHECK_FUNC(
+            "openat",
+            define = "HAVE_OPENAT",
+            subst = True,
+        ),
+    ] + select({
+        "@platforms//os:macos": [
+            checks.AC_SUBST(
+                "REPLACE_OPENAT",
+                condition = "gl_cv_macos_sdk_modern",
+                if_false = "1",
+                if_true = "0",
+            ),
+        ],
+        # M4 m4/openat.m4: runtime bug probes drive REPLACE_OPENAT. On
+        # macOS the SDK probe decides; only Windows still needs replacement
+        # when openat exists.
+        "@platforms//os:windows": [
+            checks.AC_SUBST(
+                "REPLACE_OPENAT",
+                condition = "ac_cv_func_openat",
+                if_false = 0,
+                if_true = 1,
+            ),
+        ],
+        "//conditions:default": [
+            checks.AC_SUBST("REPLACE_OPENAT", 0),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/extensions",  # AC_REQUIRE([gl_USE_SYSTEM_EXTENSIONS])
+        "//gnulib/m4/fcntl_h",
+        "//gnulib/m4/lstat:gl_FUNC_LSTAT_FOLLOWS_SLASHED_SYMLINK",  # AC_REQUIRE([gl_FUNC_LSTAT_FOLLOWS_SLASHED_SYMLINK])
+        "//gnulib/m4/open-cloexec",  # AC_REQUIRE([gl_PREPROC_O_CLOEXEC])
+        "//gnulib/m4/mode_t",  # Provides PROMOTED_MODE_T (needed for test compatibility)
+        # For test compatibility
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+autoconf(
+    name = "openat",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_OPENAT",
+    ],
+)

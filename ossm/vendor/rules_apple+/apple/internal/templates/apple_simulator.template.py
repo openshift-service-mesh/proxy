@@ -18,8 +18,8 @@
 
 # This script works in one of two modes.
 #
-# If either --ios_simulator_version or --ios_simulator_device were not
-# passed to bazel:
+# If either the ios_simulator_version or ios_simulator_device build setting was
+# not passed to bazel:
 #
 # 1. Discovers a simulator compatible with the minimum_os of the
 #    *_application target, preferring already-booted simulators
@@ -31,8 +31,8 @@
 # This mode does not kill running simulators or shutdown or delete the simulator
 # after it completes.
 #
-# If --ios_simulator_version and --ios_simulator_device were both passed
-# to bazel:
+# If the ios_simulator_version and ios_simulator_device build settings were both
+# passed to bazel:
 #
 # 1. Creates a new temporary simulator by running "simctl create ..."
 # 2. Boots the new temporary simulator
@@ -52,13 +52,25 @@ import os.path
 import pathlib
 import platform
 import plistlib
+import pty
+import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
-import time
-from typing import Dict, Optional
+from typing import IO, Dict, Optional, Sequence
 import zipfile
+
+_RUN_MODE_ENV_VAR = "BAZEL_APPLE_RUN_MODE"
+_RUN_MODE_INSTALL_AND_RUN = "install_and_run"
+_RUN_MODE_INSTALL_WITHOUT_RUNNING = "install_without_running"
+_RUN_MODE_RUN_WITHOUT_INSTALLING = "run_without_installing"
+_VALID_RUN_MODES = frozenset((
+    _RUN_MODE_INSTALL_AND_RUN,
+    _RUN_MODE_INSTALL_WITHOUT_RUNNING,
+    _RUN_MODE_RUN_WITHOUT_INSTALLING,
+))
 
 
 # Custom type for methods yielding an Apple simulator UDID.
@@ -76,6 +88,22 @@ if platform.system() != "Darwin":
   raise Exception(
       "Cannot run Apple platform application targets on a non-mac machine."
   )
+
+
+class BufferFlusher:
+  """Flushes a buffer to a file descriptor.
+
+  This is used to ensure that the buffer is flushed to the file descriptor
+  as soon as possible.
+  """
+
+  def __init__(self, raw: IO[bytes]):
+    self.raw = raw
+
+  def write(self, b: bytes) -> int:
+    n = self.raw.write(b)
+    self.raw.flush()
+    return n
 
 
 class DeviceType(collections.abc.Mapping):
@@ -132,7 +160,7 @@ class DeviceType(collections.abc.Mapping):
 
   def is_apple_watch(self) -> bool:
     return self.has_product_family_or_identifier("Apple Watch")
-  
+
   def is_apple_vision(self) -> bool:
     return self.has_product_family_or_identifier("Apple Vision")
 
@@ -207,21 +235,39 @@ def minimum_os_to_simctl_runtime_version(minimum_os: str) -> int:
   return result
 
 
+def runtime_identifier(
+    *,
+    platform_type: str,
+    version: str,
+) -> str:
+  """Returns the runtime identifier for the given platform type and version."""
+  runtime_version_name = version.replace(".", "-")
+  # capitalizes 'os' from Apple platform type string (e.g. watchos -> watchOS)
+  runtime_platform = platform_type[0:-2].lower() + platform_type[-2:].upper()
+  return "{prefix}.{runtime_platform}-{runtime_version_name}".format(
+      prefix="com.apple.CoreSimulator.SimRuntime",
+      runtime_platform=runtime_platform,
+      runtime_version_name=runtime_version_name,
+  )
+
+
 def discover_best_compatible_simulator(
     *,
     platform_type: str,
     simctl_path: str,
     minimum_os: str,
     sim_device: str,
+    sim_identifier: str,
     sim_os_version: str,
-) -> (Optional[DeviceType], Optional[Device]):
+) -> tuple[Optional[DeviceType], Optional[Device]]:
   """Discovers the best compatible simulator device type and device.
 
   Args:
     platform_type: The Apple platform type for the given *_application() target.
     simctl_path: The path to the `simctl` binary.
     minimum_os: The minimum OS version required by the *_application() target.
-    sim_device: Optional name of the device (e.g. "iPhone 8 Plus").
+    sim_device: Optional name of the device type (e.g. "iPhone 8 Plus").
+    sim_identifier: The identifier of the simulator (<uuid>).
     sim_os_version: Optional version of the Apple platform runtime (e.g.
       "13.2").
 
@@ -259,7 +305,7 @@ def discover_best_compatible_simulator(
     max_runtime_version = device_type.get("maxRuntimeVersion")
     if max_runtime_version and max_runtime_version < minimum_runtime_version:
       continue
-    if sim_device and device_type["name"].casefold().find(sim_device) == -1:
+    if sim_device and device_type["name"].casefold() != sim_device:
       continue
     compatible_device_types.append(device_type)
   compatible_device_types.sort()
@@ -280,6 +326,12 @@ def discover_best_compatible_simulator(
     for device in devices:
       if not device["isAvailable"]:
         continue
+      if sim_identifier:
+        if device["udid"] != sim_identifier:
+          continue
+        compatible_device = Device(device, None)
+        compatible_devices.append(compatible_device)
+        break
       compatible_device = None
       for device_type in compatible_device_types:
         if device["deviceTypeIdentifier"] == device_type["identifier"]:
@@ -290,7 +342,7 @@ def discover_best_compatible_simulator(
       compatible_devices.append(compatible_device)
   compatible_devices.sort()
   logger.debug("Found %d compatible devices.", len(compatible_devices))
-  if compatible_device_types:
+  if not sim_identifier and compatible_device_types:
     best_compatible_device_type = compatible_device_types[-1]
   else:
     best_compatible_device_type = None
@@ -307,6 +359,7 @@ def persistent_simulator(
     simctl_path: str,
     minimum_os: str,
     sim_device: str,
+    sim_identifier: str,
     sim_os_version: str,
 ) -> str:
   """Finds or creates a persistent compatible Apple simulator.
@@ -318,7 +371,8 @@ def persistent_simulator(
     platform_type: The Apple platform type for the given *_application() target.
     simctl_path: The path to the `simctl` binary.
     minimum_os: The minimum OS version required by the *_application() target.
-    sim_device: Optional name of the device (e.g. "iPhone 8 Plus").
+    sim_device: Optional name of the device type (e.g. "iPhone 8 Plus").
+    sim_identifier: The identifier of the simulator (<uuid>).
     sim_os_version: Optional version of the Apple platform runtime (e.g.
       "13.2").
 
@@ -334,6 +388,7 @@ def persistent_simulator(
           simctl_path=simctl_path,
           minimum_os=minimum_os,
           sim_device=sim_device,
+          sim_identifier=sim_identifier,
           sim_os_version=sim_os_version,
       )
   )
@@ -348,20 +403,30 @@ def persistent_simulator(
   if best_compatible_device_type:
     device_name = best_compatible_device_type["name"]
     device_id = best_compatible_device_type["identifier"]
-    logger.info("Creating new %s simulator", device_name)
+    runtime_id = runtime_identifier(
+      platform_type=platform_type,
+      version=sim_os_version,
+    )
+    logger.info(
+      "Creating persistent simulator (name=%s, device_id=%s, runtime_id=%s)",
+      device_name,
+      device_id,
+      runtime_id,
+    )
     create_result = subprocess.run(
-        [simctl_path, "create", device_name, device_id],
+        [simctl_path, "create", device_name, device_id, runtime_id],
         encoding="utf-8",
         stdout=subprocess.PIPE,
         check=True,
     )
     udid = create_result.stdout.rstrip()
-    logger.debug("Created new simulator: %s", udid)
+    logger.debug("Created persistent simulator: %s", udid)
     return udid
   raise Exception(
-      f"Could not find or create a simulator for the {platform_type} platform"
-      f"compatible with minimum OS version {minimum_os} (device name "
-      f"{sim_device}, OS version {sim_os_version})"
+      f"Could not find or create a simulator for the {platform_type} platform "
+      f"compatible with minimum OS version {minimum_os} (uuid "
+      f"'{sim_identifier}', device name '{sim_device}', OS version "
+      f"'{sim_os_version}')"
   )
 
 
@@ -376,32 +441,18 @@ def wait_for_sim_to_boot(simctl_path: str, udid: str) -> bool:
     True if the simulator boots within 60 seconds, False otherwise.
   """
   logger.info("Waiting for simulator to boot...")
-  for _ in range(0, 60):
-    # The expected output of "simctl list" is like:
-    # -- iOS 8.4 --
-    # iPhone 5s (E946FA1C-26AB-465C-A7AC-24750D520BEA) (Shutdown)
-    # TestDevice (8491C4BC-B18E-4E2D-934A-54FA76365E48) (Booted)
-    # So if there's any booted simulator, $booted_device will not be empty.
-    simctl_list_result = subprocess.run(
-        [simctl_path, "list", "devices"],
-        encoding="utf-8",
-        check=True,
-        stdout=subprocess.PIPE,
-    )
-    for line in simctl_list_result.stdout.split("\n"):
-      if line.find(udid) != -1 and line.find("Booted") != -1:
-        logger.debug("Simulator is booted.")
-        # Simulator is booted.
-        return True
-    logger.debug("Simulator not booted, still waiting...")
-    time.sleep(1)
-  return False
+  subprocess.run(
+      [simctl_path, "bootstatus", udid, "-b"],
+      encoding="utf-8",
+      check=True,
+  )
+  return True
 
 
 def boot_simulator(*, developer_path: str, simctl_path: str, udid: str) -> None:
   """Launches the Apple simulator for the given identifier.
 
-  Ensures the Simulator process is in the foreground.
+  Launches the simulator GUI when available.
 
   Args:
     developer_path: The path to /Applications/Xcode.app/Contents/Developer.
@@ -421,11 +472,33 @@ def boot_simulator(*, developer_path: str, simctl_path: str, udid: str) -> None:
   # This is likely because the newly-spawned Simulator.app process
   # hasn't had time to connect to the Apple Events system which
   # `osascript` relies on.
-  simulator_path = os.path.join(developer_path, "Applications/Simulator.app")
   subprocess.run(
-      ["open", "-a", simulator_path, "--args", "-CurrentDeviceUDID", udid],
-      check=True,
+      [simctl_path, "boot", udid],
+      stdout=subprocess.DEVNULL,
+      stderr=subprocess.DEVNULL,
+      check=False,
   )
+
+  # Simulator.app was replaced by DeviceHub.app in Xcode 27. This is a
+  # non-critical step that serves only to launch the simulator GUI, so simply
+  # checking path existence is good enough.
+  legacy_simulator = os.path.join(developer_path, "Applications", "Simulator.app")
+  device_hub = os.path.join(
+      developer_path, os.pardir, "Applications", "DeviceHub.app"
+  )
+  if os.path.exists(legacy_simulator):
+    subprocess.run(
+        ["open", "-a", legacy_simulator, "--args", "-CurrentDeviceUDID", udid],
+        check=False,
+    )
+  elif os.path.exists(device_hub):
+    subprocess.run(["open", "-a", device_hub], check=False)
+  else:
+    logger.warning(
+        "No simulator GUI app found under %s; the device is booted but no "
+        "window will be shown.",
+        developer_path,
+    )
   logger.debug("Simulator launched.")
   if not wait_for_sim_to_boot(simctl_path, udid):
     raise Exception("Failed to launch simulator with UDID: " + udid)
@@ -446,27 +519,26 @@ def temporary_simulator(
   Yields:
     The UDID of the newly-created Apple simulator.
   """
-  runtime_version_name = version.replace(".", "-")
-  # capitalizes 'os' from Apple platform type string (e.g. watchos -> watchOS)
-  runtime_platform = platform_type[0:-2].lower() + platform_type[-2:].upper()
-  logger.info("Creating simulator, device=%s, version=%s", device, version)
+  runtime_id = runtime_identifier(platform_type=platform_type, version=version)
+  logger.info(
+    "Creating temporary simulator (device_id=%s, runtime_id=%s)",
+    device,
+    runtime_id,
+  )
   simctl_create_result = subprocess.run(
       [
           simctl_path,
           "create",
           "TestDevice",
           device,
-          "{prefix}.{runtime_platform}-{runtime_version_name}".format(
-              prefix="com.apple.CoreSimulator.SimRuntime",
-              runtime_platform=runtime_platform,
-              runtime_version_name=runtime_version_name,
-          ),
+          runtime_id,
       ],
       encoding="utf-8",
       check=True,
       stdout=subprocess.PIPE,
   )
   udid = simctl_create_result.stdout.rstrip()
+  logger.debug("Created temporary simulator: %s", udid)
   try:
     logger.info("Killing all running simulators...")
     subprocess.run(
@@ -537,8 +609,15 @@ def extracted_app(
     # fail with `Unhandled error domain NSPOSIXErrorDomain, code 13`.
     dst_dir = os.path.join(tempfile.gettempdir(), "bazel_temp_" + app_name)
     os.makedirs(dst_dir, exist_ok=True)
+
+    # NOTE: use `which` to find the path to `rsync`.
+    # In macOS 15.4, the system `rsync` is using `openrsync` which contains some permission issues.
+    # This allows users to workaround the issue by overriding the system `rsync` with a working version.
+    # Remove this once we no longer support macOS versions with broken `rsync`.
+    rsync_path = shutil.which("rsync")
+
     rsync_command = [
-        "/usr/bin/rsync",
+        rsync_path,
         "--archive",
         "--delete",
         "--checksum",
@@ -573,7 +652,18 @@ def extracted_app(
       )
       with zipfile.ZipFile(application_output_path) as ipa_zipfile:
         ipa_zipfile.extractall(temp_dir)
-        yield os.path.join(temp_dir, "Payload", app_name + ".app")
+        # iOS/tvOS apps use Payload/ directory structure, while watchOS apps
+        # have the .app bundle at the root of the archive.
+        payload_path = os.path.join(temp_dir, "Payload", app_name + ".app")
+        root_path = os.path.join(temp_dir, app_name + ".app")
+        if os.path.isdir(payload_path):
+          yield payload_path
+        elif os.path.isdir(root_path):
+          yield root_path
+        else:
+          raise FileNotFoundError(
+              f"Couldn't find {app_name}.app in the archive."
+          )
 
 
 def bundle_id(bundle_path: str) -> str:
@@ -604,6 +694,47 @@ def simctl_launch_environ() -> Dict[str, str]:
   return result
 
 
+def app_run_mode() -> str:
+  """Returns the configured app run mode."""
+  run_mode = os.environ.get(_RUN_MODE_ENV_VAR, _RUN_MODE_INSTALL_AND_RUN)
+  if run_mode not in _VALID_RUN_MODES:
+    valid_modes = ", ".join(sorted(_VALID_RUN_MODES))
+    raise ValueError(
+        f"Invalid {_RUN_MODE_ENV_VAR} value {run_mode!r}; "
+        f"expected one of: {valid_modes}"
+    )
+  return run_mode
+
+
+def clear_launch_info_path() -> None:
+  """Deletes any stale launch info file written by a prior run."""
+  launch_info_path = os.environ.get("BAZEL_APPLE_LAUNCH_INFO_PATH")
+  if not launch_info_path:
+    return
+
+  try:
+    os.remove(launch_info_path)
+  except FileNotFoundError:
+    pass
+
+
+def terminate_existing_app(
+    *,
+    simctl_path: str,
+    simulator_udid: str,
+    app_bundle_id: str,
+) -> None:
+  """Best-effort terminate of any running app instance."""
+  logger.debug(
+      "Terminating existing instances of %s in %s", app_bundle_id, simulator_udid
+  )
+  subprocess.run(
+      [simctl_path, "terminate", simulator_udid, app_bundle_id],
+      stdout=subprocess.DEVNULL,
+      stderr=subprocess.DEVNULL,
+  )
+
+
 @contextlib.contextmanager
 def apple_simulator(
     *,
@@ -611,22 +742,25 @@ def apple_simulator(
     simctl_path: str,
     minimum_os: str,
     sim_device: str,
+    sim_identifier: str,
     sim_os_version: str,
 ) -> AppleSimulatorUDID:
-  """Finds either a temporary or persistent Apple simulator based on args.
+  """Finds or creates a persistent compatible Apple simulator.
 
   Args:
     platform_type: The Apple platform type for the given *_application() target.
     simctl_path: The path to the `simctl` binary.
     minimum_os: The minimum OS version required by the *_application() target.
-    sim_device: Optional name of the device (e.g. "iPhone 8 Plus").
+    sim_device: Optional name of the device type (e.g. "iPhone 8 Plus").
+    sim_identifier: The identifier of the simulator (<uuid>).
     sim_os_version: Optional version of the Apple platform runtime (e.g.
       "13.2").
 
   Yields:
     The UDID of the simulator.
   """
-  if sim_device and sim_os_version:
+  prefer_persistent = os.environ.get("BAZEL_APPLE_PREFER_PERSISTENT_SIMS", "0") == "1"
+  if not prefer_persistent and sim_device and sim_os_version:
     with temporary_simulator(
         platform_type=platform_type,
         simctl_path=simctl_path,
@@ -640,6 +774,7 @@ def apple_simulator(
         simctl_path=simctl_path,
         minimum_os=minimum_os,
         sim_device=sim_device,
+        sim_identifier=sim_identifier,
         sim_os_version=sim_os_version,
     )
 
@@ -652,7 +787,7 @@ def run_app_in_simulator(
     application_output_path: str,
     app_name: str,
 ) -> None:
-  """Installs and runs an app in the specified simulator.
+  """Installs and/or runs an app in the specified simulator.
 
   Args:
     simulator_udid: The UDID of the simulator in which to run the app.
@@ -668,25 +803,114 @@ def run_app_in_simulator(
   )
   root_dir = os.path.dirname(application_output_path)
   register_dsyms(root_dir)
+  run_mode = app_run_mode()
   with extracted_app(application_output_path, app_name) as app_path:
-    logger.debug("Installing app %s to simulator %s", app_path, simulator_udid)
-    subprocess.run(
-        [simctl_path, "install", simulator_udid, app_path], check=True
-    )
     app_bundle_id = bundle_id(app_path)
+    terminate_existing_app(
+        simctl_path=simctl_path,
+        simulator_udid=simulator_udid,
+        app_bundle_id=app_bundle_id,
+    )
+
+    if run_mode != _RUN_MODE_RUN_WITHOUT_INSTALLING:
+      # We should now be able to install and run it.
+      logger.debug("Installing...")
+      subprocess.run(
+          [simctl_path, "install", simulator_udid, app_path],
+          check=True,
+      )
+
+    if run_mode == _RUN_MODE_INSTALL_WITHOUT_RUNNING:
+      clear_launch_info_path()
+      return
+
+    launch_args = shlex.split(
+      os.environ.get(
+        "BAZEL_SIMCTL_LAUNCH_FLAGS",
+        # Attaches the application to the console and waits for it to exit.
+        "--console-pty",
+      ),
+    )
     logger.info(
         "Launching app %s in simulator %s", app_bundle_id, simulator_udid
     )
     args = [
         simctl_path,
         "launch",
-        "--console-pty",
+        *launch_args,
         simulator_udid,
         app_bundle_id,
     ]
     # Append optional launch arguments.
     args.extend(sys.argv[1:])
-    subprocess.run(args, env=simctl_launch_environ(), check=False)
+    launch_app(args, env=simctl_launch_environ(), simulator_udid=simulator_udid)
+
+
+def launch_app(
+    args: Sequence[str],
+    *,
+    env: Dict[str, str],
+    simulator_udid: str,
+) -> None:
+  """Launches an app in a simulator.
+
+  Args:
+    args: The arguments to pass to simctl.
+    env: The environment variables to pass to simctl.
+    simulator_udid: The UDID of the simulator in which to run the app.
+  """
+  launch_info_path = os.environ.get("BAZEL_APPLE_LAUNCH_INFO_PATH")
+  if not launch_info_path:
+    subprocess.run(args, env=env, check=True)
+    return
+
+  # Open a PTY to capture the output of simctl. We need a PTY to ensure that
+  # the PID is written to stdout before the rest of the app output.
+  primary_fd, secondary_fd = pty.openpty()
+
+  proc = subprocess.Popen(
+      args,
+      env=env,
+      stdout=secondary_fd,
+      close_fds=True,
+  )
+
+  # simctl has the fd dup; close ours.
+  os.close(secondary_fd)
+
+  with os.fdopen(primary_fd, "rb", buffering=0) as r:
+    # Grab PID from the first line of output.
+    first_line = r.readline()
+    pid_match = re.search(rb":\s*(\d+)\s*$", first_line)
+    if pid_match:
+      pid = int(pid_match.group(1))
+      try:
+        os.makedirs(os.path.dirname(launch_info_path), exist_ok=True)
+        with open(launch_info_path, "w", encoding="utf-8") as f:
+          f.write(json.dumps(
+              {
+                  "platform": "ios-simulator",
+                  "udid": simulator_udid,
+                  "pid": pid,
+              },
+              indent=2,
+          ))
+        logger.info(
+          "Successfully written launch info to: %s", launch_info_path
+        )
+      except Exception as e:
+        logger.error("Failed to write launch info to file: %s", e)
+    else:
+      logger.error("Failed to parse PID from output")
+
+    # Stream the rest until simctl exits.
+    sys.stdout.buffer.write(first_line)
+    sys.stdout.flush()
+    shutil.copyfileobj(r, BufferFlusher(sys.stdout.buffer))
+
+  exit_code = proc.wait()
+  if exit_code != 0:
+    raise subprocess.CalledProcessError(exit_code, args)
 
 
 def main(
@@ -696,6 +920,7 @@ def main(
     minimum_os: str,
     platform_type: str,
     sim_device: str,
+    sim_identifier: str,
     sim_os_version: str,
 ):
   """Main entry point to `bazel run` for *_application() targets.
@@ -705,7 +930,8 @@ def main(
     application_output_path: Path to the output of an *_application().
     minimum_os: The minimum OS version required by the *_application() target.
     platform_type: The Apple platform type for the given *_application() target.
-    sim_device: The name of the device (e.g. "iPhone 8 Plus").
+    sim_device: The name of the device type (e.g. "iPhone 8 Plus").
+    sim_identifier: The identifier of the simulator (<uuid>).
     sim_os_version: The version of the Apple platform runtime (e.g. "13.2").
   """
   xcode_select_result = subprocess.run(
@@ -722,6 +948,7 @@ def main(
       simctl_path=simctl_path,
       minimum_os=minimum_os,
       sim_device=sim_device,
+      sim_identifier=os.environ.get("BAZEL_APPLE_DEVICE_UDID", sim_identifier),
       sim_os_version=sim_os_version,
   ) as simulator_udid:
     run_app_in_simulator(
@@ -742,9 +969,11 @@ if __name__ == "__main__":
         minimum_os="%minimum_os%",
         platform_type="%platform_type%",
         sim_device="%sim_device%",
+        sim_identifier="%sim_identifier%",
         sim_os_version="%sim_os_version%",
     )
   except subprocess.CalledProcessError as e:
     logger.error("%s exited with error code %d", e.cmd, e.returncode)
+    sys.exit(e.returncode)
   except KeyboardInterrupt:
-    pass
+    sys.exit(1)

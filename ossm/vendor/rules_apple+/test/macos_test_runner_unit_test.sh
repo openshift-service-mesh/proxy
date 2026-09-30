@@ -27,16 +27,18 @@ function tear_down() {
 function create_runners() {
   cat > macos/BUILD <<EOF
 load(
-    "@build_bazel_rules_apple//apple:macos.bzl",
+    "@rules_apple//apple:macos.bzl",
     "macos_unit_test"
 )
-load("@build_bazel_rules_swift//swift:swift.bzl",
+load("@rules_swift//swift:swift.bzl",
      "swift_library"
 )
 load(
-    "@build_bazel_rules_apple//apple/testing/default_runner:macos_test_runner.bzl",
+    "@rules_apple//apple/testing/default_runner:macos_test_runner.bzl",
     "macos_test_runner"
 )
+load("@rules_cc//cc:objc_library.bzl", "objc_library")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 macos_test_runner(
     name = "macos_runner",
@@ -74,6 +76,27 @@ macos_test_runner(
     name = "macos_runner_with_hooks",
     pre_action = ":pre_action",
     post_action = ":post_action",
+)
+
+
+genrule(
+  name = "post_action_soft_fail_gen",
+  executable = True,
+  outs = ["post_action_soft_fail.bash"],
+  cmd = """
+echo 'echo "POST-ACTION: Soft failing." && exit 0' > \$@
+""",
+)
+
+sh_binary(
+  name = "post_action_soft_fail",
+  srcs = [":post_action_soft_fail_gen"],
+)
+
+macos_test_runner(
+    name = "macos_runner_with_soft_fail",
+    post_action = ":post_action_soft_fail",
+    post_action_determines_exit_code = True,
 )
 EOF
 }
@@ -250,10 +273,17 @@ objc_library(
     srcs = ["pass_unit_test.m"],
 )
 
+swift_library(
+    name = "pass_unit_test_swift_lib",
+    testonly = True,
+    srcs = ["pass_unit_test.swift"],
+    module_name = "PassingUnitTestSwift",
+)
+
 macos_unit_test(
     name = "PassingUnitTest",
     infoplists = ["PassUnitTest-Info.plist"],
-    deps = [":pass_unit_test_lib"],
+    deps = [":pass_unit_test_lib", ":pass_unit_test_swift_lib"],
     minimum_os_version = "${MIN_OS_MACOS}",
     env = test_env,
     runner = ":macos_runner",
@@ -262,7 +292,7 @@ macos_unit_test(
 macos_unit_test(
     name = "PassingUnitTestWithHooks",
     infoplists = ["PassUnitTest-Info.plist"],
-    deps = [":pass_unit_test_lib"],
+    deps = [":pass_unit_test_lib", ":pass_unit_test_swift_lib"],
     minimum_os_version = "${MIN_OS_MACOS}",
     env = test_env,
     runner = ":macos_runner_with_hooks",
@@ -279,6 +309,14 @@ macos_unit_test(
     deps = [":fail_unit_test_lib"],
     minimum_os_version = "${MIN_OS_MACOS}",
     runner = ":macos_runner",
+)
+
+macos_unit_test(
+    name = 'SoftFailingUnitTest',
+    infoplists = ["FailUnitTest-Info.plist"],
+    deps = [":fail_unit_test_lib"],
+    minimum_os_version = "${MIN_OS_MACOS}",
+    runner = ":macos_runner_with_soft_fail",
 )
 EOF
 }
@@ -492,7 +530,7 @@ function test_macos_unit_test_pass() {
 
   expect_log "Test Suite 'PassingUnitTest' passed"
   expect_log "Test Suite 'PassingUnitTest.xctest' passed"
-  expect_log "Executed 4 tests, with 0 failures"
+  expect_log "Executed 7 tests, with 0 failures"
 }
 
 function test_macos_unit_test_with_hooks_pass() {
@@ -503,7 +541,7 @@ function test_macos_unit_test_with_hooks_pass() {
   expect_log "PRE-ACTION: TEST_TARGET=//macos:PassingUnitTestWithHooks"
   expect_log "Test Suite 'PassingUnitTest' passed"
   expect_log "Test Suite 'PassingUnitTestWithHooks.xctest' passed"
-  expect_log "Executed 4 tests, with 0 failures"
+  expect_log "Executed 7 tests, with 0 failures"
   expect_log "POST-ACTION: TEST_TARGET=//macos:PassingUnitTestWithHooks"
 }
 
@@ -515,6 +553,17 @@ function test_macos_unit_test_fail() {
   expect_log "Test Suite 'FailingUnitTest' failed"
   expect_log "Test Suite 'FailingUnitTest.xctest' failed"
   expect_log "Executed 1 test, with 1 failure"
+}
+
+function test_macos_unit_test_soft_fail() {
+  create_runners
+  create_macos_unit_tests
+  do_macos_test //macos:SoftFailingUnitTest || fail "should pass"
+
+  expect_log "Test Suite 'FailingUnitTest' failed"
+  expect_log "Test Suite 'SoftFailingUnitTest.xctest' failed"
+  expect_log "Executed 1 test, with 1 failure"
+  expect_log "POST-ACTION: Soft failing."
 }
 
 function test_macos_unit_test_with_filter() {

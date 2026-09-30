@@ -5,6 +5,7 @@ go_library(
     srcs = ["flag.go"],
     importpath = "github.com/bazelbuild/bazel-gazelle/flag",
     visibility = ["//visibility:public"],
+    deps = ["//v2/flag"],
 )
 
 filegroup(

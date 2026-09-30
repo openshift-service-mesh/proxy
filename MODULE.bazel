@@ -64,7 +64,6 @@ bazel_dep(name = "rules_rust", version = "0.74.0.envoy")
 # Versions must match what envoy's own MODULE.bazel declares to avoid a second
 # resolution.
 bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
-bazel_dep(name = "rules_go", version = "0.59.0")
 bazel_dep(name = "rules_java", version = "9.3.0")
 
 # Same reasoning as grpc/librdkafka/libsxg above: only a transitive dep (via
@@ -72,31 +71,6 @@ bazel_dep(name = "rules_java", version = "9.3.0")
 # envoy's own MODULE.bazel.
 bazel_dep(name = "zlib-ng", version = "2.3.3.bcr.2")
 bazel_dep(name = "envoy_toolshed", version = "0.5.1.envoy")
-
-# OSSM: patch envoy_toolshed's minimal-LLVM machinery. The patch does two
-# things (see the patch header):
-#
-#   1. Host LLVM: `envoy_toolshed`'s `llvm_toolchain_alias` extension normally
-#      backs `@llvm_toolchain_llvm` with the *hermetic* clang-22 minimal LLVM.
-#      Envoy's compat/openssl prefixer then links that hermetic `libclang-cpp`,
-#      which needs a newer libstdc++ (GLIBCXX_3.4.30) than RHEL/UBI ships,
-#      failing at runtime. The patch adds a host-mode branch: when
-#      `BAZEL_LLVM_PATH` is set (see ossm/bazelrc) it backs `@llvm_toolchain_llvm`
-#      with the host `/usr` LLVM instead -- reproducing the WORKSPACE-era host
-#      toolchain, so the prefixer links host clang's `libclang-cpp` (matching the
-#      host libstdc++). The repo *name* is unchanged, so the prefixer's
-#      hardcoded `-isystem .../llvm_toolchain_llvm/include` keeps resolving (now
-#      to host `/usr/include`).
-#   2. Sandbox fix: even in hermetic mode, `all_includes` used to stage both the
-#      `include/c++` directory *and* the files beneath it (`exclude_directories =
-#      0`), so sandbox setup failed with `Could not copy inputs into sandbox:
-#      .../llvm_toolchain_llvm/include/c++ (File exists)`. The patch globs the
-#      directory *contents* (`/**`) instead.
-single_version_override(
-    module_name = "envoy_toolshed",
-    patch_strip = 1,
-    patches = ["//ossm/patches:envoy_toolshed-host-llvm.patch"],
-)
 
 # Vendor v8's Python wheels for aarch64 as well as x86_64. v8 (from Envoy's
 # bazel-registry) pins markupsafe, whose wheels are arch-specific. Its pip.parse
@@ -181,16 +155,16 @@ bazel_dep(name = "toolchains_llvm", version = "1.9.1.envoy", dev_dependency = Tr
 # with envoy's own MODULE.bazel.
 bazel_dep(name = "rules_go", version = "0.63.0")
 
-go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
-go_sdk.download(
-    sdks = {
-        "linux_amd64": ("go1.27.1.linux-amd64.tar.gz", "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445"),
-        "linux_arm64": ("go1.27.1.linux-arm64.tar.gz", "3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec"),
-        "darwin_arm64": ("go1.27.1.darwin-arm64.tar.gz", "ee215d57e0ec269c60cc9ceca68e6bda321ba9ee5afe24f4b0988703c2d87d12"),
-        "darwin_amd64": ("go1.27.1.darwin-amd64.tar.gz", "8f8f52c6649542cf027bbc9b9c68d1ec042f9f34808a40413f0b8b3f66f3caa4"),
-    },
-    version = "1.27.1",
-)
+# go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+# go_sdk.download(
+#     sdks = {
+#         "linux_amd64": ("go1.27.1.linux-amd64.tar.gz", "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445"),
+#         "linux_arm64": ("go1.27.1.linux-arm64.tar.gz", "3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec"),
+#         "darwin_arm64": ("go1.27.1.darwin-arm64.tar.gz", "ee215d57e0ec269c60cc9ceca68e6bda321ba9ee5afe24f4b0988703c2d87d12"),
+#         "darwin_amd64": ("go1.27.1.darwin-amd64.tar.gz", "8f8f52c6649542cf027bbc9b9c68d1ec042f9f34808a40413f0b8b3f66f3caa4"),
+#     },
+#     version = "1.27.1",
+# )
 
 # Build-time Python uses the *host* interpreter, mirroring the WORKSPACE-era
 # `use_host_tools = True` behavior. Without this, rules_python (registered by
@@ -399,3 +373,25 @@ llvm.toolchain_root(
     path = "/usr",
 )
 use_repo(llvm, "llvm_host")
+
+################################################################################
+# OSSM: back @llvm_toolchain_llvm with the host LLVM (for the openssl prefixer).
+#
+# This is a *separate* concern from the @llvm_host main-compile toolchain above.
+# @llvm_toolchain_llvm is the repo Envoy's compat/openssl prefixer links its
+# libclang-cpp / clang-tooling headers from. By default Envoy's own
+# `envoy_llvm_extension` backs it with the *hermetic* clang-22 minimal LLVM,
+# whose libclang-cpp needs a newer libstdc++ (GLIBCXX_3.4.30) than RHEL/UBI
+# ships -- failing at runtime.
+#
+# Envoy exposes a root-module-only `host` tag for exactly this case (see
+# envoyproxy/envoy#47848): calling `envoy_llvm.host(path = ...)` backs
+# @llvm_toolchain_llvm with the host LLVM install instead, so the prefixer links
+# host clang's libclang-cpp (matching the host libstdc++). This replaces the
+# former OSSM `envoy_toolshed-host-llvm.patch` + `BAZEL_LLVM_PATH` wiring, which
+# predated upstream's native support. The version is auto-detected from
+# `<path>/bin/clang --version`; keep `path` in sync with the build container's
+# LLVM prefix (same /usr root as @llvm_host).
+envoy_llvm_ext = use_extension("@envoy//bazel:extensions.bzl", "envoy_llvm_extension")
+envoy_llvm_ext.host(path = "/usr")
+use_repo(envoy_llvm_ext, "llvm_toolchain_llvm")

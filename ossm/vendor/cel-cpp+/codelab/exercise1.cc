@@ -14,69 +14,74 @@
 
 #include "codelab/exercise1.h"
 
-#include <memory>
+#include <memory>  // IWYU pragma: keep
 #include <string>
+#include <utility>  // IWYU pragma: keep
 
-#include "cel/expr/syntax.pb.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "eval/public/activation.h"
-#include "eval/public/builtin_func_registrar.h"
-#include "eval/public/cel_expr_builder_factory.h"
-#include "eval/public/cel_expression.h"
-#include "eval/public/cel_options.h"
-#include "eval/public/cel_value.h"
-#include "internal/status_macros.h"
-#include "parser/parser.h"
+#include "checker/validation_result.h"  // IWYU pragma: keep, needed for codelab solution
+#include "common/ast.h"  // IWYU pragma: keep
+#include "common/minimal_descriptor_pool.h"  // IWYU pragma: keep
+#include "common/value.h"
+#include "compiler/compiler.h"          // IWYU pragma: keep
+#include "compiler/compiler_factory.h"  // IWYU pragma: keep
+#include "compiler/standard_library.h"  // IWYU pragma: keep
+#include "internal/status_macros.h"     // IWYU pragma: keep
+#include "runtime/activation.h"
+#include "runtime/runtime.h"          // IWYU pragma: keep
+#include "runtime/runtime_builder.h"  // IWYU pragma: keep
+#include "runtime/runtime_options.h"  // IWYU pragma: keep
+#include "runtime/standard_runtime_builder_factory.h"  // IWYU pragma: keep
 #include "google/protobuf/arena.h"
 
 namespace cel_codelab {
 namespace {
 
-using ::google::api::expr::runtime::Activation;
-using ::google::api::expr::runtime::CelValue;
-
-// Convert the CelResult to a C++ string if it is string typed. Otherwise,
-// return invalid argument error. This takes a copy to avoid lifecycle concerns
-// (the evaluator may represent strings as stringviews backed by the input
-// expression).
-absl::StatusOr<std::string> ConvertResult(const CelValue& value) {
-  if (CelValue::StringHolder inner_value; value.GetValue(&inner_value)) {
-    return std::string(inner_value.value());
-  } else {
-    return absl::InvalidArgumentError(absl::StrCat(
-        "expected string result got '", CelValue::TypeName(value.type()), "'"));
+// Convert the cel::Value to a C++ string if it is string typed. Otherwise,
+// return invalid argument error.
+absl::StatusOr<std::string> ConvertResult(const cel::Value& value) {
+  if (value.IsString()) {
+    return value.GetString().ToString();
   }
+  return absl::InvalidArgumentError(
+      absl::StrCat("expected string result got '", value.GetTypeName(), "'"));
 }
+
 }  // namespace
 
 absl::StatusOr<std::string> ParseAndEvaluate(absl::string_view cel_expr) {
   // === Start Codelab ===
-  // Parse the expression using ::google::api::expr::parser::Parse;
-  // This will return a cel::expr::ParsedExpr message.
+  // 1. Setup a default compiler for compiling expressions:
+  //    Use cel::NewCompilerBuilder(cel::GetMinimalDescriptorPool()) and add
+  //    cel::StandardCompilerLibrary(). Build the cel::Compiler.
 
-  // Setup a default environment for building expressions.
-  // std::unique_ptr<CelExpressionBuilder> builder =
-  //     CreateCelExpressionBuilder(options);
+  // 2. Compile the expression using compiler->Compile(cel_expr).
+  //    Check that the resulting validation_result.IsValid().
 
-  // Register standard functions.
-  // CEL_RETURN_IF_ERROR(
-  //     RegisterBuiltinFunctions(builder->GetRegistry(), options));
+  // 3. Setup a standard runtime for evaluating expressions:
+  //    Use cel::CreateStandardRuntimeBuilder(cel::GetMinimalDescriptorPool(),
+  //    options) and build the cel::Runtime.
 
-  // The evaluator uses a proto Arena for incidental allocations during
-  // evaluation.
+  // 4. Create an executable program from the compiled AST:
+  //    Use CEL_ASSIGN_OR_RETURN(std::unique_ptr<cel::Ast> ast,
+  //                             validation_result.ReleaseAst()) and
+  //    runtime->CreateProgram(std::move(ast)).
+
+  // The evaluator uses a proto Arena for allocations during evaluation.
   google::protobuf::Arena arena;
-  // The activation provides variables and functions that are bound into the
+  // The activation provides variables and functions bound into the
   // expression environment. In this example, there's no context expected, so
-  // we just provide an empty one to the evaluator.
-  Activation activation;
+  // we provide an empty activation.
+  cel::Activation activation;
+  (void)arena;
+  (void)activation;
 
-  // Using the CelExpressionBuilder and the ParseExpr, create an execution plan
-  // (google::api::expr::runtime::CelExpression), evaluate, and return the
-  // result. Use the provided helper function ConvertResult to copy the value
-  // for return.
+  // 5. Evaluate the program and convert the result:
+  //    Call program->Evaluate(&arena, activation) and pass the resulting
+  //    cel::Value to ConvertResult.
   return absl::UnimplementedError("Not yet implemented");
   // === End Codelab ===
 }

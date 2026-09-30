@@ -28,6 +28,14 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_license//rules:license.bzl", "license")
 
+# BSD-style HT_PROTOTYPE / SPLAY_PROTOTYPE macros (ht-internal.h,
+# compat/sys/tree.h) emit a family of static inline functions per
+# instantiation; each TU only uses a subset.
+LIBEVENT_COPTS = select({
+    "@platforms//os:windows": [],
+    "//conditions:default": ["-Wno-unused-function"],
+})
+
 package(
     default_visibility = ["//visibility:private"],
 )
@@ -152,6 +160,7 @@ cc_library(
         "//conditions:default": [],
     }),
     hdrs = EVENT_CORE_PUBLIC_HEADERS,
+    copts = LIBEVENT_COPTS,
     includes = ["include"],
     linkopts = select({
         "@platforms//os:windows": [
@@ -219,6 +228,7 @@ cc_library(
         "ws.c",
     ],
     hdrs = EVENT_EXTRA_PUBLIC_HEADERS,
+    copts = LIBEVENT_COPTS,
     includes = ["include"],
     linkopts = select({
         "@platforms//os:windows": [
@@ -279,6 +289,7 @@ cc_library(
         "bufferevent_openssl.c",
         "bufferevent_ssl.c",
     ],
+    copts = LIBEVENT_COPTS,
     includes = ["include"],
     tags = [
         "requires_openssl",
@@ -299,6 +310,7 @@ cc_library(
         "@platforms//os:windows": [],
         "//conditions:default": ["evthread_pthread.c"],
     }),
+    copts = LIBEVENT_COPTS,
     includes = ["include"],
     linkopts = select({
         "@platforms//os:windows": [],

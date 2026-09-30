@@ -15,12 +15,12 @@
 """Intent definitions related actions."""
 
 load(
-    "@bazel_skylib//lib:versions.bzl",
-    "versions",
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
 )
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
+    "@bazel_skylib//lib:versions.bzl",
+    "versions",
 )
 load(
     "//apple/internal/utils:xctoolrunner.bzl",
@@ -30,6 +30,7 @@ load(
 def generate_intent_classes_sources(
         *,
         actions,
+        mac_exec_group,
         input_file,
         swift_output_src,
         objc_output_srcs,
@@ -45,6 +46,7 @@ def generate_intent_classes_sources(
 
     Args:
         actions: The actions provider from `ctx.actions`.
+        mac_exec_group: The execution group for Mac tools.
         input_file: The intent definition file.
         swift_output_src: The output file when generating Swift sources.
         objc_output_srcs: The output sources directory when generating ObjC.
@@ -103,6 +105,7 @@ def generate_intent_classes_sources(
         actions = actions,
         apple_fragment = platform_prerequisites.apple_fragment,
         arguments = arguments,
+        exec_group = mac_exec_group,
         executable = xctoolrunner,
         inputs = [input_file],
         mnemonic = "IntentGenerate",

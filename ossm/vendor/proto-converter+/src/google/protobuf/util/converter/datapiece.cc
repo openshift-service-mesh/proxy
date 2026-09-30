@@ -224,8 +224,7 @@ absl::StatusOr<std::string> DataPiece::ToString() const {
     case TYPE_STRING:
       return std::string(str_);
     case TYPE_BYTES: {
-      std::string base64;
-      absl::Base64Escape(str_, &base64);
+      std::string base64 = absl::Base64Escape(str_);
       return base64;
     }
     default:
@@ -254,8 +253,7 @@ std::string DataPiece::ValueAsStringOrDefault(
     case TYPE_STRING:
       return absl::StrCat("\"", str_, "\"");
     case TYPE_BYTES: {
-      std::string base64;
-      absl::WebSafeBase64Escape(str_, &base64);
+      std::string base64 = absl::WebSafeBase64Escape(str_);
       return absl::StrCat("\"", base64, "\"");
     }
     case TYPE_NULL:
@@ -379,9 +377,8 @@ bool DataPiece::DecodeBase64(absl::string_view src, std::string* dest) const {
     if (use_strict_base64_decoding_) {
       // In strict mode, check if the escaped version gives us the same value as
       // unescaped.
-      std::string encoded;
       // WebSafeBase64Escape does no padding by default.
-      absl::WebSafeBase64Escape(*dest, &encoded);
+      std::string encoded = absl::WebSafeBase64Escape(*dest);
       // Remove trailing padding '=' characters before comparison.
       absl::string_view src_no_padding = absl::string_view(src).substr(
           0, absl::EndsWith(src, "=") ? src.find_last_not_of('=') + 1

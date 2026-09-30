@@ -1,5 +1,8 @@
 workspace(name = "rules_foreign_cc_examples")
 
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+load("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
+
 local_repository(
     name = "rules_foreign_cc",
     path = "..",
@@ -9,29 +12,56 @@ load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_depende
 
 rules_foreign_cc_dependencies(register_built_pkgconfig_toolchain = True)
 
+load("@bazel_features//:deps.bzl", "bazel_features_deps")
+
+bazel_features_deps()
+
+http_archive(
+    name = "with_cfg.bzl",
+    integrity = "sha256-h4UuEzw3VaVkL+EFQ+4g7acA2uFNMNE9rJbiLqUQbQc=",
+    strip_prefix = "with_cfg.bzl-0.14.6",
+    urls = [
+        "https://github.com/fmeum/with_cfg.bzl/releases/download/v0.14.6/with_cfg.bzl-v0.14.6.tar.gz",
+    ],
+)
+
+load("@rules_cc//cc:extensions.bzl", "compatibility_proxy_repo")
+
+compatibility_proxy_repo()
+
 load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
 
 bazel_skylib_workspace()
-
-load("//deps:repositories.bzl", "repositories")
-
-repositories()
-
-load("//deps:deps_android.bzl", "deps_android")
-
-deps_android()
-
-load("//deps:deps_jvm_external.bzl", "deps_jvm_external")
-
-deps_jvm_external()
 
 load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
 
 py_repositories()
 
-load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
+load("@rules_shell//shell:repositories.bzl", "rules_shell_dependencies", "rules_shell_toolchains")
 
-protobuf_deps()
+rules_shell_dependencies()
+
+rules_shell_toolchains()
+
+http_archive(
+    name = "rules_java",
+    sha256 = "c5bc17e17bb62290b1fd8fdd847a2396d3459f337a7e07da7769b869b488ec26",
+    urls = [
+        "https://github.com/bazelbuild/rules_java/releases/download/8.6.1/rules_java-8.6.1.tar.gz",
+    ],
+)
+
+load("@rules_java//java:rules_java_deps.bzl", "rules_java_dependencies")
+
+rules_java_dependencies()
+
+load("@com_google_protobuf//bazel/private:proto_bazel_features.bzl", "proto_bazel_features")  # buildifier: disable=bzl-visibility
+
+proto_bazel_features(name = "proto_bazel_features")
+
+load("@rules_java//java:repositories.bzl", "rules_java_toolchains")
+
+rules_java_toolchains()
 
 python_register_toolchains(
     name = "python_3_10",
@@ -46,52 +76,76 @@ pip_parse(
     requirements_lock = "//:requirements_lock.txt",
 )
 
-load("@pip//:requirements.bzl", "install_deps")
-
-install_deps()
-
 local_repository(
     name = "rules_foreign_cc_examples_third_party",
     path = "third_party",
 )
 
+pip_parse(
+    name = "third_party_pip",
+    python_interpreter_target = "@python_3_10_host//:python",
+    requirements_lock = "@rules_foreign_cc_examples_third_party//:requirements_lock.txt",
+)
+
+load("@pip//:requirements.bzl", "install_deps")
+load("@third_party_pip//:requirements.bzl", third_party_install_deps = "install_deps")
+
+install_deps()
+
+third_party_install_deps()
+
 load("@rules_foreign_cc_examples_third_party//:repositories.bzl", examples_third_party_repositories = "repositories")
+
+http_archive(
+    name = "rules_perl",
+    integrity = "sha256-2Z/JEFL8OWBRlck3voAdj0spjBtukSqADwvR9xd0WVk=",
+    strip_prefix = "",
+    urls = [
+        "https://github.com/bazel-contrib/rules_perl/releases/download/1.0.0/rules_perl-1.0.0.tar.gz",
+    ],
+)
 
 examples_third_party_repositories()
 
-load("@rules_foreign_cc_examples_third_party//:setup.bzl", examples_third_party_setup = "setup")
+load("@rules_perl//perl:deps.bzl", "perl_register_toolchains", "perl_rules_dependencies")
 
-examples_third_party_setup()
+perl_rules_dependencies()
 
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+perl_register_toolchains()
 
 http_archive(
-    name = "bazelci_rules",
+    name = "bazel_ci_rules",
     sha256 = "eca21884e6f66a88c358e580fd67a6b148d30ab57b1680f62a96c00f9bc6a07e",
     strip_prefix = "bazelci_rules-1.0.0",
     url = "https://github.com/bazelbuild/continuous-integration/releases/download/rules-1.0.0/bazelci_rules-1.0.0.tar.gz",
 )
 
-load("@bazelci_rules//:rbe_repo.bzl", "rbe_preconfig")
+load("@bazel_ci_rules//:rbe_repo.bzl", "rbe_preconfig")
 
 # Creates a default toolchain config for RBE.
 # Use this as is if you are using the rbe_ubuntu16_04 container,
 # otherwise refer to RBE docs.
 rbe_preconfig(
     name = "buildkite_config",
-    toolchain = "ubuntu1804-bazel-java11",
+    toolchain = "ubuntu2204",
 )
 
 http_archive(
     name = "build_bazel_apple_support",
-    sha256 = "100d12617a84ebc7ee7a10ecf3b3e2fdadaebc167ad93a21f820a6cb60158ead",
-    url = "https://github.com/bazelbuild/apple_support/releases/download/1.12.0/apple_support.1.12.0.tar.gz",
+    sha256 = "1ae6fcf983cff3edab717636f91ad0efff2e5ba75607fdddddfd6ad0dbdfaf10",
+    url = "https://github.com/bazelbuild/apple_support/releases/download/1.24.5/apple_support.1.24.5.tar.gz",
 )
 
 http_archive(
     name = "build_bazel_rules_apple",
-    sha256 = "ed432a2d5929452748bd53a4ff9e652f2332283eb3d7ffad6cb63aab96a06301",
-    url = "https://github.com/bazelbuild/rules_apple/releases/download/3.4.0/rules_apple.3.4.0.tar.gz",
+    sha256 = "20152b14d9a420afc15ace905c02fd6425ddceb084630f3f043b287adf0fcdbd",
+    url = "https://github.com/bazelbuild/rules_apple/releases/download/4.1.0/rules_apple.4.1.0.tar.gz",
+)
+
+http_archive(
+    name = "build_bazel_rules_swift",
+    sha256 = "5eff717c18bb513285b499add68f2331509cd4e411ff085e96a86b3342c1e5aa",
+    url = "https://github.com/bazelbuild/rules_swift/releases/download/3.1.2/rules_swift.3.1.2.tar.gz",
 )
 
 load(
@@ -122,13 +176,14 @@ load(
 
 apple_support_dependencies()
 
-load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
+load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
-maybe(
-    http_archive,
+protobuf_deps()
+
+http_archive(
     name = "rules_rust",
-    integrity = "sha256-8TBqrAsli3kN8BrZq8arsN8LZUFsdLTvJ/Sqsph4CmQ=",
-    urls = ["https://github.com/bazelbuild/rules_rust/releases/download/0.56.0/rules_rust-0.56.0.tar.gz"],
+    integrity = "sha256-X/2f8fby8U8gV7fLqpGl5qzZpMve1ayB2tm+s2hZYB4=",
+    urls = ["https://github.com/bazelbuild/rules_rust/releases/download/0.70.0/rules_rust-0.70.0.tar.gz"],
 )
 
 load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains")
@@ -177,3 +232,15 @@ load(
 )
 
 rust_example_crate_repositories()
+
+new_local_repository(
+    name = "rules_foreign_cc_detect_root_test_repo",
+    build_file_content = """\
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/**"]),
+    visibility = ["//visibility:public"],
+)
+""",
+    path = "integration_tests/detect_root_test/dir1",
+)

@@ -14,7 +14,7 @@
 
 """Support functions related to getting clang runtime libraries."""
 
-load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
+load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cc_toolchain")
 
 def _should_package_clang_runtime(*, features):
     """Returns whether the Clang runtime should be bundled."""
@@ -34,8 +34,8 @@ def _should_package_clang_runtime(*, features):
     return False
 
 def _get_from_toolchain(ctx):
-    if hasattr(ctx.attr, "_cc_toolchain"):
-        cc_toolchain = find_cpp_toolchain(ctx)
+    cc_toolchain = find_cc_toolchain(ctx)
+    if cc_toolchain:
         dylibs = [
             x
             for x in cc_toolchain.all_files.to_list()

@@ -10,6 +10,8 @@ exports_files([
     "sign.bzl",
     "sq.bzl",
     "sq_package.bzl",
+    "sq_prebuilt.bzl",
+    "sq_source_hub.bzl",
 ])
 
 sh_binary(

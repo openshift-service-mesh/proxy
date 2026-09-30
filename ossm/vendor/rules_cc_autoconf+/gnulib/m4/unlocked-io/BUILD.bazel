@@ -1,0 +1,115 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/unlocked-io.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+COMPILE_DEFINES = [
+    "STDC_HEADERS",
+    "_ALL_SOURCE",
+    "_DARWIN_C_SOURCE",
+    "_GNU_SOURCE",
+    "_HPUX_ALT_XOPEN_SOCKET_API",
+    "_NETBSD_SOURCE",
+    "_OPENBSD_SOURCE",
+    "_POSIX_PTHREAD_SEMANTICS",
+]
+
+autoconf(
+    name = "unlocked-io",
+    checks = [
+        # AC_CHECK_DECLS_ONCE for unlocked IO functions
+        # No headers specified in M4, so we use default includes
+        # Extension defines are needed for these declarations to be visible
+        # AC_CHECK_DECLS_ONCE for unlocked IO functions
+        # On macOS, some are declared, some are not
+        checks.AC_CHECK_DECL(
+            "clearerr_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_CLEARERR_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "feof_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_FEOF_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "ferror_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_FERROR_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "fflush_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_FFLUSH_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "fgets_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_FGETS_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "fileno_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_FILENO_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "fputc_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_FPUTC_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "fputs_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_FPUTS_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "fread_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_FREAD_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "fwrite_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_FWRITE_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "getc_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_GETC_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "getchar_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_GETCHAR_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "putc_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_PUTC_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "putchar_unlocked",
+            compile_defines = COMPILE_DEFINES,
+            define = "HAVE_DECL_PUTCHAR_UNLOCKED",
+            includes = ["#include <stdio.h>"],
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/extensions",
+    ],
+)

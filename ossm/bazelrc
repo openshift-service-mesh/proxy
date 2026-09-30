@@ -11,19 +11,13 @@ build --repo_env=BAZEL_USE_HOST_SYSROOT=True
 # default host platform -- reproducing the WORKSPACE-era host build.
 build --extra_toolchains=@llvm_host//:all
 
-# Point Envoy's compat/openssl prefixer at the *host* LLVM. This does NOT change
-# the main C++ toolchain (that is @llvm_host above); its effect is that Envoy's
-# @envoy_repo//:compiler.bzl detects a host LLVM and makes bazel/toolchains.bzl
-# select @llvm_toolchain_llvm//:lib64/libclang-cpp.so.<host-version> (+libLLVM)
-# for the prefixer, plus host-shaped -isystem paths. On its own that target
-# would not exist -- @llvm_toolchain_llvm is normally envoy_toolshed's hermetic
-# clang-22 minimal LLVM -- so we also patch envoy_toolshed (see MODULE.bazel) to
-# back @llvm_toolchain_llvm with the host /usr LLVM when this env var is set.
-# Together this reproduces the WORKSPACE-era behavior: the prefixer links the
-# host libclang (matching the host libstdc++) instead of a hermetic clang whose
-# libstdc++ requirements the build container does not satisfy.
-build --repo_env=BAZEL_LLVM_PATH=/usr
-build --config=clang-common
+# Envoy's compat/openssl prefixer links libclang-cpp / clang-tooling headers
+# from @llvm_toolchain_llvm. We back that repo with the host /usr LLVM via
+# `envoy_llvm_ext.host(path = "/usr")` in MODULE.bazel (Envoy's native host
+# support), so the prefixer links the host libclang (matching the host
+# libstdc++) instead of the hermetic clang-22 whose libstdc++ requirements the
+# build container does not satisfy. No BAZEL_LLVM_PATH is needed anymore -- the
+# path is passed to the extension directly.
 build --config=libstdc++
 build --action_env=Clang_DIR=/usr/lib64/llvm21
 build --cxxopt=-Wno-nullability-completeness

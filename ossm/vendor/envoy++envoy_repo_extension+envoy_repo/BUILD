@@ -5,23 +5,6 @@ load("@rules_python//python/entry_points:py_console_script_binary.bzl", "py_cons
 load("//:path.bzl", "PATH")
 
 bool_flag(
-    name = "use_local_llvm_flag",
-    build_setting_default = True,
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "use_local_llvm",
-    flag_values = {
-        ":use_local_llvm_flag": "True",
-    },
-    constraint_values = [
-        "@platforms//os:linux",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-bool_flag(
     name = "use_local_sysroot_flag",
     build_setting_default = True,
     visibility = ["//visibility:public"],

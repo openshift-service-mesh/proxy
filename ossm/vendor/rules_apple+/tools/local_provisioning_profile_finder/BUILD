@@ -1,4 +1,4 @@
-load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("@rules_python//python:py_binary.bzl", "py_binary")
 
 py_binary(
     name = "local_provisioning_profile_finder",

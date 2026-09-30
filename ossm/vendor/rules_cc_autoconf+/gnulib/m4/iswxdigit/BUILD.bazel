@@ -1,0 +1,21 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/iswxdigit.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+
+autoconf(
+    name = "iswxdigit",
+    checks = [
+        # Equivalent to gl_FUNC_ISWXDIGIT macro from iswxdigit.m4
+        # Note: Full implementation includes runtime locale-based checks
+        # that are not easily replicable in Bazel
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/codeset:AM_LANGINFO_CODESET",
+        "//gnulib/m4/locale-en",
+        "//gnulib/m4/locale-ja",
+        "//gnulib/m4/locale-zh",
+        "//gnulib/m4/wctype_h",
+    ],
+)

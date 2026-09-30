@@ -27,7 +27,7 @@ absl::optional<LegacyTypeAdapter> ProtobufDescriptorProvider::ProvideLegacyType(
     absl::string_view name) const {
   const ProtoMessageTypeAdapter* result = GetTypeAdapter(name);
   if (result == nullptr) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   // ProtoMessageTypeAdapter provides apis for both access and mutation.
   return LegacyTypeAdapter(result, result);
@@ -38,7 +38,7 @@ ProtobufDescriptorProvider::ProvideLegacyTypeInfo(
     absl::string_view name) const {
   const ProtoMessageTypeAdapter* result = GetTypeAdapter(name);
   if (result == nullptr) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return result;
 }
@@ -57,7 +57,7 @@ ProtobufDescriptorProvider::CreateTypeAdapter(absl::string_view name) const {
 
 const ProtoMessageTypeAdapter* ProtobufDescriptorProvider::GetTypeAdapter(
     absl::string_view name) const {
-  absl::MutexLock lock(&mu_);
+  absl::MutexLock lock(mu_);
   auto it = type_cache_.find(name);
   if (it != type_cache_.end()) {
     return it->second.get();

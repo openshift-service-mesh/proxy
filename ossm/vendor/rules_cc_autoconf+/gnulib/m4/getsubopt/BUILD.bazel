@@ -1,0 +1,34 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/getsubopt.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "getsubopt",
+    checks = [
+        # On macOS, getsubopt is available
+        # Use subst=True to automatically create both config.h define and subst.h entry
+        checks.AC_CHECK_FUNC(
+            "getsubopt",
+            code = """\
+#include <stdlib.h>
+#include <unistd.h>
+int main(void) {
+    char *valuep;
+    getsubopt(NULL, NULL, &valuep);
+    return 0;
+}
+""",
+            define = "HAVE_GETSUBOPT",
+            subst = True,
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/extensions",  # AC_REQUIRE([AC_USE_SYSTEM_EXTENSIONS])
+        # Note: gl_STDLIB_H_DEFAULTS is a _DEFAULTS function, so we don't track it as a dependency
+        # The defaults are provided by the toolchain/defaults target
+        # For test compatibility
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)

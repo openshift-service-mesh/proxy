@@ -15,19 +15,16 @@
 """Implementation of the resource propagation aspect."""
 
 load(
-    "@bazel_skylib//lib:dicts.bzl",
-    "dicts",
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
 )
+load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load(
     "@bazel_skylib//lib:partial.bzl",
     "partial",
 )
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
-)
-load(
-    "@build_bazel_rules_swift//swift:swift.bzl",
+    "@rules_swift//swift:swift.bzl",
     "SwiftInfo",
 )
 load(
@@ -38,8 +35,6 @@ load(
 )
 load(
     "//apple/internal:apple_toolchains.bzl",
-    "AppleMacToolsToolchainInfo",
-    "AppleXPlatToolsToolchainInfo",
     "apple_toolchain_utils",
 )
 load(
@@ -78,7 +73,7 @@ load(
 
 def _platform_prerequisites_for_aspect(target, aspect_ctx):
     """Return the set of platform prerequisites that can be determined from this aspect."""
-    apple_xplat_toolchain_info = aspect_ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo]
+    apple_xplat_toolchain_info = apple_toolchain_utils.get_xplat_toolchain(aspect_ctx)
     deps_and_target = getattr(aspect_ctx.rule.attr, "deps", []) + [target]
     uses_swift = swift_support.uses_swift(deps_and_target)
     features = features_support.compute_enabled_features(
@@ -91,6 +86,7 @@ def _platform_prerequisites_for_aspect(target, aspect_ctx):
     # rule_descriptor.
     return platform_support.platform_prerequisites(
         apple_fragment = aspect_ctx.fragments.apple,
+        apple_platform_info = platform_support.apple_platform_info_from_rule_ctx(aspect_ctx),
         build_settings = apple_xplat_toolchain_info.build_settings,
         config_vars = aspect_ctx.var,
         device_families = None,
@@ -98,13 +94,12 @@ def _platform_prerequisites_for_aspect(target, aspect_ctx):
         explicit_minimum_os = None,
         features = features,
         objc_fragment = None,
-        platform_type_string = str(aspect_ctx.fragments.apple.single_arch_platform.platform_type),
         uses_swift = uses_swift,
         xcode_version_config = aspect_ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
     )
 
 def _apple_resource_aspect_impl(target, ctx):
-    """Implementation of the resource propation aspect."""
+    """Implementation of the resource propagation aspect."""
 
     # If the target already propagates a AppleResourceInfo, do nothing.
     if AppleResourceInfo in target:
@@ -120,8 +115,9 @@ def _apple_resource_aspect_impl(target, ctx):
     # necessary to do this on account of how deduping resources works in the resources partial.
     process_args = {
         "actions": ctx.actions,
-        "apple_mac_toolchain_info": ctx.attr._mac_toolchain[AppleMacToolsToolchainInfo],
+        "apple_mac_toolchain_info": apple_toolchain_utils.get_mac_toolchain(ctx),
         "bundle_id": None,
+        "mac_exec_group": apple_toolchain_utils.get_mac_exec_group(ctx),
         "product_type": None,
         "rule_label": ctx.label,
     }
@@ -184,8 +180,16 @@ def _apple_resource_aspect_impl(target, ctx):
         default_action = apple_resource_hint_action.resources
         module_names = [x.name for x in target[SwiftInfo].direct_modules if x.swift]
         bucketize_args["swift_module"] = module_names[0] if module_names else None
-        collect_args["res_attrs"] = ["data"]
         owner = str(ctx.label)
+
+        # The mixed_language_library macro passes data to its clang_target and
+        # swift_target sub-targets. Collect their resource providers so resources
+        # propagate even when the rule itself does not have a data attribute.
+        for attr in ("clang_target", "swift_target"):
+            if hasattr(ctx.rule.attr, attr):
+                dep = getattr(ctx.rule.attr, attr)
+                if AppleResourceInfo in dep:
+                    apple_resource_infos.append(dep[AppleResourceInfo])
 
     elif ctx.rule.kind in ["apple_static_framework_import", "apple_static_xcframework_import"]:
         default_action = apple_resource_hint_action.resources
@@ -305,7 +309,7 @@ def _apple_resource_aspect_impl(target, ctx):
             # Avoid processing PNG files that are referenced through the structured_resources
             # attribute. This is mostly for legacy reasons and should get cleaned up in the future.
             bucketized_owners, unowned_resources, buckets = resources.bucketize_data(
-                allowed_buckets = ["strings", "plists"],
+                allowed_buckets = ["strings", "plists", "xcstrings"],
                 owner = owner,
                 parent_dir_param = structured_parent_dir_param,
                 resources = structured_files,
@@ -429,18 +433,12 @@ def _apple_resource_aspect_impl(target, ctx):
 
 apple_resource_aspect = aspect(
     implementation = _apple_resource_aspect_impl,
-    attr_aspects = [
-        "data",
-        "deps",
-        "implementation_deps",
-        "private_deps",
-        "structured_resources",
-        "resources",
-    ],
+    attr_aspects = ["clang_target", "data", "deps", "implementation_deps", "private_deps", "resources", "structured_resources", "swift_target"],
     attrs = dicts.add(
         apple_support.action_required_attrs(),
-        apple_toolchain_utils.shared_attrs(),
+        apple_support.platform_constraint_attrs(),
     ),
+    exec_groups = apple_toolchain_utils.use_apple_exec_group_toolchain(),
     fragments = ["apple"],
     doc = """Aspect that collects and propagates resource information to be bundled by a top-level
 bundling rule.""",

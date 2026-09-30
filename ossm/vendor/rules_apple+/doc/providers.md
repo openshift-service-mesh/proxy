@@ -21,13 +21,20 @@ boundary with well-defined public APIs for broader usage.
 ## AppleBaseBundleIdInfo
 
 <pre>
-AppleBaseBundleIdInfo(<a href="#AppleBaseBundleIdInfo-base_bundle_id">base_bundle_id</a>)
+load("@rules_apple//apple:providers.bzl", "AppleBaseBundleIdInfo")
+
+AppleBaseBundleIdInfo(<a href="#AppleBaseBundleIdInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Provides the base bundle ID prefix for an Apple rule.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleBaseBundleIdInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -39,7 +46,9 @@ Provides the base bundle ID prefix for an Apple rule.
 ## AppleBinaryInfo
 
 <pre>
-AppleBinaryInfo(<a href="#AppleBinaryInfo-binary">binary</a>, <a href="#AppleBinaryInfo-infoplist">infoplist</a>, <a href="#AppleBinaryInfo-product_type">product_type</a>)
+load("@rules_apple//apple:providers.bzl", "AppleBinaryInfo")
+
+AppleBinaryInfo(<a href="#AppleBinaryInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Provides information about an Apple binary target.
@@ -47,8 +56,13 @@ Provides information about an Apple binary target.
 This provider propagates general information about an Apple binary that is not
 specific to any particular binary type.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleBinaryInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -62,6 +76,8 @@ specific to any particular binary type.
 ## AppleBinaryInfoplistInfo
 
 <pre>
+load("@rules_apple//apple:providers.bzl", "AppleBinaryInfoplistInfo")
+
 AppleBinaryInfoplistInfo(<a href="#AppleBinaryInfoplistInfo-infoplist">infoplist</a>)
 </pre>
 
@@ -69,7 +85,6 @@ Provides information about the Info.plist that was linked into an Apple binary
 target.
 
 **FIELDS**
-
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -81,18 +96,22 @@ target.
 ## AppleBundleInfo
 
 <pre>
-AppleBundleInfo(<a href="#AppleBundleInfo-archive">archive</a>, <a href="#AppleBundleInfo-archive_root">archive_root</a>, <a href="#AppleBundleInfo-binary">binary</a>, <a href="#AppleBundleInfo-bundle_extension">bundle_extension</a>, <a href="#AppleBundleInfo-bundle_id">bundle_id</a>, <a href="#AppleBundleInfo-bundle_name">bundle_name</a>,
-                <a href="#AppleBundleInfo-entitlements">entitlements</a>, <a href="#AppleBundleInfo-executable_name">executable_name</a>, <a href="#AppleBundleInfo-extension_safe">extension_safe</a>, <a href="#AppleBundleInfo-infoplist">infoplist</a>,
-                <a href="#AppleBundleInfo-minimum_deployment_os_version">minimum_deployment_os_version</a>, <a href="#AppleBundleInfo-minimum_os_version">minimum_os_version</a>, <a href="#AppleBundleInfo-platform_type">platform_type</a>, <a href="#AppleBundleInfo-product_type">product_type</a>,
-                <a href="#AppleBundleInfo-uses_swift">uses_swift</a>)
+load("@rules_apple//apple:providers.bzl", "AppleBundleInfo")
+
+AppleBundleInfo(<a href="#AppleBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 This provider propagates general information about an Apple bundle that is not
 specific to any particular bundle type. It is propagated by most bundling
 rules (applications, extensions, frameworks, test bundles, and so forth).
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -118,13 +137,20 @@ rules (applications, extensions, frameworks, test bundles, and so forth).
 ## AppleBundleVersionInfo
 
 <pre>
-AppleBundleVersionInfo(<a href="#AppleBundleVersionInfo-version_file">version_file</a>)
+load("@rules_apple//apple:providers.bzl", "AppleBundleVersionInfo")
+
+AppleBundleVersionInfo(<a href="#AppleBundleVersionInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Provides versioning information for an Apple bundle.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleBundleVersionInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -136,13 +162,20 @@ Provides versioning information for an Apple bundle.
 ## AppleCodesigningDossierInfo
 
 <pre>
-AppleCodesigningDossierInfo(<a href="#AppleCodesigningDossierInfo-dossier">dossier</a>)
+load("@rules_apple//apple:providers.bzl", "AppleCodesigningDossierInfo")
+
+AppleCodesigningDossierInfo(<a href="#AppleCodesigningDossierInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Provides information around the use of a code signing dossier.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleCodesigningDossierInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -154,7 +187,9 @@ Provides information around the use of a code signing dossier.
 ## AppleDebugOutputsInfo
 
 <pre>
-AppleDebugOutputsInfo(<a href="#AppleDebugOutputsInfo-outputs_map">outputs_map</a>)
+load("@rules_apple//apple:providers.bzl", "AppleDebugOutputsInfo")
+
+AppleDebugOutputsInfo(<a href="#AppleDebugOutputsInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Holds debug outputs of an Apple binary rule.
@@ -166,8 +201,13 @@ The only field is `output_map`, which is a dictionary of:
 
 Where `arch` is any Apple architecture such as "arm64" or "armv7".
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleDebugOutputsInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -179,13 +219,14 @@ Where `arch` is any Apple architecture such as "arm64" or "armv7".
 ## AppleDeviceTestRunnerInfo
 
 <pre>
+load("@rules_apple//apple:providers.bzl", "AppleDeviceTestRunnerInfo")
+
 AppleDeviceTestRunnerInfo(<a href="#AppleDeviceTestRunnerInfo-device_type">device_type</a>, <a href="#AppleDeviceTestRunnerInfo-os_version">os_version</a>)
 </pre>
 
 Provider that device-based runner targets must propagate.
 
 **FIELDS**
-
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -198,13 +239,20 @@ Provider that device-based runner targets must propagate.
 ## AppleDsymBundleInfo
 
 <pre>
-AppleDsymBundleInfo(<a href="#AppleDsymBundleInfo-direct_dsyms">direct_dsyms</a>, <a href="#AppleDsymBundleInfo-transitive_dsyms">transitive_dsyms</a>)
+load("@rules_apple//apple:providers.bzl", "AppleDsymBundleInfo")
+
+AppleDsymBundleInfo(<a href="#AppleDsymBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Provides information for an Apple dSYM bundle.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleDsymBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -217,13 +265,20 @@ Provides information for an Apple dSYM bundle.
 ## AppleDynamicFrameworkInfo
 
 <pre>
-AppleDynamicFrameworkInfo(<a href="#AppleDynamicFrameworkInfo-framework_dirs">framework_dirs</a>, <a href="#AppleDynamicFrameworkInfo-framework_files">framework_files</a>, <a href="#AppleDynamicFrameworkInfo-binary">binary</a>, <a href="#AppleDynamicFrameworkInfo-cc_info">cc_info</a>)
+load("@rules_apple//apple:providers.bzl", "AppleDynamicFrameworkInfo")
+
+AppleDynamicFrameworkInfo(<a href="#AppleDynamicFrameworkInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Contains information about an Apple dynamic framework.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleDynamicFrameworkInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -238,14 +293,21 @@ Contains information about an Apple dynamic framework.
 ## AppleExecutableBinaryInfo
 
 <pre>
-AppleExecutableBinaryInfo(<a href="#AppleExecutableBinaryInfo-binary">binary</a>, <a href="#AppleExecutableBinaryInfo-cc_info">cc_info</a>)
+load("@rules_apple//apple:providers.bzl", "AppleExecutableBinaryInfo")
+
+AppleExecutableBinaryInfo(<a href="#AppleExecutableBinaryInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Contains the executable binary output that was built using
 `link_multi_arch_binary` with the `executable` binary type.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleExecutableBinaryInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -258,7 +320,9 @@ Contains the executable binary output that was built using
 ## AppleExtraOutputsInfo
 
 <pre>
-AppleExtraOutputsInfo(<a href="#AppleExtraOutputsInfo-files">files</a>)
+load("@rules_apple//apple:providers.bzl", "AppleExtraOutputsInfo")
+
+AppleExtraOutputsInfo(<a href="#AppleExtraOutputsInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Provides information about extra outputs that should be produced from the build.
@@ -271,8 +335,13 @@ also being generated, we do want to produce the dSYMs for *both* application and
 extension as outputs of the build, not just the dSYMs of the explicit target
 being built (the application).
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleExtraOutputsInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -284,7 +353,9 @@ being built (the application).
 ## AppleFrameworkBundleInfo
 
 <pre>
-AppleFrameworkBundleInfo()
+load("@rules_apple//apple:providers.bzl", "AppleFrameworkBundleInfo")
+
+AppleFrameworkBundleInfo(<a href="#AppleFrameworkBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes a target is an Apple framework bundle.
@@ -292,8 +363,11 @@ Denotes a target is an Apple framework bundle.
 This provider does not reference 3rd party or precompiled frameworks.
 Propagated by Apple framework rules: `ios_framework`, and `tvos_framework`.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleFrameworkBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="AppleFrameworkImportInfo"></a>
@@ -301,7 +375,9 @@ Propagated by Apple framework rules: `ios_framework`, and `tvos_framework`.
 ## AppleFrameworkImportInfo
 
 <pre>
-AppleFrameworkImportInfo(<a href="#AppleFrameworkImportInfo-framework_imports">framework_imports</a>, <a href="#AppleFrameworkImportInfo-dsym_imports">dsym_imports</a>, <a href="#AppleFrameworkImportInfo-build_archs">build_archs</a>, <a href="#AppleFrameworkImportInfo-debug_info_binaries">debug_info_binaries</a>)
+load("@rules_apple//apple:providers.bzl", "AppleFrameworkImportInfo")
+
+AppleFrameworkImportInfo(<a href="#AppleFrameworkImportInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Provider that propagates information about 3rd party imported framework targets.
@@ -310,8 +386,13 @@ Propagated by framework and XCFramework import rules: `apple_dynamic_framework_i
 `apple_dynamic_xcframework_import`, `apple_static_framework_import`, and
 `apple_static_xcframework_import`
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleFrameworkImportInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -326,19 +407,27 @@ Propagated by framework and XCFramework import rules: `apple_dynamic_framework_i
 ## ApplePlatformInfo
 
 <pre>
-ApplePlatformInfo(<a href="#ApplePlatformInfo-target_os">target_os</a>, <a href="#ApplePlatformInfo-target_arch">target_arch</a>, <a href="#ApplePlatformInfo-target_environment">target_environment</a>)
+load("@rules_apple//apple:providers.bzl", "ApplePlatformInfo")
+
+ApplePlatformInfo(<a href="#ApplePlatformInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Provides information for the currently selected Apple platforms.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="ApplePlatformInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
-| <a id="ApplePlatformInfo-target_os"></a>target_os |  `String` representing the selected Apple OS.    |
 | <a id="ApplePlatformInfo-target_arch"></a>target_arch |  `String` representing the selected target architecture or cpu type.    |
+| <a id="ApplePlatformInfo-target_build_config"></a>target_build_config |  'configuration' representing the selected target's build configuration.    |
 | <a id="ApplePlatformInfo-target_environment"></a>target_environment |  `String` representing the selected target environment (e.g. "device", "simulator").    |
+| <a id="ApplePlatformInfo-target_os"></a>target_os |  `String` representing the selected Apple OS.    |
 
 
 <a id="AppleProvisioningProfileInfo"></a>
@@ -346,13 +435,14 @@ Provides information for the currently selected Apple platforms.
 ## AppleProvisioningProfileInfo
 
 <pre>
+load("@rules_apple//apple:providers.bzl", "AppleProvisioningProfileInfo")
+
 AppleProvisioningProfileInfo(<a href="#AppleProvisioningProfileInfo-provisioning_profile">provisioning_profile</a>, <a href="#AppleProvisioningProfileInfo-profile_name">profile_name</a>, <a href="#AppleProvisioningProfileInfo-team_id">team_id</a>)
 </pre>
 
 Provides information about a provisioning profile.
 
 **FIELDS**
-
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -366,7 +456,9 @@ Provides information about a provisioning profile.
 ## AppleResourceBundleInfo
 
 <pre>
-AppleResourceBundleInfo()
+load("@rules_apple//apple:providers.bzl", "AppleResourceBundleInfo")
+
+AppleResourceBundleInfo(<a href="#AppleResourceBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is an Apple resource bundle.
@@ -377,8 +469,11 @@ a "marker" to indicate that a target is specifically an Apple resource bundle
 dependency is an Apple resource bundle should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleResourceBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="AppleResourceInfo"></a>
@@ -386,15 +481,20 @@ requirement.
 ## AppleResourceInfo
 
 <pre>
-AppleResourceInfo(<a href="#AppleResourceInfo-alternate_icons">alternate_icons</a>, <a href="#AppleResourceInfo-asset_catalogs">asset_catalogs</a>, <a href="#AppleResourceInfo-datamodels">datamodels</a>, <a href="#AppleResourceInfo-framework">framework</a>, <a href="#AppleResourceInfo-infoplists">infoplists</a>, <a href="#AppleResourceInfo-metals">metals</a>,
-                  <a href="#AppleResourceInfo-mlmodels">mlmodels</a>, <a href="#AppleResourceInfo-plists">plists</a>, <a href="#AppleResourceInfo-pngs">pngs</a>, <a href="#AppleResourceInfo-processed">processed</a>, <a href="#AppleResourceInfo-storyboards">storyboards</a>, <a href="#AppleResourceInfo-strings">strings</a>, <a href="#AppleResourceInfo-texture_atlases">texture_atlases</a>,
-                  <a href="#AppleResourceInfo-unprocessed">unprocessed</a>, <a href="#AppleResourceInfo-xibs">xibs</a>, <a href="#AppleResourceInfo-owners">owners</a>, <a href="#AppleResourceInfo-processed_origins">processed_origins</a>, <a href="#AppleResourceInfo-unowned_resources">unowned_resources</a>)
+load("@rules_apple//apple:providers.bzl", "AppleResourceInfo")
+
+AppleResourceInfo(<a href="#AppleResourceInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Provider that propagates buckets of resources that are differentiated by type.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleResourceInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -406,12 +506,13 @@ Provider that propagates buckets of resources that are differentiated by type.
 | <a id="AppleResourceInfo-metals"></a>metals |  Metal Shading Language source files to be compiled into a single .metallib file and bundled at the top level.    |
 | <a id="AppleResourceInfo-mlmodels"></a>mlmodels |  Core ML model files that should be processed and bundled at the top level.    |
 | <a id="AppleResourceInfo-plists"></a>plists |  Resource Plist files that should not be merged into Info.plist    |
-| <a id="AppleResourceInfo-pngs"></a>pngs |  PNG images which are not bundled in an .xcassets folder.    |
+| <a id="AppleResourceInfo-pngs"></a>pngs |  PNG images which are not bundled in an .xcassets folder or an .icon folder in Xcode 26+.    |
 | <a id="AppleResourceInfo-processed"></a>processed |  Typed resources that have already been processed.    |
 | <a id="AppleResourceInfo-storyboards"></a>storyboards |  Storyboard files.    |
 | <a id="AppleResourceInfo-strings"></a>strings |  Localization strings files.    |
 | <a id="AppleResourceInfo-texture_atlases"></a>texture_atlases |  Texture atlas files.    |
 | <a id="AppleResourceInfo-unprocessed"></a>unprocessed |  Generic resources not mapped to the other types.    |
+| <a id="AppleResourceInfo-xcstrings"></a>xcstrings |  String catalog files.    |
 | <a id="AppleResourceInfo-xibs"></a>xibs |  XIB Interface files.    |
 | <a id="AppleResourceInfo-owners"></a>owners |  `depset` of (resource, owner) pairs.    |
 | <a id="AppleResourceInfo-processed_origins"></a>processed_origins |  `depset` of (processed resource, resource list) pairs.    |
@@ -423,13 +524,20 @@ Provider that propagates buckets of resources that are differentiated by type.
 ## AppleSharedCapabilityInfo
 
 <pre>
-AppleSharedCapabilityInfo(<a href="#AppleSharedCapabilityInfo-base_bundle_id">base_bundle_id</a>)
+load("@rules_apple//apple:providers.bzl", "AppleSharedCapabilityInfo")
+
+AppleSharedCapabilityInfo(<a href="#AppleSharedCapabilityInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Provides information on a mergeable set of shared capabilities.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleSharedCapabilityInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -441,7 +549,9 @@ Provides information on a mergeable set of shared capabilities.
 ## AppleStaticXcframeworkBundleInfo
 
 <pre>
-AppleStaticXcframeworkBundleInfo()
+load("@rules_apple//apple:providers.bzl", "AppleStaticXcframeworkBundleInfo")
+
+AppleStaticXcframeworkBundleInfo(<a href="#AppleStaticXcframeworkBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a static library XCFramework.
@@ -452,8 +562,11 @@ a "marker" to indicate that a target is specifically an XCFramework bundle
 dependency is an XCFramework should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleStaticXcframeworkBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="AppleTestInfo"></a>
@@ -461,31 +574,25 @@ requirement.
 ## AppleTestInfo
 
 <pre>
-AppleTestInfo(<a href="#AppleTestInfo-includes">includes</a>, <a href="#AppleTestInfo-module_maps">module_maps</a>, <a href="#AppleTestInfo-module_name">module_name</a>, <a href="#AppleTestInfo-non_arc_sources">non_arc_sources</a>, <a href="#AppleTestInfo-sources">sources</a>, <a href="#AppleTestInfo-swift_modules">swift_modules</a>,
-              <a href="#AppleTestInfo-test_bundle">test_bundle</a>, <a href="#AppleTestInfo-test_host">test_host</a>, <a href="#AppleTestInfo-deps">deps</a>)
+load("@rules_apple//apple:providers.bzl", "AppleTestInfo")
+
+AppleTestInfo(<a href="#AppleTestInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Provider that test targets propagate to be used for IDE integration.
 
-This includes information regarding test source files, transitive include paths,
-transitive module maps, and transitive Swift modules. Test source files are
-considered to be all of which belong to the first-level dependencies on the test
-target.
+**CONSTRUCTOR PARAMETERS**
+
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleTestInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 **FIELDS**
 
-
 | Name  | Description |
 | :------------- | :------------- |
-| <a id="AppleTestInfo-includes"></a>includes |  `depset` of `String`s representing transitive include paths which are needed by IDEs to be used for indexing the test sources.    |
-| <a id="AppleTestInfo-module_maps"></a>module_maps |  `depset` of `File`s representing module maps which are needed by IDEs to be used for indexing the test sources.    |
-| <a id="AppleTestInfo-module_name"></a>module_name |  `String` representing the module name used by the test's sources. This is only set if the test only contains a single top-level Swift dependency. This may be used by an IDE to identify the Swift module (if any) used by the test's sources.    |
-| <a id="AppleTestInfo-non_arc_sources"></a>non_arc_sources |  `depset` of `File`s containing non-ARC sources from the test's immediate deps.    |
-| <a id="AppleTestInfo-sources"></a>sources |  `depset` of `File`s containing sources and headers from the test's immediate deps.    |
-| <a id="AppleTestInfo-swift_modules"></a>swift_modules |  `depset` of `File`s representing transitive swift modules which are needed by IDEs to be used for indexing the test sources.    |
 | <a id="AppleTestInfo-test_bundle"></a>test_bundle |  The artifact representing the XCTest bundle for the test target.    |
 | <a id="AppleTestInfo-test_host"></a>test_host |  The artifact representing the test host for the test target, if the test requires a test host.    |
-| <a id="AppleTestInfo-deps"></a>deps |  `depset` of `String`s representing the labels of all immediate deps of the test. Only source files from these deps will be present in `sources`. This may be used by IDEs to differentiate a test target's transitive module maps from its direct module maps, as including the direct module maps may break indexing for the source files of the immediate deps.    |
 
 
 <a id="AppleTestRunnerInfo"></a>
@@ -493,8 +600,9 @@ target.
 ## AppleTestRunnerInfo
 
 <pre>
-AppleTestRunnerInfo(<a href="#AppleTestRunnerInfo-execution_requirements">execution_requirements</a>, <a href="#AppleTestRunnerInfo-execution_environment">execution_environment</a>, <a href="#AppleTestRunnerInfo-test_environment">test_environment</a>,
-                    <a href="#AppleTestRunnerInfo-test_runner_template">test_runner_template</a>)
+load("@rules_apple//apple:providers.bzl", "AppleTestRunnerInfo")
+
+AppleTestRunnerInfo(<a href="#AppleTestRunnerInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Provider that runner targets must propagate.
@@ -502,8 +610,13 @@ Provider that runner targets must propagate.
 In addition to the fields, all the runfiles that the runner target declares will be added to the
 test rules runfiles.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleTestRunnerInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+**FIELDS**
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -518,7 +631,9 @@ test rules runfiles.
 ## AppleXcframeworkBundleInfo
 
 <pre>
-AppleXcframeworkBundleInfo()
+load("@rules_apple//apple:providers.bzl", "AppleXcframeworkBundleInfo")
+
+AppleXcframeworkBundleInfo(<a href="#AppleXcframeworkBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is an XCFramework.
@@ -529,8 +644,11 @@ a "marker" to indicate that a target is specifically an XCFramework bundle
 dependency is an XCFramework should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="AppleXcframeworkBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="DocCBundleInfo"></a>
@@ -538,13 +656,14 @@ requirement.
 ## DocCBundleInfo
 
 <pre>
+load("@rules_apple//apple:providers.bzl", "DocCBundleInfo")
+
 DocCBundleInfo(<a href="#DocCBundleInfo-bundle">bundle</a>, <a href="#DocCBundleInfo-bundle_files">bundle_files</a>)
 </pre>
 
 Provides general information about a .docc bundle.
 
 **FIELDS**
-
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -557,13 +676,14 @@ Provides general information about a .docc bundle.
 ## DocCSymbolGraphsInfo
 
 <pre>
+load("@rules_apple//apple:providers.bzl", "DocCSymbolGraphsInfo")
+
 DocCSymbolGraphsInfo(<a href="#DocCSymbolGraphsInfo-symbol_graphs">symbol_graphs</a>)
 </pre>
 
 Provides the symbol graphs required to archive a .docc bundle.
 
 **FIELDS**
-
 
 | Name  | Description |
 | :------------- | :------------- |
@@ -575,7 +695,9 @@ Provides the symbol graphs required to archive a .docc bundle.
 ## IosAppClipBundleInfo
 
 <pre>
-IosAppClipBundleInfo()
+load("@rules_apple//apple:providers.bzl", "IosAppClipBundleInfo")
+
+IosAppClipBundleInfo(<a href="#IosAppClipBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is an iOS app clip.
@@ -585,8 +707,11 @@ a "marker" to indicate that a target is specifically an iOS app clip bundle (and
 not some other Apple bundle). Rule authors who wish to require that a dependency
 is an iOS app clip should use this provider to describe that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="IosAppClipBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="IosApplicationBundleInfo"></a>
@@ -594,7 +719,9 @@ is an iOS app clip should use this provider to describe that requirement.
 ## IosApplicationBundleInfo
 
 <pre>
-IosApplicationBundleInfo()
+load("@rules_apple//apple:providers.bzl", "IosApplicationBundleInfo")
+
+IosApplicationBundleInfo(<a href="#IosApplicationBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is an iOS application.
@@ -605,8 +732,11 @@ a "marker" to indicate that a target is specifically an iOS application bundle
 dependency is an iOS application should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="IosApplicationBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="IosExtensionBundleInfo"></a>
@@ -614,7 +744,9 @@ requirement.
 ## IosExtensionBundleInfo
 
 <pre>
-IosExtensionBundleInfo()
+load("@rules_apple//apple:providers.bzl", "IosExtensionBundleInfo")
+
+IosExtensionBundleInfo(<a href="#IosExtensionBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is an iOS application extension.
@@ -625,8 +757,11 @@ extension bundle (and not some other Apple bundle). Rule authors who wish to
 require that a dependency is an iOS application extension should use this
 provider to describe that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="IosExtensionBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="IosFrameworkBundleInfo"></a>
@@ -634,7 +769,9 @@ provider to describe that requirement.
 ## IosFrameworkBundleInfo
 
 <pre>
-IosFrameworkBundleInfo()
+load("@rules_apple//apple:providers.bzl", "IosFrameworkBundleInfo")
+
+IosFrameworkBundleInfo(<a href="#IosFrameworkBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is an iOS dynamic framework.
@@ -645,8 +782,11 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is an iOS dynamic framework should use this provider to describe
 that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="IosFrameworkBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="IosImessageApplicationBundleInfo"></a>
@@ -654,7 +794,9 @@ that requirement.
 ## IosImessageApplicationBundleInfo
 
 <pre>
-IosImessageApplicationBundleInfo()
+load("@rules_apple//apple:providers.bzl", "IosImessageApplicationBundleInfo")
+
+IosImessageApplicationBundleInfo(<a href="#IosImessageApplicationBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is an iOS iMessage application.
@@ -665,8 +807,11 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is an iOS iMessage application should use this provider to describe
 that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="IosImessageApplicationBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="IosImessageExtensionBundleInfo"></a>
@@ -674,7 +819,9 @@ that requirement.
 ## IosImessageExtensionBundleInfo
 
 <pre>
-IosImessageExtensionBundleInfo()
+load("@rules_apple//apple:providers.bzl", "IosImessageExtensionBundleInfo")
+
+IosImessageExtensionBundleInfo(<a href="#IosImessageExtensionBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is an iOS iMessage extension.
@@ -685,8 +832,36 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is an iOS iMessage extension should use this provider to describe
 that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="IosImessageExtensionBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
+
+
+<a id="IosKernelExtensionBundleInfo"></a>
+
+## IosKernelExtensionBundleInfo
+
+<pre>
+load("@rules_apple//apple:providers.bzl", "IosKernelExtensionBundleInfo")
+
+IosKernelExtensionBundleInfo(<a href="#IosKernelExtensionBundleInfo-_init-kwargs">*kwargs</a>)
+</pre>
+
+Denotes that a target is an iOS kernel extension.
+
+This provider does not contain any fields of its own at this time but is used as
+a "marker" to indicate that a target is specifically an iOS kernel extension
+bundle (and not some other Apple bundle). Rule authors who wish to require that
+a dependency is an iOS kernel extension should use this provider to describe that
+requirement.
+
+**CONSTRUCTOR PARAMETERS**
+
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="IosKernelExtensionBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="IosStaticFrameworkBundleInfo"></a>
@@ -694,7 +869,9 @@ that requirement.
 ## IosStaticFrameworkBundleInfo
 
 <pre>
-IosStaticFrameworkBundleInfo()
+load("@rules_apple//apple:providers.bzl", "IosStaticFrameworkBundleInfo")
+
+IosStaticFrameworkBundleInfo(<a href="#IosStaticFrameworkBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is an iOS static framework.
@@ -705,8 +882,11 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is an iOS static framework should use this provider to describe
 that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="IosStaticFrameworkBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="IosStickerPackExtensionBundleInfo"></a>
@@ -714,6 +894,8 @@ that requirement.
 ## IosStickerPackExtensionBundleInfo
 
 <pre>
+load("@rules_apple//apple:providers.bzl", "IosStickerPackExtensionBundleInfo")
+
 IosStickerPackExtensionBundleInfo()
 </pre>
 
@@ -725,16 +907,15 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is an iOS Sticker Pack extension should use this provider to describe
 that requirement.
 
-**FIELDS**
-
-
 
 <a id="IosXcTestBundleInfo"></a>
 
 ## IosXcTestBundleInfo
 
 <pre>
-IosXcTestBundleInfo()
+load("@rules_apple//apple:providers.bzl", "IosXcTestBundleInfo")
+
+IosXcTestBundleInfo(<a href="#IosXcTestBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes a target that is an iOS .xctest bundle.
@@ -744,8 +925,11 @@ a "marker" to indicate that a target is specifically an iOS .xctest bundle (and
 not some other Apple bundle). Rule authors who wish to require that a dependency
 is an iOS .xctest bundle should use this provider to describe that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="IosXcTestBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="MacosApplicationBundleInfo"></a>
@@ -753,7 +937,9 @@ is an iOS .xctest bundle should use this provider to describe that requirement.
 ## MacosApplicationBundleInfo
 
 <pre>
-MacosApplicationBundleInfo()
+load("@rules_apple//apple:providers.bzl", "MacosApplicationBundleInfo")
+
+MacosApplicationBundleInfo(<a href="#MacosApplicationBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a macOS application.
@@ -764,8 +950,11 @@ a "marker" to indicate that a target is specifically a macOS application bundle
 dependency is a macOS application should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="MacosApplicationBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="MacosBundleBundleInfo"></a>
@@ -773,7 +962,9 @@ requirement.
 ## MacosBundleBundleInfo
 
 <pre>
-MacosBundleBundleInfo()
+load("@rules_apple//apple:providers.bzl", "MacosBundleBundleInfo")
+
+MacosBundleBundleInfo(<a href="#MacosBundleBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a macOS loadable bundle.
@@ -784,8 +975,11 @@ a "marker" to indicate that a target is specifically a macOS loadable bundle
 dependency is a macOS loadable bundle should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="MacosBundleBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="MacosExtensionBundleInfo"></a>
@@ -793,7 +987,9 @@ requirement.
 ## MacosExtensionBundleInfo
 
 <pre>
-MacosExtensionBundleInfo()
+load("@rules_apple//apple:providers.bzl", "MacosExtensionBundleInfo")
+
+MacosExtensionBundleInfo(<a href="#MacosExtensionBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a macOS application extension.
@@ -804,8 +1000,11 @@ extension bundle (and not some other Apple bundle). Rule authors who wish to
 require that a dependency is a macOS application extension should use this
 provider to describe that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="MacosExtensionBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="MacosFrameworkBundleInfo"></a>
@@ -813,6 +1012,8 @@ provider to describe that requirement.
 ## MacosFrameworkBundleInfo
 
 <pre>
+load("@rules_apple//apple:providers.bzl", "MacosFrameworkBundleInfo")
+
 MacosFrameworkBundleInfo()
 </pre>
 
@@ -824,16 +1025,15 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is an macOS dynamic framework should use this provider to describe
 that requirement.
 
-**FIELDS**
-
-
 
 <a id="MacosKernelExtensionBundleInfo"></a>
 
 ## MacosKernelExtensionBundleInfo
 
 <pre>
-MacosKernelExtensionBundleInfo()
+load("@rules_apple//apple:providers.bzl", "MacosKernelExtensionBundleInfo")
+
+MacosKernelExtensionBundleInfo(<a href="#MacosKernelExtensionBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a macOS kernel extension.
@@ -844,8 +1044,11 @@ a "marker" to indicate that a target is specifically a macOS kernel extension
 dependency is a macOS kernel extension should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="MacosKernelExtensionBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="MacosQuickLookPluginBundleInfo"></a>
@@ -853,7 +1056,9 @@ requirement.
 ## MacosQuickLookPluginBundleInfo
 
 <pre>
-MacosQuickLookPluginBundleInfo()
+load("@rules_apple//apple:providers.bzl", "MacosQuickLookPluginBundleInfo")
+
+MacosQuickLookPluginBundleInfo(<a href="#MacosQuickLookPluginBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a macOS Quick Look Generator bundle.
@@ -864,8 +1069,11 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is a macOS Quick Look generator should use this provider to describe
 that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="MacosQuickLookPluginBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="MacosSpotlightImporterBundleInfo"></a>
@@ -873,7 +1081,9 @@ that requirement.
 ## MacosSpotlightImporterBundleInfo
 
 <pre>
-MacosSpotlightImporterBundleInfo()
+load("@rules_apple//apple:providers.bzl", "MacosSpotlightImporterBundleInfo")
+
+MacosSpotlightImporterBundleInfo(<a href="#MacosSpotlightImporterBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a macOS Spotlight Importer bundle.
@@ -884,8 +1094,11 @@ a "marker" to indicate that a target is specifically a macOS Spotlight importer
 dependency is a macOS Spotlight importer should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="MacosSpotlightImporterBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="MacosStaticFrameworkBundleInfo"></a>
@@ -893,6 +1106,8 @@ requirement.
 ## MacosStaticFrameworkBundleInfo
 
 <pre>
+load("@rules_apple//apple:providers.bzl", "MacosStaticFrameworkBundleInfo")
+
 MacosStaticFrameworkBundleInfo()
 </pre>
 
@@ -904,16 +1119,15 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is an macOS static framework should use this provider to describe
 that requirement.
 
-**FIELDS**
-
-
 
 <a id="MacosXPCServiceBundleInfo"></a>
 
 ## MacosXPCServiceBundleInfo
 
 <pre>
-MacosXPCServiceBundleInfo()
+load("@rules_apple//apple:providers.bzl", "MacosXPCServiceBundleInfo")
+
+MacosXPCServiceBundleInfo(<a href="#MacosXPCServiceBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a macOS XPC Service bundle.
@@ -924,8 +1138,11 @@ a "marker" to indicate that a target is specifically a macOS XPC service
 dependency is a macOS XPC service should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="MacosXPCServiceBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="MacosXcTestBundleInfo"></a>
@@ -933,7 +1150,9 @@ requirement.
 ## MacosXcTestBundleInfo
 
 <pre>
-MacosXcTestBundleInfo()
+load("@rules_apple//apple:providers.bzl", "MacosXcTestBundleInfo")
+
+MacosXcTestBundleInfo(<a href="#MacosXcTestBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes a target that is a macOS .xctest bundle.
@@ -944,8 +1163,11 @@ a "marker" to indicate that a target is specifically a macOS .xctest bundle
 dependency is a macOS .xctest bundle should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="MacosXcTestBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="TvosApplicationBundleInfo"></a>
@@ -953,7 +1175,9 @@ requirement.
 ## TvosApplicationBundleInfo
 
 <pre>
-TvosApplicationBundleInfo()
+load("@rules_apple//apple:providers.bzl", "TvosApplicationBundleInfo")
+
+TvosApplicationBundleInfo(<a href="#TvosApplicationBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a tvOS application.
@@ -964,8 +1188,11 @@ a "marker" to indicate that a target is specifically a tvOS application bundle
 dependency is a tvOS application should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="TvosApplicationBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="TvosExtensionBundleInfo"></a>
@@ -973,7 +1200,9 @@ requirement.
 ## TvosExtensionBundleInfo
 
 <pre>
-TvosExtensionBundleInfo()
+load("@rules_apple//apple:providers.bzl", "TvosExtensionBundleInfo")
+
+TvosExtensionBundleInfo(<a href="#TvosExtensionBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a tvOS application extension.
@@ -984,8 +1213,11 @@ extension bundle (and not some other Apple bundle). Rule authors who wish to
 require that a dependency is a tvOS application extension should use this
 provider to describe that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="TvosExtensionBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="TvosFrameworkBundleInfo"></a>
@@ -993,7 +1225,9 @@ provider to describe that requirement.
 ## TvosFrameworkBundleInfo
 
 <pre>
-TvosFrameworkBundleInfo()
+load("@rules_apple//apple:providers.bzl", "TvosFrameworkBundleInfo")
+
+TvosFrameworkBundleInfo(<a href="#TvosFrameworkBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a tvOS dynamic framework.
@@ -1004,8 +1238,11 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is a tvOS dynamic framework should use this provider to describe
 that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="TvosFrameworkBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="TvosStaticFrameworkBundleInfo"></a>
@@ -1013,7 +1250,9 @@ that requirement.
 ## TvosStaticFrameworkBundleInfo
 
 <pre>
-TvosStaticFrameworkBundleInfo()
+load("@rules_apple//apple:providers.bzl", "TvosStaticFrameworkBundleInfo")
+
+TvosStaticFrameworkBundleInfo(<a href="#TvosStaticFrameworkBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a tvOS static framework.
@@ -1024,8 +1263,11 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is a tvOS static framework should use this provider to describe
 that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="TvosStaticFrameworkBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="TvosXcTestBundleInfo"></a>
@@ -1033,7 +1275,9 @@ that requirement.
 ## TvosXcTestBundleInfo
 
 <pre>
-TvosXcTestBundleInfo()
+load("@rules_apple//apple:providers.bzl", "TvosXcTestBundleInfo")
+
+TvosXcTestBundleInfo(<a href="#TvosXcTestBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes a target that is a tvOS .xctest bundle.
@@ -1043,8 +1287,11 @@ a "marker" to indicate that a target is specifically a tvOS .xctest bundle (and
 not some other Apple bundle). Rule authors who wish to require that a dependency
 is a tvOS .xctest bundle should use this provider to describe that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="TvosXcTestBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="VisionosApplicationBundleInfo"></a>
@@ -1052,7 +1299,9 @@ is a tvOS .xctest bundle should use this provider to describe that requirement.
 ## VisionosApplicationBundleInfo
 
 <pre>
-VisionosApplicationBundleInfo()
+load("@rules_apple//apple:providers.bzl", "VisionosApplicationBundleInfo")
+
+VisionosApplicationBundleInfo(<a href="#VisionosApplicationBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a visionOS application.
@@ -1063,8 +1312,11 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that 
 dependency is a visionOS application should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="VisionosApplicationBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="VisionosExtensionBundleInfo"></a>
@@ -1072,7 +1324,9 @@ requirement.
 ## VisionosExtensionBundleInfo
 
 <pre>
-VisionosExtensionBundleInfo()
+load("@rules_apple//apple:providers.bzl", "VisionosExtensionBundleInfo")
+
+VisionosExtensionBundleInfo(<a href="#VisionosExtensionBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a visionOS application.
@@ -1083,8 +1337,11 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that 
 dependency is a visionOS application should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="VisionosExtensionBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="VisionosFrameworkBundleInfo"></a>
@@ -1092,7 +1349,9 @@ requirement.
 ## VisionosFrameworkBundleInfo
 
 <pre>
-VisionosFrameworkBundleInfo()
+load("@rules_apple//apple:providers.bzl", "VisionosFrameworkBundleInfo")
+
+VisionosFrameworkBundleInfo(<a href="#VisionosFrameworkBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is visionOS dynamic framework.
@@ -1103,8 +1362,11 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is a visionOS dynamic framework should use this provider to describe
 that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="VisionosFrameworkBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="VisionosXcTestBundleInfo"></a>
@@ -1112,7 +1374,9 @@ that requirement.
 ## VisionosXcTestBundleInfo
 
 <pre>
-VisionosXcTestBundleInfo()
+load("@rules_apple//apple:providers.bzl", "VisionosXcTestBundleInfo")
+
+VisionosXcTestBundleInfo(<a href="#VisionosXcTestBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes a target that is a visionOS .xctest bundle.
@@ -1123,8 +1387,11 @@ a "marker" to indicate that a target is specifically a visionOS .xctest bundle
 dependency is a visionOS .xctest bundle  should use this provider to describe
 that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="VisionosXcTestBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="WatchosApplicationBundleInfo"></a>
@@ -1132,7 +1399,9 @@ that requirement.
 ## WatchosApplicationBundleInfo
 
 <pre>
-WatchosApplicationBundleInfo()
+load("@rules_apple//apple:providers.bzl", "WatchosApplicationBundleInfo")
+
+WatchosApplicationBundleInfo(<a href="#WatchosApplicationBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a watchOS application.
@@ -1143,8 +1412,11 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is a watchOS application should use this provider to describe that
 requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="WatchosApplicationBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="WatchosExtensionBundleInfo"></a>
@@ -1152,7 +1424,9 @@ requirement.
 ## WatchosExtensionBundleInfo
 
 <pre>
-WatchosExtensionBundleInfo()
+load("@rules_apple//apple:providers.bzl", "WatchosExtensionBundleInfo")
+
+WatchosExtensionBundleInfo(<a href="#WatchosExtensionBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes that a target is a watchOS application extension.
@@ -1163,8 +1437,11 @@ extension bundle (and not some other Apple bundle). Rule authors who wish to
 require that a dependency is a watchOS application extension should use this
 provider to describe that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="WatchosExtensionBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="WatchosFrameworkBundleInfo"></a>
@@ -1172,6 +1449,8 @@ provider to describe that requirement.
 ## WatchosFrameworkBundleInfo
 
 <pre>
+load("@rules_apple//apple:providers.bzl", "WatchosFrameworkBundleInfo")
+
 WatchosFrameworkBundleInfo()
 </pre>
 
@@ -1183,15 +1462,14 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is a watchOS dynamic framework should use this provider to describe
 that requirement.
 
-**FIELDS**
-
-
 
 <a id="WatchosStaticFrameworkBundleInfo"></a>
 
 ## WatchosStaticFrameworkBundleInfo
 
 <pre>
+load("@rules_apple//apple:providers.bzl", "WatchosStaticFrameworkBundleInfo")
+
 WatchosStaticFrameworkBundleInfo()
 </pre>
 
@@ -1203,16 +1481,15 @@ bundle (and not some other Apple bundle). Rule authors who wish to require that
 a dependency is a watchOS static framework should use this provider to describe
 that requirement.
 
-**FIELDS**
-
-
 
 <a id="WatchosXcTestBundleInfo"></a>
 
 ## WatchosXcTestBundleInfo
 
 <pre>
-WatchosXcTestBundleInfo()
+load("@rules_apple//apple:providers.bzl", "WatchosXcTestBundleInfo")
+
+WatchosXcTestBundleInfo(<a href="#WatchosXcTestBundleInfo-_init-kwargs">*kwargs</a>)
 </pre>
 
 Denotes a target that is a watchOS .xctest bundle.
@@ -1222,8 +1499,11 @@ a "marker" to indicate that a target is specifically a watchOS .xctest bundle (a
 not some other Apple bundle). Rule authors who wish to require that a dependency
 is a watchOS .xctest bundle should use this provider to describe that requirement.
 
-**FIELDS**
+**CONSTRUCTOR PARAMETERS**
 
+| Name  | Description | Default Value |
+| :------------- | :------------- | :------------- |
+| <a id="WatchosXcTestBundleInfo-_init-kwargs"></a>kwargs | <p align="center">-</p> | none |
 
 
 <a id="apple_provider.make_apple_bundle_version_info"></a>
@@ -1231,7 +1511,9 @@ is a watchOS .xctest bundle should use this provider to describe that requiremen
 ## apple_provider.make_apple_bundle_version_info
 
 <pre>
-apple_provider.make_apple_bundle_version_info(<a href="#apple_provider.make_apple_bundle_version_info-version_file">version_file</a>)
+load("@rules_apple//apple:providers.bzl", "apple_provider")
+
+apple_provider.make_apple_bundle_version_info(*, <a href="#apple_provider.make_apple_bundle_version_info-version_file">version_file</a>)
 </pre>
 
 Creates a new instance of the `AppleBundleVersionInfo` provider.
@@ -1253,7 +1535,9 @@ A new `AppleBundleVersionInfo` provider based on the supplied arguments.
 ## apple_provider.make_apple_test_runner_info
 
 <pre>
-apple_provider.make_apple_test_runner_info(<a href="#apple_provider.make_apple_test_runner_info-kwargs">kwargs</a>)
+load("@rules_apple//apple:providers.bzl", "apple_provider")
+
+apple_provider.make_apple_test_runner_info(<a href="#apple_provider.make_apple_test_runner_info-kwargs">**kwargs</a>)
 </pre>
 
 Creates a new instance of the AppleTestRunnerInfo provider.
@@ -1275,6 +1559,8 @@ A new `AppleTestRunnerInfo` provider based on the supplied arguments.
 ## apple_provider.merge_apple_framework_import_info
 
 <pre>
+load("@rules_apple//apple:providers.bzl", "apple_provider")
+
 apple_provider.merge_apple_framework_import_info(<a href="#apple_provider.merge_apple_framework_import_info-apple_framework_import_infos">apple_framework_import_infos</a>)
 </pre>
 

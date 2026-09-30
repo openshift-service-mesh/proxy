@@ -75,9 +75,14 @@ _EXPECTED_GO_MOD_21_PARSE_RESULT = struct(
 def _use_spec_to_label_test_impl(ctx):
     env = unittest.begin(ctx)
 
-    asserts.equals(env, Label("@@org_example//go_mod_one:go.mod"), use_spec_to_label("org_example", "./go_mod_one"))
-    asserts.equals(env, Label("@@org_example//go_mod_one:go.mod"), use_spec_to_label("org_example", "./go_mod_one/"))
-    asserts.equals(env, Label("@@org_example//bar/go_mod_one:go.mod"), use_spec_to_label("org_example", "./bar/go_mod_one"))
+    root_go_work = Label("@@org_example//:go.work")
+    asserts.equals(env, Label("@@org_example//go_mod_one:go.mod"), use_spec_to_label(root_go_work, "./go_mod_one"))
+    asserts.equals(env, Label("@@org_example//go_mod_one:go.mod"), use_spec_to_label(root_go_work, "./go_mod_one/"))
+    asserts.equals(env, Label("@@org_example//bar/go_mod_one:go.mod"), use_spec_to_label(root_go_work, "./bar/go_mod_one"))
+
+    package_go_work = Label("@@org_example//go:go.work")
+    asserts.equals(env, Label("@@org_example//go/foo/bar:go.mod"), use_spec_to_label(package_go_work, "./foo/bar"))
+    asserts.equals(env, Label("@@org_example//go:go.mod"), use_spec_to_label(package_go_work, "."))
 
     return unittest.end(env)
 
@@ -117,14 +122,20 @@ go_mod_godebug_test = unittest.make(_go_mod_godebug_test_impl)
 
 _GO_SUM_CONTENT = """cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
+""" + """<<<<<<<
 github.com/bazelbuild/buildtools v0.0.0-20220531122519-a43aed7014c8 h1:fmdo+fvvWlhldUcqkhAMpKndSxMN3vH5l7yow5cEaiQ=
 github.com/bazelbuild/buildtools v0.0.0-20220531122519-a43aed7014c8/go.mod h1:689QdV3hBP7Vo9dJMmzhoYIyo/9iMhEmHkJcnaPRCbo=
+""" + """=======
+github.com/bazelbuild/buildtools2 v0.0.0-20220531122519-a43aed7014c8 h1:fmdo+fvvWlhldUcqkhAMpKndSxMN3vH5l7yow5cEaiQ=
+github.com/bazelbuild/buildtools2 v0.0.0-20220531122519-a43aed7014c8/go.mod h1:689QdV3hBP7Vo9dJMmzhoYIyo/9iMhEmHkJcnaPRCbo=
+""" + """>>>>>>>
 github.com/bazelbuild/rules_go v0.33.0 h1:WW9CHmFxbE+Lm4qiLOFAPogmiAUzZtvQsWxUcm4wwaU=
 github.com/bazelbuild/rules_go v0.33.0/go.mod h1:MC23Dc/wkXEyk3Wpq6lCqz0ZAYOZDw2DR5y3N1q2i7M=
 """
 
 _EXPECTED_GO_SUM_PARSE_RESULT = {
     ("github.com/bazelbuild/buildtools", "0.0.0-20220531122519-a43aed7014c8"): "h1:fmdo+fvvWlhldUcqkhAMpKndSxMN3vH5l7yow5cEaiQ=",
+    ("github.com/bazelbuild/buildtools2", "0.0.0-20220531122519-a43aed7014c8"): "h1:fmdo+fvvWlhldUcqkhAMpKndSxMN3vH5l7yow5cEaiQ=",
     ("github.com/bazelbuild/rules_go", "0.33.0"): "h1:WW9CHmFxbE+Lm4qiLOFAPogmiAUzZtvQsWxUcm4wwaU=",
 }
 
@@ -150,9 +161,9 @@ replace example.org/hello => ../fixtures/hello
 _EXPECTED_GO_WORK_PARSE_RESULT = struct(
     go = (1, 18),
     from_file_tags = [
-        struct(_is_dev_dependency = False, go_mod = Label("//go_mod_one:go.mod")),
-        struct(_is_dev_dependency = False, go_mod = Label("//foo/go_mod_two:go.mod")),
-        struct(_is_dev_dependency = False, go_mod = Label("//bar/baz/go_mod_three:go.mod")),
+        struct(_is_dev_dependency = False, go_mod = Label("//go_mod_one:go.mod"), _from_go_work = True),
+        struct(_is_dev_dependency = False, go_mod = Label("//foo/go_mod_two:go.mod"), _from_go_work = True),
+        struct(_is_dev_dependency = False, go_mod = Label("//bar/baz/go_mod_three:go.mod"), _from_go_work = True),
     ],
     module_tags = [
         struct(indirect = False, _parent_label = Label("//:go.work"), local_path = None, path = "github.com/fsnotify/fsnotify", version = "1.4.2"),
@@ -193,8 +204,8 @@ godebug (
 _EXPECTED_GO_WORK_GODEBUG_PARSE_RESULT = struct(
     go = (1, 24),
     from_file_tags = [
-        struct(_is_dev_dependency = False, go_mod = Label("//foo/go_mod_one:go.mod")),
-        struct(_is_dev_dependency = False, go_mod = Label("//bar/baz/go_mod_two:go.mod")),
+        struct(go_mod = Label("//foo/go_mod_one:go.mod"), _is_dev_dependency = False, _from_go_work = True),
+        struct(go_mod = Label("//bar/baz/go_mod_two:go.mod"), _is_dev_dependency = False, _from_go_work = True),
     ],
     module_tags = [],
     replace_map = {},
@@ -211,6 +222,34 @@ def _go_work_godebug_test_impl(ctx):
 
 go_work_godebug_test = unittest.make(_go_work_godebug_test_impl)
 
+_GO_WORK_IN_PACKAGE_CONTENT = """go 1.24
+use (
+    ./foo/bar
+    .
+)
+"""
+
+_EXPECTED_GO_WORK_IN_PACKAGE_PARSE_RESULT = struct(
+    go = (1, 24),
+    from_file_tags = [
+        struct(go_mod = Label("//go/foo/bar:go.mod"), _is_dev_dependency = False, _from_go_work = True),
+        struct(go_mod = Label("//go:go.mod"), _is_dev_dependency = False, _from_go_work = True),
+    ],
+    module_tags = [],
+    replace_map = {},
+    use = [
+        "./foo/bar",
+        ".",
+    ],
+)
+
+def _go_work_in_package_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, _EXPECTED_GO_WORK_IN_PACKAGE_PARSE_RESULT, parse_go_work(_GO_WORK_IN_PACKAGE_CONTENT, Label("@@//go:go.work")))
+    return unittest.end(env)
+
+go_work_in_package_test = unittest.make(_go_work_in_package_test_impl)
+
 def go_mod_test_suite(name):
     unittest.suite(
         name,
@@ -220,5 +259,6 @@ def go_mod_test_suite(name):
         go_sum_test,
         go_work_test,
         go_work_godebug_test,
+        go_work_in_package_test,
         use_spec_test,
     )

@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(
     default_testonly = True,
@@ -12,6 +13,7 @@ cc_library(
     name = "matchers",
     srcs = ["matchers.cc"],
     hdrs = ["matchers.h"],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public:cel_value",
         "//eval/public:set_util",
@@ -27,6 +29,7 @@ cc_library(
 cc_test(
     name = "matchers_test",
     srcs = ["matchers_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":matchers",
         "//eval/public/containers:container_backed_list_impl",

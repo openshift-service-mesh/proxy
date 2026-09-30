@@ -1,0 +1,47 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/errno_h.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+load("//gnulib:macros.bzl", gl_macros = "macros")
+
+autoconf(
+    name = "gl_HEADER_ERRNO_H",
+    checks = [
+        # AC_CACHE_CHECK([for complete errno.h], [gl_cv_header_errno_h_complete])
+        # Single combined check for all 18 error codes (matches M4's AC_EGREP_CPP)
+        checks.AC_TRY_COMPILE(
+            name = "gl_cv_header_errno_h_complete",
+            code = """\
+int e[] = {ETXTBSY, ENOMSG, EIDRM, ENOLINK, EPROTO, EMULTIHOP,
+           EBADMSG, EOVERFLOW, ENOTSUP, ENETRESET, ECONNABORTED,
+           ESTALE, EDQUOT, ECANCELED, EOWNERDEAD, ENOTRECOVERABLE,
+           EILSEQ, ESOCKTNOSUPPORT}; (void)e;""",
+            includes = ["#include <errno.h>"],
+        ),
+        # GL_GENERATE_ERRNO_H: true when errno.h is incomplete and gnulib must
+        # ship a replacement.  Plain shell variable in upstream m4; consumed
+        # by gnulib/m4/perror (REPLACE_PERROR=1 when GL_GENERATE_ERRNO_H).
+        checks.M4_VARIABLE(
+            "GL_GENERATE_ERRNO_H",
+            condition = "gl_cv_header_errno_h_complete",
+            if_false = "true",
+            if_true = "false",
+        ),
+        # gl_NEXT_HEADERS([errno.h]) -- only called when errno.h is incomplete
+    ] + gl_macros.GL_NEXT_HEADERS(
+        ["errno.h"],
+        condition = "!gl_cv_header_errno_h_complete",
+    ),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/include_next",
+    ],
+)
+
+autoconf(
+    name = "errno_h",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_HEADER_ERRNO_H",
+    ],
+)

@@ -1,19 +1,32 @@
-load("@bazel_skylib//rules:diff_test.bzl", "diff_test")
+load("@bazel_lib//lib:diff_test.bzl", "diff_test")
+load("@rules_shell//shell:sh_library.bzl", "sh_library")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools/lint:linters.bzl", "shellcheck_test")
 load(":cmake_text_tests.bzl", "cmake_script_test_suite")
 load(":convert_shell_script_test.bzl", "shell_script_conversion_suite")
+load(":make_env_vars_test.bzl", "make_env_vars_test_suite")
+load(":meson_text_tests.bzl", "meson_script_test_suite")
+load(":msbuild_text_tests.bzl", "msbuild_script_test_suite")
+load(":planner_test.bzl", "planner_test_suite")
 load(":shell_script_helper_test_rule.bzl", "shell_script_helper_test_rule")
 load(":symlink_contents_to_dir_test_rule.bzl", "symlink_contents_to_dir_test_rule")
 load(":utils_test.bzl", "utils_test_suite")
+load(":wildcard_resolution_test.bzl", "wildcard_resolution_test_suite")
 
 # gazelle:exclude
 
+# Reach the source-mode build targets through hub-published aliases so
+# this file does not encode any pinned tool versions. Each alias forwards
+# to ``@<tool>_src_<picked>//:<tool>_built`` -- aliases forward providers,
+# so the ``script_file`` / ``wrapper_script_file`` output groups read
+# through cleanly.
+#
+# The registry-backed tools are absent: they are plain cc_binary targets in
+# their modules, not rfcc framework rules, so they emit no build script to
+# lint. The two below exercise the same script generator.
 TOOL_TARGETS = [
-    "//toolchains/private:cmake_tool",
-    "//toolchains/private:make_tool",
-    "//toolchains/private:meson_tool",
-    "//toolchains/private:ninja_tool",
-    "//toolchains/private:pkgconfig_tool",
+    "@rules_foreign_cc_toolchains//:cmake_built",
+    "@rules_foreign_cc_toolchains//:meson_built",
 ]
 
 filegroup(
@@ -41,26 +54,30 @@ sh_library(
 )
 
 shellcheck_test(
-    name = "shellcheck_linux",
+    name = "shellcheck",
+    size = "small",
     srcs = [":tool_build_scripts"],
-    target_compatible_with = [
-        "@platforms//os:linux",
-    ],
-)
-
-shellcheck_test(
-    name = "shellcheck_macos",
-    srcs = [":tool_build_scripts"],
-    target_compatible_with = [
-        "@platforms//os:macos",
-    ],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
 
 cmake_script_test_suite()
 
+meson_script_test_suite()
+
+msbuild_script_test_suite()
+
 shell_script_conversion_suite()
 
+make_env_vars_test_suite()
+
 utils_test_suite()
+
+wildcard_resolution_test_suite()
+
+planner_test_suite()
 
 shell_script_helper_test_rule(
     name = "shell_script_inner_fun",
@@ -68,30 +85,13 @@ shell_script_helper_test_rule(
     script = ["##symlink_contents_to_dir## $$SOURCE_DIR$$ $$TARGET_DIR$$ False"],
 )
 
-# TODO: This should not be necessary but there appears to be some inconsistent
-# behavior with the use of `constraint_value`s in `select` statements. A support
-# thread was started at the end of https://github.com/bazelbuild/bazel/pull/12071
-# Once it is possible to replace `:macos` with `@platforms//os:macos` that
-# should be done for this file. Note actioning on this will set the minimum
-# supported version of Bazel to 4.0.0 for these examples.
-config_setting(
-    name = "macos",
-    constraint_values = ["@platforms//os:macos"],
-    visibility = ["//visibility:private"],
-)
-
-config_setting(
-    name = "freebsd",
-    constraint_values = ["@platforms//os:freebsd"],
-    visibility = ["//visibility:private"],
-)
-
 diff_test(
     name = "shell_script_inner_fun_test",
     file1 = ":shell_script_inner_fun",
     file2 = select({
-        ":freebsd": "expected/inner_fun_text_freebsd.txt",
-        ":macos": "expected/inner_fun_text_macos.txt",
+        "@platforms//os:freebsd": "expected/inner_fun_text_freebsd.txt",
+        "@platforms//os:macos": "expected/inner_fun_text_macos.txt",
+        "@platforms//os:windows": "expected/inner_fun_text_windows.txt",
         "//conditions:default": "expected/inner_fun_text.txt",
     }),
 )
@@ -115,10 +115,14 @@ symlink_contents_to_dir_test_rule(
 
 diff_test(
     name = "shell_method_symlink_contents_to_dir_test",
-    file1 = select({
-        ":freebsd": "expected/out_symlinked_dirs_freebsd.txt",
-        ":macos": "expected/out_symlinked_dirs_macos.txt",
-        "//conditions:default": "expected/out_symlinked_dirs.txt",
-    }),
+    file1 = "expected/out_symlinked_dirs.txt",
     file2 = ":symlink_dirs",
+)
+
+sh_test(
+    name = "output_validation_script_test",
+    size = "small",
+    srcs = ["assert_output_validation_script.sh"],
+    args = ["$(locations //test/output_validation:wrong_output_in_action_check_script)"],
+    data = ["//test/output_validation:wrong_output_in_action_check_script"],
 )

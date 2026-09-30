@@ -1,0 +1,23 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/write.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+
+# gl_FUNC_WRITE macro from write.m4
+# COMPLEX CASE: This M4 file uses m4_ifdef conditionals to check for
+# MSVC invalid parameter handling, SIGPIPE, and non-blocking I/O.
+# These checks involve shell variable logic and conditional module inclusion
+# that cannot be directly translated to Bazel.
+# The dependencies provide the necessary prerequisite checks.
+autoconf(
+    name = "write",
+    checks = [
+        # No direct compile checks - uses m4_ifdef conditionals
+        # for gl_MSVC_INVAL, gl_SIGNAL_SIGPIPE, and gl_NONBLOCKING_IO
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/msvc-inval",
+        # Note: gl_UNISTD_H_DEFAULTS is a _DEFAULTS function, so we don't track it as a dependency
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)

@@ -1,12 +1,140 @@
-"Public API for calling jq"
+"""
+Load in your `BUILD` file with:
 
+```starlark
+load("@jq.bzl", "jq")
+```
+
+Examples
+--------
+
+Create a new file `bazel-out/.../no_srcs.json` containing some JSON data:
+
+```starlark
+jq(
+    name = "no_srcs",
+    srcs = [],
+    filter = ".name = \"Alice\"",
+)
+```
+
+Remove a field from `package.json`:
+
+> The output path `bazel-out/.../package.json` matches the path of the source file,
+> which means you must refer to the label `:no_dev_deps` to reference the output,
+> since Bazel doesn't provide a label for an output file that collides with an input file.
+
+```starlark
+jq(
+    name = "no_dev_deps",
+    srcs = ["package.json"],
+    out = "package.json",
+    filter = "del(.devDependencies)",
+)
+```
+
+Merge data from `bar.json` on top of `foo.json`, producing `foobar.json`:
+
+```starlark
+jq(
+    name = "merged",
+    srcs = ["foo.json", "bar.json"],
+    filter = ".[0] * .[1]",
+    args = ["--slurp"],
+    out = "foobar.json",
+)
+```
+
+Long filters can be split over several lines with comments:
+
+```starlark
+jq(
+    name = "complex",
+    srcs = ["a.json", "b.json"],
+    filter = \"\"\"
+        .[0] as $a
+        # Take select fields from b.json
+        | (.[1] | {foo, bar, tags}) as $b
+        # Merge b onto a
+        | ($a * $b)
+        # Combine 'tags' array from both
+        | .tags = ($a.tags + $b.tags)
+        # Add new field
+        + {\\\"aspect_is_cool\\\": true}
+    \"\"\",
+    args = ["--slurp"],
+)
+```
+
+Load filter from a file `filter.jq`, making it easier to edit complex filters:
+
+```starlark
+jq(
+    name = "merged",
+    srcs = ["foo.json", "bar.json"],
+    filter_file = "filter.jq",
+    args = ["--slurp"],
+    out = "foobar.json",
+)
+```
+
+Convert [genquery](https://bazel.build/reference/be/general#genquery) output to JSON.
+
+```starlark
+genquery(
+    name = "deps",
+    expression = "deps(//some:target)",
+    scope = ["//some:target"],
+)
+
+jq(
+    name = "deps_json",
+    srcs = [":deps"],
+    args = [
+        "--raw-input",
+        "--slurp",
+    ],
+    filter = "{ deps: split(\\\"\\\\n\\\") | map(select(. | length > 0)) }",
+)
+```
+
+When Bazel is run with `--stamp`, replace some properties with version control info:
+
+```starlark
+jq(
+    name = "stamped",
+    srcs = ["package.json"],
+    filter = "|".join([
+        # Don't directly reference $STAMP as it's only set when stamping
+        # This 'as' syntax results in $stamp being null in unstamped builds.
+        "$ARGS.named.STAMP as $stamp",
+        # Provide a default using the "alternative operator" in case $stamp is null.
+        ".version = ($stamp[0].BUILD_EMBED_LABEL // \"<unstamped>\")",
+    ]),
+)
+```
+
+jq is exposed as a "Make variable", so you could use it directly from a `genrule` by referencing the toolchain.
+
+```starlark
+genrule(
+    name = "case_genrule",
+    srcs = ["a.json"],
+    outs = ["genrule_output.json"],
+    cmd = "$(JQ_BIN) '.' $(location a.json) > $@",
+    toolchains = ["@jq_toolchains//:resolved_toolchain"],
+)
+```
+"""
+
+load("@bazel_lib//lib:diff_test.bzl", "diff_test")
 load("//jq/private:jq.bzl", "jq_lib")
 
 jq_rule = rule(
     doc = """Most users should use the `jq` macro instead.""",
     attrs = jq_lib.attrs,
     implementation = jq_lib.implementation,
-    toolchains = ["@aspect_bazel_lib//lib:jq_toolchain_type"],
+    toolchains = ["@jq.bzl//jq/toolchain:type"],
 )
 
 def jq(name, srcs, filter = None, filter_file = None, args = [], out = None, data = [], expand_args = False, **kwargs):
@@ -16,7 +144,7 @@ def jq(name, srcs, filter = None, filter_file = None, args = [], out = None, dat
         name: Name of the rule
         srcs: List of input files. May be empty.
         data: List of additional files. May be empty.
-        filter: Filter expression (https://stedolan.github.io/jq/manual/#Basicfilters).
+        filter: Filter expression (https://jqlang.org/manual/#basic-filters).
             Subject to stamp variable replacements, see [Stamping](./stamping.md).
             When stamping is enabled, a variable named "STAMP" will be available in the filter.
 
@@ -41,5 +169,53 @@ def jq(name, srcs, filter = None, filter_file = None, args = [], out = None, dat
         out = out,
         expand_args = expand_args,
         data = data,
+        **kwargs
+    )
+
+def jq_test(name, file1, file2, filter1 = ".", filter2 = ".", **kwargs):
+    """Assert that the given json files have the same semantic content.
+
+    Uses jq to filter each file. The default value of `"."` as the filter
+    means to compare the whole file.
+
+    See the jq macro for more about the filter expressions as well as
+    setup notes for the `jq` toolchain.
+
+    Note that this macro is equivalent to calling bazel_lib's `diff_test` with the jq outputs.
+
+    Args:
+        name: name of resulting diff_test target
+        file1: a json file
+        file2: another json file
+        filter1: a jq filter to apply to file1
+        filter2: a jq filter to apply to file2
+        **kwargs: additional named arguments for the resulting diff_test
+    """
+    name1 = "{}_jq1".format(name)
+    name2 = "{}_jq2".format(name)
+    jq_rule(
+        name = name1,
+        srcs = [file1],
+        filter = filter1,
+        out = name1 + ".json",
+    )
+
+    jq_rule(
+        name = name2,
+        srcs = [file2],
+        filter = filter2,
+        out = name2 + ".json",
+    )
+
+    diff_test(
+        name = name,
+        file1 = name1,
+        file2 = name2,
+        failure_message = "'{}' from {} doesn't match '{}' from {}".format(
+            filter1,
+            file1,
+            filter2,
+            file2,
+        ),
         **kwargs
     )

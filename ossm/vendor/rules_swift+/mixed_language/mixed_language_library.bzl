@@ -14,6 +14,7 @@
 
 """Implementation of the `mixed_language_library` macro."""
 
+load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load(
     "//mixed_language/internal:library.bzl",
     _mixed_language_library = "mixed_language_library",
@@ -35,9 +36,12 @@ load("//swift:swift_library.bzl", "swift_library")
 def mixed_language_library(
         *,
         name,
+        additional_objc_compiler_inputs = [],
+        always_include_developer_search_paths = False,
         alwayslink = False,
         clang_copts = [],
         clang_defines = [],
+        clang_deps = [],
         clang_srcs,
         data = [],
         enable_modules = False,
@@ -53,6 +57,7 @@ def mixed_language_library(
         sdk_frameworks = [],
         swift_copts = [],
         swift_defines = [],
+        swift_plugins = [],
         swift_srcs,
         swiftc_inputs = [],
         textual_hdrs = [],
@@ -63,11 +68,18 @@ def mixed_language_library(
     """Creates a mixed language library from a Clang and Swift library target \
     pair.
 
-    Note: In the future `swift_library` will support mixed-langauge libraries.
+    Note: In the future `swift_library` will support mixed-language libraries.
     Once that is the case, this macro will be deprecated.
 
     Args:
         name: The name of the target.
+        additional_objc_compiler_inputs: Additional files that are referenced
+            using `$(location ...)` in attributes that support location
+            expansion.
+        always_include_developer_search_paths: If `True`, the developer
+            framework search paths will be added to the swift compilation
+            command. This enables a Swift module to access `XCTest` without
+            having to mark the target as `testonly = True`.
         alwayslink: If true, any binary that depends (directly or indirectly) on
             this library will link in all the object files for the files listed
             in `clang_srcs` and `swift_srcs`, even if some contain no symbols
@@ -84,6 +96,8 @@ def mixed_language_library(
             only to the compiler for this target (as `clang_copts` are) but also
             to all dependers of this target. Subject to "Make variable"
             substitution and Bourne shell tokenization.
+        clang_deps: A list of targets that are dependencies of only the
+            clang library.
         clang_srcs: The list of C, C++, Objective-C, or Objective-C++ sources
             for the clang library.
         data: The list of files needed by this target at runtime.
@@ -152,6 +166,7 @@ def mixed_language_library(
             It is preferred that you add defines directly to `swift_copts`, only
             using this feature in the rare case that a library needs to
             propagate a symbol up to those that depend on it.
+        swift_plugins: A list of Swift plugins for the swift library.
         swift_srcs: The sources for the swift library.
         swiftc_inputs: Additional files that are referenced using
             `$(location ...)` in attributes that support location expansion.
@@ -289,8 +304,9 @@ a mixed language Swift library, use a clang only library rule like \
         module_name = module_name,
     )
     headers_library_name = name + "_headers"
-    native.objc_library(
+    objc_library(
         name = headers_library_name,
+        testonly = testonly,
         hdrs = adjusted_hdrs,
         aspect_hints = aspect_hints + [":" + internal_swift_interop_name],
         defines = clang_defines,
@@ -298,14 +314,18 @@ a mixed language Swift library, use a clang only library rule like \
         includes = includes,
         tags = internal_tags,
         textual_hdrs = textual_hdrs,
+        # PCM deps must be re-exported for consumers of this
+        deps = deps,
         **kwargs
     )
 
     swift_library_name = name + "_swift"
     swift_library(
         name = swift_library_name,
+        data = data,
         srcs = swift_srcs,
         alwayslink = alwayslink,
+        always_include_developer_search_paths = always_include_developer_search_paths,
         aspect_hints = aspect_hints,
         copts = ["-import-underlying-module"] + swift_copts,
         defines = swift_defines,
@@ -319,6 +339,7 @@ a mixed language Swift library, use a clang only library rule like \
         linkopts = linkopts,
         module_name = module_name,
         package_name = package_name,
+        plugins = swift_plugins,
         private_deps = private_deps,
         swiftc_inputs = swiftc_inputs,
         tags = internal_tags,
@@ -343,11 +364,12 @@ a mixed language Swift library, use a clang only library rule like \
     # We can't look at the `clang_srcs` attribute because it might be a
     # `select`.
     clang_library_name = name + "_clang"
-    native.objc_library(
+    objc_library(
         name = clang_library_name,
+        data = data,
         srcs = clang_srcs,
         alwayslink = alwayslink,
-        hdrs = adjusted_hdrs,
+        hdrs = adjusted_hdrs + additional_objc_compiler_inputs,
         non_arc_srcs = non_arc_srcs,
         # `internal_swift_interop_name` isn't needed here because
         # `_mixed_language_library` will explciitly set the module name. We set
@@ -370,7 +392,7 @@ a mixed language Swift library, use a clang only library rule like \
         testonly = testonly,
         textual_hdrs = textual_hdrs,
         weak_sdk_frameworks = weak_sdk_frameworks,
-        deps = deps,
+        deps = deps + clang_deps,
         **kwargs
     )
 
@@ -384,7 +406,6 @@ a mixed language Swift library, use a clang only library rule like \
         name = name,
         aspect_hints = aspect_hints,
         clang_target = ":" + clang_library_name,
-        data = data,
         features = features,
         module_map = module_map,
         module_name = module_name,

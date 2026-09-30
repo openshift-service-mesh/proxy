@@ -15,12 +15,12 @@
 """Defines rules for building Apple DocC targets."""
 
 load(
-    "@bazel_skylib//lib:dicts.bzl",
-    "dicts",
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
 )
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
+    "@bazel_skylib//lib:dicts.bzl",
+    "dicts",
 )
 load(
     "//apple:providers.bzl",
@@ -28,8 +28,24 @@ load(
     "DocCSymbolGraphsInfo",
 )
 load(
+    "//apple/internal:apple_toolchains.bzl",
+    "apple_toolchain_utils",
+)
+load(
+    "//apple/internal:features_support.bzl",
+    "features_support",
+)
+load(
+    "//apple/internal:platform_support.bzl",
+    "platform_support",
+)
+load(
     "//apple/internal:providers.bzl",
     "new_applebinaryinfo",
+)
+load(
+    "//apple/internal:swift_support.bzl",
+    "swift_support",
 )
 load(
     "//apple/internal/aspects:docc_archive_aspect.bzl",
@@ -42,6 +58,7 @@ def _docc_archive_impl(ctx):
     """
 
     apple_fragment = ctx.fragments.apple
+    apple_xplat_toolchain_info = apple_toolchain_utils.get_xplat_toolchain(ctx)
     default_code_listing_language = ctx.attr.default_code_listing_language
     diagnostic_level = ctx.attr.diagnostic_level
     enable_inherited_docs = ctx.attr.enable_inherited_docs
@@ -49,15 +66,35 @@ def _docc_archive_impl(ctx):
     fallback_bundle_identifier = ctx.attr.fallback_bundle_identifier
     fallback_bundle_version = ctx.attr.fallback_bundle_version
     fallback_display_name = ctx.attr.fallback_display_name
+    features = features_support.compute_enabled_features(
+        requested_features = ctx.features,
+        unsupported_features = ctx.disabled_features,
+    )
     hosting_base_path = ctx.attr.hosting_base_path
     kinds = ctx.attr.kinds
-    platform = ctx.fragments.apple.single_arch_platform
     transform_for_static_hosting = ctx.attr.transform_for_static_hosting
     xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
     dep = ctx.attr.dep
     symbol_graphs_info = None
     docc_bundle_info = None
     docc_build_inputs = []
+
+    platform_prerequisites = platform_support.platform_prerequisites(
+        apple_fragment = ctx.fragments.apple,
+        apple_platform_info = platform_support.apple_platform_info_from_rule_ctx(ctx),
+        build_settings = apple_xplat_toolchain_info.build_settings,
+        config_vars = ctx.var,
+        cpp_fragment = ctx.fragments.cpp,
+        device_families = None,
+        explicit_minimum_deployment_os = None,
+        explicit_minimum_os = None,
+        features = features,
+        objc_fragment = ctx.fragments.objc,
+        uses_swift = swift_support.uses_swift([ctx.attr.dep]),
+        xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
+    )
+
+    platform = platform_prerequisites.platform
 
     if DocCSymbolGraphsInfo in dep:
         symbol_graphs_info = dep[DocCSymbolGraphsInfo]
@@ -97,14 +134,39 @@ def _docc_archive_impl(ctx):
     if hosting_base_path:
         arguments.add("--hosting-base-path", hosting_base_path)
 
-    # Add symbol graphs
+    # Add symbol graphs.
+    #
+    # `docc convert` only honors a single `--additional-symbol-graph-dir`
+    # argument, silently ignoring all but one when it is repeated. Collect
+    # every module's symbol graphs into one directory and pass that single
+    # directory instead; docc discovers symbol graph files in it recursively.
+    combined_symbol_graphs = None
     if symbol_graphs_info:
-        arguments.add_all(
-            symbol_graphs,
-            before_each = "--additional-symbol-graph-dir",
-            expand_directories = False,
+        combined_symbol_graphs = ctx.actions.declare_directory(
+            "%s_combined_symbol_graphs" % ctx.attr.name,
         )
-        docc_build_inputs.extend(symbol_graphs)
+        combine_arguments = ctx.actions.args()
+        combine_arguments.add(combined_symbol_graphs.path)
+        combine_arguments.add_all(symbol_graphs, expand_directories = False)
+        ctx.actions.run_shell(
+            inputs = symbol_graphs,
+            outputs = [combined_symbol_graphs],
+            mnemonic = "DocCCollectSymbolGraphs",
+            progress_message = "Collecting symbol graphs for %{label}",
+            command = """\
+set -eu
+output_dir="$1"
+shift
+index=0
+for symbol_graph_dir in "$@"; do
+    cp -R "$symbol_graph_dir" "$output_dir/$index"
+    index=$((index + 1))
+done
+""",
+            arguments = [combine_arguments],
+        )
+        arguments.add("--additional-symbol-graph-dir", combined_symbol_graphs.path)
+        docc_build_inputs.append(combined_symbol_graphs)
 
     # The .docc bundle (if provided, only one is allowed)
     if docc_bundle_info:
@@ -140,7 +202,7 @@ def _docc_archive_impl(ctx):
             "{fallback_display_name}": fallback_display_name,
             "{platform}": platform.name_in_plist,
             "{sdk_version}": str(xcode_config.sdk_version_for_platform(platform)),
-            "{symbol_graph_dirs}": " ".join([f.path for f in symbol_graphs]) if symbol_graphs else "",
+            "{symbol_graph_dirs}": combined_symbol_graphs.path if combined_symbol_graphs else "",
             "{target_name}": ctx.attr.name,
             "{xcode_version}": str(xcode_config.xcode_version()),
         },
@@ -167,7 +229,12 @@ def _docc_archive_impl(ctx):
 
 docc_archive = rule(
     implementation = _docc_archive_impl,
-    fragments = ["apple"],
+    exec_groups = apple_toolchain_utils.use_apple_exec_group_toolchain(),
+    fragments = [
+        "apple",
+        "cpp",
+        "objc",
+    ],
     doc = """
 Builds a .doccarchive for the given dependency.
 The target created by this rule can also be `run` to preview the generated documentation in Xcode.
@@ -177,7 +244,7 @@ NOTE: At this time Swift is the only supported language for this rule.
 Example:
 
 ```starlark
-load("@build_bazel_rules_apple//apple:docc.bzl", "docc_archive")
+load("@rules_apple//apple:docc.bzl", "docc_archive")
 
 docc_archive(
     name = "Lib.doccarchive",
@@ -189,6 +256,7 @@ docc_archive(
 ```""",
     attrs = dicts.add(
         apple_support.action_required_attrs(),
+        apple_support.platform_constraint_attrs(),
         {
             "dep": attr.label(
                 aspects = [

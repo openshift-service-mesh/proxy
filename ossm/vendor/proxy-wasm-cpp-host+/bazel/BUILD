@@ -124,46 +124,9 @@ v8_lib_no_pointer_compression(
     library = "@v8//:wee8",
 )
 
+alias(
+    name = "default_wasmedge_lib",
+    actual = "@com_github_wasmedge_wasmedge//:wasmedge_lib",
+)
+
 exports_files(["tsan_suppressions.txt"])
-# Crypto library dependency - can be overridden by consuming repos
-# Default: @boringssl//:crypto
-# Can be overriden, eg:
-#   --@proxy_wasm_cpp_host//bazel:crypto_lib=@boringssl-fips//:crypto
-#   --@proxy_wasm_cpp_host//bazel:crypto_lib=@envoy//bazel:boringcrypto
-#   --@proxy_wasm_cpp_host//bazel:crypto_lib=@some-other-ssl//:crypto
-label_flag(
-    name = "crypto_lib",
-    build_setting_default = "@boringssl//:crypto",
-)
-
-# WAMR library - can be overridden by consuming repos
-# Default: @com_github_bytecodealliance_wasm_micro_runtime//:wamr_lib
-# Override example: --@proxy_wasm_cpp_host//bazel:wamr_lib=@envoy//bazel/foreign_cc:wamr
-label_flag(
-    name = "wamr_lib",
-    build_setting_default = "@com_github_bytecodealliance_wasm_micro_runtime//:wamr_lib",
-)
-
-# Wasmtime library - can be overridden by consuming repos
-label_flag(
-    name = "wasmtime_lib",
-    build_setting_default = "@com_github_wasmtime//:wasmtime_lib",
-)
-
-# Prefixed wasmtime library (for multi-engine builds)
-label_flag(
-    name = "prefixed_wasmtime_lib",
-    build_setting_default = "@com_github_wasmtime//:prefixed_wasmtime_lib",
-)
-
-# WasmEdge library - can be overridden by consuming repos
-label_flag(
-    name = "wasmedge_lib",
-    build_setting_default = "@com_github_wasmedge_wasmedge//:wasmedge_lib",
-)
-
-# V8/wee8 library - can be overridden by consuming repos
-label_flag(
-    name = "v8_engine",
-    build_setting_default = "//bazel:wee8_no_pointer_compression",
-)

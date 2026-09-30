@@ -13,18 +13,18 @@
 # limitations under the License.
 
 load(
+    "@bazel_gazelle_is_bazel_module//:defs.bzl",
+    "GAZELLE_IS_BAZEL_MODULE",
+    "GAZELLE_MODULE_VERSION",
+)
+load(
     "@io_bazel_rules_go//go:def.bzl",
     "GoArchive",
-    "go_context",
-    "new_go_info",
+    "go_binary",
 )
 
-def _gazelle_binary_impl(ctx):
-    go = go_context(ctx)
-
-    # Generate a source file with a list of languages. This will get compiled
-    # with the rest of the sources in the main package.
-    langs_file = go.declare_file(go, "langs.go")
+def _gazelle_main_impl(ctx):
+    langs_file = ctx.actions.declare_file(ctx.label.name + ".go")
     langs_content_tpl = """
 package main
 
@@ -34,60 +34,24 @@ import (
 	{lang_imports}
 )
 
-var languages = []language.Language{{
-	{lang_calls},
+func init() {{
+	languages = []language.Language{{
+		{lang_calls},
+	}}
 }}
 """
     lang_imports = [format_import(d[GoArchive].data.importpath) for d in ctx.attr.languages]
     lang_calls = [format_call(d[GoArchive].data.importpath) for d in ctx.attr.languages]
     langs_content = langs_content_tpl.format(
         lang_imports = "\n\t".join(lang_imports),
-        lang_calls = ",\n\t".join(lang_calls),
+        lang_calls = ",\n\t\t".join(lang_calls),
     )
-    go.actions.write(langs_file, langs_content)
+    ctx.actions.write(langs_file, langs_content)
+    return DefaultInfo(files = depset([langs_file]))
 
-    # Build the gazelle binary.
-    attr = struct(
-        srcs = [struct(files = [langs_file])],
-        deps = ctx.attr.languages,
-        embed = [ctx.attr._srcs],
-    )
-    go_info = new_go_info(go, attr, is_main = True)
-
-    archive, executable, runfiles = go.binary(
-        go,
-        name = ctx.label.name,
-        source = go_info,
-        version_file = ctx.version_file,
-        info_file = ctx.info_file,
-    )
-
-    return [
-        go_info,
-        archive,
-        OutputGroupInfo(compilation_outputs = [archive.data.file]),
-        DefaultInfo(
-            files = depset([executable]),
-            runfiles = runfiles,
-            executable = executable,
-        ),
-    ]
-
-_gazelle_binary_kwargs = {
-    "implementation": _gazelle_binary_impl,
-    "doc": """The `gazelle_binary` rule builds a Go binary that incorporates a list of
-language extensions. This requires generating a small amount of code that
-must be compiled into Gazelle's main package, so the normal [go_binary]
-rule is not used.
-
-When the binary runs, each language extension is run sequentially. This affects
-the order that rules appear in generated build files. Metadata may be produced
-by an earlier extension and consumed by a later extension. For example, the
-proto extension stores metadata in hidden attributes of generated
-`proto_library` rules. The Go extension uses this metadata to generate
-`go_proto_library` rules.
-""",
-    "attrs": {
+gazelle_main = rule(
+    implementation = _gazelle_main_impl,
+    attrs = {
         "languages": attr.label_list(
             doc = """A list of language extensions the Gazelle binary will use.
 
@@ -98,25 +62,31 @@ proto extension stores metadata in hidden attributes of generated
             mandatory = True,
             allow_empty = False,
         ),
-        "_go_context_data": attr.label(default = "@io_bazel_rules_go//:go_context_data"),
-        # _stdlib is needed for rules_go versions before v0.23.0. After that,
-        # _go_context_data includes a dependency on stdlib.
-        "_stdlib": attr.label(default = "@io_bazel_rules_go//:stdlib"),
-        "_srcs": attr.label(
-            default = "//cmd/gazelle:gazelle_lib",
-        ),
     },
-    "executable": True,
-    "toolchains": ["@io_bazel_rules_go//go:toolchain"],
-}
+)
 
-gazelle_binary = rule(**_gazelle_binary_kwargs)
+def gazelle_binary(name, languages, version = 0, **kwargs):
+    """Builds a Gazelle binary with the requested language extensions."""
 
-def gazelle_binary_wrapper(**kwargs):
-    for key in ("goos", "goarch", "static", "msan", "race", "pure", "strip", "debug", "linkmode", "gotags"):
-        if key in kwargs:
-            fail("gazelle_binary attribute '%s' is no longer supported (https://github.com/bazelbuild/bazel-gazelle/issues/803)" % key)
-    gazelle_binary(**kwargs)
+    if version not in (0, 1, 2):
+        fail("gazelle_binary version must be 0, 1, or 2")
+    if version == 0:
+        version = _get_gazelle_major_version()
+
+    main_name = name + "_main"
+    gazelle_main(
+        name = main_name,
+        languages = languages,
+        testonly = kwargs.get("testonly", False),
+        visibility = ["//visibility:private"],
+    )
+    go_binary(
+        name = name,
+        srcs = [main_name],
+        deps = languages,
+        embed = [Label("//v2/cmd/gazelle:gazelle_lib") if version == 2 else Label("//cmd/gazelle:gazelle_lib")],
+        **kwargs
+    )
 
 def _import_alias(importpath):
     return importpath.replace("/", "_").replace(".", "_").replace("-", "_") + "_"
@@ -126,3 +96,27 @@ def format_import(importpath):
 
 def format_call(importpath):
     return _import_alias(importpath) + ".NewLanguage()"
+
+def _get_gazelle_major_version():
+    """Parses a version string and returns either 1 or 2.
+
+    Returns 1 if the major version is 0 or 1 or when building in WORKSPACE mode.
+    Very little difference in behavior is expected between these versions.
+
+    Returns 2 if the major version is 2 or unset. When the major version is not
+    set, it's assumed to be a development version.
+    """
+    if not GAZELLE_IS_BAZEL_MODULE:
+        return 1
+    if not GAZELLE_MODULE_VERSION:
+        return 2
+    parts = GAZELLE_MODULE_VERSION.split(".", 1)
+    if not parts:
+        fail("Invalid version format: '{}'".format(GAZELLE_MODULE_VERSION))
+    major = parts[0]
+    if major == "0" or major == "1":
+        return 1
+    elif major == "2":
+        return 2
+    else:
+        fail("Unsupported Gazelle major version: {}. Only versions 0, 1, and 2 are supported.".format(major))

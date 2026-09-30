@@ -67,19 +67,18 @@ bzl_library(
 )
 
 bzl_library(
+    name = "synthesize_interface_config",
+    srcs = ["synthesize_interface_config.bzl"],
+    deps = [
+        ":action_config",
+        "//swift/internal:action_names",
+    ],
+)
+
+bzl_library(
     name = "tool_config",
     srcs = ["tool_config.bzl"],
     deps = [
         "@bazel_skylib//lib:paths",
-    ],
-)
-
-# Consumed by Bazel integration tests.
-filegroup(
-    name = "for_bazel_tests",
-    testonly = 1,
-    srcs = glob(["**"]),
-    visibility = [
-        "//swift/toolchains:__pkg__",
     ],
 )

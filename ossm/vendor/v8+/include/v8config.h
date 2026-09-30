@@ -493,6 +493,37 @@ path. Add it with -I<path> to the command line
 
 #endif
 
+// Derive sanitizer configuration from the compiler when the build system has
+// not set it explicitly. This keeps V8_USE_*_SANITIZER in lockstep with
+// -fsanitize=..., so that e.g. host tools (mksnapshot) built in an
+// unsanitized exec configuration never reference __asan_*/__msan_* symbols
+// they cannot link.
+#if !defined(V8_USE_ADDRESS_SANITIZER)
+#if defined(__SANITIZE_ADDRESS__)
+#define V8_USE_ADDRESS_SANITIZER 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define V8_USE_ADDRESS_SANITIZER 1
+#endif
+#endif
+#endif
+
+#if !defined(V8_USE_MEMORY_SANITIZER)
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer)
+#define V8_USE_MEMORY_SANITIZER 1
+#endif
+#endif
+#endif
+
+#if !defined(V8_USE_UNDEFINED_BEHAVIOR_SANITIZER)
+#if defined(__has_feature)
+#if __has_feature(undefined_behavior_sanitizer)
+#define V8_USE_UNDEFINED_BEHAVIOR_SANITIZER 1
+#endif
+#endif
+#endif
+
 
 // -----------------------------------------------------------------------------
 // Helper macros

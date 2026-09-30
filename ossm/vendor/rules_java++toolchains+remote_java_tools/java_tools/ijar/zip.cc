@@ -117,7 +117,6 @@ class InputZipFile : public ZipExtractor {
   // pointers. They are allocated by the Create() method before
   // the object is actually created using mmap.
   const u1 * zipdata_in_;   // start of input file mmap
-  size_t bytes_unmapped_;         // bytes that have already been unmapped
   const u1 * central_dir_;  // central directory in input file
 
   size_t in_offset_;  // offset  the input file
@@ -125,17 +124,6 @@ class InputZipFile : public ZipExtractor {
   const u1 *p;  // input cursor
 
   const u1* central_dir_current_;  // central dir input cursor
-
-  // Buffer size is initially INITIAL_BUFFER_SIZE. It doubles in size every
-  // time it is found too small, until it reaches MAX_BUFFER_SIZE. If that is
-  // not enough, we bail out. We only decompress class files, so they should
-  // be smaller than 64K anyway, but we give a little leeway.
-  // MAX_BUFFER_SIZE must be bigger than the size of the biggest file in the
-  // ZIP. It is set to 2GB here because no one has audited the code for 64-bit
-  // cleanliness.
-  static constexpr size_t INITIAL_BUFFER_SIZE = 256 * 1024;  // 256K
-  static constexpr size_t MAX_BUFFER_SIZE = std::numeric_limits<int32_t>::max();
-  static constexpr size_t MAX_MAPPED_REGION = 32 * 1024 * 1024;
 
   // These metadata fields are the fields of the ZIP header of the file being
   // processed.
@@ -422,12 +410,6 @@ int InputZipFile::ProcessLocalFileEntry(
     } else {
       p += 4 * 2;
     }
-  }
-
-  size_t bytes_processed = p - zipdata_in_;
-  if (bytes_processed > bytes_unmapped_ + MAX_MAPPED_REGION) {
-    input_file_->Discard(MAX_MAPPED_REGION);
-    bytes_unmapped_ += MAX_MAPPED_REGION;
   }
 
   return 0;
@@ -795,7 +777,6 @@ bool FindZipCentralDirectory(const u1 *bytes, size_t in_length, u8 *offset,
 
 void InputZipFile::Reset() {
   central_dir_current_ = central_dir_;
-  bytes_unmapped_ = 0;
   p = zipdata_in_ + in_offset_;
 }
 
@@ -821,10 +802,9 @@ ZipExtractor* ZipExtractor::Create(const char* filename,
 
 // zipdata_in_, in_offset_, p, central_dir_current_
 
-InputZipFile::InputZipFile(ZipExtractorProcessor *processor,
+InputZipFile::InputZipFile(ZipExtractorProcessor* processor,
                            const char* filename)
-    : processor(processor), filename_(filename), input_file_(NULL),
-      bytes_unmapped_(0) {
+    : processor(processor), filename_(filename), input_file_(NULL) {
   decompressor_ = new Decompressor();
   errmsg[0] = 0;
 }
@@ -903,7 +883,8 @@ int OutputZipFile::WriteEmptyFile(const char *filename) {
   entry->uncompressed_length = 0;
   entry->compression_method = 0;
   entry->extra_field = (const u1 *)"";
-  entry->file_name = (u1*) strdup((const char *) file_name);
+  entry->file_name = new u1[file_name_length];
+  memcpy(entry->file_name, file_name, file_name_length);
   entries_.push_back(entry);
 
   return 0;
@@ -999,8 +980,8 @@ u1* OutputZipFile::WriteLocalFileHeader(const char* filename, const u4 attr) {
   entry->local_header_offset = Offset(q);
   entry->file_name_length = file_name_length_;
   entry->file_name = new u1[file_name_length_];
-  entry->external_attr = attr;
   memcpy(entry->file_name, filename, file_name_length_);
+  entry->external_attr = attr;
   entry->extra_field_length = 0;
   entry->extra_field = (const u1 *)"";
   entry->crc32 = 0;
@@ -1053,12 +1034,22 @@ int OutputZipFile::Finish() {
 
   finished_ = true;
   WriteCentralDirectory();
+
+  int ret = 0;
   if (output_file_->Close(GetSize()) < 0) {
-    return error("%s", output_file_->Error());
+    ret = error("%s", output_file_->Error());
   }
+
   delete output_file_;
-  output_file_ = NULL;
-  return 0;
+  output_file_ = nullptr;
+
+  for (LocalFileEntry* entry : entries_) {
+    delete[] entry->file_name;
+    delete entry;
+  }
+  entries_.clear();
+
+  return ret;
 }
 
 u1* OutputZipFile::NewFile(const char* filename, const u4 attr) {

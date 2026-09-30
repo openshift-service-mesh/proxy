@@ -17,6 +17,8 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
 # This package contains implementation of expression evaluator
 # internals.
+load("//bazel:copts.bzl", "CEL_COPTS")
+
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
@@ -40,6 +42,7 @@ cc_library(
     hdrs = [
         "evaluator_core.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_utility",
         ":comprehension_slots",
@@ -72,6 +75,7 @@ cc_library(
     hdrs = [
         "cel_expression_flat_impl.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":comprehension_slots",
@@ -101,6 +105,7 @@ cc_library(
     hdrs = [
         "comprehension_slots.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         "//common:value",
@@ -118,6 +123,7 @@ cc_test(
     srcs = [
         "comprehension_slots_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":comprehension_slots",
@@ -137,6 +143,7 @@ cc_library(
     hdrs = [
         "evaluator_stack.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         "//common:value",
@@ -158,6 +165,7 @@ cc_test(
     srcs = [
         "evaluator_stack_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":evaluator_stack",
         "//base:attributes",
@@ -171,26 +179,21 @@ cc_library(
     hdrs = [
         "expression_step_base.h",
     ],
+    copts = CEL_COPTS,
     deps = [":evaluator_core"],
 )
 
 cc_library(
     name = "const_value_step",
-    srcs = [
-        "const_value_step.cc",
-    ],
     hdrs = [
         "const_value_step.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":compiler_constant_step",
         ":direct_expression_step",
         ":evaluator_core",
-        "//common:allocator",
-        "//common:constant",
         "//common:value",
-        "//internal:status_macros",
-        "//runtime/internal:convert_constant",
         "@com_google_absl//absl/status:statusor",
     ],
 )
@@ -203,6 +206,7 @@ cc_library(
     hdrs = [
         "container_access_step.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":attribute_utility",
@@ -232,6 +236,7 @@ cc_library(
     name = "regex_match_step",
     srcs = ["regex_match_step.cc"],
     hdrs = ["regex_match_step.h"],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
@@ -255,6 +260,7 @@ cc_library(
     hdrs = [
         "ident_step.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":comprehension_slots",
@@ -280,6 +286,7 @@ cc_library(
     hdrs = [
         "function_step.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
@@ -298,6 +305,7 @@ cc_library(
         "//runtime:function_overload_reference",
         "//runtime:function_provider",
         "//runtime:function_registry",
+        "//runtime/internal:errors",
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -315,18 +323,17 @@ cc_library(
     hdrs = [
         "select_step.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
         ":evaluator_core",
         ":expression_step_base",
-        "//common:expr",
+        "//common:type",
         "//common:value",
         "//common:value_kind",
-        "//eval/internal:errors",
         "//internal:status_macros",
         "//runtime:runtime_options",
-        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/log:absl_log",
         "@com_google_absl//absl/status",
@@ -345,6 +352,7 @@ cc_library(
     hdrs = [
         "create_list_step.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":attribute_utility",
@@ -370,6 +378,7 @@ cc_library(
     hdrs = [
         "create_struct_step.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
@@ -394,6 +403,7 @@ cc_library(
     hdrs = [
         "create_map_step.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
@@ -418,13 +428,13 @@ cc_library(
     hdrs = [
         "jump_step.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":evaluator_core",
         ":expression_step_base",
         "//common:value",
         "//eval/internal:errors",
         "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/types:optional",
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
     ],
@@ -438,6 +448,7 @@ cc_library(
     hdrs = [
         "logic_step.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
@@ -465,6 +476,7 @@ cc_library(
     hdrs = [
         "equality_steps.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
@@ -487,6 +499,7 @@ cc_test(
     srcs = [
         "equality_steps_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
@@ -518,6 +531,7 @@ cc_library(
     hdrs = [
         "comprehension_step.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":comprehension_slots",
@@ -545,6 +559,7 @@ cc_test(
     srcs = [
         "comprehension_step_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":cel_expression_flat_impl",
@@ -587,6 +602,7 @@ cc_test(
     srcs = [
         "evaluator_core_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_flat_impl",
         ":evaluator_core",
@@ -611,41 +627,12 @@ cc_test(
 )
 
 cc_test(
-    name = "const_value_step_test",
-    size = "small",
-    srcs = [
-        "const_value_step_test.cc",
-    ],
-    deps = [
-        ":cel_expression_flat_impl",
-        ":const_value_step",
-        ":evaluator_core",
-        "//base:data",
-        "//common:constant",
-        "//common:expr",
-        "//eval/internal:errors",
-        "//eval/public:activation",
-        "//eval/public:cel_value",
-        "//eval/public/testing:matchers",
-        "//internal:status_macros",
-        "//internal:testing",
-        "//runtime:runtime_options",
-        "//runtime/internal:runtime_env",
-        "//runtime/internal:runtime_env_testing",
-        "@com_google_absl//absl/base:nullability",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/time",
-        "@com_google_protobuf//:protobuf",
-    ],
-)
-
-cc_test(
     name = "container_access_step_test",
     size = "small",
     srcs = [
         "container_access_step_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_flat_impl",
         ":container_access_step",
@@ -685,6 +672,7 @@ cc_test(
     srcs = [
         "regex_match_step_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":regex_match_step",
         "//eval/public:activation",
@@ -707,6 +695,7 @@ cc_test(
     srcs = [
         "ident_step_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":cel_expression_flat_impl",
@@ -714,11 +703,11 @@ cc_test(
         ":ident_step",
         "//base:data",
         "//common:casting",
-        "//common:expr",
         "//common:memory",
         "//common:value",
         "//eval/public:activation",
         "//eval/public:cel_attribute",
+        "//eval/public:cel_value",
         "//internal:testing",
         "//internal:testing_descriptor_pool",
         "//internal:testing_message_factory",
@@ -737,6 +726,7 @@ cc_test(
     srcs = [
         "function_step_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_flat_impl",
         ":const_value_step",
@@ -782,6 +772,7 @@ cc_test(
     srcs = [
         "logic_step_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":cel_expression_flat_impl",
@@ -825,10 +816,13 @@ cc_test(
     srcs = [
         "select_step_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":cel_expression_flat_impl",
+        ":compiler_constant_step",
         ":const_value_step",
+        ":create_map_step",
         ":evaluator_core",
         ":ident_step",
         ":select_step",
@@ -837,11 +831,14 @@ cc_test(
         "//common:casting",
         "//common:expr",
         "//common:legacy_value",
+        "//common:type",
         "//common:value",
         "//common:value_testing",
         "//eval/public:activation",
         "//eval/public:cel_attribute",
         "//eval/public:cel_value",
+        "//eval/public:unknown_attribute_set",
+        "//eval/public:unknown_set",
         "//eval/public/containers:container_backed_map_impl",
         "//eval/public/structs:cel_proto_wrapper",
         "//eval/public/structs:legacy_type_adapter",
@@ -868,6 +865,7 @@ cc_test(
         "@com_google_absl//absl/strings",
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
         "@com_google_cel_spec//proto/cel/expr/conformance/proto3:test_all_types_cc_proto",
+        "@com_google_protobuf//:protobuf",
         "@com_google_protobuf//:wrappers_cc_proto",
     ],
 )
@@ -878,6 +876,7 @@ cc_test(
     srcs = [
         "create_list_step_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":cel_expression_flat_impl",
@@ -922,6 +921,7 @@ cc_test(
     srcs = [
         "create_struct_step_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_flat_impl",
         ":create_struct_step",
@@ -961,6 +961,7 @@ cc_test(
     srcs = [
         "create_map_step_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_flat_impl",
         ":create_map_step",
@@ -992,6 +993,7 @@ cc_library(
     name = "attribute_trail",
     srcs = ["attribute_trail.cc"],
     hdrs = ["attribute_trail.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base:attributes",
         "@com_google_absl//absl/types:optional",
@@ -1005,6 +1007,7 @@ cc_test(
     srcs = [
         "attribute_trail_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         "//eval/public:cel_attribute",
@@ -1018,6 +1021,7 @@ cc_library(
     name = "attribute_utility",
     srcs = ["attribute_utility.cc"],
     hdrs = ["attribute_utility.h"],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         "//base:attributes",
@@ -1044,6 +1048,7 @@ cc_test(
     srcs = [
         "attribute_utility_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":attribute_utility",
@@ -1069,6 +1074,7 @@ cc_library(
     hdrs = [
         "ternary_step.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
@@ -1089,6 +1095,7 @@ cc_test(
     srcs = [
         "ternary_step_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":cel_expression_flat_impl",
@@ -1125,6 +1132,7 @@ cc_library(
     name = "shadowable_value_step",
     srcs = ["shadowable_value_step.cc"],
     hdrs = ["shadowable_value_step.h"],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
@@ -1135,6 +1143,7 @@ cc_library(
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
     ],
 )
 
@@ -1142,6 +1151,7 @@ cc_test(
     name = "shadowable_value_step_test",
     size = "small",
     srcs = ["shadowable_value_step_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":cel_expression_flat_impl",
         ":evaluator_core",
@@ -1165,6 +1175,7 @@ cc_library(
     name = "compiler_constant_step",
     srcs = ["compiler_constant_step.cc"],
     hdrs = ["compiler_constant_step.h"],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
@@ -1179,6 +1190,7 @@ cc_library(
 cc_test(
     name = "compiler_constant_step_test",
     srcs = ["compiler_constant_step_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":compiler_constant_step",
         ":evaluator_core",
@@ -1198,6 +1210,7 @@ cc_library(
     name = "lazy_init_step",
     srcs = ["lazy_init_step.cc"],
     hdrs = ["lazy_init_step.h"],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":comprehension_slots",
@@ -1215,6 +1228,7 @@ cc_library(
 cc_test(
     name = "lazy_init_step_test",
     srcs = ["lazy_init_step_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":const_value_step",
         ":evaluator_core",
@@ -1235,6 +1249,7 @@ cc_library(
     name = "direct_expression_step",
     srcs = ["direct_expression_step.cc"],
     hdrs = ["direct_expression_step.h"],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":evaluator_core",
@@ -1249,6 +1264,7 @@ cc_library(
 cc_library(
     name = "trace_step",
     hdrs = ["trace_step.h"],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
@@ -1265,6 +1281,7 @@ cc_library(
     name = "optional_or_step",
     srcs = ["optional_or_step.cc"],
     hdrs = ["optional_or_step.h"],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":direct_expression_step",
@@ -1286,6 +1303,7 @@ cc_library(
 cc_test(
     name = "optional_or_step_test",
     srcs = ["optional_or_step_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":attribute_trail",
         ":const_value_step",
@@ -1312,6 +1330,7 @@ cc_test(
 cc_library(
     name = "iterator_stack",
     hdrs = ["iterator_stack.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:value",
         "@com_google_absl//absl/base:nullability",

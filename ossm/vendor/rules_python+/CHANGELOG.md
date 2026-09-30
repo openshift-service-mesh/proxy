@@ -29,6 +29,144 @@ Unreleased changes are tracked as individual files in the [news/](./news)
 directory, or view the [latest generated
 changelog](https://rules-python.readthedocs.io/en/latest/changelog.html).
 
+{#v2-3-3}
+## [2.3.3] - 2026-09-02
+
+[2.3.3]: https://github.com/bazel-contrib/rules_python/releases/tag/2.3.3
+
+{#v2-3-3-changed}
+### Changed
+* (publish): The twine packages are now configured for three major platforms.
+
+{#v2-3-3-fixed}
+### Fixed
+* (gazelle) Fixed a regression from version 1.8.0 which broke module map
+  generation for old-style namespace packages.
+  ([#4135](https://github.com/bazel-contrib/rules_python/pull/4135)).
+* (zipapp) Fixed handling of {obj}`PyRuntimeInfo` with `files = None` so creating
+  zipapp archives does not error.
+
+
+
+
+{#v2-3-2}
+## [2.3.2] - 2026-08-22
+
+[2.3.2]: https://github.com/bazel-contrib/rules_python/releases/tag/2.3.2
+
+{#v2-3-2-fixed}
+### Fixed
+* (pypi) Fixed analysis failures in {obj}`pip.parse` for source-less wheels with
+  dependencies. ([#4053](https://github.com/bazel-contrib/rules_python/issues/4053))
+* (pypi) Fixed the handling of optional args for the {obj}`pip_archive` and {obj}`whl_archive`
+  repository rules within the {obj}`whl_library`. From now on we are dropping unsupported args.
+* (pypi) Fixed {obj}`pip.parse` repository names for Git sources in `uv.lock`
+  files by excluding URL query and fragment components
+  ([#4084](https://github.com/bazel-contrib/rules_python/issues/4084)).
+
+{#v2-3-1}
+## [2.3.1] - 2026-08-14
+
+[2.3.1]: https://github.com/bazel-contrib/rules_python/releases/tag/2.3.1
+
+{#v2-3-1-fixed}
+### Fixed
+* Previous refactor that shipped with 2.3 introduced regression for the experimental repository cache
+  users. This restores the previous behavior ([#3791](https://github.com/bazel-contrib/rules_python/pull/3791)).
+
+
+{#v2-3-0}
+## [2.3.0] - 2026-08-07
+
+[2.3.0]: https://github.com/bazel-contrib/rules_python/releases/tag/2.3.0
+
+{#v2-3-0-changed}
+### Changed
+* (gazelle) **BREAKING** rules_python 1.5.0 or higher is now required. The Python
+  extension selects its standard library list on `is_python_3.14`, which earlier
+  versions do not define.
+
+{#v2-3-0-fixed}
+### Fixed
+* Fixed `py_binary_rule_builder()` / `py_test_rule_builder()` (from `python/api/executables.bzl`)
+  failing at analysis time with a visibility error when used to construct a custom rule from an
+  external module.
+* (compile_pip_requirements) Add the explicit `data` attribute and forward it
+  directly to the generated `py_binary`, so files passed via `data` can be
+  referenced from `extra_args` using `$(location ...)`.
+* (coverage) The warning about a missing bundled `coverage.py` wheel is no longer
+  emitted as we are now falling back to a pure python wheel
+  ([#3950](https://github.com/bazel-contrib/rules_python/issues/3950)).
+* (gazelle) The Python extension now uses the correct standard library module list for
+  `python_version` 3.13 and 3.14; previously both fell back to the 3.11 list, so modules
+  added or removed since then (e.g. `compression.zstd`, `telnetlib`) were misclassified. The
+  fallback list for unrecognized versions is now the newest available one rather than 3.11
+  ([#3978](https://github.com/bazel-contrib/rules_python/pull/3978)).
+* (pypi) Allow `uv_lock` to be specified in `pip.parse` without requiring
+  `requirements_lock` (or other os-specific requirement file attributes) to be
+  set.
+* (pypi) Fixed the fixed-point loop that resolves self-referencing extras
+  (`pkg[extra]` entries in a package's own `Requires-Dist`). The loop compared the
+  number of extras discovered in the current round against the number known
+  before it, rather than against the size of the merged set. As a result it could
+  stop before every extra was resolved, silently dropping dependencies only
+  reachable through two or more `pkg[extra]` hops, and for the common case of a
+  package with no self-referencing extras it never converged at all, running all
+  10000 rounds while evaluating each wheel's generated `BUILD` file
+  ([#4039](https://github.com/bazel-contrib/rules_python/pull/4039)).
+* (pypi) Requirement `--hash=<algo>:<digest>` pins and Simple API
+  `#<algo>=<digest>` URL fragments are now parsed for all hash algorithms
+  instead of silently dropping everything except `sha256`. Non-sha256 pins are
+  matched against the digests advertised by the index and downloads are verified
+  using the corresponding Subresource Integrity value, and the pins are kept in
+  the requirement line when falling back to `pip`
+  ([#3972](https://github.com/bazel-contrib/rules_python/issues/3972)).
+  As part of this, `whl_library` repos created by `pip.parse` now always pass
+  the digest via the `integrity` attribute (SRI format) instead of `sha256`,
+  and the lock file facts store digests as `<algo>:<digest>` values (the facts
+  version was bumped, so cached index information is refreshed once).
+* (pypi) `pip.parse(uv_lock = ...)` no longer exposes uv workspace/root members
+  that resolve to no wheel or sdist (e.g. `source = { virtual = "." }` or editable
+  installs). Previously these source-less packages were added to the hub's
+  `all_requirements` / `all_whl_requirements` with an alias to a subpackage that
+  does not exist, breaking analysis for anything enumerating the full set such as
+  `modules_mapping(wheels = all_whl_requirements)`
+  ([#3934](https://github.com/bazel-contrib/rules_python/issues/3934)).
+* (pypi) correctly parse the `index_url` for each wheel so that the source registry is forwarded to
+  the {obj}`whl_library`. This is so that the `purl` for `package_metadata` can be correctly
+  constructed.
+* (pypi) fixed the URL normalization function to correctly handle local paths
+  enabling wheel sources files to point to an absolute path. Currently it supports
+  the `file://<absolute_path>` for linux and windows like paths. We also support
+  envsubst for the said paths from now on.
+
+{#v2-3-0-added}
+### Added
+* (bzlmod) Added MODULE.bazel flag aliases for Starlark-defined flags:
+  `build_python_zip`, `incompatible_default_to_explicit_init_py`,
+  `python_path`, and `experimental_python_import_all_repositories`.
+* (bzlmod) Added the `{obj}`explicit_init_py`` tag class to the
+  `{obj}`config`` module extension for configuring implicit `__init__.py` file
+  generation module-wide.
+  ([#3997](https://github.com/bazel-contrib/rules_python/pull/3997),
+  [#2945](https://github.com/bazel-contrib/rules_python/issues/2945))
+* (cc) Added experimental {obj}`py_extension` macro for creating C/C++ Python
+  extension modules
+  ([#3283](https://github.com/bazel-contrib/rules_python/issues/3283)).
+  (cc) Added `libc`, `platform_machine`, `platform_tag`, `soabi`, and
+  `sys_platform` attributes and info fields to {obj}`py_cc_toolchain` /
+  {obj}`PyCcToolchainInfo`.
+* (pip,python) Added `pyproject_toml` attribute to {obj}`pip.default`, {obj}`pip.parse` and {obj}`python.defaults` to read the default Python version from the `requires-python` field of `pyproject.toml`.
+* (py_test) Added an opt-in safeguard against `py_test` targets that silently
+  pass without running any tests. Set
+  {obj}`--@rules_python//python/config_settings:validate_test_main=enabled` to
+  fail the build when a test's main module only contains inert top-level
+  statements (definitions, imports, assignments) and never invokes a test
+  runner ([#3824](https://github.com/bazel-contrib/rules_python/issues/3824)).
+
+
+
+
 {#v2-2-0}
 ## [2.2.0] - 2026-06-30
 
@@ -47,9 +185,9 @@ compatibility.
 site initialization by retrying the lookup
 ([#3721](https://github.com/bazel-contrib/rules_python/issues/3721)).
 * (binaries) Fixed building of legacy zipapps on Windows execution platforms by
-using a hermetic tool instead of host `cat`.
-* (bootstrap) Fixed stage 1 bootstrap imports when target outputs shadow standard
-library modules.
+  using a hermetic tool instead of host `cat`.
+* (bootstrap) Fixed stage 1 bootstrap imports when target outputs shadow
+  standard library modules.
 * (coverage) Skip lcov report when no data was collected.
 * (pypi) Fixed `experimental_index_url` checking truthiness before envsubst
 expansion.
@@ -66,18 +204,14 @@ exported by bzl files.
 {bzl:target}`//python:py_info.bzl`.
 * (pypi) Added `@pypi` repo: a unified hub of `pip.parse` hubs.
 * (pypi) Added a `dep` tag class to the `pip` bzlmod extension. This allows
-modules to declare abstract PyPI dependencies, ensuring target structures
-exist in the unified hub, while allowing other modules to provide the
-concrete implementation via `pip.parse`.
+  modules to declare abstract PyPI dependencies, ensuring target structures
+  exist in the unified hub, while allowing other modules to provide the
+  concrete implementation via `pip.parse`.
 * (uv) Support for basic `uv.lock` generation via the `lock` rule
 and basic support for importing the `uv.lock` file itself. Since this
 may have bugs, please report this by creating new tickets.
 Work towards [#2787](https://github.com/bazel-contrib/rules_python/issues/2787)
 and [#1975](https://github.com/bazel-contrib/rules_python/issues/1975).
-
-
-
-
 
 
 
@@ -725,7 +859,7 @@ Other changes:
 * (core) `#!/usr/bin/env bash` is now used as a shebang in the stage1 bootstrap template.
 * (gazelle:docs) The Gazelle docs have been migrated from {gh-path}`gazelle/README.md` to
   {gh-path}`gazelle/docs` and are now available on the primary documentation site
-  at https://rules-python.readthedocs.io/en/latest/gazelle/docs/index.html
+  at <https://rules-python.readthedocs.io/en/latest/gazelle/docs/index.html>
 
 [20250808]: https://github.com/astral-sh/python-build-standalone/releases/tag/20250808
 
@@ -1137,7 +1271,7 @@ Other changes:
 {#v1-2-0-changed}
 ### Changed
 * (rules) `py_proto_library` is deprecated in favour of the
-  implementation in https://github.com/protocolbuffers/protobuf. It will be
+  implementation in <https://github.com/protocolbuffers/protobuf>. It will be
   removed in the future release.
 * (pypi) {obj}`pip.override` will now be ignored instead of raising an error,
   fixes [#2550](https://github.com/bazel-contrib/rules_python/issues/2550).
@@ -2121,7 +2255,7 @@ Other changes:
   `common --@rules_python//python/config_settings:python_version=X.Y.Z`.
 
 * New Python versions available: `3.11.7`, `3.12.1` using
-  https://github.com/indygreg/python-build-standalone/releases/tag/20240107.
+  <https://github.com/indygreg/python-build-standalone/releases/tag/20240107>.
 
 * (toolchain) Allow setting `x.y` as the `python_version` parameter in
   the version-aware `py_binary` and `py_test` rules. This allows users to
@@ -2273,7 +2407,7 @@ Other changes:
 
 * (docs) bzlmod extensions are now documented on rules-python.readthedocs.io
 * (docs) Support and backwards compatibility policies have been documented.
-  See https://rules-python.readthedocs.io/en/latest/support.html
+  See <https://rules-python.readthedocs.io/en/latest/support.html>
 * (gazelle) `file` generation mode can now also add `__init__.py` to the srcs
   attribute for every target in the package. This is enabled through a separate
   directive `python_generation_mode_per_file_include_init`.
@@ -2405,7 +2539,7 @@ Breaking changes:
   the `py_binary` rule used to build it.
 
 * New Python versions available: `3.8.17`, `3.11.5` using
-  https://github.com/indygreg/python-build-standalone/releases/tag/20230826.
+  <https://github.com/indygreg/python-build-standalone/releases/tag/20230826>.
 
 * (gazelle) New `# gazelle:python_generation_mode file` directive to support
   generating one `py_library` per file.
@@ -2425,7 +2559,7 @@ Breaking changes:
   time being.
 
 * New Python versions available: `3.8.18`, `3.9.18`, `3.10.13`, `3.11.6`, `3.12.0` using
-  https://github.com/indygreg/python-build-standalone/releases/tag/20231002.
+  <https://github.com/indygreg/python-build-standalone/releases/tag/20231002>.
   `3.12.0` support is considered beta and may have issues.
 
 ### Removed
