@@ -1,4 +1,7 @@
 # OSSM-specific attributes. Kept out of the repo-root .gitattributes so that
 # upstream merges never conflict with our additions. Patterns are relative to
 # this directory, so `vendor/**` matches `ossm/vendor/**`.
-vendor/**  linguist-vendored=true
+# linguist-generated makes GitHub collapse these files in PR diffs.
+vendor/**  linguist-vendored=true linguist-generated=true
+# Hand-maintained; keep it visible in diffs.
+vendor/VENDOR.bazel  -linguist-vendored -linguist-generated
