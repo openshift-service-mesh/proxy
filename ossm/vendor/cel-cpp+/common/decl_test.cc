@@ -14,16 +14,22 @@
 
 #include "common/decl.h"
 
+#include <string>
+#include <vector>
+
+#include "absl/log/die_if_null.h"  // IWYU pragma: keep
 #include "absl/status/status.h"
 #include "common/constant.h"
 #include "common/type.h"
 #include "internal/testing.h"
+#include "internal/testing_descriptor_pool.h"
 #include "google/protobuf/arena.h"
 
 namespace cel {
 namespace {
 
 using ::absl_testing::StatusIs;
+using ::cel::internal::GetTestingDescriptorPool;
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
 using ::testing::Property;
@@ -157,6 +163,102 @@ TEST(FunctionDecl, Overloads) {
   EXPECT_THAT(function_decl.AddOverload(
                   MakeOverloadDecl("qux", DynType{}, StringType{})),
               StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
+TEST(FunctionDecl, AddOverloadInvalidSignature) {
+  FunctionDecl function_decl;
+  function_decl.set_name("foo");
+  // Member overload must have at least one argument (the receiver).
+  // This should fail to add because signature generation fails.
+  EXPECT_THAT(function_decl.AddOverload(MakeMemberOverloadDecl(StringType{})),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
+TEST(FunctionDecl, AddOverloadDuplicateId) {
+  ASSERT_OK_AND_ASSIGN(
+      auto function_decl,
+      MakeFunctionDecl("hello",
+                       MakeOverloadDecl("foo", StringType{}, StringType{})));
+  // Adding another overload with the same ID "foo" should fail.
+  EXPECT_THAT(
+      function_decl.AddOverload(MakeOverloadDecl("foo", IntType{}, IntType{})),
+      StatusIs(absl::StatusCode::kAlreadyExists));
+}
+
+TEST(FunctionDecl, FindOverload) {
+  ASSERT_OK_AND_ASSIGN(
+      auto function_decl,
+      MakeFunctionDecl(
+          "hello", MakeOverloadDecl("foo", StringType{}, StringType{}),
+          MakeMemberOverloadDecl("bar", StringType{}, StringType{}),
+          MakeOverloadDecl(IntType{}, IntType{})));
+
+  // Find by explicit ID
+  const OverloadDecl* overload = function_decl.FindOverloadById("foo");
+  ASSERT_NE(overload, nullptr);
+  EXPECT_EQ(overload->id(), "foo");
+
+  // Find by ID fallback to signature
+  overload = function_decl.FindOverloadById("hello(string)");
+  ASSERT_NE(overload, nullptr);
+  EXPECT_EQ(overload->id(), "foo");
+
+  // Find implicit overload (where ID == signature)
+  overload = function_decl.FindOverloadById("hello(int)");
+  ASSERT_NE(overload, nullptr);
+  EXPECT_EQ(overload->id(), "hello(int)");
+
+  // Non-existent
+  EXPECT_EQ(function_decl.FindOverloadById("non_existent"), nullptr);
+}
+
+TEST(FunctionDecl, OverloadId) {
+  google::protobuf::Arena arena;
+  const auto* descriptor =
+      ABSL_DIE_IF_NULL(GetTestingDescriptorPool()->FindMessageTypeByName(
+          "cel.expr.conformance.proto3.TestAllTypes"));
+
+  ASSERT_OK_AND_ASSIGN(
+      auto function_decl,
+      MakeFunctionDecl(
+          "hello", MakeOverloadDecl(DoubleType{}),
+          MakeOverloadDecl(StringType{}, StringType{}),
+          MakeOverloadDecl(IntType{}, IntType{}, UintType{}),
+          MakeOverloadDecl(IntType{}, ListType(&arena, TypeParamType("A"))),
+          MakeOverloadDecl(IntType{}, MapType(&arena, TypeParamType("B"),
+                                              TypeParamType("C"))),
+          MakeOverloadDecl(
+              IntType{},
+              OpaqueType(&arena, "bar",
+                         {FunctionType(&arena, TypeParamType("D"), {})})),
+          MakeOverloadDecl(IntType{}, AnyType{}),
+          MakeOverloadDecl(IntType{}, DurationType{}),
+          MakeOverloadDecl(IntType{}, TimestampType{}),
+          MakeOverloadDecl(IntType{}, IntWrapperType{}),
+          MakeOverloadDecl(IntType{}, MessageType(descriptor)),
+          MakeMemberOverloadDecl(StringType{}, StringType{}),
+          MakeMemberOverloadDecl(StringType{}, StringType{},
+                                 ListType(&arena, BoolType{})),
+          MakeMemberOverloadDecl(StringType{}, StringType{}, BoolType{},
+                                 DynType{})));
+
+  EXPECT_THAT(
+      function_decl.overloads(),
+      ElementsAre(Property(&OverloadDecl::id, "hello()"),
+                  Property(&OverloadDecl::id, "hello(string)"),
+                  Property(&OverloadDecl::id, "hello(int,uint)"),
+                  Property(&OverloadDecl::id, "hello(list<~A>)"),
+                  Property(&OverloadDecl::id, "hello(map<~B,~C>)"),
+                  Property(&OverloadDecl::id, "hello(bar<function<~D>>)"),
+                  Property(&OverloadDecl::id, "hello(any)"),
+                  Property(&OverloadDecl::id, "hello(duration)"),
+                  Property(&OverloadDecl::id, "hello(timestamp)"),
+                  Property(&OverloadDecl::id, "hello(int_wrapper)"),
+                  Property(&OverloadDecl::id,
+                           "hello(cel.expr.conformance.proto3.TestAllTypes)"),
+                  Property(&OverloadDecl::id, "string.hello()"),
+                  Property(&OverloadDecl::id, "string.hello(list<bool>)"),
+                  Property(&OverloadDecl::id, "string.hello(bool,dyn)")));
 }
 
 using common_internal::TypeIsAssignable;

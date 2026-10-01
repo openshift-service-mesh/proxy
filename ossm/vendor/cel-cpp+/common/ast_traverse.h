@@ -43,8 +43,6 @@ struct TraversalOptions {
 // while(!traversal.IsDone()) {
 //   traversal.Step(visitor);
 // }
-//
-// This class is thread-hostile and should only be used in synchronous code.
 class AstTraversal {
  public:
   static AstTraversal Create(const cel::Expr& ast ABSL_ATTRIBUTE_LIFETIME_BOUND,

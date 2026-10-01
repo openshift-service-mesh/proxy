@@ -23,12 +23,6 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   set(CMAKE_INSTALL_PREFIX ${CMAKE_SOURCE_DIR}/install CACHE PATH "" FORCE)
 endif()
 
-if(WIN32)
-  # On Windows, prefer cl over gcc if both are available. By default most of
-  # the CMake generators prefer gcc, even on Windows.
-  set(CMAKE_GENERATOR_CC cl)
-endif()
-
 include(cmake/go.cmake)
 include(gen/sources.cmake)
 
@@ -488,14 +482,17 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CLANG)
   endif()
 
   # Clang 12's -Wframe-larger-than reportedly does not work in clang-cl. See
-  # https://crbug.com/boringssl/709. Clang 13 includes the following fix, which
-  # may be related. Speculatively gate on Clang 13. That corresponds to
+  # https://crbug.com/42290587. Clang 13 includes the following fix, which may
+  # be related. Speculatively gate on Clang 13. That corresponds to
   # AppleClang 13.1.6.
   # https://github.com/llvm/llvm-project/commit/6aaf4fa2885600b0e31042071ad06f78218ab0f2
-  if((CMAKE_C_COMPILER_ID STREQUAL "Clang" AND
-      CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0.0") OR
-     (CMAKE_C_COMPILER_ID STREQUAL "AppleClang" AND
-      CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL "13.1.6"))
+  #
+  # Only enable this warning in release builds.
+  if(CMAKE_BUILD_TYPE MATCHES "[rR][eE][lL]" AND
+     ((CMAKE_C_COMPILER_ID STREQUAL "Clang" AND
+       CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0.0") OR
+      (CMAKE_C_COMPILER_ID STREQUAL "AppleClang" AND
+       CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL "13.1.6")))
     list(APPEND C_CXX_WARNINGS -Wframe-larger-than=25344)
   endif()
 
@@ -582,7 +579,7 @@ if(FIPS_DELOCATE)
             ${BCM_SOURCES_ASM_USED}
             ${CRYPTO_HEADERS}
     DEPENDS bcm_c_generated_asm
-            delocate
+            ${CMAKE_CURRENT_BINARY_DIR}/delocate
             ${BCM_SOURCES_ASM_USED}
             ${CRYPTO_HEADERS}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -600,9 +597,9 @@ if(FIPS_DELOCATE)
                 boringssl.googlesource.com/boringssl.git/util/fipstools/inject_hash)
   add_custom_command(
     OUTPUT bcm.o
-    COMMAND ./inject_hash -o bcm.o -in-object $<TARGET_OBJECTS:bcm_hashunset>
-            -in-hash $<TARGET_FILE:bcm_relocated>
-    DEPENDS bcm_hashunset bcm_relocated inject_hash
+    COMMAND ${CMAKE_CURRENT_BINARY_DIR}/inject_hash -o bcm.o -in-object
+            $<TARGET_OBJECTS:bcm_hashunset> -in-hash $<TARGET_FILE:bcm_relocated>
+    DEPENDS bcm_hashunset bcm_relocated ${CMAKE_CURRENT_BINARY_DIR}/inject_hash
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
   set(CRYPTO_FIPS_OBJECTS bcm.o)
@@ -736,6 +733,7 @@ if(BUILD_TESTING)
   add_executable(ssl_test ${SSL_TEST_SOURCES})
   target_link_libraries(ssl_test test_support_lib boringssl_gtest ssl crypto)
   add_dependencies(boringssl_all_tests ssl_test)
+
   add_executable(decrepit_test ${DECREPIT_TEST_SOURCES})
   target_link_libraries(decrepit_test test_support_lib boringssl_gtest
                         decrepit ssl crypto)
@@ -752,10 +750,8 @@ if(BUILD_TESTING)
   add_executable(jitter_deltas util/fipstools/entropy/jitter_deltas.cc)
   target_link_libraries(jitter_deltas crypto)
 
-  if(BUILD_TESTING)
-    add_executable(bssl_bench ${BENCH_SOURCES})
-    target_link_libraries(bssl_bench ssl pki crypto benchmark::benchmark)
-  endif()
+  add_executable(bssl_bench ${BENCH_SOURCES})
+  target_link_libraries(bssl_bench ssl pki crypto benchmark::benchmark)
 endif()
 
 if(FIPS)
@@ -825,22 +821,35 @@ if(BUILD_TESTING)
   if(PROJECT_IS_TOP_LEVEL AND NOT CMAKE_GENERATOR MATCHES "^Visual Studio ")
     if(GO_EXECUTABLE)
       add_custom_target(
-          run_tests
+          run_unit_tests
+          COMMAND ${CMAKE_COMMAND} -E echo
+          COMMAND ${CMAKE_COMMAND} -E echo "Checking pregenerated files"
+          COMMAND ${GO_EXECUTABLE} run ./util/pregenerate -check
+          COMMAND ${CMAKE_COMMAND} -E echo
           COMMAND ${CMAKE_COMMAND} -E echo "Running Go tests"
           COMMAND ${GO_EXECUTABLE} test ${GO_TESTS}
           COMMAND ${CMAKE_COMMAND} -E echo
           COMMAND ${CMAKE_COMMAND} -E echo "Running unit tests"
           COMMAND ${GO_EXECUTABLE} run util/all_tests.go -build-dir
                   ${CMAKE_CURRENT_BINARY_DIR}
+          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+          DEPENDS boringssl_all_tests fips_specific_tests_if_any
+          USES_TERMINAL)
+      add_custom_target(
+          run_tests
           COMMAND ${CMAKE_COMMAND} -E echo
           COMMAND ${CMAKE_COMMAND} -E echo "Running SSL tests"
           COMMAND cd ssl/test/runner &&
                   ${GO_EXECUTABLE} test -shim-path $<TARGET_FILE:bssl_shim>
                     ${HANDSHAKER_ARGS} ${RUNNER_ARGS}
           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-          DEPENDS boringssl_all_tests bssl_shim handshaker fips_specific_tests_if_any
+          DEPENDS run_unit_tests bssl_shim handshaker
           USES_TERMINAL)
     else()
+      add_custom_target(
+          run_unit_tests
+          COMMAND ${CMAKE_COMMAND} -E echo "Running tests requires Go"
+          COMMAND ${CMAKE_COMMAND} -E false)
       add_custom_target(
           run_tests
           COMMAND ${CMAKE_COMMAND} -E echo "Running tests requires Go"

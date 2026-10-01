@@ -37,6 +37,8 @@
 #include "google/protobuf/message.h"
 #include "google/protobuf/reflection.h"
 
+#undef GetMessage
+
 namespace cel::extensions::protobuf_internal {
 
 namespace {
@@ -143,7 +145,7 @@ absl::StatusOr<absl::optional<google::protobuf::MapValueConstRef>> LookupMapValu
   bool found = cel::extensions::protobuf_internal::LookupMapValue(
       *reflection, *message, *field_desc, proto_key, &value_ref);
   if (!found) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   return value_ref;
 }
@@ -337,7 +339,12 @@ absl::StatusOr<google::protobuf::MapValueConstRef> ProtoQualifyState::CheckMapIn
                      qualifier));
 
   if (!value_ref.has_value()) {
-    return runtime_internal::CreateNoSuchKeyError("");
+    std::string key_string;
+    absl::StatusOr<std::string> key_string_or = qualifier.AsString();
+    if (key_string_or.ok()) {
+      key_string = *key_string_or;
+    }
+    return runtime_internal::CreateNoSuchKeyError(key_string);
   }
   return std::move(value_ref).value();
 }

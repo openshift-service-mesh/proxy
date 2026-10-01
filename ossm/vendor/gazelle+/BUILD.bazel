@@ -1,5 +1,5 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
-load("@io_bazel_rules_go//go:def.bzl", "go_cross_binary", "nogo")
+load("@io_bazel_rules_go//go:def.bzl", "nogo")
 load("//:def.bzl", "gazelle", "gazelle_binary")
 
 # gazelle:prefix github.com/bazelbuild/bazel-gazelle
@@ -11,8 +11,8 @@ load("//:def.bzl", "gazelle", "gazelle_binary")
 # gazelle:exclude .ijwb
 # gazelle:exclude .github
 # gazelle:exclude .vscode
-# gazelle:exclude internal/module/testdata
 # gazelle:go_naming_convention import_alias
+# gazelle:go_naming_convention_external import
 gazelle(
     name = "gazelle",
     command = "fix",
@@ -35,12 +35,6 @@ gazelle_binary(
         "//internal/language/test_filegroup",
         "@bazel_skylib_gazelle_plugin//bzl",
     ],
-)
-
-go_cross_binary(
-    name = "gazelle_local_go1.22",
-    sdk_version = "1.22",
-    target = ":gazelle_local",
 )
 
 nogo(
@@ -74,14 +68,17 @@ filegroup(
         "CODEOWNERS",
         "CONTRIBUTING.md",
         "CONTRIBUTORS",
-        "Design.md",
         "LICENSE",
+        "MODULE.bazel",
         "README.md",
         "WORKSPACE",
         "def.bzl",
         "deps.bzl",
         "go.mod",
         "go.sum",
+        "go.work",
+        "go.work.sum",
+        "how-gazelle-works.md",
         "//cmd:all_files",
         "//config:all_files",
         "//flag:all_files",
@@ -95,6 +92,7 @@ filegroup(
         "//rule:all_files",
         "//testtools:all_files",
         "//tools:all_files",
+        "//v2:all_files",
         "//walk:all_files",
     ],
     visibility = ["//visibility:public"],
@@ -123,9 +121,9 @@ bzl_library(
     deps = [
         "//internal:go_repository",
         "//internal:go_repository_cache",
-        "//internal:go_repository_config",
         "//internal:go_repository_tools",
         "//internal:is_bazel_module",
+        "//internal/workspace:go_repository_config",
         "@bazel_tools//tools/build_defs/repo:git.bzl",
     ],
 )

@@ -67,9 +67,7 @@ class FunctionImpl : public cel::Function {
   FunctionImpl() = default;
 
   absl::StatusOr<Value> Invoke(absl::Span<const Value> args,
-                               const google::protobuf::DescriptorPool* absl_nonnull,
-                               google::protobuf::MessageFactory* absl_nonnull,
-                               google::protobuf::Arena* absl_nonnull) const override {
+                               const InvokeContext& context) const override {
     return NullValue();
   }
 };
@@ -81,7 +79,7 @@ TEST_F(ActivationTest, ValueNotFound) {
 
   EXPECT_THAT(activation.FindVariable("var1", descriptor_pool(),
                                       message_factory(), arena()),
-              IsOkAndHolds(Eq(absl::nullopt)));
+              IsOkAndHolds(Eq(std::nullopt)));
 }
 
 TEST_F(ActivationTest, InsertValue) {
@@ -124,11 +122,11 @@ TEST_F(ActivationTest, InsertProviderForwardsNotFound) {
       "var1",
       [](absl::string_view name, const google::protobuf::DescriptorPool* absl_nonnull,
          google::protobuf::MessageFactory* absl_nonnull,
-         google::protobuf::Arena* absl_nonnull) { return absl::nullopt; }));
+         google::protobuf::Arena* absl_nonnull) { return std::nullopt; }));
 
   EXPECT_THAT(activation.FindVariable("var1", descriptor_pool(),
                                       message_factory(), arena()),
-              IsOkAndHolds(Eq(absl::nullopt)));
+              IsOkAndHolds(Eq(std::nullopt)));
 }
 
 TEST_F(ActivationTest, InsertProviderForwardsStatus) {
@@ -328,7 +326,7 @@ TEST_F(ActivationTest, MoveAssignment) {
       "val_provided",
       [](absl::string_view name, const google::protobuf::DescriptorPool* absl_nonnull,
          google::protobuf::MessageFactory* absl_nonnull, google::protobuf::Arena* absl_nonnull)
-          -> absl::StatusOr<absl::optional<Value>> { return IntValue(42); }));
+          -> absl::StatusOr<std::optional<Value>> { return IntValue(42); }));
   moved_from.SetUnknownPatterns(
       {AttributePattern("var1",
                         {AttributeQualifierPattern::OfString("field1")}),
@@ -357,10 +355,10 @@ TEST_F(ActivationTest, MoveAssignment) {
   // NOLINTBEGIN(bugprone-use-after-move)
   EXPECT_THAT(moved_from.FindVariable("val", descriptor_pool(),
                                       message_factory(), arena()),
-              IsOkAndHolds(Eq(absl::nullopt)));
+              IsOkAndHolds(Eq(std::nullopt)));
   EXPECT_THAT(moved_from.FindVariable("val_provided", descriptor_pool(),
                                       message_factory(), arena()),
-              IsOkAndHolds(Eq(absl::nullopt)));
+              IsOkAndHolds(Eq(std::nullopt)));
   EXPECT_THAT(moved_from.FindFunctionOverloads("Fn"), SizeIs(0));
   EXPECT_THAT(moved_from.GetUnknownAttributes(), SizeIs(0));
   EXPECT_THAT(moved_from.GetMissingAttributes(), SizeIs(0));
@@ -379,7 +377,7 @@ TEST_F(ActivationTest, MoveCtor) {
       "val_provided",
       [](absl::string_view name, const google::protobuf::DescriptorPool* absl_nonnull,
          google::protobuf::MessageFactory* absl_nonnull, google::protobuf::Arena* absl_nonnull)
-          -> absl::StatusOr<absl::optional<Value>> { return IntValue(42); }));
+          -> absl::StatusOr<std::optional<Value>> { return IntValue(42); }));
   moved_from.SetUnknownPatterns(
       {AttributePattern("var1",
                         {AttributeQualifierPattern::OfString("field1")}),
@@ -407,10 +405,10 @@ TEST_F(ActivationTest, MoveCtor) {
   // NOLINTBEGIN(bugprone-use-after-move)
   EXPECT_THAT(moved_from.FindVariable("val", descriptor_pool(),
                                       message_factory(), arena()),
-              IsOkAndHolds(Eq(absl::nullopt)));
+              IsOkAndHolds(Eq(std::nullopt)));
   EXPECT_THAT(moved_from.FindVariable("val_provided", descriptor_pool(),
                                       message_factory(), arena()),
-              IsOkAndHolds(Eq(absl::nullopt)));
+              IsOkAndHolds(Eq(std::nullopt)));
   EXPECT_THAT(moved_from.FindFunctionOverloads("Fn"), SizeIs(0));
   EXPECT_THAT(moved_from.GetUnknownAttributes(), SizeIs(0));
   EXPECT_THAT(moved_from.GetMissingAttributes(), SizeIs(0));

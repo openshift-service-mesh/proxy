@@ -14,6 +14,7 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(
     # Under active development, not yet being released.
@@ -26,6 +27,7 @@ cc_library(
     name = "memory_manager",
     srcs = ["memory_manager.cc"],
     hdrs = ["memory_manager.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:memory",
         "@com_google_absl//absl/base:core_headers",
@@ -37,6 +39,7 @@ cc_library(
 cc_test(
     name = "memory_manager_test",
     srcs = ["memory_manager_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":memory_manager",
         "//common:memory",
@@ -48,6 +51,7 @@ cc_test(
 cc_library(
     name = "ast_converters",
     hdrs = ["ast_converters.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:ast",
         "//common:ast_proto",
@@ -62,6 +66,7 @@ cc_library(
     name = "runtime_adapter",
     srcs = ["runtime_adapter.cc"],
     hdrs = ["runtime_adapter.h"],
+    copts = CEL_COPTS,
     deps = [
         ":ast_converters",
         "//internal:status_macros",
@@ -79,6 +84,7 @@ cc_library(
     name = "enum_adapter",
     srcs = ["enum_adapter.cc"],
     hdrs = ["enum_adapter.h"],
+    copts = CEL_COPTS,
     deps = [
         "//runtime:type_registry",
         "@com_google_absl//absl/status",
@@ -88,47 +94,12 @@ cc_library(
 )
 
 cc_library(
-    name = "type",
-    srcs = [
-        "type_introspector.cc",
-    ],
-    hdrs = [
-        "type_introspector.h",
-    ],
-    deps = [
-        "//common:type",
-        "@com_google_absl//absl/base:nullability",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:string_view",
-        "@com_google_absl//absl/types:optional",
-        "@com_google_protobuf//:protobuf",
-    ],
-)
-
-cc_test(
-    name = "type_test",
-    srcs = [
-        "type_introspector_test.cc",
-    ],
-    deps = [
-        ":type",
-        "//common:type",
-        "//common:type_kind",
-        "//internal:testing",
-        "@com_google_absl//absl/types:optional",
-        "@com_google_cel_spec//proto/cel/expr/conformance/proto2:test_all_types_cc_proto",
-        "@com_google_protobuf//:protobuf",
-    ],
-)
-
-cc_library(
     name = "value",
     hdrs = [
-        "type_reflector.h",
         "value.h",
     ],
+    copts = CEL_COPTS,
     deps = [
-        ":type",
         "//common:memory",
         "//common:type",
         "//common:value",
@@ -151,6 +122,7 @@ cc_test(
     srcs = [
         "value_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":value",
         "//base:attributes",
@@ -178,6 +150,7 @@ cc_test(
 cc_test(
     name = "value_end_to_end_test",
     srcs = ["value_end_to_end_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":runtime_adapter",
         "//common:value",
@@ -200,12 +173,14 @@ cc_library(
     name = "bind_proto_to_activation",
     srcs = ["bind_proto_to_activation.cc"],
     hdrs = ["bind_proto_to_activation.h"],
+    copts = CEL_COPTS,
     deps = [
-        ":value",
         "//common:casting",
         "//common:value",
         "//internal:status_macros",
         "//runtime:activation",
+        "//runtime:bind_proto_to_activation",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -216,6 +191,7 @@ cc_library(
 cc_test(
     name = "bind_proto_to_activation_test",
     srcs = ["bind_proto_to_activation_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":bind_proto_to_activation",
         "//common:casting",
@@ -236,6 +212,7 @@ cc_library(
     name = "value_testing",
     testonly = True,
     hdrs = ["value_testing.h"],
+    copts = CEL_COPTS,
     deps = [
         ":value",
         "//common:value",
@@ -248,6 +225,7 @@ cc_library(
 cc_test(
     name = "value_testing_test",
     srcs = ["value_testing_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":value",
         ":value_testing",

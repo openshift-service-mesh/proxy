@@ -1,11 +1,25 @@
+"""Macros for dependency update utilities."""
+
+load("@aspect_bazel_lib//lib:jq.bzl", "jq")
+load("@aspect_bazel_lib//lib:write_source_files.bzl", "write_source_files")
+load("@envoy_toolshed_jq//:defs.bzl", "toolshed_jq")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load("//dependency:registry.bzl", "git_launcher", "registry_bazelrc", "registry_resolve", "registry_settings")
+
+_BAZEL_UPDATE_SH = Label("//dependency:bazel-update.sh")
+_JQ_TOOLCHAIN = Label("@jq_toolchains//:resolved_toolchain")
+_MODULE_UPDATE_SH = Label("//dependency:module-update.sh")
+_REGISTRY_RESOLVE_SH = Label("//dependency:registry-resolve.sh")
+_TOOLSHED_JQ_MODULES = Label("@envoy_toolshed_jq//:modules")
+_TOOLSHED_JQ_ROOT_MARKER = Label("@envoy_toolshed_jq//:modules_root.marker")
+
 
 def updater(
         name,
         dependencies,
         version_file,
-        jq_toolchain = "@jq_toolchains//:resolved_toolchain",
-        update_script = "@envoy_toolshed//dependency:bazel-update.sh",
+        jq_toolchain = _JQ_TOOLCHAIN,
+        update_script = _BAZEL_UPDATE_SH,
         post_script = None,
         data = None,
         deps = None,
@@ -20,6 +34,29 @@ def updater(
         toolchains = None,
         pydict = False,
         **kwargs):
+    """Create a shell-based dependency updater binary.
+
+    Args:
+        name: Name of the generated target.
+        dependencies: Label for the dependency data consumed by the updater.
+        version_file: Label for the file updated in place.
+        jq_toolchain: jq toolchain target used by the updater.
+        update_script: Shell script implementing the update logic.
+        post_script: Optional script run after a version update.
+        data: Additional runtime data dependencies.
+        deps: Additional target dependencies.
+        dep_search: Optional search string for dependency entries.
+        sha_search: Optional search string for sha entries.
+        version_search: Optional search string for version entries.
+        repo_selector: Optional selector for repo names.
+        sha_selector: Optional selector for sha values.
+        url_selector: Optional selector for URLs.
+        version_path_replace: Optional replacement for version paths.
+        version_selector: Optional selector for version values.
+        toolchains: Additional toolchains required by the updater.
+        pydict: Whether to use Python dict search defaults.
+        **kwargs: Forwarded to sh_binary.
+    """
     toolchains = [jq_toolchain] + (toolchains or [])
     deps = deps or []
     data = (data or []) + [
@@ -56,8 +93,314 @@ def updater(
         env["VERSION_SELECTOR"] = version_selector
 
     if post_script:
-        data += [post_script]
+        data.append(post_script)
         env["VERSION_UPDATE_POST_SCRIPT"] = "$(location %s)" % post_script
+
+    sh_binary(
+        name = name,
+        srcs = [update_script],
+        data = data,
+        env = env,
+        args = args,
+        deps = deps,
+        toolchains = toolchains,
+        **kwargs
+    )
+
+
+def registry_updater(
+        name,
+        bazelrc,
+        repo = "https://github.com/envoyproxy/bazel-registry.git",
+        url = "https://raw.githubusercontent.com/envoyproxy/bazel-registry",
+        branch = "main",
+        release_tags = None,
+        visibility = None,
+        **kwargs):
+    """Rewrite the registry pin in a bazelrc file.
+
+    Args:
+        name: Name of the generated target.
+        bazelrc: Label for the bazelrc file to rewrite.
+        repo: Git repository used to resolve the current registry SHA.
+        url: Raw content base URL for the registry.
+        branch: Registry branch used for latest and ancestor verification.
+        release_tags: Optional tag glob used when resolving latest published releases.
+        visibility: Optional visibility for the generated target.
+        **kwargs: Forwarded to write_source_files.
+    """
+    helper_tags = ["manual"] + kwargs.pop("tags", [])
+    target_compatible_with = kwargs.pop(
+        "target_compatible_with",
+        ["@platforms//os:linux"],
+    )
+    helper_kwargs = {
+        "tags": helper_tags,
+        "target_compatible_with": target_compatible_with,
+    }
+    if visibility != None:
+        helper_kwargs["visibility"] = visibility
+
+    registry_settings(
+        name = name + "_settings",
+        tags = helper_tags,
+        target_compatible_with = target_compatible_with,
+    )
+    registry_resolve(
+        name = name + "_resolved",
+        branch = branch,
+        release_tags = release_tags or "",
+        repo = repo,
+        tags = helper_tags,
+        target_compatible_with = target_compatible_with,
+        url = url,
+    )
+    registry_bazelrc(
+        name = name + "_bazelrc",
+        bazelrc = bazelrc,
+        registry = ":" + name + "_resolved",
+        tags = helper_tags,
+        target_compatible_with = target_compatible_with,
+        url = url,
+    )
+    git_launcher(
+        name = name + "_git",
+        tags = helper_tags,
+        target_compatible_with = target_compatible_with,
+    )
+
+    resolve_args = [
+        "resolve",
+        "--repo=%s" % repo,
+        "--url=%s" % url,
+        "--branch=%s" % branch,
+        "--settings-file=$(location :%s_settings)" % name,
+    ]
+    check_args = [
+        "check",
+        "--repo=%s" % repo,
+        "--url=%s" % url,
+        "--branch=%s" % branch,
+        "--bazelrc=$(location %s)" % bazelrc,
+        "--settings-file=$(location :%s_settings)" % name,
+    ]
+    if release_tags != None:
+        resolve_args.append("--release-tags=%s" % release_tags)
+        check_args.append("--release-tags=%s" % release_tags)
+
+    sh_binary(
+        name = name + ".resolve",
+        srcs = [_REGISTRY_RESOLVE_SH],
+        data = [
+            _TOOLSHED_JQ_MODULES,
+            _TOOLSHED_JQ_ROOT_MARKER,
+            _JQ_TOOLCHAIN,
+            ":" + name + "_git",
+            ":" + name + "_settings",
+        ],
+        env = {
+            "GIT_BIN": "$(rootpath :%s_git)" % name,
+            "JQ_BIN": "$(rootpath %s)" % _JQ_TOOLCHAIN,
+            "TOOLSHED_JQ_ROOT": "$(rootpath %s)" % _TOOLSHED_JQ_ROOT_MARKER,
+        },
+        args = resolve_args,
+        **helper_kwargs
+    )
+    sh_binary(
+        name = name + ".check",
+        srcs = [_REGISTRY_RESOLVE_SH],
+        data = [
+            _TOOLSHED_JQ_MODULES,
+            _TOOLSHED_JQ_ROOT_MARKER,
+            _JQ_TOOLCHAIN,
+            bazelrc,
+            ":" + name + "_git",
+            ":" + name + "_settings",
+        ],
+        env = {
+            "GIT_BIN": "$(rootpath :%s_git)" % name,
+            "JQ_BIN": "$(rootpath %s)" % _JQ_TOOLCHAIN,
+            "TOOLSHED_JQ_ROOT": "$(rootpath %s)" % _TOOLSHED_JQ_ROOT_MARKER,
+        },
+        args = check_args,
+        **helper_kwargs
+    )
+
+    if visibility != None:
+        kwargs["visibility"] = visibility
+
+    write_source_files(
+        name = name,
+        check_that_out_file_exists = False,
+        diff_test = False,
+        files = {bazelrc: ":" + name + "_bazelrc"},
+        tags = helper_tags,
+        target_compatible_with = target_compatible_with,
+        **kwargs
+    )
+
+
+def module_deps_json(
+        name,
+        lockfile,
+        module_file,
+        buildozer = "@buildifier//:buildozer",
+        visibility = None):
+    """Generate dependency JSON from MODULE.bazel and MODULE.bazel.lock.
+
+    Args:
+        name: Name of the generated target.
+        lockfile: Label for the lockfile to read.
+        module_file: Label for the MODULE.bazel file to read declared deps from.
+        buildozer: buildozer binary used to read bazel_dep declarations.
+        visibility: Optional target visibility.
+    """
+    native.genrule(
+        name = name + "_declared",
+        srcs = [module_file],
+        outs = [name + ".declared.txt"],
+        tools = [buildozer],
+        cmd = """
+set -euo pipefail
+err="$(@D)/%s.declared.err"
+status=0
+RUNFILES_DIR="$(execpath %s).runfiles" "$(execpath %s)" 'print name version dev_dependency' "$(location %s):%%bazel_dep" > "$@" 2>"$$err" || status=$$?
+if [ "$$status" -eq 3 ]; then
+  : > "$@"
+elif [ "$$status" -ne 0 ]; then
+  cat "$$err" >&2
+  exit "$$status"
+fi
+rm -f "$$err"
+""" % (name, buildozer, buildozer, module_file),
+    )
+
+    native.genrule(
+        name = name + "_overridden",
+        srcs = [module_file],
+        outs = [name + ".overridden.txt"],
+        tools = [buildozer],
+        cmd = """
+set -euo pipefail
+: > "$@"
+err="$(@D)/%s.overridden.err"
+status=0
+RUNFILES_DIR="$(execpath %s).runfiles" "$(execpath %s)" 'print module_name' "$(location %s):%%local_path_override" >> "$@" 2>"$$err" || status=$$?
+if [ "$$status" -ne 0 ] && [ "$$status" -ne 3 ]; then
+  cat "$$err" >&2
+  exit "$$status"
+fi
+status=0
+RUNFILES_DIR="$(execpath %s).runfiles" "$(execpath %s)" 'print module_name' "$(location %s):%%git_override" >> "$@" 2>"$$err" || status=$$?
+if [ "$$status" -ne 0 ] && [ "$$status" -ne 3 ]; then
+  cat "$$err" >&2
+  exit "$$status"
+fi
+status=0
+RUNFILES_DIR="$(execpath %s).runfiles" "$(execpath %s)" 'print module_name' "$(location %s):%%archive_override" >> "$@" 2>"$$err" || status=$$?
+if [ "$$status" -ne 0 ] && [ "$$status" -ne 3 ]; then
+  cat "$$err" >&2
+  exit "$$status"
+fi
+rm -f "$$err"
+""" % (
+            name,
+            buildozer,
+            buildozer,
+            module_file,
+            buildozer,
+            buildozer,
+            module_file,
+            buildozer,
+            buildozer,
+            module_file,
+        ),
+    )
+
+    toolshed_jq(
+        name = name,
+        srcs = [lockfile],
+        out = name + ".json",
+        filter = 'import "bazel/dep" as dep; dep::deps_json($declared; $overridden)',
+        args = [
+            "--rawfile",
+            "declared",
+            "$(location :%s_declared)" % name,
+            "--rawfile",
+            "overridden",
+            "$(location :%s_overridden)" % name,
+        ],
+        data = [
+            ":" + name + "_declared",
+            ":" + name + "_overridden",
+        ],
+        visibility = visibility,
+    )
+
+
+def module_updater(
+        name,
+        dependencies,
+        module_file,
+        bazelrc = None,
+        registries = None,
+        jq_toolchain = _JQ_TOOLCHAIN,
+        update_script = _MODULE_UPDATE_SH,
+        buildozer = "@buildifier//:buildozer",
+        data = None,
+        deps = None,
+        toolchains = None,
+        visibility = None,
+        **kwargs):
+    """Create a bzlmod dependency updater runnable.
+
+    Args:
+        name: Name of the generated target.
+        dependencies: Label for the dependency JSON input.
+        module_file: Label for the MODULE.bazel file to update.
+        bazelrc: Optional bazelrc file used to discover registries.
+        registries: Optional explicit list of registries.
+        jq_toolchain: jq toolchain target used by the updater.
+        update_script: Shell script implementing the updater.
+        buildozer: buildozer binary used to rewrite MODULE.bazel.
+        data: Additional runtime data dependencies.
+        deps: Additional target dependencies.
+        toolchains: Additional toolchains required by the updater.
+        visibility: Optional target visibility.
+        **kwargs: Forwarded to sh_binary.
+    """
+    if not bazelrc and not registries:
+        fail("module_updater requires either bazelrc or registries")
+
+    toolchains = [jq_toolchain] + (toolchains or [])
+    deps = deps or []
+    data = (data or []) + [
+        jq_toolchain,
+        update_script,
+        buildozer,
+        dependencies,
+        module_file,
+        _TOOLSHED_JQ_MODULES,
+        _TOOLSHED_JQ_ROOT_MARKER,
+    ]
+    env = {
+        "JQ_BIN": "$(rootpath %s)" % jq_toolchain,
+        "BUILDOZER": "$(rootpath %s)" % buildozer,
+        "TOOLSHED_JQ_ROOT": "$(rootpath %s)" % _TOOLSHED_JQ_ROOT_MARKER,
+    }
+    args = [
+        "$(location %s)" % module_file,
+        "$(location %s)" % dependencies,
+    ]
+
+    if bazelrc:
+        data.append(bazelrc)
+        env["MODULE_UPDATER_BAZELRC"] = "$(location %s)" % bazelrc
+    if registries:
+        env["MODULE_UPDATER_REGISTRIES"] = "\n".join(registries)
+
+    if visibility != None:
+        kwargs["visibility"] = visibility
 
     sh_binary(
         name = name,

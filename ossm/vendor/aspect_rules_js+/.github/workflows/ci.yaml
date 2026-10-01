@@ -22,7 +22,7 @@ jobs:
     matrix-prep:
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@v5
+            - uses: actions/checkout@v4
             - id: bazel-version
               name: Prepare 'bazel-version' matrix axis
               run: |
@@ -236,7 +236,7 @@ jobs:
         # Steps represent a sequence of tasks that will be executed as part of the job
         steps:
             # Checks-out your repository under github.workspace, so your job can access it
-            - uses: actions/checkout@v5
+            - uses: actions/checkout@v4
 
             # Setup an ssh keypair and github.com in known_hosts for e2e/git_dep_metadata,
             # which exercises fetching a git repository via ssh.
@@ -272,6 +272,11 @@ jobs:
                   # still bootstraps Aspect CLI from configuration in .bazeliskrc. Aspect CLI will
                   # then use .bazelversion to determine which Bazel version to use.
                   echo "${{ matrix.bazel-version.version }}" > .bazelversion
+                  # Delete all the version specific bazelrc files that are used for local development
+                  # since the version we're testing against is dynamic. These are just symlinks and the
+                  # root .bazelrc brings these in with try-imports. In this CI workflows, we explicitly
+                  # bring in the version specific bazelrc file with --bazelrc when we invoke bazel.
+                  rm ${GITHUB_WORKSPACE//\\/\/}/.aspect/bazelrc/bazel*.bazelrc
 
             # TODO: remove this block once we have Aspect CLI Windows releases
             - name: Don't use Aspect CLI on Windows
@@ -283,11 +288,11 @@ jobs:
               shell: bash
               run: |
                   bazel \
+                    --bazelrc=${GITHUB_WORKSPACE//\\/\/}/.github/workflows/bazel${{ matrix.bazel-version.major }}.bazelrc \
+                    --bazelrc=${GITHUB_WORKSPACE//\\/\/}/.aspect/bazelrc/ci.bazelrc \
                     --bazelrc=${GITHUB_WORKSPACE//\\/\/}/.github/workflows/ci.bazelrc \
                     test \
                     --config=local \
-                    --config=ci \
-                    --incompatible_merge_fixed_and_default_shell_env \
                     --test_tag_filters=-skip-on-bazel${{ matrix.bazel-version.major }} \
                     --build_tag_filters=-skip-on-bazel${{ matrix.bazel-version.major }} \
                     --enable_bzlmod=${{ matrix.bzlmod }} \
@@ -323,11 +328,11 @@ jobs:
               shell: bash
               run: |
                   bazel \
+                    --bazelrc=${GITHUB_WORKSPACE//\\/\/}/.github/workflows/bazel${{ matrix.bazel-version.major }}.bazelrc \
+                    --bazelrc=${GITHUB_WORKSPACE//\\/\/}/.aspect/bazelrc/ci.bazelrc \
                     --bazelrc=${GITHUB_WORKSPACE//\\/\/}/.github/workflows/ci.bazelrc \
                     coverage \
                     --config=local \
-                    --config=ci \
-                    --incompatible_merge_fixed_and_default_shell_env \
                     --test_tag_filters=-skip-on-bazel${{ matrix.bazel-version.major }} \
                     --build_tag_filters=-skip-on-bazel${{ matrix.bazel-version.major }} \
                     --enable_bzlmod=${{ matrix.bzlmod }} \

@@ -10,9 +10,11 @@
 #include <variant>
 
 #include "absl/base/attributes.h"
+#include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "quiche/quic/core/quic_time.h"
 #include "quiche/quic/moqt/moqt_error.h"
+#include "quiche/quic/moqt/moqt_fetch_task.h"
 #include "quiche/quic/moqt/moqt_key_value_pair.h"
 #include "quiche/quic/moqt/moqt_names.h"
 #include "quiche/quic/moqt/moqt_object.h"
@@ -50,10 +52,19 @@ void MoqtRelayTrackPublisher::OnReply(
       ok_data.parameters.expires.value_or(kDefaultExpires);
   expiration_ = expires.IsInfinite() ? quic::QuicTime::Infinite()
                                      : clock_->Now() + expires;
-  extensions_ = ok_data.extensions;
-  next_location_ = ok_data.parameters.largest_object.has_value()
-                       ? ok_data.parameters.largest_object->Next()
-                       : Location(0, 0);
+  properties_ = ok_data.properties;
+  if (ok_data.parameters.largest_object.has_value() &&
+      ok_data.parameters.largest_object->Next() > next_location_) {
+    // We may have already received objects that exceed what's reported in
+    // SUBSCRIBE_OK.
+    next_location_ = ok_data.parameters.largest_object->Next();
+    // If LARGEST_OBJECT equals or exceeds the pending new group request,
+    // clear the pending new group request.
+    if (pending_new_group_request_.has_value() &&
+        *pending_new_group_request_ <= next_location_.group) {
+      pending_new_group_request_ = std::nullopt;
+    }
+  }
   got_response_ = true;
   // TODO(martinduke): Handle parameters.
   for (MoqtObjectListener* listener : listeners_) {
@@ -199,7 +210,7 @@ void MoqtRelayTrackPublisher::OnObjectFragment(
   }
   if (duplicate_object != nullptr) {
     if (metadata.IsMalformed(duplicate_object->metadata())) {
-      // Something besides the arrival time and extension headers changed.
+      // Something besides the arrival time and properties changed.
       OnMalformedTrack(full_track_name);
       return;
     }
@@ -226,6 +237,9 @@ void MoqtRelayTrackPublisher::OnObjectFragment(
   }
   // Object is valid. Update state.
   if (next_location_ <= metadata.location) {
+    if (metadata.location.group > next_location_.group) {
+      pending_new_group_request_ = std::nullopt;
+    }
     next_location_ = metadata.location.Next();
   }
   if (metadata.location.object >= group.next_object) {
@@ -352,7 +366,8 @@ std::optional<PublishedObject> MoqtRelayTrackPublisher::GetCachedObject(
   return object_it->second.ToPublishedObject(offset);
 }
 
-void MoqtRelayTrackPublisher::AddObjectListener(MoqtObjectListener* listener) {
+void MoqtRelayTrackPublisher::AddObjectListener(
+    MoqtObjectListener* listener, const MessageParameters& parameters) {
   if (is_closing_) {
     return;
   }
@@ -367,15 +382,25 @@ void MoqtRelayTrackPublisher::AddObjectListener(MoqtObjectListener* listener) {
       DeleteTrack();
       return;
     }
-    MessageParameters parameters;
-    // Use default params, not what the subscriber used.
-    parameters.oack_window_size = oack_window_size_;
-    // TODO(b/478300706): Always forward NEW_GROUP_REQUEST in this case.
-    session->Subscribe(track_, this, parameters);
+    MessageParameters upstream_parameters;
+    upstream_parameters.oack_window_size = oack_window_size_;
+    if (parameters.new_group_request.has_value()) {
+      upstream_parameters.new_group_request = *parameters.new_group_request;
+    }
+    if (!session->Subscribe(track_, this, upstream_parameters)) {
+      listener->OnSubscribeRejected(
+          MoqtRequestErrorInfo{RequestErrorCode::kInternalError, std::nullopt,
+                               "Could not send SUBSCRIBE upstream."});
+      DeleteTrack();
+      return;
+    }
+    listeners_.insert(listener);
+    pending_new_group_request_ = upstream_parameters.new_group_request;
+  } else {
+    listeners_.insert(listener);
+    // SUBSCRIBE will be accepted regardless of outcome.
+    UpdateObjectListener(listener, parameters).IgnoreError();
   }
-  listeners_.insert(listener);
-  // TODO(b/478300706): If there is a NEW_GROUP_REQUEST and we don't have one
-  // pending, send it.
   if (got_response_) {
     listener->OnSubscribeAccepted();
   }
@@ -391,6 +416,46 @@ void MoqtRelayTrackPublisher::RemoveObjectListener(
     DeleteTrack();
   }
   // No class access below this line!
+}
+
+absl::Status MoqtRelayTrackPublisher::UpdateObjectListener(
+    MoqtObjectListener* listener, const MessageParameters& parameters) {
+  if (is_closing_) {
+    return absl::InternalError("The track publisher is closing.");
+  }
+  if (!listeners_.contains(listener)) {
+    return absl::NotFoundError("Listener not found.");
+  }
+  MoqtSessionInterface* session = upstream_.GetIfAvailable();
+  if (session == nullptr) {
+    return absl::InternalError("The upstream session was closed.");
+  }
+  if (parameters.new_group_request.has_value() &&
+      (!got_response_ || properties_.dynamic_groups()) &&
+      (*parameters.new_group_request == 0 ||
+       *parameters.new_group_request > next_location_.group) &&
+      (!pending_new_group_request_.has_value() ||
+       *pending_new_group_request_ < *parameters.new_group_request)) {
+    MessageParameters update_parameters;
+    if (*parameters.new_group_request == 0 && next_location_ > Location(0, 0)) {
+      // The relay has more information than the client, so update
+      // NEW_GROUP_REQUEST to be more specific and avoid duplicate
+      // SUBSCRIBE_UPDATEs.
+      update_parameters.new_group_request = next_location_.group + 1;
+    } else {
+      // The client might have other access to a higher group ID, so
+      // preserve requests that are greater than next_location_.
+      update_parameters.new_group_request = *parameters.new_group_request;
+    }
+    if (session->SubscribeUpdate(
+            track_, update_parameters,
+            [](std::variant<MessageParameters, MoqtRequestErrorInfo>) {})) {
+      pending_new_group_request_ = update_parameters.new_group_request;
+      return absl::OkStatus();
+    }
+    return absl::InternalError("Could not send SUBSCRIBE_UPDATE upstream.");
+  }
+  return absl::OkStatus();
 }
 
 void MoqtRelayTrackPublisher::ForAllObjects(

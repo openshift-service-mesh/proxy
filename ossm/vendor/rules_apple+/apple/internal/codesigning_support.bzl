@@ -15,6 +15,10 @@
 """Actions related to codesigning."""
 
 load(
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
+load(
     "@bazel_skylib//lib:paths.bzl",
     "paths",
 )
@@ -23,16 +27,16 @@ load(
     "shell",
 )
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
-)
-load(
     "//apple/internal:intermediates.bzl",
     "intermediates",
 )
 load(
     "//apple/internal:rule_support.bzl",
     "rule_support",
+)
+load(
+    "//apple/internal:shared_environment.bzl",
+    "shared_environment",
 )
 load(
     "//apple/internal/utils:defines.bzl",
@@ -82,7 +86,8 @@ def _preferred_codesigning_identity(platform_prerequisites):
             # TODO(b/252873771): Remove this fallback when the native Bazel flag
             # ios_signing_cert_name is removed.
             return (build_settings.signing_certificate_name or
-                    objc_fragment.signing_certificate_name)
+                    # TODO: Remove when we drop bazel 9.x support
+                    getattr(objc_fragment, "signing_certificate_name", None))
         else:
             return build_settings.signing_certificate_name
     return None
@@ -487,7 +492,9 @@ def _generate_codesigning_dossier_action(
         output_discriminator,
         output_dossier,
         platform_prerequisites,
-        provisioning_profile):
+        provisioning_profile,
+        *,
+        mac_exec_group):
     """Generates a codesigning dossier based on parameters.
 
     Args:
@@ -503,6 +510,7 @@ def _generate_codesigning_dossier_action(
       output_dossier: The `File` representing the output dossier file - the zipped dossier will be placed here.
       platform_prerequisites: Struct containing information on the platform being targeted.
       provisioning_profile: The provisioning profile file. May be `None`.
+      mac_exec_group: The execution group for Mac tools.
     """
     input_files = [x.dossier_file for x in embedded_dossiers]
 
@@ -561,6 +569,8 @@ def _generate_codesigning_dossier_action(
         actions = actions,
         apple_fragment = platform_prerequisites.apple_fragment,
         arguments = args,
+        env = shared_environment.default_env,
+        exec_group = mac_exec_group,
         executable = dossier_codesigningtool,
         inputs = input_files,
         mnemonic = mnemonic,
@@ -572,6 +582,7 @@ def _generate_codesigning_dossier_action(
 def _post_process_and_sign_archive_action(
         *,
         actions,
+        mac_exec_group,
         archive_codesigning_path,
         codesign_inputs,
         codesigningtool,
@@ -605,6 +616,7 @@ def _post_process_and_sign_archive_action(
           that has not yet been processed or signed.
       ipa_post_processor: A file that acts as a bundle post processing tool. May be `None`.
       label_name: Name of the target being built.
+      mac_exec_group: The execution group for Mac tools.
       output_archive: The `File` representing the processed and signed archive.
       output_archive_root_path: The `string` path to where the processed, uncompressed archive
           should be located.
@@ -694,13 +706,13 @@ def _post_process_and_sign_archive_action(
         output = process_and_sign_expanded_template,
         is_executable = True,
         substitutions = {
-            "%ipa_post_processor%": ipa_post_processor_path or "",
-            "%output_path%": output_archive.path,
+            "%ipa_post_processor%": shell.quote(ipa_post_processor_path) or "",
+            "%output_path%": shell.quote(output_archive.path),
             "%should_compress%": "1" if should_compress else "",
             "%should_verify%": "1",  # always verify the crc
             "%signing_command_lines%": signing_command_lines,
-            "%unprocessed_archive_path%": input_archive.path,
-            "%work_dir%": output_archive_root_path,
+            "%unprocessed_archive_path%": shell.quote(input_archive.path),
+            "%work_dir%": shell.quote(output_archive_root_path),
         },
     )
 
@@ -720,6 +732,8 @@ def _post_process_and_sign_archive_action(
             actions = actions,
             apple_fragment = platform_prerequisites.apple_fragment,
             arguments = arguments,
+            env = shared_environment.default_env,
+            exec_group = mac_exec_group,
             executable = process_and_sign_expanded_template,
             execution_requirements = execution_requirements,
             inputs = input_files + codesign_inputs,
@@ -732,6 +746,7 @@ def _post_process_and_sign_archive_action(
     else:
         actions.run(
             arguments = arguments,
+            env = shared_environment.default_env,
             executable = process_and_sign_expanded_template,
             inputs = input_files,
             mnemonic = mnemonic,
@@ -742,6 +757,7 @@ def _post_process_and_sign_archive_action(
 def _sign_binary_action(
         *,
         actions,
+        mac_exec_group,
         codesign_inputs,
         codesigningtool,
         codesignopts,
@@ -758,6 +774,7 @@ def _sign_binary_action(
       codesigningtool: The files_to_run for the code signing tool.
       codesignopts: Extra options to pass to the `codesign` tool.
       input_binary: The `File` representing the binary to be signed.
+      mac_exec_group: The execution group for Mac tools.
       output_binary: The `File` representing signed binary.
       platform_prerequisites: Struct containing information on the platform being targeted.
       provisioning_profile: The provisioning profile file. May be `None`.
@@ -800,6 +817,8 @@ def _sign_binary_action(
             input_binary = input_binary.path,
             output_binary = output_binary.path,
         ) + "\n" + signing_commands,
+        env = shared_environment.default_env,
+        exec_group = mac_exec_group,
         execution_requirements = execution_requirements,
         inputs = [input_binary] + codesign_inputs,
         mnemonic = "SignBinary",

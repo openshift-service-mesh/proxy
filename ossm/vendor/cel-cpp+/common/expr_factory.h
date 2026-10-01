@@ -32,6 +32,16 @@ namespace cel {
 
 class MacroExprFactory;
 class ParserMacroExprFactory;
+class OptimizerExprFactory;
+
+namespace tools {
+class ProtoToPredicateBuilder;
+}
+
+namespace parser_internal {
+template <typename ExprNode>
+class AstFactoryInterface;
+}
 
 class ExprFactory {
  protected:
@@ -352,12 +362,37 @@ class ExprFactory {
     return expr;
   }
 
+  template <typename NextIdFunc, typename BindVar, typename BindExpr,
+            typename RestExpr,
+            typename = std::enable_if_t<
+                std::is_invocable_r<ExprId, NextIdFunc>::value>,
+            typename = std::enable_if_t<IsStringLike<BindVar>::value>,
+            typename = std::enable_if_t<IsExprLike<BindExpr>::value>,
+            typename = std::enable_if_t<IsExprLike<RestExpr>::value>>
+  Expr NewBind(NextIdFunc next_id, BindVar bind_var, BindExpr bind_expr,
+               RestExpr rest_expr) {
+    Expr expr;
+    expr.set_id(next_id());
+    auto& comprehension_expr = expr.mutable_comprehension_expr();
+    comprehension_expr.set_iter_var("#unused");
+    comprehension_expr.set_iter_range(
+        NewList(next_id(), std::vector<cel::ListExprElement>{}));
+    comprehension_expr.set_accu_var(bind_var);
+    comprehension_expr.set_accu_init(std::move(bind_expr));
+    comprehension_expr.set_loop_condition(NewBoolConst(next_id(), false));
+    comprehension_expr.set_loop_step(NewIdent(next_id(), bind_var));
+    comprehension_expr.set_result(std::move(rest_expr));
+    return expr;
+  }
+
  private:
   friend class MacroExprFactory;
   friend class ParserMacroExprFactory;
+  friend class OptimizerExprFactory;
+  friend class tools::ProtoToPredicateBuilder;
+  friend class parser_internal::AstFactoryInterface<Expr>;
 
   ExprFactory() : accu_var_(kAccumulatorVariableName) {}
-  explicit ExprFactory(absl::string_view accu_var) : accu_var_(accu_var) {}
 
   std::string accu_var_;
 };

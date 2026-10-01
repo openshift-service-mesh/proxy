@@ -23,6 +23,7 @@ import (
 	"go/parser"
 	"go/token"
 	"log"
+	"os"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -131,6 +132,10 @@ const (
 
 	// protoExt is applied to .proto files.
 	protoExt
+
+	// pgoExt is applied to .pgo files, expected to be in a pprof format.
+	// Currently, only "default.pgo" is supported. Other *.pgo files are ignored.
+	pgoExt
 )
 
 // fileNameInfo returns information that can be inferred from the name of
@@ -156,6 +161,8 @@ func fileNameInfo(path_ string) fileInfo {
 			ext = csExt
 		case ".proto":
 			ext = protoExt
+		case ".pgo":
+			ext = pgoExt
 		}
 	}
 
@@ -228,8 +235,13 @@ func otherFileInfo(path string) fileInfo {
 // TODD(#53): extract canonical import path
 func goFileInfo(path, srcdir string) fileInfo {
 	info := fileNameInfo(path)
+	source, err := os.ReadFile(info.path)
+	if err != nil {
+		log.Printf("%s: error reading go file: %v", info.path, err)
+		return info
+	}
 	fset := token.NewFileSet()
-	pf, err := parser.ParseFile(fset, info.path, nil, parser.ImportsOnly|parser.ParseComments)
+	pf, err := parser.ParseFile(fset, info.path, source, parser.ImportsOnly|parser.ParseComments)
 	if err != nil {
 		log.Printf("%s: error reading go file: %v", info.path, err)
 		return info
@@ -282,7 +294,7 @@ func goFileInfo(path, srcdir string) fileInfo {
 		}
 	}
 
-	tags, err := readTags(info.path)
+	tags, err := readTagsFromContent(source)
 	if err != nil {
 		log.Printf("%s: error reading go file: %v", info.path, err)
 		return info
@@ -290,7 +302,7 @@ func goFileInfo(path, srcdir string) fileInfo {
 	info.tags = tags
 
 	if importsEmbed || info.packageName == "main" {
-		pf, err = parser.ParseFile(fset, info.path, nil, parser.ParseComments)
+		pf, err = parser.ParseFile(fset, info.path, source, parser.ParseComments)
 		if err != nil {
 			log.Printf("%s: error reading go file: %v", info.path, err)
 			return info

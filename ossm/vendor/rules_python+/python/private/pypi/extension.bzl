@@ -20,6 +20,7 @@ load("@rules_python_internal//:rules_python_config.bzl", rp_config = "config")
 load("@toml.bzl", "toml")
 load("//python/private:auth.bzl", "AUTH_ATTRS")
 load("//python/private:normalize_name.bzl", "normalize_name")
+load("//python/private:pyproject_utils.bzl", "read_pyproject", "version_from_requires_python")
 load("//python/private:repo_utils.bzl", "repo_utils")
 load(":hub_builder.bzl", "hub_builder")
 load(":hub_repository.bzl", "hub_repository", "whl_config_settings_to_json")
@@ -208,6 +209,7 @@ def build_config(
     default_hub = None
     defaults = {
         "platforms": default_platforms(),
+        "python_version": None,
     }
     for mod in module_ctx.modules:
         if not (mod.is_root or mod.name == "rules_python"):
@@ -219,6 +221,11 @@ def build_config(
                     if default_hub:
                         fail("Duplicate pip.default tag: only one explicit default PyPI hub is allowed.")
                     default_hub = tag.default_hub
+            pyproject_toml = tag.pyproject_toml
+            if pyproject_toml:
+                pyproject = read_pyproject(module_ctx, pyproject_toml)
+                if pyproject.requires_python:
+                    defaults["python_version"] = version_from_requires_python(pyproject.requires_python)
 
             platform = tag.platform
             if platform:
@@ -256,6 +263,7 @@ def build_config(
         default_hub = default_hub,
         index_url = defaults.get("index_url", "https://pypi.org/simple").rstrip("/"),
         netrc = defaults.get("netrc", None),
+        python_version = defaults.get("python_version", None),
         platforms = {
             name: _plat(**values)
             for name, values in defaults["platforms"].items()
@@ -359,6 +367,15 @@ You cannot use both the additive_build_content and additive_build_content_file a
 
     for mod in module_ctx.modules:
         for pip_attr in mod.tags.parse:
+            python_version = pip_attr.python_version
+            if not python_version and pip_attr.pyproject_toml:
+                pyproject = read_pyproject(module_ctx, pip_attr.pyproject_toml)
+                if pyproject.requires_python:
+                    python_version = version_from_requires_python(pyproject.requires_python)
+            python_version = python_version or config.python_version
+            if not python_version:
+                _fail("pip.parse() requires one of `python_version`, `pyproject_toml`, or `pip.default(pyproject_toml=...)` to be set")
+
             hub_name = pip_attr.hub_name
             if hub_name == "pypi":
                 if is_pypi_hub_reserved:
@@ -422,6 +439,7 @@ You cannot use both the additive_build_content and additive_build_content_file a
             builder.pip_parse(
                 module_ctx,
                 pip_attr = pip_attr,
+                python_version = python_version,
             )
 
     # dict[str package, dict[str, None] extra_targets]
@@ -672,10 +690,10 @@ This value is going to be subject to `envsubst` substitutions if necessary, look
 {attr}`pip.parse.envsubst` documentation for more information..
 
 The indexes must support Simple API as described here:
-https://packaging.python.org/en/latest/specifications/simple-repository-api/
+<https://packaging.python.org/en/latest/specifications/simple-repository-api/>
 
-Index metadata will be used to get `sha256` values for packages even if the
-`sha256` values are not present in the requirements.txt lock file.
+Index metadata will be used to get the hash digest values for packages even
+if the `--hash` values are not present in the requirements.txt lock file.
 
 Defaults to `https://pypi.org/simple`.
 
@@ -718,6 +736,23 @@ If you are defining custom platforms in your project and don't want things to cl
 [isolation] feature.
 
 [isolation]: https://bazel.build/rules/lib/globals/module#use_extension.isolate
+""",
+    ),
+    "pyproject_toml": attr.label(
+        mandatory = False,
+        doc = """\
+Label pointing to pyproject.toml file to read the default Python version from.
+When specified, reads the `requires-python` field from pyproject.toml and uses
+it as the default python_version for all `pip.parse()` calls that don't
+explicitly specify one.
+
+:::{note}
+The version must be specified as `==X.Y.Z` (exact version with full semver).
+This is designed to work with dependency management tools like Renovate.
+:::
+
+:::{versionadded} 2.3.0
+:::
 """,
     ),
     "whl_abi_tags": attr.string_list(
@@ -832,10 +867,10 @@ index URL.
 
 This design pattern has been chosen in order to be fully deterministic about which
 packages come from which source. We want to avoid issues similar to what happened in
-https://pytorch.org/blog/compromised-nightly-dependency/.
+<https://pytorch.org/blog/compromised-nightly-dependency/>.
 
 The indexes must support Simple API as described here:
-https://packaging.python.org/en/latest/specifications/simple-repository-api/
+<https://packaging.python.org/en/latest/specifications/simple-repository-api/>
 """,
         ),
         "hub_name": attr.string(
@@ -888,8 +923,23 @@ find in case extra indexes are specified.
 """,
             default = True,
         ),
+        "pyproject_toml": attr.label(
+            mandatory = False,
+            doc = """\
+Label pointing to a pyproject.toml file to read the Python version from.
+When specified, the `requires-python` field is used as the `python_version`
+for this `pip.parse()` call, unless `python_version` is set explicitly.
+
+:::{note}
+The version must be specified as `==X.Y.Z` (exact version with full semver).
+:::
+
+:::{versionadded} 2.3.0
+:::
+""",
+        ),
         "python_version": attr.string(
-            mandatory = True,
+            mandatory = False,
             doc = """
 The Python version the dependencies are targetting, in Major.Minor format
 (e.g., "3.11") or patch level granularity (e.g. "3.11.1").
@@ -897,6 +947,15 @@ The Python version the dependencies are targetting, in Major.Minor format
 If an interpreter isn't explicitly provided (using `python_interpreter` or
 `python_interpreter_target`), then the version specified here must have
 a corresponding `python.toolchain()` configured.
+
+:::{seealso}
+The {obj}`pyproject_toml` attribute for getting the version from a project file.
+:::
+
+:::{versionchanged} 2.3.0
+No longer mandatory if the {obj}`pyproject_toml` attribute or
+{obj}`pip.default.pyproject_toml` is specified.
+:::
 """,
         ),
         "simpleapi_skip": attr.string_list(
@@ -932,9 +991,12 @@ a string `"{os}_{arch}"` as the value here. You could also use `"{os}_{arch}_fre
 """,
         ),
         "uv_lock": attr.label(
-            doc = """\
+            doc = """
 (label, optional): A label pointing to the uv.lock file. If provided,
 the uv.lock file will be used as the primary source for package metadata.
+
+:::{versionadded} 2.2.0
+:::
 """,
         ),
         "whl_modifications": attr.label_keyed_string_dict(

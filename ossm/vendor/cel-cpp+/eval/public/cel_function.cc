@@ -3,16 +3,13 @@
 #include <cstddef>
 #include <vector>
 
-#include "absl/base/nullability.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "common/value.h"
 #include "eval/internal/interop.h"
 #include "eval/public/cel_value.h"
 #include "internal/status_macros.h"
-#include "google/protobuf/arena.h"
-#include "google/protobuf/descriptor.h"
-#include "google/protobuf/message.h"
+#include "runtime/function.h"
 
 namespace google::api::expr::runtime {
 
@@ -55,9 +52,7 @@ bool CelFunction::MatchArguments(absl::Span<const cel::Value> arguments) const {
 
 absl::StatusOr<Value> CelFunction::Invoke(
     absl::Span<const cel::Value> arguments,
-    const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool,
-    google::protobuf::MessageFactory* absl_nonnull message_factory,
-    google::protobuf::Arena* absl_nonnull arena) const {
+    const cel::Function::InvokeContext& context) const {
   std::vector<CelValue> legacy_args;
   legacy_args.reserve(arguments.size());
 
@@ -67,15 +62,15 @@ absl::StatusOr<Value> CelFunction::Invoke(
   // interpreter expects to only be used with internal program steps.
   for (const auto& arg : arguments) {
     CEL_ASSIGN_OR_RETURN(legacy_args.emplace_back(),
-                         ToLegacyValue(arena, arg, true));
+                         ToLegacyValue(context.arena(), arg, true));
   }
 
   CelValue legacy_result;
 
-  CEL_RETURN_IF_ERROR(Evaluate(legacy_args, &legacy_result, arena));
+  CEL_RETURN_IF_ERROR(Evaluate(legacy_args, &legacy_result, context.arena()));
 
   return cel::interop_internal::LegacyValueToModernValueOrDie(
-      arena, legacy_result, /*unchecked=*/true);
+      context.arena(), legacy_result, /*unchecked=*/true);
 }
 
 }  // namespace google::api::expr::runtime

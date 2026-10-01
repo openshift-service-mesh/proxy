@@ -235,6 +235,9 @@
 /* Define to 1 if you have the `signal' function. */
 #define EVENT__HAVE_SIGNAL 1
 
+/* Define to 1 if you have the `socketpair' function. */
+#define EVENT__HAVE_SOCKETPAIR 1
+
 /* Define to 1 if you have the `splice' function. */
 /* #undef EVENT__HAVE_SPLICE */
 

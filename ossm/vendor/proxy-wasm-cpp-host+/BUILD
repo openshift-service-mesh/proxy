@@ -93,7 +93,7 @@ cc_library(
         "@com_google_absl//absl/cleanup",
     ] + select({
         "//bazel:crypto_system": [],
-        "//conditions:default": ["//bazel:crypto_lib"],
+        "//conditions:default": ["@proxy_wasm_cpp_host_deps//:crypto_lib"],
     }),
     alwayslink = 1,
 )
@@ -136,7 +136,7 @@ cc_library(
     deps = [
         ":base_lib",
         ":wasm_vm_headers",
-        "//bazel:v8_engine",
+        "@proxy_wasm_cpp_host_deps//:v8_engine",
     ],
 )
 
@@ -158,7 +158,7 @@ cc_library(
     }),
     deps = [
         ":wasm_vm_headers",
-        "//bazel:wamr_lib",
+        "@proxy_wasm_cpp_host_deps//:wamr_lib",
     ],
 )
 
@@ -185,7 +185,7 @@ cc_library(
     }),
     deps = [
         ":wasm_vm_headers",
-        "//bazel:wasmedge_lib",
+        "@proxy_wasm_cpp_host_deps//:wasmedge_lib",
     ],
 )
 
@@ -224,7 +224,7 @@ cc_library(
     deps = [
         ":base_lib",
         ":wasm_vm_headers",
-        "//bazel:wasmtime_lib",
+        "@proxy_wasm_cpp_host_deps//:wasmtime_lib",
     ],
 )
 

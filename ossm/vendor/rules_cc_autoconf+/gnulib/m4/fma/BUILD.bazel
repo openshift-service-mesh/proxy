@@ -1,0 +1,25 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/fma.m4
+
+gl_FUNC_FMA:
+- AC_REQUIRE([gl_MATH_H_DEFAULTS])
+- AC_REQUIRE([gl_USE_SYSTEM_EXTENSIONS])
+- AC_CHECK_FUNCS([fma])
+- AC_SUBST([FMA_LIBM])
+"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "fma",
+    checks = [
+        # FMA_LIBM is empty on macOS
+        checks.AC_SUBST("FMA_LIBM", ""),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/fegetround",
+        "//gnulib/m4/frexp",
+        "//gnulib/m4/ldexp",
+    ],
+)

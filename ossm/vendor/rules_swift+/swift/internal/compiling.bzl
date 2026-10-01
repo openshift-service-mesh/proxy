@@ -14,8 +14,10 @@
 
 """Implementation of compilation logic for Swift."""
 
+load("@bazel_skylib//lib:collections.bzl", "collections")
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@bazel_skylib//lib:sets.bzl", "sets")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load(
     "//swift:providers.bzl",
     "SwiftInfo",
@@ -35,17 +37,24 @@ load(":actions.bzl", "is_action_enabled", "run_toolchain_action")
 load(":explicit_module_map_file.bzl", "write_explicit_swift_module_map_file")
 load(
     ":feature_names.bzl",
+    "SWIFT_FEATURE_ADD_DEFAULT_PRECOMPILED_MODULES",
     "SWIFT_FEATURE_ADD_TARGET_NAME_TO_OUTPUT",
     "SWIFT_FEATURE_DECLARE_SWIFTSOURCEINFO",
     "SWIFT_FEATURE_EMIT_BC",
     "SWIFT_FEATURE_EMIT_C_MODULE",
+    "SWIFT_FEATURE_EMIT_LOCALIZED_STRINGS",
     "SWIFT_FEATURE_EMIT_PRIVATE_SWIFTINTERFACE",
     "SWIFT_FEATURE_EMIT_SWIFTDOC",
     "SWIFT_FEATURE_EMIT_SWIFTINTERFACE",
+    "SWIFT_FEATURE_ENABLE_EMBEDDED",
     "SWIFT_FEATURE_FULL_LTO",
     "SWIFT_FEATURE_HEADERS_ALWAYS_ACTION_INPUTS",
     "SWIFT_FEATURE_INDEX_WHILE_BUILDING",
+    "SWIFT_FEATURE_LAYERING_CHECK_EXTERNAL_SWIFT",
+    "SWIFT_FEATURE_LAYERING_CHECK_SWIFT",
+    "SWIFT_FEATURE_LOAD_PLUGINS_FROM_DIRECT_DEPENDENCIES",
     "SWIFT_FEATURE_MODULAR_INDEXING",
+    "SWIFT_FEATURE_MODULE_MAP_HOME_IS_CWD",
     "SWIFT_FEATURE_NO_GENERATED_MODULE_MAP",
     "SWIFT_FEATURE_OPT",
     "SWIFT_FEATURE_OPT_USES_WMO",
@@ -53,33 +62,103 @@ load(
     "SWIFT_FEATURE_SPLIT_DERIVED_FILES_GENERATION",
     "SWIFT_FEATURE_SYSTEM_MODULE",
     "SWIFT_FEATURE_THIN_LTO",
+    "SWIFT_FEATURE_USE_C_MODULES",
     "SWIFT_FEATURE_USE_EXPLICIT_SWIFT_MODULE_MAP",
-    "SWIFT_FEATURE_VFSOVERLAY",
     "SWIFT_FEATURE__NUM_THREADS_0_IN_SWIFTCOPTS",
     "SWIFT_FEATURE__WMO_IN_SWIFTCOPTS",
 )
 load(
     ":features.bzl",
     "are_all_features_enabled",
+    "gather_toolchains",
     "get_cc_feature_configuration",
     "is_feature_enabled",
     "upcoming_and_experimental_features",
 )
 load(":module_maps.bzl", "write_module_map")
+load(":toolchain_utils.bzl", "SWIFT_TOOLCHAIN_TYPE")
 load(
     ":utils.bzl",
     "compact",
     "compilation_context_for_explicit_module_compilation",
+    "get_clang_implicit_deps",
+    "get_swift_implicit_deps",
     "merge_compilation_contexts",
     "owner_relative_path",
     "struct_fields",
 )
-load(":vfsoverlay.bzl", "write_vfsoverlay")
 load(":wmo.bzl", "find_num_threads_flag_value", "is_wmo_manually_requested")
 
-# VFS root where all .swiftmodule files will be placed when
-# SWIFT_FEATURE_VFSOVERLAY is enabled.
-_SWIFTMODULES_VFS_ROOT = "/__build_bazel_rules_swift/swiftmodules"
+def transitive_swift_dependency_inputs(transitive_modules):
+    """Returns Swift dependency artifacts that must be present in the sandbox.
+
+    Args:
+        transitive_modules: A list of transitive Swift module contexts.
+
+    Returns:
+        A list of `.swiftmodule` files and the preferred textual interface file
+        for each Swift dependency.
+    """
+    inputs = []
+
+    for module in transitive_modules:
+        swift_module = module.swift
+        if not swift_module:
+            continue
+
+        if type(swift_module.swiftmodule) == "File":
+            inputs.append(swift_module.swiftmodule)
+
+        interface_file = (
+            swift_module.private_swiftinterface or
+            swift_module.swiftinterface
+        )
+        if interface_file:
+            inputs.append(interface_file)
+
+    return inputs
+
+def _explicit_swift_module_map_info(
+        *,
+        actions,
+        feature_configuration,
+        target_name,
+        transitive_modules):
+    """Returns the explicit Swift module map file and matching Swift inputs."""
+    if is_feature_enabled(
+        feature_configuration = feature_configuration,
+        feature_name = SWIFT_FEATURE_USE_EXPLICIT_SWIFT_MODULE_MAP,
+    ):
+        module_contexts = transitive_modules
+        filename = "{}.swift-explicit-module-map.json".format(target_name)
+    elif is_feature_enabled(
+        feature_configuration = feature_configuration,
+        feature_name = SWIFT_FEATURE_USE_C_MODULES,
+    ):
+        # Keep non-system Swift deps on search paths, but include system
+        # modules to make sure everything loads them with the same behavior
+        module_contexts = [
+            module
+            for module in transitive_modules
+            if module.is_system
+        ]
+        if not module_contexts:
+            return struct(file = None, inputs = [])
+
+        filename = "{}.swift-system-explicit-module-map.json".format(target_name)
+    else:
+        return struct(file = None, inputs = [])
+
+    explicit_swift_module_map_file = actions.declare_file(filename)
+    write_explicit_swift_module_map_file(
+        actions = actions,
+        explicit_swift_module_map_file = explicit_swift_module_map_file,
+        module_contexts = module_contexts,
+    )
+    return struct(
+        file = explicit_swift_module_map_file,
+        inputs = transitive_swift_dependency_inputs(module_contexts),
+    )
 
 def create_compilation_context(defines, srcs, transitive_modules):
     """Cretes a compilation context for a Swift target.
@@ -132,6 +211,7 @@ def create_compilation_context(defines, srcs, transitive_modules):
 def compile_module_interface(
         *,
         actions,
+        additional_inputs = [],
         clang_module = None,
         compilation_contexts,
         copts = [],
@@ -141,12 +221,19 @@ def compile_module_interface(
         module_name,
         swiftinterface_file,
         swift_infos,
-        swift_toolchain,
-        target_name):
+        swift_toolchain = None,
+        target_name,
+        toolchains = None,
+        toolchain_type = SWIFT_TOOLCHAIN_TYPE):
     """Compiles a Swift module interface.
 
     Args:
         actions: The context's `actions` object.
+        additional_inputs: A list of `File`s that should be available to the
+            compile action in the sandbox but are not referenced on the command
+            line. The typical use case is making a sibling `.private.swiftinterface`
+            available alongside the public `.swiftinterface` so the compiler can
+            resolve SPI references during the textual-interface build.
         clang_module: An optional underlying Clang module (as returned by
             `create_clang_module_inputs`), if present for this Swift module.
         compilation_contexts: A list of `CcCompilationContext`s that represent
@@ -167,30 +254,55 @@ def compile_module_interface(
         swift_infos: A list of `SwiftInfo` providers from dependencies of the
             target being compiled.
         swift_toolchain: The `SwiftToolchainInfo` provider of the toolchain.
-        target_name: The name of the target for which the code is being
+        target_name: The name of the target for which the interface is being
             compiled, which is used to determine unique file paths for the
             outputs.
+        toolchains: The struct containing the Swift and C++ toolchain providers,
+            as returned by `swift_common.find_all_toolchains()`.
+        toolchain_type: The toolchain type of the `swift_toolchain` which is
+            used for the proper selection of the execution platform inside
+            `run_toolchain_action`.
 
     Returns:
-        A Swift module context (as returned by `create_swift_module_context`)
-        that contains the Swift (and potentially C/Objective-C) compilation
-        prerequisites of the compiled module. This should typically be
-        propagated by a `SwiftInfo` provider of the calling rule, and the
-        `CcCompilationContext` inside the Clang module substructure should be
-        propagated by the `CcInfo` provider of the calling rule.
-    """
-    swiftmodule_file = actions.declare_file("{}.swiftmodule".format(module_name))
+        A `struct` with the following fields:
 
+        *   `module_context`: A Swift module context (as returned by
+            `create_swift_module_context`) that contains the Swift (and
+            potentially C/Objective-C) compilation prerequisites of the compiled
+            module. This should typically be propagated by a `SwiftInfo`
+            provider of the calling rule, and the `CcCompilationContext` inside
+            the Clang module substructure should be propagated by the `CcInfo`
+            provider of the calling rule.
+
+        *   `supplemental_outputs`: A `struct` representing supplemental,
+            optional outputs. Its fields are:
+
+            *   `indexstore_directory`: A directory-type `File` that represents
+                the indexstore output files created when the feature
+                `swift.index_while_building` is enabled.
+    """
+    toolchains = gather_toolchains(
+        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
+    )
+
+    swiftmodule_file = actions.declare_file(
+        "{}_outs/{}.swiftmodule".format(target_name, module_name),
+    )
+    outputs = [swiftmodule_file]
+
+    implicit_swift_infos, implicit_cc_infos = get_swift_implicit_deps(
+        feature_configuration = feature_configuration,
+        swift_toolchain = toolchains.swift,
+    )
     merged_compilation_context = merge_compilation_contexts(
         transitive_compilation_contexts = compilation_contexts + [
             cc_info.compilation_context
-            for cc_info in swift_toolchain.implicit_deps_providers.cc_infos
+            for cc_info in implicit_cc_infos
         ],
     )
     merged_swift_info = SwiftInfo(
-        swift_infos = (
-            swift_infos + swift_toolchain.implicit_deps_providers.swift_infos
-        ),
+        swift_infos = swift_infos + implicit_swift_infos,
     )
 
     # Flattening this `depset` is necessary because we need to extract the
@@ -200,73 +312,52 @@ def compile_module_interface(
     # than the same `depset` being flattened and re-merged multiple times up
     # the build graph.
     transitive_modules = merged_swift_info.transitive_modules.to_list()
-    transitive_swiftmodules = []
-    for module in transitive_modules:
-        swift_module = module.swift
-        if not swift_module:
-            continue
-        transitive_swiftmodules.append(swift_module.swiftmodule)
+    transitive_swift_dependency_inputs_list = transitive_swift_dependency_inputs(
+        transitive_modules,
+    )
 
     if clang_module:
         transitive_modules.append(create_swift_module_context(
             name = module_name,
             clang = clang_module,
+            label = feature_configuration._label,
         ))
 
-    # We need this when generating the VFS overlay file and also when
-    # configuring inputs for the compile action, so it's best to precompute it
-    # here.
-    if is_feature_enabled(
+    explicit_swift_module_map_info = _explicit_swift_module_map_info(
+        actions = actions,
         feature_configuration = feature_configuration,
-        feature_name = SWIFT_FEATURE_VFSOVERLAY,
-    ):
-        vfsoverlay_file = actions.declare_file(
-            "{}.vfsoverlay.yaml".format(target_name),
-        )
-        write_vfsoverlay(
-            actions = actions,
-            swiftmodules = transitive_swiftmodules,
-            vfsoverlay_file = vfsoverlay_file,
-            virtual_swiftmodule_root = _SWIFTMODULES_VFS_ROOT,
-        )
-    else:
-        vfsoverlay_file = None
+        target_name = target_name,
+        transitive_modules = transitive_modules,
+    )
 
     if is_feature_enabled(
         feature_configuration = feature_configuration,
-        feature_name = SWIFT_FEATURE_USE_EXPLICIT_SWIFT_MODULE_MAP,
+        feature_name = SWIFT_FEATURE_INDEX_WHILE_BUILDING,
     ):
-        if vfsoverlay_file:
-            fail("Cannot use both `swift.vfsoverlay` and `swift.use_explicit_swift_module_map` features at the same time.")
-
-        explicit_swift_module_map_file = actions.declare_file(
-            "{}.swift-explicit-module-map.json".format(target_name),
+        indexstore_directory = actions.declare_directory(
+            "{}.swiftinterface.indexstore".format(target_name),
         )
-        write_explicit_swift_module_map_file(
-            actions = actions,
-            explicit_swift_module_map_file = explicit_swift_module_map_file,
-            module_contexts = transitive_modules,
-        )
+        outputs.append(indexstore_directory)
     else:
-        explicit_swift_module_map_file = None
+        indexstore_directory = None
 
     prerequisites = struct(
+        additional_inputs = additional_inputs,
         bin_dir = feature_configuration._bin_dir,
         cc_compilation_context = merged_compilation_context,
-        explicit_swift_module_map_file = explicit_swift_module_map_file,
+        explicit_swift_module_map_file = explicit_swift_module_map_info.file,
+        explicit_swift_module_map_inputs = explicit_swift_module_map_info.inputs,
         genfiles_dir = feature_configuration._genfiles_dir,
+        indexstore_directory = indexstore_directory,
         is_swift = True,
         module_name = module_name,
         objc_include_paths_workaround = depset(),
-        objc_info = None,
         source_files = [swiftinterface_file],
         swiftmodule_file = swiftmodule_file,
         target_label = feature_configuration._label,
         transitive_modules = transitive_modules,
-        transitive_swiftmodules = transitive_swiftmodules,
+        transitive_swift_dependency_inputs = transitive_swift_dependency_inputs_list,
         user_compile_flags = copts,
-        vfsoverlay_file = vfsoverlay_file,
-        vfsoverlay_search_path = _SWIFTMODULES_VFS_ROOT,
     )
 
     run_toolchain_action(
@@ -274,10 +365,11 @@ def compile_module_interface(
         action_name = SWIFT_ACTION_COMPILE_MODULE_INTERFACE,
         exec_group = exec_group,
         feature_configuration = feature_configuration,
-        outputs = [swiftmodule_file],
+        outputs = outputs,
         prerequisites = prerequisites,
         progress_message = "Compiling Swift module {} from textual interface".format(module_name),
-        swift_toolchain = swift_toolchain,
+        swift_toolchain = toolchains.swift,
+        toolchain_type = toolchain_type,
     )
 
     module_context = create_swift_module_context(
@@ -291,14 +383,21 @@ def compile_module_interface(
             feature_configuration = feature_configuration,
             feature_name = SWIFT_FEATURE_SYSTEM_MODULE,
         ),
+        label = feature_configuration._label,
         swift = create_swift_module_inputs(
+            indexstore = indexstore_directory,
             swiftdoc = None,
             swiftinterface = swiftinterface_file,
             swiftmodule = swiftmodule_file,
         ),
     )
 
-    return module_context
+    return struct(
+        module_context = module_context,
+        supplemental_outputs = struct(
+            indexstore_directory = indexstore_directory,
+        ),
+    )
 
 def compile(
         *,
@@ -314,14 +413,16 @@ def compile(
         is_test = None,
         include_dev_srch_paths = None,
         module_name,
-        objc_infos,
         package_name,
         plugins = [],
+        private_cc_infos = [],
         private_swift_infos = [],
         srcs,
         swift_infos,
-        swift_toolchain,
+        swift_toolchain = None,
         target_name,
+        toolchains = None,
+        toolchain_type = SWIFT_TOOLCHAIN_TYPE,
         workspace_name):
     """Compiles a Swift module.
 
@@ -335,8 +436,8 @@ def compile(
             preprocessor defines, header search paths, and so forth. These are
             typically retrieved from a target's dependencies.
         copts: A list of compiler flags that apply to the target being built.
-            These flags, along with those from Bazel's Swift configuration
-            fragment (i.e., `--swiftcopt` command line flags) are scanned to
+            These flags, along with those from the `@rules_swift//swift:copt`
+            build setting (typically passed as `--swiftcopt`) are scanned to
             determine whether whole module optimization is being requested,
             which affects the nature of the output files.
         defines: Symbols that should be defined by passing `-D` to the compiler.
@@ -358,14 +459,15 @@ def compile(
         module_name: The name of the Swift module being compiled. This must be
             present and valid; use `derive_swift_module_name` to generate a
             default from the target's label if needed.
-        objc_infos: A list of `apple_common.ObjC` providers that represent
-            C/Objective-C requirements of the target being compiled, such as
-            Swift-compatible preprocessor defines, header search paths, and so
-            forth. These are typically retrieved from a target's dependencies.
         package_name: The semantic package of the name of the Swift module
             being compiled.
         plugins: A list of `SwiftCompilerPluginInfo` providers that represent
             plugins that should be loaded by the compiler.
+        private_cc_infos: A list of `CcInfos`s that represent private
+            (non-propagated) C/Objective-C requirements of the target being
+            compiled, such as Swift-compatible preprocessor defines, header
+            search paths, and so forth. These are typically retrieved from a
+            target's `private_deps`.
         private_swift_infos: A list of `SwiftInfo` providers from private
             (implementation-only) dependencies of the target being compiled. The
             modules defined by these providers are used as dependencies of the
@@ -377,9 +479,17 @@ def compile(
             these providers are used as dependencies of both the Swift module
             being compiled and the Clang module for the generated header.
         swift_toolchain: The `SwiftToolchainInfo` provider of the toolchain.
+        toolchain_type: A toolchain type of the `swift_toolchain` which is used
+            for the proper selection of the execution platform inside
+            `run_toolchain_action`.
         target_name: The name of the target for which the code is being
             compiled, which is used to determine unique file paths for the
             outputs.
+        toolchains: The struct containing the Swift and C++ toolchain providers,
+            as returned by `swift_common.find_all_toolchains()`.
+        toolchain_type: The toolchain type of the `swift_toolchain` which is
+            used for the proper selection of the execution platform inside
+            `run_toolchain_action`.
         workspace_name: The name of the workspace for which the code is being
              compiled, which is used to determine unique file paths for some
              outputs.
@@ -421,19 +531,34 @@ def compile(
                 the indexstore output files created when the feature
                 `swift.index_while_building` is enabled.
 
+            *   `localized_strings_directory`: A directory-type `File` that
+                represents the location where the Swift compiler's
+                `.stringsdata` localized-string files were written (one per
+                source file), created when the feature
+                `swift.emit_localized_strings` is enabled.
+
             *   `macro_expansion_directory`: A directory-type `File` that
                 represents the location where macro expansion files were written
                 (only in debug/fastbuild and only when the toolchain supports
                 macros).
     """
+    toolchains = gather_toolchains(
+        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
+    )
 
     # Apply the module alias for the module being compiled, if present.
-    module_alias = swift_toolchain.module_aliases.get(module_name)
+    module_alias = toolchains.swift.module_aliases.get(module_name)
     if module_alias:
         original_module_name = module_name
         module_name = module_alias
     else:
         original_module_name = None
+
+    implicit_swift_infos, implicit_cc_infos = get_swift_implicit_deps(
+        feature_configuration = feature_configuration,
+        swift_toolchain = toolchains.swift,
+    )
 
     # Collect the `SwiftInfo` providers that represent the dependencies of the
     # Objective-C generated header module -- this includes the dependencies of
@@ -443,8 +568,8 @@ def compile(
     # `use` declarations), and later in this function when precompiling the
     # module.
     generated_module_deps_swift_infos = (
-        swift_infos +
-        swift_toolchain.generated_header_module_implicit_deps_providers.swift_infos
+        swift_infos + implicit_swift_infos +
+        toolchains.swift.generated_header_module_implicit_deps_providers.swift_infos
     )
 
     # These are the `SwiftInfo` providers that will be merged with the compiled
@@ -455,15 +580,23 @@ def compile(
     # TODO(allevato): It would potentially clean things up if we included the
     # toolchain's implicit dependencies here as well. Do this and make sure it
     # doesn't break anything unexpected.
-    swift_infos_to_propagate = swift_infos + _cross_imported_swift_infos(
-        swift_toolchain = swift_toolchain,
-        user_swift_infos = swift_infos + private_swift_infos,
-    )
-
+    if is_feature_enabled(
+        feature_configuration = feature_configuration,
+        feature_name = SWIFT_FEATURE_USE_C_MODULES,
+    ):
+        cross_imported_overlays = _cross_imported_overlays(
+            swift_toolchain = toolchains.swift,
+            user_swift_infos = swift_infos + private_swift_infos + implicit_swift_infos,
+        )
+    else:
+        cross_imported_overlays = []
+    swift_infos_to_propagate = swift_infos + [
+        swift_info
+        for overlay in cross_imported_overlays
+        for swift_info in overlay.swift_infos
+    ]
     all_swift_infos = (
-        swift_infos_to_propagate +
-        private_swift_infos +
-        swift_toolchain.implicit_deps_providers.swift_infos
+        swift_infos_to_propagate + private_swift_infos + implicit_swift_infos
     )
     merged_swift_info = SwiftInfo(swift_infos = all_swift_infos)
 
@@ -477,7 +610,7 @@ def compile(
     for info in extra_swift_infos:
         transitive_modules.extend(info.transitive_modules.to_list())
 
-    const_gather_protocols_file = swift_toolchain.const_protocols_to_gather
+    const_gather_protocols_file = toolchains.swift.const_protocols_to_gather
 
     compile_outputs = _declare_compile_outputs(
         srcs = srcs,
@@ -498,10 +631,8 @@ def compile(
 
     if split_derived_file_generation:
         all_compile_outputs = compact([
-            compile_outputs.swiftinterface_file,
-            compile_outputs.private_swiftinterface_file,
             compile_outputs.indexstore_directory,
-            compile_outputs.macro_expansion_directory,
+            compile_outputs.localized_strings_directory,
         ]) + compile_outputs.object_files + compile_outputs.const_values_files
         all_derived_outputs = compact([
             # The `.swiftmodule` file is explicitly listed as the first output
@@ -509,9 +640,12 @@ def compile(
             # various things (such as the filename prefix for param files generated
             # for that action). This guarantees some predictability.
             compile_outputs.swiftmodule_file,
-            compile_outputs.swiftdoc_file,
-            compile_outputs.swiftsourceinfo_file,
             compile_outputs.generated_header_file,
+            compile_outputs.macro_expansion_directory,
+            compile_outputs.swiftdoc_file,
+            compile_outputs.swiftinterface_file,
+            compile_outputs.private_swiftinterface_file,
+            compile_outputs.swiftsourceinfo_file,
         ])
     else:
         all_compile_outputs = compact([
@@ -526,6 +660,7 @@ def compile(
             compile_outputs.swiftsourceinfo_file,
             compile_outputs.generated_header_file,
             compile_outputs.indexstore_directory,
+            compile_outputs.localized_strings_directory,
             compile_outputs.macro_expansion_directory,
         ]) + compile_outputs.object_files + compile_outputs.const_values_files
         all_derived_outputs = []
@@ -534,78 +669,105 @@ def compile(
     # `compilation_contexts` instead of merging `CcInfo`s. This is because
     # they don't need the merged linking context to disable framework
     # autolinking. If we ever remove our need for `-disable-autolink-framework`,
-    # we should change this to match `upstream`. Same for `apple_common.Objc`.
+    # we should change this to match `upstream`. Same for `ObjcInfo`.
     compilation_contexts = [
         cc_info.compilation_context
         for cc_info in cc_infos
     ]
     merged_cc_info = cc_common.merge_cc_infos(
-        cc_infos = cc_infos + swift_toolchain.implicit_deps_providers.cc_infos,
-    )
-    merged_objc_info = apple_common.new_objc_provider(
-        providers = objc_infos + swift_toolchain.implicit_deps_providers.objc_infos,
+        cc_infos = cc_infos + private_cc_infos +
+                   implicit_cc_infos,
     )
 
-    transitive_swiftmodules = []
     defines_set = sets.make(defines)
     for module in transitive_modules:
         swift_module = module.swift
         if not swift_module:
             continue
-        transitive_swiftmodules.append(swift_module.swiftmodule)
         if swift_module.defines:
             defines_set = sets.union(
                 defines_set,
                 sets.make(swift_module.defines),
             )
+    transitive_swift_dependency_inputs_list = transitive_swift_dependency_inputs(
+        transitive_modules,
+    )
 
-    # We need this when generating the VFS overlay file and also when
-    # configuring inputs for the compile action, so it's best to precompute it
-    # here.
-    if is_feature_enabled(
+    explicit_swift_module_map_info = _explicit_swift_module_map_info(
+        actions = actions,
         feature_configuration = feature_configuration,
-        feature_name = SWIFT_FEATURE_VFSOVERLAY,
-    ):
-        vfsoverlay_file = actions.declare_file(
-            "{}.vfsoverlay.yaml".format(target_name),
+        target_name = target_name,
+        transitive_modules = transitive_modules,
+    )
+
+    swift_layering_check_enabled = is_feature_enabled(
+        feature_configuration = feature_configuration,
+        feature_name = SWIFT_FEATURE_LAYERING_CHECK_SWIFT,
+    )
+
+    if swift_layering_check_enabled and feature_configuration._label.repo_name:
+        swift_layering_check_enabled = is_feature_enabled(
+            feature_configuration = feature_configuration,
+            feature_name = SWIFT_FEATURE_LAYERING_CHECK_EXTERNAL_SWIFT,
         )
-        write_vfsoverlay(
+
+    if swift_layering_check_enabled:
+        # For performance, don't worry about uniquing the module names; since
+        # Bazel doesn't allow repeated `deps` the only time a duplicate might
+        # appear is if someone explicitly depends on an implicit dependency that
+        # came from the toolchain. This is relatively unlikely, and the worker
+        # will dedupe it anyway.
+        direct_module_names = []
+        for dep_swift_info in all_swift_infos:
+            for dep_module_context in dep_swift_info.direct_modules:
+                direct_module_names.append(dep_module_context.name)
+
+        validate_system_modules = is_feature_enabled(
+            feature_configuration = feature_configuration,
+            feature_name = SWIFT_FEATURE_USE_C_MODULES,
+        ) and not is_feature_enabled(
+            feature_configuration = feature_configuration,
+            feature_name = SWIFT_FEATURE_ADD_DEFAULT_PRECOMPILED_MODULES,
+        )
+
+        layering_check_transitive_modules = [
+            module_context
+            for module_context in transitive_modules
+            # If we want to validate system modules that happens below
+            if not module_context.is_system
+        ]
+        if validate_system_modules:
+            # Default precompiled modules are disabled, so SDK modules are no
+            # longer implicit imports and should participate in layering checks.
+            for swift_info in toolchains.swift.system_modules.swift_infos:
+                layering_check_transitive_modules.extend(
+                    swift_info.transitive_modules.to_list(),
+                )
+
+        deps_modules_file = actions.declare_file(
+            "{}.deps-module-mapping".format(target_name),
+        )
+        _write_deps_modules_file(
             actions = actions,
-            swiftmodules = transitive_swiftmodules,
-            vfsoverlay_file = vfsoverlay_file,
-            virtual_swiftmodule_root = _SWIFTMODULES_VFS_ROOT,
+            deps_modules_file = deps_modules_file,
+            direct_module_names = direct_module_names,
+            transitive_modules = layering_check_transitive_modules,
         )
     else:
-        vfsoverlay_file = None
+        deps_modules_file = None
 
-    if is_feature_enabled(
-        feature_configuration = feature_configuration,
-        feature_name = SWIFT_FEATURE_USE_EXPLICIT_SWIFT_MODULE_MAP,
-    ):
-        if vfsoverlay_file:
-            fail("Cannot use both `swift.vfsoverlay` and `swift.use_explicit_swift_module_map` features at the same time.")
-
-        # Generate the JSON file that contains the manifest of Swift
-        # dependencies.
-        explicit_swift_module_map_file = actions.declare_file(
-            "{}.swift-explicit-module-map.json".format(target_name),
-        )
-        write_explicit_swift_module_map_file(
-            actions = actions,
-            explicit_swift_module_map_file = explicit_swift_module_map_file,
-            module_contexts = transitive_modules,
-        )
-    else:
-        explicit_swift_module_map_file = None
-
-    # As of the time of this writing (Xcode 15.0), macros are the only kind of
-    # plugins that are available. Since macros do source-level transformations,
-    # we only need to load plugins directly used by the module being compiled.
-    # Plugins that are only used by transitive dependencies do *not* need to be
-    # passed; the compiler does not attempt to load them when deserializing
-    # modules.
     used_plugins = list(plugins)
-    for module_context in transitive_modules:
+    if is_feature_enabled(
+        feature_configuration = feature_configuration,
+        feature_name = SWIFT_FEATURE_LOAD_PLUGINS_FROM_DIRECT_DEPENDENCIES,
+    ):
+        plugin_module_contexts = []
+        for swift_info in swift_infos + private_swift_infos:
+            plugin_module_contexts.extend(swift_info.direct_modules)
+    else:
+        plugin_module_contexts = transitive_modules
+
+    for module_context in plugin_module_contexts:
         if module_context.swift and module_context.swift.plugins:
             used_plugins.extend(module_context.swift.plugins)
 
@@ -628,7 +790,7 @@ to use swift_common.compile(include_dev_srch_paths = ...) instead.\
         feature_configuration = feature_configuration,
     )
     prerequisites = struct(
-        additional_inputs = additional_inputs,
+        additional_inputs = additional_inputs + toolchains.cc.all_files.to_list(),
         always_include_headers = is_feature_enabled(
             feature_configuration = feature_configuration,
             feature_name = SWIFT_FEATURE_HEADERS_ALWAYS_ACTION_INPUTS,
@@ -637,26 +799,26 @@ to use swift_common.compile(include_dev_srch_paths = ...) instead.\
         cc_compilation_context = merged_cc_info.compilation_context,
         const_gather_protocols_file = const_gather_protocols_file,
         cc_linking_context = merged_cc_info.linking_context,
+        cross_import_overlays = cross_imported_overlays,
         defines = sets.to_list(defines_set),
-        developer_dirs = swift_toolchain.developer_dirs,
+        deps_modules_file = deps_modules_file,
+        developer_dirs = toolchains.swift.developer_dirs,
         experimental_features = experimental_features,
-        explicit_swift_module_map_file = explicit_swift_module_map_file,
+        explicit_swift_module_map_file = explicit_swift_module_map_info.file,
+        explicit_swift_module_map_inputs = explicit_swift_module_map_info.inputs,
         genfiles_dir = feature_configuration._genfiles_dir,
         include_dev_srch_paths = include_dev_srch_paths_value,
         is_swift = True,
         module_name = module_name,
-        objc_info = merged_objc_info,
         original_module_name = original_module_name,
         package_name = package_name,
-        plugins = used_plugins,
+        plugins = collections.uniq(used_plugins),
         source_files = srcs,
         target_label = feature_configuration._label,
         transitive_modules = transitive_modules,
-        transitive_swiftmodules = transitive_swiftmodules,
+        transitive_swift_dependency_inputs = transitive_swift_dependency_inputs_list,
         upcoming_features = upcoming_features,
         user_compile_flags = copts,
-        vfsoverlay_file = vfsoverlay_file,
-        vfsoverlay_search_path = _SWIFTMODULES_VFS_ROOT,
         workspace_name = workspace_name,
         # Merge the compile outputs into the prerequisites.
         **struct_fields(compile_outputs)
@@ -666,11 +828,13 @@ to use swift_common.compile(include_dev_srch_paths = ...) instead.\
         run_toolchain_action(
             actions = actions,
             action_name = SWIFT_ACTION_DERIVE_FILES,
+            exec_group = exec_group,
             feature_configuration = feature_configuration,
             outputs = all_derived_outputs,
             prerequisites = prerequisites,
             progress_message = "Generating derived files for Swift module %{label}",
-            swift_toolchain = swift_toolchain,
+            swift_toolchain = toolchains.swift,
+            toolchain_type = toolchain_type,
         )
 
     run_toolchain_action(
@@ -681,7 +845,8 @@ to use swift_common.compile(include_dev_srch_paths = ...) instead.\
         outputs = all_compile_outputs,
         prerequisites = prerequisites,
         progress_message = "Compiling Swift module %{label}",
-        swift_toolchain = swift_toolchain,
+        swift_toolchain = toolchains.swift,
+        toolchain_type = toolchain_type,
     )
 
     # Dump AST has to run in its own action because `-dump-ast` is incompatible
@@ -693,11 +858,13 @@ to use swift_common.compile(include_dev_srch_paths = ...) instead.\
     run_toolchain_action(
         actions = actions,
         action_name = SWIFT_ACTION_DUMP_AST,
+        exec_group = exec_group,
         feature_configuration = feature_configuration,
         outputs = compile_outputs.ast_files,
         prerequisites = prerequisites,
         progress_message = "Dumping Swift AST for %{label}",
-        swift_toolchain = swift_toolchain,
+        swift_toolchain = toolchains.swift,
+        toolchain_type = toolchain_type,
     )
 
     # If a header and module map were generated for this Swift module, attempt
@@ -720,7 +887,7 @@ to use swift_common.compile(include_dev_srch_paths = ...) instead.\
             )
         )
 
-        pcm_outputs = _precompile_clang_module(
+        compile_result = _precompile_clang_module(
             actions = actions,
             cc_compilation_context = compilation_context_to_compile,
             exec_group = exec_group,
@@ -729,13 +896,12 @@ to use swift_common.compile(include_dev_srch_paths = ...) instead.\
             module_map_file = compile_outputs.generated_module_map_file,
             module_name = module_name,
             swift_infos = generated_module_deps_swift_infos,
-            swift_toolchain = swift_toolchain,
+            swift_toolchain = toolchains.swift,
             target_name = target_name,
+            toolchain_type = toolchain_type,
+            user_compile_flags = [],
         )
-        if pcm_outputs:
-            precompiled_module = pcm_outputs.pcm_file
-        else:
-            precompiled_module = None
+        precompiled_module = compile_result.clang_module.precompiled_module if compile_result else None
     else:
         precompiled_module = None
 
@@ -769,14 +935,15 @@ to use swift_common.compile(include_dev_srch_paths = ...) instead.\
                 feature_configuration = feature_configuration,
                 includes = includes,
                 public_hdrs = public_hdrs,
-                swift_toolchain = swift_toolchain,
                 target_name = target_name,
+                toolchains = toolchains,
             ),
             module_map = compile_outputs.generated_module_map_file,
             precompiled_module = precompiled_module,
         ),
         compilation_context = compilation_context,
         is_system = False,
+        label = feature_configuration._label,
         swift = create_swift_module_inputs(
             ast_files = compile_outputs.ast_files,
             defines = defines,
@@ -805,6 +972,7 @@ to use swift_common.compile(include_dev_srch_paths = ...) instead.\
             ast_files = compile_outputs.ast_files,
             const_values_files = compile_outputs.const_values_files,
             indexstore_directory = compile_outputs.indexstore_directory,
+            localized_strings_directory = compile_outputs.localized_strings_directory,
             macro_expansion_directory = compile_outputs.macro_expansion_directory,
         ),
         swift_info = SwiftInfo(
@@ -821,9 +989,12 @@ def precompile_clang_module(
         feature_configuration,
         module_map_file,
         module_name,
-        swift_toolchain,
+        swift_toolchain = None,
         target_name,
-        swift_infos = []):
+        toolchains = None,
+        toolchain_type = SWIFT_TOOLCHAIN_TYPE,
+        swift_infos = [],
+        user_compile_flags = []):
     """Precompiles an explicit Clang module that is compatible with Swift.
 
     Args:
@@ -846,15 +1017,30 @@ def precompile_clang_module(
         module_name: The name of the top-level module in the module map that
             will be compiled.
         swift_toolchain: The `SwiftToolchainInfo` provider of the toolchain.
+        toolchains: The struct containing the Swift and C++ toolchain providers,
+            as returned by `swift_common.find_all_toolchains()`.
         target_name: The name of the target for which the code is being
             compiled, which is used to determine unique file paths for the
             outputs.
+        toolchain_type: The toolchain type of the Swift toolchain.
         swift_infos: A list of `SwiftInfo` providers representing dependencies
             required to compile this module.
+        user_compile_flags: Additional Clang flags to pass to the precompile
+            action. Each flag is forwarded to the underlying clang invocation
+            via `-Xcc`.
 
     Returns:
-        A struct containing the precompiled module and optional indexstore directory,
-        or `None` if the toolchain or target does not support precompiled modules.
+        A struct containing the following fields:
+
+        *   `clang_module`: A structure (as returned by
+            `create_clang_module_inputs`) containing the headers, module map,
+            and precompiled module. This can be used if you need to construct a
+            `SwiftInfo` provider for a pure C module (that is, if you are doing
+            something that `swift_clang_module_aspect` cannot handle on its own)
+            or it can be passing into `swift_common.compile_module_interface`
+            when compiling a textual interface that has an underlying C module.
+        *   `indexstore_directory`: The indexstore directory for the precompiled
+            module, if any.
     """
     return _precompile_clang_module(
         actions = actions,
@@ -867,6 +1053,9 @@ def precompile_clang_module(
         swift_infos = swift_infos,
         swift_toolchain = swift_toolchain,
         target_name = target_name,
+        toolchains = toolchains,
+        toolchain_type = toolchain_type,
+        user_compile_flags = user_compile_flags,
     )
 
 def _precompile_clang_module(
@@ -879,8 +1068,11 @@ def _precompile_clang_module(
         module_map_file,
         module_name,
         swift_infos = [],
-        swift_toolchain,
-        target_name):
+        swift_toolchain = None,
+        target_name,
+        toolchains = None,
+        toolchain_type,
+        user_compile_flags):
     """Precompiles an explicit Clang module that is compatible with Swift.
 
     Args:
@@ -910,18 +1102,37 @@ def _precompile_clang_module(
         target_name: The name of the target for which the code is being
             compiled, which is used to determine unique file paths for the
             outputs.
+        toolchains: The struct containing the Swift and C++ toolchain providers,
+            as returned by `swift_common.find_all_toolchains()`.
+        toolchain_type: The toolchain type of the Swift toolchain.
+        user_compile_flags: Additional Clang flags to pass to the precompile
+            action. Each flag is forwarded to the underlying clang invocation
+            via `-Xcc`.
 
     Returns:
-        A struct containing the precompiled module and optional indexstore directory,
-        or `None` if the toolchain or target does not support precompiled modules.
+        A struct containing the following fields:
+
+        *   `clang_module`: A structure (as returned by
+            `create_clang_module_inputs`) containing the headers, module map,
+            and precompiled module. This can be used if you need to construct a
+            `SwiftInfo` provider for a pure C module (that is, if you are doing
+            something that `swift_clang_module_aspect` cannot handle on its own)
+            or it can be passing into `swift_common.compile_module_interface`
+            when compiling a textual interface that has an underlying C module.
+        *   `indexstore_directory`: The indexstore directory for the precompiled
+            module, if any.
     """
+    toolchains = gather_toolchains(
+        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
+    )
 
     # Exit early if the toolchain does not support precompiled modules or if the
     # feature configuration for the target being built does not want a module to
     # be emitted.
     if not is_action_enabled(
         action_name = SWIFT_ACTION_PRECOMPILE_C_MODULE,
-        swift_toolchain = swift_toolchain,
+        swift_toolchain = toolchains.swift,
     ):
         return None
     if not is_feature_enabled(
@@ -934,23 +1145,28 @@ def _precompile_clang_module(
         "{}.swift.pcm".format(target_name),
     )
 
+    additional_swift_infos = []
+    additional_compilation_contexts = []
     if not is_swift_generated_header:
-        implicit_swift_infos = (
-            swift_toolchain.clang_implicit_deps_providers.swift_infos
+        implicit_swift_infos, implicit_cc_infos = get_clang_implicit_deps(
+            feature_configuration = feature_configuration,
+            swift_toolchain = toolchains.swift,
         )
+        additional_swift_infos.extend(implicit_swift_infos)
+        additional_compilation_contexts.extend([
+            cc_info.compilation_context
+            for cc_info in implicit_cc_infos
+        ])
+
+    if additional_compilation_contexts:
         cc_compilation_context = merge_compilation_contexts(
             direct_compilation_contexts = [cc_compilation_context],
-            transitive_compilation_contexts = [
-                cc_info.compilation_context
-                for cc_info in swift_toolchain.clang_implicit_deps_providers.cc_infos
-            ],
+            transitive_compilation_contexts = additional_compilation_contexts,
         )
-    else:
-        implicit_swift_infos = []
 
-    if not is_swift_generated_header and implicit_swift_infos:
+    if additional_swift_infos:
         swift_infos = list(swift_infos)
-        swift_infos.extend(implicit_swift_infos)
+        swift_infos.extend(additional_swift_infos)
 
     if swift_infos:
         merged_swift_info = SwiftInfo(swift_infos = swift_infos)
@@ -976,9 +1192,14 @@ def _precompile_clang_module(
         indexstore_directory = None
         index_unit_output_path = None
 
+    compilation_context_for_compilation = compilation_context_for_explicit_module_compilation(
+        compilation_contexts = [cc_compilation_context],
+        swift_infos = swift_infos,
+    )
+
     prerequisites = struct(
         bin_dir = feature_configuration._bin_dir,
-        cc_compilation_context = cc_compilation_context,
+        cc_compilation_context = compilation_context_for_compilation,
         genfiles_dir = feature_configuration._genfiles_dir,
         include_dev_srch_paths = False,
         indexstore_directory = indexstore_directory,
@@ -987,11 +1208,11 @@ def _precompile_clang_module(
         is_swift_generated_header = is_swift_generated_header,
         module_name = module_name,
         package_name = None,
-        objc_info = apple_common.new_objc_provider(),
         pcm_file = precompiled_module,
         source_files = [module_map_file],
         target_label = feature_configuration._label,
         transitive_modules = transitive_modules,
+        user_compile_flags = user_compile_flags,
     )
 
     run_toolchain_action(
@@ -1002,12 +1223,17 @@ def _precompile_clang_module(
         outputs = outputs,
         prerequisites = prerequisites,
         progress_message = "Precompiling C module %{label}",
-        swift_toolchain = swift_toolchain,
+        swift_toolchain = toolchains.swift,
+        toolchain_type = toolchain_type,
     )
 
     return struct(
+        clang_module = create_clang_module_inputs(
+            compilation_context = compilation_context_for_compilation,
+            module_map = module_map_file,
+            precompiled_module = precompiled_module,
+        ),
         indexstore_directory = indexstore_directory,
-        pcm_file = precompiled_module,
     )
 
 def _create_cc_compilation_context(
@@ -1017,9 +1243,10 @@ def _create_cc_compilation_context(
         defines,
         feature_configuration,
         includes,
+        has_generated_header = False,
         public_hdrs,
-        swift_toolchain,
-        target_name):
+        target_name,
+        toolchains = None):
     """Creates a `CcCompilationContext` to propagate for a Swift module.
 
     The returned compilation context contains the generated Objective-C header
@@ -1038,12 +1265,15 @@ def _create_cc_compilation_context(
             `configure_features`.
         includes: Include paths that should be propagated by the new compilation
             context.
+        has_generated_header: If True, the `public_hdrs` include a generated
+            Objective-C header.
         public_hdrs: Public headers that should be propagated by the new
             compilation context (for example, the module's generated header).
-        swift_toolchain: The `SwiftToolchainInfo` provider of the toolchain.
         target_name: The name of the target for which the code is being
             compiled, which is used to determine unique file paths for the
             outputs.
+        toolchains: The struct containing the Swift and C++ toolchain providers,
+            as returned by `swift_common.find_all_toolchains()`.
 
     Returns:
         The `CcCompilationContext` that should be propagated by the calling
@@ -1059,14 +1289,24 @@ def _create_cc_compilation_context(
     # layering checks will fail when the Objective-C code tries to import the
     # `swift_library`'s headers.
     if public_hdrs:
+        # If we have a generated header, we need to create the feature
+        # configuration that disables `parse_headers` for the compilation
+        # action.
+        if has_generated_header:
+            cc_feature_configuration = (
+                feature_configuration._cc_feature_configuration_no_parse_headers()
+            )
+        else:
+            cc_feature_configuration = get_cc_feature_configuration(
+                feature_configuration = feature_configuration,
+            )
+
         compilation_context, _ = cc_common.compile(
             actions = actions,
-            cc_toolchain = swift_toolchain.cc_toolchain_info,
+            cc_toolchain = toolchains.cc,
             compilation_contexts = compilation_contexts,
             defines = defines,
-            feature_configuration = get_cc_feature_configuration(
-                feature_configuration = feature_configuration,
-            ),
+            feature_configuration = cc_feature_configuration,
             name = target_name,
             includes = includes,
             public_hdrs = public_hdrs,
@@ -1088,8 +1328,11 @@ def _create_cc_compilation_context(
         transitive_compilation_contexts = compilation_contexts,
     )
 
-def _cross_imported_swift_infos(*, swift_toolchain, user_swift_infos):
-    """Returns `SwiftInfo` providers for any cross-imported modules.
+def _cross_imported_overlays(
+        *,
+        swift_toolchain,
+        user_swift_infos):
+    """Returns cross-import overlays needed for a compilation.
 
     Args:
         swift_toolchain: The `SwiftToolchainInfo` provider of the toolchain.
@@ -1100,27 +1343,29 @@ def _cross_imported_swift_infos(*, swift_toolchain, user_swift_infos):
             compilation prerequisites, if any.
 
     Returns:
-        A list of `SwiftInfo` providers representing cross-import overlays
-        needed for compilation.
+        A list of `SwiftCrossImportOverlayInfo` providers needed for
+        compilation.
     """
 
     # Build a "set" containing the module names of direct dependencies so that
     # we can do quicker hash-based lookups below.
-    direct_module_names = {}
+    module_names = {}
     for swift_info in user_swift_infos:
-        for module_context in swift_info.direct_modules:
-            direct_module_names[module_context.name] = True
+        # TODO: Ideally this would only be the direct dependencies, but unless
+        # you enforce layering_check it's easy to rely on this
+        for module_context in swift_info.transitive_modules.to_list():
+            module_names[module_context.name] = True
 
     # For each cross-import overlay registered with the toolchain, add its
     # `SwiftInfo` providers to the list if both its declaring and bystanding
     # modules were imported.
-    overlay_swift_infos = []
+    overlays = []
     for overlay in swift_toolchain.cross_import_overlays:
-        if (overlay.declaring_module in direct_module_names and
-            overlay.bystanding_module in direct_module_names):
-            overlay_swift_infos.extend(overlay.swift_infos)
+        if (overlay.declaring_module in module_names and
+            overlay.bystanding_module in module_names):
+            overlays.append(overlay)
 
-    return overlay_swift_infos
+    return overlays
 
 def _declare_compile_outputs(
         *,
@@ -1268,6 +1513,10 @@ def _declare_compile_outputs(
             module_map_file = generated_module_map,
             module_name = module_name,
             public_headers = [generated_header],
+            workspace_relative = is_feature_enabled(
+                feature_configuration = feature_configuration,
+                feature_name = SWIFT_FEATURE_MODULE_MAP_HOME_IS_CWD,
+            ),
         )
     else:
         generated_module_map = None
@@ -1300,6 +1549,20 @@ def _declare_compile_outputs(
     else:
         indexstore_directory = None
         include_index_unit_paths = False
+
+    # Configure localized-string extraction if requested. The compiler emits one
+    # `.stringsdata` file per source file into this directory; the file set is
+    # not known at analysis time, so (like the index store) it must be a
+    # declared directory output.
+    if is_feature_enabled(
+        feature_configuration = feature_configuration,
+        feature_name = SWIFT_FEATURE_EMIT_LOCALIZED_STRINGS,
+    ):
+        localized_strings_directory = actions.declare_directory(
+            "{}.stringsdata".format(target_name),
+        )
+    else:
+        localized_strings_directory = None
 
     if not output_nature.emits_multiple_objects:
         # If we're emitting a single object, we don't use an object map; we just
@@ -1380,6 +1643,7 @@ def _declare_compile_outputs(
         generated_header_file = generated_header,
         generated_module_map_file = generated_module_map,
         indexstore_directory = indexstore_directory,
+        localized_strings_directory = localized_strings_directory,
         macro_expansion_directory = macro_expansion_directory,
         private_swiftinterface_file = private_swiftinterface_file,
         object_files = object_files,
@@ -1410,7 +1674,9 @@ def _declare_per_source_output_file(actions, extension, target_name, src):
         The declared `File`.
     """
     objs_dir = "{}_objs".format(target_name)
-    owner_rel_path = owner_relative_path(src).replace(" ", "__SPACE__")
+
+    # Spaces in object file paths break response-file parsing on Windows
+    owner_rel_path = owner_relative_path(src).replace(" ", "_")
     basename = paths.basename(owner_rel_path)
     dirname = paths.join(objs_dir, paths.dirname(owner_rel_path))
 
@@ -1624,7 +1890,7 @@ def _emitted_output_nature(feature_configuration, user_compile_flags):
 
     The compiler emits a single object if it is invoked with whole-module
     optimization enabled and is single-threaded (`-num-threads` is not present
-    or is equal to 1); otherwise, it emits one object file per source file. It
+    or is equal to 0); otherwise, it emits one object file per source file. It
     also emits a single `.swiftmodule` file for WMO builds, _regardless of
     thread count,_ so we have to treat that case separately.
 
@@ -1646,6 +1912,10 @@ def _emitted_output_nature(feature_configuration, user_compile_flags):
             feature_configuration = feature_configuration,
             feature_name = SWIFT_FEATURE__WMO_IN_SWIFTCOPTS,
         ) or
+        is_feature_enabled(
+            feature_configuration = feature_configuration,
+            feature_name = SWIFT_FEATURE_ENABLE_EMBEDDED,
+        ) or
         are_all_features_enabled(
             feature_configuration = feature_configuration,
             feature_names = [SWIFT_FEATURE_OPT, SWIFT_FEATURE_OPT_USES_WMO],
@@ -1665,4 +1935,44 @@ def _emitted_output_nature(feature_configuration, user_compile_flags):
     return struct(
         emits_multiple_objects = not (is_wmo and is_single_threaded),
         is_wmo = is_wmo,
+    )
+
+def _write_deps_modules_file(
+        actions,
+        deps_modules_file,
+        direct_module_names,
+        transitive_modules):
+    """Writes a file containing dependency module names and owning labels.
+
+    This file is used by the Swift worker process to perform layering checks.
+    Direct modules are the modules that the Swift code is allowed to import
+    explicitly. Transitive modules are used to filter the imported module list
+    to modules that are known to come from the Bazel dependency graph, which
+    lets SDK/toolchain modules imported implicitly by the compiler be ignored.
+
+    Args:
+        actions: The object used to register actions.
+        deps_modules_file: The output file that will contain the list of
+            imported module names.
+        direct_module_names: The list of names of modules that are the direct
+            dependencies of the code being compiled.
+        transitive_modules: The list of module contexts in the target's
+            transitive dependency graph.
+    """
+    deps_mapping = actions.args()
+    deps_mapping.set_param_file_format("multiline")
+    deps_mapping.add_all(direct_module_names, format_each = "direct:%s")
+    for module_context in transitive_modules:
+        deps_mapping.add_joined(
+            [
+                module_context.name,
+                getattr(module_context, "label", None) or "",
+            ],
+            format_joined = "transitive:%s",
+            join_with = "\t",
+        )
+
+    actions.write(
+        content = deps_mapping,
+        output = deps_modules_file,
     )

@@ -37,6 +37,7 @@ def _archive(
         bundle_extension,
         bundle_name,
         label_name,
+        output_discriminator = "",
         platform_prerequisites,
         predeclared_outputs,
         rule_descriptor):
@@ -50,9 +51,19 @@ def _archive(
         if bundle_name != label_name:
             archive_relative_path = rule_descriptor.bundle_locations.archive_relative
             root_path = label_name + "_archive-root"
-            return actions.declare_directory(
-                paths.join(root_path, archive_relative_path, bundle_name_with_extension),
-            )
+            if output_discriminator:
+                return actions.declare_directory(
+                    paths.join(root_path, archive_relative_path, output_discriminator, bundle_name_with_extension),
+                )
+            else:
+                return actions.declare_directory(
+                    paths.join(root_path, archive_relative_path, bundle_name_with_extension),
+                )
+        if output_discriminator:
+            return actions.declare_directory(paths.join(
+                output_discriminator,
+                bundle_name_with_extension,
+            ))
 
         return actions.declare_directory(bundle_name_with_extension)
     return predeclared_outputs.archive

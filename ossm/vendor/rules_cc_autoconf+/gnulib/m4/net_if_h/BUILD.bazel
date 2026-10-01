@@ -1,0 +1,63 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/net_if_h.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks", "utils")
+load("//gnulib:macros.bzl", gl_macros = "macros")
+
+# gl_HEADER_NET_IF - single AC_DEFUN
+autoconf(
+    name = "gl_HEADER_NET_IF",
+    checks = [
+        # AC_CACHE_CHECK([whether <net/if.h> is self-contained])
+        checks.AC_TRY_COMPILE(
+            name = "_gl_cv_header_net_if_h_selfcontained",
+            code = utils.AC_LANG_PROGRAM(
+                ["#include <net/if.h>"],
+                "struct if_nameindex ni;",
+            ),
+            language = "c",
+        ),
+
+        # AC_CHECK_HEADERS([net/if.h], ...) - only when not self-contained
+        checks.AC_TRY_COMPILE(
+            name = "_gl_cv_header_net_if_h",
+            code = """#include <sys/socket.h>
+#include <net/if.h>
+int main(void) { return 0; }""",
+            language = "c",
+            requires = ["!_gl_cv_header_net_if_h_selfcontained"],
+        ),
+        checks.AC_DEFINE(
+            "HAVE_NET_IF_H",
+            "1",
+            requires = [
+                "!_gl_cv_header_net_if_h_selfcontained",
+                "_gl_cv_header_net_if_h==1",
+            ],
+        ),
+
+        # AC_SUBST([HAVE_NET_IF_H]) - only set when not self-contained
+        checks.AC_SUBST(
+            "HAVE_NET_IF_H",
+            condition = "_gl_cv_header_net_if_h_selfcontained",
+            if_false = "1",
+            if_true = "",
+        ),
+
+        # gl_NEXT_HEADERS([net/if.h]) - only called when not self-contained
+    ] + gl_macros.GL_NEXT_HEADERS(
+        ["net/if.h"],
+        condition = "!_gl_cv_header_net_if_h_selfcontained",
+    ),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/include_next",
+    ],
+)
+
+autoconf(
+    name = "net_if_h",
+    visibility = ["//visibility:public"],
+    deps = [":gl_HEADER_NET_IF"],
+)

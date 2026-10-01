@@ -24,7 +24,7 @@ load(
 load("//foreign_cc/private:make_script.bzl", "pkgconfig_script")
 load("//foreign_cc/private:transitions.bzl", "foreign_cc_rule_variant")
 load("//toolchains/native_tools:native_tools_toolchain.bzl", "native_tool_toolchain")
-load("//toolchains/native_tools:tool_access.bzl", "get_cmake_data", "get_meson_data", "get_ninja_data", "get_pkgconfig_data")
+load("//toolchains/native_tools:tool_access.bzl", "get_cmake_data", "get_make_data", "get_meson_data", "get_ninja_data", "get_pkgconfig_data")
 
 def _meson_impl(ctx):
     """The implementation of the `meson` rule
@@ -40,8 +40,9 @@ def _meson_impl(ctx):
     cmake_data = get_cmake_data(ctx)
     ninja_data = get_ninja_data(ctx)
     pkg_config_data = get_pkgconfig_data(ctx)
+    make_data = get_make_data(ctx)
 
-    tools_data = [meson_data, cmake_data, ninja_data, pkg_config_data]
+    tools_data = [meson_data, cmake_data, ninja_data, pkg_config_data, make_data]
 
     attrs = create_attrs(
         ctx.attr,
@@ -51,6 +52,7 @@ def _meson_impl(ctx):
         meson_path = meson_data.path,
         cmake_path = cmake_data.path,
         ninja_path = ninja_data.path,
+        make_path = make_data.path,
         pkg_config_path = pkg_config_data.path,
     )
     return cc_external_rule_impl(ctx, attrs)
@@ -71,6 +73,7 @@ def _create_meson_script(configureParameters):
     tools = get_tools_info(ctx)
     flags = get_flags_info(ctx)
     script = pkgconfig_script(inputs.ext_build_dirs)
+    build_options = ctx.attr.options
 
     # CFLAGS and CXXFLAGS are also set in foreign_cc/private/cmake_script.bzl, so that meson
     # can use the intended tools.
@@ -81,6 +84,10 @@ def _create_meson_script(configureParameters):
         script.append("##export_var## CC {}".format(_absolutize(ctx.workspace_name, tools.cc)))
     if " " not in tools.cxx:
         script.append("##export_var## CXX {}".format(_absolutize(ctx.workspace_name, tools.cxx)))
+    if " " not in tools.cxx_linker_static and tools.cxx_linker_static.endswith("ar"):
+        script.append("##export_var## AR {}".format(_absolutize(ctx.workspace_name, tools.cxx_linker_static)))
+    if tools.strip and " " not in tools.strip:
+        script.append("##export_var## STRIP {}".format(_absolutize(ctx.workspace_name, tools.strip)))
 
     copts = flags.cc
     cxxopts = flags.cxx
@@ -92,9 +99,16 @@ def _create_meson_script(configureParameters):
     if flags.cxx_linker_executable:
         script.append("##export_var## LDFLAGS \"{} ${{LDFLAGS:-}}\"".format(_join_flags_list(ctx.workspace_name, flags.cxx_linker_executable).replace("\"", "'")))
 
+    # Note that these variables do help meson, but meson has a dependency
+    # search fallback where it asks cmake, and when it tries to invoke all of
+    # the cmake generators (it tries a bunch of them) it doesn't set
+    # CMAKE_MAKE_PROGRAM, so tools like ninja must be in the PATH to be found
+    # (which is handled by the tools setup) and setting NINJA here does not
+    # help that
     script.append("##export_var## CMAKE {}".format(attrs.cmake_path))
     script.append("##export_var## NINJA {}".format(attrs.ninja_path))
     script.append("##export_var## PKG_CONFIG {}".format(attrs.pkg_config_path))
+    script.append("##export_var## MAKE {}".format(attrs.make_path))
 
     root = detect_root(ctx.attr.lib_source)
     data = ctx.attr.data + ctx.attr.build_data
@@ -125,10 +139,10 @@ def _create_meson_script(configureParameters):
     ]
 
     for target_name, args_ in deprecated:
-        if args_ and target_name in target_args:
-            fail("Please migrate '{t}_args' to 'target_args[\"{t}\"]'".format(t = target_name))
-
-        target_args[target_name] = args_
+        if args_:
+            if target_name in target_args:
+                fail("Please migrate '{t}_args' to 'target_args[\"{t}\"]'".format(t = target_name))
+            target_args[target_name] = args_
 
     # --- TODO: DEPRECATED, delete on a future release ------------------------
 
@@ -141,13 +155,24 @@ def _create_meson_script(configureParameters):
 
         target_args[target_name] = args
 
+    # Append shared flags to build options
+    if flags.cxx_linker_shared and ctx.attr.shared_ldflags_option:
+        if ctx.attr.shared_ldflags_option in build_options:
+            fail("cannot override existing build option: {}".format(ctx.attr.shared_ldflags_option))
+
+        absolutized = [_absolutize(ctx.workspace_name, f).replace("$EXT_BUILD_ROOT/", "$$EXT_BUILD_ROOT$$/") for f in flags.cxx_linker_shared]
+        build_options = build_options | {ctx.attr.shared_ldflags_option: _list_to_str_repr(absolutized)}
+
+    # Expand options
+    build_options = expand_locations_and_make_variables(ctx, build_options, "options", data)
+
     script.append("{meson} setup --prefix={install_dir} {setup_args} {options} {source_dir}".format(
         meson = meson_path,
         install_dir = "$$INSTALLDIR$$",
         setup_args = " ".join(target_args.get("setup", [])),
         options = " ".join([
-            "-D{}=\"{}\"".format(key, ctx.attr.options[key])
-            for key in ctx.attr.options
+            "\"-D{}={}\"".format(key, build_options[key])
+            for key in build_options
         ]),
         source_dir = "$$EXT_BUILD_ROOT$$/" + root,
     ))
@@ -225,6 +250,10 @@ def _attrs():
             doc = "__deprecated__: please use `target_args` with `'setup'` target key.",
             mandatory = False,
         ),
+        "shared_ldflags_option": attr.string(
+            doc = "Name of additional setup option that will contain shared ldflags.",
+            mandatory = False,
+        ),
         "target_args": attr.string_list_dict(
             doc = "Dict of arguments for each of the Meson targets. The " +
                   "target name is the key and the list of args is the value.",
@@ -252,6 +281,7 @@ meson = rule(
         "@rules_foreign_cc//toolchains:cmake_toolchain",
         "@rules_foreign_cc//toolchains:ninja_toolchain",
         "@rules_foreign_cc//toolchains:pkgconfig_toolchain",
+        "@rules_foreign_cc//toolchains:make_toolchain",
         "@rules_foreign_cc//foreign_cc/private/framework:shell_toolchain",
         "@bazel_tools//tools/cpp:toolchain_type",
     ],
@@ -269,17 +299,21 @@ def meson_with_requirements(name, requirements, **kwargs):
 
     meson_tool(
         name = "meson_tool_for_{}".format(name),
-        main = "@meson_src//:meson.py",
-        data = ["@meson_src//:runtime"],
+        main = "@rules_foreign_cc//foreign_cc:meson_src_meson_py",
+        data = ["@rules_foreign_cc//foreign_cc:meson_src_runtime"],
         requirements = requirements,
         tags = tags + ["manual"],
     )
 
     native_tool_toolchain(
         name = "built_meson_for_{}".format(name),
-        env = {"MESON": "$(execpath :meson_tool_for_{})".format(name)},
+        env = {
+            "MESON": "$(execpath :meson_tool_for_{})".format(name),
+            "REAL_MESON": "$(rlocationpath @rules_foreign_cc//foreign_cc:meson_src_meson_py)",
+        },
         path = "$(execpath :meson_tool_for_{})".format(name),
         target = ":meson_tool_for_{}".format(name),
+        tools = ["@rules_foreign_cc//foreign_cc:meson_src_meson_py"],
     )
 
     native.toolchain(
@@ -300,3 +334,16 @@ def _absolutize(workspace_name, text, force = False):
 
 def _join_flags_list(workspace_name, flags):
     return " ".join([_absolutize(workspace_name, flag) for flag in flags])
+
+def _list_to_str_repr(lst):
+    # see https://mesonbuild.com/Build-options.html#using-build-options
+    # meson array build options with elements that contain commas need to be in the format
+    # "-Doption=['a,b', 'c,d']"
+    quoted = []
+    for item in lst:
+        quoted.append("'" + item + "'")
+    return "[" + ", ".join(quoted) + "]"
+
+export_for_test = struct(
+    list_to_str_repr = _list_to_str_repr,
+)

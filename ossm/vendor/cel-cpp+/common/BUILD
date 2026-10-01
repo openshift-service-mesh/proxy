@@ -14,6 +14,7 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -23,8 +24,10 @@ cc_library(
     name = "ast",
     srcs = ["ast.cc"],
     hdrs = ["ast.h"],
+    copts = CEL_COPTS,
     deps = [
         ":expr",
+        ":source",
         "//common/ast:metadata",
         "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/base:nullability",
@@ -33,14 +36,161 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "expr_printer",
+    srcs = ["expr_printer.cc"],
+    hdrs = ["expr_printer.h"],
+    copts = CEL_COPTS,
+    deps = [
+        ":ast",
+        ":ast_proto",
+        ":constant",
+        ":expr",
+        "//internal:strings",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/log:absl_log",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
+    ],
+)
+
+cc_test(
+    name = "expr_printer_test",
+    srcs = ["expr_printer_test.cc"],
+    copts = CEL_COPTS,
+    deps = [
+        ":expr",
+        ":expr_printer",
+        "//internal:testing",
+        "//parser",
+        "//parser:options",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
 cc_test(
     name = "ast_test",
     srcs = ["ast_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":ast",
         ":expr",
+        ":source",
         "//internal:testing",
         "@com_google_absl//absl/container:flat_hash_map",
+    ],
+)
+
+cc_library(
+    name = "type_spec_resolver",
+    srcs = ["type_spec_resolver.cc"],
+    hdrs = ["type_spec_resolver.h"],
+    copts = CEL_COPTS,
+    deps = [
+        ":ast",
+        ":descriptor_pool_type_introspector",
+        ":type",
+        ":type_kind",
+        "//internal:status_macros",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "type_spec_resolver_test",
+    srcs = ["type_spec_resolver_test.cc"],
+    copts = CEL_COPTS,
+    deps = [
+        ":ast",
+        ":type",
+        ":type_kind",
+        ":type_spec_resolver",
+        "//internal:testing",
+        "//internal:testing_descriptor_pool",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_library(
+    name = "descriptor_pool_type_introspector",
+    srcs = ["descriptor_pool_type_introspector.cc"],
+    hdrs = ["descriptor_pool_type_introspector.h"],
+    copts = CEL_COPTS,
+    deps = [
+        ":type",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "descriptor_pool_type_introspector_test",
+    srcs = ["descriptor_pool_type_introspector_test.cc"],
+    copts = CEL_COPTS,
+    deps = [
+        ":descriptor_pool_type_introspector",
+        ":type",
+        "//internal:testing",
+        "//internal:testing_descriptor_pool",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:optional",
+    ],
+)
+
+cc_library(
+    name = "signature",
+    srcs = ["signature.cc"],
+    hdrs = ["signature.h"],
+    copts = CEL_COPTS,
+    deps = [
+        ":ast",
+        ":type",
+        ":type_spec_resolver",
+        "//internal:status_macros",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "signature_test",
+    srcs = ["signature_test.cc"],
+    copts = CEL_COPTS,
+    deps = [
+        ":ast",
+        ":signature",
+        ":type",
+        ":type_kind",
+        ":type_spec_resolver",
+        "//internal:testing",
+        "//internal:testing_descriptor_pool",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_matchers",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_protobuf//:protobuf",
     ],
 )
 
@@ -48,14 +198,15 @@ cc_library(
     name = "expr",
     srcs = ["expr.cc"],
     hdrs = ["expr.h"],
+    copts = CEL_COPTS,
     deps = [
         ":constant",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/functional:overload",
+        "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/strings:string_view",
-        "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
         "@com_google_absl//absl/types:variant",
     ],
@@ -64,6 +215,7 @@ cc_library(
 cc_test(
     name = "expr_test",
     srcs = ["expr_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":expr",
         "//internal:testing",
@@ -74,6 +226,7 @@ cc_library(
     name = "navigable_ast",
     srcs = ["navigable_ast.cc"],
     hdrs = ["navigable_ast.h"],
+    copts = CEL_COPTS,
     deps = [
         ":ast_traverse",
         ":ast_visitor",
@@ -90,6 +243,7 @@ cc_library(
 cc_test(
     name = "navigable_ast_test",
     srcs = ["navigable_ast_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":ast",
         ":expr",
@@ -108,16 +262,17 @@ cc_library(
     name = "decl",
     srcs = ["decl.cc"],
     hdrs = ["decl.h"],
+    copts = CEL_COPTS,
     deps = [
         ":constant",
+        ":signature",
         ":type",
         ":type_kind",
         "//internal:status_macros",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/hash",
-        "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -130,11 +285,14 @@ cc_library(
 cc_test(
     name = "decl_test",
     srcs = ["decl_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":constant",
         ":decl",
         ":type",
         "//internal:testing",
+        "//internal:testing_descriptor_pool",
+        "@com_google_absl//absl/log:die_if_null",
         "@com_google_absl//absl/status",
         "@com_google_protobuf//:protobuf",
     ],
@@ -144,6 +302,7 @@ cc_library(
     name = "reference",
     srcs = ["reference.cc"],
     hdrs = ["reference.h"],
+    copts = CEL_COPTS,
     deps = [
         ":constant",
         "@com_google_absl//absl/algorithm:container",
@@ -157,6 +316,7 @@ cc_library(
 cc_test(
     name = "reference_test",
     srcs = ["reference_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":constant",
         ":reference",
@@ -168,6 +328,7 @@ cc_library(
     name = "ast_rewrite",
     srcs = ["ast_rewrite.cc"],
     hdrs = ["ast_rewrite.h"],
+    copts = CEL_COPTS,
     deps = [
         ":ast_visitor",
         ":constant",
@@ -182,6 +343,7 @@ cc_library(
 cc_test(
     name = "ast_rewrite_test",
     srcs = ["ast_rewrite_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":ast",
         ":ast_rewrite",
@@ -201,6 +363,7 @@ cc_library(
     name = "ast_traverse",
     srcs = ["ast_traverse.cc"],
     hdrs = ["ast_traverse.h"],
+    copts = CEL_COPTS,
     deps = [
         ":ast_visitor",
         ":constant",
@@ -214,6 +377,7 @@ cc_library(
 cc_test(
     name = "ast_traverse_test",
     srcs = ["ast_traverse_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":ast_traverse",
         ":ast_visitor",
@@ -226,6 +390,7 @@ cc_test(
 cc_library(
     name = "ast_visitor",
     hdrs = ["ast_visitor.h"],
+    copts = CEL_COPTS,
     deps = [
         ":constant",
         ":expr",
@@ -235,6 +400,7 @@ cc_library(
 cc_library(
     name = "ast_visitor_base",
     hdrs = ["ast_visitor_base.h"],
+    copts = CEL_COPTS,
     deps = [
         ":ast_visitor",
         ":constant",
@@ -246,6 +412,7 @@ cc_library(
     name = "constant",
     srcs = ["constant.cc"],
     hdrs = ["constant.h"],
+    copts = CEL_COPTS,
     deps = [
         "//internal:strings",
         "@com_google_absl//absl/base:core_headers",
@@ -261,6 +428,7 @@ cc_library(
 cc_test(
     name = "constant_test",
     srcs = ["constant_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":constant",
         "//internal:testing",
@@ -273,6 +441,7 @@ cc_test(
 cc_library(
     name = "expr_factory",
     hdrs = ["expr_factory.h"],
+    copts = CEL_COPTS,
     deps = [
         ":constant",
         ":expr",
@@ -289,6 +458,7 @@ cc_library(
     hdrs = [
         "operators.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/strings",
@@ -301,6 +471,7 @@ cc_library(
     name = "any",
     srcs = ["any.cc"],
     hdrs = ["any.h"],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:nullability",
@@ -313,6 +484,7 @@ cc_library(
 cc_test(
     name = "any_test",
     srcs = ["any_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":any",
         "//internal:testing",
@@ -325,6 +497,7 @@ cc_test(
 cc_library(
     name = "casting",
     hdrs = ["casting.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common/internal:casting",
         "@com_google_absl//absl/base:core_headers",
@@ -334,12 +507,14 @@ cc_library(
 cc_library(
     name = "json",
     hdrs = ["json.h"],
+    copts = CEL_COPTS,
 )
 
 cc_library(
     name = "kind",
     srcs = ["kind.cc"],
     hdrs = ["kind.h"],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings",
@@ -349,6 +524,7 @@ cc_library(
 cc_test(
     name = "kind_test",
     srcs = ["kind_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":kind",
         ":type_kind",
@@ -361,11 +537,11 @@ cc_library(
     name = "memory",
     srcs = ["memory.cc"],
     hdrs = ["memory.h"],
+    copts = CEL_COPTS,
     deps = [
         ":allocator",
         ":arena",
         ":data",
-        ":native_type",
         ":reference_count",
         "//common/internal:metadata",
         "//common/internal:reference_count",
@@ -383,17 +559,14 @@ cc_library(
 cc_test(
     name = "memory_test",
     srcs = ["memory_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":allocator",
         ":data",
         ":memory",
-        ":native_type",
         "//common/internal:reference_count",
         "//internal:testing",
         "@com_google_absl//absl/base:nullability",
-        "@com_google_absl//absl/debugging:leak_check",
-        "@com_google_absl//absl/log:absl_check",
-        "@com_google_absl//absl/types:optional",
         "@com_google_protobuf//:protobuf",
         "@com_google_protobuf//:struct_cc_proto",
     ],
@@ -403,6 +576,7 @@ cc_library(
     name = "memory_testing",
     testonly = True,
     hdrs = ["memory_testing.h"],
+    copts = CEL_COPTS,
     deps = [
         ":memory",
         "//internal:testing",
@@ -416,6 +590,7 @@ cc_library(
     name = "type_testing",
     testonly = True,
     hdrs = ["type_testing.h"],
+    copts = CEL_COPTS,
 )
 
 cc_library(
@@ -423,6 +598,7 @@ cc_library(
     testonly = True,
     srcs = ["value_testing.cc"],
     hdrs = ["value_testing.h"],
+    copts = CEL_COPTS,
     deps = [
         ":value",
         ":value_kind",
@@ -447,6 +623,7 @@ cc_library(
 cc_test(
     name = "value_testing_test",
     srcs = ["value_testing_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":value",
         ":value_testing",
@@ -459,6 +636,7 @@ cc_test(
 cc_library(
     name = "type_kind",
     hdrs = ["type_kind.h"],
+    copts = CEL_COPTS,
     deps = [
         ":kind",
         "@com_google_absl//absl/base:core_headers",
@@ -469,6 +647,7 @@ cc_library(
 cc_library(
     name = "value_kind",
     hdrs = ["value_kind.h"],
+    copts = CEL_COPTS,
     deps = [
         ":kind",
         "@com_google_absl//absl/base:core_headers",
@@ -480,6 +659,7 @@ cc_library(
     name = "source",
     srcs = ["source.cc"],
     hdrs = ["source.h"],
+    copts = CEL_COPTS,
     deps = [
         "//internal:unicode",
         "//internal:utf8",
@@ -501,17 +681,19 @@ cc_library(
 cc_test(
     name = "source_test",
     srcs = ["source_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":source",
         "//internal:testing",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings:cord",
-        "@com_google_absl//absl/types:optional",
     ],
 )
 
 cc_library(
     name = "native_type",
     hdrs = ["native_type.h"],
+    copts = CEL_COPTS,
     deps = [
         ":typeinfo",
     ],
@@ -539,12 +721,10 @@ cc_library(
         ],
     ) + [
         "type.h",
-        "type_factory.h",
         "type_introspector.h",
-        "type_manager.h",
     ],
+    copts = CEL_COPTS,
     deps = [
-        ":memory",
         ":type_kind",
         "//internal:string_pool",
         "@com_google_absl//absl/algorithm:container",
@@ -571,6 +751,18 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "format_type_name",
+    srcs = ["format_type_name.cc"],
+    hdrs = ["format_type_name.h"],
+    copts = CEL_COPTS,
+    deps = [
+        ":type",
+        ":type_kind",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
 cc_test(
     name = "type_test",
     srcs = glob([
@@ -578,6 +770,7 @@ cc_test(
     ]) + [
         "type_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":memory",
         ":type",
@@ -589,6 +782,19 @@ cc_test(
         "@com_google_absl//absl/hash:hash_testing",
         "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/log:die_if_null",
+        "@com_google_protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "format_type_name_test",
+    srcs = ["format_type_name_test.cc"],
+    copts = CEL_COPTS,
+    deps = [
+        ":format_type_name",
+        ":type",
+        "//internal:testing",
+        "@com_google_cel_spec//proto/cel/expr/conformance/proto2:test_all_types_cc_proto",
         "@com_google_protobuf//:protobuf",
     ],
 )
@@ -618,6 +824,7 @@ cc_library(
         "type_reflector.h",
         "value.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":allocator",
         ":any",
@@ -699,6 +906,7 @@ cc_test(
         "type_reflector_test.cc",
         "value_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":casting",
         ":memory",
@@ -740,6 +948,7 @@ cc_test(
 cc_library(
     name = "unknown",
     hdrs = ["unknown.h"],
+    copts = CEL_COPTS,
     deps = ["//base/internal:unknown_set"],
 )
 
@@ -751,6 +960,7 @@ alias(
 cc_library(
     name = "arena",
     hdrs = ["arena.h"],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_absl//absl/base:nullability",
         "@com_google_protobuf//:protobuf",
@@ -760,12 +970,14 @@ cc_library(
 cc_library(
     name = "reference_count",
     hdrs = ["reference_count.h"],
+    copts = CEL_COPTS,
     deps = ["//common/internal:reference_count"],
 )
 
 cc_library(
     name = "allocator",
     hdrs = ["allocator.h"],
+    copts = CEL_COPTS,
     deps = [
         ":arena",
         ":data",
@@ -782,6 +994,7 @@ cc_library(
 cc_test(
     name = "allocator_test",
     srcs = ["allocator_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":allocator",
         "//internal:testing",
@@ -793,6 +1006,7 @@ cc_test(
 cc_library(
     name = "data",
     hdrs = ["data.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common/internal:metadata",
         "@com_google_absl//absl/base:nullability",
@@ -804,6 +1018,7 @@ cc_library(
 cc_test(
     name = "data_test",
     srcs = ["data_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":data",
         "//common/internal:reference_count",
@@ -816,6 +1031,7 @@ cc_test(
 cc_library(
     name = "optional_ref",
     hdrs = ["optional_ref.h"],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:nullability",
@@ -830,6 +1046,7 @@ cc_library(
         "arena_string.h",
         "arena_string_view.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:core_headers",
@@ -846,6 +1063,8 @@ cc_test(
         "arena_string_test.cc",
         "arena_string_view_test.cc",
     ],
+    copts = CEL_COPTS,
+    tags = ["no_test_msvc"],
     deps = [
         ":arena_string",
         "//internal:testing",
@@ -860,6 +1079,7 @@ cc_test(
 cc_library(
     name = "arena_string_pool",
     hdrs = ["arena_string_pool.h"],
+    copts = CEL_COPTS,
     deps = [
         ":arena_string",
         "//internal:string_pool",
@@ -875,6 +1095,8 @@ cc_library(
 cc_test(
     name = "arena_string_pool_test",
     srcs = ["arena_string_pool_test.cc"],
+    copts = CEL_COPTS,
+    tags = ["no_test_msvc"],
     deps = [
         ":arena_string_pool",
         "//internal:testing",
@@ -888,6 +1110,7 @@ cc_library(
     name = "minimal_descriptor_pool",
     srcs = ["minimal_descriptor_pool.cc"],
     hdrs = ["minimal_descriptor_pool.h"],
+    copts = CEL_COPTS,
     deps = [
         "//internal:minimal_descriptors",
         "@com_google_absl//absl/base:nullability",
@@ -899,6 +1122,7 @@ cc_library(
 cc_test(
     name = "minimal_descriptor_pool_test",
     srcs = ["minimal_descriptor_pool_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":minimal_descriptor_pool",
         "//internal:testing",
@@ -911,6 +1135,7 @@ cc_library(
     name = "minimal_descriptor_database",
     srcs = ["minimal_descriptor_database.cc"],
     hdrs = ["minimal_descriptor_database.h"],
+    copts = CEL_COPTS,
     deps = [
         "//internal:minimal_descriptors",
         "@com_google_absl//absl/base:nullability",
@@ -921,6 +1146,7 @@ cc_library(
 cc_test(
     name = "minimal_descriptor_database_test",
     srcs = ["minimal_descriptor_database_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":minimal_descriptor_database",
         "//internal:testing",
@@ -936,6 +1162,7 @@ cc_library(
     hdrs = [
         "function_descriptor.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":kind",
         "@com_google_absl//absl/base:core_headers",
@@ -948,6 +1175,7 @@ cc_library(
     name = "decl_proto",
     srcs = ["decl_proto.cc"],
     hdrs = ["decl_proto.h"],
+    copts = CEL_COPTS,
     deps = [
         ":decl",
         ":type",
@@ -966,6 +1194,7 @@ cc_library(
 cc_test(
     name = "decl_proto_test",
     srcs = ["decl_proto_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":decl",
         ":decl_proto",
@@ -984,12 +1213,10 @@ cc_library(
     name = "decl_proto_v1alpha1",
     srcs = ["decl_proto_v1alpha1.cc"],
     hdrs = ["decl_proto_v1alpha1.h"],
+    copts = CEL_COPTS,
     deps = [
         ":decl",
         ":decl_proto",
-        ":type",
-        ":type_proto",
-        "//internal:status_macros",
         "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -1005,6 +1232,7 @@ cc_library(
     name = "type_proto",
     srcs = ["type_proto.cc"],
     hdrs = ["type_proto.h"],
+    copts = CEL_COPTS,
     deps = [
         ":type",
         ":type_kind",
@@ -1024,6 +1252,7 @@ cc_library(
 cc_test(
     name = "type_proto_test",
     srcs = ["type_proto_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":type",
         ":type_kind",
@@ -1043,6 +1272,7 @@ cc_library(
     name = "ast_proto",
     srcs = ["ast_proto.cc"],
     hdrs = ["ast_proto.h"],
+    copts = CEL_COPTS,
     deps = [
         ":ast",
         ":constant",
@@ -1070,6 +1300,7 @@ cc_test(
     srcs = [
         "ast_proto_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":ast",
         ":ast_proto",
@@ -1107,6 +1338,7 @@ cc_library(
     hdrs = [
         "standard_definitions.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_absl//absl/strings:string_view",
     ],
@@ -1116,6 +1348,7 @@ cc_library(
     name = "typeinfo",
     srcs = ["typeinfo.cc"],
     hdrs = ["typeinfo.h"],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:config",
@@ -1129,10 +1362,36 @@ cc_library(
 cc_test(
     name = "typeinfo_test",
     srcs = ["typeinfo_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":typeinfo",
         "//internal:testing",
         "@com_google_absl//absl/hash:hash_testing",
         "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "container",
+    srcs = ["container.cc"],
+    hdrs = ["container.h"],
+    copts = CEL_COPTS,
+    deps = [
+        "//internal:lexis",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "container_test",
+    srcs = ["container_test.cc"],
+    copts = CEL_COPTS,
+    deps = [
+        ":container",
+        "//internal:testing",
+        "@com_google_absl//absl/status",
     ],
 )

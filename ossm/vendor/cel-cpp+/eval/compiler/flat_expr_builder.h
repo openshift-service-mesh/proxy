@@ -23,12 +23,10 @@
 #include <vector>
 
 #include "absl/base/nullability.h"
-#include "absl/container/flat_hash_map.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "base/ast.h"
 #include "base/type_provider.h"
-#include "common/value.h"
 #include "eval/compiler/flat_expr_builder_extensions.h"
 #include "eval/eval/evaluator_core.h"
 #include "runtime/function_registry.h"
@@ -51,18 +49,6 @@ class FlatExprBuilder {
         container_(options.container),
         function_registry_(env_->function_registry),
         type_registry_(env_->type_registry),
-        use_legacy_type_provider_(use_legacy_type_provider) {}
-
-  FlatExprBuilder(
-      absl_nonnull std::shared_ptr<const cel::runtime_internal::RuntimeEnv> env,
-      const cel::FunctionRegistry& function_registry,
-      const cel::TypeRegistry& type_registry,
-      const cel::RuntimeOptions& options, bool use_legacy_type_provider = false)
-      : env_(std::move(env)),
-        options_(options),
-        container_(options.container),
-        function_registry_(function_registry),
-        type_registry_(type_registry),
         use_legacy_type_provider_(use_legacy_type_provider) {}
 
   void AddAstTransform(std::unique_ptr<AstTransform> transform) {

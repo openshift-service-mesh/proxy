@@ -14,17 +14,21 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("//bazel:copts.bzl", "CEL_COPTS")
+
 package(default_visibility = ["//visibility:public"])
 
 cc_library(
     name = "checker_options",
     hdrs = ["checker_options.h"],
+    copts = CEL_COPTS,
 )
 
 cc_library(
     name = "type_check_issue",
     srcs = ["type_check_issue.cc"],
     hdrs = ["type_check_issue.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:source",
         "@com_google_absl//absl/strings:str_format",
@@ -35,6 +39,7 @@ cc_library(
 cc_test(
     name = "type_check_issue_test",
     srcs = ["type_check_issue_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":type_check_issue",
         "//common:source",
@@ -46,11 +51,15 @@ cc_library(
     name = "validation_result",
     srcs = ["validation_result.cc"],
     hdrs = ["validation_result.h"],
+    copts = CEL_COPTS,
     deps = [
         ":type_check_issue",
         "//common:ast",
+        "//common:decl",
         "//common:source",
+        "//common:type",
         "@com_google_absl//absl/base:nullability",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -61,6 +70,7 @@ cc_library(
 cc_test(
     name = "validation_result_test",
     srcs = ["validation_result_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":type_check_issue",
         ":validation_result",
@@ -74,20 +84,26 @@ cc_test(
 
 cc_library(
     name = "type_checker",
+    srcs = ["type_checker.cc"],
     hdrs = ["type_checker.h"],
+    copts = CEL_COPTS,
     deps = [
         ":validation_result",
         "//common:ast",
+        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_protobuf//:protobuf",
     ],
 )
 
 cc_library(
     name = "type_checker_builder",
     hdrs = ["type_checker_builder.h"],
+    copts = CEL_COPTS,
     deps = [
         ":checker_options",
         ":type_checker",
+        "//common:container",
         "//common:decl",
         "//common:type",
         "@com_google_absl//absl/base:nullability",
@@ -103,6 +119,7 @@ cc_library(
     name = "type_checker_builder_factory",
     srcs = ["type_checker_builder_factory.cc"],
     hdrs = ["type_checker_builder_factory.h"],
+    copts = CEL_COPTS,
     deps = [
         ":checker_options",
         ":type_checker_builder",
@@ -120,14 +137,17 @@ cc_library(
 cc_test(
     name = "type_checker_builder_factory_test",
     srcs = ["type_checker_builder_factory_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":checker_options",
+        ":optional",
         ":standard_library",
         ":type_checker",
         ":type_checker_builder",
         ":type_checker_builder_factory",
         ":validation_result",
         "//checker/internal:test_ast_helpers",
+        "//common:ast",
         "//common:decl",
         "//common:type",
         "//internal:status_macros",
@@ -143,6 +163,7 @@ cc_library(
     name = "standard_library",
     srcs = ["standard_library.cc"],
     hdrs = ["standard_library.h"],
+    copts = CEL_COPTS,
     deps = [
         ":type_checker_builder",
         "//checker/internal:builtins_arena",
@@ -159,6 +180,7 @@ cc_library(
 cc_test(
     name = "standard_library_test",
     srcs = ["standard_library_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":checker_options",
         ":standard_library",
@@ -183,6 +205,7 @@ cc_library(
     name = "optional",
     srcs = ["optional.cc"],
     hdrs = ["optional.h"],
+    copts = CEL_COPTS,
     deps = [
         ":type_checker_builder",
         "//base:builtins",
@@ -198,6 +221,7 @@ cc_library(
 cc_test(
     name = "optional_test",
     srcs = ["optional_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":checker_options",
         ":optional",
@@ -219,8 +243,11 @@ cc_library(
     name = "type_checker_subset_factory",
     srcs = ["type_checker_subset_factory.cc"],
     hdrs = ["type_checker_subset_factory.h"],
+    copts = CEL_COPTS,
     deps = [
         ":type_checker_builder",
+        "//common:decl",
+        "//common:signature",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
@@ -230,6 +257,7 @@ cc_library(
 cc_test(
     name = "type_checker_subset_factory_test",
     srcs = ["type_checker_subset_factory_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":type_checker_subset_factory",
         ":validation_result",

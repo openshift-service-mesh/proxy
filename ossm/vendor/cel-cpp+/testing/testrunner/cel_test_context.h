@@ -29,7 +29,7 @@
 #include "common/value.h"
 #include "compiler/compiler.h"
 #include "eval/public/cel_expression.h"
-#include "runtime/activation.h"
+#include "runtime/activation_interface.h"
 #include "runtime/runtime.h"
 #include "testing/testrunner/cel_expression_source.h"
 #include "cel/expr/conformance/test/suite.pb.h"
@@ -40,9 +40,10 @@ namespace cel::test {
 // compiled CEL expressions.
 class CelTestContext {
  public:
-  using CelActivationFactoryFn = std::function<absl::StatusOr<cel::Activation>(
-      const cel::expr::conformance::test::TestCase& test_case,
-      google::protobuf::Arena* arena)>;
+  using CelActivationFactoryFn =
+      std::function<absl::StatusOr<std::unique_ptr<cel::ActivationInterface>>(
+          const cel::expr::conformance::test::TestCase& test_case,
+          google::protobuf::Arena* arena)>;
   using AssertFn = std::function<void(
       const cel::Value& computed,
       const cel::expr::conformance::test::TestCase& test_case,

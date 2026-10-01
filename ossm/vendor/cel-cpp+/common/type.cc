@@ -75,7 +75,9 @@ Type Type::Message(const Descriptor* absl_nonnull descriptor) {
 
 Type Type::Enum(const google::protobuf::EnumDescriptor* absl_nonnull descriptor) {
   if (descriptor->full_name() == "google.protobuf.NullValue") {
-    return NullType();
+    // Special case NullValue to prevent the emebedder providing a different
+    // descriptor for it and it leaking.
+    return IntType();
   }
   return EnumType(descriptor);
 }
@@ -95,7 +97,7 @@ static constexpr std::array<TypeKind, 28> kTypeToKindArray = {
     TypeKind::kUnknown};
 
 static_assert(kTypeToKindArray.size() ==
-                  absl::variant_size<common_internal::TypeVariant>(),
+                  std::variant_size<common_internal::TypeVariant>(),
               "Kind indexer must match variant declaration for cel::Type.");
 
 }  // namespace
@@ -156,7 +158,7 @@ absl::optional<T> GetOrNullopt(const common_internal::TypeVariant& variant) {
   if (const auto* alt = absl::get_if<T>(&variant); alt != nullptr) {
     return *alt;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 }  // namespace
@@ -241,7 +243,7 @@ absl::optional<OptionalType> Type::AsOptional() const {
   if (auto maybe_opaque = AsOpaque(); maybe_opaque.has_value()) {
     return maybe_opaque->AsOptional();
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<StringType> Type::AsString() const {
@@ -261,7 +263,7 @@ absl::optional<StructType> Type::AsStruct() const {
   if (const auto* alt = absl::get_if<MessageType>(&variant_); alt != nullptr) {
     return *alt;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::optional<TimestampType> Type::AsTimestamp() const {
@@ -601,7 +603,12 @@ absl::optional<MessageTypeField> StructTypeField::AsMessage() const {
       alternative != nullptr) {
     return *alternative;
   }
-  return absl::nullopt;
+  return std::nullopt;
+}
+
+MessageTypeField StructTypeField::GetMessage() const {
+  ABSL_DCHECK(IsMessage());
+  return absl::get<MessageTypeField>(variant_);
 }
 
 StructTypeField::operator MessageTypeField() const {
@@ -638,8 +645,6 @@ constexpr absl::string_view kUInt64TypeName = "uint";
 constexpr absl::string_view kDoubleTypeName = "double";
 constexpr absl::string_view kStringTypeName = "string";
 constexpr absl::string_view kBytesTypeName = "bytes";
-constexpr absl::string_view kDurationTypeName = "google.protobuf.Duration";
-constexpr absl::string_view kTimestampTypeName = "google.protobuf.Timestamp";
 constexpr absl::string_view kListTypeName = "list";
 constexpr absl::string_view kMapTypeName = "map";
 constexpr absl::string_view kCelTypeTypeName = "type";
@@ -668,12 +673,6 @@ Type LegacyRuntimeType(absl::string_view name) {
   if (name == kBytesTypeName) {
     return BytesType{};
   }
-  if (name == kDurationTypeName) {
-    return DurationType{};
-  }
-  if (name == kTimestampTypeName) {
-    return TimestampType{};
-  }
   if (name == kListTypeName) {
     return ListType{};
   }
@@ -682,6 +681,53 @@ Type LegacyRuntimeType(absl::string_view name) {
   }
   if (name == kCelTypeTypeName) {
     return TypeType{};
+  }
+  if (cel::IsWellKnownMessageType(name)) {
+    if (name == "google.protobuf.Any") {
+      return AnyType();
+    }
+    if (name == "google.protobuf.BoolValue") {
+      return BoolWrapperType();
+    }
+    if (name == "google.protobuf.BytesValue") {
+      return BytesWrapperType();
+    }
+    if (name == "google.protobuf.DoubleValue") {
+      return DoubleWrapperType();
+    }
+    if (name == "google.protobuf.Duration") {
+      return DurationType();
+    }
+    if (name == "google.protobuf.FloatValue") {
+      return DoubleWrapperType();
+    }
+    if (name == "google.protobuf.Int32Value") {
+      return IntWrapperType();
+    }
+    if (name == "google.protobuf.Int64Value") {
+      return IntWrapperType();
+    }
+    if (name == "google.protobuf.ListValue") {
+      return ListType();
+    }
+    if (name == "google.protobuf.StringValue") {
+      return StringWrapperType();
+    }
+    if (name == "google.protobuf.Struct") {
+      return JsonMapType();
+    }
+    if (name == "google.protobuf.Timestamp") {
+      return TimestampType();
+    }
+    if (name == "google.protobuf.UInt32Value") {
+      return UintWrapperType();
+    }
+    if (name == "google.protobuf.UInt64Value") {
+      return UintWrapperType();
+    }
+    if (name == "google.protobuf.Value") {
+      return DynType();
+    }
   }
   return common_internal::MakeBasicStructType(name);
 }

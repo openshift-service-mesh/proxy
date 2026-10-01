@@ -15,17 +15,15 @@
 """Implementation of ObjC/Swift Intent library rule."""
 
 load(
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
+load(
     "@bazel_skylib//lib:dicts.bzl",
     "dicts",
 )
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
-)
-load(
     "//apple/internal:apple_toolchains.bzl",
-    "AppleMacToolsToolchainInfo",
-    "AppleXPlatToolsToolchainInfo",
     "apple_toolchain_utils",
 )
 load(
@@ -66,9 +64,10 @@ def _apple_intent_library_impl(ctx):
         unsupported_features = ctx.disabled_features,
     )
 
-    apple_xplat_toolchain_info = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo]
+    apple_xplat_toolchain_info = apple_toolchain_utils.get_xplat_toolchain(ctx)
     platform_prerequisites = platform_support.platform_prerequisites(
         apple_fragment = ctx.fragments.apple,
+        apple_platform_info = platform_support.apple_platform_info_from_rule_ctx(ctx),
         build_settings = apple_xplat_toolchain_info.build_settings,
         config_vars = ctx.var,
         device_families = None,
@@ -76,17 +75,17 @@ def _apple_intent_library_impl(ctx):
         explicit_minimum_os = None,
         features = features,
         objc_fragment = None,
-        platform_type_string = str(ctx.fragments.apple.single_arch_platform.platform_type),
         uses_swift = False,
         xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
     )
 
-    apple_mac_toolchain_info = ctx.attr._mac_toolchain[AppleMacToolsToolchainInfo]
+    apple_mac_toolchain_info = apple_toolchain_utils.get_mac_toolchain(ctx)
     resource_actions.generate_intent_classes_sources(
         actions = ctx.actions,
         input_file = ctx.file.src,
         swift_output_src = swift_output_src,
         objc_output_srcs = objc_output_srcs,
+        mac_exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
         objc_output_hdrs = objc_output_hdrs,
         objc_public_header = objc_public_header,
         language = ctx.attr.language,
@@ -114,9 +113,10 @@ def _apple_intent_library_impl(ctx):
 
 apple_intent_library = rule(
     implementation = _apple_intent_library_impl,
+    exec_groups = apple_toolchain_utils.use_apple_exec_group_toolchain(),
     attrs = dicts.add(
+        apple_support.platform_constraint_attrs(),
         apple_support.action_required_attrs(),
-        apple_toolchain_utils.shared_attrs(),
         {
             "src": attr.label(
                 allow_single_file = [".intentdefinition"],

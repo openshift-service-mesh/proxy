@@ -125,6 +125,11 @@ read alert 1 0
 				},
 			},
 			flags: []string{
+				// Exact message trace of the handshake depends on selected curves,
+				// as MLKEM causes messages to be split due to its handshake size
+				// and DTLS trying to respect a MTU here.
+				// TODO(crbug.com/507830312): Eventually fix that?
+				"-curves", strconv.Itoa(int(CurveX25519)),
 				"-enable-ocsp-stapling",
 				// This test involves an optional message. Test the message callback
 				// trace to ensure we do not miss or double-report any.
@@ -1116,6 +1121,34 @@ read alert 1 0
 			expectedError:     ":TOO_MANY_WARNING_ALERTS:",
 		},
 		{
+			name: "AlternateEmptyRecordsAndWarningAlerts",
+			config: Config{
+				MaxVersion: VersionTLS12,
+			},
+			sendEmptyRecords:  32,
+			sendWarningAlerts: 4,
+		},
+		{
+			name: "AlternateTooManyEmptyRecordsAndWarningAlerts",
+			config: Config{
+				MaxVersion: VersionTLS12,
+			},
+			sendEmptyRecords:  33,
+			sendWarningAlerts: 4,
+			shouldFail:        true,
+			expectedError:     ":TOO_MANY_EMPTY_FRAGMENTS:",
+		},
+		{
+			name: "AlternateEmptyRecordsAndTooManyWarningAlerts",
+			config: Config{
+				MaxVersion: VersionTLS12,
+			},
+			sendEmptyRecords:  32,
+			sendWarningAlerts: 5,
+			shouldFail:        true,
+			expectedError:     ":TOO_MANY_WARNING_ALERTS:",
+		},
+		{
 			name:               "SendBogusAlertType",
 			sendBogusAlertType: true,
 			shouldFail:         true,
@@ -1970,6 +2003,10 @@ read alert 1 0
 			MinVersion: VersionTLS13,
 		},
 		flags: []string{
+			// Exact message trace of the handshake depends on selected curves,
+			// as MLKEM causes messages to be split due to its handshake size
+			// and DTLS trying to respect a MTU here.
+			"-curves", strconv.Itoa(int(CurveX25519)),
 			"-expect-msg-callback",
 			`read hs 1
 write hs 2

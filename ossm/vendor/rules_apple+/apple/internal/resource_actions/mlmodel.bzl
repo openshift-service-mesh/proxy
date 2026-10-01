@@ -15,7 +15,7 @@
 """CoreML related actions."""
 
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
+    "@apple_support//lib:apple_support.bzl",
     "apple_support",
 )
 load(
@@ -26,6 +26,7 @@ load(
 def compile_mlmodel(
         *,
         actions,
+        mac_exec_group,
         input_file,
         output_bundle,
         output_plist,
@@ -36,24 +37,28 @@ def compile_mlmodel(
     Args:
       actions: The actions provider from `ctx.actions`.
       input_file: The input mlmodel file.
+      mac_exec_group: The execution group for Mac tools.
       output_bundle: The directory reference for the output mlmodelc bundle.
       output_plist: The file reference for the output plist from coremlc that needs to be merged.
       platform_prerequisites: Struct containing information on the platform being targeted.
       xctoolrunner: A files_to_run for the wrapper around the "xcrun" tool.
     """
-    args = [
-        "coremlc",
-        "compile",
-        xctoolrunner_support.prefixed_path(input_file.path),
-        output_bundle.dirname,
+
+    args = actions.args()
+    args.add("coremlc")
+    args.add("compile")
+    args.add(xctoolrunner_support.prefixed_path(input_file.path))
+    args.add(output_bundle.dirname)
+    args.add(
         "--output-partial-info-plist",
         xctoolrunner_support.prefixed_path(output_plist.path),
-    ]
+    )
 
     apple_support.run(
         actions = actions,
         apple_fragment = platform_prerequisites.apple_fragment,
-        arguments = args,
+        arguments = [args],
+        exec_group = mac_exec_group,
         executable = xctoolrunner,
         inputs = [input_file],
         mnemonic = "MlmodelCompile",
@@ -64,6 +69,7 @@ def compile_mlmodel(
 def generate_mlmodel_sources(
         *,
         actions,
+        mac_exec_group,
         input_file,
         swift_output_src,
         objc_output_src,
@@ -75,6 +81,7 @@ def generate_mlmodel_sources(
 
     Args:
       actions: The actions provider from `ctx.actions`.
+      mac_exec_group: The execution group for Mac tools.
       input_file: The input mlmodel file.
       swift_output_src: The output file when generating Swift sources.
       objc_output_src: The output source file when generating Obj-C.
@@ -86,29 +93,29 @@ def generate_mlmodel_sources(
 
     is_swift = language == "Swift"
 
-    arguments = [
-        "coremlc",
-        "generate",
-        xctoolrunner_support.prefixed_path(input_file.path),
-    ]
+    arguments = actions.args()
+    arguments.add("coremlc")
+    arguments.add("generate")
+    arguments.add(xctoolrunner_support.prefixed_path(input_file.path))
 
     outputs = []
     if is_swift:
-        arguments += [
+        arguments.add_all([
             "--public-access",
             "--language",
             "Swift",
             swift_output_src.dirname,
-        ]
+        ])
         outputs = [swift_output_src]
     else:
-        arguments.append(objc_output_src.dirname)
+        arguments.add(objc_output_src.dirname)
         outputs = [objc_output_src, objc_output_hdr]
 
     apple_support.run(
         actions = actions,
         apple_fragment = platform_prerequisites.apple_fragment,
-        arguments = arguments,
+        arguments = [arguments],
+        exec_group = mac_exec_group,
         executable = xctoolrunner,
         inputs = [input_file],
         mnemonic = "MlmodelGenerate",

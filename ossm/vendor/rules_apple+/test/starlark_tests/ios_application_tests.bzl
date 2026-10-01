@@ -19,6 +19,14 @@ load(
     "build_settings_labels",
 )
 load(
+    "//test/starlark_tests/rules:action_command_line_test.bzl",
+    "action_command_line_test",
+)
+load(
+    "//test/starlark_tests/rules:action_inputs_test.bzl",
+    "action_inputs_test",
+)
+load(
     "//test/starlark_tests/rules:analysis_failure_message_test.bzl",
     "analysis_failure_message_test",
 )
@@ -29,6 +37,7 @@ load(
 load(
     "//test/starlark_tests/rules:analysis_target_actions_test.bzl",
     "analysis_target_actions_tree_artifacts_outputs_test",
+    "make_analysis_target_actions_test",
 )
 load(
     "//test/starlark_tests/rules:analysis_target_outputs_test.bzl",
@@ -69,9 +78,79 @@ load(
     "output_group_zip_contents_test",
 )
 load(
+    "//test/starlark_tests/rules:plisttool_error_test.bzl",
+    "plisttool_error_test",
+)
+load(
+    "//test/starlark_tests/rules:provisioning_profile_tool_error_test.bzl",
+    "provisioning_profile_tool_error_test",
+)
+load(
     ":common.bzl",
     "common",
 )
+
+_analysis_ios_strip_enabled_opt_test = make_analysis_target_actions_test(
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:ios_multi_cpus": "x86_64",
+        "//command_line_option:objc_enable_binary_stripping": True,
+    },
+)
+
+_analysis_ios_strip_disabled_opt_test = make_analysis_target_actions_test(
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:ios_multi_cpus": "x86_64",
+        "//command_line_option:objc_enable_binary_stripping": False,
+    },
+)
+
+_analysis_ios_strip_disabled_dbg_test = make_analysis_target_actions_test(
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        "//command_line_option:ios_multi_cpus": "x86_64",
+        "//command_line_option:objc_enable_binary_stripping": True,
+    },
+)
+
+def _application_plist_substitutions(name):
+    return {
+        "BUNDLE_NAME": name + ".app",
+        "DEVELOPMENT_LANGUAGE": "en",
+        "EXECUTABLE_NAME": name,
+        "PRODUCT_BUNDLE_IDENTIFIER": "com.google.example",
+        "PRODUCT_BUNDLE_PACKAGE_TYPE": "APPL",
+        "PRODUCT_NAME": name,
+        "TARGET_NAME": name,
+    }
+
+def _debugger_entitlements_contents_tests(
+        suite_name,
+        test_name,
+        target_under_test,
+        expected_get_task_allow,
+        build_settings = {}):
+    expected_values = {
+        "keychain-access-groups:0": "FOOBARBAZ1.com.google.example",
+    }
+    not_expected_keys = []
+    if expected_get_task_allow:
+        expected_values["get-task-allow"] = "true"
+    else:
+        not_expected_keys.append("get-task-allow")
+
+    for build_type in ["simulator", "device"]:
+        entitlements_contents_test(
+            name = "{}_{}_test".format(test_name, build_type),
+            build_type = build_type,
+            build_settings = build_settings,
+            compilation_mode = "opt",
+            expected_values = expected_values,
+            not_expected_keys = not_expected_keys,
+            target_under_test = target_under_test,
+            tags = [suite_name],
+        )
 
 def ios_application_test_suite(name):
     """Test suite for ios_application.
@@ -127,11 +206,151 @@ def ios_application_test_suite(name):
         tags = [name],
     )
 
+    archive_contents_test(
+        name = "{}_tree_artifacts_and_disable_simulator_codesigning_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_minimal",
+        build_settings = {
+            build_settings_labels.use_tree_artifacts_outputs: "True",
+        },
+        contains = [
+            "$BUNDLE_ROOT/Info.plist",
+            "$BUNDLE_ROOT/PkgInfo",
+            "$BUNDLE_ROOT/app_minimal",
+        ],
+        not_contains = [
+            "$BUNDLE_ROOT/_CodeSignature/CodeResources",
+        ],
+        target_features = ["apple.skip_codesign_simulator_bundles"],
+        tags = [name],
+    )
+
     analysis_target_actions_tree_artifacts_outputs_test(
         name = "{}_registers_action_for_tree_artifact_bundling_test".format(name),
         target_under_test = "//test/starlark_tests/targets_under_test/ios:app_minimal",
         target_mnemonic = "BundleTreeApp",
         not_expected_mnemonic = ["BundleApp"],
+        tags = [name],
+    )
+
+    # Test that ios_application works without explicit infoplists
+    analysis_target_tree_artifacts_outputs_test(
+        name = "{}_no_infoplist_builds_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_minimal_no_infoplist",
+        expected_outputs = ["app_minimal_no_infoplist.app"],
+        tags = [name],
+    )
+
+    infoplist_contents_test(
+        name = "{}_no_infoplist_has_default_values_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_minimal_no_infoplist",
+        expected_values = {
+            "CFBundleIdentifier": "com.google.example",
+            "CFBundleName": "app_minimal_no_infoplist",
+            "CFBundlePackageType": "APPL",
+        },
+        tags = [name],
+    )
+
+    plisttool_error_test(
+        name = "{}_missing_version_fails_test".format(name),
+        target_label = "//test/starlark_tests/targets_under_test/ios:app_missing_version",
+        plists = ["//test/starlark_tests/resources:Info-extension-missing-version.plist"],
+        plist_values = {
+            "CFBundleIdentifier": "com.google.example",
+        },
+        expected_error = "is missing CFBundleVersion.",
+        variable_substitutions = _application_plist_substitutions("app_missing_version"),
+        version_keys_required = True,
+        tags = [name],
+    )
+
+    plisttool_error_test(
+        name = "{}_missing_short_version_fails_test".format(name),
+        target_label = "//test/starlark_tests/targets_under_test/ios:app_missing_short_version",
+        plists = ["//test/starlark_tests/resources:Info-extension-missing-short-version.plist"],
+        plist_values = {
+            "CFBundleIdentifier": "com.google.example",
+        },
+        expected_error = "is missing CFBundleShortVersionString.",
+        variable_substitutions = _application_plist_substitutions("app_missing_short_version"),
+        version_keys_required = True,
+        tags = [name],
+    )
+
+    infoplist_contents_test(
+        name = "{}_version_attr_overrides_plist_contents_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_version_overrides_plist_contents",
+        expected_values = {
+            "CFBundleShortVersionString": "6.5",
+            "CFBundleVersion": "9.8.7",
+        },
+        tags = [name],
+    )
+
+    provisioning_profile_tool_error_test(
+        name = "{}_provisioning_profile_extraction_failure_test".format(name),
+        target_label = "//test/starlark_tests/targets_under_test/ios:app_with_bogus_provisioning_profile",
+        provisioning_profile = "//test/starlark_tests/resources:bogus.mobileprovision",
+        expected_error = 'While processing target "//test/starlark_tests/targets_under_test/ios:app_with_bogus_provisioning_profile", failed to extract from the provisioning profile "test/starlark_tests/resources/bogus.mobileprovision".',
+        tags = [name, "requires-darwin"],
+    )
+
+    archive_contents_test(
+        name = "{}_ipa_post_processor_test".format(name),
+        build_type = "simulator",
+        contains = [
+            "$BUNDLE_ROOT/inserted_by_post_processor.txt",
+        ],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_ipa_post_processor",
+        text_test_file = "$BUNDLE_ROOT/inserted_by_post_processor.txt",
+        text_test_values = ["foo"],
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_pkginfo_contents_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_minimal",
+        text_test_file = "$BUNDLE_ROOT/PkgInfo",
+        text_test_values = ["APPL????"],
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_custom_linkopts_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_special_linkopts",
+        binary_test_file = "$BINARY",
+        binary_test_architecture = "x86_64",
+        binary_contains_symbols = ["_linkopts_test_main"],
+        tags = [name],
+    )
+
+    action_command_line_test(
+        name = "{}_additional_linker_inputs_expansion_command_line_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_additional_linker_inputs",
+        mnemonic = "ObjcLink",
+        expected_argv = [
+            "-order_file",
+            "app_additional_linker_input.lds",
+        ],
+        tags = [name],
+    )
+
+    action_inputs_test(
+        name = "{}_additional_linker_inputs_expansion_inputs_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_additional_linker_inputs",
+        mnemonic = "ObjcLink",
+        expected_inputs = ["app_additional_linker_input.lds"],
+        tags = [name],
+    )
+
+    apple_verification_test(
+        name = "{}_target_name_sanitized_for_entitlements_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app-with-hyphen",
+        verifier_script = "verifier_scripts/entitlements_verifier.sh",
         tags = [name],
     )
 
@@ -142,6 +361,32 @@ def ios_application_test_suite(name):
         verifier_script = "verifier_scripts/codesign_verifier.sh",
         compilation_mode = "opt",
         objc_enable_binary_stripping = True,
+        tags = [name],
+    )
+
+    # Tests that strip action is registered when building in opt mode with binary stripping enabled.
+    _analysis_ios_strip_enabled_opt_test(
+        name = "{}_binary_strip_action_enabled_in_opt_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app",
+        target_mnemonic = "ObjcBinarySymbolStrip",
+        tags = [name],
+    )
+
+    # Tests that strip action is not registered when in opt mode but stripping is disabled.
+    _analysis_ios_strip_disabled_opt_test(
+        name = "{}_binary_strip_action_disabled_without_flag_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app",
+        target_mnemonic = "ObjcLink",
+        not_expected_mnemonic = ["ObjcBinarySymbolStrip"],
+        tags = [name],
+    )
+
+    # Tests that strip action is not registered in dbg mode even if stripping is enabled.
+    _analysis_ios_strip_disabled_dbg_test(
+        name = "{}_binary_strip_action_disabled_in_dbg_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app",
+        target_mnemonic = "ObjcLink",
+        not_expected_mnemonic = ["ObjcBinarySymbolStrip"],
         tags = [name],
     )
 
@@ -184,6 +429,54 @@ def ios_application_test_suite(name):
         target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_fmwk",
         verifier_script = "verifier_scripts/codesign_verifier.sh",
         tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_device_swift_span_compatibility_dylib_present_on_older_os".format(name),
+        build_type = "device",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:swift_app_using_span_pre_26",
+        contains = [
+            "$BUNDLE_ROOT/Frameworks/libswiftCompatibilitySpan.dylib",
+            "$ARCHIVE_ROOT/SwiftSupport/iphoneos/libswiftCompatibilitySpan.dylib",
+        ],
+        tags = [
+            name,
+        ],
+    )
+    archive_contents_test(
+        name = "{}_simulator_swift_span_compatibility_dylib_present_on_older_os".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:swift_app_using_span_pre_26",
+        contains = [
+            "$BUNDLE_ROOT/Frameworks/libswiftCompatibilitySpan.dylib",
+        ],
+        tags = [
+            name,
+        ],
+    )
+
+    archive_contents_test(
+        name = "{}_device_swift_span_compatibility_dylib_not_present_on_newer_os".format(name),
+        build_type = "device",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:swift_app_using_span_post_26",
+        not_contains = [
+            "$BUNDLE_ROOT/Frameworks/libswiftCompatibilitySpan.dylib",
+            "$ARCHIVE_ROOT/SwiftSupport/iphoneos/libswiftCompatibilitySpan.dylib",
+        ],
+        tags = [
+            name,
+        ],
+    )
+    archive_contents_test(
+        name = "{}_simulator_swift_span_compatibility_dylib_not_present_on_newer_os".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:swift_app_using_span_post_26",
+        not_contains = [
+            "$BUNDLE_ROOT/Frameworks/libswiftCompatibilitySpan.dylib",
+        ],
+        tags = [
+            name,
+        ],
     )
 
     apple_verification_test(
@@ -400,12 +693,76 @@ def ios_application_test_suite(name):
         tags = [name],
     )
 
+    _debugger_entitlements_contents_tests(
+        suite_name = name,
+        test_name = "{}_debugger_entitlements_default".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_debugger_entitlements_without_get_task_allow",
+        expected_get_task_allow = False,
+    )
+
+    _debugger_entitlements_contents_tests(
+        suite_name = name,
+        test_name = "{}_debugger_entitlements_from_provisioning_profile".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_debugger_entitlements",
+        expected_get_task_allow = True,
+    )
+
+    _debugger_entitlements_contents_tests(
+        suite_name = name,
+        test_name = "{}_debugger_entitlements_forced_false".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_debugger_entitlements_without_get_task_allow",
+        expected_get_task_allow = False,
+        build_settings = {
+            build_settings_labels.add_debugger_entitlement: "False",
+        },
+    )
+
+    _debugger_entitlements_contents_tests(
+        suite_name = name,
+        test_name = "{}_debugger_entitlements_forced_true".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_debugger_entitlements_without_get_task_allow",
+        expected_get_task_allow = True,
+        build_settings = {
+            build_settings_labels.add_debugger_entitlement: "True",
+        },
+    )
+
     archive_contents_test(
         name = "{}_custom_executable_name_test".format(name),
         build_type = "simulator",
         target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_custom_executable_name",
         contains = ["$BUNDLE_ROOT/app.exe"],
         not_contains = ["$BUNDLE_ROOT/app_with_custom_executable_name"],
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_bundle_library_dependency_simulator_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_bundle_library_dependency",
+        contains = [
+            "$BUNDLE_ROOT/bundle_library_dependency.bundle/bundle_library_dependency_sim.txt",
+        ],
+        not_contains = [
+            "$BUNDLE_ROOT/bundle_library_dependency.bundle/bundle_library_dependency_device.txt",
+        ],
+        text_test_file = "$BUNDLE_ROOT/bundle_library_dependency.bundle/bundle_library_dependency_sim.txt",
+        text_test_values = ["foo_sim"],
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_bundle_library_dependency_device_test".format(name),
+        build_type = "device",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_bundle_library_dependency",
+        contains = [
+            "$BUNDLE_ROOT/bundle_library_dependency.bundle/bundle_library_dependency_device.txt",
+        ],
+        not_contains = [
+            "$BUNDLE_ROOT/bundle_library_dependency.bundle/bundle_library_dependency_sim.txt",
+        ],
+        text_test_file = "$BUNDLE_ROOT/bundle_library_dependency.bundle/bundle_library_dependency_device.txt",
+        text_test_values = ["foo_device"],
         tags = [name],
     )
 
@@ -606,6 +963,19 @@ def ios_application_test_suite(name):
         build_type = "simulator",
         tags = [name],
         target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_ext_and_fmwk_and_symbols_in_bundle",
+    )
+
+    # Tests that app clips also contribute .symbols package files when
+    # `include_symbols_in_bundle` is enabled on the embedding application.
+    apple_symbols_file_test(
+        name = "{}_archive_contains_apple_symbols_files_with_app_clip_test".format(name),
+        binary_paths = [
+            "Payload/app_with_app_clip_and_symbols_in_bundle.app/app_with_app_clip_and_symbols_in_bundle",
+            "Payload/app_with_app_clip_and_symbols_in_bundle.app/AppClips/app_clip.app/app_clip",
+        ],
+        build_type = "simulator",
+        tags = [name],
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_app_clip_and_symbols_in_bundle",
     )
 
     # Tests that the archive contains .symbols package files generated from
@@ -829,9 +1199,11 @@ def ios_application_test_suite(name):
         target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_app_intents",
         text_test_file = "$BUNDLE_ROOT/Metadata.appintents/extract.actionsdata",
         text_test_values = [
-            ".*HelloWorldIntent.*",
+            ".*\"identifier\":\"HelloWorldIntent\".*",
             ".*IntelIntent.*",
             ".*iOSIntent.*",
+            ".*TestAppShortcuts.*",
+            ".*\"actionIdentifier\":\"HelloWorldIntent\".*",
         ],
         text_file_not_contains = [
             ".*ArmIntent.*",
@@ -847,9 +1219,11 @@ def ios_application_test_suite(name):
         target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_app_intents",
         text_test_file = "$BUNDLE_ROOT/Metadata.appintents/extract.actionsdata",
         text_test_values = [
-            ".*HelloWorldIntent.*",
+            ".*\"identifier\":\"HelloWorldIntent\".*",
             ".*ArmIntent.*",
             ".*iOSIntent.*",
+            ".*TestAppShortcuts.*",
+            ".*\"actionIdentifier\":\"HelloWorldIntent\".*",
         ],
         text_file_not_contains = [
             ".*IntelIntent.*",
@@ -857,6 +1231,20 @@ def ios_application_test_suite(name):
             ".*tvOSIntent.*",
             ".*watchOSIntent.*",
         ],
+        tags = [name],
+    )
+
+    apple_verification_test(
+        name = "{}_app_intents_metadata_json_keys_sorted_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_with_app_intents",
+        verifier_script = "verifier_scripts/app_intents_metadata_json_sorted.sh",
+        env = {
+            "JSON_FILES": [
+                "$BUNDLE_ROOT/Metadata.appintents/version.json",
+                "$BUNDLE_ROOT/Metadata.appintents/extract.actionsdata",
+            ],
+        },
         tags = [name],
     )
 
@@ -1032,6 +1420,60 @@ Found "com.bazel.app.example" which does not match previously defined "com.altba
         name = "{}_codesigning_dossier_info_provider_test".format(name),
         expected_dossier = "app_dossier.zip",
         target_under_test = "//test/starlark_tests/targets_under_test/ios:app",
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_with_spaces_contents_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app minimal has several spaces",
+        contains = [
+            "$BUNDLE_ROOT/Info.plist",
+            "$BUNDLE_ROOT/PkgInfo",
+            "$BUNDLE_ROOT/app minimal has several spaces",
+        ],
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_tree_artifact_with_spaces_contents_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app minimal has several spaces",
+        build_settings = {
+            build_settings_labels.use_tree_artifacts_outputs: "True",
+        },
+        contains = [
+            "$BUNDLE_ROOT/Info.plist",
+            "$BUNDLE_ROOT/PkgInfo",
+            "$BUNDLE_ROOT/app minimal has several spaces",
+        ],
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_bundle_name_with_spaces_contents_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_minimal_bundle_name_with_spaces",
+        contains = [
+            "$BUNDLE_ROOT/Info.plist",
+            "$BUNDLE_ROOT/PkgInfo",
+            "$BUNDLE_ROOT/app minimal bundle name has several spaces",
+        ],
+        tags = [name],
+    )
+
+    archive_contents_test(
+        name = "{}_tree_artifact_bundle_name_with_spaces_contents_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/ios:app_minimal_bundle_name_with_spaces",
+        build_settings = {
+            build_settings_labels.use_tree_artifacts_outputs: "True",
+        },
+        contains = [
+            "$BUNDLE_ROOT/Info.plist",
+            "$BUNDLE_ROOT/PkgInfo",
+            "$BUNDLE_ROOT/app minimal bundle name has several spaces",
+        ],
         tags = [name],
     )
 

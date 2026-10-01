@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_java//java:defs.bzl", "java_binary")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 java_binary(
     name = "antlr4_tool",
@@ -9,9 +10,17 @@ java_binary(
 
 package(default_visibility = ["//visibility:public"])
 
+exports_files(
+    srcs = [
+        "antlr.patch",
+    ],
+    visibility = ["//:__subpackages__"],
+)
+
 cc_binary(
     name = "cel_cc_embed",
     srcs = ["cel_cc_embed.cc"],
+    copts = CEL_COPTS,
     visibility = ["//:__subpackages__"],
     deps = [
         "@com_google_absl//absl/flags:flag",
@@ -20,5 +29,17 @@ cc_binary(
         "@com_google_absl//absl/log:initialize",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+cc_binary(
+    name = "cat_param_file",
+    srcs = ["cat_param_file.cc"],
+    copts = CEL_COPTS,
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/log:absl_log",
+        "@com_google_absl//absl/log:initialize",
     ],
 )

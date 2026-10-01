@@ -29,6 +29,10 @@ go_repository(
     module_name = "rules_go",
 )
 go_repository(
+    name = "com_github_aymanbagabas_go_udiff",
+    importpath = "github.com/aymanbagabas/go-udiff",
+)
+go_repository(
     name = "com_github_bazelbuild_buildtools",
     importpath = "github.com/bazelbuild/buildtools",
 )
@@ -113,6 +117,10 @@ go_repository(
     importpath = "google.golang.org/genproto/googleapis/api",
 )
 go_repository(
+    name = "org_golang_google_genproto_googleapis_bytestream",
+    importpath = "google.golang.org/genproto/googleapis/bytestream",
+)
+go_repository(
     name = "org_golang_google_genproto_googleapis_rpc",
     importpath = "google.golang.org/genproto/googleapis/rpc",
 )
@@ -127,6 +135,10 @@ go_repository(
 go_repository(
     name = "org_golang_google_protobuf",
     importpath = "google.golang.org/protobuf",
+)
+go_repository(
+    name = "org_golang_x_crypto",
+    importpath = "golang.org/x/crypto",
 )
 go_repository(
     name = "org_golang_x_mod",

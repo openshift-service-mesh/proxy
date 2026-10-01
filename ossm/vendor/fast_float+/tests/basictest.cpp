@@ -1134,6 +1134,23 @@ TEST_CASE("double.inf") {
          std::errc::result_out_of_range);
   verify("1.9e308", std::numeric_limits<double>::infinity(),
          std::errc::result_out_of_range);
+
+  // DBL_MAX + 0.00000000000000001e308
+  verify("1.79769313486231581e308", std::numeric_limits<double>::infinity(),
+         std::errc::result_out_of_range);
+
+  // DBL_MAX + 0.0000000000000001e308
+  verify("1.7976931348623159e308", std::numeric_limits<double>::infinity(),
+         std::errc::result_out_of_range);
+
+  // ( (2 - 0.5*2^(−52)) * 2^1023 ) smallest number that overflows to infinity
+  verify("179769313486231580793728971405303415079934132710037826936173778980444"
+         "968292764750946649017977587207096330286416692887910946555547851940402"
+         "630657488671505820681908902000708383676273854845817711531764475730270"
+         "069855571366959622842914819860834936475292719074168444365510704342711"
+         "559699508093042880177904174497792",
+         std::numeric_limits<double>::infinity(),
+         std::errc::result_out_of_range);
 }
 
 TEST_CASE("double.general") {
@@ -1143,6 +1160,16 @@ TEST_CASE("double.general") {
   verify("-22250738585072012e-324",
          -0x1p-1022); /* limit between normal and subnormal*/
   verify("-1e-999", -0.0, std::errc::result_out_of_range);
+
+  // DBL_TRUE_MIN / 2
+  verify("2.4703282292062327e-324", 0.0, std::errc::result_out_of_range);
+
+  // DBL_TRUE_MIN / 2 + 0.0000000000000001e-324
+  verify("2.4703282292062328e-324", 0x0.0000000000001p-1022);
+
+  verify("0.2470328229206232720e-323", 0.0, std::errc::result_out_of_range);
+  verify("0.2470328229206232721e-323", 0x0.0000000000001p-1022);
+
   verify("-2.2222222222223e-322", -0x1.68p-1069);
   verify("9007199254740993.0", 0x1p+53);
   verify("860228122.6654514319E+90", 0x1.92bb20990715fp+328);
@@ -1238,8 +1265,13 @@ TEST_CASE("double.general") {
   verify("4.9406564584124654e-324", 0x0.0000000000001p-1022);
   verify("2.2250738585072009e-308", 0x0.fffffffffffffp-1022);
   verify("2.2250738585072014e-308", 0x1p-1022);
+  verify("0.2225073858507201136e-307", 0x0.fffffffffffffp-1022);
+  verify("0.2225073858507201137e-307", 0x1p-1022);
   verify("1.7976931348623157e308", 0x1.fffffffffffffp+1023);
   verify("1.7976931348623158e308", 0x1.fffffffffffffp+1023);
+  verify("1.7976931348623158079e308", std::numeric_limits<double>::max());
+  verify("1.7976931348623158080e308", std::numeric_limits<double>::infinity(),
+         std::errc::result_out_of_range);
   verify("4503599627370496.5", 4503599627370496.5);
   verify("4503599627475352.5", 4503599627475352.5);
   verify("4503599627475353.5", 4503599627475353.5);
@@ -1318,6 +1350,15 @@ TEST_CASE("double.general") {
       std::numeric_limits<double>::infinity(), std::errc::result_out_of_range);
   verify("-2240084132271013504.131248280843119943687942846658579428",
          -0x1.f1660a65b00bfp+60);
+
+  // ( (2 - 0.5*2^(−52)) * 2^1023 - 1 ) largest 309 decimal digit number
+  // that rounds to DBL_MAX
+  verify("179769313486231580793728971405303415079934132710037826936173778980444"
+         "968292764750946649017977587207096330286416692887910946555547851940402"
+         "630657488671505820681908902000708383676273854845817711531764475730270"
+         "069855571366959622842914819860834936475292719074168444365510704342711"
+         "559699508093042880177904174497791",
+         std::numeric_limits<double>::max());
 }
 
 TEST_CASE("double.decimal_point") {
@@ -1492,13 +1533,39 @@ TEST_CASE("float.inf") {
          std::errc::result_out_of_range);
   verify("3.5028234666e38", std::numeric_limits<float>::infinity(),
          std::errc::result_out_of_range);
+  // FLT_MAX + 0.00000007e38
+  verify("3.40282357e38", std::numeric_limits<float>::infinity(),
+         std::errc::result_out_of_range);
+  // FLT_MAX + 0.0000001e38
+  verify("3.4028236e38", std::numeric_limits<float>::infinity(),
+         std::errc::result_out_of_range);
+
+  // ( (2 - 0.5*2^(-23)) * 2^127 ) smallest number that overflows to infinity
+  verify("340282356779733661637539395458142568448",
+         std::numeric_limits<float>::infinity(),
+         std::errc::result_out_of_range);
 }
 
 TEST_CASE("float.general") {
+  // FLT_TRUE_MIN / 2
+  verify("0.7006492e-45", 0.f, std::errc::result_out_of_range);
+  // FLT_TRUE_MIN / 2 + 0.0000001e-45
+  verify("0.7006493e-45", 0x1p-149f);
+  verify("0.7006492321624085354e-45", 0.f, std::errc::result_out_of_range);
+  verify("0.7006492321624085355e-45", 0x1p-149f);
+
   // max
   verify("340282346638528859811704183484516925440", 0x1.fffffep+127f);
   // -max
   verify("-340282346638528859811704183484516925440", -0x1.fffffep+127f);
+
+  // ( (2 - 0.5*2^(-23)) * 2^127 - 1 ) largest 39 decimal digits number
+  // that rounds to FLT_MAX
+  verify("340282356779733661637539395458142568447",
+         std::numeric_limits<float>::max());
+  verify("0.3402823567797336616e39", std::numeric_limits<float>::max());
+  verify("0.3402823567797336617e39", std::numeric_limits<float>::infinity(),
+         std::errc::result_out_of_range);
 
   verify("-1e-999", -0.0f, std::errc::result_out_of_range);
   verify("1."
@@ -1509,6 +1576,8 @@ TEST_CASE("float.general") {
          "175494140627517859246175898662808184331245864732796240031385942718174"
          "6759860647699724722770042717456817626953125e-38",
          0x1.fffff8p-127f);
+  verify("1.1754942807573642917e-38", 0x1.fffffcp-127f);
+  verify("1.1754942807573642918e-38", std::numeric_limits<float>::min());
   verify_runtime(
       append_zeros("1."
                    "17549414062751785924617589866280818433124586473279624003138"
@@ -2070,3 +2139,317 @@ TEST_CASE("bfloat16.general") {
   //     0.00000000000000000000000000000000000001175494210692441075487029444849287348827052428745893333857174530571588870475618904265502351336181163787841796875bf16);
 }
 #endif
+
+template <typename Int, typename T, typename U>
+void verify_integer_times_pow10_result(Int mantissa, int decimal_exponent,
+                                       T actual, U expected) {
+  static_assert(std::is_same<T, U>::value,
+                "expected and actual types must match");
+
+  INFO("m * 10^e=" << mantissa << " * 10^" << decimal_exponent
+                   << "\n"
+                      "  expected="
+                   << fHexAndDec(expected) << "\n"
+                   << "  ..actual=" << fHexAndDec(actual) << "\n"
+                   << "  expected mantissa="
+                   << iHexAndDec(get_mantissa(expected)) << "\n"
+                   << "  ..actual mantissa=" << iHexAndDec(get_mantissa(actual))
+                   << "\n");
+  CHECK_EQ(actual, expected);
+}
+
+template <typename T, typename Int>
+T calculate_integer_times_pow10_expected_result(Int mantissa,
+                                                int decimal_exponent) {
+  std::string constructed_string =
+      std::to_string(mantissa) + "e" + std::to_string(decimal_exponent);
+  T expected_result;
+  const auto result = fast_float::from_chars(
+      constructed_string.data(),
+      constructed_string.data() + constructed_string.size(), expected_result);
+  if (result.ec != std::errc())
+    INFO("Failed to parse: " << constructed_string);
+  return expected_result;
+}
+
+template <typename Int>
+void verify_integer_times_pow10_dflt(Int mantissa, int decimal_exponent,
+                                     double expected) {
+  static_assert(std::is_integral<Int>::value);
+
+  // the "default" overload
+  const double actual =
+      fast_float::integer_times_pow10(mantissa, decimal_exponent);
+
+  verify_integer_times_pow10_result(mantissa, decimal_exponent, actual,
+                                    expected);
+}
+
+template <typename Int>
+void verify_integer_times_pow10_dflt(Int mantissa, int decimal_exponent) {
+  static_assert(std::is_integral<Int>::value);
+
+  const auto expected_result =
+      calculate_integer_times_pow10_expected_result<double>(mantissa,
+                                                            decimal_exponent);
+
+  verify_integer_times_pow10_dflt(mantissa, decimal_exponent, expected_result);
+}
+
+template <typename T, typename Int>
+void verify_integer_times_pow10(Int mantissa, int decimal_exponent,
+                                T expected) {
+  static_assert(std::is_floating_point<T>::value);
+  static_assert(std::is_integral<Int>::value);
+
+  // explicit specialization
+  const auto actual =
+      fast_float::integer_times_pow10<T>(mantissa, decimal_exponent);
+
+  verify_integer_times_pow10_result(mantissa, decimal_exponent, actual,
+                                    expected);
+}
+
+template <typename T, typename Int>
+void verify_integer_times_pow10(Int mantissa, int decimal_exponent) {
+  static_assert(std::is_floating_point<T>::value);
+  static_assert(std::is_integral<Int>::value);
+
+  const auto expected_result = calculate_integer_times_pow10_expected_result<T>(
+      mantissa, decimal_exponent);
+
+  verify_integer_times_pow10(mantissa, decimal_exponent, expected_result);
+}
+
+namespace all_supported_types {
+template <typename Int>
+void verify_integer_times_pow10(Int mantissa, int decimal_exponent) {
+  static_assert(std::is_integral<Int>::value);
+
+  // verify the "default" overload
+  verify_integer_times_pow10_dflt(mantissa, decimal_exponent);
+
+  // verify explicit specializations
+  ::verify_integer_times_pow10<double>(mantissa, decimal_exponent);
+  ::verify_integer_times_pow10<float>(mantissa, decimal_exponent);
+#if defined(__STDCPP_FLOAT64_T__)
+  ::verify_integer_times_pow10<std::float64_t>(mantissa, decimal_exponent);
+#endif
+#if defined(__STDCPP_FLOAT32_T__)
+  ::verify_integer_times_pow10<std::float32_t>(mantissa, decimal_exponent);
+#endif
+#if defined(__STDCPP_FLOAT16_T__)
+  ::verify_integer_times_pow10<std::float16_t>(mantissa, decimal_exponent);
+#endif
+#if defined(__STDCPP_BFLOAT16_T__)
+  ::verify_integer_times_pow10<std::bfloat16_t>(mantissa, decimal_exponent);
+#endif
+}
+} // namespace all_supported_types
+
+TEST_CASE("integer_times_pow10") {
+  /* explicitly verifying API with different types of integers */
+  // double (the "default" overload)
+  verify_integer_times_pow10_dflt<int8_t>(31, -1, 3.1);
+  verify_integer_times_pow10_dflt<int8_t>(-31, -1, -3.1);
+  verify_integer_times_pow10_dflt<uint8_t>(31, -1, 3.1);
+  verify_integer_times_pow10_dflt<int16_t>(31415, -4, 3.1415);
+  verify_integer_times_pow10_dflt<int16_t>(-31415, -4, -3.1415);
+  verify_integer_times_pow10_dflt<uint16_t>(31415, -4, 3.1415);
+  verify_integer_times_pow10_dflt<int32_t>(314159265, -8, 3.14159265);
+  verify_integer_times_pow10_dflt<int32_t>(-314159265, -8, -3.14159265);
+  verify_integer_times_pow10_dflt<uint32_t>(3141592653, -9, 3.141592653);
+  verify_integer_times_pow10_dflt<long>(314159265, -8, 3.14159265);
+  verify_integer_times_pow10_dflt<long>(-314159265, -8, -3.14159265);
+  verify_integer_times_pow10_dflt<unsigned long>(3141592653, -9, 3.141592653);
+  verify_integer_times_pow10_dflt<int64_t>(3141592653589793238, -18,
+                                           3.141592653589793238);
+  verify_integer_times_pow10_dflt<int64_t>(-3141592653589793238, -18,
+                                           -3.141592653589793238);
+  verify_integer_times_pow10_dflt<uint64_t>(3141592653589793238, -18,
+                                            3.141592653589793238);
+  verify_integer_times_pow10_dflt<long long>(3141592653589793238, -18,
+                                             3.141592653589793238);
+  verify_integer_times_pow10_dflt<long long>(-3141592653589793238, -18,
+                                             -3.141592653589793238);
+  verify_integer_times_pow10_dflt<unsigned long long>(3141592653589793238, -18,
+                                                      3.141592653589793238);
+  // double (explicit specialization)
+  verify_integer_times_pow10<double, int8_t>(31, -1, 3.1);
+  verify_integer_times_pow10<double, int8_t>(-31, -1, -3.1);
+  verify_integer_times_pow10<double, uint8_t>(31, -1, 3.1);
+  verify_integer_times_pow10<double, int16_t>(31415, -4, 3.1415);
+  verify_integer_times_pow10<double, int16_t>(-31415, -4, -3.1415);
+  verify_integer_times_pow10<double, uint16_t>(31415, -4, 3.1415);
+  verify_integer_times_pow10<double, int32_t>(314159265, -8, 3.14159265);
+  verify_integer_times_pow10<double, int32_t>(-314159265, -8, -3.14159265);
+  verify_integer_times_pow10<double, uint32_t>(3141592653, -9, 3.141592653);
+  verify_integer_times_pow10<double, long>(314159265, -8, 3.14159265);
+  verify_integer_times_pow10<double, long>(-314159265, -8, -3.14159265);
+  verify_integer_times_pow10<double, unsigned long>(3141592653, -9,
+                                                    3.141592653);
+  verify_integer_times_pow10<double, int64_t>(3141592653589793238, -18,
+                                              3.141592653589793238);
+  verify_integer_times_pow10<double, int64_t>(-3141592653589793238, -18,
+                                              -3.141592653589793238);
+  verify_integer_times_pow10<double, uint64_t>(3141592653589793238, -18,
+                                               3.141592653589793238);
+  verify_integer_times_pow10<double, long long>(3141592653589793238, -18,
+                                                3.141592653589793238);
+  verify_integer_times_pow10<double, long long>(-3141592653589793238, -18,
+                                                -3.141592653589793238);
+  verify_integer_times_pow10<double, unsigned long long>(
+      3141592653589793238, -18, 3.141592653589793238);
+  // float (explicit specialization)
+  verify_integer_times_pow10<float, int8_t>(31, -1, 3.1f);
+  verify_integer_times_pow10<float, int8_t>(-31, -1, -3.1f);
+  verify_integer_times_pow10<float, uint8_t>(31, -1, 3.1f);
+  verify_integer_times_pow10<float, int16_t>(31415, -4, 3.1415f);
+  verify_integer_times_pow10<float, int16_t>(-31415, -4, -3.1415f);
+  verify_integer_times_pow10<float, uint16_t>(31415, -4, 3.1415f);
+  verify_integer_times_pow10<float, int32_t>(314159265, -8, 3.14159265f);
+  verify_integer_times_pow10<float, int32_t>(-314159265, -8, -3.14159265f);
+  verify_integer_times_pow10<float, uint32_t>(3141592653, -9, 3.14159265f);
+  verify_integer_times_pow10<float, long>(314159265, -8, 3.14159265f);
+  verify_integer_times_pow10<float, long>(-314159265, -8, -3.14159265f);
+  verify_integer_times_pow10<float, unsigned long>(3141592653, -9, 3.14159265f);
+  verify_integer_times_pow10<float, int64_t>(3141592653589793238, -18,
+                                             3.141592653589793238f);
+  verify_integer_times_pow10<float, int64_t>(-3141592653589793238, -18,
+                                             -3.141592653589793238f);
+  verify_integer_times_pow10<float, uint64_t>(3141592653589793238, -18,
+                                              3.141592653589793238f);
+  verify_integer_times_pow10<float, long long>(3141592653589793238, -18,
+                                               3.141592653589793238f);
+  verify_integer_times_pow10<float, long long>(-3141592653589793238, -18,
+                                               -3.141592653589793238f);
+  verify_integer_times_pow10<float, unsigned long long>(
+      3141592653589793238, -18, 3.141592653589793238f);
+
+  for (int mode : {FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO, FE_TONEAREST}) {
+    fesetround(mode);
+    INFO("fesetround(): " << std::string{round_name(mode)});
+
+    struct Guard {
+      ~Guard() { fesetround(FE_TONEAREST); }
+    } guard;
+
+    namespace all = all_supported_types;
+
+    all::verify_integer_times_pow10(0, 0);
+    all::verify_integer_times_pow10(1, 0);
+    all::verify_integer_times_pow10(0, 1);
+    all::verify_integer_times_pow10(1, 1);
+    all::verify_integer_times_pow10(-1, 0);
+    all::verify_integer_times_pow10(0, -1);
+    all::verify_integer_times_pow10(-1, -1);
+    all::verify_integer_times_pow10(-1, 1);
+    all::verify_integer_times_pow10(1, -1);
+
+    /* denormal min */
+    verify_integer_times_pow10_dflt(49406564584124654, -340,
+                                    std::numeric_limits<double>::denorm_min());
+    verify_integer_times_pow10<double>(
+        49406564584124654, -340, std::numeric_limits<double>::denorm_min());
+    verify_integer_times_pow10<float>(14012984, -52,
+                                      std::numeric_limits<float>::denorm_min());
+
+    /* normal min */
+    verify_integer_times_pow10_dflt(22250738585072014, -324,
+                                    std::numeric_limits<double>::min());
+    verify_integer_times_pow10<double>(22250738585072014, -324,
+                                       std::numeric_limits<double>::min());
+    verify_integer_times_pow10<float>(11754944, -45,
+                                      std::numeric_limits<float>::min());
+
+    /* max */
+    verify_integer_times_pow10_dflt(17976931348623158, 292,
+                                    std::numeric_limits<double>::max());
+    verify_integer_times_pow10<double>(17976931348623158, 292,
+                                       std::numeric_limits<double>::max());
+    verify_integer_times_pow10<float>(34028235, 31,
+                                      std::numeric_limits<float>::max());
+
+    /* underflow */
+    // (DBL_TRUE_MIN / 2) underflows to 0
+    verify_integer_times_pow10_dflt(49406564584124654 / 2, -340, 0.);
+    verify_integer_times_pow10<double>(49406564584124654 / 2, -340, 0.);
+    // (FLT_TRUE_MIN / 2) underflows to 0
+    verify_integer_times_pow10<float>(14012984 / 2, -52, 0.f);
+
+    /* rounding to denormal min */
+    // (DBL_TRUE_MIN / 2 + 0.0000000000000001e-324) rounds to DBL_TRUE_MIN
+    verify_integer_times_pow10_dflt(49406564584124654 / 2 + 1, -340,
+                                    std::numeric_limits<double>::denorm_min());
+    verify_integer_times_pow10<double>(
+        49406564584124654 / 2 + 1, -340,
+        std::numeric_limits<double>::denorm_min());
+    // (FLT_TRUE_MIN / 2 + 0.0000001e-45) rounds to FLT_TRUE_MIN
+    verify_integer_times_pow10<float>(14012984 / 2 + 1, -52,
+                                      std::numeric_limits<float>::denorm_min());
+
+    /* overflow */
+    // (DBL_MAX + 0.0000000000000001e308) overflows to infinity
+    verify_integer_times_pow10_dflt(17976931348623158 + 1, 292,
+                                    std::numeric_limits<double>::infinity());
+    verify_integer_times_pow10<double>(17976931348623158 + 1, 292,
+                                       std::numeric_limits<double>::infinity());
+    // (DBL_MAX + 0.00000000000000001e308) overflows to infinity
+    verify_integer_times_pow10_dflt(179769313486231580 + 1, 291,
+                                    std::numeric_limits<double>::infinity());
+    verify_integer_times_pow10<double>(179769313486231580 + 1, 291,
+                                       std::numeric_limits<double>::infinity());
+    // (FLT_MAX + 0.0000001e38) overflows to infinity
+    verify_integer_times_pow10<float>(34028235 + 1, 31,
+                                      std::numeric_limits<float>::infinity());
+    // (FLT_MAX + 0.00000007e38) overflows to infinity
+    verify_integer_times_pow10<float>(340282350 + 7, 30,
+                                      std::numeric_limits<float>::infinity());
+
+    // loosely verifying correct rounding of 1 to 64 bits
+    // worth of significant digits
+    all::verify_integer_times_pow10(1, 42);
+    all::verify_integer_times_pow10(1, -42);
+    all::verify_integer_times_pow10(12, 42);
+    all::verify_integer_times_pow10(12, -42);
+    all::verify_integer_times_pow10(123, 42);
+    all::verify_integer_times_pow10(123, -42);
+    all::verify_integer_times_pow10(1234, 42);
+    all::verify_integer_times_pow10(1234, -42);
+    all::verify_integer_times_pow10(12345, 42);
+    all::verify_integer_times_pow10(12345, -42);
+    all::verify_integer_times_pow10(123456, 42);
+    all::verify_integer_times_pow10(123456, -42);
+    all::verify_integer_times_pow10(1234567, 42);
+    all::verify_integer_times_pow10(1234567, -42);
+    all::verify_integer_times_pow10(12345678, 42);
+    all::verify_integer_times_pow10(12345678, -42);
+    all::verify_integer_times_pow10(123456789, 42);
+    all::verify_integer_times_pow10(1234567890, 42);
+    all::verify_integer_times_pow10(1234567890, -42);
+    all::verify_integer_times_pow10(12345678901, 42);
+    all::verify_integer_times_pow10(12345678901, -42);
+    all::verify_integer_times_pow10(123456789012, 42);
+    all::verify_integer_times_pow10(123456789012, -42);
+    all::verify_integer_times_pow10(1234567890123, 42);
+    all::verify_integer_times_pow10(1234567890123, -42);
+    all::verify_integer_times_pow10(12345678901234, 42);
+    all::verify_integer_times_pow10(12345678901234, -42);
+    all::verify_integer_times_pow10(123456789012345, 42);
+    all::verify_integer_times_pow10(123456789012345, -42);
+    all::verify_integer_times_pow10(1234567890123456, 42);
+    all::verify_integer_times_pow10(1234567890123456, -42);
+    all::verify_integer_times_pow10(12345678901234567, 42);
+    all::verify_integer_times_pow10(12345678901234567, -42);
+    all::verify_integer_times_pow10(123456789012345678, 42);
+    all::verify_integer_times_pow10(123456789012345678, -42);
+    all::verify_integer_times_pow10(1234567890123456789, 42);
+    all::verify_integer_times_pow10(1234567890123456789, -42);
+    all::verify_integer_times_pow10(12345678901234567890ull, 42);
+    all::verify_integer_times_pow10(12345678901234567890ull, -42);
+    all::verify_integer_times_pow10(std::numeric_limits<int64_t>::max(), 42);
+    all::verify_integer_times_pow10(std::numeric_limits<int64_t>::max(), -42);
+    all::verify_integer_times_pow10(std::numeric_limits<uint64_t>::max(), 42);
+    all::verify_integer_times_pow10(std::numeric_limits<uint64_t>::max(), -42);
+  }
+}

@@ -745,10 +745,11 @@ class alignas(kValueVariantAlign) CEL_COMMON_INTERNAL_VALUE_VARIANT_TRIVIAL_ABI
         // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
         std::memcpy(tmp, std::addressof(lhs), sizeof(ValueVariant));
         // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
-        std::memcpy(std::addressof(lhs), std::addressof(rhs),
-                    sizeof(ValueVariant));
+        std::memcpy(static_cast<void*>(std::addressof(lhs)),
+                    std::addressof(rhs), sizeof(ValueVariant));
         // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
-        std::memcpy(std::addressof(rhs), tmp, sizeof(ValueVariant));
+        std::memcpy(static_cast<void*>(std::addressof(rhs)), tmp,
+                    sizeof(ValueVariant));
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic pop
 #elif defined(__clang__) && __clang_major__ >= 20

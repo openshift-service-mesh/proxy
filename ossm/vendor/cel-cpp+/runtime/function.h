@@ -15,6 +15,7 @@
 #ifndef THIRD_PARTY_CEL_CPP_COMMON_FUNCTION_H_
 #define THIRD_PARTY_CEL_CPP_COMMON_FUNCTION_H_
 
+#include "absl/base/attributes.h"
 #include "absl/base/nullability.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
@@ -24,6 +25,8 @@
 #include "google/protobuf/message.h"
 
 namespace cel {
+
+class EmbedderContext;
 
 // Interface for extension functions.
 //
@@ -35,6 +38,57 @@ class Function {
  public:
   virtual ~Function() = default;
 
+  // Context for the function invocation.
+  //
+  // Collects evaluation state that may be needed for the function to operate.
+  //
+  // The function implementation should not retain a reference to the context
+  // object beyond the duration of the function call or modify the InvokeContext
+  // itself.
+  class InvokeContext {
+   public:
+    InvokeContext(
+        const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool,
+        google::protobuf::MessageFactory* absl_nonnull message_factory,
+        google::protobuf::Arena* absl_nonnull arena,
+        const EmbedderContext* absl_nullable embedder_context = nullptr)
+        : descriptor_pool_(descriptor_pool),
+          message_factory_(message_factory),
+          arena_(arena),
+          embedder_context_(embedder_context) {}
+    const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool() const {
+      return descriptor_pool_;
+    }
+
+    google::protobuf::MessageFactory* absl_nonnull message_factory() const {
+      return message_factory_;
+    }
+
+    google::protobuf::Arena* absl_nonnull arena() const { return arena_; }
+
+    const EmbedderContext* absl_nullable embedder_context() const {
+      return embedder_context_;
+    }
+
+    void set_embedder_context(
+        const EmbedderContext* absl_nullable embedder_context) {
+      embedder_context_ = embedder_context;
+    }
+
+   private:
+    const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool_;
+    google::protobuf::MessageFactory* absl_nonnull message_factory_;
+    google::protobuf::Arena* absl_nonnull arena_;
+    const EmbedderContext* absl_nullable embedder_context_;
+  };
+
+  ABSL_DEPRECATED("Use the InvokeContext overload instead.")
+  inline absl::StatusOr<Value> Invoke(
+      absl::Span<const Value> args,
+      const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool,
+      google::protobuf::MessageFactory* absl_nonnull message_factory,
+      google::protobuf::Arena* absl_nonnull arena) const;
+
   // Attempt to evaluate an extension function based on the runtime arguments
   // during the evaluation of a CEL expression.
   //
@@ -43,12 +97,18 @@ class Function {
   //
   // A cel::ErrorValue typed result is considered a recoverable error and
   // follows CEL's logical short-circuiting behavior.
-  virtual absl::StatusOr<Value> Invoke(
-      absl::Span<const Value> args,
-      const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool,
-      google::protobuf::MessageFactory* absl_nonnull message_factory,
-      google::protobuf::Arena* absl_nonnull arena) const = 0;
+  virtual absl::StatusOr<Value> Invoke(absl::Span<const Value> args,
+                                       const InvokeContext& context) const = 0;
 };
+
+absl::StatusOr<Value> Function::Invoke(
+    absl::Span<const Value> args,
+    const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool,
+    google::protobuf::MessageFactory* absl_nonnull message_factory,
+    google::protobuf::Arena* absl_nonnull arena) const {
+  InvokeContext context(descriptor_pool, message_factory, arena);
+  return Invoke(args, context);
+}
 
 }  // namespace cel
 

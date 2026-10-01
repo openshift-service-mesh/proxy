@@ -133,19 +133,12 @@ java_runtime_files(
 #
 # See test_jni in third_party/bazel/src/test/shell/bazel/bazel_java_test.sh for
 # an example of using Bazel to build a Java program that calls a C function.
-#
-# TODO(ilist): use //src:condition:linux when released in Bazel
 cc_library(
     name = "jni",
     hdrs = [":jni_header"] + select({
         "@bazel_tools//src/conditions:darwin": [":jni_md_header-darwin"],
         "@bazel_tools//src/conditions:freebsd": [":jni_md_header-freebsd"],
-        "@bazel_tools//src/conditions:linux_aarch64": [":jni_md_header-linux"],
-        "@bazel_tools//src/conditions:linux_mips64": [":jni_md_header-linux"],
-        "@bazel_tools//src/conditions:linux_ppc64le": [":jni_md_header-linux"],
-        "@bazel_tools//src/conditions:linux_riscv64": [":jni_md_header-linux"],
-        "@bazel_tools//src/conditions:linux_s390x": [":jni_md_header-linux"],
-        "@bazel_tools//src/conditions:linux_x86_64": [":jni_md_header-linux"],
+        "@bazel_tools//src/conditions:linux": [":jni_md_header-linux"],
         "@bazel_tools//src/conditions:openbsd": [":jni_md_header-openbsd"],
         "@bazel_tools//src/conditions:windows": [":jni_md_header-windows"],
         "//conditions:default": [],
@@ -153,12 +146,7 @@ cc_library(
     includes = ["include"] + select({
         "@bazel_tools//src/conditions:darwin": ["include/darwin"],
         "@bazel_tools//src/conditions:freebsd": ["include/freebsd"],
-        "@bazel_tools//src/conditions:linux_aarch64": ["include/linux"],
-        "@bazel_tools//src/conditions:linux_mips64": ["include/linux"],
-        "@bazel_tools//src/conditions:linux_ppc64le": ["include/linux"],
-        "@bazel_tools//src/conditions:linux_riscv64": ["include/linux"],
-        "@bazel_tools//src/conditions:linux_s390x": ["include/linux"],
-        "@bazel_tools//src/conditions:linux_x86_64": ["include/linux"],
+        "@bazel_tools//src/conditions:linux": ["include/linux"],
         "@bazel_tools//src/conditions:openbsd": ["include/openbsd"],
         "@bazel_tools//src/conditions:windows": ["include/win32"],
         "//conditions:default": [],
@@ -183,15 +171,24 @@ cc_library(
             actual = "@remote_java_tools_%s//:prebuilt_one_version" % OS,
             visibility = ["//visibility:private"],
         ),
-        alias(
-            name = "turbine_direct_graal_%s" % OS,
-            actual = "@remote_java_tools_%s//:turbine_direct_graal" % OS,
-        ),
     )
     for OS in [
         "linux",
         "linux_aarch64",
         "darwin_x86_64",
+        "darwin_arm64",
+        "windows",
+    ]
+]
+
+[
+    alias(
+        name = "turbine_direct_graal_%s" % OS,
+        actual = "@remote_java_tools_%s//:turbine_direct_graal" % OS,
+    )
+    for OS in [
+        "linux",
+        "linux_aarch64",
         "darwin_arm64",
         "windows",
     ]
@@ -290,7 +287,6 @@ alias(
     name = "turbine_direct_graal_or_java",
     actual = select({
         "@bazel_tools//src/conditions:darwin_arm64": ":turbine_direct_graal_darwin_arm64",
-        "@bazel_tools//src/conditions:darwin_x86_64": ":turbine_direct_graal_darwin_x86_64",
         "@bazel_tools//src/conditions:linux_x86_64": ":turbine_direct_graal_linux",
         "@bazel_tools//src/conditions:linux_aarch64": ":turbine_direct_graal_linux_aarch64",
         "@bazel_tools//src/conditions:windows": ":turbine_direct_graal_windows",
@@ -302,7 +298,6 @@ alias(
     name = "turbine_direct_graal",
     actual = select({
         "@bazel_tools//src/conditions:darwin_arm64": ":turbine_direct_graal_darwin_arm64",
-        "@bazel_tools//src/conditions:darwin_x86_64": ":turbine_direct_graal_darwin_x86_64",
         "@bazel_tools//src/conditions:linux_x86_64": ":turbine_direct_graal_linux",
         "@bazel_tools//src/conditions:linux_aarch64": ":turbine_direct_graal_linux_aarch64",
         "@bazel_tools//src/conditions:windows": ":turbine_direct_graal_windows",
@@ -378,7 +373,7 @@ RELEASES = (8, 9, 10, 11, 17, 21, 25)
 [
     default_java_toolchain(
         name = ("toolchain_java%d" if release <= 11 else "toolchain_jdk_%d") % release,
-        configuration = DEFAULT_TOOLCHAIN_CONFIGURATION | {"java_runtime": ":remotejdk_25"},
+        configuration = DEFAULT_TOOLCHAIN_CONFIGURATION,
         source_version = "%s" % release,
         target_version = "%s" % release,
     )

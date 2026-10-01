@@ -1,0 +1,18 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/lseek.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+
+# gl_FUNC_LSEEK macro from lseek.m4
+# HAVE_UNISTD_H comes from unistd_h dependency
+# Note: Full implementation includes runtime checks for pipe detection
+# and SEEK_DATA compatibility that require file system operations
+
+autoconf(
+    name = "lseek",
+    checks = [],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/sys_types_h",  # AC_REQUIRE([gl_SYS_TYPES_H])
+        # Note: gl_UNISTD_H_DEFAULTS is a _DEFAULTS function, so we don't track it as a dependency - provides HAVE_UNISTD_H
+    ],
+)

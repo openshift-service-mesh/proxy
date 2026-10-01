@@ -20,6 +20,7 @@ load(
     "@bazel_skylib//lib:paths.bzl",
     "paths",
 )
+load("@protobuf//bazel/common:proto_common.bzl", "proto_common")
 load(
     "//proto:swift_proto_common.bzl",
     "swift_proto_common",
@@ -29,6 +30,8 @@ load(
     "register_module_mapping_write_action",
 )
 load("//swift:providers.bzl", "SwiftInfo", "SwiftProtoCompilerInfo")
+
+PROTOC_TOOLCHAIN = Label("@protobuf//bazel/private:proto_toolchain_type")
 
 def _swift_proto_compile(label, actions, swift_proto_compiler_info, additional_compiler_info, proto_infos, module_mappings):
     """Compiles Swift source files from `ProtoInfo` providers.
@@ -160,7 +163,7 @@ def _swift_proto_compile(label, actions, swift_proto_compiler_info, additional_c
     # Add the plugin argument with the provided name to namespace all of the options:
     plugin_name_argument = "--plugin=protoc-gen-{}={}".format(
         swift_proto_compiler_info.internal.plugin_name,
-        swift_proto_compiler_info.internal.plugin.path,
+        swift_proto_compiler_info.internal.plugin.executable.path,
     )
     arguments.add(plugin_name_argument)
 
@@ -199,11 +202,7 @@ def _swift_proto_compile(label, actions, swift_proto_compiler_info, additional_c
     # Run the protoc action:
     actions.run(
         inputs = depset(
-            direct = [
-                swift_proto_compiler_info.internal.protoc,
-                swift_proto_compiler_info.internal.plugin,
-                module_mappings_file,
-            ],
+            direct = [module_mappings_file],
             transitive = [transitive_descriptor_sets],
         ),
         outputs = [temporary_output_directory],
@@ -211,6 +210,7 @@ def _swift_proto_compile(label, actions, swift_proto_compiler_info, additional_c
         mnemonic = "SwiftProtocGen",
         executable = swift_proto_compiler_info.internal.protoc,
         arguments = [arguments],
+        tools = [swift_proto_compiler_info.internal.plugin],
     )
 
     # Expand the copy Swift sources template:
@@ -238,6 +238,22 @@ def _swift_proto_compile(label, actions, swift_proto_compiler_info, additional_c
 
     return swift_srcs
 
+def _incompatible_toolchains_enabled():
+    return getattr(proto_common, "INCOMPATIBLE_ENABLE_PROTO_TOOLCHAIN_RESOLUTION", False)
+
+def _find_protoc_toolchain(ctx):
+    if not _incompatible_toolchains_enabled():
+        fail("""\
+Could not resolve protocol compiler toolchain. Either provide an explicit `protoc` attr or set \
+`--incompatible_enable_proto_toolchain_resolution`.""")
+    toolchain = ctx.toolchains[PROTOC_TOOLCHAIN]
+    if not toolchain:
+        fail("No proto toolchains registered for '%s'." % PROTOC_TOOLCHAIN)
+    return toolchain.proto
+
+def _protoc_executable(ctx):
+    return ctx.executable.protoc or _find_protoc_toolchain(ctx).proto_compiler.executable
+
 def _swift_proto_compiler_impl(ctx):
     return [
         SwiftProtoCompilerInfo(
@@ -245,8 +261,8 @@ def _swift_proto_compiler_impl(ctx):
             compile = _swift_proto_compile,
             compiler_deps = ctx.attr.deps,
             internal = struct(
-                protoc = ctx.executable.protoc,
-                plugin = ctx.executable.plugin,
+                protoc = _protoc_executable(ctx),
+                plugin = ctx.attr.plugin[DefaultInfo].files_to_run,
                 plugin_name = ctx.attr.plugin_name,
                 plugin_option_allowlist = ctx.attr.plugin_option_allowlist,
                 plugin_options = ctx.attr.plugin_options,
@@ -287,15 +303,10 @@ Typically, these are Well Known Types and proto runtime libraries.
             providers = [SwiftInfo],
         ),
         "protoc": attr.label(
-            doc = """\
-A proto compiler executable binary.
-
-E.g.
-"//tools/protoc_wrapper:protoc"
-""",
-            mandatory = True,
-            executable = True,
+            allow_single_file = True,
             cfg = "exec",
+            executable = True,
+            mandatory = False,
         ),
         "plugin": attr.label(
             doc = """\
@@ -386,5 +397,7 @@ Each compiler target should configure this based on the suffix applied to the ge
             allow_single_file = True,
         ),
     },
+    fragments = ["proto"],
     implementation = _swift_proto_compiler_impl,
+    toolchains = [PROTOC_TOOLCHAIN],
 )

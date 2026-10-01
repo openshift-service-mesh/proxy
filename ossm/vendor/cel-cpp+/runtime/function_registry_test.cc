@@ -19,19 +19,18 @@
 #include <tuple>
 #include <vector>
 
-#include "absl/base/nullability.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/types/span.h"
 #include "common/function_descriptor.h"
 #include "common/kind.h"
+#include "common/value.h"
 #include "internal/testing.h"
 #include "runtime/activation.h"
 #include "runtime/function.h"
 #include "runtime/function_adapter.h"
 #include "runtime/function_overload_reference.h"
 #include "runtime/function_provider.h"
-#include "google/protobuf/arena.h"
-#include "google/protobuf/descriptor.h"
-#include "google/protobuf/message.h"
 
 namespace cel {
 
@@ -50,11 +49,8 @@ class ConstIntFunction : public cel::Function {
     return {"ConstFunction", false, {}};
   }
 
-  absl::StatusOr<Value> Invoke(
-      absl::Span<const Value> args,
-      const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool,
-      google::protobuf::MessageFactory* absl_nonnull message_factory,
-      google::protobuf::Arena* absl_nonnull arena) const override {
+  absl::StatusOr<Value> Invoke(absl::Span<const Value> args,
+                               const InvokeContext& context) const override {
     return IntValue(42);
   }
 };
@@ -124,11 +120,11 @@ TEST(FunctionRegistryTest, DefaultLazyProviderNoOverloadFound) {
   ASSERT_THAT(providers, SizeIs(1));
   const FunctionProvider& provider = providers[0].provider;
   ASSERT_OK_AND_ASSIGN(
-      absl::optional<FunctionOverloadReference> func,
+      std::optional<FunctionOverloadReference> func,
       provider.GetFunction({"LazyFunc", false, {cel::Kind::kInt64}},
                            activation));
 
-  EXPECT_EQ(func, absl::nullopt);
+  EXPECT_EQ(func, std::nullopt);
 }
 
 TEST(FunctionRegistryTest, DefaultLazyProviderReturnsImpl) {
@@ -150,7 +146,7 @@ TEST(FunctionRegistryTest, DefaultLazyProviderReturnsImpl) {
   ASSERT_THAT(providers, SizeIs(1));
   const FunctionProvider& provider = providers[0].provider;
   ASSERT_OK_AND_ASSIGN(
-      absl::optional<FunctionOverloadReference> func,
+      std::optional<FunctionOverloadReference> func,
       provider.GetFunction(
           FunctionDescriptor("LazyFunction", false, {Kind::kInt}), activation));
 

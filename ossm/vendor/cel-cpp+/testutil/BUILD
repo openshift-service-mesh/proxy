@@ -12,45 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
-
-cc_library(
-    name = "expr_printer",
-    srcs = ["expr_printer.cc"],
-    hdrs = ["expr_printer.h"],
-    deps = [
-        "//common:ast",
-        "//common:ast_proto",
-        "//common:constant",
-        "//common:expr",
-        "//internal:strings",
-        "@com_google_absl//absl/base:no_destructor",
-        "@com_google_absl//absl/log:absl_log",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
-    ],
-)
-
-cc_test(
-    name = "expr_printer_test",
-    srcs = ["expr_printer_test.cc"],
-    deps = [
-        ":expr_printer",
-        "//common:expr",
-        "//internal:testing",
-        "//parser",
-        "//parser:options",
-        "@com_google_absl//absl/base:no_destructor",
-        "@com_google_absl//absl/strings",
-    ],
-)
 
 cc_library(
     name = "util",
@@ -58,7 +27,29 @@ cc_library(
     hdrs = [
         "util.h",
     ],
+    copts = CEL_COPTS,
     deps = ["//internal:proto_matchers"],
+)
+
+cc_library(
+    name = "test_macros",
+    testonly = True,
+    srcs = ["test_macros.cc"],
+    hdrs = ["test_macros.h"],
+    copts = CEL_COPTS,
+    deps = [
+        "//common:expr",
+        "//internal:status_macros",
+        "//parser:macro",
+        "//parser:macro_expr_factory",
+        "//parser:macro_registry",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/log:absl_check",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
+    ],
 )
 
 cc_library(
@@ -66,10 +57,11 @@ cc_library(
     testonly = True,
     srcs = ["baseline_tests.cc"],
     hdrs = ["baseline_tests.h"],
+    copts = CEL_COPTS,
     deps = [
-        ":expr_printer",
         "//common:ast",
         "//common:expr",
+        "//common:expr_printer",
         "//extensions/protobuf:ast_converters",
         "@com_google_absl//absl/strings",
         "@com_google_cel_spec//proto/cel/expr:checked_cc_proto",
@@ -79,10 +71,16 @@ cc_library(
 cc_test(
     name = "baseline_tests_test",
     srcs = ["baseline_tests_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":baseline_tests",
         "//common:ast",
         "//internal:testing",
         "@com_google_protobuf//:protobuf",
     ],
+)
+
+proto_library(
+    name = "test_json_names_proto",
+    srcs = ["test_json_names.proto"],
 )

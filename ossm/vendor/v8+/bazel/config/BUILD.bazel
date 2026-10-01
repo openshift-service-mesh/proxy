@@ -359,14 +359,22 @@ selects.config_setting_group(
     ],
 )
 
-# To build with sanitizers in the command line, define the local
-# variable SANITIZER.
-# Eg: bazel build --copt=-fsanitize=address --linkopt=-fsanitize=address \
-#       --define=SANITIZER=asan ...
+# To build with sanitizers, pass the matching flag alongside the compiler
+# flags, e.g.:
+#   bazel build --copt=-fsanitize=address --linkopt=-fsanitize=address \
+#       --@v8//bazel/config:asan=true ...
+# These are Starlark build settings rather than --define so they do not leak
+# into the exec configuration (host tools such as mksnapshot must not be
+# built with V8_USE_*_SANITIZER when the sanitizer runtime isn't linked).
+
+bool_flag(
+    name = "asan",
+    build_setting_default = False,
+)
 
 config_setting(
     name = "asan_enabled",
-    values = {"define": "SANITIZER=asan"},
+    flag_values = {":asan": "True"},
 )
 
 config_setting(
@@ -374,14 +382,24 @@ config_setting(
     values = {"define": "SANITIZER=hwasan"},
 )
 
+bool_flag(
+    name = "msan",
+    build_setting_default = False,
+)
+
 config_setting(
     name = "msan_enabled",
-    values = {"define": "SANITIZER=msan"},
+    flag_values = {":msan": "True"},
+)
+
+bool_flag(
+    name = "ubsan",
+    build_setting_default = False,
 )
 
 config_setting(
     name = "ubsan_enabled",
-    values = {"define": "SANITIZER=ubsan"},
+    flag_values = {":ubsan": "True"},
 )
 
 bool_flag(

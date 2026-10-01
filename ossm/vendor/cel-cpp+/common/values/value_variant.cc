@@ -491,7 +491,8 @@ void ValueVariant::SlowSwap(ValueVariant& lhs, ValueVariant& rhs,
     lhs.flags_ = rhs.flags_;
     // This is acceptable. We know that both are trivially copyable at runtime.
     // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
-    std::memcpy(std::addressof(rhs), tmp, sizeof(ValueVariant));
+    std::memcpy(static_cast<void*>(std::addressof(rhs)), tmp,
+                sizeof(ValueVariant));
   } else if (rhs_trivial) {
     alignas(ValueVariant) std::byte tmp[sizeof(ValueVariant)];
     // This is acceptable. We know that both are trivially copyable at runtime.
@@ -526,7 +527,8 @@ void ValueVariant::SlowSwap(ValueVariant& lhs, ValueVariant& rhs,
     rhs.flags_ = lhs.flags_;
     // This is acceptable. We know that both are trivially copyable at runtime.
     // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
-    std::memcpy(std::addressof(lhs), tmp, sizeof(ValueVariant));
+    std::memcpy(static_cast<void*>(std::addressof(lhs)), tmp,
+                sizeof(ValueVariant));
   } else {
     ValueVariant tmp = std::move(lhs);
     lhs = std::move(rhs);

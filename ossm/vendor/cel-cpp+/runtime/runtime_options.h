@@ -139,17 +139,23 @@ struct RuntimeOptions {
   // removed in a later update.
   bool enable_lazy_bind_initialization = true;
 
-  // Maximum recursion depth for evaluable programs.
+  // Enable recursive planning with a maximum recursion depth for evaluable
+  // programs.
   //
-  // This is proportional to the maximum number of recursive Evaluate calls that
-  // a single expression program might require while evaluating. This is
-  // coarse -- the actual C++ stack requirements will vary depending on the
+  // This limit is proportional to the maximum number of recursive Evaluate
+  // calls that a single expression program might require while evaluating. This
+  // is coarse -- the actual C++ stack requirements will vary depending on the
   // expression.
   //
   // This does not account for re-entrant evaluation in a client's extension
-  // function.
+  // function (i.e. a CEL function that calls Evaluate on another CEL program)
+  //
+  // If the limit is exceeded, the planner will return an error instead of
+  // planning the program.
   //
   // -1 means unbounded.
+  // 0 means disabled (using a heap-based stack machine instead), which is the
+  // default.
   int max_recursion_depth = 0;
 
   // Enable tracing support for recursively planned programs.
@@ -170,6 +176,31 @@ struct RuntimeOptions {
   //
   // Currently applies to !_, @not_strictly_false, _==_, _!=_, @in
   bool enable_fast_builtins = true;
+
+  // When enabled, string(double) will format the double with enough precision
+  // to ensure that the original double value can be recovered exactly.
+  //
+  // If available, will use the `std::to_chars` standard library function to
+  // perform the conversion to generate the shortest representation.
+  //
+  // Otherwise, will fall back to formatting with the worst-case required
+  // precision.
+  //
+  // If disabled, will use the legacy behavior of rounding to 6 decimal places.
+  bool enable_precision_preserving_double_format = true;
+
+  // When enabled, the planner will attempt to use a more performant execution
+  // path for field access when the type is known at plan time, instead of using
+  // the generic field access implementation.
+  //
+  // The runtime will try to verify that the field access is compatible with the
+  // actual type at evaluation time, and will fall back to the generic
+  // implementation if the value is not what was expected.
+  //
+  // This is not recommended if the values bound to the activation are typically
+  // not what the planner expected (e.g. a map that was declared as a proto or
+  // a different message with matching field names).
+  bool enable_typed_field_access = false;
 };
 // LINT.ThenChange(//depot/google3/eval/public/cel_options.h)
 

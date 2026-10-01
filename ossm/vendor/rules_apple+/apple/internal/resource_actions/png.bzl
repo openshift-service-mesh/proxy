@@ -15,16 +15,21 @@
 """PNG related actions."""
 
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
+    "@apple_support//lib:apple_support.bzl",
     "apple_support",
 )
+load(
+    "//apple/internal:shared_environment.bzl",
+    "shared_environment",
+)
 
-def copy_png(*, actions, input_file, output_file, platform_prerequisites):
+def copy_png(*, actions, mac_exec_group, input_file, output_file, platform_prerequisites):
     """Creates an action that copies and compresses a png using copypng.
 
     Args:
       actions: The actions provider from `ctx.actions`.
       input_file: The png file to be copied.
+      mac_exec_group: The execution group for Mac tools.
       output_file: The file reference for the output plist.
       platform_prerequisites: Struct containing information on the platform being targeted.
     """
@@ -56,6 +61,8 @@ def copy_png(*, actions, input_file, output_file, platform_prerequisites):
                 input_file.path,
                 output_file.path,
             ],
+            env = shared_environment.default_env,
+            exec_group = mac_exec_group,
             executable = "/usr/bin/xcrun",
             inputs = [input_file],
             mnemonic = "CopyPng",

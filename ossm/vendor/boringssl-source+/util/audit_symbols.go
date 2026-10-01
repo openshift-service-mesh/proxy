@@ -50,7 +50,7 @@ var skipWeakSymbols = []*regexp.Regexp{
 	regexp.MustCompile(`^DW\.ref\.__gxx_personality_.*`), // libstdc++ exception handling
 	regexp.MustCompile(`^_Z6memchr.*`),                   // memchr()
 	regexp.MustCompile(`^_Z6strchr.*`),                   // strchr()
-	regexp.MustCompile(`^_ZN9__gnu_cxx.*`),               // __gnu_cxx::
+	regexp.MustCompile(`^_ZNr?V?K?9__gnu_cxx.*`),         // __gnu_cxx::
 	regexp.MustCompile(`^_ZTI.*`),                        // typeinfo
 	regexp.MustCompile(`^_ZTS.*`),                        // typeinfo name
 	regexp.MustCompile(`^_ZTV.*`),                        // vtable
@@ -69,6 +69,7 @@ var skipWeakSymbols = []*regexp.Regexp{
 	// Symbols on Windows.
 	regexp.MustCompile(`.*<lambda.*`),                                   // Lambda classes
 	regexp.MustCompile(`.*@std(@.*)?$`),                                 // std::
+	regexp.MustCompile(`.*@stdext(@.*)?$`),                              // stdext::
 	regexp.MustCompile(`^(.*\?\?)?__local_stdio_printf_options(@.*)?$`), // stdio
 	regexp.MustCompile(`^(.*\?\?)?gai_strerrorA(@.*)?$`),                // gai_strerrorA()
 	regexp.MustCompile(`^RtlSecureZeroMemory$`),                         // RtlSecureZeroMemory()
@@ -86,6 +87,8 @@ var skipWeakSymbols = []*regexp.Regexp{
 	regexp.MustCompile(`^snprintf$`),                                    // snprintf()
 	regexp.MustCompile(`^vsnprintf$`),                                   // vsnprintf()
 	regexp.MustCompile(`^\?\?_R[0-4].*$`),                               // RTTI
+	regexp.MustCompile(`^_Avx2WmemEnabledWeakValue$`),                   // MSVC 14.50+ CRT
+	regexp.MustCompile(`^time$`),                                        // MSVC 14.50+ CRT
 
 	// Symbols in the FIPS module.
 	// They are provided for tooling only and should not be read internally.
@@ -129,12 +132,52 @@ func printAndExit(format string, args ...any) {
 	os.Exit(1)
 }
 
+func guessArchiveFiles() []string {
+	var paths []string
+	for _, name := range []string{
+		// List of libraries for which symbol prefixing is stable.
+		"crypto",
+	} {
+		found := ""
+		// Trying patterns for all platforms as the current build might be a cross compile.
+		for _, pattern := range []string{
+			"lib%s.a",     // Linux and macOS static.
+			"lib%s.so",    // Linux shared.
+			"%s.lib",      // Windows static.
+			"%s.dll",      // Windows shared.
+			"lib%s.dylib", // macOS shared.
+		} {
+			path := fmt.Sprintf(pattern, name)
+			if _, err := os.Stat(path); err == nil {
+				if found != "" {
+					fmt.Fprintf(os.Stderr, "Multiple library files for lib%s found in the current directory: %s and %s - please specify explicitly, or do a clean build first.\n", name, found, path)
+					return nil // Will show usage.
+				}
+				found = path
+			}
+		}
+		if found == "" {
+			// Fail if _any_ of the libraries that should be there isn't there.
+			// This guards against an accidentally successful result from an incomplete build.
+			fmt.Fprintf(os.Stderr, "No library file for lib%s found in the current directory - please specify explicitly, or chdir to where it is first.\n", name)
+			return nil // Will show usage.
+		}
+		paths = append(paths, found)
+	}
+	return paths
+}
+
 func main() {
 	flag.Parse()
-	if flag.NArg() < 1 {
+	archiveFiles := flag.Args()
+
+	if len(archiveFiles) == 0 {
+		archiveFiles = guessArchiveFiles()
+	}
+
+	if len(archiveFiles) == 0 {
 		printAndExit("Usage: %s [-out OUT] [-obj-file-format FORMAT] ARCHIVE_FILE [ARCHIVE_FILE [...]]", os.Args[0])
 	}
-	archiveFiles := flag.Args()
 
 	out := os.Stdout
 	if *outFlag != "-" {
@@ -161,6 +204,8 @@ func main() {
 	}
 
 	for _, archive := range archiveFiles {
+		fmt.Fprintf(os.Stderr, "Checking %s...\n", archive)
+
 		f, err := os.Open(archive)
 		if err != nil {
 			printAndExit("Error opening %s: %s", archive, err)

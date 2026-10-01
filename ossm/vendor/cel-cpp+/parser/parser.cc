@@ -25,8 +25,9 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
-#include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -39,6 +40,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/overload.h"
 #include "absl/log/absl_check.h"
+#include "absl/log/check.h"
 #include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -57,13 +59,14 @@
 #include "common/ast/expr_proto.h"
 #include "common/ast/source_info_proto.h"
 #include "common/constant.h"
+#include "common/expr.h"
 #include "common/expr_factory.h"
 #include "common/operators.h"
 #include "common/source.h"
 #include "internal/lexis.h"
 #include "internal/status_macros.h"
 #include "internal/strings.h"
-#include "internal/utf8.h"
+#include "parser/internal/pratt_parser.h"
 #pragma push_macro("IN")
 #undef IN
 #include "parser/internal/CelBaseVisitor.h"
@@ -87,7 +90,7 @@ namespace cel {
 
 namespace {
 
-constexpr const char kHiddenAccumulatorVariableName[] = "@result";
+[[maybe_unused]] constexpr const char kHiddenAccumulatorVariableName[] = "@result";
 
 std::any ExprPtrToAny(std::unique_ptr<Expr>&& expr) {
   return std::make_any<Expr*>(expr.release());
@@ -112,13 +115,12 @@ struct ParserError {
 };
 
 std::string DisplayParserError(const cel::Source& source,
-                               const ParserError& error) {
-  auto location =
-      source.GetLocation(error.range.begin).value_or(SourceLocation{});
+                               SourceLocation location,
+                               absl::string_view message) {
   return absl::StrCat(absl::StrFormat("ERROR: %s:%zu:%zu: %s",
                                       source.description(), location.line,
                                       // add one to the 0-based column
-                                      location.column + 1, error.message),
+                                      location.column + 1, message),
                       source.DisplayErrorLocation(location));
 }
 
@@ -164,8 +166,8 @@ SourceRange SourceRangeFromParserRuleContext(
 class ParserMacroExprFactory final : public MacroExprFactory {
  public:
   explicit ParserMacroExprFactory(const cel::Source& source,
-                                  absl::string_view accu_var)
-      : MacroExprFactory(accu_var), source_(source) {}
+                                  int expression_node_limit)
+      : source_(source), expression_node_limit_(expression_node_limit) {}
 
   void BeginMacro(SourceRange macro_position) {
     macro_position_ = macro_position;
@@ -202,15 +204,21 @@ class ParserMacroExprFactory final : public MacroExprFactory {
 
   int64_t NextId(const SourceRange& range) {
     auto id = expr_id_++;
+    if (id > expression_node_limit_ && !node_limit_exceeded_) {
+      node_limit_exceeded_ = true;
+      ReportError(range, "expression node limit exceeded");
+    }
     if (range.begin != -1 || range.end != -1) {
       positions_.insert(std::pair{id, range});
     }
     return id;
   }
 
+  bool is_node_limit_exceeded() const { return node_limit_exceeded_; }
+
   bool HasErrors() const { return error_count_ != 0; }
 
-  std::string ErrorMessage() {
+  std::vector<cel::ParseIssue> CollectIssues() {
     // Errors are collected as they are encountered, not by their location
     // within the source. To have a more stable error message as implementation
     // details change, we sort the collected errors by their source location
@@ -227,20 +235,23 @@ class ParserMacroExprFactory final : public MacroExprFactory {
         });
     // Build the summary error message using the sorted errors.
     bool errors_truncated = error_count_ > 100;
-    std::vector<std::string> messages;
-    messages.reserve(
+    std::vector<cel::ParseIssue> issues;
+    issues.reserve(
         errors_.size() +
         errors_truncated);  // Reserve space for the transform and an
                             // additional element when truncation occurs.
-    std::transform(errors_.begin(), errors_.end(), std::back_inserter(messages),
-                   [this](const ParserError& error) {
-                     return cel::DisplayParserError(source_, error);
-                   });
+    std::transform(
+        errors_.begin(), errors_.end(), std::back_inserter(issues),
+        [this](const ParserError& error) {
+          auto location =
+              source_.GetLocation(error.range.begin).value_or(SourceLocation{});
+          return cel::ParseIssue(location, error.message);
+        });
     if (errors_truncated) {
-      messages.emplace_back(
-          absl::StrCat(error_count_ - 100, " more errors were truncated."));
+      issues.push_back(cel::ParseIssue(
+          absl::StrCat(error_count_ - 100, " more errors were truncated.")));
     }
-    return absl::StrJoin(messages, "\n");
+    return issues;
   }
 
   void AddMacroCall(int64_t macro_id, absl::string_view function,
@@ -405,6 +416,8 @@ class ParserMacroExprFactory final : public MacroExprFactory {
   std::vector<ParserError> errors_;
   size_t error_count_ = 0;
   const Source& source_;
+  int expression_node_limit_;
+  bool node_limit_exceeded_ = false;
   SourceRange macro_position_;
 };
 
@@ -551,7 +564,7 @@ class ExpressionBalancer final {
 
   // balance creates a balanced tree from the sub-terms and returns the final
   // Expr value.
-  Expr Balance();
+  Expr Balance(bool enable_variadic = false);
 
  private:
   // balancedTree recursively balances the terms provided to a commutative
@@ -576,9 +589,12 @@ void ExpressionBalancer::AddTerm(int64_t op, Expr term) {
   ops_.push_back(op);
 }
 
-Expr ExpressionBalancer::Balance() {
+Expr ExpressionBalancer::Balance(bool enable_variadic) {
   if (terms_.size() == 1) {
     return std::move(terms_[0]);
+  }
+  if (enable_variadic) {
+    return factory_.NewCall(ops_[0], function_, std::move(terms_));
   }
   return BalancedTree(0, ops_.size() - 1);
 }
@@ -603,23 +619,34 @@ Expr ExpressionBalancer::BalancedTree(int lo, int hi) {
   return factory_.NewCall(ops_[mid], function_, std::move(arguments));
 }
 
+std::string FormatIssues(const cel::Source& source,
+                         absl::Span<const cel::ParseIssue> issues) {
+  return absl::StrJoin(
+      issues, "\n", [&source](std::string* out, const cel::ParseIssue& issue) {
+        absl::StrAppend(out, cel::DisplayParserError(source, issue.location(),
+                                                     issue.message()));
+      });
+}
+
 class ParserVisitor final : public CelBaseVisitor,
                             public antlr4::BaseErrorListener {
  public:
   ParserVisitor(const cel::Source& source, int max_recursion_depth,
-                absl::string_view accu_var,
+                int max_expression_node_count,
                 const cel::MacroRegistry& macro_registry,
                 bool add_macro_calls = false,
                 bool enable_optional_syntax = false,
-                bool enable_quoted_identifiers = false)
+                bool enable_quoted_identifiers = false,
+                bool enable_variadic_logical_operators = false)
       : source_(source),
-        factory_(source_, accu_var),
+        factory_(source_, max_expression_node_count),
         macro_registry_(macro_registry),
         recursion_depth_(0),
         max_recursion_depth_(max_recursion_depth),
         add_macro_calls_(add_macro_calls),
         enable_optional_syntax_(enable_optional_syntax),
-        enable_quoted_identifiers_(enable_quoted_identifiers) {}
+        enable_quoted_identifiers_(enable_quoted_identifiers),
+        enable_variadic_logical_operators_(enable_variadic_logical_operators) {}
 
   ~ParserVisitor() override = default;
 
@@ -675,7 +702,7 @@ class ParserVisitor final : public CelBaseVisitor,
                    const std::string& msg, std::exception_ptr e) override;
   bool HasErrored() const;
 
-  std::string ErrorMessage();
+  std::vector<cel::ParseIssue> CollectIssues();
 
  private:
   template <typename... Args>
@@ -710,6 +737,7 @@ class ParserVisitor final : public CelBaseVisitor,
   const bool add_macro_calls_;
   const bool enable_optional_syntax_;
   const bool enable_quoted_identifiers_;
+  const bool enable_variadic_logical_operators_;
 };
 
 template <typename T, typename = std::enable_if_t<
@@ -914,7 +942,7 @@ std::any ParserVisitor::visitConditionalOr(
     int64_t op_id = factory_.NextId(SourceRangeFromToken(op));
     b.AddTerm(op_id, std::move(next));
   }
-  return ExprToAny(b.Balance());
+  return ExprToAny(b.Balance(enable_variadic_logical_operators_));
 }
 
 std::any ParserVisitor::visitConditionalAnd(
@@ -935,7 +963,7 @@ std::any ParserVisitor::visitConditionalAnd(
     int64_t op_id = factory_.NextId(SourceRangeFromToken(op));
     b.AddTerm(op_id, std::move(next));
   }
-  return ExprToAny(b.Balance());
+  return ExprToAny(b.Balance(enable_variadic_logical_operators_));
 }
 
 std::any ParserVisitor::visitRelation(CelParser::RelationContext* ctx) {
@@ -1089,7 +1117,7 @@ std::any ParserVisitor::visitCreateMessage(
   } else {
     name = absl::StrJoin(parts, ".");
   }
-  int64_t obj_id = factory_.NextId(SourceRangeFromToken(ctx->op));
+  int64_t obj_id = factory_.NextId(SourceRangeFromParserRuleContext(ctx));
   std::vector<StructExprField> fields;
   if (ctx->entries) {
     fields = visitFields(ctx->entries);
@@ -1191,7 +1219,7 @@ std::any ParserVisitor::visitNested(CelParser::NestedContext* ctx) {
 }
 
 std::any ParserVisitor::visitCreateList(CelParser::CreateListContext* ctx) {
-  int64_t list_id = factory_.NextId(SourceRangeFromToken(ctx->op));
+  int64_t list_id = factory_.NextId(SourceRangeFromParserRuleContext(ctx));
   auto elems = visitList(ctx->elems);
   return ExprToAny(factory_.NewList(list_id, std::move(elems)));
 }
@@ -1209,6 +1237,8 @@ std::vector<ListExprElement> ParserVisitor::visitList(
     if (!enable_optional_syntax_ && expr_ctx->opt != nullptr) {
       factory_.ReportError(SourceRangeFromParserRuleContext(ctx),
                            "unsupported syntax '?'");
+      // Still generate an ID to detect node limit exceeded.
+      factory_.NextId(SourceRangeFromParserRuleContext(ctx));
       rv.push_back(factory_.NewListElement(factory_.NewUnspecified(0), false));
       continue;
     }
@@ -1229,7 +1259,7 @@ std::vector<Expr> ParserVisitor::visitList(CelParser::ExprListContext* ctx) {
 }
 
 std::any ParserVisitor::visitCreateMap(CelParser::CreateMapContext* ctx) {
-  int64_t struct_id = factory_.NextId(SourceRangeFromToken(ctx->op));
+  int64_t struct_id = factory_.NextId(SourceRangeFromParserRuleContext(ctx));
   std::vector<MapExprEntry> entries;
   if (ctx->entries) {
     entries = visitEntries(ctx->entries);
@@ -1280,6 +1310,9 @@ std::vector<MapExprEntry> ParserVisitor::visitEntries(
     if (!enable_optional_syntax_ && ctx->keys[i]->opt) {
       factory_.ReportError(SourceRangeFromParserRuleContext(ctx),
                            "unsupported syntax '?'");
+      // Still generate an ID to detect node limit exceeded.
+      factory_.NextId(SourceRangeFromParserRuleContext(ctx));
+      factory_.NextId(SourceRangeFromParserRuleContext(ctx));
       res.push_back(factory_.NewMapEntry(0, factory_.NewUnspecified(0),
                                          factory_.NewUnspecified(0), false));
       continue;
@@ -1436,34 +1469,41 @@ void ParserVisitor::syntaxError(antlr4::Recognizer* recognizer,
 
 bool ParserVisitor::HasErrored() const { return factory_.HasErrors(); }
 
-std::string ParserVisitor::ErrorMessage() { return factory_.ErrorMessage(); }
+std::vector<cel::ParseIssue> ParserVisitor::CollectIssues() {
+  return factory_.CollectIssues();
+}
 
 Expr ParserVisitor::GlobalCallOrMacroImpl(int64_t expr_id,
                                           absl::string_view function,
                                           std::vector<Expr> args) {
-  if (auto macro = macro_registry_.FindMacro(function, args.size(), false);
-      macro) {
-    std::vector<Expr> macro_args;
-    if (add_macro_calls_) {
-      macro_args.reserve(args.size());
-      for (const auto& arg : args) {
-        macro_args.push_back(factory_.BuildMacroCallArg(arg));
-      }
-    }
-    factory_.BeginMacro(factory_.GetSourceRange(expr_id));
-    auto expr = macro->Expand(factory_, absl::nullopt, absl::MakeSpan(args));
-    factory_.EndMacro();
-    if (expr) {
-      if (add_macro_calls_) {
-        factory_.AddMacroCall(expr->id(), function, absl::nullopt,
-                              std::move(macro_args));
-      }
-      // We did not end up using `expr_id`. Delete metadata.
-      factory_.EraseId(expr_id);
-      return std::move(*expr);
+  auto macro = macro_registry_.FindMacro(function, args.size(), false);
+  if (!macro) {
+    return factory_.NewCall(expr_id, function, std::move(args));
+  }
+  if (factory_.is_node_limit_exceeded()) {
+    return factory_.ReportError(
+        factory_.GetSourceRange(expr_id),
+        "could not expand macro: expression node limit exceeded");
+  }
+  std::vector<Expr> macro_args;
+  if (add_macro_calls_) {
+    macro_args.reserve(args.size());
+    for (const auto& arg : args) {
+      macro_args.push_back(factory_.BuildMacroCallArg(arg));
     }
   }
-
+  factory_.BeginMacro(factory_.GetSourceRange(expr_id));
+  auto expr = macro->Expand(factory_, std::nullopt, absl::MakeSpan(args));
+  factory_.EndMacro();
+  if (expr) {
+    if (add_macro_calls_) {
+      factory_.AddMacroCall(expr->id(), function, std::nullopt,
+                            std::move(macro_args));
+    }
+    // We did not end up using `expr_id`. Delete metadata.
+    factory_.EraseId(expr_id);
+    return std::move(*expr);
+  }
   return factory_.NewCall(expr_id, function, std::move(args));
 }
 
@@ -1471,30 +1511,39 @@ Expr ParserVisitor::ReceiverCallOrMacroImpl(int64_t expr_id,
                                             absl::string_view function,
                                             Expr target,
                                             std::vector<Expr> args) {
-  if (auto macro = macro_registry_.FindMacro(function, args.size(), true);
-      macro) {
-    Expr macro_target;
-    std::vector<Expr> macro_args;
-    if (add_macro_calls_) {
-      macro_args.reserve(args.size());
-      macro_target = factory_.BuildMacroCallArg(target);
-      for (const auto& arg : args) {
-        macro_args.push_back(factory_.BuildMacroCallArg(arg));
-      }
-    }
-    factory_.BeginMacro(factory_.GetSourceRange(expr_id));
-    auto expr = macro->Expand(factory_, std::ref(target), absl::MakeSpan(args));
-    factory_.EndMacro();
-    if (expr) {
-      if (add_macro_calls_) {
-        factory_.AddMacroCall(expr->id(), function, std::move(macro_target),
-                              std::move(macro_args));
-      }
-      // We did not end up using `expr_id`. Delete metadata.
-      factory_.EraseId(expr_id);
-      return std::move(*expr);
+  auto macro = macro_registry_.FindMacro(function, args.size(), true);
+  if (!macro) {
+    return factory_.NewMemberCall(expr_id, function, std::move(target),
+                                  std::move(args));
+  }
+  if (factory_.is_node_limit_exceeded()) {
+    return factory_.ReportError(
+        factory_.GetSourceRange(expr_id),
+        "could not expand macro: expression node limit exceeded");
+  }
+
+  Expr macro_target;
+  std::vector<Expr> macro_args;
+  if (add_macro_calls_) {
+    macro_args.reserve(args.size());
+    macro_target = factory_.BuildMacroCallArg(target);
+    for (const auto& arg : args) {
+      macro_args.push_back(factory_.BuildMacroCallArg(arg));
     }
   }
+  factory_.BeginMacro(factory_.GetSourceRange(expr_id));
+  auto expr = macro->Expand(factory_, std::ref(target), absl::MakeSpan(args));
+  factory_.EndMacro();
+  if (expr) {
+    if (add_macro_calls_) {
+      factory_.AddMacroCall(expr->id(), function, std::move(macro_target),
+                            std::move(macro_args));
+    }
+    // We did not end up using `expr_id`. Delete metadata.
+    factory_.EraseId(expr_id);
+    return std::move(*expr);
+  }
+
   return factory_.NewMemberCall(expr_id, function, std::move(target),
                                 std::move(args));
 }
@@ -1640,9 +1689,11 @@ struct ParseResult {
   EnrichedSourceInfo enriched_source_info;
 };
 
-absl::StatusOr<ParseResult> ParseImpl(const cel::Source& source,
-                                      const cel::MacroRegistry& registry,
-                                      const ParserOptions& options) {
+absl::StatusOr<ParseResult> ParseImpl(
+    const cel::Source& source, const cel::MacroRegistry& registry,
+    const ParserOptions& options,
+    std::vector<cel::ParseIssue>* parse_issues = nullptr) {
+  ABSL_DCHECK(!options.enable_pratt_parser);
   try {
     CodePointStream input(source.content(), source.description());
     if (input.size() > options.expression_size_codepoint_limit) {
@@ -1654,14 +1705,11 @@ absl::StatusOr<ParseResult> ParseImpl(const cel::Source& source,
     CommonTokenStream tokens(&lexer);
     CelParser parser(&tokens);
     ExprRecursionListener listener(options.max_recursion_depth);
-    absl::string_view accu_var = cel::kAccumulatorVariableName;
-    if (options.enable_hidden_accumulator_var) {
-      accu_var = cel::kHiddenAccumulatorVariableName;
-    }
-    ParserVisitor visitor(source, options.max_recursion_depth, accu_var,
-                          registry, options.add_macro_calls,
-                          options.enable_optional_syntax,
-                          options.enable_quoted_identifiers);
+    ParserVisitor visitor(
+        source, options.max_recursion_depth, options.expression_node_limit,
+        registry, options.add_macro_calls, options.enable_optional_syntax,
+        options.enable_quoted_identifiers,
+        options.enable_variadic_logical_operators);
 
     lexer.removeErrorListeners();
     parser.removeErrorListeners();
@@ -1680,13 +1728,23 @@ absl::StatusOr<ParseResult> ParseImpl(const cel::Source& source,
       expr = ExprFromAny(visitor.visit(parser.start()));
     } catch (const ParseCancellationException& e) {
       if (visitor.HasErrored()) {
-        return absl::InvalidArgumentError(visitor.ErrorMessage());
+        auto issues = visitor.CollectIssues();
+        std::string error_message = FormatIssues(source, issues);
+        if (parse_issues != nullptr) {
+          *parse_issues = std::move(issues);
+        }
+        return absl::InvalidArgumentError(error_message);
       }
       return absl::CancelledError(e.what());
     }
 
     if (visitor.HasErrored()) {
-      return absl::InvalidArgumentError(visitor.ErrorMessage());
+      auto issues = visitor.CollectIssues();
+      std::string error_message = FormatIssues(source, issues);
+      if (parse_issues != nullptr) {
+        *parse_issues = std::move(issues);
+      }
+      return absl::InvalidArgumentError(error_message);
     }
 
     return {
@@ -1707,19 +1765,36 @@ absl::StatusOr<ParseResult> ParseImpl(const cel::Source& source,
 class ParserImpl : public cel::Parser {
  public:
   explicit ParserImpl(const ParserOptions& options,
-                      cel::MacroRegistry macro_registry)
-      : options_(options), macro_registry_(std::move(macro_registry)) {}
-  absl::StatusOr<std::unique_ptr<cel::Ast>> Parse(
-      const cel::Source& source) const override {
+                      cel::MacroRegistry macro_registry,
+                      absl::flat_hash_set<std::string> library_ids)
+      : options_(options),
+        macro_registry_(std::move(macro_registry)),
+        library_ids_(std::move(library_ids)) {}
+
+  absl::StatusOr<std::unique_ptr<cel::Ast>> ParseImpl(
+      const cel::Source& source,
+      std::vector<cel::ParseIssue>* parse_issues) const override {
     CEL_ASSIGN_OR_RETURN(auto parse_result,
-                         ParseImpl(source, macro_registry_, options_));
+                         ::google::api::expr::parser::ParseImpl(
+                             source, macro_registry_, options_, parse_issues));
     return std::make_unique<cel::Ast>(std::move(parse_result.expr),
                                       std::move(parse_result.source_info));
   }
 
+  absl::StatusOr<std::unique_ptr<cel::Source>> PrepareSourceImpl(
+      absl::string_view input, absl::string_view description) const override {
+    return cel::NewSource(
+        input, std::string(description),
+        cel::SourceOptions{.max_codepoint_size =
+                               options_.expression_size_codepoint_limit});
+  }
+
+  std::unique_ptr<cel::ParserBuilder> ToBuilder() const override;
+
  private:
   const ParserOptions options_;
   const cel::MacroRegistry macro_registry_;
+  absl::flat_hash_set<std::string> library_ids_;
 };
 
 class ParserBuilderImpl : public cel::ParserBuilder {
@@ -1796,27 +1871,45 @@ class ParserBuilderImpl : public cel::ParserBuilder {
       macros_.clear();
     }
 
+    absl::flat_hash_set<std::string> library_ids(library_ids_);
+
     // Hack to support adding the standard library macros either by option or
     // with a library configurer.
     if (!options_.disable_standard_macros && !library_ids_.contains("stdlib")) {
       CEL_RETURN_IF_ERROR(macro_registry.RegisterMacros(Macro::AllMacros()));
+      library_ids.insert("stdlib");
     }
 
     if (options_.enable_optional_syntax && !library_ids_.contains("optional")) {
       CEL_RETURN_IF_ERROR(macro_registry.RegisterMacro(cel::OptMapMacro()));
       CEL_RETURN_IF_ERROR(macro_registry.RegisterMacro(cel::OptFlatMapMacro()));
+      library_ids.insert("optional");
     }
     CEL_RETURN_IF_ERROR(macro_registry.RegisterMacros(individual_macros));
-    return std::make_unique<ParserImpl>(options_, std::move(macro_registry));
+    if (options_.enable_pratt_parser) {
+      return std::make_unique<cel::parser_internal::PrattParserImpl>(
+          options_, std::move(macro_registry), std::move(library_ids));
+    }
+    return std::make_unique<ParserImpl>(options_, std::move(macro_registry),
+                                        std::move(library_ids));
   }
 
  private:
+  friend class ParserImpl;
+
   ParserOptions options_;
   std::vector<cel::Macro> macros_;
   absl::flat_hash_set<std::string> library_ids_;
   std::vector<cel::ParserLibrary> libraries_;
   absl::flat_hash_map<std::string, cel::ParserLibrarySubset> library_subsets_;
 };
+
+std::unique_ptr<cel::ParserBuilder> ParserImpl::ToBuilder() const {
+  auto ins = std::make_unique<ParserBuilderImpl>(options_);
+  ins->library_ids_ = library_ids_;
+  ins->macros_ = macro_registry_.ListMacros();
+  return ins;
+}
 
 }  // namespace
 
@@ -1856,9 +1949,19 @@ absl::StatusOr<VerboseParsedExpr> EnrichedParse(
 absl::StatusOr<VerboseParsedExpr> EnrichedParse(
     const cel::Source& source, const cel::MacroRegistry& registry,
     const ParserOptions& options) {
+  ParsedExpr parsed_expr;
+  if (options.enable_pratt_parser) {
+    CEL_ASSIGN_OR_RETURN(
+        std::unique_ptr<cel::Ast> ast,
+        cel::parser_internal::PrattParseImpl(source, registry, options));
+    CEL_RETURN_IF_ERROR(cel::ast_internal::ExprToProto(
+        ast->root_expr(), parsed_expr.mutable_expr()));
+    CEL_RETURN_IF_ERROR(cel::ast_internal::SourceInfoToProto(
+        ast->source_info(), parsed_expr.mutable_source_info()));
+    return VerboseParsedExpr(std::move(parsed_expr), EnrichedSourceInfo());
+  }
   CEL_ASSIGN_OR_RETURN(ParseResult parse_result,
                        ParseImpl(source, registry, options));
-  ParsedExpr parsed_expr;
   CEL_RETURN_IF_ERROR(cel::ast_internal::ExprToProto(
       parse_result.expr, parsed_expr.mutable_expr()));
 

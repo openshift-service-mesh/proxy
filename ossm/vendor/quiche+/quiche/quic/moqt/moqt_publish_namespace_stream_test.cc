@@ -94,10 +94,7 @@ TEST_F(MoqtPublishNamespaceRequestStreamTest, OnControlMessageOk) {
         callback_called = true;
         EXPECT_TRUE(std::holds_alternative<MessageParameters>(res));
       });
-
-  MoqtRequestOk message;
-  message.request_id = 10;
-  QUICHE_EXPECT_OK(request_stream->OnControlMessage(message));
+  QUICHE_EXPECT_OK(request_stream->OnControlMessage(MoqtRequestOk()));
   EXPECT_TRUE(callback_called);
 }
 
@@ -105,18 +102,15 @@ TEST_F(MoqtPublishNamespaceRequestStreamTest, OnControlMessageError) {
   std::unique_ptr<MoqtPublishNamespaceRequestStream> request_stream =
       CreateAndBindStream();
   bool callback_called = false;
+  MoqtRequestError message(RequestErrorCode::kUnauthorized, std::nullopt,
+                           "unauthorized");
   EXPECT_CALL(response_callback_, Call(_))
       .WillOnce([&](std::variant<MessageParameters, MoqtRequestErrorInfo> res) {
         callback_called = true;
         ASSERT_TRUE(std::holds_alternative<MoqtRequestErrorInfo>(res));
-        EXPECT_EQ(std::get<MoqtRequestErrorInfo>(res).error_code,
-                  RequestErrorCode::kUnauthorized);
+        EXPECT_EQ(std::get<MoqtRequestErrorInfo>(res), message);
       });
   ExpectFin(mock_stream_);
-
-  MoqtRequestError message;
-  message.request_id = 10;
-  message.error_code = RequestErrorCode::kUnauthorized;
   QUICHE_EXPECT_OK(request_stream->OnControlMessage(message));
   EXPECT_TRUE(callback_called);
 }
@@ -126,14 +120,11 @@ TEST_F(MoqtPublishNamespaceRequestStreamTest, SendRequestUpdateAndReceiveOk) {
       CreateAndBindStream();
   // Resolve initial response first.
   EXPECT_CALL(response_callback_, Call(_));
-  MoqtRequestOk initial_ok;
-  initial_ok.request_id = 10;
-  QUICHE_EXPECT_OK(request_stream->OnControlMessage(initial_ok));
+  QUICHE_EXPECT_OK(request_stream->OnControlMessage(MoqtRequestOk()));
 
   // Now send update.
   EXPECT_CALL(mock_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kRequestUpdate), _));
-
   MessageParameters parameters;
   parameters.subscriber_priority = 50;
   bool update_callback_called = false;
@@ -143,13 +134,11 @@ TEST_F(MoqtPublishNamespaceRequestStreamTest, SendRequestUpdateAndReceiveOk) {
         ASSERT_TRUE(std::holds_alternative<MessageParameters>(res));
         EXPECT_EQ(std::get<MessageParameters>(res).subscriber_priority, 50);
       };
-
   QUICHE_EXPECT_OK(request_stream->SendRequestUpdate(
       11, 0, parameters, std::move(update_callback)));
 
   // Receive OK for update.
   MoqtRequestOk ok;
-  ok.request_id = 11;
   ok.parameters.subscriber_priority = 50;
   QUICHE_EXPECT_OK(request_stream->OnControlMessage(ok));
   EXPECT_TRUE(update_callback_called);

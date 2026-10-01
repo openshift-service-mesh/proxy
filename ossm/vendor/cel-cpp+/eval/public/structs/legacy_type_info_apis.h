@@ -61,8 +61,13 @@ class LegacyTypeInfoApis {
   virtual absl::string_view GetTypename(
       const MessageWrapper& wrapped_message) const = 0;
 
+  // Return a pointer to the descriptor for the wrapped message's type.
+  //
+  // Should only be defined for messages with standard behavior (i.e. normal
+  // duck-typed behavior of resolving fields by associated descriptor is
+  // correct).
   virtual const google::protobuf::Descriptor* absl_nullable GetDescriptor(
-      const MessageWrapper& wrapped_message) const {
+      const MessageWrapper& wrapped_message [[maybe_unused]]) const {
     return nullptr;
   }
 
@@ -84,7 +89,7 @@ class LegacyTypeInfoApis {
   //
   // Nullptr signals that the value does not provide mutation apis.
   virtual const LegacyTypeMutationApis* GetMutationApis(
-      const MessageWrapper& wrapped_message) const {
+      const MessageWrapper& wrapped_message [[maybe_unused]]) const {
     return nullptr;
   }
 
@@ -93,7 +98,7 @@ class LegacyTypeInfoApis {
   // The underlying string is expected to remain valid as long as the
   // LegacyTypeInfoApis instance.
   virtual absl::optional<FieldDescription> FindFieldByName(
-      absl::string_view name) const {
+      absl::string_view name [[maybe_unused]]) const {
     return absl::nullopt;
   }
 };

@@ -1,0 +1,70 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/renameat.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "gl_FUNC_RENAMEAT",
+    checks = [
+
+        # Note: gl_STDIO_H_DEFAULTS is a _DEFAULTS function, so we ignore it per user's instruction
+        checks.AC_CHECK_HEADER(
+            "linux/fs.h",
+            define = "HAVE_LINUX_FS_H",
+        ),
+        checks.AC_CHECK_FUNC(
+            "renameat",
+            define = "HAVE_RENAMEAT",
+            subst = True,
+        ),
+
+        # Set REPLACE_RENAMEAT substitution variable
+        # If REPLACE_RENAME=1, then REPLACE_RENAMEAT=1
+        # Otherwise, REPLACE_RENAMEAT=0
+        checks.AC_SUBST(
+            "REPLACE_RENAMEAT",
+            condition = "REPLACE_RENAME==1",
+            if_false = 0,
+            if_true = 1,
+        ),
+        checks.AC_CHECK_FUNC(
+            "renameat2",
+            name = "ac_cv_func_renameat2",
+        ),
+        checks.AC_DEFINE(
+            "HAVE_RENAMEAT2",
+            condition = "ac_cv_func_renameat2",
+            if_false = None,
+            if_true = 1,
+        ),
+        # AC_RUN_IFELSE for renameat2 is skipped - runtime checks can't be done in Bazel.
+        # Conditioning on the link check is the best approximation, matching what autoconf
+        # does when cross-compiling for Linux ("guessing yes"), but only when the function
+        # actually exists in libc (glibc >= 2.28 or musl >= 1.2.4).
+        checks.AC_DEFINE(
+            "HAVE_WORKING_RENAMEAT2",
+            condition = "ac_cv_func_renameat2",
+            if_false = None,
+            if_true = 1,
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/openat",
+        "//gnulib/m4/rename",
+        # Note: gl_STDIO_H_DEFAULTS is a _DEFAULTS function, so we ignore it per user's instruction
+        # But we need REPLACE_RENAME from rename module, which should be available
+        "//autoconf/macros/AC_CANONICAL_HOST",
+        "//gnulib/m4/extensions",
+        # For test compatibility
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+autoconf(
+    name = "renameat",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_RENAMEAT",
+    ],
+)

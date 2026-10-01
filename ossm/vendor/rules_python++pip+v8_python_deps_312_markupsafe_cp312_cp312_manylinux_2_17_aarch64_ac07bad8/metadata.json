@@ -1,0 +1,6 @@
+{
+	"name": "MarkupSafe",
+	"provides_extra": [],
+	"requires_dist": [],
+	"version": "2.1.5"
+}

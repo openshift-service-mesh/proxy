@@ -1,0 +1,53 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/termcap.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# Check where termcap library functions come from.
+#
+# On macOS: termcap comes from libncurses (gl_cv_termcap=libncurses)
+# Defines HAVE_TERMCAP, HAVE_TERMINFO, sets INCTERMCAP/LIBTERMCAP/LTLIBTERMCAP
+autoconf(
+    name = "gl_TERMCAP_BODY",
+    checks = [
+        # Subst variables for library linkage
+        # On macOS (libncurses), INCTERMCAP is empty
+        checks.AC_SUBST("INCTERMCAP", ""),
+        checks.AC_SUBST("LIBTERMCAP", "-lncurses"),
+        checks.AC_SUBST("LTLIBTERMCAP", "-lncurses"),
+    ] + select({
+        # On macOS, termcap functions are found in libncurses
+        "@platforms//os:macos": [
+            checks.AC_DEFINE("HAVE_TERMCAP", "1"),
+        ],
+        # On Linux (Docker Ubuntu 22.04), termcap might not be available
+        # Golden shows HAVE_TERMCAP is undef
+        "//conditions:default": [
+            # Don't define HAVE_TERMCAP - let it be undef
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/curses",
+        "//gnulib/m4/terminfo",
+    ],
+)
+
+# Main macro that wraps gl_TERMCAP_BODY
+autoconf(
+    name = "gl_TERMCAP",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_TERMCAP_BODY",
+    ],
+)
+
+# Package-level aggregator target
+autoconf(
+    name = "termcap",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_TERMCAP",
+    ],
+)

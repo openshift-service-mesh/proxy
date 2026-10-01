@@ -1,0 +1,5 @@
+alias(
+    name = "zlib",
+    actual = "@@envoy+//bazel:zlib",
+    visibility = ["//visibility:public"],
+)

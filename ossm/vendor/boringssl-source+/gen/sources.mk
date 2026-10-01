@@ -64,7 +64,6 @@ boringssl_bcm_internal_headers := \
   crypto/fipsmodule/ec/ec_montgomery.cc.inc \
   crypto/fipsmodule/ec/felem.cc.inc \
   crypto/fipsmodule/ec/oct.cc.inc \
-  crypto/fipsmodule/ec/p224-64.cc.inc \
   crypto/fipsmodule/ec/p256-nistz.cc.inc \
   crypto/fipsmodule/ec/p256.cc.inc \
   crypto/fipsmodule/ec/scalar.cc.inc \
@@ -83,6 +82,7 @@ boringssl_bcm_internal_headers := \
   crypto/fipsmodule/mldsa/mldsa.cc.inc \
   crypto/fipsmodule/mlkem/fips_known_values.inc \
   crypto/fipsmodule/mlkem/mlkem.cc.inc \
+  crypto/fipsmodule/rand/android_entropy_client.cc.inc \
   crypto/fipsmodule/rand/ctrdrbg.cc.inc \
   crypto/fipsmodule/rand/rand.cc.inc \
   crypto/fipsmodule/rsa/padding.cc.inc \
@@ -388,6 +388,7 @@ boringssl_crypto_sources := \
   crypto/evp/p_mlkem.cc \
   crypto/evp/p_rsa.cc \
   crypto/evp/p_x25519.cc \
+  crypto/evp/p_xwing.cc \
   crypto/evp/pbkdf.cc \
   crypto/evp/print.cc \
   crypto/evp/scrypt.cc \
@@ -397,7 +398,6 @@ boringssl_crypto_sources := \
   crypto/fuzzer_mode.cc \
   crypto/hpke/hpke.cc \
   crypto/hrss/hrss.cc \
-  crypto/kyber/kyber.cc \
   crypto/lhash/lhash.cc \
   crypto/md4/md4.cc \
   crypto/md5/md5.cc \
@@ -428,7 +428,6 @@ boringssl_crypto_sources := \
   crypto/rand/forkunsafe.cc \
   crypto/rand/getentropy.cc \
   crypto/rand/ios.cc \
-  crypto/rand/passive.cc \
   crypto/rand/rand.cc \
   crypto/rand/trusty.cc \
   crypto/rand/urandom.cc \
@@ -498,6 +497,7 @@ boringssl_crypto_sources := \
   crypto/x509/x509_def.cc \
   crypto/x509/x509_ext.cc \
   crypto/x509/x509_lu.cc \
+  crypto/x509/x509_mtc.cc \
   crypto/x509/x509_obj.cc \
   crypto/x509/x509_req.cc \
   crypto/x509/x509_set.cc \
@@ -665,7 +665,6 @@ boringssl_crypto_internal_headers := \
   crypto/fipsmodule/tls/internal.h \
   crypto/hrss/internal.h \
   crypto/internal.h \
-  crypto/kyber/internal.h \
   crypto/lhash/internal.h \
   crypto/md5/internal.h \
   crypto/mem_internal.h \
@@ -781,7 +780,6 @@ boringssl_crypto_test_sources := \
   crypto/hpke/hpke_test.cc \
   crypto/hrss/hrss_test.cc \
   crypto/impl_dispatch_test.cc \
-  crypto/kyber/kyber_test.cc \
   crypto/lhash/lhash_test.cc \
   crypto/md5/md5_test.cc \
   crypto/mem_test.cc \
@@ -807,16 +805,20 @@ boringssl_crypto_test_sources := \
   crypto/test/gtest_main.cc \
   crypto/thread_test.cc \
   crypto/trust_token/trust_token_test.cc \
+  crypto/x509/x509_extension_test.cc \
   crypto/x509/x509_test.cc \
   crypto/x509/x509_time_test.cc \
   crypto/xwing/xwing_test.cc \
-  third_party/fiat/bedrock_platform_test.cc \
+  third_party/fiat/bedrock_platform_test.cc
+
+boringssl_crypto_test_internal_headers := \
   third_party/fiat/bedrock_polyfill_platform.c.inc
 
 boringssl_crypto_test_data := \
   crypto/blake2/blake2b256_tests.txt \
   crypto/cipher/test/aes_128_cbc_sha1_tls_implicit_iv_tests.txt \
   crypto/cipher/test/aes_128_cbc_sha1_tls_tests.txt \
+  crypto/cipher/test/aes_128_cbc_sha256_tls_tests.txt \
   crypto/cipher/test/aes_128_ccm_bluetooth_8_tests.txt \
   crypto/cipher/test/aes_128_ccm_bluetooth_tests.txt \
   crypto/cipher/test/aes_128_ccm_matter_tests.txt \
@@ -859,6 +861,7 @@ boringssl_crypto_test_data := \
   crypto/evp/test/rsa_tests.txt \
   crypto/evp/test/scrypt_tests.txt \
   crypto/evp/test/x25519_tests.txt \
+  crypto/evp/test/xwing_tests.txt \
   crypto/fipsmodule/aes/aes_tests.txt \
   crypto/fipsmodule/bn/test/exp_tests.txt \
   crypto/fipsmodule/bn/test/gcd_tests.txt \
@@ -884,7 +887,7 @@ boringssl_crypto_test_data := \
   crypto/fipsmodule/rand/ctrdrbg_vectors.txt \
   crypto/hmac/hmac_tests.txt \
   crypto/hpke/hpke_test_vectors.txt \
-  crypto/kyber/kyber_tests.txt \
+  crypto/hpke/hpke_test_vectors_pq.txt \
   crypto/mldsa/mldsa_nist_keygen_44_tests.txt \
   crypto/mldsa/mldsa_nist_keygen_65_tests.txt \
   crypto/mldsa/mldsa_nist_keygen_87_tests.txt \
@@ -904,10 +907,12 @@ boringssl_crypto_test_data := \
   crypto/pkcs7/test/nss.p7c \
   crypto/pkcs7/test/openssl_crl.p7c \
   crypto/pkcs7/test/sign_cert.pem \
+  crypto/pkcs7/test/sign_cert2.pem \
   crypto/pkcs7/test/sign_key.pem \
   crypto/pkcs7/test/sign_sha1.p7s \
   crypto/pkcs7/test/sign_sha1_key_id.p7s \
   crypto/pkcs7/test/sign_sha256.p7s \
+  crypto/pkcs7/test/sign_sha256_cert2.p7s \
   crypto/pkcs7/test/sign_sha256_key_id.p7s \
   crypto/pkcs7/test/windows.p7c \
   crypto/pkcs8/test/bad1.p12 \
@@ -1097,6 +1102,14 @@ boringssl_crypto_test_data := \
   third_party/wycheproof_testvectors/mldsa_87_sign_noseed_test.txt \
   third_party/wycheproof_testvectors/mldsa_87_sign_seed_test.txt \
   third_party/wycheproof_testvectors/mldsa_87_verify_test.txt \
+  third_party/wycheproof_testvectors/mlkem_1024_encaps_test.txt \
+  third_party/wycheproof_testvectors/mlkem_1024_keygen_seed_test.txt \
+  third_party/wycheproof_testvectors/mlkem_1024_semi_expanded_decaps_test.txt \
+  third_party/wycheproof_testvectors/mlkem_1024_test.txt \
+  third_party/wycheproof_testvectors/mlkem_768_encaps_test.txt \
+  third_party/wycheproof_testvectors/mlkem_768_keygen_seed_test.txt \
+  third_party/wycheproof_testvectors/mlkem_768_semi_expanded_decaps_test.txt \
+  third_party/wycheproof_testvectors/mlkem_768_test.txt \
   third_party/wycheproof_testvectors/primality_test.txt \
   third_party/wycheproof_testvectors/rsa_oaep_2048_sha1_mgf1sha1_test.txt \
   third_party/wycheproof_testvectors/rsa_oaep_2048_sha224_mgf1sha1_test.txt \
@@ -2136,6 +2149,7 @@ boringssl_pki_test_data := \
   pki/testdata/ocsp_unittest/bad_status.pem \
   pki/testdata/ocsp_unittest/future_response.pem \
   pki/testdata/ocsp_unittest/good_response.pem \
+  pki/testdata/ocsp_unittest/good_response_invalid_serial.pem \
   pki/testdata/ocsp_unittest/good_response_next_update.pem \
   pki/testdata/ocsp_unittest/good_response_sha256.pem \
   pki/testdata/ocsp_unittest/has_critical_ct_extension.pem \
@@ -2289,6 +2303,14 @@ boringssl_pki_test_data := \
   pki/testdata/path_builder_unittest/mtc/leaf.pem \
   pki/testdata/path_builder_unittest/mtc/mtc-ica.pem \
   pki/testdata/path_builder_unittest/mtc/mtc-leaf.pem \
+  pki/testdata/path_builder_unittest/mtc_plants04/leaf.pem \
+  pki/testdata/path_builder_unittest/mtc_plants04/mtc-ica.pem \
+  pki/testdata/path_builder_unittest/mtc_plants04/mtc-leaf-standalone-3cosigners.pem \
+  pki/testdata/path_builder_unittest/mtc_plants04/mtc-leaf-standalone-cosigner_wrong_order.pem \
+  pki/testdata/path_builder_unittest/mtc_plants04/mtc-leaf-standalone-duplicate_ca_signer.pem \
+  pki/testdata/path_builder_unittest/mtc_plants04/mtc-leaf-standalone-no_ca_signer.pem \
+  pki/testdata/path_builder_unittest/mtc_plants04/mtc-leaf-standalone.pem \
+  pki/testdata/path_builder_unittest/mtc_plants04/mtc-leaf.pem \
   pki/testdata/path_builder_unittest/multi-root-A-by-B.pem \
   pki/testdata/path_builder_unittest/multi-root-B-by-C.pem \
   pki/testdata/path_builder_unittest/multi-root-B-by-F.pem \
@@ -2817,6 +2839,7 @@ boringssl_pki_test_data := \
   pki/testdata/verify_unittest/mtc-leaf-b.pem \
   pki/testdata/verify_unittest/mtc-leaf-bitflip.pem \
   pki/testdata/verify_unittest/mtc-leaf-c.pem \
+  pki/testdata/verify_unittest/mtc-leaf-unused-bit.pem \
   pki/testdata/verify_unittest/mtc-leaf.pem \
   pki/testdata/verify_unittest/self-issued.pem
 
@@ -2853,6 +2876,14 @@ boringssl_rust_bssl_macros_sources := \
 
 boringssl_rust_bssl_sys_sources := \
   rust/bssl-sys/src/lib.rs
+
+boringssl_rust_bssl_tls_tokio_sources := \
+  rust/bssl-tls-tokio/src/hyper.rs \
+  rust/bssl-tls-tokio/src/lib.rs \
+  rust/bssl-tls-tokio/src/tests.rs \
+  rust/bssl-tls-tokio/src/tests/convenience.rs \
+  rust/bssl-tls-tokio/src/tests/datagram.rs \
+  rust/bssl-tls-tokio/src/tests/transport.rs
 
 boringssl_rust_bssl_x509_sources := \
   rust/bssl-x509/src/certificates.rs \

@@ -28,11 +28,6 @@ exports_files(
     visibility = ["//cmake:__pkg__"],
 )
 
-label_flag(
-    name = "zlib",
-    build_setting_default = "@zlib",
-    visibility = ["//visibility:public"],
-)
 
 ################################################################################
 # Well Known Types Proto Library Rules

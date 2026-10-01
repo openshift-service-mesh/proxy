@@ -13,6 +13,7 @@
 # limitations under the License.
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//bazel:copts.bzl", "CEL_COPTS")
 load("//conformance:run.bzl", "gen_conformance_tests")
 
 package(default_visibility = ["//visibility:public"])
@@ -24,6 +25,7 @@ cc_library(
     testonly = True,
     srcs = ["service.cc"],
     hdrs = ["service.h"],
+    copts = CEL_COPTS,
     deps = [
         "//checker:optional",
         "//checker:standard_library",
@@ -31,11 +33,8 @@ cc_library(
         "//checker:type_checker_builder_factory",
         "//common:ast",
         "//common:ast_proto",
-        "//common:decl",
         "//common:decl_proto_v1alpha1",
-        "//common:expr",
         "//common:source",
-        "//common:type",
         "//common:value",
         "//common/internal:value_conversion",
         "//eval/public:activation",
@@ -46,6 +45,7 @@ cc_library(
         "//eval/public:cel_value",
         "//eval/public:transform_utility",
         "//extensions:bindings_ext",
+        "//extensions:comprehensions_v2",
         "//extensions:comprehensions_v2_functions",
         "//extensions:comprehensions_v2_macros",
         "//extensions:encoders",
@@ -53,12 +53,11 @@ cc_library(
         "//extensions:math_ext_decls",
         "//extensions:math_ext_macros",
         "//extensions:proto_ext",
+        "//extensions:select_optimization",
         "//extensions:strings",
         "//extensions/protobuf:enum_adapter",
         "//internal:status_macros",
         "//parser",
-        "//parser:macro",
-        "//parser:macro_expr_factory",
         "//parser:macro_registry",
         "//parser:options",
         "//parser:standard_macros",
@@ -67,21 +66,22 @@ cc_library(
         "//runtime:constant_folding",
         "//runtime:optional_types",
         "//runtime:reference_resolver",
+        "//runtime:regex_precompilation",
         "//runtime:runtime_options",
         "//runtime:standard_runtime_builder_factory",
+        "//testutil:test_macros",
         "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:optional",
-        "@com_google_absl//absl/types:span",
         "@com_google_cel_spec//proto/cel/expr:syntax_cc_proto",
         "@com_google_cel_spec//proto/cel/expr/conformance/proto2:test_all_types_cc_proto",
         "@com_google_cel_spec//proto/cel/expr/conformance/proto3:test_all_types_cc_proto",
         "@com_google_googleapis//google/api/expr/conformance/v1alpha1:conformance_cc_proto",
         "@com_google_googleapis//google/api/expr/v1alpha1:checked_cc_proto",
         "@com_google_googleapis//google/rpc:code_cc_proto",
+        "@com_google_googleapis//google/rpc:status_cc_proto",
         "@com_google_protobuf//:duration_cc_proto",
         "@com_google_protobuf//:empty_cc_proto",
         "@com_google_protobuf//:protobuf",
@@ -94,9 +94,11 @@ cc_library(
     name = "run",
     testonly = True,
     srcs = ["run.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":service",
         ":utils",
+        "//internal:runfiles",
         "//internal:testing_no_main",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/log:absl_check",
@@ -121,6 +123,7 @@ cc_library(
     name = "utils",
     testonly = True,
     hdrs = ["utils.h"],
+    copts = CEL_COPTS,
     deps = [
         "//internal:testing_no_main",
         "@com_google_absl//absl/log:absl_check",
@@ -146,6 +149,7 @@ _ALL_TESTS = [
     "@com_google_cel_spec//tests/simple:testdata/lists.textproto",
     "@com_google_cel_spec//tests/simple:testdata/logic.textproto",
     "@com_google_cel_spec//tests/simple:testdata/macros.textproto",
+    "@com_google_cel_spec//tests/simple:testdata/macros2.textproto",
     "@com_google_cel_spec//tests/simple:testdata/math_ext.textproto",
     "@com_google_cel_spec//tests/simple:testdata/namespace.textproto",
     "@com_google_cel_spec//tests/simple:testdata/optionals.textproto",
@@ -163,16 +167,12 @@ _ALL_TESTS = [
     "@com_google_cel_spec//tests/simple:testdata/type_deduction.textproto",
 ]
 
-_TESTS_TO_SKIP_MODERN = [
+_TESTS_TO_SKIP = [
     # Tests which require spec changes.
     # TODO(issues/93): Deprecate Duration.getMilliseconds.
     "timestamps/duration_converters/get_milliseconds",
 
     # Broken test cases which should be supported.
-    # TODO(issues/112): Unbound functions result in empty eval response.
-    "basic/functions/unbound",
-    "basic/functions/unbound_is_runtime_error",
-
     # TODO(issues/97): Parse-only qualified variable lookup "x.y" with binding "x.y" or "y" within container "x" fails
     "fields/qualified_identifier_resolution/qualified_ident,map_field_select,ident_with_longest_prefix_check,qualified_identifier_resolution_unchecked",
     "namespace/qualified/self_eval_qualified_lookup",
@@ -191,9 +191,21 @@ _TESTS_TO_SKIP_MODERN = [
     "enums/strong_proto2",
     "enums/strong_proto3",
 
-    # Not yet implemented.
-    "string_ext/type_errors",
+    # These depend on legacy US/ timezones. It's spotty if these are included with a normally
+    # configured timezone database.
+    "timestamps/timestamp_selectors_tz/getDayOfMonth_name_pos",
+    "timestamps/timestamp_selectors_tz/getDayOfYear",
+    # These depend on using charconv (or equivalent) to format doubles with shortest possible
+    # precision to preserve value. Not available on older compilers where we just use absl::Format.
+    # We should probably update the spec to allow different formats that parse to the same value.
+    "conversions/string/double_hard",
+
+    # Recent changes
+    "namespace/namespace_shadowing/basic",
+    "namespace/namespace_shadowing/comprehension_shadowing_namespaced_selector_disambiguation",
 ]
+
+_TESTS_TO_SKIP_MODERN = _TESTS_TO_SKIP
 
 _TESTS_TO_SKIP_MODERN_DASHBOARD = [
     # Future features for CEL 1.0
@@ -202,39 +214,9 @@ _TESTS_TO_SKIP_MODERN_DASHBOARD = [
     "enums/strong_proto3",
 ]
 
-_TESTS_TO_SKIP_LEGACY = [
-    # Tests which require spec changes.
-    # TODO(issues/93): Deprecate Duration.getMilliseconds.
-    "timestamps/duration_converters/get_milliseconds",
-
-    # Broken test cases which should be supported.
-    # TODO(issues/112): Unbound functions result in empty eval response.
-    "basic/functions/unbound",
-    "basic/functions/unbound_is_runtime_error",
-
-    # TODO(issues/97): Parse-only qualified variable lookup "x.y" with binding "x.y" or "y" within container "x" fails
-    "fields/qualified_identifier_resolution/qualified_ident,map_field_select,ident_with_longest_prefix_check,qualified_identifier_resolution_unchecked",
-    "namespace/qualified/self_eval_qualified_lookup",
-    "namespace/namespace/self_eval_container_lookup,self_eval_container_lookup_unchecked",
-    # TODO(issues/117): Integer overflow on enum assignments should error.
-    "enums/legacy_proto2/select_big,select_neg",
-
-    # Skip until fixed.
-    "wrappers/field_mask/to_json",
-    "wrappers/empty/to_json",
-    "fields/qualified_identifier_resolution/map_value_repeat_key_heterogeneous",
-    "parse/receiver_function_names",
-
-    # Future features for CEL 1.0
-    # TODO(issues/119): Strong typing support for enums, specified but not implemented.
-    "enums/strong_proto2",
-    "enums/strong_proto3",
-
+_TESTS_TO_SKIP_LEGACY = _TESTS_TO_SKIP + [
     # Legacy value does not support optional_type.
     "optionals/optionals",
-
-    # Not yet implemented.
-    "string_ext/type_errors",
 
     # TODO(uncreated-issue/81): Fix null assignment to a field
     "proto2/set_null/list_value",
@@ -242,7 +224,7 @@ _TESTS_TO_SKIP_LEGACY = [
     "proto3/set_null/list_value",
     "proto3/set_null/single_struct",
 
-    # cel.@block
+    # no optional support for legacy types
     "block_ext/basic/optional_list",
     "block_ext/basic/optional_map",
     "block_ext/basic/optional_map_chained",
@@ -260,7 +242,7 @@ _TESTS_TO_SKIP_LEGACY_DASHBOARD = [
 ]
 
 # Generates a bunch of `cc_test` whose names follow the pattern
-# `conformance_(...)_{arena|refcount}_{optimized|unoptimized}_{recursive|iterative}`.
+# `conformance_(...)_{pratt|antlr}_{optimized|unoptimized}_{recursive|iterative}`.
 gen_conformance_tests(
     name = "conformance_parse_only",
     data = _ALL_TESTS,
@@ -280,15 +262,56 @@ gen_conformance_tests(
     checked = True,
     data = _ALL_TESTS,
     modern = True,
-    skip_tests = _TESTS_TO_SKIP_MODERN + [
-        # block is a post-check optimization that inserts internal variables. The C++ type checker
-        # needs support for a proper optimizer for this to work.
-        "block_ext",
-    ],
+    skip_tests = _TESTS_TO_SKIP_MODERN,
+)
+
+gen_conformance_tests(
+    name = "conformance_legacy_checked",
+    checked = True,
+    data = _ALL_TESTS,
+    modern = False,
+    skip_tests = _TESTS_TO_SKIP_LEGACY,
+)
+
+# select optimization is only supported for checked expressions.
+gen_conformance_tests(
+    name = "conformance_legacy_select_opt",
+    checked = True,
+    data = _ALL_TESTS,
+    modern = False,
+    select_opt = True,
+    skip_tests = _TESTS_TO_SKIP_LEGACY,
+)
+
+gen_conformance_tests(
+    name = "conformance_select_opt",
+    checked = True,
+    data = _ALL_TESTS,
+    modern = True,
+    select_opt = True,
+    skip_tests = _TESTS_TO_SKIP_MODERN,
+)
+
+gen_conformance_tests(
+    name = "conformance_variadic",
+    checked = True,
+    data = _ALL_TESTS,
+    enable_variadic_logical_operators = True,
+    modern = True,
+    skip_tests = _TESTS_TO_SKIP_MODERN,
+)
+
+gen_conformance_tests(
+    name = "conformance_legacy_variadic",
+    checked = True,
+    data = _ALL_TESTS,
+    enable_variadic_logical_operators = True,
+    modern = False,
+    skip_tests = _TESTS_TO_SKIP_LEGACY,
 )
 
 # Generates a bunch of `cc_test` whose names follow the pattern
-# `conformance_dashboard_..._{arena|refcount}_{optimized|unoptimized}_{recursive|iterative}`.
+# `conformance_dashboard_..._{pratt|antlr}_{optimized|unoptimized}_{recursive|iterative}`.
 gen_conformance_tests(
     name = "conformance_dashboard_parse_only",
     dashboard = True,

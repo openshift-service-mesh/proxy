@@ -14,6 +14,7 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -33,6 +34,7 @@ cc_library(
     hdrs = [
         "field_access.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public:cel_options",
         "//eval/public:cel_value",
@@ -51,6 +53,7 @@ cc_library(
     hdrs = [
         "container_backed_list_impl.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public:cel_value",
         "@com_google_protobuf//:protobuf",
@@ -65,6 +68,7 @@ cc_library(
     hdrs = [
         "container_backed_map_impl.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public:cel_value",
         "@com_google_absl//absl/container:node_hash_map",
@@ -81,6 +85,7 @@ cc_library(
     hdrs = [
         "field_backed_list_impl.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":internal_field_backed_list_impl",
         "//eval/public:cel_value",
@@ -93,6 +98,7 @@ cc_library(
     hdrs = [
         "field_backed_map_impl.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":internal_field_backed_map_impl",
         "//eval/public:cel_value",
@@ -108,6 +114,7 @@ cc_test(
     srcs = [
         "container_backed_map_impl_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":container_backed_map_impl",
         "//eval/public:cel_value",
@@ -122,6 +129,7 @@ cc_test(
     srcs = [
         "field_backed_list_impl_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":field_backed_list_impl",
         "//eval/testutil:test_message_cc_proto",
@@ -136,6 +144,7 @@ cc_test(
     srcs = [
         "field_backed_map_impl_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":field_backed_map_impl",
         "//eval/testutil:test_message_cc_proto",
@@ -148,6 +157,7 @@ cc_test(
 cc_test(
     name = "field_access_test",
     srcs = ["field_access_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":field_access",
         "//eval/public:cel_value",
@@ -172,6 +182,7 @@ cc_library(
     hdrs = [
         "internal_field_backed_list_impl.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public:cel_value",
         "//eval/public/structs:field_access_impl",
@@ -185,6 +196,7 @@ cc_test(
     srcs = [
         "internal_field_backed_list_impl_test.cc",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":internal_field_backed_list_impl",
         "//eval/public/structs:cel_proto_wrapper",
@@ -202,6 +214,7 @@ cc_library(
     hdrs = [
         "internal_field_backed_map_impl.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//eval/public:cel_value",
         "//eval/public/structs:field_access_impl",
@@ -220,6 +233,7 @@ cc_test(
     srcs = [
         "internal_field_backed_map_impl_test.cc",
     ],
+    copts = CEL_COPTS,
     visibility = ["//visibility:private"],
     deps = [
         ":internal_field_backed_map_impl",

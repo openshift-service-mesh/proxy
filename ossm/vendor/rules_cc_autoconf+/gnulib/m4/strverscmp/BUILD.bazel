@@ -1,0 +1,62 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/strverscmp.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "strverscmp",
+    checks = [
+        # Note: gl_STRING_H_DEFAULTS is a _DEFAULTS function, so we ignore it per user's instruction
+
+        # Use AC_TRY_LINK to verify the function actually links (not just declared)
+        checks.AC_TRY_LINK(
+            name = "ac_cv_func_strverscmp",
+            code = """\
+#include <string.h>
+int main(void) {
+    return strverscmp("1.0", "2.0");
+}
+""",
+        ),
+
+        # if test $ac_cv_func_strverscmp = no; then
+        # else
+        #   case "$gl_cv_func_strverscmp_works" in
+        #     *yes) ;;
+        #   esac
+        # fi
+        # Define HAVE_STRVERSCMP in config.h if the function exists
+        checks.AC_DEFINE(
+            "HAVE_STRVERSCMP",
+            requires = ["ac_cv_func_strverscmp==1"],
+        ),
+
+        # Bind the subst counterpart to the same probe — the gnulib
+        # string.h wrapper template gates its declaration on
+        # !@HAVE_STRVERSCMP@, so without writing the subst here the
+        # wrapper falls back to the HAVE_STRVERSCMP=1 default from
+        # gl_STRING_H_DEFAULTS and skips the declaration on toolchains
+        # lacking strverscmp (macOS, MSVC / clang-cl on Windows).
+        checks.AC_SUBST(
+            "HAVE_STRVERSCMP",
+            condition = "ac_cv_func_strverscmp",
+            if_false = "0",
+            if_true = "1",
+        ),
+
+        # REPLACE_STRVERSCMP: Based on golden files, REPLACE_STRVERSCMP=0 on macOS/Linux
+        # The AC_RUN_IFELSE check can't be done in Bazel, so we assume it works correctly
+        # on our target platforms (macOS/Linux)
+        checks.AC_SUBST("REPLACE_STRVERSCMP", 0),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CANONICAL_HOST",  # AC_REQUIRE([AC_CANONICAL_HOST])
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/extensions",  # AC_REQUIRE([AC_USE_SYSTEM_EXTENSIONS])
+        "//gnulib/m4/string_h",  # AC_REQUIRE([gl_STRING_H_DEFAULTS])
+    ],
+)
+
+# Prerequisites of lib/strverscmp.c (empty)
+# No separate target needed as it's empty

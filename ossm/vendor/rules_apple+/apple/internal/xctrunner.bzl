@@ -18,6 +18,10 @@ platform and architectures as the given `tests` bundles.
 """
 
 load(
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
+load(
     "//apple:providers.bzl",
     "AppleBundleInfo",
 )
@@ -66,7 +70,7 @@ def _test_bundle_info_aspect_impl(target, ctx):
             ],
         )
         platform_types = [
-            dep[AppleBundleInfo].platform_type
+            dep[_TestBundleInfo].platform_type
             for dep in deps
         ]
 
@@ -92,6 +96,9 @@ test_bundle_info_aspect = aspect(
 )
 
 def _xctrunner_impl(ctx):
+    apple_fragment = ctx.fragments.apple
+    xcode_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
+
     output = ctx.actions.declare_directory(ctx.attr.name + ".app")
     infos = [target[_TestBundleInfo] for target in ctx.attr.tests]
     infoplists = depset(
@@ -106,6 +113,7 @@ def _xctrunner_impl(ctx):
     args = ctx.actions.args()
     args.add("--name", ctx.attr.name)
     args.add("--platform", PLATFORM_MAP[platform])
+    args.add("--xcode-version", xcode_config.xcode_version())
     if ctx.attr.verbose:
         args.add("--verbose", ctx.attr.verbose)
 
@@ -117,7 +125,10 @@ def _xctrunner_impl(ctx):
 
     args.add("--output", output.path)
 
-    ctx.actions.run(
+    apple_support.run(
+        actions = ctx.actions,
+        xcode_config = xcode_config,
+        apple_fragment = apple_fragment,
         inputs = depset(transitive = [xctests, infoplists]),
         outputs = [output],
         executable = ctx.attr._xctrunnertool[DefaultInfo].files_to_run,
@@ -163,7 +174,7 @@ An executable binary that can merge separate xctest into a single XCTestRunner
 bundle.
 """,
         ),
-    },
+    } | apple_support.action_required_attrs(),
     doc = """
 Packages one or more .xctest bundles into a XCTRunner.app. Retains same 
 platform and architectures as the given `tests` bundles.
@@ -176,7 +187,7 @@ load("//apple:xctrunner.bzl", "xctrunner")
 ios_ui_test(
     name = "HelloWorldSwiftUITests",
     minimum_os_version = "15.0",
-    runner = "@build_bazel_rules_apple//apple/testing/default_runner:ios_xctestrun_ordered_runner",
+    runner = "@rules_apple//apple/testing/default_runner:ios_xctestrun_ordered_runner",
     test_host = ":HelloWorldSwift",
     deps = [":UITests"],
 )
@@ -188,4 +199,5 @@ xctrunner(
 )
 ````
 """,
+    fragments = ["apple"],
 )

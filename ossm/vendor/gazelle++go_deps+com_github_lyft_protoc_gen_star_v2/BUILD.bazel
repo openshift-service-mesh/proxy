@@ -101,23 +101,3 @@ go_test(
         "@org_golang_google_protobuf//types/pluginpb",
     ],
 )
-
-load("@package_metadata//rules:package_metadata.bzl", "package_metadata")
-load("@rules_license//rules:package_info.bzl", "package_info")
-
-package_metadata(
-    name = "package_metadata",
-    purl = "pkg:golang/github.com/lyft/protoc-gen-star/v2@v2.0.4",
-    visibility = [
-        "//:__subpackages__",
-    ],
-)
-
-package_info(
-    name = "gazelle_generated_package_info",
-    package_name = "github.com/lyft/protoc-gen-star/v2",
-    package_url = "https://github.com/lyft/protoc-gen-star/v2",
-    package_version = "2.0.4",
-    purl = "pkg:golang/github.com/lyft/protoc-gen-star/v2@v2.0.4",
-    visibility = ["//:__subpackages__"],
-)

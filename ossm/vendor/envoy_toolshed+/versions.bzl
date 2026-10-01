@@ -1,6 +1,6 @@
 SUPPORTED_ARCHES = ["aarch64", "x86_64"]
 
-BINS_RELEASE = "0.2.16"
+BINS_RELEASE = "0.2.21"
 
 LLVM_VERSION = "22.1.8"
 
@@ -16,14 +16,15 @@ LLVM_DISTRIBUTIONS = {
 
 VERSIONS = {
     "cmake": "3.23.2",
+    "git": "2.55.0",
     "llvm": LLVM_VERSION,
     "sq": "1.4.0",
     "v8": V8_VERSION,
     "ninja": "1.12.0",
     "python": "3.12",
     "bins_release": BINS_RELEASE,
-    "msan_libs_sha256": "63484ef3d967c8eda3c277a2d3aaaf1047b863ef191df40182824bde50793995",
-    "tsan_libs_sha256": "3e0a7c4521a75b5b9c473d50d7fd32a9601c92c5abe8d014ac3cc4b3c915efbf",
+    "msan_libs_sha256": "9755683afc5550dedaa7a004523e2d422ea3ed7278c1f5cbb1342cbb14535ba5",
+    "tsan_libs_sha256": "adb9d3a27bcbe88ebfd462b8e6eeb8d305ea44f5aac01336d9ce85b010794fa9",
     "libcxx_libs_sha256": {
         "aarch64": "b3bd8dfc1c250d5c2c36de174138ffef9754402b33e54abe9b5efb25982fa2f7",
         "x86_64": "e40f39338ffe561dfa26541557c9e548fc7760db9d99f7b6c5de237b725482aa",
@@ -58,8 +59,18 @@ VERSIONS = {
         "macOS-ARM64": "928e51aa7c97fbb8c5c50075118f4b36e36363b1a2c3af2dfef9aea1ef526ade",
     },
     "sq_sha256": {
-        "Linux-X64": "dcef2a3f6ca8090684fdcbad777acbec83c9f6b182e2dca0288b06aa30b938a0",
-        "Linux-ARM64": "ccdbe4a6c79c589a12d6a2eff3fe8f635e7b170a45bf947971c47a018e923ebd",
+        "Linux-X64": "bf865008e64daaea7207dd589ea27557c92b1ff5d5bc988427f070c64da3e0c9",
+        "Linux-ARM64": "fd04277a3847288ae1c4ee92848eafa51ca2a422f2ec73f16389ebb280c6354b",
+    },
+    # Git prebuilt hashes keyed by the artifact platform suffix (linux-x86_64, linux-aarch64).
+    "git_sha256": {
+        "linux-x86_64": "35ecec697d06af954c3d9d015e5cd328a71a7ea849fa833f45450c3ffc883f34",
+        "linux-aarch64": "21708e8d80aa9d367981ac3257010fc6fbcdb09a279ede3784c3ed3f3838d0cd",
+    },
+    "cacert": {
+        "version": "2026-08-13",
+        "sha256": "f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9",
+        "url": "https://curl.se/ca/cacert-{version}.pem",
     },
 
     # Glint binary hashes by architecture
@@ -72,11 +83,11 @@ VERSIONS = {
     # libcxx keeps the legacy unsuffixed artifact name; libstdcxx is suffixed.
     "wee8_sha256": {
         "x86_64": {
-            "libcxx": "fcb7842467db8412971b90b2ad6c602ba4834b3eaa44fe5a175ae22d4cc0c96c",
-            "libstdcxx": "02248a38aeef1103a02dc2d65ef20249d42df7aed812f53f63482cee7babe82f",
+            "libcxx": "a9c87dc23cae39b5d0666b9b22f5faf4dc028cc10cca734268ec673e8eee6ea6",
+            "libstdcxx": "b2584b813cbbe1dfce67aaf72e1c4a0a4d746c5fbee44064a5464be62edf4f4b",
         },
         "aarch64": {
-            "libcxx": "c1c842e38ade0149eedf6dcd928eb4290cc01be6ebe213f642b161e9f0bb1cdc",
+            "libcxx": "96f3e3b7dceb2e5779ed067b76faea9cc4caa699658b3a7b5cedabd0d4e64197",
             "libstdcxx": "",
         },
     },
@@ -87,22 +98,22 @@ VERSIONS = {
     "sysroot_hashes": {
         "2.31": {
             "base": {
-                "amd64": "cffbc25e7678f17fca98030857a7e067498c6b000d97e30f8053306624253de5",
-                "arm64": "4b69e95730bbb551fc803bb70ea7ecf98eeaabeff115e1f2bd2bcdfcd4d66192",
+                "amd64": "b15fe2bed311223fa98fea03a54bb5bef3808e8d8c4becd14bbe579930039302",
+                "arm64": "b49ffc7a1f8016eb669c77626958397ecaa86eae21f86911ca79c73ac768d3f2",
             },
             "13": {
-                "amd64": "5134f12e58c9acea186b520d985cd5beec2518f24bdb346f08f930edd45544e1",
-                "arm64": "659b3fefbd4e24eb9fcc51bd0429815b27b7edadea38dcab07bb16221970163f",
+                "amd64": "7625512f6609535504c04544928103fd32ea24dde374ef0a806f1ab227c96ffc",
+                "arm64": "deccbf6c39f77dc7cace1b1d1f550f67dd3db1912bd99a02f5b88a89b6e5a3ac",
             },
         },
         "2.28": {
             "base": {
-                "amd64": "16b98c27a8f43597aaa7b67fefb5f4a04fb726aab41312900d4201a557377270",
-                "arm64": "f88a80ceab479dab849637b2e91cea51b48f5b534e408399a6f50ba320b62e6d",
+                "amd64": "d4fb7aa5e4d4b864b87e590401e3f48e7fbfc9dc41d7e6a6fd11008ff66263cc",
+                "arm64": "4daa3de33bd5463978017e279bebebad26d1281f1721ac0f1bdff78bc8a7b620",
             },
             "13": {
-                "amd64": "846e8eed82f233466b242b5bb97d184f1b4632e6502ae88cafa3dd502df4c217",
-                "arm64": "26d8c0e82388d8712c0e7f106bef0d096cdebc98ace594fa7f8c4bc4716e201e",
+                "amd64": "7fcfc93653130adfb8de4ae1de457cba03d51a6afc726112064ac91622dc80ec",
+                "arm64": "e9721bb09be40cc429d257b799afc6b94e4691d56fadad3c0e1d9a2aefe8d509",
             },
         },
     },

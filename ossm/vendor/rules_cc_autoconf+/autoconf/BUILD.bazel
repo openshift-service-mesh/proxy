@@ -1,0 +1,103 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+
+toolchain_type(
+    name = "toolchain_type",
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "autoconf_bzl",
+    srcs = ["autoconf.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/private:bzl_lib",
+    ],
+)
+
+bzl_library(
+    name = "autoconf_hdr_bzl",
+    srcs = ["autoconf_hdr.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/private:bzl_lib",
+    ],
+)
+
+bzl_library(
+    name = "autoconf_linkopts_bzl",
+    srcs = ["autoconf_linkopts.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/private:bzl_lib",
+    ],
+)
+
+bzl_library(
+    name = "autoconf_srcs_bzl",
+    srcs = ["autoconf_srcs.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/private:bzl_lib",
+    ],
+)
+
+bzl_library(
+    name = "autoconf_toolchain_bzl",
+    srcs = ["autoconf_toolchain.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/private:bzl_lib",
+    ],
+)
+
+bzl_library(
+    name = "cc_autoconf_info_bzl",
+    srcs = ["cc_autoconf_info.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "checks_bzl",
+    srcs = ["checks.bzl"],
+    visibility = ["//visibility:public"],
+    deps = ["//autoconf/private:bzl_lib"],
+)
+
+bzl_library(
+    name = "package_info_bzl",
+    srcs = ["package_info.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":cc_autoconf_info_bzl",
+        "//autoconf/private:bzl_lib",
+    ],
+)
+
+bzl_library(
+    name = "defs_bzl",
+    srcs = ["defs.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":autoconf_bzl",
+        ":autoconf_hdr_bzl",
+        ":autoconf_linkopts_bzl",
+        ":autoconf_srcs_bzl",
+        ":autoconf_toolchain_bzl",
+        ":cc_autoconf_info_bzl",
+        ":checks_bzl",
+        ":package_info_bzl",
+    ],
+)
+
+exports_files([
+    "autoconf_hdr.bzl",
+    "autoconf_linkopts.bzl",
+    "autoconf_srcs.bzl",
+    "autoconf_toolchain.bzl",
+    "autoconf.bzl",
+    "cc_autoconf_info.bzl",
+    "checks.bzl",
+    "defs.bzl",
+    "package_info.bzl",
+    "utils.bzl",
+])

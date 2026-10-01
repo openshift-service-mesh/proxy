@@ -15,6 +15,10 @@
 """Implementation of apple_precompiled_resource_bundle rule."""
 
 load(
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
+load(
     "@bazel_skylib//lib:dicts.bzl",
     "dicts",
 )
@@ -33,8 +37,7 @@ load(
 )
 load(
     "//apple/internal:apple_toolchains.bzl",
-    "AppleMacToolsToolchainInfo",
-    "AppleXPlatToolsToolchainInfo",
+    "apple_toolchain_utils",
 )
 load(
     "//apple/internal:features_support.bzl",
@@ -71,8 +74,10 @@ def _apple_precompiled_resource_bundle_impl(ctx):
     owner = str(label)
     bucketize_args = {}
 
+    platform_info = platform_support.apple_platform_info_from_rule_ctx(ctx)
+
     rule_descriptor = rule_support.rule_descriptor(
-        platform_type = str(ctx.fragments.apple.single_arch_platform.platform_type),
+        platform_type = platform_info.target_os,
         product_type = apple_product_type.application,
     )
 
@@ -82,11 +87,12 @@ def _apple_precompiled_resource_bundle_impl(ctx):
     )
 
     actions = ctx.actions
-    apple_mac_toolchain_info = ctx.attr._mac_toolchain[AppleMacToolsToolchainInfo]
-    apple_xplat_toolchain_info = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo]
+    apple_mac_toolchain_info = apple_toolchain_utils.get_mac_toolchain(ctx)
+    apple_xplat_toolchain_info = apple_toolchain_utils.get_xplat_toolchain(ctx)
 
     platform_prerequisites = platform_support.platform_prerequisites(
         apple_fragment = ctx.fragments.apple,
+        apple_platform_info = platform_support.apple_platform_info_from_rule_ctx(ctx),
         build_settings = apple_xplat_toolchain_info.build_settings,
         config_vars = ctx.var,
         cpp_fragment = ctx.fragments.cpp,
@@ -95,7 +101,6 @@ def _apple_precompiled_resource_bundle_impl(ctx):
         explicit_minimum_os = None,
         features = features,
         objc_fragment = ctx.fragments.objc,
-        platform_type_string = str(ctx.fragments.apple.single_arch_platform.platform_type),
         uses_swift = False,
         xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
     )
@@ -108,6 +113,7 @@ def _apple_precompiled_resource_bundle_impl(ctx):
         "actions": actions,
         "apple_mac_toolchain_info": apple_mac_toolchain_info,
         "bundle_id": bundle_id,
+        "mac_exec_group": apple_toolchain_utils.get_mac_exec_group(ctx),
         "product_type": rule_descriptor.product_type,
         "rule_label": label,
     }
@@ -169,6 +175,7 @@ def _apple_precompiled_resource_bundle_impl(ctx):
                     "storyboards",
                     "strings",
                     "texture_atlases",
+                    "xcstrings",
                     "xibs",
                 ],
                 unowned_resources = unowned_resources,
@@ -249,6 +256,7 @@ def _apple_precompiled_resource_bundle_impl(ctx):
 
 apple_precompiled_resource_bundle = rule(
     implementation = _apple_precompiled_resource_bundle_impl,
+    exec_groups = apple_toolchain_utils.use_apple_exec_group_toolchain(),
     fragments = ["apple", "cpp", "objc"],
     attrs = dicts.add(
         {
@@ -333,6 +341,7 @@ bundle root in the same structure passed to this argument, so `["res/foo.png"]` 
                 default = "//apple/internal/resource_rules:Info.plist",
             ),
         },
+        apple_support.platform_constraint_attrs(),
         rule_attrs.common_tool_attrs(),
     ),
     doc = """

@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "absl/base/nullability.h"
 #include "absl/functional/any_invocable.h"
@@ -25,6 +26,7 @@
 #include "absl/strings/string_view.h"
 #include "checker/checker_options.h"
 #include "checker/type_checker.h"
+#include "common/container.h"
 #include "common/decl.h"
 #include "common/type.h"
 #include "common/type_introspector.h"
@@ -34,7 +36,6 @@
 namespace cel {
 
 class TypeCheckerBuilder;
-class TypeCheckerBuilderImpl;
 
 // Functional implementation to apply the library features to a
 // TypeCheckerBuilder.
@@ -51,7 +52,7 @@ struct CheckerLibrary {
 // Represents a declaration to only use a subset of a library.
 struct TypeCheckerSubset {
   using FunctionPredicate = absl::AnyInvocable<bool(
-      absl::string_view function, absl::string_view overload_id) const>;
+      absl::string_view function, const OverloadDecl& overload) const>;
 
   // The id of the library to subset. Only one subset can be applied per
   // library id.
@@ -102,6 +103,27 @@ class TypeCheckerBuilder {
   // Note: only protobuf backed struct types are supported at this time.
   virtual absl::Status AddContextDeclaration(absl::string_view type) = 0;
 
+  // Declares struct type by fully qualified name as a context declaration.
+  //
+  // This version accepts a mask in terms of field selections from the
+  // context type. The mask specifies which fields are visible on the
+  // struct and its members. The visible fields for a type accumulate
+  // across calls. This is a lightweight way to adjust the type checking
+  // behavior for a group of related types.
+  //
+  // Context declarations are a way to declare a group of variables based on the
+  // definition of a struct type. Each top level field of the struct that is
+  // also the first field name in a field path is declared as an individual
+  // variable of the field type.
+  //
+  // It is an error if the type contains a field that overlaps with another
+  // declared variable. It is an error if the input field paths is the empty
+  // set.
+  //
+  // Note: only protobuf backed struct types are supported at this time.
+  virtual absl::Status AddContextDeclarationWithProtoTypeMask(
+      absl::string_view type, std::vector<std::string> field_paths) = 0;
+
   // Adds a function declaration that may be referenced in expressions checked
   // with the resulting TypeChecker.
   virtual absl::Status AddFunction(const FunctionDecl& decl) = 0;
@@ -132,9 +154,15 @@ class TypeCheckerBuilder {
   //
   // This is used for resolving references in the expressions being built.
   //
+  // Prefer setting the container via SetExpressionContainer().
+  //
   // Note: if set multiple times, the last value is used. This can lead to
-  // surprising behavior if used in a custom library.
+  // surprising behavior if used in a custom library. If container is not a
+  // valid container name, the operation is ignored.
   virtual void set_container(absl::string_view container) = 0;
+
+  virtual void SetExpressionContainer(
+      ExpressionContainer expression_container) = 0;
 
   // The current options for the TypeChecker being built.
   virtual const CheckerOptions& options() const = 0;

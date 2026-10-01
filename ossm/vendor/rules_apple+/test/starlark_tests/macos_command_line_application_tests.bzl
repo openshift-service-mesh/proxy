@@ -23,6 +23,10 @@ load(
     "analysis_runfiles_dsym_test",
 )
 load(
+    "//test/starlark_tests/rules:analysis_target_actions_test.bzl",
+    "make_analysis_target_actions_test",
+)
+load(
     "//test/starlark_tests/rules:apple_dsym_bundle_info_test.bzl",
     "apple_dsym_bundle_info_test",
 )
@@ -43,6 +47,49 @@ load(
     "common",
 )
 
+_analysis_macos_strip_enabled_opt_test = make_analysis_target_actions_test(
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:macos_cpus": "x86_64",
+        "//command_line_option:objc_enable_binary_stripping": True,
+    },
+)
+
+_analysis_macos_strip_disabled_opt_test = make_analysis_target_actions_test(
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:macos_cpus": "x86_64",
+        "//command_line_option:objc_enable_binary_stripping": False,
+    },
+)
+
+_analysis_macos_strip_disabled_dbg_test = make_analysis_target_actions_test(
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        "//command_line_option:macos_cpus": "x86_64",
+        "//command_line_option:objc_enable_binary_stripping": True,
+    },
+)
+
+def _universal_binary_embedded_plist_test(
+        name,
+        embedded_plist_test_values,
+        plist_section_name,
+        tags):
+    for arch in ["x86_64", "arm64"]:
+        binary_contents_test(
+            name = "{}_{}_test".format(name, arch),
+            build_type = "device",
+            target_under_test = "//test/starlark_tests/targets_under_test/macos:cmd_app_info_and_launchd_plists",
+            binary_test_file = "$BINARY",
+            binary_test_architecture = arch,
+            compilation_mode = "opt",
+            cpus = {"macos_cpus": ["x86_64", "arm64"]},
+            embedded_plist_test_values = embedded_plist_test_values,
+            plist_section_name = plist_section_name,
+            tags = tags,
+        )
+
 def macos_command_line_application_test_suite(name):
     """Test suite for macos_command_line_application.
 
@@ -58,10 +105,47 @@ def macos_command_line_application_test_suite(name):
     )
 
     apple_verification_test(
+        name = "{}_info_plist_fat_binary_codesign_test".format(name),
+        build_type = "device",
+        cpus = {
+            "macos_cpus": ["x86_64", "arm64"],
+        },
+        target_under_test = "//test/starlark_tests/targets_under_test/macos:cmd_app_info_plists",
+        verifier_script = "verifier_scripts/codesign_verifier.sh",
+        tags = [name],
+    )
+
+    apple_verification_test(
         name = "{}_swift_codesign_test".format(name),
         build_type = "device",
         target_under_test = "//test/starlark_tests/targets_under_test/macos:cmd_app_basic_swift",
         verifier_script = "verifier_scripts/codesign_verifier.sh",
+        tags = [name],
+    )
+
+    # Tests that strip action is registered when building in opt mode with binary stripping enabled.
+    _analysis_macos_strip_enabled_opt_test(
+        name = "{}_binary_strip_action_enabled_in_opt_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/macos:cmd_app_basic",
+        target_mnemonic = "ObjcBinarySymbolStrip",
+        tags = [name],
+    )
+
+    # Tests that strip action is not registered when in opt mode but stripping is disabled.
+    _analysis_macos_strip_disabled_opt_test(
+        name = "{}_binary_strip_action_disabled_without_flag_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/macos:cmd_app_basic",
+        target_mnemonic = "ObjcLink",
+        not_expected_mnemonic = ["ObjcBinarySymbolStrip"],
+        tags = [name],
+    )
+
+    # Tests that strip action is not registered in dbg mode even if stripping is enabled.
+    _analysis_macos_strip_disabled_dbg_test(
+        name = "{}_binary_strip_action_disabled_in_dbg_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/macos:cmd_app_basic",
+        target_mnemonic = "ObjcLink",
+        not_expected_mnemonic = ["ObjcBinarySymbolStrip"],
         tags = [name],
     )
 
@@ -123,6 +207,24 @@ def macos_command_line_application_test_suite(name):
         compilation_mode = "opt",
         embedded_plist_test_values = {
             "AnotherKey": "AnotherValue",
+            "Label": "com.test.bundle",
+        },
+        plist_section_name = "__launchd_plist",
+        tags = [name],
+    )
+
+    _universal_binary_embedded_plist_test(
+        name = "{}_universal_info_plist".format(name),
+        embedded_plist_test_values = {
+            "CFBundleIdentifier": "com.google.example",
+        },
+        plist_section_name = "__info_plist",
+        tags = [name],
+    )
+
+    _universal_binary_embedded_plist_test(
+        name = "{}_universal_launchd_plist".format(name),
+        embedded_plist_test_values = {
             "Label": "com.test.bundle",
         },
         plist_section_name = "__launchd_plist",

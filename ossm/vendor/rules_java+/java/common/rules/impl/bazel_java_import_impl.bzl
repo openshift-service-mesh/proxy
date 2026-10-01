@@ -63,36 +63,15 @@ def _process_with_ijars_if_needed(jars, ctx):
 
     return file_dict
 
-def _check_export_error(ctx, exports):
-    not_in_allowlist = hasattr(ctx.attr, "_allowlist_java_import_exports") and not getattr(ctx.attr, "_allowlist_java_import_exports")[PackageSpecificationInfo].contains(ctx.label)
+def _check_export_error(ctx, exports, permit_exports):
     disallow_java_import_exports = ctx.fragments.java.disallow_java_import_exports()
 
-    if len(exports) != 0 and (disallow_java_import_exports or not_in_allowlist):
+    if len(exports) != 0 and (disallow_java_import_exports or not permit_exports):
         fail("java_import.exports is no longer supported; use java_import.deps instead")
 
 def _check_empty_jars_error(ctx, jars):
     if len(jars) == 0:
         fail("empty java_import.jars is not supported " + ctx.label.package)
-
-def _create_java_info_with_dummy_output_file(ctx, srcjar, all_deps, exports, runtime_deps_list, neverlink, cc_info_list, add_exports, add_opens):
-    dummy_jar = ctx.actions.declare_file(ctx.label.name + "_dummy.jar")
-    dummy_src_jar = srcjar
-    if dummy_src_jar == None:
-        dummy_src_jar = ctx.actions.declare_file(ctx.label.name + "_src_dummy.java")
-        ctx.actions.write(dummy_src_jar, "")
-    return java_common.compile(
-        ctx,
-        output = dummy_jar,
-        java_toolchain = semantics.find_java_toolchain(ctx),
-        source_files = [dummy_src_jar],
-        deps = all_deps,
-        runtime_deps = runtime_deps_list,
-        neverlink = neverlink,
-        exports = [export[JavaInfo] for export in exports if JavaInfo in export],  # Watchout, maybe you need to add them there manually.
-        native_libraries = cc_info_list,
-        add_exports = add_exports,
-        add_opens = add_opens,
-    )
 
 def bazel_java_import_rule(
         ctx,
@@ -104,7 +83,9 @@ def bazel_java_import_rule(
         neverlink = False,
         proguard_specs = [],
         add_exports = [],
-        add_opens = []):
+        add_opens = [],
+        permit_exports = True,
+        skip_incomplete_deps_check = True):
     """Implements java_import.
 
     This rule allows the use of precompiled .jar files as libraries in other Java rules.
@@ -120,6 +101,8 @@ def bazel_java_import_rule(
       proguard_specs: (list[File]) Files to be used as Proguard specification.
       add_exports: (list[str]) Allow this library to access the given <module>/<package>.
       add_opens: (list[str]) Allow this library to reflectively access the given <module>/<package>.
+      permit_exports: (bool) Allow using exports
+      skip_incomplete_deps_check: (bool) If this target is allowed to have incomplete deps
 
     Returns:
       (list[provider]) A list containing DefaultInfo, JavaInfo,
@@ -127,15 +110,14 @@ def bazel_java_import_rule(
     """
 
     _check_empty_jars_error(ctx, jars)
-    _check_export_error(ctx, exports)
+    _check_export_error(ctx, exports, permit_exports)
 
     collected_jars = _collect_jars(ctx, jars)
     all_deps = _filter_provider(JavaInfo, deps, exports)
 
     jdeps_artifact = None
     merged_java_info = java_common.merge(all_deps)
-    not_in_allowlist = hasattr(ctx.attr, "_allowlist_java_import_deps_checking") and not ctx.attr._allowlist_java_import_deps_checking[PackageSpecificationInfo].contains(ctx.label)
-    if len(collected_jars) > 0 and not_in_allowlist and "incomplete-deps" not in ctx.attr.tags:
+    if not skip_incomplete_deps_check and "incomplete-deps" not in ctx.attr.tags:
         jdeps_artifact = import_deps_check(
             ctx,
             collected_jars,
@@ -147,26 +129,21 @@ def bazel_java_import_rule(
     compilation_to_runtime_jar_map = _process_with_ijars_if_needed(collected_jars, ctx)
     runtime_deps_list = [runtime_dep[JavaInfo] for runtime_dep in runtime_deps if JavaInfo in runtime_dep]
     cc_info_list = [dep[CcInfo] for dep in deps if CcInfo in dep]
-    java_info = None
-    if len(collected_jars) > 0:
-        java_infos = []
-        for jar in collected_jars:
-            java_infos.append(JavaInfo(
-                output_jar = jar,
-                compile_jar = compilation_to_runtime_jar_map[jar],
-                deps = all_deps,
-                runtime_deps = runtime_deps_list,
-                neverlink = neverlink,
-                source_jar = srcjar,
-                exports = [export[JavaInfo] for export in exports if JavaInfo in export],  # Watchout, maybe you need to add them there manually.
-                native_libraries = cc_info_list,
-                add_exports = add_exports,
-                add_opens = add_opens,
-            ))
-        java_info = java_common.merge(java_infos)
-    else:
-        # TODO(kotlaja): Remove next line once all java_import targets with empty jars attribute are cleaned from depot (b/246559727).
-        java_info = _create_java_info_with_dummy_output_file(ctx, srcjar, all_deps, exports, runtime_deps_list, neverlink, cc_info_list, add_exports, add_opens)
+    java_infos = []
+    for jar in collected_jars:
+        java_infos.append(JavaInfo(
+            output_jar = jar,
+            compile_jar = compilation_to_runtime_jar_map[jar],
+            deps = all_deps,
+            runtime_deps = runtime_deps_list,
+            neverlink = neverlink,
+            source_jar = srcjar,
+            exports = [export[JavaInfo] for export in exports if JavaInfo in export],  # Watchout, maybe you need to add them there manually.
+            native_libraries = cc_info_list,
+            add_exports = add_exports,
+            add_opens = add_opens,
+        ))
+    java_info = java_common.merge(java_infos)
 
     target = {"JavaInfo": java_info}
 

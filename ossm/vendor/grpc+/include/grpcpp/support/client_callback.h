@@ -537,7 +537,7 @@ class ClientCallbackReaderWriterImpl
     start_ops_.FillOps(&call_);
 
     {
-      grpc::internal::MutexLock lock(&start_mu_);
+      grpc::internal::MutexLock lock(start_mu_);
 
       if (backlog_.read_ops) {
         read_ops_.FillOps(&call_);
@@ -563,7 +563,7 @@ class ClientCallbackReaderWriterImpl
     read_ops_.RecvMessage(msg);
     callbacks_outstanding_.fetch_add(1, std::memory_order_relaxed);
     if (GPR_UNLIKELY(!started_.load(std::memory_order_acquire))) {
-      grpc::internal::MutexLock lock(&start_mu_);
+      grpc::internal::MutexLock lock(start_mu_);
       if (GPR_LIKELY(!started_.load(std::memory_order_relaxed))) {
         backlog_.read_ops = true;
         return;
@@ -591,7 +591,7 @@ class ClientCallbackReaderWriterImpl
     }
 
     if (GPR_UNLIKELY(!started_.load(std::memory_order_acquire))) {
-      grpc::internal::MutexLock lock(&start_mu_);
+      grpc::internal::MutexLock lock(start_mu_);
       if (GPR_LIKELY(!started_.load(std::memory_order_relaxed))) {
         backlog_.write_ops = true;
         return;
@@ -616,7 +616,7 @@ class ClientCallbackReaderWriterImpl
       corked_write_needed_ = false;
     }
     if (GPR_UNLIKELY(!started_.load(std::memory_order_acquire))) {
-      grpc::internal::MutexLock lock(&start_mu_);
+      grpc::internal::MutexLock lock(start_mu_);
       if (GPR_LIKELY(!started_.load(std::memory_order_relaxed))) {
         backlog_.writes_done_ops = true;
         return;
@@ -818,7 +818,7 @@ class ClientCallbackReaderImpl : public ClientCallbackReader<Response> {
     read_ops_.set_core_cq_tag(&read_tag_);
 
     {
-      grpc::internal::MutexLock lock(&start_mu_);
+      grpc::internal::MutexLock lock(start_mu_);
       if (backlog_.read_ops) {
         read_ops_.FillOps(&call_);
       }
@@ -838,7 +838,7 @@ class ClientCallbackReaderImpl : public ClientCallbackReader<Response> {
     read_ops_.RecvMessage(msg);
     callbacks_outstanding_.fetch_add(1, std::memory_order_relaxed);
     if (GPR_UNLIKELY(!started_.load(std::memory_order_acquire))) {
-      grpc::internal::MutexLock lock(&start_mu_);
+      grpc::internal::MutexLock lock(start_mu_);
       if (GPR_LIKELY(!started_.load(std::memory_order_relaxed))) {
         backlog_.read_ops = true;
         return;
@@ -964,7 +964,7 @@ class ClientCallbackWriterImpl : public ClientCallbackWriter<Request> {
     start_ops_.FillOps(&call_);
 
     {
-      grpc::internal::MutexLock lock(&start_mu_);
+      grpc::internal::MutexLock lock(start_mu_);
 
       if (backlog_.write_ops) {
         write_ops_.FillOps(&call_);
@@ -1003,7 +1003,7 @@ class ClientCallbackWriterImpl : public ClientCallbackWriter<Request> {
     }
 
     if (GPR_UNLIKELY(!started_.load(std::memory_order_acquire))) {
-      grpc::internal::MutexLock lock(&start_mu_);
+      grpc::internal::MutexLock lock(start_mu_);
       if (GPR_LIKELY(!started_.load(std::memory_order_relaxed))) {
         backlog_.write_ops = true;
         return;
@@ -1031,7 +1031,7 @@ class ClientCallbackWriterImpl : public ClientCallbackWriter<Request> {
     }
 
     if (GPR_UNLIKELY(!started_.load(std::memory_order_acquire))) {
-      grpc::internal::MutexLock lock(&start_mu_);
+      grpc::internal::MutexLock lock(start_mu_);
       if (GPR_LIKELY(!started_.load(std::memory_order_relaxed))) {
         backlog_.writes_done_ops = true;
         return;

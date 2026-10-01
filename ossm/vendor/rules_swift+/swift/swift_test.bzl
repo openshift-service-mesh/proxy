@@ -16,16 +16,19 @@
 
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("//swift/internal:binary_attrs.bzl", "binary_rule_attrs")
 load("//swift/internal:compiling.bzl", "compile")
 load("//swift/internal:env_expansion.bzl", "expanded_env")
 load(
     "//swift/internal:feature_names.bzl",
     "SWIFT_FEATURE_ADD_TARGET_NAME_TO_OUTPUT",
+    "SWIFT_FEATURE_STATIC_STDLIB",
 )
 load("//swift/internal:features.bzl", "is_feature_enabled")
 load(
     "//swift/internal:linking.bzl",
-    "binary_rule_attrs",
     "configure_features_for_binary",
     "malloc_linking_context",
     "register_link_binary_action",
@@ -37,13 +40,14 @@ load(
 load("//swift/internal:providers.bzl", "SwiftCompilerPluginInfo")
 load(
     "//swift/internal:swift_symbol_graph_aspect.bzl",
+    "SwiftTestDiscoverySymbolGraphInfo",
     "make_swift_symbol_graph_aspect",
 )
 load("//swift/internal:symbol_graph_extracting.bzl", "extract_symbol_graph")
 load(
     "//swift/internal:toolchain_utils.bzl",
-    "get_swift_toolchain",
-    "use_swift_toolchain",
+    "find_all_toolchains",
+    "use_all_toolchains",
 )
 load(
     "//swift/internal:utils.bzl",
@@ -56,9 +60,11 @@ load(
     ":providers.bzl",
     "SwiftBinaryInfo",
     "SwiftInfo",
-    "SwiftSymbolGraphInfo",
     "create_swift_module_context",
 )
+
+# Name of the execution group used for `SwiftTestDiscovery` actions.
+_DISCOVER_TESTS_EXEC_GROUP = "discover_tests"
 
 _test_discovery_symbol_graph_aspect = make_swift_symbol_graph_aspect(
     default_emit_extension_block_symbols = "0",
@@ -85,77 +91,13 @@ def _maybe_parse_as_library_copts(srcs):
                            srcs[0].basename != "main.swift"
     return ["-parse-as-library"] if use_parse_as_library else []
 
-def _create_xctest_bundle(name, actions, binary):
-    """Creates an `.xctest` bundle that contains the given binary.
-
-    Args:
-        name: The name of the target being built, which will be used as the
-            basename of the bundle (followed by the .xctest bundle extension).
-        actions: The context's actions object.
-        binary: The binary that will be copied into the test bundle.
-
-    Returns:
-        A `File` (tree artifact) representing the `.xctest` bundle.
-    """
-    xctest_bundle = actions.declare_directory("{}.xctest".format(name))
-
-    args = actions.args()
-    args.add(xctest_bundle.path)
-    args.add(binary)
-
-    # When XCTest loads this bundle, it will create an instance of this class
-    # which will register the observer that writes the XML output.
-    plist = '{ NSPrincipalClass = "BazelXMLTestObserverRegistration"; }'
-
-    actions.run_shell(
-        arguments = [args],
-        command = (
-            'mkdir -p "$1/Contents/MacOS" && ' +
-            'cp "$2" "$1/Contents/MacOS" && ' +
-            'echo \'{}\' > "$1/Contents/Info.plist"'.format(plist)
-        ),
-        inputs = [binary],
-        mnemonic = "SwiftCreateTestBundle",
-        outputs = [xctest_bundle],
-        progress_message = "Creating test bundle for {}".format(name),
-    )
-
-    return xctest_bundle
-
-def _create_xctest_runner(name, actions, bundle, xctest_runner_template):
-    """Creates a script that will launch `xctest` with the given test bundle.
-
-    Args:
-        name: The name of the target being built, which will be used as the
-            basename of the test runner script.
-        actions: The context's actions object.
-        bundle: The `File` representing the `.xctest` bundle that should be
-            executed.
-        xctest_runner_template: The `File` that will be used as a template to
-            generate the test runner shell script.
-
-    Returns:
-        A `File` representing the shell script that will launch the test bundle
-        with the `xctest` tool.
-    """
-    xctest_runner = actions.declare_file("{}.test-runner.sh".format(name))
-
-    actions.expand_template(
-        is_executable = True,
-        output = xctest_runner,
-        template = xctest_runner_template,
-        substitutions = {
-            "%bundle%": bundle.short_path,
-        },
-    )
-
-    return xctest_runner
-
 def _generate_test_discovery_srcs(
         *,
         actions,
         deps,
+        env = {},
         name,
+        objc_test_discovery,
         owner_module_name,
         owner_symbol_graph_dir = None,
         test_discoverer):
@@ -169,8 +111,13 @@ def _generate_test_discovery_srcs(
     Args:
         actions: The context's actions object.
         deps: The list of direct dependencies of the test target.
+        env: Environment variables to set when running the discovery tool. On
+            Windows this must include a `Path` that contains the Swift runtime
+            DLLs, otherwise the (Swift) discovery executable fails to launch.
         name: The name of the target being built, which will be used to derive
             the basename of the directory containing the generated files.
+        objc_test_discovery: If `True`, the runner should use Objective-C-based
+            XCTest discovery instead of symbol graphs.
         owner_module_name: The name of the owner module (the target being
             built).
         owner_symbol_graph_dir: A directory-type `File` containing the extracted
@@ -187,54 +134,59 @@ def _generate_test_discovery_srcs(
     modules_to_scan = []
     args = actions.args()
 
-    if owner_symbol_graph_dir:
-        inputs.append(owner_symbol_graph_dir)
-        modules_to_scan.append(owner_module_name)
+    if objc_test_discovery:
+        args.add("--objc-test-discovery")
+    else:
+        if owner_symbol_graph_dir:
+            inputs.append(owner_symbol_graph_dir)
+            modules_to_scan.append(owner_module_name)
 
-    for dep in deps:
-        if SwiftSymbolGraphInfo not in dep:
-            continue
+        for dep in deps:
+            if SwiftTestDiscoverySymbolGraphInfo not in dep:
+                continue
 
-        symbol_graph_info = dep[SwiftSymbolGraphInfo]
+            symbol_graph_info = (
+                dep[SwiftTestDiscoverySymbolGraphInfo].symbol_graph_info
+            )
 
-        # Only include the direct symbol graphs if the owner didn't have any
-        # sources.
-        if not owner_symbol_graph_dir:
-            modules_to_scan.extend([
-                symbol_graph.module_name
-                for symbol_graph in symbol_graph_info.direct_symbol_graphs
-            ])
+            # Only include the direct symbol graphs if the owner didn't have any
+            # sources.
+            if not owner_symbol_graph_dir:
+                modules_to_scan.extend([
+                    symbol_graph.module_name
+                    for symbol_graph in symbol_graph_info.direct_symbol_graphs
+                ])
 
-        # Always include the transitive symbol graphs; if a library depends on a
-        # support class that inherits from `XCTestCase`, we need to be able to
-        # detect that.
-        for symbol_graph in (
-            symbol_graph_info.transitive_symbol_graphs.to_list()
-        ):
-            inputs.append(symbol_graph.symbol_graph_dir)
+            # Always include the transitive symbol graphs; if a library depends
+            # on a support class that inherits from `XCTestCase`, we need to be
+            # able to detect that.
+            for symbol_graph in (
+                symbol_graph_info.transitive_symbol_graphs.to_list()
+            ):
+                inputs.append(symbol_graph.symbol_graph_dir)
 
-    if not modules_to_scan:
-        fail("Failed to find any modules to inspect for tests.")
+        if not modules_to_scan:
+            fail("Failed to find any modules to inspect for tests.")
 
-    # For each direct dependency/module that we have a symbol graph for (i.e.,
-    # every testonly dependency), declare a `.swift` source file where the
-    # discovery tool will generate an extension that lists the test entries for
-    # the classes/methods found in that module.
-    for module_name in modules_to_scan:
-        output_file = actions.declare_file(
-            "{target}_test_discovery_srcs/{module}.entries.swift".format(
-                module = module_name,
-                target = name,
-            ),
-        )
-        outputs.append(output_file)
-        args.add(
-            "--module-output",
-            "{module}={path}".format(
-                module = module_name,
-                path = output_file.path,
-            ),
-        )
+        # For each direct dependency/module that we have a symbol graph for
+        # (i.e., every testonly dependency), declare a `.swift` source file
+        # where the discovery tool will generate an extension that lists the
+        # test entries for the classes/methods found in that module.
+        for module_name in modules_to_scan:
+            output_file = actions.declare_file(
+                "{target}_test_discovery_srcs/{module}.entries.swift".format(
+                    module = module_name,
+                    target = name,
+                ),
+            )
+            outputs.append(output_file)
+            args.add(
+                "--module-output",
+                "{module}={path}".format(
+                    module = module_name,
+                    path = output_file.path,
+                ),
+            )
 
     # Also declare a single `main.swift` file where the discovery tool will
     # generate the main runner.
@@ -250,7 +202,9 @@ def _generate_test_discovery_srcs(
 
     actions.run(
         arguments = [args],
+        env = env,
         executable = test_discoverer,
+        exec_group = _DISCOVER_TESTS_EXEC_GROUP,
         inputs = inputs,
         mnemonic = "SwiftTestDiscovery",
         outputs = outputs,
@@ -267,13 +221,12 @@ def _do_compile(
         feature_configuration,
         include_dev_srch_paths,
         module_name,
-        objc_infos,
         name,
         package_name,
         plugins = [],
         srcs,
         swift_infos,
-        swift_toolchain,
+        toolchains,
         workspace_name):
     """Compiles Swift source code for a `swift_test` target.
 
@@ -289,8 +242,6 @@ def _do_compile(
         module_name: The name of the module being compiled.
         name: The target name or a value derived from the target name that is
             used to name output files generated by the action.
-        objc_infos: A list of `apple_common.ObjC` providers that should be
-            provided as inputs to the compilation action.
         package_name: The semantic package of the name of the Swift module
             being compiled.
         plugins: A list of `SwiftCompilerPluginInfo` providers that need to be
@@ -298,7 +249,8 @@ def _do_compile(
         srcs: The sources to compile.
         swift_infos: A list of `SwiftInfo` providers that should be used to
             determine the module inputs for the action.
-        swift_toolchain: The Swift toolchain to use to configure the build.
+        toolchains: The struct containing the Swift and C++ toolchain providers,
+            as returned by `swift_common.find_all_toolchains()`.
         workspace_name: The name of the workspace for which the code is being
              compiled, which is used to determine unique file paths for some
              outputs.
@@ -321,31 +273,27 @@ def _do_compile(
         module_name = module_name,
         package_name = package_name,
         plugins = plugins,
-        objc_infos = objc_infos,
         srcs = srcs,
         swift_infos = swift_infos,
-        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
         target_name = name,
         workspace_name = workspace_name,
     )
 
 def _swift_test_impl(ctx):
-    swift_toolchain = get_swift_toolchain(ctx)
-
+    toolchains = find_all_toolchains(ctx)
     feature_configuration = configure_features_for_binary(
         ctx = ctx,
         requested_features = ctx.features,
-        swift_toolchain = swift_toolchain,
-        unsupported_features = ctx.disabled_features,
+        toolchains = toolchains,
+        # XCTest and Swift Testing are shared libraries whose dependencies use
+        # the dynamic Swift runtime, so a test executable cannot safely link a
+        # separate static copy of that runtime.
+        unsupported_features = ctx.disabled_features + [SWIFT_FEATURE_STATIC_STDLIB],
     )
 
     discover_tests = ctx.attr.discover_tests
-    uses_xctest_bundles = swift_toolchain.test_configuration.uses_xctest_bundles
-    is_bundled = discover_tests and uses_xctest_bundles
-
-    # If we need to run the test in an .xctest bundle, the binary must have
-    # Mach-O type `MH_BUNDLE` instead of `MH_EXECUTE`.
-    extra_linkopts = ["-Wl,-bundle"] if is_bundled else []
+    objc_test_discovery = toolchains.swift.test_configuration.objc_test_discovery
 
     deps = list(ctx.attr.deps)
     test_runner_deps = list(ctx.attr._test_runner_deps)
@@ -374,22 +322,21 @@ def _swift_test_impl(ctx):
     # support testing those.
     deps_cc_infos = []
     deps_compilation_contexts = []
-    deps_objc_infos = []
     deps_swift_infos = []
-    additional_linking_contexts = []
+    additional_linking_contexts = list(
+        toolchains.swift.test_configuration.test_linking_contexts,
+    )
     for dep in deps:
         if CcInfo in dep:
             deps_cc_infos.append(dep[CcInfo])
             deps_compilation_contexts.append(dep[CcInfo].compilation_context)
-        if apple_common.Objc in dep:
-            deps_objc_infos.append(dep[apple_common.Objc])
         if SwiftInfo in dep:
             deps_swift_infos.append(dep[SwiftInfo])
         if SwiftBinaryInfo in dep:
-            plugin_info = dep[SwiftBinaryInfo]
-            deps_swift_infos.append(plugin_info.swift_info)
+            binary_info = dep[SwiftBinaryInfo]
+            deps_swift_infos.append(binary_info.swift_info)
             additional_linking_contexts.append(
-                plugin_info.cc_info.linking_context,
+                binary_info.cc_info.linking_context,
             )
     additional_linking_contexts.append(malloc_linking_context(ctx))
 
@@ -401,7 +348,10 @@ def _swift_test_impl(ctx):
 
     module_name = ctx.attr.module_name
     if not module_name:
-        module_name = derive_swift_module_name(ctx.label)
+        module_name = derive_swift_module_name(
+            ctx.label,
+            feature_configuration = feature_configuration,
+        )
 
     include_dev_srch_paths = include_developer_search_paths(ctx.attr)
 
@@ -427,13 +377,12 @@ def _swift_test_impl(ctx):
             feature_configuration = feature_configuration,
             include_dev_srch_paths = include_dev_srch_paths,
             module_name = module_name,
-            objc_infos = deps_objc_infos,
             package_name = ctx.attr.package_name,
             plugins = get_providers(ctx.attr.plugins, SwiftCompilerPluginInfo),
             name = ctx.label.name,
             srcs = srcs,
             swift_infos = deps_swift_infos,
-            swift_toolchain = swift_toolchain,
+            toolchains = toolchains,
             workspace_name = ctx.workspace_name,
         )
 
@@ -443,10 +392,11 @@ def _swift_test_impl(ctx):
 
         swift_infos_including_owner = [compile_result.swift_info]
 
-        # If we're going to do test discovery below, extract the symbol graph of
-        # the module that we just compiled so that we can discover any tests in
-        # the `srcs` of this target (instead of just in the direct `deps`).
-        if not is_bundled:
+        # If we're going to do symbol-graph-based test discovery below, extract
+        # the symbol graph of the module that we just compiled so that we can
+        # discover any tests in the `srcs` of this target (instead of just in
+        # the direct `deps`).
+        if not objc_test_discovery:
             owner_symbol_graph_dir = ctx.actions.declare_directory(
                 "{}.symbolgraphs".format(ctx.label.name),
             )
@@ -459,19 +409,20 @@ def _swift_test_impl(ctx):
                 module_name = module_name,
                 output_dir = owner_symbol_graph_dir,
                 swift_infos = swift_infos_including_owner,
-                swift_toolchain = swift_toolchain,
+                toolchains = toolchains,
             )
     else:
         compilation_outputs = cc_common.create_compilation_outputs()
         swift_infos_including_owner = deps_swift_infos
 
-    # If requested, discover tests using symbol graphs and generate a runner for
-    # them.
-    if discover_tests and not uses_xctest_bundles:
+    # If requested, discover tests and generate a runner for them.
+    if discover_tests:
         discovery_srcs = _generate_test_discovery_srcs(
             actions = ctx.actions,
             deps = ctx.attr.deps,
+            env = toolchains.swift.test_configuration.env,
             name = ctx.label.name,
+            objc_test_discovery = objc_test_discovery,
             owner_module_name = module_name,
             owner_symbol_graph_dir = owner_symbol_graph_dir,
             test_discoverer = ctx.executable._test_discoverer,
@@ -485,13 +436,12 @@ def _swift_test_impl(ctx):
             include_dev_srch_paths = include_dev_srch_paths,
             module_name = module_name + "__GeneratedTestDiscoveryRunner",
             name = ctx.label.name + "__GeneratedTestDiscoveryRunner",
-            objc_infos = deps_objc_infos,
             package_name = ctx.attr.package_name,
             srcs = discovery_srcs,
             swift_infos = (
                 swift_infos_including_owner + test_runner_deps_swift_infos
             ),
-            swift_toolchain = swift_toolchain,
+            toolchains = toolchains,
             workspace_name = ctx.workspace_name,
         )
         module_contexts.append(discovery_compile_result.module_context)
@@ -505,13 +455,9 @@ def _swift_test_impl(ctx):
             discovery_compile_result.supplemental_outputs,
         )
 
-    # If we need to run the test in an .xctest bundle, the binary must have
-    # Mach-O type `MH_BUNDLE` instead of `MH_EXECUTE`.
-    extra_linkopts = ["-Wl,-bundle"] if is_bundled else []
-
     # Apply the optional debugging outputs extension if the toolchain defines
     # one.
-    debug_outputs_provider = swift_toolchain.debug_outputs_provider
+    debug_outputs_provider = toolchains.swift.debug_outputs_provider
     if debug_outputs_provider:
         debug_extension = debug_outputs_provider(ctx = ctx)
         additional_debug_outputs = debug_extension.additional_outputs
@@ -524,10 +470,17 @@ def _swift_test_impl(ctx):
         feature_configuration = feature_configuration,
         feature_name = SWIFT_FEATURE_ADD_TARGET_NAME_TO_OUTPUT,
     ):
-        name = paths.join(ctx.label.name, ctx.label.name)
+        bundle_name = paths.join(ctx.label.name, ctx.label.name)
     else:
-        name = ctx.label.name
+        bundle_name = ctx.label.name
 
+    binary_name = toolchains.swift.test_configuration.binary_name.replace(
+        "{bundle_name}",
+        bundle_name,
+    ).replace(
+        "{name}",
+        ctx.label.name,
+    )
     linking_outputs = register_link_binary_action(
         actions = ctx.actions,
         additional_inputs = ctx.files.swiftc_inputs,
@@ -536,59 +489,37 @@ def _swift_test_impl(ctx):
         compilation_outputs = compilation_outputs,
         deps = deps + additional_link_deps,
         feature_configuration = feature_configuration,
+        label = ctx.label,
         module_contexts = module_contexts,
-        name = name,
+        name = binary_name,
         output_type = "executable",
-        owner = ctx.label,
         stamp = ctx.attr.stamp,
-        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
         user_link_flags = expand_locations(
             ctx,
             ctx.attr.linkopts,
             ctx.attr.swiftc_inputs,
-        ) + extra_linkopts + ctx.fragments.cpp.linkopts,
+        ) + ctx.fragments.cpp.linkopts,
         variables_extension = variables_extension,
     )
 
-    # If the tests are to be bundled, create the bundle and the test runner
-    # script that launches it via `xctest`. Otherwise, just use the binary
-    # itself as the executable to launch.
-    if is_bundled:
-        xctest_bundle = _create_xctest_bundle(
-            name = ctx.label.name,
-            actions = ctx.actions,
-            binary = linking_outputs.executable,
-        )
-        xctest_runner = _create_xctest_runner(
-            name = ctx.label.name,
-            actions = ctx.actions,
-            bundle = xctest_bundle,
-            xctest_runner_template = ctx.file._xctest_runner_template,
-        )
-        additional_test_outputs = [xctest_bundle]
-        executable = xctest_runner
-    else:
-        additional_test_outputs = []
-        executable = linking_outputs.executable
-
     test_environment = dicts.add(
-        swift_toolchain.test_configuration.env,
+        ctx.attr.env,
+        toolchains.swift.test_configuration.env,
         {"TEST_BINARIES_FOR_LLVM_COV": linking_outputs.executable.short_path},
         expanded_env.get_expanded_env(ctx, {}),
     )
 
     return [
         DefaultInfo(
-            executable = executable,
+            executable = linking_outputs.executable,
             files = depset(
-                [executable] + additional_test_outputs +
-                additional_debug_outputs,
+                [linking_outputs.executable] + additional_debug_outputs,
             ),
             runfiles = ctx.runfiles(
                 collect_data = True,
                 collect_default = True,
-                files = ctx.files.data + additional_test_outputs,
-                transitive_files = ctx.attr._apple_coverage_support.files,
+                files = ctx.files.data,
             ),
         ),
         OutputGroupInfo(
@@ -605,6 +536,7 @@ def _swift_test_impl(ctx):
                 create_swift_module_context(
                     name = module_context.name,
                     compilation_context = module_context.compilation_context,
+                    label = getattr(module_context, "label", None),
                     # The rest of the fields are intentionally ommited, as we
                     # only want to expose the compilation_context
                 )
@@ -612,9 +544,16 @@ def _swift_test_impl(ctx):
             ],
         ),
         testing.ExecutionInfo(
-            swift_toolchain.test_configuration.execution_requirements,
+            toolchains.swift.test_configuration.execution_requirements,
         ),
-        testing.TestEnvironment(test_environment),
+        RunEnvironmentInfo(
+            environment = expand_locations(
+                ctx,
+                test_environment,
+                ctx.attr.swiftc_inputs,
+            ),
+            inherited_environment = ctx.attr.env_inherit,
+        ),
     ]
 
 swift_test = rule(
@@ -631,18 +570,18 @@ swift_test = rule(
 Determines whether or not tests are automatically discovered in the binary. The
 default value is `True`.
 
+Tests are discovered in a platform-specific manner. On Apple platforms, they are
+found using the XCTest framework's `XCTestSuite.default` accessor, which uses
+the Objective-C runtime to dynamically discover tests. On non-Apple platforms,
+discovery uses symbol graphs generated from dependencies to find classes and
+methods written in XCTest's style.
+
 If tests are discovered, then you should not provide your own `main` entry point
 in the `swift_test` binary; the test runtime provides the entry point for you.
 If you set this attribute to `False`, then you are responsible for providing
 your own `main`. This allows you to write tests that use a framework other than
 Apple's `XCTest`. The only requirement of such a test is that it terminate with
 a zero exit code for success or a non-zero exit code for failure.
-
-Additionally, on Apple platforms, test discovery is handled by the Objective-C
-runtime and the output of a `swift_test` rule is an `.xctest` bundle that is
-invoked using the `xctest` tool in Xcode. If this attribute is used to disable
-test discovery, then the output of the `swift_test` rule will instead be a
-standard executable binary that is invoked directly.
 """,
                 mandatory = False,
             ),
@@ -651,11 +590,11 @@ standard executable binary that is invoked directly.
                 Dictionary of environment variables that should be set during the test execution.
                 """,
             ),
-            "_apple_coverage_support": attr.label(
-                cfg = "exec",
-                default = Label(
-                    "@build_bazel_apple_support//tools:coverage_support",
-                ),
+            "env_inherit": attr.string_list(
+                doc = """\
+Specifies additional environment variables to inherit from the external
+environment when the test is executed by `bazel test`.
+""",
             ),
             "_swizzle_absolute_xcttestsourcelocation": attr.label(
                 default = Label(
@@ -663,7 +602,7 @@ standard executable binary that is invoked directly.
                 ),
             ),
             "_test_discoverer": attr.label(
-                cfg = "exec",
+                cfg = config.exec(_DISCOVER_TESTS_EXEC_GROUP),
                 default = Label("//tools/test_discoverer"),
                 executable = True,
             ),
@@ -672,12 +611,6 @@ standard executable binary that is invoked directly.
                     Label("//tools/test_observer"),
                 ],
             ),
-            "_xctest_runner_template": attr.label(
-                allow_single_file = True,
-                default = Label("//tools/xctest_runner:xctest_runner_template"),
-            ),
-            # TODO(b/301253335): Enable AEGs and switch from `swift` exec_group to swift `toolchain` param.
-            "_use_auto_exec_groups": attr.bool(default = False),
         },
     ),
     doc = """\
@@ -709,7 +642,30 @@ test discovery:
 
 See the documentation of the `discover_tests` attribute for more information
 about how this behavior affects the rule's outputs.
-```
+
+### Test Bundles
+
+The `swift_test` rule always produces a standard executable binary. This is true
+even when targeting macOS, where the typical practice is to use a Mach-O bundle
+binary. However, when targeting macOS, the executable binary is still generated
+inside a bundle-like directory structure: `{name}.xctest/Contents/MacOS/{name}`.
+This allows tests to still work if they contain logic that looks for the path to
+their bundle.
+
+### Test Filtering
+
+`swift_test` supports Bazel's `--test_filter` flag on all platforms (i.e., Apple
+and Linux), which can be used to run only a subset of tests. The test filter can
+be a test name of the form `ClassName/MethodName` or a regular expression that
+matches names of that form.
+
+For example,
+
+*   `--test_filter='ArrayTests/testAppend'` would only run the test method
+    `testAppend` in the `ArrayTests` class.
+
+*   `--test_filter='ArrayTests/test(App.*|Ins.*)'` would run all test methods
+    starting with `testApp` or `testIns` in the `ArrayTests` class.
 
 ### Xcode Integration
 
@@ -719,28 +675,27 @@ have the paths made absolute via swizzling by enabling the
 `"apple.swizzle_absolute_xcttestsourcelocation"` feature. You'll also need to
 set the `BUILD_WORKSPACE_DIRECTORY` environment variable in your scheme to the
 root of your workspace (i.e. `$(SRCROOT)`).
-
-### Test Filtering
-
-`swift_test` supports Bazel's `--test_filter` flag on all platforms (i.e., Apple
-and Linux), which can be used to run only a subset of tests. The expected filter
-format is the same as Xcode's `xctest` tool:
-
-*   `ModuleName`: Run only the test classes/methods in module `ModuleName`.
-*   `ModuleName.ClassName`: Run only the test methods in class
-    `ModuleName.ClassName`.
-*   `ModuleName.ClassName/testMethodName`: Run only the method `testMethodName`
-    in class `ModuleName.ClassName`.
-
-Multiple such filters can be separated by commas. For example:
-
-```shell
-bazel test --test_filter=AModule,BModule.SomeTests,BModule.OtherTests/testX //my/package/...
-```
 """,
+    exec_groups = {
+        # The `plugins` attribute associates its `exec` transition with this
+        # execution group. Even though the group is otherwise not used in this
+        # rule, we must resolve the Swift toolchain in this execution group so
+        # that the execution platform of the plugins will have the same
+        # constraints as the execution platform as the other uses of the same
+        # toolchain, ensuring that they don't get built for mismatched
+        # platforms.
+        "swift_plugins": exec_group(
+            toolchains = use_all_toolchains(),
+        ),
+        # Define an execution group for `SwiftTestDiscovery` actions that does
+        # not have constraints, so that test discovery using the already
+        # generated symbol graphs can be routed to any platform that supports it
+        # (even one with a different toolchain).
+        _DISCOVER_TESTS_EXEC_GROUP: exec_group(),
+    },
     executable = True,
     fragments = ["cpp"],
     test = True,
     implementation = _swift_test_impl,
-    toolchains = use_swift_toolchain(),
+    toolchains = use_all_toolchains(),
 )

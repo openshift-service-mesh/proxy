@@ -323,7 +323,7 @@ class Path(pathlib.Path):
         return self._as_path().is_socket()
 
     # override
-    def open(
+    def open(  # pyrefly: ignore[bad-override]
         self,
         mode: str = "r",
         buffering: int = -1,
@@ -614,7 +614,7 @@ class Runfiles:
 
         More information about the difference between canonical repository
         names and the `@repo` part of labels is available at:
-        https://bazel.build/build/bzlmod#repository-names
+        <https://bazel.build/build/bzlmod#repository-names>
 
         NOTE: This function inspects the callstack to determine where in the
         runfiles the caller is located to determine which repository it came

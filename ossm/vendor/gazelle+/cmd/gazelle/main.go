@@ -18,14 +18,29 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 
+	"github.com/bazel-contrib/bazel-gazelle/v2/cmd/gazelle/update"
+	"github.com/bazel-contrib/bazel-gazelle/v2/compat"
+	"github.com/bazel-contrib/bazel-gazelle/v2/language"
 	"github.com/bazelbuild/bazel-gazelle/config"
-	"github.com/bazelbuild/bazel-gazelle/language"
+	languagev1 "github.com/bazelbuild/bazel-gazelle/language"
 )
+
+var languages []languagev1.Language
+
+func languagesV2() []language.Language {
+	langsV2 := make([]language.Language, len(languages))
+	for i := range languages {
+		langsV2[i] = compat.LanguageV2(languages[i])
+	}
+	return langsV2
+}
 
 type command int
 
@@ -59,6 +74,11 @@ func main() {
 	log.SetPrefix("gazelle: ")
 	log.SetFlags(0) // don't print timestamps
 
+	// TODO(#2279): interpret arguments as paths relative to either
+	// BUILD_WORKSPACE_DIRECTORY or BUILD_WORKING_DIRECTORY, depending on whether
+	// the paths were specified as arguments to the gazelle macro or passed as
+	// arguments to `bazel run`. Currently, we mix them together and interpret
+	// relative to BUILD_WORKSPACE_DIRECTORY.
 	var wd string
 	if wsDir := os.Getenv("BUILD_WORKSPACE_DIRECTORY"); wsDir != "" {
 		wd = wsDir
@@ -70,7 +90,7 @@ func main() {
 	}
 
 	if err := run(wd, os.Args[1:]); err != nil && err != flag.ErrHelp {
-		if err == errExit {
+		if errors.Is(err, update.ErrDiff) {
 			os.Exit(1)
 		} else {
 			log.Fatal(err)
@@ -79,28 +99,24 @@ func main() {
 }
 
 func run(wd string, args []string) error {
-	cmd := updateCmd
+	ctx := context.Background()
 	if len(args) == 1 && (args[0] == "-h" || args[0] == "-help" || args[0] == "--help") {
-		cmd = helpCmd
-	} else if len(args) > 0 {
-		c, ok := commandFromName[args[0]]
-		if ok {
-			cmd = c
-			args = args[1:]
-		}
-	}
-
-	switch cmd {
-	case fixCmd, updateCmd:
-		return runFixUpdate(wd, cmd, args)
-	case helpCmd:
 		return help()
-	case updateReposCmd:
-		return updateRepos(wd, args)
-	default:
-		log.Panicf("unknown command: %v", cmd)
 	}
-	return nil
+	langsV2 := languagesV2()
+	if len(args) == 0 {
+		return update.Run(ctx, langsV2, wd, args)
+	}
+	switch args[0] {
+	case "help":
+		return help()
+	case "update-repos":
+		return updateRepos(wd, args[1:])
+	default:
+		// Either "fix", "update", or a directory name. Pass through args[0].
+		// update.Run knows what to do with it.
+		return update.Run(ctx, langsV2, wd, args)
+	}
 }
 
 func help() error {
@@ -138,12 +154,12 @@ without notice.
 
 // filterLanguages returns the subset of input languages that pass the config's
 // filter, if any. Gazelle should not generate rules for languages not returned.
-func filterLanguages(c *config.Config, langs []language.Language) []language.Language {
+func filterLanguages(c *config.Config, langs []languagev1.Language) []languagev1.Language {
 	if len(c.Langs) == 0 {
 		return langs
 	}
 
-	var result []language.Language
+	var result []languagev1.Language
 	for _, inputLang := range langs {
 		if containsLang(c.Langs, inputLang) {
 			result = append(result, inputLang)
@@ -152,7 +168,7 @@ func filterLanguages(c *config.Config, langs []language.Language) []language.Lan
 	return result
 }
 
-func containsLang(langNames []string, lang language.Language) bool {
+func containsLang(langNames []string, lang languagev1.Language) bool {
 	for _, langName := range langNames {
 		if langName == lang.Name() {
 			return true

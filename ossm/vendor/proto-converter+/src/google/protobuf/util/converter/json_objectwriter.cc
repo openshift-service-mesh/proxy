@@ -137,7 +137,7 @@ JsonObjectWriter* JsonObjectWriter::RenderBytes(absl::string_view name,
   if (use_websafe_base64_for_bytes_)
     WebSafeBase64EscapeWithPadding(value, &base64);
   else
-    absl::Base64Escape(value, &base64);
+    base64 = absl::Base64Escape(value);
 
   WriteChar('"');
   // TODO(wpoon): Consider a ByteSink solution that writes the base64 bytes

@@ -1,4 +1,4 @@
-load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("@bazel_lib//:bzl_library.bzl", "bzl_library")
 
 exports_files(glob(["*.bzl"]))
 
@@ -6,5 +6,9 @@ bzl_library(
     name = "jq",
     srcs = ["jq.bzl"],
     visibility = ["//visibility:public"],
-    deps = ["//jq/private:jq"],
+    deps = [
+        "//jq/private:jq",
+        "//jq/toolchain",
+        "@bazel_lib//lib:diff_test",
+    ],
 )

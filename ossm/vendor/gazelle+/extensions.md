@@ -8,14 +8,14 @@
 
 <pre>
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
-go_deps.archive_override(<a href="#go_deps.archive_override-patch_strip">patch_strip</a>, <a href="#go_deps.archive_override-patches">patches</a>, <a href="#go_deps.archive_override-path">path</a>, <a href="#go_deps.archive_override-sha256">sha256</a>, <a href="#go_deps.archive_override-strip_prefix">strip_prefix</a>, <a href="#go_deps.archive_override-urls">urls</a>)
-go_deps.config(<a href="#go_deps.config-check_direct_dependencies">check_direct_dependencies</a>, <a href="#go_deps.config-debug_mode">debug_mode</a>, <a href="#go_deps.config-go_env">go_env</a>)
+go_deps.archive_override(<a href="#go_deps.archive_override-patch_cmds">patch_cmds</a>, <a href="#go_deps.archive_override-patch_strip">patch_strip</a>, <a href="#go_deps.archive_override-patches">patches</a>, <a href="#go_deps.archive_override-path">path</a>, <a href="#go_deps.archive_override-sha256">sha256</a>, <a href="#go_deps.archive_override-strip_prefix">strip_prefix</a>, <a href="#go_deps.archive_override-urls">urls</a>)
+go_deps.config(<a href="#go_deps.config-check_direct_dependencies">check_direct_dependencies</a>, <a href="#go_deps.config-debug_mode">debug_mode</a>, <a href="#go_deps.config-go_env">go_env</a>, <a href="#go_deps.config-go_env_inherit">go_env_inherit</a>)
 go_deps.from_file(<a href="#go_deps.from_file-fail_on_version_conflict">fail_on_version_conflict</a>, <a href="#go_deps.from_file-go_mod">go_mod</a>, <a href="#go_deps.from_file-go_work">go_work</a>)
 go_deps.gazelle_override(<a href="#go_deps.gazelle_override-build_extra_args">build_extra_args</a>, <a href="#go_deps.gazelle_override-build_file_generation">build_file_generation</a>, <a href="#go_deps.gazelle_override-directives">directives</a>, <a href="#go_deps.gazelle_override-path">path</a>)
 go_deps.gazelle_default_attributes(<a href="#go_deps.gazelle_default_attributes-build_extra_args">build_extra_args</a>, <a href="#go_deps.gazelle_default_attributes-build_file_generation">build_file_generation</a>, <a href="#go_deps.gazelle_default_attributes-directives">directives</a>)
 go_deps.module(<a href="#go_deps.module-build_file_proto_mode">build_file_proto_mode</a>, <a href="#go_deps.module-build_naming_convention">build_naming_convention</a>, <a href="#go_deps.module-indirect">indirect</a>, <a href="#go_deps.module-local_path">local_path</a>, <a href="#go_deps.module-path">path</a>, <a href="#go_deps.module-sum">sum</a>,
                <a href="#go_deps.module-version">version</a>)
-go_deps.module_override(<a href="#go_deps.module_override-patch_strip">patch_strip</a>, <a href="#go_deps.module_override-patches">patches</a>, <a href="#go_deps.module_override-path">path</a>)
+go_deps.module_override(<a href="#go_deps.module_override-patch_cmds">patch_cmds</a>, <a href="#go_deps.module_override-patch_strip">patch_strip</a>, <a href="#go_deps.module_override-patches">patches</a>, <a href="#go_deps.module_override-path">path</a>, <a href="#go_deps.module_override-repo_name">repo_name</a>)
 </pre>
 
 
@@ -31,6 +31,7 @@ Override the default source location on a given Go module in this extension.
 
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
+| <a id="go_deps.archive_override-patch_cmds"></a>patch_cmds |  Commands to run in the repository after patches are applied.   | List of strings | optional |  `[]`  |
 | <a id="go_deps.archive_override-patch_strip"></a>patch_strip |  The number of leading path segments to be stripped from the file name in the patches.   | Integer | optional |  `0`  |
 | <a id="go_deps.archive_override-patches"></a>patches |  A list of patches to apply to the repository *after* gazelle runs.   | <a href="https://bazel.build/concepts/labels">List of labels</a> | optional |  `[]`  |
 | <a id="go_deps.archive_override-path"></a>path |  The Go module path for the repository to be overridden.<br><br>This module path must be defined by other tags in this extension within this Bazel module.   | String | required |  |
@@ -44,8 +45,6 @@ Override the default source location on a given Go module in this extension.
 
 Configures the general behavior of the go_deps extension.
 
-Only the root module's config tag is used.
-
 **Attributes**
 
 | Name  | Description | Type | Mandatory | Default |
@@ -53,6 +52,7 @@ Only the root module's config tag is used.
 | <a id="go_deps.config-check_direct_dependencies"></a>check_direct_dependencies |  The way in which warnings about version mismatches for direct dependencies and Go modules that are also Bazel modules are reported.   | String | optional |  `""`  |
 | <a id="go_deps.config-debug_mode"></a>debug_mode |  Whether or not to print stdout and stderr messages from gazelle   | Boolean | optional |  `False`  |
 | <a id="go_deps.config-go_env"></a>go_env |  The environment variables to use when fetching Go dependencies or running the `@rules_go//go` tool.   | <a href="https://bazel.build/rules/lib/dict">Dictionary: String -> String</a> | optional |  `{}`  |
+| <a id="go_deps.config-go_env_inherit"></a>go_env_inherit |  Host environment variable names to inherit when fetching Go dependencies or running the `@rules_go//go` tool.   | List of strings | optional |  `[]`  |
 
 <a id="go_deps.from_file"></a>
 
@@ -123,14 +123,16 @@ Declare a single Go module dependency. Prefer using `from_file` instead.
 
 ### module_override
 
-Apply patches to a given Go module defined by other tags in this extension.
+Override the definition of a Go module defined by other tags in this extension, e.g. to apply patches or change its Bazel repository name.
 
 **Attributes**
 
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
+| <a id="go_deps.module_override-patch_cmds"></a>patch_cmds |  Commands to run in the repository after patches are applied.   | List of strings | optional |  `[]`  |
 | <a id="go_deps.module_override-patch_strip"></a>patch_strip |  The number of leading path segments to be stripped from the file name in the patches.   | Integer | optional |  `0`  |
 | <a id="go_deps.module_override-patches"></a>patches |  A list of patches to apply to the repository *after* gazelle runs.   | <a href="https://bazel.build/concepts/labels">List of labels</a> | optional |  `[]`  |
 | <a id="go_deps.module_override-path"></a>path |  The Go module path for the repository to be overridden.<br><br>This module path must be defined by other tags in this extension within this Bazel module.   | String | required |  |
+| <a id="go_deps.module_override-repo_name"></a>repo_name |  The Bazel repository name to use for this Go module.<br><br>By default, Gazelle derives the repository name from the module's import path. Two distinct modules whose import paths differ only by "/" vs "_" (or only by case) derive the same default name, which Gazelle rejects with an error. When both are pulled in transitively, dropping one from the go.mod is not always possible. Setting this attribute lets the root module assign a distinct repository name to one of the colliding modules so they can coexist. The collision check still runs on the resulting names.   | String | optional |  `""`  |
 
 

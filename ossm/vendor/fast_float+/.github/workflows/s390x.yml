@@ -3,16 +3,16 @@ name: Ubuntu s390x (GCC 11)
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
     branches:
-      - master
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
       - uses: uraimo/run-on-arch-action@v3
         name: Test
         id: runcmd
@@ -22,9 +22,9 @@ jobs:
           distro: ubuntu_latest
           install: |
             apt-get update -q -y
-            apt-get install -y cmake make g++
+            apt-get install -y cmake make g++ git
           run: |
-            cmake -DCMAKE_BUILD_TYPE=Release -B build
+            cmake -DCMAKE_BUILD_TYPE=Release -B build  -DFASTFLOAT_TEST=ON
             cmake --build build -j=2
             ctest --output-on-failure --test-dir build
 

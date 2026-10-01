@@ -15,8 +15,7 @@
 """Partial implementation for processing AppIntents metadata bundle."""
 
 load("@bazel_skylib//lib:partial.bzl", "partial")
-load("//apple/internal:intermediates.bzl", "intermediates")
-load("//apple/internal:linking_support.bzl", "linking_support")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("//apple/internal:processor.bzl", "processor")
 load(
     "//apple/internal/providers:app_intents_info.bzl",
@@ -30,63 +29,16 @@ load(
 def _app_intents_metadata_bundle_partial_impl(
         *,
         actions,
+        mac_exec_group,
         cc_toolchains,
-        ctx,
         deps,
-        disabled_features,
-        features,
         label,
-        platform_prerequisites):
+        platform_prerequisites,
+        json_tool):
     """Implementation of the AppIntents metadata bundle partial."""
     if not deps:
         # No `app_intents` were set by the rule calling this partial.
         return struct()
-
-    # Link 'stub' binary to use for app intents metadata processing.
-    # This binary should only contain symbols for structs implementing the AppIntents protocol.
-    # Instead of containing all the application/extension/framework binary symbols, allowing
-    # the action to run faster and avoid depending on the application binary linking step.
-    #
-    # TODO(b/295227222): Avoid this linker step for Xcode 15.0+ when rules_swift supports the new
-    # swiftconstvalues-based manner of handling App Intents metadata.
-    link_result = linking_support.legacy_link_multi_arch_binary(
-        actions = actions,
-        cc_toolchains = cc_toolchains,
-        ctx = ctx,
-        deps = deps,
-        disabled_features = disabled_features,
-        features = features,
-        label = label,
-        user_link_flags = [
-            # Force _NSExtensionMain, which exists on all Apple platforms, to
-            # be the main symbol for the binary, just so any main symbol will
-            # exist. Since this binary is discarded afterwards the main symbol
-            # doesn't actually matter. This can be removed when the TODO above
-            # is resolved.
-            "-Wl,-e,_NSExtensionMain",
-            # Force the binary to link Foundation to make the hack above work.
-            "-Wl,-framework,Foundation",
-        ],
-    )
-
-    fat_stub_binary = intermediates.file(
-        actions = actions,
-        target_name = label.name,
-        output_discriminator = None,
-        file_name = "{}_app_intents_stub_binary".format(label.name),
-    )
-
-    linking_support.lipo_or_symlink_inputs(
-        actions = actions,
-        inputs = [output.binary for output in link_result.outputs],
-        output = fat_stub_binary,
-        apple_fragment = platform_prerequisites.apple_fragment,
-        xcode_config = platform_prerequisites.xcode_version_config,
-    )
-
-    label.relative(
-        label.name + "_app_intents_stub_binary",
-    )
 
     # Mirroring Xcode 15+ behavior, the metadata tool only looks at the first split for a given arch
     # rather than every possible set of source files and inputs. Oddly, this only applies to the
@@ -97,7 +49,6 @@ def _app_intents_metadata_bundle_partial_impl(
     metadata_bundle = generate_app_intents_metadata_bundle(
         actions = actions,
         apple_fragment = platform_prerequisites.apple_fragment,
-        bundle_binary = fat_stub_binary,
         constvalues_files = [
             swiftconstvalues_file
             for dep in deps[first_cc_toolchain_key]
@@ -109,6 +60,8 @@ def _app_intents_metadata_bundle_partial_impl(
             for intent_module_name in dep[AppIntentsInfo].intent_module_names
         ],
         label = label,
+        mac_exec_group = mac_exec_group,
+        platform_prerequisites = platform_prerequisites,
         source_files = [
             swift_source_file
             for dep in deps[first_cc_toolchain_key]
@@ -119,6 +72,7 @@ def _app_intents_metadata_bundle_partial_impl(
             for cc_toolchain in cc_toolchains.values()
         ],
         xcode_version_config = platform_prerequisites.xcode_version_config,
+        json_tool = json_tool,
     )
 
     bundle_location = processor.location.bundle
@@ -136,27 +90,27 @@ def _app_intents_metadata_bundle_partial_impl(
 def app_intents_metadata_bundle_partial(
         *,
         actions,
+        mac_exec_group,
         cc_toolchains,
-        ctx,
         deps,
-        disabled_features,
-        features,
         label,
-        platform_prerequisites):
+        platform_prerequisites,
+        json_tool):
     """Constructor for the AppIntents metadata bundle processing partial.
 
     This partial generates the Metadata.appintents bundle required for AppIntents functionality.
 
     Args:
         actions: The actions provider from ctx.actions.
+        mac_exec_group: The execution group for Mac tools.
         cc_toolchains: Dictionary of CcToolchainInfo and ApplePlatformInfo providers under a split
             transition to relay target platform information.
-        ctx: The Starlark context for a rule target being built.
         deps: Dictionary of targets under a split transition implementing the AppIntents protocol.
-        disabled_features: List of features to be disabled for C++ link actions.
-        features: List of features to be enabled for C++ link actions.
         label: Label of the target being built.
         platform_prerequisites: Struct containing information on the platform being targeted.
+        json_tool: A `files_to_run` wrapping Python's `json.tool` module
+            (https://docs.python.org/3.5/library/json.html#module-json.tool) for deterministic
+            JSON handling.
     Returns:
         A partial that generates the Metadata.appintents bundle.
     """
@@ -164,10 +118,9 @@ def app_intents_metadata_bundle_partial(
         _app_intents_metadata_bundle_partial_impl,
         actions = actions,
         cc_toolchains = cc_toolchains,
-        ctx = ctx,
         deps = deps,
-        disabled_features = disabled_features,
-        features = features,
         label = label,
+        mac_exec_group = mac_exec_group,
         platform_prerequisites = platform_prerequisites,
+        json_tool = json_tool,
     )

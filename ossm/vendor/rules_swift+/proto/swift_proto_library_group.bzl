@@ -16,14 +16,8 @@
 Defines a rule that generates Swift libraries from protocol buffer sources.
 """
 
-load(
-    "@bazel_skylib//lib:dicts.bzl",
-    "dicts",
-)
-load(
-    "@rules_proto//proto:defs.bzl",
-    "ProtoInfo",
-)
+load("@bazel_skylib//lib:dicts.bzl", "dicts")
+load("@protobuf//bazel/common:proto_info.bzl", "ProtoInfo")
 load(
     "//proto:swift_proto_utils.bzl",
     "SwiftProtoCcInfo",
@@ -128,17 +122,11 @@ def _swift_proto_library_group_impl(ctx):
         direct_output_group_info,
         direct_swift_info,
         direct_swift_proto_cc_info.cc_info,
-        direct_swift_proto_cc_info.objc_info,
         direct_swift_proto_info,
     ]
 
 swift_proto_library_group = rule(
     attrs = {
-        "_allowlist_function_transition": attr.label(
-            default = Label(
-                "@bazel_tools//tools/allowlists/function_transition_allowlist",
-            ),
-        ),
         "compiler": attr.label(
             default = Label("//proto/compilers:swift_proto"),
             doc = """\

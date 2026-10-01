@@ -1,0 +1,31 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/ieee754-h.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "ieee754-h",
+    checks = [
+        checks.AC_CHECK_HEADER(
+            "ieee754.h",
+            define = "HAVE_IEEE754_H",
+        ),
+    ] + select({
+        "@platforms//os:linux": [
+            # Linux glibc has ieee754.h
+        ],
+        "@platforms//os:macos": [
+            # macOS doesn't have ieee754.h, use gnulib replacement
+            checks.AC_DEFINE("_GL_REPLACE_IEEE754_H", "1"),
+        ],
+        "//conditions:default": [
+            # Assume need replacement for others
+            checks.AC_DEFINE("_GL_REPLACE_IEEE754_H", "1"),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        # Note: AC_CHECK_INCLUDES_DEFAULT is added for test compatibility
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)

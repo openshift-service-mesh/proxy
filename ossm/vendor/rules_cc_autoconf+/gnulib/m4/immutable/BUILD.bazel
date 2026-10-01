@@ -1,0 +1,16 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/immutable.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+
+autoconf(
+    name = "immutable",
+    checks = [
+        # gl_IMMUTABLE requires gl_FUNC_MPROTECT_WORKS and AC_C_INLINE
+        # These are dependencies only, no direct checks
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_C_INLINE",  # AC_REQUIRE([AC_C_INLINE])
+        "//gnulib/m4/mprotect",  # AC_REQUIRE([gl_FUNC_MPROTECT_WORKS])
+    ],
+)

@@ -42,11 +42,13 @@
 #include "absl/strings/cord.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
 #include "absl/types/span.h"
 #include "conformance/service.h"
 #include "conformance/utils.h"
+#include "internal/runfiles.h"
 #include "internal/testing.h"
 #include "cel/expr/conformance/test/simple.pb.h"
 #include "google/protobuf/io/zero_copy_stream_impl.h"
@@ -63,10 +65,14 @@ ABSL_FLAG(bool, recursive, false,
 ABSL_FLAG(std::vector<std::string>, skip_tests, {}, "Tests to skip");
 ABSL_FLAG(bool, dashboard, false, "Dashboard mode, ignore test failures");
 ABSL_FLAG(bool, skip_check, true, "Skip type checking the expressions");
+ABSL_FLAG(bool, select_optimization, false, "Enable select optimization.");
+ABSL_FLAG(bool, enable_variadic_logical_operators, false,
+          "Enable parsing logical AND & OR operators as a single flat variadic "
+          "call.");
+ABSL_FLAG(bool, enable_pratt_parser, true,
+          "Enable manual (Pratt) parser instead of ANTLR parser.");
 
 namespace {
-
-using ::testing::IsEmpty;
 
 using cel::expr::conformance::test::SimpleTest;
 using cel::expr::conformance::test::SimpleTestFile;
@@ -76,6 +82,7 @@ using google::api::expr::conformance::v1alpha1::EvalRequest;
 using google::api::expr::conformance::v1alpha1::EvalResponse;
 using google::api::expr::conformance::v1alpha1::ParseRequest;
 using google::api::expr::conformance::v1alpha1::ParseResponse;
+using ::testing::IsEmpty;
 
 google::rpc::Code ToGrpcCode(absl::StatusCode code) {
   return static_cast<google::rpc::Code>(code);
@@ -257,7 +264,12 @@ NewConformanceServiceFromFlags() {
       cel_conformance::ConformanceServiceOptions{
           .optimize = absl::GetFlag(FLAGS_opt),
           .modern = absl::GetFlag(FLAGS_modern),
-          .recursive = absl::GetFlag(FLAGS_recursive)});
+          .recursive = absl::GetFlag(FLAGS_recursive),
+          .select_optimization = absl::GetFlag(FLAGS_select_optimization),
+          .enable_variadic_logical_operators =
+              absl::GetFlag(FLAGS_enable_variadic_logical_operators),
+          .enable_pratt_parser = absl::GetFlag(FLAGS_enable_pratt_parser),
+      });
   ABSL_CHECK_OK(status_or_service);
   return std::shared_ptr<cel_conformance::ConformanceServiceInterface>(
       std::move(*status_or_service));
@@ -270,9 +282,17 @@ int main(int argc, char** argv) {
   {
     auto service = NewConformanceServiceFromFlags();
     auto tests_to_skip = absl::GetFlag(FLAGS_skip_tests);
+    if (const char* env_skip = std::getenv("CEL_SKIP_TESTS");
+        env_skip != nullptr) {
+      for (absl::string_view test :
+           absl::StrSplit(env_skip, ',', absl::SkipEmpty())) {
+        tests_to_skip.push_back(std::string(test));
+      }
+    }
     for (int argi = 1; argi < argc; argi++) {
+      std::string path = cel::internal::ResolveRunfilesPath(argv[argi]);
       ABSL_CHECK_OK(RegisterTestsFromFile(service, tests_to_skip,
-                                          absl::string_view(argv[argi])));
+                                          absl::string_view(path)));
     }
   }
   int exit_code = RUN_ALL_TESTS();

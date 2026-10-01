@@ -11,9 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-#ifndef THIRD_PARTY_CEL_CPP_EVAL_EVAL_EQUALITY_STEPS_H_
-#define THIRD_PARTY_CEL_CPP_EVAL_EVAL_EQUALITY_STEPS_H_
+#include "eval/eval/equality_steps.h"
 
 #include <cstdint>
 #include <memory>
@@ -134,15 +132,11 @@ class IterativeEqualityStep : public ExpressionStepBase {
 absl::StatusOr<Value> EvaluateInMap(ExecutionFrameBase& frame,
                                     const Value& item,
                                     const MapValue& container) {
-  absl::StatusOr<Value> result = {BoolValue(false)};
   switch (item.kind()) {
     case ValueKind::kBool:
     case ValueKind::kString:
     case ValueKind::kInt:
     case ValueKind::kUint:
-      result = container.Has(item, frame.descriptor_pool(),
-                             frame.message_factory(), frame.arena());
-      break;
     case ValueKind::kDouble:
       break;
     default:
@@ -150,9 +144,12 @@ absl::StatusOr<Value> EvaluateInMap(ExecutionFrameBase& frame,
           cel::runtime_internal::CreateNoMatchingOverloadError(
               cel::builtin::kIn));
   }
+  Value result;
+  CEL_RETURN_IF_ERROR(container.Has(item, frame.descriptor_pool(),
+                                    frame.message_factory(), frame.arena(),
+                                    &result));
 
-  if (result.ok() && result.value().IsBool() &&
-      result.value().GetBool().NativeValue()) {
+  if (result.IsTrue()) {
     return result;
   }
 
@@ -161,10 +158,10 @@ absl::StatusOr<Value> EvaluateInMap(ExecutionFrameBase& frame,
                         ? Number::FromDouble(item.GetDouble().NativeValue())
                         : Number::FromUint64(item.GetUint().NativeValue());
     if (number.LosslessConvertibleToInt()) {
-      result = container.Has(IntValue(number.AsInt()), frame.descriptor_pool(),
-                             frame.message_factory(), frame.arena());
-      if (result.ok() && result.value().IsBool() &&
-          result.value().GetBool().NativeValue()) {
+      CEL_RETURN_IF_ERROR(
+          container.Has(IntValue(number.AsInt()), frame.descriptor_pool(),
+                        frame.message_factory(), frame.arena(), &result));
+      if (result.IsTrue()) {
         return result;
       }
     }
@@ -175,21 +172,16 @@ absl::StatusOr<Value> EvaluateInMap(ExecutionFrameBase& frame,
                         ? Number::FromDouble(item.GetDouble().NativeValue())
                         : Number::FromInt64(item.GetInt().NativeValue());
     if (number.LosslessConvertibleToUint()) {
-      result =
+      CEL_RETURN_IF_ERROR(
           container.Has(UintValue(number.AsUint()), frame.descriptor_pool(),
-                        frame.message_factory(), frame.arena());
-      if (result.ok() && result.value().IsBool() &&
-          result.value().GetBool().NativeValue()) {
+                        frame.message_factory(), frame.arena(), &result));
+      if (result.IsTrue()) {
         return result;
       }
     }
   }
 
-  if (!result.ok()) {
-    return BoolValue(false);
-  }
-
-  return result;
+  return BoolValue(false);
 }
 
 absl::StatusOr<Value> EvaluateIn(ExecutionFrameBase& frame, const Value& item,
@@ -299,5 +291,3 @@ std::unique_ptr<ExpressionStep> CreateInStep(int64_t expr_id) {
 }
 
 }  // namespace google::api::expr::runtime
-
-#endif  // THIRD_PARTY_CEL_CPP_EVAL_EVAL_EQUALITY_STEPS_H_

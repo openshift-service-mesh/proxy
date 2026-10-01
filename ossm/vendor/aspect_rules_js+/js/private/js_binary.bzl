@@ -574,35 +574,15 @@ def _js_binary_impl(ctx):
 
     providers = []
 
-    # Create RunEnvironmentInfo provider with both env and env_inherit (if available)
-    run_env_info_kwargs = {}
-
-    if ctx.attr.env:
-        action_context_env_expanded = {}
-        for key, value in ctx.attr.env.items():
-            action_context_env_expanded[key] = _expand_env_if_needed(ctx, value)
-        run_env_info_kwargs["environment"] = action_context_env_expanded
-
-    # Add inherited environment variables (for js_test)
-    if hasattr(ctx.attr, "env_inherit"):
-        run_env_info_kwargs["inherited_environment"] = ctx.attr.env_inherit
-
-    # Only create provider if we have something to provide
-    if run_env_info_kwargs:
-        providers.append(RunEnvironmentInfo(**run_env_info_kwargs))
-
     if ctx.attr.testonly and ctx.configuration.coverage_enabled:
+        # We have to instruct rule implementers to have this attribute present.
+        if not hasattr(ctx.attr, "_lcov_merger"):
+            fail("_lcov_merger attribute is missing and coverage was requested")
+
         # We have to propagate _lcov_merger runfiles since bazel does not treat _lcov_merger as a proper tool.
         # See: https://github.com/bazelbuild/bazel/issues/4033
-        # This is optional because:
-        # - We do not want to require it for js_binary targets
-        #   (but we cannot distinguish js_binary from js_test here, see #2229).
-        # - It is not required anymore on bazel 8
-        #   (https://github.com/bazelbuild/bazel/issues/4033#issuecomment-2507162290)
-        # TODO: Remove once bazel<8 support is dropped.
-        if hasattr(ctx.attr, "_lcov_merger"):
-            runfiles = runfiles.merge(ctx.attr._lcov_merger[DefaultInfo].default_runfiles)
-        providers.append(
+        runfiles = runfiles.merge(ctx.attr._lcov_merger[DefaultInfo].default_runfiles)
+        providers = [
             coverage_common.instrumented_files_info(
                 ctx,
                 source_attributes = ["data"],
@@ -620,7 +600,7 @@ def _js_binary_impl(ctx):
                     "tsx",
                 ],
             ),
-        )
+        ]
 
     return providers + [
         DefaultInfo(
@@ -672,12 +652,6 @@ See the Bazel [Test encyclopedia](https://bazel.build/reference/test-encyclopedi
 the contract between Bazel and a test runner.""",
     implementation = js_binary_lib.implementation,
     attrs = dict(js_binary_lib.attrs, **{
-        "env_inherit": attr.string_list(
-            default = [],
-            doc = "Specifies additional environment variables to inherit from the external environment when the test is executed by bazel test.",
-        ),
-        # TODO: Remove once bazel<8 support is dropped.
-        # See comment at usage site in the rule impl for more.
         "_lcov_merger": attr.label(
             executable = True,
             default = Label("//js/private/coverage:merger"),

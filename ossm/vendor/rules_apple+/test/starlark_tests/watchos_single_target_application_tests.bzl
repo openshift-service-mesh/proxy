@@ -33,6 +33,7 @@ load(
 load(
     "//test/starlark_tests/rules:common_verification_tests.bzl",
     "archive_contents_test",
+    "binary_contents_test",
 )
 load(
     "//test/starlark_tests/rules:infoplist_contents_test.bzl",
@@ -146,6 +147,37 @@ delegate is referenced in the single-target `watchos_application`'s `deps`.
         ],
     )
 
+    # TODO: b/433727264 - Create a new test with archive_contents_test once Xcode 26 beta 4 is
+    # widely used by clients with the following target:
+    # //test/starlark_tests/targets_under_test/watchos:app_with_icon_bundle_only_for_low_minimum_os_version
+
+    # Tests the new icon composer bundles for Xcode 26.
+    archive_contents_test(
+        name = "{}_icon_composer_app_icons_plist_test".format(name),
+        build_type = "device",
+        target_under_test = "//test/starlark_tests/targets_under_test/watchos:app_with_icon_bundle",
+        contains = [
+            "$BUNDLE_ROOT/Assets.car",
+        ],
+        plist_test_file = "$CONTENT_ROOT/Info.plist",
+        plist_test_values = {
+            "CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName": "app_icon",
+        },
+        tags = [name] + common.fixture_tags,
+    )
+
+    # Test for a failure when the new icon composer bundles for Xcode 26 are assigned  with a set
+    # of asset catalog icons.
+    analysis_failure_message_test(
+        name = "{}_icon_composer_and_asset_catalog_app_icons_failure_test".format(name),
+        target_under_test = "//test/starlark_tests/targets_under_test/watchos:app_with_icon_bundle_and_xcassets_app_icons",
+        expected_error = """
+            Found .appiconset files among the assigned app_icons, which are ignored when Icon \
+            Composer .icon bundles are present.
+            """,
+        tags = [name],
+    )
+
     # Tests xcasset tool is passed the correct arguments.
     analysis_target_actions_test(
         name = "{}_xcasset_actool_argv".format(name),
@@ -190,6 +222,59 @@ delegate is referenced in the single-target `watchos_application`'s `deps`.
         tags = [
             name,
         ],
+    )
+
+    # Test that the output application binary is identified as watchOS simulator via the Mach-O
+    # load command LC_BUILD_VERSION for the arm64 binary slice when only iOS cpus are defined, and
+    # that 32-bit archs are eliminated.
+    binary_contents_test(
+        name = "{}_simulator_ios_cpus_intel_platform_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/watchos:app_companion_arm64_support",
+        cpus = {
+            "ios_multi_cpus": ["x86_64", "sim_arm64"],
+            "watchos_cpus": [""],
+        },
+        binary_test_file = "$BUNDLE_ROOT/Watch/app_arm64_support.app/app_arm64_support",
+        binary_test_architecture = "x86_64",
+        binary_not_contains_architectures = ["i386", "arm64e"],
+        macho_load_commands_contain = ["cmd LC_BUILD_VERSION", "platform WATCHOSSIMULATOR"],
+        tags = [name],
+    )
+
+    # Test that the output application binary is identified as watchOS simulator via the Mach-O
+    # load command LC_BUILD_VERSION for the arm64 binary slice when only iOS cpus are defined, and
+    # that 32-bit archs are eliminated.
+    binary_contents_test(
+        name = "{}_simulator_ios_cpus_arm_platform_test".format(name),
+        build_type = "simulator",
+        target_under_test = "//test/starlark_tests/targets_under_test/watchos:app_companion_arm64_support",
+        cpus = {
+            "ios_multi_cpus": ["x86_64", "sim_arm64"],
+            "watchos_cpus": [""],
+        },
+        binary_test_file = "$BUNDLE_ROOT/Watch/app_arm64_support.app/app_arm64_support",
+        binary_test_architecture = "arm64",
+        binary_not_contains_architectures = ["i386", "arm64e"],
+        macho_load_commands_contain = ["cmd LC_BUILD_VERSION", "platform WATCHOSSIMULATOR"],
+        tags = [name],
+    )
+
+    # Test that the output application binary is identified as watchOS device via the Mach-O
+    # load command LC_BUILD_VERSION for the arm64 binary slice when only iOS cpus are defined
+    binary_contents_test(
+        name = "{}_device_ios_cpus_platform_test".format(name),
+        build_type = "device",
+        target_under_test = "//test/starlark_tests/targets_under_test/watchos:app_companion_arm64_support",
+        cpus = {
+            "ios_multi_cpus": ["arm64"],
+            "watchos_cpus": [""],
+        },
+        binary_test_file = "$BUNDLE_ROOT/Watch/app_arm64_support.app/app_arm64_support",
+        binary_test_architecture = "arm64_32",
+        binary_not_contains_architectures = ["arm64", "arm64e"],
+        macho_load_commands_contain = ["cmd LC_BUILD_VERSION", "platform WATCHOS"],
+        tags = [name],
     )
 
     infoplist_contents_test(

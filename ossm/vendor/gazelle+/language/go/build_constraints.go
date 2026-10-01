@@ -40,7 +40,12 @@ func readTags(path string) (*buildTags, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readTagsFromContent(content)
+}
 
+// readTagsFromContent extracts build tags from content already read from a
+// file.
+func readTagsFromContent(content []byte) (*buildTags, error) {
 	content, goBuild, _, err := parseFileHeader(content)
 	if err != nil {
 		return nil, err
@@ -57,15 +62,28 @@ func readTags(path string) (*buildTags, error) {
 
 	var fullConstraint constraint.Expr
 	// Search and parse +build tags
-	scanner := bufio.NewScanner(bytes.NewReader(content))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	for len(content) > 0 {
+		line := content
+		if i := bytes.IndexByte(line, '\n'); i >= 0 {
+			line, content = line[:i], line[i+1:]
+		} else {
+			content = content[len(content):]
+		}
+		// Preserve the maximum token size and error returned by Scanner.
+		if len(line) >= bufio.MaxScanTokenSize {
+			return nil, bufio.ErrTooLong
+		}
+		line = bytes.TrimSpace(line)
 
-		if !constraint.IsPlusBuild(line) {
+		if !bytes.HasPrefix(line, []byte("//")) || !bytes.Contains(line, []byte("+build")) {
+			continue
+		}
+		text := string(line)
+		if !constraint.IsPlusBuild(text) {
 			continue
 		}
 
-		x, err := constraint.Parse(line)
+		x, err := constraint.Parse(text)
 		if err != nil {
 			return nil, err
 		}
@@ -78,10 +96,6 @@ func readTags(path string) (*buildTags, error) {
 		} else {
 			fullConstraint = x
 		}
-	}
-
-	if scanner.Err() != nil {
-		return nil, scanner.Err()
 	}
 
 	if fullConstraint == nil {
@@ -274,13 +288,13 @@ func matchAuto(tokens []string) (*buildTags, error) {
 	return newBuildTags(x), nil
 }
 
-// isDefaultIgnoredTag returns whether the tag is "cgo", "purego", "race", "msan"  or is a release tag.
+// isDefaultIgnoredTag returns whether the tag is "cgo", "purego", "race", "msan" , is a goexperiment, or is a release tag.
 // Release tags match the pattern "go[0-9]\.[0-9]+".
 // Gazelle won't consider whether an ignored tag is satisfied when evaluating
 // build constraints for a file and will instead defer to the compiler at compile
 // time.
 func isDefaultIgnoredTag(tag string) bool {
-	if tag == "cgo" || tag == "purego" || tag == "race" || tag == "msan" {
+	if tag == "cgo" || tag == "purego" || tag == "race" || tag == "msan" || strings.HasPrefix(tag, "goexperiment.") {
 		return true
 	}
 	if len(tag) < 5 || !strings.HasPrefix(tag, "go") {

@@ -15,20 +15,15 @@
 """Implementation of Metal shader library rule."""
 
 load(
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
+load(
     "@bazel_skylib//lib:dicts.bzl",
     "dicts",
 )
 load(
-    "@bazel_skylib//lib:paths.bzl",
-    "paths",
-)
-load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
-)
-load(
     "//apple/internal:apple_toolchains.bzl",
-    "AppleXPlatToolsToolchainInfo",
     "apple_toolchain_utils",
 )
 load(
@@ -55,7 +50,7 @@ def _metal_apple_target_triple(platform_prerequisites):
     """
     target_os_version = platform_prerequisites.minimum_os
 
-    platform = platform_prerequisites.apple_fragment.single_arch_platform
+    platform = platform_prerequisites.platform
     platform_string = str(platform.platform_type)
     if platform_string == "macos":
         platform_string = "macosx"
@@ -70,11 +65,11 @@ def _metal_apple_target_triple(platform_prerequisites):
 
 def _apple_metal_library_impl(ctx):
     """Implementation of the apple_metal_library rule."""
-    air_files = []
 
     platform_prerequisites = platform_support.platform_prerequisites(
         apple_fragment = ctx.fragments.apple,
-        build_settings = ctx.attr._xplat_toolchain[AppleXPlatToolsToolchainInfo].build_settings,
+        apple_platform_info = platform_support.apple_platform_info_from_rule_ctx(ctx),
+        build_settings = apple_toolchain_utils.get_xplat_toolchain(ctx).build_settings,
         config_vars = ctx.var,
         device_families = None,
         explicit_minimum_deployment_os = None,
@@ -84,50 +79,27 @@ def _apple_metal_library_impl(ctx):
             unsupported_features = ctx.disabled_features,
         ),
         objc_fragment = None,
-        platform_type_string = str(ctx.fragments.apple.single_arch_platform.platform_type),
         uses_swift = False,
         xcode_version_config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig],
     )
+
     target = _metal_apple_target_triple(platform_prerequisites)
-
-    for src in ctx.files.srcs:
-        air_file = ctx.actions.declare_file(
-            paths.replace_extension(src.basename, ".air"),
-        )
-        air_files.append(air_file)
-
-        args = ctx.actions.args()
-        args.add("metal")
-        args.add("-c")
-        args.add("-target", target)
-        args.add("-o", air_file)
-        args.add_all(ctx.attr.copts)
-        args.add(src.path)
-
-        apple_support.run(
-            actions = ctx.actions,
-            apple_fragment = platform_prerequisites.apple_fragment,
-            arguments = [args],
-            executable = "/usr/bin/xcrun",
-            inputs = [src] + ctx.files.hdrs,
-            mnemonic = "MetalCompile",
-            outputs = [air_file],
-            xcode_config = platform_prerequisites.xcode_version_config,
-        )
-
     out = ctx.actions.declare_file(ctx.attr.out)
 
     args = ctx.actions.args()
-    args.add("metallib")
+    args.add("metal")
+    args.add("-target", target)
     args.add("-o", out.path)
-    args.add_all(air_files)
+    args.add_all(ctx.attr.copts)
+    args.add_all(ctx.files.srcs)
 
     apple_support.run(
         actions = ctx.actions,
         apple_fragment = platform_prerequisites.apple_fragment,
         arguments = [args],
+        exec_group = apple_toolchain_utils.get_mac_exec_group(ctx),
         executable = "/usr/bin/xcrun",
-        inputs = air_files,
+        inputs = ctx.files.srcs + ctx.files.hdrs,
         mnemonic = "MetallibCompile",
         outputs = [out],
         xcode_config = platform_prerequisites.xcode_version_config,
@@ -139,9 +111,10 @@ def _apple_metal_library_impl(ctx):
     ]
 
 apple_metal_library = rule(
+    exec_groups = apple_toolchain_utils.use_apple_exec_group_toolchain(),
     attrs = dicts.add(
+        apple_support.platform_constraint_attrs(),
         apple_support.action_required_attrs(),
-        apple_toolchain_utils.shared_attrs(),
         {
             "copts": attr.string_list(
                 doc = """\
@@ -152,11 +125,6 @@ A list of compiler options passed to the `metal` compiler for each source.
                 allow_files = [".h"],
                 doc = """\
 A list of headers to make importable when compiling the metal library.
-""",
-            ),
-            "includes": attr.string_list(
-                doc = """\
-A list of header search paths.
 """,
             ),
             "out": attr.string(

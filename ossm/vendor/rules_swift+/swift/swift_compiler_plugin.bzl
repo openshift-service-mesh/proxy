@@ -14,13 +14,16 @@
 
 """Implementation of the `swift_compiler_plugin` rule."""
 
-load("@bazel_skylib//lib:dicts.bzl", "dicts")
-load("@build_bazel_apple_support//lib:apple_support.bzl", "apple_support")
-load("@build_bazel_apple_support//lib:lipo.bzl", "lipo")
+load("@apple_support//lib:apple_support.bzl", "apple_support")
+load("@apple_support//lib:lipo.bzl", "lipo")
 load(
-    "@build_bazel_apple_support//lib:transitions.bzl",
+    "@apple_support//lib:transitions.bzl",
     "macos_universal_transition",
 )
+load("@bazel_skylib//lib:dicts.bzl", "dicts")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("//swift/internal:binary_attrs.bzl", "binary_rule_attrs")
 load("//swift/internal:compiling.bzl", "compile")
 load(
     "//swift/internal:feature_names.bzl",
@@ -29,9 +32,9 @@ load(
 load("//swift/internal:features.bzl", "is_feature_enabled")
 load(
     "//swift/internal:linking.bzl",
-    "binary_rule_attrs",
     "configure_features_for_binary",
     "create_linking_context_from_compilation_outputs",
+    "entry_point_function_name",
     "malloc_linking_context",
     "register_link_binary_action",
 )
@@ -42,8 +45,8 @@ load(
 load("//swift/internal:providers.bzl", "SwiftCompilerPluginInfo")
 load(
     "//swift/internal:toolchain_utils.bzl",
-    "get_swift_toolchain",
-    "use_swift_toolchain",
+    "find_all_toolchains",
+    "use_all_toolchains",
 )
 load(
     "//swift/internal:utils.bzl",
@@ -51,15 +54,14 @@ load(
     "get_providers",
 )
 load(":module_name.bzl", "derive_swift_module_name")
-load(":providers.bzl", "SwiftBinaryInfo", "SwiftInfo")
+load(":providers.bzl", "SwiftBinaryInfo", "SwiftInfo", "SwiftOverlayInfo")
 
 def _swift_compiler_plugin_impl(ctx):
-    swift_toolchain = get_swift_toolchain(ctx)
-
+    toolchains = find_all_toolchains(ctx)
     feature_configuration = configure_features_for_binary(
         ctx = ctx,
         requested_features = ctx.features,
-        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
         unsupported_features = ctx.disabled_features,
     )
 
@@ -72,8 +74,11 @@ def _swift_compiler_plugin_impl(ctx):
 
     module_name = ctx.attr.module_name
     if not module_name:
-        module_name = derive_swift_module_name(ctx.label)
-    entry_point_function_name = "{}_main".format(module_name)
+        module_name = derive_swift_module_name(
+            ctx.label,
+            feature_configuration = feature_configuration,
+        )
+    entry_point_name = entry_point_function_name(module_name)
 
     compile_result = compile(
         actions = ctx.actions,
@@ -93,18 +98,17 @@ def _swift_compiler_plugin_impl(ctx):
             "-Xfrontend",
             "-entry-point-function-name",
             "-Xfrontend",
-            entry_point_function_name,
+            entry_point_name,
         ],
         defines = ctx.attr.defines,
         feature_configuration = feature_configuration,
         include_dev_srch_paths = ctx.attr.testonly,
         module_name = module_name,
-        objc_infos = get_providers(deps, apple_common.Objc),
         package_name = ctx.attr.package_name,
         plugins = get_providers(ctx.attr.plugins, SwiftCompilerPluginInfo),
         srcs = srcs,
         swift_infos = get_providers(deps, SwiftInfo),
-        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
         target_name = ctx.label.name,
         workspace_name = ctx.workspace_name,
     )
@@ -115,7 +119,7 @@ def _swift_compiler_plugin_impl(ctx):
 
     # Apply the optional debugging outputs extension if the toolchain defines
     # one.
-    debug_outputs_provider = swift_toolchain.debug_outputs_provider
+    debug_outputs_provider = toolchains.swift.debug_outputs_provider
     if debug_outputs_provider:
         debug_extension = debug_outputs_provider(ctx = ctx)
         additional_debug_outputs = debug_extension.additional_outputs
@@ -141,12 +145,12 @@ def _swift_compiler_plugin_impl(ctx):
         compilation_outputs = compilation_outputs,
         deps = deps,
         feature_configuration = feature_configuration,
+        label = ctx.label,
         module_contexts = module_contexts,
         name = name,
         output_type = "executable",
-        owner = ctx.label,
         stamp = ctx.attr.stamp,
-        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
         user_link_flags = expand_locations(
             ctx,
             ctx.attr.linkopts,
@@ -154,8 +158,8 @@ def _swift_compiler_plugin_impl(ctx):
         ) + ctx.fragments.cpp.linkopts + (
             # When linking the plugin binary, make sure we use the correct entry
             # point name.
-            swift_toolchain.entry_point_linkopts_provider(
-                entry_point_name = entry_point_function_name,
+            toolchains.swift.entry_point_linkopts_provider(
+                entry_point_name = entry_point_name,
             ).linkopts
         ),
         variables_extension = variables_extension,
@@ -174,9 +178,13 @@ def _swift_compiler_plugin_impl(ctx):
                 dep[CcInfo].linking_context
                 for dep in deps
                 if CcInfo in dep
+            ] + [
+                dep[SwiftOverlayInfo].linking_context
+                for dep in deps
+                if SwiftOverlayInfo in dep
             ],
             module_context = module_context,
-            swift_toolchain = swift_toolchain,
+            toolchains = toolchains,
             user_link_flags = ctx.attr.linkopts,
         )
     )
@@ -196,6 +204,12 @@ def _swift_compiler_plugin_impl(ctx):
         OutputGroupInfo(
             **supplemental_compilation_output_groups(supplemental_outputs)
         ),
+        coverage_common.instrumented_files_info(
+            ctx,
+            dependency_attributes = ["deps"],
+            extensions = ["swift"],
+            source_attributes = ["srcs"],
+        ),
         SwiftBinaryInfo(
             cc_info = CcInfo(
                 compilation_context = module_context.clang.compilation_context,
@@ -212,7 +226,12 @@ def _swift_compiler_plugin_impl(ctx):
 swift_compiler_plugin = rule(
     attrs = dicts.add(
         # Do not stamp macro binaries by default to prevent frequent rebuilds.
-        binary_rule_attrs(stamp_default = 0),
+        binary_rule_attrs(
+            exclude_env = True,
+            # Do not stamp macro binaries by default to prevent frequent
+            # rebuilds.
+            stamp_default = 0,
+        ),
     ),
     doc = """\
 Compiles and links a Swift compiler plugin (for example, a macro).
@@ -242,9 +261,9 @@ swift_compiler_plugin(
     name = "Macros",
     srcs = glob(["Macros/*.swift"]),
     deps = [
-        "@SwiftSyntax",
-        "@SwiftSyntax//:SwiftCompilerPlugin",
-        "@SwiftSyntax//:SwiftSyntaxMacros",
+        "@swift-syntax//:SwiftSyntax",
+        "@swift-syntax//:SwiftCompilerPlugin",
+        "@swift-syntax//:SwiftSyntaxMacros",
     ],
 )
 
@@ -254,7 +273,7 @@ swift_test(
     srcs = glob(["MacrosTests/*.swift"]),
     deps = [
         ":Macros",
-        "@SwiftSyntax//:SwiftSyntaxMacrosTestSupport",
+        "@swift-syntax//:SwiftSyntaxMacrosTestSupport",
     ],
 )
 
@@ -274,10 +293,22 @@ swift_library(
 )
 ```
 """,
+    exec_groups = {
+        # The `plugins` attribute associates its `exec` transition with this
+        # execution group. Even though the group is otherwise not used in this
+        # rule, we must resolve the Swift toolchain in this execution group so
+        # that the execution platform of the plugins will have the same
+        # constraints as the execution platform as the other uses of the same
+        # toolchain, ensuring that they don't get built for mismatched
+        # platforms.
+        "swift_plugins": exec_group(
+            toolchains = use_all_toolchains(),
+        ),
+    },
     executable = True,
     fragments = ["cpp"],
     implementation = _swift_compiler_plugin_impl,
-    toolchains = use_swift_toolchain(),
+    toolchains = use_all_toolchains(),
 )
 
 def _universal_swift_compiler_plugin_impl(ctx):
@@ -355,13 +386,6 @@ universal_swift_compiler_plugin = rule(
                 mandatory = True,
                 providers = [[SwiftBinaryInfo, SwiftCompilerPluginInfo]],
             ),
-            "_allowlist_function_transition": attr.label(
-                default = Label(
-                    "@bazel_tools//tools/allowlists/function_transition_allowlist",
-                ),
-            ),
-            # TODO(b/301253335): Enable AEGs and switch from `swift` exec_group to swift `toolchain` param.
-            "_use_auto_exec_groups": attr.bool(default = False),
         },
     ),
     doc = """\
@@ -378,9 +402,9 @@ swift_compiler_plugin(
     name = "Macros",
     srcs = glob(["Macros/*.swift"]),
     deps = [
-        "@SwiftSyntax",
-        "@SwiftSyntax//:SwiftCompilerPlugin",
-        "@SwiftSyntax//:SwiftSyntaxMacros",
+        "@swift-syntax//:SwiftSyntax",
+        "@swift-syntax//:SwiftCompilerPlugin",
+        "@swift-syntax//:SwiftSyntaxMacros",
     ],
 )
 

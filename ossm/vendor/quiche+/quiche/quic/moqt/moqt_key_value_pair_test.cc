@@ -258,116 +258,150 @@ TEST_F(MessageParametersTest, Update) {
   EXPECT_EQ(p1.new_group_request, 1);
 }
 
-class TrackExtensionsTest : public quic::test::QuicTest {};
+class TrackPropertiesTest : public quic::test::QuicTest {};
 
-TEST_F(TrackExtensionsTest, DefaultConstructor) {
-  TrackExtensions extensions;
-  EXPECT_TRUE(extensions.Validate());
-  EXPECT_EQ(extensions.delivery_timeout(), kDefaultDeliveryTimeout);
-  EXPECT_EQ(extensions.max_cache_duration(), kDefaultMaxCacheDuration);
-  EXPECT_EQ(extensions.default_publisher_priority(), kDefaultPublisherPriority);
-  EXPECT_EQ(extensions.default_publisher_group_order(), kDefaultGroupOrder);
-  EXPECT_EQ(extensions.dynamic_groups(), kDefaultDynamicGroups);
-  EXPECT_TRUE(extensions.immutable_extensions().empty());
+TEST_F(TrackPropertiesTest, DefaultConstructor) {
+  TrackProperties properties;
+  EXPECT_TRUE(properties.Validate());
+  EXPECT_EQ(properties.delivery_timeout(), kDefaultDeliveryTimeout);
+  EXPECT_EQ(properties.max_cache_duration(), kDefaultMaxCacheDuration);
+  EXPECT_EQ(properties.default_publisher_priority(), kDefaultPublisherPriority);
+  EXPECT_EQ(properties.default_publisher_group_order(), kDefaultGroupOrder);
+  EXPECT_EQ(properties.dynamic_groups(), kDefaultDynamicGroups);
+  EXPECT_TRUE(properties.immutable_properties().empty());
 }
 
-TEST_F(TrackExtensionsTest, AllExtensions) {
-  TrackExtensions extensions(quic::QuicTimeDelta::FromMilliseconds(1),
+TEST_F(TrackPropertiesTest, AllProperties) {
+  TrackProperties properties(quic::QuicTimeDelta::FromMilliseconds(1),
                              quic::QuicTimeDelta::FromMilliseconds(2),
                              MoqtPriority(10), MoqtDeliveryOrder::kDescending,
-                             true, "extensions");
-  EXPECT_TRUE(extensions.Validate());
-  EXPECT_EQ(extensions.delivery_timeout(),
+                             true, "properties");
+  EXPECT_TRUE(properties.Validate());
+  EXPECT_EQ(properties.delivery_timeout(),
             quic::QuicTimeDelta::FromMilliseconds(1));
-  EXPECT_EQ(extensions.max_cache_duration(),
+  EXPECT_EQ(properties.max_cache_duration(),
             quic::QuicTimeDelta::FromMilliseconds(2));
-  EXPECT_EQ(extensions.default_publisher_priority(), MoqtPriority(10));
-  EXPECT_EQ(extensions.default_publisher_group_order(),
+  EXPECT_EQ(properties.default_publisher_priority(), MoqtPriority(10));
+  EXPECT_EQ(properties.default_publisher_group_order(),
             MoqtDeliveryOrder::kDescending);
-  EXPECT_TRUE(extensions.dynamic_groups());
-  EXPECT_EQ(extensions.immutable_extensions(), "extensions");
+  EXPECT_TRUE(properties.dynamic_groups());
+  EXPECT_EQ(properties.immutable_properties(), "properties");
 }
 
-TEST_F(TrackExtensionsTest, ExplicitDefaults) {
-  TrackExtensions extensions(kDefaultDeliveryTimeout, kDefaultMaxCacheDuration,
+TEST_F(TrackPropertiesTest, ExplicitDefaults) {
+  TrackProperties properties(kDefaultDeliveryTimeout, kDefaultMaxCacheDuration,
                              kDefaultPublisherPriority, kDefaultGroupOrder,
                              kDefaultDynamicGroups, "");
-  EXPECT_TRUE(extensions.Validate());
-  EXPECT_EQ(extensions.size(), 0);
-  EXPECT_EQ(extensions.delivery_timeout(), kDefaultDeliveryTimeout);
-  EXPECT_EQ(extensions.max_cache_duration(), kDefaultMaxCacheDuration);
-  EXPECT_EQ(extensions.default_publisher_priority(), kDefaultPublisherPriority);
-  EXPECT_EQ(extensions.default_publisher_group_order(), kDefaultGroupOrder);
-  EXPECT_EQ(extensions.dynamic_groups(), kDefaultDynamicGroups);
-  EXPECT_TRUE(extensions.immutable_extensions().empty());
+  EXPECT_TRUE(properties.Validate());
+  EXPECT_EQ(properties.size(), 0);
+  EXPECT_EQ(properties.delivery_timeout(), kDefaultDeliveryTimeout);
+  EXPECT_EQ(properties.max_cache_duration(), kDefaultMaxCacheDuration);
+  EXPECT_EQ(properties.default_publisher_priority(), kDefaultPublisherPriority);
+  EXPECT_EQ(properties.default_publisher_group_order(), kDefaultGroupOrder);
+  EXPECT_EQ(properties.dynamic_groups(), kDefaultDynamicGroups);
+  EXPECT_TRUE(properties.immutable_properties().empty());
 }
 
-TEST_F(TrackExtensionsTest, Validate) {
-  TrackExtensions extensions;
-  // Unknown extension.
-  extensions.insert(0x42, 15ULL);
-  extensions.insert(0x42, 25ULL);
-  EXPECT_TRUE(extensions.Validate());
+TEST_F(TrackPropertiesTest, Validate) {
+  TrackProperties properties;
+  // Unknown property.
+  properties.insert(0x42, 15ULL);
+  properties.insert(0x42, 25ULL);
+  EXPECT_TRUE(properties.Validate());
 
-  extensions.insert(static_cast<uint64_t>(ExtensionHeader::kDeliveryTimeout),
+  properties.insert(static_cast<uint64_t>(PropertyType::kDeliveryTimeout),
                     5ULL);
-  extensions.insert(static_cast<uint64_t>(ExtensionHeader::kDeliveryTimeout),
+  properties.insert(static_cast<uint64_t>(PropertyType::kDeliveryTimeout),
                     6ULL);
-  EXPECT_FALSE(extensions.Validate());
+  EXPECT_FALSE(properties.Validate());
 
-  extensions.clear();
-  extensions.insert(static_cast<uint64_t>(ExtensionHeader::kMaxCacheDuration),
+  properties.clear();
+  properties.insert(static_cast<uint64_t>(PropertyType::kMaxCacheDuration),
                     5ULL);
-  extensions.insert(static_cast<uint64_t>(ExtensionHeader::kMaxCacheDuration),
+  properties.insert(static_cast<uint64_t>(PropertyType::kMaxCacheDuration),
                     6ULL);
-  EXPECT_FALSE(extensions.Validate());
+  EXPECT_FALSE(properties.Validate());
 
-  extensions.clear();
-  extensions.insert(
-      static_cast<uint64_t>(ExtensionHeader::kDefaultPublisherPriority),
-      256ULL);
-  EXPECT_FALSE(extensions.Validate());
-  extensions.clear();
-  extensions.insert(
-      static_cast<uint64_t>(ExtensionHeader::kDefaultPublisherPriority), 0ULL);
-  extensions.insert(
-      static_cast<uint64_t>(ExtensionHeader::kDefaultPublisherPriority), 1ULL);
-  EXPECT_FALSE(extensions.Validate());
+  properties.clear();
+  properties.insert(
+      static_cast<uint64_t>(PropertyType::kDefaultPublisherPriority), 256ULL);
+  EXPECT_FALSE(properties.Validate());
+  properties.clear();
+  properties.insert(
+      static_cast<uint64_t>(PropertyType::kDefaultPublisherPriority), 0ULL);
+  properties.insert(
+      static_cast<uint64_t>(PropertyType::kDefaultPublisherPriority), 1ULL);
+  EXPECT_FALSE(properties.Validate());
 
-  extensions.clear();
-  extensions.insert(
-      static_cast<uint64_t>(ExtensionHeader::kDefaultPublisherGroupOrder),
-      0ULL);
-  EXPECT_FALSE(extensions.Validate());
-  extensions.clear();
-  extensions.insert(
-      static_cast<uint64_t>(ExtensionHeader::kDefaultPublisherGroupOrder),
-      3ULL);
-  EXPECT_FALSE(extensions.Validate());
-  extensions.clear();
-  extensions.insert(static_cast<uint64_t>(ExtensionHeader::kDynamicGroups),
-                    2ULL);
-  extensions.insert(static_cast<uint64_t>(ExtensionHeader::kDynamicGroups),
-                    1ULL);
-  EXPECT_FALSE(extensions.Validate());
+  properties.clear();
+  properties.insert(
+      static_cast<uint64_t>(PropertyType::kDefaultPublisherGroupOrder), 0ULL);
+  EXPECT_FALSE(properties.Validate());
+  properties.clear();
+  properties.insert(
+      static_cast<uint64_t>(PropertyType::kDefaultPublisherGroupOrder), 3ULL);
+  EXPECT_FALSE(properties.Validate());
+  properties.clear();
+  properties.insert(static_cast<uint64_t>(PropertyType::kDynamicGroups), 2ULL);
+  properties.insert(static_cast<uint64_t>(PropertyType::kDynamicGroups), 1ULL);
+  EXPECT_FALSE(properties.Validate());
 
-  extensions.clear();
-  extensions.insert(static_cast<uint64_t>(ExtensionHeader::kDynamicGroups),
-                    2ULL);
-  EXPECT_FALSE(extensions.Validate());
-  extensions.clear();
-  extensions.insert(static_cast<uint64_t>(ExtensionHeader::kDynamicGroups),
-                    0ULL);
-  extensions.insert(static_cast<uint64_t>(ExtensionHeader::kDynamicGroups),
-                    1ULL);
-  EXPECT_FALSE(extensions.Validate());
+  properties.clear();
+  properties.insert(static_cast<uint64_t>(PropertyType::kDynamicGroups), 2ULL);
+  EXPECT_FALSE(properties.Validate());
+  properties.clear();
+  properties.insert(static_cast<uint64_t>(PropertyType::kDynamicGroups), 0ULL);
+  properties.insert(static_cast<uint64_t>(PropertyType::kDynamicGroups), 1ULL);
+  EXPECT_FALSE(properties.Validate());
 
-  extensions.clear();
-  extensions.insert(
-      static_cast<uint64_t>(ExtensionHeader::kImmutableExtensions), "foo");
-  extensions.insert(
-      static_cast<uint64_t>(ExtensionHeader::kImmutableExtensions), "bar");
-  EXPECT_FALSE(extensions.Validate());
+  properties.clear();
+  properties.insert(static_cast<uint64_t>(PropertyType::kImmutableProperties),
+                    "foo");
+  properties.insert(static_cast<uint64_t>(PropertyType::kImmutableProperties),
+                    "bar");
+  EXPECT_FALSE(properties.Validate());
+}
+
+TEST_F(TrackPropertiesTest, CheckForUnknownMandatoryProperty) {
+  TrackProperties properties;
+  QUICHE_EXPECT_OK(properties.CheckForUnknownMandatoryProperty());
+
+  // Non-mandatory property types (< 0x4000).
+  properties.insert(static_cast<uint64_t>(PropertyType::kDeliveryTimeout),
+                    5ULL);
+  properties.insert(0x3FFE, 1ULL);
+  properties.insert(0x3FFF, "odd_optional");
+  QUICHE_EXPECT_OK(properties.CheckForUnknownMandatoryProperty());
+
+  // Non-mandatory property types (> 0x7FFF).
+  properties.insert(0x8000, 2ULL);
+  properties.insert(0x8001, "above_range");
+  properties.insert(0x10000, 3ULL);
+  QUICHE_EXPECT_OK(properties.CheckForUnknownMandatoryProperty());
+
+  // Min boundary: 0x4000.
+  TrackProperties min_mandatory;
+  min_mandatory.insert(kMinMandatoryTrackProperty, 0ULL);
+  EXPECT_TRUE(
+      IsFailedPrecondition(min_mandatory.CheckForUnknownMandatoryProperty()));
+  EXPECT_EQ(min_mandatory.CheckForUnknownMandatoryProperty().message(),
+            "Unknown mandatory property: 0x4000");
+
+  // Max boundary: 0x7FFF.
+  TrackProperties max_mandatory;
+  max_mandatory.insert(kMaxMandatoryTrackProperty, "mandatory_string");
+  EXPECT_TRUE(
+      IsFailedPrecondition(max_mandatory.CheckForUnknownMandatoryProperty()));
+  EXPECT_EQ(max_mandatory.CheckForUnknownMandatoryProperty().message(),
+            "Unknown mandatory property: 0x7fff");
+
+  // In between.
+  TrackProperties mid_mandatory;
+  mid_mandatory.insert(0x5000, 42ULL);
+  EXPECT_TRUE(
+      IsFailedPrecondition(mid_mandatory.CheckForUnknownMandatoryProperty()));
+  EXPECT_EQ(mid_mandatory.CheckForUnknownMandatoryProperty().message(),
+            "Unknown mandatory property: 0x5000");
 }
 
 }  // namespace moqt::test

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(
     # Under active development, not yet being released.
@@ -25,6 +26,7 @@ cc_library(
     name = "map_reflection",
     srcs = ["map_reflection.cc"],
     hdrs = ["map_reflection.h"],
+    copts = CEL_COPTS,
     deps = [
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/base:nullability",
@@ -36,6 +38,7 @@ cc_library(
     name = "qualify",
     srcs = ["qualify.cc"],
     hdrs = ["qualify.h"],
+    copts = CEL_COPTS,
     deps = [
         ":map_reflection",
         "//base:attributes",

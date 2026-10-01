@@ -12,17 +12,24 @@ filegroup(
 
 configure_make(
     name = "autoconf",
+    # Empty `dist_man_MANS` so automake's `all-am` doesn't pull in the
+    # `.w.1` suffix rule, which calls `$(HELP2MAN) ... --output=$@.t`
+    # followed by `mv $@.t $@`. With HELP2MAN stubbed to `true` (it
+    # isn't on RBE workers), the `.t` file is never created and the
+    # `mv` fails. Pre-built man pages ship in the tarball and autoconf
+    # binaries don't need the regenerated copies at runtime.
+    args = ["dist_man_MANS="],
     build_data = [
-        "@m4",
+        "@gnu_m4//:m4_exe",
     ],
-    env = select({
+    env = {
+        "M4": "$$EXT_BUILD_ROOT/$(location @gnu_m4//:m4_exe)",
+        "PERL": "$$EXT_BUILD_ROOT/$(PERL)",
+    } | select({
         "@platforms//os:macos": {
             "AR": "",
-            "M4": "$$EXT_BUILD_DEPS$$/bin/m4/bin/m4",
         },
-        "//conditions:default": {
-            "M4": "$$EXT_BUILD_DEPS$$/bin/m4/bin/m4",
-        },
+        "//conditions:default": {},
     }),
     lib_source = ":all_srcs",
     out_binaries = [
@@ -35,4 +42,13 @@ configure_make(
         "ifnames",
     ],
     out_data_dirs = ["share"],
+    out_include_dir = "",
+    toolchains = ["@rules_perl//:current_toolchain"],
+)
+
+filegroup(
+    name = "gen_dir",
+    srcs = [":autoconf"],
+    output_group = "gen_dir",
+    visibility = ["//visibility:public"],
 )

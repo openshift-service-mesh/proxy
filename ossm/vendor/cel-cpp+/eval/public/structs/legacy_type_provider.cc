@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "absl/base/nullability.h"
@@ -27,6 +28,7 @@
 #include "common/legacy_value.h"
 #include "common/memory.h"
 #include "common/type.h"
+#include "common/type_introspector.h"
 #include "common/value.h"
 #include "eval/public/message_wrapper.h"
 #include "eval/public/structs/legacy_type_adapter.h"
@@ -34,6 +36,7 @@
 #include "extensions/protobuf/memory_manager.h"
 #include "internal/status_macros.h"
 #include "google/protobuf/arena.h"
+#include "google/protobuf/descriptor.h"
 #include "google/protobuf/message.h"
 
 namespace google::api::expr::runtime {
@@ -62,7 +65,7 @@ class LegacyStructValueBuilder final : public cel::StructValueBuilder {
     CEL_RETURN_IF_ERROR(adapter_.mutation_apis()->SetField(
                             name, legacy_value, memory_manager_, builder_))
         .With(cel::ErrorValueReturn());
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   absl::StatusOr<absl::optional<cel::ErrorValue>> SetFieldByNumber(
@@ -75,7 +78,7 @@ class LegacyStructValueBuilder final : public cel::StructValueBuilder {
     CEL_RETURN_IF_ERROR(adapter_.mutation_apis()->SetFieldByNumber(
                             number, legacy_value, memory_manager_, builder_))
         .With(cel::ErrorValueReturn());
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   absl::StatusOr<cel::StructValue> Build() && override {
@@ -115,7 +118,7 @@ class LegacyValueBuilder final : public cel::ValueBuilder {
     CEL_RETURN_IF_ERROR(adapter_.mutation_apis()->SetField(
                             name, legacy_value, memory_manager_, builder_))
         .With(cel::ErrorValueReturn());
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   absl::StatusOr<absl::optional<cel::ErrorValue>> SetFieldByNumber(
@@ -128,7 +131,7 @@ class LegacyValueBuilder final : public cel::ValueBuilder {
     CEL_RETURN_IF_ERROR(adapter_.mutation_apis()->SetFieldByNumber(
                             number, legacy_value, memory_manager_, builder_))
         .With(cel::ErrorValueReturn());
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   absl::StatusOr<cel::Value> Build() && override {
@@ -175,6 +178,9 @@ LegacyTypeProvider::NewValueBuilder(
 
 absl::StatusOr<absl::optional<cel::Type>> LegacyTypeProvider::FindTypeImpl(
     absl::string_view name) const {
+  if (auto type = cel::FindWellKnownType(name); type.has_value()) {
+    return type;
+  }
   if (auto type_info = ProvideLegacyTypeInfo(name); type_info.has_value()) {
     const auto* descriptor = (*type_info)->GetDescriptor(MessageWrapper());
     if (descriptor != nullptr) {
@@ -183,28 +189,44 @@ absl::StatusOr<absl::optional<cel::Type>> LegacyTypeProvider::FindTypeImpl(
     return cel::common_internal::MakeBasicStructType(
         (*type_info)->GetTypename(MessageWrapper()));
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 absl::StatusOr<absl::optional<cel::StructTypeField>>
 LegacyTypeProvider::FindStructTypeFieldByNameImpl(
     absl::string_view type, absl::string_view name) const {
-  if (auto type_info = ProvideLegacyTypeInfo(type); type_info.has_value()) {
-    if (auto field_desc = (*type_info)->FindFieldByName(name);
-        field_desc.has_value()) {
-      return cel::common_internal::BasicStructTypeField(
-          field_desc->name, field_desc->number, cel::DynType{});
-    } else {
-      const auto* mutation_apis =
-          (*type_info)->GetMutationApis(MessageWrapper());
-      if (mutation_apis == nullptr || !mutation_apis->DefinesField(name)) {
-        return absl::nullopt;
-      }
-      return cel::common_internal::BasicStructTypeField(name, 0,
-                                                        cel::DynType{});
+  if (auto result = cel::FindWellKnownTypeFieldByName(type, name);
+      result.has_value()) {
+    return result;
+  }
+  absl::optional<const LegacyTypeInfoApis*> type_info =
+      ProvideLegacyTypeInfo(type);
+  if (!type_info.has_value()) {
+    return std::nullopt;
+  }
+  if (const auto* descriptor = (*type_info)->GetDescriptor(MessageWrapper());
+      descriptor != nullptr) {
+    // If it's a normal proto, just use the descriptor to find the field.
+    // Allows us to get the same optimizations as the modern value in most
+    // cases.
+    const google::protobuf::FieldDescriptor* field = descriptor->FindFieldByName(name);
+    if (field != nullptr) {
+      return cel::StructTypeField(cel::MessageTypeField(field));
     }
   }
-  return absl::nullopt;
+
+  if (auto field_desc = (*type_info)->FindFieldByName(name);
+      field_desc.has_value()) {
+    return cel::common_internal::BasicStructTypeField(
+        field_desc->name, field_desc->number, cel::DynType{});
+  }
+
+  const auto* mutation_apis = (*type_info)->GetMutationApis(MessageWrapper());
+  if (mutation_apis == nullptr || !mutation_apis->DefinesField(name)) {
+    return std::nullopt;
+  }
+
+  return cel::common_internal::BasicStructTypeField(name, 0, cel::DynType{});
 }
 
 }  // namespace google::api::expr::runtime

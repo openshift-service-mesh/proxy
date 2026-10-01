@@ -14,18 +14,18 @@
 
 use core::{
     marker::PhantomData,
-    ptr::{NonNull, null},
-    slice::from_raw_parts,
+    ptr::{
+        NonNull,
+        null, //
+    },//
 };
 
 use bssl_crypto::FfiSlice;
 
 use crate::errors::{PkiError, X509Error};
 
-/// This method catches panics before they cross language boundary.
 #[must_use]
-#[inline]
-pub(crate) fn maybe_panic<T>(work: impl FnOnce() -> T) -> T {
+pub(crate) fn abort_on_panic<T>(work: impl FnOnce() -> T) -> T {
     let assert_unwind_safe = core::panic::AssertUnwindSafe(work);
     let call = move || {
         let core::panic::AssertUnwindSafe(work) = { assert_unwind_safe };
@@ -49,25 +49,6 @@ pub(crate) fn slice_into_ffi_raw_parts<T>(slice: &[T]) -> (*const T, usize) {
         (null(), 0)
     } else {
         (slice.as_ptr(), slice.len())
-    }
-}
-
-/// Sanitize the data pointer and length and reconstitute the slice.
-///
-/// This method returns an empty slice if the length is 0 or the pointer is NULL.
-/// # Safety
-/// Caller must ensure that `'a` outlives `input`.
-#[inline]
-pub(crate) unsafe fn sanitize_slice<'a, T>(input: *const T, len: usize) -> Option<&'a [T]> {
-    if len == 0 || input.is_null() {
-        return Some(&[]);
-    }
-    if !input.is_aligned() || len.checked_mul(size_of::<T>())? > isize::MAX as usize {
-        return None;
-    }
-    unsafe {
-        // Safety: the pointer and the size has been sanitised.
-        Some(from_raw_parts(input, len))
     }
 }
 

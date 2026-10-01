@@ -15,47 +15,26 @@
 """IBTool related actions."""
 
 load(
-    "@bazel_skylib//lib:collections.bzl",
-    "collections",
+    "@apple_support//lib:apple_support.bzl",
+    "apple_support",
 )
 load(
     "@bazel_skylib//lib:paths.bzl",
     "paths",
 )
 load(
-    "@build_bazel_apple_support//lib:apple_support.bzl",
-    "apple_support",
+    "//apple/internal:shared_environment.bzl",
+    "shared_environment",
 )
 load(
     "//apple/internal/utils:xctoolrunner.bzl",
     xctoolrunner_support = "xctoolrunner",
 )
 
-def _ibtool_arguments(min_os, families):
-    """Returns common `ibtool` command line arguments.
-
-    This function returns the common arguments used by both xib and storyboard
-    compilation, as well as storyboard linking. Callers should add their own
-    arguments to the returned array for their specific purposes.
-
-    Args:
-      min_os: The minimum OS version to use when compiling interface files.
-      families: The families that should be supported by the compiled interfaces.
-
-    Returns:
-      An array of command-line arguments to pass to ibtool.
-    """
-    return [
-        "--minimum-deployment-target",
-        min_os,
-    ] + collections.before_each(
-        "--target-device",
-        families,
-    )
-
 def compile_storyboard(
         *,
         actions,
+        mac_exec_group,
         input_file,
         output_dir,
         platform_prerequisites,
@@ -66,6 +45,7 @@ def compile_storyboard(
     Args:
       actions: The actions provider from `ctx.actions`.
       input_file: The storyboard to compile.
+      mac_exec_group: The execution group for Mac tools.
       output_dir: The directory where the compiled outputs should be placed.
       platform_prerequisites: Struct containing information on the platform being targeted.
       swift_module: The name of the Swift module to use when compiling the
@@ -73,16 +53,27 @@ def compile_storyboard(
       xctoolrunner: A files_to_run for the wrapper around the "xcrun" tool.
     """
 
-    args = [
+    args = actions.args()
+    args.add_all([
         "ibtool",
         "--compilation-directory",
         xctoolrunner_support.prefixed_path(output_dir.dirname),
-    ]
+        "--errors",
+        "--warnings",
+        "--notices",
+        "--auto-activate-custom-fonts",
+        "--output-format",
+        "human-readable-text",
+    ])
 
     min_os = platform_prerequisites.minimum_os
     families = platform_prerequisites.device_families
-    args.extend(_ibtool_arguments(min_os, families))
-    args.extend([
+
+    # Standard ibtool options.
+    args.add("--minimum-deployment-target", min_os)
+    args.add_all(families, before_each = "--target-device")
+
+    args.add_all([
         "--module",
         swift_module,
         xctoolrunner_support.prefixed_path(input_file.path),
@@ -90,8 +81,10 @@ def compile_storyboard(
 
     apple_support.run(
         actions = actions,
-        arguments = args,
+        arguments = [args],
         apple_fragment = platform_prerequisites.apple_fragment,
+        env = shared_environment.default_env,
+        exec_group = mac_exec_group,
         executable = xctoolrunner,
         execution_requirements = {"no-sandbox": "1"},
         inputs = [input_file],
@@ -103,6 +96,7 @@ def compile_storyboard(
 def link_storyboards(
         *,
         actions,
+        mac_exec_group,
         output_dir,
         platform_prerequisites,
         storyboardc_dirs,
@@ -115,6 +109,7 @@ def link_storyboards(
 
     Args:
       actions: The actions provider from `ctx.actions`.
+      mac_exec_group: The execution group for Mac tools.
       output_dir: The directory where the linked outputs should be placed.
       platform_prerequisites: Struct containing information on the platform being targeted.
       storyboardc_dirs: A list of `File`s that represent directories containing
@@ -125,21 +120,28 @@ def link_storyboards(
     min_os = platform_prerequisites.minimum_os
     families = platform_prerequisites.device_families
 
-    args = [
+    args = actions.args()
+    args.add_all([
         "ibtool",
         "--link",
         xctoolrunner_support.prefixed_path(output_dir.path),
-    ]
-    args.extend(_ibtool_arguments(min_os, families))
-    args.extend([
+    ])
+
+    # Standard ibtool options.
+    args.add("--minimum-deployment-target", min_os)
+    args.add_all(families, before_each = "--target-device")
+
+    args.add_all([
         xctoolrunner_support.prefixed_path(f.path)
         for f in storyboardc_dirs
     ])
 
     apple_support.run(
         actions = actions,
-        arguments = args,
+        arguments = [args],
         apple_fragment = platform_prerequisites.apple_fragment,
+        env = shared_environment.default_env,
+        exec_group = mac_exec_group,
         executable = xctoolrunner,
         execution_requirements = {"no-sandbox": "1"},
         inputs = storyboardc_dirs,
@@ -151,6 +153,7 @@ def link_storyboards(
 def compile_xib(
         *,
         actions,
+        mac_exec_group,
         input_file,
         output_dir,
         platform_prerequisites,
@@ -161,6 +164,7 @@ def compile_xib(
     Args:
       actions: The actions provider from `ctx.actions`.
       input_file: The Xib file to compile.
+      mac_exec_group: The execution group for Mac tools.
       output_dir: The file reference for the output directory.
       platform_prerequisites: Struct containing information on the platform being targeted.
       swift_module: The name of the Swift module to use when compiling the
@@ -173,13 +177,18 @@ def compile_xib(
 
     nib_name = paths.replace_extension(paths.basename(input_file.short_path), ".nib")
 
-    args = [
+    args = actions.args()
+    args.add_all([
         "ibtool",
         "--compile",
         xctoolrunner_support.prefixed_path(paths.join(output_dir.path, nib_name)),
-    ]
-    args.extend(_ibtool_arguments(min_os, families))
-    args.extend([
+    ])
+
+    # Standard ibtool options.
+    args.add("--minimum-deployment-target", min_os)
+    args.add_all(families, before_each = "--target-device")
+
+    args.add_all([
         "--module",
         swift_module,
         xctoolrunner_support.prefixed_path(input_file.path),
@@ -187,8 +196,10 @@ def compile_xib(
 
     apple_support.run(
         actions = actions,
-        arguments = args,
+        arguments = [args],
         apple_fragment = platform_prerequisites.apple_fragment,
+        env = shared_environment.default_env,
+        exec_group = mac_exec_group,
         executable = xctoolrunner,
         execution_requirements = {"no-sandbox": "1"},
         inputs = [input_file],

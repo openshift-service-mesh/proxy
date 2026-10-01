@@ -1,4 +1,4 @@
-load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//test/starlark_tests:common.bzl", "common")
 
 package(
@@ -14,11 +14,8 @@ licenses(["notice"])
 swift_library(
     name = "swift_library",
     srcs = ["//test/starlark_tests/resources/frameworks:SharedClass.swift"],
-    features = [
-        "swift.emit_swiftinterface",
-        "swift.enable_library_evolution",
-    ],
     generates_header = True,
+    library_evolution = True,
     module_name = "iOSSwiftStaticFramework",
     tags = common.fixture_tags,
 )
@@ -26,11 +23,8 @@ swift_library(
 swift_library(
     name = "swift_lib_for_static_xcframework",
     srcs = ["//test/starlark_tests/resources/frameworks:SharedClass.swift"],
-    features = [
-        "swift.emit_swiftinterface",
-        "swift.enable_library_evolution",
-    ],
     generates_header = True,
+    library_evolution = True,
     module_name = "generated_swift_static_xcframework",
     tags = common.fixture_tags,
 )

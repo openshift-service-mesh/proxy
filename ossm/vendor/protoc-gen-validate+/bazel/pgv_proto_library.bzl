@@ -52,7 +52,7 @@ def pgv_cc_proto_library(
             protobuf or "@com_google_protobuf//:protobuf",
             re2 or "@com_googlesource_code_re2//:re2",
         ],
-        copts = copts + select({
+        copts = copts + ["-Wno-deprecated-declarations"] + select({
             Label("//bazel:windows_x86_64"): ["-DWIN32"],
             "//conditions:default": [],
         }),

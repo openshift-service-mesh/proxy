@@ -16,6 +16,7 @@ limitations under the License.
 package golang
 
 import (
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -50,7 +51,7 @@ func TestGenerateRules(t *testing.T) {
 				continue
 			}
 			if strings.HasPrefix(rel, "..") {
-				// make sure we're not moving around file that we're not inrerested in
+				// make sure we're not moving around file that we're not interested in
 				continue
 			}
 			newPath := filepath.FromSlash(path.Join(testdataDir, rel))
@@ -174,6 +175,66 @@ go_test(name = "foo_test")
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
+}
+
+
+// Test that no data attribute is added for an empty testdata subdirectory
+func TestGenerateRulesEmptyTestdata(t *testing.T) {
+	dir, err := bazel.NewTmpDir("example")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an empty testdata subdirectory
+	testdataDir := filepath.Join(dir, "testdata")
+	if err := os.Mkdir(testdataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a test file in the example directory
+	testFile := filepath.Join(dir, "example_test.go")
+	testContent := []byte(`package example
+
+import "testing"
+
+func TestExample(t *testing.T) {
+	t.Log("test")
+}
+`)
+	if err := os.WriteFile(testFile, testContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c, langs, cexts := testConfig(t, "-go_prefix=example.com/repo")
+	goLang := langs[1].(*goLang)
+
+	walk.Walk(c, cexts, []string{dir}, walk.VisitAllUpdateSubdirsMode, func(dir, rel string, c *config.Config, update bool, oldFile *rule.File, subdirs, regularFiles, genFiles []string) {
+		res := goLang.GenerateRules(language.GenerateArgs{
+			Config:       c,
+			Dir:          dir,
+			Rel:          "example",
+			Subdirs:      []string{"testdata"},
+			RegularFiles: []string{"example_test.go"},
+		})
+
+		// Find the go_test rule
+		var testRule *rule.Rule
+		for _, r := range res.Gen {
+			if r.Kind() == "go_test" {
+				testRule = r
+				break
+			}
+		}
+
+		if testRule == nil {
+			t.Fatal("expected a go_test rule to be generated")
+		}
+
+		// Verify that no data attribute was added
+		if data := testRule.Attr("data"); data != nil {
+			t.Errorf("expected no data attribute for empty testdata subdirectory, but got: %v", data)
+		}
+	})
 }
 
 func TestGenerateRulesEmptyLegacyProto(t *testing.T) {
@@ -362,5 +423,90 @@ func convertImportsAttrs(f *rule.File) {
 		if v != nil {
 			r.SetAttr(config.GazelleImportsKey, v)
 		}
+	}
+}
+
+func TestProtoLibraryCompilers(t *testing.T) {
+	for _, tc := range []struct {
+		desc          string
+		moduleContent string
+		rulesGoName   string
+	}{
+		{
+			desc:        "workspace_fallback",
+			rulesGoName: "io_bazel_rules_go",
+		},
+		{
+			desc:          "bzlmod_default_apparent_name",
+			moduleContent: `bazel_dep(name = "rules_go", version = "0.60.0")
+`,
+			rulesGoName:   "rules_go",
+		},
+		{
+			desc:          "bzlmod_custom_repo_name",
+			moduleContent: `bazel_dep(name = "rules_go", version = "0.60.0", repo_name = "my_rules_go")
+`,
+			rulesGoName:   "my_rules_go",
+		},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.moduleContent != "" {
+				if err := os.WriteFile(filepath.Join(dir, "MODULE.bazel"), []byte(tc.moduleContent), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			svcDir := filepath.Join(dir, "svc")
+			if err := os.MkdirAll(svcDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(svcDir, "svc.proto"), []byte(`
+syntax = "proto2";
+option go_package = "example.com/repo/svc";
+service S {}
+`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			c, langs, cexts := testConfig(t,
+				"-go_prefix=example.com/repo",
+				"-repo_root="+dir)
+			for _, cext := range cexts {
+				cext.Configure(c, "", nil)
+			}
+
+			var got []string
+			walk.Walk(c, cexts, []string{dir}, walk.VisitAllUpdateSubdirsMode, func(walkDir, rel string, walkC *config.Config, _ bool, oldFile *rule.File, subdirs, regularFiles, genFiles []string) {
+				var empty, gen []*rule.Rule
+				for _, lang := range langs {
+					res := lang.GenerateRules(language.GenerateArgs{
+						Config:       walkC,
+						Dir:          walkDir,
+						Rel:          rel,
+						File:         oldFile,
+						Subdirs:      subdirs,
+						RegularFiles: regularFiles,
+						GenFiles:     genFiles,
+						OtherEmpty:   empty,
+						OtherGen:     gen,
+					})
+					empty = append(empty, res.Empty...)
+					gen = append(gen, res.Gen...)
+				}
+				for _, r := range gen {
+					if r.Kind() == "go_proto_library" {
+						got = r.AttrStrings("compilers")
+					}
+				}
+			})
+
+			want := []string{
+				fmt.Sprintf("@%s//proto:go_proto", tc.rulesGoName),
+				fmt.Sprintf("@%s//proto:go_grpc_v2", tc.rulesGoName),
+			}
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("(-want, +got):\n%s", diff)
+			}
+		})
 	}
 }

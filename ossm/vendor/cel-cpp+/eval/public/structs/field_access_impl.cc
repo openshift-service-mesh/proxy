@@ -32,7 +32,10 @@
 #include "internal/casts.h"
 #include "internal/overflow.h"
 #include "google/protobuf/arena.h"
+#include "google/protobuf/descriptor.h"
 #include "google/protobuf/map_field.h"
+
+#undef GetMessage
 
 namespace google::api::expr::runtime::internal {
 
@@ -136,8 +139,7 @@ class FieldAccessor {
           case FieldDescriptor::TYPE_BYTES:
             return CelValue::CreateBytesView(value);
           default:
-            return absl::Status(absl::StatusCode::kInvalidArgument,
-                                "Error handling C++ string conversion");
+            break;
         }
         break;
       }
@@ -150,8 +152,7 @@ class FieldAccessor {
         return CelValue::CreateInt64(enum_value);
       }
       default:
-        return absl::Status(absl::StatusCode::kInvalidArgument,
-                            "Unhandled C++ type conversion");
+        break;
     }
     return absl::Status(absl::StatusCode::kInvalidArgument,
                         "Unhandled C++ type conversion");

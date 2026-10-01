@@ -541,6 +541,9 @@ void QuicConnection::SetFromConfig(const QuicConfig& config) {
   if (config.HasClientRequestedIndependentOption(k5AFF, perspective_)) {
     anti_amplification_factor_ = 5;
   }
+  if (config.HasClientRequestedIndependentOption(k8AFF, perspective_)) {
+    anti_amplification_factor_ = 8;
+  }
   if (config.HasClientRequestedIndependentOption(k10AF, perspective_)) {
     anti_amplification_factor_ = 10;
   }
@@ -1251,12 +1254,6 @@ void QuicConnection::OnDecryptedPacket(size_t /*length*/,
   visitor_->OnPacketDecrypted(level);
 }
 
-QuicSocketAddress QuicConnection::GetEffectivePeerAddressFromCurrentPacket()
-    const {
-  // By default, the connection is not proxied, and the effective peer address
-  // is the packet's source address, i.e. the direct peer address.
-  return last_received_packet_info_.source_address;
-}
 
 bool QuicConnection::OnPacketHeader(const QuicPacketHeader& header) {
   if (spin_bit_enabled_ && header.form == IETF_QUIC_SHORT_HEADER_PACKET) {
@@ -1349,7 +1346,7 @@ bool QuicConnection::OnPacketHeader(const QuicPacketHeader& header) {
         // TODO(fayang): only change peer addresses in application data packet
         // number space.
         UpdatePeerAddress(last_received_packet_info_.source_address);
-        default_path_.peer_address = GetEffectivePeerAddressFromCurrentPacket();
+        default_path_.peer_address = last_received_packet_info_.source_address;
       }
     }
   } else {
@@ -1367,10 +1364,10 @@ bool QuicConnection::OnPacketHeader(const QuicPacketHeader& header) {
     current_effective_peer_migration_type_ =
         QuicUtils::DetermineAddressChangeType(
             default_path_.peer_address,
-            GetEffectivePeerAddressFromCurrentPacket());
+            last_received_packet_info_.source_address);
 
     if (version().IsIetfQuic()) {
-      auto effective_peer_address = GetEffectivePeerAddressFromCurrentPacket();
+      auto effective_peer_address = last_received_packet_info_.source_address;
       // Since server does not send new connection ID to client before handshake
       // completion and source connection ID is omitted in short header packet,
       // the server_connection_id on PathState on the server side does not
@@ -1409,7 +1406,7 @@ bool QuicConnection::OnPacketHeader(const QuicPacketHeader& header) {
     QUIC_DLOG_IF(INFO, current_effective_peer_migration_type_ != NO_CHANGE)
         << ENDPOINT << "Effective peer's ip:port changed from "
         << default_path_.peer_address.ToString() << " to "
-        << GetEffectivePeerAddressFromCurrentPacket().ToString()
+        << last_received_packet_info_.source_address.ToString()
         << ", active_effective_peer_migration_type is "
         << active_effective_peer_migration_type_;
   }
@@ -1830,10 +1827,10 @@ bool QuicConnection::OnPathChallengeFrame(const QuicPathChallengeFrame& frame) {
   const QuicSocketAddress effective_peer_address_to_respond =
       perspective_ == Perspective::IS_CLIENT
           ? effective_peer_address()
-          : GetEffectivePeerAddressFromCurrentPacket();
+          : last_received_packet_info_.source_address;
   const QuicSocketAddress direct_peer_address_to_respond =
       perspective_ == Perspective::IS_CLIENT
-          ? direct_peer_address_
+          ? peer_address()
           : last_received_packet_info_.source_address;
   QuicConnectionId client_cid, server_cid;
   FindOnPathConnectionIds(last_received_packet_info_.destination_address,
@@ -2393,7 +2390,7 @@ bool QuicConnection::IsValidStatelessResetToken(
                  token, *default_path_.stateless_reset_token);
     }
     if (IsAlternativePath(last_received_packet_info_.destination_address,
-                          GetEffectivePeerAddressFromCurrentPacket())) {
+                          last_received_packet_info_.source_address)) {
       QUIC_RELOADABLE_FLAG_COUNT_N(quic_check_alternate_reset_token, 2, 2);
       return alternative_path_.stateless_reset_token.has_value() &&
              QuicUtils::AreStatelessResetTokensEqual(
@@ -2416,7 +2413,7 @@ void QuicConnection::OnAuthenticatedIetfStatelessResetPacket() {
                      last_received_packet_info_.source_address)) {
     // This packet is received on a probing path. Do not close connection.
     if (IsAlternativePath(last_received_packet_info_.destination_address,
-                          GetEffectivePeerAddressFromCurrentPacket())) {
+                          last_received_packet_info_.source_address)) {
       QUIC_BUG_IF(quic_bug_12714_18, alternative_path_.validated)
           << "STATELESS_RESET received on alternate path after it's "
              "validated.";
@@ -2836,9 +2833,10 @@ std::string QuicConnection::UndecryptablePacketsInfo() const {
   return info;
 }
 
-void QuicConnection::ProcessUdpPacket(const QuicSocketAddress& self_address,
-                                      const QuicSocketAddress& peer_address,
-                                      const QuicReceivedPacket& packet) {
+void QuicConnection::ProcessUdpPacket(
+    const QuicSocketAddress& packet_self_address,
+    const QuicSocketAddress& packet_peer_address,
+    const QuicReceivedPacket& packet) {
   if (!connected_) {
     return;
   }
@@ -2852,26 +2850,27 @@ void QuicConnection::ProcessUdpPacket(const QuicSocketAddress& self_address,
   QUIC_BUG_IF(quic_bug_12714_21, current_packet_data_ != nullptr)
       << "ProcessUdpPacket must not be called while processing a packet.";
   if (debug_visitor_ != nullptr) {
-    debug_visitor_->OnPacketReceived(self_address, peer_address, packet);
+    debug_visitor_->OnPacketReceived(packet_self_address, packet_peer_address,
+                                     packet);
   }
   last_received_packet_info_ = ReceivedPacketInfo(
-      self_address, peer_address, packet.receipt_time(), packet.length(),
-      packet.ecn_codepoint(), packet.ipv6_flow_label());
+      packet_self_address, packet_peer_address, packet.receipt_time(),
+      packet.length(), packet.ecn_codepoint(), packet.ipv6_flow_label());
   current_packet_data_ = packet.data();
 
   if (!default_path_.self_address.IsInitialized()) {
     default_path_.self_address = last_received_packet_info_.destination_address;
-  } else if (default_path_.self_address != self_address &&
+  } else if (default_path_.self_address != packet_self_address &&
              expected_server_preferred_address_.IsInitialized() &&
-             self_address.Normalized() ==
+             packet_self_address.Normalized() ==
                  expected_server_preferred_address_.Normalized()) {
     // If the packet is received at the preferred address, treat it as if it is
     // received on the original server address.
     last_received_packet_info_.destination_address = default_path_.self_address;
-    last_received_packet_info_.actual_destination_address = self_address;
+    last_received_packet_info_.actual_destination_address = packet_self_address;
   }
 
-  if (!direct_peer_address_.IsInitialized()) {
+  if (!peer_address().IsInitialized()) {
     if (perspective_ == Perspective::IS_CLIENT) {
       AddKnownServerAddress(last_received_packet_info_.source_address);
     }
@@ -2880,14 +2879,14 @@ void QuicConnection::ProcessUdpPacket(const QuicSocketAddress& self_address,
 
   if (!default_path_.peer_address.IsInitialized()) {
     const QuicSocketAddress effective_peer_addr =
-        GetEffectivePeerAddressFromCurrentPacket();
+        last_received_packet_info_.source_address;
 
     // The default path peer_address must be initialized at the beginning of the
     // first packet processed(here). If effective_peer_addr is uninitialized,
     // just set effective_peer_address_ to the direct peer address.
     default_path_.peer_address = effective_peer_addr.IsInitialized()
                                      ? effective_peer_addr
-                                     : direct_peer_address_;
+                                     : peer_address();
   }
 
   stats_.bytes_received += packet.length();
@@ -3123,11 +3122,11 @@ void QuicConnection::SetDefaultPathState(PathState new_path_state) {
 // --quic_test_peer_addr_change_after_normalize.
 bool QuicConnection::PeerAddressChanged() const {
   if (quic_test_peer_addr_change_after_normalize_) {
-    return direct_peer_address_.Normalized() !=
+    return peer_address().Normalized() !=
            last_received_packet_info_.source_address.Normalized();
   }
 
-  return direct_peer_address_ != last_received_packet_info_.source_address;
+  return peer_address() != last_received_packet_info_.source_address;
 }
 
 void QuicConnection::GenerateNewOutgoingFlowLabel() {
@@ -3146,7 +3145,7 @@ void QuicConnection::MaybeSendSconePacketAfterMigration() {
 
 bool QuicConnection::ProcessValidatedPacket(const QuicPacketHeader& header) {
   if (perspective_ == Perspective::IS_CLIENT && version().IsIetfQuic() &&
-      direct_peer_address_.IsInitialized() &&
+      peer_address().IsInitialized() &&
       last_received_packet_info_.source_address.IsInitialized() &&
       PeerAddressChanged() &&
       !IsKnownServerAddress(last_received_packet_info_.source_address)) {
@@ -3201,14 +3200,13 @@ bool QuicConnection::ProcessValidatedPacket(const QuicPacketHeader& header) {
   if (perspective_ == Perspective::IS_SERVER &&
       last_received_packet_info_.actual_destination_address.IsInitialized() &&
       !IsHandshakeConfirmed() &&
-      GetEffectivePeerAddressFromCurrentPacket() !=
-          default_path_.peer_address) {
+      last_received_packet_info_.source_address != default_path_.peer_address) {
     // Our client implementation has an optimization to spray packets from
     // different sockets to the server's preferred address before handshake
     // gets confirmed. In this case, do not kick off client address migration
     // detection.
     QUICHE_DCHECK(expected_server_preferred_address_.IsInitialized());
-    last_received_packet_info_.source_address = direct_peer_address_;
+    last_received_packet_info_.source_address = peer_address();
   }
 
   if (PacketCanReplaceServerConnectionId(header, perspective_) &&
@@ -4292,7 +4290,7 @@ void QuicConnection::MaybeCreateMultiPortPath() {
   if (path_validator_.HasPendingPathValidation()) {
     QUIC_CLIENT_HISTOGRAM_ENUM("QuicConnection.MultiPortPathCreationCancelled",
                                path_validator_.GetPathValidationReason(),
-                               PathValidationReason::kMaxValue,
+                               PathValidationReason::kNumReasons,
                                "Reason for cancelled multi port path creation");
     return;
   }
@@ -5511,13 +5509,13 @@ void QuicConnection::StartEffectivePeerMigration(AddressChangeType type) {
     QUIC_DLOG(INFO)
         << ENDPOINT << "Effective peer's ip:port changed from "
         << default_path_.peer_address.ToString() << " to "
-        << GetEffectivePeerAddressFromCurrentPacket().ToString()
+        << last_received_packet_info_.source_address.ToString()
         << ", address change type is " << type
         << ", migrating connection without validating new client address.";
 
     highest_packet_sent_before_effective_peer_migration_ =
         sent_packet_manager_.GetLargestSentPacket();
-    default_path_.peer_address = GetEffectivePeerAddressFromCurrentPacket();
+    default_path_.peer_address = last_received_packet_info_.source_address;
     active_effective_peer_migration_type_ = type;
 
     OnConnectionMigration();
@@ -5548,14 +5546,14 @@ void QuicConnection::StartEffectivePeerMigration(AddressChangeType type) {
   // is validated or not and which path the incoming packet is on.
 
   const QuicSocketAddress current_effective_peer_address =
-      GetEffectivePeerAddressFromCurrentPacket();
+      last_received_packet_info_.source_address;
   QUIC_DLOG(INFO) << ENDPOINT << "Effective peer's ip:port changed from "
                   << default_path_.peer_address.ToString() << " to "
                   << current_effective_peer_address.ToString()
                   << ", address change type is " << type
                   << ", migrating connection.";
 
-  const QuicSocketAddress previous_direct_peer_address = direct_peer_address_;
+  const QuicSocketAddress previous_direct_peer_address = peer_address();
   PathState previous_default_path = std::move(default_path_);
   active_effective_peer_migration_type_ = type;
   MaybeClearQueuedPacketsOnPathChange();
@@ -5783,7 +5781,7 @@ bool QuicConnection::UpdatePacketContent(QuicFrameType type) {
       return connected_;
     }
     QuicSocketAddress current_effective_peer_address =
-        GetEffectivePeerAddressFromCurrentPacket();
+        last_received_packet_info_.source_address;
     if (IsDefaultPath(last_received_packet_info_.destination_address,
                       last_received_packet_info_.source_address)) {
       return connected_;
@@ -5852,7 +5850,7 @@ void QuicConnection::MaybeStartIetfPeerMigration() {
     QUIC_LOG_EVERY_N_SEC(INFO, 60)
         << ENDPOINT << "Effective peer's ip:port changed from "
         << default_path_.peer_address.ToString() << " to "
-        << GetEffectivePeerAddressFromCurrentPacket().ToString()
+        << last_received_packet_info_.source_address.ToString()
         << " before handshake confirmed, "
            "current_effective_peer_migration_type_: "
         << current_effective_peer_migration_type_;
@@ -5864,7 +5862,7 @@ void QuicConnection::MaybeStartIetfPeerMigration() {
         absl::StrFormat(
             "Peer address changed from %s to %s before handshake is confirmed.",
             default_path_.peer_address.ToString(),
-            GetEffectivePeerAddressFromCurrentPacket().ToString()),
+            last_received_packet_info_.source_address.ToString()),
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return;
   }
@@ -6516,7 +6514,7 @@ void QuicConnection::MaybeMigrateToMultiPortPath() {
     QUIC_CLIENT_HISTOGRAM_ENUM(
         "QuicConnection.MultiPortPathStatusWhenMigrating",
         MultiPortStatusOnMigration::kNotValidated,
-        MultiPortStatusOnMigration::kMaxValue,
+        MultiPortStatusOnMigration::kNumStatuses,
         "Status of the multi port path upon migration");
     return;
   }
@@ -6531,7 +6529,7 @@ void QuicConnection::MaybeMigrateToMultiPortPath() {
     QUIC_CLIENT_HISTOGRAM_ENUM(
         "QuicConnection.MultiPortPathStatusWhenMigrating",
         MultiPortStatusOnMigration::kWaitingForRefreshValidation,
-        MultiPortStatusOnMigration::kMaxValue,
+        MultiPortStatusOnMigration::kNumStatuses,
         "Status of the multi port path upon migration");
   } else {
     // The multi-port path is currently under probing.
@@ -6539,7 +6537,7 @@ void QuicConnection::MaybeMigrateToMultiPortPath() {
     QUIC_CLIENT_HISTOGRAM_ENUM(
         "QuicConnection.MultiPortPathStatusWhenMigrating",
         MultiPortStatusOnMigration::kPendingRefreshValidation,
-        MultiPortStatusOnMigration::kMaxValue,
+        MultiPortStatusOnMigration::kNumStatuses,
         "Status of the multi port path upon migration");
   }
   if (context == nullptr) {
@@ -7300,7 +7298,6 @@ void QuicConnection::MaybeUpdateBytesSentToAlternativeAddress(
   QUICHE_DCHECK(!IsDefaultPath(default_path_.self_address, peer_address));
   if (!IsAlternativePath(default_path_.self_address, peer_address)) {
     QUIC_DLOG(INFO) << "Wrote to uninteresting peer address: " << peer_address
-                    << " default direct_peer_address_ " << direct_peer_address_
                     << " alternative path peer address "
                     << alternative_path_.peer_address;
     return;
@@ -7326,14 +7323,14 @@ void QuicConnection::MaybeUpdateBytesReceivedFromAlternativeAddress(
     QuicByteCount received_packet_size) {
   if (!version().IsIetfQuic() || perspective_ != Perspective::IS_SERVER ||
       !IsAlternativePath(last_received_packet_info_.destination_address,
-                         GetEffectivePeerAddressFromCurrentPacket()) ||
+                         last_received_packet_info_.source_address) ||
       last_received_packet_info_.received_bytes_counted) {
     return;
   }
   // Only update bytes received if this probing frame is received on the most
   // recent alternative path.
   QUICHE_DCHECK(!IsDefaultPath(last_received_packet_info_.destination_address,
-                               GetEffectivePeerAddressFromCurrentPacket()));
+                               last_received_packet_info_.source_address));
   if (!alternative_path_.validated) {
     alternative_path_.bytes_received_before_address_validation +=
         received_packet_size;
@@ -7342,10 +7339,10 @@ void QuicConnection::MaybeUpdateBytesReceivedFromAlternativeAddress(
 }
 
 bool QuicConnection::IsDefaultPath(
-    const QuicSocketAddress& self_address,
-    const QuicSocketAddress& peer_address) const {
-  return direct_peer_address_ == peer_address &&
-         default_path_.self_address == self_address;
+    const QuicSocketAddress& path_self_address,
+    const QuicSocketAddress& path_peer_address) const {
+  return peer_address() == path_peer_address &&
+         default_path_.self_address == path_self_address;
 }
 
 bool QuicConnection::IsAlternativePath(
@@ -7402,7 +7399,7 @@ QuicConnection::PathState& QuicConnection::PathState::operator=(
 
 bool QuicConnection::IsReceivedPeerAddressValidated() const {
   QuicSocketAddress current_effective_peer_address =
-      GetEffectivePeerAddressFromCurrentPacket();
+      last_received_packet_info_.source_address;
   QUICHE_DCHECK(current_effective_peer_address.IsInitialized());
   return (alternative_path_.peer_address.host() ==
               current_effective_peer_address.host() &&
@@ -7494,7 +7491,7 @@ QuicConnection::ReversePathValidationResultDelegate::
     : QuicPathValidator::ResultDelegate(),
       connection_(connection),
       original_direct_peer_address_(direct_peer_address),
-      peer_address_default_path_(connection->direct_peer_address_),
+      peer_address_default_path_(connection->peer_address()),
       peer_address_alternative_path_(
           connection_->alternative_path_.peer_address),
       active_effective_peer_migration_type_(
@@ -7515,7 +7512,7 @@ void QuicConnection::ReversePathValidationResultDelegate::
           context->peer_address().ToString(),
           " completed without active peer address change: current "
           "peer address on default path ",
-          connection_->direct_peer_address_.ToString(),
+          connection_->peer_address().ToString(),
           ", peer address on default path when the reverse path "
           "validation was kicked off ",
           peer_address_default_path_.ToString(),

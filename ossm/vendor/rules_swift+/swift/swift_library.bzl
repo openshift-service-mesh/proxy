@@ -16,7 +16,7 @@
 
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@bazel_skylib//lib:sets.bzl", "sets")
-load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(
     "//swift/internal:attrs.bzl",
     "swift_deps_attr",
@@ -32,13 +32,17 @@ load(
     "//swift/internal:feature_names.bzl",
     "SWIFT_FEATURE_EMIT_PRIVATE_SWIFTINTERFACE",
     "SWIFT_FEATURE_EMIT_SWIFTINTERFACE",
+    "SWIFT_FEATURE_ENABLE_EMBEDDED",
     "SWIFT_FEATURE_ENABLE_LIBRARY_EVOLUTION",
 )
-load("//swift/internal:features.bzl", "configure_features")
+load(
+    "//swift/internal:features.bzl",
+    "configure_features",
+    "is_feature_enabled",
+)
 load(
     "//swift/internal:linking.bzl",
     "create_linking_context_from_compilation_outputs",
-    "new_objc_provider",
 )
 load(
     "//swift/internal:output_groups.bzl",
@@ -47,8 +51,8 @@ load(
 load("//swift/internal:providers.bzl", "SwiftCompilerPluginInfo")
 load(
     "//swift/internal:toolchain_utils.bzl",
-    "get_swift_toolchain",
-    "use_swift_toolchain",
+    "find_all_toolchains",
+    "use_all_toolchains",
 )
 load(
     "//swift/internal:utils.bzl",
@@ -59,7 +63,7 @@ load(
     "include_developer_search_paths",
 )
 load(":module_name.bzl", "derive_swift_module_name")
-load(":providers.bzl", "SwiftInfo")
+load(":providers.bzl", "SwiftInfo", "SwiftOverlayInfo")
 load(":swift_clang_module_aspect.bzl", "swift_clang_module_aspect")
 
 def _maybe_parse_as_library_copts(srcs):
@@ -67,11 +71,11 @@ def _maybe_parse_as_library_copts(srcs):
 
     Builds on Apple platforms typically don't use `swift_binary`; they use
     different linking logic (https://github.com/bazelbuild/rules_apple) to
-    produce fat binaries and bundles. This means that all such application code
-    will typically be in a `swift_library` target, and that includes a possible
-    custom main entry point. For this reason, we need to support the creation of
-    `swift_library` targets containing a `main.swift` file, which should *not*
-    pass the `-parse-as-library` flag to the compiler.
+    produce universal binaries and bundles. This means that all such application
+    code will typically be in a `swift_library` target, and that includes a
+    possible custom main entry point. For this reason, we need to support the
+    creation of `swift_library` targets containing a `main.swift` file, which
+    should *not* pass the `-parse-as-library` flag to the compiler.
 
     Args:
         srcs: A list of source files to check for the presence of `main.swift`.
@@ -140,33 +144,25 @@ def _swift_library_impl(ctx):
 
     extra_features = []
 
-    # TODO(b/239957001): Remove the global flag.
-    if (
-        ctx.attr.library_evolution or
-        ctx.attr._config_emit_swiftinterface[BuildSettingInfo].value
-    ):
+    if ctx.attr.library_evolution:
         extra_features.append(SWIFT_FEATURE_ENABLE_LIBRARY_EVOLUTION)
         extra_features.append(SWIFT_FEATURE_EMIT_SWIFTINTERFACE)
-
-    # TODO(b/239957001): Remove the global flag.
-    if (
-        ctx.attr.library_evolution or
-        ctx.attr._config_emit_private_swiftinterface[BuildSettingInfo].value
-    ):
-        extra_features.append(SWIFT_FEATURE_ENABLE_LIBRARY_EVOLUTION)
         extra_features.append(SWIFT_FEATURE_EMIT_PRIVATE_SWIFTINTERFACE)
 
-    module_name = ctx.attr.module_name
-    if not module_name:
-        module_name = derive_swift_module_name(ctx.label)
-
-    swift_toolchain = get_swift_toolchain(ctx)
+    toolchains = find_all_toolchains(ctx)
     feature_configuration = configure_features(
         ctx = ctx,
         requested_features = ctx.features + extra_features,
-        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
         unsupported_features = ctx.disabled_features,
     )
+
+    module_name = ctx.attr.module_name
+    if not module_name:
+        module_name = derive_swift_module_name(
+            ctx.label,
+            feature_configuration = feature_configuration,
+        )
 
     swift_infos = get_providers(deps, SwiftInfo)
     private_swift_infos = get_providers(private_deps, SwiftInfo)
@@ -197,13 +193,13 @@ def _swift_library_impl(ctx):
         generated_header_name = generated_header_name,
         include_dev_srch_paths = include_dev_srch_paths,
         module_name = module_name,
-        objc_infos = get_providers(ctx.attr.deps, apple_common.Objc),
         package_name = ctx.attr.package_name,
         plugins = get_providers(ctx.attr.plugins, SwiftCompilerPluginInfo),
+        private_cc_infos = get_providers(ctx.attr.private_deps, CcInfo),
         private_swift_infos = private_swift_infos,
         srcs = srcs,
         swift_infos = swift_infos,
-        swift_toolchain = swift_toolchain,
+        toolchains = toolchains,
         target_name = ctx.label.name,
         workspace_name = ctx.workspace_name,
     )
@@ -212,11 +208,21 @@ def _swift_library_impl(ctx):
     compilation_outputs = compile_result.compilation_outputs
     supplemental_outputs = compile_result.supplemental_outputs
 
+    # Override alwayslink to False if embedded Swift is enabled, as the
+    # features that require -force_load (like reflection) are not available
+    # in embedded mode.
+    alwayslink = ctx.attr.alwayslink
+    if alwayslink and is_feature_enabled(
+        feature_configuration = feature_configuration,
+        feature_name = SWIFT_FEATURE_ENABLE_EMBEDDED,
+    ):
+        alwayslink = False
+
     linking_context, linking_output = (
         create_linking_context_from_compilation_outputs(
             actions = ctx.actions,
             additional_inputs = additional_inputs,
-            alwayslink = ctx.attr.alwayslink,
+            alwayslink = alwayslink,
             compilation_outputs = compilation_outputs,
             feature_configuration = feature_configuration,
             include_dev_srch_paths = include_dev_srch_paths,
@@ -225,9 +231,13 @@ def _swift_library_impl(ctx):
                 dep[CcInfo].linking_context
                 for dep in deps + private_deps
                 if CcInfo in dep
+            ] + [
+                dep[SwiftOverlayInfo].linking_context
+                for dep in deps + private_deps
+                if SwiftOverlayInfo in dep
             ],
             module_context = module_context,
-            swift_toolchain = swift_toolchain,
+            toolchains = toolchains,
             user_link_flags = linkopts,
         )
     )
@@ -253,8 +263,7 @@ def _swift_library_impl(ctx):
         linking_output.library_to_link.pic_static_library,
     ])
 
-    implicit_deps_providers = swift_toolchain.implicit_deps_providers
-    providers = [
+    return [
         DefaultInfo(
             files = depset(direct_output_files),
             runfiles = ctx.runfiles(
@@ -279,25 +288,6 @@ def _swift_library_impl(ctx):
         ),
     ]
 
-    # Propagate an `apple_common.Objc` provider with linking info about the
-    # library so that linking with Apple Starlark APIs/rules works correctly.
-    # TODO(b/171413861): This can be removed when the Obj-C rules are migrated
-    # to use `CcLinkingContext`.
-    providers.append(new_objc_provider(
-        additional_link_inputs = additional_inputs,
-        additional_objc_infos = implicit_deps_providers.objc_infos,
-        alwayslink = ctx.attr.alwayslink,
-        deps = deps + private_deps,
-        feature_configuration = feature_configuration,
-        is_test = ctx.attr.testonly,
-        module_context = module_context,
-        libraries_to_link = [linking_output.library_to_link],
-        user_link_flags = linkopts,
-        swift_toolchain = swift_toolchain,
-    ))
-
-    return providers
-
 swift_library = rule(
     attrs = dicts.add(
         swift_library_rule_attrs(additional_deps_aspects = [
@@ -313,17 +303,26 @@ dependent for linking, but artifacts/flags required for compilation (such as
 .swiftmodule files, C headers, and search paths) will not be propagated.
 """,
             ),
-            # TODO(b/301253335): Once AEGs are enabled in Bazel, set the swift toolchain type in the
-            # exec configuration of `plugins` attribute and enable AEGs in swift_library.
-            "_use_auto_exec_groups": attr.bool(default = False),
         },
     ),
     doc = """\
 Compiles and links Swift code into a static library and Swift module.
 """,
+    exec_groups = {
+        # The `plugins` attribute associates its `exec` transition with this
+        # execution group. Even though the group is otherwise not used in this
+        # rule, we must resolve the Swift toolchain in this execution group so
+        # that the execution platform of the plugins will have the same
+        # constraints as the execution platform as the other uses of the same
+        # toolchain, ensuring that they don't get built for mismatched
+        # platforms.
+        "swift_plugins": exec_group(
+            toolchains = use_all_toolchains(),
+        ),
+    },
     fragments = [
         "cpp",
     ],
     implementation = _swift_library_impl,
-    toolchains = use_swift_toolchain(),
+    toolchains = use_all_toolchains(),
 )

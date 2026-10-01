@@ -1,3 +1,5 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load(
     "//swift:swift_interop_hint.bzl",
     "swift_interop_hint",
@@ -10,6 +12,10 @@ load(
     "//test/fixtures:common.bzl",
     "FIXTURE_TAGS",
     "forward_swift_info_from_swift_clang_module_aspect",
+)
+load(
+    ":custom_interop_rule.bzl",
+    "custom_interop_rule",
 )
 
 package(
@@ -122,5 +128,17 @@ objc_library(
 swift_library(
     name = "empty_lib",
     srcs = ["Empty.swift"],
+    tags = FIXTURE_TAGS,
+)
+
+forward_swift_info_from_swift_clang_module_aspect(
+    name = "custom_interop_rule_suppressed",
+    tags = FIXTURE_TAGS,
+    target = ":custom_interop_rule_suppressed_lib",
+)
+
+custom_interop_rule(
+    name = "custom_interop_rule_suppressed_lib",
+    aspect_hints = ["//swift:no_module"],
     tags = FIXTURE_TAGS,
 )

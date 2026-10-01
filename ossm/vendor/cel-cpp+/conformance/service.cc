@@ -14,7 +14,6 @@
 
 #include "conformance/service.h"
 
-#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -31,28 +30,23 @@
 #include "google/protobuf/struct.pb.h"
 #include "google/protobuf/timestamp.pb.h"
 #include "google/rpc/code.pb.h"
+#include "google/rpc/status.pb.h"
 #include "absl/log/absl_check.h"
 #include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
-#include "absl/types/optional.h"
-#include "absl/types/span.h"
 #include "checker/optional.h"
 #include "checker/standard_library.h"
 #include "checker/type_checker_builder.h"
 #include "checker/type_checker_builder_factory.h"
 #include "common/ast.h"
 #include "common/ast_proto.h"
-#include "common/decl.h"
 #include "common/decl_proto_v1alpha1.h"
-#include "common/expr.h"
 #include "common/internal/value_conversion.h"
 #include "common/source.h"
-#include "common/type.h"
 #include "common/value.h"
 #include "eval/public/activation.h"
 #include "eval/public/builtin_func_registrar.h"
@@ -62,6 +56,7 @@
 #include "eval/public/cel_value.h"
 #include "eval/public/transform_utility.h"
 #include "extensions/bindings_ext.h"
+#include "extensions/comprehensions_v2.h"
 #include "extensions/comprehensions_v2_functions.h"
 #include "extensions/comprehensions_v2_macros.h"
 #include "extensions/encoders.h"
@@ -70,10 +65,9 @@
 #include "extensions/math_ext_macros.h"
 #include "extensions/proto_ext.h"
 #include "extensions/protobuf/enum_adapter.h"
+#include "extensions/select_optimization.h"
 #include "extensions/strings.h"
 #include "internal/status_macros.h"
-#include "parser/macro.h"
-#include "parser/macro_expr_factory.h"
 #include "parser/macro_registry.h"
 #include "parser/options.h"
 #include "parser/parser.h"
@@ -82,9 +76,11 @@
 #include "runtime/constant_folding.h"
 #include "runtime/optional_types.h"
 #include "runtime/reference_resolver.h"
+#include "runtime/regex_precompilation.h"
 #include "runtime/runtime.h"
 #include "runtime/runtime_options.h"
 #include "runtime/standard_runtime_builder_factory.h"
+#include "testutil/test_macros.h"
 #include "cel/expr/conformance/proto2/test_all_types.pb.h"
 #include "cel/expr/conformance/proto2/test_all_types_extensions.pb.h"
 #include "cel/expr/conformance/proto3/test_all_types.pb.h"
@@ -105,109 +101,6 @@ using ::google::protobuf::Arena;
 namespace google::api::expr::runtime {
 
 namespace {
-
-bool IsCelNamespace(const cel::Expr& target) {
-  return target.has_ident_expr() && target.ident_expr().name() == "cel";
-}
-
-absl::optional<cel::Expr> CelBlockMacroExpander(cel::MacroExprFactory& factory,
-                                                cel::Expr& target,
-                                                absl::Span<cel::Expr> args) {
-  if (!IsCelNamespace(target)) {
-    return absl::nullopt;
-  }
-  cel::Expr& bindings_arg = args[0];
-  if (!bindings_arg.has_list_expr()) {
-    return factory.ReportErrorAt(
-        bindings_arg, "cel.block requires the first arg to be a list literal");
-  }
-  return factory.NewCall("cel.@block", args);
-}
-
-absl::optional<cel::Expr> CelIndexMacroExpander(cel::MacroExprFactory& factory,
-                                                cel::Expr& target,
-                                                absl::Span<cel::Expr> args) {
-  if (!IsCelNamespace(target)) {
-    return absl::nullopt;
-  }
-  cel::Expr& index_arg = args[0];
-  if (!index_arg.has_const_expr() || !index_arg.const_expr().has_int_value()) {
-    return factory.ReportErrorAt(
-        index_arg, "cel.index requires a single non-negative int constant arg");
-  }
-  int64_t index = index_arg.const_expr().int_value();
-  if (index < 0) {
-    return factory.ReportErrorAt(
-        index_arg, "cel.index requires a single non-negative int constant arg");
-  }
-  return factory.NewIdent(absl::StrCat("@index", index));
-}
-
-absl::optional<cel::Expr> CelIterVarMacroExpander(
-    cel::MacroExprFactory& factory, cel::Expr& target,
-    absl::Span<cel::Expr> args) {
-  if (!IsCelNamespace(target)) {
-    return absl::nullopt;
-  }
-  cel::Expr& depth_arg = args[0];
-  if (!depth_arg.has_const_expr() || !depth_arg.const_expr().has_int_value() ||
-      depth_arg.const_expr().int_value() < 0) {
-    return factory.ReportErrorAt(
-        depth_arg, "cel.iterVar requires two non-negative int constant args");
-  }
-  cel::Expr& unique_arg = args[1];
-  if (!unique_arg.has_const_expr() ||
-      !unique_arg.const_expr().has_int_value() ||
-      unique_arg.const_expr().int_value() < 0) {
-    return factory.ReportErrorAt(
-        unique_arg, "cel.iterVar requires two non-negative int constant args");
-  }
-  return factory.NewIdent(
-      absl::StrCat("@it:", depth_arg.const_expr().int_value(), ":",
-                   unique_arg.const_expr().int_value()));
-}
-
-absl::optional<cel::Expr> CelAccuVarMacroExpander(
-    cel::MacroExprFactory& factory, cel::Expr& target,
-    absl::Span<cel::Expr> args) {
-  if (!IsCelNamespace(target)) {
-    return absl::nullopt;
-  }
-  cel::Expr& depth_arg = args[0];
-  if (!depth_arg.has_const_expr() || !depth_arg.const_expr().has_int_value() ||
-      depth_arg.const_expr().int_value() < 0) {
-    return factory.ReportErrorAt(
-        depth_arg, "cel.accuVar requires two non-negative int constant args");
-  }
-  cel::Expr& unique_arg = args[1];
-  if (!unique_arg.has_const_expr() ||
-      !unique_arg.const_expr().has_int_value() ||
-      unique_arg.const_expr().int_value() < 0) {
-    return factory.ReportErrorAt(
-        unique_arg, "cel.accuVar requires two non-negative int constant args");
-  }
-  return factory.NewIdent(
-      absl::StrCat("@ac:", depth_arg.const_expr().int_value(), ":",
-                   unique_arg.const_expr().int_value()));
-}
-
-absl::Status RegisterCelBlockMacros(cel::MacroRegistry& registry) {
-  CEL_ASSIGN_OR_RETURN(auto block_macro,
-                       cel::Macro::Receiver("block", 2, CelBlockMacroExpander));
-  CEL_RETURN_IF_ERROR(registry.RegisterMacro(block_macro));
-  CEL_ASSIGN_OR_RETURN(auto index_macro,
-                       cel::Macro::Receiver("index", 1, CelIndexMacroExpander));
-  CEL_RETURN_IF_ERROR(registry.RegisterMacro(index_macro));
-  CEL_ASSIGN_OR_RETURN(
-      auto iter_var_macro,
-      cel::Macro::Receiver("iterVar", 2, CelIterVarMacroExpander));
-  CEL_RETURN_IF_ERROR(registry.RegisterMacro(iter_var_macro));
-  CEL_ASSIGN_OR_RETURN(
-      auto accu_var_macro,
-      cel::Macro::Receiver("accuVar", 2, CelAccuVarMacroExpander));
-  CEL_RETURN_IF_ERROR(registry.RegisterMacro(accu_var_macro));
-  return absl::OkStatus();
-}
 
 google::rpc::Code ToGrpcCode(absl::StatusCode code) {
   return static_cast<google::rpc::Code>(code);
@@ -236,13 +129,17 @@ cel::expr::Expr ExtractExpr(
 
 absl::Status LegacyParse(const conformance::v1alpha1::ParseRequest& request,
                          conformance::v1alpha1::ParseResponse& response,
-                         bool enable_optional_syntax) {
+                         bool enable_optional_syntax,
+                         bool enable_variadic_logical_operators,
+                         bool enable_pratt_parser) {
   if (request.cel_source().empty()) {
     return absl::InvalidArgumentError("no source code");
   }
   cel::ParserOptions options;
   options.enable_optional_syntax = enable_optional_syntax;
   options.enable_quoted_identifiers = true;
+  options.enable_variadic_logical_operators = enable_variadic_logical_operators;
+  options.enable_pratt_parser = enable_pratt_parser;
   cel::MacroRegistry macros;
   CEL_RETURN_IF_ERROR(cel::RegisterStandardMacros(macros, options));
   CEL_RETURN_IF_ERROR(
@@ -250,7 +147,7 @@ absl::Status LegacyParse(const conformance::v1alpha1::ParseRequest& request,
   CEL_RETURN_IF_ERROR(cel::extensions::RegisterBindingsMacros(macros, options));
   CEL_RETURN_IF_ERROR(cel::extensions::RegisterMathMacros(macros, options));
   CEL_RETURN_IF_ERROR(cel::extensions::RegisterProtoMacros(macros, options));
-  CEL_RETURN_IF_ERROR(RegisterCelBlockMacros(macros));
+  CEL_RETURN_IF_ERROR(cel::test::RegisterTestMacros(macros));
   CEL_ASSIGN_OR_RETURN(auto source, cel::NewSource(request.cel_source(),
                                                    request.source_location()));
   CEL_ASSIGN_OR_RETURN(auto parsed_expr,
@@ -260,10 +157,92 @@ absl::Status LegacyParse(const conformance::v1alpha1::ParseRequest& request,
   return absl::OkStatus();
 }
 
+absl::Status CheckImpl(google::protobuf::Arena* arena,
+                       const conformance::v1alpha1::CheckRequest& request,
+                       conformance::v1alpha1::CheckResponse& response) {
+  cel::expr::ParsedExpr parsed_expr;
+
+  ABSL_CHECK(ConvertWireCompatProto(request.parsed_expr(),  // Crash OK
+                                    &parsed_expr));
+
+  CEL_ASSIGN_OR_RETURN(std::unique_ptr<cel::Ast> ast,
+                       cel::CreateAstFromParsedExpr(parsed_expr));
+
+  absl::string_view location = parsed_expr.source_info().location();
+  std::unique_ptr<cel::Source> source;
+  if (absl::StartsWith(location, "Source: ")) {
+    location = absl::StripPrefix(location, "Source: ");
+    CEL_ASSIGN_OR_RETURN(source, cel::NewSource(location));
+  }
+
+  CEL_ASSIGN_OR_RETURN(
+      std::unique_ptr<cel::TypeCheckerBuilder> builder,
+      cel::CreateTypeCheckerBuilder(google::protobuf::DescriptorPool::generated_pool()));
+
+  if (!request.no_std_env()) {
+    CEL_RETURN_IF_ERROR(builder->AddLibrary(cel::StandardCheckerLibrary()));
+    CEL_RETURN_IF_ERROR(builder->AddLibrary(cel::OptionalCheckerLibrary()));
+    CEL_RETURN_IF_ERROR(
+        builder->AddLibrary(cel::extensions::BindingsCheckerLibrary()));
+    CEL_RETURN_IF_ERROR(
+        builder->AddLibrary(cel::extensions::StringsCheckerLibrary()));
+    CEL_RETURN_IF_ERROR(
+        builder->AddLibrary(cel::extensions::MathCheckerLibrary()));
+    CEL_RETURN_IF_ERROR(
+        builder->AddLibrary(cel::extensions::EncodersCheckerLibrary()));
+    CEL_RETURN_IF_ERROR(
+        builder->AddLibrary(cel::extensions::ComprehensionsV2CheckerLibrary()));
+  }
+
+  for (const auto& decl : request.type_env()) {
+    const auto& name = decl.name();
+    if (decl.has_function()) {
+      CEL_ASSIGN_OR_RETURN(
+          auto fn_decl, cel::FunctionDeclFromV1Alpha1Proto(
+                            name, decl.function(),
+                            google::protobuf::DescriptorPool::generated_pool(), arena));
+      CEL_RETURN_IF_ERROR(builder->AddFunction(std::move(fn_decl)));
+    } else if (decl.has_ident()) {
+      CEL_ASSIGN_OR_RETURN(
+          auto var_decl, cel::VariableDeclFromV1Alpha1Proto(
+                             name, decl.ident(),
+                             google::protobuf::DescriptorPool::generated_pool(), arena));
+      CEL_RETURN_IF_ERROR(builder->AddVariable(std::move(var_decl)));
+    }
+  }
+  builder->set_container(request.container());
+
+  CEL_ASSIGN_OR_RETURN(auto checker, std::move(*builder).Build());
+
+  CEL_ASSIGN_OR_RETURN(auto validation_result, checker->Check(std::move(ast)));
+
+  for (const auto& checker_issue : validation_result.GetIssues()) {
+    auto* issue = response.add_issues();
+    issue->set_code(ToGrpcCode(absl::StatusCode::kInvalidArgument));
+    if (source) {
+      issue->set_message(checker_issue.ToDisplayString(*source));
+    } else {
+      issue->set_message(checker_issue.message());
+    }
+  }
+
+  const cel::Ast* checked_ast = validation_result.GetAst();
+  if (!validation_result.IsValid() || checked_ast == nullptr) {
+    return absl::OkStatus();
+  }
+  cel::expr::CheckedExpr pb_checked_ast;
+  CEL_RETURN_IF_ERROR(
+      cel::AstToCheckedExpr(*validation_result.GetAst(), &pb_checked_ast));
+  ABSL_CHECK(ConvertWireCompatProto(pb_checked_ast,  // Crash OK
+                                    response.mutable_checked_expr()));
+  return absl::OkStatus();
+}
+
 class LegacyConformanceServiceImpl : public ConformanceServiceInterface {
  public:
   static absl::StatusOr<std::unique_ptr<LegacyConformanceServiceImpl>> Create(
-      bool optimize, bool recursive) {
+      bool optimize, bool recursive, bool select_optimization,
+      bool enable_variadic_logical_operators, bool enable_pratt_parser) {
     static auto* constant_arena = new Arena();
 
     google::protobuf::LinkMessageReflection<
@@ -301,11 +280,18 @@ class LegacyConformanceServiceImpl : public ConformanceServiceInterface {
     options.enable_heterogeneous_equality = true;
     options.enable_empty_wrapper_null_unboxing = true;
     options.enable_qualified_identifier_rewrites = true;
+    options.fail_on_warnings = false;
 
     if (optimize) {
       std::cerr << "Enabling optimizations" << std::endl;
       options.constant_folding = true;
       options.constant_arena = constant_arena;
+      options.enable_typed_field_access = true;
+    }
+
+    if (select_optimization) {
+      std::cerr << "Enabling select optimizations" << std::endl;
+      options.enable_select_optimization = true;
     }
 
     if (recursive) {
@@ -334,14 +320,16 @@ class LegacyConformanceServiceImpl : public ConformanceServiceInterface {
     CEL_RETURN_IF_ERROR(cel::extensions::RegisterMathExtensionFunctions(
         builder->GetRegistry(), options));
 
-    return absl::WrapUnique(
-        new LegacyConformanceServiceImpl(std::move(builder)));
+    return absl::WrapUnique(new LegacyConformanceServiceImpl(
+        std::move(builder), enable_variadic_logical_operators,
+        enable_pratt_parser));
   }
 
   void Parse(const conformance::v1alpha1::ParseRequest& request,
              conformance::v1alpha1::ParseResponse& response) override {
     auto status =
-        LegacyParse(request, response, /*enable_optional_syntax=*/false);
+        LegacyParse(request, response, /*enable_optional_syntax=*/false,
+                    enable_variadic_logical_operators_, enable_pratt_parser_);
     if (!status.ok()) {
       auto* issue = response.add_issues();
       issue->set_code(ToGrpcCode(status.code()));
@@ -351,9 +339,13 @@ class LegacyConformanceServiceImpl : public ConformanceServiceInterface {
 
   void Check(const conformance::v1alpha1::CheckRequest& request,
              conformance::v1alpha1::CheckResponse& response) override {
-    auto issue = response.add_issues();
-    issue->set_message("Check is not supported");
-    issue->set_code(google::rpc::Code::UNIMPLEMENTED);
+    google::protobuf::Arena arena;
+    auto status = CheckImpl(&arena, request, response);
+    if (!status.ok()) {
+      auto* issue = response.add_issues();
+      issue->set_code(ToGrpcCode(status.code()));
+      issue->set_message(status.message());
+    }
   }
 
   absl::Status Eval(const conformance::v1alpha1::EvalRequest& request,
@@ -362,8 +354,26 @@ class LegacyConformanceServiceImpl : public ConformanceServiceInterface {
     cel::expr::SourceInfo source_info;
     cel::expr::Expr expr = ExtractExpr(request);
     builder_->set_container(request.container());
-    auto cel_expression_status =
-        builder_->CreateExpression(&expr, &source_info);
+    absl::StatusOr<std::unique_ptr<CelExpression>> cel_expression_status =
+        absl::InternalError(
+            "no expression provided in ConformanceService::Eval");
+
+    if (request.has_parsed_expr()) {
+      cel::expr::ParsedExpr parsed_expr;
+      if (!ConvertWireCompatProto(request.parsed_expr(), &parsed_expr)) {
+        return absl::InternalError(
+            "failed to convert versioned ParsedExpr to unversioned");
+      }
+      cel_expression_status = builder_->CreateExpression(
+          &parsed_expr.expr(), &parsed_expr.source_info());
+    } else if (request.has_checked_expr()) {
+      cel::expr::CheckedExpr checked_expr;
+      if (!ConvertWireCompatProto(request.checked_expr(), &checked_expr)) {
+        return absl::InternalError(
+            "failed to convert versioned CheckedExpr to unversioned");
+      }
+      cel_expression_status = builder_->CreateExpression(&checked_expr);
+    }
 
     if (!cel_expression_status.ok()) {
       return absl::InternalError(cel_expression_status.status().ToString(
@@ -417,17 +427,23 @@ class LegacyConformanceServiceImpl : public ConformanceServiceInterface {
   }
 
  private:
-  explicit LegacyConformanceServiceImpl(
-      std::unique_ptr<CelExpressionBuilder> builder)
-      : builder_(std::move(builder)) {}
+  LegacyConformanceServiceImpl(std::unique_ptr<CelExpressionBuilder> builder,
+                               bool enable_variadic_logical_operators,
+                               bool enable_pratt_parser)
+      : builder_(std::move(builder)),
+        enable_variadic_logical_operators_(enable_variadic_logical_operators),
+        enable_pratt_parser_(enable_pratt_parser) {}
 
   std::unique_ptr<CelExpressionBuilder> builder_;
+  bool enable_variadic_logical_operators_;
+  bool enable_pratt_parser_;
 };
 
 class ModernConformanceServiceImpl : public ConformanceServiceInterface {
  public:
   static absl::StatusOr<std::unique_ptr<ModernConformanceServiceImpl>> Create(
-      bool optimize, bool recursive) {
+      bool optimize, bool recursive, bool select_optimization,
+      bool enable_variadic_logical_operators, bool enable_pratt_parser) {
     google::protobuf::LinkMessageReflection<
         cel::expr::conformance::proto3::TestAllTypes>();
     google::protobuf::LinkMessageReflection<
@@ -462,18 +478,25 @@ class ModernConformanceServiceImpl : public ConformanceServiceInterface {
     options.enable_timestamp_duration_overflow_errors = true;
     options.enable_heterogeneous_equality = true;
     options.enable_empty_wrapper_null_unboxing = true;
+    // Planning warnings are expected in conformance tests, but the test expects
+    // failure to happen at evaluation time so we ignore them.
+    options.fail_on_warnings = false;
     if (recursive) {
       options.max_recursion_depth = 48;
     }
 
-    return absl::WrapUnique(
-        new ModernConformanceServiceImpl(options, optimize));
+    return absl::WrapUnique(new ModernConformanceServiceImpl(
+        options, optimize, select_optimization,
+        enable_variadic_logical_operators, enable_pratt_parser));
   }
 
   absl::StatusOr<std::unique_ptr<const cel::Runtime>> Setup(
       absl::string_view container) {
     RuntimeOptions options(options_);
     options.container = std::string(container);
+    if (enable_optimizations_) {
+      options.enable_typed_field_access = true;
+    }
     CEL_ASSIGN_OR_RETURN(
         auto builder, CreateStandardRuntimeBuilder(
                           google::protobuf::DescriptorPool::generated_pool(), options));
@@ -481,9 +504,13 @@ class ModernConformanceServiceImpl : public ConformanceServiceInterface {
     if (enable_optimizations_) {
       CEL_RETURN_IF_ERROR(cel::extensions::EnableConstantFolding(
           builder, google::protobuf::MessageFactory::generated_factory()));
+      CEL_RETURN_IF_ERROR(cel::extensions::EnableRegexPrecompilation(builder));
     }
     CEL_RETURN_IF_ERROR(cel::EnableReferenceResolver(
         builder, cel::ReferenceResolverEnabled::kAlways));
+    if (enable_select_optimization_) {
+      CEL_RETURN_IF_ERROR(cel::extensions::EnableSelectOptimization(builder));
+    }
 
     auto& type_registry = builder.type_registry();
     // Use linked pbs in the generated descriptor pool.
@@ -516,7 +543,8 @@ class ModernConformanceServiceImpl : public ConformanceServiceInterface {
   void Parse(const conformance::v1alpha1::ParseRequest& request,
              conformance::v1alpha1::ParseResponse& response) override {
     auto status =
-        LegacyParse(request, response, /*enable_optional_syntax=*/true);
+        LegacyParse(request, response, /*enable_optional_syntax=*/true,
+                    enable_variadic_logical_operators_, enable_pratt_parser_);
     if (!status.ok()) {
       auto* issue = response.add_issues();
       issue->set_code(ToGrpcCode(status.code()));
@@ -527,7 +555,7 @@ class ModernConformanceServiceImpl : public ConformanceServiceInterface {
   void Check(const conformance::v1alpha1::CheckRequest& request,
              conformance::v1alpha1::CheckResponse& response) override {
     google::protobuf::Arena arena;
-    auto status = DoCheck(&arena, request, response);
+    auto status = CheckImpl(&arena, request, response);
     if (!status.ok()) {
       auto* issue = response.add_issues();
       issue->set_code(ToGrpcCode(status.code()));
@@ -605,88 +633,16 @@ class ModernConformanceServiceImpl : public ConformanceServiceInterface {
   }
 
  private:
-  explicit ModernConformanceServiceImpl(const RuntimeOptions& options,
-                                        bool enable_optimizations)
-      : options_(options), enable_optimizations_(enable_optimizations) {}
-
-  static absl::Status DoCheck(
-      google::protobuf::Arena* arena, const conformance::v1alpha1::CheckRequest& request,
-      conformance::v1alpha1::CheckResponse& response) {
-    cel::expr::ParsedExpr parsed_expr;
-
-    ABSL_CHECK(ConvertWireCompatProto(request.parsed_expr(),  // Crash OK
-                                      &parsed_expr));
-
-    CEL_ASSIGN_OR_RETURN(std::unique_ptr<cel::Ast> ast,
-                         cel::CreateAstFromParsedExpr(parsed_expr));
-
-    absl::string_view location = parsed_expr.source_info().location();
-    std::unique_ptr<cel::Source> source;
-    if (absl::StartsWith(location, "Source: ")) {
-      location = absl::StripPrefix(location, "Source: ");
-      CEL_ASSIGN_OR_RETURN(source, cel::NewSource(location));
-    }
-
-    CEL_ASSIGN_OR_RETURN(std::unique_ptr<cel::TypeCheckerBuilder> builder,
-                         cel::CreateTypeCheckerBuilder(
-                             google::protobuf::DescriptorPool::generated_pool()));
-
-    if (!request.no_std_env()) {
-      CEL_RETURN_IF_ERROR(builder->AddLibrary(cel::StandardCheckerLibrary()));
-      CEL_RETURN_IF_ERROR(builder->AddLibrary(cel::OptionalCheckerLibrary()));
-      CEL_RETURN_IF_ERROR(
-          builder->AddLibrary(cel::extensions::StringsCheckerLibrary()));
-      CEL_RETURN_IF_ERROR(
-          builder->AddLibrary(cel::extensions::MathCheckerLibrary()));
-      CEL_RETURN_IF_ERROR(
-          builder->AddLibrary(cel::extensions::EncodersCheckerLibrary()));
-    }
-
-    for (const auto& decl : request.type_env()) {
-      const auto& name = decl.name();
-      if (decl.has_function()) {
-        CEL_ASSIGN_OR_RETURN(
-            auto fn_decl, cel::FunctionDeclFromV1Alpha1Proto(
-                              name, decl.function(),
-                              google::protobuf::DescriptorPool::generated_pool(), arena));
-        CEL_RETURN_IF_ERROR(builder->AddFunction(std::move(fn_decl)));
-      } else if (decl.has_ident()) {
-        CEL_ASSIGN_OR_RETURN(
-            auto var_decl,
-            cel::VariableDeclFromV1Alpha1Proto(
-                name, decl.ident(), google::protobuf::DescriptorPool::generated_pool(),
-                arena));
-        CEL_RETURN_IF_ERROR(builder->AddVariable(std::move(var_decl)));
-      }
-    }
-    builder->set_container(request.container());
-
-    CEL_ASSIGN_OR_RETURN(auto checker, std::move(*builder).Build());
-
-    CEL_ASSIGN_OR_RETURN(auto validation_result,
-                         checker->Check(std::move(ast)));
-
-    for (const auto& checker_issue : validation_result.GetIssues()) {
-      auto* issue = response.add_issues();
-      issue->set_code(ToGrpcCode(absl::StatusCode::kInvalidArgument));
-      if (source) {
-        issue->set_message(checker_issue.ToDisplayString(*source));
-      } else {
-        issue->set_message(checker_issue.message());
-      }
-    }
-
-    const cel::Ast* checked_ast = validation_result.GetAst();
-    if (!validation_result.IsValid() || checked_ast == nullptr) {
-      return absl::OkStatus();
-    }
-    cel::expr::CheckedExpr pb_checked_ast;
-    CEL_RETURN_IF_ERROR(
-        cel::AstToCheckedExpr(*validation_result.GetAst(), &pb_checked_ast));
-    ABSL_CHECK(ConvertWireCompatProto(pb_checked_ast,  // Crash OK
-                                      response.mutable_checked_expr()));
-    return absl::OkStatus();
-  }
+  ModernConformanceServiceImpl(const RuntimeOptions& options,
+                               bool enable_optimizations,
+                               bool enable_select_optimization,
+                               bool enable_variadic_logical_operators,
+                               bool enable_pratt_parser)
+      : options_(options),
+        enable_optimizations_(enable_optimizations),
+        enable_select_optimization_(enable_select_optimization),
+        enable_variadic_logical_operators_(enable_variadic_logical_operators),
+        enable_pratt_parser_(enable_pratt_parser) {}
 
   static absl::StatusOr<std::unique_ptr<cel::TraceableProgram>> Plan(
       const cel::Runtime& runtime,
@@ -716,6 +672,9 @@ class ModernConformanceServiceImpl : public ConformanceServiceInterface {
 
   RuntimeOptions options_;
   bool enable_optimizations_;
+  bool enable_select_optimization_;
+  bool enable_variadic_logical_operators_;
+  bool enable_pratt_parser_;
 };
 
 }  // namespace
@@ -728,10 +687,12 @@ absl::StatusOr<std::unique_ptr<ConformanceServiceInterface>>
 NewConformanceService(const ConformanceServiceOptions& options) {
   if (options.modern) {
     return google::api::expr::runtime::ModernConformanceServiceImpl::Create(
-        options.optimize, options.recursive);
+        options.optimize, options.recursive, options.select_optimization,
+        options.enable_variadic_logical_operators, options.enable_pratt_parser);
   } else {
     return google::api::expr::runtime::LegacyConformanceServiceImpl::Create(
-        options.optimize, options.recursive);
+        options.optimize, options.recursive, options.select_optimization,
+        options.enable_variadic_logical_operators, options.enable_pratt_parser);
   }
 }
 

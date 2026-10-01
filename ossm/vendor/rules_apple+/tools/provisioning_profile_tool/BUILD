@@ -1,4 +1,4 @@
-load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("@rules_python//python:py_binary.bzl", "py_binary")
 
 licenses(["notice"])
 
@@ -9,13 +9,14 @@ py_binary(
     srcs_version = "PY3",
     visibility = [
         "//apple/internal:__pkg__",
+        "//test/starlark_tests:__subpackages__",
     ],
 )
 
 # Consumed by bazel tests.
 filegroup(
     name = "for_bazel_tests",
-    testonly = 1,
+    testonly = True,
     srcs = glob(["**"]),
     visibility = [
         "//tools:__pkg__",

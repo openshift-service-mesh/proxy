@@ -113,6 +113,7 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
         if go.mode.linkmode in (LINKMODE_C_SHARED, LINKMODE_C_ARCHIVE):
             out_cgo_export_h = go.declare_file(go, path = "_cgo_install.h")
         cgo_deps = cgo.deps
+        cgo_link_inputs = cgo.link_inputs
         runfiles = runfiles.merge(cgo.runfiles)
         emit_compilepkg(
             go,
@@ -139,12 +140,13 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
             cxxopts = cgo.cxxopts,
             objcopts = cgo.objcopts,
             objcxxopts = cgo.objcxxopts,
-            clinkopts = cgo.clinkopts,
+            ldflags = cgo.ldflags,
             testfilter = testfilter,
             is_external_pkg = is_external_pkg,
         )
     else:
         cgo_deps = depset()
+        cgo_link_inputs = depset()
         emit_compilepkg(
             go,
             sources = source.srcs,
@@ -193,6 +195,7 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
         _copts = tuple(source.copts),
         _cxxopts = tuple(source.cxxopts),
         _clinkopts = tuple(source.clinkopts),
+        _package_metadata = getattr(source, "_package_metadata", None),
 
         # Information on dependencies
         _dep_labels = tuple([d.data.label for d in direct]),
@@ -205,16 +208,23 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
         _validation_output = out_nogo_validation,
         _nogo_diagnostics = out_diagnostics,
         _cgo_deps = cgo_deps,
+        _cgo_link_inputs = cgo_link_inputs,
     )
-    x_defs = dict(source.x_defs)
+    x_defs = {}
     for a in direct:
         x_defs.update(a.x_defs)
+    x_defs.update(source.x_defs)
 
     # Ensure that the _cgo_export.h of the current target comes first when cgo_exports is iterated
     # by prepending it and specifying the order explicitly. This is required as the CcInfo attached
     # to the archive only exposes a single header rather than combining all headers.
     cgo_exports_direct = [out_cgo_export_h] if out_cgo_export_h else []
     cgo_exports = depset(direct = cgo_exports_direct, transitive = [a.cgo_exports for a in direct], order = "preorder")
+    package_metadata = getattr(data, "_package_metadata", None)
+    package_metadata_files = depset(
+        direct = [package_metadata] if package_metadata else [],
+        transitive = [getattr(a, "_package_metadata_files", depset()) for a in direct],
+    )
     return GoArchive(
         source = source,
         data = data,
@@ -223,7 +233,9 @@ def emit_archive(go, source = None, _recompile_suffix = "", recompile_internal_d
         transitive = depset([data], transitive = [a.transitive for a in direct]),
         x_defs = x_defs,
         cgo_deps = depset(transitive = [cgo_deps] + [a.cgo_deps for a in direct]),
+        cgo_link_inputs = depset(transitive = [cgo_link_inputs] + [a.cgo_link_inputs for a in direct]),
         cgo_exports = cgo_exports,
         runfiles = runfiles,
         _headers = headers,
+        _package_metadata_files = package_metadata_files,
     )

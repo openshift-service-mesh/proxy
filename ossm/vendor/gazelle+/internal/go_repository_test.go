@@ -60,10 +60,10 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
     name = "io_bazel_rules_go",
-    sha256 = "9d72f7b8904128afb98d46bbef82ad7223ec9ff3718d419afb355fddd9f9484a",
+    sha256 = "68af54cb97fbdee5e5e8fe8d210d15a518f9d62abfd71620c3eaff3b26a5ff86",
     urls = [
-        "https://mirror.bazel.build/github.com/bazel-contrib/rules_go/releases/download/v0.55.1/rules_go-v0.55.1.zip",
-        "https://github.com/bazel-contrib/rules_go/releases/download/v0.55.1/rules_go-v0.55.1.zip",
+        "https://mirror.bazel.build/github.com/bazel-contrib/rules_go/releases/download/v0.59.0/rules_go-v0.59.0.zip",
+        "https://github.com/bazel-contrib/rules_go/releases/download/v0.59.0/rules_go-v0.59.0.zip",
     ],
 )
 `,
@@ -75,6 +75,7 @@ gazelle_dependencies(
 		"GOPRIVATE": "example.com/m",
 		"GOSUMDB": "off",
 	},
+	go_env_inherit = ["GAZELLE_INHERITED_TOKEN"],
 )
 
 # gazelle:repo test
@@ -116,6 +117,9 @@ go_repository(
 }
 
 func TestMain(m *testing.M) {
+	if err := os.Setenv("GAZELLE_INHERITED_TOKEN", "top-secret-token"); err != nil {
+		panic(err)
+	}
 	bazel_testing.TestMain(m, testArgs)
 }
 
@@ -202,8 +206,8 @@ go_repository(
 http_archive(
     name = "io_bazel_rules_go",
     urls = [
-        "https://mirror.bazel.build/github.com/bazel-contrib/rules_go/releases/download/v0.55.1/rules_go-v0.55.1.zip",
-        "https://github.com/bazel-contrib/rules_go/releases/download/v0.55.1/rules_go-v0.55.1.zip",
+        "https://mirror.bazel.build/github.com/bazel-contrib/rules_go/releases/download/v0.59.0/rules_go-v0.59.0.zip",
+        "https://github.com/bazel-contrib/rules_go/releases/download/v0.59.0/rules_go-v0.59.0.zip",
     ],
 )
 
@@ -216,22 +220,126 @@ go_repository(
 	})
 }
 
-func TestModcacheRW(t *testing.T) {
-	if err := bazel_testing.RunBazel("query", "--enable_workspace", "@errors_go_mod//:go_default_library"); err != nil {
-		t.Fatal(err)
-	}
-	out, err := bazel_testing.BazelOutput("info", "output_base")
+func TestGoModCacheModes(t *testing.T) {
+	const (
+		repo       = "errors_go_mod"
+		importpath = "github.com/pkg/errors"
+		version    = "v0.8.1"
+		target     = "@errors_go_mod//:go_default_library"
+	)
+	outputBase, err := getBazelOutputBase()
 	if err != nil {
 		t.Fatal(err)
 	}
-	outputBase := strings.TrimSpace(string(out))
-	dir := filepath.Join(outputBase, "external/bazel_gazelle_go_repository_cache/pkg/mod/github.com/pkg/errors@v0.8.1")
-	info, err := os.Stat(dir)
-	if err != nil {
-		t.Fatal(err)
+	sharedModcache := filepath.Join(outputBase, "external/bazel_gazelle_go_repository_cache/pkg/mod")
+
+	cases := []struct {
+		name        string
+		extraArgs   []string
+		wantTree    bool
+		wantArchive bool
+	}{
+		{
+			name: "default",
+			// Explicit "0" (vs unset) invalidates Bazel's repo cache so the
+			// pre-clean's removal of shared-cache state gets repopulated.
+			extraArgs:   []string{"--repo_env=GO_REPOSITORY_EPHEMERAL_MODCACHE=0"},
+			wantTree:    true,
+			wantArchive: true,
+		},
+		{
+			name:        "ephemeral",
+			extraArgs:   []string{"--repo_env=GO_REPOSITORY_EPHEMERAL_MODCACHE=1"},
+			wantTree:    false,
+			wantArchive: false,
+		},
+		{
+			name: "host_modcache",
+			extraArgs: []string{
+				"--repo_env=GO_REPOSITORY_USE_HOST_MODCACHE=1",
+				"--repo_env=GOMODCACHE=" + t.TempDir(),
+			},
+			wantTree:    true,
+			wantArchive: true,
+		},
+		{
+			name: "host_cache",
+			extraArgs: []string{
+				"--repo_env=GO_REPOSITORY_USE_HOST_CACHE=1",
+				"--repo_env=GOMODCACHE=" + t.TempDir(),
+				"--repo_env=GOCACHE=" + t.TempDir(),
+			},
+			wantTree:    true,
+			wantArchive: true,
+		},
 	}
-	if info.Mode()&0o200 == 0 {
-		t.Fatal("module cache is read-only")
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Clear any prior write to the shared cache from another subtest so
+			// each case observes only its own fetch.
+			for _, p := range []string{
+				filepath.Join(sharedModcache, importpath+"@"+version),
+				filepath.Join(sharedModcache, "cache/download", importpath),
+			} {
+				if err := os.RemoveAll(p); err != nil {
+					t.Fatalf("pre-clean %s: %v", p, err)
+				}
+			}
+
+			// If the case overrides GOMODCACHE via --repo_env, that's where the
+			// tree/archive should end up; otherwise the shared cache.
+			modcache := sharedModcache
+			for _, arg := range tc.extraArgs {
+				if v, ok := strings.CutPrefix(arg, "--repo_env=GOMODCACHE="); ok {
+					modcache = v
+					break
+				}
+			}
+
+			args := append([]string{"query", "--enable_workspace"}, tc.extraArgs...)
+			args = append(args, target)
+
+			if err := bazel_testing.RunBazel(args...); err != nil {
+				t.Fatal(err)
+			}
+
+			treePath := filepath.Join(modcache, importpath+"@"+version)
+			_, treeErr := os.Stat(treePath)
+			switch {
+			case tc.wantTree && treeErr != nil:
+				t.Errorf("expected extracted tree at %s: %v", treePath, treeErr)
+			case !tc.wantTree && treeErr == nil:
+				t.Errorf("extracted tree at %s should not exist", treePath)
+			}
+
+			zipPath := filepath.Join(modcache, "cache/download", importpath, "@v", version+".zip")
+			zipInfo, zipErr := os.Stat(zipPath)
+			switch {
+			case tc.wantArchive && zipErr != nil:
+				t.Errorf("expected module zip at %s: %v", zipPath, zipErr)
+			case tc.wantArchive && zipInfo.Mode()&0o200 == 0:
+				t.Errorf("module zip at %s is not writable (mode %v); -modcacherw missing?", zipPath, zipInfo.Mode())
+			case !tc.wantArchive && zipErr == nil:
+				t.Errorf("module zip at %s should not exist", zipPath)
+			}
+
+			// A leaked GOMODCACHE tempdir under the repo looks like a `cache/download` subtree.
+			repoRoot := filepath.Join(outputBase, "external", repo)
+			walkErr := filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				if info.IsDir() && filepath.Base(path) == "download" && filepath.Base(filepath.Dir(path)) == "cache" {
+					t.Errorf("leaked GOMODCACHE tree: %s", path)
+					return filepath.SkipDir
+				}
+				return nil
+			})
+			if walkErr != nil {
+				t.Fatalf("walking %s: %v", repoRoot, walkErr)
+			}
+		})
 	}
 }
 
@@ -248,10 +356,42 @@ func TestRepoCacheContainsGoEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not read file %s: %v", goEnvPath, err)
 	}
-	for _, want := range []string{"GOPRIVATE='example.com/m'", "GOSUMDB='off'"} {
+	for _, want := range []string{
+		"GOPRIVATE='example.com/m'",
+		"GOSUMDB='off'",
+		"GAZELLE_INHERITED_TOKEN='top-secret-token'",
+	} {
 		if !strings.Contains(string(gotBytes), want) {
 			t.Fatalf("go.env did not contain %s", want)
 		}
+	}
+
+	// The cache env must stay relocatable so that vendoring across users can use said go.env.
+	for _, line := range strings.Split(string(gotBytes), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			t.Fatalf("malformed go.env line %q", line)
+		}
+		value = strings.Trim(value, "'")
+		if filepath.IsAbs(value) {
+			t.Errorf("go.env: %s=%s is an absolute path; go.env must be relocatable", key, value)
+		}
+		if strings.Contains(value, outputBase) {
+			t.Errorf("go.env: %s=%s references the output base; go.env must be relocatable", key, value)
+		}
+	}
+
+	goEnvBzlPath := filepath.Join(outputBase, "external/bazel_gazelle_go_repository_config", "go_env.bzl")
+	goEnvBzl, err := os.ReadFile(goEnvBzlPath)
+	if err != nil {
+		t.Fatalf("could not read file %s: %v", goEnvBzlPath, err)
+	}
+	if !strings.Contains(string(goEnvBzl), "\"GAZELLE_INHERITED_TOKEN\": \"top-secret-token\"") {
+		t.Fatalf("go_env.bzl did not contain inherited GAZELLE_INHERITED_TOKEN")
 	}
 }
 

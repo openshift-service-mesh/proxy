@@ -16,18 +16,17 @@ local_path_override(
 
 bazel_dep(name = "bazel_features", version = "1.27.0")
 bazel_dep(name = "protobuf", version = "27.0", repo_name = "my_protobuf")
-bazel_dep(name = "rules_go", version = "0.58.3", repo_name = "my_rules_go")
+bazel_dep(name = "rules_go", version = "0.59.0", repo_name = "my_rules_go")
 bazel_dep(name = "rules_license", version = "1.0.0")
 bazel_dep(name = "package_metadata", version = "0.0.5")
-bazel_dep(name = "rules_proto", version = "6.0.0", repo_name = "my_rules_proto")
 bazel_dep(name = "rules_testing", version = "0.6.0")
 
 go_sdk = use_extension("@my_rules_go//go:extensions.bzl", "go_sdk")
-go_sdk.download(version = "1.24.2")
+go_sdk.download(version = "1.24.12")
 
 # This bazel_dep provides the Go dependency github.com/cloudflare/circl, which requires custom
 # patches beyond what Gazelle can generate.
-bazel_dep(name = "circl", version = "1.3.7")
+bazel_dep(name = "circl", version = "1.3.8")
 
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
 go_deps.config(
@@ -81,11 +80,22 @@ go_deps.gazelle_override(
 
 # Apply a patch to test the `module_override` tags.
 go_deps.module_override(
+    patch_cmds = [
+        "echo 'const PatchCmdHello = \"patch_cmd_hello\"' >> require/require.go",
+    ],
     patch_strip = 1,
     patches = [
         "//patches:testify.patch",
     ],
     path = "github.com/stretchr/testify",
+)
+
+# example.org/collision/mangle and example.org/collision_mangle mangle to the
+# same default Bazel repo name (org_example_collision_mangle). Assign a distinct
+# repo name to one of them via module_override so both can be depended on.
+go_deps.module_override(
+    path = "example.org/collision_mangle",
+    repo_name = "org_example_collision_mangle_alt",
 )
 
 # Test an archive override from a known archive.
@@ -110,6 +120,15 @@ go_deps.archive_override(
 go_deps.gazelle_override(
     build_file_generation = "clean",
     path = "github.com/google/go-jsonnet",
+)
+
+# Test a module that ships with its own BUILD files that load proto rules from
+# @rules_proto, which is provided as a compatibility shim by the go_deps
+# extension since Gazelle no longer depends on rules_proto.
+# See https://github.com/bazel-contrib/bazel-gazelle/issues/2358.
+go_deps.gazelle_override(
+    build_file_generation = "off",
+    path = "example.org/proto_compat",
 )
 
 # Transitive dependencies have to be listed here explicitly.
@@ -147,7 +166,10 @@ use_repo(
     "com_github_google_go_jsonnet",
     "com_github_google_safetext",
     "com_github_stretchr_testify",
+    "org_example_collision_mangle",
+    "org_example_collision_mangle_alt",
     "org_example_hello",
+    "org_example_proto_compat",
     "org_golang_google_genproto",
     "org_golang_google_genproto_googleapis_bytestream",
     "org_golang_google_protobuf",

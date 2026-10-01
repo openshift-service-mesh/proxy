@@ -1,6 +1,6 @@
 """Implementation for yq rule"""
 
-load("@aspect_bazel_lib//lib:stamping.bzl", "STAMP_ATTRS", "maybe_stamp")
+load("@bazel_lib//lib:stamping.bzl", "STAMP_ATTRS", "maybe_stamp")
 
 _yq_attrs = dict({
     "srcs": attr.label_list(
@@ -9,6 +9,7 @@ _yq_attrs = dict({
         allow_empty = True,
     ),
     "expression": attr.string(mandatory = False),
+    "expression_file": attr.label(allow_single_file = True),
     "args": attr.string_list(),
     "outs": attr.output_list(mandatory = True),
     "_parse_status_file_expression": attr.label(
@@ -27,11 +28,16 @@ def _escape_path(path):
     return "/".join([".." for t in path.split("/")]) + "/"
 
 def _yq_impl(ctx):
-    yq_bin = ctx.toolchains["@aspect_bazel_lib//lib:yq_toolchain_type"].yqinfo.bin
+    yq_bin = ctx.toolchains["@yq.bzl//yq/toolchain:type"].yqinfo.bin
 
     outs = ctx.outputs.outs
     args = ctx.attr.args[:]
     inputs = ctx.files.srcs[:]
+
+    if ctx.attr.expression and ctx.attr.expression_file:
+        fail("Cannot provide both an expression and an expression_file")
+    if ctx.attr.expression_file:
+        inputs.append(ctx.file.expression_file)
 
     split_operation = is_split_operation(args)
 
@@ -52,7 +58,7 @@ def _yq_impl(ctx):
             tools = [yq_bin],
             inputs = [stamp.stable_status_file, stamp.volatile_status_file, ctx.file._parse_status_file_expression],
             outputs = [stamp_yaml],
-            command = "{yq} --from-file {expression} {stable} {volatile} > {out}".format(
+            command = "{yq} --input-format=props --output-format=yaml --from-file {expression} {stable} {volatile} > {out}".format(
                 yq = yq_bin.path,
                 expression = ctx.file._parse_status_file_expression.path,
                 stable = stamp.stable_status_file.path,
@@ -60,7 +66,7 @@ def _yq_impl(ctx):
                 out = stamp_yaml.path,
             ),
             mnemonic = "ConvertStatusToYaml",
-            toolchain = "@aspect_bazel_lib//lib:yq_toolchain_type",
+            toolchain = "@yq.bzl//yq/toolchain:type",
         )
     else:
         # create an empty stamp file as placeholder
@@ -72,21 +78,20 @@ def _yq_impl(ctx):
 
     # For split operations, yq outputs files in the same directory so we
     # must cd to the correct output dir before executing it
-    bin_dir = ctx.bin_dir.path
-    if ctx.label.workspace_name:
-        bin_dir = "%s/external/%s" % (bin_dir, ctx.label.workspace_name)
-    bin_dir = bin_dir + "/" + ctx.label.package
+    bin_dir = outs[0].dirname
     escape_bin_dir = _escape_path(bin_dir)
     cmd = "cd {bin_dir} && {yq} {args} {eval_cmd} {expression} {sources} {maybe_out}".format(
         bin_dir = bin_dir,
         yq = escape_bin_dir + yq_bin.path,
-        eval_cmd = "eval" if len(inputs) <= 1 else "eval-all",
+        # Keep expression_file and stamp files from changing how sources select the subcommand.
+        eval_cmd = "eval" if len(ctx.files.srcs) == 0 else "eval-all",
         args = " ".join(args),
-        expression = "'%s'" % ctx.attr.expression if ctx.attr.expression else "",
+        expression = "--from-file '%s%s'" % (escape_bin_dir, ctx.file.expression_file.path) if ctx.attr.expression_file else "'%s'" % ctx.attr.expression if ctx.attr.expression else "",
         sources = " ".join(["'%s%s'" % (escape_bin_dir, file.path) for file in ctx.files.srcs]),
         # In the -s/--split-exr case, the out file names are determined by the yq expression
         maybe_out = (" > %s%s" % (escape_bin_dir, outs[0].path)) if len(outs) == 1 else "",
     )
+
     ctx.actions.run_shell(
         tools = [yq_bin],
         inputs = inputs,
@@ -94,7 +99,7 @@ def _yq_impl(ctx):
         command = cmd,
         env = {"STAMP": escape_bin_dir + stamp_yaml.path},
         mnemonic = "Yq",
-        toolchain = "@aspect_bazel_lib//lib:yq_toolchain_type",
+        toolchain = "@yq.bzl//yq/toolchain:type",
     )
 
     return DefaultInfo(files = depset(outs), runfiles = ctx.runfiles(outs))

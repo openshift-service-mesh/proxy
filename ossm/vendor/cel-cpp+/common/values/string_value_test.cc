@@ -82,7 +82,7 @@ TEST_F(StringValueTest, TryFlat) {
   EXPECT_THAT(
       StringValue(absl::MakeFragmentedCord({"Hello, World!", "World, Hello!"}))
           .TryFlat(),
-      Eq(absl::nullopt));
+      Eq(std::nullopt));
 }
 
 TEST_F(StringValueTest, ToString) {
@@ -227,7 +227,7 @@ TEST_F(StringValueTest, IndexOf) {
 
   EXPECT_THAT(big_string.IndexOf("is"), Optional(Eq(2)));
   EXPECT_THAT(big_string_cord.IndexOf("is"), Optional(Eq(2)));
-  EXPECT_THAT(big_string_cord.IndexOf("not found"), Eq(absl::nullopt));
+  EXPECT_THAT(big_string_cord.IndexOf("not found"), Eq(std::nullopt));
 
   EXPECT_THAT(big_string.IndexOf(small_string, 4), Optional(Eq(12)));
   EXPECT_THAT(big_string.IndexOf(small_string_cord, 4), Optional(Eq(12)));
@@ -237,16 +237,15 @@ TEST_F(StringValueTest, IndexOf) {
   EXPECT_THAT(big_string.IndexOf("is", 4), Optional(Eq(12)));
   EXPECT_THAT(big_string_cord.IndexOf("is", 4), Optional(Eq(12)));
 
-  EXPECT_THAT(big_string.IndexOf(small_string, 13), Eq(absl::nullopt));
-  EXPECT_THAT(big_string.IndexOf(small_string_cord, 13), Eq(absl::nullopt));
-  EXPECT_THAT(big_string_cord.IndexOf(small_string, 13), Eq(absl::nullopt));
-  EXPECT_THAT(big_string_cord.IndexOf(small_string_cord, 13),
-              Eq(absl::nullopt));
+  EXPECT_THAT(big_string.IndexOf(small_string, 13), Eq(std::nullopt));
+  EXPECT_THAT(big_string.IndexOf(small_string_cord, 13), Eq(std::nullopt));
+  EXPECT_THAT(big_string_cord.IndexOf(small_string, 13), Eq(std::nullopt));
+  EXPECT_THAT(big_string_cord.IndexOf(small_string_cord, 13), Eq(std::nullopt));
 
   EXPECT_THAT(big_string.IndexOf(absl::Cord("is"), 4), Optional(Eq(12)));
   EXPECT_THAT(big_string_cord.IndexOf(absl::Cord("is"), 4), Optional(Eq(12)));
-  EXPECT_THAT(big_string.IndexOf(absl::Cord("is"), 13), Eq(absl::nullopt));
-  EXPECT_THAT(big_string_cord.IndexOf(absl::Cord("is"), 13), Eq(absl::nullopt));
+  EXPECT_THAT(big_string.IndexOf(absl::Cord("is"), 13), Eq(std::nullopt));
+  EXPECT_THAT(big_string_cord.IndexOf(absl::Cord("is"), 13), Eq(std::nullopt));
 }
 
 TEST_F(StringValueTest, LowerAscii) {
@@ -318,7 +317,7 @@ TEST_F(StringValueTest, LastIndexOf) {
 
   EXPECT_THAT(big_string.LastIndexOf("is"), Optional(Eq(12)));
   EXPECT_THAT(big_string_cord.LastIndexOf("is"), Optional(Eq(12)));
-  EXPECT_THAT(big_string_cord.LastIndexOf("not found"), Eq(absl::nullopt));
+  EXPECT_THAT(big_string_cord.LastIndexOf("not found"), Eq(std::nullopt));
 
   EXPECT_THAT(big_string.LastIndexOf(small_string, 4), Optional(Eq(2)));
   EXPECT_THAT(big_string.LastIndexOf(small_string_cord, 4), Optional(Eq(2)));
@@ -410,6 +409,35 @@ TEST_F(StringValueTest, CharAt) {
   EXPECT_THAT(big_string_cord.CharAt(-1),
               ErrorValueIs(absl::InvalidArgumentError(
                   "<string>.charAt(<pos>): <pos> is less than 0")));
+}
+
+TEST_F(StringValueTest, Substring) {
+  using ::cel::test::ErrorValueIs;
+  using ::cel::test::StringValueIs;
+
+  // Each '€' is three bytes, so the cord built here is 18 bytes and is stored
+  // as a large (cord-backed) value. The substring length must be measured in
+  // code units, not code points, otherwise the cord overload truncates a
+  // multi-byte character or underflows the length.
+  StringValue unicode_cord = StringValue(absl::Cord("€€€€€€"));
+  StringValue unicode_view = StringValue("€€€€€€");
+
+  EXPECT_THAT(unicode_cord.Substring(0, 2), StringValueIs("€€"));
+  EXPECT_THAT(unicode_view.Substring(0, 2), StringValueIs("€€"));
+  EXPECT_THAT(unicode_cord.Substring(1, 2), StringValueIs("€"));
+  EXPECT_THAT(unicode_view.Substring(1, 2), StringValueIs("€"));
+  EXPECT_THAT(unicode_cord.Substring(2, 4), StringValueIs("€€"));
+  EXPECT_THAT(unicode_view.Substring(2, 4), StringValueIs("€€"));
+  EXPECT_THAT(unicode_cord.Substring(2), StringValueIs("€€€€"));
+  EXPECT_THAT(unicode_view.Substring(2), StringValueIs("€€€€"));
+
+  EXPECT_THAT(unicode_cord.Substring(0, 7),
+              ErrorValueIs(absl::InvalidArgumentError(
+                  "<string>.substring(<start>, <end>): <start> or <end> is "
+                  "greater than <string>.size()")));
+  EXPECT_THAT(unicode_cord.Substring(-1),
+              ErrorValueIs(absl::InvalidArgumentError(
+                  "<string>.substring(<start>): <start> is less than 0")));
 }
 
 TEST_F(StringValueTest, Join) {

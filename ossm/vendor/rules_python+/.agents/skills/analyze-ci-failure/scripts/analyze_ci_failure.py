@@ -16,6 +16,25 @@ def fetch_log(build_id, job_id, output_path):
     else:
         log_url = f"https://buildkite.com/organizations/bazel/pipelines/rules-python-python/builds/{build_id}/jobs/{job_id}/download.txt"
 
+    # Check if this is a GitHub Actions job
+    gh_match = re.search(r"github\.com/.*/job/(\d+)", log_url) or re.search(
+        r"^(\d+)$", job_id
+    )
+    if gh_match:
+        gh_job_id = gh_match.group(1)
+        print(f"📥 Fetching GitHub Action log for job {gh_job_id} using gh CLI...")
+        cmd = ["gh", "run", "view", "--job", gh_job_id, "--log"]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            with open(output_path, "w") as f:
+                f.write(res.stdout)
+            return True
+        except Exception as e:
+            print(
+                f"⚠️ Failed to fetch GitHub log via gh CLI for job {gh_job_id}: {e}",
+                file=sys.stderr,
+            )
+
     if not log_url.endswith("/download.txt") and "buildkite.com" in log_url:
         log_url = re.sub(r"/log$", "/download.txt", log_url)
 
@@ -55,6 +74,13 @@ def parse_log(log_path):
                 "no such package",
                 "no such target",
                 "exit code",
+                "exit-code",
+                "fatal:",
+                "fatal",
+                "##[error]",
+                "Would reformat:",
+                "would be reformatted",
+                "error]",
             ]
         ):
             errors.append(line.strip())
@@ -98,12 +124,12 @@ def main():
     parser.add_argument("conv_id", help="Conversation ID to report back to")
     args = parser.parse_args()
 
-    skill_dir = os.path.abspath(os.path.dirname(__file__))
-    logs_dir = os.path.join(skill_dir, "ci_logs")
-    os.makedirs(logs_dir, exist_ok=True)
+    skill_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    scratch_dir = os.path.join(skill_dir, "scratch")
+    os.makedirs(scratch_dir, exist_ok=True)
 
     safe_jname = re.sub(r"[^a-zA-Z0-9]", "_", args.job_name)
-    log_path = os.path.join(logs_dir, f"ci_{safe_jname}_{args.job_id}.log")
+    log_path = os.path.join(scratch_dir, f"ci_{safe_jname}_{args.job_id}.log")
 
     fetch_log(args.build_id, args.job_id, log_path)
 
@@ -111,7 +137,7 @@ def main():
     errors = parse_log(log_path)
     plan = create_plan(args.job_name, log_path, errors)
 
-    plan_file = os.path.join(logs_dir, f"ci_plan_{safe_jname}.md")
+    plan_file = os.path.join(scratch_dir, f"ci_plan_{safe_jname}.md")
     with open(plan_file, "w") as f:
         f.write(plan)
 

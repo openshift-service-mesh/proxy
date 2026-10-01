@@ -1,5 +1,9 @@
 #include <event2/event-config.h>
 
+#ifdef __APPLE__
+#include <event2/util.h>
+#endif
+
 #ifdef EVENT__HAVE_PTHREADS
 #include <pthread.h>
 #endif
@@ -46,6 +50,18 @@ int main() {
   if (!TestSizeof()) {
     pass = 0;
   }
+
+#ifdef __APPLE__
+  // The TCP fallback cannot create Unix datagram socket pairs.
+  evutil_socket_t sockets[2];
+  if (evutil_socketpair(AF_UNIX, SOCK_DGRAM, 0, sockets) != 0) {
+    perror("FAIL: evutil_socketpair(AF_UNIX, SOCK_DGRAM)");
+    pass = 0;
+  } else {
+    evutil_closesocket(sockets[0]);
+    evutil_closesocket(sockets[1]);
+  }
+#endif
 
   if (pass) {
     printf("PASS\n");

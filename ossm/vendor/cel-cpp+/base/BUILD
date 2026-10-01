@@ -14,6 +14,7 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//bazel:copts.bzl", "CEL_COPTS")
 
 package(
     # Under active development, not yet being released.
@@ -31,10 +32,12 @@ cc_library(
         "attribute.h",
         "attribute_set.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":kind",
         "//internal:status_macros",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/base:nullability",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -48,6 +51,7 @@ cc_library(
 cc_library(
     name = "kind",
     hdrs = ["kind.h"],
+    copts = CEL_COPTS,
     deps = [
         "//common:kind",
         "//common:type_kind",
@@ -59,6 +63,7 @@ cc_library(
     name = "operators",
     srcs = ["operators.cc"],
     hdrs = ["operators.h"],
+    copts = CEL_COPTS,
     deps = [
         "//base/internal:operators",
         "@com_google_absl//absl/base",
@@ -72,6 +77,7 @@ cc_library(
 cc_test(
     name = "operators_test",
     srcs = ["operators_test.cc"],
+    copts = CEL_COPTS,
     deps = [
         ":operators",
         "//base/internal:operators",
@@ -88,6 +94,7 @@ cc_library(
     hdrs = [
         "type_provider.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//common:value",
     ],
@@ -98,6 +105,7 @@ cc_library(
     hdrs = [
         "function.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//runtime:function",
     ],
@@ -108,6 +116,7 @@ cc_library(
     hdrs = [
         "function_descriptor.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         "//common:function_descriptor",
     ],
@@ -118,6 +127,7 @@ cc_library(
     hdrs = [
         "function_result.h",
     ],
+    copts = CEL_COPTS,
     deps = [":function_descriptor"],
 )
 
@@ -129,6 +139,7 @@ cc_library(
     hdrs = [
         "function_result_set.h",
     ],
+    copts = CEL_COPTS,
     deps = [
         ":function_result",
         "@com_google_absl//absl/container:btree",
@@ -138,12 +149,14 @@ cc_library(
 cc_library(
     name = "ast",
     hdrs = ["ast.h"],
+    copts = CEL_COPTS,
     deps = ["//common:ast"],
 )
 
 cc_library(
     name = "function_adapter",
     hdrs = ["function_adapter.h"],
+    copts = CEL_COPTS,
     deps = [
         "//runtime:function_adapter",
     ],
@@ -152,4 +165,5 @@ cc_library(
 cc_library(
     name = "builtins",
     hdrs = ["builtins.h"],
+    copts = CEL_COPTS,
 )

@@ -1,0 +1,42 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/warnings.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# warnings.m4 macros: gl_COMPILER_OPTION_IF, gl_WARN_ADD, gl_CC_INHIBIT_WARNINGS
+# COMPLEX CASE: This M4 file provides utility macros for testing compiler
+# warning options. These are meta-macros used by other modules rather than
+# direct configuration checks. The behavior involves:
+# - Testing if compiler supports -Werror
+# - Testing if compiler supports -Wunknown-warning-option
+# - Dynamically adding warning flags
+#
+# This cannot be fully translated to Bazel as it's meant to modify CFLAGS/CXXFLAGS
+# at configure time. In Bazel, warning flags are typically set in the toolchain
+# or build rules directly.
+autoconf(
+    name = "warnings",
+    checks = [
+        checks.AC_CHECK_C_COMPILER_FLAG(
+            "-Werror",
+            define = "HAVE_WERROR",
+        ),
+        checks.AC_CHECK_C_COMPILER_FLAG(
+            "-w",
+            define = "HAVE_W_INHIBIT",
+        ),
+        # gl_CC_INHIBIT_WARNINGS / WARN_CFLAGS; golden expects these values
+        checks.AC_SUBST("GL_CXXFLAG_INHIBIT_WARNINGS", ""),
+        checks.AC_SUBST("WARN_CFLAGS", " "),
+    ] + select({
+        # On Linux, also add -fno-analyzer
+        "@platforms//os:linux": [
+            checks.AC_SUBST("GL_CFLAG_INHIBIT_WARNINGS", "-w -fno-analyzer"),
+        ],
+        "//conditions:default": [
+            checks.AC_SUBST("GL_CFLAG_INHIBIT_WARNINGS", "-w"),
+        ],
+    }) + [
+    ],
+    visibility = ["//visibility:public"],
+)

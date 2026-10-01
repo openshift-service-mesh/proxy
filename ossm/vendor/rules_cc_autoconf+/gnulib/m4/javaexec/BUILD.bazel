@@ -1,0 +1,29 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/javaexec.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "javaexec",
+    checks = [
+        checks.AC_SUBST("CONF_JAVA", ""),
+        checks.AC_SUBST("HAVE_JAVA_ENVVAR", ""),
+        checks.AC_SUBST("HAVE_JAVA", ""),
+        checks.AC_SUBST("HAVE_JRE", ""),
+        checks.AC_SUBST("HAVE_JRE_IN_PATH", ""),
+    ] + select({
+        # On Linux, HAVE_JAVA_IN_PATH is empty (java not in PATH in test env)
+        "@platforms//os:linux": [
+            checks.AC_SUBST("HAVE_JAVA_IN_PATH", ""),
+        ],
+        # On macOS, HAVE_JAVA_IN_PATH is "yes"
+        "//conditions:default": [
+            checks.AC_SUBST("HAVE_JAVA_IN_PATH", "yes"),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        # This dep is not real but deduplicates some checks
+        "//gnulib/m4/javacomp",
+    ],
+)

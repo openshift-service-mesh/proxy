@@ -8,9 +8,10 @@ def libpng_repositories():
         http_archive,
         name = "libpng",
         build_file = Label("//libpng:BUILD.libpng.bazel"),
-        sha256 = "",
+        integrity = "sha256-alygZSOSotfJ2yrltAIQhDwLvAgcvUEIJasAzFnxSmw=",
         strip_prefix = "libpng-1.6.43",
         urls = [
             "https://downloads.sourceforge.net/project/libpng/libpng16/1.6.43/libpng-1.6.43.tar.xz",
+            "https://download.sourceforge.net/libpng/libpng-1.6.43.tar.xz",
         ],
     )

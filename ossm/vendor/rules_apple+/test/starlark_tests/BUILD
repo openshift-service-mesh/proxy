@@ -4,7 +4,9 @@ load(":apple_capability_tests.bzl", "apple_capability_test_suite")
 load(":apple_core_data_model_tests.bzl", "apple_core_data_model_test_suite")
 load(":apple_core_ml_library_tests.bzl", "apple_core_ml_library_test_suite")
 load(":apple_dynamic_xcframework_import_tests.bzl", "apple_dynamic_xcframework_import_test_suite")
+load(":apple_intent_library_tests.bzl", "apple_intent_library_test_suite")
 load(":apple_metal_library_tests.bzl", "apple_metal_library_test_suite")
+load(":apple_static_framework_import_tests.bzl", "apple_static_framework_import_test_suite")
 load(":apple_static_library_tests.bzl", "apple_static_library_test_suite")
 load(":apple_static_xcframework_import_tests.bzl", "apple_static_xcframework_import_test_suite")
 load(":apple_static_xcframework_tests.bzl", "apple_static_xcframework_test_suite")
@@ -17,18 +19,24 @@ load(":generate_dynamic_xcframework_tests.bzl", "generate_dynamic_xcframework_te
 load(":generate_import_framework_tests.bzl", "generate_import_framework_test_suite")
 load(":ios_app_clip_tests.bzl", "ios_app_clip_test_suite")
 load(":ios_application_resources_test.bzl", "ios_application_resources_test_suite")
+load(":ios_application_swift_tests.bzl", "ios_application_swift_test_suite")
 load(":ios_application_tests.bzl", "ios_application_test_suite")
+load(":ios_build_test_tests.bzl", "ios_build_test_test_suite")
+load(":ios_coverage_tests.bzl", "ios_coverage_test_suite")
 load(":ios_dynamic_framework_tests.bzl", "ios_dynamic_framework_test_suite")
 load(":ios_extension_tests.bzl", "ios_extension_test_suite")
 load(":ios_framework_tests.bzl", "ios_framework_test_suite")
 load(":ios_imessage_application_tests.bzl", "ios_imessage_application_test_suite")
 load(":ios_imessage_extension_tests.bzl", "ios_imessage_extension_test_suite")
+load(":ios_kernel_extension_tests.bzl", "ios_kernel_extension_test_suite")
 load(":ios_static_framework_tests.bzl", "ios_static_framework_test_suite")
 load(":ios_sticker_pack_extension_tests.bzl", "ios_sticker_pack_extension_test_suite")
+load(":ios_test_runner_ui_test_tests.bzl", "ios_test_runner_ui_test_test_suite")
 load(":ios_ui_test_tests.bzl", "ios_ui_test_test_suite")
 load(":ios_unit_test_tests.bzl", "ios_unit_test_test_suite")
 load(":macos_application_resources_tests.bzl", "macos_application_resources_test_suite")
 load(":macos_application_tests.bzl", "macos_application_test_suite")
+load(":macos_build_test_tests.bzl", "macos_build_test_test_suite")
 load(":macos_bundle_tests.bzl", "macos_bundle_test_suite")
 load(":macos_command_line_application_tests.bzl", "macos_command_line_application_test_suite")
 load(":macos_dylib_tests.bzl", "macos_dylib_test_suite")
@@ -39,8 +47,11 @@ load(":macos_quick_look_plugin_tests.bzl", "macos_quick_look_plugin_test_suite")
 load(":macos_static_framework_tests.bzl", "macos_static_framework_test_suite")
 load(":macos_ui_test_tests.bzl", "macos_ui_test_test_suite")
 load(":macos_unit_test_tests.bzl", "macos_unit_test_test_suite")
+load(":order_file_tests.bzl", "order_file_test_suite")
+load(":smart_resource_deduplication_tests.bzl", "smart_resource_deduplication_test_suite")
 load(":tvos_application_swift_tests.bzl", "tvos_application_swift_test_suite")
 load(":tvos_application_tests.bzl", "tvos_application_test_suite")
+load(":tvos_build_test_tests.bzl", "tvos_build_test_test_suite")
 load(":tvos_dynamic_framework_tests.bzl", "tvos_dynamic_framework_test_suite")
 load(":tvos_extension_tests.bzl", "tvos_extension_test_suite")
 load(":tvos_framework_tests.bzl", "tvos_framework_test_suite")
@@ -48,8 +59,10 @@ load(":tvos_static_framework_tests.bzl", "tvos_static_framework_test_suite")
 load(":tvos_ui_test_tests.bzl", "tvos_ui_test_test_suite")
 load(":tvos_unit_test_tests.bzl", "tvos_unit_test_test_suite")
 load(":visionos_application_tests.bzl", "visionos_application_test_suite")
+load(":visionos_build_test_tests.bzl", "visionos_build_test_test_suite")
 load(":watchos_application_swift_tests.bzl", "watchos_application_swift_test_suite")
 load(":watchos_application_tests.bzl", "watchos_application_test_suite")
+load(":watchos_build_test_tests.bzl", "watchos_build_test_test_suite")
 load(":watchos_dynamic_framework_tests.bzl", "watchos_dynamic_framework_test_suite")
 load(":watchos_extension_tests.bzl", "watchos_extension_test_suite")
 load(":watchos_framework_tests.bzl", "watchos_framework_test_suite")
@@ -73,7 +86,11 @@ apple_core_ml_library_test_suite(name = "apple_core_ml_library")
 
 apple_dynamic_xcframework_import_test_suite(name = "apple_dynamic_xcframework_import")
 
+apple_intent_library_test_suite(name = "apple_intent_library")
+
 apple_metal_library_test_suite(name = "apple_metal_library")
+
+apple_static_framework_import_test_suite(name = "apple_static_framework_import")
 
 apple_static_library_test_suite(name = "apple_static_library")
 
@@ -95,9 +112,15 @@ generate_import_framework_test_suite(name = "generate_import_framework")
 
 ios_application_resources_test_suite(name = "ios_application_resources")
 
+ios_application_swift_test_suite(name = "ios_application_swift")
+
 ios_application_test_suite(name = "ios_application")
 
 ios_app_clip_test_suite(name = "ios_app_clip")
+
+ios_build_test_test_suite(name = "ios_build_test")
+
+ios_coverage_test_suite(name = "ios_coverage")
 
 ios_extension_test_suite(name = "ios_extension")
 
@@ -109,13 +132,19 @@ ios_imessage_application_test_suite(name = "ios_imessage_application")
 
 ios_imessage_extension_test_suite(name = "ios_imessage_extension")
 
+ios_kernel_extension_test_suite(name = "ios_kernel_extension")
+
 ios_static_framework_test_suite(name = "ios_static_framework")
 
 ios_sticker_pack_extension_test_suite(name = "ios_sticker_pack_extension")
 
+ios_test_runner_ui_test_test_suite(name = "ios_test_runner_ui_test")
+
 ios_ui_test_test_suite(name = "ios_ui_test")
 
 ios_unit_test_test_suite(name = "ios_unit_test")
+
+macos_build_test_test_suite(name = "macos_build_test")
 
 macos_application_resources_test_suite(name = "macos_application_resources")
 
@@ -144,6 +173,12 @@ macos_ui_test_test_suite(name = "macos_ui_test")
 
 macos_unit_test_test_suite(name = "macos_unit_test")
 
+order_file_test_suite(name = "order_file")
+
+smart_resource_deduplication_test_suite(name = "smart_resource_deduplication")
+
+tvos_build_test_test_suite(name = "tvos_build_test")
+
 tvos_application_swift_test_suite(name = "tvos_application_swift")
 
 tvos_application_test_suite(name = "tvos_application")
@@ -160,7 +195,11 @@ tvos_ui_test_test_suite(name = "tvos_ui_test")
 
 tvos_unit_test_test_suite(name = "tvos_unit_test")
 
+visionos_build_test_test_suite(name = "visionos_build_test")
+
 visionos_application_test_suite(name = "visionos_application")
+
+watchos_build_test_test_suite(name = "watchos_build_test")
 
 watchos_application_swift_test_suite(name = "watchos_application_swift")
 
@@ -194,6 +233,9 @@ bzl_library(
     name = "starlark_tests_bzls",
     srcs = glob(["**/*.bzl"]),
     deps = [
+        "//apple:linker",
+        "//apple/build_settings",
+        "//apple/internal:shared_environment",
         "//test/starlark_tests/rules:test_rules",
     ],
 )

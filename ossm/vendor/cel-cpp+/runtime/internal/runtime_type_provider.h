@@ -21,6 +21,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
+#include "common/descriptor_pool_type_introspector.h"
 #include "common/type.h"
 #include "common/type_reflector.h"
 #include "common/value.h"
@@ -34,7 +35,8 @@ class RuntimeTypeProvider final : public TypeReflector {
  public:
   explicit RuntimeTypeProvider(
       const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool)
-      : descriptor_pool_(descriptor_pool) {}
+      : descriptor_pool_(descriptor_pool),
+        descriptor_pool_provider_(descriptor_pool) {}
 
   absl::Status RegisterType(const OpaqueType& type);
 
@@ -55,6 +57,7 @@ class RuntimeTypeProvider final : public TypeReflector {
 
  private:
   const google::protobuf::DescriptorPool* absl_nonnull descriptor_pool_;
+  DescriptorPoolTypeIntrospector descriptor_pool_provider_;
   absl::flat_hash_map<absl::string_view, Type> types_;
 };
 

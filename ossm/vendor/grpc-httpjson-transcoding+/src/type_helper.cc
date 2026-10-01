@@ -116,26 +116,26 @@ class LockedTypeInfo : public pbconv::TypeInfo {
 
   absl::StatusOr<const google::protobuf::Type*> ResolveTypeUrl(
       absl::string_view type_url) const override {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     return type_info_->ResolveTypeUrl(type_url);
   }
 
   const google::protobuf::Type* GetTypeByTypeUrl(
       absl::string_view type_url) const override {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     return type_info_->GetTypeByTypeUrl(type_url);
   }
 
   const google::protobuf::Enum* GetEnumByTypeUrl(
       absl::string_view type_url) const override {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     return type_info_->GetEnumByTypeUrl(type_url);
   }
 
   const google::protobuf::Field* FindField(
       const google::protobuf::Type* type,
       absl::string_view camel_case_name) const override {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     return type_info_->FindField(type, camel_case_name);
   }
 

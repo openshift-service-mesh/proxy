@@ -87,6 +87,11 @@ class MessageType final {
     return descriptor_;
   }
 
+  const google::protobuf::Descriptor* absl_nonnull descriptor() const {
+    ABSL_DCHECK(*this);
+    return descriptor_;
+  }
+
   explicit operator bool() const { return descriptor_ != nullptr; }
 
  private:
@@ -166,8 +171,12 @@ class MessageTypeField final {
     return *descriptor_;
   }
 
-  const google::protobuf::FieldDescriptor* absl_nonnull operator->() const
-      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  const google::protobuf::FieldDescriptor* absl_nonnull operator->() const {
+    ABSL_DCHECK(*this);
+    return descriptor_;
+  }
+
+  const google::protobuf::FieldDescriptor* absl_nonnull descriptor() const {
     ABSL_DCHECK(*this);
     return descriptor_;
   }

@@ -12,23 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Implementation of the `swift_cross_import_overlay` rule."""
+"""Implementation of cross-import overlay rules."""
 
-load("//swift/internal:providers.bzl", "SwiftCrossImportOverlayInfo")
+load(
+    "//swift/internal:providers.bzl",
+    "SwiftCrossImportOverlayInfo",
+    "SwiftCrossImportOverlaysInfo",
+)
 load(":providers.bzl", "SwiftInfo")
 
 def _get_sole_module_name(swift_info, attr):
     if len(swift_info.direct_modules) != 1:
-        fail(("The target specified by '{}' must define exactly one Swift " +
-              "and/or Clang module.").format(attr))
+        fail(("The target specified by '{attr}' must define exactly one Swift " +
+              "and/or Clang module, or you must specify '{attr}_name' to" +
+              "disambiguate them.").format(attr = attr))
     return swift_info.direct_modules[0].name
 
 def _swift_cross_import_overlay_impl(ctx):
-    bystanding_module = _get_sole_module_name(
+    bystanding_module = ctx.attr.bystanding_module_name or _get_sole_module_name(
         ctx.attr.bystanding_module[SwiftInfo],
         "bystanding_module",
     )
-    declaring_module = _get_sole_module_name(
+    declaring_module = ctx.attr.declaring_module_name or _get_sole_module_name(
         ctx.attr.declaring_module[SwiftInfo],
         "declaring_module",
     )
@@ -37,6 +42,7 @@ def _swift_cross_import_overlay_impl(ctx):
             bystanding_module = bystanding_module,
             declaring_module = declaring_module,
             swift_infos = [dep[SwiftInfo] for dep in ctx.attr.deps],
+            swiftoverlay_file = ctx.attr.swiftoverlay,
         ),
     ]
 
@@ -53,6 +59,15 @@ the cross-import modules.
             mandatory = True,
             providers = [[SwiftInfo]],
         ),
+        "bystanding_module_name": attr.string(
+            doc = """\
+The name of the bystanding module from the target specified by the
+`bystanding_module` attribute. This is inferred if `bystanding_module` only
+exports a single direct module; this name must be specified if
+`bystanding_module` exports more than one.
+""",
+            mandatory = False,
+        ),
         "declaring_module": attr.label(
             doc = """\
 A label for the target representing the first of the two modules (the other
@@ -63,6 +78,15 @@ overlay definition that connects it to the bystander and to the overlay modules.
             mandatory = True,
             providers = [[SwiftInfo]],
         ),
+        "declaring_module_name": attr.string(
+            doc = """\
+The name of the declaring module from the target specified by the
+`declaring_module` attribute. This is inferred if `declaring_module` only
+exports a single direct module; this name must be specified if
+`declaring_module` exports more than one.
+""",
+            mandatory = False,
+        ),
         "deps": attr.label_list(
             allow_empty = False,
             doc = """\
@@ -72,6 +96,10 @@ dependencies when a target depends on both `declaring_module` and
 """,
             mandatory = True,
             providers = [[SwiftInfo]],
+        ),
+        "swiftoverlay": attr.string(
+            doc = "The path to the SDK `.swiftoverlay` file that declares this cross-import.",
+            mandatory = True,
         ),
     },
     doc = """\
@@ -98,4 +126,24 @@ a public feature of the compiler and its design and implementation may change in
 the future, this rule is not recommended for other widespread use.
 """,
     implementation = _swift_cross_import_overlay_impl,
+)
+
+def _swift_cross_import_overlay_group_impl(ctx):
+    return [
+        SwiftCrossImportOverlaysInfo(
+            overlays = [
+                target[SwiftCrossImportOverlayInfo]
+                for target in ctx.attr.overlays
+            ],
+        ),
+    ]
+
+swift_cross_import_overlay_group = rule(
+    attrs = {
+        "overlays": attr.label_list(
+            allow_empty = True,
+            providers = [[SwiftCrossImportOverlayInfo]],
+        ),
+    },
+    implementation = _swift_cross_import_overlay_group_impl,
 )

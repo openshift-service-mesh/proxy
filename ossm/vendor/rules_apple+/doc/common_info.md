@@ -51,6 +51,22 @@ By default, only the top level dSYM bundles is built when this flag is
 specified. If you require the dSYM bundles of the top level target dependencies,
 you'll need to specify the `--output_groups=+dsyms` flag.
 
+### Asset catalog thinning {#asset_catalog_thinning}
+
+Asset catalogs can be compiled for a specific device model and OS version to
+remove asset variants that the target device cannot use, such as images for a
+different device family or display scale. This reduces the size of the compiled
+`Assets.car` and, consequently, the application archive.
+
+Pass the device's hardware model identifier and target OS version when building
+the application:
+
+```shell
+bazel build //your/target \
+  --@rules_apple//apple/build_settings:thin_for_device_model=iPhone14,6 \
+  --@rules_apple//apple/build_settings:thin_for_os_version=15.0
+```
+
 <!-- Begin-External -->
 
 ### Codesigning identity
@@ -64,7 +80,7 @@ cases you can use the `--ios_signing_cert_name` flag to force the signing
 identity to be used when codesigning your app.
 
 ```shell
-bazel build //your/target --ios_signing_cert_name="iPhone Developer: [CERT OWNER NAME]"
+bazel build //your/target --@rules_apple//apple/build_settings:signing_certificate_name="iPhone Developer: [CERT OWNER NAME]"
 ```
 
 To make this easier to use, we recommend adding the following to the
@@ -72,7 +88,17 @@ To make this easier to use, we recommend adding the following to the
 invocations:
 
 ```text
-build --ios_signing_cert_name="iPhone Developer: [CERT OWNER NAME]"
+build --@rules_apple//apple/build_settings:signing_certificate_name="iPhone Developer: [CERT OWNER NAME]"
+```
+
+Note this was previously builtin to bazel with `--ios_signing_cert_name`
+but has been removed for the 10.x release cycle.
+
+If you would like to maintain the shorter command line argument name,
+you can put this in your `.bazelrc`:
+
+```
+build --flag_alias=ios_signing_cert_name=@rules_apple//apple/build_settings:signing_certificate_name
 ```
 
 <!-- End-External -->
@@ -250,15 +276,34 @@ ios_application(
         "//conditions:default": [],
     }),
     codesign_inputs = select({
-        ":dbg": ["@build_bazel_rules_apple//tools/codesigningtool:disable_signing_resource_rules"],
+        ":dbg": ["@rules_apple//tools/codesigningtool:disable_signing_resource_rules"],
         "//conditions:default": [],
     }),
     toolchains = select({
-        "//:dbg": ["@build_bazel_rules_apple//tools/codesigningtool:disable_signing_resource_rules"],
+        "//:dbg": ["@rules_apple//tools/codesigningtool:disable_signing_resource_rules"],
         "//conditions:default": [],
     }),
 )
 ```
+
+### Running applications
+
+When using `bazel run` with Apple application targets, the generated simulator
+and device runners support additional control via the
+`BAZEL_APPLE_RUN_MODE` environment variable.
+
+Supported values are:
+
+*   `install_and_run` (default): Terminates any existing instance, installs the
+    app, and launches it.
+*   `install_without_running`: Terminates any existing instance, installs the
+    app, and exits without launching it.
+*   `run_without_installing`: Terminates any existing instance and launches the
+    existing installed app without reinstalling it.
+
+If `BAZEL_APPLE_RUN_MODE=install_without_running` is used together with
+`BAZEL_APPLE_LAUNCH_INFO_PATH`, the runner removes any stale launch info file
+and does not write a new one, since no process is launched.
 
 ### Localization Handling
 
@@ -490,11 +535,10 @@ There are a few steps required to properly make Bazel use the right Xcode versio
 
 1. The first thing you should think about is to enforce a single Xcode version for all your builds to ensure remote cache hits. On top of that, enforcing a single Xcode version speeds up repository setup time. You can achieve this by passing a specific Xcode version config via the `--xcode_version_config` flag. More details are available in [Locking Xcode versions in Bazel](https://www.smileykeith.com/2021/03/08/locking-xcode-in-bazel).
 2. If your configuration supports multiple Xcode versions, you should pass `--xcode_version` to specify which version should be used.
-3. In your Bazel wrapper (an executable script place at `tools/bazel` in your repository, read more [here](https://github.com/bazelbuild/bazelisk#ensuring-that-your-developers-use-bazelisk-rather-than-bazel)), you should pass a few flags to every invocation or generate and import a `bazelrc`:
+3. In your Bazel wrapper (`tools/bazel` in your repository, read more [here](https://github.com/bazelbuild/bazelisk#ensuring-that-your-developers-use-bazelisk-rather-than-bazel)), you should pass a few flags to every invocation or generate and import a `bazelrc`:
     * Capture `xcode-select -p` or use the value of `DEVELOPER_DIR` if available and forward it to repository rules for invalidation when changed: `--repo_env=DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
-    * If not using the new [Apple CC toolchain](https://github.com/bazelbuild/apple_support#toolchain-setup) available starting in apple_support 1.4.0, pass `--repo_env=USE_CLANG_CL=$xcode_version` where `xcode_version` should be the value of `xcodebuild -version | tail -1 | cut -d " " -f3` which is unique to each version.
-    * If using the new Apple CC toolchain and [apple_support](https://github.com/bazelbuild/apple_support) 1.7.0 or higher, pass `--repo_env=XCODE_VERSION=$xcode_version` instead.
-    * To invalidate the repository rule when Xcode's path changes but the version doesn't, pass the `--host_jvm_args=-Xdock:name=$developer_dir` startup flag. This forwards an argument to the JVM which is ignored except for causing the server to restart when its value changes.
+    * Pass `--repo_env=XCODE_VERSION=$xcode_version` where `xcode_version` should be the value of `xcodebuild -version | tail -1 | cut -d " " -f3` which is unique to each version. This will make sure the `apple_support` toolchain and `xcode_configure` repository rule are re-evaluated when your version changes.
+    * To invalidate bazel's in-memory cache of Xcode version -> absolute path on disk, pass the `--host_jvm_args=-Xdock:name=$developer_dir` startup flag. This forwards an argument to the JVM which is ignored except for causing the server to restart when its value changes.
 
 The above flags can be passed either directly to each invocation or by generating a `bazelrc` which is imported from your main `.bazelrc`. This snippet shows the latter option:
 
@@ -529,7 +573,7 @@ When using Bazel's remote cache and/or build execution, there are a few flags yo
 We recommend adding the following to your `.bazelrc`:
 
 ```shell
-common --modify_execution_info=^(BitcodeSymbolsCopy|BundleApp|BundleTreeApp|DsymDwarf|DsymLipo|GenerateAppleSymbolsFile|ObjcBinarySymbolStrip|CppArchive|CppLink|ObjcLink|ProcessAndSign|SignBinary|SwiftArchive|SwiftStdlibCopy)$=+no-remote,^(BundleResources|ImportedDynamicFrameworkProcessor)$=+no-remote-exec
+common --modify_execution_info=^(BundleApp|BundleTreeApp|DsymDwarf|DsymLipo|GenerateAppleSymbolsFile|ObjcBinarySymbolStrip|CppArchive|CppLink|ObjcLink|ProcessAndSign|SignBinary|SwiftArchive|SwiftStdlibCopy)$=+no-remote,^(BundleResources|ImportedDynamicFrameworkProcessor)$=+no-remote-exec
 ```
 
 The following table provides a rationale for each mnemonic and tag. In general though, the mnemonics that are excluded in `--modify_execution_info` are excluded because they produce or work on large outputs which change frequently and as such are faster when run locally, or they are not generally configured for remote execution (such as signing).
@@ -539,7 +583,7 @@ The following table provides a rationale for each mnemonic and tag. In general t
 | `BundleApp`, `BundleTreeApp`, `ProcessAndSign` | `no-remote` | Produces a large bundle, which is inefficient to upload and download |
 | `CppArchive`, `CppLink`, `ObjcLink`, `SwiftArchive` | `no-remote` | Linked binaries have local paths, and it's slower to download them versus linking locally |
 | `SwiftStdlibCopy` | `no-remote` | Processing Swift stdlib is a quick file copy of a locally available resource, so it's not worth uploading or downloading |
-| `BitcodeSymbolsCopy`, `DsymDwarf`, `DsymLipo`, `GenerateAppleSymbolsFile`| `no-remote-exec` | Processing dSYMs/Symbols remotely requires uploading the linked binary; this could go away if you switch to uploading linked binaries |
+| `DsymDwarf`, `DsymLipo`, `GenerateAppleSymbolsFile`| `no-remote-exec` | Processing dSYMs/Symbols remotely requires uploading the linked binary; this could go away if you switch to uploading linked binaries |
 | `ImportedDynamicFrameworkProcessor` | `no-remote-exec` | Processing dynamic frameworks remotely incurs an upload and download of the same blob |
 | `ObjcBinarySymbolStrip` | `no-remote-exec` | Stripping binaries remotely requires uploading the linked binary; this could go away if you switch to uploading linked binaries |
 | `ProcessAndSign`, `SignBinary` | `no-remote-exec` | RBE is not generally configured for code signing |
