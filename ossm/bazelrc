@@ -82,6 +82,35 @@ build:ppc --define=DUMMY=dummy
 
 build:aarch64 --define=DUMMY=dummy
 
+# OSSM: use the vendored envoy source directly on non-x86 arches.
+#
+# The vendor snapshot (ossm/vendor) is produced entirely on an x86_64 host --
+# update-deps.sh's per-arch passes are no-ops (--config=<arch> only sets
+# --define=DUMMY; nothing cross-compiles), so every repo's vendor marker is
+# computed on x86_64. For almost all repos that marker is arch-portable, but the
+# envoy+/envoy_api+ repos (the GitHub `archive_override` tarballs declared in
+# MODULE.bazel) are flagged "out-of-date" on a real aarch64/s390x/ppc host, so
+# Bazel tries to re-fetch them from github.com -- which fails in the air-gapped
+# build (Unknown host: github.com). x86_64 is unaffected because the snapshot was
+# vendored there.
+#
+# Point the envoy modules at their committed vendored source trees (each has a
+# MODULE.bazel at its root) so Bazel reads them locally instead of fetching the
+# archive during module resolution. This must be --override_module, not
+# --override_repository: envoy is a bzlmod module, so resolution reads the pinned
+# archive's own MODULE.bazel unless the module itself is overridden (see the
+# override note in MODULE.bazel). Scoped to the non-x86 arch configs so x86_64
+# keeps validating the snapshot natively and the local-dev
+# `--override_module=envoy=/path` workflow stays usable there. update-deps.sh
+# vendors x86_64 first and never wipes between passes, so envoy+ is captured
+# before any non-x86 pass could see this override.
+build:aarch64 --override_module=envoy=%workspace%/ossm/vendor/envoy+
+build:aarch64 --override_module=envoy_api=%workspace%/ossm/vendor/envoy_api+
+build:s390x --override_module=envoy=%workspace%/ossm/vendor/envoy+
+build:s390x --override_module=envoy_api=%workspace%/ossm/vendor/envoy_api+
+build:ppc --override_module=envoy=%workspace%/ossm/vendor/envoy+
+build:ppc --override_module=envoy_api=%workspace%/ossm/vendor/envoy_api+
+
 # Colored ouput messes with some of the logging systems in CI, so we disable that.
 build:ci-config --color=no
 build:ci-config --show_progress_rate_limit=10
