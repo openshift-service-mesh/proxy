@@ -348,6 +348,10 @@ unsafe extern "C" fn rust_bio_read(
     buffer: *mut c_char,
     buf_len: c_int,
 ) -> c_int {
+    unsafe {
+        // Safety: `bio` is valid as witnessed by the C callback contract.
+        bssl_sys::BIO_clear_retry_flags(bio);
+    }
     let rust_bio = unsafe {
         // Safety: `bio` is still valid and so is the `RustBio` which we have exclusive access to.
         rust_bio_data_mut(bio)
@@ -408,6 +412,10 @@ unsafe extern "C" fn rust_bio_write(
     buffer: *const c_char,
     buf_len: c_int,
 ) -> c_int {
+    unsafe {
+        // Safety: `bio` is valid as witnessed by the C callback contract.
+        bssl_sys::BIO_clear_retry_flags(bio);
+    }
     let rust_bio = unsafe {
         // Safety: `bio` is still valid and so is the `RustBio` which we have exclusive access to.
         rust_bio_data_mut(bio)
@@ -463,6 +471,10 @@ unsafe extern "C" fn rust_bio_write(
 }
 
 unsafe fn rust_bio_flush(bio: *mut bssl_sys::BIO) -> c_long {
+    unsafe {
+        // Safety: `bio` is valid as witnessed by the caller contract.
+        bssl_sys::BIO_clear_retry_flags(bio);
+    }
     let rust_bio = unsafe {
         // Safety: `bio` is still valid
         rust_bio_data_mut(bio)
@@ -484,7 +496,14 @@ unsafe fn rust_bio_flush(bio: *mut bssl_sys::BIO) -> c_long {
     };
     let res = abort_on_panic(work);
     match rust_bio.transform_result(res, TlsRetryReason::WantWrite) {
-        IoStatus::Ok(_) | IoStatus::Retry(_) => 1,
+        IoStatus::Ok(_) => 1,
+        IoStatus::Retry(_) => {
+            unsafe {
+                // Safety: `bio` is still valid now.
+                bssl_sys::BIO_set_retry_write(bio);
+            }
+            0
+        }
         IoStatus::EndOfStream => {
             rust_bio.write_eos = true;
             0
