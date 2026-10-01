@@ -608,9 +608,6 @@ int X509_is_valid_trust_id(int trust);
 
 int X509_PURPOSE_get_trust(const X509_PURPOSE *xp);
 
-// TODO(https://crbug.com/boringssl/695): Remove this.
-int DIST_POINT_set_dpname(DIST_POINT_NAME *dpn, X509_NAME *iname);
-
 void x509_name_init(X509_NAME *name);
 void x509_name_cleanup(X509_NAME *name);
 
