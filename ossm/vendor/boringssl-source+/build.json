@@ -429,6 +429,7 @@
             "include/openssl/cmac.h",
             "include/openssl/cms.h",
             "include/openssl/conf.h",
+            "include/openssl/configuration.h",
             "include/openssl/cpu.h",
             "include/openssl/crypto.h",
             "include/openssl/ctrdrbg.h",
@@ -492,6 +493,7 @@
             "include/openssl/tls_prf.h",
             "include/openssl/trust_token.h",
             "include/openssl/type_check.h",
+            "include/openssl/types.h",
             "include/openssl/x509.h",
             "include/openssl/x509_vfy.h",
             "include/openssl/x509v3.h",
@@ -835,6 +837,7 @@
             "crypto/constant_time_test.cc",
             "crypto/cpu_arm_linux_test.cc",
             "crypto/crypto_test.cc",
+            "crypto/curve25519/curve25519_test.cc",
             "crypto/curve25519/ed25519_test.cc",
             "crypto/curve25519/spake25519_test.cc",
             "crypto/curve25519/x25519_test.cc",
@@ -902,6 +905,7 @@
             "crypto/cipher/test/*.txt",
             "crypto/cipher/test/nist_cavp/*.txt",
             "crypto/curve25519/ed25519_tests.txt",
+            "crypto/curve25519/ed25519ph_tests.txt",
             "crypto/ecdh/ecdh_tests.txt",
             "crypto/evp/test/*.txt",
             "crypto/fipsmodule/aes/aes_tests.txt",
@@ -951,6 +955,8 @@
             "crypto/slhdsa/slhdsa_shake_256f_sigver.txt",
             "crypto/x509/test/*.pem",
             "crypto/x509/test/*.pk8",
+            "crypto/x509/test/mtc/*.pem",
+            "crypto/x509/test/mtc/*.txt",
             "third_party/wycheproof_testvectors/*.txt"
         ],
         "internal_hdrs": [
@@ -1001,6 +1007,7 @@
             "pki/verify_unittest.cc"
         ],
         "data": [
+            "crypto/x509/test/mtc/*.txt",
             "pki/testdata/cert_issuer_source_static_unittest/*.pem",
             "pki/testdata/certificate_policies_unittest/*.pem",
             "pki/testdata/crl_unittest/*.pem",

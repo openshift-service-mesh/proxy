@@ -106,7 +106,8 @@ fn dumb_server_client() -> Result<(TlsConnection<Server>, TlsConnection<Client>)
 fn sync_ping_pong<
     M: crate::connection::methods::HasTlsConnectionMethod
         + crate::context::SupportedMode
-        + crate::context::HasBasicIo
+        + crate::context::HasStreamIo
+        + crate::context::HasShutdown
         + 'static,
 >(
     mut server_conn: TlsConnection<Server, M>,
@@ -125,8 +126,12 @@ fn sync_ping_pong<
         assert_eq!(*message, *b"BoringSSL is awesome!");
         server_conn.sync_write(b"Oh yeah definitely!")?;
         server_conn.established().unwrap().sync_shutdown()?;
-        // Second shutdown poll.
-        server_conn.established().unwrap().sync_shutdown()?;
+        // Consume the peer's `close_notify` before this end of the transport is dropped.
+        // Otherwise, the connection may block or reset from unconsumed data.
+        let mut eof = [MaybeUninit::uninit(); 1];
+        let mut eof = ReceiveBuffer::new_uninit(&mut eof);
+        // We do not care if the connection was torn down or not.
+        let _ = server_conn.sync_read(&mut eof);
         Ok::<_, Error>(())
     });
 
@@ -447,11 +452,12 @@ fn test_async() -> Result<(), Error> {
 
         let server_data = async move {
             let mut buf = [0u8; TEST_DATA.len()];
+            let mut message = ReceiveBuffer::new(&mut buf);
             let mut read_bytes = 0;
             while read_bytes < TEST_DATA.len() {
                 match server_conn
                     .as_pin_mut()
-                    .async_read(&mut buf[read_bytes..])
+                    .async_read(&mut message)
                     .await
                     .unwrap()
                 {
