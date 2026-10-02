@@ -1,3 +1,3 @@
-PATH = '/tmp/tmp.fNK28i9w9h/external/envoy'
-VERSION = '1.38.5-dev'
+PATH = '/tmp/tmp.i2DWfcIe1I/external/envoy'
+VERSION = '1.38.5'
 API_VERSION = '3.0.0'
