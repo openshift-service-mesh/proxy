@@ -117,6 +117,20 @@ function run_bazel() {
   # Fetch luajit2 explicitly - needed for s390x/ppc64le builds
   bazel --output_base="${OUTPUT_BASE}" fetch @luajit2//:all || true
 
+  # ppc64le/s390x have no prebuilt java_tools: the ijar/singlejar/one_version selects in
+  # rules_java/toolchains/BUILD have no branch for either arch, so they fall through to
+  # //conditions:default and are compiled from source there. On x86_64 the prebuilt branch
+  # wins, so their dep closure (@com_google_absl, @zlib) is never fetched and never
+  # vendored. Name the source targets directly to bypass the select.
+  bazel --output_base="${OUTPUT_BASE}" fetch \
+    @remote_java_tools//:ijar_cc_binary \
+    @remote_java_tools//:singlejar_cc_bin \
+    @remote_java_tools//:one_version_cc_bin
+
+  for repo in com_google_absl zlib; do
+    [ -d "${OUTPUT_BASE}/external/${repo}" ] || error "java_tools fetch did not produce ${repo}"
+  done
+
   # Fetch all the rest and check everything using "build --nobuild "option
   # Note: The envoy repository is automatically patched via patches = [...] in WORKSPACE
   for config in x86_64 aarch64 s390x; do

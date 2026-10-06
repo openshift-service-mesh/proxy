@@ -30,6 +30,7 @@ build --override_repository=com_github_grpc_grpc=%workspace%/ossm/vendor/com_git
 build --override_repository=com_github_iancoleman_strcase=%workspace%/ossm/vendor/com_github_iancoleman_strcase
 build --override_repository=com_github_lyft_protoc_gen_star_v2=%workspace%/ossm/vendor/com_github_lyft_protoc_gen_star_v2
 build --override_repository=com_github_spf13_afero=%workspace%/ossm/vendor/com_github_spf13_afero
+build --override_repository=com_google_absl=%workspace%/ossm/vendor/com_google_absl
 build --override_repository=com_google_googleapis=%workspace%/ossm/vendor/com_google_googleapis
 build --override_repository=com_google_googleapis_imports=%workspace%/ossm/vendor/com_google_googleapis_imports
 build --override_repository=com_google_protobuf=%workspace%/ossm/vendor/com_google_protobuf
@@ -161,5 +162,6 @@ build --override_repository=yaml-cpp=%workspace%/ossm/vendor/yaml-cpp
 build --override_repository=yq.bzl=%workspace%/ossm/vendor/yq.bzl
 build --override_repository=yq_toolchains=%workspace%/ossm/vendor/yq_toolchains
 build --override_repository=zipkin-api=%workspace%/ossm/vendor/zipkin-api
+build --override_repository=zlib=%workspace%/ossm/vendor/zlib
 build --override_repository=zlib-ng=%workspace%/ossm/vendor/zlib-ng
 build --override_repository=zstd=%workspace%/ossm/vendor/zstd
