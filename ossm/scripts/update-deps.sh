@@ -98,6 +98,18 @@ for arch in "${ARCHES[@]}"; do
     "${TARGET}"
 done
 
+# On ppc64le/s390x, rules_java builds these tools from source instead of
+# selecting the x86_64/aarch64 prebuilts. Vendor their dependency closure
+# explicitly on this x86_64 host, including Abseil and rules_java's zlib.
+# Use the extension's canonical repo name: @remote_java_tools is not exposed
+# in the root module's repository mapping.
+echo ">> Vendoring Java tools source dependencies for ppc64le/s390x"
+bazel vendor \
+  --vendor_dir="${VENDOR_DIR}" \
+  @@rules_java++toolchains+remote_java_tools//:ijar_cc_binary \
+  @@rules_java++toolchains+remote_java_tools//:singlejar_cc_bin \
+  @@rules_java++toolchains+remote_java_tools//:one_version_cc_bin
+
 echo ">> Vendoring option-referenced and cross-arch host-tool repos"
 bazel vendor \
   --vendor_dir="${VENDOR_DIR}" \
