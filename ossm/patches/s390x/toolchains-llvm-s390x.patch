@@ -1,8 +1,8 @@
 diff --git a/ossm/vendor/toolchains_llvm/toolchain/cc_toolchain_config.bzl b/ossm/vendor/toolchains_llvm/toolchain/cc_toolchain_config.bzl
-index 787f37a57..a4db25c1b 100644
+index 8316fcadb3..abf5bd9143 100644
 --- a/ossm/vendor/toolchains_llvm/toolchain/cc_toolchain_config.bzl
 +++ b/ossm/vendor/toolchains_llvm/toolchain/cc_toolchain_config.bzl
-@@ -108,6 +108,14 @@ def cc_toolchain_config(
+@@ -116,6 +116,14 @@ def cc_toolchain_config(
              "clang",
              "glibc_unknown",
          ),
@@ -18,27 +18,26 @@ index 787f37a57..a4db25c1b 100644
              "clang-riscv32-none",
              "riscv32",
 diff --git a/ossm/vendor/toolchains_llvm/toolchain/internal/common.bzl b/ossm/vendor/toolchains_llvm/toolchain/internal/common.bzl
-index 5355d90b7..0f8335f94 100644
+index 4fd39dbbf4..d9939408e4 100644
 --- a/ossm/vendor/toolchains_llvm/toolchain/internal/common.bzl
 +++ b/ossm/vendor/toolchains_llvm/toolchain/internal/common.bzl
-@@ -17,6 +17,7 @@ SUPPORTED_TARGETS = [
-     ("linux", "aarch64"),
+@@ -18,6 +18,7 @@ SUPPORTED_TARGETS = [
      ("linux", "armv7"),
+     ("linux", "ppc64le"),
      ("linux", "riscv64"),
 +    ("linux", "s390x"),
      ("darwin", "x86_64"),
      ("darwin", "aarch64"),
      ("none", "riscv32"),
 diff --git a/ossm/vendor/toolchains_llvm/toolchain/internal/configure.bzl b/ossm/vendor/toolchains_llvm/toolchain/internal/configure.bzl
-index 85037739f..9416ab5bf 100644
+index f64a7e24d0..0851af019b 100644
 --- a/ossm/vendor/toolchains_llvm/toolchain/internal/configure.bzl
 +++ b/ossm/vendor/toolchains_llvm/toolchain/internal/configure.bzl
-@@ -403,6 +403,7 @@ def _cc_toolchain_str(
-         "linux-armv7": "armv7-unknown-linux-gnueabihf",
+@@ -404,6 +404,7 @@ def _cc_toolchain_str(
+         "linux-ppc64le": "powerpc64le-unknown-linux-gnu",
          "linux-x86_64": "x86_64-unknown-linux-gnu",
          "linux-riscv64": "riscv64-unknown-linux-gnu",
 +        "linux-s390x": "s390x-unknown-linux-gnu",
          "none-riscv32": "riscv32-unknown-none-elf",
          "none-x86_64": "x86_64-unknown-none",
          "wasm32": "wasm32-unknown-unknown",
-
