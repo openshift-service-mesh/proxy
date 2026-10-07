@@ -1,10 +1,10 @@
 diff --git a/ossm/vendor/proxy_wasm_cpp_host/bazel/BUILD b/ossm/vendor/proxy_wasm_cpp_host/bazel/BUILD
-index 15f323fa7..23f677cb3 100644
+index 58b4aed789..4db441139e 100644
 --- a/ossm/vendor/proxy_wasm_cpp_host/bazel/BUILD
 +++ b/ossm/vendor/proxy_wasm_cpp_host/bazel/BUILD
-@@ -52,21 +52,8 @@ config_setting(
+@@ -53,21 +53,8 @@ config_setting(
  )
-
+ 
  config_setting(
 -    name = "requested_crypto_system",
 -    values = {"define": "crypto=system"},
@@ -23,60 +23,37 @@ index 15f323fa7..23f677cb3 100644
 -    ],
 +    values = {"define": "crypto=system"},
  )
+ 
+ # V8 library with pointer compression disabled using V8's Starlark transition.
+diff --git a/ossm/vendor/proxy_wasm_cpp_host/src/pairs_util.cc b/ossm/vendor/proxy_wasm_cpp_host/src/pairs_util.cc
+index b8121882fd..5b65162562 100644
+--- a/ossm/vendor/proxy_wasm_cpp_host/src/pairs_util.cc
++++ b/ossm/vendor/proxy_wasm_cpp_host/src/pairs_util.cc
+@@ -65,7 +65,7 @@ bool PairsUtil::marshalPairs(const Pairs &pairs, char *buffer, size_t size) {
+ 
+   // Write number of pairs.
+   uint32_t num_pairs =
+-      htowasm(pairs.size(), contextOrEffectiveContext() != nullptr
++      htowasm(static_cast<uint32_t>(pairs.size()), contextOrEffectiveContext() != nullptr
+                                 ? contextOrEffectiveContext()->wasmVm()->usesWasmByteOrder()
+                                 : false);
+   if (pos + sizeof(uint32_t) > end) {
+@@ -77,7 +77,7 @@ bool PairsUtil::marshalPairs(const Pairs &pairs, char *buffer, size_t size) {
+   for (const auto &p : pairs) {
+     // Write name length.
+     uint32_t name_len =
+-        htowasm(p.first.size(), contextOrEffectiveContext() != nullptr
++        htowasm(static_cast<uint32_t>(p.first.size()), contextOrEffectiveContext() != nullptr
+                                     ? contextOrEffectiveContext()->wasmVm()->usesWasmByteOrder()
+                                     : false);
+     if (pos + sizeof(uint32_t) > end) {
+@@ -88,7 +88,7 @@ bool PairsUtil::marshalPairs(const Pairs &pairs, char *buffer, size_t size) {
+ 
+     // Write value length.
+     uint32_t value_len =
+-        htowasm(p.second.size(), contextOrEffectiveContext() != nullptr
++        htowasm(static_cast<uint32_t>(p.second.size()), contextOrEffectiveContext() != nullptr
+                                      ? contextOrEffectiveContext()->wasmVm()->usesWasmByteOrder()
+                                      : false);
+     if (pos + sizeof(uint32_t) > end) {
 
- exports_files(["tsan_suppressions.txt"])
-diff --git a/ossm/vendor/proxy_wasm_cpp_host/src/exports.cc b/ossm/vendor/proxy_wasm_cpp_host/src/exports.cc
-index 25ca06c9d..f95288047 100644
---- a/ossm/vendor/proxy_wasm_cpp_host/src/exports.cc
-+++ b/ossm/vendor/proxy_wasm_cpp_host/src/exports.cc
-@@ -266,7 +266,7 @@ Word register_shared_queue(Word queue_name_ptr, Word queue_name_size, Word token
-   if (result != WasmResult::Ok) {
-     return result;
-   }
--  if (!context->wasm()->setDatatype(token_ptr, token)) {
-+  if (!context->wasm()->setDatatype(token_ptr, htowasm(token, context->wasmVm()->usesWasmByteOrder()))) {
-     return WasmResult::InvalidMemoryAccess;
-   }
-   return WasmResult::Ok;
-@@ -298,7 +298,7 @@ Word resolve_shared_queue(Word vm_id_ptr, Word vm_id_size, Word queue_name_ptr,
-   if (result != WasmResult::Ok) {
-     return result;
-   }
--  if (!context->wasm()->setDatatype(token_ptr, token)) {
-+  if (!context->wasm()->setDatatype(token_ptr, htowasm(token, context->wasmVm()->usesWasmByteOrder()))) {
-     return WasmResult::InvalidMemoryAccess;
-   }
-   return WasmResult::Ok;
-@@ -524,12 +524,12 @@ Word http_call(Word uri_ptr, Word uri_size, Word header_pairs_ptr, Word header_p
-   uint32_t token = 0;
-   // NB: try to write the token to verify the memory before starting the async
-   // operation.
--  if (!context->wasm()->setDatatype(token_ptr, token)) {
-+  if (!context->wasm()->setDatatype(token_ptr, htowasm(token, context->wasmVm()->usesWasmByteOrder()))) {
-     return WasmResult::InvalidMemoryAccess;
-   }
-   auto result =
-       context->httpCall(uri.value(), headers, body.value(), trailers, timeout_milliseconds, &token);
--  context->wasm()->setDatatype(token_ptr, token);
-+  context->wasm()->setDatatype(token_ptr, htowasm(token, context->wasmVm()->usesWasmByteOrder()));
-   return result;
- }
-
-@@ -596,7 +596,7 @@ Word grpc_call(Word service_ptr, Word service_size, Word service_name_ptr, Word
-   if (result != WasmResult::Ok) {
-     return result;
-   }
--  if (!context->wasm()->setDatatype(token_ptr, token)) {
-+  if (!context->wasm()->setDatatype(token_ptr, htowasm(token, context->wasmVm()->usesWasmByteOrder()))) {
-     return WasmResult::InvalidMemoryAccess;
-   }
-   return WasmResult::Ok;
-@@ -621,7 +621,7 @@ Word grpc_stream(Word service_ptr, Word service_size, Word service_name_ptr, Wor
-   if (result != WasmResult::Ok) {
-     return result;
-   }
--  if (!context->wasm()->setDatatype(token_ptr, token)) {
-+  if (!context->wasm()->setDatatype(token_ptr, htowasm(token, context->wasmVm()->usesWasmByteOrder()))) {
-     return WasmResult::InvalidMemoryAccess;
-   }
-   return WasmResult::Ok;

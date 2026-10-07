@@ -404,6 +404,7 @@ def _cc_toolchain_str(
         "linux-ppc64le": "powerpc64le-unknown-linux-gnu",
         "linux-x86_64": "x86_64-unknown-linux-gnu",
         "linux-riscv64": "riscv64-unknown-linux-gnu",
+        "linux-s390x": "s390x-unknown-linux-gnu",
         "none-riscv32": "riscv32-unknown-none-elf",
         "none-x86_64": "x86_64-unknown-none",
         "wasm32": "wasm32-unknown-unknown",

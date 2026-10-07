@@ -1,0 +1,38 @@
+diff --git a/ossm/vendor/envoy/source/extensions/filters/http/oauth2/filter.cc b/ossm/vendor/envoy/source/extensions/filters/http/oauth2/filter.cc
+index 796db27b67..fe026288c1 100644
+--- a/ossm/vendor/envoy/source/extensions/filters/http/oauth2/filter.cc
++++ b/ossm/vendor/envoy/source/extensions/filters/http/oauth2/filter.cc
+@@ -1,5 +1,6 @@
+ #include "source/extensions/filters/http/oauth2/filter.h"
+ 
++#include <endian.h>
+ #include <algorithm>
+ #include <chrono>
+ #include <memory>
+@@ -299,7 +300,7 @@ std::string generateCodeVerifier(Random::RandomGenerator& random) {
+   // create 4 random uint64_t values to fill the buffer because RFC 7636 recommends 32 octets of
+   // randomness.
+   for (size_t i = 0; i < 4; i++) {
+-    mem_block.appendOne(random.random());
++    mem_block.appendOne(htole64(random.random()));
+   }
+ 
+   std::unique_ptr<uint64_t[]> data = mem_block.release();
+@@ -387,7 +388,7 @@ std::string encryptCbc(absl::string_view plaintext, absl::string_view secret,
+   MemBlockBuilder<uint64_t> mem_block(4);
+   // create 2 random uint64_t values to fill the buffer because AES-256-CBC requires 16 bytes IV
+   for (size_t i = 0; i < 2; i++) {
+-    mem_block.appendOne(random.random());
++    mem_block.appendOne(htole64(random.random()));
+   }
+ 
+   std::unique_ptr<uint64_t[]> data = mem_block.release();
+@@ -509,7 +510,7 @@ std::string encrypt(absl::string_view plaintext, absl::string_view secret,
+   // Generate a random IV
+   MemBlockBuilder<uint64_t> mem_block(2);
+   for (size_t i = 0; i < 2; i++) {
+-    mem_block.appendOne(random.random());
++    mem_block.appendOne(htole64(random.random()));
+   }
+ 
+   std::unique_ptr<uint64_t[]> data = mem_block.release();
