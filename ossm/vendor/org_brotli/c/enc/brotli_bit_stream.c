@@ -10,10 +10,6 @@
 
 #include "brotli_bit_stream.h"
 
-#include <string.h>  /* memcpy, memset */
-
-#include <brotli/types.h>
-
 #include "../common/constants.h"
 #include "../common/context.h"
 #include "../common/platform.h"
@@ -169,7 +165,8 @@ static void BrotliStoreUncompressedMetaBlockHeader(size_t length,
 static void BrotliStoreHuffmanTreeOfHuffmanTreeToBitMask(
     const int num_codes, const uint8_t* code_length_bitdepth,
     size_t* storage_ix, uint8_t* storage) {
-  static const uint8_t kStorageOrder[BROTLI_CODE_LENGTH_CODES] = {
+  static const BROTLI_MODEL("small")
+  uint8_t kStorageOrder[BROTLI_CODE_LENGTH_CODES] = {
     1, 2, 3, 4, 0, 5, 17, 6, 16, 7, 8, 9, 10, 11, 12, 13, 14, 15
   };
   /* The bit lengths of the Huffman code over the code length alphabet
@@ -182,10 +179,12 @@ static void BrotliStoreHuffmanTreeOfHuffmanTreeToBitMask(
        3          01
        4          10
        5        1111 */
-  static const uint8_t kHuffmanBitLengthHuffmanCodeSymbols[6] = {
+  static const BROTLI_MODEL("small")
+  uint8_t kHuffmanBitLengthHuffmanCodeSymbols[6] = {
      0, 7, 3, 2, 1, 15
   };
-  static const uint8_t kHuffmanBitLengthHuffmanCodeBitLengths[6] = {
+  static const BROTLI_MODEL("small")
+  uint8_t kHuffmanBitLengthHuffmanCodeBitLengths[6] = {
     2, 4, 3, 2, 2, 4
   };
 
@@ -1018,16 +1017,44 @@ void BrotliStoreMetaBlock(MemoryManager* m,
     if (BROTLI_IS_OOM(m)) return;
   }
 
-  BuildAndStoreEntropyCodesLiteral(m, literal_enc, mb->literal_histograms,
-      mb->literal_histograms_size, BROTLI_NUM_LITERAL_SYMBOLS, tree,
-      storage_ix, storage);
+  {
+    uint8_t is_base64_histogram[256] = {0};
+    size_t max_type_id = BROTLI_MIN(size_t, mb->literal_split.num_types, 256);
+    size_t type_id;
+    for (type_id = 0; type_id < max_type_id; ++type_id) {
+      if (mb->literal_is_base64[type_id >> 3] & (1u << (type_id & 7))) {
+        if (mb->literal_context_map) {
+          size_t j;
+          for (j = 0; j < (1u << BROTLI_LITERAL_CONTEXT_BITS); ++j) {
+            uint32_t b64_histo_id =
+                mb->literal_context_map[(type_id << BROTLI_LITERAL_CONTEXT_BITS) + j];
+            if (b64_histo_id < 256) {
+              is_base64_histogram[b64_histo_id] = 1;
+            }
+          }
+        } else {
+          uint32_t b64_histo_id = (uint32_t)type_id;
+          if (b64_histo_id < 256) {
+            is_base64_histogram[b64_histo_id] = 1;
+          }
+        }
+      }
+    }
+
+    BuildAndStoreEntropyCodesLiteral(m, literal_enc, mb->literal_histograms,
+        mb->literal_histograms_size, BROTLI_NUM_LITERAL_SYMBOLS, tree,
+        is_base64_histogram,
+        storage_ix, storage);
+  }
   if (BROTLI_IS_OOM(m)) return;
   BuildAndStoreEntropyCodesCommand(m, command_enc, mb->command_histograms,
       mb->command_histograms_size, BROTLI_NUM_COMMAND_SYMBOLS, tree,
+      NULL,
       storage_ix, storage);
   if (BROTLI_IS_OOM(m)) return;
   BuildAndStoreEntropyCodesDistance(m, distance_enc, mb->distance_histograms,
       mb->distance_histograms_size, num_distance_symbols, tree,
+      NULL,
       storage_ix, storage);
   if (BROTLI_IS_OOM(m)) return;
   BROTLI_FREE(m, tree);
@@ -1325,8 +1352,10 @@ void BrotliStoreUncompressedMetaBlock(BROTLI_BOOL is_final_block,
 }
 
 #if defined(BROTLI_TEST)
-void GetBlockLengthPrefixCodeForTest(uint32_t len, size_t* code,
-                                     uint32_t* n_extra, uint32_t* extra) {
+void BrotliGetBlockLengthPrefixCodeForTest(uint32_t len, size_t* code,
+                                           uint32_t* n_extra, uint32_t* extra);
+void BrotliGetBlockLengthPrefixCodeForTest(uint32_t len, size_t* code,
+                                           uint32_t* n_extra, uint32_t* extra) {
   GetBlockLengthPrefixCode(len, code, n_extra, extra);
 }
 #endif
