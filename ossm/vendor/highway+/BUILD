@@ -130,6 +130,9 @@ COPTS = select({
         "-march=rv64gcv1p0",
         "-menable-experimental-extensions",
     ],
+    "@platforms//cpu:s390x": [
+        "-DTOOLCHAIN_MISS_ASM_HWCAP_H",
+    ],
     "//conditions:default": [
     ],
 })

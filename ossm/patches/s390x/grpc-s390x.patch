@@ -1,8 +1,7 @@
-diff --git a/ossm/vendor/com_github_grpc_grpc/src/core/tsi/alts/crypt/aes_gcm.cc b/ossm/vendor/com_github_grpc_grpc/src/core/tsi/alts/crypt/aes_gcm.cc
-index d768f85b2..917e6d44f 100644
---- a/ossm/vendor/com_github_grpc_grpc/src/core/tsi/alts/crypt/aes_gcm.cc
-+++ b/ossm/vendor/com_github_grpc_grpc/src/core/tsi/alts/crypt/aes_gcm.cc
-@@ -364,15 +364,15 @@ static grpc_status_code gsec_aes_gcm_aead_crypter_encrypt_iovec(
+diff --git a/ossm/vendor/grpc+/src/core/tsi/alts/crypt/aes_gcm.cc b/ossm/vendor/grpc+/src/core/tsi/alts/crypt/aes_gcm.cc
+--- a/ossm/vendor/grpc+/src/core/tsi/alts/crypt/aes_gcm.cc
++++ b/ossm/vendor/grpc+/src/core/tsi/alts/crypt/aes_gcm.cc
+@@ -364,15 +364,15 @@
      if (aad_length == 0) {
        continue;
      }
@@ -21,7 +20,7 @@ index d768f85b2..917e6d44f 100644
        aes_gcm_format_errors("Setting authenticated associated data failed",
                              error_details);
        return GRPC_STATUS_INTERNAL;
-@@ -514,15 +514,15 @@ static grpc_status_code gsec_aes_gcm_aead_crypter_decrypt_iovec(
+@@ -514,15 +514,15 @@
      if (aad_length == 0) {
        continue;
      }
@@ -40,7 +39,7 @@ index d768f85b2..917e6d44f 100644
        aes_gcm_format_errors("Setting authenticated associated data failed.",
                              error_details);
        return GRPC_STATUS_INTERNAL;
-@@ -552,7 +552,7 @@ static grpc_status_code gsec_aes_gcm_aead_crypter_decrypt_iovec(
+@@ -552,7 +552,7 @@
        memset(plaintext_vec.iov_base, 0x00, plaintext_vec.iov_len);
        return GRPC_STATUS_INVALID_ARGUMENT;
      }
@@ -49,7 +48,7 @@ index d768f85b2..917e6d44f 100644
      size_t bytes_to_write = ciphertext_length;
      // Don't include the tag
      if (bytes_to_write > total_ciphertext_length - kAesGcmTagLength) {
-@@ -565,12 +565,13 @@ static grpc_status_code gsec_aes_gcm_aead_crypter_decrypt_iovec(
+@@ -565,12 +565,13 @@
        return GRPC_STATUS_INVALID_ARGUMENT;
      }
      if (!EVP_DecryptUpdate(aes_gcm_crypter->ctx, plaintext,

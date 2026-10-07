@@ -149,6 +149,12 @@ do
   git apply "ossm/patches/ppc64le/${p}"
 done
 
+echo ">> Applying s390x source patches"
+for p in ossm/patches/s390x/*.patch; do
+  git apply --check "${p}"
+  git apply "${p}"
+done
+
 echo ">> Applying OSSM source patches to the vendored Envoy tree"
 # Patch the freshly vendored Envoy sources in place. This is done here as a
 # post-vendor tree edit rather than via an archive_override `patches` attribute

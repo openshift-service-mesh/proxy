@@ -1,0 +1,38 @@
+diff --git a/ossm/vendor/envoy+/source/extensions/filters/http/oauth2/filter.cc b/ossm/vendor/envoy+/source/extensions/filters/http/oauth2/filter.cc
+--- a/ossm/vendor/envoy+/source/extensions/filters/http/oauth2/filter.cc
++++ b/ossm/vendor/envoy+/source/extensions/filters/http/oauth2/filter.cc
+@@ -1,6 +1,7 @@
+ #include "source/extensions/filters/http/oauth2/filter.h"
+ 
+ #include <algorithm>
++#include <endian.h>
+ #include <array>
+ #include <chrono>
+ #include <memory>
+@@ -441,7 +442,7 @@
+   // create 4 random uint64_t values to fill the buffer because RFC 7636 recommends 32 octets of
+   // randomness.
+   for (size_t i = 0; i < 4; i++) {
+-    mem_block.appendOne(random.random());
++    mem_block.appendOne(htole64(random.random()));
+   }
+ 
+   std::unique_ptr<uint64_t[]> data = mem_block.release();
+@@ -535,7 +536,7 @@
+   // Generate a random IV. Two random uint64_t values fill the 16 bytes AES-256-CBC requires.
+   MemBlockBuilder<uint64_t> mem_block(2);
+   for (size_t i = 0; i < 2; i++) {
+-    mem_block.appendOne(random.random());
++    mem_block.appendOne(htole64(random.random()));
+   }
+   std::unique_ptr<uint64_t[]> data = mem_block.release();
+   const auto* random_bytes = reinterpret_cast<const unsigned char*>(data.get());
+@@ -651,7 +652,7 @@
+   // Generate a random IV.
+   MemBlockBuilder<uint64_t> mem_block(2);
+   for (size_t i = 0; i < 2; i++) {
+-    mem_block.appendOne(random.random());
++    mem_block.appendOne(htole64(random.random()));
+   }
+ 
+   std::unique_ptr<uint64_t[]> data = mem_block.release();
