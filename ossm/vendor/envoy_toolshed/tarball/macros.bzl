@@ -1,11 +1,10 @@
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 def unpacker(
         name,
         script = "@envoy_toolshed//tarball:unpack.sh",
         zstd = None,
-        visibility = ["//visibility:public"],
-):
-
+        visibility = ["//visibility:public"]):
     native.genrule(
         name = "placeholder",
         outs = ["PLACEHOLDER.TXT"],
@@ -52,12 +51,13 @@ def unpacker(
         data += [zstd]
         env["ZSTD"] = "$(location %s)" % zstd
 
-    native.sh_binary(
+    sh_binary(
         name = name,
         srcs = [script],
         visibility = visibility,
         data = data,
         env = env | select({
             ":overwrite_enabled": {"OVERWRITE": "1"},
-            "//conditions:default": {}}),
+            "//conditions:default": {},
+        }),
     )

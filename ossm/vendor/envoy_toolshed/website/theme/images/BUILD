@@ -3,13 +3,16 @@ load("@rules_pkg//pkg:pkg.bzl", "pkg_tar")
 
 pkg_files(
     name = "image_files",
-    srcs = glob([
-        "**/*.ico",
-        "**/*.svg",
-        "**/*.png",
-    ]),
-    strip_prefix = "",
+    srcs = glob(
+        [
+            "**/*.ico",
+            "**/*.svg",
+            "**/*.png",
+        ],
+        allow_empty = True,
+    ),
     prefix = "theme/static/images",
+    strip_prefix = "",
     visibility = ["//visibility:public"],
 )
 

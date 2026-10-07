@@ -12,9 +12,9 @@ OPENSSL_DISABLED_EXTENSIONS = [
 def load_envoy():
     http_archive(
         name = "envoy",
-        sha256 = "d514db7405f4e96ad1928868851cb0ccfbf131b857de128d19a7a1b072b3a5a8",
-        strip_prefix = "envoy-openssl-5685e29e07d126033e30668e7f6bc3de971e8c34",
-        url = "https://github.com/envoyproxy/envoy-openssl/archive/5685e29e07d126033e30668e7f6bc3de971e8c34.tar.gz",
+        sha256 = "685e4c7e2e5515b766748ecda8fc90e85c4c537a64dbe8b4ca69b6890172f841",
+        strip_prefix = "envoy-openssl-afc67ae0a0e1b318d0e8c78f849cd635328cc5d4",
+        url = "https://github.com/envoyproxy/envoy-openssl/archive/afc67ae0a0e1b318d0e8c78f849cd635328cc5d4.tar.gz",
         patch_args = ["-p1"],
         patches = [
             "@io_istio_proxy//ossm/patches:use-cmake-from-host.patch",

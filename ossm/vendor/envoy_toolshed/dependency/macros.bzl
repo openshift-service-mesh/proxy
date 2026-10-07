@@ -1,3 +1,4 @@
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 def updater(
         name,
@@ -18,8 +19,7 @@ def updater(
         version_selector = None,
         toolchains = None,
         pydict = False,
-        **kwargs,
-):
+        **kwargs):
     toolchains = [jq_toolchain] + (toolchains or [])
     deps = deps or []
     data = (data or []) + [
@@ -32,9 +32,7 @@ def updater(
         "$(location %s)" % version_file,
         "$(location %s)" % dependencies,
     ]
-    env = {
-        "JQ_BIN": "$(JQ_BIN)",
-    }
+    env = {"JQ_BIN": "$(rootpath %s)" % jq_toolchain}
     if pydict:
         env["DEP_SEARCH"] = "__DEP__ = dict("
         env["SHA_SEARCH"] = "sha256 = \"__EXISTING_SHA__\","
@@ -61,7 +59,7 @@ def updater(
         data += [post_script]
         env["VERSION_UPDATE_POST_SCRIPT"] = "$(location %s)" % post_script
 
-    native.sh_binary(
+    sh_binary(
         name = name,
         srcs = [update_script],
         data = data,
@@ -69,5 +67,5 @@ def updater(
         args = args,
         deps = deps,
         toolchains = toolchains,
-        **kwargs,
+        **kwargs
     )

@@ -3,92 +3,148 @@
 # Distributed under MIT license.
 # See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
 
-import functools
-import unittest
+import queue
+import random
+import threading
+import time
+
+import brotli
+import pytest
 
 from . import _test_utils
-import brotli
 
 
-# Do not inherit from TestCase here to ensure that test methods
-# are not run automatically and instead are run as part of a specific
-# configuration below.
-class _TestCompressor(object):
-
-    CHUNK_SIZE = 2048
-
-    def tearDown(self):
-        self.compressor = None
-
-    def _check_decompression(self, test_data):
-        # Write decompression to temp file and verify it matches the original.
-        temp_uncompressed = _test_utils.get_temp_uncompressed_name(test_data)
-        temp_compressed = _test_utils.get_temp_compressed_name(test_data)
-        original = test_data
-        with open(temp_uncompressed, 'wb') as out_file:
-            with open(temp_compressed, 'rb') as in_file:
-                out_file.write(brotli.decompress(in_file.read()))
-        self.assertFilesMatch(temp_uncompressed, original)
-
-    def _test_single_process(self, test_data):
-        # Write single-shot compression to temp file.
-        temp_compressed = _test_utils.get_temp_compressed_name(test_data)
-        with open(temp_compressed, 'wb') as out_file:
-            with open(test_data, 'rb') as in_file:
-                out_file.write(self.compressor.process(in_file.read()))
-            out_file.write(self.compressor.finish())
-        self._check_decompression(test_data)
-
-    def _test_multiple_process(self, test_data):
-        # Write chunked compression to temp file.
-        temp_compressed = _test_utils.get_temp_compressed_name(test_data)
-        with open(temp_compressed, 'wb') as out_file:
-            with open(test_data, 'rb') as in_file:
-                read_chunk = functools.partial(in_file.read, self.CHUNK_SIZE)
-                for data in iter(read_chunk, b''):
-                    out_file.write(self.compressor.process(data))
-            out_file.write(self.compressor.finish())
-        self._check_decompression(test_data)
-
-    def _test_multiple_process_and_flush(self, test_data):
-        # Write chunked and flushed compression to temp file.
-        temp_compressed = _test_utils.get_temp_compressed_name(test_data)
-        with open(temp_compressed, 'wb') as out_file:
-            with open(test_data, 'rb') as in_file:
-                read_chunk = functools.partial(in_file.read, self.CHUNK_SIZE)
-                for data in iter(read_chunk, b''):
-                    out_file.write(self.compressor.process(data))
-                    out_file.write(self.compressor.flush())
-            out_file.write(self.compressor.finish())
-        self._check_decompression(test_data)
+@pytest.mark.parametrize("quality", [1, 6, 9, 11])
+@pytest.mark.parametrize("text_name", _test_utils.gather_text_inputs())
+def test_single_process(quality, text_name):
+  original = _test_utils.take_input(text_name)
+  compressor = brotli.Compressor(quality=quality)
+  compressed = compressor.process(original)
+  compressed += compressor.finish()
+  decompressed = brotli.decompress(compressed)
+  assert original == decompressed
 
 
-_test_utils.generate_test_methods(_TestCompressor)
+@pytest.mark.parametrize("quality", [1, 6, 9, 11])
+@pytest.mark.parametrize("text_name", _test_utils.gather_text_inputs())
+def test_multiple_process(quality, text_name):
+  original = _test_utils.take_input(text_name)
+  chunk_size = 2048
+  chunks = _test_utils.chunk_input(original, chunk_size)
+  compressor = brotli.Compressor(quality=quality)
+  compressed = b""
+  for chunk in chunks:
+    compressed += compressor.process(chunk)
+  compressed += compressor.finish()
+  decompressed = brotli.decompress(compressed)
+  assert original == decompressed
 
 
-class TestCompressorQuality1(_TestCompressor, _test_utils.TestCase):
-
-    def setUp(self):
-        self.compressor = brotli.Compressor(quality=1)
-
-
-class TestCompressorQuality6(_TestCompressor, _test_utils.TestCase):
-
-    def setUp(self):
-        self.compressor = brotli.Compressor(quality=6)
-
-
-class TestCompressorQuality9(_TestCompressor, _test_utils.TestCase):
-
-    def setUp(self):
-        self.compressor = brotli.Compressor(quality=9)
+@pytest.mark.parametrize("quality", [1, 6, 9, 11])
+@pytest.mark.parametrize("text_name", _test_utils.gather_text_inputs())
+def test_multiple_process_and_flush(quality, text_name):
+  original = _test_utils.take_input(text_name)
+  chunk_size = 2048
+  chunks = _test_utils.chunk_input(original, chunk_size)
+  compressor = brotli.Compressor(quality=quality)
+  compressed = b""
+  for chunk in chunks:
+    compressed += compressor.process(chunk)
+    compressed += compressor.flush()
+  compressed += compressor.finish()
+  decompressed = brotli.decompress(compressed)
+  assert original == decompressed
 
 
-class TestCompressorQuality11(_TestCompressor, _test_utils.TestCase):
+def make_input(size):
+  abc = [bytes([b]) for b in b"abcdefghijklmnopqrstuvwxyz"]
+  abc_cap = [bytes([b]) for b in b"ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
+  num_words_by_len = [0, 25, 100, 175, 1700, 1000, 1000, 1000]
+  word_set = set()
+  rng = random.Random()
+  rng.seed(2025)
+  words_by_len = [[]]
+  for word_len in range(1, len(num_words_by_len)):
+    num_words = num_words_by_len[word_len]
+    words = []
+    for _ in range(num_words):
+      while True:
+        word = b"".join(
+            [rng.choice(abc_cap)]
+            + [rng.choice(abc) for _ in range(word_len - 1)]
+        )
+        if word not in word_set:
+          word_set.add(word)
+          words.append(word)
+          break
+    words_by_len.append(words)
+  total_size = 0
+  out = []
+  while total_size < size:
+    word_len = rng.choice(range(1, len(num_words_by_len)))
+    word = rng.choice(words_by_len[word_len])
+    total_size += len(word)
+    out.append(word)
+  return b"".join(out)
 
-    def setUp(self):
-        self.compressor = brotli.Compressor(quality=11)
+
+def _thread_compress(original, compressor, results):
+  compressed = compressor.process(original)
+  compressed += compressor.finish()
+  results.put(1)
 
 
-if __name__ == '__main__':
-    unittest.main()
+def _thread_concurrent_process(compressor, results):
+  time.sleep(0.01)
+  try:
+    _ = compressor.process(b"whatever")
+  except brotli.error:
+    results.put(2)
+
+
+def _thread_concurrent_flush(compressor, results):
+  time.sleep(0.02)
+  try:
+    _ = compressor.flush()
+  except brotli.error:
+    results.put(3)
+
+
+def _thread_concurrent_finish(compressor, results):
+  time.sleep(0.03)
+  try:
+    _ = compressor.finish()
+  except brotli.error:
+    results.put(4)
+
+
+def test_concurrency():
+  original = make_input(2 * 1024 * 1024)
+  compressor = brotli.Compressor(quality=9)
+  results = queue.Queue()
+  threads = []
+  threads.append(
+      threading.Thread(
+          target=_thread_compress, args=(original, compressor, results)
+      )
+  )
+  threads.append(
+      threading.Thread(
+          target=_thread_concurrent_process, args=(compressor, results)
+      )
+  )
+  threads.append(
+      threading.Thread(
+          target=_thread_concurrent_flush, args=(compressor, results)
+      )
+  )
+  threads.append(
+      threading.Thread(
+          target=_thread_concurrent_finish, args=(compressor, results)
+      )
+  )
+  for thread in threads:
+    thread.start()
+  for thread in threads:
+    thread.join()
+  assert sorted(results.queue) == [1, 2, 3, 4]
