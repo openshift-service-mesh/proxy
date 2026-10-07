@@ -62,7 +62,6 @@
 #include "quiche/quic/platform/api/quic_flags.h"
 #include "quiche/quic/platform/api/quic_ip_address_family.h"
 #include "quiche/quic/platform/api/quic_logging.h"
-#include "quiche/common/quiche_endian.h"
 #include "quiche/common/quiche_text_utils.h"
 #include "quiche/common/wire_serialization.h"
 
@@ -1279,7 +1278,7 @@ std::unique_ptr<QuicEncryptedPacket> QuicFramer::BuildPublicResetPacket(
     const QuicPublicResetPacket& packet) {
   CryptoHandshakeMessage reset;
   reset.set_tag(kPRST);
-  reset.SetValue(kRNON, quiche::QuicheEndian::HostToLittleEndian64(packet.nonce_proof));
+  reset.SetValue(kRNON, packet.nonce_proof);
   if (packet.client_address.host().address_family() !=
       IpAddressFamily::IP_UNSPEC) {
     // packet.client_address is non-empty.
@@ -5373,8 +5372,7 @@ bool QuicFramer::AppendAckFrameAndTypeByte(const QuicAckFrame& frame,
   }
 
   if (num_ack_blocks > 0) {
-    uint8_t num_ack_blocks_serialized = static_cast<uint8_t>(num_ack_blocks);
-      if (!writer->WriteBytes(&num_ack_blocks_serialized, 1)) {
+    if (!writer->WriteBytes(&num_ack_blocks, 1)) {
       return false;
     }
   }

@@ -94,11 +94,7 @@ std::ostream& operator<<(std::ostream& os,
 }
 
 QuicVersionLabel MakeVersionLabel(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
-  if (quiche::QuicheEndian::HostEndianness == quiche::BIG) {
-    return MakeQuicTag(a, b, c, d);
-  } else {
-    return MakeQuicTag(d, c, b, a);
-  }
+  return MakeQuicTag(d, c, b, a);
 }
 
 std::ostream& operator<<(std::ostream& os,

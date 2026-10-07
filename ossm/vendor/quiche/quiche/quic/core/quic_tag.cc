@@ -15,16 +15,9 @@
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
-#include "quiche/common/quiche_endian.h"
 #include "quiche/common/quiche_text_utils.h"
 
 namespace quic {
-
-bool QuicTagLess::operator()(const QuicTag& a, const QuicTag& b) const {
-  return quiche::QuicheEndian::HostToLittleEndian32(a)
-      < quiche::QuicheEndian::HostToLittleEndian32(b);
-}
-
 
 bool FindMutualQuicTag(const QuicTagVector& our_tags,
                        const QuicTagVector& their_tags, QuicTag* out_result,
@@ -54,31 +47,17 @@ std::string QuicTagToString(QuicTag tag) {
   bool ascii = true;
   const QuicTag orig_tag = tag;
 
-  if (quiche::QuicheEndian::HostEndianness == quiche::BIG) {
-    memcpy(&chars, &tag, sizeof tag);
-    for (size_t i = 0; i < ABSL_ARRAYSIZE(chars); i++) {
-      if ((chars[i] == 0 || chars[i] == '\xff') &&
-          i == ABSL_ARRAYSIZE(chars) - 1) {
-        chars[i] = ' ';
-      }
-      if (!absl::ascii_isprint(static_cast<unsigned char>(chars[i]))) {
-        ascii = false;
-        break;
-      }
+  for (size_t i = 0; i < ABSL_ARRAYSIZE(chars); i++) {
+    chars[i] = static_cast<char>(tag);
+    if ((chars[i] == 0 || chars[i] == '\xff') &&
+        i == ABSL_ARRAYSIZE(chars) - 1) {
+      chars[i] = ' ';
     }
-  } else {
-    for (size_t i = 0; i < ABSL_ARRAYSIZE(chars); i++) {
-      chars[i] = static_cast<char>(tag);
-      if ((chars[i] == 0 || chars[i] == '\xff') &&
-          i == ABSL_ARRAYSIZE(chars) - 1) {
-        chars[i] = ' ';
-      }
-      if (!absl::ascii_isprint(static_cast<unsigned char>(chars[i]))) {
-        ascii = false;
-        break;
-      }
-      tag >>= 8;
+    if (!absl::ascii_isprint(static_cast<unsigned char>(chars[i]))) {
+      ascii = false;
+      break;
     }
+    tag >>= 8;
   }
 
   if (ascii) {
@@ -90,13 +69,8 @@ std::string QuicTagToString(QuicTag tag) {
 }
 
 uint32_t MakeQuicTag(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
-  if (quiche::QuicheEndian::HostEndianness == quiche::BIG) {
-    return static_cast<uint32_t>(d) | static_cast<uint32_t>(c) << 8 |
-           static_cast<uint32_t>(b) << 16 | static_cast<uint32_t>(a) << 24;
-  } else {
-    return static_cast<uint32_t>(a) | static_cast<uint32_t>(b) << 8 |
-           static_cast<uint32_t>(c) << 16 | static_cast<uint32_t>(d) << 24;
-  }
+  return static_cast<uint32_t>(a) | static_cast<uint32_t>(b) << 8 |
+         static_cast<uint32_t>(c) << 16 | static_cast<uint32_t>(d) << 24;
 }
 
 bool ContainsQuicTag(const QuicTagVector& tag_vector, QuicTag tag) {
@@ -112,18 +86,12 @@ QuicTag ParseQuicTag(absl::string_view tag_string) {
     tag_string = tag_bytes;
   }
   QuicTag tag = 0;
-  if (quiche::QuicheEndian::HostEndianness == quiche::BIG) {
-    size_t len = tag_string.length() < sizeof tag
-        ? tag_string.length() : sizeof tag;
-    memcpy(&tag, tag_string.data(), len);
-  } else {
-    // Iterate over every character from right to left.
-    for (auto it = tag_string.rbegin(); it != tag_string.rend(); ++it) {
-      // The cast here is required on platforms where char is signed.
-      unsigned char token_char = static_cast<unsigned char>(*it);
-      tag <<= 8;
-      tag |= token_char;
-    }
+  // Iterate over every character from right to left.
+  for (auto it = tag_string.rbegin(); it != tag_string.rend(); ++it) {
+    // The cast here is required on platforms where char is signed.
+    unsigned char token_char = static_cast<unsigned char>(*it);
+    tag <<= 8;
+    tag |= token_char;
   }
   return tag;
 }

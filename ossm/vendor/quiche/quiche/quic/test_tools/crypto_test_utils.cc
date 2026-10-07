@@ -48,7 +48,6 @@
 #include "quiche/quic/test_tools/simple_quic_framer.h"
 #include "quiche/quic/test_tools/test_certificates.h"
 #include "quiche/common/platform/api/quiche_logging.h"
-#include "quiche/common/quiche_endian.h"
 #include "quiche/common/quiche_callbacks.h"
 #include "quiche/common/test_tools/quiche_test_utils.h"
 
@@ -784,7 +783,6 @@ QuicTag ParseTag(const char* tagstr) {
       tag |= static_cast<uint32_t>(tagstr[i]) << 24;
     }
   }
-  tag = quiche::QuicheEndian::HostToLittleEndian32(tag);
 
   return tag;
 }
