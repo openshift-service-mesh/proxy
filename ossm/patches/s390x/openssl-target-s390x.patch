@@ -1,7 +1,6 @@
-diff --git a/ossm/vendor/boringssl/include/openssl/target.h b/ossm/vendor/boringssl/include/openssl/target.h
-index 2c03389c4..66bb7a44f 100644
---- a/ossm/vendor/boringssl/include/openssl/target.h
-+++ b/ossm/vendor/boringssl/include/openssl/target.h
+diff --git a/ossm/vendor/boringssl-source+/include/openssl/target.h b/ossm/vendor/boringssl-source+/include/openssl/target.h
+--- a/ossm/vendor/boringssl-source+/include/openssl/target.h
++++ b/ossm/vendor/boringssl-source+/include/openssl/target.h
 @@ -56,6 +56,8 @@
  #define OPENSSL_32_BIT
  #elif defined(__myriad2__)
