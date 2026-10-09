@@ -386,7 +386,8 @@ cc_library(
         "src/lj_*.h",
     ]) + select({
         # Generated VM assembly
-        ":windows_x86_64": [],
+        # On Windows the generated VM is an .obj file, which must be in srcs to be linked.
+        ":windows_x86_64": [":lj_vm_obj"],
         "//conditions:default": [":lj_vm_s"],
     }),
     hdrs = [
@@ -403,11 +404,6 @@ cc_library(
         ":lj_recdef_h",
         ":lj_folddef_h",
     ],
-    deps = select({
-        # Generated VM assembly on Windows is an .obj file
-        ":windows_x86_64": [":lj_vm_obj"],
-        "//conditions:default": [],
-    }),
     copts = [
         "-O2",
         "-fomit-frame-pointer",
