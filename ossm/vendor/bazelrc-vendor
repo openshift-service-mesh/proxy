@@ -42,6 +42,7 @@ common --override_repository=envoy++envoy_repo_extension+envoy_repo=%workspace%/
 common --override_repository=envoy_toolshed++git_prebuilt_extension+git_toolchains=%workspace%/ossm/vendor/envoy_toolshed++git_prebuilt_extension+git_toolchains
 common --override_repository=envoy_toolshed++sq_prebuilt_extension+sq_toolchains=%workspace%/ossm/vendor/envoy_toolshed++sq_prebuilt_extension+sq_toolchains
 common --override_repository=envoy_toolshed+=%workspace%/ossm/vendor/envoy_toolshed+
+common --override_repository=envoy_toolshed_jq+=%workspace%/ossm/vendor/envoy_toolshed_jq+
 common --override_repository=fast_float+=%workspace%/ossm/vendor/fast_float+
 common --override_repository=flatbuffers+=%workspace%/ossm/vendor/flatbuffers+
 common --override_repository=fmt+=%workspace%/ossm/vendor/fmt+
