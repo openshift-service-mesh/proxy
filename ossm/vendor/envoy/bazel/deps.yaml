@@ -583,7 +583,7 @@ wasmtime:
   project_name: "wasmtime"
   project_desc: "A standalone runtime for WebAssembly"
   project_url: "https://github.com/bytecodealliance/wasmtime"
-  release_date: "2026-05-21"
+  release_date: "2026-06-15"
   use_category:
   - dataplane_ext
   extensions:
@@ -1432,7 +1432,7 @@ thrift:
   project_name: "Apache Thrift"
   project_desc: "Apache Thrift Python library"
   project_url: "https://thrift.apache.org/"
-  release_date: "2026-04-27"
+  release_date: "2026-07-11"
   use_category:
   - test_only
   cpe: "cpe:2.3:a:apache:thrift:*"
