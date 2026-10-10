@@ -439,6 +439,7 @@ class MoqtFetchResponseStreamTest : public quiche::test::QuicheTest {
     EXPECT_CALL(session_error_callback_, Call).Times(testing::AnyNumber());
     ON_CALL(mock_data_stream_, CanWrite).WillByDefault(Return(true));
     ON_CALL(mock_stream_, CanWrite).WillByDefault(Return(true));
+    ON_CALL(validate_request_id_, Call).WillByDefault(Return(absl::OkStatus()));
   }
 
   std::unique_ptr<MoqtFetchResponseStream> CreateAndBindStream(
@@ -450,6 +451,7 @@ class MoqtFetchResponseStreamTest : public quiche::test::QuicheTest {
     auto stream = std::make_unique<MoqtFetchResponseStream>(
         &framer_, message_parser_, &mock_publisher_,
         session_error_callback_.AsStdFunction(),
+        validate_request_id_.AsStdFunction(),
         open_stream_callback_.AsStdFunction(), std::move(subscription_cb));
     stream->BindStream(&mock_stream_);
     return stream;
@@ -463,6 +465,7 @@ class MoqtFetchResponseStreamTest : public quiche::test::QuicheTest {
   MockFetchTask task_;
   StrictMock<testing::MockFunction<void(MoqtError, absl::string_view)>>
       session_error_callback_;
+  testing::MockFunction<absl::Status(uint64_t)> validate_request_id_;
   StrictMock<
       testing::MockFunction<void(webtransport::StreamId, MoqtTrackPriority)>>
       open_stream_callback_;
@@ -506,6 +509,19 @@ TEST_F(MoqtFetchResponseStreamTest, ReceiveFetchStandaloneTrackDoesNotExist) {
   MoqtFetch fetch;
   fetch.request_id = kRequestId;
   fetch.fetch = StandaloneFetch(kTrackName, kStart, kEnd);
+  QUICHE_EXPECT_OK(stream->OnControlMessage(fetch));
+}
+
+TEST_F(MoqtFetchResponseStreamTest, ReceiveFetchStandaloneReservedTrackName) {
+  std::unique_ptr<MoqtFetchResponseStream> stream = CreateAndBindStream();
+  FullTrackName reserved_track_name(TrackNamespace({"."}), "track");
+  EXPECT_CALL(mock_publisher_, GetTrack(reserved_track_name)).Times(0);
+  MoqtRequestError expected_error = {RequestErrorCode::kDoesNotExist,
+                                     std::nullopt, "Reserved track name"};
+  EXPECT_CALL(mock_stream_, Writev(SerializedControlMessage(expected_error), _))
+      .WillOnce(Return(absl::OkStatus()));
+  MoqtFetch fetch(kRequestId,
+                  StandaloneFetch(reserved_track_name, kStart, kEnd));
   QUICHE_EXPECT_OK(stream->OnControlMessage(fetch));
 }
 

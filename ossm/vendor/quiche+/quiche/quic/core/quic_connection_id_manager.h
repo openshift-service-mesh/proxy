@@ -75,6 +75,10 @@ class QUICHE_EXPORT QuicPeerIssuedConnectionIdManager {
     return !unused_connection_id_data_.empty();
   }
 
+  size_t NumUnusedConnectionIds() const {
+    return unused_connection_id_data_.size();
+  }
+
   // Returns the data associated with an unused connection Id. After the call,
   // the Id is marked as used. Returns nullptr if there is no unused connection
   // Id.
@@ -95,6 +99,12 @@ class QUICHE_EXPORT QuicPeerIssuedConnectionIdManager {
   // replace it with new_connection_id. Otherwise, this is a no-op.
   void ReplaceConnectionId(const QuicConnectionId& old_connection_id,
                            const QuicConnectionId& new_connection_id);
+
+  void set_active_connection_id_limit(size_t active_connection_id_limit) {
+    if (active_connection_id_limit > active_connection_id_limit_) {
+      active_connection_id_limit_ = active_connection_id_limit;
+    }
+  }
 
  private:
   friend class test::QuicConnectionIdManagerPeer;
@@ -161,6 +171,12 @@ class QUICHE_EXPORT QuicSelfIssuedConnectionIdManager {
   // QuicSelfIssuedConnectionIdManager and not retired locally yet. Called to
   // tell if a received packet has a valid connection ID.
   bool IsConnectionIdInUse(const QuicConnectionId& cid) const;
+
+  void set_active_connection_id_limit(size_t active_connection_id_limit) {
+    if (active_connection_id_limit > active_connection_id_limit_) {
+      active_connection_id_limit_ = active_connection_id_limit;
+    }
+  }
 
  private:
   friend class test::QuicConnectionIdManagerPeer;

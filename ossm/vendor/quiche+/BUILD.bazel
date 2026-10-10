@@ -2569,6 +2569,12 @@ quiche_cc_library(
 )
 
 quiche_cc_library(
+    name = "quiche_common_types_lib",
+    hdrs = ["quiche/common/quiche_types.h"],
+    copts = quiche_copts,
+)
+
+quiche_cc_library(
     name = "quic_core_data_lib",
     srcs = [
         "quiche/quic/core/quic_data_reader.cc",
@@ -3962,6 +3968,7 @@ quiche_cc_library(
         ":quic_platform_base",
         ":quiche_common_endian_lib",
         ":quiche_common_print_elements_lib",
+        ":quiche_common_types_lib",
         ":quiche_web_transport_web_transport_lib",
     ],
 )
@@ -4548,6 +4555,7 @@ quiche_cc_library(
         ":quic_platform_ip_address_family",
         ":quiche_common_platform_default_quiche_platform_impl_udp_socket_platform_impl_lib",
         ":quiche_common_platform_export",
+        ":quiche_common_types_lib",
     ],
 )
 
@@ -4829,6 +4837,7 @@ quiche_cc_library(
         ":quic_core_types_lib",
         ":quic_core_utils_lib",
         ":quic_platform_base",
+        ":quiche_common_types_lib",
         ":quiche_common_platform",
     ],
 )

@@ -26,6 +26,7 @@
 #include "quiche/common/platform/api/quiche_logging.h"
 #include "quiche/common/quiche_buffer_allocator.h"
 #include "quiche/common/quiche_callbacks.h"
+#include "quiche/common/quiche_circular_deque.h"
 #include "quiche/web_transport/web_transport.h"
 
 namespace moqt {
@@ -36,6 +37,10 @@ class MoqtBidiStreamTestWrapper;
 
 using SessionErrorCallback =
     quiche::SingleUseCallback<void(MoqtError, absl::string_view)>;
+// If it returns !ok, the session will immediately terminate and the caller
+// must return immediately.
+using ValidateRequestIdCallback =
+    quiche::MultiUseCallback<absl::Status(uint64_t)>;
 
 // MoqtBidiStreamBase is the base class for bidirectional streams in MoQT.  It
 // contains basic methods for handling and dispatching messages.  An instance of
@@ -68,6 +73,7 @@ class MoqtBidiStreamBase : public webtransport::StreamVisitor {
 
   // webtransport::StreamVisitor implementation.
   void OnResetStreamReceived(webtransport::StreamErrorCode error) override {
+    stream_status_ = MoqtStreamErrorToStatus(error, "");
     Reset(error);
   }
   void OnStopSendingReceived(webtransport::StreamErrorCode error) override {
@@ -112,6 +118,9 @@ class MoqtBidiStreamBase : public webtransport::StreamVisitor {
   }
   void Reset(webtransport::StreamErrorCode error) {
     if (stream() != nullptr) {
+      if (stream_status().ok()) {  // a Reset has not been received yet.
+        stream()->SendStopSending(error);
+      }
       stream()->ResetWithUserCode(error);
     }
     stream_status_ = MoqtStreamErrorToStatus(error, "");
@@ -141,6 +150,19 @@ class MoqtBidiStreamBase : public webtransport::StreamVisitor {
   webtransport::StreamId stream_id() const {
     return stream() != nullptr ? stream()->GetStreamId() : 0;
   }
+  // If there are incoming REQUEST_UPDATEs buffered for processing, returns the
+  // parameters saved for the oldest one. Also pops it from the queue.
+  // Otherwise, returns nullopt.
+  std::optional<MessageParameters> NextIncomingUpdate() {
+    if (incoming_update_queue_.empty()) {
+      return std::nullopt;
+    }
+    MessageParameters parameters = incoming_update_queue_.front();
+    incoming_update_queue_.pop_front();
+    return parameters;
+  }
+
+  absl::Status OnControlMessage(const MoqtGoAway& message);
 
  protected:
   // Called when a WebTransport stream has been associated with the object.
@@ -153,8 +175,12 @@ class MoqtBidiStreamBase : public webtransport::StreamVisitor {
       const MoqtRawControlMessage& message) = 0;
 
   MoqtRequestUpdateQueue& request_update_queue() {
-    return request_update_queue_;
+    return outgoing_update_queue_;
   }
+  void QueueIncomingUpdate(const MessageParameters& parameters) {
+    incoming_update_queue_.push_back(parameters);
+  }
+  bool IncomingUpdatesQueued() const { return !incoming_update_queue_.empty(); }
 
   // Terminates the MoQT session due to a fatal error encountered.
   void OnFatalError(absl::Status status);
@@ -177,9 +203,13 @@ class MoqtBidiStreamBase : public webtransport::StreamVisitor {
   std::optional<MoqtControlStreamParser> stream_parser_;
   MoqtControlMessageParser message_parser_;
   MoqtControlMessageQueue outgoing_message_queue_;
-  MoqtRequestUpdateQueue request_update_queue_;
+  MoqtRequestUpdateQueue outgoing_update_queue_;
+  // Incoming REQUEST_UPDATEs that cannot be handled synchronously (possibly
+  // because the OK for the original request has not been sent)
+  quiche::QuicheCircularDeque<MessageParameters> incoming_update_queue_;
   SessionErrorCallback session_error_callback_;
   absl::Status stream_status_ = absl::OkStatus();
+  bool received_goaway_ = false;
 };
 
 // DispatchControlMessage is wrapped into a class so that the caller class can

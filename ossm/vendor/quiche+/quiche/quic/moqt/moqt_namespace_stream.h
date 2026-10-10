@@ -51,6 +51,7 @@ class MoqtSubscribeNamespaceRequestStream : public MoqtBidiStreamBase {
   ~MoqtSubscribeNamespaceRequestStream();
 
   // MoqtBidiStreamBase overrides.
+  using MoqtBidiStreamBase::OnControlMessage;
   void OnStreamBound() override;
   absl::Status OnRawControlMessage(
       const MoqtRawControlMessage& message) override;
@@ -149,9 +150,11 @@ class MoqtSubscribeNamespaceResponseStream : public MoqtBidiStreamBase {
       MoqtFramer* framer, const MoqtControlMessageParser& message_parser,
       AddPrefixCallback add_callback, RemovePrefixCallback remove_callback,
       SessionErrorCallback session_error_callback,
+      ValidateRequestIdCallback validate_request_id,
       MoqtIncomingSubscribeNamespaceCallback& application);
   ~MoqtSubscribeNamespaceResponseStream() { Detach(); }
 
+  using MoqtBidiStreamBase::OnControlMessage;
   void OnStreamBound() override {
     // TODO(martinduke): Set the priority for this stream.
   }
@@ -170,6 +173,7 @@ class MoqtSubscribeNamespaceResponseStream : public MoqtBidiStreamBase {
   TrackNamespace prefix_;
   AddPrefixCallback add_callback_;
   RemovePrefixCallback remove_callback_;
+  ValidateRequestIdCallback validate_request_id_;
   MoqtIncomingSubscribeNamespaceCallback& application_;
   std::unique_ptr<MoqtNamespaceTask> task_;
   absl::flat_hash_set<TrackNamespace> published_suffixes_;

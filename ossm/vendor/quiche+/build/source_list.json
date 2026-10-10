@@ -8,6 +8,7 @@
     "quiche/quic/test_tools/send_algorithm_test_result.proto"
   ],
   "quiche_core_hdrs": [
+    "quiche/common/abiding_object_pool.h",
     "quiche/common/btree_scheduler.h",
     "quiche/common/bug_utils.h",
     "quiche/common/bug_utils_test_helper.h",
@@ -63,6 +64,7 @@
     "quiche/common/quiche_status_utils.h",
     "quiche/common/quiche_string_tuple.h",
     "quiche/common/quiche_text_utils.h",
+    "quiche/common/quiche_types.h",
     "quiche/common/quiche_weak_ptr.h",
     "quiche/common/simple_buffer_allocator.h",
     "quiche/common/stable_block_list.h",
@@ -1130,6 +1132,7 @@
     "quiche/balsa/header_properties_test.cc",
     "quiche/balsa/simple_buffer_test.cc",
     "quiche/binary_http/binary_http_message_test.cc",
+    "quiche/common/abiding_object_pool_test.cc",
     "quiche/common/btree_scheduler_test.cc",
     "quiche/common/bug_utils_test.cc",
     "quiche/common/capsule_test.cc",
@@ -1314,6 +1317,7 @@
     "quiche/quic/core/http/quic_spdy_stream_test.cc",
     "quiche/quic/core/http/spdy_utils_test.cc",
     "quiche/quic/core/http/web_transport_http3_test.cc",
+    "quiche/quic/core/http/web_transport_stream_adapter_test.cc",
     "quiche/quic/core/legacy_quic_stream_id_manager_test.cc",
     "quiche/quic/core/packet_number_indexed_queue_test.cc",
     "quiche/quic/core/qpack/new_qpack_blocking_manager_test.cc",
@@ -1504,7 +1508,6 @@
     "quiche/http2/adapter/nghttp2_callbacks.cc",
     "quiche/http2/adapter/nghttp2_data_provider.cc",
     "quiche/http2/adapter/nghttp2_session.cc",
-    "quiche/http2/adapter/nghttp2_test.cc",
     "quiche/http2/adapter/nghttp2_util.cc"
   ],
   "nghttp2_test_support_hdrs": [
@@ -1523,7 +1526,8 @@
     "quiche/http2/adapter/callback_visitor_test.cc",
     "quiche/http2/adapter/nghttp2_adapter_test.cc",
     "quiche/http2/adapter/nghttp2_data_provider_test.cc",
-    "quiche/http2/adapter/nghttp2_session_test.cc"
+    "quiche/http2/adapter/nghttp2_session_test.cc",
+    "quiche/http2/adapter/nghttp2_test.cc"
   ],
   "default_platform_impl_hdrs": [
     "quiche/common/platform/default/quiche_platform_impl/quiche_bug_tracker_impl.h",

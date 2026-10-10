@@ -29,6 +29,7 @@ config_setting(
 )
 
 STRICT_C_OPTIONS = select({
+    ":msvc": [],
     ":clang-cl": [
         "/W4",
         "-Wconversion",
@@ -40,7 +41,6 @@ STRICT_C_OPTIONS = select({
         "-Wsign-compare",
         "-Wno-sign-conversion",
     ],
-    ":msvc": [],
     "//conditions:default": [
         "--pedantic-errors",
         "-Wall",

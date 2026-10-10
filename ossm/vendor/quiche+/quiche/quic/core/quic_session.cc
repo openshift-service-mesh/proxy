@@ -234,17 +234,34 @@ void QuicSession::Initialize() {
         connection_->version().IsIetfQuic()) {
       config()->SetMinAckDelayDraft10Ms(kDefaultMinAckDelayTimeMs);
     }
+    if (config()->HasClientRequestedIndependentOption(kBCFR, perspective_)) {
+      bundle_retransmitted_crypto_frames_ = true;
+    }
+    if (GetQuicReloadableFlag(quic_active_connection_id_limit) &&
+        connection_->version().IsIetfQuic()) {
+      if (config()->HasClientRequestedIndependentOption(k3CID, perspective_)) {
+        QUIC_RELOADABLE_FLAG_COUNT_N(quic_active_connection_id_limit, 1, 5);
+        config()->SetActiveConnectionIdLimitToSend(3);
+      } else if (config()->HasClientRequestedIndependentOption(k4CID,
+                                                               perspective_)) {
+        QUIC_RELOADABLE_FLAG_COUNT_N(quic_active_connection_id_limit, 2, 5);
+        config()->SetActiveConnectionIdLimitToSend(4);
+      } else if (config()->HasClientRequestedIndependentOption(k5CID,
+                                                               perspective_)) {
+        QUIC_RELOADABLE_FLAG_COUNT_N(quic_active_connection_id_limit, 3, 5);
+        config()->SetActiveConnectionIdLimitToSend(5);
+      }
+    }
   } else if (GetQuicReloadableFlag(quic_receive_ack_frequency) &&
              connection_->version().IsIetfQuic()) {
     config()->SetMinAckDelayDraft10Ms(kDefaultMinAckDelayTimeMs);
   }
+  connection_->CreateConnectionIdManager();
   connection_->SetFromConfig(*config());
   if (perspective() == Perspective::IS_SERVER &&
       connection_->version().IsIetfQuic()) {
     config()->SetStatelessResetTokenToSend(GetStatelessResetToken());
   }
-
-  connection_->CreateConnectionIdManager();
 
   // On the server side, version negotiation has been done by the dispatcher,
   // and the server session is created with the right version.
@@ -2647,17 +2664,32 @@ void QuicSession::OnFrameLost(const QuicFrame& frame) {
 bool QuicSession::RetransmitFrames(const QuicFrames& frames,
                                    TransmissionType type) {
   QuicConnection::ScopedPacketFlusher retransmission_flusher(connection_);
+  std::optional<QuicConnection::ScopedEncryptionLevelContext>
+      encryption_level_context;
   for (const QuicFrame& frame : frames) {
     if (frame.type == DATAGRAM_FRAME) {
       // Do not retransmit DATAGRAM frames.
       continue;
     }
     if (frame.type == CRYPTO_FRAME) {
+      if (bundle_retransmitted_crypto_frames_ &&
+          (!encryption_level_context.has_value() ||
+           connection_->encryption_level() != frame.crypto_frame->level)) {
+        QUIC_RELOADABLE_FLAG_COUNT_N(quic_bundle_crypto_retransmits, 1, 3);
+        // Crypto frames are only retransmitted in the same encryption level
+        // as the original frame, and adding an encryption level context ensures
+        // they are bundled together if possible.
+        encryption_level_context.emplace(
+            connection_,
+            GetCryptoStream()->GetEncryptionLevelToSendCryptoDataOfSpace(
+                QuicUtils::GetPacketNumberSpace(frame.crypto_frame->level)));
+      }
       if (!GetMutableCryptoStream()->RetransmitData(frame.crypto_frame, type)) {
         return false;
       }
       continue;
     }
+    encryption_level_context.reset();
     if (frame.type != STREAM_FRAME) {
       if (!control_frame_manager_.RetransmitControlFrame(frame, type)) {
         return false;

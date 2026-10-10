@@ -199,11 +199,14 @@ class MoqtTrackStatusResponseStreamTest : public quiche::test::QuicheTest {
         message_parser_(kDefaultMoqtVersion, /*uses_web_transport=*/true,
                         quic::Perspective::IS_SERVER),
         track_name_("foo", "bar"),
-        mock_publisher_(track_name_) {}
+        mock_publisher_(track_name_) {
+    ON_CALL(validate_request_id_, Call).WillByDefault(Return(absl::OkStatus()));
+  }
 
   MoqtTrackStatusResponseStream CreateStream() {
     return MoqtTrackStatusResponseStream(
         &framer_, message_parser_, session_error_callback_.AsStdFunction(),
+        validate_request_id_.AsStdFunction(),
         session_.weak_ptr_factory_.Create());
   }
 
@@ -214,6 +217,7 @@ class MoqtTrackStatusResponseStreamTest : public quiche::test::QuicheTest {
   FullTrackName track_name_;
   StrictMock<testing::MockFunction<void(MoqtError, absl::string_view)>>
       session_error_callback_;
+  testing::MockFunction<absl::Status(uint64_t)> validate_request_id_;
   MockSessionToPublisherInterface session_;
   MockTrackPublisher mock_publisher_;
   StrictMock<webtransport::test::MockStream> mock_stream_;
@@ -268,6 +272,23 @@ TEST_F(MoqtTrackStatusResponseStreamTest, TrackDoesNotExist) {
 
   QUICHE_EXPECT_OK(stream.OnRawControlMessage(
       GenericMessageToRawControlMessage(track_status)));
+}
+
+TEST_F(MoqtTrackStatusResponseStreamTest, TrackReservedTrackName) {
+  MoqtTrackStatusResponseStream stream = CreateStream();
+  EXPECT_CALL(mock_stream_, CanWrite).WillRepeatedly(Return(true));
+  stream.BindStream(&mock_stream_);
+
+  EXPECT_CALL(session_, GetTrackPublisher).Times(0);
+  MoqtRequestError expected_error{RequestErrorCode::kDoesNotExist, std::nullopt,
+                                  "Reserved track name"};
+  EXPECT_CALL(mock_stream_, Writev(SerializedControlMessage(expected_error), _))
+      .WillOnce(Return(absl::OkStatus()));
+
+  MoqtTrackStatus track_status;
+  track_status.request_id = kRequestId;
+  track_status.full_track_name = FullTrackName(TrackNamespace({"."}), "bar");
+  QUICHE_EXPECT_OK(stream.OnControlMessage(track_status));
 }
 
 TEST_F(MoqtTrackStatusResponseStreamTest, DuplicateTrackStatus) {

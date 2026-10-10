@@ -11,6 +11,7 @@
 
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
+#include "quiche/quic/core/quic_time.h"
 #include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/moqt/moqt_error.h"
 #include "quiche/quic/moqt/moqt_fetch_task.h"
@@ -31,6 +32,7 @@ namespace moqt::test {
 class TestMoqtBidiStream : public MoqtBidiStreamBase {
  public:
   using MoqtBidiStreamBase::MoqtBidiStreamBase;
+  using MoqtBidiStreamBase::OnControlMessage;
 
   void OnStreamBound() override {}
   absl::Status OnRawControlMessage(
@@ -56,6 +58,9 @@ class TestMoqtBidiStream : public MoqtBidiStreamBase {
     }
     return status;
   }
+
+  using MoqtBidiStreamBase::IncomingUpdatesQueued;
+  using MoqtBidiStreamBase::QueueIncomingUpdate;
 };
 
 class MoqtBidiStreamTest : public quiche::test::QuicheTest {
@@ -78,6 +83,7 @@ class MoqtBidiStreamTest : public quiche::test::QuicheTest {
 
 TEST_F(MoqtBidiStreamTest, Reset) {
   stream_->BindStream(&mock_stream_);
+  EXPECT_CALL(mock_stream_, SendStopSending(1234));
   EXPECT_CALL(mock_stream_, ResetWithUserCode(1234));
   stream_->Reset(1234);
   EXPECT_TRUE(stream_->detached_);
@@ -85,6 +91,7 @@ TEST_F(MoqtBidiStreamTest, Reset) {
 
 TEST_F(MoqtBidiStreamTest, IncomingReset) {
   stream_->BindStream(&mock_stream_);
+  EXPECT_CALL(mock_stream_, SendStopSending).Times(0);
   EXPECT_CALL(mock_stream_, ResetWithUserCode(1234));
   stream_->OnResetStreamReceived(1234);
   EXPECT_TRUE(stream_->detached_);
@@ -98,6 +105,7 @@ TEST_F(MoqtBidiStreamTest, FinDetaches) {
 
 TEST_F(MoqtBidiStreamTest, IncomingStopSending) {
   stream_->BindStream(&mock_stream_);
+  EXPECT_CALL(mock_stream_, SendStopSending(1234));
   EXPECT_CALL(mock_stream_, ResetWithUserCode(1234));
   stream_->OnStopSendingReceived(1234);
   EXPECT_TRUE(stream_->detached_);
@@ -121,15 +129,27 @@ TEST_F(MoqtBidiStreamTest, DispatchControlMessage) {
   stream.Receive(framer.SerializeObjectAck(MoqtObjectAck()).AsStringView());
   stream_->OnCanRead();
 
-  stream.Receive(framer.SerializeGoAway(MoqtGoAway()).AsStringView());
+  stream.Receive(framer.SerializePublishDone(MoqtPublishDone()).AsStringView());
   EXPECT_CALL(error_callback_, Call)
       .WillOnce([](MoqtError error, absl::string_view message) {
         EXPECT_EQ(error, MoqtError::kProtocolViolation);
-        EXPECT_EQ(
-            message,
-            "Received an unexpected message of type GOAWAY on a test stream");
+        EXPECT_EQ(message,
+                  "Received an unexpected message of type PUBLISH_DONE on a "
+                  "test stream");
       });
   stream_->OnCanRead();
+}
+
+TEST_F(MoqtBidiStreamTest, ReceiveGoAway) {
+  QUICHE_EXPECT_OK(stream_->OnControlMessage(
+      MoqtGoAway("", quic::QuicTimeDelta::Zero(), std::nullopt)));
+  EXPECT_TRUE(IsInvalidArgument(stream_->OnControlMessage(
+      MoqtGoAway("", quic::QuicTimeDelta::Zero(), std::nullopt))));
+}
+
+TEST_F(MoqtBidiStreamTest, ReceiveGoAwayWithRequestId) {
+  EXPECT_TRUE(IsInvalidArgument(stream_->OnControlMessage(
+      MoqtGoAway("", quic::QuicTimeDelta::Zero(), /*request_id=*/0))));
 }
 
 TEST_F(MoqtBidiStreamTest, SendRequestOk) {
@@ -209,6 +229,27 @@ TEST_F(MoqtBidiStreamTest, SendRequestUpdateAndReceiveError) {
 TEST_F(MoqtBidiStreamTest, QueueIsFull) {
   stream_->BindStream(&mock_stream_);
   EXPECT_FALSE(stream_->QueueIsFull());
+}
+
+TEST_F(MoqtBidiStreamTest, IncomingUpdateQueue) {
+  EXPECT_FALSE(stream_->IncomingUpdatesQueued());
+  EXPECT_EQ(stream_->NextIncomingUpdate(), std::nullopt);
+
+  MessageParameters update1;
+  update1.subscriber_priority = 10;
+  MessageParameters update2;
+  update2.subscriber_priority = 20;
+
+  stream_->QueueIncomingUpdate(update1);
+  EXPECT_TRUE(stream_->IncomingUpdatesQueued());
+  stream_->QueueIncomingUpdate(update2);
+  EXPECT_TRUE(stream_->IncomingUpdatesQueued());
+
+  EXPECT_EQ(stream_->NextIncomingUpdate(), update1);
+  EXPECT_TRUE(stream_->IncomingUpdatesQueued());
+  EXPECT_EQ(stream_->NextIncomingUpdate(), update2);
+  EXPECT_FALSE(stream_->IncomingUpdatesQueued());
+  EXPECT_EQ(stream_->NextIncomingUpdate(), std::nullopt);
 }
 
 }  // namespace moqt::test

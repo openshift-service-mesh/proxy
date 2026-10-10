@@ -32,6 +32,7 @@
 #include "quiche/quic/moqt/moqt_types.h"
 #include "quiche/quic/moqt/moqt_uni_stream.h"
 #include "quiche/common/platform/api/quiche_bug_tracker.h"
+#include "quiche/common/quiche_status_utils.h"
 #include "quiche/web_transport/web_transport.h"
 
 namespace moqt {
@@ -224,12 +225,14 @@ MoqtFetchResponseStream::MoqtFetchResponseStream(
     const MoqtControlMessageParser& message_parser,
     MoqtPublisher* absl_nonnull application,
     SessionErrorCallback session_error_callback,
+    ValidateRequestIdCallback validate_request_id,
     OpenStreamCallback open_stream_callback,
     GetSubscriptionCallback get_subscription_callback)
     : MoqtBidiStreamBase(framer, message_parser,
                          std::move(session_error_callback)),
       data_stream_(nullptr),
       application_(application),
+      validate_request_id_(std::move(validate_request_id)),
       open_stream_callback_(std::move(open_stream_callback)),
       get_subscription_callback_(std::move(get_subscription_callback)),
       weak_ptr_factory_(this) {}
@@ -246,6 +249,7 @@ absl::Status MoqtFetchResponseStream::OnControlMessage(
     return absl::InvalidArgumentError(
         "FETCH received on stream that already has a fetch");
   }
+  QUICHE_RETURN_IF_ERROR(validate_request_id_(message.request_id));
   request_id_ = message.request_id;
   parameters_ = message.parameters;
   MoqtDeliveryOrder delivery_order =
@@ -274,6 +278,11 @@ absl::Status MoqtFetchResponseStream::OnControlMessage(
     const StandaloneFetch& standalone_fetch =
         std::get<StandaloneFetch>(message.fetch);
     FullTrackName track_name = standalone_fetch.full_track_name;
+    if (track_name.DoesNotExist()) {
+      return SendRequestError(RequestErrorCode::kDoesNotExist,
+                              /*retry_interval=*/std::nullopt,
+                              "Reserved track name");
+    }
     std::shared_ptr<MoqtTrackPublisher> track_publisher =
         application_->GetTrack(track_name);
     if (track_publisher == nullptr) {
@@ -288,6 +297,25 @@ absl::Status MoqtFetchResponseStream::OnControlMessage(
         delivery_order, std::move(response_callback));
   } else {
     // Joining Fetch.
+    // TODO(martinduke): There are some gaps in this implementation that are
+    // relevant to draft-18 Joining FETCH but not later drafts, where it occurs
+    // on the SUBSCRIBE stream and therefore does not need a reference request
+    // ID:
+    // 1. draft-18 is ambiguous about whether to use the original request ID or
+    // the request ID of a REQUEST_UPDATE. Our current request ID tracking data
+    // structures and callbacks are not well-equipped to track multiple request
+    // IDs per subscription. There are good reasons to use the REQUEST_UPDATE
+    // ID: it can prevent a FETCH from failing because forward is set to zero.
+    // However, our draft-18 implementation will fail any joining FETCH that
+    // beats such a REQUEST_UPDATE.
+    // 2. It's hard to distinguish between a request ID that used to exist and
+    // one that has yet to arrive. It would be best to use
+    // MoqtSession::next_incoming_request_id to guess if the request is new or
+    // old, and buffer the stream if it's new.
+    //
+    // draft-18 is a candidate for long term support, but it may not be worth it
+    // to fix problems that don't exist in future drafts if joining FETCH is
+    // not important to early-deployed use cases.
     uint64_t joining_request_id =
         std::holds_alternative<JoiningFetchRelative>(message.fetch)
             ? std::get<JoiningFetchRelative>(message.fetch).joining_request_id
@@ -378,6 +406,7 @@ absl::Status MoqtFetchResponseStream::OnControlMessage(
 
 absl::Status MoqtFetchResponseStream::OnControlMessage(
     const MoqtRequestUpdate& message) {
+  QUICHE_RETURN_IF_ERROR(validate_request_id_(message.request_id));
   if (data_stream_ != nullptr &&
       message.parameters.subscriber_priority.has_value()) {
     data_stream_->UpdatePriority(*message.parameters.subscriber_priority);

@@ -86,9 +86,28 @@ absl::Status MoqtBidiStreamBase::SendRequestUpdate(
   request_update.request_id = request_id;
   request_update.existing_request_id = existing_request_id;
   request_update.parameters = parameters;
-  request_update_queue_.Enqueue(parameters, std::move(callback));
+  outgoing_update_queue_.Enqueue(parameters, std::move(callback));
   return SendOrBufferMessage(framer_->SerializeRequestUpdate(request_update),
                              /*fin=*/false);
+}
+
+// TODO(martinduke): There should be an application callback when these are
+// received, but https://github.com/moq-wg/moq-transport/issues/1655 is
+// resolving which child classes of MoqtBidiStreamBase should handle them. For
+// now, we just handle them silently, as in draft-18 they are all allowed, to
+// avoid changing the application API twice. However, it will return an error if
+// the message is incorrectly formatted or there is more than one.
+absl::Status MoqtBidiStreamBase::OnControlMessage(const MoqtGoAway& message) {
+  if (received_goaway_) {
+    return absl::InvalidArgumentError(
+        "Received multiple GOAWAY on a bidi stream");
+  }
+  if (message.request_id.has_value()) {
+    return absl::InvalidArgumentError(
+        "GOAWAY with request ID on a bidi stream");
+  }
+  received_goaway_ = true;
+  return absl::OkStatus();
 }
 
 void MoqtBidiStreamBase::OnFatalError(absl::Status status) {
