@@ -7,6 +7,7 @@
 
 #include "quiche/quic/core/frames/quic_ack_frequency_frame.h"
 #include "quiche/quic/core/quic_received_packet_manager.h"
+#include "quiche/quic/core/quic_types.h"
 
 namespace quic {
 
@@ -95,6 +96,7 @@ class QUICHE_EXPORT UberReceivedPacketManager {
   void OnAckFrequencyFrame(const QuicAckFrequencyFrame& frame);
 
   void set_save_timestamps(bool save_timestamps);
+  void set_receive_timestamp_basis(QuicTime receive_timestamp_basis);
 
  private:
   friend class test::QuicConnectionPeer;

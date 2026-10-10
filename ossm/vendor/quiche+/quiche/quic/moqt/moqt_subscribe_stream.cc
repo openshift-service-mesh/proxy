@@ -25,6 +25,7 @@
 #include "quiche/quic/moqt/moqt_parser.h"
 #include "quiche/quic/moqt/moqt_publisher.h"
 #include "quiche/quic/moqt/moqt_session_callbacks.h"
+#include "quiche/common/quiche_status_utils.h"
 #include "quiche/common/quiche_weak_ptr.h"
 
 namespace moqt {
@@ -179,12 +180,14 @@ MoqtSubscribeResponseStream::MoqtSubscribeResponseStream(
     LivePublisher::AddCallback add_callback,
     LivePublisher::RemoveCallback remove_callback,
     SessionErrorCallback session_error_callback,
+    ValidateRequestIdCallback validate_request_id,
     quiche::QuicheWeakPtr<SessionToPublisherInterface> session)
     : MoqtBidiStreamBase(framer, message_parser,
                          std::move(session_error_callback)),
       track_alias_(track_alias),
       add_callback_(std::move(add_callback)),
       remove_callback_(std::move(remove_callback)),
+      validate_request_id_(std::move(validate_request_id)),
       session_(std::move(session)) {}
 
 absl::Status MoqtSubscribeResponseStream::OnRawControlMessage(
@@ -195,13 +198,20 @@ absl::Status MoqtSubscribeResponseStream::OnRawControlMessage(
 
 absl::Status MoqtSubscribeResponseStream::OnControlMessage(
     const MoqtSubscribe& message) {
-  if (subscription_ != nullptr) {
+  if (add_callback_ == nullptr) {
     return absl::InvalidArgumentError(
         "SUBSCRIBE received on stream that already has a subscription");
   }
+  QUICHE_RETURN_IF_ERROR(validate_request_id_(message.request_id));
   QUIC_DLOG(INFO) << "Received a SUBSCRIBE for " << message.full_track_name;
   if (session() == nullptr) {
     return absl::OkStatus();
+  }
+  if (message.full_track_name.DoesNotExist()) {
+    add_callback_ = nullptr;
+    remove_callback_ = nullptr;
+    return SendRequestError(RequestErrorCode::kDoesNotExist, std::nullopt,
+                            "reserved track name");
   }
   std::shared_ptr<MoqtTrackPublisher> track_publisher =
       session()->GetTrackPublisher(message.full_track_name);
@@ -229,13 +239,19 @@ absl::Status MoqtSubscribeResponseStream::OnControlMessage(
 
 absl::Status MoqtSubscribeResponseStream::OnControlMessage(
     const MoqtRequestUpdate& message) {
+  QUICHE_RETURN_IF_ERROR(validate_request_id_(message.request_id));
   if (subscription_ == nullptr) {
     QUICHE_BUG(INFO) << "Received REQUEST_UPDATE, no subscription state";
     return SendRequestError(RequestErrorCode::kInternalError, std::nullopt,
                             "no subscription");
   }
-  subscription_->Update(message.parameters);
-  return SendRequestOk(MessageParameters());
+  if (!subscription_->established() || IncomingUpdatesQueued()) {
+    // There are requests waiting in the queue. Buffer this one.
+    QueueIncomingUpdate(message.parameters);
+    return absl::OkStatus();
+  }
+  subscription_->Update(message.parameters, /*from_request_ok=*/false);
+  return absl::OkStatus();
 }
 
 void MoqtSubscribeResponseStream::Detach() {

@@ -20,6 +20,7 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "quiche/quic/core/quic_data_reader.h"
+#include "quiche/quic/core/quic_data_writer.h"
 #include "quiche/quic/core/quic_time.h"
 #include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/moqt/moqt_bidi_stream.h"
@@ -28,6 +29,7 @@
 #include "quiche/quic/moqt/moqt_framer.h"
 #include "quiche/quic/moqt/moqt_key_value_pair.h"
 #include "quiche/quic/moqt/moqt_known_track_publisher.h"
+#include "quiche/quic/moqt/moqt_live_publisher.h"
 #include "quiche/quic/moqt/moqt_messages.h"
 #include "quiche/quic/moqt/moqt_names.h"
 #include "quiche/quic/moqt/moqt_object.h"
@@ -48,6 +50,7 @@
 #include "quiche/common/quiche_data_reader.h"
 #include "quiche/common/quiche_mem_slice.h"
 #include "quiche/common/quiche_weak_ptr.h"
+#include "quiche/common/test_tools/quiche_test_utils.h"
 #include "quiche/web_transport/test_tools/in_memory_stream.h"
 #include "quiche/web_transport/test_tools/mock_web_transport.h"
 #include "quiche/web_transport/web_transport.h"
@@ -529,6 +532,61 @@ TEST_F(MoqtSessionTest, OnIncomingUnidirectionalStream) {
   session_.OnIncomingUnidirectionalStreamAvailable();
 }
 
+TEST_F(MoqtSessionTest, IncomingPaddingStream) {
+  webtransport::test::InMemoryStream padding_stream(/*stream_id=*/10);
+  char buffer[64];
+  quic::QuicDataWriter writer(sizeof(buffer), buffer);
+  ASSERT_TRUE(writer.WriteMoqVarInt(kPaddingStreamType));
+  ASSERT_TRUE(writer.WriteStringPiece("padding_data"));
+  padding_stream.Receive(absl::string_view(writer.data(), writer.length()),
+                         true);
+  EXPECT_CALL(mock_session_, AcceptIncomingUnidirectionalStream())
+      .WillOnce(Return(&padding_stream))
+      .WillOnce(Return(nullptr));
+  session_.OnIncomingUnidirectionalStreamAvailable();
+  EXPECT_EQ(padding_stream.ReadableBytes(), 0);
+
+  padding_stream.Receive("even_more_padding", true);
+  EXPECT_EQ(padding_stream.ReadableBytes(), 0);
+}
+
+TEST_F(MoqtSessionTest, IncomingUnknownStreamType) {
+  webtransport::test::InMemoryStream unknown_stream(/*stream_id=*/10);
+  char buffer[16];
+  quic::QuicDataWriter writer(sizeof(buffer), buffer);
+  ASSERT_TRUE(writer.WriteMoqVarInt(0x99));
+  unknown_stream.Receive(absl::string_view(writer.data(), writer.length()),
+                         false);
+  EXPECT_CALL(mock_session_, AcceptIncomingUnidirectionalStream())
+      .WillOnce(Return(&unknown_stream))
+      .WillOnce(Return(nullptr));
+  EXPECT_CALL(mock_session_,
+              CloseSession(static_cast<uint64_t>(MoqtError::kProtocolViolation),
+                           "Unknown stream type"));
+  EXPECT_CALL(session_callbacks_.session_terminated_callback,
+              Call(absl::string_view("Unknown stream type")));
+  session_.OnIncomingUnidirectionalStreamAvailable();
+}
+
+TEST_F(MoqtSessionTest, PaddingDatagramDiscarded) {
+  EXPECT_CALL(mock_session_, CloseSession).Times(0);
+  EXPECT_CALL(session_callbacks_.session_terminated_callback, Call).Times(0);
+  EXPECT_CALL(remote_track_visitor_, OnObjectFragment).Times(0);
+
+  char buffer[64];
+  quic::QuicDataWriter writer(sizeof(buffer), buffer);
+  ASSERT_TRUE(writer.WriteMoqVarInt(kPaddingDatagramType));
+  ASSERT_TRUE(writer.WriteStringPiece("padding_data"));
+  session_.OnDatagramReceived(
+      absl::string_view(writer.data(), writer.length()));
+
+  char empty_buffer[16];
+  quic::QuicDataWriter empty_writer(sizeof(empty_buffer), empty_buffer);
+  ASSERT_TRUE(empty_writer.WriteMoqVarInt(kPaddingDatagramType));
+  session_.OnDatagramReceived(
+      absl::string_view(empty_writer.data(), empty_writer.length()));
+}
+
 TEST_F(MoqtSessionTest, Error) {
   bool reported_error = false;
   EXPECT_CALL(
@@ -626,6 +684,7 @@ TEST_F(MoqtSessionTest, PublishNamespaceWithOkAndPublishNamespaceDone) {
           });
   bidi_wrapper_->ReceiveMessage(ok);
 
+  EXPECT_CALL(mock_bidi_stream_, SendStopSending);
   EXPECT_CALL(mock_bidi_stream_, ResetWithUserCode);
   session_.PublishNamespaceDone(TrackNamespace{"foo"});
   // State is gone.
@@ -821,10 +880,28 @@ TEST_F(MoqtSessionTest, UnsubscribeAllowsSecondSubscribe) {
 }
 
 TEST_F(MoqtSessionTest, RequestIdWrongLsb) {
-  // TODO(martinduke): Implement this test.
+  // Client session expects odd request IDs from the server.
+  EXPECT_CALL(mock_session_,
+              CloseSession(static_cast<uint64_t>(MoqtError::kInvalidRequestId),
+                           "Request ID evenness incorrect"));
+  EXPECT_FALSE(
+      MoqtSessionPeer::ValidateNewIncomingRequestId(&session_, 0).ok());
+
+  // Server session expects even request IDs from the client.
+  MoqtSessionParameters server_parameters(quic::Perspective::IS_SERVER);
+  MoqtSession server_session(&mock_session_, server_parameters,
+                             std::make_unique<quic::test::TestAlarmFactory>(),
+                             session_callbacks_.AsSessionCallbacks());
+  EXPECT_CALL(mock_session_,
+              CloseSession(static_cast<uint64_t>(MoqtError::kInvalidRequestId),
+                           "Request ID evenness incorrect"));
+  EXPECT_FALSE(
+      MoqtSessionPeer::ValidateNewIncomingRequestId(&server_session, 1).ok());
+  QUICHE_EXPECT_OK(
+      MoqtSessionPeer::ValidateNewIncomingRequestId(&server_session, 0));
 }
 
-TEST_F(MoqtSessionTest, SubscribeIdNotIncreasing) {
+TEST_F(MoqtSessionTest, RequestIdNotIncreasing) {
   MoqtSubscribe request = DefaultSubscribe();
   bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
       ResponseStream(kSubscribeByte));
@@ -840,8 +917,9 @@ TEST_F(MoqtSessionTest, SubscribeIdNotIncreasing) {
   webtransport::test::MockStream bidi_stream_2;
   auto bidi_wrapper_2 = std::make_unique<MoqtBidiStreamTestWrapper>(
       ResponseStream(kSubscribeByte, &bidi_stream_2));
-  EXPECT_CALL(bidi_stream_2,
-              Writev(ControlMessageOfType(MoqtMessageType::kRequestError), _));
+  EXPECT_CALL(mock_session_,
+              CloseSession(static_cast<uint64_t>(MoqtError::kInvalidRequestId),
+                           "Duplicate Request ID"));
   bidi_wrapper_2->ReceiveMessage(request);
 }
 
@@ -974,10 +1052,12 @@ TEST_F(MoqtSessionTest, Unsubscribe) {
               Writev(ControlMessageOfType(MoqtMessageType::kSubscribe), _));
   EXPECT_TRUE(
       session_.Subscribe(ftn, &remote_track_visitor_, MessageParameters()));
+  EXPECT_CALL(mock_bidi_stream_, SendStopSending);
   EXPECT_CALL(mock_bidi_stream_, ResetWithUserCode);
   EXPECT_CALL(remote_track_visitor_, OnPublishDone);
   session_.Unsubscribe(ftn);
   // Verify it was destroyed.
+  EXPECT_CALL(mock_bidi_stream_, SendStopSending).Times(0);
   EXPECT_CALL(mock_bidi_stream_, ResetWithUserCode).Times(0);
   EXPECT_CALL(remote_track_visitor_, OnPublishDone).Times(0);
   session_.Unsubscribe(ftn);
@@ -1092,6 +1172,7 @@ TEST_F(MoqtSessionTest, SubscribeNamespaceLifeCycle) {
       });
   bidi_wrapper_->ReceiveMessage(MoqtRequestOk());
   EXPECT_TRUE(got_callback);
+  EXPECT_CALL(mock_bidi_stream_, SendStopSending);
   EXPECT_CALL(mock_bidi_stream_, ResetWithUserCode);
 }
 
@@ -1823,6 +1904,46 @@ TEST_F(MoqtSessionTest, IncomingJoiningFetchForwardZero) {
   fetch_wrapper->ReceiveMessage(fetch);
 }
 
+TEST_F(MoqtSessionTest, IncomingJoiningFetchAfterRequestUpdate) {
+  MoqtSubscribe subscribe = DefaultSubscribe();
+  subscribe.parameters.set_forward(false);
+  bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
+      ResponseStream(kSubscribeByte));
+  MockTrackPublisher* track = CreateTrackPublisher();
+  SetLargestId(track, Location(2, 10));
+  MoqtObjectListener* listener =
+      ReceiveSubscribeSynchronousOk(track, subscribe, bidi_wrapper_.get());
+  LivePublisher* subscription = absl::down_cast<LivePublisher*>(listener);
+  ASSERT_NE(subscription, nullptr);
+
+  SetLargestId(track, Location(4, 10));
+  MessageParameters update_parameters;
+  update_parameters.set_forward(true);
+  update_parameters.subscription_filter.emplace(MoqtFilterType::kLargestObject);
+  MessageParameters expected_ok_parameters;
+  expected_ok_parameters.largest_object = Location(4, 10);
+  EXPECT_CALL(
+      mock_bidi_stream_,
+      Writev(SerializedControlMessage(MoqtRequestOk{expected_ok_parameters}),
+             _));
+  bidi_wrapper_->ReceiveMessage(
+      MoqtRequestUpdate{3, subscribe.request_id, update_parameters});
+  ASSERT_TRUE(subscription->parameters().subscription_filter.has_value());
+  EXPECT_EQ(subscription->parameters().subscription_filter->start(),
+            Location(4, 11));
+
+  webtransport::test::MockStream fetch_stream;
+  std::unique_ptr<MoqtBidiStreamTestWrapper> fetch_wrapper =
+      std::make_unique<MoqtBidiStreamTestWrapper>(
+          ResponseStream(kFetchByte, &fetch_stream));
+  MoqtFetch fetch = DefaultFetch();
+  fetch.request_id = 5;
+  fetch.fetch = JoiningFetchRelative(subscribe.request_id, 2);
+  EXPECT_CALL(*track, StandaloneFetch(Location(2, 0), Location(4, 10), _, _))
+      .WillOnce(Return(std::make_unique<MockFetchTask>()));
+  fetch_wrapper->ReceiveMessage(fetch);
+}
+
 TEST_F(MoqtSessionTest, SendJoiningFetch) {
   webtransport::test::MockStream subscribe_stream;
   std::unique_ptr<MoqtBidiStreamTestWrapper> subscribe_wrapper;
@@ -2022,6 +2143,7 @@ TEST_F(MoqtSessionTest, FetchThenOkThenCancel) {
   EXPECT_EQ(fetch_task->GetNextObject(object),
             MoqtFetchTask::GetNextObjectResult::kPending);
   // Cancel the fetch.
+  EXPECT_CALL(mock_bidi_stream_, SendStopSending(kResetCodeCancelled));
   EXPECT_CALL(mock_bidi_stream_, ResetWithUserCode(kResetCodeCancelled));
   fetch_task.reset();
 }
@@ -2233,8 +2355,10 @@ TEST_F(MoqtSessionTest, DeliveryTimeoutParameter) {
 TEST_F(MoqtSessionTest, ReceiveGoAwayEnforcement) {
   bidi_wrapper_ =
       MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
-  EXPECT_CALL(session_callbacks_.goaway_received_callback, Call("foo"));
-  bidi_wrapper_->ReceiveMessage(MoqtGoAway("foo"));
+  EXPECT_CALL(session_callbacks_.goaway_received_callback,
+              Call("", quic::QuicTimeDelta::Zero()));
+  bidi_wrapper_->ReceiveMessage(
+      MoqtGoAway("", quic::QuicTimeDelta::Zero(), /*request_id=*/0));
   // New requests not allowed.
   EXPECT_CALL(mock_bidi_stream_, Writev).Times(0);
   MessageParameters parameters = SubscribeForTest();
@@ -2257,15 +2381,51 @@ TEST_F(MoqtSessionTest, ReceiveGoAwayEnforcement) {
   // Error on additional GOAWAY.
   EXPECT_CALL(mock_session_,
               CloseSession(static_cast<uint64_t>(MoqtError::kProtocolViolation),
-                           "Received multiple GOAWAY messages"))
+                           "Received multiple GOAWAY on control stream"))
       .Times(1);
   bool reported_error = false;
-  EXPECT_CALL(session_callbacks_.session_terminated_callback, Call(_))
+  EXPECT_CALL(session_callbacks_.session_terminated_callback, Call)
       .WillOnce([&](absl::string_view error_message) {
         reported_error = true;
-        EXPECT_EQ(error_message, "Received multiple GOAWAY messages");
+        EXPECT_EQ(error_message, "Received multiple GOAWAY on control stream");
       });
-  bidi_wrapper_->ReceiveMessage(MoqtGoAway("foo"));
+  bidi_wrapper_->ReceiveMessage(
+      MoqtGoAway{"", quic::QuicTimeDelta::Zero(), /*request_id=*/0});
+}
+
+TEST_F(MoqtSessionTest, GoAwayMissingRequestId) {
+  bidi_wrapper_ =
+      MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
+  EXPECT_CALL(mock_session_,
+              CloseSession(static_cast<uint64_t>(MoqtError::kProtocolViolation),
+                           "GOAWAY missing request ID"));
+  bidi_wrapper_->ReceiveMessage(
+      MoqtGoAway{"", quic::QuicTimeDelta::Zero(), std::nullopt});
+}
+
+TEST_F(MoqtSessionTest, GoAwayRequestIdWrongParity) {
+  // Client session has even next_request_id_, so odd request_id fails.
+  bidi_wrapper_ =
+      MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
+  EXPECT_CALL(mock_session_,
+              CloseSession(static_cast<uint64_t>(MoqtError::kInvalidRequestId),
+                           "GOAWAY request ID has incorrect parity"));
+  bidi_wrapper_->ReceiveMessage(
+      MoqtGoAway{"", quic::QuicTimeDelta::Zero(), /*request_id=*/1});
+
+  // Server session has odd next_request_id_, so even request_id fails.
+  webtransport::test::MockSession mock_server_session;
+  MoqtSession server_session(
+      &mock_server_session, MoqtSessionParameters(quic::Perspective::IS_SERVER),
+      std::make_unique<quic::test::TestAlarmFactory>(),
+      session_callbacks_.AsSessionCallbacks());
+  auto server_control_stream =
+      MoqtSessionPeer::CreateControlStream(&server_session, &mock_bidi_stream_);
+  EXPECT_CALL(mock_server_session,
+              CloseSession(static_cast<uint64_t>(MoqtError::kInvalidRequestId),
+                           "GOAWAY request ID has incorrect parity"));
+  server_control_stream->ReceiveMessage(
+      MoqtGoAway{"", quic::QuicTimeDelta::Zero(), /*request_id=*/0});
 }
 
 TEST_F(MoqtSessionTest, SendGoAwayEnforcement) {
@@ -2297,6 +2457,7 @@ TEST_F(MoqtSessionTest, SendGoAwayEnforcement) {
       .WillOnce(Return(&new_request_stream_2))
       .WillOnce(Return(nullptr));
   EXPECT_CALL(new_request_stream_2, CanWrite()).WillOnce(Return(false));
+  EXPECT_CALL(new_request_stream_2, SendStopSending);
   EXPECT_CALL(new_request_stream_2, ResetWithUserCode);
   session_.OnIncomingBidirectionalStreamAvailable();
 
@@ -2339,30 +2500,6 @@ TEST_F(MoqtSessionTest, ClientCannotSendNewSessionUri) {
   session_.GoAway("foo");
 }
 
-TEST_F(MoqtSessionTest, ServerCannotReceiveNewSessionUri) {
-  webtransport::test::MockSession mock_session;
-  MoqtSession session(&mock_session,
-                      MoqtSessionParameters(quic::Perspective::IS_SERVER),
-                      std::make_unique<quic::test::TestAlarmFactory>(),
-                      session_callbacks_.AsSessionCallbacks());
-  bidi_wrapper_ =
-      MoqtSessionPeer::CreateControlStream(&session, &mock_bidi_stream_);
-  EXPECT_CALL(
-      mock_session,
-      CloseSession(static_cast<uint64_t>(MoqtError::kProtocolViolation),
-                   "Received GOAWAY with new_session_uri on the server"))
-      .Times(1);
-  bool reported_error = false;
-  EXPECT_CALL(session_callbacks_.session_terminated_callback, Call(_))
-      .WillOnce([&](absl::string_view error_message) {
-        reported_error = true;
-        EXPECT_EQ(error_message,
-                  "Received GOAWAY with new_session_uri on the server");
-      });
-  bidi_wrapper_->ReceiveMessage(MoqtGoAway("foo"));
-  EXPECT_TRUE(reported_error);
-}
-
 TEST_F(MoqtSessionTest, IncomingTrackStatusBeforeSetup) {
   MoqtSessionParameters session_parameters(quic::Perspective::IS_SERVER);
   MoqtSession server_session(&mock_session_, session_parameters,
@@ -2375,7 +2512,7 @@ TEST_F(MoqtSessionTest, IncomingTrackStatusBeforeSetup) {
   webtransport::test::InMemoryStreamWithWriteBuffer bidi_stream(0);
   MoqtFramer client_framer(session_parameters.using_webtrans,
                            quic::Perspective::IS_CLIENT);
-  MoqtTrackStatus track_status = DefaultSubscribe();
+  MoqtTrackStatus track_status = DefaultLocalSubscribe();
   quiche::QuicheBuffer serialized_track_status =
       client_framer.SerializeTrackStatus(track_status);
   bidi_stream.Receive(serialized_track_status.AsStringView(),
@@ -2763,6 +2900,7 @@ TEST_F(MoqtSessionTest, PublishAfterGoaway) {
       MoqtSessionPeer::CreateControlStream(&session_, &mock_bidi_stream_);
   MoqtGoAway goaway;
   goaway.new_session_uri = "";
+  goaway.request_id = 0;
   bidi_wrapper_->ReceiveMessage(goaway);
   CreateTrackPublisher();
   std::shared_ptr<MoqtTrackPublisher> track_publisher =
@@ -2796,6 +2934,7 @@ TEST_F(MoqtSessionTest, IncomingPublishAbortsPendingSubscribe) {
   std::unique_ptr<MoqtBidiStreamTestWrapper> publish_wrapper =
       std::make_unique<MoqtBidiStreamTestWrapper>(
           ResponseStream(kPublishByte, &publish_stream));
+  EXPECT_CALL(mock_bidi_stream_, SendStopSending(kResetCodeCancelled));
   EXPECT_CALL(mock_bidi_stream_, ResetWithUserCode(kResetCodeCancelled));
   MoqtRequestOk expected_request_ok;
   expected_request_ok.parameters = parameters;  // params from the SUBSCRIBE.

@@ -260,6 +260,8 @@ QuicConnection::QuicConnection(
                          : kDefaultMaxPacketSize);
   uber_received_packet_manager_.set_max_ack_ranges(255);
   MaybeEnableMultiplePacketNumberSpacesSupport();
+  uber_received_packet_manager_.set_receive_timestamp_basis(
+      framer_.creation_time());
   QUICHE_DCHECK(perspective_ == Perspective::IS_CLIENT ||
                 supported_versions.size() == 1);
   InstallInitialCrypters(default_path_.server_connection_id);
@@ -449,6 +451,27 @@ void QuicConnection::SetFromConfig(const QuicConfig& config) {
 
   if (config.enable_spin_bit()) {
     spin_bit_enabled_ = ShouldEnableSpinBit();
+  }
+
+  if (GetQuicReloadableFlag(quic_active_connection_id_limit) &&
+      version().IsIetfQuic()) {
+    if (perspective_ == Perspective::IS_CLIENT &&
+        peer_issued_cid_manager_ != nullptr &&
+        config.GetActiveConnectionIdLimitToSend() >
+            kMinNumOfActiveConnectionIds) {
+      QUIC_RELOADABLE_FLAG_COUNT_N(quic_active_connection_id_limit, 4, 5);
+      peer_issued_cid_manager_->set_active_connection_id_limit(
+          config.GetActiveConnectionIdLimitToSend());
+    } else if (perspective_ == Perspective::IS_SERVER &&
+               self_issued_cid_manager_ != nullptr &&
+               config.HasReceivedActiveConnectionIdLimit() &&
+               config.ReceivedActiveConnectionIdLimit() >
+                   kMinNumOfActiveConnectionIds) {
+      QUIC_RELOADABLE_FLAG_COUNT_N(quic_active_connection_id_limit, 5, 5);
+      self_issued_cid_manager_->set_active_connection_id_limit(
+          std::min<size_t>(config.ReceivedActiveConnectionIdLimit(),
+                           kMaxNumOfActiveConnectionIds));
+    }
   }
 
   if (version().IsIetfQuic() &&
@@ -2381,27 +2404,19 @@ void QuicConnection::OnPacketComplete() {
 bool QuicConnection::IsValidStatelessResetToken(
     const StatelessResetToken& token) const {
   QUICHE_DCHECK_EQ(perspective_, Perspective::IS_CLIENT);
-  if (GetQuicReloadableFlag(quic_check_alternate_reset_token)) {
-    if (IsDefaultPath(last_received_packet_info_.destination_address,
-                      last_received_packet_info_.source_address)) {
-      QUIC_RELOADABLE_FLAG_COUNT_N(quic_check_alternate_reset_token, 1, 2);
-      return default_path_.stateless_reset_token.has_value() &&
-             QuicUtils::AreStatelessResetTokensEqual(
-                 token, *default_path_.stateless_reset_token);
-    }
-    if (IsAlternativePath(last_received_packet_info_.destination_address,
-                          last_received_packet_info_.source_address)) {
-      QUIC_RELOADABLE_FLAG_COUNT_N(quic_check_alternate_reset_token, 2, 2);
-      return alternative_path_.stateless_reset_token.has_value() &&
-             QuicUtils::AreStatelessResetTokensEqual(
-                 token, *alternative_path_.stateless_reset_token);
-    }
-    return false;
-  } else {
+  if (IsDefaultPath(last_received_packet_info_.destination_address,
+                    last_received_packet_info_.source_address)) {
     return default_path_.stateless_reset_token.has_value() &&
            QuicUtils::AreStatelessResetTokensEqual(
                token, *default_path_.stateless_reset_token);
   }
+  if (IsAlternativePath(last_received_packet_info_.destination_address,
+                        last_received_packet_info_.source_address)) {
+    return alternative_path_.stateless_reset_token.has_value() &&
+           QuicUtils::AreStatelessResetTokensEqual(
+               token, *alternative_path_.stateless_reset_token);
+  }
+  return false;
 }
 
 void QuicConnection::OnAuthenticatedIetfStatelessResetPacket() {
@@ -4398,6 +4413,12 @@ bool QuicConnection::HasUnusedConnectionId() const {
           self_issued_cid_manager_->HasConnectionIdToConsume()) &&
          (peer_issued_cid_manager_ == nullptr ||
           peer_issued_cid_manager_->HasUnusedConnectionId());
+}
+
+size_t QuicConnection::NumUnusedPeerIssuedConnectionIds() const {
+  return peer_issued_cid_manager_ == nullptr
+             ? 0
+             : peer_issued_cid_manager_->NumUnusedConnectionIds();
 }
 
 void QuicConnection::OnRetransmissionAlarm() {
@@ -6959,7 +6980,9 @@ void QuicConnection::ValidatePath(
     }
     if (!HasUnusedConnectionId()) {
       QUIC_DVLOG(1) << "Client cannot start new path validation as there is no "
-                       "requried connection ID is available.";
+                       "unused connection ID available.";
+      context->set_failure_reason(
+          PathValidationFailure::Reason::kNoAvailableConnectionId);
       result_delegate->OnPathValidationFailure(std::move(context));
       return;
     }

@@ -898,7 +898,7 @@ OgHttp2Session::SendResult OgHttp2Session::WriteForStream(
   bool wrote_data = false;
   int32_t available_window =
       std::min({connection_send_window_, state.send_window,
-                static_cast<int32_t>(max_frame_payload_)});
+                static_cast<int32_t>(MaxOutboundDataFramePayload())});
   while (connection_can_write == SendResult::SEND_OK && available_window > 0 &&
          IsReadyToWriteData(state)) {
     wrote_data = true;
@@ -939,8 +939,9 @@ OgHttp2Session::SendResult OgHttp2Session::WriteForStream(
       }
       connection_send_window_ -= info.payload_length;
       state.send_window -= info.payload_length;
-      available_window = std::min({connection_send_window_, state.send_window,
-                                   static_cast<int32_t>(max_frame_payload_)});
+      available_window =
+          std::min({connection_send_window_, state.send_window,
+                    static_cast<int32_t>(MaxOutboundDataFramePayload())});
       if (info.end_stream) {
         state.half_closed_local = true;
         MaybeFinWithRstStream(it);
@@ -1206,6 +1207,15 @@ void OgHttp2Session::OnDataFrameHeader(spdy::SpdyStreamId stream_id,
     return;
   }
 
+  if (iter->second.half_closed_remote) {
+    // RFC 9113 Section 5.1: DATA on a half-closed (remote) stream is a stream
+    // error of type STREAM_CLOSED.
+    EnqueueFrame(std::make_unique<spdy::SpdyRstStreamIR>(
+        stream_id, spdy::ERROR_CODE_STREAM_CLOSED));
+    streams_reset_.insert(stream_id);
+    return;
+  }
+
   if (static_cast<int64_t>(length) >
       connection_window_manager_.CurrentWindowSize()) {
     // Peer exceeded the connection flow control limit.
@@ -1335,6 +1345,14 @@ spdy::SpdyHeadersHandlerInterface* OgHttp2Session::OnHeaderFrameStart(
     spdy::SpdyStreamId stream_id) {
   auto it = stream_map_.find(stream_id);
   if (it != stream_map_.end() && !streams_reset_.contains(stream_id)) {
+    if (it->second.half_closed_remote) {
+      // RFC 9113 Section 5.1: HEADERS on a half-closed (remote) stream is a
+      // stream error of type STREAM_CLOSED.
+      EnqueueFrame(std::make_unique<spdy::SpdyRstStreamIR>(
+          stream_id, spdy::ERROR_CODE_STREAM_CLOSED));
+      streams_reset_.insert(stream_id);
+      return &noop_headers_handler_;
+    }
     headers_handler_.set_stream_id(stream_id);
     headers_handler_.set_header_type(
         NextHeaderType(it->second.received_header_type));
@@ -2234,6 +2252,15 @@ OgHttp2Session::DataFrameHeaderInfo OgHttp2Session::GetDataFrameInfo(
   QUICHE_LOG(DFATAL) << "GetDataFrameInfo for stream " << stream_id
                      << " but no body available!";
   return {/*payload_length=*/0, /*end_data=*/true, /*end_stream=*/true};
+}
+
+uint32_t OgHttp2Session::MaxOutboundDataFramePayload() const {
+  if (options_.max_outbound_data_frame_payload.has_value() &&
+      *options_.max_outbound_data_frame_payload > 0) {
+    return std::min(max_frame_payload_,
+                    *options_.max_outbound_data_frame_payload);
+  }
+  return max_frame_payload_;
 }
 
 bool OgHttp2Session::SendDataFrame(Http2StreamId stream_id,

@@ -195,8 +195,6 @@ static BROTLI_INLINE void FN(FindLongestMatch)(
   out->len = 0;
   out->len_code_delta = 0;
 
-  BROTLI_DCHECK(cur_ix_masked + max_length <= ring_buffer_mask);
-
   /* Try last distance first. */
   for (i = 0; i < (size_t)self->num_last_distances_to_check_; ++i) {
     const size_t backward = (size_t)distance_cache[i];
@@ -247,11 +245,11 @@ static BROTLI_INLINE void FN(FindLongestMatch)(
     const uint8_t tag = hash & TAG_HASH_MASK;
     const uint32_t first4 = BrotliUnalignedRead32(data + cur_ix_masked);
     const size_t max_length_m4 = max_length - 4;
-    const size_t head = (num[key] + 1U) & self->block_mask_;
+    const size_t head = (num[key] + 1) & self->block_mask_;
     uint64_t matches =
         GetMatchingTagMask(self->block_size_ / 16, tag, tag_bucket, head);
     /* Mask off any matches from uninitialized tags. */
-    uint16_t n = (uint16_t)(65535 - num[key]);
+    uint16_t n = 65535 - num[key];
     uint64_t block_has_unused_slots = self->block_size_ > n;
     uint64_t mask = (block_has_unused_slots << (n & (64 - 1))) - 1;
     matches &= mask;

@@ -40,6 +40,7 @@ class MoqtSubscribeRequestStream : public MoqtBidiStreamBase {
   ~MoqtSubscribeRequestStream() { Detach(); }
 
   // StreamBase overrides.
+  using MoqtBidiStreamBase::OnControlMessage;
   void OnStreamBound() override;
   absl::Status OnRawControlMessage(
       const MoqtRawControlMessage& message) override;
@@ -67,6 +68,7 @@ class MoqtSubscribeResponseStream : public MoqtBidiStreamBase {
       LivePublisher::AddCallback add_callback,
       LivePublisher::RemoveCallback remove_callback,
       SessionErrorCallback session_error_callback,
+      ValidateRequestIdCallback validate_request_id,
       quiche::QuicheWeakPtr<SessionToPublisherInterface> session);
   ~MoqtSubscribeResponseStream() {
     if (subscription_ != nullptr) {
@@ -76,6 +78,7 @@ class MoqtSubscribeResponseStream : public MoqtBidiStreamBase {
   }
 
   // MoqtBidiStreamBase overrides.
+  using MoqtBidiStreamBase::OnControlMessage;
   void OnStreamBound() override { stream_parser()->set_allow_fin(true); }
   absl::Status OnRawControlMessage(
       const MoqtRawControlMessage& message) override;
@@ -98,6 +101,7 @@ class MoqtSubscribeResponseStream : public MoqtBidiStreamBase {
   std::unique_ptr<LivePublisher> subscription_;
   LivePublisher::AddCallback add_callback_;
   LivePublisher::RemoveCallback remove_callback_;
+  ValidateRequestIdCallback validate_request_id_;
   quiche::QuicheWeakPtr<SessionToPublisherInterface> session_;
 };
 

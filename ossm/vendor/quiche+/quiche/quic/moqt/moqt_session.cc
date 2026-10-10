@@ -99,14 +99,18 @@ MoqtSession::MoqtSession(webtransport::Session* session,
   if (parameters_.using_webtrans) {
     session_->SetOnDraining([this]() {
       QUICHE_DLOG(INFO) << "WebTransport session is draining";
-      received_goaway_ = true;
-      if (callbacks_.goaway_received_callback != nullptr) {
-        std::move(callbacks_.goaway_received_callback)(absl::string_view());
+      if (callbacks_.goaway_received_callback == nullptr) {
+        return;
       }
+      MoqtSessionGoAwayCallback callback =
+          std::move(callbacks_.goaway_received_callback);
+      callbacks_.goaway_received_callback = nullptr;
+      std::move(callback)(absl::string_view(), quic::QuicTimeDelta::Zero());
     });
   }
   if (parameters_.perspective == Perspective::IS_SERVER) {
     next_request_id_ = 1;
+    next_incoming_request_id_ = 0;
   }
   QUICHE_DCHECK(parameters_.moqt_implementation.empty());
   parameters_.moqt_implementation = kImplementationName;
@@ -172,7 +176,8 @@ void MoqtSession::OnIncomingBidirectionalStreamAvailable() {
       // Immediately reject new requests with REQUEST_ERROR. If the stream
       // cannot be written, just reset it.
       if (!stream->CanWrite()) {
-        stream->ResetWithUserCode(kResetCodeSessionClosed);
+        stream->SendStopSending(kResetCodeGoingAway);
+        stream->ResetWithUserCode(kResetCodeGoingAway);
         continue;
       }
       webtransport::StreamWriteOptions options;
@@ -181,7 +186,8 @@ void MoqtSession::OnIncomingBidirectionalStreamAvailable() {
           quiche::QuicheMemSlice(framer_.SerializeRequestError(MoqtRequestError{
               RequestErrorCode::kGoingAway, std::nullopt, ""}))};
       if (!stream->Writev(absl::MakeSpan(write_vector), options).ok()) {
-        stream->ResetWithUserCode(kResetCodeSessionClosed);
+        stream->SendStopSending(kResetCodeGoingAway);
+        stream->ResetWithUserCode(kResetCodeGoingAway);
       };
       continue;
     }
@@ -202,9 +208,12 @@ void MoqtSession::OnIncomingUnidirectionalStreamAvailable() {
 void MoqtSession::OnDatagramReceived(absl::string_view datagram) {
   MoqtObject message;
   bool use_default_priority;
-  std::optional<absl::string_view> payload =
+  absl::StatusOr<absl::string_view> payload =
       ParseDatagram(datagram, message, use_default_priority);
-  if (!payload.has_value()) {
+  if (!payload.ok()) {
+    if (absl::IsNotFound(payload.status())) {
+      return;  // It's PADDING.
+    }
     Error(MoqtError::kProtocolViolation, "Malformed datagram received");
     return;
   }
@@ -279,6 +288,11 @@ std::unique_ptr<MoqtNamespaceTask> MoqtSession::SubscribeNamespace(
                     << "Tried to send SUBSCRIBE_NAMESPACE after GOAWAY";
     return nullptr;
   }
+  if (prefix.DoesNotExist()) {
+    QUIC_DLOG(INFO) << ENDPOINT
+                    << "Tried to subscribe to a reserved track namespace";
+    return nullptr;
+  }
   if (!outgoing_subscribe_namespace_.SubscribeNamespace(prefix)) {
     return nullptr;
   }
@@ -321,6 +335,11 @@ std::unique_ptr<MoqtNamespaceTask> MoqtSession::SubscribeNamespace(
 bool MoqtSession::SubscribeTracks(TrackNamespace& prefix,
                                   const MessageParameters& parameters,
                                   MoqtResponseCallback response_callback) {
+  if (prefix.DoesNotExist()) {
+    QUIC_DLOG(INFO) << ENDPOINT
+                    << "Tried to subscribe to a reserved track namespace";
+    return false;
+  }
   return false;
 }
 
@@ -336,7 +355,11 @@ bool MoqtSession::TrackStatus(const FullTrackName& name,
     QUIC_DLOG(INFO) << ENDPOINT << "Tried to send TRACK_STATUS after GOAWAY";
     return false;
   }
-
+  if (name.DoesNotExist()) {
+    QUIC_DLOG(INFO) << ENDPOINT
+                    << "Tried to get status of a reserved track name";
+    return false;
+  }
   webtransport::Stream* stream = session_->OpenOutgoingBidirectionalStream();
   if (stream == nullptr) {
     return false;
@@ -368,6 +391,10 @@ bool MoqtSession::PublishNamespace(
   if (received_goaway_ || sent_goaway_) {
     QUIC_DLOG(INFO) << ENDPOINT
                     << "Tried to send PUBLISH_NAMESPACE after GOAWAY";
+    return false;
+  }
+  if (track_namespace.DoesNotExist()) {
+    QUIC_DLOG(INFO) << ENDPOINT << "Tried to publish a reserved namespace";
     return false;
   }
   webtransport::Stream* stream = session_->OpenOutgoingBidirectionalStream();
@@ -467,6 +494,11 @@ bool MoqtSession::Subscribe(const FullTrackName& name,
   }
   if (!session_->CanOpenNextOutgoingBidirectionalStream()) {
     return false;  // Do not retry opening a SUBSCRIBE stream.
+  }
+  if (name.DoesNotExist()) {
+    QUIC_DLOG(INFO) << ENDPOINT
+                    << "Tried to subscribe to a reserved track name";
+    return false;
   }
   auto stream_visitor = std::make_unique<MoqtSubscribeRequestStream>(
       &framer_, ControlMessageParser(), NextRequestId(),
@@ -571,6 +603,10 @@ bool MoqtSession::Publish(
   if (!session_->CanOpenNextOutgoingBidirectionalStream()) {
     return false;  // Do not retry opening a PUBLISH stream.
   }
+  if (name.DoesNotExist()) {
+    QUIC_DLOG(INFO) << ENDPOINT << "Tried to publish a reserved track name";
+    return false;
+  }
   auto it = subscribed_track_names_.find(name);
   if (it != subscribed_track_names_.end()) {
     if (it->second->established()) {
@@ -600,6 +636,13 @@ bool MoqtSession::Publish(
         }
         session->Error(code, reason);
       },
+      [weak_session = GetWeakPtr()](uint64_t request_id) {
+        MoqtSession* session = MoqtSessionFromWeakPtr(weak_session);
+        if (session == nullptr) {
+          return absl::NotFoundError("Session is gone");
+        }
+        return session->ValidateNewIncomingRequestId(request_id);
+      },
       std::move(response_callback));
   auto publish_state = std::make_unique<LivePublisher>(
       framer_, publisher, stream_visitor.get(), next_request_id_,
@@ -624,6 +667,10 @@ std::unique_ptr<MoqtFetchTask> MoqtSession::Fetch(
   QUICHE_DCHECK(name.IsValid());
   if (received_goaway_ || sent_goaway_) {
     QUIC_DLOG(INFO) << ENDPOINT << "Tried to send FETCH after GOAWAY";
+    return nullptr;
+  }
+  if (name.DoesNotExist()) {
+    QUIC_DLOG(INFO) << ENDPOINT << "Tried to fetch a reserved track name";
     return nullptr;
   }
   webtransport::Stream* stream = session_->OpenOutgoingBidirectionalStream();
@@ -664,6 +711,10 @@ bool MoqtSession::RelativeJoiningFetch(const FullTrackName& name,
                                        uint64_t num_previous_groups,
                                        const MessageParameters& parameters) {
   QUICHE_DCHECK(name.IsValid());
+  if (name.DoesNotExist()) {
+    QUIC_DLOG(INFO) << ENDPOINT << "Tried to fetch a reserved track name";
+    return false;
+  }
   std::unique_ptr<MoqtFetchTask> fetch_task = RelativeJoiningFetch(
       name, visitor, [](std::variant<FetchOkData, MoqtRequestErrorInfo>) {},
       num_previous_groups, parameters);
@@ -734,13 +785,16 @@ void MoqtSession::GoAway(absl::string_view new_session_uri) {
     QUIC_DLOG(INFO) << ENDPOINT << "Tried to send multiple GOAWAY";
     return;
   }
-  if (!new_session_uri.empty() && !new_session_uri.empty()) {
+  if (!new_session_uri.empty() &&
+      parameters_.perspective == Perspective::IS_CLIENT) {
     QUIC_DLOG(INFO) << ENDPOINT
                     << "Client tried to send GOAWAY with new session URI";
     return;
   }
   MoqtGoAway message;
   message.new_session_uri = std::string(new_session_uri);
+  message.timeout = kDefaultGoAwayTimeout;
+  message.request_id = next_incoming_request_id_;
   SendControlMessage(framer_.SerializeGoAway(message));
   sent_goaway_ = true;
   goaway_timeout_alarm_ = absl::WrapUnique(
@@ -865,16 +919,23 @@ void MoqtSession::OnCanCreateNewOutgoingUnidirectionalStream() {
   }
 }
 
-bool MoqtSession::ValidateRequestId(uint64_t request_id) {
+absl::Status MoqtSession::ValidateNewIncomingRequestId(uint64_t request_id) {
   if ((request_id % 2 == 0) !=
       (parameters_.perspective == Perspective::IS_SERVER)) {
-    QUICHE_DLOG(INFO) << ENDPOINT << "Request ID evenness incorrect";
+    QUIC_DLOG(INFO) << parameters_.perspective
+                    << "Request ID evenness incorrect";
     Error(MoqtError::kInvalidRequestId, "Request ID evenness incorrect");
-    return false;
+    return absl::InvalidArgumentError("Request ID evenness incorrect");
   }
-  // TODO(martinduke): Write new checks for duplicate request IDs. It's
-  // probably best to track the largest observed plus a set of holes.
-  return true;
+  // Check the one request ID map we have for the value. Most active request IDs
+  // are not tracked at the session level.
+  if (published_subscriptions_.contains(request_id)) {
+    QUIC_DLOG(INFO) << parameters_.perspective << "Duplicate Request ID";
+    Error(MoqtError::kInvalidRequestId, "Duplicate Request ID");
+    return absl::InvalidArgumentError("Duplicate Request ID");
+  }
+  next_incoming_request_id_ = request_id + 2;
+  return absl::OkStatus();
 }
 
 void MoqtSession::UnknownBidiStream::OnCanRead() {
@@ -890,6 +951,7 @@ void MoqtSession::UnknownBidiStream::OnCanRead() {
   if (!type.ok()) {
     // The result is neither of "OK", "no type available", or "parse error".
     // This is unexpected; treat it as an internal error, and reset the stream.
+    stream_->SendStopSending(kResetCodeInternalError);
     stream_->ResetWithUserCode(kResetCodeInternalError);
     return;
   }
@@ -920,6 +982,13 @@ void MoqtSession::UnknownBidiStream::OnCanRead() {
                 if (session != nullptr) {
                   session->Error(code, reason);
                 }
+              },
+              [weakptr = session_->GetWeakPtr()](uint64_t request_id) {
+                MoqtSession* session = MoqtSessionFromWeakPtr(weakptr);
+                if (session == nullptr) {
+                  return absl::NotFoundError("Session is gone");
+                }
+                return session->ValidateNewIncomingRequestId(request_id);
               },
               session_->callbacks_.incoming_subscribe_namespace_callback);
       namespace_stream->BindStream(std::move(parser_));
@@ -973,6 +1042,13 @@ void MoqtSession::UnknownBidiStream::OnCanRead() {
                   session->Error(code, reason);
                 }
               },
+              [weakptr = session_->GetWeakPtr()](uint64_t request_id) {
+                MoqtSession* session = MoqtSessionFromWeakPtr(weakptr);
+                if (session == nullptr) {
+                  return absl::NotFoundError("Session is gone");
+                }
+                return session->ValidateNewIncomingRequestId(request_id);
+              },
               [weakptr = session_->GetWeakPtr()](
                   const TrackNamespace& track_namespace,
                   const MessageParameters* absl_nullable parameters,
@@ -1003,6 +1079,13 @@ void MoqtSession::UnknownBidiStream::OnCanRead() {
             if (session != nullptr) {
               session->Error(code, reason);
             }
+          },
+          [weakptr = session_->GetWeakPtr()](uint64_t request_id) {
+            MoqtSession* session = MoqtSessionFromWeakPtr(weakptr);
+            if (session == nullptr) {
+              return absl::NotFoundError("Session is gone");
+            }
+            return session->ValidateNewIncomingRequestId(request_id);
           },
           &session_->callbacks_.incoming_publish_callback,
           [weakptr = session_->GetWeakPtr()](LiveSubscriber* track) {
@@ -1089,6 +1172,13 @@ void MoqtSession::UnknownBidiStream::OnCanRead() {
               session->Error(code, reason);
             }
           },
+          [weakptr = session_->GetWeakPtr()](uint64_t request_id) {
+            MoqtSession* session = MoqtSessionFromWeakPtr(weakptr);
+            if (session == nullptr) {
+              return absl::NotFoundError("Session is gone");
+            }
+            return session->ValidateNewIncomingRequestId(request_id);
+          },
           session_->weak_ptr_factory_for_publishers_.Create());
       subscribe_stream->BindStream(std::move(parser_));
       MoqtSubscribeResponseStream* temp_stream = subscribe_stream.get();
@@ -1109,6 +1199,13 @@ void MoqtSession::UnknownBidiStream::OnCanRead() {
                   session->Error(code, reason);
                 }
               },
+              [weakptr = session_->GetWeakPtr()](uint64_t request_id) {
+                MoqtSession* session = MoqtSessionFromWeakPtr(weakptr);
+                if (session == nullptr) {
+                  return absl::NotFoundError("Session is gone");
+                }
+                return session->ValidateNewIncomingRequestId(request_id);
+              },
               session_->weak_ptr_factory_for_publishers_.Create());
       track_status_stream->BindStream(std::move(parser_));
       MoqtTrackStatusResponseStream* temp_stream = track_status_stream.get();
@@ -1126,6 +1223,13 @@ void MoqtSession::UnknownBidiStream::OnCanRead() {
             if (session != nullptr) {
               session->Error(code, reason);
             }
+          },
+          [weakptr = session_->GetWeakPtr()](uint64_t request_id) {
+            MoqtSession* session = MoqtSessionFromWeakPtr(weakptr);
+            if (session == nullptr) {
+              return absl::NotFoundError("Session is gone");
+            }
+            return session->ValidateNewIncomingRequestId(request_id);
           },
           // OpenStreamCallback
           [weakptr = session_->GetWeakPtr()](webtransport::StreamId stream_id,
@@ -1199,7 +1303,7 @@ void MoqtSession::UnknownUniStream::OnCanRead() {
     return;
   }
   if (!type.ok()) {
-    stream_->ResetWithUserCode(kResetCodeInternalError);
+    stream_->SendStopSending(kResetCodeInternalError);
     return;
   }
   if (*type == static_cast<uint64_t>(MoqtMessageType::kSetup)) {
@@ -1216,6 +1320,18 @@ void MoqtSession::UnknownUniStream::OnCanRead() {
     // The line below destroys `this`.
     stream_->SetVisitor(std::move(control_stream));
     temp_stream->OnCanRead();
+    return;
+  }
+  if (*type == kPaddingStreamType) {
+    auto padding_stream = std::make_unique<IncomingPaddingStream>(stream_);
+    IncomingPaddingStream* temp_stream = padding_stream.get();
+    // The line below destroys `this`.
+    stream_->SetVisitor(std::move(padding_stream));
+    temp_stream->OnCanRead();
+    return;
+  }
+  if (!MoqtDataStreamType::FromValue(*type).has_value()) {
+    session->Error(MoqtError::kProtocolViolation, "Unknown stream type");
     return;
   }
   auto data_stream = std::make_unique<IncomingDataStream>(
@@ -1336,21 +1452,29 @@ absl::Status MoqtSession::OnControlMessage(const MoqtSetup& message) {
 }
 
 absl::Status MoqtSession::OnControlMessage(const MoqtGoAway& message) {
-  if (!message.new_session_uri.empty() &&
-      perspective() == quic::Perspective::IS_SERVER) {
-    return absl::InvalidArgumentError(
-        "Received GOAWAY with new_session_uri on the server");
-  }
   if (received_goaway_) {
-    return absl::InvalidArgumentError("Received multiple GOAWAY messages");
+    return absl::InvalidArgumentError(
+        "Received multiple GOAWAY on control stream");
+  }
+  if (!message.request_id.has_value()) {
+    return absl::InvalidArgumentError("GOAWAY missing request ID");
+  }
+  if ((*message.request_id & 0x1) != (next_request_id_ & 0x1)) {
+    Error(MoqtError::kInvalidRequestId,
+          "GOAWAY request ID has incorrect parity");
+    return absl::OkStatus();
   }
   received_goaway_ = true;
-  if (callbacks_.goaway_received_callback != nullptr) {
-    std::move(callbacks_.goaway_received_callback)(message.new_session_uri);
+  if (callbacks_.goaway_received_callback == nullptr) {
+    // An HTTP/3 or WebTransport GOAWAY already invoked the callback.
+    return absl::OkStatus();
   }
+  MoqtSessionGoAwayCallback callback =
+      std::move(callbacks_.goaway_received_callback);
+  callbacks_.goaway_received_callback = nullptr;
+  std::move(callback)(message.new_session_uri, message.timeout);
   return absl::OkStatus();
 }
-
 
 void MoqtSession::OnMalformedTrack(ObjectSubscriber* track) {
   if (track->is_fetch()) {

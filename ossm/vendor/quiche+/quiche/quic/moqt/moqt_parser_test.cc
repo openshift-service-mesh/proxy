@@ -100,6 +100,11 @@ std::vector<MoqtParserTestParams> GetMoqtParserTestParams() {
               message_type, uses_web_transport, perspective));
         }
       }
+    } else if (message_type == MoqtMessageType::kGoAway) {
+      // GoAwayMessage has a non-empty new_session_uri, which is only valid
+      // when received by the client.
+      params.push_back(MoqtParserTestParams(message_type, true,
+                                            quic::Perspective::IS_CLIENT));
     } else {
       // All other types are processed the same for either perspective or
       // transport.
@@ -408,6 +413,10 @@ TEST_P(MoqtParserTest, PayloadLengthTooShort) {
   }
   std::unique_ptr<TestMessageBase> message = MakeMessage();
   message->DecreasePayloadLengthByOne();
+  if (std::get<MoqtMessageType>(message_type_) == MoqtMessageType::kGoAway) {
+    // GOAWAY has a variant that is one byte shorter, so decrease by another.
+    message->DecreasePayloadLengthByOne();
+  }
   ProcessData(message->PacketSample(), false);
   EXPECT_EQ(messages_received(), 0);
   EXPECT_TRUE(parsing_error().has_value());
@@ -1285,11 +1294,11 @@ TEST_F(MoqtMessageSpecificTest, AllMessagesTogether) {
   std::string buffer;
   for (MoqtMessageType type : kMessageTypes) {
     std::unique_ptr<TestMessageBase> message =
-        CreateTestMessage(type, kRawQuic);
+        CreateTestMessage(type, kRawQuic, quic::Perspective::IS_SERVER);
     buffer += message->PacketSample();
   }
-  absl::StatusOr<std::vector<AnyMoqtControlMessage>> parsed =
-      ParseAllMessages(buffer, kDefaultMoqtVersion, kRawQuic);
+  absl::StatusOr<std::vector<AnyMoqtControlMessage>> parsed = ParseAllMessages(
+      buffer, kDefaultMoqtVersion, kRawQuic, quic::Perspective::IS_CLIENT);
   ASSERT_TRUE(parsed.ok());
 }
 
@@ -1298,10 +1307,10 @@ TEST_F(MoqtMessageSpecificTest, DatagramSuccessful) {
     ObjectDatagramMessage message(datagram_type);
     MoqtObject object;
     bool use_default_priority;
-    std::optional<absl::string_view> payload =
+    absl::StatusOr<absl::string_view> payload =
         ParseDatagram(message.PacketSample(), object, use_default_priority);
+    QUICHE_ASSERT_OK(payload);
     EXPECT_EQ(use_default_priority, datagram_type.has_default_priority());
-    ASSERT_TRUE(payload.has_value());
     if (use_default_priority) {
       object.publisher_priority = message.publisher_priority();
     }
@@ -1309,9 +1318,9 @@ TEST_F(MoqtMessageSpecificTest, DatagramSuccessful) {
         TestMessageBase::MessageStructuredData(object);
     EXPECT_TRUE(message.EqualFieldValues(object_metadata));
     if (datagram_type.has_status()) {
-      EXPECT_EQ(payload, "");
+      EXPECT_TRUE(payload->empty());
     } else {
-      EXPECT_EQ(payload, "foo");
+      EXPECT_EQ(*payload, "foo");
     }
   }
 }
@@ -1322,10 +1331,10 @@ TEST_F(MoqtMessageSpecificTest, DatagramSuccessfulExpandVarints) {
     message.ExpandVarints();
     MoqtObject object;
     bool check_priority;
-    std::optional<absl::string_view> payload =
+    absl::StatusOr<absl::string_view> payload =
         ParseDatagram(message.PacketSample(), object, check_priority);
+    QUICHE_ASSERT_OK(payload);
     EXPECT_EQ(check_priority, datagram_type.has_default_priority());
-    ASSERT_TRUE(payload.has_value());
     if (check_priority) {
       object.publisher_priority = message.publisher_priority();
     }
@@ -1333,9 +1342,9 @@ TEST_F(MoqtMessageSpecificTest, DatagramSuccessfulExpandVarints) {
         TestMessageBase::MessageStructuredData(object);
     EXPECT_TRUE(message.EqualFieldValues(object_metadata));
     if (datagram_type.has_status()) {
-      EXPECT_EQ(payload, "");
+      EXPECT_TRUE(payload->empty());
     } else {
-      EXPECT_EQ(payload, "foo");
+      EXPECT_EQ(*payload, "foo");
     }
   }
 }
@@ -1344,9 +1353,10 @@ TEST_F(MoqtMessageSpecificTest, WrongMessageInDatagram) {
   char payload[] = {0x33, 0x10, 0x20};
   MoqtObject object;
   bool check_priority;
-  EXPECT_EQ(ParseDatagram(absl::string_view(payload, sizeof(payload)), object,
-                          check_priority),
-            std::nullopt);
+  EXPECT_TRUE(absl::IsInvalidArgument(
+      ParseDatagram(absl::string_view(payload, sizeof(payload)), object,
+                    check_priority)
+          .status()));
 }
 
 TEST_F(MoqtMessageSpecificTest, TruncatedDatagram) {
@@ -1355,17 +1365,17 @@ TEST_F(MoqtMessageSpecificTest, TruncatedDatagram) {
   message.set_wire_image_size(4);
   MoqtObject object;
   bool check_priority;
-  EXPECT_EQ(ParseDatagram(message.PacketSample(), object, check_priority),
-            std::nullopt);
+  EXPECT_TRUE(absl::IsInvalidArgument(
+      ParseDatagram(message.PacketSample(), object, check_priority).status()));
 }
 
 TEST_F(MoqtMessageSpecificTest, VeryTruncatedDatagram) {
   char message = 0x40;
   MoqtObject object;
   bool check_priority;
-  EXPECT_EQ(ParseDatagram(absl::string_view(&message, sizeof(message)), object,
-                          check_priority),
-            std::nullopt);
+  EXPECT_TRUE(absl::IsInvalidArgument(
+      ParseDatagram(absl::string_view(&message, 1), object, check_priority)
+          .status()));
 }
 
 TEST_F(MoqtMessageSpecificTest, SubscribeOkInvalidDeliveryOrder) {
@@ -1434,24 +1444,9 @@ TEST_F(MoqtMessageSpecificTest, FetchInvalidRange2) {
               HasSubstr("End object comes before start object in FETCH"));
 }
 
-TEST_F(MoqtMessageSpecificTest, PaddingStream) {
-  MoqtParserTestVisitor visitor;
-  webtransport::test::InMemoryStream stream(/*stream_id=*/0);
-  MoqtDataParser parser(&stream, &visitor);
-  std::string buffer(32, '\0');
-  quic::QuicDataWriter writer(buffer.size(), buffer.data());
-  ASSERT_TRUE(writer.WriteMoqVarInt(MoqtDataStreamType::Padding().value()));
-  for (int i = 0; i < 100; ++i) {
-    stream.Receive(buffer, false);
-    parser.ReadAllData();
-    ASSERT_EQ(visitor.messages_received(), 0);
-    ASSERT_EQ(visitor.parsing_error(), std::nullopt);
-  }
-}
-
-// All messages with TrackNamespace use ReadTrackNamespace too check this. Use
+// All messages with TrackNamespace use ReadTrackNamespace. Use
 // PUBLISH_NAMESPACE.
-TEST_F(MoqtMessageSpecificTest, NamespaceTooSmall) {
+TEST_F(MoqtMessageSpecificTest, EmptyNamespace) {
   char publish_namespace[7] = {
       0x06, 0x00, 0x04, 0x02,  // request_id = 2
       0x01, 0x00,              // one empty namespace element
@@ -1463,14 +1458,32 @@ TEST_F(MoqtMessageSpecificTest, NamespaceTooSmall) {
   ASSERT_TRUE(parsed.ok());
   ASSERT_EQ(parsed->size(), 1u);
 
-  --publish_namespace[2];  // Remove one element.
-  --publish_namespace[4];
+  --publish_namespace[2];  // Length is now 3.
+  --publish_namespace[4];  // 0 elements.
   parsed = ParseAllMessages(
       absl::string_view(publish_namespace, sizeof(publish_namespace) - 1),
       kDefaultMoqtVersion, /*uses_web_transport=*/false);
-  EXPECT_FALSE(parsed.ok());
-  EXPECT_THAT(parsed.status().message(),
-              HasSubstr("Invalid number of namespace elements"));
+  ASSERT_TRUE(parsed.ok());
+  ASSERT_EQ(parsed->size(), 1u);
+  EXPECT_TRUE(
+      std::get<MoqtPublishNamespace>(parsed->at(0)).track_namespace.empty());
+}
+
+TEST_F(MoqtMessageSpecificTest, FullTrackNameEmptyNamespace) {
+  char subscribe[] = {
+      0x03, 0x00, 0x08, 0x01,        // request_id = 1
+      0x00,                          // 0 namespace elements
+      0x04, 0x61, 0x62, 0x63, 0x64,  // track_name = "abcd"
+      0x00,                          // 0 parameters
+  };
+  absl::StatusOr<std::vector<AnyMoqtControlMessage>> parsed =
+      ParseAllMessages(absl::string_view(subscribe, sizeof(subscribe)),
+                       kDefaultMoqtVersion, kRawQuic);
+  ASSERT_TRUE(parsed.ok());
+  ASSERT_EQ(parsed->size(), 1);
+  MoqtSubscribe message = std::get<MoqtSubscribe>((*parsed)[0]);
+  EXPECT_TRUE(message.full_track_name.track_namespace().empty());
+  EXPECT_EQ(message.full_track_name.name(), "abcd");
 }
 
 TEST_F(MoqtMessageSpecificTest, NamespaceTooLarge) {
@@ -1856,10 +1869,12 @@ TEST_F(MoqtMessageSpecificTest, StreamTypeParserFinAfterType) {
 TEST_F(MoqtMessageSpecificTest, StreamTypeParserFinForPadding) {
   webtransport::test::InMemoryStream stream(/*stream_id=*/0);
   MoqtStreamTypeParser type_parser(&stream);
-  stream.Receive("\xa6\xd3", true);
+  char buffer[5];
+  quic::QuicDataWriter writer(sizeof(buffer), buffer);
+  ASSERT_TRUE(writer.WriteMoqVarInt(kPaddingStreamType));
+  stream.Receive(absl::string_view(writer.data(), writer.length()), true);
   absl::StatusOr<uint64_t> type = type_parser.ReadStreamType();
-  EXPECT_THAT(
-      type, IsOkAndHolds(static_cast<uint64_t>(MoqtDataStreamType::kPadding)));
+  EXPECT_THAT(type, IsOkAndHolds(kPaddingStreamType));
 }
 
 TEST_F(MoqtMessageSpecificTest, StreamTypeParserMovedFrom) {
@@ -1869,6 +1884,64 @@ TEST_F(MoqtMessageSpecificTest, StreamTypeParserMovedFrom) {
   EXPECT_THAT(
       type_parser.ReadStreamType(),  // NOLINT(bugprone-use-after-move)
       StatusIs(absl::StatusCode::kInternal, HasSubstr("moved-from parser")));
+}
+
+TEST_F(MoqtMessageSpecificTest, ParseGoAwayWithoutRequestId) {
+  GoAwayMessage goaway_message;
+  goaway_message.RequestStreamMessage();
+  absl::StatusOr<std::vector<AnyMoqtControlMessage>> parsed =
+      ParseAllMessages(goaway_message.PacketSample(), kDefaultMoqtVersion,
+                       kRawQuic, quic::Perspective::IS_CLIENT);
+  ASSERT_TRUE(parsed.ok());
+  ASSERT_EQ(parsed->size(), 1);
+  EXPECT_TRUE(
+      goaway_message.EqualFieldValues(std::get<MoqtGoAway>((*parsed)[0])));
+}
+
+TEST_F(MoqtMessageSpecificTest, GoAwayNewSessionUriFromClient) {
+  GoAwayMessage goaway_message;
+  absl::StatusOr<std::vector<AnyMoqtControlMessage>> parsed =
+      ParseAllMessages(goaway_message.PacketSample(), kDefaultMoqtVersion,
+                       kWebTrans, quic::Perspective::IS_SERVER);
+  EXPECT_THAT(parsed,
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("New session URI must be empty from client")));
+}
+
+TEST_F(MoqtMessageSpecificTest, GoAwayNewSessionUriTooLong) {
+  auto make_goaway_packet = [](size_t uri_length) {
+    std::string uri(uri_length, 'a');
+    std::string buffer(kMaxMessageHeaderSize, '\0');
+    quic::QuicDataWriter writer(buffer.size(), buffer.data());
+    QUICHE_CHECK(
+        writer.WriteMoqVarInt(static_cast<uint64_t>(MoqtMessageType::kGoAway)));
+    // Payload is: 2-byte varint length (8192 or 8193) + URI bytes + 1-byte
+    // timeout.
+    uint16_t payload_length = 2 + uri.length() + 1;
+    QUICHE_CHECK(writer.WriteUInt16(payload_length));
+    QUICHE_CHECK(writer.WriteMoqVarInt(uri.length()));
+    QUICHE_CHECK(writer.WriteStringPiece(uri));
+    QUICHE_CHECK(writer.WriteMoqVarInt(0));
+    buffer.resize(writer.length());
+    return buffer;
+  };
+
+  // Exactly kMaxNewSessionUriLength succeeds.
+  std::string valid_packet = make_goaway_packet(kMaxNewSessionUriLength);
+  absl::StatusOr<std::vector<AnyMoqtControlMessage>> parsed =
+      ParseAllMessages(valid_packet, kDefaultMoqtVersion, kWebTrans,
+                       quic::Perspective::IS_CLIENT);
+  ASSERT_TRUE(parsed.ok());
+  ASSERT_EQ(parsed->size(), 1);
+  EXPECT_EQ(std::get<MoqtGoAway>((*parsed)[0]).new_session_uri.length(),
+            kMaxNewSessionUriLength);
+
+  // kMaxNewSessionUriLength + 1 fails with "New session URI too long".
+  std::string invalid_packet = make_goaway_packet(kMaxNewSessionUriLength + 1);
+  parsed = ParseAllMessages(invalid_packet, kDefaultMoqtVersion, kWebTrans,
+                            quic::Perspective::IS_CLIENT);
+  EXPECT_THAT(parsed, StatusIs(absl::StatusCode::kInvalidArgument,
+                               HasSubstr("New session URI too long")));
 }
 
 }  // namespace moqt::test

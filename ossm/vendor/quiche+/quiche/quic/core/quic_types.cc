@@ -90,7 +90,7 @@ std::ostream& operator<<(std::ostream& os, const LostPacket& lost_packet) {
   return os;
 }
 
-std::string HistogramEnumString(WriteStatus enum_value) {
+absl::string_view HistogramEnumString(WriteStatus enum_value) {
   switch (enum_value) {
     case WRITE_STATUS_OK:
       return "OK";
@@ -205,6 +205,12 @@ std::string QuicIetfFrameTypeString(QuicIetfFrameType t) {
     RETURN_STRING_LITERAL(IETF_EXTENSION_DATAGRAM);
     RETURN_STRING_LITERAL(IETF_EXTENSION_DATAGRAM_NO_LENGTH_V99);
     RETURN_STRING_LITERAL(IETF_EXTENSION_DATAGRAM_V99);
+    RETURN_STRING_LITERAL(IETF_HANDSHAKE_DONE);
+    RETURN_STRING_LITERAL(IETF_IMMEDIATE_ACK);
+    RETURN_STRING_LITERAL(IETF_ACK_FREQUENCY);
+    RETURN_STRING_LITERAL(IETF_ACK_RECEIVE_TIMESTAMPS);
+    RETURN_STRING_LITERAL(IETF_ACK_RECEIVE_TIMESTAMPS_ECN);
+    RETURN_STRING_LITERAL(IETF_RESET_STREAM_AT);
     default:
       return absl::StrCat("Private value (", t, ")");
   }

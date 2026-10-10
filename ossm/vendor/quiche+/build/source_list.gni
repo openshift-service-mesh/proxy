@@ -9,6 +9,7 @@ protobuf_test_support = [
     "src/quiche/quic/test_tools/send_algorithm_test_result.proto",
 ]
 quiche_core_hdrs = [
+    "src/quiche/common/abiding_object_pool.h",
     "src/quiche/common/btree_scheduler.h",
     "src/quiche/common/bug_utils.h",
     "src/quiche/common/bug_utils_test_helper.h",
@@ -64,6 +65,7 @@ quiche_core_hdrs = [
     "src/quiche/common/quiche_status_utils.h",
     "src/quiche/common/quiche_string_tuple.h",
     "src/quiche/common/quiche_text_utils.h",
+    "src/quiche/common/quiche_types.h",
     "src/quiche/common/quiche_weak_ptr.h",
     "src/quiche/common/simple_buffer_allocator.h",
     "src/quiche/common/stable_block_list.h",
@@ -1131,6 +1133,7 @@ quiche_tests_srcs = [
     "src/quiche/balsa/header_properties_test.cc",
     "src/quiche/balsa/simple_buffer_test.cc",
     "src/quiche/binary_http/binary_http_message_test.cc",
+    "src/quiche/common/abiding_object_pool_test.cc",
     "src/quiche/common/btree_scheduler_test.cc",
     "src/quiche/common/bug_utils_test.cc",
     "src/quiche/common/capsule_test.cc",
@@ -1315,6 +1318,7 @@ quiche_tests_srcs = [
     "src/quiche/quic/core/http/quic_spdy_stream_test.cc",
     "src/quiche/quic/core/http/spdy_utils_test.cc",
     "src/quiche/quic/core/http/web_transport_http3_test.cc",
+    "src/quiche/quic/core/http/web_transport_stream_adapter_test.cc",
     "src/quiche/quic/core/legacy_quic_stream_id_manager_test.cc",
     "src/quiche/quic/core/packet_number_indexed_queue_test.cc",
     "src/quiche/quic/core/qpack/new_qpack_blocking_manager_test.cc",
@@ -1505,7 +1509,6 @@ nghttp2_srcs = [
     "src/quiche/http2/adapter/nghttp2_callbacks.cc",
     "src/quiche/http2/adapter/nghttp2_data_provider.cc",
     "src/quiche/http2/adapter/nghttp2_session.cc",
-    "src/quiche/http2/adapter/nghttp2_test.cc",
     "src/quiche/http2/adapter/nghttp2_util.cc",
 ]
 nghttp2_test_support_hdrs = [
@@ -1525,6 +1528,7 @@ nghttp2_tests_srcs = [
     "src/quiche/http2/adapter/nghttp2_adapter_test.cc",
     "src/quiche/http2/adapter/nghttp2_data_provider_test.cc",
     "src/quiche/http2/adapter/nghttp2_session_test.cc",
+    "src/quiche/http2/adapter/nghttp2_test.cc",
 ]
 default_platform_impl_hdrs = [
     "src/quiche/common/platform/default/quiche_platform_impl/quiche_bug_tracker_impl.h",

@@ -41,6 +41,7 @@ class MoqtTrackStatusRequestStream : public MoqtBidiStreamBase {
   ~MoqtTrackStatusRequestStream() { Detach(); }
 
   // MoqtBidiStreamBase overrides.
+  using MoqtBidiStreamBase::OnControlMessage;
   void OnStreamBound() override;
   absl::Status OnRawControlMessage(
       const MoqtRawControlMessage& message) override;
@@ -64,10 +65,12 @@ class MoqtTrackStatusResponseStream : public MoqtBidiStreamBase,
       MoqtFramer* absl_nonnull framer,
       const MoqtControlMessageParser& message_parser,
       SessionErrorCallback session_error_callback,
+      ValidateRequestIdCallback validate_request_id,
       quiche::QuicheWeakPtr<SessionToPublisherInterface> session);
   ~MoqtTrackStatusResponseStream() { Detach(); }
 
   // MoqtBidiStreamBase overrides.
+  using MoqtBidiStreamBase::OnControlMessage;
   void OnStreamBound() override { stream_parser()->set_allow_fin(true); }
   absl::Status OnRawControlMessage(
       const MoqtRawControlMessage& message) override;
@@ -95,6 +98,7 @@ class MoqtTrackStatusResponseStream : public MoqtBidiStreamBase,
   }
 
   std::optional<uint64_t> request_id_;
+  ValidateRequestIdCallback validate_request_id_;
   const quiche::QuicheWeakPtr<SessionToPublisherInterface> session_;
   std::shared_ptr<MoqtTrackPublisher> publisher_ = nullptr;
 };
