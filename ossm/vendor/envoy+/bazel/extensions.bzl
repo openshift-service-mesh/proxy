@@ -40,10 +40,24 @@ def _llvm_repo_build(llvm_version):
     libclang_glob = 'glob(["lib/libclang.so*", "lib/libclang*.dylib"], allow_empty = True)'
     if libclang_glob not in build:
         fail("The envoy_toolshed LLVM repository BUILD template changed")
+
+    # OSSM: distro LLVM (RHEL/UBI) ships its shared libraries under lib64/, but the
+    # envoy_toolshed template only exports_files() under lib/**. Without lib64 in the
+    # glob, host-backed file labels such as lib64/libclang-cpp.so.<ver> (referenced via
+    # $(location) by compat/openssl, see bazel/toolchains.bzl LIBCLANG_CPP/LIBLLVM) are
+    # not declared -- failing analysis with "no such target ... however, a source file
+    # of this name exists".
+    exports_glob = 'exports_files(glob(["bin/*", "lib/**", "include/**", "share/clang/*"], allow_empty = True))'
+    if exports_glob not in build:
+        fail("The envoy_toolshed LLVM repository BUILD exports_files template changed")
+
     return (
         build.replace(
             libclang_glob,
             'glob(["lib/**/libclang.so*", "lib/**/libclang*.dylib", "lib64/**/libclang.so*", "lib64/**/libclang*.dylib"], allow_empty = True)',
+        ).replace(
+            exports_glob,
+            'exports_files(glob(["bin/*", "lib/**", "lib64/**", "include/**", "share/clang/*"], allow_empty = True))',
         ) + _LLVM_LIBRARY_TARGETS + '\nexports_files(["llvm.bzl"])\n'
     )
 
