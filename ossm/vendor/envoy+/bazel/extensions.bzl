@@ -42,23 +42,22 @@ def _llvm_repo_build(llvm_version):
         fail("The envoy_toolshed LLVM repository BUILD template changed")
 
     # OSSM: distro LLVM (RHEL/UBI) ships its shared libraries under lib64/, but the
-    # envoy_toolshed template only exports_files() under lib/**. Without lib64 in the
-    # glob, host-backed file labels such as lib64/libclang-cpp.so.<ver> (referenced via
-    # $(location) by compat/openssl, see bazel/toolchains.bzl LIBCLANG_CPP/LIBLLVM) are
-    # not declared -- failing analysis with "no such target ... however, a source file
-    # of this name exists".
-    exports_glob = 'exports_files(glob(["bin/*", "lib/**", "include/**", "share/clang/*"], allow_empty = True))'
-    if exports_glob not in build:
-        fail("The envoy_toolshed LLVM repository BUILD exports_files template changed")
-
+    # envoy_toolshed template only exports_files() under lib/**. Without them, host-backed
+    # file labels such as lib64/libclang-cpp.so.<ver> (referenced via $(location) by
+    # compat/openssl, see bazel/toolchains.bzl LIBCLANG_CPP/LIBLLVM) are not declared --
+    # failing analysis with "no such target ... however, a source file of this name exists".
+    #
+    # We export only the specific lib64 shared libraries, NOT glob(["lib64/**"]): for the
+    # host repo, lib64/ symlinks the whole system /usr/lib64, which contains files whose
+    # names include ':' (illegal in a Bazel target name). Exporting that tree wholesale
+    # aborts the BUILD with "Error in exports_files: target names may not contain ':'",
+    # which in turn leaves every target -- including libclang-cpp.so.<ver> -- undeclared.
     return (
         build.replace(
             libclang_glob,
             'glob(["lib/**/libclang.so*", "lib/**/libclang*.dylib", "lib64/**/libclang.so*", "lib64/**/libclang*.dylib"], allow_empty = True)',
-        ).replace(
-            exports_glob,
-            'exports_files(glob(["bin/*", "lib/**", "lib64/**", "include/**", "share/clang/*"], allow_empty = True))',
-        ) + _LLVM_LIBRARY_TARGETS + '\nexports_files(["llvm.bzl"])\n'
+        ) + _LLVM_LIBRARY_TARGETS + '\nexports_files(["llvm.bzl"])\n' +
+        'exports_files(glob(["lib64/libclang-cpp.so*", "lib64/libLLVM.so*", "lib64/libclang.so*"], allow_empty = True))\n'
     )
 
 def _write_llvm_bzl(repository_ctx, llvm_version, llvm_lib_dir, is_host):
