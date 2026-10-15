@@ -1,6 +1,6 @@
 module(
     name = "cel-spec",
-    version = "0.25.3",
+    version = "0.25.1",
     compatibility_level = 1,
 )
 
