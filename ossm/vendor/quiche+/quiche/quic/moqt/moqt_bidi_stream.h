@@ -60,6 +60,7 @@ class MoqtBidiStreamBase : public webtransport::StreamVisitor {
   void BindStream(MoqtStreamTypeParser parser) {
     QUICHE_DCHECK(!stream_parser_.has_value());
     stream_parser_.emplace(std::move(parser));
+    stream_parser_->set_allow_fin(true);
     outgoing_message_queue_.SetStream(stream_parser_->stream());
     OnStreamBound();
   }
@@ -67,6 +68,7 @@ class MoqtBidiStreamBase : public webtransport::StreamVisitor {
   void BindStream(webtransport::Stream* absl_nonnull stream) {
     QUICHE_DCHECK(!stream_parser_.has_value());
     stream_parser_.emplace(stream);
+    stream_parser_->set_allow_fin(true);
     outgoing_message_queue_.SetStream(stream);
     OnStreamBound();
   }
@@ -101,7 +103,8 @@ class MoqtBidiStreamBase : public webtransport::StreamVisitor {
 
   // Do not use for TRACK_STATUS_OK because that should also contain
   // TrackProperties.
-  absl::Status SendRequestOk(const MessageParameters& parameters);
+  absl::Status SendRequestOk(const MessageParameters& parameters,
+                             MoqtMessageType type_of_ok);
   absl::Status SendRequestError(
       RequestErrorCode error_code,
       std::optional<quic::QuicTimeDelta> retry_interval,
@@ -109,9 +112,9 @@ class MoqtBidiStreamBase : public webtransport::StreamVisitor {
   absl::Status SendRequestError(const MoqtRequestErrorInfo& info);
   // Can be overridden for message-specific constraints.
   virtual absl::Status SendRequestUpdate(uint64_t request_id,
-                                         uint64_t existing_request_id,
                                          const MessageParameters& parameters,
-                                         MoqtResponseCallback callback);
+                                         MoqtResponseCallback callback,
+                                         MoqtMessageType updated_type);
   void Fin() {
     CheckStatus(outgoing_message_queue_.Fin());
     Detach();

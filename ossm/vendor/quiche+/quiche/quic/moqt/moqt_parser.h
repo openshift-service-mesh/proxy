@@ -20,12 +20,10 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "quiche/quic/core/quic_data_reader.h"
 #include "quiche/quic/core/quic_types.h"
 #include "quiche/quic/moqt/moqt_error.h"
 #include "quiche/quic/moqt/moqt_key_value_pair.h"
 #include "quiche/quic/moqt/moqt_messages.h"
-#include "quiche/quic/moqt/moqt_names.h"
 #include "quiche/quic/moqt/moqt_priority.h"
 #include "quiche/common/platform/api/quiche_export.h"
 #include "quiche/common/quiche_callbacks.h"
@@ -164,6 +162,8 @@ class MoqtControlMessageParser {
   absl::StatusOr<MoqtNamespace> ProcessNamespace(absl::string_view data) const;
   absl::StatusOr<MoqtNamespaceDone> ProcessNamespaceDone(
       absl::string_view data) const;
+  absl::StatusOr<MoqtPublishSkipped> ProcessPublishSkipped(
+      absl::string_view data) const;
   absl::StatusOr<MoqtTrackStatus> ProcessTrackStatus(
       absl::string_view data) const;
   absl::StatusOr<MoqtGoAway> ProcessGoAway(absl::string_view data) const;
@@ -212,6 +212,8 @@ class MoqtControlMessageParser {
         return parse(&MoqtControlMessageParser::ProcessNamespace);
       case MoqtMessageType::kNamespaceDone:
         return parse(&MoqtControlMessageParser::ProcessNamespaceDone);
+      case MoqtMessageType::kPublishSkipped:
+        return parse(&MoqtControlMessageParser::ProcessPublishSkipped);
       case MoqtMessageType::kTrackStatus:
         return parse(&MoqtControlMessageParser::ProcessTrackStatus);
       case MoqtMessageType::kGoAway:
@@ -236,21 +238,8 @@ class MoqtControlMessageParser {
   }
 
  private:
-  // Reads a TrackNamespace from the reader. Returns false if the namespace is
-  // too large. Sets a ParseError if the namespace is malformed.
-  absl::Status ReadTrackNamespace(quic::QuicDataReader& reader,
-                                  TrackNamespace& track_namespace) const;
-  // Reads a FullTrackName from the reader. Returns false if the name is too
-  // large. Sets a ParseError if the name is malformed.
-  absl::Status ReadFullTrackName(quic::QuicDataReader& reader,
-                                 FullTrackName& full_track_name) const;
   absl::Status FillAndValidateSetupOptions(const KeyValuePairList& in,
                                            SetupOptions& out) const;
-  // |reader| points to the beginning of a KeyValuePairList. Returns false if
-  // there is any sort of error. (The function calls ParseError(), so the
-  // caller has no need to do so.)
-  absl::Status FillAndValidateMessageParameters(quic::QuicDataReader& reader,
-                                                MessageParameters& out) const;
 
   bool uses_web_transport_;
   const quic::Perspective perspective_;
@@ -285,6 +274,13 @@ class QUICHE_EXPORT MoqtDataParser {
   void ReadStreamType();
   void ReadTrackAlias();
   void ReadAtMostOneObject();
+
+  void SetGroupOrder(MoqtGroupOrder group_order) {
+    if (group_order_.has_value()) {
+      return;
+    }
+    group_order_ = group_order;
+  }
 
   // Returns the type of the unidirectional stream, if already known.
   std::optional<MoqtDataStreamType> stream_type() const {
@@ -324,7 +320,6 @@ class QUICHE_EXPORT MoqtDataParser {
     kObjectPayloadLength,
     kStatus,
     kData,
-    kAwaitingNextByte,  // Can't determine status until the next byte arrives.
     kPadding,
     kFailed,
   };
@@ -371,13 +366,18 @@ class QUICHE_EXPORT MoqtDataParser {
 
   std::string buffered_message_;
 
+  std::optional<MoqtGroupOrder> group_order_;
   MoqtDataStreamType type_;
   MoqtFetchSerialization fetch_serialization_;
   NextInput next_input_ = kStreamType;
   MoqtObject metadata_;
+  std::optional<uint64_t> last_group_id_;
   std::optional<uint64_t> last_object_id_;
   size_t payload_length_remaining_ = 0;
   size_t num_objects_read_ = 0;
+  // Set to true if a non-range object has been read. This is useful for
+  // validating past object references.
+  bool non_fetch_range_object_read_ = false;
 
   bool processing_ = false;  // True if currently in ProcessData(), to prevent
                              // re-entrancy.

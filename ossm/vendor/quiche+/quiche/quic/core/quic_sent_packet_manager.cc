@@ -624,7 +624,6 @@ void QuicSentPacketManager::RecordOneSpuriousRetransmission(
 void QuicSentPacketManager::MarkPacketHandled(QuicPacketNumber packet_number,
                                               QuicTime ack_receive_time,
                                               QuicTime::Delta ack_delay_time,
-                                              QuicTime receive_timestamp,
                                               QuicTransmissionInfo*& info) {
   if (info->has_ack_frequency) {
     for (const auto& frame : info->retransmittable_frames) {
@@ -636,13 +635,13 @@ void QuicSentPacketManager::MarkPacketHandled(QuicPacketNumber packet_number,
   // Try to aggregate acked stream frames if acked packet is not a
   // retransmission.
   if (info->transmission_type == NOT_RETRANSMISSION) {
-    unacked_packets_.MaybeAggregateAckedStreamFrame(
-        packet_number, ack_delay_time, receive_timestamp, info);
+    unacked_packets_.MaybeAggregateAckedStreamFrame(packet_number,
+                                                    ack_delay_time, info);
   } else {
     unacked_packets_.NotifyAggregatedStreamFrameAcked(ack_delay_time);
     info = unacked_packets_.GetMutableTransmissionInfo(packet_number);
-    const bool new_data_acked = unacked_packets_.NotifyFramesAcked(
-        packet_number, ack_delay_time, receive_timestamp, info);
+    const bool new_data_acked =
+        unacked_packets_.NotifyFramesAcked(packet_number, ack_delay_time, info);
     if (!new_data_acked && info->transmission_type != NOT_RETRANSMISSION) {
       // Record as a spurious retransmission if this packet is a
       // retransmission and no new data gets acked.
@@ -1473,6 +1472,12 @@ AckResult QuicSentPacketManager::OnAckFrameEnd(
     } else if (info->encryption_level == ENCRYPTION_FORWARD_SECURE) {
       one_rtt_packet_acked_ = true;
     }
+    if (packet_number_space == APPLICATION_DATA) {
+      ++stats_->application_data_packets_acked;
+      if (acked_packet.receive_timestamp.IsInitialized()) {
+        ++stats_->application_data_packets_with_receive_timestamps_acked;
+      }
+    }
     largest_packet_peer_knows_is_acked_.UpdateMax(info->largest_acked);
     if (supports_multiple_packet_number_spaces()) {
       largest_packets_peer_knows_is_acked_[packet_number_space].UpdateMax(
@@ -1512,8 +1517,7 @@ AckResult QuicSentPacketManager::OnAckFrameEnd(
     unacked_packets_.MaybeUpdateLargestAckedOfPacketNumberSpace(
         packet_number_space, acked_packet.packet_number);
     MarkPacketHandled(acked_packet.packet_number, ack_receive_time,
-                      last_ack_frame_.ack_delay_time,
-                      acked_packet.receive_timestamp, info);
+                      last_ack_frame_.ack_delay_time, info);
   }
   // Copy raw ECN counts to last_ack_frame_ so it is logged properly. Validated
   // ECN counts are stored in valid_ecn_counts, and the congestion controller

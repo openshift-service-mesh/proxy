@@ -31,6 +31,7 @@
 #include "quiche/quic/moqt/moqt_types.h"
 #include "quiche/common/platform/api/quiche_bug_tracker.h"
 #include "quiche/common/quiche_buffer_allocator.h"
+#include "quiche/common/quiche_checked_math.h"
 #include "quiche/common/quiche_mem_slice.h"
 #include "quiche/common/quiche_weak_ptr.h"
 #include "quiche/web_transport/stream_helpers.h"
@@ -55,7 +56,18 @@ bool OutgoingUniStream::WriteObjectToStream(PublishedObject& object,
   header.properties = object.metadata.properties;
   header.object_status = object.metadata.status;
   header.payload_length = object.metadata.payload_length;
-
+  bool separate_end_of_group = false;
+  if (type.IsSubgroup() && !type.EndOfGroupInStream() &&
+      object.fin_after_this &&
+      object.metadata.status == MoqtObjectStatus::kEndOfGroup &&
+      (object.metadata.payload_length > 0 ||
+       !object.metadata.properties.empty())) {
+    // Handle the special case where an EndOfGroup is encoded in an object with
+    // payload or properties. It cannot be expressed that way on the wire;
+    // create a notional object instead.
+    separate_end_of_group = true;
+    header.object_status = MoqtObjectStatus::kNormal;
+  }
   quiche::QuicheBuffer serialized_header =
       framer_.SerializeObjectHeader(header, type, last_object_);
   std::vector<quiche::QuicheMemSlice> write_vector;
@@ -63,6 +75,18 @@ bool OutgoingUniStream::WriteObjectToStream(PublishedObject& object,
   write_vector.push_back(quiche::QuicheMemSlice(std::move(serialized_header)));
   for (auto& slice : object.payload) {
     write_vector.push_back(std::move(slice));
+  }
+  if (separate_end_of_group) {
+    last_object_ = object.metadata;
+    if (quiche::SafeIncrementBy<uint64_t>(header.object_id, 1)) {
+      header.object_status = MoqtObjectStatus::kEndOfGroup;
+      header.payload_length = 0;
+      header.properties.clear();
+      serialized_header =
+          framer_.SerializeObjectHeader(header, type, last_object_);
+      write_vector.push_back(
+          quiche::QuicheMemSlice(std::move(serialized_header)));
+    }
   }
   webtransport::StreamWriteOptions options;
   options.set_send_fin(!type.IsFetch() && object.fin_after_this);
@@ -76,8 +100,7 @@ bool OutgoingUniStream::WriteObjectToStream(PublishedObject& object,
     return false;
   }
   QUIC_DVLOG(1) << "Stream " << stream_.GetStreamId() << " successfully wrote "
-                << object.metadata.location
-                << ", fin = " << object.fin_after_this;
+                << object.metadata.location;
   return true;
 }
 
@@ -164,10 +187,9 @@ void OutgoingSubgroupStream::SendObjects() {
       return;
     }
 
-    quic::QuicTimeDelta delivery_timeout = visitor->delivery_timeout();
-    if (!visitor->alternate_delivery_timeout() &&
-        visitor->clock()->ApproximateNow() - object->metadata.arrival_time >
-            delivery_timeout) {
+    quic::QuicTimeDelta delivery_timeout = visitor->object_delivery_timeout();
+    if (visitor->clock()->ApproximateNow() - object->metadata.arrival_time >
+        delivery_timeout) {
       visitor->OnStreamTimeout(index_);
       stream().ResetWithUserCode(kResetCodeDeliveryTimeout);
       // No class access below this line.
@@ -223,15 +245,20 @@ void OutgoingSubgroupStream::SendObjects() {
     }
     ++next_object_;
     already_delivered_ = 0;
-    if (object->fin_after_this && !delivery_timeout.IsInfinite() &&
-        !visitor->alternate_delivery_timeout()) {
-      CreateAndSetAlarm(object->metadata.arrival_time + delivery_timeout);
-    }
   }
 }
 
 void OutgoingSubgroupStream::Fin(Location last_object) {
   QUICHE_DCHECK_EQ(last_object.group, index_.group);
+  LivePublisherInterface* visitor = visitor_.GetIfAvailable();
+  if (visitor != nullptr) {
+    quic::QuicTimeDelta subgroup_delivery_timeout =
+        visitor->subgroup_delivery_timeout();
+    if (!subgroup_delivery_timeout.IsInfinite()) {
+      CreateAndSetAlarm(visitor->clock()->ApproximateNow() +
+                        subgroup_delivery_timeout);
+    }
+  }
   if (next_object_ <= last_object.object) {
     // There is still data to send, do nothing.
     return;
@@ -240,14 +267,6 @@ void OutgoingSubgroupStream::Fin(Location last_object) {
   absl::Status status = webtransport::SendFinOnStream(stream());
   QUICHE_BUG_IF(OutgoingSubgroupStream_fin_failed, !status.ok())
       << "Writing pure FIN failed.";
-  LivePublisherInterface* visitor = visitor_.GetIfAvailable();
-  if (visitor == nullptr) {
-    return;
-  }
-  quic::QuicTimeDelta delivery_timeout = visitor->delivery_timeout();
-  if (!delivery_timeout.IsInfinite()) {
-    CreateAndSetAlarm(visitor->clock()->ApproximateNow() + delivery_timeout);
-  }
 }
 
 void OutgoingSubgroupStream::CreateAndSetAlarm(quic::QuicTime deadline) {

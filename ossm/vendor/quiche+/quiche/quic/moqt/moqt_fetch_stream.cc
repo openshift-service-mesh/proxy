@@ -102,7 +102,10 @@ void MoqtFetchRequestStream::OnStreamOpened(
   // Interactions with the task will now be mediated through the uni stream.
   // If the uni stream closes, so will the bidi stream.
   task_ = nullptr;
-  absl::down_cast<IncomingDataStream*>(stream)->set_fetch_task(task);
+  auto* data_stream = absl::down_cast<IncomingDataStream*>(stream);
+  data_stream->set_group_order(
+      const_parameters().group_order.value_or(MoqtGroupOrder::kAscending));
+  data_stream->set_fetch_task(task);
 }
 
 void MoqtFetchRequestStream::OnStreamClosed(absl::Status status,
@@ -115,7 +118,6 @@ void MoqtFetchRequestStream::OnStreamClosed(absl::Status status,
 }
 
 void MoqtFetchRequestStream::OnStreamBound() {
-  stream_parser()->set_allow_fin(true);
   // TODO(martinduke): Set the priority for this stream.
   MoqtFetch fetch;
   fetch.request_id = request_id();
@@ -171,6 +173,11 @@ absl::Status MoqtFetchRequestStream::OnControlMessage(
         "REQUEST_UPDATE_OK received with properties"));
     return absl::OkStatus();
   }
+  if (!ParametersAllowedByRequestOk(message.parameters,
+                                    MoqtMessageType::kRequestUpdate)) {
+    return absl::InvalidArgumentError(
+        "REQUEST_OK contains invalid parameters for REQUEST_UPDATE");
+  }
   absl::StatusOr<MessageParameters> old_parameters =
       request_update_queue().NextParameters();
   if (!old_parameters.ok()) {
@@ -184,6 +191,11 @@ absl::Status MoqtFetchRequestStream::OnControlMessage(
 absl::Status MoqtFetchRequestStream::OnControlMessage(
     const MoqtRequestError& message) {
   if (response_callback_ != nullptr) {
+    if (!RedirectAllowedByRequestError(message.redirect,
+                                       MoqtMessageType::kFetch)) {
+      return absl::InvalidArgumentError(
+          "REQUEST_ERROR contains invalid redirect for FETCH");
+    }
     FetchResponseCallback response_callback = std::move(response_callback_);
     response_callback_ = nullptr;
     std::move(response_callback)(message);
@@ -197,6 +209,11 @@ absl::Status MoqtFetchRequestStream::OnControlMessage(
     return absl::OkStatus();
   }
   // Response to REQUEST_UPDATE.
+  if (!RedirectAllowedByRequestError(message.redirect,
+                                     MoqtMessageType::kRequestUpdate)) {
+    return absl::InvalidArgumentError(
+        "REQUEST_ERROR contains invalid redirect for REQUEST_UPDATE");
+  }
   absl::Status status = request_update_queue().OnControlMessage(message);
   if (status.ok()) {
     Fin();
@@ -252,8 +269,8 @@ absl::Status MoqtFetchResponseStream::OnControlMessage(
   QUICHE_RETURN_IF_ERROR(validate_request_id_(message.request_id));
   request_id_ = message.request_id;
   parameters_ = message.parameters;
-  MoqtDeliveryOrder delivery_order =
-      message.parameters.group_order.value_or(MoqtDeliveryOrder::kAscending);
+  MoqtGroupOrder group_order =
+      message.parameters.group_order.value_or(MoqtGroupOrder::kAscending);
   std::unique_ptr<MoqtFetchTask> fetch;
   FetchResponseCallback response_callback =
       [weak_ptr = weak_ptr_factory_.Create()](
@@ -263,9 +280,10 @@ absl::Status MoqtFetchResponseStream::OnControlMessage(
           return;
         }
         if (std::holds_alternative<FetchOkData>(result)) {
-          const auto& ok_data = std::get<FetchOkData>(result);
+          auto& ok_data = std::get<FetchOkData>(result);
           stream->default_publisher_priority_ =
               ok_data.properties.default_publisher_priority();
+          SanitizeParameters(ok_data.parameters, MoqtMessageType::kFetchOk);
           stream->parameters_.Update(ok_data.parameters);
           stream->SendOrBufferMessageOrFatal(
               stream->framer()->SerializeFetchOk(ok_data));
@@ -294,7 +312,7 @@ absl::Status MoqtFetchResponseStream::OnControlMessage(
     QUIC_DLOG(INFO) << "Received a StandaloneFETCH for " << track_name;
     fetch = track_publisher->StandaloneFetch(
         standalone_fetch.start_location, standalone_fetch.end_location,
-        delivery_order, std::move(response_callback));
+        group_order, std::move(response_callback));
   } else {
     // Joining Fetch.
     // TODO(martinduke): There are some gaps in this implementation that are
@@ -368,18 +386,18 @@ absl::Status MoqtFetchResponseStream::OnControlMessage(
         }
       }
       fetch = subscription->publisher().StandaloneFetch(
-          Location{start_group, 0}, *largest_object, delivery_order,
+          Location{start_group, 0}, *largest_object, group_order,
           std::move(response_callback));
     } else {
       // Subscription is in PENDING state.
       if (std::holds_alternative<JoiningFetchRelative>(message.fetch)) {
         fetch = subscription->publisher().RelativeFetch(
             std::get<JoiningFetchRelative>(message.fetch).joining_start,
-            delivery_order, std::move(response_callback));
+            group_order, std::move(response_callback));
       } else {
         fetch = subscription->publisher().AbsoluteFetch(
             std::get<JoiningFetchAbsolute>(message.fetch).joining_start,
-            delivery_order, std::move(response_callback));
+            group_order, std::move(response_callback));
       }
     }
   }
@@ -407,11 +425,16 @@ absl::Status MoqtFetchResponseStream::OnControlMessage(
 absl::Status MoqtFetchResponseStream::OnControlMessage(
     const MoqtRequestUpdate& message) {
   QUICHE_RETURN_IF_ERROR(validate_request_id_(message.request_id));
+  if (!ParametersAllowedByRequestUpdate(message.parameters,
+                                        MoqtMessageType::kFetch)) {
+    return absl::InvalidArgumentError(
+        "REQUEST_UPDATE contains invalid parameters for FETCH");
+  }
   if (data_stream_ != nullptr &&
       message.parameters.subscriber_priority.has_value()) {
     data_stream_->UpdatePriority(*message.parameters.subscriber_priority);
   }
-  return SendRequestOk(MessageParameters());
+  return SendRequestOk(MessageParameters(), MoqtMessageType::kRequestUpdate);
 }
 
 void MoqtFetchResponseStream::OnDataStreamOpen(

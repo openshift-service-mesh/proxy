@@ -24,9 +24,8 @@ sh_test(
         "@jq_toolchains//:resolved_toolchain",
     ],
     env = {
-        "JQ_BIN": "$(JQ_BIN)",
+        "JQ_BIN": "$(rootpath @jq_toolchains//:resolved_toolchain)",
     },
-    toolchains = ["@jq_toolchains//:resolved_toolchain"],
 )
 
 module_updater_fixture(
@@ -136,10 +135,9 @@ sh_test(
     ],
     env = {
         "BUILDOZER": "$(rootpath @buildifier//:buildozer)",
-        "JQ_BIN": "$(JQ_BIN)",
+        "JQ_BIN": "$(rootpath @jq_toolchains//:resolved_toolchain)",
         "TOOLSHED_JQ_ROOT": "$(rootpath @envoy_toolshed_jq//:modules_root.marker)",
     },
-    toolchains = ["@jq_toolchains//:resolved_toolchain"],
 )
 
 sh_test(
@@ -153,7 +151,7 @@ sh_test(
         "@jq_toolchains//:resolved_toolchain",
     ],
     env = {
-        "JQ_BIN": "$(JQ_BIN)",
+        "JQ_BIN": "$(rootpath @jq_toolchains//:resolved_toolchain)",
         "TOOLSHED_JQ_ROOT": "$(rootpath @envoy_toolshed_jq//:modules_root.marker)",
     },
     tags = [
@@ -162,7 +160,6 @@ sh_test(
         "requires-network",
     ],
     target_compatible_with = ["@platforms//os:linux"],
-    toolchains = ["@jq_toolchains//:resolved_toolchain"],
 )
 
 registry_bazelrc(
@@ -188,8 +185,7 @@ sh_test(
         "//dependency:registry_bazelrc.sh",
         "@jq_toolchains//:resolved_toolchain",
     ],
-    env = {"JQ_BIN": "$(JQ_BIN)"},
-    toolchains = ["@jq_toolchains//:resolved_toolchain"],
+    env = {"JQ_BIN": "$(rootpath @jq_toolchains//:resolved_toolchain)"},
 )
 
 git_launcher(
@@ -209,10 +205,9 @@ sh_test(
     ],
     env = {
         "GIT_BIN": "$(rootpath :registry_test_git)",
-        "JQ_BIN": "$(JQ_BIN)",
+        "JQ_BIN": "$(rootpath @jq_toolchains//:resolved_toolchain)",
         "TOOLSHED_JQ_ROOT": "$(rootpath @envoy_toolshed_jq//:modules_root.marker)",
     },
-    toolchains = ["@jq_toolchains//:resolved_toolchain"],
 )
 
 registry_resolve(
@@ -245,7 +240,7 @@ sh_test(
         "@jq_toolchains//:resolved_toolchain",
     ],
     env = {
-        "JQ_BIN": "$(JQ_BIN)",
+        "JQ_BIN": "$(rootpath @jq_toolchains//:resolved_toolchain)",
         "RESOLVED": "$(rootpath :resolved_registry)",
     },
     tags = [
@@ -253,7 +248,6 @@ sh_test(
         "requires-network",
     ],
     target_compatible_with = ["@platforms//os:linux"],
-    toolchains = ["@jq_toolchains//:resolved_toolchain"],
 )
 
 filegroup(
@@ -418,9 +412,8 @@ sh_test(
         "@jq_toolchains//:resolved_toolchain",
     ],
     env = {
-        "JQ_BIN": "$(JQ_BIN)",
+        "JQ_BIN": "$(rootpath @jq_toolchains//:resolved_toolchain)",
     },
-    toolchains = ["@jq_toolchains//:resolved_toolchain"],
 )
 
 # ---------------------------------------------------------------------------
@@ -459,9 +452,8 @@ sh_test(
         "@jq_toolchains//:resolved_toolchain",
     ],
     env = {
-        "JQ_BIN": "$(JQ_BIN)",
+        "JQ_BIN": "$(rootpath @jq_toolchains//:resolved_toolchain)",
     },
-    toolchains = ["@jq_toolchains//:resolved_toolchain"],
 )
 
 custom_library_rule(
@@ -502,7 +494,9 @@ filegroup(
     name = "pattern_root",
     srcs = [
         "@bazel_skylib//lib:paths",
-        "@bazel_tools//tools/bash/runfiles",
+        # Use a concrete rule: since Bazel 9, bash/runfiles aliases rules_shell,
+        # and aspects observe the actual target's repository.
+        "@bazel_tools//tools/cpp:toolchain_type",
     ],
 )
 
@@ -511,6 +505,22 @@ dependency_reachability(
     testonly = True,
     excluded_patterns = ["bazel_*"],
     roots = [":pattern_root"],
+)
+
+alias(
+    name = "skylib_alias",
+    actual = "@bazel_skylib//lib:sets",
+)
+
+filegroup(
+    name = "alias_root",
+    srcs = [":skylib_alias"],
+)
+
+dependency_reachability(
+    name = "reachability_alias",
+    testonly = True,
+    roots = [":alias_root"],
 )
 
 filegroup(
@@ -568,6 +578,7 @@ sh_test(
     size = "small",
     srcs = ["exclusions_reachability_test.sh"],
     data = [
+        ":reachability_alias",
         ":reachability_apparent_exclusion",
         ":reachability_apparent_exclusion_baseline",
         ":reachability_attribution_excluded",
@@ -582,9 +593,8 @@ sh_test(
         "@jq_toolchains//:resolved_toolchain",
     ],
     env = {
-        "JQ_BIN": "$(JQ_BIN)",
+        "JQ_BIN": "$(rootpath @jq_toolchains//:resolved_toolchain)",
     },
-    toolchains = ["@jq_toolchains//:resolved_toolchain"],
 )
 
 bzl_library(

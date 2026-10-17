@@ -89,7 +89,7 @@ TEST_F(MoqtTrackStatusRequestStreamTest, SendRequestOnStreamBound) {
 
 TEST_F(MoqtTrackStatusRequestStreamTest, SendRequestWithParameters) {
   MessageParameters parameters;
-  parameters.delivery_timeout = quic::QuicTimeDelta::FromSeconds(5);
+  parameters.object_delivery_timeout = quic::QuicTimeDelta::FromSeconds(5);
   MoqtTrackStatusRequestStream stream = CreateStream(parameters);
   EXPECT_CALL(mock_stream_, CanWrite).WillRepeatedly(Return(true));
   MoqtTrackStatus expected_message;
@@ -118,9 +118,9 @@ TEST_F(MoqtTrackStatusRequestStreamTest, ReceiveOkResponse) {
   MoqtRequestOk ok(
       MessageParameters(),
       TrackProperties(quic::QuicTimeDelta::FromSeconds(5),
-                      quic::QuicTimeDelta::FromSeconds(10), std::nullopt,
+                      quic::QuicTimeDelta::FromSeconds(10),
+                      quic::QuicTimeDelta::FromSeconds(5), std::nullopt,
                       std::nullopt, std::nullopt, std::nullopt));
-  ok.parameters.expires = quic::QuicTimeDelta::FromSeconds(10);
   ok.parameters.largest_object = Location(1, 2);
   EXPECT_CALL(response_callback_, Call)
       .WillOnce([&](std::variant<TrackStatusOkData, MoqtRequestErrorInfo> v) {
@@ -244,8 +244,6 @@ TEST_F(MoqtTrackStatusResponseStreamTest, ProcessTrackStatusSuccess) {
       GenericMessageToRawControlMessage(track_status)));
   ASSERT_NE(listener, nullptr);
 
-  EXPECT_CALL(mock_publisher_, expiration)
-      .WillRepeatedly(Return(quic::QuicTimeDelta::FromSeconds(5)));
   EXPECT_CALL(mock_publisher_, largest_location)
       .WillRepeatedly(Return(Location(10, 20)));
   EXPECT_CALL(mock_stream_,

@@ -95,13 +95,14 @@ MoqtSubscribe DefaultSubscribe(uint64_t request_id) {
 
 MessageParameters SubscribeForTest() {
   MessageParameters parameters;
-  parameters.delivery_timeout = quic::QuicTimeDelta::FromMilliseconds(10000);
+  parameters.object_delivery_timeout =
+      quic::QuicTimeDelta::FromMilliseconds(10000);
   parameters.authorization_tokens.emplace_back(AuthTokenType::kOutOfBand,
                                                "bar");
   parameters.set_forward(true);
   parameters.subscriber_priority = 0x20;
   parameters.subscription_filter.emplace(Location(4, 1));
-  parameters.group_order = MoqtDeliveryOrder::kDescending;
+  parameters.group_order = MoqtGroupOrder::kDescending;
   return parameters;
 }
 
@@ -113,6 +114,22 @@ MoqtSubscribe DefaultSubscribe() {
 // Used when a test sets up a remote track.
 MoqtSubscribe DefaultLocalSubscribe() {
   return DefaultSubscribe(kDefaultLocalRequestId);
+}
+
+MoqtTrackStatus DefaultTrackStatus() {
+  return MoqtTrackStatus{
+      kDefaultPeerRequestId,
+      kDefaultTrackName(),
+      MessageParameters(),
+  };
+}
+
+MoqtTrackStatus DefaultLocalTrackStatus() {
+  return MoqtTrackStatus{
+      kDefaultLocalRequestId,
+      kDefaultTrackName(),
+      MessageParameters(),
+  };
 }
 
 MoqtFetch DefaultFetch() {
@@ -1229,8 +1246,9 @@ TEST_F(MoqtSessionTest, ReceiveUnsubscribe) {
   const MoqtPriority kLocalDefaultPriority = 0x20;
   bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
       ResponseStream(kSubscribeByte));
-  TrackProperties properties(std::nullopt, std::nullopt, kLocalDefaultPriority,
-                             std::nullopt, std::nullopt, std::nullopt);
+  TrackProperties properties(std::nullopt, std::nullopt, std::nullopt,
+                             kLocalDefaultPriority, std::nullopt, std::nullopt,
+                             std::nullopt);
   EXPECT_CALL(*track, properties)
       .WillRepeatedly(testing::ReturnRef(properties));
   MoqtObjectListener* listener = ReceiveSubscribeSynchronousOk(
@@ -1247,10 +1265,10 @@ TEST_F(MoqtSessionTest, ReceiveDatagram) {
   EXPECT_CALL(mock_bidi_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kSubscribe), _));
   session_.Subscribe(ftn, &remote_track_visitor_, MessageParameters());
-  MoqtSubscribeOk ok(
-      2, MessageParameters(),
-      TrackProperties(std::nullopt, std::nullopt, kPeerDefaultPriority,
-                      std::nullopt, std::nullopt, std::nullopt));
+  MoqtSubscribeOk ok(2, MessageParameters(),
+                     TrackProperties(std::nullopt, std::nullopt, std::nullopt,
+                                     kPeerDefaultPriority, std::nullopt,
+                                     std::nullopt, std::nullopt));
   EXPECT_CALL(remote_track_visitor_, OnReply);
   bidi_wrapper_->ReceiveMessage(ok);
 
@@ -1259,14 +1277,14 @@ TEST_F(MoqtSessionTest, ReceiveDatagram) {
       /*group_sequence=*/0,
       /*object_sequence=*/0,
       /*publisher_priority=*/0,
-      /*properties=*/"",
+      /*properties=*/"foo",
       /*object_status=*/MoqtObjectStatus::kNormal,
       /*subgroup_id=*/std::nullopt,
       /*first_object_in_subgroup=*/std::nullopt,
       /*payload_length=*/8,
   };
-  char datagram[] = {0x00, 0x02, 0x00, 0x00, 0x00, 0x64, 0x65,
-                     0x61, 0x64, 0x62, 0x65, 0x65, 0x66};
+  char datagram[] = {0x01, 0x02, 0x00, 0x00, 0x00, 0x03, 0x66, 0x6f, 0x6f,
+                     0x64, 0x65, 0x61, 0x64, 0x62, 0x65, 0x65, 0x66};
   EXPECT_CALL(remote_track_visitor_, OnObjectFragment)
       .WillOnce([&](const FullTrackName& track_name,
                     const PublishedObjectMetadata& metadata,
@@ -1275,6 +1293,7 @@ TEST_F(MoqtSessionTest, ReceiveDatagram) {
         EXPECT_EQ(metadata.location,
                   Location(object.group_id, object.object_id));
         EXPECT_EQ(metadata.subgroup, object.subgroup_id);
+        EXPECT_EQ(metadata.properties, object.properties);
         EXPECT_EQ(metadata.publisher_priority, object.publisher_priority);
         EXPECT_EQ(metadata.status, object.object_status);
         EXPECT_EQ(metadata.payload_length, payload.length());
@@ -1291,10 +1310,10 @@ TEST_F(MoqtSessionTest, UsePeerDefaultPriority) {
   EXPECT_CALL(mock_bidi_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kSubscribe), _));
   session_.Subscribe(ftn, &remote_track_visitor_, MessageParameters());
-  MoqtSubscribeOk ok(
-      2, MessageParameters(),
-      TrackProperties(std::nullopt, std::nullopt, kPeerDefaultPriority,
-                      std::nullopt, std::nullopt, std::nullopt));
+  MoqtSubscribeOk ok(2, MessageParameters(),
+                     TrackProperties(std::nullopt, std::nullopt, std::nullopt,
+                                     kPeerDefaultPriority, std::nullopt,
+                                     std::nullopt, std::nullopt));
   EXPECT_CALL(remote_track_visitor_, OnReply);
   bidi_wrapper_->ReceiveMessage(ok);
   // Omit priority from a datagram.
@@ -1336,8 +1355,9 @@ TEST_F(MoqtSessionTest, OmitPublisherPriority) {
   // Create the publisher and the SUBSCRIBE with kLocalDefaultPriority.
   MockTrackPublisher* track = CreateTrackPublisher();
   std::make_shared<MockTrackPublisher>(request.full_track_name);
-  TrackProperties properties(std::nullopt, std::nullopt, kLocalDefaultPriority,
-                             std::nullopt, std::nullopt, std::nullopt);
+  TrackProperties properties(std::nullopt, std::nullopt, std::nullopt,
+                             kLocalDefaultPriority, std::nullopt, std::nullopt,
+                             std::nullopt);
   EXPECT_CALL(*track, properties)
       .WillRepeatedly(testing::ReturnRef(properties));
   MoqtObjectListener* listener = ReceiveSubscribeSynchronousOk(
@@ -1421,10 +1441,10 @@ TEST_F(MoqtSessionTest, DatagramOutOfWindow) {
   MessageParameters params;
   params.subscription_filter.emplace(Location(1, 0));
   session_.Subscribe(ftn, &remote_track_visitor_, params);
-  MoqtSubscribeOk ok(
-      2, MessageParameters(),
-      TrackProperties(std::nullopt, std::nullopt, kPeerDefaultPriority,
-                      std::nullopt, std::nullopt, std::nullopt));
+  MoqtSubscribeOk ok(2, MessageParameters(),
+                     TrackProperties(std::nullopt, std::nullopt, std::nullopt,
+                                     kPeerDefaultPriority, std::nullopt,
+                                     std::nullopt, std::nullopt));
   EXPECT_CALL(remote_track_visitor_, OnReply);
   bidi_wrapper_->ReceiveMessage(ok);
   char datagram[] = {0x01, 0x02, 0x00, 0x00, 0x80, 0x00, 0x08, 0x64,
@@ -1497,8 +1517,6 @@ void ExpectSendObject(MockFetchTask* fetch_task,
                       MoqtObjectStatus status, Location location,
                       absl::string_view payload,
                       MoqtFetchTask::GetNextObjectResult second_result) {
-  // Nothing is sent for status = kObjectDoesNotExist. Do not use this function.
-  QUICHE_DCHECK(status != MoqtObjectStatus::kObjectDoesNotExist);
   QUICHE_DCHECK(second_result != MoqtFetchTask::GetNextObjectResult::kSuccess);
   EXPECT_CALL(data_stream, CanWrite).WillRepeatedly(Return(true));
   EXPECT_CALL(*fetch_task, GetNextObject)
@@ -1561,7 +1579,7 @@ TEST_F(MoqtSessionTest, ProcessFetchGetEverythingFromUpstream) {
 
   FetchResponseCallback fetch_response_callback;
   EXPECT_CALL(*track, StandaloneFetch)
-      .WillOnce([&](Location, Location, MoqtDeliveryOrder,
+      .WillOnce([&](Location, Location, MoqtGroupOrder,
                     FetchResponseCallback callback) {
         fetch_response_callback = std::move(callback);
         return std::move(fetch_task_ptr);
@@ -1596,7 +1614,7 @@ TEST_F(MoqtSessionTest, ProcessFetchWholeRangeIsPresent) {
   auto fetch_task_ptr = std::make_unique<MockFetchTask>(true);
   MockFetchTask* fetch_task = fetch_task_ptr.get();
   EXPECT_CALL(*track, StandaloneFetch)
-      .WillOnce([&](Location, Location, MoqtDeliveryOrder,
+      .WillOnce([&](Location, Location, MoqtGroupOrder,
                     FetchResponseCallback callback) {
         std::move(callback)(expected_ok);
         return std::move(fetch_task_ptr);
@@ -1627,7 +1645,7 @@ TEST_F(MoqtSessionTest, SendFragmentedFetchObject) {
   MockFetchTask* fetch_task = fetch_task_ptr.get();
   FetchResponseCallback fetch_response_callback;
   EXPECT_CALL(*track, StandaloneFetch)
-      .WillOnce([&](Location, Location, MoqtDeliveryOrder,
+      .WillOnce([&](Location, Location, MoqtGroupOrder,
                     FetchResponseCallback callback) {
         fetch_response_callback = std::move(callback);
         return std::move(fetch_task_ptr);
@@ -1705,7 +1723,7 @@ TEST_F(MoqtSessionTest, FetchReturnsObjectBeforeOk) {
   MockFetchTask* fetch_task = fetch_task_ptr.get();
   FetchResponseCallback fetch_response_callback;
   EXPECT_CALL(*track, StandaloneFetch)
-      .WillOnce([&](Location, Location, MoqtDeliveryOrder,
+      .WillOnce([&](Location, Location, MoqtGroupOrder,
                     FetchResponseCallback callback) {
         fetch_response_callback = std::move(callback);
         return std::move(fetch_task_ptr);
@@ -1734,7 +1752,7 @@ TEST_F(MoqtSessionTest, FetchReturnsObjectBeforeError) {
   MockFetchTask* fetch_task = fetch_task_ptr.get();
   FetchResponseCallback fetch_response_callback;
   EXPECT_CALL(*track, StandaloneFetch)
-      .WillOnce([&](Location, Location, MoqtDeliveryOrder,
+      .WillOnce([&](Location, Location, MoqtGroupOrder,
                     FetchResponseCallback callback) {
         fetch_response_callback = std::move(callback);
         return std::move(fetch_task_ptr);
@@ -1777,7 +1795,7 @@ TEST_F(MoqtSessionTest, FetchFails) {
 
   auto fetch_task_ptr = std::make_unique<MockFetchTask>();
   EXPECT_CALL(*track, StandaloneFetch)
-      .WillOnce([&](Location, Location, MoqtDeliveryOrder,
+      .WillOnce([&](Location, Location, MoqtGroupOrder,
                     FetchResponseCallback callback) {
         std::move(callback)(MoqtRequestErrorInfo(
             RequestErrorCode::kDoesNotExist, std::nullopt, "foo"));
@@ -1926,8 +1944,7 @@ TEST_F(MoqtSessionTest, IncomingJoiningFetchAfterRequestUpdate) {
       mock_bidi_stream_,
       Writev(SerializedControlMessage(MoqtRequestOk{expected_ok_parameters}),
              _));
-  bidi_wrapper_->ReceiveMessage(
-      MoqtRequestUpdate{3, subscribe.request_id, update_parameters});
+  bidi_wrapper_->ReceiveMessage(MoqtRequestUpdate{3, update_parameters});
   ASSERT_TRUE(subscription->parameters().subscription_filter.has_value());
   EXPECT_EQ(subscription->parameters().subscription_filter->start(),
             Location(4, 11));
@@ -2019,13 +2036,13 @@ TEST_F(MoqtSessionTest, IncomingSubscribeNamespace) {
   MoqtSubscribeNamespace subscribe_namespace = {/*request_id=*/1, prefix,
                                                 parameters};
   quiche::QuicheWeakPtr<MockNamespaceTask> task;
-  MoqtRequestOk expected_ok;
-  expected_ok.parameters.expires = quic::QuicTimeDelta::FromSeconds(60);
+  MessageParameters ok_params;
+  ok_params.expires = quic::QuicTimeDelta::FromSeconds(60);
   EXPECT_CALL(session_callbacks_.incoming_subscribe_namespace_callback,
               Call(prefix, parameters, _))
       .WillOnce([&](const TrackNamespace& prefix, const MessageParameters&,
                     MoqtResponseCallback response_callback) {
-        std::move(response_callback)(expected_ok.parameters);
+        std::move(response_callback)(ok_params);
         auto task_ptr = std::make_unique<MockNamespaceTask>(prefix);
         task = task_ptr->GetWeakPtr();
         return task_ptr;
@@ -2033,7 +2050,7 @@ TEST_F(MoqtSessionTest, IncomingSubscribeNamespace) {
   bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
       ResponseStream(kSubscribeNamespaceByte));
   EXPECT_CALL(mock_bidi_stream_,
-              Writev(SerializedControlMessage(expected_ok), _))
+              Writev(SerializedControlMessage(MoqtRequestOk()), _))
       .WillOnce(Return(absl::OkStatus()));
   bidi_wrapper_->ReceiveMessage(subscribe_namespace);
 
@@ -2055,8 +2072,28 @@ TEST_F(MoqtSessionTest, IncomingSubscribeNamespace) {
   task.GetIfAvailable()->InvokeCallback();
 
   // Unsubscribe
-  bidi_wrapper_.reset();
+  bidi_wrapper_->stream().OnResetStreamReceived(kResetCodeCancelled);
   EXPECT_FALSE(task.IsValid());
+  bidi_wrapper_.reset();
+
+  // Resubscribing to the same prefix should succeed.
+  subscribe_namespace.request_id += 2;
+  EXPECT_CALL(session_callbacks_.incoming_subscribe_namespace_callback,
+              Call(prefix, parameters, _))
+      .WillOnce([&](const TrackNamespace& prefix, const MessageParameters&,
+                    MoqtResponseCallback response_callback) {
+        std::move(response_callback)(ok_params);
+        auto task_ptr = std::make_unique<MockNamespaceTask>(prefix);
+        task = task_ptr->GetWeakPtr();
+        return task_ptr;
+      });
+  bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
+      ResponseStream(kSubscribeNamespaceByte));
+  EXPECT_CALL(mock_bidi_stream_,
+              Writev(SerializedControlMessage(MoqtRequestOk()), _))
+      .WillOnce(Return(absl::OkStatus()));
+  bidi_wrapper_->ReceiveMessage(subscribe_namespace);
+  EXPECT_TRUE(task.IsValid());
 }
 
 TEST_F(MoqtSessionTest, IncomingSubscribeNamespaceWithSynchronousError) {
@@ -2341,13 +2378,14 @@ TEST_F(MoqtSessionTest, IncomingFetchObjectsSlowApp) {
 
 TEST_F(MoqtSessionTest, DeliveryTimeoutParameter) {
   MoqtSubscribe request = DefaultSubscribe();
-  request.parameters.delivery_timeout = quic::QuicTimeDelta::FromSeconds(1);
+  request.parameters.object_delivery_timeout =
+      quic::QuicTimeDelta::FromSeconds(1);
   bidi_wrapper_ = std::make_unique<MoqtBidiStreamTestWrapper>(
       ResponseStream(kSubscribeByte));
   MockTrackPublisher* track = CreateTrackPublisher();
   ReceiveSubscribeSynchronousOk(track, request, bidi_wrapper_.get());
   std::optional<quic::QuicTimeDelta> delivery_timeout =
-      MoqtSessionPeer::GetDeliveryTimeout(&session_, request.request_id);
+      MoqtSessionPeer::GetObjectDeliveryTimeout(&session_, request.request_id);
   EXPECT_TRUE(delivery_timeout.has_value() &&
               *delivery_timeout == quic::QuicTimeDelta::FromSeconds(1));
 }
@@ -2512,7 +2550,7 @@ TEST_F(MoqtSessionTest, IncomingTrackStatusBeforeSetup) {
   webtransport::test::InMemoryStreamWithWriteBuffer bidi_stream(0);
   MoqtFramer client_framer(session_parameters.using_webtrans,
                            quic::Perspective::IS_CLIENT);
-  MoqtTrackStatus track_status = DefaultLocalSubscribe();
+  MoqtTrackStatus track_status = DefaultLocalTrackStatus();
   quiche::QuicheBuffer serialized_track_status =
       client_framer.SerializeTrackStatus(track_status);
   bidi_stream.Receive(serialized_track_status.AsStringView(),
@@ -2553,17 +2591,12 @@ TEST_F(MoqtSessionTest, IncomingTrackStatusThenSynchronousOk) {
       ResponseStream(kTrackStatusByte));
   auto* track = CreateTrackPublisher();
 
-  MoqtTrackStatus track_status = DefaultSubscribe();
+  MoqtTrackStatus track_status = DefaultTrackStatus();
   EXPECT_CALL(*track, AddObjectListener)
       .WillOnce([&](MoqtObjectListener* listener, const MessageParameters&) {
-        EXPECT_CALL(*track, expiration)
-            .WillRepeatedly(
-                Return(quic::QuicTimeDelta::FromMilliseconds(10000)));
         EXPECT_CALL(*track, largest_location)
             .WillRepeatedly(Return(Location(5, 30)));
         MoqtRequestOk expected_ok;
-        expected_ok.parameters.expires =
-            quic::QuicTimeDelta::FromMilliseconds(10000);
         expected_ok.parameters.largest_object = Location(5, 30);
         EXPECT_CALL(mock_bidi_stream_,
                     Writev(SerializedControlMessage(expected_ok), _));
@@ -2578,17 +2611,14 @@ TEST_F(MoqtSessionTest, IncomingTrackStatusThenAsynchronousOk) {
       ResponseStream(kTrackStatusByte));
   auto* track = CreateTrackPublisher();
 
-  MoqtTrackStatus track_status = DefaultSubscribe();
+  MoqtTrackStatus track_status = DefaultTrackStatus();
   MoqtObjectListener* listener = nullptr;
   EXPECT_CALL(*track, AddObjectListener)
       .WillOnce(testing::SaveArg<0>(&listener));
   bidi_wrapper_->ReceiveMessage(track_status);
   ASSERT_NE(listener, nullptr);
-  EXPECT_CALL(*track, expiration)
-      .WillRepeatedly(Return(quic::QuicTimeDelta::FromMilliseconds(10000)));
   EXPECT_CALL(*track, largest_location).WillRepeatedly(Return(Location(5, 30)));
   MoqtRequestOk expected_ok;
-  expected_ok.parameters.expires = quic::QuicTimeDelta::FromMilliseconds(10000);
   expected_ok.parameters.largest_object = Location(5, 30);
   EXPECT_CALL(mock_bidi_stream_,
               Writev(SerializedControlMessage(expected_ok), _));
@@ -2601,7 +2631,7 @@ TEST_F(MoqtSessionTest, IncomingTrackStatusThenSynchronousError) {
       ResponseStream(kTrackStatusByte));
   auto* track = CreateTrackPublisher();
 
-  MoqtTrackStatus track_status = DefaultSubscribe();
+  MoqtTrackStatus track_status = DefaultTrackStatus();
   bool executed_AddObjectListener = false;
   EXPECT_CALL(*track, AddObjectListener)
       .WillOnce([&](MoqtObjectListener* listener, const MessageParameters&) {
@@ -2622,7 +2652,7 @@ TEST_F(MoqtSessionTest, IncomingTrackStatusThenAsynchronousError) {
       ResponseStream(kTrackStatusByte));
   auto* track = CreateTrackPublisher();
 
-  MoqtTrackStatus track_status = DefaultSubscribe();
+  MoqtTrackStatus track_status = DefaultTrackStatus();
   MoqtObjectListener* listener;
   EXPECT_CALL(*track, AddObjectListener)
       .WillOnce(testing::SaveArg<0>(&listener));
@@ -2721,16 +2751,16 @@ TEST_F(MoqtSessionTest, IncomingPublishNamespaceCleanup) {
   // Register two incoming PUBLISH_NAMESPACE.
   MoqtPublishNamespace publish_namespace{
       /*request_id=*/1, TrackNamespace{"foo"}, MessageParameters()};
-  MoqtRequestOk expected_ok;
-  expected_ok.parameters.expires = quic::QuicTimeDelta::FromSeconds(60);
+  MessageParameters ok_params;
+  ok_params.expires = quic::QuicTimeDelta::FromSeconds(60);
   EXPECT_CALL(session_callbacks_.incoming_publish_namespace_callback,
               Call(TrackNamespace{"foo"}, _, _))
       .WillOnce([&](const TrackNamespace&, const MessageParameters*,
                     MoqtResponseCallback callback) {
-        std::move(callback)(expected_ok.parameters);
+        std::move(callback)(ok_params);
       });
   EXPECT_CALL(mock_bidi_stream_,
-              Writev(SerializedControlMessage(expected_ok), _));
+              Writev(SerializedControlMessage(MoqtRequestOk()), _));
   bidi_wrapper_->ReceiveMessage(publish_namespace);
 
   auto bidi_wrapper_2 = std::make_unique<MoqtBidiStreamTestWrapper>(
@@ -2799,7 +2829,7 @@ TEST_F(MoqtSessionTest, IncomingRequestUpdateTriggersRequestOk) {
   ReceiveSubscribeSynchronousOk(track, subscribe, bidi_wrapper_.get(), 0);
   EXPECT_CALL(mock_bidi_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kRequestOk), _));
-  bidi_wrapper_->ReceiveMessage(MoqtRequestUpdate{3, 1, MessageParameters()});
+  bidi_wrapper_->ReceiveMessage(MoqtRequestUpdate{3, MessageParameters()});
 }
 
 TEST_F(MoqtSessionTest, IncomingRequestUpdateTriggersRequestError) {
@@ -2807,9 +2837,9 @@ TEST_F(MoqtSessionTest, IncomingRequestUpdateTriggersRequestError) {
       ResponseStream(kSubscribeByte));
   EXPECT_CALL(mock_bidi_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kRequestError), _));
-  EXPECT_QUICHE_BUG(bidi_wrapper_->ReceiveMessage(
-                        MoqtRequestUpdate{3, 1, MessageParameters()}),
-                    "Received REQUEST_UPDATE, no subscription state");
+  EXPECT_QUICHE_BUG(
+      bidi_wrapper_->ReceiveMessage(MoqtRequestUpdate{3, MessageParameters()}),
+      "Received REQUEST_UPDATE, no subscription state");
 }
 
 TEST_F(MoqtSessionTest, StopSendingBlocksSubgroup) {
@@ -2875,12 +2905,13 @@ TEST_F(MoqtSessionTest, PublishSuccess) {
       }));
 
   MoqtRequestOk request_ok;
-  request_ok.parameters.delivery_timeout = quic::QuicTimeDelta::FromSeconds(2);
+  request_ok.parameters.object_delivery_timeout =
+      quic::QuicTimeDelta::FromSeconds(2);
   bidi_wrapper_->ReceiveMessage(request_ok);
 
   ASSERT_TRUE(response.has_value());
   EXPECT_TRUE(std::holds_alternative<MessageParameters>(*response));
-  EXPECT_EQ(std::get<MessageParameters>(*response).delivery_timeout,
+  EXPECT_EQ(std::get<MessageParameters>(*response).object_delivery_timeout,
             quic::QuicTimeDelta::FromSeconds(2));
 }
 
@@ -2938,8 +2969,10 @@ TEST_F(MoqtSessionTest, IncomingPublishAbortsPendingSubscribe) {
   EXPECT_CALL(mock_bidi_stream_, ResetWithUserCode(kResetCodeCancelled));
   MoqtRequestOk expected_request_ok;
   expected_request_ok.parameters = parameters;  // params from the SUBSCRIBE.
-  // group_order can be in SUBSCRIBE but not REQUEST_OK.
+  // group_order is not stored in ObjectSubscriber::parameters_, and
+  // authorization_tokens is sanitized out of PUBLISH_OK.
   expected_request_ok.parameters.group_order = std::nullopt;
+  expected_request_ok.parameters.authorization_tokens.clear();
   EXPECT_CALL(publish_stream,
               Writev(SerializedControlMessage(expected_request_ok), _));
   // remote_track_visitor_ is reused, not destroyed.

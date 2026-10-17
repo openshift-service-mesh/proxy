@@ -49,10 +49,9 @@ MoqtSubscribeRequestStream::MoqtSubscribeRequestStream(
       alarm_factory_(alarm_factory) {}
 
 void MoqtSubscribeRequestStream::OnStreamBound() {
-  stream_parser()->set_allow_fin(true);
-  SendOrBufferMessageOrFatal(framer()->SerializeSubscribe(
-      MoqtSubscribe{track_->request_id(), track_->full_track_name(),
-                    track_->const_parameters()}));
+  MoqtSubscribe subscribe{track_->request_id(), track_->full_track_name(),
+                          track_->const_parameters()};
+  SendOrBufferMessageOrFatal(framer()->SerializeSubscribe(subscribe));
 }
 
 absl::Status MoqtSubscribeRequestStream::OnRawControlMessage(
@@ -114,6 +113,11 @@ absl::Status MoqtSubscribeRequestStream::OnControlMessage(
         "REQUEST_UPDATE_OK received with properties"));
     return absl::OkStatus();
   }
+  if (!ParametersAllowedByRequestOk(message.parameters,
+                                    MoqtMessageType::kRequestUpdate)) {
+    return absl::InvalidArgumentError(
+        "REQUEST_OK contains invalid parameters for REQUEST_UPDATE");
+  }
   absl::StatusOr<MessageParameters> old_parameters =
       request_update_queue().NextParameters();
   if (!old_parameters.ok()) {
@@ -135,18 +139,26 @@ absl::Status MoqtSubscribeRequestStream::OnControlMessage(
 
 absl::Status MoqtSubscribeRequestStream::OnControlMessage(
     const MoqtRequestError& message) {
-  MoqtRequestErrorInfo error_info{message.error_code, message.retry_interval,
-                                  message.reason_phrase};
   if (track_->ErrorIsAllowed()) {
+    if (!RedirectAllowedByRequestError(message.redirect,
+                                       MoqtMessageType::kSubscribe)) {
+      return absl::InvalidArgumentError(
+          "REQUEST_ERROR contains invalid redirect for SUBSCRIBE");
+    }
     // The REQUEST_ERROR is a response to the SUBSCRIBE message.
     if (track_->visitor() != nullptr) {
-      track_->visitor()->OnReply(track_->full_track_name(), error_info);
+      track_->visitor()->OnReply(track_->full_track_name(), message);
     }
     Fin();
     return absl::OkStatus();
   }
 
   // The REQUEST_ERROR is a response to the REQUEST_UPDATE message.
+  if (!RedirectAllowedByRequestError(message.redirect,
+                                     MoqtMessageType::kRequestUpdate)) {
+    return absl::InvalidArgumentError(
+        "REQUEST_ERROR contains invalid redirect for REQUEST_UPDATE");
+  }
   absl::Status status = request_update_queue().OnControlMessage(message);
   if (status.ok()) {
     Fin();
@@ -240,6 +252,11 @@ absl::Status MoqtSubscribeResponseStream::OnControlMessage(
 absl::Status MoqtSubscribeResponseStream::OnControlMessage(
     const MoqtRequestUpdate& message) {
   QUICHE_RETURN_IF_ERROR(validate_request_id_(message.request_id));
+  if (!ParametersAllowedByRequestUpdate(message.parameters,
+                                        MoqtMessageType::kSubscribe)) {
+    return absl::InvalidArgumentError(
+        "REQUEST_UPDATE contains invalid parameters for SUBSCRIBE");
+  }
   if (subscription_ == nullptr) {
     QUICHE_BUG(INFO) << "Received REQUEST_UPDATE, no subscription state";
     return SendRequestError(RequestErrorCode::kInternalError, std::nullopt,

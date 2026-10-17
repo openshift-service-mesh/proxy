@@ -91,6 +91,9 @@ void MoqtOutgoingQueue::AddRawObject(MoqtObjectStatus status,
   queue_.back().push_back(
       std::make_unique<CachedObject>(metadata, std::move(payload), fin));
   for (MoqtObjectListener* listener : listeners_) {
+    if (fin) {
+      listener->OnNewFinAvailable(sequence, 0);
+    }
     listener->OnNewObjectAvailable(sequence, /*subgroup=*/0,
                                    default_publisher_priority());
   }
@@ -138,7 +141,7 @@ std::optional<Location> MoqtOutgoingQueue::largest_location() const {
 }
 
 std::unique_ptr<MoqtFetchTask> MoqtOutgoingQueue::StandaloneFetch(
-    Location start, Location end, MoqtDeliveryOrder order,
+    Location start, Location end, MoqtGroupOrder order,
     FetchResponseCallback callback) {
   if (queue_.empty()) {
     std::move(callback)(
@@ -175,7 +178,7 @@ std::unique_ptr<MoqtFetchTask> MoqtOutgoingQueue::StandaloneFetch(
     return nullptr;
   }
   // Default to ascending order.
-  if (order == MoqtDeliveryOrder::kDescending) {
+  if (order == MoqtGroupOrder::kDescending) {
     ObjectsInDescendingOrder(objects);
   }
   FetchOkData ok(closed_ && adjusted_end == largest_location(), adjusted_end,
@@ -185,8 +188,7 @@ std::unique_ptr<MoqtFetchTask> MoqtOutgoingQueue::StandaloneFetch(
 }
 
 std::unique_ptr<MoqtFetchTask> MoqtOutgoingQueue::RelativeFetch(
-    uint64_t /*group_diff*/, MoqtDeliveryOrder,
-    FetchResponseCallback callback) {
+    uint64_t /*group_diff*/, MoqtGroupOrder, FetchResponseCallback callback) {
   QUICHE_BUG(MoqtOutgoingQueue_RelativeFetch)
       << "Calling RelativeFetch() on an established subscription";
   std::move(callback)(MoqtRequestErrorInfo(
@@ -196,7 +198,7 @@ std::unique_ptr<MoqtFetchTask> MoqtOutgoingQueue::RelativeFetch(
 }
 
 std::unique_ptr<MoqtFetchTask> MoqtOutgoingQueue::AbsoluteFetch(
-    uint64_t /*group*/, MoqtDeliveryOrder /*order*/,
+    uint64_t /*group*/, MoqtGroupOrder /*order*/,
     FetchResponseCallback callback) {
   QUICHE_BUG(MoqtOutgoingQueue_AbsoluteFetch)
       << "Calling AbsoluteFetch() on an established subscription";

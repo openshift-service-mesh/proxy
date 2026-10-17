@@ -23,6 +23,8 @@
 
 namespace moqt {
 
+// See the "MoqtObject" comment in moqt_messages.h for how status can interact
+// with payload and priority.
 struct PublishedObjectMetadata {
   Location location;
   std::optional<uint64_t> subgroup;  // nullopt for datagrams.
@@ -39,9 +41,9 @@ struct PublishedObjectMetadata {
   uint64_t payload_length;
   quic::QuicTime arrival_time = quic::QuicTime::Zero();
   bool IsMalformed(const PublishedObjectMetadata& other) const {
-    // It's OK for arrival_time to be different when checking immutables.
+    // It's OK for arrival_time or status to be different when checking
+    // immutables.
     return (location != other.location || subgroup != other.subgroup ||
-            status != other.status ||
             publisher_priority != other.publisher_priority);
   }
   bool operator==(const PublishedObjectMetadata& other) const = default;

@@ -148,25 +148,8 @@ class QUICHE_EXPORT MoqtDatagramType {
   MoqtDatagramType(bool payload, bool properties, bool end_of_group,
                    bool default_priority, bool zero_object_id)
       : value_(0) {
-    // Avoid illegal types. Status cannot coexist with the zero-object-id flag
-    // or the end-of-group flag.
-    if (!payload && !end_of_group) {
-      // The only way to express non-normal, non-end-of-group with no payload is
-      // with an explicit status, so we cannot utilize object ID compression.
-      zero_object_id = false;
-    } else if (zero_object_id) {
-      // zero-object-id saves a byte; no-payload does not.
-      payload = true;
-    } else if (!payload) {
-      // If it's an empty end-of-group object, use the explict status because
-      // it's more readable.
-      end_of_group = false;
-    }
     if (properties) {
       value_ |= kProperties;
-    }
-    if (end_of_group) {
-      value_ |= kEndOfGroup;
     }
     if (zero_object_id) {
       value_ |= kZeroObjectId;
@@ -174,8 +157,10 @@ class QUICHE_EXPORT MoqtDatagramType {
     if (default_priority) {
       value_ |= kDefaultPriority;
     }
-    if (!payload) {
+    if (!payload && !properties) {
       value_ |= kStatus;
+    } else if (end_of_group) {
+      value_ |= kEndOfGroup;
     }
   }
   static std::optional<MoqtDatagramType> FromValue(uint64_t value) {
@@ -213,6 +198,7 @@ enum class QUICHE_EXPORT MoqtMessageType : uint64_t {
   kPublishDone = 0x0b,
   kTrackStatus = 0x0d,
   kNamespaceDone = 0x0e,
+  kPublishSkipped = 0x0f,
   kGoAway = 0x10,
   kFetch = 0x16,
   kFetchOk = 0x18,
@@ -249,6 +235,11 @@ MoqtObjectStatus IntegerToObjectStatus(uint64_t integer);
 
 // The data contained in every Object message, although the message type
 // implies some of the values.
+// On the wire, objects cannot carry status and payload/properties. However, all
+// objects can implicity have Normal status and payload/properties. Furthermore,
+// when passed in internal APIs, an EndOfGroup status can indicate that a
+// datagram, or last object in a stream, was encoded as being the last object in
+// its group.
 struct QUICHE_EXPORT MoqtObject {
   uint64_t track_alias;  // For FETCH, this is the subscribe ID.
   uint64_t group_id;
@@ -284,6 +275,14 @@ class QUICHE_EXPORT MoqtFetchSerialization {
   MoqtFetchSerialization() = default;
   // Serialization for the first object in a stream.
   MoqtFetchSerialization(const MoqtObject& object) {
+    if (object.object_status == MoqtObjectStatus::kEndOfNonExistentRange) {
+      value_ |= kEndOfNonExistentRange;
+      return;
+    }
+    if (object.object_status == MoqtObjectStatus::kEndOfUnknownRange) {
+      value_ |= kEndOfUnknownRange;
+      return;
+    }
     if (!object.subgroup_id.has_value()) {
       value_ |= kIsDatagram;
     } else {
@@ -301,6 +300,14 @@ class QUICHE_EXPORT MoqtFetchSerialization {
   // Serialization for a subsequent object in a stream.
   MoqtFetchSerialization(const MoqtObject& object,
                          const PublishedObjectMetadata& previous_object) {
+    if (object.object_status == MoqtObjectStatus::kEndOfNonExistentRange) {
+      value_ |= kEndOfNonExistentRange;
+      return;
+    }
+    if (object.object_status == MoqtObjectStatus::kEndOfUnknownRange) {
+      value_ |= kEndOfUnknownRange;
+      return;
+    }
     uint64_t value = 0;
     if (!object.subgroup_id.has_value()) {
       value |= kIsDatagram;
@@ -380,7 +387,6 @@ struct QUICHE_EXPORT MoqtSubscribeOk {
 };
 
 struct QUICHE_EXPORT MoqtPublishDone {
-  uint64_t request_id;
   PublishDoneCode status_code;
   uint64_t stream_count;
   std::string error_reason;
@@ -388,7 +394,6 @@ struct QUICHE_EXPORT MoqtPublishDone {
 
 struct QUICHE_EXPORT MoqtRequestUpdate {
   uint64_t request_id;
-  uint64_t existing_request_id;
   MessageParameters parameters;
 };
 
@@ -400,9 +405,10 @@ struct QUICHE_EXPORT MoqtPublishNamespace {
 
 using MoqtRequestOk = TrackStatusOkData;
 
-struct QUICHE_EXPORT MoqtTrackStatus : public MoqtSubscribe {
-  MoqtTrackStatus() = default;
-  MoqtTrackStatus(MoqtSubscribe subscribe) : MoqtSubscribe(subscribe) {}
+struct QUICHE_EXPORT MoqtTrackStatus {
+  uint64_t request_id;
+  FullTrackName full_track_name;
+  MessageParameters parameters;
 };
 
 struct QUICHE_EXPORT MoqtGoAway {
@@ -429,6 +435,10 @@ struct QUICHE_EXPORT MoqtNamespace {
 
 struct QUICHE_EXPORT MoqtNamespaceDone {
   TrackNamespace track_namespace_suffix;
+};
+
+struct QUICHE_EXPORT MoqtPublishSkipped {
+  FullTrackName name;
 };
 
 enum class QUICHE_EXPORT FetchType : uint64_t {
@@ -505,6 +515,44 @@ struct QUICHE_EXPORT MoqtObjectAck {
 MoqtError SetupOptionsAllowedByMessage(const SetupOptions& options,
                                        quic::Perspective sender_perspective,
                                        bool webtrans);
+// Returns false if |parameters| cannot be in |message_type|. Will trigger
+// QUICHE_BUG if |message_type| is REQUEST_OK, REQUEST_UPDATE, or a message
+// without parameters. Called by MoqtParser.
+bool ParametersAllowedByMessage(const MessageParameters& parameters,
+                                MoqtMessageType message_type);
+// Will remove from |parameters| any parameters that are not allowed in
+// |message_type|. Will trigger QUICHE_BUG if |message_type| is REQUEST_OK,
+// REQUEST_UPDATE, or a message without parameters. Called by MoqtParser.
+void SanitizeParameters(MessageParameters& parameters,
+                        MoqtMessageType message_type);
+// Returns false if |parameters| cannot be in a REQUEST_UPDATE for
+// |updated_type|. Called by the bidi stream visitor. If |updated_type| is
+// REQUEST_OK, that corresponds to PUBLISH_OK (as other OK messages cannot be
+// updated).
+bool ParametersAllowedByRequestUpdate(const MessageParameters& parameters,
+                                      MoqtMessageType updated_type);
+// Will remove from |parameters| any parameters that are not allowed in a
+// REQUEST_UPDATE for |updated_type|. Will trigger QUICHE_BUG if |updated_type|
+// is REQUEST_OK or a message without parameters. Called by the bidi stream
+// visitor. If |updated_type| is REQUEST_OK, that corresponds to PUBLISH_OK (as
+// other OK messages cannot be updated).
+void SanitizeUpdateParameters(MessageParameters& parameters,
+                              MoqtMessageType updated_type);
+// Returns false if |parameters| cannot be in a REQUEST_OK in response to
+// |request_type|. Called by the bidi stream visitor. SUBSCRIBE_OK and FETCH_OK
+// are distinct message types to be handled by ParametersAllowedByMessage().
+bool ParametersAllowedByRequestOk(const MessageParameters& parameters,
+                                  MoqtMessageType type_of_ok);
+// Will remove from |parameters| any parameters that are not allowed in a
+// REQUEST_OK in response to |type_of_ok|. Called by the bidi stream visitor.
+// SUBSCRIBE_OK and FETCH_OK are distinct message types to be handled by
+// SanitizeParameters().
+void SanitizeRequestOkParameters(MessageParameters& parameters,
+                                 MoqtMessageType type_of_ok);
+// Returns false if |redirect| cannot be in a REQUEST_ERROR in response to
+// |request_type|. Called by the bidi stream visitor.
+bool RedirectAllowedByRequestError(const std::optional<Redirect>& redirect,
+                                   MoqtMessageType request_type);
 
 std::string MoqtMessageTypeToString(MoqtMessageType message_type);
 std::string MoqtDataStreamTypeToString(MoqtDataStreamType type);

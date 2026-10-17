@@ -1,0 +1,16 @@
+{
+    "url": "https://github.com/google/quiche/archive/132bfd90ea370faeacee616c70d10210bb12ba66.tar.gz",
+    "integrity": "sha256-k8+eNsRUUeYnTa3GMRTRUl4BZN7mzrFOx0fkY/H6l+o=",
+    "strip_prefix": "quiche-132bfd90ea370faeacee616c70d10210bb12ba66",
+    "patch_strip": 1,
+    "patches": {
+        "balsa_frame_unused_variable.patch": "sha256-HnRMLDXAx2pwixjFeCkBiMLVl80pAjfn7bVDv4G8ftQ=",
+        "delete-bazel-files.patch": "sha256-pPXq5RbMW5YpJdq/gcGZwmZghwRPIW3lMzlW4xd2x3U="
+    },
+    "overlay": {
+        "BUILD.bazel": "sha256-0EhF5qJ8DrRwnD/Y9Y15vB30QJUMXLCOBbKVA2VBFBQ=",
+        "envoy_deps.bzl": "sha256-iSZdcoZ4fJTDsezIPLhCZV0FUZQo92gGpmWPJHCK+ak=",
+        "extensions.bzl": "sha256-CMNzHyry4UGLTGqH1aRFngZjdz3WEpDwipdJyIId3t0=",
+        "quiche_overlay.bzl": "sha256-G8VUNge4iweEN07/YtjmlSvKeeyfcZyhPE5wtLIHK0k="
+    }
+}

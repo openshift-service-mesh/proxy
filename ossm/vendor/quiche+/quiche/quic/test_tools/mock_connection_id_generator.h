@@ -5,6 +5,10 @@
 #ifndef QUICHE_QUIC_TEST_TOOLS_MOCK_CONNECTION_ID_GENERATOR_H_
 #define QUICHE_QUIC_TEST_TOOLS_MOCK_CONNECTION_ID_GENERATOR_H_
 
+#include <cstdint>
+#include <optional>
+#include <vector>
+
 #include "quiche/quic/core/connection_id_generator.h"
 #include "quiche/quic/platform/api/quic_test.h"
 
@@ -21,8 +25,14 @@ class MockConnectionIdGenerator : public quic::ConnectionIdGeneratorInterface {
                const quic::ParsedQuicVersion& version),
               (override));
 
+  MOCK_METHOD(std::vector<quic::QuicConnectionId>, GenerateNextConnectionIds,
+              (const quic::QuicConnectionId& original, int num_connection_ids),
+              (override));
+
   MOCK_METHOD(uint8_t, ConnectionIdLength, (uint8_t first_byte),
               (const, override));
+
+  MOCK_METHOD(bool, IsEncrypted, (), (const, override));
 };
 
 }  // namespace test
