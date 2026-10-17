@@ -97,6 +97,17 @@ TEST_F(MoqtSubscribeNamespaceRequestStreamTest, RequestError) {
                        quic::QuicTimeDelta::FromMilliseconds(100), "bar"));
 }
 
+TEST_F(MoqtSubscribeNamespaceRequestStreamTest, RequestErrorRedirect) {
+  MoqtRequestError invalid_redirect(
+      RequestErrorCode::kRedirect, std::nullopt, "redirect",
+      Redirect{"moqt://example.com", FullTrackName("foo", "bar")});
+  EXPECT_CALL(
+      error_callback_,
+      Call(MoqtError::kProtocolViolation,
+           "REQUEST_ERROR contains invalid redirect for SUBSCRIBE_NAMESPACE"));
+  ReceiveControlMessage(invalid_redirect);
+}
+
 TEST_F(MoqtSubscribeNamespaceRequestStreamTest, NamespaceBeforeResponse) {
   EXPECT_CALL(error_callback_,
               Call(MoqtError::kProtocolViolation,
@@ -260,11 +271,10 @@ TEST_F(MoqtSubscribeNamespaceRequestStreamTest, UpdateAndRequestOk) {
 }
 
 TEST_F(MoqtSubscribeNamespaceRequestStreamTest, UpdateAndRequestError) {
-  MessageParameters ok_params;
-  ok_params.expires = quic::QuicTimeDelta::FromSeconds(60);
-  EXPECT_CALL(response_callback_,
-              Call(testing::VariantWith<MessageParameters>(Eq(ok_params))));
-  ReceiveControlMessage(MoqtRequestOk(ok_params));
+  EXPECT_CALL(
+      response_callback_,
+      Call(testing::VariantWith<MessageParameters>(Eq(MessageParameters()))));
+  ReceiveControlMessage(MoqtRequestOk());
   EXPECT_CALL(mock_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kRequestUpdate), _));
   MessageParameters update_params;
@@ -320,19 +330,20 @@ TEST_F(MoqtSubscribeNamespaceResponseStreamTest, Subscribe) {
   };
   ObjectsAvailableCallback callback;
   MockNamespaceTask* task_ptr = nullptr;
-  MoqtRequestOk ok;
-  ok.parameters.expires = quic::QuicTimeDelta::FromSeconds(60);
+  MessageParameters ok_params;
+  ok_params.expires = quic::QuicTimeDelta::FromSeconds(60);
   EXPECT_CALL(add_callback_, Call).WillOnce(Return(true));
   EXPECT_CALL(mock_application_, Call)
       .WillOnce([&](const TrackNamespace&, const MessageParameters&,
                     MoqtResponseCallback response_callback) {
-        std::move(response_callback)(ok.parameters);
+        std::move(response_callback)(ok_params);
         auto task =
             std::make_unique<MockNamespaceTask>(message.track_namespace_prefix);
         task_ptr = task.get();
         return task;
       });
-  EXPECT_CALL(mock_stream_, Writev(SerializedControlMessage(ok), _));
+  EXPECT_CALL(mock_stream_,
+              Writev(SerializedControlMessage(MoqtRequestOk()), _));
   ReceiveControlMessage(message);
   ASSERT_TRUE(task_ptr != nullptr);
   EXPECT_EQ(task_ptr->prefix(), message.track_namespace_prefix);
@@ -389,24 +400,25 @@ TEST_F(MoqtSubscribeNamespaceResponseStreamTest, SubscribeUnsubscribe) {
   };
   ObjectsAvailableCallback callback;
   MockNamespaceTask* task_ptr = nullptr;
-  MoqtRequestOk ok;
-  ok.parameters.expires = quic::QuicTimeDelta::FromSeconds(60);
+  MessageParameters ok_params;
+  ok_params.expires = quic::QuicTimeDelta::FromSeconds(60);
   EXPECT_CALL(add_callback_, Call).WillOnce(Return(true));
   EXPECT_CALL(mock_application_, Call)
       .WillOnce([&](const TrackNamespace&, const MessageParameters&,
                     MoqtResponseCallback response_callback) {
-        std::move(response_callback)(ok.parameters);
+        std::move(response_callback)(ok_params);
         auto task =
             std::make_unique<MockNamespaceTask>(message.track_namespace_prefix);
         task_ptr = task.get();
         return task;
       });
-  EXPECT_CALL(mock_stream_, Writev(SerializedControlMessage(ok), _));
+  EXPECT_CALL(mock_stream_,
+              Writev(SerializedControlMessage(MoqtRequestOk()), _));
   ReceiveControlMessage(message);
   ASSERT_TRUE(task_ptr != nullptr);
   EXPECT_EQ(task_ptr->prefix(), message.track_namespace_prefix);
   // Unsubscribe.
-  EXPECT_CALL(remove_callback_, Call);
+  EXPECT_CALL(remove_callback_, Call(TrackNamespace({"foo"})));
   stream_.OnResetStreamReceived(kResetCodeCancelled);
 }
 
@@ -427,6 +439,7 @@ TEST_F(MoqtSubscribeNamespaceResponseStreamTest, RequestError) {
       });
   EXPECT_CALL(mock_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kRequestError), _));
+  EXPECT_CALL(remove_callback_, Call(TrackNamespace({"foo"})));
   ReceiveControlMessage(message);
 }
 
@@ -464,17 +477,15 @@ TEST_F(MoqtSubscribeNamespaceResponseStreamTest, RequestUpdateOk) {
   ASSERT_TRUE(task_ptr != nullptr);
 
   // Now send RequestUpdate
-  MoqtRequestUpdate update_message = {
-      kRequestId + 2,
-      kRequestId,
-      MessageParameters(),
-  };
-  update_message.parameters.subscriber_priority = 10;
+  MoqtRequestUpdate update_message(kRequestId + 2, MessageParameters());
+  update_message.parameters.track_namespace_prefix =
+      TrackNamespace({"foo", "bar"});
   MoqtRequestOk ok_response;
   ok_response.parameters.expires = quic::QuicTimeDelta::FromSeconds(60);
   EXPECT_CALL(*task_ptr, Update(_, _))
       .WillOnce([&](const MessageParameters& params, MoqtResponseCallback cb) {
-        EXPECT_EQ(params.subscriber_priority, 10);
+        EXPECT_EQ(params.track_namespace_prefix,
+                  TrackNamespace({"foo", "bar"}));
         std::move(cb)(ok_response.parameters);
       });
   EXPECT_CALL(mock_stream_, Writev(SerializedControlMessage(ok_response), _));
@@ -504,15 +515,13 @@ TEST_F(MoqtSubscribeNamespaceResponseStreamTest, RequestUpdateError) {
   ASSERT_TRUE(task_ptr != nullptr);
 
   // Now send RequestUpdate
-  MoqtRequestUpdate update_message = {
-      kRequestId + 2,
-      kRequestId,
-      MessageParameters(),
-  };
-  update_message.parameters.subscriber_priority = 10;
+  MoqtRequestUpdate update_message(kRequestId + 2, MessageParameters());
+  update_message.parameters.track_namespace_prefix =
+      TrackNamespace({"foo", "bar"});
   EXPECT_CALL(*task_ptr, Update(_, _))
       .WillOnce([&](const MessageParameters& params, MoqtResponseCallback cb) {
-        EXPECT_EQ(params.subscriber_priority, 10);
+        EXPECT_EQ(params.track_namespace_prefix,
+                  TrackNamespace({"foo", "bar"}));
         std::move(cb)(MoqtRequestErrorInfo{
             RequestErrorCode::kInternalError,
             quic::QuicTimeDelta::FromMilliseconds(100), "bar"});
@@ -530,6 +539,7 @@ TEST_F(MoqtSubscribeNamespaceResponseStreamTest, SubscribePrefixOverlap) {
   };
   // The namespace tree already has a subscriber for a prefix of "foo".
   EXPECT_CALL(add_callback_, Call).WillOnce(Return(false));
+  EXPECT_CALL(remove_callback_, Call).Times(0);
   EXPECT_CALL(mock_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kRequestError), _));
   ReceiveControlMessage(message);

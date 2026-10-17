@@ -51,6 +51,7 @@ class MoqtOutgoingQueue : public MoqtTrackPublisher {
       : clock_(clock),
         track_(std::move(track)),
         properties_(std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+                    std::nullopt,
                     new_group_callback != nullptr ? std::optional<bool>(true)
                                                   : std::nullopt,
                     std::nullopt),
@@ -96,15 +97,15 @@ class MoqtOutgoingQueue : public MoqtTrackPublisher {
   const TrackProperties& properties() const override { return properties_; }
 
   std::unique_ptr<MoqtFetchTask> StandaloneFetch(
-      Location start, Location end, MoqtDeliveryOrder order,
+      Location start, Location end, MoqtGroupOrder order,
       FetchResponseCallback callback) override;
   // Joining Fetch functions should never be called because subscriptions are
   // never pending in MoqtOutgoingQueue.
   std::unique_ptr<MoqtFetchTask> RelativeFetch(
-      uint64_t group_diff, MoqtDeliveryOrder order,
+      uint64_t group_diff, MoqtGroupOrder order,
       FetchResponseCallback callback) override;
   std::unique_ptr<MoqtFetchTask> AbsoluteFetch(
-      uint64_t group, MoqtDeliveryOrder order,
+      uint64_t group, MoqtGroupOrder order,
       FetchResponseCallback callback) override;
 
   bool HasSubscribers() const { return !listeners_.empty(); }

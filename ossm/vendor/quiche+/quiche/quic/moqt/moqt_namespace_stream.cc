@@ -54,10 +54,20 @@ absl::Status MoqtSubscribeNamespaceRequestStream::OnControlMessage(
     return absl::OkStatus();
   }
   if (response_callback_ != nullptr) {
+    if (!ParametersAllowedByRequestOk(message.parameters,
+                                      MoqtMessageType::kSubscribeNamespace)) {
+      return absl::InvalidArgumentError(
+          "REQUEST_OK contains invalid parameters for SUBSCRIBE_NAMESPACE");
+    }
     MoqtResponseCallback callback = std::move(response_callback_);
     response_callback_ = nullptr;
     std::move(callback)(message.parameters);
     return absl::OkStatus();
+  }
+  if (!ParametersAllowedByRequestOk(message.parameters,
+                                    MoqtMessageType::kRequestUpdate)) {
+    return absl::InvalidArgumentError(
+        "REQUEST_OK contains invalid parameters for REQUEST_UPDATE");
   }
   NamespaceTask* task = task_.GetIfAvailable();
   if (task == nullptr) {
@@ -72,9 +82,19 @@ absl::Status MoqtSubscribeNamespaceRequestStream::OnControlMessage(
 absl::Status MoqtSubscribeNamespaceRequestStream::OnControlMessage(
     const MoqtRequestError& message) {
   if (response_callback_ != nullptr) {
+    if (!RedirectAllowedByRequestError(message.redirect,
+                                       MoqtMessageType::kSubscribeNamespace)) {
+      return absl::InvalidArgumentError(
+          "REQUEST_ERROR contains invalid redirect for SUBSCRIBE_NAMESPACE");
+    }
     std::move(response_callback_)(message);
     response_callback_ = nullptr;
     return absl::OkStatus();
+  }
+  if (!RedirectAllowedByRequestError(message.redirect,
+                                     MoqtMessageType::kRequestUpdate)) {
+    return absl::InvalidArgumentError(
+        "REQUEST_ERROR contains invalid redirect for REQUEST_UPDATE");
   }
   NamespaceTask* task = task_.GetIfAvailable();
   if (task == nullptr) {
@@ -173,11 +193,9 @@ void MoqtSubscribeNamespaceRequestStream::NamespaceTask::Update(
                              "Stream has been reset"});
     return;
   }
-  MoqtRequestUpdate message{next_request_id_, state_->request_id_, parameters};
-  state_->request_update_queue().Enqueue(parameters,
-                                         std::move(response_callback));
-  state_->SendOrBufferMessageOrFatal(
-      state_->framer()->SerializeRequestUpdate(message));
+  state_->CheckStatus(state_->SendRequestUpdate(
+      next_request_id_, parameters, std::move(response_callback),
+      MoqtMessageType::kSubscribeNamespace));
   next_request_id_ += 2;
 }
 
@@ -260,14 +278,19 @@ absl::Status MoqtSubscribeNamespaceResponseStream::OnControlMessage(
   }
   if (!std::move(add_callback_)(message.track_namespace_prefix)) {
     add_callback_ = nullptr;
+    remove_callback_ = nullptr;
     return SendRequestError(RequestErrorCode::kPrefixOverlap, std::nullopt, "");
   }
   add_callback_ = nullptr;
   QUICHE_DCHECK(task_ == nullptr);
   task_ = application_(message.track_namespace_prefix, message.parameters,
-                       ResponseCallback());
+                       ResponseCallback(MoqtMessageType::kSubscribeNamespace));
   if (task_ != nullptr) {
     task_->SetObjectsAvailableCallback([this]() { ProcessNamespaces(); });
+  } else if (remove_callback_ != nullptr) {
+    RemovePrefixCallback callback = std::move(remove_callback_);
+    remove_callback_ = nullptr;
+    std::move(callback)(message.track_namespace_prefix);
   }
   return absl::OkStatus();
 }
@@ -275,19 +298,35 @@ absl::Status MoqtSubscribeNamespaceResponseStream::OnControlMessage(
 absl::Status MoqtSubscribeNamespaceResponseStream::OnControlMessage(
     const MoqtRequestUpdate& message) {
   QUICHE_RETURN_IF_ERROR(validate_request_id_(message.request_id));
+  if (!ParametersAllowedByRequestUpdate(message.parameters,
+                                        MoqtMessageType::kSubscribeNamespace)) {
+    return absl::InvalidArgumentError(
+        "REQUEST_UPDATE contains invalid parameters for SUBSCRIBE_NAMESPACE");
+  }
   if (task_ == nullptr) {
     // This stream is dying.
     return absl::OkStatus();
   }
-  task_->Update(message.parameters, ResponseCallback());
+  task_->Update(message.parameters,
+                ResponseCallback(MoqtMessageType::kRequestUpdate));
   return absl::OkStatus();
 }
 
 void MoqtSubscribeNamespaceResponseStream::Detach() {
-  if (remove_callback_ != nullptr) {
-    std::move(remove_callback_)(prefix_);
-    remove_callback_ = nullptr;
+  if (task_ == nullptr) {
+    return;
   }
+  if (remove_callback_ != nullptr) {
+    RemovePrefixCallback callback = std::move(remove_callback_);
+    remove_callback_ = nullptr;
+    std::move(callback)(task_->prefix());
+  }
+  // In general, a remove_callback should not be followed by further operations
+  // on class members. But in this case, the remove_callback merely removes the
+  // prefix from SessionNamespaceTree; it doesn't destroy the class. If task_
+  // is destroyed first, it would have to make an expensive copy of
+  // TrackNamespace to send to the remove_callback.
+  task_.reset();
 }
 
 void MoqtSubscribeNamespaceResponseStream::ProcessNamespaces() {
@@ -352,19 +391,21 @@ void MoqtSubscribeNamespaceResponseStream::ProcessNamespaces() {
   }
 }
 
-MoqtResponseCallback MoqtSubscribeNamespaceResponseStream::ResponseCallback() {
-  return [this](
+MoqtResponseCallback MoqtSubscribeNamespaceResponseStream::ResponseCallback(
+    MoqtMessageType type_of_ok) {
+  return [this, type_of_ok](
              std::variant<MessageParameters, MoqtRequestErrorInfo> response) {
-    std::visit(absl::Overload{[this](const MessageParameters& parameters) {
-                                // In draft-18, there are no useful parameters
-                                // in SUBSCRIBE_NAMESPACE_OK, but Issue #1639
-                                // would change that.
-                                CheckStatus(SendRequestOk(parameters));
-                              },
-                              [this](const MoqtRequestErrorInfo& error_info) {
-                                CheckStatus(SendRequestError(error_info));
-                              }},
-               response);
+    std::visit(
+        absl::Overload{[this, type_of_ok](const MessageParameters& parameters) {
+                         // In draft-18, there are no useful parameters
+                         // in SUBSCRIBE_NAMESPACE_OK, but Issue #1639
+                         // would change that.
+                         CheckStatus(SendRequestOk(parameters, type_of_ok));
+                       },
+                       [this](const MoqtRequestErrorInfo& error_info) {
+                         CheckStatus(SendRequestError(error_info));
+                       }},
+        response);
   };
 }
 

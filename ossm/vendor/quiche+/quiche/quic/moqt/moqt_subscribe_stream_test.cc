@@ -162,7 +162,8 @@ TEST_F(MoqtSubscribeRequestStreamTest, RequestOkWithProperties) {
   MoqtRequestOk request_ok(
       MessageParameters(),
       TrackProperties(quic::QuicTimeDelta::FromSeconds(5), std::nullopt,
-                      std::nullopt, std::nullopt, std::nullopt, std::nullopt));
+                      std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+                      std::nullopt));
   QUICHE_EXPECT_OK(stream_->OnControlMessage(request_ok));
   // Test cleanup.
   EXPECT_CALL(mock_remove_callback_, Call);
@@ -192,8 +193,9 @@ TEST_F(MoqtSubscribeRequestStreamTest, ReceiveRequestOk) {
                   quic::QuicTimeDelta::FromSeconds(30));
       };
   parameters_.subscriber_priority = 20;
-  QUICHE_EXPECT_OK(stream_->SendRequestUpdate(
-      kRequestId, kRequestId, parameters_, std::move(callback)));
+  QUICHE_EXPECT_OK(stream_->SendRequestUpdate(kRequestId, parameters_,
+                                              std::move(callback),
+                                              MoqtMessageType::kSubscribe));
   // Params not yet updated.
   EXPECT_EQ(stream_->track()->const_parameters().subscriber_priority,
             std::nullopt);
@@ -231,7 +233,6 @@ TEST_F(MoqtSubscribeRequestStreamTest, ReceiveRequestError) {
 
 TEST_F(MoqtSubscribeRequestStreamTest, ReceivePublishDone) {
   MoqtPublishDone publish_done;
-  publish_done.request_id = kRequestId;
   publish_done.stream_count = 5;
   EXPECT_CALL(mock_subscribe_visitor_, OnPublishDone(track_name_));
   QUICHE_EXPECT_OK(stream_->OnControlMessage(publish_done));
@@ -377,7 +378,6 @@ TEST_F(MoqtSubscribeResponseStreamTest,
   EXPECT_CALL(mock_stream_, Writev).Times(0);
   MoqtRequestUpdate update;
   update.request_id = kRequestId + 2;
-  update.existing_request_id = kRequestId;
   update.parameters.subscriber_priority = 10;
   QUICHE_EXPECT_OK(stream_->OnControlMessage(update));
 

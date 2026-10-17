@@ -103,6 +103,26 @@ TEST_F(MoqtBidiStreamTest, FinDetaches) {
   EXPECT_TRUE(stream_->detached_);
 }
 
+TEST_F(MoqtBidiStreamTest, ReceiveFin) {
+  webtransport::test::InMemoryStream stream(0);
+  stream_->BindStream(&stream);
+  MoqtFramer framer(/*using_webtrans=*/true, quic::Perspective::IS_SERVER);
+  stream.Receive(framer.SerializeObjectAck(MoqtObjectAck()).AsStringView(),
+                 /*fin=*/true);
+  stream_->OnCanRead();
+}
+
+TEST_F(MoqtBidiStreamTest, ReceiveFinWithTypeParser) {
+  webtransport::test::InMemoryStream stream(0);
+  MoqtFramer framer(/*using_webtrans=*/true, quic::Perspective::IS_SERVER);
+  stream.Receive(framer.SerializeObjectAck(MoqtObjectAck()).AsStringView(),
+                 /*fin=*/true);
+  MoqtStreamTypeParser parser(&stream);
+  QUICHE_ASSERT_OK(parser.ReadStreamType().status());
+  stream_->BindStream(std::move(parser));
+  stream_->OnCanRead();
+}
+
 TEST_F(MoqtBidiStreamTest, IncomingStopSending) {
   stream_->BindStream(&mock_stream_);
   EXPECT_CALL(mock_stream_, SendStopSending(1234));
@@ -155,12 +175,16 @@ TEST_F(MoqtBidiStreamTest, ReceiveGoAwayWithRequestId) {
 TEST_F(MoqtBidiStreamTest, SendRequestOk) {
   stream_->BindStream(&mock_stream_);
   EXPECT_CALL(mock_stream_, CanWrite).WillRepeatedly(testing::Return(true));
-  EXPECT_CALL(
-      mock_stream_,
-      Writev(ControlMessageOfType(MoqtMessageType::kRequestOk), testing::_));
+  MoqtRequestOk expected_ok;
+  expected_ok.parameters.subscriber_priority = 20;
+  EXPECT_CALL(mock_stream_,
+              Writev(SerializedControlMessage(expected_ok), testing::_));
   MessageParameters parameters;
   parameters.subscriber_priority = 20;
-  QUICHE_EXPECT_OK(stream_->SendRequestOk(parameters));
+  // Disallowed for PUBLISH_OK, should be sanitized out.
+  parameters.largest_object = Location(1, 2);
+  QUICHE_EXPECT_OK(
+      stream_->SendRequestOk(parameters, MoqtMessageType::kPublish));
   EXPECT_FALSE(stream_->detached_);  // No FIN.
 }
 
@@ -178,11 +202,15 @@ TEST_F(MoqtBidiStreamTest, SendRequestErrorOverload) {
 TEST_F(MoqtBidiStreamTest, SendRequestUpdateAndReceiveOk) {
   stream_->BindStream(&mock_stream_);
   EXPECT_CALL(mock_stream_, CanWrite).WillRepeatedly(testing::Return(true));
+  MoqtRequestUpdate expected_update;
+  expected_update.request_id = 1;
+  expected_update.parameters.subscriber_priority = 20;
   EXPECT_CALL(mock_stream_,
-              Writev(ControlMessageOfType(MoqtMessageType::kRequestUpdate),
-                     testing::_));
+              Writev(SerializedControlMessage(expected_update), testing::_));
   MessageParameters parameters;
   parameters.subscriber_priority = 20;
+  // Disallowed in REQUEST_UPDATE for SUBSCRIBE, should be sanitized out.
+  parameters.expires = quic::QuicTimeDelta::FromSeconds(10);
   bool callback_called = false;
   MoqtResponseCallback callback =
       [&](std::variant<MessageParameters, MoqtRequestErrorInfo> res) {
@@ -190,8 +218,8 @@ TEST_F(MoqtBidiStreamTest, SendRequestUpdateAndReceiveOk) {
         ASSERT_TRUE(std::holds_alternative<MessageParameters>(res));
         EXPECT_EQ(std::get<MessageParameters>(res).subscriber_priority, 30);
       };
-  QUICHE_EXPECT_OK(
-      stream_->SendRequestUpdate(1, 0, parameters, std::move(callback)));
+  QUICHE_EXPECT_OK(stream_->SendRequestUpdate(
+      1, parameters, std::move(callback), MoqtMessageType::kSubscribe));
   // Simulate receiving RequestOk
   MoqtRequestOk request_ok;
   request_ok.parameters.subscriber_priority = 30;
@@ -215,8 +243,8 @@ TEST_F(MoqtBidiStreamTest, SendRequestUpdateAndReceiveError) {
         EXPECT_EQ(std::get<MoqtRequestErrorInfo>(res).error_code,
                   RequestErrorCode::kUnauthorized);
       };
-  QUICHE_EXPECT_OK(
-      stream_->SendRequestUpdate(1, 0, parameters, std::move(callback)));
+  QUICHE_EXPECT_OK(stream_->SendRequestUpdate(
+      1, parameters, std::move(callback), MoqtMessageType::kSubscribe));
   // Simulate receiving RequestError
   MoqtRequestError request_error(RequestErrorCode::kUnauthorized, std::nullopt,
                                  "unauthorized");

@@ -115,6 +115,28 @@ TEST_F(MoqtPublishNamespaceRequestStreamTest, OnControlMessageError) {
   EXPECT_TRUE(callback_called);
 }
 
+TEST_F(MoqtPublishNamespaceRequestStreamTest, OnControlMessageErrorRedirect) {
+  std::unique_ptr<MoqtPublishNamespaceRequestStream> request_stream =
+      CreateAndBindStream();
+  MoqtRequestError invalid_redirect(
+      RequestErrorCode::kRedirect, std::nullopt, "redirect",
+      Redirect{"moqt://example.com", FullTrackName("foo", "bar")});
+  EXPECT_THAT(request_stream->OnControlMessage(invalid_redirect),
+              quiche::test::StatusIs(absl::StatusCode::kInvalidArgument));
+
+  MoqtRequestError valid_redirect(
+      RequestErrorCode::kRedirect, std::nullopt, "redirect",
+      Redirect{"moqt://example.com",
+               FullTrackName(TrackNamespace({"foo"}), "")});
+  EXPECT_CALL(response_callback_, Call(_))
+      .WillOnce([&](std::variant<MessageParameters, MoqtRequestErrorInfo> res) {
+        ASSERT_TRUE(std::holds_alternative<MoqtRequestErrorInfo>(res));
+        EXPECT_EQ(std::get<MoqtRequestErrorInfo>(res), valid_redirect);
+      });
+  ExpectFin(mock_stream_);
+  QUICHE_EXPECT_OK(request_stream->OnControlMessage(valid_redirect));
+}
+
 TEST_F(MoqtPublishNamespaceRequestStreamTest, SendRequestUpdateAndReceiveOk) {
   std::unique_ptr<MoqtPublishNamespaceRequestStream> request_stream =
       CreateAndBindStream();
@@ -126,20 +148,23 @@ TEST_F(MoqtPublishNamespaceRequestStreamTest, SendRequestUpdateAndReceiveOk) {
   EXPECT_CALL(mock_stream_,
               Writev(ControlMessageOfType(MoqtMessageType::kRequestUpdate), _));
   MessageParameters parameters;
-  parameters.subscriber_priority = 50;
+  parameters.authorization_tokens.emplace_back(AuthTokenType::kOutOfBand,
+                                               "token");
   bool update_callback_called = false;
   MoqtResponseCallback update_callback =
       [&](std::variant<MessageParameters, MoqtRequestErrorInfo> res) {
         update_callback_called = true;
         ASSERT_TRUE(std::holds_alternative<MessageParameters>(res));
-        EXPECT_EQ(std::get<MessageParameters>(res).subscriber_priority, 50);
+        EXPECT_EQ(std::get<MessageParameters>(res).expires,
+                  quic::QuicTimeDelta::FromSeconds(10));
       };
   QUICHE_EXPECT_OK(request_stream->SendRequestUpdate(
-      11, 0, parameters, std::move(update_callback)));
+      11, parameters, std::move(update_callback),
+      MoqtMessageType::kPublishNamespace));
 
   // Receive OK for update.
   MoqtRequestOk ok;
-  ok.parameters.subscriber_priority = 50;
+  ok.parameters.expires = quic::QuicTimeDelta::FromSeconds(10);
   QUICHE_EXPECT_OK(request_stream->OnControlMessage(ok));
   EXPECT_TRUE(update_callback_called);
 }
@@ -360,7 +385,8 @@ TEST_F(MoqtPublishNamespaceResponseStreamTest, OnRequestUpdateSuccess) {
   // Now send a RequestUpdate.
   MoqtRequestUpdate update;
   update.request_id = 12;
-  update.parameters.subscriber_priority = 40;
+  update.parameters.authorization_tokens.emplace_back(AuthTokenType::kOutOfBand,
+                                                      "token");
 
   MoqtResponseCallback update_callback;
   EXPECT_CALL(application_,
@@ -415,7 +441,8 @@ TEST_F(MoqtPublishNamespaceResponseStreamTest, OnRequestUpdateRejected) {
   // Now send a RequestUpdate.
   MoqtRequestUpdate update;
   update.request_id = 12;
-  update.parameters.subscriber_priority = 40;
+  update.parameters.authorization_tokens.emplace_back(AuthTokenType::kOutOfBand,
+                                                      "token");
 
   MoqtResponseCallback update_callback;
   EXPECT_CALL(application_,

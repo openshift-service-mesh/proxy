@@ -17,7 +17,6 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
-#include "quiche/quic/core/quic_clock.h"
 #include "quiche/quic/moqt/moqt_bidi_stream.h"
 #include "quiche/quic/moqt/moqt_error.h"
 #include "quiche/quic/moqt/moqt_framer.h"
@@ -62,6 +61,10 @@ LivePublisher::LivePublisher(
   if (monitoring_interface_ != nullptr) {
     monitoring_interface_->OnObjectAckSupportKnown(parameters.oack_window_size);
   }
+  if (is_publish) {
+    parameters_.group_order =
+        track_publisher_->properties().default_publisher_group_order();
+  }
   QUIC_DLOG(INFO) << "Created subscription for "
                   << track_publisher_->GetTrackName();
   // TODO(martinduke): Handle NEW_GROUP_REQUEST
@@ -79,6 +82,7 @@ void LivePublisher::Update(const MessageParameters& parameters,
       track_publisher_->UpdateObjectListener(this, parameters);
   if (!pub_status.ok()) {
     if (!from_request_ok) {
+      PublishIsDone(PublishDoneCode::kUpdateFailed, "Update failed");
       bidi_stream_->CheckStatus(
           bidi_stream_->SendRequestError(StatusToMoqtRequestError(pub_status)));
     } else {
@@ -130,7 +134,8 @@ void LivePublisher::Update(const MessageParameters& parameters,
     }
   }
   if (!from_request_ok) {
-    bidi_stream_->CheckStatus(bidi_stream_->SendRequestOk(response));
+    bidi_stream_->CheckStatus(
+        bidi_stream_->SendRequestOk(response, MoqtMessageType::kRequestUpdate));
   }
 }
 
@@ -147,6 +152,12 @@ void LivePublisher::ResetAllStreams() {
 }
 
 void LivePublisher::OnSubscribeAccepted() {
+  publisher_subgroup_delivery_timeout_ =
+      track_publisher_->properties().subgroup_delivery_timeout();
+  publisher_object_delivery_timeout_ =
+      track_publisher_->properties().object_delivery_timeout();
+  default_publisher_priority_ =
+      track_publisher_->properties().default_publisher_priority();
   if (established_) {
     return;  // It's a PUBLISH.
   }
@@ -165,10 +176,6 @@ void LivePublisher::OnSubscribeAccepted() {
     parameters_.group_order =
         subscribe_ok.properties.default_publisher_group_order();
   }
-  // TODO(martinduke): Support sending DELIVERY_TIMEOUT parameter as the
-  // publisher.
-  default_publisher_priority_ =
-      subscribe_ok.properties.default_publisher_priority();
   bidi_stream_->SendOrBufferMessageOrFatal(
       framer_.SerializeSubscribeOk(subscribe_ok));
   // It is now safe to process buffered REQUEST_UPDATEs.
@@ -216,7 +223,6 @@ void LivePublisher::OnNewObjectAvailable(Location location,
       monitoring_interface_->OnNewObjectEnqueued(location);
     }
   }
-
   // TODO(vasilvv): This currently sends UINT64_MAX for datagram subgroups.
   // Maybe do something more satisfactory?
   SessionToPublisherInterface* session_info = visitor();
@@ -235,25 +241,6 @@ void LivePublisher::OnNewObjectAvailable(Location location,
       return;
     }
     stream_id = stream_map_.GetStreamFor(index);
-  }
-  if (session_info->alternate_delivery_timeout() &&
-      !delivery_timeout().IsInfinite() && largest_sent_.has_value() &&
-      location.group >= largest_sent_->group) {
-    // Start the delivery timeout timer on all previous groups.
-    for (uint64_t group = first_active_group_; group < location.group;
-         ++group) {
-      for (webtransport::StreamId stream_to_update :
-           stream_map_.GetStreamsForGroup(group)) {
-        webtransport::Stream* raw_stream = GetStreamById(stream_to_update);
-        if (raw_stream == nullptr) {
-          continue;
-        }
-        OutgoingSubgroupStream* stream =
-            absl::down_cast<OutgoingSubgroupStream*>(raw_stream->visitor());
-        stream->CreateAndSetAlarm(session_info->clock()->ApproximateNow() +
-                                  delivery_timeout());
-      }
-    }
   }
   QUICHE_DCHECK_GE(location.group, first_active_group_);
   if (!subgroup.has_value()) {
@@ -289,6 +276,10 @@ void LivePublisher::OnNewObjectAvailable(Location location,
                                               default_publisher_priority())}),
           MoqtTrackPriority{subscriber_priority(), publisher_priority});
     }
+    // TODO(martinduke): We are not properly enforcing SUBGROUP_DELIVERY_TIMEOUT
+    // for pending streams. When LivePublisher receives OnNewFinAvailable(), it
+    // should check pending streams (which ought to be accessible by index, not
+    // just rank) and start a timer on them.
     pending_streams_.emplace(rank, parameters);
   }
 }
@@ -349,7 +340,8 @@ void LivePublisher::OnGroupAbandoned(uint64_t group_id) {
   }
   std::vector<webtransport::StreamId> streams =
       stream_map_.GetStreamsForGroup(group_id);
-  if (delivery_timeout().IsInfinite() && largest_sent_.has_value() &&
+  if (subgroup_delivery_timeout().IsInfinite() &&
+      object_delivery_timeout().IsInfinite() && largest_sent_.has_value() &&
       largest_sent_->group <= group_id) {
     PublishIsDone(PublishDoneCode::kTooFarBehind, "");
     // No class access below this line!
@@ -390,9 +382,16 @@ void LivePublisher::SendDatagram(Location sequence) {
   QUICHE_BUG_IF(LivePublisher_SendDatagram_partial_payload,
                 object->payload.size() > 1)
       << "Datagram is split into multiple slices";
-  quiche::QuicheBuffer datagram = framer_.SerializeObjectDatagram(
-      header, object->payload[0].AsStringView(),
-      default_publisher_priority_.value_or(kDefaultPublisherPriority));
+  quiche::QuicheBuffer datagram;
+  if (object->payload.empty()) {
+    datagram = framer_.SerializeObjectDatagram(
+        header, "",
+        default_publisher_priority_.value_or(kDefaultPublisherPriority));
+  } else {
+    datagram = framer_.SerializeObjectDatagram(
+        header, object->payload[0].AsStringView(),
+        default_publisher_priority_.value_or(kDefaultPublisherPriority));
+  }
   if (visitor() == nullptr) {
     return;
   }
@@ -443,7 +442,6 @@ webtransport::Stream* absl_nullable LivePublisher::OpenDataStream(
 void LivePublisher::PublishIsDone(PublishDoneCode code,
                                   absl::string_view error_reason) {
   MoqtPublishDone publish_done;
-  publish_done.request_id = request_id_;
   publish_done.status_code = code;
   publish_done.stream_count = streams_opened_;
   publish_done.error_reason = error_reason;
@@ -453,7 +451,9 @@ void LivePublisher::PublishIsDone(PublishDoneCode code,
   QUICHE_DLOG(INFO) << "Sending PUBLISH_DONE message for "
                     << track_publisher_->GetTrackName();
   bidi_stream_->SendOrBufferMessageOrFatal(
-      framer_.SerializePublishDone(publish_done), /*fin=*/true);
+      framer_.SerializePublishDone(publish_done),
+      // Don't send FIN if the UPDATE failed; REQUEST_ERROR will follow.
+      /*fin=*/code != PublishDoneCode::kUpdateFailed);
   // sending FIN will delete the class.
 }
 

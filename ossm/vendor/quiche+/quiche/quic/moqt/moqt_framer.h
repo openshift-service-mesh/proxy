@@ -48,18 +48,16 @@ class QUICHE_EXPORT MoqtFramer {
   quiche::QuicheBuffer SerializeRequestOk(const MoqtRequestOk& message);
   quiche::QuicheBuffer SerializeRequestError(const MoqtRequestError& message);
   // Returns an empty buffer if there is an illegal combination of locations.
-  quiche::QuicheBuffer SerializeSubscribe(
-      const MoqtSubscribe& message,
-      MoqtMessageType message_type = MoqtMessageType::kSubscribe);
-  quiche::QuicheBuffer SerializeSubscribeOk(
-      const MoqtSubscribeOk& message,
-      MoqtMessageType message_type = MoqtMessageType::kSubscribeOk);
+  quiche::QuicheBuffer SerializeSubscribe(const MoqtSubscribe& message);
+  quiche::QuicheBuffer SerializeSubscribeOk(const MoqtSubscribeOk& message);
   quiche::QuicheBuffer SerializePublishDone(const MoqtPublishDone& message);
   quiche::QuicheBuffer SerializeRequestUpdate(const MoqtRequestUpdate& message);
   quiche::QuicheBuffer SerializePublishNamespace(
       const MoqtPublishNamespace& message);
   quiche::QuicheBuffer SerializeNamespace(const MoqtNamespace& message);
   quiche::QuicheBuffer SerializeNamespaceDone(const MoqtNamespaceDone& message);
+  quiche::QuicheBuffer SerializePublishSkipped(
+      const MoqtPublishSkipped& message);
   quiche::QuicheBuffer SerializeTrackStatus(const MoqtTrackStatus& message);
   quiche::QuicheBuffer SerializeGoAway(const MoqtGoAway& message);
   quiche::QuicheBuffer SerializeSubscribeNamespace(
@@ -77,8 +75,12 @@ class QUICHE_EXPORT MoqtFramer {
   // Returns true if the parameters are valid for the message type.
   bool FillAndValidateSetupOptions(const SetupOptions& options,
                                    KeyValuePairList& out);
-  // Returns true if the metadata is internally consistent.
-  static bool ValidateObjectMetadata(const MoqtObject& object);
+  // Returns true if the metadata is internally consistent. If
+  // |alternate_end_of_group_encoding| is true, then the stream/datagram can
+  // encode EndOfGroup without using the explicit status field.
+  static bool ValidateObjectMetadata(const MoqtObject& object,
+                                     bool alternate_end_of_group_encoding,
+                                     bool is_fetch);
   const bool using_webtrans_;
   const quic::Perspective perspective_;
 };

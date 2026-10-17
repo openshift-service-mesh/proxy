@@ -70,16 +70,14 @@ TEST(PublishedObjectMetadataTest, IsMalformed) {
   EXPECT_TRUE(metadata.IsMalformed(other));
   other = metadata;
 
-  other.status = MoqtObjectStatus::kObjectDoesNotExist;
-  EXPECT_TRUE(metadata.IsMalformed(other));
-  other = metadata;
-
   other.publisher_priority = 5;
   EXPECT_TRUE(metadata.IsMalformed(other));
 
-  // arrival_time, payload_length, and properties being different should NOT
-  // make it malformed.
+  // status, arrival_time, payload_length, and properties being different should
+  // NOT make it malformed.
   other = metadata;
+  other.status = MoqtObjectStatus::kEndOfGroup;
+  EXPECT_FALSE(metadata.IsMalformed(other));
   other.arrival_time =
       quic::QuicTime::Zero() + quic::QuicTimeDelta::FromSeconds(1);
   EXPECT_FALSE(metadata.IsMalformed(other));
@@ -111,7 +109,7 @@ TEST(PublishedObjectMetadataTest, Equality) {
   EXPECT_NE(metadata, other);
   other = metadata;
 
-  other.status = MoqtObjectStatus::kObjectDoesNotExist;
+  other.status = MoqtObjectStatus::kEndOfGroup;
   EXPECT_NE(metadata, other);
   other = metadata;
 

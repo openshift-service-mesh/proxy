@@ -17,6 +17,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "quiche/quic/core/quic_time.h"
+#include "quiche/quic/moqt/moqt_names.h"
 #include "quiche/quic/moqt/moqt_priority.h"
 #include "quiche/quic/moqt/moqt_types.h"
 #include "quiche/common/platform/api/quiche_export.h"
@@ -25,7 +26,7 @@
 
 namespace moqt {
 
-// Encodes a list of key-value pairs common to both parameters and properties.
+// Encodes a list of key-value pairs common to both Options and Properties.
 // If the key is odd, it is a length-prefixed string (which may encode further
 // item-specific structure). If the key is even, it is a varint.
 // This class does not interpret the semantic meaning of the keys and values.
@@ -191,15 +192,19 @@ struct QUICHE_EXPORT SetupOptions {
 };
 
 enum class MessageParameter : uint64_t {
-  kDeliveryTimeout = 0x02,
+  kObjectDeliveryTimeout = 0x02,
   kAuthorizationToken = 0x03,
+  kRendezvousTimeout = 0x04,
+  kSubgroupDeliveryTimeout = 0x06,
   kExpires = 0x08,
   kLargestObject = 0x09,
+  kFillTimeout = 0x0a,
   kForward = 0x10,
   kSubscriberPriority = 0x20,
   kSubscriptionFilter = 0x21,
   kGroupOrder = 0x22,
   kNewGroupRequest = 0x32,
+  kTrackNamespacePrefix = 0x34,
 
   kOackWindowSize = 0xbbF1438,
 };
@@ -207,7 +212,13 @@ constexpr quic::QuicTimeDelta kDefaultDeliveryTimeout =
     quic::QuicTimeDelta::Infinite();
 constexpr quic::QuicTimeDelta kDefaultExpires = quic::QuicTimeDelta::Infinite();
 constexpr bool kDefaultForward = true;
-// TODO(martinduke): Refactor this to be more like TrackProperties.
+constexpr quic::QuicTimeDelta kDefaultFillTimeout =
+    quic::QuicTimeDelta::Infinite();
+constexpr quic::QuicTimeDelta kDefaultRendezvousTimeout =
+    quic::QuicTimeDelta::Zero();
+// Limit to prevent the publisher from waiting too long for a rendezvous.
+constexpr quic::QuicTimeDelta kMaxRendezvousTimeout =
+    quic::QuicTimeDelta::FromSeconds(30);
 struct MessageParameters {
   MessageParameters() = default;
   MessageParameters(const MessageParameters&) = default;
@@ -223,28 +234,26 @@ struct MessageParameters {
   // with it. Otherwise, leave unchanged.
   void Update(const MessageParameters& other);
 
-  std::optional<quic::QuicTimeDelta> delivery_timeout;
+  std::optional<quic::QuicTimeDelta> subgroup_delivery_timeout;
   std::vector<AuthToken> authorization_tokens;
+  std::optional<quic::QuicTimeDelta> rendezvous_timeout;
+  std::optional<quic::QuicTimeDelta> object_delivery_timeout;
   std::optional<quic::QuicTimeDelta> expires;
   std::optional<Location> largest_object;
+  std::optional<quic::QuicTimeDelta> fill_timeout;
   bool forward() const { return forward_.value_or(kDefaultForward); }
   void set_forward(bool forward) { forward_ = forward; }
+  void clear_forward() { forward_.reset(); }
   bool forward_has_value() const { return forward_.has_value(); }
   std::optional<MoqtPriority> subscriber_priority;
   std::optional<SubscriptionFilter> subscription_filter;
-  std::optional<MoqtDeliveryOrder> group_order;
+  std::optional<MoqtGroupOrder> group_order;
   std::optional<uint64_t> new_group_request;
+  std::optional<TrackNamespace> track_namespace_prefix;
 
   // QUICHE-specific parameters.
   std::optional<quic::QuicTimeDelta> oack_window_size;
   bool operator==(const MessageParameters& other) const = default;
-
-  // Defined in moqt_framer.cc.
-  KeyValuePairList ToKeyValuePairList() const;
-  // Defined in moqt_parser.cc.
-  // If the class is not initialized with the default constructor, it is likely
-  // to return an error if a non-default field duplicates what is in |list|.
-  absl::Status FromKeyValuePairList(const KeyValuePairList& list);
 
  private:
   // "if (forward)" is bug-prone because it returns forward_.has_value(). Make
@@ -253,8 +262,9 @@ struct MessageParameters {
 };
 
 enum class PropertyType : uint64_t {
-  kDeliveryTimeout = 0x02,
+  kObjectDeliveryTimeout = 0x02,
   kMaxCacheDuration = 0x04,
+  kSubgroupDeliveryTimeout = 0x06,
   kImmutableProperties = 0x0b,
   kDefaultPublisherPriority = 0x0e,
   kDefaultPublisherGroupOrder = 0x22,
@@ -265,8 +275,7 @@ enum class PropertyType : uint64_t {
 inline constexpr quic::QuicTimeDelta kDefaultMaxCacheDuration =
     quic::QuicTimeDelta::Infinite();
 inline constexpr bool kDefaultImmutableProperties = false;
-inline constexpr MoqtDeliveryOrder kDefaultGroupOrder =
-    MoqtDeliveryOrder::kAscending;
+inline constexpr MoqtGroupOrder kDefaultGroupOrder = MoqtGroupOrder::kAscending;
 inline constexpr bool kDefaultDynamicGroups = false;
 inline constexpr uint64_t kMinMandatoryTrackProperty = 0x4000;
 inline constexpr uint64_t kMaxMandatoryTrackProperty = 0x7FFF;
@@ -275,20 +284,22 @@ class TrackProperties : public KeyValuePairList {
   TrackProperties() = default;
   TrackProperties(const TrackProperties&) = default;
   // Constructor for Original publishers to create their track properties.
-  TrackProperties(std::optional<quic::QuicTimeDelta> delivery_timeout,
+  TrackProperties(std::optional<quic::QuicTimeDelta> object_delivery_timeout,
                   std::optional<quic::QuicTimeDelta> max_cache_duration,
+                  std::optional<quic::QuicTimeDelta> subgroup_delivery_timeout,
                   std::optional<MoqtPriority> publisher_priority,
-                  std::optional<MoqtDeliveryOrder> group_order,
+                  std::optional<MoqtGroupOrder> group_order,
                   std::optional<bool> dynamic_groups,
                   std::optional<absl::string_view> immutable_properties);
 
   // If present and well-formed, returns the value of the property. Returns the
   // default value if missing or ill-formed.
-  quic::QuicTimeDelta delivery_timeout() const;
+  quic::QuicTimeDelta object_delivery_timeout() const;
   quic::QuicTimeDelta max_cache_duration() const;
+  quic::QuicTimeDelta subgroup_delivery_timeout() const;
   absl::string_view immutable_properties() const;
   MoqtPriority default_publisher_priority() const;
-  MoqtDeliveryOrder default_publisher_group_order() const;
+  MoqtGroupOrder default_publisher_group_order() const;
   bool dynamic_groups() const;
   bool empty() const { return size() == 0; }
 
