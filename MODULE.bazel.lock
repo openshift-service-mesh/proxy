@@ -1009,7 +1009,7 @@
     "@@envoy+//bazel:extensions.bzl%envoy_llvm_extension": {
       "general": {
         "bzlTransitiveDigest": "h1UJsRd2xvKxwFizbMuFjW7uB771EHCv4q7YYFoeauA=",
-        "usagesDigest": "Ny6XVYgcPacGMW34YtnFfkQt4Ce0PC9juwr5FC3lLoQ=",
+        "usagesDigest": "yiHJ81nFGD1C/x1y4xtE+C+zKAaKnHKooGWiAyExug0=",
         "recordedInputs": [
           "REPO_MAPPING:envoy+,bazel_skylib bazel_skylib+",
           "REPO_MAPPING:envoy+,bazel_tools bazel_tools",
@@ -1023,7 +1023,7 @@
             "repoRuleId": "@@envoy+//bazel:extensions.bzl%_host_llvm_repo",
             "attributes": {
               "llvm_version": "",
-              "path": "/usr"
+              "path": "/usr/lib64/llvm21"
             }
           }
         }

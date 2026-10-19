@@ -391,7 +391,20 @@ use_repo(llvm, "llvm_host")
 # former OSSM `envoy_toolshed-host-llvm.patch` + `BAZEL_LLVM_PATH` wiring, which
 # predated upstream's native support. The version is auto-detected from
 # `<path>/bin/clang --version`; keep `path` in sync with the build container's
-# LLVM prefix (same /usr root as @llvm_host).
+# LLVM prefix.
+#
+# Point this at the *versioned* LLVM prefix (/usr/lib64/llvm21), NOT the bare
+# /usr root. The host() repo rule symlinks the contents of <path>/{bin,include,
+# lib,lib64} into @llvm_toolchain_llvm and its generated BUILD.bazel runs
+# `exports_files(glob(["bin/*", "lib/**", "include/**", ...]))`. With path="/usr"
+# that glob recurses over the *entire* system /usr/include and /usr/lib; if any
+# file there has a ':' in its name (target names may not contain ':') analysis
+# fails with "target names may not contain ':'". Some build containers (e.g. the
+# Konflux image) contain such a file under /usr, others (GitHub CI) do not --
+# hence the environment-specific breakage. The versioned prefix is a
+# self-contained LLVM tree (bin/clang, include/{clang,llvm}, lib64/libclang-cpp),
+# which is all the openssl prefixer needs, and keeps the glob off the rest of
+# /usr. This matches Clang_DIR and the @llvm_host llvm_version (21.x) elsewhere.
 envoy_llvm_ext = use_extension("@envoy//bazel:extensions.bzl", "envoy_llvm_extension")
-envoy_llvm_ext.host(path = "/usr")
+envoy_llvm_ext.host(path = "/usr/lib64/llvm21")
 use_repo(envoy_llvm_ext, "llvm_toolchain_llvm")
