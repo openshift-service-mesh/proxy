@@ -1,0 +1,22 @@
+diff --git a/compile/llvm_minimal.bzl b/compile/llvm_minimal.bzl
+index 9ca372ea3e..5b164f39df 100644
+--- a/compile/llvm_minimal.bzl
++++ b/compile/llvm_minimal.bzl
+@@ -153,7 +153,16 @@ def render_llvm_repo_build(llvm_major):
+     """Render BUILD.llvm_repo-shaped BUILD content for a minimal LLVM artifact."""
+     return """package(default_visibility = ["//visibility:public"])
+ 
+-exports_files(glob(["bin/*", "lib/**", "include/**", "share/clang/*"], allow_empty = True))
++# OSSM: @llvm_toolchain_llvm is backed by the host /usr (envoy_llvm.host in the
++# root MODULE.bazel), so this glob runs over the whole system prefix rather than
++# a clean LLVM tarball. Two tweaks vs upstream:
++#  - exclude **/node_modules/**: images with nodejs ship npm's bundled Perl man
++#    pages whose filenames contain ':' (e.g. "Digest::MD5.3pm.gz"). Bazel target
++#    names may not contain ':', so exports_files() would abort loading this BUILD.
++#  - also export lib64/libclang-cpp.so* and lib64/libLLVM.so*: on RHEL/UBI these
++#    live in /usr/lib64 (LLVM_LIB_DIR=lib64), and "lib/**" alone does not cover
++#    them, so LIBCLANG_CPP/LIBLLVM (bazel/toolchains.bzl) would be unresolvable.
++exports_files(glob(["bin/*", "lib/**", "lib64/libclang-cpp.so*", "lib64/libLLVM.so*", "include/**", "share/clang/*"], allow_empty = True, exclude = ["**/node_modules/**"]))
+ 
+ filegroup(
+     name = "clang",
