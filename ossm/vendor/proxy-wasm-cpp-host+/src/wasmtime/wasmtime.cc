@@ -19,8 +19,10 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "include/proxy-wasm/limits.h"
 #include "include/proxy-wasm/word.h"
@@ -58,6 +60,35 @@ using ::wasmtime::Span;
 using ::wasmtime::Store;
 using ::wasmtime::Table;
 using ::wasmtime::TrapResult;
+using ::wasmtime::ValType;
+
+bool equalValTypes(ValType::ListRef actual, const std::vector<ValType> &expected) {
+  if (actual.size() != expected.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < expected.size(); i++) {
+    if (!(actual.begin()[i] == expected[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <typename Types> std::string printValTypes(const Types &types) {
+  if (types.size() == 0) {
+    return "void";
+  }
+  std::ostringstream out;
+  bool first = true;
+  for (const auto &type : types) {
+    if (!first) {
+      out << " ";
+    }
+    out << ValType(type);
+    first = false;
+  }
+  return out.str();
+}
 
 Engine *engine() {
   static auto *const engine = []() {
@@ -390,6 +421,19 @@ void Wasmtime::getModuleFunctionImpl(std::string_view function_name,
     *function = nullptr;
     return;
   }
+  auto type = it->second.type(store_->context());
+  std::vector<ValType> arg_valtypes{::wasmtime::detail::WasmType<Args>::valtype()...};
+  std::vector<ValType> result_valtypes;
+  if (!equalValTypes(type->params(), arg_valtypes) ||
+      !equalValTypes(type->results(), result_valtypes)) {
+    fail(FailState::UnableToInitializeCode,
+         "Bad function signature for: " + std::string(function_name) +
+             ", want: " + printValTypes(arg_valtypes) + " -> " + printValTypes(result_valtypes) +
+             ", but the module exports: " + printValTypes(type->params()) + " -> " +
+             printValTypes(type->results()));
+    *function = nullptr;
+    return;
+  }
   auto typed_func = it->second.typed<std::tuple<Args...>, std::monostate>(store_->context());
   if (!typed_func) {
     *function = nullptr;
@@ -421,6 +465,19 @@ void Wasmtime::getModuleFunctionImpl(std::string_view function_name,
                                      std::function<R(ContextBase *, Args...)> *function) {
   auto it = module_functions_.find(std::string(function_name));
   if (it == module_functions_.end()) {
+    *function = nullptr;
+    return;
+  }
+  auto type = it->second.type(store_->context());
+  std::vector<ValType> arg_valtypes{::wasmtime::detail::WasmType<Args>::valtype()...};
+  std::vector<ValType> result_valtypes{::wasmtime::detail::WasmType<R>::valtype()};
+  if (!equalValTypes(type->params(), arg_valtypes) ||
+      !equalValTypes(type->results(), result_valtypes)) {
+    fail(FailState::UnableToInitializeCode,
+         "Bad function signature for: " + std::string(function_name) +
+             ", want: " + printValTypes(arg_valtypes) + " -> " + printValTypes(result_valtypes) +
+             ", but the module exports: " + printValTypes(type->params()) + " -> " +
+             printValTypes(type->results()));
     *function = nullptr;
     return;
   }

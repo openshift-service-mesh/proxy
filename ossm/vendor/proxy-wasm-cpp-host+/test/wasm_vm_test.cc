@@ -74,6 +74,61 @@ TEST_P(TestVm, Basic) {
   EXPECT_EQ(vm_->getEngineName(), engine_);
 }
 
+TEST_P(TestVm, WasmtimeFunctionSignatures) {
+  if (engine_ != "wasmtime") {
+    return;
+  }
+  auto source = readTestWasmFile("abi_export.wasm");
+  ASSERT_TRUE(vm_->load(source, {}, {}));
+  ASSERT_TRUE(vm_->link(""));
+
+  WasmCallVoid<0> abi_version;
+  vm_->getFunction("proxy_abi_version_0_2_0", &abi_version);
+  ASSERT_TRUE(abi_version);
+  abi_version(nullptr);
+  WasmCallWord<2> vm_start;
+  vm_->getFunction("proxy_on_vm_start", &vm_start);
+  ASSERT_TRUE(vm_start);
+  EXPECT_EQ(vm_start(nullptr, Word(0), Word(0)).u32(), 1);
+  EXPECT_FALSE(vm_->isFailed());
+
+  vm_->getFunction("missing_export", &abi_version);
+  EXPECT_FALSE(abi_version);
+  EXPECT_FALSE(vm_->isFailed());
+}
+
+TEST_P(TestVm, WasmtimeBadFunctionSignatures) {
+  if (engine_ != "wasmtime") {
+    return;
+  }
+  auto source = readTestWasmFile("abi_export.wasm");
+  auto check = [&](auto function, std::string_view name, std::string_view signature) {
+    auto vm = makeVm(engine_);
+    ASSERT_TRUE(vm->load(source, {}, {}));
+    ASSERT_TRUE(vm->link(""));
+    FailState fail_state = FailState::Ok;
+    vm->addFailCallback([&](FailState state) { fail_state = state; });
+    vm->getFunction(name, &function);
+    EXPECT_FALSE(function);
+    EXPECT_TRUE(vm->isFailed());
+    EXPECT_EQ(fail_state, FailState::UnableToInitializeCode);
+    EXPECT_TRUE(static_cast<TestIntegration *>(vm->integration().get())
+                    ->isErrorLogged("Bad function signature for: " + std::string(name) +
+                                    ", want: " + std::string(signature)));
+  };
+
+  check(WasmCallVoid<0>([](ContextBase *) {}), "proxy_on_context_create",
+        "void -> void, but the module exports: i32 i32 -> void");
+  check(WasmCallWord<1>{}, "proxy_on_vm_start",
+        "i32 -> i32, but the module exports: i32 i32 -> i32");
+  check(WasmCallVoid<2>{}, "proxy_on_vm_start",
+        "i32 i32 -> void, but the module exports: i32 i32 -> i32");
+  check(WasmCallWord<2>{}, "proxy_on_context_create",
+        "i32 i32 -> i32, but the module exports: i32 i32 -> void");
+  check(WasmCall_fff{}, "proxy_on_vm_start",
+        "f32 f32 -> f32, but the module exports: i32 i32 -> i32");
+}
+
 TEST_P(TestVm, Memory) {
   auto source = readTestWasmFile("abi_export.wasm");
   ASSERT_TRUE(vm_->load(source, {}, {}));
