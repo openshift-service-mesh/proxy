@@ -19,9 +19,9 @@ DEFAULT_TOOL_VERSIONS = {
     "cmake": "3.31.12",
     "m4": "1.4.21",
     "make": "4.4.1",
-    "meson": "1.10.1",
+    "meson": "1.12.1",
     "ninja": "1.13.2",
-    "pkgconfig": "3.0.7",
+    "pkgconfig": "3.0.10",
 }
 
 # buildifier: disable=unnamed-macro
@@ -70,7 +70,9 @@ def rules_foreign_cc_dependencies(
             Central Registry `ninja` module the source-built toolchain uses,
             whose versions do not all coincide with the prebuilt ones.
 
-        meson_version: The target version of the meson toolchain if `register_built_tools` is set to `True`.
+        meson_version: The target version of the default meson toolchain. Selects
+            which Bazel Central Registry `meson` module is fetched, so it applies
+            whenever `register_repos` is `True`, not only to the built toolchain.
 
         pkgconfig_version: The target version of the default pkg-config
             toolchain. Selects which Bazel Central Registry `pkgconf` module is
@@ -179,9 +181,9 @@ def rules_foreign_cc_dependencies(
     maybe(
         http_archive,
         name = "rules_shell",
-        sha256 = "e6b87c89bd0b27039e3af2c5da01147452f240f75d505f5b6880874f31036307",
-        strip_prefix = "rules_shell-0.6.1",
-        url = "https://github.com/bazelbuild/rules_shell/releases/download/v0.6.1/rules_shell-v0.6.1.tar.gz",
+        sha256 = "20721f63908879c083f94869e618ea8d4ff5edb91ff9a72a2ebee357fdbc352d",
+        strip_prefix = "rules_shell-0.8.0",
+        url = "https://github.com/bazelbuild/rules_shell/releases/download/v0.8.0/rules_shell-v0.8.0.tar.gz",
     )
 
     # Declared, never built by rfcc: the glib archives the public
@@ -194,6 +196,7 @@ def rules_foreign_cc_dependencies(
     bcr_repos(
         m4_version = m4_version,
         make_version = make_version,
+        meson_version = meson_version,
         ninja_version = ninja_version,
         pkgconfig_version = pkgconfig_version,
     )

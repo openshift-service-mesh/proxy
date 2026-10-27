@@ -1,4 +1,4 @@
-bazel_dep(name = "librdkafka", version = "2.15.0")
+bazel_dep(name = "librdkafka", version = "2.15.0.bcr.1")
 local_path_override(
     module_name = "librdkafka",
     path = "..",

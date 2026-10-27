@@ -28,6 +28,18 @@ _PLATFORM_TYPE_TO_PLATFORM_FAMILY = {
     "visionos": "xrOS",
 }
 
+def _file_list_args(*, actions, files):
+    """Returns `Args` that expand to the path of a file listing `files`, one per line.
+
+    The file is for appintentsmetadataprocessor's `--*-list` flags. One flag per file can exceed
+    ARG_MAX for large modules.
+    """
+    file_list_args = actions.args()
+    file_list_args.add_all(files)
+    file_list_args.set_param_file_format("multiline")
+    file_list_args.use_param_file("%s", use_always = True)
+    return file_list_args
+
 def generate_app_intents_metadata_bundle(
         *,
         actions,
@@ -95,10 +107,6 @@ Could not find a module name for app_intents. One is required for App Intents me
 
     args.add("--module-name", intents_module_names[0])
     args.add("--output", output.dirname)
-    args.add_all(
-        source_files,
-        before_each = "--source-files",
-    )
     transitive_inputs = [depset(source_files)]
     args.add("--sdk-root", apple_support.path_placeholders.sdkroot())
     platform_type_string = str(platform_prerequisites.platform_type)
@@ -106,10 +114,6 @@ Could not find a module name for app_intents. One is required for App Intents me
     args.add("--platform-family", platform_family)
     args.add("--deployment-target", platform_prerequisites.minimum_os)
     args.add_all(target_triples, before_each = "--target-triple")
-    args.add_all(
-        constvalues_files,
-        before_each = "--swift-const-vals",
-    )
     transitive_inputs.append(depset(constvalues_files))
     args.add("--compile-time-extraction")
 
@@ -130,7 +134,13 @@ an issue with the Apple BUILD rules with repro steps.
     apple_support.run_shell(
         actions = actions,
         apple_fragment = apple_fragment,
-        arguments = [args],
+        arguments = [
+            args,
+            "--source-file-list",
+            _file_list_args(actions = actions, files = source_files),
+            "--swift-const-vals-list",
+            _file_list_args(actions = actions, files = constvalues_files),
+        ],
         env = shared_environment.default_env,
         command = '''\
 set -euo pipefail
@@ -185,6 +195,73 @@ fi
         tools = [json_tool],
         outputs = [output],
         mnemonic = "AppIntentsMetadataProcessor",
+        xcode_config = xcode_version_config,
+    )
+
+    return output
+
+def generate_app_intents_nl_training_assets(
+        *,
+        actions,
+        apple_fragment,
+        bundle_id,
+        infoplist,
+        label,
+        lproj_dirs,
+        lproj_files,
+        mac_exec_group,
+        metadata_bundle,
+        nl_training_tool,
+        resource_trees,
+        xcode_version_config):
+    """Generates the App Shortcuts Flexible Matching assets (`<locale>.lproj/nlu.appintents`).
+
+    Args:
+        actions: The actions provider from `ctx.actions`.
+        apple_fragment: An Apple fragment (ctx.fragments.apple).
+        bundle_id: The bundle ID of the target.
+        infoplist: The merged root Info.plist of the target.
+        label: Label for the current target (`ctx.label`).
+        lproj_dirs: Names of the `.lproj` directories in the bundle's resources.
+        lproj_files: List of (lproj_dir, File) tuples for strings files the tool reads.
+        mac_exec_group: The execution group for Mac tools.
+        metadata_bundle: The Metadata.appintents directory for the target.
+        nl_training_tool: A `files_to_run` for the App Intents NL training tool.
+        resource_trees: List of (resource-relative parent directory, tree File) tuples that may
+            contain localized strings. A parent of "." denotes the resources root.
+        xcode_version_config: The `apple_common.XcodeVersionConfig` provider from the current ctx.
+    Returns:
+        A directory with the assets, laid out relative to the bundle's resources directory.
+    """
+    output = intermediates.directory(
+        actions = actions,
+        target_name = label.name,
+        output_discriminator = None,
+        dir_name = "AppShortcutsFlexibleMatching",
+    )
+
+    args = actions.args()
+    args.add("--bundle-id", bundle_id)
+    args.add("--infoplist", infoplist)
+    args.add("--metadata", metadata_bundle.path)
+    args.add("--output", output.path)
+    args.add_all(lproj_dirs, before_each = "--lproj")
+    for lproj_dir, file in lproj_files:
+        args.add("--lproj-file", lproj_dir)
+        args.add(file)
+    for parent_dir, tree in resource_trees:
+        args.add("--resource-tree", parent_dir)
+        args.add(tree.path)
+
+    apple_support.run(
+        actions = actions,
+        apple_fragment = apple_fragment,
+        arguments = [args],
+        exec_group = mac_exec_group,
+        executable = nl_training_tool,
+        inputs = [infoplist, metadata_bundle] + [f for _, f in lproj_files] + [f for _, f in resource_trees],
+        mnemonic = "AppIntentsNLTraining",
+        outputs = [output],
         xcode_config = xcode_version_config,
     )
 

@@ -3,27 +3,36 @@
 load("@bazel_features//:features.bzl", "bazel_features")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_cc//cc:find_cc_toolchain.bzl", "use_cc_toolchain")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(
     "//autoconf/private:autoconf_config.bzl",
+    "AUTOCONF_EXEC_GROUP",
+    "cc_deps_args",
+    "collect_cc_deps",
+    "collect_defaults",
     "collect_deps",
     "collect_transitive_results",
+    "constant_check_result",
     "create_config_dict",
     "encode_result",
     "get_autoconf_toolchain_cache",
     "get_cc_toolchain_info",
     "get_environment_variables",
+    "merge_defaults",
     "write_config_json",
 )
 load("//autoconf/private:condition_utils.bzl", "extract_condition_vars", "strip_macro_args")
 load("//autoconf/private:ctx_actions_write.bzl", "write")
-load("//autoconf/private:providers.bzl", "CcAutoconfInfo")
+load("//autoconf/private:providers.bzl", "CcAutoconfDefaultsInfo", "CcAutoconfInfo")
 
 _CONTENT_KEY_FIELDS = (
     "type",
     "code",
+    "code_must_fail",
     "language",
     "define_value",
     "define_value_fail",
+    "error",
     "if_true",
     "if_false",
     "library",
@@ -37,17 +46,24 @@ _CONTENT_KEY_FIELDS = (
     "members",
 )
 
-def _check_content_key(check):
+def _check_content_key(check, target_flags = None):
     """Compute a deterministic content key from a check's implementation fields.
 
     Consumer metadata (name, define, subst, unquote) is excluded so that
     identical checks with different consumer names share the same key.
+    `target_flags` (the target's copts / conlyopts / cxxopts) are part of it
+    when set, since they change the result.
     """
     pairs = sorted([
         (k, check[k])
         for k in _CONTENT_KEY_FIELDS
         if k in check
     ])
+    if target_flags:
+        # The target's own copts change what every check of it sees: a result
+        # computed under other flags (a dependency's, the toolchain cache's)
+        # is not this target's.  Flagless targets keep the plain key.
+        pairs.append(("target_flags", target_flags))
     return json.encode(pairs)
 
 def _same_content_key(file_a, file_b, path_to_content_key):
@@ -63,6 +79,29 @@ def _same_content_key(file_a, file_b, path_to_content_key):
     if key_a == None or key_b == None:
         return False
     return key_a == key_b
+
+def _duplicate_message(kind, symbol, local_check, local_file, dep_file):
+    """The error for a define or subst both this target and a dependency produce.
+
+    Result files are shared by content: a literal `AC_SUBST("X", 0)` reuses
+    the file of any earlier check with the same value, so the local file is
+    named after whichever check first produced that content.  Name the local
+    check itself, so the message points at the producer to remove.
+    """
+    local_name = local_check.get("name") if type(local_check) == "dict" else None
+    return (
+        "{kind} '{symbol}' is produced both by this target and by a dependency, from different checks:\n" +
+        "  Local:    check `{local}` (result file {local_file}, shared by content with other checks of the same value)\n" +
+        "  Dep:      {dep_file}\n" +
+        "Two producers of one {lower} are rejected. Remove the local check, or drop the dependency that provides it."
+    ).format(
+        kind = kind,
+        symbol = symbol,
+        local = local_name or "?",
+        local_file = local_file.path,
+        dep_file = dep_file.path,
+        lower = kind.lower(),
+    )
 
 def _coerce_name(name, value):
     if type(value) == "string":
@@ -179,14 +218,28 @@ def autoconf_impl_common(ctx, resolve_toolchain):
     # Get cc_toolchain info
     toolchain_info = get_cc_toolchain_info(ctx)
 
+    # `cc_deps`: configure's CPPFLAGS and LIBS.  Their flags are part of every
+    # check's identity (content key): a check compiled against gmp's headers
+    # shares no result with the same check compiled without them.
+    cc_deps = collect_cc_deps(getattr(ctx.attr, "cc_deps", []), toolchain_info.compiler_type, ctx.bin_dir.path)
+    target_flags = [getattr(ctx.attr, name, []) for name in ("copts", "conlyopts", "cxxopts")]
+    target_flags.append(cc_deps.key)
+    target_flags = target_flags if any(target_flags) else None
+
     # Get transitive dependencies to compute compile_defines paths
     deps = collect_deps(ctx.attr.deps)
     dep_infos = deps.to_list()
     dep_results = collect_transitive_results(dep_infos)
 
+    # Defaults (`default_deps`, plus those the deps carry) are read beneath
+    # everything else and passed on apart from the results, so a dependent
+    # never mistakes them for probe results.
+    default_infos = collect_defaults(ctx.attr.default_deps, dep_infos)
+    defaults = merge_defaults(default_infos.to_list())
+
     # Content-based cache: reuse results for checks with identical implementation
     # regardless of consumer naming (define/subst/name).
-    available_content_cache = dict(dep_results["content_cache"])
+    available_content_cache = dep_results["content_cache"]
     if resolve_toolchain:
         tc_content_cache = get_autoconf_toolchain_cache(ctx)
         available_content_cache = tc_content_cache | available_content_cache
@@ -195,6 +248,12 @@ def autoconf_impl_common(ctx, resolve_toolchain):
     define_checks = {}
     subst_checks = {}
 
+    # Checks with `error`: their result is wanted for its side effect, the
+    # build stopping when the probe fails, whether or not a header consumes
+    # it.  They go into the `_validation` output group, which Bazel builds
+    # whenever the target is built, directly or as a dependency.
+    validation_outputs = []
+
     cache_results = {}
     content_cache = {}
     define_results = {}
@@ -202,6 +261,7 @@ def autoconf_impl_common(ctx, resolve_toolchain):
     unquoted_defines = []
 
     actions = {}
+    check_specs = []
 
     # Process all checks
     for check_json in ctx.attr.checks:
@@ -226,7 +286,7 @@ def autoconf_impl_common(ctx, resolve_toolchain):
         subst_name = _coerce_name(name, _coerce_name(define_key, subst))
 
         # Compute content key from implementation fields only
-        content_key = _check_content_key(check)
+        content_key = _check_content_key(check, target_flags)
 
         # Same check implementation already processed in this target — idempotent skip
         if content_key in content_cache and name in cache_results:
@@ -240,18 +300,35 @@ def autoconf_impl_common(ctx, resolve_toolchain):
         else:
             output = ctx.actions.declare_file("{}/{}.result.cache.json".format(ctx.label.name, name))
 
+            # The spec is written for every check resolved here so the
+            # `autoconf_checks` output group lists the same files whether or
+            # not the checker runs.  For constants nothing consumes it: it is a
+            # default output of this target, so a direct build pays one
+            # FileWrite, but reaching the target through `deps` never does.
             check_spec = ctx.actions.declare_file("{}/{}.check.json".format(ctx.label.name, name))
             write(
                 actions = ctx.actions,
                 output = check_spec,
                 content = json.encode_indent(check, indent = " " * 4) + "\n",
             )
+            check_specs.append(check_spec)
 
-            actions[name] = struct(
-                output = output,
-                check = check,
-                input = check_spec,
-            )
+            # Literal defines/substs with no runtime inputs are written
+            # directly: the checker would only echo the value back, so the
+            # process spawn buys nothing.  Everything else gets a checker action.
+            constant_content = constant_check_result(check)
+            if constant_content != None:
+                write(
+                    actions = ctx.actions,
+                    output = output,
+                    content = constant_content,
+                )
+            else:
+                actions[name] = struct(
+                    output = output,
+                    check = check,
+                    input = check_spec,
+                )
 
         # Define/subst conflict detection: different cache variable claiming same symbol = error
         if define:
@@ -274,6 +351,8 @@ def autoconf_impl_common(ctx, resolve_toolchain):
         cache_checks[name] = check
         cache_results[name] = output
         content_cache[content_key] = output
+        if check.get("error"):
+            validation_outputs.append(output)
 
     _process_build_settings(
         ctx,
@@ -319,27 +398,21 @@ def autoconf_impl_common(ctx, resolve_toolchain):
             existing_file = define_results[define_name]
             if existing_file.path != define_file.path:
                 if not _same_content_key(existing_file, define_file, path_to_content_key):
-                    fail("Define '{}' is defined both locally and in dependencies with different result files:\n  Local:    {}\n  Dep:      {}\nThis indicates duplicate defines. Consider removing the local define or using a different name.".format(
-                        define_name,
-                        existing_file.path,
-                        define_file.path,
-                    ))
+                    fail(_duplicate_message("Define", define_name, define_checks[strip_macro_args(define_name)], existing_file, define_file))
 
     for subst_name, subst_file in dep_results["subst"].items():
         if subst_name in subst_results:
             existing_file = subst_results[subst_name]
             if existing_file.path != subst_file.path:
                 if not _same_content_key(existing_file, subst_file, path_to_content_key):
-                    fail("Subst '{}' is defined both locally and in dependencies with different result files:\n  Local:    {}\n  Dep:      {}\nThis indicates duplicate subst. Consider removing the local subst or using a different name.".format(
-                        subst_name,
-                        existing_file.path,
-                        subst_file.path,
-                    ))
+                    fail(_duplicate_message("Subst", subst_name, subst_checks[subst_name], existing_file, subst_file))
 
+    # What this target's checks may read: the dependencies' defaults first,
+    # so an ordinary result of the same name wins.
     all_results = {
-        "cache": cache_results | dep_results["cache"],
-        "define": define_results | dep_results["define"],
-        "subst": subst_results | dep_results["subst"],
+        "cache": defaults.cache | dep_results["cache"] | cache_results,
+        "define": defaults.define | dep_results["define"] | define_results,
+        "subst": defaults.subst | dep_results["subst"] | subst_results,
     }
 
     # Create individual CcAutoconfCheck actions for each cache variable
@@ -371,6 +444,7 @@ def autoconf_impl_common(ctx, resolve_toolchain):
         args.add("--config", config_json)
         args.add("--check", check_json)
         args.add("--results", check_result_file)
+        cc_deps_args(args, cc_deps)
 
         # Collect dependencies for all required defines
         # Build a dictionary mapping lookup_name -> file_path
@@ -455,9 +529,10 @@ def autoconf_impl_common(ctx, resolve_toolchain):
             args.add_all([file_path], before_each = "--dep", format_each = "{}=%s".format(lookup_name))
 
         ctx.actions.run(
+            exec_group = AUTOCONF_EXEC_GROUP,
             executable = ctx.executable._checker,
             arguments = [args],
-            inputs = depset(inputs + [check_json] + check_deps),
+            inputs = depset(inputs + [check_json] + check_deps, transitive = [cc_deps.inputs]),
             outputs = [check_result_file],
             mnemonic = "CcAutoconfCheck",
             progress_message = "CcAutoconfCheck %{label} - " + check_name,
@@ -467,20 +542,25 @@ def autoconf_impl_common(ctx, resolve_toolchain):
             execution_requirements = {"supports-path-mapping": ""} if bazel_features.rules.write_action_has_execution_requirements else {},
         )
 
-    # Return provider with result buckets and content cache for dedup
+    # The provider: this target's own results, and the defaults it read
+    # (its dependencies' and its `default_deps`'), for dependents to read beneath theirs.
+    own_files = cache_results.values() + define_results.values() + subst_results.values()
+    info = CcAutoconfInfo(
+        owner = ctx.label,
+        deps = deps,
+        cache_results = cache_results,
+        content_cache = content_cache,
+        define_results = define_results,
+        subst_results = subst_results,
+        unquoted_defines = unquoted_defines,
+        defaults = default_infos,
+    )
     return [
-        CcAutoconfInfo(
-            owner = ctx.label,
-            deps = deps,
-            cache_results = cache_results,
-            content_cache = content_cache,
-            define_results = define_results,
-            subst_results = subst_results,
-            unquoted_defines = unquoted_defines,
-        ),
+        info,
         OutputGroupInfo(
-            autoconf_checks = depset([action.input for action in actions.values()]),
-            autoconf_results = depset(cache_results.values() + define_results.values() + subst_results.values()),
+            _validation = depset(validation_outputs),
+            autoconf_checks = depset(check_specs),
+            autoconf_results = depset(own_files),
         ),
     ]
 
@@ -528,16 +608,46 @@ COMMON_ATTRS = {
         providers = [BuildSettingInfo],
         default = {},
     ),
+    "cc_deps": attr.label_list(
+        doc = "Libraries the checks compile against and link, as configure's CPPFLAGS and LIBS carry a " +
+              "project's dependencies: every check sees their include directories and defines, and every " +
+              "link probe links their archives after its own object.  Their flags are part of each check's " +
+              "identity, so a check never shares a result between targets with different `cc_deps`.  Prefer " +
+              "`cc_deps = [\"@gmp//:gmp\"]` with a real `AC_CHECK_LIB` over a static `AC_DEFINE`.",
+        providers = [CcInfo],
+    ),
     "checks": attr.string_list(
         doc = "List of JSON-encoded checks from checks (e.g., `checks.AC_CHECK_HEADER('stdio.h')`).",
         default = [],
     ),
+    "conlyopts": attr.string_list(
+        doc = "Flags for the C compiles of this target's checks only, after `copts` (as on a cc_library).  " +
+              "Not transitive: flags for every check of a build, the gnulib ports included, are `--copt`.",
+    ),
+    "copts": attr.string_list(
+        doc = "Flags for every compile of this target's checks, after the toolchain's and `--copt` / " +
+              "`--cxxopt` and before a check's own `copts` (the order of a cc_library's), so they win " +
+              "over the command line where the last flag counts.  Not transitive.",
+    ),
+    "cxxopts": attr.string_list(
+        doc = "Flags for the C++ compiles of this target's checks only, after `copts` (as on a cc_library).  " +
+              "Not transitive.",
+    ),
+    "default_deps": attr.label_list(
+        doc = "`autoconf_defaults` targets.  Their values stand where no result of the name comes through " +
+              "`deps`; a result overrides a default silently, and two defaults of one name must agree.  " +
+              "The defaults a `deps` entry carries are read as well, and dependents of this target read all " +
+              "of them in turn.  This is gnulib's `*_H_DEFAULTS` pattern (`HAVE_X=1`, `REPLACE_X=0` before the " +
+              "probes may reassign them): list a header's `:defaults` here where the m4 `AC_REQUIRE`s " +
+              "`gl_<HEADER>_H_DEFAULTS`.",
+        providers = [CcAutoconfDefaultsInfo],
+    ),
     "deps": attr.label_list(
-        doc = "Additional `autoconf`, `autoconf_library`, or `package_info` dependencies.",
+        doc = "Additional `autoconf`, `autoconf_library`, or `autoconf_package_info` dependencies.",
         providers = [CcAutoconfInfo],
     ),
     "_checker": attr.label(
-        cfg = "exec",
+        cfg = config.exec(AUTOCONF_EXEC_GROUP),
         executable = True,
         default = Label("//autoconf/private/checker:checker_bin"),
     ),
@@ -575,7 +685,8 @@ or wrapped source files.
 """,
     attrs = COMMON_ATTRS,
     fragments = ["cpp"],
-    toolchains = use_cc_toolchain() + [
+    exec_groups = {AUTOCONF_EXEC_GROUP: exec_group(toolchains = use_cc_toolchain())},
+    toolchains = [
         config_common.toolchain_type("@rules_cc_autoconf//autoconf:toolchain_type", mandatory = False),
     ],
     provides = [CcAutoconfInfo],
@@ -591,14 +702,14 @@ Run autoconf-like checks without resolving the autoconf toolchain.
 
 Identical to ``autoconf`` except that it does **not** resolve the
 ``autoconf_toolchain``.  Use this rule for targets that are listed as
-``cache_deps`` or ``defaults`` of an ``autoconf_toolchain`` -- using the
-regular ``autoconf`` rule in that position would create a dependency cycle.
+``cache_deps`` of an ``autoconf_toolchain`` -- using the regular ``autoconf``
+rule in that position would create a dependency cycle.
 
 Dep-level caching still applies: if a check's cache variable name already
 has a result in transitive ``deps``, the action is skipped.
 """,
     attrs = COMMON_ATTRS,
     fragments = ["cpp"],
-    toolchains = use_cc_toolchain(),
+    exec_groups = {AUTOCONF_EXEC_GROUP: exec_group(toolchains = use_cc_toolchain())},
     provides = [CcAutoconfInfo],
 )

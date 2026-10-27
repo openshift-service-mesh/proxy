@@ -6,12 +6,20 @@ load(
     _autoconf = "autoconf",
 )
 load(
+    ":autoconf_defaults.bzl",
+    _autoconf_defaults = "autoconf_defaults",
+)
+load(
     ":autoconf_hdr.bzl",
     _autoconf_hdr = "autoconf_hdr",
 )
 load(
     ":autoconf_linkopts.bzl",
     _autoconf_linkopts = "autoconf_linkopts",
+)
+load(
+    ":autoconf_package_info.bzl",
+    _autoconf_package_info = "autoconf_package_info",
 )
 load(
     ":autoconf_srcs.bzl",
@@ -26,17 +34,17 @@ load(
     _checks = "checks",
     _macros = "macros",
 )
-load(
-    ":package_info.bzl",
-    _package_info = "package_info",
-)
 
 autoconf = _autoconf
+autoconf_defaults = _autoconf_defaults
 
 autoconf_hdr = _autoconf_hdr
 autoconf_linkopts = _autoconf_linkopts
+autoconf_package_info = _autoconf_package_info
 autoconf_srcs = _autoconf_srcs
 autoconf_toolchain = _autoconf_toolchain
 checks = _checks
 macros = _macros
-package_info = _package_info
+
+# Deprecated: use `autoconf_package_info` instead.
+package_info = _autoconf_package_info

@@ -18,6 +18,39 @@ CheckResult make_result(const std::string& name, const std::string& value,
 }
 
 // ---------------------------------------------------------------------------
+// String-valued results
+// ---------------------------------------------------------------------------
+
+// A subst/m4_variable result arrives JSON-encoded (`"present"`); the
+// comparison is against the string, not its encoding.
+void test_compare_json_encoded_string() {
+    std::map<std::string, CheckResult> results;
+    results.emplace("vintage", make_result("vintage", "\"posix\"", true));
+    results.emplace("count", make_result("count", "3", true));
+    assert(ConditionEvaluator("vintage==posix").compute(results));
+    assert(!ConditionEvaluator("vintage==bsd").compute(results));
+    assert(ConditionEvaluator("vintage!=bsd").compute(results));
+    assert(ConditionEvaluator("count==3").compute(results));
+}
+
+// gnulib's GL_GENERATE_*_H variables carry the strings "true" / "false":
+// "false" is falsy as a bare condition, and `==false` compares the string.
+void test_gnulib_true_false_strings() {
+    std::map<std::string, CheckResult> results;
+    results.emplace("GL_GENERATE_A_H",
+                    make_result("GL_GENERATE_A_H", "\"true\"", true));
+    results.emplace("GL_GENERATE_B_H",
+                    make_result("GL_GENERATE_B_H", "\"false\"", true));
+    results.emplace("EMPTY", make_result("EMPTY", "\"\"", true));
+    assert(ConditionEvaluator("GL_GENERATE_A_H").compute(results));
+    assert(!ConditionEvaluator("GL_GENERATE_B_H").compute(results));
+    assert(ConditionEvaluator("!GL_GENERATE_B_H").compute(results));
+    assert(ConditionEvaluator("GL_GENERATE_B_H==false").compute(results));
+    assert(!ConditionEvaluator("GL_GENERATE_B_H==true").compute(results));
+    assert(!ConditionEvaluator("EMPTY").compute(results));
+}
+
+// ---------------------------------------------------------------------------
 // Parse tests
 // ---------------------------------------------------------------------------
 
@@ -255,6 +288,22 @@ void test_eval_falsy_not_success() {
     assert(e.compute(results) == false);
 }
 
+// AC_SEARCH_LIBS stores the library flag: "" when the function is in libc
+// (autoconf's "none required"), "" with success=false when it is nowhere.
+// The bare name is the search's outcome, not the flag's emptiness.
+void test_eval_search_libs_in_libc() {
+    std::map<std::string, CheckResult> results;
+    results.emplace("ac_cv_search_dlopen",
+                    CheckResult("ac_cv_search_dlopen", std::string(""), true,
+                                false, false, CheckType::kSearchLibs));
+    results.emplace("ac_cv_search_nowhere",
+                    CheckResult("ac_cv_search_nowhere", std::string(""), false,
+                                false, false, CheckType::kSearchLibs));
+    assert(ConditionEvaluator("ac_cv_search_dlopen").compute(results));
+    assert(!ConditionEvaluator("ac_cv_search_nowhere").compute(results));
+    assert(!ConditionEvaluator("!ac_cv_search_dlopen").compute(results));
+}
+
 void test_eval_falsy_missing() {
     std::map<std::string, CheckResult> results;
     ConditionEvaluator e("FOO");
@@ -279,6 +328,37 @@ void test_eval_eq_no_match() {
     std::map<std::string, CheckResult> results;
     results.emplace("FOO", make_result("FOO", "0", true));
     ConditionEvaluator e("FOO==1");
+    assert(e.compute(results) == false);
+}
+
+// An AC_DEFINE whose condition failed (`if_false = None`) has no value: it is
+// `#undef` in config.h, which `#if X == 0` treats as 0. gnulib overlays spell
+// "function missing" as `ac_cv_define_HAVE_X==0`, so this must hold.
+void test_eval_eq_zero_matches_undefined_define() {
+    std::map<std::string, CheckResult> results;
+    results.emplace("ac_cv_define_HAVE_FOO",
+                    CheckResult("ac_cv_define_HAVE_FOO", std::nullopt, false,
+                                /*is_define=*/true, /*is_subst=*/false,
+                                CheckType::kDefine, "HAVE_FOO"));
+    ConditionEvaluator eq("ac_cv_define_HAVE_FOO==0");
+    assert(eq.compute(results) == true);
+    ConditionEvaluator neq("ac_cv_define_HAVE_FOO!=0");
+    assert(neq.compute(results) == false);
+    ConditionEvaluator one("ac_cv_define_HAVE_FOO==1");
+    assert(one.compute(results) == false);
+    // Looked up through the define name as well.
+    ConditionEvaluator by_define("HAVE_FOO==0");
+    assert(by_define.compute(results) == true);
+}
+
+// A subst with an explicitly empty value is not 0 (shell semantics).
+void test_eval_eq_zero_rejects_empty_subst() {
+    std::map<std::string, CheckResult> results;
+    results.emplace("ac_cv_subst_LIBS",
+                    CheckResult("ac_cv_subst_LIBS", std::string(""), true,
+                                /*is_define=*/false, /*is_subst=*/true,
+                                CheckType::kM4Variable, std::nullopt, "LIBS"));
+    ConditionEvaluator e("ac_cv_subst_LIBS==0");
     assert(e.compute(results) == false);
 }
 
@@ -427,6 +507,8 @@ void test_evaluator_lookup_by_define_field() {
     } while (0)
 
 int main() {
+    RUN(test_gnulib_true_false_strings);
+    test_compare_json_encoded_string();
     std::cout << "Parse tests:\n";
     RUN(test_parse_simple_var);
     RUN(test_parse_negation);
@@ -456,10 +538,13 @@ int main() {
     RUN(test_eval_truthy);
     RUN(test_eval_falsy_zero);
     RUN(test_eval_falsy_not_success);
+    RUN(test_eval_search_libs_in_libc);
     RUN(test_eval_falsy_missing);
     RUN(test_eval_negation);
     RUN(test_eval_eq_match);
     RUN(test_eval_eq_no_match);
+    RUN(test_eval_eq_zero_matches_undefined_define);
+    RUN(test_eval_eq_zero_rejects_empty_subst);
     RUN(test_eval_neq_match);
     RUN(test_eval_neq_no_match);
     RUN(test_eval_relational);

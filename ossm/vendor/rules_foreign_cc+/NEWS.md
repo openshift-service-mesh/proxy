@@ -1,5 +1,124 @@
 # News
 
+## Unreleased
+
+### Breaking changes
+
+- **A `bzlmod` `tools.<tool>(...)` tag is now all-or-nothing.** Every attribute
+  defaults to empty and nothing is inferred: `mode` is always required,
+  `version` is required for `binary`/`source` and rejected everywhere else, and
+  the new `target` is required for `custom` and rejected everywhere else.
+  Previously a tag could omit `mode` and be resolved through a per-tool
+  priority ladder (binary > source > system). Omitting a tag entirely still
+  inherits rfcc's own registration, unchanged. If your root module has a tag
+  with no `mode`, add the one the ladder was picking for you:
+
+  ```python
+  # Before                              # After
+  tools.cmake(version = "3.31.12")      tools.cmake(mode = "binary", version = "3.31.12")
+  tools.meson(version = "1.10.1")       tools.meson(mode = "source", version = "1.10.1")
+  tools.ninja(                          tools.ninja(
+      exec_compatible_with = [...],         mode = "binary",
+  )                                         version = "1.13.2",
+                                            exec_compatible_with = [...],
+                                        )
+  ```
+
+  Inference had to go because `source` changed meaning underneath it (below):
+  an under-specified `tools.pkgconfig(...)` would have resolved to `source` and
+  then to pkgconf 3.0.7, a version the pkg-config source table has never
+  contained, failing far from the tag that caused it
+  ([#1596](https://github.com/bazel-contrib/rules_foreign_cc/pull/1596)).
+- **`mode = "source"` builds from source again** for `make`, `ninja` and
+  `pkg-config`, reversing the 0.16.0 change below. It fetches the upstream
+  release tarball and bootstraps it, as it did before 0.16.0; the registry
+  modules are still the **default**, now reached through `custom` mode, so a
+  build that declares no tag for these tools sees no change at all. Only a tag
+  that explicitly says `mode = "source"` gets the bootstrap. Note the source
+  tables are the stale ones 0.16.0 moved away from - source `pkgconfig` is
+  **pkg-config 0.29.2**, a different program from the default pkgconf 3.0.7 -
+  so treat a `source` version as pinned rather than tracking
+  ([#1596](https://github.com/bazel-contrib/rules_foreign_cc/pull/1596)).
+- **Under `bzlmod`, the hub's `make_built`, `make_src_all`, `ninja_built` and
+  `ninja_src_all` aliases are back**, pointing at the restored source spokes
+  (`@make_src_4.4.1`, `@ninja_src_1.13.2`) rather than at the registry
+  modules' `cc_binary` targets. `pkgconfig_built` stays absent: the default
+  pkgconf version has no entry in the pkg-config source table, so there is no
+  spoke for it to alias. The *registered* make, ninja and pkgconfig toolchains
+  are unaffected ([#1596](https://github.com/bazel-contrib/rules_foreign_cc/pull/1596)).
+- **`tools.m4(version = ...)` is rejected again.** m4 has never had a
+  from-source bootstrap, so it gained no `source` mode in this restoration; its
+  modes are `custom`, `system` and `noop`, defaulting to `custom` over the
+  `@m4` registry module. The default tool is exactly what 0.16.0 shipped - only
+  the mode name and the version attribute changed
+  ([#1596](https://github.com/bazel-contrib/rules_foreign_cc/pull/1596)).
+- **`WORKSPACE` is unaffected by all of the above.** `custom` and the restored
+  `source` bootstrap are tag-driven, so they exist only under `bzlmod`;
+  `rules_foreign_cc_dependencies()` keeps 0.16.0's behavior verbatim
+  ([#1596](https://github.com/bazel-contrib/rules_foreign_cc/pull/1596)).
+- **meson toolchains export `PYTHON3` and `MESON_REAL` and pin the Python
+  environment.** Every shipped meson toolchain is now a `meson_tool_toolchain`
+  (see Added). It runs the same binary as before and additionally exports
+  `PYTHON3` (the exec-configuration interpreter) and `MESON_REAL` (the exec
+  path of `meson.py`; `REAL_MESON` stays its rlocationpath), puts the
+  binary's import roots on `PYTHONPATH`, and points launchers that build a
+  venv at run time (`RULES_PYTHON_EXTRACT_ROOT`) to a directory under
+  `EXT_BUILD_DEPS`, removed with it when the action ends. Both defer to the
+  target's `env`. A `system` meson is untouched. The
+  `meson_tool` macro in `foreign_cc/built_tools/meson_build.bzl` and its
+  wrapper script are removed; `PYTHONPATH` now does the wrapper's job, and
+  `meson_with_requirements`'s `meson_tool_for_<name>` is a plain `py_binary`
+  ([#1599](https://github.com/bazel-contrib/rules_foreign_cc/pull/1599)).
+
+### Added
+
+- **New `custom` tool mode**, for pointing a toolchain at an executable your
+  build already produces:
+
+  ```python
+  tools.make(mode = "custom", target = "//tools/make:my_make")
+  ```
+
+  `target` is a plain executable, not a `native_tool_toolchain` -
+  `rules_foreign_cc` generates the wrapper into a spoke repo and slots the
+  resulting `toolchain(...)` into the hub, so a `custom` tag participates in
+  the hub's precedence ordering and honours `exec_compatible_with` /
+  `target_compatible_with`. That is what it offers over registering your own
+  `toolchain(...)` alongside rfcc's, which was previously the only option.
+  Supported for every tool driven by a single environment variable: `cmake`,
+  `m4`, `make`, `meson`, `msbuild`, `ninja` and `pkgconfig`. Two caveats are
+  covered in [the hub docs](docs/src/bzlmod_hub.md#custom-mode): the target
+  must be `//visibility:public`, and the generated alias does not rename the
+  underlying file.
+
+  `rules_foreign_cc` uses this mode itself - its `MODULE.bazel` now reads
+  `tools.m4(mode = "custom", target = "@m4")`,
+  `tools.make(mode = "custom", target = "@make")` and
+  `tools.pkgconfig(mode = "custom", target = "@pkgconf//:pkg-config")`, which
+  is what makes the 0.16.0 defaults survive the `source` restoration
+  unchanged ([#1596](https://github.com/bazel-contrib/rules_foreign_cc/pull/1596)).
+- **New `meson_tool_toolchain` rule**
+  (`//toolchains/native_tools:meson_tool_toolchain.bzl`): a
+  `native_tool_toolchain` for meson that takes the Python binary as `meson`
+  and defines `MESON`, `REAL_MESON`, `MESON_REAL` and `PYTHON3` itself. The
+  binary may be a rules_python `py_binary` or one from another Python ruleset
+  that provides `PyInfo` and `PyExecutableInfo`.
+
+### Internal
+
+- CI now runs the full platform matrix (Linux, RBE, macOS, Windows) on Bazel
+  9.3.0 as well as 7.x and 8.x, in bzlmod mode. The RBE toolchain config repo
+  is declared in `MODULE.bazel` so that the bzlmod-only lanes, which never read
+  `WORKSPACE.bzlmod`, can reach it. Bringing the examples up on Bazel 9 also
+  moved macOS fully onto Apple toolchain resolution: the legacy
+  `--crosstool_top` flags are gone from `.bazelrc.common`,
+  `--incompatible_enable_apple_toolchain_resolution` is on for Bazel 7 and 8
+  (Bazel 9 has no other mode), `examples/platform_mappings` is deleted, and
+  `rules_apple` is bumped to 4.3.3, the first 4.x release whose transitions no
+  longer touch the removed legacy settings. rules_python's own
+  `build_python_zip` flag is switched off under Bazel 9, which reads it in place
+  of the native one.
+
 ## 0.16.0 (2026-09-14)
 
 This is the first entry in the resumed changelog. Changes below are listed

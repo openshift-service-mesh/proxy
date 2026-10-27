@@ -80,13 +80,17 @@ def _kotlin_toolchain_impl(ctx):
         jvm_stdlibs = java_common.merge(compile_time_providers + runtime_providers),
         jvm_emit_jdeps = ctx.attr._jvm_emit_jdeps[BuildSettingInfo].value,
         execution_requirements = {
+            "supports-multiplex-sandboxing": "1" if ctx.attr.experimental_multiplex_sandboxing else "0",
             "supports-multiplex-workers": "1" if ctx.attr.experimental_multiplex_workers else "0",
+            "supports-path-mapping": "1" if ctx.attr.supports_path_mapping else "0",
             "supports-workers": "1",
         },
         experimental_use_abi_jars = ctx.attr.experimental_use_abi_jars,
         experimental_treat_internal_as_private_in_abi_jars = ctx.attr.experimental_treat_internal_as_private_in_abi_jars,
         experimental_remove_private_classes_in_abi_jars = ctx.attr.experimental_remove_private_classes_in_abi_jars,
         experimental_remove_debug_info_in_abi_jars = ctx.attr.experimental_remove_debug_info_in_abi_jars,
+        experimental_preserve_declaration_order = ctx.attr.experimental_preserve_declaration_order,
+        experimental_remove_data_class_copy_if_constructor_is_private = ctx.attr.experimental_remove_data_class_copy_if_constructor_is_private,
         experimental_strict_kotlin_deps = ctx.attr.experimental_strict_kotlin_deps,
         experimental_report_unused_deps = ctx.attr.experimental_report_unused_deps,
         experimental_reduce_classpath_mode = ctx.attr.experimental_reduce_classpath_mode,
@@ -98,6 +102,7 @@ def _kotlin_toolchain_impl(ctx):
         jacocorunner = ctx.attr.jacocorunner,
         experimental_prune_transitive_deps = ctx.attr._experimental_prune_transitive_deps[BuildSettingInfo].value,
         experimental_strict_associate_dependencies = ctx.attr._experimental_strict_associate_dependencies[BuildSettingInfo].value,
+        experimental_ksp2_psi_resolution = ctx.attr._experimental_ksp2_psi_resolution[BuildSettingInfo].value,
     )
 
     return [
@@ -125,6 +130,7 @@ _kt_toolchain = rule(
                 "2.1",
                 "2.2",
                 "2.3",
+                "2.4",
             ],
         ),
         "debug": attr.string_list(
@@ -138,8 +144,19 @@ _kt_toolchain = rule(
             doc = "Enables experimental support for Build Tools API integration",
             default = False,
         ),
+        "experimental_multiplex_sandboxing": attr.bool(
+            doc = """Run workers with multiplex sandboxing.""",
+            default = False,
+        ),
         "experimental_multiplex_workers": attr.bool(
             doc = """Run workers in multiplex mode.""",
+            default = True,
+        ),
+        "experimental_preserve_declaration_order": attr.bool(
+            doc = """This applies the following compiler plugin option:
+              plugin:org.jetbrains.kotlin.jvm.abi:preserveDeclarationOrder=true
+            Can be disabled for an individual target using the tag.
+            `kt_experimental_preserve_declaration_order_in_abi_plugin_incompatible`""",
             default = False,
         ),
         "experimental_reduce_classpath_mode": attr.string(
@@ -149,6 +166,13 @@ _kt_toolchain = rule(
                 "NONE",
                 "KOTLINBUILDER_REDUCED",
             ],
+        ),
+        "experimental_remove_data_class_copy_if_constructor_is_private": attr.bool(
+            doc = """This applies the following compiler plugin option:
+              plugin:org.jetbrains.kotlin.jvm.abi:removeDataClassCopyIfConstructorIsPrivate=true
+            Can be disabled for an individual target using the tag.
+            `kt_experimental_remove_data_class_copy_if_constructor_is_private_in_abi_plugin_incompatible`""",
+            default = False,
         ),
         "experimental_remove_debug_info_in_abi_jars": attr.bool(
             doc = """This applies the following compiler plugin option:
@@ -288,7 +312,12 @@ _kt_toolchain = rule(
                 "2.1",
                 "2.2",
                 "2.3",
+                "2.4",
             ],
+        ),
+        "supports_path_mapping": attr.bool(
+            doc = """Enable path mapping for Kotlin actions. Requires experimental_multiplex_sandboxing.""",
+            default = False,
         ),
         "_empty_jar": attr.label(
             doc = """Empty jar for exporting JavaInfos.""",
@@ -301,6 +330,11 @@ _kt_toolchain = rule(
             allow_single_file = True,
             cfg = "target",
             default = Label("//third_party:empty.jdeps"),
+        ),
+        "_experimental_ksp2_psi_resolution": attr.label(
+            doc = """If enabled, KSP2 uses its experimental PSI-based symbol resolution strategy
+            (KSPJvmConfig.experimentalPsiResolution) instead of the default Analysis API strategy.""",
+            default = Label("//kotlin/settings:experimental_ksp2_psi_resolution"),
         ),
         "_experimental_prune_transitive_deps": attr.label(
             doc = """If enabled, compilation is performed against only direct dependencies.
@@ -350,10 +384,14 @@ def define_kt_toolchain(
         experimental_treat_internal_as_private_in_abi_jars = False,
         experimental_remove_private_classes_in_abi_jars = False,
         experimental_remove_debug_info_in_abi_jars = False,
+        experimental_preserve_declaration_order = False,
+        experimental_remove_data_class_copy_if_constructor_is_private = False,
         experimental_strict_kotlin_deps = None,
         experimental_report_unused_deps = None,
         experimental_reduce_classpath_mode = None,
         experimental_multiplex_workers = None,
+        experimental_multiplex_sandboxing = None,
+        supports_path_mapping = None,
         experimental_build_tools_api = None,
         javac_options = Label("//kotlin/internal:default_javac_options"),
         kotlinc_options = Label("//kotlin/internal:default_kotlinc_options"),
@@ -380,7 +418,11 @@ def define_kt_toolchain(
         experimental_treat_internal_as_private_in_abi_jars = experimental_treat_internal_as_private_in_abi_jars,
         experimental_remove_private_classes_in_abi_jars = experimental_remove_private_classes_in_abi_jars,
         experimental_remove_debug_info_in_abi_jars = experimental_remove_debug_info_in_abi_jars,
+        experimental_preserve_declaration_order = experimental_preserve_declaration_order,
+        experimental_remove_data_class_copy_if_constructor_is_private = experimental_remove_data_class_copy_if_constructor_is_private,
         experimental_multiplex_workers = experimental_multiplex_workers,
+        experimental_multiplex_sandboxing = experimental_multiplex_sandboxing,
+        supports_path_mapping = supports_path_mapping,
         experimental_strict_kotlin_deps = experimental_strict_kotlin_deps,
         experimental_report_unused_deps = experimental_report_unused_deps,
         experimental_reduce_classpath_mode = experimental_reduce_classpath_mode,

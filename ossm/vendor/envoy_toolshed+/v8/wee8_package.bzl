@@ -27,8 +27,7 @@ _ARCH_PLATFORMS = {
     ("x86_64", "libcxx"): "@toolchains_llvm//platforms:linux-x86_64",
     ("aarch64", "libcxx"): "@toolchains_llvm//platforms:linux-aarch64",
     ("x86_64", "libstdcxx"): "//platforms:linux_x86_64_libstdcxx",
-    # This does not currently work as it would require x-libs similar to how we provision llvm
-    # ("aarch64", "libstdcxx"): "//platforms:linux_aarch64_libstdcxx",
+    ("aarch64", "libstdcxx"): "//platforms:linux_aarch64_libstdcxx",
 }
 
 # V8's mksnapshot/torque run as exec (build-host) tools but must emit code for
@@ -43,12 +42,10 @@ _V8_TARGET_CPU = {
 # The transition sets the target platform only. Execution platforms are supplied
 # by config, not here:
 #
-#   --config=gcc      registers //platforms:linux_x86_64_gcc_worker, which
-#                     carries //compile:gcc_worker so the gcc toolchain resolves
-#                     locally.
-#   --config=rbe-gcc  overrides that with the //platforms/rbe gcc platforms,
-#                     which also carry the `container-image` exec property that
-#                     EngFlow matches on.
+#   --config=gcc      selects the libstdcxx target platform. The hermetic gcc
+#                     toolchain can execute locally on Linux x86_64.
+#   --config=rbe-gcc  supplies the //platforms/rbe gcc platforms, which carry the
+#                     `container-image` exec property that EngFlow matches on.
 #
 # Setting --extra_execution_platforms from the transition would clobber the RBE
 # platforms, and dispatched actions would fail with `No matching action runner
@@ -111,6 +108,13 @@ _TRANSITION_ATTRS = {
 # basenames, exactly like V8's own `.lo`, which links correctly because the linker
 # reads members by content, not by filesystem name. `@file` avoids ARG_MAX with
 # ~1200 objects; both llvm-ar and GNU ar expand it.
+#
+# Use `q` (quick append) rather than `r` (replace-or-add). `r` matches incoming
+# files against existing members by basename, and whether that catches the
+# same-basename objects above is archiver-specific; `q` never replaces, so the
+# result is the same under llvm-ar and GNU ar. `s` writes the symbol index, `D`
+# makes it deterministic. The member-count assertion below makes any future
+# collapse a hard build failure rather than a silently smaller archive.
 _ARCHIVE_SCRIPT = r"""
 set -e -o pipefail
 
@@ -123,7 +127,16 @@ if [ ! -s "$PARAMS" ]; then
     exit 1
 fi
 
-"$AR" Drcs "$OUT" "@$PARAMS"
+rm -f "$OUT"
+"$AR" Dqs "$OUT" "@$PARAMS"
+
+expected="$(grep -c . "$PARAMS")"
+actual="$("$AR" t "$OUT" | wc -l)"
+if [ "$expected" != "$actual" ]; then
+    echo "ERROR: libwee8.a has ${actual} members but ${expected} objects were supplied" >&2
+    echo "ERROR: the archiver dropped same-basename objects" >&2
+    exit 1
+fi
 """
 
 def _wee8_fat_archive_impl(ctx):
@@ -189,6 +202,7 @@ def _wee8_fat_archive_impl(ctx):
     )
 
     params = ctx.actions.declare_file("%s/libwee8.objects.params" % ctx.label.name)
+
     # Trailing newline: llvm-ar and GNU ar both tolerate its absence, but it is
     # free insurance against an archiver that expects newline-terminated entries.
     ctx.actions.write(params, "\n".join([o.path for o in objects]) + "\n")

@@ -4,7 +4,7 @@ load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
 load("//autoconf:checks.bzl", "checks")
 
 autoconf(
-    name = "strndup",
+    name = "gl_FUNC_STRNDUP",
     checks = [
         # gl_FUNC_STRNDUP checks for strndup function
         checks.AC_CHECK_FUNC(
@@ -17,14 +17,37 @@ autoconf(
             define = "HAVE_DECL_STRNDUP",
             includes = ["#include <string.h>"],
         ),
+
+        # if test $ac_cv_have_decl_strndup = no; then
+        #   HAVE_DECL_STRNDUP=0
+        # fi
+        # Overrides the gl_STRING_H_DEFAULTS value of 1 (e.g. MSVC has no strndup).
+        checks.AC_SUBST(
+            "HAVE_DECL_STRNDUP",
+            condition = "ac_cv_have_decl_strndup",
+            if_false = 0,
+            if_true = 1,
+        ),
+
+        # gl_cv_func_strndup_works is an AC_RUN_IFELSE probe that only fails on
+        # AIX; everywhere else REPLACE_STRNDUP keeps its default of 0.
+    ],
+    default_deps = [
+        "//gnulib/m4/string_h:defaults",  # AC_REQUIRE: gl_STRING_H_DEFAULTS
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//gnulib/m4/extensions",  # AC_REQUIRE([AC_USE_SYSTEM_EXTENSIONS])
         "//autoconf/macros/AC_CANONICAL_HOST",  # AC_REQUIRE([AC_CANONICAL_HOST])
-        "//gnulib/m4/string_h",  # AC_REQUIRE([gl_STRING_H_DEFAULTS])
-        "//gnulib/m4/wchar_h:gl_WCHAR_H_CORE",
         # For test compatibility - need basic header defines
         "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+autoconf(
+    name = "strndup",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_STRNDUP",
     ],
 )

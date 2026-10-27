@@ -88,12 +88,11 @@ autoconf(
         "@platforms//os:macos": [
 
             # macOS posix_spawn is buggy (gl_POSIX_SPAWN_WORKS / gl_POSIX_SPAWN_SECURE
-            # fail at runtime); always use gnulib replacement.
-            checks.AC_DEFINE(
-                "REPLACE_POSIX_SPAWN",
-                1,
-                subst = True,
-            ),
+            # fail at runtime); always use gnulib replacement.  The define and the subst
+            # are separate checks, as in the other arms, so `ac_cv_subst_REPLACE_POSIX_SPAWN`
+            # (what a gnulib.mk condition over REPLACE_POSIX_SPAWN resolves to) exists here too.
+            checks.AC_DEFINE("REPLACE_POSIX_SPAWN", 1),
+            checks.AC_SUBST("REPLACE_POSIX_SPAWN", 1),
         ],
         "@platforms//os:windows": [
             # UCRT has spawn.h but no POSIX spawn API or POSIX_SPAWN_* constants.
@@ -144,6 +143,9 @@ int main(void) { return 0; }
 """,
         ),
     ],
+    default_deps = [
+        "//gnulib/m4/spawn_h:defaults",  # AC_REQUIRE: gl_SPAWN_H_DEFAULTS
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":gl_HAVE_DECL_POSIX_SPAWN",
@@ -161,6 +163,9 @@ int main(void) { return 0; }
 autoconf(
     name = "gl_POSIX_SPAWN",
     checks = [],
+    default_deps = [
+        "//gnulib/m4/spawn_h:defaults",  # through a macro it invokes: gl_SPAWN_H_DEFAULTS
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":gl_POSIX_SPAWN_BODY",
@@ -185,6 +190,9 @@ autoconf(
             ),
         ],
     }),
+    default_deps = [
+        "//gnulib/m4/spawn_h:defaults",  # AC_REQUIRE: gl_SPAWN_H_DEFAULTS
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":gl_POSIX_SPAWN",
@@ -205,6 +213,9 @@ autoconf(
             ),
         ],
     }),
+    default_deps = [
+        "//gnulib/m4/spawn_h:defaults",  # AC_REQUIRE: gl_SPAWN_H_DEFAULTS
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":gl_POSIX_SPAWN",
@@ -225,6 +236,9 @@ autoconf(
             ),
         ],
     }),
+    default_deps = [
+        "//gnulib/m4/spawn_h:defaults",  # AC_REQUIRE: gl_SPAWN_H_DEFAULTS
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":gl_POSIX_SPAWN",

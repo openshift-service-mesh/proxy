@@ -44,6 +44,7 @@ common --override_repository=emsdk+=%workspace%/ossm/vendor/emsdk+
 common --override_repository=envoy++envoy_repo_extension+envoy_repo=%workspace%/ossm/vendor/envoy++envoy_repo_extension+envoy_repo
 common --override_repository=envoy_toolshed++git_prebuilt_extension+git_toolchains=%workspace%/ossm/vendor/envoy_toolshed++git_prebuilt_extension+git_toolchains
 common --override_repository=envoy_toolshed++sq_prebuilt_extension+sq_toolchains=%workspace%/ossm/vendor/envoy_toolshed++sq_prebuilt_extension+sq_toolchains
+common --override_repository=envoy_toolshed++sysroot_extension+libstdcxx_sysroot_linux_amd64=%workspace%/ossm/vendor/envoy_toolshed++sysroot_extension+libstdcxx_sysroot_linux_amd64
 common --override_repository=envoy_toolshed+=%workspace%/ossm/vendor/envoy_toolshed+
 common --override_repository=envoy_toolshed_jq+=%workspace%/ossm/vendor/envoy_toolshed_jq+
 common --override_repository=fast_float+=%workspace%/ossm/vendor/fast_float+

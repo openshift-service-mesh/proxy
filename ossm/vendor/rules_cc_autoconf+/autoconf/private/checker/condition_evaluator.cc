@@ -197,9 +197,58 @@ const CheckResult* find_result(
     return nullptr;
 }
 
+// A string result is stored JSON-encoded (`"present"`, quotes included) so
+// that the header generator can tell `1` from `"1"`; a condition such as
+// `bash_cv_signal_vintage==posix` compares the string itself.
+std::string decode_json_string(const std::string& value) {
+    if (value.size() < 2 || value.front() != '"' || value.back() != '"') {
+        return value;
+    }
+    std::string out;
+    out.reserve(value.size() - 2);
+    for (size_t i = 1; i + 1 < value.size(); ++i) {
+        char c = value[i];
+        if (c == '\\' && i + 2 < value.size()) {
+            char next = value[++i];
+            switch (next) {
+                case 'n':
+                    out += '\n';
+                    break;
+                case 't':
+                    out += '\t';
+                    break;
+                case 'r':
+                    out += '\r';
+                    break;
+                case 'b':
+                    out += '\b';
+                    break;
+                case 'f':
+                    out += '\f';
+                    break;
+                default:
+                    out += next;
+                    break;  // \" \\ \/ (and \uXXXX stays as written)
+            }
+            continue;
+        }
+        out += c;
+    }
+    return out;
+}
+
 std::string result_value(const CheckResult* r) {
     if (!r) return "";
-    return r->value.value_or("");
+    return decode_json_string(r->value.value_or(""));
+}
+
+// The text a comparison sees. A define with no value is `/* #undef X */` in
+// config.h, which the preprocessor compares as 0 (`#if X == 0` holds), so
+// `X==0` and `!X` agree on an absent define. Substs always carry a value, and
+// an explicitly empty one ("") keeps shell semantics (`test "$X" = 0` fails).
+std::string comparison_value(const CheckResult* r) {
+    if (r && r->is_define && !r->value.has_value()) return "0";
+    return result_value(r);
 }
 
 bool compare_values(const std::string& actual, CmpOp op,
@@ -231,11 +280,18 @@ bool compare_values(const std::string& actual, CmpOp op,
     return false;
 }
 
+// A bare variable as a condition.  Empty and "0" are false as in the shell
+// and the preprocessor; so is the literal "false", which is what gnulib's
+// GL_GENERATE_*_H variables (and the shell's `true`/`false` idiom) carry.
+// The value is the decoded string: a subst arrives JSON-encoded.  A
+// search_libs result is the library flag, empty when the function is in libc
+// (autoconf's "none required"): its success is the search's outcome.
 bool is_truthy(const CheckResult* r) {
     if (!r) return false;
     if (!r->success) return false;
-    const std::string& v = r->value.value_or("");
-    return !v.empty() && v != "0";
+    if (r->type == CheckType::kSearchLibs) return true;
+    const std::string v = result_value(r);
+    return !v.empty() && v != "0" && v != "false";
 }
 
 }  // namespace
@@ -246,7 +302,8 @@ bool eval_cond(const Cond& c,
         case Cond::Var: {
             const CheckResult* r = find_result(c.name, results);
             if (!c.cmp_value.empty()) {
-                return compare_values(result_value(r), c.cmp_op, c.cmp_value);
+                return compare_values(comparison_value(r), c.cmp_op,
+                                      c.cmp_value);
             }
             return is_truthy(r);
         }

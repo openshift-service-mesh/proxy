@@ -16,6 +16,7 @@ Run from the repo root:
     python3 toolchains/prebuilt_toolchains.py
 """
 
+import base64
 import hashlib
 import json
 import os
@@ -102,6 +103,13 @@ CMAKE_TARGETS = {
             "@platforms//os:macos",
         ],
     },
+    "windows-arm64": {
+        "os_arch": ("windows", "aarch64"),
+        "constraints": [
+            "@platforms//cpu:aarch64",
+            "@platforms//os:windows",
+        ],
+    },
     "windows-i386": {
         "os_arch": ("windows", "x86_32"),
         "constraints": [
@@ -132,12 +140,13 @@ CMAKE_TARGETS = {
     },
 }
 
-# --- Ninja (prebuilt binaries only) -----------------------------------------
+# --- Ninja -----------------------------------------------------------------
 #
-# Minor series to support; the latest patch within each is auto-discovered.
-# Only the prebuilt binaries are generated here: source-mode ninja comes from
-# its Bazel Central Registry module (//toolchains/private:bcr_modules.bzl), so
-# there is no source table to keep in step with this one.
+# Minor series to support; the latest patch within each is auto-discovered and
+# used for BOTH the prebuilt binary and the from-source build (see
+# NINJA_SRC_PATCHES), so the two modes always accept the same versions. Capped
+# at 1.10 because that is the oldest series rules_foreign_cc ships a source
+# build for.
 NINJA_MINORS = (
     "1.13",
     "1.12",
@@ -151,6 +160,22 @@ NINJA_RELEASES_URL = (
 NINJA_URL_TEMPLATE = (
     "https://github.com/ninja-build/ninja/releases/download/v{full}/ninja-{target}.zip"
 )
+# Source-mode archive (bazel mirror first, upstream github fallback); the
+# sha256 is hashed at generation time. A version with no mirror copy yet
+# 404s past the mirror to github, at both hash time and build time.
+NINJA_SRC_URL_TEMPLATE = (
+    "https://mirror.bazel.build/github.com/ninja-build/ninja/archive/v{version}.tar.gz"
+)
+NINJA_SRC_URL_FALLBACK = (
+    "https://github.com/ninja-build/ninja/archive/v{version}.tar.gz"
+)
+# Per-version source patch overrides. The source version SET is derived from
+# NINJA_MINORS (same exact patches as the binaries); this map only attaches
+# patch labels to specific versions. Ninja needs none today, so it's empty --
+# add an entry keyed by exact version (e.g. "1.13.2": [label]) if a future
+# version needs one.
+NINJA_SRC_PATCHES = {}
+
 NINJA_TARGETS = {
     "linux": {
         "os_arch": ("linux", "x86_64"),
@@ -187,10 +212,29 @@ NINJA_TARGETS = {
             "@platforms//os:windows",
         ],
     },
+    "winarm64": {
+        "os_arch": ("windows", "aarch64"),
+        "constraints": [
+            "@platforms//cpu:aarch64",
+            "@platforms//os:windows",
+        ],
+    },
 }
 
-# make is deliberately absent: it is built from its Bazel Central Registry
-# module, not an archive rfcc hashes. See //toolchains/private:bcr_modules.bzl.
+# --- Make (source-only) ----------------------------------------------------
+#
+# {version: [patch labels]}. The sha256 is hashed at generation time. make's
+# reproducible-bootstrap patch targets per-version bootstrap files, so each
+# version names its own; a version with no divergence can use [].
+MAKE_URL_TEMPLATE = (
+    "https://mirror.bazel.build/ftpmirror.gnu.org/gnu/make/make-{version}.tar.gz"
+)
+MAKE_URL_FALLBACK = "http://ftpmirror.gnu.org/gnu/make/make-{version}.tar.gz"
+MAKE_VERSIONS = {
+    "4.4.1": ["//toolchains/patches:make-4.4.1-reproducible-bootstrap.patch"],
+    "4.4": ["//toolchains/patches:make-4.4-reproducible-bootstrap.patch"],
+    "4.3": ["//toolchains/patches:make-4.3-reproducible-bootstrap.patch"],
+}
 
 # --- Meson (source-only) ---------------------------------------------------
 #
@@ -198,14 +242,27 @@ NINJA_TARGETS = {
 MESON_URL_TEMPLATE = "https://mirror.bazel.build/github.com/mesonbuild/meson/releases/download/{version}/meson-{version}.tar.gz"
 MESON_URL_FALLBACK = "https://github.com/mesonbuild/meson/releases/download/{version}/meson-{version}.tar.gz"
 MESON_VERSIONS = {
+    "1.12.1": [],
     "1.10.1": [],
     "1.5.1": [],
     "1.1.1": [],
     "0.63.0": [],
 }
 
-# pkg-config is deliberately absent, for the same reason make is -- it comes
-# from the `pkgconf` registry module.
+# --- pkg-config (source-only) ----------------------------------------------
+#
+# {version: [patch labels]}. The sha256 is hashed at generation time.
+PKGCONFIG_URL_TEMPLATE = "https://mirror.bazel.build/pkgconfig.freedesktop.org/releases/pkg-config-{version}.tar.gz"
+PKGCONFIG_URL_FALLBACK = (
+    "https://pkgconfig.freedesktop.org/releases/pkg-config-{version}.tar.gz"
+)
+PKGCONFIG_VERSIONS = {
+    "0.29.2": [
+        "//toolchains/patches:pkgconfig-detectenv.patch",
+        "//toolchains/patches:pkgconfig-makefile-vc.patch",
+        "//toolchains/patches:pkgconfig-builtin-glib-int-conversion.patch",
+    ],
+}
 
 # ===========================================================================
 # MACHINERY
@@ -282,6 +339,11 @@ def _sha256_of(url):
             )
         h.update(data)
     return h.hexdigest()
+
+
+def _integrity_of(sha256_hex):
+    """Return the `sha256-<base64>` integrity spelling of a hex sha256."""
+    return "sha256-" + base64.b64encode(bytes.fromhex(sha256_hex)).decode("ascii")
 
 
 def _sha256_of_first(urls):
@@ -402,7 +464,7 @@ def hashed_source_versions(tool, versions, url_template, fallback_template):
         _log("hashing {} {}".format(tool, version))
         out[version] = {
             "urls": urls,
-            "sha256": _sha256_of_first(urls),
+            "integrity": _integrity_of(_sha256_of_first(urls)),
             "patches": list(patches),
         }
     return out
@@ -618,7 +680,7 @@ def get_cmake_definitions():
                         # directory name; render_source_dict would otherwise
                         # derive "cmake-3.19.x" from the alias key.
                         "strip_prefix": "cmake-{}.{}.{}".format(major, minor, patch),
-                        "sha256": sha256,
+                        "integrity": _integrity_of(sha256),
                         "patches": [],
                     }
                     src_versions["{}.{}.{}".format(major, minor, patch)] = entry
@@ -643,8 +705,7 @@ def get_cmake_definitions():
             per_plat[os_arch] = {
                 "urls": [CMAKE_URL_TEMPLATE.format(full=version, file=file)],
                 "strip_prefix": prefix,
-                "sha256": sha256,
-                "integrity": "",
+                "integrity": _integrity_of(sha256),
                 "constraints": list(target_meta["constraints"]),
                 "bin": bin_name,
             }
@@ -674,12 +735,22 @@ def get_ninja_definitions(latest_by_minor):
             "1.11.1",
         ]
         supports_mac_universal = version not in ["1.10.0", "1.10.1"]
+        # ninja-winarm64.zip is first published with 1.12.0.
+        supports_win_arm64 = version not in [
+            "1.10.0",
+            "1.10.1",
+            "1.10.2",
+            "1.11.0",
+            "1.11.1",
+        ]
         per_plat = {}
 
         for target, target_meta in NINJA_TARGETS.items():
             if not supports_linux_aarch64 and target == "linux-aarch64":
                 continue
             if not supports_mac_universal and target == "mac_aarch64":
+                continue
+            if not supports_win_arm64 and target == "winarm64":
                 continue
 
             url = NINJA_URL_TEMPLATE.format(
@@ -697,8 +768,7 @@ def get_ninja_definitions(latest_by_minor):
             per_plat[os_arch] = {
                 "urls": [url],
                 "strip_prefix": "",
-                "sha256": sha256,
-                "integrity": "",
+                "integrity": _integrity_of(sha256),
                 "constraints": list(target_meta["constraints"]),
                 "bin": "ninja.exe" if "win" in target else "ninja",
             }
@@ -730,7 +800,13 @@ def main():
 
     cmake_bin, cmake_src = get_cmake_definitions()
 
-    ninja_bin = get_ninja_definitions(latest_ninja_patches(NINJA_MINORS))
+    # Resolve the ninja patch set once; both modes ship the same versions.
+    ninja_latest = latest_ninja_patches(NINJA_MINORS)
+    ninja_bin = get_ninja_definitions(ninja_latest)
+    ninja_src_versions = {
+        version: list(NINJA_SRC_PATCHES.get(version, []))
+        for version in ninja_latest.values()
+    }
 
     # --- per-tool version dicts under toolchains/private/ ---
     cmake_versions_text = (
@@ -754,8 +830,44 @@ def main():
         + render_binary_dict("NINJA_BIN_SRCS", ninja_bin)
         + "\n"
         + render_wildcard_map("NINJA_BIN_WILDCARDS", ninja_bin)
+        + "\n"
+        + render_source_dict(
+            varname="NINJA_SRC_SRCS",
+            url_template="",  # explicit `urls` override per entry
+            fallback_template=None,
+            versions=add_source_wildcards(
+                hashed_source_versions(
+                    "ninja",
+                    ninja_src_versions,
+                    NINJA_SRC_URL_TEMPLATE,
+                    NINJA_SRC_URL_FALLBACK,
+                ),
+                "",
+                None,
+                "ninja-{version}",
+            ),
+            prefix_template="ninja-{version}",
+        )
     )
     _write(private_dir / "ninja_versions.bzl", ninja_versions_text)
+
+    _write(
+        private_dir / "make_versions.bzl",
+        emit_source_dict(
+            varname="GNUMAKE_SRCS",
+            url_template="",  # explicit `urls` override per entry
+            fallback_template=None,
+            versions=add_source_wildcards(
+                hashed_source_versions(
+                    "make", MAKE_VERSIONS, MAKE_URL_TEMPLATE, MAKE_URL_FALLBACK
+                ),
+                "",
+                None,
+                "make-{version}",
+            ),
+            prefix_template="make-{version}",
+        ),
+    )
 
     _write(
         private_dir / "meson_versions.bzl",
@@ -772,6 +884,27 @@ def main():
                 "meson-{version}",
             ),
             prefix_template="meson-{version}",
+        ),
+    )
+
+    _write(
+        private_dir / "pkgconfig_versions.bzl",
+        emit_source_dict(
+            varname="PKGCONFIG_SRCS",
+            url_template="",  # explicit `urls` override per entry
+            fallback_template=None,
+            versions=add_source_wildcards(
+                hashed_source_versions(
+                    "pkgconfig",
+                    PKGCONFIG_VERSIONS,
+                    PKGCONFIG_URL_TEMPLATE,
+                    PKGCONFIG_URL_FALLBACK,
+                ),
+                "",
+                None,
+                "pkg-config-{version}",
+            ),
+            prefix_template="pkg-config-{version}",
         ),
     )
 

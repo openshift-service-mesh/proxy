@@ -7,34 +7,63 @@ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 # buildifier: disable=bzl-visibility
 load(
     "//autoconf/private:autoconf_config.bzl",
+    "collect_defaults",
     "collect_deps",
     "collect_transitive_results",
+    "merge_defaults",
+    "merge_results",
 )
 
 # buildifier: disable=bzl-visibility
 load("//autoconf/private:condition_utils.bzl", "extract_condition_vars")
 
 # buildifier: disable=bzl-visibility
-load("//autoconf/private:providers.bzl", "CcAutoconfInfo")
+load("//autoconf/private:providers.bzl", "CcAutoconfDefaultsInfo", "CcAutoconfInfo")
 load("//gnulib/private:result_lookup.bzl", "find_result_file")
 
-def _slot_name(hdr_file, ctx):
-    if not ctx.attr.preserve_paths:
-        return hdr_file.basename
+def _package_relative(hdr_file, ctx):
+    """The header's path relative to this rule's package, or None when it is in another package.
 
-    pkg = ctx.label.package
+    `short_path` of a file in an external repository is `../<repo>/<path>`;
+    the root package is the empty string.
+    """
     short = hdr_file.short_path
-    if pkg and short.startswith(pkg + "/"):
+    if short.startswith("../"):
+        short = short.split("/", 2)[2]
+    pkg = ctx.label.package
+    if not pkg:
+        return short
+    if short.startswith(pkg + "/"):
         return short[len(pkg) + 1:]
+    return None
+
+def _slot_name(hdr_file, ctx):
+    """Where a header lands in the TreeArtifact: what consumers `#include`."""
+    prefix = ctx.attr.strip_include_prefix.strip("/")
+    if prefix:
+        relative = _package_relative(hdr_file, ctx)
+        if relative == None or not relative.startswith(prefix + "/"):
+            fail("`{}` in hdrs of `{}` is not under strip_include_prefix `{}/` of its package".format(
+                hdr_file.short_path,
+                ctx.label,
+                prefix,
+            ))
+        return relative[len(prefix) + 1:]
+    if ctx.attr.preserve_paths:
+        relative = _package_relative(hdr_file, ctx)
+        return relative if relative != None else hdr_file.basename
     return hdr_file.basename
 
 def _cc_gnulib_conditional_hdrs_impl(ctx):
+    if ctx.attr.strip_include_prefix and ctx.attr.preserve_paths:
+        fail("`{}`: strip_include_prefix and preserve_paths are mutually exclusive".format(ctx.label))
     deps = collect_deps(ctx.attr.deps)
     dep_results = collect_transitive_results(deps.to_list())
 
-    all_cache = dep_results["cache"]
-    all_define = dep_results["define"]
-    all_subst = dep_results["subst"]
+    merged = merge_results(dep_results, merge_defaults(collect_defaults(ctx.attr.default_deps, deps.to_list()).to_list()))
+    all_cache = merged.cache
+    all_define = merged.define
+    all_subst = merged.subst
 
     tree_name = ctx.attr.out
     if not tree_name:
@@ -93,6 +122,7 @@ def _cc_gnulib_conditional_hdrs_impl(ctx):
         inputs.append(hdr_file)
 
     ctx.actions.run(
+        toolchain = None,
         executable = ctx.executable._runner,
         arguments = [args],
         inputs = inputs,
@@ -152,12 +182,25 @@ cc_library(
 )
 ```
 
-Unlike the deprecated ``gnulib_conditional_hdr``, this rule does not need
-``INCLUDE_NEXT`` / ``NEXT_*_H``: the falsy branch emits no file (true to
-upstream's ``rm -f $@``), and any ``#include_next`` chain a ``.in.h``
-template needs is baked into the header by the upstream ``autoconf_hdr``
-substitution.  As a side effect, this rule has no MSVC ``#include_next``
-gap — it never emits ``#include_next`` directly.
+The falsy branch emits no file, true to upstream's ``rm -f $@``: any
+``#include_next`` chain a ``.in.h`` template needs is baked into the header
+by the upstream ``autoconf_hdr`` substitution, so this rule never emits
+``#include_next`` itself and has no MSVC gap.
+
+Headers in subdirectories (``selinux/context.h``) are gated through
+``strip_include_prefix``: declare them under one directory and strip it, as
+``cc_library`` does.
+
+```python
+cc_gnulib_conditional_hdrs(
+    name = "gnu_replacements",
+    hdrs = {
+        ":_gnulib_cond/selinux/context.h": "GL_GENERATE_SELINUX_CONTEXT_H",
+    },
+    strip_include_prefix = "_gnulib_cond",
+    deps = [":autoconf"],
+)
+```
 
 Limitations:
 
@@ -167,23 +210,29 @@ Limitations:
   - *TreeArtifact semantics.* Bazel cannot statically know which slot
     names will be present (truthy is a configure-time decision).  This
     is intentional and matches upstream behavior.
-  - *Preserve-mode shadowing on non-sandboxed builds (Windows).* With
-    ``preserve_paths = True``, the TreeArtifact contents path matches
-    the upstream ``autoconf_hdr`` ``out`` path verbatim.  On sandboxed
-    builds the intermediate is not an input to the consumer and so is
-    invisible.  On non-sandboxed builds the intermediate is physically
-    present in ``bazel-bin``; if another rule in the consumer's graph
-    exposes ``bazel-bin/<pkg>/`` to ``-I`` (e.g.
-    ``cc_library(includes = ["."])``), an ``#include`` may resolve to
-    the un-gated intermediate instead of the rule's gated copy.
-    Mitigations: pick an ``autoconf_hdr`` ``out`` path whose top-level
-    segment differs from what consumers ``#include`` (e.g.
-    ``_processed/_gnulib/foo.h``), or stay on the ``preserve_paths =
-    False`` default, which is collision-immune by construction (the
-    intermediate's path and the TreeArtifact contents path never
-    coincide).
+  - *``preserve_paths`` shadowing on non-sandboxed builds (Windows).* With
+    the deprecated ``preserve_paths = True`` the TreeArtifact contents path
+    equals the upstream ``autoconf_hdr`` ``out`` path verbatim, and on a
+    non-sandboxed build a ``cc_library(includes = ["."])`` elsewhere in the
+    graph may resolve an ``#include`` to the un-gated intermediate.
+    ``strip_include_prefix`` is immune: the stripped directory never
+    coincides with the slot.
 """,
     attrs = {
+        "default_deps": attr.label_list(
+            doc = """\
+`autoconf_defaults` targets whose values stand where no result of the name comes through `deps`
+(a result overrides a default silently; two defaults of one name must agree).  The defaults the
+`deps` carry are read as well.
+""",
+            providers = [CcAutoconfDefaultsInfo],
+        ),
+        "defaults": attr.bool(
+            doc = """\
+Deprecated and ignored: defaults come through `deps` and `default_deps`; the autoconf toolchain
+no longer carries any.  Accepted so existing BUILD files keep loading.""",
+            default = False,
+        ),
         "deps": attr.label_list(
             doc = """\
 Autoconf targets providing check results.  The condition expressions in
@@ -208,14 +257,20 @@ and consumer ``#include``s fall through the include search path.""",
         ),
         "preserve_paths": attr.bool(
             doc = """\
-If ``False`` (default), each header is placed at ``basename(hdr)`` inside
-the TreeArtifact, matching gnulib's ``rm -f $@`` semantics: consumers
-``#include <foo.h>`` and fall through to the system header on the falsy
-branch.  If ``True``, each header is placed at its path relative to the
-rule's package (e.g. ``_gnulib/foo.h``); consumers then
-``#include <_gnulib/foo.h>``.  Headers from other packages always use
-basename.""",
+Deprecated: use ``strip_include_prefix``.  If ``True``, each header is placed
+at its path relative to the rule's package (``_gnulib/foo.h``), so consumers
+``#include <_gnulib/foo.h>``; headers from other packages use their basename.
+Mutually exclusive with ``strip_include_prefix``.""",
             default = False,
+        ),
+        "strip_include_prefix": attr.string(
+            doc = """\
+A directory of this package to strip from each header's package-relative
+path to get its slot, as ``cc_library`` does: with ``_gnulib_cond`` the
+header ``_gnulib_cond/selinux/context.h`` is included as
+``<selinux/context.h>``.  Every header in ``hdrs`` must be under it.  Unset,
+each header is placed at its basename.""",
+            default = "",
         ),
         "_runner": attr.label(
             cfg = "exec",
