@@ -1,0 +1,39 @@
+diff --git a/compile/llvm_minimal.bzl b/compile/llvm_minimal.bzl
+index cf647fe..ca4e16b 100644
+--- a/compile/llvm_minimal.bzl
++++ b/compile/llvm_minimal.bzl
+@@ -374,19 +374,21 @@ cc_library(
+ LLVM_MINIMAL_LLVM_REPO_BUILD = render_llvm_repo_build(_llvm_version_major(LLVM_VERSION))
+ 
+ def _llvm_minimal_repo_impl(ctx):
+-    """Downloads and extracts a released minimal LLVM artifact."""
+-    if ctx.attr.sha256:
+-        ctx.download_and_extract(
+-            url = ctx.attr.url,
+-            sha256 = ctx.attr.sha256,
+-            stripPrefix = ctx.attr.strip_prefix,
+-        )
+-    else:
+-        # Placeholder state before first release: create an empty repo so callers
+-        # that do not reference it are not broken.
+-        result = ctx.execute(["mkdir", "-p", "bin", "include", "lib", "share/clang"])
+-        if result.return_code:
+-            fail("Failed to create placeholder llvm_minimal repo directories: " + result.stderr)
++    """Create an empty placeholder minimal LLVM repo (no download)."""
++    # OSSM: OSSM builds use the host LLVM (@llvm_host for the compile toolchain and
++    # @llvm_toolchain_llvm for the openssl prefixer, both rooted at /usr), never
++    # this hermetic minimal LLVM. Envoy still registers toolchains_llvm's
++    # @llvm_toolchain hub (toolchain_root = @llvm_minimal_*), which materializes
++    # this repo, but @llvm_host outranks it (--extra_toolchains in ossm/bazelrc) so
++    # nothing is ever compiled with it. Downloading the released artifact would
++    # therefore be pure waste -- and it breaks offline/air-gapped builds and is too
++    # large to commit to ossm/vendor. Always create the empty placeholder instead,
++    # the same state envoy_toolshed shipped before the minimal artifact was first
++    # released (sha256 unset), which OSSM offline builds already relied on. The
++    # url/sha256/strip_prefix attrs are consequently unused.
++    result = ctx.execute(["mkdir", "-p", "bin", "include", "lib", "share/clang"])
++    if result.return_code:
++        fail("Failed to create placeholder llvm_minimal repo directories: " + result.stderr)
+     ctx.file("BUILD.bazel", LLVM_MINIMAL_LLVM_REPO_BUILD)
+     write_llvm_bzl(ctx, LLVM_VERSION, "lib", False)
+ 

@@ -4,6 +4,8 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
 licenses(["notice"])
 
 package(default_visibility = ["//visibility:public"])

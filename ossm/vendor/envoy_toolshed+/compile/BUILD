@@ -17,17 +17,28 @@ exports_files([
     "libcxx_darwin.bzl",
     "llvm_minimal.bzl",
     "extensions.bzl",
+    "llvm_runtimes.bzl",
+    "unwind_libs.bzl",
 ])
 
 bzl_library(
     name = "compile_extensions_bzl",
     srcs = ["extensions.bzl"],
     visibility = ["//visibility:public"],
-    deps = ["//private:extension_utils_bzl"],
+    deps = [
+        "//compile:llvm_minimal_bzl",
+        "//private:extension_utils_bzl",
+    ],
 )
 
-# Build setting to control which toolchain to use
-# This can be set with --//compile:use_gcc_toolchain=true
+bzl_library(
+    name = "llvm_minimal_bzl",
+    srcs = ["llvm_minimal.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+# Toolshed-internal build setting to select its GCC toolchain/platform.
+# Consumers using their own GCC toolchain should not need to set this.
 bool_flag(
     name = "use_gcc_toolchain",
     build_setting_default = False,
@@ -35,7 +46,7 @@ bool_flag(
 
 config_setting(
     name = "gcc_build",
-    flag_values = {":use_gcc_toolchain": "true"},
+    flag_values = {"@bazel_tools//tools/cpp:compiler": "gcc"},
 )
 
 config_setting(
@@ -58,6 +69,17 @@ config_setting(
     ]
 ]
 
+[
+    alias(
+        name = name,
+        actual = "//compile/unwind:%s" % name,
+    )
+    for name in [
+        "libunwind_shared",
+        "unwind_libs_files",
+    ]
+]
+
 # Sanitizer tarballs are packaged here (rather than in //compile/sanitizer) so
 # they keep their stable bazel-bin/compile/ paths for release CI.
 pkg_tar(
@@ -77,6 +99,18 @@ pkg_tar(
     srcs = ["//compile/sanitizer:tsan_libs_files"],
     extension = "tar.xz",
     package_file_name = "tsan-llvm%s-x86_64.tar.xz" % VERSIONS["llvm"],
+    target_compatible_with = select({
+        ":gcc_build": ["@platforms//:incompatible"],
+        ":macos_build": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+pkg_tar(
+    name = "cxx_unwind",
+    srcs = ["//compile/unwind:unwind_libs_files"],
+    extension = "tar.xz",
+    package_file_name = "unwind-llvm%s-x86_64.tar.xz" % VERSIONS["llvm"],
     target_compatible_with = select({
         ":gcc_build": ["@platforms//:incompatible"],
         ":macos_build": ["@platforms//:incompatible"],

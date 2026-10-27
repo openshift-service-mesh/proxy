@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from tools.private.release.git import Git
+from dev.release.git import Git
 
 pytest_plugins = ["tests.tools.private.release.release_test_helper"]
 
@@ -10,7 +10,7 @@ pytest_plugins = ["tests.tools.private.release.release_test_helper"]
 @pytest.fixture(name="git_obj")
 def fixture_git_obj(mocker):
     git = Git(".")
-    git.mock_run_git = mocker.patch.object(git, "_run_git")
+    git.mock_run_git = mocker.patch.object(git, "_run_git")  # pyrefly: ignore[missing-attribute]
     return git
 
 
@@ -23,7 +23,7 @@ def test_checkout_simple(git_obj):
 
 def test_checkout_track_remote_new_branch(mocker, git_obj):
     mock_branch_exists = mocker.patch(
-        "tools.private.release.git.Git.branch_exists", return_value=False
+        "dev.release.git.Git.branch_exists", return_value=False
     )
 
     git_obj.checkout("my-branch", track_remote="origin")
@@ -36,9 +36,9 @@ def test_checkout_track_remote_new_branch(mocker, git_obj):
 
 def test_checkout_track_remote_existing_branch(mocker, git_obj):
     mock_branch_exists = mocker.patch(
-        "tools.private.release.git.Git.branch_exists", return_value=True
+        "dev.release.git.Git.branch_exists", return_value=True
     )
-    mock_reset_hard = mocker.patch("tools.private.release.git.Git.reset_hard")
+    mock_reset_hard = mocker.patch("dev.release.git.Git.reset_hard")
 
     git_obj.checkout("my-branch", track_remote="origin")
 

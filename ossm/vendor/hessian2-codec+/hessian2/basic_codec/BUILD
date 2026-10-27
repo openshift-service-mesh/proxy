@@ -1,3 +1,4 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//:copts.bzl", "DEFAULT_COPTS", "TEST_COPTS")
 
 package(default_visibility = ["//visibility:public"])

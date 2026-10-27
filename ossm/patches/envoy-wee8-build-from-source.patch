@@ -1,0 +1,30 @@
+diff --git a/bazel/BUILD b/bazel/BUILD
+index c3ecfe5..772667e 100644
+--- a/bazel/BUILD
++++ b/bazel/BUILD
+@@ -651,16 +651,17 @@ label_flag(
+     visibility = ["//visibility:public"],
+ )
+ 
+-# wee8 engine: envoy_toolshed prebuilt by default, source for configs the
+-# prebuilt is incompatible with (gcc libstdc++ ABI; sanitizers need instrumented deps).
++# wee8 engine: build from source for every config.
++# OSSM: upstream defaults the non-sanitizer path to envoy_toolshed's prebuilt
++# @envoy_toolshed//v8:wee8 static lib, but that artifact (libwee8.a) is ~124MB --
++# over GitHub's 100MB file limit, so it cannot be committed to the ossm/vendor
++# snapshot -- and prebuilts only exist for x86_64/aarch64, not the s390x/ppc64le
++# arches OSSM also targets. Build wee8 from source (@proxy-wasm-cpp-host) on all
++# configs instead; the prebuilt repo then drops out of //:envoy's build closure
++# and is never fetched or vendored.
+ alias(
+     name = "wee8_engine",
+-    actual = select({
+-        ":asan_build": "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
+-        ":msan_build": "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
+-        ":tsan_build": "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
+-        "//conditions:default": "@envoy_toolshed//v8:wee8",
+-    }),
++    actual = "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
+     visibility = ["//visibility:public"],
+ )
+ 

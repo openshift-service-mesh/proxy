@@ -1,3 +1,4 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag", "string_list_flag")
 load("//cc:cc_library.bzl", "cc_library")
 load("//cc/toolchains:cc_toolchain.bzl", "cc_toolchain")
@@ -9,6 +10,14 @@ package(default_visibility = [
     "//tests:__subpackages__",
     "//tools/build_defs/cc/tests:__subpackages__",
 ])
+
+bzl_library(
+    name = "features",
+    srcs = ["features.bzl"],
+    deps = [
+        "//cc/common:feature_names_bzl",
+    ],
+)
 
 platform(
     name = "linux_x86_64",
@@ -159,6 +168,14 @@ filegroup(
 
 filegroup(
     name = "compile-k8",
+    srcs = [
+        "toolchain_header.h",
+        ":everything-multilib",
+    ],
+)
+
+filegroup(
+    name = "compile-without-includes-k8",
     srcs = [":everything-multilib"],
 )
 
@@ -353,6 +370,7 @@ cc_toolchain(
     ar_files = "ar-k8",
     as_files = "as-k8",
     compiler_files = "compile-k8",
+    compiler_files_without_includes = "compile-without-includes-k8",
     coverage_files = "coverage-file",
     dwp_files = "dwp-k8",
     licenses = ["unencumbered"],
@@ -372,6 +390,7 @@ cc_toolchain(
     ar_files = "ar-k8",
     as_files = "as-k8",
     compiler_files = "compile-k8",
+    compiler_files_without_includes = "compile-without-includes-k8",
     coverage_files = "coverage-file",
     dwp_files = "dwp-k8",
     licenses = ["unencumbered"],
@@ -452,6 +471,7 @@ cc_toolchain(
     ar_files = "ar-k8",
     as_files = "as-k8",
     compiler_files = "compile-k8",
+    compiler_files_without_includes = "compile-without-includes-k8",
     coverage_files = "coverage-file",
     dwp_files = "dwp-k8",
     licenses = ["unencumbered"],
@@ -500,6 +520,7 @@ cc_toolchain(
     ar_files = "ar-k8",
     as_files = "as-k8",
     compiler_files = "compile-k8",
+    compiler_files_without_includes = "compile-without-includes-k8",
     coverage_files = "coverage-file",
     dwp_files = "dwp-k8",
     licenses = ["unencumbered"],

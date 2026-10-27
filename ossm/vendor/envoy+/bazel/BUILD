@@ -173,40 +173,47 @@ config_setting(
 
 config_setting(
     name = "windows_opt_build",
-    values = {
-        "cpu": "x64_windows",
-        "compilation_mode": "opt",
-    },
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+    values = {"compilation_mode": "opt"},
 )
 
 config_setting(
     name = "windows_dbg_build",
-    values = {
-        "cpu": "x64_windows",
-        "compilation_mode": "dbg",
-    },
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+    values = {"compilation_mode": "dbg"},
 )
 
 config_setting(
     name = "windows_fastbuild_build",
-    values = {
-        "cpu": "x64_windows",
-        "compilation_mode": "fastbuild",
-    },
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+    values = {"compilation_mode": "fastbuild"},
 )
 
 config_setting(
     name = "clang_cl_build",
-    values = {
-        "cpu": "x64_windows",
-        "define": "clang_cl=1",
-    },
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+    values = {"define": "clang_cl=1"},
 )
 
 config_setting(
     name = "clang_cl_opt_build",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
     values = {
-        "cpu": "x64_windows",
         "define": "clang_cl=1",
         "compilation_mode": "opt",
     },
@@ -214,8 +221,11 @@ config_setting(
 
 config_setting(
     name = "clang_cl_dbg_build",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
     values = {
-        "cpu": "x64_windows",
         "define": "clang_cl=1",
         "compilation_mode": "dbg",
     },
@@ -223,8 +233,11 @@ config_setting(
 
 config_setting(
     name = "clang_cl_fastbuild_build",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
     values = {
-        "cpu": "x64_windows",
         "define": "clang_cl=1",
         "compilation_mode": "fastbuild",
     },
@@ -638,17 +651,18 @@ label_flag(
     visibility = ["//visibility:public"],
 )
 
-# wee8 engine: envoy_toolshed prebuilt by default, source for configs the
-# prebuilt is incompatible with (gcc libstdc++ ABI; sanitizers need instrumented deps).
+# wee8 engine: build from source for every config.
+# OSSM: upstream defaults the non-sanitizer path to envoy_toolshed's prebuilt
+# @envoy_toolshed//v8:wee8 static lib, but that artifact (libwee8.a) is ~124MB --
+# over GitHub's 100MB file limit, so it cannot be committed to the ossm/vendor
+# snapshot -- and prebuilts only exist for x86_64/aarch64, not the s390x/ppc64le
+# arches OSSM also targets. Build wee8 from source (@proxy-wasm-cpp-host) on all
+# configs instead; the prebuilt repo then drops out of //:envoy's build closure
+# and is never fetched or vendored.
 alias(
     name = "wee8_engine",
-    actual = select({
-        ":gcc_build": "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
-        ":asan_build": "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
-        ":msan_build": "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
-        ":tsan_build": "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
-        "//conditions:default": "@envoy_toolshed//v8:wee8",
-    }),
+    actual = "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
+    visibility = ["//visibility:public"],
 )
 
 bool_flag(
@@ -796,14 +810,19 @@ config_setting(
 
 config_setting(
     name = "windows_x86_64",
-    values = {"cpu": "x64_windows"},
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
 )
 
 # Configuration settings to make doing selects for Apple vs non-Apple platforms
 # easier. More details: https://docs.bazel.build/versions/master/configurable-attributes.html#config_settingaliasing
 config_setting(
     name = "darwin",
-    values = {"cpu": "darwin"},
+    constraint_values = [
+        "@platforms//os:macos",
+    ],
 )
 
 config_setting(
@@ -824,37 +843,65 @@ config_setting(
 
 config_setting(
     name = "ios_i386",
-    values = {"cpu": "ios_i386"},
+    constraint_values = [
+        "@platforms//cpu:x86_32",
+        "@platforms//os:ios",
+    ],
 )
 
 config_setting(
     name = "ios_x86_64",
-    values = {"cpu": "ios_x86_64"},
+    constraint_values = [
+        "@apple_support//constraints:simulator",
+        "@platforms//cpu:x86_64",
+        "@platforms//os:ios",
+    ],
 )
 
 config_setting(
     name = "ios_armv7",
-    values = {"cpu": "ios_armv7"},
+    constraint_values = [
+        "@apple_support//constraints:device",
+        "@platforms//cpu:armv7",
+        "@platforms//os:ios",
+    ],
 )
 
+# armv7s has no platforms constraint, so this matches the same platforms as `ios_armv7`.
 config_setting(
     name = "ios_armv7s",
-    values = {"cpu": "ios_armv7s"},
+    constraint_values = [
+        "@apple_support//constraints:device",
+        "@platforms//cpu:armv7",
+        "@platforms//os:ios",
+    ],
 )
 
 config_setting(
     name = "ios_arm64",
-    values = {"cpu": "ios_arm64"},
+    constraint_values = [
+        "@apple_support//constraints:device",
+        "@platforms//cpu:arm64",
+        "@platforms//os:ios",
+    ],
 )
 
 config_setting(
     name = "ios_sim_arm64",
-    values = {"cpu": "ios_sim_arm64"},
+    constraint_values = [
+        "@apple_support//constraints:simulator",
+        "@platforms//cpu:arm64",
+        "@platforms//os:ios",
+    ],
 )
 
 config_setting(
     name = "ios_arm64e",
-    values = {"cpu": "ios_arm64e"},
+    constraint_values = [
+        "@apple_support//constraints:device",
+        "@platforms//cpu:arm64e",
+        "@platforms//os:ios",
+    ],
 )
 
 config_setting(

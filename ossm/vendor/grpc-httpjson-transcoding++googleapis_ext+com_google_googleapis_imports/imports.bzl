@@ -1,4 +1,6 @@
 
+load("@com_google_protobuf//bazel:cc_proto_library.bzl", _cc_proto_library = "cc_proto_library")
+
 def proto_library_with_info(**kwargs):
     pass
 
@@ -56,7 +58,7 @@ def go_gapic_library(**kwargs):
 def go_gapic_assembly_pkg(**kwargs):
     pass
 
-cc_proto_library = native.cc_proto_library
+cc_proto_library = _cc_proto_library
 
 def cc_grpc_library(**kwargs):
     pass

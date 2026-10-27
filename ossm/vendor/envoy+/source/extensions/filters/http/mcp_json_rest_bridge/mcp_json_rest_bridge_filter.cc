@@ -914,7 +914,7 @@ bool McpJsonRestBridgePerRouteConfig::hasEndpoint(absl::string_view host,
 }
 
 Http::FilterHeadersStatus
-McpJsonRestBridgeFilter::decodeHeaders(Http::RequestHeaderMap& request_headers, bool) {
+McpJsonRestBridgeFilter::decodeHeaders(Http::RequestHeaderMap& request_headers, bool end_stream) {
   absl::string_view path = request_headers.getPathValue();
   auto query_idx = path.find('?');
   if (query_idx != absl::string_view::npos) {
@@ -959,6 +959,12 @@ McpJsonRestBridgeFilter::decodeHeaders(Http::RequestHeaderMap& request_headers, 
                                    Http::Headers::get().MethodValues.Post);
         },
         "", json::object(), Grpc::Status::WellKnownGrpcStatus::InvalidArgument);
+    return Http::FilterHeadersStatus::StopIteration;
+  }
+
+  if (end_stream) {
+    sendErrorResponse(Http::Code::BadRequest, BridgeStatus::RequestFailedToParseJsonRpc,
+                      generateErrorJsonResponse(-32700, "JSON parse error").dump());
     return Http::FilterHeadersStatus::StopIteration;
   }
 
@@ -1104,9 +1110,10 @@ McpJsonRestBridgeFilter::encodeHeaders(Http::ResponseHeaderMap& response_headers
 
 Http::FilterDataStatus McpJsonRestBridgeFilter::encodeData(Buffer::Instance& data,
                                                            bool end_stream) {
-  // No need to encode the response body for Initialization and InitializationAck. ToolsListLocal
-  // and ServerDiscover are local responses, and the response body is already encoded.
-  if (mcp_operation_ == McpOperation::Unspecified ||
+  // No need to encode the response body for Initialization and InitializationAck. ToolsListLocal,
+  // ServerDiscover, and Undecided (e.g. local replies before body decoding) are local responses,
+  // and the response body is already encoded.
+  if (mcp_operation_ == McpOperation::Unspecified || mcp_operation_ == McpOperation::Undecided ||
       mcp_operation_ == McpOperation::Initialization ||
       mcp_operation_ == McpOperation::InitializationAck ||
       mcp_operation_ == McpOperation::ServerDiscover ||
@@ -1360,6 +1367,31 @@ absl::Status McpJsonRestBridgeFilter::validateMcpProtocolVersionHeader(
   return absl::OkStatus();
 }
 
+bool McpJsonRestBridgeFilter::validateClientCapabilitiesMeta(const nlohmann::json& json_rpc,
+                                                             absl::string_view method) {
+  const nlohmann::json& params = json_rpc[McpConstants::PARAMS_FIELD];
+  const nlohmann::json& meta = params[McpConstants::META_FIELD];
+  const auto client_capabilities = meta.find(McpConstants::MCP_META_CLIENT_CAPABILITIES_FIELD);
+  if (client_capabilities != meta.end() && client_capabilities->is_object()) {
+    return true;
+  }
+
+  const std::string error_message =
+      client_capabilities == meta.end()
+          ? absl::StrCat("Missing required params._meta field: ",
+                         McpConstants::MCP_META_CLIENT_CAPABILITIES_FIELD)
+          : absl::StrCat("Invalid params._meta field: ",
+                         McpConstants::MCP_META_CLIENT_CAPABILITIES_FIELD, " must be an object");
+  ENVOY_STREAM_LOG(debug, "Rejecting stateless MCP request: {}", *decoder_callbacks_,
+                   error_message);
+  sendErrorResponse(
+      Http::Code::BadRequest, BridgeStatus::RequestMcpClientCapabilitiesInvalid,
+      generateErrorJsonResponse(McpConstants::JSONRPC_INVALID_PARAMS_ERROR_CODE, error_message)
+          .dump(),
+      nullptr, method, params);
+  return false;
+}
+
 bool McpJsonRestBridgeFilter::validateMcpMethodHeader(
     const nlohmann::json& json_rpc, absl::string_view method,
     Http::RequestHeaderMapOptRef request_headers) {
@@ -1458,6 +1490,10 @@ void McpJsonRestBridgeFilter::handleMcpMethod(
 
   if (is_stateless_request_ && method == McpConstants::Methods::TOOLS_CALL &&
       !validateMcpNameHeader(json_rpc, method, request_headers)) {
+    return;
+  }
+
+  if (is_stateless_request_ && !validateClientCapabilitiesMeta(json_rpc, method)) {
     return;
   }
 
@@ -1846,7 +1882,9 @@ void McpJsonRestBridgeFilter::sendErrorResponse(
   ENVOY_STREAM_LOG(error, "Sending error response with status: {}", *decoder_callbacks_,
                    bridgeStatusToString(status));
   status_ = status;
-  mcp_operation_ = McpOperation::OperationFailed;
+  if (status != BridgeStatus::HttpRequestMethodNotPost) {
+    mcp_operation_ = McpOperation::OperationFailed;
+  }
   setParsingMetadata(method, params);
 
   decoder_callbacks_->sendLocalReply(response_code, response_body, modify_headers, grpc_status,

@@ -55,6 +55,10 @@ setup_sanitizer_libs()
 
 This will create `@msan_libs` and `@tsan_libs` repositories you can use in your builds.
 
+GCC-specific targets are selected from the compiler reported by the resolved C++ toolchain.
+Consumers registering a GCC `cc_toolchain` get the matching libstdc++ targets automatically;
+they do not need to set toolshed's internal `//compile:use_gcc_toolchain` flag.
+
 ### Using with bzlmod (MODULE.bazel)
 
 In your MODULE.bazel file:
@@ -80,6 +84,69 @@ sanitizer_ext.setup(
 )
 use_repo(sanitizer_ext, "msan_libs", "tsan_libs")
 ```
+
+## Shared libunwind for sanitizer builds
+
+ASAN intercepts `_Unwind_RaiseException` and finds the real implementation with
+`dlsym(RTLD_NEXT)`. A static libunwind in the executable is invisible to that
+lookup, which can fall through to Rust std's `libgcc_s` dependency. Mixing the
+unwinders breaks Rust panics in dynamic modules. Linking LLVM libunwind as a
+shared library lets these calls resolve to the same unwinder.
+
+The upstream LLVM 22.1.8 Linux shared libunwind requires glibc 2.34, newer than
+toolshed's glibc 2.31 sysroot. This package builds only shared libunwind from
+`@llvm_source`, using the LLVM toolchain, compiler-rt builtins, and that sysroot.
+It does not change the MSAN/TSAN libraries or the sysroot.
+
+Build and verify (x86_64 Linux only):
+
+```bash
+cd bazel
+bazel build //compile:cxx_unwind
+bazel test //compile/test:libunwind_shared_test
+```
+
+The output `bazel-bin/compile/unwind-llvm22.1.8-x86_64.tar.xz` contains
+`unwind-libs-x86_64/lib/libunwind.so.1`. The manual test inspects the **built**
+library, not a downloaded artifact, checking its SONAME, absence of a `libgcc_s`
+dependency, and glibc version requirements. It also runs in Linux CI.
+Release preparation fills `VERSIONS["unwind_libs_sha256"]` after the `bins-v*`
+release publishes the artifact. Until then, the repository rule rejects the
+empty hash; consumers can supply a published release's `version` and `sha256`.
+
+In `MODULE.bazel`:
+
+```starlark
+unwind_ext = use_extension("@envoy_toolshed//compile:extensions.bzl", "unwind_extension")
+unwind_ext.setup()
+use_repo(unwind_ext, "unwind_libs")
+```
+
+The repository exposes `@unwind_libs//:libunwind_so` (the shared file) and
+`@unwind_libs//:libunwind` (a public `cc_import`). Add the import to your ASAN
+configuration's dependencies so Bazel manages solib rpaths and runfiles:
+
+```starlark
+cc_library(
+    name = "unwinder",
+    linkopts = select({
+        ":linux_asan_build": ["-unwindlib=none"],
+        "//conditions:default": [],
+    }),
+    deps = select({
+        ":linux_asan_build": ["@unwind_libs//:libunwind"],
+        "//conditions:default": [],
+    }),
+)
+```
+
+Here `:linux_asan_build` is the consumer's Linux ASAN `config_setting`.
+`-unwindlib=none` prevents Clang from adding a static unwinder even when other
+flags include `-static-libgcc`. Also disable any explicit static `libunwind.a`
+dependency in that configuration. Alternatively, a consumer's own `cc_import`
+can set `shared_library = "@unwind_libs//:libunwind_so"`.
+Verify that the executable's `DT_NEEDED` lists `libunwind.so.1` before
+`libgcc_s.so.1`, so ASAN and dynamically loaded Rust modules use LLVM's unwinder.
 
 ## libcxx bundles (for cross-compilation)
 
@@ -321,3 +388,20 @@ SHA256 values default to `VERSIONS["llvm_minimal_sha256"][platform]` from
 `versions.bzl`.  Empty strings (the placeholder state before first release)
 cause `setup_llvm_minimal()` to create a stub empty repository instead of
 downloading, so builds that don't reference the repo are not broken.
+
+### Host LLVM and toolchain alias
+
+The `llvm_toolchain_alias_extension` creates `@llvm_toolchain_llvm`, backed by
+the matching minimal LLVM artifact by default. Its `host` tag can instead use
+a local LLVM installation; it may only be declared once by the root module:
+
+```starlark
+llvm = use_extension("@envoy_toolshed//compile:extensions.bzl", "llvm_toolchain_alias_extension")
+llvm.host(path = "/usr/lib/llvm-22", llvm_version = "22.1.8")
+use_repo(llvm, "llvm_toolchain_llvm")
+```
+
+The repository exports `llvm.bzl` with `LLVM_VERSION`, `LLVM_MAJOR`,
+`LLVM_MAJOR_MINOR`, `LLVM_LIB_DIR`, and `LLVM_IS_HOST`. It also exposes
+`libclang_cpp`, `libllvm`, and `clang_tooling_headers` targets, in addition to
+the LLVM toolchain targets.

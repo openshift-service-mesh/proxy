@@ -72,16 +72,30 @@ bazel_dep(name = "rules_java", version = "9.9.0")
 bazel_dep(name = "zlib-ng", version = "2.3.3.bcr.2")
 bazel_dep(name = "envoy_toolshed", version = "0.5.6.envoy")
 
-# OSSM: make envoy_toolshed's render_llvm_repo_build tolerate backing
-# @llvm_toolchain_llvm with the host /usr (envoy_llvm.host, see below). Its
-# exports_files(glob([...])) assumes a clean LLVM tarball; over /usr it must
-# skip node_modules (npm's ':'-named Perl man pages crash exports_files) and
-# also export the lib64/ libclang-cpp/libLLVM that RHEL/UBI ships. See the
-# patch header for details.
+# OSSM: two patches to envoy_toolshed's compile/llvm_minimal.bzl.
+#
+# 1. host-llvm-glob: make render_llvm_repo_build tolerate backing
+#    @llvm_toolchain_llvm with the host /usr (envoy_llvm.host, see below). Its
+#    exports_files(glob([...])) assumes a clean LLVM tarball; over /usr it must
+#    skip node_modules (npm's ':'-named Perl man pages crash exports_files) and
+#    also export the lib64/ libclang-cpp/libLLVM that RHEL/UBI ships.
+#
+# 2. skip-llvm-minimal-download: don't download the hermetic minimal LLVM
+#    artifact. OSSM compiles with the host LLVM (@llvm_host), never this repo,
+#    but envoy's @llvm_toolchain registration still materializes it; the download
+#    breaks offline builds and is too large to vendor. Force the empty placeholder.
+#
+# See each patch header for details.
 single_version_override(
     module_name = "envoy_toolshed",
     patch_strip = 1,
-    patches = ["//ossm/patches:envoy_toolshed-host-llvm-glob.patch"],
+    # Order matters: the skip-download hunk sits lower in the file (~line 374)
+    # than the glob hunk (~line 182). Applying it first keeps each hunk at its
+    # original line numbers, so neither relies on the patcher's offset search.
+    patches = [
+        "//ossm/patches:envoy_toolshed-skip-llvm-minimal-download.patch",
+        "//ossm/patches:envoy_toolshed-host-llvm-glob.patch",
+    ],
 )
 
 # Vendor v8's Python wheels for aarch64 as well as x86_64. v8 (from Envoy's
@@ -132,6 +146,11 @@ ENVOY_REPO = "envoy"
 bazel_dep(name = "envoy", version = "1.41.0-dev")
 archive_override(
     module_name = "envoy",
+    patch_strip = 1,
+    # Build wee8 (V8) from source instead of envoy_toolshed's ~124MB prebuilt
+    # libwee8.a, which exceeds GitHub's 100MB file limit and so cannot live in
+    # the ossm/vendor snapshot (and has no s390x/ppc64le prebuilt). See the patch.
+    patches = ["//ossm/patches:envoy-wee8-build-from-source.patch"],
     sha256 = ENVOY_SHA256,
     strip_prefix = ENVOY_REPO + "-" + ENVOY_SHA,
     urls = ["https://github.com/" + ENVOY_ORG + "/" + ENVOY_REPO + "/archive/" + ENVOY_SHA + ".tar.gz"],

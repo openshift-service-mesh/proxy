@@ -1,0 +1,9 @@
+{
+    "url": "https://github.com/ncopa/su-exec/archive/refs/tags/v0.3.tar.gz",
+    "integrity": "sha256-HedHmFeHm20UdyeSN1KQqH6smjewUk05c5pKBzkDliA=",
+    "strip_prefix": "su-exec-0.3",
+    "overlay": {
+        "BUILD.bazel": "sha256-nuT6WxuA4m4Ggp8B3Ez+WIbzfIgC+Pyw/F8NxMwcdKw=",
+        "MODULE.bazel": "sha256-E4y9ETG0fZdIg0TVJ66f5TqyN0zqzfa5dhzz/sohZGE="
+    }
+}

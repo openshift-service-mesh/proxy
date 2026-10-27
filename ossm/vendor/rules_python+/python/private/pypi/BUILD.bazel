@@ -13,6 +13,8 @@
 # limitations under the License.
 
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("//python:py_binary.bzl", "py_binary")
+load("//python/private:distribution_filegroup.bzl", "distribution_filegroup")
 
 package(default_visibility = ["//:__subpackages__"])
 
@@ -32,46 +34,58 @@ alias(
     visibility = ["//visibility:public"],
 )
 
+py_binary(
+    name = "venv_shebang_rewriter_py",
+    srcs = ["venv_shebang_rewriter.py"],
+    legacy_create_init = False,
+    main = "venv_shebang_rewriter.py",
+)
+
 alias(
     name = "venv_shebang_rewriter",
     actual = select({
         "@platforms//os:windows": "venv_shebang_rewriter.ps1",
-        "//conditions:default": "venv_shebang_rewriter.sh",
+        "//conditions:default": "venv_shebang_rewriter_py",
+    }),
+    visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "wheel_record_rewriter_py",
+    srcs = ["wheel_record_rewriter.py"],
+    legacy_create_init = False,
+    main = "wheel_record_rewriter.py",
+)
+
+alias(
+    name = "wheel_record_rewriter",
+    actual = select({
+        "@platforms//os:windows": "wheel_record_rewriter.ps1",
+        "//conditions:default": "wheel_record_rewriter_py",
     }),
     visibility = ["//visibility:public"],
 )
 
 exports_files(
     srcs = ["deps.bzl"],
-    visibility = ["//tools/private/update_deps:__pkg__"],
+    visibility = ["//:__subpackages__"],
 )
 
-filegroup(
+distribution_filegroup(
     name = "distribution",
-    srcs = glob(
-        ["**"],
-        exclude = ["requirements.txt"],
-    ) + [
-        "//python/private/pypi/dependency_resolver:distribution",
-        "//python/private/pypi/whl_installer:distribution",
-    ],
-    visibility = ["//python/private:__pkg__"],
 )
 
 # Filegroup of bzl files that can be used by downstream rules for documentation generation
 filegroup(
     name = "bzl",
     srcs = glob(["**/*.bzl"]),
-    visibility = [
-        "//python/private:__pkg__",
-        "//tools/private:__pkg__",
-    ],
+    visibility = ["//:__subpackages__"],
 )
 
 filegroup(
     name = "requirements_txt",
     srcs = ["requirements.txt"],
-    visibility = ["//tools/private/update_deps:__pkg__"],
+    visibility = ["//:__subpackages__"],
 )
 
 bzl_library(
@@ -333,6 +347,7 @@ bzl_library(
     srcs = ["pkg_aliases.bzl"],
     deps = [
         ":labels",
+        ":whl_library_deps_targets",
         "//python/private:common_labels",
         "//python/private:text_util",
         "@bazel_skylib//lib:selects",
@@ -479,19 +494,20 @@ bzl_library(
 )
 
 bzl_library(
+    name = "gen_wheel_record",
+    srcs = ["gen_wheel_record.bzl"],
+    deps = [
+        "//python/private:attributes",
+        "//python/private:common",
+    ],
+)
+
+bzl_library(
     name = "whl_library_targets",
     srcs = ["whl_library_targets.bzl"],
     deps = [
-        ":env_marker_setting",
-        ":labels",
-        ":namespace_pkgs",
-        ":pep508_deps",
-        ":venv_entry_point",
-        ":venv_rewrite_shebang",
-        "//python:py_binary",
-        "//python:py_library",
-        "//python/private:normalize_name",
-        "@bazel_skylib//rules:copy_file",
+        ":whl_library_deps_targets",
+        ":whl_library_srcs",
     ],
 )
 
@@ -568,6 +584,32 @@ bzl_library(
         ":whl_metadata",
         "//python/private:normalize_name",
         "//python/private:repo_utils",
+    ],
+)
+
+bzl_library(
+    name = "whl_library_deps_targets",
+    srcs = ["whl_library_deps_targets.bzl"],
+    deps = [
+        ":env_marker_setting",
+        ":labels",
+        ":pep508_deps",
+        "//python:py_library",
+        "//python/private:normalize_name",
+    ],
+)
+
+bzl_library(
+    name = "whl_library_srcs",
+    srcs = ["whl_library_srcs.bzl"],
+    deps = [
+        ":gen_wheel_record",
+        ":labels",
+        ":namespace_pkgs",
+        ":venv_entry_point",
+        ":venv_rewrite_shebang",
+        "//python:py_library",
+        "@bazel_skylib//rules:copy_file",
     ],
 )
 
