@@ -127,6 +127,31 @@ if [ -d "${CACHE_DIR}" ]; then
   done
 fi
 
+echo ">> Applying OSSM source patches to the vendored Envoy tree"
+# Patch the freshly vendored Envoy sources in place. This is done here as a
+# post-vendor tree edit rather than via an archive_override `patches` attribute
+# in MODULE.bazel: adding `patches` changes envoy+'s vendor marker, and x86_64
+# offline builds validate envoy+ by its marker (envoy+ is a bzlmod module, so it
+# cannot use the --override_repository marker-bypass the other repos get -- see
+# the override-generation step below), so a changed marker triggers a network
+# re-fetch and breaks the air-gapped build. Vendor mode validates repos by their
+# marker, not by file contents (the same reason the pruning below is safe), so
+# editing the extracted tree in place is correct and leaves the marker intact.
+#
+#   openssl-prefixer-host-libstdcxx.patch: the compat/openssl prefixer sources
+#   libstdc++ from envoy_toolshed's libstdcxx sysroot, whose repo name and paths
+#   are hardcoded to linux_amd64 / x86_64-linux-gnu -- which breaks the aarch64
+#   build. OSSM builds this exec-config tool with the host toolchain (@llvm_host),
+#   which already provides a full host libstdc++ for the build arch, so the patch
+#   drops the sysroot plumbing and uses the host toolchain's libstdc++ instead.
+ENVOY_PATCHES=(
+  "openssl-prefixer-host-libstdcxx.patch"
+)
+for p in "${ENVOY_PATCHES[@]}"; do
+  echo "   applying ${p}"
+  patch -p1 -d "${VENDOR_DIR}/envoy+" < "ossm/patches/${p}"
+done
+
 echo ">> Pruning content the //:envoy build never compiles (tests/docs/fixtures)"
 # Upstream test suites, fuzz corpora, docs, and dev-container assets are not
 # build inputs for //:envoy, so dropping them shrinks the committed snapshot
