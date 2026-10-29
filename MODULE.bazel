@@ -72,18 +72,6 @@ bazel_dep(name = "rules_java", version = "9.9.0")
 bazel_dep(name = "zlib-ng", version = "2.3.3.bcr.2")
 bazel_dep(name = "envoy_toolshed", version = "0.5.10.envoy")
 
-# OSSM: make envoy_toolshed's render_llvm_repo_build tolerate backing
-# @llvm_toolchain_llvm with the host /usr (envoy_llvm.host, see below). Its
-# exports_files(glob([...])) assumes a clean LLVM tarball; over /usr it must
-# skip node_modules (npm's ':'-named Perl man pages crash exports_files) and
-# also export the lib64/ libclang-cpp/libLLVM that RHEL/UBI ships. See the
-# patch header for details.
-single_version_override(
-    module_name = "envoy_toolshed",
-    patch_strip = 1,
-    patches = ["//ossm/patches:envoy_toolshed-host-llvm-glob.patch"],
-)
-
 # Vendor v8's Python wheels for aarch64 as well as x86_64. v8 (from Envoy's
 # bazel-registry) pins markupsafe, whose wheels are arch-specific. Its pip.parse
 # sets no `target_platforms`, so rules_python resolves wheels for the *host* arch
@@ -394,26 +382,24 @@ use_repo(llvm, "llvm_host")
 #
 # This is a *separate* concern from the @llvm_host main-compile toolchain above.
 # @llvm_toolchain_llvm is the repo Envoy's compat/openssl prefixer links its
-# libclang-cpp / clang-tooling headers from. By default Envoy's own
-# `envoy_llvm_extension` backs it with the *hermetic* clang-22 minimal LLVM,
-# whose libclang-cpp needs a newer libstdc++ (GLIBCXX_3.4.30) than RHEL/UBI
-# ships -- failing at runtime.
+# libclang-cpp / clang-tooling headers from. By default it is backed by the
+# *hermetic* minimal LLVM, whose libclang-cpp needs a newer libstdc++ (GLIBCXX)
+# than RHEL/UBI ships -- failing at runtime.
 #
-# Envoy exposes a root-module-only `host` tag for exactly this case (see
-# envoyproxy/envoy#47848): calling `envoy_llvm.host(path = ...)` backs
-# @llvm_toolchain_llvm with the host LLVM install instead, so the prefixer links
-# host clang's libclang-cpp (matching the host libstdc++). This replaces the
-# former OSSM `envoy_toolshed-host-llvm.patch` + `BAZEL_LLVM_PATH` wiring, which
-# predated upstream's native support. The version is auto-detected from
-# `<path>/bin/clang --version`; keep `path` in sync with the build container's
-# LLVM prefix (same /usr root as @llvm_host).
+# envoy_toolshed's llvm_toolchain_alias_extension exposes a root-module-only
+# `host` tag: `host(path = ...)` backs @llvm_toolchain_llvm with the host LLVM
+# install instead, so the prefixer links host clang's libclang-cpp (matching the
+# host libstdc++). (Envoy's former `envoy_llvm_extension.host` was removed in
+# envoyproxy/envoy#48620 in favour of this toolshed extension.) The version is
+# auto-detected from `<path>/bin/clang --version`; keep `path` in sync with the
+# build container's LLVM prefix (same /usr root as @llvm_host).
 #
 # NOTE: this must stay /usr, not a versioned prefix like /usr/lib64/llvm21.
 # On RHEL/UBI the clang resource dir (the builtin stddef.h the openssl prefixer
 # needs) lives at /usr/lib/clang/<major>/include -- OUTSIDE the versioned
 # prefix -- and libclang-cpp/libLLVM live in /usr/lib64. Only /usr sees all of
 # them. The glob-over-/usr fallout (colon-named files, the lib64 export gap) is
-# handled in envoy_toolshed's render_llvm_repo_build (see the OSSM edit there).
-envoy_llvm_ext = use_extension("@envoy//bazel:extensions.bzl", "envoy_llvm_extension")
-envoy_llvm_ext.host(path = "/usr")
-use_repo(envoy_llvm_ext, "llvm_toolchain_llvm")
+# handled by render_llvm_repo_build's is_host scoping in envoy_toolshed >= 0.5.10.
+llvm_toolchain_alias_ext = use_extension("@envoy_toolshed//compile:extensions.bzl", "llvm_toolchain_alias_extension")
+llvm_toolchain_alias_ext.host(path = "/usr")
+use_repo(llvm_toolchain_alias_ext, "llvm_toolchain_llvm")
