@@ -26,75 +26,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  setup:
+  validate:
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.m.outputs.matrix }}
-    steps:
-      - id: m
-        run: |
-          if [[ "${{ inputs.base_ref }}" == "release-1.24" ]]; then
-            echo 'matrix={"include":[{"arch":"x86_64","suffix":"","status_name":"x86_64 bare metal"}]}' >> "$GITHUB_OUTPUT"
-          else
-            echo 'matrix={"include":[{"arch":"x86_64","suffix":"","status_name":"x86_64 bare metal"},{"arch":"aarch64","suffix":"-arm64","status_name":"arm64 bare metal"}]}' >> "$GITHUB_OUTPUT"
-          fi
-
-  # Post a comment on the PR with a link to this workflow run.
-  # this lets reviewers navigate to "Re-run failed jobs" without searching the Actions tab.
-  # The comment is created or updated (never duplicated) using an invisible HTML marker
-  post-link:
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-      - name: Post Workflow run link as PR comment
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        env:
-          PR_NUMBER: ${{ inputs.pr_number }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        with:
-          script: |
-            const marker = '<!-- proxy-build-link -->';
-            const prNumber = parseInt(process.env.PR_NUMBER);
-            const runUrl = process.env.RUN_URL;
-            const body = [
-              marker,
-              `**Build dispatched:** [workflow run](${runUrl})`,
-              'Use **Re-run failed jobs** from there if a build fails.'
-            ].join('\n');
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber
-            });
-            const existing = comments.find(c => c.body.includes(marker));
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body
-              });
-            }
-  build:
-    needs: setup
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-      statuses: write
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
-    name: "build (${{ matrix.arch }}, Testing Farm bare metal)"
     steps:
       - name: Validate inputs
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
@@ -161,6 +94,82 @@ jobs:
 
             core.info(`Inputs validated: PR #${prNumber}, SHA ${headSha}`);
 
+  setup:
+    needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        run: |
+          if [[ "${{ inputs.base_ref }}" == "release-1.24" ]]; then
+            echo 'matrix={"include":[{"arch":"x86_64","suffix":"","status_name":"x86_64 bare metal"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"include":[{"arch":"x86_64","suffix":"","status_name":"x86_64 bare metal"},{"arch":"aarch64","suffix":"-arm64","status_name":"arm64 bare metal"}]}' >> "$GITHUB_OUTPUT"
+          fi
+
+  # Post a comment on the PR with a link to this workflow run.
+  # this lets reviewers navigate to "Re-run failed jobs" without searching the Actions tab.
+  # The comment is created or updated (never duplicated) using an invisible HTML marker
+  post-link:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Post Workflow run link as PR comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const marker = '<!-- proxy-build-link -->';
+            const prNumber = parseInt(process.env.PR_NUMBER);
+            const runUrl = process.env.RUN_URL;
+            const body = [
+              marker,
+              `**Build dispatched:** [workflow run](${runUrl})`,
+              'Use **Re-run failed jobs** from there if a build fails.'
+            ].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+            const existing = comments.find(c => (c.body || '').includes(marker));
+
+            if (existing) {
+              if (existing.body === body) {
+                core.info('Comment already up to date, skipping update');
+                return;
+              }
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body
+              });
+            }
+  build:
+    needs: setup
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+      statuses: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    name: "build (${{ matrix.arch }}, Testing Farm bare metal)"
+    steps:
       - name: Run build on Testing Farm bare metal
         id: tf
         uses: sclorg/testing-farm-as-github-action@230555baceb860aa468d216f1822974836b965d1 # v4
