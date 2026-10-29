@@ -152,6 +152,21 @@ for p in "${ENVOY_PATCHES[@]}"; do
   patch -p1 -d "${VENDOR_DIR}/envoy+" < "ossm/patches/${p}"
 done
 
+echo ">> Dropping the orphaned libstdcxx sysroot (unused after the prefixer patch)"
+# The openssl-prefixer patch above makes the prefixer link the *host* toolchain's
+# libstdc++ instead of envoy_toolshed's downloaded libstdcxx sysroot, which was
+# that sysroot's only consumer. `bazel vendor` still captured it (it ran against
+# the pristine prefixer, before the patch), but nothing in the //:envoy build
+# graph references it now -- it is ~285MB of dead weight. Delete the repo and its
+# marker, which must happen before the --override_repository generation step below
+# so no override line is emitted for it. This is safe *because* it is unreferenced:
+# deleting a repo that the build still used would instead make Bazel try to
+# re-fetch it (hence the whole-repo deletions warned against under pruning). The
+# glob also covers the arm64 variant if a future arm64 vendoring pass captures it.
+find "${VENDOR_DIR}" -maxdepth 1 \
+  \( -name '*libstdcxx_sysroot*' -o -name '@*libstdcxx_sysroot*.marker' \) \
+  -exec rm -rf {} +
+
 echo ">> Pruning content the //:envoy build never compiles (tests/docs/fixtures)"
 # Upstream test suites, fuzz corpora, docs, and dev-container assets are not
 # build inputs for //:envoy, so dropping them shrinks the committed snapshot
