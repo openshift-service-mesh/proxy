@@ -1,5 +1,6 @@
 """https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/locale_h.m4"""
 
+load("//autoconf:autoconf_defaults.bzl", "autoconf_defaults")
 load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
 load("//autoconf:checks.bzl", "checks")
 load("//gnulib:macros.bzl", gl_macros = "macros")
@@ -56,14 +57,17 @@ locale_t x;
         checks.AC_SUBST(
             "HAVE_LOCALE_T",
             condition = "gl_cv_have_locale_t",
-            if_false = "0",
-            if_true = "1",
+            if_false = 0,
+            if_true = 1,
         ),
+    ],
+    default_deps = [
+        ":defaults",  # through a macro it invokes: gl_LOCALE_H_DEFAULTS
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":HAVE_XLOCALE_H",
-        "//gnulib/m4/extensions",
+        ":HAVE_XLOCALE_H",  # AC_CHECK_HEADERS_ONCE([xlocale.h])
+        "//gnulib/m4/extensions",  # AC_REQUIRE([gl_USE_SYSTEM_EXTENSIONS])
     ],
 )
 
@@ -162,56 +166,62 @@ int main(void) { return 0; }
         # This macro prepares warnings for unused functions. In Bazel, this is typically
         # handled at compile time, so we don't need to replicate it here.
     ],
+    default_deps = [
+        ":defaults",  # AC_REQUIRE: gl_LOCALE_H_DEFAULTS
+    ],
     visibility = ["//visibility:public"],
     deps = [
-        ":gl_LOCALE_T",
+        ":gl_LOCALE_T",  # AC_REQUIRE([gl_LOCALE_T])
+        "//autoconf/macros/AC_CANONICAL_HOST",  # AC_REQUIRE([AC_CANONICAL_HOST])
         "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
-        "//gnulib/m4/extensions",
-        "//gnulib/m4/include_next",  # For gl_CHECK_NEXT_HEADERS
-        "//gnulib/m4/stddef_h",
+        "//gnulib/m4/extensions",  # AC_REQUIRE([gl_USE_SYSTEM_EXTENSIONS])
+        "//gnulib/m4/include_next",  # gl_NEXT_HEADERS([locale.h])
+        "//gnulib/m4/stddef_h",  # AC_REQUIRE([gl_STDDEF_H])
+        # AC_REQUIRE([gl_LOCALE_H_DEFAULTS]) is delivered through :defaults
+        # (toolchain-level defaults), see gl_LOCALE_H_DEFAULTS below.
     ],
 )
 
-autoconf(
+autoconf_defaults(
     name = "gl_LOCALE_H_DEFAULTS",
-    checks = [
-        checks.AC_SUBST("HAVE_NEWLOCALE", 1),
-        checks.AC_SUBST("HAVE_DUPLOCALE", 1),
-        checks.AC_SUBST("HAVE_FREELOCALE", 1),
-        checks.AC_SUBST("HAVE_GETLOCALENAME_L", 1),
-        checks.AC_SUBST("REPLACE_LOCALECONV", 0),
-        checks.AC_SUBST("REPLACE_SETLOCALE", 0),
-        checks.AC_SUBST("REPLACE_NEWLOCALE", 0),
-        checks.AC_SUBST("REPLACE_DUPLOCALE", 0),
-        checks.AC_SUBST("REPLACE_FREELOCALE", 0),
-        checks.AC_SUBST("REPLACE_GETLOCALENAME_L", 0),
-        checks.AC_SUBST("REPLACE_STRUCT_LCONV", 0),
-        checks.AC_SUBST("LOCALENAME_ENHANCE_LOCALE_FUNCS", 0),
-    ],
+    substs = {
+        "HAVE_DUPLOCALE": "1",
+        "HAVE_FREELOCALE": "1",
+        "HAVE_GETLOCALENAME_L": "1",
+        "HAVE_NEWLOCALE": "1",
+        "LOCALENAME_ENHANCE_LOCALE_FUNCS": "0",
+        "REPLACE_DUPLOCALE": "0",
+        "REPLACE_FREELOCALE": "0",
+        "REPLACE_GETLOCALENAME_L": "0",
+        "REPLACE_LOCALECONV": "0",
+        "REPLACE_NEWLOCALE": "0",
+        "REPLACE_SETLOCALE": "0",
+        "REPLACE_STRUCT_LCONV": "0",
+    },
     visibility = ["//visibility:private"],
 )
 
-autoconf(
+autoconf_defaults(
     name = "gl_LOCALE_H_REQUIRE_DEFAULTS",
-    checks = [
-        checks.AC_SUBST("GNULIB_LOCALECONV", 0),
-        checks.AC_SUBST("GNULIB_SETLOCALE", 0),
-        checks.AC_SUBST("GNULIB_SETLOCALE_NULL", 0),
-        checks.AC_SUBST("GNULIB_NEWLOCALE", 0),
-        checks.AC_SUBST("GNULIB_DUPLOCALE", 0),
-        checks.AC_SUBST("GNULIB_FREELOCALE", 0),
-        checks.AC_SUBST("GNULIB_GETLOCALENAME_L", 0),
-        checks.AC_SUBST("GNULIB_GETLOCALENAME_L_UNSAFE", 0),
-        checks.AC_SUBST("GNULIB_LOCALENAME", 0),
-        checks.AC_SUBST("GNULIB_LOCALENAME_UNSAFE", 0),
-    ],
+    substs = {
+        "GNULIB_DUPLOCALE": "0",
+        "GNULIB_FREELOCALE": "0",
+        "GNULIB_GETLOCALENAME_L": "0",
+        "GNULIB_GETLOCALENAME_L_UNSAFE": "0",
+        "GNULIB_LOCALECONV": "0",
+        "GNULIB_LOCALENAME": "0",
+        "GNULIB_LOCALENAME_UNSAFE": "0",
+        "GNULIB_NEWLOCALE": "0",
+        "GNULIB_SETLOCALE": "0",
+        "GNULIB_SETLOCALE_NULL": "0",
+    },
     visibility = ["//visibility:private"],
     deps = [
         ":gl_LOCALE_H_DEFAULTS",
     ],
 )
 
-autoconf(
+autoconf_defaults(
     name = "defaults",
     visibility = ["//visibility:public"],
     deps = [
@@ -219,11 +229,30 @@ autoconf(
     ],
 )
 
+# gl_LOCALE_MODULE_INDICATOR([modulename]): gl_LOCALE_H_REQUIRE_DEFAULTS +
+# gl_MODULE_INDICATOR_SET_VARIABLE; the GNULIB_* defaults are toolchain-level
+# (:defaults), so this is modelled like gl_UNISTD_MODULE_INDICATOR.
 autoconf(
-    name = "locale_h",
+    name = "gl_LOCALE_MODULE_INDICATOR",
+    checks = [],
+    default_deps = [
+        ":defaults",  # through a macro it invokes: gl_LOCALE_H_DEFAULTS
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":gl_LOCALE_H",
+    ],
+)
+
+autoconf(
+    name = "locale_h",
+    default_deps = [
+        ":defaults",  # the header's own defaults, as its m4 requires
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_LOCALE_H",
+        ":gl_LOCALE_MODULE_INDICATOR",
         ":gl_LOCALE_T",
     ],
 )

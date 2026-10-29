@@ -1,5 +1,7 @@
 # SPDX-License-Identifier:Apache-2.0
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
 VERSION_MAJOR = 2
 VERSION_MINOR = 15
 

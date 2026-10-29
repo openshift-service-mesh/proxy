@@ -453,24 +453,27 @@ void QuicConnection::SetFromConfig(const QuicConfig& config) {
     spin_bit_enabled_ = ShouldEnableSpinBit();
   }
 
-  if (GetQuicReloadableFlag(quic_active_connection_id_limit) &&
-      version().IsIetfQuic()) {
+  if (version().IsIetfQuic()) {
     if (perspective_ == Perspective::IS_CLIENT &&
         peer_issued_cid_manager_ != nullptr &&
         config.GetActiveConnectionIdLimitToSend() >
             kMinNumOfActiveConnectionIds) {
-      QUIC_RELOADABLE_FLAG_COUNT_N(quic_active_connection_id_limit, 4, 5);
       peer_issued_cid_manager_->set_active_connection_id_limit(
           config.GetActiveConnectionIdLimitToSend());
     } else if (perspective_ == Perspective::IS_SERVER &&
+               GetQuicReloadableFlag(quic_active_connection_id_limit2) &&
                self_issued_cid_manager_ != nullptr &&
+               // Ensure the client is not using a CID.
+               peer_issued_cid_manager_ == nullptr &&
+               config.max_num_of_active_connection_ids() >
+                   kMinNumOfActiveConnectionIds &&
                config.HasReceivedActiveConnectionIdLimit() &&
                config.ReceivedActiveConnectionIdLimit() >
                    kMinNumOfActiveConnectionIds) {
-      QUIC_RELOADABLE_FLAG_COUNT_N(quic_active_connection_id_limit, 5, 5);
+      QUIC_RELOADABLE_FLAG_COUNT_N(quic_active_connection_id_limit2, 1, 2);
       self_issued_cid_manager_->set_active_connection_id_limit(
           std::min<size_t>(config.ReceivedActiveConnectionIdLimit(),
-                           kMaxNumOfActiveConnectionIds));
+                           config.max_num_of_active_connection_ids()));
     }
   }
 
@@ -1634,7 +1637,7 @@ bool QuicConnection::OnAckRange(QuicPacketNumber start, QuicPacketNumber end) {
 }
 
 bool QuicConnection::OnAckTimestamp(QuicPacketNumber packet_number,
-                                    QuicTime timestamp) {
+                                    QuicReceiveTime timestamp) {
   QUIC_BUG_IF(quic_bug_10511_7, !connected_)
       << "Processing ACK frame time stamp when connection is closed. Received "
          "packet info: "
@@ -4999,6 +5002,40 @@ void QuicConnection::TearDownLocalConnectionState(
   self_issued_cid_manager_.reset();
 }
 
+void QuicConnection::SetConnectionIdRotationAlarm(QuicTime::Delta interval) {
+  cid_rotation_interval_ = interval;
+  if (connection_id_rotation_alarm().IsSet()) {
+    if (interval.IsZero()) {
+      connection_id_rotation_alarm().Cancel();
+    }
+    return;
+  }
+  connection_id_rotation_alarm().Set(clock_->ApproximateNow() + interval);
+}
+
+void QuicConnection::OnConnectionIdRotationAlarm() {
+  if (!connected_) {
+    return;
+  }
+  if (self_issued_cid_manager_ != nullptr) {
+    if (self_issued_cid_manager_->num_active_connection_ids() >
+        self_issued_cid_manager_->active_connection_id_limit()) {
+      CloseConnection(QUIC_CONNECTION_ID_LIMIT_ERROR,
+                      "Peer failed to retire connection IDs.",
+                      ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
+      return;
+    }
+    if (connection_id_generator_.IsEncrypted()) {
+      ScopedPacketFlusher flusher(this);
+      self_issued_cid_manager_->RetireAndSendNewConnectionIds();
+    }
+  }
+  if (connected_) {
+    connection_id_rotation_alarm().Set(clock_->ApproximateNow() +
+                                       cid_rotation_interval_);
+  }
+}
+
 void QuicConnection::CancelAllAlarms() {
   QUIC_DVLOG(1) << "Cancelling all QuicConnection alarms.";
 
@@ -5017,6 +5054,7 @@ void QuicConnection::CancelAllAlarms() {
   multi_port_probing_alarm().PermanentCancel();
   blackhole_detector_.StopDetection(/*permanent=*/true);
   idle_network_detector_.StopDetection();
+  connection_id_rotation_alarm().PermanentCancel();
 }
 
 QuicByteCount QuicConnection::max_packet_length() const {

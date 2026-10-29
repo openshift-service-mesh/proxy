@@ -1,6 +1,6 @@
 SUPPORTED_ARCHES = ["aarch64", "x86_64"]
 
-BINS_RELEASE = "0.2.25"
+BINS_RELEASE = "0.2.29"
 
 LLVM_VERSION = "22.1.8"
 
@@ -15,6 +15,14 @@ LLVM_DISTRIBUTIONS = {
 }
 
 VERSIONS = {
+    "gcc_toolchain": {
+        "version": "13.4.0",
+        "release": "18082025",
+        "sha256": {
+            "x86_64": "d96071c1b98499afd7b7b56ebd69ad414020edf66e982004acffe7df8aaf7e02",
+            "aarch64": "770cf6bf62bdf78763de526d3a9f5cae4c19f1a3aca0ef8f18b05f1a46d1ffaf",
+        },
+    },
     "cmake": "3.23.2",
     "git": "2.55.0",
     "llvm": LLVM_VERSION,
@@ -23,8 +31,10 @@ VERSIONS = {
     "ninja": "1.12.0",
     "python": "3.12",
     "bins_release": BINS_RELEASE,
-    "msan_libs_sha256": "f054293360a932993602265ea6c52e777c4f89eaff46cec4d80e96aa75805e4a",
-    "tsan_libs_sha256": "07f78bcfba0c6be156a893ec4e5fe27a34fd3e69ef616ae989d21ab006d41b57",
+    "msan_libs_sha256": "9283b77341f9025dcd39424aa30ee3e0d126ae901b23212663af7884bb366c07",
+    "tsan_libs_sha256": "1af4d41cbe88c2c0bbb4611f57edbf8d933b432d501ccba7d4744105d785e81d",
+    # Filled after the bins-v* release publishes the shared libunwind artifact.
+    "unwind_libs_sha256": "ba87bd62fb499791268a27fb1ac92cdddd0af1b27d6a935deaf819ca6c32b05d",
     "libcxx_libs_sha256": {
         "aarch64": "b3bd8dfc1c250d5c2c36de174138ffef9754402b33e54abe9b5efb25982fa2f7",
         "x86_64": "e40f39338ffe561dfa26541557c9e548fc7760db9d99f7b6c5de237b725482aa",
@@ -54,18 +64,18 @@ VERSIONS = {
     # Keys match the platform suffix in artifact names (Linux-X64, Linux-ARM64, macOS-ARM64).
     # Empty strings are placeholders; the release (bazel/prepare) workflow fills them after release.
     "llvm_minimal_sha256": {
-        "Linux-X64": "6cb4cca6df33be00c80fa1639062c973d1cafe4e7ad98a9b4bdf21bf9dec5806",
-        "Linux-ARM64": "9a6cc0a84d524342e578db739b04e8a3875adb40b38887e4e074661e925f8a9c",
-        "macOS-ARM64": "928e51aa7c97fbb8c5c50075118f4b36e36363b1a2c3af2dfef9aea1ef526ade",
+        "Linux-X64": "a12891b93faaf8fc1293db6232bf71fcdade9df10e978fe92dbac78d7379130d",
+        "Linux-ARM64": "a4a8a3545ca213117e9629aa4b0abd6fd1232556109af31b3dacf16b1b59ffa1",
+        "macOS-ARM64": "ca6c644a6d285d52d62bf7cb206d839623668eaf86cdc25bc0a709cd137a2017",
     },
     "sq_sha256": {
-        "Linux-X64": "cd0c003c86f6947cc43a6f4305ce04898e073deb297e598c7677b0d651fbf559",
-        "Linux-ARM64": "cdff7b439ddf9e10c6b860ea780cfcc23f976691e0154a7567c0deb0135360c3",
+        "Linux-X64": "82c13d003a924b5560822f363df1af7733839cd82546a3074b2a32de0c5e99fb",
+        "Linux-ARM64": "b0520af4b16d4ee5efaf4ecfbea2d60d6de11e29dcd003924d191a315cb211ae",
     },
     # Git prebuilt hashes keyed by the artifact platform suffix (linux-x86_64, linux-aarch64).
     "git_sha256": {
-        "linux-x86_64": "7b6040ff52b8bd09e97078f3b508c1178da93f1cdd449b4f2c536e3cca35f924",
-        "linux-aarch64": "5155be595492b8333a1fe24e3bd964937b556054a679f142842c77cde569daf5",
+        "linux-x86_64": "e64a3bac2d21552076b7dfe6e09d08f873d9391f38818f9bf2f9ea1aa4b2ebb1",
+        "linux-aarch64": "a0618fbe88c742faa7954f72d5e630c9644fc4b1909614f9cd21353f194b116b",
     },
     "cacert": {
         "version": "2026-08-13",
@@ -75,45 +85,47 @@ VERSIONS = {
 
     # Glint binary hashes by architecture
     "glint_sha256": {
-        "amd64": "50e0a0d96d3185fa4b5fda0c71e7bf2afc173abc635bb9ea1a00d6319ec97d18",
-        "arm64": "b0af7226dc726d82a92ac23320167595c6069fed9f3fb9d207bcf08dc52a94e9",
+        "amd64": "1d93c22b11dcf3b2c62e7ae39463df137fea394a2f2a22d22f8f4354bb7ef6d8",
+        "arm64": "206776e11414bb07c48b5a92f1efd684a3ce948e24b927e0a86b53d7520b2852",
     },
 
     # Wee8 prebuilt hashes by architecture and stdlib ABI flavour.
     # libcxx keeps the legacy unsuffixed artifact name; libstdcxx is suffixed.
+    # TODO: refresh both libstdcxx hashes in the next bins-v* release, built
+    # with hermetic GCC and the base glibc 2.31 sysroot, before downstream use.
     "wee8_sha256": {
         "x86_64": {
             "libcxx": "ce217d16544fb3fd2cecce3cf872a6ad82902117297b88a223aec5c81bc521df",
-            "libstdcxx": "ad9895c550bdf8f4de931c0143c99cc28ae38aa0b475bc4602e494eedac46e90",
+            "libstdcxx": "0ca4fbbab6d7f3ac52efce3834e435945d14e1f45b02daed7c7454ab5e074a51",
         },
         "aarch64": {
-            "libcxx": "65291cd8c4675ad20fccf22b15c855acca400af3bedd7f95d129b490bc7bd85c",
-            "libstdcxx": "",
+            "libcxx": "682d0926e555da2fb33c7dc6dc95f884790fce5bc49fd95ca88a121e857d71a5",
+            "libstdcxx": "a6cbe6e6212412ee180479358c58af3d15f90d306baf46fef1994f2ddf445def",
         },
     },
 
-    # Sysroot hashes organized by glibc version, stdlib variant, and architecture
+    # Sysroot hashes organized by glibc version, stdlib variant, and architecture.
     # Format: sysroot_hashes[glibc_version][stdlib_variant][arch]
-    # stdlib_variant is either "base" (no libstdc++) or the libstdc++ version (e.g., "13")
+    # stdlib_variant is "base" or the libstdc++ version (e.g., "13").
     "sysroot_hashes": {
         "2.31": {
             "base": {
-                "amd64": "c6bc3431a24a869f226f1283c95ff575d8d158b14d0b344203235f438a03c9d6",
-                "arm64": "9e69b0b19c649970c77edeb22db15ae14b821c1b506055a88ef872d261ecfa0a",
+                "amd64": "ad10588de4e1afcc5587a1664fef52fb1990a1173df4820802bbd5f80838e43b",
+                "arm64": "d545a8b3dd9b58e97a7b93864ca02984cc6d1ed461e33dbbceab39f62d402282",
             },
             "13": {
-                "amd64": "964ead7dc533aee3057ea6c780e6b5ec09b25ed7140f24906b0ea02581bd6867",
-                "arm64": "906cd276c23916ceed92bd2e6dfe80da951ecd364ca41b691536366f45689f64",
+                "amd64": "5b504e41de6ef58b3b830122ef5e0c5cf7c515d7c50287621906a03bd0f60e9a",
+                "arm64": "c2ce4262f0fa35a2a8169cfee76fe20a3f8b68f155c880337dfb276b9d663899",
             },
         },
         "2.28": {
             "base": {
-                "amd64": "e62bc513029d7fedec4b794be9c7e89da7cf0de2de2c43f6b83e636232099aaa",
-                "arm64": "3f7433b3e7b355e37a971bc7df1eb001e17e6fce8e120ac2800210acd7aff637",
+                "amd64": "6dd402f975749b7c24b6c98bceba3200adf9cc0b94720a2e89eb3ed590530617",
+                "arm64": "21cb6e9d3b215da898e7da15614c90d503f9868a86b37455b9410e733c312ff2",
             },
             "13": {
-                "amd64": "2ea419344fbe9847e30c8d4c7f459d880afe172f96aad7d2b5a8854aa526986c",
-                "arm64": "9a858b234cedcf1c03d179872e5bfa8ea5ccf2f9c44c0ddd49806bbe9f1372c3",
+                "amd64": "03a9ef447d9d49be160036bf8848dfc0a2cf000567cd6f1ba0526a6a44d30674",
+                "arm64": "79999707cdf72d8f4584f64493bff0a1b40edd29535eae9f800da71f15a72c33",
             },
         },
     },
@@ -168,7 +180,7 @@ VERSIONS = {
         "download_suffix": "Linux-X64",
         "version": LLVM_VERSION,
         "bins_release": BINS_RELEASE,
-        "sha256": "6cb4cca6df33be00c80fa1639062c973d1cafe4e7ad98a9b4bdf21bf9dec5806",
+        "sha256": "a12891b93faaf8fc1293db6232bf71fcdade9df10e978fe92dbac78d7379130d",
         "url": "https://github.com/{repo}/releases/download/bins-v{bins_release}/llvm-minimal-{version}-{download_suffix}.tar.zst",
         "strip_prefix": "llvm-minimal-{version}-{download_suffix}",
     },
@@ -178,7 +190,7 @@ VERSIONS = {
         "download_suffix": "Linux-ARM64",
         "version": LLVM_VERSION,
         "bins_release": BINS_RELEASE,
-        "sha256": "9a6cc0a84d524342e578db739b04e8a3875adb40b38887e4e074661e925f8a9c",
+        "sha256": "a4a8a3545ca213117e9629aa4b0abd6fd1232556109af31b3dacf16b1b59ffa1",
         "url": "https://github.com/{repo}/releases/download/bins-v{bins_release}/llvm-minimal-{version}-{download_suffix}.tar.zst",
         "strip_prefix": "llvm-minimal-{version}-{download_suffix}",
     },
@@ -188,7 +200,7 @@ VERSIONS = {
         "download_suffix": "macOS-ARM64",
         "version": LLVM_VERSION,
         "bins_release": BINS_RELEASE,
-        "sha256": "928e51aa7c97fbb8c5c50075118f4b36e36363b1a2c3af2dfef9aea1ef526ade",
+        "sha256": "ca6c644a6d285d52d62bf7cb206d839623668eaf86cdc25bc0a709cd137a2017",
         "url": "https://github.com/{repo}/releases/download/bins-v{bins_release}/llvm-minimal-{version}-{download_suffix}.tar.zst",
         "strip_prefix": "llvm-minimal-{version}-{download_suffix}",
     },

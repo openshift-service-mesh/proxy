@@ -29,6 +29,10 @@ class CheckRunner {
 
     /**
      * @brief Run a single check.
+     *
+     * Dispatches on the check type; a `code` list is tried in order
+     * (see Check::alternative_codes()).
+     *
      * @param check Check object describing the check to perform.
      * @return CheckResult containing the result of the check.
      */
@@ -84,6 +88,13 @@ class CheckRunner {
     ///< Directory where conftest source files are written (next to the check
     ///< JSON file), provided by Bazel via the check path
     std::filesystem::path source_dir_;
+
+    /**
+     * @brief Run one probe of a check with its first program only.
+     * @param check Check object describing the check to perform.
+     * @return CheckResult of this single probe.
+     */
+    CheckResult dispatch_check(const Check& check);
 
     /** @brief Check if a function exists and can be linked. */
     CheckResult check_function(const Check& check);
@@ -243,6 +254,20 @@ class CheckRunner {
         const std::vector<std::string>& extra_linkopts = {});
 
     /**
+     * @brief Append the cc_deps archives (Config::link_libraries) to a link
+     * command, after the probe's object and the -l<library> under test.
+     */
+    void append_link_libraries(std::vector<std::string>& cmd);
+
+    /**
+     * @brief `-L<dir>` (`/LIBPATH:<dir>` for cl) for the directory of every
+     * cc_deps archive, so a `-l<name>` under test (AC_CHECK_LIB) resolves to
+     * the dependency's lib<name>.a by name, as it would with the library
+     * installed; the archive itself is still passed by path.
+     */
+    std::vector<std::string> library_search_flags(bool msvc) const;
+
+    /**
      * @brief Append the trailing `/link` block to a cl.exe command line.
      *
      * cl hands everything after `/link` to link.exe, so this must be called
@@ -313,6 +338,16 @@ class CheckRunner {
      *         or empty string if no compile_defines specified.
      */
     std::string resolve_compile_defines(const Check& check) const;
+
+    /**
+     * @brief Decode a JSON-encoded CheckResult value into the text a probe
+     * should see after `#define NAME`.
+     *
+     * Strings yield their content, numbers their literal, booleans
+     * `true`/`false`; values that are not JSON (legacy files) are returned
+     * unchanged.
+     */
+    static std::string decode_result_value(const std::string& value);
 };
 
 }  // namespace rules_cc_autoconf

@@ -3,16 +3,18 @@
 load("@bazel_features//:features.bzl", "bazel_features")
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@rules_cc//cc:find_cc_toolchain.bzl", "use_cc_toolchain")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(
     "//autoconf/private:autoconf_config.bzl",
+    "collect_defaults",
     "collect_deps",
     "collect_transitive_results",
-    "filter_defaults",
-    "get_autoconf_toolchain_defaults",
-    "get_autoconf_toolchain_defaults_by_label",
+    "merge_defaults",
+    "merge_results",
 )
 load("//autoconf/private:condition_utils.bzl", "extract_condition_vars")
-load("//autoconf/private:providers.bzl", "CcAutoconfInfo")
+load("//autoconf/private:providers.bzl", "CcAutoconfDefaultsInfo", "CcAutoconfInfo")
 
 def _package_relative_name(ctx, file):
     """Returns the package relative path to the file.
@@ -130,42 +132,50 @@ def _lookup_var(var, all_cache, all_define, all_subst, src_label, rule_label):
 
     return distinct_paths.values()[0][1]
 
+def _repository_relative(file):
+    """The file's path within its repository.
+
+    That is what a quoted include resolves against the repository's own include
+    roots (`-iquote external/<repo>` and its output-tree twin), in the main
+    repository and in any other.  It is the `short_path` without the
+    `../<repo>/` of an external file, and it holds for generated files and under
+    path mapping, where `path` would not.
+
+    Args:
+        file: The `File` to name.
+
+    Returns:
+        The repository-relative path, as a string.
+    """
+    short = file.short_path
+    if short.startswith("../"):
+        return short.split("/", 2)[2]
+    return short
+
 def _arg_map_src(value):
     in_file, condition, out_file = value
-    return "{},{},{}".format(in_file.path, condition, out_file.path)
+    return [
+        "--src",
+        "{},{},{}".format(in_file.path, condition, out_file.path),
+        "--include-as",
+        _repository_relative(in_file),
+    ]
 
 def _autoconf_srcs_impl(ctx):
     """Implementation of the autoconf_srcs rule."""
-
-    # Validate that defaults_include and defaults_exclude are mutually exclusive
-    if ctx.attr.defaults_include and ctx.attr.defaults_exclude:
-        fail("defaults_include and defaults_exclude are mutually exclusive")
-
-    # Get toolchain defaults based on the defaults attribute
-    defaults = struct(cache = {}, define = {}, subst = {})
-    if ctx.attr.defaults:
-        # Only use label-based filtering if include/exclude is specified
-        if ctx.attr.defaults_include or ctx.attr.defaults_exclude:
-            # Filtering needed - rebuild filtered list from labels
-            defaults_by_label = get_autoconf_toolchain_defaults_by_label(ctx)
-            if defaults_by_label:
-                include_labels = [dep.label for dep in ctx.attr.defaults_include] if ctx.attr.defaults_include else []
-                exclude_labels = [dep.label for dep in ctx.attr.defaults_exclude] if ctx.attr.defaults_exclude else []
-                defaults = filter_defaults(defaults_by_label, include_labels, exclude_labels)
-        else:
-            # No filtering - use already-flattened collection directly from toolchain
-            defaults = get_autoconf_toolchain_defaults(ctx)
 
     # Collect transitive results from deps (same approach as autoconf_hdr)
     deps = collect_deps(ctx.attr.deps)
     dep_infos = deps.to_list()
     dep_results = collect_transitive_results(dep_infos)
 
-    all_cache = defaults.cache | dep_results["cache"]
-    all_define = defaults.define | dep_results["define"]
-    all_subst = defaults.subst | dep_results["subst"]
+    merged = merge_results(dep_results, merge_defaults(collect_defaults(ctx.attr.default_deps, dep_infos).to_list()))
+    all_cache = merged.cache
+    all_define = merged.define
+    all_subst = merged.subst
 
     outputs = []
+    originals = []
 
     for src, condition in ctx.attr.srcs.items():
         files = src.files.to_list()
@@ -177,6 +187,12 @@ def _autoconf_srcs_impl(ctx):
 
         in_file = files[0]
         out_name = _output_name(ctx, in_file, ctx.attr.naming)
+        if ctx.attr.wrap == "include" and ctx.attr.naming != "ac_suffix":
+            # The wrapper's `#include "<path>"` is searched for in the wrapper's own
+            # directory first, so a wrapper named like a root-level source
+            # (`foo.c` including "foo.c") would include itself: the wrapper's
+            # name always carries the `.ac` infix.
+            out_name = _add_ac_suffix(out_name)
         out = ctx.actions.declare_file(out_name)
 
         # Extract all variable names from the (possibly compound) condition.
@@ -191,9 +207,12 @@ def _autoconf_srcs_impl(ctx):
             dep_files.append(results_file)
 
         # Use comma separator: {in},{CONDITION},{out}
-        args.add_all([(in_file, condition, out)], before_each = "--src", map_each = _arg_map_src)
+        args.add_all([(in_file, condition, out)], map_each = _arg_map_src)
+        if ctx.attr.wrap == "include":
+            args.add("--include-original")
 
         ctx.actions.run(
+            toolchain = None,
             executable = ctx.executable._runner,
             arguments = [args],
             inputs = [in_file] + dep_files,
@@ -204,8 +223,17 @@ def _autoconf_srcs_impl(ctx):
         )
 
         outputs.append(out)
+        originals.append(in_file)
 
-    return [DefaultInfo(files = depset(outputs))]
+    providers = [DefaultInfo(files = depset(outputs))]
+    if ctx.attr.wrap == "include":
+        # The wrappers `#include` the originals, so the originals must reach
+        # the compiler: a consumer that lists this target in `deps` as well as
+        # `srcs` gets them as headers of its compilation context.
+        providers.append(CcInfo(compilation_context = cc_common.create_compilation_context(
+            headers = depset(originals),
+        )))
+    return providers
 
 autoconf_srcs = rule(
     implementation = _autoconf_srcs_impl,
@@ -260,30 +288,19 @@ only be compiled when a particular autoconf check passes, without having to
 manually maintain `#ifdef` guards in every source file.
 """,
     attrs = {
+        "default_deps": attr.label_list(
+            doc = """\
+`autoconf_defaults` targets whose values stand where no result of the name comes through `deps`
+(a result overrides a default silently; two defaults of one name must agree).  The defaults the
+`deps` carry are read as well.
+""",
+            providers = [CcAutoconfDefaultsInfo],
+        ),
         "defaults": attr.bool(
-            doc = """Whether to include toolchain defaults.
-
-            When False (the default), no toolchain defaults are included and only
-            the explicit deps provide check results. When True, defaults from the
-            autoconf toolchain are included, subject to filtering by defaults_include
-            or defaults_exclude.""",
+            doc = """\
+Deprecated and ignored: defaults come through `deps` and `default_deps`; the autoconf toolchain
+no longer carries any.  Accepted so existing BUILD files keep loading.""",
             default = False,
-        ),
-        "defaults_exclude": attr.label_list(
-            doc = """Labels to exclude from toolchain defaults.
-
-            Only effective when defaults=True. If specified, defaults from these
-            labels are excluded. Labels not found in the toolchain are silently
-            ignored. Mutually exclusive with defaults_include.""",
-            providers = [CcAutoconfInfo],
-        ),
-        "defaults_include": attr.label_list(
-            doc = """Labels to include from toolchain defaults.
-
-            Only effective when defaults=True. If specified, only defaults from
-            these labels are included. An error is raised if a specified label
-            is not found in the toolchain. Mutually exclusive with defaults_exclude.""",
-            providers = [CcAutoconfInfo],
         ),
         "deps": attr.label_list(
             doc = "List of `autoconf` targets which provide defines. Results from all deps will be merged together, and duplicate define names will produce an error.",
@@ -294,7 +311,9 @@ manually maintain `#ifdef` guards in every source file.
             doc = """\
 How to name generated sources: `package_relative` keeps the original package-relative path, `ac_suffix`
 inserts `.ac.` before the final suffix (e.g. `foo.cc -> foo.ac.cc`), and `per_target` prefixes outputs
-with `{ctx.label.name}` to namespace them per rule.
+with `{ctx.label.name}` to namespace them per rule.  Under `wrap = "include"` the output always carries the
+`.ac` infix as well (`foo.c -> foo.ac.c`, `per_target`: `{ctx.label.name}/foo.ac.c`): a wrapper named like
+a root-level source would resolve its own `#include "foo.c"` to itself.
 """,
             values = [
                 "package_relative",
@@ -307,6 +326,16 @@ with `{ctx.label.name}` to namespace them per rule.
             doc = "A mapping of source file to define required to compile the file.",
             allow_files = True,
             mandatory = True,
+        ),
+        "wrap": attr.string(
+            doc = "How a generated file stands for its source.  `copy` (the default) carries a copy of the " +
+                  "source's contents.  `include` carries only `#include \"<path of the source>\"`, so the " +
+                  "source's own quoted includes (`#include \"sibling.h\"`) still resolve in its directory and " +
+                  "`__FILE__` and diagnostics name the source; the sources must then reach the compiler, which " +
+                  "they do when the consumer lists this target in `deps` as well as `srcs` (the target " +
+                  "provides them as headers of a `CcInfo`).",
+            default = "copy",
+            values = ["copy", "include"],
         ),
         "_runner": attr.label(
             cfg = "exec",

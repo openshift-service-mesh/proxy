@@ -1,0 +1,29 @@
+
+package(default_visibility = ["//visibility:public"])
+
+# A single source directory avoids thousands of individual action inputs.
+filegroup(
+    name = "sysroot",
+    srcs = ["."],
+)
+
+filegroup(
+    name = "headers",
+    srcs = glob(
+        ["usr/include/**"],
+        exclude = ["**/*:*"],
+    ),
+)
+
+filegroup(
+    name = "libs",
+    srcs = glob(
+        [
+            "usr/lib/**/*.a",
+            "usr/lib/**/*.so*",
+            "lib/**/*.a",
+            "lib/**/*.so*",
+        ],
+        exclude = ["**/*:*"],
+    ),
+)

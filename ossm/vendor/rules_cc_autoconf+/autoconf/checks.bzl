@@ -28,7 +28,9 @@ When AC_DEFINE or AC_SUBST use a `condition` parameter that references a cache v
   - The value is falsy (empty string or "0")
 
 If the condition includes a comparison operator (e.g., `condition="ac_cv_header_foo_h==1"`),
-it performs value comparison instead of truthy check.
+it performs value comparison instead of truthy check. A define that produced no
+value (`/* #undef X */` in config.h) compares as `0`, as it would in `#if X == 0`;
+a substitution whose value is the empty string does not.
 
 Example:
 ```python
@@ -90,6 +92,13 @@ _AC_INCLUDE_FORMAT_WITH_NEWLINE = "#include <{}>\n"
 # Default includes for AC_CHECK_DECL, AC_CHECK_TYPE, etc. (AC_INCLUDES_DEFAULT).
 # Exposed as utils.AC_INCLUDES_DEFAULT. All includes use the form #include <foo>.
 # See: https://www.gnu.org/savannah-checkouts/gnu/autoconf/manual/autoconf-2.72/autoconf.html#Default-Includes
+# Upstream guards the optional headers with the HAVE_*_H results of
+# AC_CHECK_INCLUDES_DEFAULT (`#ifdef HAVE_UNISTD_H` and so on).  Those results
+# are not visible to a probe here, so `__has_include` -- cl 19.11+, gcc 5+,
+# clang -- stands in for them.  Keying on the OS instead would be wrong on
+# both sides of Windows: MinGW ships all three headers, MSVC ships
+# <sys/types.h> and <sys/stat.h>.  Compilers without `__has_include` get the
+# POSIX set unconditionally, as every such compiler is a Unix one.
 _AC_INCLUDES_DEFAULT = """\
 #include <stdio.h>
 #include <stdlib.h>
@@ -97,12 +106,24 @@ _AC_INCLUDES_DEFAULT = """\
 #include <string.h>
 #include <inttypes.h>
 #include <stdint.h>
-#ifdef _WIN32
-/* Windows doesn't have POSIX headers */
+#if defined __has_include
+# if __has_include(<strings.h>)
+#  include <strings.h>
+# endif
+# if __has_include(<sys/types.h>)
+#  include <sys/types.h>
+# endif
+# if __has_include(<sys/stat.h>)
+#  include <sys/stat.h>
+# endif
+# if __has_include(<unistd.h>)
+#  include <unistd.h>
+# endif
 #else
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
+# include <strings.h>
+# include <sys/types.h>
+# include <sys/stat.h>
+# include <unistd.h>
 #endif
 """
 
@@ -133,6 +154,17 @@ def _header_code_from_includes(includes_list):
         return ""
     return "\n".join([h.strip() for h in includes_list])
 
+def _wrap_bodies_with_includes(includes, code):
+    """Wrap main() body/bodies in AC_LANG_PROGRAM with the given includes.
+
+    `code` is one body, a list of bodies (one program per entry, tried in
+    order by the checker), or None for an empty body.
+    """
+    header_code = _header_code_from_includes(includes)
+    if type(code) == "list":
+        return [_AC_LANG_PROGRAM_TEMPLATE.format(header_code, body) for body in code]
+    return _AC_LANG_PROGRAM_TEMPLATE.format(header_code, code if code else "")
+
 # AC_CHECK_FUNC default code template.
 #
 # Source of truth (compare against this when upstream changes):
@@ -159,10 +191,14 @@ def _header_code_from_includes(includes_list):
 #     consumers would call the stub at runtime.
 #
 # MSVC deviation: upstream autoconf has no MSVC story. The `_MSC_VER`
-# branch returns `int` (no GCC builtins to confuse) and links
-# legacy_stdio_definitions.lib so probes for the stdio family resolve
-# against UCRT, which inlines those functions in headers rather than
-# exporting linker symbols.
+# branch returns `int` (no GCC builtins to confuse).  Nothing else is
+# added: UCRT defines printf, snprintf, vsnprintf, swprintf and friends
+# inline in its headers, so this probe reports them absent exactly as
+# GNU autoconf does on MSVC.  gnulib relies on that outcome (probe no,
+# AC_CHECK_DECL yes) to name its replacements rpl_* instead of clashing
+# with the inline definitions; see gl_REPLACE_SNPRINTF in snprintf.m4.
+# Everyone else wants to know whether the function is callable, which
+# is what _AC_CHECK_FUNC_MSVC_INLINE_TEMPLATE below answers.
 _AC_CHECK_FUNC_DEFAULT_TEMPLATE = """\
 #define {function} innocuous_{function}
 #include <limits.h>
@@ -171,7 +207,6 @@ _AC_CHECK_FUNC_DEFAULT_TEMPLATE = """\
 extern "C"
 #endif
 #if defined _MSC_VER
-#pragma comment(lib, "legacy_stdio_definitions.lib")
 int {function} (void);
 #else
 char {function} (void);
@@ -180,6 +215,46 @@ char {function} (void);
 choke me
 #endif
 int main(void) {{ return {function}(); }}
+"""
+
+# Second program of AC_CHECK_FUNC's default `code` list.  The checker
+# tries a `code` list in order until one program succeeds, so this runs
+# only after the template above failed to link, which on MSVC it does for
+# the UCRT's header-inline printf and scanf families (see "MSVC deviation"
+# above).  That "no" is GNU's literal answer and the one gnulib's
+# replacement logic is built on, but it is the wrong answer for a consumer
+# that gates a plain call on HAVE_<FUNCTION>.  References:
+#   https://learn.microsoft.com/en-us/cpp/porting/visual-cpp-change-history-2003-2015#stdioh-and-conioh
+#   https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/doc/posix-functions/snprintf.texi#L15-L16
+#   https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/snprintf.m4#L45-L62
+#
+# This probe includes the default headers (AC_INCLUDES_DEFAULT) and
+# takes the function's address.  Taking the address forces an
+# out-of-line copy of an inline function into the conftest object, so the
+# link succeeds with no extra library.  The address is stored through a
+# volatile pointer so the optimiser cannot fold the comparison away and
+# drop the symbol reference.  It never turns a "yes" into a "no", and it
+# only turns a "no" into a "yes" when the function is genuinely callable:
+# a function-like macro has no address (compile error), and a function
+# that is declared but defined in no default library still fails to link.
+#
+# The `_MSC_VER` guard (cl.exe and clang-cl define it; MinGW does not)
+# keeps it a Microsoft-CRT probe: elsewhere it fails at preprocessing, so
+# every non-MSVC result is exactly GNU's.  On GNU compilers that costs one
+# fast-failing extra compile per function the bare-symbol probe rejected.
+# A check that wants GNU's literal answer on MSVC passes GNU's program
+# alone, `code = utils.AC_LANG_FUNC_LINK_TRY(function)`, as the gnulib
+# ports do.
+_AC_CHECK_FUNC_MSVC_INLINE_TEMPLATE = """\
+#if !defined _MSC_VER
+#error "header-inline function probe: Microsoft CRT only"
+#endif
+{includes}
+static void (*volatile rules_cc_autoconf_func_addr)(void);
+int main(void) {{
+    rules_cc_autoconf_func_addr = (void (*)(void)) &{function};
+    return 0;
+}}
 """
 
 # Upstream AC_LANG_CALL(C++) uses this shape for every function
@@ -191,6 +266,21 @@ extern "C" int {function}();
 }}
 int main(void) {{ return conftest::{function}(); }}
 """
+
+def _ac_lang_func_link_try(function):
+    """Return GNU autoconf's `AC_LANG_FUNC_LINK_TRY(C)` program for `function`.
+
+    The first program of `AC_CHECK_FUNC`'s default `code` list. Pass it alone
+    as `code` to get GNU's literal answer on every compiler; see
+    `AC_CHECK_FUNC` for when that matters.
+
+    Args:
+        function: Name of the function (e.g., `"snprintf"`)
+
+    Returns:
+        C source for the link probe.
+    """
+    return _AC_CHECK_FUNC_DEFAULT_TEMPLATE.format(function = function)
 
 def _library_function_link_test_code(function, language):
     """Return source for AC_CHECK_LIB/AC_SEARCH_LIBS function-link probes."""
@@ -461,6 +551,26 @@ def _ac_check_func(
     AC_CHECK_FUNC([mmap], [AC_DEFINE([HAVE_MMAP_FEATURE], [1])])
     ```
 
+    The default `code` is a list of two programs, tried in order. The first
+    is GNU autoconf's (`utils.AC_LANG_FUNC_LINK_TRY`): declare the function
+    with a dummy prototype, call it, and link against the default
+    libraries. The second runs only if that fails and only under
+    `_MSC_VER`: it includes `AC_INCLUDES_DEFAULT` and takes the function's
+    address, because the UCRT implements the printf and scanf families as
+    header-inline functions with no linker symbol. GNU autoconf itself
+    reports those absent on MSVC; this check reports them present, which
+    is what a `HAVE_<FUNCTION>` consumer needs. Results on every other
+    compiler are exactly GNU's. Passing `code` replaces the list: a check
+    that wants GNU's literal answer on MSVC passes
+    `code = utils.AC_LANG_FUNC_LINK_TRY(function)` alone. gnulib ports
+    verified against GNU autoconf do so for the printf family, because
+    gnulib documents that answer as MSVC 14's state and builds its
+    replacement logic on it:
+
+    - https://learn.microsoft.com/en-us/cpp/porting/visual-cpp-change-history-2003-2015#stdioh-and-conioh
+    - https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/doc/posix-functions/snprintf.texi#L15-L16
+    - https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/snprintf.m4#L45-L62
+
     Example:
     ```python
     # Cache variable only (no define, no subst)
@@ -490,7 +600,9 @@ def _ac_check_func(
             - `None` (default): No define is created, only cache variable
             - `True`: Create define using the cache variable name (`name`)
             - `"HAVE_FOO"`: Create define with explicit name `HAVE_FOO` (implies `define=True`)
-        code: Custom code to compile (optional).
+        code: Custom program to compile and link, or a list of programs tried
+            in order until one links (optional). Replaces the default list
+            described above.
         language: Language to use for check (`"c"` or `"cpp"`)
         compile_defines: Optional list of preprocessor define names from previous checks
             to add before includes (e.g., `["_GNU_SOURCE", "_DARWIN_C_SOURCE"]`).
@@ -518,16 +630,23 @@ def _ac_check_func(
     if not name:
         name = _get_cache_name_for_func(function)
 
-    if not code:
-        code = _AC_CHECK_FUNC_DEFAULT_TEMPLATE.format(function = function)
-
     check = {
         "language": language,
         "name": name,  # Cache variable name
         "type": "function",
     }
 
-    check["code"] = code
+    if code:
+        # Caller-supplied program(s) replace the default list.
+        check["code"] = code
+    else:
+        check["code"] = [
+            _ac_lang_func_link_try(function),
+            _AC_CHECK_FUNC_MSVC_INLINE_TEMPLATE.format(
+                includes = _AC_INCLUDES_DEFAULT,
+                function = function,
+            ),
+        ]
     if compile_defines:
         check["compile_defines"] = compile_defines
     if copts:
@@ -677,7 +796,8 @@ def _ac_try_compile(
         requires = None,
         if_true = None,
         if_false = None,
-        subst = None):
+        subst = None,
+        error = None):
     """Try to compile custom code.
 
     Original m4 example:
@@ -718,6 +838,8 @@ def _ac_try_compile(
         code: Code to compile. If `includes` is also provided, this is treated as
             the body of main(). Otherwise, it should be complete C code. For
             AC_LANG_PROGRAM-style tests, use code = utils.AC_LANG_PROGRAM(prologue, body).
+            May be a list of programs (or bodies, with `includes`): they are
+            tried in order and the check succeeds when one compiles.
         name: Cache variable name.
         define: Define name to set if compilation succeeds
         includes: Optional list of headers to include. When provided, `code` is
@@ -736,6 +858,8 @@ def _ac_try_compile(
         if_false: Value to use when check fails (currently not used for this check type).
         subst: If True, automatically create a substitution variable with the same name
             that will be set to "1" if the check succeeds, "0" if it fails.
+        error: Stop the build with this message when the check fails: `AC_MSG_ERROR` in the
+            branch configure runs when the test does not pass, e.g. a mandatory language standard.
 
     Returns:
         A JSON-encoded check string for use with the autoconf rule.
@@ -762,9 +886,7 @@ def _ac_try_compile(
 
     if includes:
         # When includes is provided, code is the body of main()
-        header_code = _header_code_from_includes(includes)
-        body_code = code if code else ""
-        check["code"] = _AC_LANG_PROGRAM_TEMPLATE.format(header_code, body_code)
+        check["code"] = _wrap_bodies_with_includes(includes, code)
     elif code:
         check["code"] = code
 
@@ -777,9 +899,205 @@ def _ac_try_compile(
 
     if subst != None:
         check["subst"] = subst
+    if error != None:
+        check["error"] = error
 
     _add_conditionals(check, if_true, if_false)
     return make_check(check)
+
+# The value of __STDC_VERSION__ (C) or __cplusplus / _MSVC_LANG (C++) a
+# compiler reports for each standard.  C89 has no __STDC_VERSION__ at all;
+# the GNU dialects report the same value as the ISO standard they extend.
+# buildifier: disable=unsorted-dict-items
+_C_STANDARD_VERSIONS = {
+    "c89": 0,
+    "c90": 0,
+    "c94": 199409,
+    "c99": 199901,
+    "c11": 201112,
+    "c17": 201710,
+    "c18": 201710,
+    "c23": 202311,
+}
+
+# buildifier: disable=unsorted-dict-items
+_CXX_STANDARD_VERSIONS = {
+    "c++98": 199711,
+    "c++03": 199711,
+    "c++11": 201103,
+    "c++14": 201402,
+    "c++17": 201703,
+    "c++20": 202002,
+    "c++23": 202302,
+    # Not final: what GCC and clang report for -std=c++26 today.
+    "c++26": 202400,
+}
+
+# The MSVC switch that reaches each standard (its C default is C89, its C++
+# default C++14); the GNU spelling is always -std=<standard>.
+_MSVC_C_SWITCHES = {"c11": "/std:c11", "c17": "/std:c17", "c18": "/std:c17", "c23": "/std:clatest", "c99": "/std:c11"}
+_MSVC_CXX_SWITCHES = {"c++17": "/std:c++17", "c++20": "/std:c++20", "c++23": "/std:c++latest", "c++26": "/std:c++latest"}
+
+# Per comparison: the cache-name suffix and how the requirement reads, with
+# {std} the standard and {lang} "C" or "C++".
+_STANDARD_COMPARISONS = {
+    "<": ("_older", "a {lang} compiler in a mode earlier than {std}"),
+    "<=": ("_at_most", "a {lang} compiler in {std} mode or earlier"),
+    "==": ("_exact", "a {lang} compiler in exactly {std} mode"),
+    ">": ("_newer", "a {lang} compiler in a mode later than {std}"),
+    ">=": ("", "a {std} or later {lang} compiler"),
+}
+
+def _ac_lang_standard(
+        standard,
+        *,
+        name = None,
+        compare = ">=",
+        define = None,
+        error = None,
+        copts = None,
+        requires = None):
+    """Check the language standard the compiler is running in.
+
+    The probe compares `__STDC_VERSION__` (C) or `__cplusplus` -- `_MSVC_LANG`
+    on MSVC, whose `__cplusplus` stays at 199711L -- with the value of
+    `standard`, under the flags every check sees: the toolchain's, `--copt` /
+    `--conlyopt` / `--cxxopt`, and the target's own `copts` / `conlyopts` /
+    `cxxopts`.  It is
+    the test behind `AC_PROG_CC_C99`, `AC_PROG_CC_STDC` and
+    `AX_CXX_COMPILE_STDCXX`'s mandatory mode, as one check: configure
+    switches the compiler into the mode it needs and stops when it cannot;
+    a Bazel build takes its standard from the root module, so the check
+    reports, or stops the build, instead.
+
+    Original m4 example:
+    ```m4
+    AC_PROG_CC_C99
+    AX_CXX_COMPILE_STDCXX([17], [noext], [mandatory])
+    ```
+
+    Example:
+    ```python
+    # Stop the build unless the C compiler is in C11 mode or later.
+    checks.AC_LANG_STANDARD("c11", error = True)
+    # Record whether the C++ compiler is in C++17 mode or later.
+    checks.AC_LANG_STANDARD("c++17", define = "HAVE_CXX17")
+    # Exactly C99 (the GNU dialect reports the same value).
+    checks.AC_LANG_STANDARD("c99", compare = "==", error = "C99 required")
+    ```
+
+    Note:
+        This is a rules_cc_autoconf extension.  Dialects compare equal to
+        the standard they extend (`gnu11` is `c11`), and the standard is the
+        build's: a `-std` of the target's own `conlyopts` / `cxxopts` is seen,
+        a dependency's is not.
+
+    Args:
+        standard: `c89` .. `c23` or `c++98` .. `c++26`, with or without a `gnu` prefix.
+        name: Cache variable name. Defaults to `ac_cv_std_<standard>` plus a suffix
+            for comparisons other than `>=` (`ac_cv_std_c99_exact`).
+        compare: How the compiler's standard must relate to `standard`: `>=` (default),
+            `==`, `<=`, `>` or `<`.
+        define: Define name to set when the comparison holds.
+        error: Stop the build when the comparison does not hold: `True` for a message
+            naming the flags to add (GNU and MSVC spellings), or a message of your own.
+        copts: Optional list of extra compiler flags for this check.
+        requires: Requirements that must be met for this check to run.
+
+    Returns:
+        A JSON-encoded check string for use with the autoconf rule.
+    """
+    lowered = standard.lower()
+    base = lowered.replace("gnu++", "c++") if lowered.startswith("gnu++") else (
+        "c" + lowered[3:] if lowered.startswith("gnu") else lowered
+    )
+    cxx = "++" in base
+    versions = _CXX_STANDARD_VERSIONS if cxx else _C_STANDARD_VERSIONS
+    if base not in versions:
+        fail("AC_LANG_STANDARD: unknown standard {}; one of {}".format(
+            standard,
+            sorted(_C_STANDARD_VERSIONS.keys()) + sorted(_CXX_STANDARD_VERSIONS.keys()),
+        ))
+    if compare not in _STANDARD_COMPARISONS:
+        fail("AC_LANG_STANDARD: compare must be one of {}".format(sorted(_STANDARD_COMPARISONS.keys())))
+    suffix, wording = _STANDARD_COMPARISONS[compare]
+
+    if cxx:
+        prologue = "#if defined _MSVC_LANG\n# define RCCA_STD_VERSION _MSVC_LANG\n#else\n# define RCCA_STD_VERSION __cplusplus\n#endif\n"
+    else:
+        prologue = "#if defined __STDC_VERSION__\n# define RCCA_STD_VERSION __STDC_VERSION__\n#else\n# define RCCA_STD_VERSION 0\n#endif\n"
+    code = prologue + "#if !(RCCA_STD_VERSION {} {}L)\n#error \"not {}\"\n#endif\nint main(void) {{ return 0; }}\n".format(
+        compare,
+        versions[base],
+        wording.format(std = base.upper(), lang = "C++" if cxx else "C"),
+    )
+
+    if error == True:
+        error = wording.format(std = base.upper(), lang = "C++" if cxx else "C") + " is required"
+
+        # The flag to add is only knowable for "at least" and "exactly"; and
+        # MSVC's switch only names the standard exactly where it has one for
+        # it (C99 is reached through /std:c11, C++23 through /std:c++latest).
+        if compare in (">=", "=="):
+            flag = "--cxxopt=" if cxx else "--copt="
+            spellings = flag + "-std=" + lowered + " (GCC, clang)"
+            msvc = (_MSVC_CXX_SWITCHES if cxx else _MSVC_C_SWITCHES).get(base)
+            exact = msvc != None and not msvc.endswith("latest") and base != "c99"
+            if msvc and (compare == ">=" or exact):
+                spellings += " or " + flag + msvc + " (MSVC)"
+            error += "; build with " + spellings
+
+    if name == None:
+        name = "ac_cv_std_" + base.replace("++", "xx") + suffix
+
+    return _ac_try_compile(
+        code = code,
+        name = name,
+        define = define,
+        language = "cpp" if cxx else "c",
+        copts = copts,
+        requires = requires,
+        error = error if error else None,
+    )
+
+def _ax_cxx_compile_stdcxx(version, ext = "ext", mandatory = True):
+    """AX_CXX_COMPILE_STDCXX from the autoconf archive: is the C++ compiler in C++<version> mode?
+
+    Defines `HAVE_CXX<version>` when it is (or a later one), and in mandatory
+    mode stops the build when it is not.  The macro itself would add
+    `-std=c++<version>` or `-std=gnu++<version>` to CXX; a Bazel build's
+    standard comes from the root module (`--cxxopt`) or the toolchain, so
+    only the test remains.
+
+    Original m4 example:
+    ```m4
+    AX_CXX_COMPILE_STDCXX([17], [noext], [mandatory])
+    ```
+
+    Example:
+    ```python
+    checks.AX_CXX_COMPILE_STDCXX("17", "noext", mandatory = True)
+    ```
+
+    Args:
+        version: `11`, `14`, `17`, `20`, `23` or `26`.
+        ext: `ext` or `noext`, as in the macro.  Accepted for fidelity; both dialects
+            report the same `__cplusplus`, so it does not change the test.
+        mandatory: Stop the build when the compiler is not in that mode (the macro's
+            `mandatory`); `False` is its `optional`.
+
+    Returns:
+        A JSON-encoded check string for use with the autoconf rule.
+    """
+    if ext not in ("ext", "noext"):
+        fail("AX_CXX_COMPILE_STDCXX: ext must be `ext` or `noext`, got {}".format(ext))
+    version = str(version)
+    return _ac_lang_standard(
+        "c++" + version,
+        name = "ax_cv_cxx_compile_cxx" + version,
+        define = "HAVE_CXX" + version,
+        error = True if mandatory else None,
+    )
 
 def _ac_try_link(
         *,
@@ -794,7 +1112,8 @@ def _ac_try_link(
         requires = None,
         if_true = 1,
         if_false = 0,
-        subst = None):
+        subst = None,
+        error = None):
     """Try to compile and link custom code.
 
     This function mirrors GNU Autoconf's `AC_LINK_IFELSE` macro, which uses
@@ -850,6 +1169,8 @@ def _ac_try_link(
         code: Code to compile and link. If `includes` is also provided, this is
             treated as the body of main(). Otherwise, it should be complete C code.
             For AC_LANG_PROGRAM-style tests use code = utils.AC_LANG_PROGRAM(prologue, body).
+            May be a list of programs (or bodies, with `includes`): they are
+            tried in order and the check succeeds when one links.
         name: Cache variable name.
         define: Define name to set if compilation and linking succeeds
         includes: Optional list of headers to include (backward compatibility).
@@ -869,6 +1190,8 @@ def _ac_try_link(
         if_true: Value to use when check succeeds (currently not used for this check type).
         if_false: Value to use when check fails (currently not used for this check type).
         subst: If True, mark as a substitution variable (for @VAR@ replacement in subst.h).
+        error: Stop the build with this message when the check fails: `AC_MSG_ERROR` in the
+            branch configure runs when the test does not pass, e.g. a mandatory language standard.
 
     Returns:
         A JSON-encoded check string for use with the autoconf rule.
@@ -895,9 +1218,7 @@ def _ac_try_link(
 
     if includes:
         # Backward compatibility: includes + code pattern
-        header_code = _header_code_from_includes(includes)
-        body_code = code if code else ""
-        check["code"] = _AC_LANG_PROGRAM_TEMPLATE.format(header_code, body_code)
+        check["code"] = _wrap_bodies_with_includes(includes, code)
     elif code:
         check["code"] = code
 
@@ -912,6 +1233,8 @@ def _ac_try_link(
 
     if subst != None:
         check["subst"] = subst
+    if error != None:
+        check["error"] = error
 
     _add_conditionals(check, if_true, if_false)
     return make_check(check)
@@ -1067,7 +1390,8 @@ def _ac_check_sizeof(
             - `None` (default): No define is created, only cache variable
             - `True`: Create define using the cache variable name (`name`)
             - `"SIZEOF_FOO"`: Create define with explicit name `SIZEOF_FOO` (implies `define=True`)
-        includes: Optional list of header names to include (e.g. `["stddef.h"]`)
+        includes: Optional list of header names to include (e.g. `["stddef.h"]`). Without it the
+            probe compiles with autoconf's default includes (`AC_INCLUDES_DEFAULT`), as the macro does.
         language: Language to use for check (`"c"` or `"cpp"`)
         copts: Optional list of extra compiler flags for this check
             (e.g., `["-std=c11"]`). Appended after the autoconf toolchain's
@@ -1106,7 +1430,9 @@ def _ac_check_sizeof(
         else:
             subst_name = subst
 
-    header_code = _header_code_from_includes(includes) if includes else ""
+    # As autoconf: the type is looked up with AC_INCLUDES_DEFAULT (`off_t` from
+    # <sys/types.h>) unless the caller names the headers.
+    header_code = _header_code_from_includes(includes) if includes else _AC_INCLUDES_DEFAULT
 
     code = _AC_CHECK_SIZEOF_TEMPLATE.format(header_code, type_name)
 
@@ -1194,7 +1520,8 @@ def _ac_check_alignof(
     Args:
         type_name: Name of the type
         define: Custom define name (defaults to `ALIGNOF_<TYPE>`)
-        includes: Optional list of header names to include (e.g. `["stddef.h"]`)
+        includes: Optional list of header names to include (e.g. `["stddef.h"]`). Without it the
+            probe compiles with autoconf's default includes (`AC_INCLUDES_DEFAULT`), as the macro does.
         language: Language to use for check (`"c"` or `"cpp"`)
         copts: Optional list of extra compiler flags for this check
             (e.g., `["-std=c11"]`). Appended after the autoconf toolchain's
@@ -1210,7 +1537,7 @@ def _ac_check_alignof(
     if not define:
         define = "ALIGNOF_" + type_name.upper().replace(" ", "_").replace("*", "P")
 
-    header_code = _header_code_from_includes(includes) if includes else ""
+    header_code = _header_code_from_includes(includes) if includes else _AC_INCLUDES_DEFAULT  # as AC_CHECK_SIZEOF
 
     code = _AC_CHECK_ALIGNOF_TEMPLATE.format(header_code, type_name)
 
@@ -1485,7 +1812,9 @@ def _ac_check_member(
     if not name:
         name = "ac_cv_member_{}_{}".format(agg_clean, mem_clean)
 
-    header_code = _header_code_from_includes(includes) if includes else ""
+    # Autoconf's AC_CHECK_MEMBER falls back to AC_INCLUDES_DEFAULT, under which
+    # `struct stat` and `struct tm` are visible without an explicit include.
+    header_code = _header_code_from_includes(includes) if includes else _AC_INCLUDES_DEFAULT
 
     code = _AC_CHECK_MEMBER_TEMPLATE.format(header_code, aggregate, aggregate, member)
 
@@ -2660,7 +2989,8 @@ def _ac_check_funcs(
 
     Args:
         functions: List of function names to check.
-        code: Custom code to compile (applies to all checks).
+        code: Custom program, or list of programs tried in order, to compile
+            and link (applies to all checks); see `AC_CHECK_FUNC`.
         language: Language to use for checks (`"c"` or `"cpp"`).
         compile_defines: Optional list of preprocessor define names (applies to all checks).
         requires: Requirements that must be met (applies to all checks).
@@ -2961,6 +3291,7 @@ checks = struct(
     AC_DEFINE = _ac_define,
     AC_DEFINE_UNQUOTED = _ac_define_unquoted,
     AC_FAIL = _ac_fail,
+    AC_LANG_STANDARD = _ac_lang_standard,
     AC_PROG_CC = _ac_prog_cc,
     AC_PROG_CC_C_O = _ac_prog_cc_c_o,
     AC_PROG_CXX = _ac_prog_cxx,
@@ -2968,6 +3299,7 @@ checks = struct(
     AC_SUBST = _ac_subst,
     AC_TRY_COMPILE = _ac_try_compile,
     AC_TRY_LINK = _ac_try_link,
+    AX_CXX_COMPILE_STDCXX = _ax_cxx_compile_stdcxx,
     M4_VARIABLE = _m4_variable,
 )
 
@@ -2981,5 +3313,6 @@ macros = struct(
 
 utils = struct(
     AC_LANG_PROGRAM = _ac_lang_program,
+    AC_LANG_FUNC_LINK_TRY = _ac_lang_func_link_try,
     AC_INCLUDES_DEFAULT = _AC_INCLUDES_DEFAULT,
 )

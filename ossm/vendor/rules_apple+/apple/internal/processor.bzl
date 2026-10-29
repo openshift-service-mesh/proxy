@@ -22,6 +22,10 @@ and will return information on how the bundles should be built.
 All partials handled by this processor must follow this API:
 
   - The expected output is a struct with the following optional fields:
+    * app_intents_resources: Inputs exported by resource processing for deferred App Shortcuts
+      training. Contains `lproj_dirs` (top-level locale directory names), `lproj_files` (locale
+      directory, strings File pairs), and `resource_trees` (resource-relative parent directory,
+      tree File pairs, where "." denotes the resources root).
     * bundle_files: Contains tuples of the format
       (location_type, parent_dir, files) where location_type is a field of the
       location enum. The files are then placed at the given location in the
@@ -30,6 +34,9 @@ All partials handled by this processor must follow this API:
       (location_type, parent_dir, files) where location_type is a field of the
       location enum and each file is a ZIP file. The files extracted from the
       ZIPs are then placed at the given location in the output bundle.
+    * deferred_partial: A partial that the processor calls after all other
+      partials, passing their outputs as the `partial_outputs` argument. Its
+      output follows this same API, except for `deferred_partial`.
     * output_files: Depset of `File`s that should be returned as outputs of the
       target.
     * output_groups: Dictionary of output group names to depset of Files that should be returned in
@@ -223,6 +230,34 @@ def _archive_paths(
         ),
     }
 
+def _versioned_bundle_symlinks(*, bundle_path, dests, version, version_path):
+    """Returns the links of a versioned bundle: Versions/Current and one per top-level entry.
+
+    Args:
+      bundle_path: The path of the bundle in the archive.
+      dests: The archive paths files and zips are placed at.
+      version: The bundle version, e.g. "A".
+      version_path: The path of the version directory in the archive.
+
+    Returns:
+      A list of structs with the `dest` of each link in the archive and its relative `target`.
+    """
+    prefix = version_path + "/"
+    entries = {}
+    for dest in dests:
+        if not dest.startswith(prefix):
+            continue
+        entry = dest[len(prefix):].split("/", 1)[0]
+        if entry and entry != "_CodeSignature":
+            entries[entry] = None
+    symlinks = [struct(dest = paths.join(bundle_path, "Versions", "Current"), target = version)]
+    for entry in sorted(entries.keys()):
+        symlinks.append(struct(
+            dest = paths.join(bundle_path, entry),
+            target = paths.join("Versions", "Current", entry),
+        ))
+    return symlinks
+
 def _bundle_partial_outputs_files(
         *,
         actions,
@@ -315,6 +350,13 @@ def _bundle_partial_outputs_files(
         tree_artifact_is_enabled = tree_artifact_is_enabled,
     )
 
+    # In a versioned bundle everything, headers and modules included, lives in the version
+    # directory; the top level only has links into it.
+    bundle_version = rule_descriptor.bundle_locations.bundle_version
+    bundle_path = location_to_paths[_LOCATION_ENUM.bundle]
+    if bundle_version:
+        location_to_paths[_LOCATION_ENUM.bundle] = location_to_paths[_LOCATION_ENUM.content]
+
     platform_type = platform_prerequisites.platform_type
     invalid_top_level_dirs = _invalid_top_level_directories_for_platform(
         platform_type = platform_type,
@@ -380,6 +422,15 @@ def _bundle_partial_outputs_files(
                 target_path = paths.join(location_to_paths[location], parent_dir or "")
                 control_zips.append(struct(src = source.path, dest = target_path))
 
+    bundle_symlinks = []
+    if bundle_version:
+        bundle_symlinks = _versioned_bundle_symlinks(
+            bundle_path = bundle_path,
+            dests = [f.dest for f in control_files] + [z.dest for z in control_zips],
+            version = bundle_version,
+            version_path = location_to_paths[_LOCATION_ENUM.content],
+        )
+
     post_processor = ipa_post_processor
     post_processor_path = ""
 
@@ -389,6 +440,7 @@ def _bundle_partial_outputs_files(
     control = struct(
         bundle_merge_files = control_files,
         bundle_merge_zips = control_zips,
+        bundle_symlinks = bundle_symlinks,
         output = output_file.path,
         code_signing_commands = codesigning_command or "",
         post_processor = post_processor_path,
@@ -772,6 +824,11 @@ def _process(
     """
 
     partial_outputs = [partial.call(p) for p in partials]
+    partial_outputs = partial_outputs + [
+        partial.call(o.deferred_partial, partial_outputs = partial_outputs)
+        for o in partial_outputs
+        if getattr(o, "deferred_partial", None)
+    ]
 
     if bundle_post_process_and_sign:
         output_archive = outputs.archive(

@@ -1,5 +1,6 @@
 """https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/wctype_h.m4"""
 
+load("//autoconf:autoconf_defaults.bzl", "autoconf_defaults")
 load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
 load("//autoconf:checks.bzl", "checks")
 load("//gnulib:macros.bzl", gl_macros = "macros")
@@ -11,11 +12,11 @@ autoconf(
             "iswcntrl",
             name = "ac_cv_func_iswcntrl",
         ),
-        # Set HAVE_ISWCNTRL as substitution variable
-        # if test $ac_cv_func_iswcntrl = yes; then
-        # else
-        # fi
-        # On macOS, iswcntrl exists, so HAVE_ISWCNTRL=1
+        # AC_CHECK_FUNCS_ONCE([iswcntrl]); if yes HAVE_ISWCNTRL=1 else 0
+        # (lines 19-25). Kept as a separate AC_DEFINE named
+        # ac_cv_define_HAVE_ISWCNTRL: published BCR overlays (cpio, wget,
+        # wget2) reference that cache name, and every supported libc has
+        # iswcntrl, so the constant is exact where it is used.
         checks.AC_DEFINE(
             "HAVE_ISWCNTRL",
             "1",
@@ -41,9 +42,14 @@ autoconf(
         ),
     ] + gl_macros.GL_CHECK_NEXT_HEADERS(["wctype.h"]) + [
         # Note: HAVE_WINT_T is already provided by wint_t dependency
+
+        # M4 lines 82-105: the towlower probes only run when REPLACE_ISWCNTRL=0
+        # (on MSVC wint_t is too small, so REPLACE_ISWCNTRL=1 and towlower is
+        # never probed, leaving HAVE_TOWLOWER undefined).
         checks.AC_CHECK_FUNC(
             "towlower",
             define = "HAVE_TOWLOWER",
+            requires = ["REPLACE_ISWCNTRL==0"],
         ),
 
         # If towlower is not found, check for its declaration
@@ -52,6 +58,10 @@ autoconf(
             includes = [
                 "#include <wchar.h>",
                 "#include <wctype.h>",
+            ],
+            requires = [
+                "REPLACE_ISWCNTRL==0",
+                "!ac_cv_func_towlower",
             ],
         ),
 
@@ -115,11 +125,14 @@ int main(void) {
         ),
 
         # M4 lines 82-105: if REPLACE_ISWCNTRL=1 then REPLACE_TOWLOWER=1
-        # else check towlower function (exists on macOS/Linux → 0)
+        # else REPLACE_TOWLOWER=0 unless towlower is declared but missing (Minix).
         checks.AC_SUBST(
             "REPLACE_TOWLOWER",
-            condition = "REPLACE_ISWCNTRL",
+            condition = "REPLACE_ISWCNTRL==1 || (!ac_cv_func_towlower && ac_cv_have_decl_towlower)",
         ),
+    ],
+    default_deps = [
+        ":defaults",  # AC_REQUIRE: gl_WCTYPE_H_DEFAULTS
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -134,41 +147,55 @@ int main(void) {
     ],
 )
 
-autoconf(
+autoconf_defaults(
     name = "gl_WCTYPE_H_DEFAULTS",
-    checks = [
+    substs = {
         # HAVE_* defaults
-        checks.AC_SUBST("HAVE_ISWBLANK", 1),
+        "HAVE_ISWBLANK": "1",
         # REPLACE_* defaults
-        checks.AC_SUBST("REPLACE_ISWBLANK", 0),
-        checks.AC_SUBST("REPLACE_ISWDIGIT", 0),
-        checks.AC_SUBST("REPLACE_ISWPUNCT", 0),
-        checks.AC_SUBST("REPLACE_ISWXDIGIT", 0),
-        checks.AC_SUBST("REPLACE_WCTRANS", 0),
-        checks.AC_SUBST("REPLACE_WCTYPE", 0),
-    ],
+        "REPLACE_ISWBLANK": "0",
+        "REPLACE_ISWDIGIT": "0",
+        "REPLACE_ISWPUNCT": "0",
+        "REPLACE_ISWXDIGIT": "0",
+        "REPLACE_WCTRANS": "0",
+        "REPLACE_WCTYPE": "0",
+    },
     visibility = ["//visibility:private"],
 )
 
-autoconf(
+autoconf_defaults(
     name = "gl_WCTYPE_H_REQUIRE_DEFAULTS",
-    checks = [
-        checks.AC_SUBST("GNULIB_ISWBLANK", 0),
-        checks.AC_SUBST("GNULIB_ISWDIGIT", 0),
-        checks.AC_SUBST("GNULIB_ISWPUNCT", 0),
-        checks.AC_SUBST("GNULIB_ISWXDIGIT", 0),
-        checks.AC_SUBST("GNULIB_WCTYPE", 0),
-        checks.AC_SUBST("GNULIB_ISWCTYPE", 0),
-        checks.AC_SUBST("GNULIB_WCTRANS", 0),
-        checks.AC_SUBST("GNULIB_TOWCTRANS", 0),
-    ],
+    substs = {
+        "GNULIB_ISWBLANK": "0",
+        "GNULIB_ISWCTYPE": "0",
+        "GNULIB_ISWDIGIT": "0",
+        "GNULIB_ISWPUNCT": "0",
+        "GNULIB_ISWXDIGIT": "0",
+        "GNULIB_TOWCTRANS": "0",
+        "GNULIB_WCTRANS": "0",
+        "GNULIB_WCTYPE": "0",
+    },
     visibility = ["//visibility:private"],
     deps = [
         ":gl_WCTYPE_H_DEFAULTS",
     ],
 )
 
+# gl_WCTYPE_MODULE_INDICATOR([modulename]): expands gl_WCTYPE_H_REQUIRE_DEFAULTS
+# and sets GNULIB_<MODULE>; the per-module indicator itself is not modelled.
+# Deps-only; kept out of the umbrella because the defaults reach consumers via
+# the toolchain `defaults` attribute (see //gnulib/toolchain).
 autoconf(
+    name = "gl_WCTYPE_MODULE_INDICATOR",
+    checks = [],
+    default_deps = [
+        ":defaults",  # through a macro it invokes: gl_WCTYPE_H_DEFAULTS
+        ":gl_WCTYPE_H_REQUIRE_DEFAULTS",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+autoconf_defaults(
     name = "defaults",
     visibility = ["//visibility:public"],
     deps = [
@@ -178,6 +205,9 @@ autoconf(
 
 autoconf(
     name = "wctype_h",
+    default_deps = [
+        ":defaults",  # the header's own defaults, as its m4 requires
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":gl_WCTYPE_H",

@@ -2,6 +2,7 @@ load(
     "@com_google_absl//absl:copts/GENERATED_copts.bzl",
     "ABSL_GCC_FLAGS",
 )
+load("@rules_cc//cc:defs.bzl", "cc_binary")
 
 package(default_visibility = ["//visibility:public"])
 

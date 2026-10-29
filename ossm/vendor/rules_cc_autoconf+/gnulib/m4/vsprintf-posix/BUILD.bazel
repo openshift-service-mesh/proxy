@@ -14,11 +14,13 @@ autoconf(
             checks.AC_SUBST("REPLACE_VSPRINTF", "1"),
         ],
     }),
+    default_deps = [
+        "//gnulib/m4/stdio_h:defaults",  # through a macro it invokes: gl_STDIO_H_DEFAULTS
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":gl_FUNC_VSPRINTF_IS_POSIX",
         "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
-        "//gnulib/m4/alloca:gl_FUNC_ALLOCA",
         "//gnulib/m4/multiarch",
         "//gnulib/m4/vasnprintf:gl_PREREQ_VASNPRINTF_WITH_POSIX_EXTRAS",
         "//gnulib/m4/vasnprintf:gl_REPLACE_VASNPRINTF",
@@ -61,6 +63,9 @@ autoconf(
     name = "gl_REPLACE_VSPRINTF",
     checks = [
         checks.AC_SUBST("REPLACE_VSPRINTF", "1"),
+    ],
+    default_deps = [
+        "//gnulib/m4/stdio_h:defaults",  # AC_REQUIRE: gl_STDIO_H_DEFAULTS
     ],
     visibility = ["//visibility:public"],
 )

@@ -298,7 +298,7 @@ ios_application(
     ],
     linkopts = [
         "-order_file",
-        "$(location :app_additional_linker_input)",
+        "$(execpath :app_additional_linker_input)",
     ],
     minimum_os_version = common.min_os_ios.baseline,
     provisioning_profile = "//test/testdata/provisioning:integration_testing_ios.mobileprovision",
@@ -453,6 +453,43 @@ ios_application(
     bundle_id = "com.google.example",
     entitlements = "//test/starlark_tests/resources:entitlements.plist",
     families = ["iphone"],
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    launch_storyboard = "//test/starlark_tests/resources:launch_screen_ios.storyboard",
+    minimum_os_version = common.min_os_ios.baseline,
+    provisioning_profile = "//test/testdata/provisioning:integration_testing_ios.mobileprovision",
+    resources = [
+        "//test/starlark_tests/resources:example_filegroup",
+        "//test/starlark_tests/resources:localization",
+        "//test/starlark_tests/resources:resource_bundle",
+    ],
+    settings_bundle = "//test/starlark_tests/resources:settings_bundle_ios",
+    tags = common.fixture_tags,
+    visibility = [
+        "//test/starlark_tests:__subpackages__",
+        "//tools/dossier_codesigningtool:__pkg__",
+    ],
+    deps = [
+        "//test/starlark_tests/resources:basic_bundle_lib",
+        "//test/starlark_tests/resources:bundle_library_ios_lib",
+        "//test/starlark_tests/resources:empty_strings_file_lib",
+        "//test/starlark_tests/resources:ios_localized_assets_lib",
+        "//test/starlark_tests/resources:ios_non_localized_assets_lib",
+        "//test/starlark_tests/resources:nested_bundle_lib",
+        "//test/starlark_tests/resources:objc_linkopt_lib",
+        "//test/starlark_tests/resources:objc_main_lib",
+        "//test/starlark_tests/resources:sticker_pack_ios_lib",
+    ],
+)
+
+ios_application(
+    name = "app_with_generate_linkmap",
+    app_icons = ["//test/testdata/resources:app_icons_ios"],
+    bundle_id = "com.google.example",
+    entitlements = "//test/starlark_tests/resources:entitlements.plist",
+    families = ["iphone"],
+    generate_linkmap = True,
     infoplists = [
         "//test/starlark_tests/resources:Info.plist",
     ],
@@ -4093,6 +4130,13 @@ apple_dynamic_xcframework_import(
     xcframework_imports = [":swiftmodule_xcframework_with_modulemap"],
 )
 
+apple_dynamic_xcframework_import(
+    name = "ios_imported_xcframework_swiftmodule_with_modulemap_implicit",
+    features = ["-swift.layering_check"],
+    tags = common.fixture_tags,
+    xcframework_imports = [":swiftmodule_xcframework_with_modulemap"],
+)
+
 write_file(
     name = "import_swiftmodule_framework",
     out = "SwiftWithBinarySwiftmoduleFramework.swift",
@@ -4134,6 +4178,13 @@ swift_library(
     ],
     tags = common.fixture_tags,
     deps = [":ios_imported_xcframework_swiftmodule_with_modulemap"],
+)
+
+swift_library(
+    name = "swiftmodule_xcframework_with_modulemap_implicit_consumer",
+    srcs = [":use_swiftmodule_framework_with_modulemap"],
+    tags = common.fixture_tags,
+    deps = [":ios_imported_xcframework_swiftmodule_with_modulemap_implicit"],
 )
 
 # Swift app with imported Objective-C static framework.
@@ -6639,6 +6690,75 @@ ios_application(
     ],
     minimum_os_version = common.min_os_ios.app_intents_support,
     provisioning_profile = "//test/testdata/provisioning:integration_testing_ios.mobileprovision",
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:app_intent",
+        "//test/starlark_tests/resources:swift_uikit_appdelegate",
+    ],
+)
+
+ios_application(
+    name = "app_with_app_intents_and_localized_strings",
+    app_intents = [
+        "//test/starlark_tests/resources:app_intent",
+    ],
+    bundle_id = "com.google.example",
+    families = ["iphone"],
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_ios.app_intents_support,
+    provisioning_profile = "//test/testdata/provisioning:integration_testing_ios.mobileprovision",
+    resources = [
+        "//test/starlark_tests/resources:app_shortcuts_localized_strings",
+        "//test/starlark_tests/resources:localized_strings",
+    ],
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:app_intent",
+        "//test/starlark_tests/resources:swift_uikit_appdelegate",
+    ],
+)
+
+ios_application(
+    name = "app_with_app_intents_and_localized_strings_without_flexible_matching",
+    app_intents = [
+        "//test/starlark_tests/resources:app_intent",
+    ],
+    app_intents_flexible_matching = False,
+    bundle_id = "com.google.example",
+    families = ["iphone"],
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_ios.app_intents_support,
+    provisioning_profile = "//test/testdata/provisioning:integration_testing_ios.mobileprovision",
+    resources = [
+        "//test/starlark_tests/resources:app_shortcuts_localized_strings",
+        "//test/starlark_tests/resources:localized_strings",
+    ],
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:app_intent",
+        "//test/starlark_tests/resources:swift_uikit_appdelegate",
+    ],
+)
+
+ios_application(
+    name = "app_with_app_intents_and_localized_xcstrings",
+    app_intents = [
+        "//test/starlark_tests/resources:app_intent",
+    ],
+    bundle_id = "com.google.example",
+    families = ["iphone"],
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_ios.app_intents_support,
+    provisioning_profile = "//test/testdata/provisioning:integration_testing_ios.mobileprovision",
+    resources = [
+        "//test/starlark_tests/resources:localized_xcstrings",
+    ],
     tags = common.fixture_tags,
     deps = [
         "//test/starlark_tests/resources:app_intent",

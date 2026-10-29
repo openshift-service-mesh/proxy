@@ -54,6 +54,17 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+# The SASL OAUTHBEARER OIDC token refresh talks HTTP, so it needs both, matching
+# `if(WITH_SSL AND WITH_CURL)` in CMakeLists.txt.
+selects.config_setting_group(
+    name = "with_oauthbearer_oidc_setting",
+    match_all = [
+        ":with_curl_setting",
+        ":with_ssl_setting",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 bool_flag(
     name = "with_c11threads",
     build_setting_default = False,
@@ -97,7 +108,9 @@ expand_template(
         "#cmakedefine01 WITH_LIBDL": "#define WITH_LIBDL 1",
         "#cmakedefine01 WITH_LZ4_EXT": "#define WITH_LZ4_EXT 1",
     } | {
-        # SASL is not in the BCR.
+        # Only cyrus-sasl is missing from the BCR, and it backs GSSAPI alone. The
+        # SCRAM and OAUTHBEARER mechanisms need nothing but OpenSSL, and OIDC also
+        # curl, so the selects below turn those on with their dependencies.
         "#cmakedefine01 WITH_OAUTHBEARER_OIDC": "#define WITH_OAUTHBEARER_OIDC 0",
         "#cmakedefine01 WITH_PKGCONFIG": "#define WITH_PKGCONFIG 0",
         "#cmakedefine01 WITH_PLUGINS": "#define WITH_PLUGINS 1",
@@ -143,7 +156,16 @@ expand_template(
         ":with_curl_setting": {"#cmakedefine01 WITH_CURL": "#define WITH_CURL 1"},
         "//conditions:default": {},
     }) | select({
-        ":with_ssl_setting": {"#cmakedefine01 WITH_SSL": "#define WITH_SSL 1"},
+        ":with_ssl_setting": {
+            "#cmakedefine01 WITH_SASL_OAUTHBEARER": "#define WITH_SASL_OAUTHBEARER 1",
+            "#cmakedefine01 WITH_SASL_SCRAM": "#define WITH_SASL_SCRAM 1",
+            "#cmakedefine01 WITH_SSL": "#define WITH_SSL 1",
+        },
+        "//conditions:default": {},
+    }) | select({
+        ":with_oauthbearer_oidc_setting": {
+            "#cmakedefine01 WITH_OAUTHBEARER_OIDC": "#define WITH_OAUTHBEARER_OIDC 1",
+        },
         "//conditions:default": {},
     }) | select({
         ":with_zlib_setting": {"#cmakedefine01 WITH_ZLIB": "#define WITH_ZLIB 1"},
@@ -166,8 +188,8 @@ cc_library(
             "src/rdkafka_ssl.c",
             "src/rdgz.c",
             "src/rdkafka_zstd.c",
-            # Exclude files for SASL feature, since cyrus-sasl is currently not
-            # in the BCR.
+            # cyrus-sasl is not in the BCR, so GSSAPI stays out for good; the
+            # mechanisms below come back through the selects.
             "src/rdkafka_sasl_win32.c",
             "src/rdkafka_sasl_cyrus.c",
             "src/rdkafka_sasl_scram.c",
@@ -185,7 +207,14 @@ cc_library(
         ":with_curl_setting": ["src/rdhttp.c"],
         "//conditions:default": [],
     }) + select({
-        ":with_ssl_setting": ["src/rdkafka_ssl.c"],
+        ":with_ssl_setting": [
+            "src/rdkafka_sasl_oauthbearer.c",
+            "src/rdkafka_sasl_scram.c",
+            "src/rdkafka_ssl.c",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        ":with_oauthbearer_oidc_setting": ["src/rdkafka_sasl_oauthbearer_oidc.c"],
         "//conditions:default": [],
     }) + select({
         ":with_zlib_setting": ["src/rdgz.c"],

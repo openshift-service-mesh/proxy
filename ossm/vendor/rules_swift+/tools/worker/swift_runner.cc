@@ -21,6 +21,7 @@
 #include <map>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "absl/container/btree_set.h"
 #include "absl/container/flat_hash_set.h"
@@ -50,12 +51,20 @@ namespace {
 using namespace bazel_rules_swift;
 
 // Creates a temporary file and writes the given arguments to it, one per line.
+// A leading -frontend is passed outside the response file by
+// ArgsWithResponseFile because some swift-driver versions select the invocation
+// mode before expanding response files.
 static std::unique_ptr<TempFile> WriteResponseFile(
     const std::vector<std::string>& args) {
   auto response_file = TempFile::Create("swiftc_params.XXXXXX");
   std::ofstream response_file_stream(response_file->GetPath());
 
-  for (const auto& arg : args) {
+  auto it = args.begin();
+  if (it != args.end() && *it == "-frontend") {
+    ++it;
+  }
+  for (; it != args.end(); ++it) {
+    const auto& arg = *it;
     // When Clang/Swift write out a response file to communicate from driver to
     // frontend, they just quote every argument to be safe; we duplicate that
     // instead of trying to be "smarter" and only quoting when necessary.
@@ -317,10 +326,10 @@ bool CreateVerifyOutputs(const std::string& output_file_map_path,
                          std::ostream* stderr_stream) {
   if (!output_file_map_path.empty()) {
     OutputFileMap output_file_map;
-    output_file_map.ReadFromPath(output_file_map_path, "", "");
-    for (const auto& expected_output_pair :
+    output_file_map.ReadFromPath(output_file_map_path);
+    for (const auto& [declared_path, incremental_path] :
          output_file_map.incremental_outputs()) {
-      if (!TouchFile(expected_output_pair.first, stderr_stream)) {
+      if (!TouchFile(declared_path, stderr_stream)) {
         return false;
       }
     }
@@ -341,6 +350,7 @@ bool CreateVerifyOutputs(const std::string& output_file_map_path,
 
 struct LayeringCheckModules {
   absl::btree_set<std::string> direct_modules;
+  std::vector<absl::btree_set<std::string>> direct_module_groups_to_check;
   absl::btree_set<std::string> transitive_modules;
   std::map<std::string, absl::btree_set<std::string>> labels;
 };
@@ -363,6 +373,17 @@ LayeringCheckModules ReadLayeringCheckModules(absl::string_view path) {
       if (!module_and_label.second.empty()) {
         modules.labels[module_and_label.first].insert(module_and_label.second);
       }
+    } else if (absl::ConsumePrefix(&value, "unused-check:")) {
+      absl::btree_set<std::string> direct_module_group;
+      for (absl::string_view module_name : absl::StrSplit(value, ',')) {
+        if (!module_name.empty()) {
+          direct_module_group.insert(std::string(module_name));
+        }
+      }
+      if (!direct_module_group.empty()) {
+        modules.direct_module_groups_to_check.push_back(
+            std::move(direct_module_group));
+      }
     }
   }
   return modules;
@@ -379,6 +400,17 @@ bool SupportsResponseFileInvocation(const std::vector<std::string>& args) {
   return args.empty() || args.front() != "-modulewrap";
 }
 
+std::vector<std::string> ArgsWithResponseFile(
+    const std::vector<std::string>& tool_args,
+    const std::vector<std::string>& args, const TempFile& response_file) {
+  std::vector<std::string> spawn_args(tool_args);
+  if (!args.empty() && args.front() == "-frontend") {
+    spawn_args.push_back(args.front());
+  }
+  spawn_args.push_back("@" + response_file.GetPath());
+  return spawn_args;
+}
+
 // Spawns an executable, constructing the command line by writing `args` to a
 // response file when the Swift invocation mode supports it and concatenating
 // that after `tool_args` (which are passed outside the response file).
@@ -389,20 +421,12 @@ int SpawnJob(const std::vector<std::string>& tool_args,
   std::vector<std::string> spawn_args(tool_args);
   if (SupportsResponseFileInvocation(args)) {
     auto response_file = WriteResponseFile(args);
-    spawn_args.push_back("@" + response_file->GetPath());
+    spawn_args = ArgsWithResponseFile(tool_args, args, *response_file);
     return RunSubProcess(spawn_args, env, stderr_stream, stdout_to_stderr);
   }
 
   spawn_args.insert(spawn_args.end(), args.begin(), args.end());
   return RunSubProcess(spawn_args, env, stderr_stream, stdout_to_stderr);
-}
-
-std::vector<std::string> ArgsWithResponseFile(
-    const std::vector<std::string>& tool_args,
-    const std::vector<std::string>& args, const TempFile& response_file) {
-  std::vector<std::string> spawn_args(tool_args);
-  spawn_args.push_back("@" + response_file.GetPath());
-  return spawn_args;
 }
 
 std::vector<std::string> FullArgsForDisplay(
@@ -444,8 +468,10 @@ bool SkipLayeringCheckIncompatibleArgs(std::vector<std::string>::iterator& it) {
 // modules.
 static const absl::flat_hash_set<absl::string_view>
     kModulesIgnorableForLayeringCheck = {
-        "Builtin",      "Swift",        "SwiftOnoneSupport",
-        "_Backtracing", "_Concurrency", "_StringProcessing",
+        "Builtin",           "Swift",
+        "SwiftOnoneSupport", "SwiftShims",
+        "_Backtracing",      "_Concurrency",
+        "_StringProcessing", "_SwiftConcurrencyShims",
 };
 
 // Returns true if the module can be ignored for the purposes of layering check
@@ -525,10 +551,7 @@ int SwiftRunner::Run(std::ostream* stderr_stream, bool stdout_to_stderr) {
     }
 
     OutputFileMap output_file_map;
-    output_file_map.ReadFromPath(output_file_map_path_, "", "");
-
-    auto outputs = output_file_map.incremental_outputs();
-    std::map<std::string, std::string>::iterator it;
+    output_file_map.ReadFromPath(output_file_map_path_);
 
     std::vector<std::string> ii_args;
     ii_args.push_back(index_import_path_);
@@ -538,9 +561,9 @@ int SwiftRunner::Run(std::ostream* stderr_stream, bool stdout_to_stderr) {
       ii_args.push_back(std::filesystem::current_path().string() + "=.");
     }
 
-    for (it = outputs.begin(); it != outputs.end(); it++) {
+    for (const auto& [output_path, incremental_path] :
+         output_file_map.incremental_outputs()) {
       // Need the actual output paths of the compiler - not bazel
-      auto output_path = it->first;
       auto file_type = output_path.substr(output_path.find_last_of(".") + 1);
       if (file_type == "o") {
         ii_args.push_back("-import-output-file");
@@ -651,6 +674,14 @@ bool SwiftRunner::ProcessArgument(
       // without breaking hermiticity.
       file_prefix_pwd_is_dot_ = true;
       add_prefix_map_flags("-file-prefix-map");
+      return true;
+    }
+    if (absl::ConsumePrefix(&wrapped_arg, "-resource-dir=")) {
+      std::string resource_dir(wrapped_arg);
+      bazel_placeholder_substitutions_.Apply(resource_dir);
+      // https://github.com/swiftlang/swift/pull/92879
+      consumer("-resource-dir");
+      consumer(std::filesystem::absolute(resource_dir).string());
       return true;
     }
     if (absl::ConsumePrefix(&wrapped_arg, "-macro-expansion-dir=")) {
@@ -879,32 +910,63 @@ int SwiftRunner::PerformLayeringCheck(std::ostream& stderr_stream,
   // Use a `btree_set` so that the output is automatically sorted
   // lexicographically.
   absl::btree_set<std::string> missing_deps;
+  absl::btree_set<std::string> imported_modules;
   std::ifstream imported_modules_stream(imported_modules_path);
   std::string module_name;
+  auto diagnostic_module_name = [this](const std::string& module_name) {
+    // Swift's `-emit-imported-modules` output reports resolved aliased module
+    // names. Map them back to the names users write in source before reporting
+    // diagnostics.
+    if (auto alias_and_source_name = alias_to_source_mapping_.find(module_name);
+        alias_and_source_name != alias_to_source_mapping_.end()) {
+      return alias_and_source_name->second;
+    }
+    return module_name;
+  };
+
   while (std::getline(imported_modules_stream, module_name)) {
+    imported_modules.insert(module_name);
+
     // A module can import itself when the Swift module has an underlying Clang
     // module, such as with `@_exported import X` in a Swift overlay for X.
     if (module_name != module_name_ &&
         !IsModuleIgnorableForLayeringCheck(module_name) &&
         layering_check_modules.transitive_modules.contains(module_name) &&
         !layering_check_modules.direct_modules.contains(module_name)) {
-      // Swift's `-emit-imported-modules` output reports resolved aliased module
-      // names. Map them back to the names users write in source before
-      // reporting missing deps.
       auto labels = layering_check_modules.labels.find(module_name);
-      if (auto alias_and_source_name =
-              alias_to_source_mapping_.find(module_name);
-          alias_and_source_name != alias_to_source_mapping_.end()) {
-        module_name = alias_and_source_name->second;
-      }
-
       if (labels != layering_check_modules.labels.end()) {
         for (const std::string& label : labels->second) {
-          missing_deps.insert(absl::Substitute("$0 ($1)", module_name, label));
+          missing_deps.insert(absl::Substitute(
+              "$0 ($1)", diagnostic_module_name(module_name), label));
         }
       } else {
-        missing_deps.insert(module_name);
+        missing_deps.insert(diagnostic_module_name(module_name));
       }
+    }
+  }
+
+  absl::btree_set<std::string> unused_deps;
+  for (const auto& direct_module_group :
+       layering_check_modules.direct_module_groups_to_check) {
+    bool has_checkable_module = false;
+    bool has_imported_module = false;
+    absl::btree_set<std::string> unused_modules_in_group;
+    for (const std::string& module_name : direct_module_group) {
+      if (module_name == module_name_ ||
+          IsModuleIgnorableForLayeringCheck(module_name)) {
+        continue;
+      }
+
+      has_checkable_module = true;
+      unused_modules_in_group.insert(diagnostic_module_name(module_name));
+      if (imported_modules.contains(module_name)) {
+        has_imported_module = true;
+      }
+    }
+
+    if (has_checkable_module && !has_imported_module) {
+      unused_deps.insert(unused_modules_in_group.begin(),
+                         unused_modules_in_group.end());
     }
   }
 
@@ -926,6 +988,29 @@ int SwiftRunner::PerformLayeringCheck(std::ostream& stderr_stream,
     WithColor(stderr_stream, Color::kBold)
         << "Please add the correct 'deps' to " << target_label_
         << " to import those modules." << std::endl;
+  }
+
+  if (!unused_deps.empty()) {
+    stderr_stream << std::endl;
+    WithColor(stderr_stream, Color::kBoldRed) << "error: ";
+    WithColor(stderr_stream, Color::kBold) << "Unused dependencies in ";
+    WithColor(stderr_stream, Color::kBoldGreen) << target_label_ << std::endl;
+    stderr_stream
+        << "The following modules are provided by direct dependencies, but "
+        << "they were not imported:" << std::endl
+        << std::endl;
+
+    for (const std::string& module_name : unused_deps) {
+      stderr_stream << "    " << module_name << std::endl;
+    }
+    stderr_stream << std::endl;
+
+    WithColor(stderr_stream, Color::kBold)
+        << "Please remove the unused 'deps' from " << target_label_ << "."
+        << std::endl;
+  }
+
+  if (!missing_deps.empty() || !unused_deps.empty()) {
     return 1;
   }
 

@@ -15,6 +15,15 @@ bzl_library(
 )
 
 bzl_library(
+    name = "autoconf_defaults_bzl",
+    srcs = ["autoconf_defaults.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/private:bzl_lib",
+    ],
+)
+
+bzl_library(
     name = "autoconf_hdr_bzl",
     srcs = ["autoconf_hdr.bzl"],
     visibility = ["//visibility:public"],
@@ -64,8 +73,8 @@ bzl_library(
 )
 
 bzl_library(
-    name = "package_info_bzl",
-    srcs = ["package_info.bzl"],
+    name = "autoconf_package_info_bzl",
+    srcs = ["autoconf_package_info.bzl"],
     visibility = ["//visibility:public"],
     deps = [
         ":cc_autoconf_info_bzl",
@@ -74,13 +83,22 @@ bzl_library(
 )
 
 bzl_library(
+    name = "package_info_bzl",
+    srcs = ["package_info.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [":autoconf_package_info_bzl"],
+)
+
+bzl_library(
     name = "defs_bzl",
     srcs = ["defs.bzl"],
     visibility = ["//visibility:public"],
     deps = [
         ":autoconf_bzl",
+        ":autoconf_defaults_bzl",
         ":autoconf_hdr_bzl",
         ":autoconf_linkopts_bzl",
+        ":autoconf_package_info_bzl",
         ":autoconf_srcs_bzl",
         ":autoconf_toolchain_bzl",
         ":cc_autoconf_info_bzl",
@@ -90,8 +108,10 @@ bzl_library(
 )
 
 exports_files([
+    "autoconf_defaults.bzl",
     "autoconf_hdr.bzl",
     "autoconf_linkopts.bzl",
+    "autoconf_package_info.bzl",
     "autoconf_srcs.bzl",
     "autoconf_toolchain.bzl",
     "autoconf.bzl",

@@ -2,13 +2,13 @@
 
 module(
     name = "rules_swift",
-    version = "4.0.1",
+    version = "4.2.2",
     bazel_compatibility = [">=8.0.0"],
     compatibility_level = 3,
 )
 
 bazel_dep(name = "abseil-cpp", version = "20250814.1")
-bazel_dep(name = "apple_support", version = "2.8.0")
+bazel_dep(name = "apple_support", version = "2.9.1")
 bazel_dep(name = "bazel_linux_packages", version = "0.4.1")
 bazel_dep(name = "bazel_features", version = "1.51.0")
 bazel_dep(name = "bazel_skylib", version = "1.7.1")
@@ -20,41 +20,56 @@ bazel_dep(name = "rules_shell", version = "0.3.0")
 bazel_dep(name = "swift_argument_parser", version = "1.7.0")
 
 # Regenerate lockfiles with:
-# bazel run @swift_ubuntu22.04_sysroot//:lock
-# bazel run @swift_ubuntu22.04_aarch64_sysroot//:lock
+# bazel run //tools/sysroots:lock
 apt = use_extension("@bazel_linux_packages//apt:extensions.bzl", "apt")
-apt.ubuntu(
-    name = "swift_ubuntu22.04_sysroot",
-    architectures = ["amd64"],
-    lockfile = "//swift/internal/extensions:ubuntu22.04_sysroot.lock.json",
-    packages = [
-        "libc6-dev",
-        "libcurl4-openssl-dev",
-        "libstdc++-11-dev",
-        "libxml2-dev",
-        "linux-libc-dev",
-        "zlib1g-dev",
-    ],
-    suites = ["jammy"],
+apt.index_integrity(
+    integrities = {
+        "https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/dists/jammy/main/binary-amd64/Packages.xz": "sha256-N8tX8VVMv6ccWinun/7hipqMF4K7BWjgh0t/9M6PnBE=",
+        "https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/dists/jammy/main/binary-arm64/Packages.xz": "sha256-uA0fCXGY9KLYD4TbAlImPZAgUaaVBArLwIXwMwSLybs=",
+        "https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/dists/noble/main/binary-amd64/Packages.xz": "sha256-KmoZnhAxpcJ5yzRmRtWUmT81scA91KgqqgMjmA3ZJFE=",
+        "https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/dists/noble/main/binary-arm64/Packages.xz": "sha256-ShkB5hJPsKER9d/8j1wUR09Eni7Ppx8urwspkX7bU/k=",
+        "https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/dists/resolute/main/binary-amd64/Packages.xz": "sha256-7ZrEHLJj767MWgagdC3FZXDi+1/5TE8uSy+9zd1zzyQ=",
+        "https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/dists/resolute/main/binary-arm64/Packages.xz": "sha256-U3cVgX2e13zJGfUSPtuRpI2a6Xq/BViKjxggjMcifgg=",
+    },
 )
-apt.ubuntu(
-    name = "swift_ubuntu22.04_aarch64_sysroot",
-    architectures = ["arm64"],
-    lockfile = "//swift/internal/extensions:ubuntu22.04_aarch64_sysroot.lock.json",
-    packages = [
-        "libc6-dev",
-        "libcurl4-openssl-dev",
-        "libstdc++-11-dev",
-        "libxml2-dev",
-        "linux-libc-dev",
-        "zlib1g-dev",
-    ],
-    suites = ["jammy"],
-)
+
+[
+    apt.ubuntu(
+        name = "swift_ubuntu{}_{}_sysroot".format(version, arch),
+        architectures = [arch],
+        glob_excludes = ["usr/share/man/**"],
+        lockfile = "//swift/internal/extensions:ubuntu{}_{}_sysroot.lock.json".format(version, arch),
+        # Supplies the /lib symlink required by libc's linker scripts on 24.04+.
+        packages = (["base-files"] if version != "22.04" else []) + [
+            "libc6-dev",
+            "libcurl4-openssl-dev",
+            "libstdc++-{}-dev".format(gcc),
+            "libxml2-dev",
+            "linux-libc-dev",
+            "zlib1g-dev",
+        ],
+        suites = [suite],
+        uri = "https://snapshot.ubuntu.com/ubuntu/20261001T000000Z",
+    )
+    for version, suite, gcc in [
+        ("22.04", "jammy", "11"),
+        ("24.04", "noble", "13"),
+        ("26.04", "resolute", "15"),
+    ]
+    for arch in [
+        "amd64",
+        "arm64",
+    ]
+]
+
 use_repo(
     apt,
-    "swift_ubuntu22.04_aarch64_sysroot",
-    "swift_ubuntu22.04_sysroot",
+    "swift_ubuntu22.04_amd64_sysroot",
+    "swift_ubuntu22.04_arm64_sysroot",
+    "swift_ubuntu24.04_amd64_sysroot",
+    "swift_ubuntu24.04_arm64_sysroot",
+    "swift_ubuntu26.04_amd64_sysroot",
+    "swift_ubuntu26.04_arm64_sysroot",
 )
 
 swift_autoconfiguration = use_repo_rule("//swift/internal:swift_autoconfiguration.bzl", "swift_autoconfiguration")
@@ -177,11 +192,11 @@ http_archive(
 )
 
 http_archive(
-    name = "rules_swift_index_import_6_1",
+    name = "rules_swift_index_import_6_4",
     build_file = "//third_party:rules_swift_index_import/BUILD.overlay",
-    canonical_id = "index-import-6.1",
-    sha256 = "9a54fc1674af6031125a9884480a1e31e1bcf48b8f558b3e8bcc6b6fcd6e8b61",
-    urls = ["https://github.com/MobileNativeFoundation/index-import/releases/download/6.1.0.1/index-import.tar.gz"],
+    canonical_id = "index-import-6.4",
+    sha256 = "8d0ecfb7abd2c47a3b253f8f20ad76b4932f7f99c8f314951823d7b63a61d78d",
+    urls = ["https://github.com/MobileNativeFoundation/index-import/releases/download/6.4.0/index-import.tar.gz"],
 )
 
 system_sdk = use_extension("//swift:extensions.bzl", "system_sdk")
@@ -191,32 +206,16 @@ system_sdk.configure_sdks(
         "AppleTVOS": [
             "CoreAudio_Private",  # TODO: Remove once CI >= Xcode 26.4
             "MobileGestaltPrivate",
+            "_AppIntents_HealthKit",  # Imports HealthKit, which is unavailable on tvOS.
+            "_Contacts_AppIntents",  # Imports Contacts, which is unavailable on tvOS.
         ],
         "AppleTVSimulator": [
             "CoreAudio_Private",  # TODO: Remove once CI >= Xcode 26.4
             "MobileGestaltPrivate",
-        ],
-        "iPhoneSimulator": [
-            "AssetsLibrary",  #  TODO: Remove once CI >= Xcode 26.4
-            "CoreAudio_Private",
-            "MobileGestaltPrivate",
-        ],
-        "iPhoneOS": [
-            "AssetsLibrary",  #  TODO: Remove once CI >= Xcode 26.4
-            "CoreAudio_Private",  # TODO: Remove once CI >= Xcode 26.4
-            "MobileGestaltPrivate",
+            "_AppIntents_HealthKit",  # Imports HealthKit, which is unavailable on tvOS.
+            "_Contacts_AppIntents",  # Imports Contacts, which is unavailable on tvOS.
         ],
         "MacOSX": [
-            "MobileGestaltPrivate",
-        ],
-        "XROS": [
-            "AccessoryTransportExtension",
-            "CoreAudio_Private",  # TODO: Remove once CI >= Xcode 26.4
-            "MobileGestaltPrivate",
-        ],
-        "XRSimulator": [
-            "AccessoryTransportExtension",
-            "CoreAudio_Private",  # TODO: Remove once CI >= Xcode 26.4
             "MobileGestaltPrivate",
         ],
         "WatchOS": [
@@ -229,6 +228,26 @@ system_sdk.configure_sdks(
             "CoreAudio_Private",  # TODO: Remove once CI >= Xcode 26.4
             "MobileGestaltPrivate",
         ],
+        "XROS": [
+            "AccessoryTransportExtension",
+            "CoreAudio_Private",  # TODO: Remove once CI >= Xcode 26.4
+            "MobileGestaltPrivate",
+        ],
+        "XRSimulator": [
+            "AccessoryTransportExtension",
+            "CoreAudio_Private",  # TODO: Remove once CI >= Xcode 26.4
+            "MobileGestaltPrivate",
+        ],
+        "iPhoneOS": [
+            "AssetsLibrary",  #  TODO: Remove once CI >= Xcode 26.4
+            "CoreAudio_Private",  # TODO: Remove once CI >= Xcode 26.4
+            "MobileGestaltPrivate",
+        ],
+        "iPhoneSimulator": [
+            "AssetsLibrary",  #  TODO: Remove once CI >= Xcode 26.4
+            "CoreAudio_Private",
+            "MobileGestaltPrivate",
+        ],
     },
     include_all = True,
 )
@@ -237,7 +256,7 @@ use_repo(system_sdk, "system_sdk")
 swift = use_extension("//swift:extensions.bzl", "swift", dev_dependency = True)
 swift.toolchain(
     name = "swift_toolchain",
-    swift_version = "6.3.2",
+    swift_version = "6.4.0",
 )
 use_repo(
     swift,
@@ -272,14 +291,24 @@ register_toolchains("//swift/toolchains:all")
 # Dev dependencies
 bazel_dep(name = "bazel_skylib_gazelle_plugin", version = "1.5.0", dev_dependency = True)
 bazel_dep(name = "gazelle", version = "0.46.0", dev_dependency = True)
+bazel_dep(name = "platforms_contrib", version = "0.2.3", dev_dependency = True)
 bazel_dep(name = "rules_go", version = "0.59.0", dev_dependency = True)  # TODO: Remove when transitives update past this version
+bazel_dep(name = "rules_multirun", version = "0.14.0", dev_dependency = True)
 bazel_dep(name = "rules_python", version = "2.2.0", dev_dependency = True)
 bazel_dep(name = "stardoc", version = "0.8.0", dev_dependency = True)
-bazel_dep(name = "swift-syntax", version = "602.0.0.bcr.2", dev_dependency = True)
+bazel_dep(name = "swift-syntax", version = "604.0.0", dev_dependency = True)
 bazel_dep(name = "rules_swift_layering_check_external_test", version = "0.0.0", dev_dependency = True)
 local_path_override(
     module_name = "rules_swift_layering_check_external_test",
     path = "third_party/rules_swift_layering_check_external_test",
+)
+
+# TODO: Use a release once platforms_contrib includes host libc detection.
+archive_override(
+    module_name = "platforms_contrib",
+    integrity = "sha256-kj0hka+hWv1khEjLUeB2NQF8b50v7MmihsJy5QUQHvc=",
+    strip_prefix = "platforms_contrib-94eb2db76709c1fb597b33969a48cfef3d76a259",
+    urls = ["https://github.com/bazel-contrib/platforms_contrib/archive/94eb2db76709c1fb597b33969a48cfef3d76a259.tar.gz"],
 )
 
 # TODO: In stardoc 0.7.1+, the `load` statements added to the docs are relative to the `alias` targets which is incorrect.
@@ -292,24 +321,22 @@ single_version_override(
 )
 
 # Android dev dependencies
-bazel_dep(name = "hermetic_android_toolchains", version = "0.1.1", dev_dependency = True)
-bazel_dep(name = "rules_android", version = "0.7.3", dev_dependency = True)
+bazel_dep(name = "hermetic_android_toolchains", version = "0.4.0", dev_dependency = True)
+bazel_dep(name = "rules_android", version = "0.8.0", dev_dependency = True)
 bazel_dep(name = "rules_android_ndk", version = "0.1.5", dev_dependency = True)
 bazel_dep(name = "rules_java", version = "9.3.0", dev_dependency = True)
-bazel_dep(name = "rules_jvm_external", version = "7.0", dev_dependency = True)
+bazel_dep(name = "rules_jvm_external", version = "7.1", dev_dependency = True)
 bazel_dep(name = "rules_kotlin", version = "2.2.2", dev_dependency = True)
 
-swift.android_sdk()
-
-# TODO: Remove once https://github.com/bazelbuild/rules_android/commit/57ad9e4898b726c3938c5173a3f3f9adef9384dc is in a release
+# TODO: Remove once a release includes https://github.com/bazel-contrib/rules_jvm_external/pull/1620.
 archive_override(
-    module_name = "rules_android",
-    integrity = "sha256-koIx40jK5V/o9qC8zaOc5Jbgp+nY7QG0dpak9FT4VWA=",
-    strip_prefix = "rules_android-71c053c203ea875f069092b989d4704ddecb5caf",
-    urls = [
-        "https://github.com/bazelbuild/rules_android/archive/71c053c203ea875f069092b989d4704ddecb5caf.tar.gz",
-    ],
+    module_name = "rules_jvm_external",
+    integrity = "sha256-xLO0uCpzSupyXT3DmAKQNvLEKIg2OzTl0yyIkSwjDC0=",
+    strip_prefix = "rules_jvm_external-e98a2bcebf3038243243941f458fefe940e980fb",
+    urls = ["https://github.com/bazel-contrib/rules_jvm_external/archive/e98a2bcebf3038243243941f458fefe940e980fb.tar.gz"],
 )
+
+swift.android_sdk()
 
 rules_java_toolchains = use_extension(
     "@rules_java//java:extensions.bzl",
@@ -351,7 +378,7 @@ android.sdk(
 )
 android.ndk(
     api_level = 28,
-    version = "r27c",
+    version = "r30",
 )
 use_repo(android, "androidndk", "androidsdk")
 

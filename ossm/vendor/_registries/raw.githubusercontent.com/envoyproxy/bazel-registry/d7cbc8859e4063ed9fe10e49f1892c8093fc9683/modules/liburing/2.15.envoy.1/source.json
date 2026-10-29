@@ -1,0 +1,13 @@
+{
+    "url": "https://github.com/axboe/liburing/archive/refs/tags/liburing-2.15.tar.gz",
+    "integrity": "sha256-jQUvJiLcs2eMuu5f9YKodXJnKmwKVlM83aW2XLY2Ego=",
+    "strip_prefix": "liburing-liburing-2.15",
+    "overlay": {
+        "BUILD.bazel": "sha256-TemvkugJ2nF756JKqScVsEJsWbyKBHZ8G3IqVKroeg4=",
+        "MODULE.bazel": "sha256-6k/71nuwpysBNirI6+c8onEio58zKM4X8+lv1ObarZA="
+    },
+    "patch_strip": 1,
+    "patches": {
+        "liburing.patch": "sha256-xTx/VyNO9vhzuQ+ZSl5chkTgj7HclpEGzRC0QNeMXqA="
+    }
+}

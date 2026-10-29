@@ -29,6 +29,7 @@ load(
     "get_tools_info",
 )
 load("//foreign_cc/private:detect_xcompile.bzl", "detect_xcompile")
+load("//foreign_cc/private/framework:exec_groups.bzl", "foreign_cc_exec_groups")
 load(
     "//foreign_cc/private/framework:helpers.bzl",
     "escape_dquote_bash",
@@ -68,7 +69,10 @@ def _pkgconfig_tool_impl(ctx):
     absolute_ar = absolutize(ctx.workspace_name, ar_path, True)
 
     if os_name(ctx) == "macos":
-        absolute_ar = ""
+        # When using libtool nested build systems that expect 'ar' will pass
+        # invalid arguments
+        if "libtool" in absolute_ar:
+            absolute_ar = ""
         non_system_include_ldflags += ["-undefined", "error"]
 
     arflags = [e for e in frozen_arflags]
@@ -103,10 +107,7 @@ def _pkgconfig_tool_impl(ctx):
         "\"%s\" install" % make_data.path,
     ]
 
-    if make_data.target:
-        additional_tools = depset(transitive = [make_data.target.files])
-    else:
-        additional_tools = depset()
+    additional_tools = depset(transitive = [t.files for t in make_data.tools])
 
     return built_tool_rule_impl(
         ctx,
@@ -123,11 +124,11 @@ pkgconfig_tool_unix = rule(
     fragments = FOREIGN_CC_BUILT_TOOLS_FRAGMENTS,
     output_to_genfiles = True,
     implementation = _pkgconfig_tool_impl,
-    toolchains = [
+    exec_groups = foreign_cc_exec_groups([
         "@rules_foreign_cc//foreign_cc/private/framework:shell_toolchain",
         "@rules_foreign_cc//toolchains:make_toolchain",
         "@bazel_tools//tools/cpp:toolchain_type",
-    ],
+    ]),
 )
 
 def pkgconfig_tool(name, srcs, **kwargs):
