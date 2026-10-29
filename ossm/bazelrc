@@ -13,13 +13,26 @@ build --extra_toolchains=@llvm_host//:all
 
 # Envoy's compat/openssl prefixer links libclang-cpp / clang-tooling headers
 # from @llvm_toolchain_llvm. We back that repo with the host /usr LLVM via
-# `envoy_llvm_ext.host(path = "/usr")` in MODULE.bazel (Envoy's native host
-# support), so the prefixer links the host libclang (matching the host
-# libstdc++) instead of the hermetic clang-22 whose libstdc++ requirements the
-# build container does not satisfy. No BAZEL_LLVM_PATH is needed anymore -- the
-# path is passed to the extension directly.
+# `llvm_toolchain_alias_ext.host(path = "/usr")` in MODULE.bazel (envoy_toolshed's
+# host support), so the prefixer links the host libclang (matching the host
+# libstdc++) instead of the hermetic clang whose libstdc++ requirements the build
+# container does not satisfy.
+#
+# Skip downloading envoy_toolshed's prebuilt minimal LLVM. OSSM compiles with the
+# host clang (@llvm_host) and never uses it, but envoy still references it as the
+# hermetic @llvm_toolchain's toolchain_root, so it would otherwise fetch an unused
+# ~100MB+ artifact -- breaking offline/air-gapped builds and bloating the vendor
+# snapshot. Honored by envoy_toolshed >= 0.5.10.
+build --repo_env=ENVOY_TOOLSHED_SKIP_LLVM_MINIMAL_DOWNLOAD=1
 build --config=libstdc++
 build --action_env=Clang_DIR=/usr/lib64/llvm21
+
+# Build wee8 (V8) from source instead of envoy_toolshed's prebuilt libwee8.a.
+# The prebuilt (~124MB) exceeds GitHub's 100MB file limit, so it cannot live in
+# the committed ossm/vendor snapshot, and it has no s390x/ppc64le build. Envoy's
+# //bazel:wee8_engine alias selects the source build when use_prebuilt_libs is
+# False (envoyproxy/envoy, the :wee8_source_build config_setting).
+build --@envoy//bazel:use_prebuilt_libs=False
 build --cxxopt=-Wno-nullability-completeness
 build --host_linkopt=-latomic
 build --linkopt=-latomic
