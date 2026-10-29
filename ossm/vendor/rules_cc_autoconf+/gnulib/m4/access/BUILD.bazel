@@ -64,13 +64,17 @@ int main(void) { return 0; }
             checks.AC_SUBST("REPLACE_ACCESS", "0"),
         ],
     }),
+    default_deps = [
+        "//gnulib/m4/unistd_h:defaults",  # AC_REQUIRE: gl_UNISTD_H_DEFAULTS
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":HAVE_ACCESS",
         "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
         "//gnulib/m4/gnulib-common:gl_HOST_MACOS_SDK_MODERN",
-        # AC_CHECK_FUNCS_ONCE([lstat]) - provided by lstat dependency
-        "//gnulib/m4/lstat",
+        # AC_CHECK_FUNCS_ONCE([lstat]) - probe + config.h define only; the
+        # HAVE_LSTAT subst keeps its gl_SYS_STAT_H_DEFAULTS value.
+        "//gnulib/m4/lstat:AC_CHECK_FUNCS_ONCE_lstat",
     ],
 )
 

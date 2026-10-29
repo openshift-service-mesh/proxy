@@ -1,13 +1,14 @@
 import argparse
 
-from tools.private.release.prepare import Prepare
+from dev.release.gh import RELEASE_PREPARED_LABEL
+from dev.release.prepare import Prepare
 
 pytest_plugins = ["tests.tools.private.release.release_test_helper"]
 
 
 def test_prepare_success_existing_issue(mocker, release_tool_env, mock_git, mock_gh):
-    mocker.patch("tools.private.release.prepare.replace_version_next")
-    mocker.patch("tools.private.release.prepare.changelog_news")
+    mocker.patch("dev.release.prepare.replace_version_next")
+    mocker.patch("dev.release.prepare.changelog_news")
 
     # Arrange
     args = argparse.Namespace(version="2.0.0", issue=None, dry_run=False)
@@ -27,12 +28,13 @@ def test_prepare_success_existing_issue(mocker, release_tool_env, mock_git, mock
     assert 1002 in mock_gh.prs
     assert mock_gh.prs[1002]["title"] == "Prepare release v2.0.0"
     assert mock_gh.prs[1002]["body"] == "Work towards #1001"
+    assert mock_gh.prs[1002]["labels"] == [RELEASE_PREPARED_LABEL]
     mock_git.add_modified_and_deleted.assert_called_once()
 
 
 def test_prepare_success_create_issue(mocker, release_tool_env, mock_git, mock_gh):
-    mocker.patch("tools.private.release.prepare.replace_version_next")
-    mocker.patch("tools.private.release.prepare.changelog_news")
+    mocker.patch("dev.release.prepare.replace_version_next")
+    mocker.patch("dev.release.prepare.changelog_news")
 
     # Arrange: release_tool_env sets up template_file automatically
     args = argparse.Namespace(version="2.0.0", issue=None, dry_run=False)
@@ -49,12 +51,13 @@ def test_prepare_success_create_issue(mocker, release_tool_env, mock_git, mock_g
     assert 1002 in mock_gh.prs
     assert mock_gh.prs[1002]["title"] == "Prepare release v2.0.0"
     assert mock_gh.prs[1002]["body"] == "Work towards #1001"
+    assert mock_gh.prs[1002]["labels"] == [RELEASE_PREPARED_LABEL]
     mock_git.add_modified_and_deleted.assert_called_once()
 
 
 def test_prepare_ambiguous_issue(mocker, release_tool_env, mock_git, mock_gh):
-    mocker.patch("tools.private.release.prepare.replace_version_next")
-    mocker.patch("tools.private.release.prepare.changelog_news")
+    mocker.patch("dev.release.prepare.replace_version_next")
+    mocker.patch("dev.release.prepare.changelog_news")
 
     # Arrange
     args = argparse.Namespace(version="2.0.0", issue=None, dry_run=False)
@@ -76,8 +79,8 @@ def test_prepare_ambiguous_issue(mocker, release_tool_env, mock_git, mock_gh):
 
 
 def test_prepare_dry_run(mocker, release_tool_env, mock_git, mock_gh):
-    mocker.patch("tools.private.release.prepare.replace_version_next")
-    mocker.patch("tools.private.release.prepare.changelog_news")
+    mocker.patch("dev.release.prepare.replace_version_next")
+    mocker.patch("dev.release.prepare.changelog_news")
 
     # Arrange
     args = argparse.Namespace(version="2.0.0", issue=None, dry_run=True)
@@ -99,8 +102,8 @@ def test_prepare_dry_run(mocker, release_tool_env, mock_git, mock_gh):
 def test_prepare_use_associated_pr_from_tracking_issue(
     mocker, release_tool_env, mock_git, mock_gh
 ):
-    mocker.patch("tools.private.release.prepare.replace_version_next")
-    mocker.patch("tools.private.release.prepare.changelog_news")
+    mocker.patch("dev.release.prepare.replace_version_next")
+    mocker.patch("dev.release.prepare.changelog_news")
 
     # Arrange
     args = argparse.Namespace(version="2.0.0", issue=None, dry_run=False)
@@ -129,8 +132,8 @@ def test_prepare_use_associated_pr_from_tracking_issue(
 def test_prepare_create_pr_when_none_associated(
     mocker, release_tool_env, mock_git, mock_gh
 ):
-    mocker.patch("tools.private.release.prepare.replace_version_next")
-    mocker.patch("tools.private.release.prepare.changelog_news")
+    mocker.patch("dev.release.prepare.replace_version_next")
+    mocker.patch("dev.release.prepare.changelog_news")
 
     # Arrange
     args = argparse.Namespace(version="2.0.0", issue=None, dry_run=False)
@@ -154,11 +157,12 @@ def test_prepare_create_pr_when_none_associated(
     )
     updated_body = mock_gh.get_issue_body(1001)
     assert "pr=#1002" in updated_body
+    assert mock_gh.prs[1002]["labels"] == [RELEASE_PREPARED_LABEL]
 
 
 def test_prepare_reuse_existing_pr(mocker, release_tool_env, mock_git, mock_gh):
-    mocker.patch("tools.private.release.prepare.replace_version_next")
-    mocker.patch("tools.private.release.prepare.changelog_news")
+    mocker.patch("dev.release.prepare.replace_version_next")
+    mocker.patch("dev.release.prepare.changelog_news")
 
     # Arrange
     args = argparse.Namespace(version="2.0.0", issue=None, dry_run=False)
@@ -191,8 +195,8 @@ def test_prepare_reuse_existing_pr(mocker, release_tool_env, mock_git, mock_gh):
 
 
 def test_prepare_dry_run_no_issue(mocker, release_tool_env, mock_git, mock_gh):
-    mocker.patch("tools.private.release.prepare.replace_version_next")
-    mocker.patch("tools.private.release.prepare.changelog_news")
+    mocker.patch("dev.release.prepare.replace_version_next")
+    mocker.patch("dev.release.prepare.changelog_news")
 
     # Arrange
     args = argparse.Namespace(version="2.0.0", issue=None, dry_run=True)

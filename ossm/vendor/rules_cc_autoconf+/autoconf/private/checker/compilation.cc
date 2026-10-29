@@ -37,19 +37,27 @@ namespace {
  * fails.
  */
 std::string get_short_path(const std::string& long_path) {
+    // cmd.exe accepts forward slashes in an absolute program path such as
+    // `C:/.../cl.exe`, but parses a relative one such as
+    // `external/<repo>/bin/clang.exe` (hermetic toolchains) as the command
+    // `external` followed by switches: "'external' is not recognized as an
+    // internal or external command". Use backslashes throughout.
+    std::string path = long_path;
+    std::replace(path.begin(), path.end(), '/', '\\');
+
     // Get the required buffer size
-    DWORD length = GetShortPathNameA(long_path.c_str(), nullptr, 0);
+    DWORD length = GetShortPathNameA(path.c_str(), nullptr, 0);
     if (length == 0) {
         // If conversion fails, return original path quoted
-        return "\"" + long_path + "\"";
+        return "\"" + path + "\"";
     }
 
     // Get the short path
     std::vector<char> buffer(length);
-    DWORD result = GetShortPathNameA(long_path.c_str(), buffer.data(), length);
+    DWORD result = GetShortPathNameA(path.c_str(), buffer.data(), length);
     if (result == 0 || result >= length) {
         // If conversion fails, return original path quoted
-        return "\"" + long_path + "\"";
+        return "\"" + path + "\"";
     }
 
     return std::string(buffer.data());
@@ -226,6 +234,11 @@ struct BuildDir {
 
     /**
      * @brief Write source code to a file inside the build directory.
+     *
+     * Written in binary mode: the compiler sees the program byte for byte as
+     * the check spelled it.  A text-mode stream on Windows turned each CRLF of
+     * a program taken from a CRLF checkout into CR CR LF, which cl reads as a
+     * "Mac format" file and across which a backslash-newline splice fails.
      * @param code The source code to write.
      * @param extension The file extension (e.g., ".c" or ".cpp").
      * @return The path to the written source file, or nullopt on failure.
@@ -233,7 +246,8 @@ struct BuildDir {
     std::optional<std::filesystem::path> write_source(
         const std::string& code, const std::string& extension) {
         std::filesystem::path source_file = dir / (safe_id + extension);
-        std::ofstream source = open_ofstream(source_file);
+        std::ofstream source =
+            open_ofstream(source_file, std::ios::out | std::ios::binary);
         if (!source.is_open()) {
             DebugLogger::warn("Failed to create source file");
             return std::nullopt;
@@ -317,6 +331,19 @@ std::vector<std::string> CheckRunner::get_compiler_and_flags(
         filter_error_flags(cpp ? config_.cpp_flags : config_.c_flags);
     auto processed = replace_marker(filtered, kCoptsMarker, extra_copts);
     cmd.insert(cmd.end(), processed.begin(), processed.end());
+    if (is_msvc_like(config_.compiler_type)) {
+        // Probes must see the real library symbol, not a compiler builtin.
+        // Autoconf's AC_CHECK_FUNC body declares `int f(void)` and calls
+        // `f()`; cl.exe treats memcmp/memcpy/fabs/labs/strlen/... as
+        // intrinsics whenever /Oi is active -- which /O2 (Bazel's opt mode,
+        // and therefore every exec-configuration tool build) switches on
+        // -- and rejects that call with C2168 "too few actual parameters
+        // for intrinsic function". The probe then reports "no" for a
+        // function every CRT has. /Oi- goes last so it wins over any /O2
+        // or /Oi earlier in the toolchain or per-check copts; it only
+        // affects the throwaway conftest, never the user's build.
+        cmd.push_back("/Oi-");
+    }
     return cmd;
 }
 
@@ -337,11 +364,40 @@ std::vector<std::string> CheckRunner::get_link_only_flags(
     return flags;
 }
 
+void CheckRunner::append_link_libraries(std::vector<std::string>& cmd) {
+    // The cc_deps archives, after whatever they must satisfy: the probe's
+    // object and the -l<library> under test.  Both dialects take an archive
+    // path as a positional input.
+    cmd.insert(cmd.end(), config_.link_libraries.begin(),
+               config_.link_libraries.end());
+}
+
+std::vector<std::string> CheckRunner::library_search_flags(bool msvc) const {
+    std::vector<std::string> flags;
+    for (const std::string& item : config_.link_libraries) {
+        const std::filesystem::path path(item);
+        const std::string extension = path.extension().string();
+        if (extension != ".a" && extension != ".lib" && extension != ".so" &&
+            extension != ".dylib") {
+            continue;  // a link flag, not an archive
+        }
+        const std::string dir = path.parent_path().string();
+        if (dir.empty()) continue;
+        const std::string flag = (msvc ? "/LIBPATH:" : "-L") + dir;
+        if (std::find(flags.begin(), flags.end(), flag) == flags.end()) {
+            flags.push_back(flag);
+        }
+    }
+    return flags;
+}
+
 void CheckRunner::append_msvc_link_block(
     std::vector<std::string>& cmd, const std::string& language,
     const std::vector<std::string>& extra_linkopts) {
     std::vector<std::string> link_flags =
         get_link_only_flags(language, extra_linkopts);
+    const std::vector<std::string> search = library_search_flags(true);
+    link_flags.insert(link_flags.end(), search.begin(), search.end());
     if (link_flags.empty()) return;
     cmd.push_back("/link");
     cmd.insert(cmd.end(), std::make_move_iterator(link_flags.begin()),
@@ -392,6 +448,7 @@ bool CheckRunner::try_link(const std::filesystem::path& object_file,
         cmd.insert(cmd.end(), link_flags.begin(), link_flags.end());
         cmd.push_back("/OUT:" + executable.string());
         cmd.push_back(object_file.string());
+        append_link_libraries(cmd);
     } else {
         std::string link_tool =
             config_.linker.empty()
@@ -403,9 +460,15 @@ bool CheckRunner::try_link(const std::filesystem::path& object_file,
             DebugLogger::debug("Using compiler as linker: [" + link_tool + "]");
         }
         cmd.push_back(link_tool);
+        // The cc_deps archives' directories: a probe's own `-l<name>` linkopt
+        // (lib-link's `-lssl -lcrypto`) resolves to the dependency's archive by
+        // name, as check_library's -l<library> does.
+        const std::vector<std::string> search = library_search_flags(false);
+        cmd.insert(cmd.end(), search.begin(), search.end());
         auto link_flags = get_link_only_flags(language, extra_linkopts);
         cmd.insert(cmd.end(), link_flags.begin(), link_flags.end());
         cmd.push_back(object_file.string());
+        append_link_libraries(cmd);
         cmd.push_back("-o");
         cmd.push_back(executable.string());
     }
@@ -427,8 +490,8 @@ bool CheckRunner::try_compile_and_link(
     if (msvc) {
         // On MSVC, compile and link in one cl.exe invocation. Using cl.exe
         // directly (instead of separate cl.exe /c + link.exe) ensures that
-        // default libraries are linked, including legacy_stdio_definitions.lib
-        // which provides linker symbols for UCRT inline functions like printf.
+        // the CRT default libraries are linked, as they are for configure's
+        // own `cl conftest.c` probes.
         // Link flags are held back for the trailing /link block rather than
         // mixed in with the compile flags -- see append_msvc_link_block.
         std::vector<std::string> cmd =
@@ -444,6 +507,7 @@ bool CheckRunner::try_compile_and_link(
         // from an absent feature, so the check silently reports "no".
         cmd.push_back("/Fo" + tmp.object_path(true).string());
         cmd.push_back(source_file->string());
+        append_link_libraries(cmd);
         append_msvc_link_block(cmd, language, extra_linkopts);
         return run_command("compile and link", cmd) == 0;
     }
@@ -492,6 +556,7 @@ bool CheckRunner::try_compile_and_link_with_lib(
         // A bare .lib is a positional input that cl already forwards to the
         // linker, so it stays before /link rather than inside the block.
         cmd.push_back(library + ".lib");
+        append_link_libraries(cmd);
         append_msvc_link_block(cmd, language, extra_linkopts);
         return run_command("compile and link", cmd) == 0;
     }
@@ -503,7 +568,10 @@ bool CheckRunner::try_compile_and_link_with_lib(
     cmd.push_back(source_file->string());
     cmd.push_back("-o");
     cmd.push_back((tmp.dir / tmp.safe_id).string());
+    const std::vector<std::string> search = library_search_flags(false);
+    cmd.insert(cmd.end(), search.begin(), search.end());
     cmd.push_back("-l" + library);
+    append_link_libraries(cmd);
 
     return run_command("compile and link", cmd) == 0;
 }

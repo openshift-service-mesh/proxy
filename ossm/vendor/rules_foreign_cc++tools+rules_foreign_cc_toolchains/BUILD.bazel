@@ -82,6 +82,16 @@ toolchain(
 toolchain(
     name = "20_cmake_000_003",
     toolchain_type = "@rules_foreign_cc//toolchains:cmake_toolchain",
+    toolchain = "@cmake-3.31.12-windows-aarch64//:cmake_tool",
+    exec_compatible_with = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:windows",
+    ],
+)
+
+toolchain(
+    name = "20_cmake_000_004",
+    toolchain_type = "@rules_foreign_cc//toolchains:cmake_toolchain",
     toolchain = "@cmake-3.31.12-windows-x86_32//:cmake_tool",
     exec_compatible_with = [
         "@platforms//cpu:x86_32",
@@ -90,7 +100,7 @@ toolchain(
 )
 
 toolchain(
-    name = "20_cmake_000_004",
+    name = "20_cmake_000_005",
     toolchain_type = "@rules_foreign_cc//toolchains:cmake_toolchain",
     toolchain = "@cmake-3.31.12-windows-x86_64//:cmake_tool",
     exec_compatible_with = [
@@ -108,19 +118,19 @@ toolchain(
 toolchain(
     name = "20_m4_000_000",
     toolchain_type = "@rules_foreign_cc//toolchains:m4_toolchain",
-    toolchain = "@rules_foreign_cc//toolchains/private:built_m4",
+    toolchain = "@m4_custom_m4_m4//:m4_tool",
 )
 
 toolchain(
     name = "20_make_000_000",
     toolchain_type = "@rules_foreign_cc//toolchains:make_toolchain",
-    toolchain = "@rules_foreign_cc//toolchains/private:built_make",
+    toolchain = "@make_custom_make_make//:make_tool",
 )
 
 toolchain(
     name = "20_meson_000_000",
     toolchain_type = "@rules_foreign_cc//toolchains:meson_toolchain",
-    toolchain = "@meson_src_1.10.1//:meson_tool",
+    toolchain = "@meson_custom_meson_meson//:meson_tool",
 )
 
 toolchain(
@@ -138,63 +148,13 @@ toolchain(
 toolchain(
     name = "20_ninja_000_000",
     toolchain_type = "@rules_foreign_cc//toolchains:ninja_toolchain",
-    toolchain = "@ninja-1.13.2-linux-aarch64//:ninja_tool",
-    exec_compatible_with = [
-        "@platforms//cpu:aarch64",
-        "@platforms//os:linux",
-    ],
-)
-
-toolchain(
-    name = "20_ninja_000_001",
-    toolchain_type = "@rules_foreign_cc//toolchains:ninja_toolchain",
-    toolchain = "@ninja-1.13.2-linux-x86_64//:ninja_tool",
-    exec_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
-)
-
-toolchain(
-    name = "20_ninja_000_002",
-    toolchain_type = "@rules_foreign_cc//toolchains:ninja_toolchain",
-    toolchain = "@ninja-1.13.2-macos-aarch64//:ninja_tool",
-    exec_compatible_with = [
-        "@platforms//cpu:aarch64",
-        "@platforms//os:macos",
-    ],
-)
-
-toolchain(
-    name = "20_ninja_000_003",
-    toolchain_type = "@rules_foreign_cc//toolchains:ninja_toolchain",
-    toolchain = "@ninja-1.13.2-macos-x86_64//:ninja_tool",
-    exec_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:macos",
-    ],
-)
-
-toolchain(
-    name = "20_ninja_000_004",
-    toolchain_type = "@rules_foreign_cc//toolchains:ninja_toolchain",
-    toolchain = "@ninja-1.13.2-windows-x86_64//:ninja_tool",
-    exec_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:windows",
-    ],
-)
-
-toolchain(
-    name = "20_ninja_001_000",
-    toolchain_type = "@rules_foreign_cc//toolchains:ninja_toolchain",
-    toolchain = "@rules_foreign_cc//toolchains/private:preinstalled_ninja",
+    toolchain = "@ninja_custom_ninja_ninja//:ninja_tool",
 )
 
 toolchain(
     name = "20_pkgconfig_000_000",
     toolchain_type = "@rules_foreign_cc//toolchains:pkgconfig_toolchain",
-    toolchain = "@rules_foreign_cc//toolchains/private:built_pkgconfig",
+    toolchain = "@pkgconfig_custom_pkgconf_pkg-config//:pkgconfig_tool",
 )
 
 alias(
@@ -208,22 +168,42 @@ alias(
 )
 
 alias(
+    name = "make_built",
+    actual = "@make_src_4.4.1//:make_built",
+)
+
+alias(
+    name = "make_src_all",
+    actual = "@make_src_4.4.1//:all_srcs",
+)
+
+alias(
     name = "meson_built",
-    actual = "@meson_src_1.10.1//:meson_built",
+    actual = "@meson_src_1.12.1//:meson_built",
 )
 
 alias(
     name = "meson_src_all",
-    actual = "@meson_src_1.10.1//:all_srcs",
+    actual = "@meson_src_1.12.1//:all_srcs",
 )
 
 alias(
     name = "meson_src_meson_py",
-    actual = "@meson_src_1.10.1//:meson.py",
+    actual = "@meson_src_1.12.1//:meson.py",
 )
 
 alias(
     name = "meson_src_runtime",
-    actual = "@meson_src_1.10.1//:runtime",
+    actual = "@meson_src_1.12.1//:runtime",
+)
+
+alias(
+    name = "ninja_built",
+    actual = "@ninja_src_1.13.2//:ninja_built",
+)
+
+alias(
+    name = "ninja_src_all",
+    actual = "@ninja_src_1.13.2//:all_srcs",
 )
 

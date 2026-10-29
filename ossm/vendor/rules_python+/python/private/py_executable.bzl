@@ -50,6 +50,7 @@ load(
     "create_py_info",
     "create_windows_exe_launcher",
     "csv",
+    "filter_to_direct_sources",
     "filter_to_py_srcs",
     "is_bool",
     "is_windows_platform",
@@ -64,7 +65,6 @@ load(":py_cc_link_params_info.bzl", "PyCcLinkParamsInfo")
 load(":py_executable_info.bzl", "PyExecutableInfo")
 load(":py_info.bzl", "PyInfo", "VenvSymlinkKind")
 load(":py_internal.bzl", "py_internal")
-load(":py_interpreter_program.bzl", "PyInterpreterProgramInfo")
 load(":py_runtime_info.bzl", "DEFAULT_STUB_SHEBANG")
 load(":reexports.bzl", "BuiltinPyInfo", "BuiltinPyRuntimeInfo")
 load(":rule_builders.bzl", "ruleb")
@@ -227,7 +227,7 @@ accepting arbitrary Python versions.
         ),
         "_exe_zip_maker": lambda: attrb.Label(
             cfg = "exec",
-            default = "//tools/private/zipapp:exe_zip_maker",
+            default = "//tools/zipapp:exe_zip_maker",
         ),
         "_launcher": lambda: attrb.Label(
             cfg = "target",
@@ -595,6 +595,7 @@ def _create_venv(ctx, output_prefix, imports, runtime_details, add_runfiles_root
             "%add_runfiles_root_to_sys_path%": add_runfiles_root_to_sys_path,
             "%coverage_tool%": _get_coverage_tool_runfiles_path(ctx, runtime),
             "%import_all%": "True" if read_possibly_native_flag(ctx, "python_import_all_repositories") else "False",
+            "%interpreter_actual_path%": interpreter_actual_path,
             "%site_init_runfiles_path%": runfiles_root_path(ctx, site_init.short_path),
             "%workspace_name%": ctx.workspace_name,
         },
@@ -1199,13 +1200,13 @@ def py_executable_base_impl(ctx, *, semantics, is_test, inherited_environment = 
     # precompiled pyc below) so the test-main validation can statically analyze
     # the original source.
     main_py_source = main_py
-    direct_sources = filter_to_py_srcs(ctx.files.srcs)
+    direct_sources = filter_to_direct_sources(ctx.files.srcs)
     precompile_result = maybe_precompile(ctx, direct_sources)
 
-    required_py_files = precompile_result.keep_srcs
+    required_py_files = filter_to_py_srcs(precompile_result.keep_srcs)
     required_pyc_files = []
     implicit_pyc_files = []
-    implicit_pyc_source_files = direct_sources
+    implicit_pyc_source_files = filter_to_py_srcs(direct_sources)
 
     if ctx.attr.precompile == PrecompileAttr.ENABLED:
         required_pyc_files.extend(precompile_result.pyc_files)
@@ -1348,47 +1349,33 @@ def _maybe_add_test_main_validation(ctx, main_py, output_groups):
         return
 
     exec_tools_toolchain = ctx.toolchains[EXEC_TOOLS_TOOLCHAIN_TYPE]
-    if exec_tools_toolchain == None or exec_tools_toolchain.exec_tools.exec_interpreter == None:
+    if (
+        exec_tools_toolchain == None or
+        exec_tools_toolchain.exec_tools.exec_runtime == None
+    ):
         fail(
             "Validating py_test main modules requires the exec tools toolchain " +
-            "with an exec interpreter, but none was found. Either register one " +
+            "with an exec runtime, but none was found. Either register one " +
             "or set --@rules_python//python/config_settings:validate_test_main=disabled.",
         )
 
-    exec_tools = exec_tools_toolchain.exec_tools
     validator = ctx.attr._validate_test_main
-    program_info = validator[PyInterpreterProgramInfo]
-    interpreter = exec_tools.exec_interpreter[DefaultInfo].files_to_run
-    validator_files_to_run = validator[DefaultInfo].files_to_run
-
     validation_output = ctx.actions.declare_file(ctx.label.name + "_validate_test_main.txt")
 
     args = ctx.actions.args()
-    args.add_all(program_info.interpreter_args)
-    args.add(validator_files_to_run.executable)
     args.add("--src", main_py)
     args.add("--src_name", main_py.short_path)
     args.add("--label", str(ctx.label))
     args.add("--output", validation_output)
 
-    execution_requirements = {}
-    if testing.ExecutionInfo in validator:
-        execution_requirements = validator[testing.ExecutionInfo].requirements
-
-    ctx.actions.run(
-        executable = interpreter,
+    actions_run(
+        ctx,
+        executable = validator,
         arguments = [args],
         inputs = [main_py],
         outputs = [validation_output],
-        tools = [validator_files_to_run],
         mnemonic = "PyValidateTestMain",
         progress_message = "Validating py_test main %{label}",
-        env = program_info.env | {
-            "PYTHONNOUSERSITE": "1",
-            "PYTHONSAFEPATH": "1",
-        },
-        execution_requirements = execution_requirements,
-        toolchain = EXEC_TOOLS_TOOLCHAIN_TYPE,
     )
     if "_validation" in output_groups:
         output_groups["_validation"] = depset([validation_output], transitive = [output_groups["_validation"]])
@@ -1647,17 +1634,31 @@ WARNING: Target {} is using implicit __init__.py creation.
     )
 
 def _write_build_data(ctx):
+    build_data_name = ctx.label.name + ".build_data.txt"
+
+    if not is_stamping_enabled(ctx):
+        # Without stamping there are no volatile inputs, so the content is known
+        # at analysis time. Write it directly. This skips a spawn per executable.
+        # It also skips the constant metadata output below, which never reports
+        # as up to date.
+        build_data = ctx.actions.declare_file(build_data_name)
+
+        ctx.actions.write(
+            output = build_data,
+            content = ctx.actions.args()
+                .set_param_file_format("multiline")
+                .add(str(ctx.label), format = "TARGET %s")
+                .add("STAMPED FALSE"),
+        )
+
+        return build_data
+
+    info_file = ctx.info_file
+    version_file = ctx.files._uncachable_version_file[0]
+
     inputs = builders.DepsetBuilder()
-    if is_stamping_enabled(ctx):
-        # NOTE: ctx.info_file is undocumented; see
-        # https://github.com/bazelbuild/bazel/issues/9363
-        info_file = ctx.info_file
-        version_file = ctx.files._uncachable_version_file[0]
-        inputs.add(info_file)
-        inputs.add(version_file)
-    else:
-        info_file = None
-        version_file = None
+    inputs.add(info_file)
+    inputs.add(version_file)
 
     # A "constant metadata" file is basically a special file that doesn't
     # support change detection logic and reports that it is unchanged. i.e., it
@@ -1683,9 +1684,15 @@ def _write_build_data(ctx):
     #     mostly works. Google's RBE, unfortunately, rejects it.
     #   * A binary's transitive closure may be so large that it exceeds
     #     Google RBE limits for action inputs.
+    #
+    # The cost is that this action never reports as up to date. Constant
+    # metadata cannot be restored from the action cache, so ActionCacheChecker
+    # stats the output instead. That stat fails when outputs are not downloaded,
+    # and the action re-runs. The trade is worth it here, because the inputs do
+    # really change every build.
     build_data = _py_builtins.declare_constant_metadata_file(
         ctx = ctx,
-        name = ctx.label.name + ".build_data.txt",
+        name = build_data_name,
         root = ctx.bin_dir,
     )
 
@@ -1711,13 +1718,13 @@ def _write_build_data(ctx):
         executable = action_exe,
         arguments = [action_args],
         env = {
-            "INFO_FILE": info_file.path if info_file else "",
+            "INFO_FILE": info_file.path,
             "OUTPUT": build_data.path,
             # Include this so it's explicit, otherwise, one has to detect
             # this by looking for the absense of info_file keys.
-            "STAMPED": "TRUE" if is_stamping_enabled(ctx) else "FALSE",
+            "STAMPED": "TRUE",
             "TARGET": str(ctx.label),
-            "VERSION_FILE": version_file.path if version_file else "",
+            "VERSION_FILE": version_file.path,
         },
         inputs = inputs.build(),
         outputs = [build_data],

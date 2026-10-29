@@ -1,9 +1,41 @@
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//swift:swift.bzl", "swift_binary")
 load("//swift:swift_library.bzl", "swift_library")
 load("//swift:swift_test.bzl", "swift_test")
 load("//test:transitions.bzl", "transition_test")
 load("//test/rules:provider_test.bzl", "provider_test")
+
+cc_test(
+    name = "sysroot_cc_test",
+    srcs = [
+        "sysroot.c",
+        "sysroot.h",
+        "sysroot_test.cc",
+    ],
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+[
+    transition_test(
+        name = "linux_ubuntu{}_cc_test".format(version),
+        extra_toolchains = [
+            "@swift_toolchain//:cc_toolchain_exec_ubuntu{}".format(version),
+            "@swift_toolchain//:cc_toolchain_exec_ubuntu{}-aarch64".format(version),
+        ],
+        target = ":sysroot_cc_test",
+        target_compatible_with = [
+            "@platforms//os:linux",
+            "@platforms_contrib//os/linux/libc/glibc:at_least_{}_available".format(glibc),
+        ],
+    )
+    for version, glibc in [
+        ("22.04", "2.35"),
+        ("24.04", "2.39"),
+        ("26.04", "2.43"),
+    ]
+]
 
 swift_library(
     name = "foundation_library",
@@ -38,6 +70,22 @@ swift_binary(
     deps = [":foundation_library"],
 )
 
+# A dynamically linked binary's runfiles must carry the shared Swift runtime
+# libraries its RUNPATH points at, or it only runs from the output tree it was
+# built in (and fails to load them under remote execution, for example).
+provider_test(
+    name = "uses_dynamic_foundation_runfiles_test",
+    expected_files = [
+        "libFoundation.so",
+        "libswiftCore.so",
+        "*",
+    ],
+    field = "default_runfiles.files",
+    provider = "DefaultInfo",
+    target_compatible_with = ["@platforms//os:linux"],
+    target_under_test = ":uses_dynamic_foundation",
+)
+
 swift_binary(
     name = "uses_foundation_shared",
     srcs = ["FoundationLibrary.swift"],
@@ -50,6 +98,26 @@ swift_test(
     name = "foundation_library_test",
     srcs = ["FoundationLibraryTests.swift"],
     deps = [":foundation_library"],
+)
+
+swift_test(
+    name = "foundation_library_dynamic_test",
+    srcs = ["FoundationLibraryTests.swift"],
+    features = ["-swift.static_stdlib"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [":foundation_library"],
+)
+
+provider_test(
+    name = "foundation_library_dynamic_test_runfiles_test",
+    expected_files = [
+        "libswiftCore.so",
+        "*",
+    ],
+    field = "default_runfiles.files",
+    provider = "DefaultInfo",
+    target_compatible_with = ["@platforms//os:linux"],
+    target_under_test = ":foundation_library_dynamic_test",
 )
 
 sh_test(
@@ -152,3 +220,25 @@ sh_test(
         "@platforms//os:linux",
     ],
 )
+
+[
+    transition_test(
+        name = "linux_ubuntu{}_foundation_test".format(version),
+        extra_toolchains = [
+            "@swift_toolchain//:cc_toolchain_exec_ubuntu{}".format(version),
+            "@swift_toolchain//:cc_toolchain_exec_ubuntu{}-aarch64".format(version),
+            "@swift_toolchain//:swift_toolchain_exec_ubuntu{}".format(version),
+            "@swift_toolchain//:swift_toolchain_exec_ubuntu{}-aarch64".format(version),
+        ],
+        target = ":foundation_library_test",
+        target_compatible_with = [
+            "@platforms//os:linux",
+            "@platforms_contrib//os/linux/libc/glibc:at_least_{}_available".format(glibc),
+        ],
+    )
+    for version, glibc in [
+        ("22.04", "2.35"),
+        ("24.04", "2.39"),
+        ("26.04", "2.43"),
+    ]
+]

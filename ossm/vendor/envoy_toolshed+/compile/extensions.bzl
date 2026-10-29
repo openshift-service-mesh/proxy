@@ -2,9 +2,41 @@
 
 load("//private:extension_utils.bzl", "single_setup_tag")
 load(":libcxx_libs.bzl", "setup_libcxx_libs")
-load(":llvm_minimal.bzl", "llvm_toolchain_alias", "setup_llvm_minimal", "setup_llvm_minimal_build")
+load(":llvm_minimal.bzl", "llvm_host_repo", "llvm_toolchain_alias", "setup_llvm_minimal", "setup_llvm_minimal_build")
 load(":llvm_prebuilt.bzl", "setup_llvm_prebuilt")
 load(":sanitizer_libs.bzl", "setup_sanitizer_libs")
+load(":unwind_libs.bzl", "setup_unwind_libs")
+
+def _unwind_libs_ext_impl(module_ctx):
+    setup_tag = single_setup_tag(
+        module_ctx = module_ctx,
+        ext_name = "unwind_extension",
+        repos = "@unwind_libs",
+        attrs = ["version", "sha256"],
+    )
+    if setup_tag:
+        setup_unwind_libs(
+            version = setup_tag.version,
+            sha256 = setup_tag.sha256,
+        )
+    else:
+        setup_unwind_libs()
+
+_unwind_setup = tag_class(
+    attrs = {
+        "version": attr.string(
+            doc = "Release version (default: VERSIONS['bins_release'] from //:versions.bzl)",
+        ),
+        "sha256": attr.string(
+            doc = "SHA256 hash of the shared libunwind archive (default: VERSIONS['unwind_libs_sha256'] from //:versions.bzl)",
+        ),
+    },
+)
+
+unwind_extension = module_extension(
+    implementation = _unwind_libs_ext_impl,
+    tag_classes = {"setup": _unwind_setup},
+)
 
 def _sanitizer_libs_impl(module_ctx):
     """Implementation of the sanitizer_libs module extension.
@@ -178,7 +210,7 @@ llvm_minimal_build_extension = module_extension(
     implementation = _llvm_minimal_build_ext_impl,
 )
 
-def _llvm_toolchain_alias_ext_impl(_module_ctx):
+def _llvm_toolchain_alias_ext_impl(module_ctx):
     """Set up the host-arch llvm_toolchain_llvm alias repo.
 
     This extension creates the llvm_minimal_* repos itself so they are siblings
@@ -190,14 +222,36 @@ def _llvm_toolchain_alias_ext_impl(_module_ctx):
     against extensions.bzl's own repo mapping (which has no apparent-name entry
     for the extension-created repos) and fail in an external consumer's build.
     """
+    host = None
+    for module in module_ctx.modules:
+        for tag in module.tags.host:
+            if not module.is_root:
+                fail("llvm_toolchain_alias_extension.host may only be set by the root module")
+            if host != None:
+                fail("llvm_toolchain_alias_extension.host may only be set once")
+            host = tag
+
     setup_llvm_minimal()
-    llvm_toolchain_alias(
-        name = "llvm_toolchain_llvm",
-        minimal_linux_x64 = "@llvm_minimal_linux_x64//:BUILD.bazel",
-        minimal_linux_arm64 = "@llvm_minimal_linux_arm64//:BUILD.bazel",
-        minimal_macos_arm64 = "@llvm_minimal_macos_arm64//:BUILD.bazel",
-    )
+    if host:
+        llvm_host_repo(
+            name = "llvm_toolchain_llvm",
+            path = host.path,
+            llvm_version = host.llvm_version,
+        )
+    else:
+        llvm_toolchain_alias(
+            name = "llvm_toolchain_llvm",
+            minimal_linux_x64 = "@llvm_minimal_linux_x64//:BUILD.bazel",
+            minimal_linux_arm64 = "@llvm_minimal_linux_arm64//:BUILD.bazel",
+            minimal_macos_arm64 = "@llvm_minimal_macos_arm64//:BUILD.bazel",
+        )
+
+_host = tag_class(attrs = {
+    "path": attr.string(mandatory = True, doc = "Root of a host LLVM install (e.g. /usr/lib/llvm-22)."),
+    "llvm_version": attr.string(doc = "Optional; if set, its major version must match bin/clang --version."),
+})
 
 llvm_toolchain_alias_extension = module_extension(
     implementation = _llvm_toolchain_alias_ext_impl,
+    tag_classes = {"host": _host},
 )

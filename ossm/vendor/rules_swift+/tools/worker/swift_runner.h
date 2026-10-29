@@ -54,12 +54,22 @@ extern bool ArgumentEnablesWMO(const std::string& arg);
 //     This remapping must be applied here because we do not know the current
 //     working directory at analysis time when the argument list is constructed.
 //
+// -Xwrapped-swift=-resource-dir=<path>
+//     Passes the resource directory as an absolute path, resolved against the
+//     execution root, to work around
+//     https://github.com/swiftlang/swift/pull/92879
+//
 // -Xwrapped-swift=-ephemeral-module-cache
 //     When specified, the spawner will create a new temporary directory, pass
 //     that to the Swift compiler using `-module-cache-path`, and then delete
 //     the directory afterwards. This should resolve issues where the module
 //     cache state is not refreshed correctly in all situations, which
 //     sometimes results in hard-to-diagnose crashes in `swiftc`.
+//
+// -Xwrapped-swift=-enable-incremental-file-hashing
+//     Indicates that the toolchain supports incremental file hashing. The
+//     persistent worker enables it only for incremental compilations. Other
+//     invocations consume this argument.
 class SwiftRunner {
  public:
   // Create a new spawner that launches a Swift tool with the given arguments.

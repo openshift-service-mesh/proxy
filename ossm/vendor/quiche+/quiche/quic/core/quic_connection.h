@@ -86,6 +86,7 @@
 #include "quiche/quic/core/quic_packets.h"
 #include "quiche/quic/core/quic_path_validator.h"
 #include "quiche/quic/core/quic_ping_manager.h"
+#include "quiche/quic/core/quic_receive_time.h"
 #include "quiche/quic/core/quic_sent_packet_manager.h"
 #include "quiche/quic/core/quic_tag.h"
 #include "quiche/quic/core/quic_time.h"
@@ -775,7 +776,7 @@ class QUICHE_EXPORT QuicConnection
                        QuicTime::Delta ack_delay_time) override;
   bool OnAckRange(QuicPacketNumber start, QuicPacketNumber end) override;
   bool OnAckTimestamp(QuicPacketNumber packet_number,
-                      QuicTime timestamp) override;
+                      QuicReceiveTime timestamp) override;
   bool OnAckFrameEnd(QuicPacketNumber start,
                      const std::optional<QuicEcnCounts>& ecn_counts) override;
   bool OnStopWaitingFrame(const QuicStopWaitingFrame& frame) override;
@@ -958,6 +959,13 @@ class QUICHE_EXPORT QuicConnection
   void SetMultiPortProbingInterval(QuicTime::Delta probing_interval) {
     multi_port_probing_interval_ = probing_interval;
   }
+
+  // Starts a repeating timer to rotate self-issued connection IDs at the given
+  // `interval`.
+  void SetConnectionIdRotationAlarm(QuicTime::Delta interval);
+
+  // Called when the connection ID rotation alarm fires.
+  void OnConnectionIdRotationAlarm() override;
 
   const MultiPortStats* multi_port_stats() const {
     return multi_port_stats_.get();
@@ -2192,6 +2200,9 @@ class QUICHE_EXPORT QuicConnection
   QuicAlarmProxy multi_port_probing_alarm() {
     return QuicAlarmProxy(&alarms_, QuicAlarmSlot::kMultiPortProbing);
   }
+  QuicAlarmProxy connection_id_rotation_alarm() {
+    return QuicAlarmProxy(&alarms_, QuicAlarmSlot::kConnectionIdRotation);
+  }
 
   // Extract destination connection ID from ReceivedPacketInfo.
   inline QuicConnectionId GetDestinationConnectionId(
@@ -2412,6 +2423,14 @@ class QUICHE_EXPORT QuicConnection
   QuicSocketAddress expected_server_preferred_address_;
 
   ConnectionIdGeneratorInterface& connection_id_generator_;
+
+  // Interval for rotating self-issued connection IDs. When nonzero,
+  // after cid_rotation_interval_ the connection will check if the
+  // connection_id_generator is encrypting. If so, it will ask the peer to
+  // retire all existing connection IDs and issue new ones. If the peer has
+  // not retired connection IDs since the previous request, it will close the
+  // connection.
+  QuicTime::Delta cid_rotation_interval_ = QuicTime::Delta::Zero();
 
   // This LRU cache records source addresses of packets received on server's
   // original address.

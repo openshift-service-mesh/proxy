@@ -7,7 +7,6 @@ building their own make keeps working -- but unexercised by rfcc's tests and
 toolchains, and not updated as make's build requirements move upstream.
 """
 
-load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 load(
     "//foreign_cc/built_tools/private:built_tools_framework.bzl",
     "FOREIGN_CC_BUILT_TOOLS_ATTRS",
@@ -17,13 +16,9 @@ load(
     "built_tool_rule_impl",
     "split_system_include_flags",
 )
-load(
-    "//foreign_cc/private:cc_toolchain_util.bzl",
-    "get_env_vars",
-    "get_flags_info",
-    "get_tools_info",
-)
+load("//foreign_cc/private:cc_toolchain_util.bzl", "find_cpp_toolchain", "get_env_vars", "get_flags_info", "get_tools_info")
 load("//foreign_cc/private:detect_xcompile.bzl", "detect_xcompile")
+load("//foreign_cc/private/framework:exec_groups.bzl", "foreign_cc_exec_groups")
 load(
     "//foreign_cc/private/framework:helpers.bzl",
     "escape_dquote_bash",
@@ -78,9 +73,7 @@ def _make_tool_impl(ctx):
         # output file always comes first and we can append this argument to the
         # flags list.
         absolute_ar = absolutize(ctx.workspace_name, ar_path, True)
-        arflags = [e for e in frozen_arflags]
-        if absolute_ar == "libtool" or absolute_ar.endswith("/libtool"):
-            arflags.append("-o")
+        arflags = _make_arflags(absolute_ar, frozen_arflags)
 
         if os_name(ctx) == "macos":
             non_system_include_ldflags += ["-undefined", "error"]
@@ -147,11 +140,19 @@ make_tool = rule(
     fragments = FOREIGN_CC_BUILT_TOOLS_FRAGMENTS,
     output_to_genfiles = True,
     implementation = _make_tool_impl,
-    toolchains = [
+    exec_groups = foreign_cc_exec_groups([
         "@rules_foreign_cc//foreign_cc/private/framework:shell_toolchain",
         "@bazel_tools//tools/cpp:toolchain_type",
-    ],
+    ]),
 )
 
 def _join_flags_list(workspace_name, flags):
     return " ".join([escape_dquote_bash(absolutize(workspace_name, flag)) for flag in flags])
+
+def _make_arflags(absolute_ar, flags):
+    arflags = [e for e in flags]
+    if absolute_ar.split("/")[-1] in ["libtool", "llvm-libtool-darwin"]:
+        arflags.append("-o")
+    return arflags
+
+export_for_test = struct(make_arflags = _make_arflags)

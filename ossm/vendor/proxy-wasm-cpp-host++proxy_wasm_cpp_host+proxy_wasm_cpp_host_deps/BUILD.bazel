@@ -30,6 +30,6 @@ alias(
 
 alias(
     name = "v8_engine",
-    actual = "@@proxy-wasm-cpp-host+//bazel:wee8_no_pointer_compression",
+    actual = "@@envoy+//bazel:wee8_engine",
     visibility = ["//visibility:public"],
 )

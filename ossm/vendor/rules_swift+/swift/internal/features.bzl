@@ -193,8 +193,8 @@ def configure_features(
     def cc_feature_configuration_no_parse_headers():
         return cc_common.configure_features(
             ctx = ctx,
-            cc_toolchain = swift_toolchain.cc_toolchain_info,
-            language = swift_toolchain.cc_language,
+            cc_toolchain = toolchains.cc,
+            language = toolchains.swift.cc_language,
             requested_features = all_requestable_features,
             unsupported_features = all_unsupported_features + ["parse_headers"],
         )
@@ -359,6 +359,28 @@ def upcoming_and_experimental_features(feature_configuration):
 
     return (upcoming, experimental)
 
+def warnings_as_errors_from_features(feature_configuration):
+    """Extracts the compiler warning groups to treat as errors.
+
+    Args:
+        feature_configuration: The Swift feature configuration.
+
+    Returns:
+        The `list` of warning groups to pass to the compiler via `-Werror`.
+        Empty names and lowercase legacy diagnostic IDs are ignored; legacy
+        diagnostic post-processing is not supported by the worker.
+    """
+    prefix = "swift.werror."
+    werror_warning_groups = []
+
+    for feature in feature_configuration._enabled_features:
+        if feature.startswith(prefix):
+            name = feature[len(prefix):]
+            if name and name[0].isupper():
+                werror_warning_groups.append(name)
+
+    return werror_warning_groups
+
 def _check_allowlists(
         *,
         allowlists,
@@ -453,8 +475,8 @@ def _compute_features(
         # Starlark doesn't support re-binding variables captured from an enclosing lexical scope
         # so we resort to mutation to achieve the same result.
         state = {
-            "requested_features": sets.make([]),
             "disabled_features": sets.make([]),
+            "requested_features": sets.make([]),
         }
 
         def _update_features(newly_requested_features, newly_disabled_features):

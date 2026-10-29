@@ -6,6 +6,8 @@
 
 """Starlark definitions for build rules embed data files directly into code libraries."""
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
 def cc_data_library(
         name,
         data,
@@ -72,7 +74,7 @@ def cc_data_library(
     )
 
     # Encapsulate the code an header files into a cc_library.
-    native.cc_library(
+    cc_library(
         name = name,
         srcs = [name + ".cc"],
         hdrs = [name + ".h"],

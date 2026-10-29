@@ -1,4 +1,4 @@
-97e8ce39cf3c08bb5f9867ee9fb2c98de5a0616640984fa20e491c995bae8444
+32d66fb8298800367cd02d258afe39dd9e3c06c065da36216f35c19a66c254f1
 FILE:@@gazelle+//BUILD.bazel 39f6a7d38268c5e51f15a8a30c0a17b17a9a662c6d0ff22e2c3a3e1ec12c0f6e
 FILE:@@gazelle+//cmd/BUILD.bazel 0b1f5424e8520004203e387c1becbb1e104f965ba6f41309f1456773878bc3e7
 FILE:@@gazelle+//cmd/autogazelle/BUILD.bazel 0a8f33fecaec5bbea586cc4ddc2cf9d4d621cebec5b0f66ab9345fe53f4abd6c
@@ -186,4 +186,4 @@ FILE:@@gazelle+//walk/config.go 05f90688fccce0e210459fc1ba1d0ad333603a593bb615a6
 FILE:@@gazelle+//walk/dirinfo.go 961bf1ef5cde5dc231266ece0d5d736366792b320f35acd775406656338eb978
 FILE:@@gazelle+//walk/walk.go 70c4a96f8ed7b33cd9cf9c878c596c09ca644607dae9efb5971b6ca8619ad2a9
 FILE:@@gazelle++non_module_deps+bazel_gazelle_go_repository_cache//go.env a34c7debd995f8961e7243fb55ca438645f1b6e0fd6db5c00d052be5a152bb63
-FILE:@@rules_go++go_sdk+main___host_0//bin/go e90c4e12df236ea0c2e7536fd68da8a47fc0b585c19588bf6c1a70cfc296a0f9
+FILE:@@rules_go++go_sdk+main___host_0//bin/go 9c2a37ae5b21ba1d5a004bb9ab4d0c64de6fc5778e9d30487adccea62678b8b5

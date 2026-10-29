@@ -6,6 +6,12 @@ This package contains three update tools:
 - `registry_updater` for pinned `--registry=` entries in `.bazelrc`
 - `module_updater` for `bazel_dep(...)` versions in `MODULE.bazel`
 
+## CVE scanning
+
+[`cve_scan`](cve/README.md) scans dependency metadata against NVD CVE data,
+provides a report/test target, and updates cached monthly data. See its
+documentation for the dependency JSON contract and YAML configuration.
+
 ## Registry updater
 
 `registry_updater` rewrites a `.bazelrc` `--registry=<url>/<sha>` pin, but it
@@ -228,7 +234,8 @@ registry explicitly.
 Edits go through hermetic `buildozer` from `buildifier_prebuilt`, so the touched
 call is rewritten with buildifier's normal formatting. Matching
 `single_version_override(...)` blocks are updated alongside the `bazel_dep(...)`
-when they exist.
+when their `module_name` attribute exactly equals the dependency name. Comments
+and overrides for other modules are ignored.
 
 Yanked versions are rejected unless `--allow-yanked` is passed.
 

@@ -327,7 +327,8 @@ class MockFramerVisitor : public QuicFramerVisitorInterface {
               (override));
   MOCK_METHOD(bool, OnAckRange, (QuicPacketNumber, QuicPacketNumber),
               (override));
-  MOCK_METHOD(bool, OnAckTimestamp, (QuicPacketNumber, QuicTime), (override));
+  MOCK_METHOD(bool, OnAckTimestamp, (QuicPacketNumber, QuicReceiveTime),
+              (override));
   MOCK_METHOD(bool, OnAckFrameEnd,
               (QuicPacketNumber, const std::optional<QuicEcnCounts>&),
               (override));
@@ -415,7 +416,7 @@ class NoOpFramerVisitor : public QuicFramerVisitorInterface {
                        QuicTime::Delta ack_delay_time) override;
   bool OnAckRange(QuicPacketNumber start, QuicPacketNumber end) override;
   bool OnAckTimestamp(QuicPacketNumber packet_number,
-                      QuicTime timestamp) override;
+                      QuicReceiveTime timestamp) override;
   bool OnAckFrameEnd(QuicPacketNumber start,
                      const std::optional<QuicEcnCounts>& ecn_counts) override;
   bool OnStopWaitingFrame(const QuicStopWaitingFrame& frame) override;
@@ -995,16 +996,13 @@ class MockQuicSpdySession : public QuicSpdySession {
               (QuicStreamId id, QuicStreamOffset byte_offset), (override));
   MOCK_METHOD(void, SendBlocked,
               (QuicStreamId id, QuicStreamOffset byte_offset), (override));
-  MOCK_METHOD(void, OnStreamHeadersPriority,
+  MOCK_METHOD(void, OnStreamPriority,
               (QuicStreamId stream_id,
                const spdy::SpdyStreamPrecedence& precedence),
               (override));
   MOCK_METHOD(void, OnStreamHeaderList,
               (QuicStreamId stream_id, bool fin, size_t frame_len,
                const QuicHeaderList& header_list),
-              (override));
-  MOCK_METHOD(void, OnPriorityFrame,
-              (QuicStreamId id, const spdy::SpdyStreamPrecedence& precedence),
               (override));
   MOCK_METHOD(void, OnCongestionWindowChange, (QuicTime now), (override));
 

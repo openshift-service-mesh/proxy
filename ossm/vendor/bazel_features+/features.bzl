@@ -64,6 +64,9 @@ _cc = struct(
     # Internal only, don't use outside rules_cc.
     # https://github.com/bazelbuild/bazel/commit/d788aa269a3300771696a0f9e00868a43cadf7d3
     _get_link_args_has_param_file_name = ge("10.0.0-pre.20260608.1"),
+    # Whether map_directory() can handle additional_params needed for create_cc_compile_action
+    # https://github.com/bazelbuild/bazel/commit/0d277213563ce36408f105f01b8f08b043c5fbaf
+    _map_directory_supports_cc_compile = ge("10.0.0rc1")
 )
 
 _docs = struct(
@@ -191,7 +194,12 @@ _rules = struct(
     is_tool_configuration_public = ge_same_major("8.7.0") or ge_same_major("9.1.0") or ge_same_major("10.0.0-pre.20260329.2"),
     # Whether constraint_setting has the refines_constraint_value attribute.
     # https://github.com/bazelbuild/bazel/commit/a59ad366453bb731b255916277d34d5d536ca696
-    constraint_setting_has_refines_constraint_value = gt("10.0.0-pre.20260524.1"),
+    # https://github.com/bazelbuild/bazel/commit/319aa51a8cbe4474d3ac6871ecedfd2e66b5fab2
+    constraint_setting_has_refines_constraint_value = ge_same_major("9.2.0") or gt("10.0.0-pre.20260524.1"),
+    # Whether the flags attribute of the platform rule takes effect. The attribute was added in
+    # 8.0.0-pre.20240401.3, but platforms only apply their flags since this commit.
+    # https://github.com/bazelbuild/bazel/commit/ac05b298a1c2f98b05c603f7a6738c761761edb6
+    platform_has_flags = ge("8.0.0-pre.20240618.2"),
 
     # Whether toolchains_aspects accept "*" to propagate to all toolchains
     # 8.8.0 : https://github.com/bazelbuild/bazel/commit/dd6a292e2b160bbd35b9d9b67d21971f4efeb94c

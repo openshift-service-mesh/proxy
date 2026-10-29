@@ -724,6 +724,11 @@ filegroup(
 )
 
 filegroup(
+    name = "app_shortcuts_localized_strings",
+    srcs = glob(["app_shortcuts/*.lproj/*.strings"]),
+)
+
+filegroup(
     name = "localized_xcstrings",
     srcs = [
         "files.xcstrings",
@@ -1362,7 +1367,7 @@ genrule(
     name = "generate_structured_image",
     srcs = [":sample.png"],
     outs = ["Images/foo.png"],
-    cmd = "cp $(location :sample.png) $@",
+    cmd = "cp $(execpath :sample.png) $@",
     tags = common.fixture_tags,
 )
 
@@ -1549,7 +1554,7 @@ genrule(
     name = "ccinfo_dylibs_mylib-shared-with-rpath",
     srcs = [":ccinfo_dylibs_mylib-shared"],
     outs = ["libmylib_with_rpath.dylib"],
-    cmd = "install_name_tool -id @rpath/libmylib_with_rpath.dylib $(location :ccinfo_dylibs_mylib-shared) && cp $(location :ccinfo_dylibs_mylib-shared) $@",
+    cmd = "install_name_tool -id @rpath/libmylib_with_rpath.dylib $(execpath :ccinfo_dylibs_mylib-shared) && cp $(execpath :ccinfo_dylibs_mylib-shared) $@",
 )
 
 # Import our dynamically linked library.

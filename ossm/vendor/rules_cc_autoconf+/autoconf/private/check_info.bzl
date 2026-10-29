@@ -6,7 +6,7 @@ validation (used only by the validation aspect).
 """
 
 KNOWN_CHECK_FIELDS = {
-    "code": "str: C/C++ source code to compile or link for this check.",
+    "code": "(str | list[str]): C/C++ program to compile or link for this check, or a list of programs tried in order until one succeeds.",
     "code_must_fail": "str: Optional second probe whose compile must FAIL for the check to succeed. Used by AC_CHECK_TYPE to distinguish a type from a variable.",
     "compile_defines": "list[str]: Preprocessor define names from previous checks to add before includes.",
     "condition": "str: Boolean expression that selects between if_true/if_false values.",
@@ -14,6 +14,7 @@ KNOWN_CHECK_FIELDS = {
     "define": "(str | bool): Define name to set in config.h, or True to use the cache variable name.",
     "define_value": "(str | int | None): Value for the define when the check succeeds.",
     "define_value_fail": "(str | int | None): Value for the define when the check fails.",
+    "error": "str: Stop the build with this message when the check fails (AC_MSG_ERROR).",
     "flag": "str: Compiler flag to test (for compiler-flag checks).",
     "if_false": "(str | int | None): Value to use when a condition evaluates to false.",
     "if_true": "(str | int | None): Value to use when a condition evaluates to true.",
@@ -60,12 +61,36 @@ TYPES_REQUIRING_CODE = {
     "sizeof": True,
 }
 
+def _lf_line_endings(value):
+    """`value` with every CRLF of its strings turned into LF, lists and dicts included.
+
+    A check's program is a string literal of a BUILD file, and a BUILD file checked out with
+    CRLF (git's autocrlf on Windows) puts CRLF into the literal.  The check's JSON is an action
+    input, so the same check would have one action key from a Windows checkout and another from
+    a Linux one, and remote execution or a shared cache would see two different checks.  Line
+    terminators are the checkout's, not the author's: they are canonicalized here, once, where
+    every check is encoded.  A lone CR, which only an explicit `\\r` escape produces, is kept.
+    """
+    if type(value) == "string":
+        return value.replace("\r\n", "\n")
+    if type(value) == "list":  # a check's lists hold strings (`includes`, `libraries`)
+        return [_lf_string(item) for item in value]
+    if type(value) == "dict":  # one level deep: a check is a flat dict of fields
+        return {
+            key: [_lf_string(item) for item in field] if type(field) == "list" else _lf_string(field)
+            for key, field in value.items()
+        }
+    return value
+
+def _lf_string(value):
+    return value.replace("\r\n", "\n") if type(value) == "string" else value
+
 def make_check(check):
     """Encode a check dict as JSON.
 
-    Single entry point for all factory functions. Currently a thin wrapper
-    around json.encode(); exists so that future global transformations or
-    legacy conversions can be applied in one place.
+    Single entry point for all factory functions: the one place for global
+    transformations, which today means canonical LF line endings
+    (`_lf_line_endings`).
 
     Args:
         check: Dict with check fields (e.g. {"type": "compile", "name": ...}).
@@ -73,7 +98,7 @@ def make_check(check):
     Returns:
         A JSON-encoded string suitable for the autoconf rule's checks attr.
     """
-    return json.encode(check)
+    return json.encode(_lf_line_endings(check))
 
 def _autoconf_check_init(
         type,
@@ -86,6 +111,7 @@ def _autoconf_check_init(
         define = None,
         define_value = None,
         define_value_fail = None,
+        error = None,
         flag = None,
         if_true = None,
         if_false = None,
@@ -112,6 +138,7 @@ def _autoconf_check_init(
     if type in TYPES_REQUIRING_CODE and code == None:
         fail("Check '{}' (type '{}') requires a 'code' field.".format(name, type))
 
+    _validate_code_field(name, code)
     _validate_list_field("compile_defines", compile_defines)
     _validate_list_field("copts", copts)
     _validate_list_field("input_deps", input_deps)
@@ -128,6 +155,7 @@ def _autoconf_check_init(
         "define": define,
         "define_value": define_value,
         "define_value_fail": define_value_fail,
+        "error": error,
         "flag": flag,
         "if_false": if_false,
         "if_true": if_true,
@@ -142,6 +170,21 @@ def _autoconf_check_init(
         "type": type,
         "unquote": unquote,
     }
+
+def _validate_code_field(name, code):
+    """Fail unless `code` is None, a string, or a non-empty list of strings.
+
+    Lives outside `_autoconf_check_init`, whose `type` parameter shadows the
+    builtin.
+    """
+    if type(code) == "list":
+        if not code:
+            fail("Check '{}' has an empty 'code' list; give at least one program.".format(name))
+        for program in code:
+            if type(program) != "string":
+                fail("Check '{}': every entry of a 'code' list must be a string, got {}.".format(name, type(program)))
+    elif code != None and type(code) != "string":
+        fail("Check '{}': 'code' must be a string or a list of strings, got {}.".format(name, type(code)))
 
 def _validate_list_field(field_name, value):
     """Fail if value is not None and not a list."""

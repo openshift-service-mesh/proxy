@@ -1,6 +1,6 @@
 import pytest
 
-from tools.private.release import release as releaser
+from dev.release import release as releaser
 
 
 def test_valid_version():
@@ -17,3 +17,12 @@ def test_invalid_version():
         releaser.create_parser().parse_args(["prepare", "0.28"])
     with pytest.raises(SystemExit):
         releaser.create_parser().parse_args(["prepare", "a.b.c"])
+
+
+def test_main_runs_command(mocker):
+    mocker.patch("sys.argv", ["release", "prepare", "0.28.0"])
+    mock_cmd = mocker.patch("dev.release.prepare.Prepare.run_from_args", return_value=0)
+    with pytest.raises(SystemExit) as exc_info:
+        releaser.main()
+    assert exc_info.value.code == 0
+    mock_cmd.assert_called_once()
