@@ -6,6 +6,8 @@
 
 # An example that output all of the possible outputs of the OCPDiag results library.
 
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+
 cc_library(
     name = "full_spec_lib",
     srcs = ["full_spec.cc"],

@@ -1,9 +1,12 @@
 load("@bazel_lib//lib:diff_test.bzl", "diff_test")
 load("@rules_shell//shell:sh_library.bzl", "sh_library")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
-load("//tools/lint:linters.bzl", "shellcheck_test")
+load("@rules_shellcheck//shellcheck:shellcheck_test.bzl", "shellcheck_test")
+load("//test/integration:bzlmod_enabled.bzl", "BZLMOD_ENABLED")
+load(":built_tools_flags_test.bzl", "built_tools_flags_test_suite")
 load(":cmake_text_tests.bzl", "cmake_script_test_suite")
 load(":convert_shell_script_test.bzl", "shell_script_conversion_suite")
+load(":make_build_test.bzl", "make_build_test_suite")
 load(":make_env_vars_test.bzl", "make_env_vars_test_suite")
 load(":meson_text_tests.bzl", "meson_script_test_suite")
 load(":msbuild_text_tests.bzl", "msbuild_script_test_suite")
@@ -21,12 +24,15 @@ load(":wildcard_resolution_test.bzl", "wildcard_resolution_test_suite")
 # so the ``script_file`` / ``wrapper_script_file`` output groups read
 # through cleanly.
 #
-# The registry-backed tools are absent: they are plain cc_binary targets in
-# their modules, not rfcc framework rules, so they emit no build script to
-# lint. The two below exercise the same script generator.
+# pkgconfig is absent. Its alias exists only when the hub picks a source
+# version for the tool, and pkgconfig's default is the pkgconf registry module
+# (3.0.10), which its source table -- pkg-config 0.29.2 -- does not contain. The
+# four below exercise the same script generator regardless.
 TOOL_TARGETS = [
     "@rules_foreign_cc_toolchains//:cmake_built",
+    "@rules_foreign_cc_toolchains//:make_built",
     "@rules_foreign_cc_toolchains//:meson_built",
+    "@rules_foreign_cc_toolchains//:ninja_built",
 ]
 
 filegroup(
@@ -50,17 +56,25 @@ sh_library(
         ":build_scripts",
         ":wrapper_scripts",
     ],
-    tags = ["lint-genfiles"],
 )
 
+# Every source here is generated, which shellcheck_test skips by default;
+# `check_generated = 1` opts them in.
+#
+# Without bzlmod the filegroups above are empty: the WORKSPACE registrations
+# alias `make_built` / `meson_built` / `ninja_built` to the plain
+# `cc_binary` / `py_binary` targets of the `@make`, `@meson` and `@ninja`
+# repos, which have no `script_file` output group. shellcheck rejects an empty
+# file list, so skip the test there rather than lint nothing.
 shellcheck_test(
     name = "shellcheck",
     size = "small",
-    srcs = [":tool_build_scripts"],
+    check_generated = 1,
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
-    }),
+    }) + ([] if BZLMOD_ENABLED else ["@platforms//:incompatible"]),
+    targets = [":tool_build_scripts"],
 )
 
 cmake_script_test_suite()
@@ -72,6 +86,8 @@ msbuild_script_test_suite()
 shell_script_conversion_suite()
 
 make_env_vars_test_suite()
+
+make_build_test_suite()
 
 utils_test_suite()
 
@@ -126,3 +142,5 @@ sh_test(
     args = ["$(locations //test/output_validation:wrong_output_in_action_check_script)"],
     data = ["//test/output_validation:wrong_output_in_action_check_script"],
 )
+
+built_tools_flags_test_suite()

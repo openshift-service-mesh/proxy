@@ -1,6 +1,6 @@
 module(
     name = "proto-field-extraction",
-    version = "0.0.0-240710-d5d39f0.envoy",
+    version = "0.0.0-240710-d5d39f0.envoy.1",
     compatibility_level = 1,
 )
 
@@ -22,12 +22,12 @@ bazel_dep(
 )
 bazel_dep(
     name = "grpc-httpjson-transcoding",
-    version = "0.0.0-20250507-a6e226f.envoy",
+    version = "0.0.0-20250507-a6e226f.envoy.1",
     repo_name = "grpc_httpjson_transcoding",
 )
 bazel_dep(
     name = "ocp-diag-core",
-    version = "0.0.0-230505-e965ac0.envoy",
+    version = "0.0.0-230505-e965ac0.envoy.1",
 )
 bazel_dep(
     name = "protobuf",
@@ -36,9 +36,9 @@ bazel_dep(
 )
 bazel_dep(
     name = "rules_cc",
-    version = "0.0.9",
+    version = "0.1.5",
 )
 bazel_dep(
     name = "rules_proto",
-    version = "5.3.0-21.7",
+    version = "7.1.0",
 )

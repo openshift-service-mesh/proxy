@@ -33,9 +33,23 @@ build --output_groups=+autoconf_checks
 # Validate check JSON field names at analysis time.
 build --aspects=//autoconf/private:validate_checks.bzl%validate_checks_aspect
 
+# Type-check every Python target with mypy (strict, see .mypy.ini) as part of the build.
+build --aspects=@rules_venv//python/mypy:defs.bzl%py_mypy_aspect
+build --output_groups=+py_mypy_checks
+
+# Lint and check the formatting of every Python target with ruff (see .ruff.toml) as part of
+# the build; `bazel run @rules_venv//python/ruff:format` and `:fix` apply what ruff can fix.
+build --aspects=@rules_venv//python/ruff:py_ruff_aspect.bzl%py_ruff_aspect
+build --output_groups=+py_ruff_checks
+build --@rules_venv//python/ruff:config=//:.ruff.toml
+build --@rules_venv//python/ruff:mode=check,format
+
 ###############################################################################
 ## Incompatibility flags
 ###############################################################################
+
+# https://github.com/bazelbuild/bazel/issues/19981
+common --incompatible_auto_exec_groups
 
 # https://github.com/bazelbuild/bazel/issues/8195
 build --incompatible_disallow_empty_glob=true
@@ -68,6 +82,19 @@ build:macos --per_file_copt=external/.*@-w
 build:windows --copt=/Wall
 build:windows --copt=/W3
 build:windows --per_file_copt=external/.*@/W0
+
+###############################################################################
+## Remote Cache
+###############################################################################
+
+common:remote_cache --bes_results_url=https://periareon.buildbuddy.io/invocation/
+common:remote_cache --bes_backend=grpcs://periareon.buildbuddy.io
+common:remote_cache --remote_cache=grpcs://periareon.buildbuddy.io
+common:remote_cache --remote_download_toplevel
+common:remote_cache --remote_timeout=10m
+
+common --remote_cache_compression
+common --noslim_profile
 
 ###############################################################################
 ## Custom user flags

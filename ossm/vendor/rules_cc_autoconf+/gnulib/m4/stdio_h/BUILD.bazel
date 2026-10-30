@@ -1,5 +1,6 @@
 """https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/stdio_h.m4"""
 
+load("//autoconf:autoconf_defaults.bzl", "autoconf_defaults")
 load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
 load("//autoconf:checks.bzl", "checks")
 load("//gnulib:macros.bzl", gl_macros = "macros")
@@ -8,11 +9,12 @@ load("//gnulib:macros.bzl", gl_macros = "macros")
 autoconf(
     name = "gl_HAVE_DECL__SNPRINTF",
     checks = [
+        # AC_CHECK_DECLS([_snprintf], , , [[#include <stdio.h>]]) in
+        # gl_PREREQ_VASNPRINTF: config.h define only, never an AC_SUBST.
         checks.AC_CHECK_DECL(
             "_snprintf",
             define = "HAVE_DECL__SNPRINTF",
             includes = ["#include <stdio.h>"],
-            subst = True,
         ),
     ],
     visibility = ["//visibility:public"],
@@ -21,12 +23,20 @@ autoconf(
     ],
 )
 
+# gl_STDIO_H_EARLY - m4 lines 9-29: AC_DEFINE([__USE_MINGW_ANSI_STDIO]) must
+# happen early because several printf/snprintf probes depend on it.
 autoconf(
-    name = "stdio_h",
+    name = "gl_STDIO_H_EARLY",
     checks = [
         # This makes printf/scanf use GNU-style format specifiers
         checks.AC_DEFINE("__USE_MINGW_ANSI_STDIO", "1"),
+    ],
+    visibility = ["//visibility:public"],
+)
 
+autoconf(
+    name = "gl_STDIO_H",
+    checks = [
         # From gl_STDIO_H: Check which flavor of printf attribute matches inttypes macros
         # Lines 39-53: AC_CACHE_CHECK + AC_COMPILE_IFELSE
         # Sets GNULIB_PRINTF_ATTRIBUTE_FLAVOR_GNU=1 when compilation FAILS (gnu printf flavor)
@@ -79,10 +89,36 @@ int main(void) { return 0; }
         ),
 
         # ac_cv_have_decl__snprintf from gl_HAVE_DECL__SNPRINTF (shared with vasnprintf)
+    ] + select({
+        # m4_ifdef([gl_NONBLOCKING_IO], [gl_NONBLOCKING_IO
+        #   if test $gl_cv_have_nonblocking != yes; then
+        #     REPLACE_STDIO_READ_FUNCS=1 / REPLACE_STDIO_WRITE_FUNCS=1 ...])
+        # gl_NONBLOCKING_IO_BODY decides gl_cv_have_nonblocking purely from
+        # $host_os: "no" on mingw/windows, "yes" everywhere else.
+        "@platforms//os:windows": [
+            checks.AC_SUBST("REPLACE_STDIO_READ_FUNCS", 1),
+            checks.AC_SUBST("REPLACE_STDIO_WRITE_FUNCS", 1),
+        ],
+        # m4_ifdef([gl_SIGNAL_SIGPIPE], [gl_SIGNAL_SIGPIPE
+        #   if test $gl_cv_header_signal_h_SIGPIPE != yes; then
+        #     REPLACE_STDIO_WRITE_FUNCS=1 ...])
+        "//conditions:default": [
+            checks.AC_SUBST("REPLACE_STDIO_READ_FUNCS", 0),
+            checks.AC_SUBST(
+                "REPLACE_STDIO_WRITE_FUNCS",
+                condition = "gl_cv_header_signal_h_SIGPIPE",
+                if_false = 1,
+                if_true = 0,
+            ),
+        ],
+    }),
+    default_deps = [
+        ":defaults",  # AC_REQUIRE: gl_STDIO_H_DEFAULTS
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":gl_HAVE_DECL__SNPRINTF",
+        "//gnulib/m4/sigpipe:gl_SIGNAL_SIGPIPE",  # m4_ifdef([gl_SIGNAL_SIGPIPE], [gl_SIGNAL_SIGPIPE])
         # Note: gl_STDIO_H_DEFAULTS is a _DEFAULTS function, so we don't track it as a dependency
         # The defaults are provided by the toolchain/defaults target
         "//gnulib/m4/include_next",
@@ -91,149 +127,176 @@ int main(void) { return 0; }
     ],
 )
 
+# gl_STDIO_MODULE_INDICATOR([modulename]): gl_STDIO_H_REQUIRE_DEFAULTS (the
+# defaults are supplied through the toolchain's :defaults target) and
+# GNULIB_<module>=1 for the named module; no checks of its own.
 autoconf(
-    name = "gl_STDIO_H_DEFAULTS",
-    checks = [
-        checks.AC_SUBST("HAVE_DECL_FCLOSEALL", 1),
-        checks.AC_SUBST("HAVE_DECL_FPURGE", 1),
-        checks.AC_SUBST("HAVE_DECL_FSEEKO", 1),
-        checks.AC_SUBST("HAVE_DECL_FTELLO", 1),
-        checks.AC_SUBST("HAVE_DECL_GETDELIM", 1),
-        checks.AC_SUBST("HAVE_DECL_GETLINE", 1),
-        checks.AC_SUBST("HAVE_DECL_GETW", 1),
-        checks.AC_SUBST("HAVE_DECL_OBSTACK_PRINTF", 1),
-        checks.AC_SUBST("HAVE_DECL_PUTW", 1),
-        checks.AC_SUBST("HAVE_DECL_SNPRINTF", 1),
-        checks.AC_SUBST("HAVE_DECL_VSNPRINTF", 1),
-        checks.AC_SUBST("HAVE_DPRINTF", 1),
-        checks.AC_SUBST("HAVE_FSEEKO", 1),
-        checks.AC_SUBST("HAVE_FTELLO", 1),
-        checks.AC_SUBST("HAVE_PCLOSE", 1),
-        checks.AC_SUBST("HAVE_POPEN", 1),
-        checks.AC_SUBST("HAVE_RENAMEAT", 1),
-        checks.AC_SUBST("HAVE_VASPRINTF", 1),
-        checks.AC_SUBST("HAVE_VDPRINTF", 1),
-        checks.AC_SUBST("REPLACE_DPRINTF", 0),
-        checks.AC_SUBST("REPLACE_FCLOSE", 0),
-        checks.AC_SUBST("REPLACE_FDOPEN", 0),
-        checks.AC_SUBST("REPLACE_FFLUSH", 0),
-        checks.AC_SUBST("REPLACE_FOPEN", 0),
-        checks.AC_SUBST("REPLACE_FOPEN_FOR_FOPEN_GNU", 0),
-        checks.AC_SUBST("REPLACE_FPRINTF", 0),
-        checks.AC_SUBST("REPLACE_FPURGE", 0),
-        checks.AC_SUBST("REPLACE_FREOPEN", 0),
-        checks.AC_SUBST("REPLACE_FSEEK", 0),
-        checks.AC_SUBST("REPLACE_FSEEKO", 0),
-        checks.AC_SUBST("REPLACE_FTELL", 0),
-        checks.AC_SUBST("REPLACE_FTELLO", 0),
-        checks.AC_SUBST("REPLACE_GETDELIM", 0),
-        checks.AC_SUBST("REPLACE_GETLINE", 0),
-        checks.AC_SUBST("REPLACE_OBSTACK_PRINTF", 0),
-        checks.AC_SUBST("REPLACE_PERROR", 0),
-        checks.AC_SUBST("REPLACE_POPEN", 0),
-        checks.AC_SUBST("REPLACE_PRINTF", 0),
-        checks.AC_SUBST("REPLACE_REMOVE", 0),
-        checks.AC_SUBST("REPLACE_RENAME", 0),
-        checks.AC_SUBST("REPLACE_RENAMEAT", 0),
-        checks.AC_SUBST("REPLACE_SNPRINTF", 0),
-        checks.AC_SUBST("REPLACE_SPRINTF", 0),
-        checks.AC_SUBST("REPLACE_STDIO_READ_FUNCS", 0),
-        checks.AC_SUBST("REPLACE_STDIO_WRITE_FUNCS", 0),
-        checks.AC_SUBST("REPLACE_TMPFILE", 0),
-        checks.AC_SUBST("REPLACE_VASPRINTF", 0),
-        checks.AC_SUBST("REPLACE_VDPRINTF", 0),
-        checks.AC_SUBST("REPLACE_VFPRINTF", 0),
-        checks.AC_SUBST("REPLACE_VPRINTF", 0),
-        checks.AC_SUBST("REPLACE_VSNPRINTF", 0),
-        checks.AC_SUBST("REPLACE_VSPRINTF", 0),
+    name = "gl_STDIO_MODULE_INDICATOR",
+    checks = [],
+    default_deps = [
+        ":defaults",  # through a macro it invokes: gl_STDIO_H_DEFAULTS
+        "//gnulib/m4/stdlib_h:defaults",  # gl_STDIO_H_REQUIRE_DEFAULTS invokes gl_STDLIB_H_REQUIRE_DEFAULTS
     ],
-    visibility = ["//visibility:private"],
+    visibility = ["//visibility:public"],
 )
 
 autoconf(
-    name = "gl_STDIO_H_REQUIRE_DEFAULTS",
-    checks = [
-        checks.AC_SUBST("GNULIB_DPRINTF", 0),
-        checks.AC_SUBST("GNULIB_DZPRINTF", 0),
-        checks.AC_SUBST("GNULIB_FCLOSE", 0),
-        checks.AC_SUBST("GNULIB_FDOPEN", 0),
-        checks.AC_SUBST("GNULIB_FFLUSH", 0),
-        checks.AC_SUBST("GNULIB_FGETC", 0),
-        checks.AC_SUBST("GNULIB_FGETS", 0),
-        checks.AC_SUBST("GNULIB_FOPEN", 0),
-        checks.AC_SUBST("GNULIB_FOPEN_GNU", 0),
-        checks.AC_SUBST("GNULIB_FPRINTF", 0),
-        checks.AC_SUBST("GNULIB_FPRINTF_POSIX", 0),
-        checks.AC_SUBST("GNULIB_FPURGE", 0),
-        checks.AC_SUBST("GNULIB_FPUTC", 0),
-        checks.AC_SUBST("GNULIB_FPUTS", 0),
-        checks.AC_SUBST("GNULIB_FREAD", 0),
-        checks.AC_SUBST("GNULIB_FREOPEN", 0),
-        checks.AC_SUBST("GNULIB_FSCANF", 0),
-        checks.AC_SUBST("GNULIB_FSEEK", 0),
-        checks.AC_SUBST("GNULIB_FSEEKO", 0),
-        checks.AC_SUBST("GNULIB_FTELL", 0),
-        checks.AC_SUBST("GNULIB_FTELLO", 0),
-        checks.AC_SUBST("GNULIB_FWRITE", 0),
-        checks.AC_SUBST("GNULIB_FZPRINTF", 0),
-        checks.AC_SUBST("GNULIB_GETC", 0),
-        checks.AC_SUBST("GNULIB_GETCHAR", 0),
-        checks.AC_SUBST("GNULIB_GETDELIM", 0),
-        checks.AC_SUBST("GNULIB_GETLINE", 0),
-        checks.AC_SUBST("GNULIB_OBSTACK_PRINTF", 0),
-        checks.AC_SUBST("GNULIB_OBSTACK_PRINTF_POSIX", 0),
-        checks.AC_SUBST("GNULIB_OBSTACK_ZPRINTF", 0),
-        checks.AC_SUBST("GNULIB_PCLOSE", 0),
-        checks.AC_SUBST("GNULIB_PERROR", 0),
-        checks.AC_SUBST("GNULIB_POPEN", 0),
-        checks.AC_SUBST("GNULIB_PRINTF", 0),
-        checks.AC_SUBST("GNULIB_PRINTF_POSIX", 0),
-        checks.AC_SUBST("GNULIB_PUTC", 0),
-        checks.AC_SUBST("GNULIB_PUTCHAR", 0),
-        checks.AC_SUBST("GNULIB_PUTS", 0),
-        checks.AC_SUBST("GNULIB_REMOVE", 0),
-        checks.AC_SUBST("GNULIB_RENAME", 0),
-        checks.AC_SUBST("GNULIB_RENAMEAT", 0),
-        checks.AC_SUBST("GNULIB_SCANF", 0),
-        checks.AC_SUBST("GNULIB_SNPRINTF", 0),
-        checks.AC_SUBST("GNULIB_SNZPRINTF", 0),
-        checks.AC_SUBST("GNULIB_SPRINTF_POSIX", 0),
-        checks.AC_SUBST("GNULIB_STDIO_H_NONBLOCKING", 0),
-        checks.AC_SUBST("GNULIB_STDIO_H_SIGPIPE", 0),
-        checks.AC_SUBST("GNULIB_SZPRINTF", 0),
-        checks.AC_SUBST("GNULIB_TMPFILE", 0),
-        checks.AC_SUBST("GNULIB_VASPRINTF", 0),
-        checks.AC_SUBST("GNULIB_VASZPRINTF", 0),
-        checks.AC_SUBST("GNULIB_VFSCANF", 0),
-        checks.AC_SUBST("GNULIB_VSCANF", 0),
-        checks.AC_SUBST("GNULIB_VDPRINTF", 0),
-        checks.AC_SUBST("GNULIB_VDZPRINTF", 0),
-        checks.AC_SUBST("GNULIB_VFPRINTF", 0),
-        checks.AC_SUBST("GNULIB_VFPRINTF_POSIX", 0),
-        checks.AC_SUBST("GNULIB_VFZPRINTF", 0),
-        checks.AC_SUBST("GNULIB_VPRINTF", 0),
-        checks.AC_SUBST("GNULIB_VPRINTF_POSIX", 0),
-        checks.AC_SUBST("GNULIB_VSNPRINTF", 0),
-        checks.AC_SUBST("GNULIB_VSNZPRINTF", 0),
-        checks.AC_SUBST("GNULIB_VSPRINTF_POSIX", 0),
-        checks.AC_SUBST("GNULIB_VSZPRINTF", 0),
-        checks.AC_SUBST("GNULIB_VZPRINTF", 0),
-        checks.AC_SUBST("GNULIB_ZPRINTF", 0),
-        # Microsoft deprecated alias function names
-        checks.AC_SUBST("GNULIB_MDA_FCLOSEALL", 1),
-        checks.AC_SUBST("GNULIB_MDA_FDOPEN", 1),
-        checks.AC_SUBST("GNULIB_MDA_FILENO", 1),
-        checks.AC_SUBST("GNULIB_MDA_GETW", 1),
-        checks.AC_SUBST("GNULIB_MDA_PUTW", 1),
-        checks.AC_SUBST("GNULIB_MDA_TEMPNAM", 1),
+    name = "stdio_h",
+    default_deps = [
+        ":defaults",  # the header's own defaults, as its m4 requires
     ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_STDIO_H",
+        ":gl_STDIO_H_EARLY",
+        ":gl_STDIO_MODULE_INDICATOR",
+    ],
+)
+
+autoconf_defaults(
+    name = "gl_STDIO_H_DEFAULTS",
+    substs = {
+        "HAVE_DECL_FCLOSEALL": "1",
+        "HAVE_DECL_FPURGE": "1",
+        "HAVE_DECL_FSEEKO": "1",
+        "HAVE_DECL_FTELLO": "1",
+        "HAVE_DECL_GETDELIM": "1",
+        "HAVE_DECL_GETLINE": "1",
+        "HAVE_DECL_GETW": "1",
+        "HAVE_DECL_OBSTACK_PRINTF": "1",
+        "HAVE_DECL_PUTW": "1",
+        "HAVE_DECL_SNPRINTF": "1",
+        "HAVE_DECL_VSNPRINTF": "1",
+        "HAVE_DPRINTF": "1",
+        "HAVE_FSEEKO": "1",
+        "HAVE_FTELLO": "1",
+        "HAVE_PCLOSE": "1",
+        "HAVE_POPEN": "1",
+        "HAVE_RENAMEAT": "1",
+        "HAVE_VASPRINTF": "1",
+        "HAVE_VDPRINTF": "1",
+        "REPLACE_DPRINTF": "0",
+        "REPLACE_FCLOSE": "0",
+        "REPLACE_FDOPEN": "0",
+        "REPLACE_FFLUSH": "0",
+        "REPLACE_FOPEN": "0",
+        "REPLACE_FOPEN_FOR_FOPEN_GNU": "0",
+        "REPLACE_FPRINTF": "0",
+        "REPLACE_FPURGE": "0",
+        "REPLACE_FREOPEN": "0",
+        "REPLACE_FSEEK": "0",
+        "REPLACE_FSEEKO": "0",
+        "REPLACE_FTELL": "0",
+        "REPLACE_FTELLO": "0",
+        "REPLACE_GETDELIM": "0",
+        "REPLACE_GETLINE": "0",
+        "REPLACE_OBSTACK_PRINTF": "0",
+        "REPLACE_PERROR": "0",
+        "REPLACE_POPEN": "0",
+        "REPLACE_PRINTF": "0",
+        "REPLACE_REMOVE": "0",
+        "REPLACE_RENAME": "0",
+        "REPLACE_RENAMEAT": "0",
+        "REPLACE_SNPRINTF": "0",
+        "REPLACE_SPRINTF": "0",
+        "REPLACE_STDIO_READ_FUNCS": "0",
+        "REPLACE_STDIO_WRITE_FUNCS": "0",
+        "REPLACE_TMPFILE": "0",
+        "REPLACE_VASPRINTF": "0",
+        "REPLACE_VDPRINTF": "0",
+        "REPLACE_VFPRINTF": "0",
+        "REPLACE_VPRINTF": "0",
+        "REPLACE_VSNPRINTF": "0",
+        "REPLACE_VSPRINTF": "0",
+    },
+    visibility = ["//visibility:private"],
+)
+
+autoconf_defaults(
+    name = "gl_STDIO_H_REQUIRE_DEFAULTS",
+    substs = {
+        "GNULIB_DPRINTF": "0",
+        "GNULIB_DZPRINTF": "0",
+        "GNULIB_FCLOSE": "0",
+        "GNULIB_FDOPEN": "0",
+        "GNULIB_FFLUSH": "0",
+        "GNULIB_FGETC": "0",
+        "GNULIB_FGETS": "0",
+        "GNULIB_FOPEN": "0",
+        "GNULIB_FOPEN_GNU": "0",
+        "GNULIB_FPRINTF": "0",
+        "GNULIB_FPRINTF_POSIX": "0",
+        "GNULIB_FPURGE": "0",
+        "GNULIB_FPUTC": "0",
+        "GNULIB_FPUTS": "0",
+        "GNULIB_FREAD": "0",
+        "GNULIB_FREOPEN": "0",
+        "GNULIB_FSCANF": "0",
+        "GNULIB_FSEEK": "0",
+        "GNULIB_FSEEKO": "0",
+        "GNULIB_FTELL": "0",
+        "GNULIB_FTELLO": "0",
+        "GNULIB_FWRITE": "0",
+        "GNULIB_FZPRINTF": "0",
+        "GNULIB_GETC": "0",
+        "GNULIB_GETCHAR": "0",
+        "GNULIB_GETDELIM": "0",
+        "GNULIB_GETLINE": "0",
+        # Microsoft deprecated alias function names
+        "GNULIB_MDA_FCLOSEALL": "1",
+        "GNULIB_MDA_FDOPEN": "1",
+        "GNULIB_MDA_FILENO": "1",
+        "GNULIB_MDA_GETW": "1",
+        "GNULIB_MDA_PUTW": "1",
+        "GNULIB_MDA_TEMPNAM": "1",
+        "GNULIB_OBSTACK_PRINTF": "0",
+        "GNULIB_OBSTACK_PRINTF_POSIX": "0",
+        "GNULIB_OBSTACK_ZPRINTF": "0",
+        "GNULIB_PCLOSE": "0",
+        "GNULIB_PERROR": "0",
+        "GNULIB_POPEN": "0",
+        "GNULIB_PRINTF": "0",
+        "GNULIB_PRINTF_POSIX": "0",
+        "GNULIB_PUTC": "0",
+        "GNULIB_PUTCHAR": "0",
+        "GNULIB_PUTS": "0",
+        "GNULIB_REMOVE": "0",
+        "GNULIB_RENAME": "0",
+        "GNULIB_RENAMEAT": "0",
+        "GNULIB_SCANF": "0",
+        "GNULIB_SNPRINTF": "0",
+        "GNULIB_SNZPRINTF": "0",
+        "GNULIB_SPRINTF_POSIX": "0",
+        "GNULIB_STDIO_H_NONBLOCKING": "0",
+        "GNULIB_STDIO_H_SIGPIPE": "0",
+        "GNULIB_SZPRINTF": "0",
+        "GNULIB_TMPFILE": "0",
+        "GNULIB_VAPRINTF": "0",  # vaprintf module (newer gnulib; stdio.in.h reads it)
+        "GNULIB_VASPRINTF": "0",
+        "GNULIB_VASZPRINTF": "0",
+        "GNULIB_VDPRINTF": "0",
+        "GNULIB_VDZPRINTF": "0",
+        "GNULIB_VFPRINTF": "0",
+        "GNULIB_VFPRINTF_POSIX": "0",
+        "GNULIB_VFSCANF": "0",
+        "GNULIB_VFZPRINTF": "0",
+        "GNULIB_VPRINTF": "0",
+        "GNULIB_VPRINTF_POSIX": "0",
+        "GNULIB_VSCANF": "0",
+        "GNULIB_VSNPRINTF": "0",
+        "GNULIB_VSNZPRINTF": "0",
+        "GNULIB_VSPRINTF_POSIX": "0",
+        "GNULIB_VSZPRINTF": "0",
+        "GNULIB_VZPRINTF": "0",
+        "GNULIB_ZPRINTF": "0",
+    },
     visibility = ["//visibility:private"],
     deps = [
         ":gl_STDIO_H_DEFAULTS",
     ],
 )
 
-autoconf(
+autoconf_defaults(
     name = "defaults",
     visibility = ["//visibility:public"],
     deps = [

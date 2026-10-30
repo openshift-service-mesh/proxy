@@ -15,7 +15,7 @@
 
 # This is a magic string expanded by `git archive`, as set by `.gitattributes`
 # See https://git-scm.com/docs/git-archive/2.29.0#Documentation/git-archive.txt-export-subst
-_VERSION_PRIVATE = "2.3.3"
+_VERSION_PRIVATE = "2.4.5"
 
 def _features_typedef():
     """Information about features rules_python has implemented.

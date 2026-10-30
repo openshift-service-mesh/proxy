@@ -5,12 +5,12 @@
 load("@bazel_skylib//lib:collections.bzl", "collections")
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 load("@rules_cc//cc:defs.bzl", "CcInfo", "cc_common")
 load("@rules_cc//cc/common:cc_shared_library_info.bzl", "CcSharedLibraryInfo")
 load("//foreign_cc:providers.bzl", "ForeignCcArtifactInfo", "ForeignCcDepsInfo")
 load("//foreign_cc/private:detect_root.bzl", "filter_containing_dirs_from_inputs")
 load("//foreign_cc/private:resource_sets.bzl", "SIZE_ATTRIBUTES", "get_resource_env_vars")
+load("//foreign_cc/private/framework:exec_groups.bzl", "FOREIGN_CC_EXEC_GROUP")
 load(
     "//foreign_cc/private/framework:helpers.bzl",
     "convert_shell_script",
@@ -20,11 +20,14 @@ load(
     "shebang",
 )
 load("//foreign_cc/private/framework:platform.bzl", "PLATFORM_CONSTRAINTS_RULE_ATTRIBUTES")
+load("//toolchains/native_tools:native_tools_toolchain.bzl", "tool_targets")
 load(
     ":cc_toolchain_util.bzl",
     "LibrariesToLinkInfo",
     "create_linking_info",
+    "find_cpp_toolchain",
     "get_env_vars",
+    "get_tools_info",
     "targets_windows",
 )
 load(
@@ -75,7 +78,7 @@ FOREIGN_CC_FRAMEWORK_COMMON_ATTRS = {
     ),
     "_foreign_cc_framework_platform": attr.label(
         doc = "Information about the execution platform",
-        cfg = "exec",
+        cfg = config.exec(FOREIGN_CC_EXEC_GROUP),
         default = Label("@rules_foreign_cc//foreign_cc/private/framework:platform_info"),
     ),
     "_set_file_prefix_map_default": attr.label(
@@ -105,7 +108,7 @@ CC_EXTERNAL_RULE_ATTRIBUTES = {
         ),
         mandatory = False,
         allow_files = True,
-        cfg = "exec",
+        cfg = config.exec(FOREIGN_CC_EXEC_GROUP),
         default = [],
     ),
     "alwayslink": attr.bool(
@@ -120,7 +123,7 @@ CC_EXTERNAL_RULE_ATTRIBUTES = {
         doc = "Files needed by this rule only during build/compile time. May list file or rule targets. Generally allows any target.",
         mandatory = False,
         allow_files = True,
-        cfg = "exec",
+        cfg = config.exec(FOREIGN_CC_EXEC_GROUP),
         default = [],
     ),
     "data": attr.label_list(
@@ -266,7 +269,7 @@ CC_EXTERNAL_RULE_ATTRIBUTES = {
         doc = "__deprecated__: Please use the `build_data` attribute.",
         mandatory = False,
         allow_files = True,
-        cfg = "exec",
+        cfg = config.exec(FOREIGN_CC_EXEC_GROUP),
         default = [],
     ),
 } | FOREIGN_CC_FRAMEWORK_COMMON_ATTRS
@@ -346,7 +349,7 @@ def get_env_prelude(ctx, installdir, data_dependencies, tools_env):
         "export INSTALLDIR=$$EXT_BUILD_ROOT$$/" + installdir,
         "export BUILD_TMPDIR=$$INSTALLDIR$$.build_tmpdir",
         "export EXT_BUILD_DEPS=$$INSTALLDIR$$.ext_build_deps",
-    ]
+    ] + _short_path_env_aliases(ctx)
 
     env = dict()
     env.update(tools_env)
@@ -391,8 +394,12 @@ def get_env_prelude(ctx, installdir, data_dependencies, tools_env):
 
     if cc_toolchain.compiler == "msvc-cl":
         # Prepend PATH environment variable with the path to the toolchain linker, which prevents MSYS using its linker (/usr/bin/link.exe) rather than the MSVC linker (both are named "link.exe")
-        linker_path = paths.dirname(cc_toolchain.ld_executable)
-        if linker_path[1] != ":":
+        # Take it from the link action rather than `ld_executable`: that legacy
+        # tool path is empty on rule-based toolchains (rules_cc's
+        # `cc_toolchain`), while the autoconfigured toolchain points both at
+        # the same link.exe.
+        linker_path = paths.dirname(get_tools_info(ctx).cxx_linker_executable)
+        if linker_path[1:2] != ":":
             linker_path = "${EXT_BUILD_ROOT/$(printf '\072')/}/" + linker_path
 
         env.update({"PATH": _normalize_path(linker_path) + ":" + env.get("PATH")})
@@ -404,6 +411,12 @@ def get_env_prelude(ctx, installdir, data_dependencies, tools_env):
 def _use_short_paths(ctx):
     """Returns True if the build should use shortened paths on Windows."""
     if not targets_windows(ctx, None):
+        return False
+
+    # The built-tool rules (built_tools_framework.bzl) share get_env_prelude
+    # and wrap_outputs but not CC_EXTERNAL_RULE_ATTRIBUTES, so they carry no
+    # opt-in and keep the long paths.
+    if not hasattr(ctx.attr, "_allow_building_in_tmp"):
         return False
     return ctx.attr._allow_building_in_tmp[BuildSettingInfo].value
 
@@ -428,9 +441,13 @@ def _short_path_env_aliases(ctx):
     """Redirect BUILD_TMPDIR/EXT_BUILD_DEPS to short paths under RFCC_SHORT_PATH_ROOT_WIN.
 
     Uses the mixed Windows path form so that downstream tools (CMake, pkg-config,
-    etc.) receive paths they understand. Must run after env_prelude in any script
-    that sets BUILD_TMPDIR/EXT_BUILD_DEPS, since env_prelude sets them to the
-    original long paths.
+    etc.) receive paths they understand. Emitted by get_env_prelude directly
+    after the long-path defaults and before any other variable: a user `env`
+    value such as `LIB = "$$EXT_BUILD_DEPS/lib"` is expanded by the shell at
+    export time, so a later redirect would leave it pointing at the long path
+    that nothing is staged under. The wrapper exports RFCC_SHORT_PATH_ROOT_WIN
+    (see _short_path_wrapper_setup) before the prelude, and the build script
+    inherits it.
     """
     if not _use_short_paths(ctx):
         return []
@@ -511,15 +528,31 @@ def cc_external_rule_impl(ctx, attrs):
     target_root = paths.dirname(installdir_copy.file.dirname)
 
     data_dependencies = ctx.attr.data + ctx.attr.build_data + ctx.attr.toolchains
+
+    # A `current_*_toolchain` hub under `toolchains` forwards its tool's files,
+    # but its `files_to_run` has no executable, so an executable tool reached
+    # that way (a Python launcher such as meson's) would be staged without the
+    # runfiles tree it needs. Stage the hub's own tool targets too, as a
+    # binary listed in `build_data` would be.
+    for toolchain in ctx.attr.toolchains:
+        if platform_common.ToolchainInfo in toolchain:
+            tool_info = getattr(toolchain[platform_common.ToolchainInfo], "data", None)
+            if tool_info != None:
+                data_dependencies += tool_targets(tool_info)
+
     tools_env = {}
     for tool in attrs.tools_data:
-        if tool.target:
-            data_dependencies.append(tool.target)
+        data_dependencies += tool.tools
         if tool.env:
             tools_env.update(tool.env)
 
     # Also add legacy dependencies while they're still available
     data_dependencies += ctx.attr.tools_deps + ctx.attr.additional_tools
+
+    # The same target can arrive by more than one route (a toolchain's tool
+    # also listed in `build_data`, or reached through both `toolchains` and the
+    # rule's own toolchain); location expansion rejects duplicates.
+    data_dependencies = uniq_list_keep_order(data_dependencies)
 
     installdir = target_root + "/" + lib_name
     env_prelude = get_env_prelude(ctx, installdir, data_dependencies, tools_env)
@@ -543,7 +576,6 @@ def cc_external_rule_impl(ctx, attrs):
         "##script_prelude##",
     ] + env_prelude + [
         "##path## $$EXT_BUILD_ROOT$$",
-    ] + _short_path_env_aliases(ctx) + [
         "##rm_rf## $$BUILD_TMPDIR$$",
         "##rm_rf## $$EXT_BUILD_DEPS$$",
         "##mkdirs## $$INSTALLDIR$$",
@@ -607,6 +639,7 @@ def cc_external_rule_impl(ctx, attrs):
     resource_set, env = get_resource_env_vars(ctx.attr)
 
     ctx.actions.run_shell(
+        exec_group = FOREIGN_CC_EXEC_GROUP,
         mnemonic = "Cc" + attrs.configure_name.capitalize() + "MakeRule",
         inputs = depset(inputs.declared_inputs),
         outputs = rule_outputs + [wrapped_outputs.log_file],
@@ -752,7 +785,7 @@ def wrap_outputs(ctx, lib_name, configure_name, script_text, env_prelude, build_
         # the call trap is defined inside, in a way how the shell function should be called
         # see, for instance, linux_commands.bzl
         trap_function,
-    ] + env_prelude + _short_path_wrapper_setup(ctx) + _short_path_env_aliases(ctx) + [
+    ] + _short_path_wrapper_setup(ctx) + env_prelude + [
         "export BUILD_WRAPPER_SCRIPT=\"{}\"".format(wrapper_script_file.path),
         "export BUILD_SCRIPT=\"{}\"".format(build_script_file.path),
         "export BUILD_LOG=\"{}\"".format(build_log_file.path),
@@ -1142,9 +1175,8 @@ def _define_inputs(attrs):
     input_files = []
     for tool in attrs.tools_data:
         tools.append(tool.path)
-        if tool.target:
-            for file_list in tool.target.files.to_list():
-                tools_files += _list(file_list)
+        for target in tool.tools:
+            tools_files += target.files.to_list()
 
     # TODO: Remove, `additional_tools` is deprecated.
     for tool in attrs.additional_tools:

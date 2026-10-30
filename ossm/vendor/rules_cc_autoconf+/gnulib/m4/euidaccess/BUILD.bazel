@@ -14,6 +14,9 @@ autoconf(
         ),
         checks.AC_DEFINE("PREFER_NONREENTRANT_EUIDACCESS", "1"),
     ],
+    default_deps = [
+        "//gnulib/m4/unistd_h:defaults",  # through a macro it invokes: gl_UNISTD_H_DEFAULTS
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":gl_FUNC_EUIDACCESS",
@@ -56,6 +59,9 @@ int main(void) {
             if_true = 1,
         ),
     ],
+    default_deps = [
+        "//gnulib/m4/unistd_h:defaults",  # AC_REQUIRE: gl_UNISTD_H_DEFAULTS
+    ],
     visibility = ["//visibility:public"],
     deps = [
         # Note: _DEFAULTS functions are ignored per porting strategy
@@ -81,8 +87,9 @@ autoconf(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        # Only need HAVE_FACCESSAT, not the full gl_FUNC_FACCESSAT replacement logic
-        "//gnulib/m4/faccessat:HAVE_FACCESSAT",
+        # gl_CHECK_FUNCS_ANDROID([faccessat]) - probe + config.h define only;
+        # the HAVE_FACCESSAT subst keeps its gl_UNISTD_H_DEFAULTS value.
+        "//gnulib/m4/faccessat:gl_CHECK_FUNCS_ANDROID_faccessat",
         # Provides GETGROUPS_T and HAVE_GETGROUPS
         "//autoconf/macros/AC_FUNC_GETGROUPS",
         "//gnulib/m4/eaccess",

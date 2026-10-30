@@ -27,8 +27,8 @@ def _rules_python_module(is_root = False):
     """A mock of what the real rules_python MODULE.bazel looks like."""
     return python_ext.module(
         name = "rules_python",
-        defaults = [python_ext.defaults(python_version = "3.11")],
-        toolchain = [python_ext.toolchain(python_version = "3.11")],
+        defaults = [python_ext.defaults(python_version = "3.14")],
+        toolchain = [python_ext.toolchain(python_version = "3.14")],
         is_root = is_root,
     )
 
@@ -51,11 +51,11 @@ def _test_default_from_rules_python_when_rules_python_is_root(env):
         "tool_versions",
         "platforms",
     ])
-    env.expect.that_str(py.default_python_version).equals("3.11")
+    env.expect.that_str(py.default_python_version).equals("3.14")
 
     want_toolchain = struct(
-        name = "python_3_11",
-        python_version = "3.11",
+        name = "python_3_14",
+        python_version = "3.14",
         register_coverage_tool = False,
     )
     env.expect.that_collection(py.toolchains).contains_exactly([want_toolchain])
@@ -71,11 +71,11 @@ def _test_default_from_rules_python_when_rules_python_is_not_root(env):
         logger = repo_utils.logger(verbosity_level = 0, name = "python"),
     )
 
-    env.expect.that_str(py.default_python_version).equals("3.11")
+    env.expect.that_str(py.default_python_version).equals("3.14")
 
     want_toolchain = struct(
-        name = "python_3_11",
-        python_version = "3.11",
+        name = "python_3_14",
+        python_version = "3.14",
         register_coverage_tool = False,
     )
     env.expect.that_collection(py.toolchains).contains_exactly([want_toolchain])
@@ -146,7 +146,7 @@ def _test_toolchain_ordering(env):
         # the default match will be somewhere in the first bunch.
         "3.10",
         MINOR_MAPPING["3.10"],
-        "3.11",
+        "3.14",
         MINOR_MAPPING["3.11"],
         # Next, the rest, where we will match things based on the `python_version` being
         # the same
@@ -284,8 +284,8 @@ def _test_defaults_overrides_single_toolchain(env):
             python_ext.module(
                 name = "my_root_module",
                 defaults = [
-                    # This relies on rules_python registering 3.11
-                    python_ext.defaults(python_version = "3.11"),
+                    # This relies on rules_python registering 3.14
+                    python_ext.defaults(python_version = "3.14"),
                 ],
                 is_root = True,
                 toolchain = [python_ext.toolchain(python_version = "3.12")],
@@ -294,7 +294,7 @@ def _test_defaults_overrides_single_toolchain(env):
         ),
         logger = repo_utils.logger(verbosity_level = 0, name = "python"),
     )
-    env.expect.that_str(py.default_python_version).equals("3.11")
+    env.expect.that_str(py.default_python_version).equals("3.14")
 
 _tests.append(_test_defaults_overrides_single_toolchain)
 
@@ -359,8 +359,8 @@ def _test_first_occurance_of_the_toolchain_wins(env):
         register_coverage_tool = False,
     )
     rules_python_toolchain = struct(
-        name = "python_3_11",
-        python_version = "3.11",
+        name = "python_3_14",
+        python_version = "3.14",
         register_coverage_tool = False,
     )
     env.expect.that_collection(py.toolchains).contains_exactly([
@@ -371,7 +371,7 @@ def _test_first_occurance_of_the_toolchain_wins(env):
     env.expect.that_dict(py.debug_info).contains_exactly({
         "toolchains_registered": [
             {"module": {"is_root": True, "name": "my_module"}, "name": "python_3_12"},
-            {"module": {"is_root": False, "name": "rules_python"}, "name": "python_3_11"},
+            {"module": {"is_root": False, "name": "rules_python"}, "name": "python_3_14"},
         ],
     })
 
@@ -408,8 +408,8 @@ def _test_auth_overrides(env):
         register_coverage_tool = False,
     )
     rules_python_toolchain = struct(
-        name = "python_3_11",
-        python_version = "3.11",
+        name = "python_3_14",
+        python_version = "3.14",
         register_coverage_tool = False,
     )
     env.expect.that_collection(py.toolchains).contains_exactly([
@@ -418,6 +418,28 @@ def _test_auth_overrides(env):
     ]).in_order()
 
 _tests.append(_test_auth_overrides)
+
+def _test_libpython_override(env):
+    py = parse_modules(
+        module_ctx = python_ext.mctx(
+            python_ext.module(
+                name = "my_module",
+                is_root = True,
+                override = [
+                    python_ext.override(libpython = "exclude"),
+                ],
+                toolchain = [python_ext.toolchain(python_version = "3.12")],
+            ),
+            _rules_python_module(),
+        ),
+        logger = repo_utils.logger(verbosity_level = 0, name = "python"),
+    )
+
+    env.expect.that_dict(py.config.default).contains_at_least({
+        "libpython": "exclude",
+    })
+
+_tests.append(_test_libpython_override)
 
 def _test_add_target_settings(env):
     py = parse_modules(
@@ -481,7 +503,11 @@ def _test_add_new_version(env):
                 ],
                 single_version_platform_override = [
                     python_ext.single_version_platform_override(
-                        coverage_tool = "specific_cov_tool",
+                        # `coverage_tool` is declared as `attr.label` on the tag class
+                        # (so bzlmod resolves it relative to the calling module), so it
+                        # is a `Label`, not a plain `str`, by the time it reaches here.
+                        # See https://github.com/bazel-contrib/rules_python/issues/2570.
+                        coverage_tool = Label("@my_module//:specific_cov_tool"),
                         patch_strip = 2,
                         patches = ["specific-patch.txt"],
                         platform = "aarch64-unknown-linux-gnu",
@@ -509,8 +535,15 @@ def _test_add_new_version(env):
         "strip_prefix": {"aarch64-unknown-linux-gnu": "prefix"},
         "url": {"aarch64-unknown-linux-gnu": ["example.org"]},
     })
+
+    # The Label must be converted to its canonical string form: `python_repository`
+    # (which ultimately consumes this value) declares `coverage_tool` as `attr.string`.
+    coverage_tool = py.config.default["tool_versions"]["3.13.99"]["coverage_tool"]["aarch64-unknown-linux-gnu"]
+    env.expect.that_str(type(coverage_tool)).equals("string")
+    env.expect.that_str(coverage_tool).equals(str(Label("@my_module//:specific_cov_tool")))
+
     env.expect.that_dict(py.config.default["tool_versions"]["3.13.99"]).contains_exactly({
-        "coverage_tool": {"aarch64-unknown-linux-gnu": "specific_cov_tool"},
+        "coverage_tool": {"aarch64-unknown-linux-gnu": coverage_tool},
         "patch_strip": {"aarch64-unknown-linux-gnu": 2},
         "patches": {"aarch64-unknown-linux-gnu": ["specific-patch.txt"]},
         "sha256": {"aarch64-unknown-linux-gnu": "deadb00f"},

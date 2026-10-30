@@ -101,6 +101,11 @@ to force diagnostics to be reported.""",
         doc = "Allow 'catch' parameters to have reified types.",
         default = False,
     ),
+    "-Xallow-returns-result-of": struct(
+        flag = "-Xallow-returns-result-of",
+        doc = "Allows to use `returnsResultOf()` in `contract {}` block of function body. This contract provides additional information for return value checker. Enabling this feature will force compiler to produce pre-release binaries, because this functions with this contract cannot be read correctly by Kotlin 2.3 and lower.",
+        default = False,
+    ),
     "-Xallow-unstable-dependencies": struct(
         flag = "-Xallow-unstable-dependencies",
         doc = "Do not report errors on classes in dependencies that were compiled by an unstable version of the Kotlin compiler.",
@@ -112,7 +117,7 @@ to force diagnostics to be reported.""",
 -Xannotation-default-target=first-only:      use the first of the following allowed targets: '@param:', '@property:', '@field:';
 -Xannotation-default-target=first-only-warn: same as first-only, and raise warnings when both '@param:' and either '@property:' or '@field:' are allowed;
 -Xannotation-default-target=param-property:  use '@param:' target if applicable, and also use the first of either '@property:' or '@field:';
-default: 'first-only-warn' in language version 2.2+, 'first-only' in version 2.1 and before.""",
+default: 'param-property' in language version 2.4+, 'first-only-warn' in language versions 2.2 & 2.3, 'first-only' in version 2.1 and before.""",
         default = None,
     ),
     "-Xannotation-target-all": struct(
@@ -147,21 +152,16 @@ The default value is 1.""",
         doc = "Check pre- and postconditions of IR lowering phases.",
         default = False,
     ),
+    "-Xcollection-literals": struct(
+        flag = "-Xcollection-literals",
+        doc = "Enable experimental language support for collection literals.",
+        default = False,
+    ),
     "-Xcommon-sources": struct(
         flag = "-Xcommon-sources",
         doc = """Sources of the common module that need to be compiled together with this module in multiplatform mode.
 They should be a subset of sources passed as free arguments.""",
         default = [],
-    ),
-    "-Xcompile-builtins-as-part-of-stdlib": struct(
-        flag = "-Xcompile-builtins-as-part-of-stdlib",
-        doc = "Enable behaviour needed to compile builtins as part of JVM stdlib",
-        default = False,
-    ),
-    "-Xcompile-java": struct(
-        flag = "-Xcompile-java",
-        doc = "Reuse 'javac' analysis and compile Java source files.",
-        default = False,
     ),
     "-Xcompiler-plugin-order": struct(
         flag = "-Xcompiler-plugin-order",
@@ -235,6 +235,11 @@ For WASM and JS, the performance report includes execution time and lines per se
         doc = "Disable standard Kotlin scripting support.",
         default = False,
     ),
+    "-Xdont-sort-source-files": struct(
+        flag = "-Xdont-sort-source-files",
+        doc = "Disable automatic sorting of source files.",
+        default = False,
+    ),
     "-Xdont-warn-on-error-suppression": struct(
         flag = "-Xdont-warn-on-error-suppression",
         doc = "Don't report warnings when errors are suppressed. This only affects K2.",
@@ -278,6 +283,11 @@ Use the 'warning' level to issue warnings instead of errors.""",
         doc = "Enable experimental language support for explicit backing fields.",
         default = False,
     ),
+    "-Xexplicit-context-arguments": struct(
+        flag = "-Xexplicit-context-arguments",
+        doc = "Enable explicit passing of context arguments using named argument syntax.",
+        default = False,
+    ),
     "-Xfragment-dependency": struct(
         flag = "-Xfragment-dependency",
         doc = """Declare common klib dependencies for the specific fragment.
@@ -319,10 +329,32 @@ The argument should be used only if the new compilation scheme is enabled with -
         doc = "Generate metadata with strict version semantics (see the KDoc entry on 'Metadata.extraInt').",
         default = False,
     ),
+    "-Xheader-mode": struct(
+        flag = "-Xheader-mode",
+        doc = """Enable header compilation mode.
+In this mode, the compiler produces class files that only contain the 'skeleton' of the classes to be
+compiled but the method bodies of all the implementations are empty.  This is used to speed up parallel compilation
+build systems where header libraries can be used to replace downstream dependencies for which we only need to
+see the type names and method signatures required to compile a given translation unit. Inline functions are still kept
+with bodies.""",
+        default = False,
+    ),
+    "-Xheader-mode-type": struct(
+        flag = "-Xheader-mode-type",
+        doc = """Generates output based on what it is used for:
+-Xheader-mode-type=compilation: Skips the IR generation for modules that don't have inline functions.
+-Xheader-mode-type=any: Can be used for any downstream dependency which doesn't require linking.""",
+        default = "any",
+    ),
     "-Xignore-const-optimization-errors": struct(
         flag = "-Xignore-const-optimization-errors",
         doc = "Ignore all compilation exceptions while optimizing some constant expressions.",
         default = False,
+    ),
+    "-Xignored-annotations-for-bridges": struct(
+        flag = "-Xignored-annotations-for-bridges",
+        doc = "Do not copy these annotations to the bridge methods from their targets.",
+        default = [],
     ),
     "-Xindy-allow-annotated-lambdas": struct(
         flag = "-Xindy-allow-annotated-lambdas",
@@ -332,6 +364,11 @@ The argument should be used only if the new compilation scheme is enabled with -
     "-Xinline-classes": struct(
         flag = "-Xinline-classes",
         doc = "Enable experimental inline classes.",
+        default = False,
+    ),
+    "-Xintrinsic-const-evaluation": struct(
+        flag = "-Xintrinsic-const-evaluation",
+        doc = "Enables `IntrinsicConstEvaluation` language feature.`",
         default = False,
     ),
     "-Xir-do-not-clear-binding-context": struct(
@@ -349,15 +386,10 @@ The argument should be used only if the new compilation scheme is enabled with -
         doc = "Paths to directories with Java source files.",
         default = [],
     ),
-    "-Xjavac-arguments": struct(
-        flag = "-Xjavac-arguments",
-        doc = "Java compiler arguments.",
-        default = [],
-    ),
     "-Xjdk-release": struct(
         flag = "-Xjdk-release",
         doc = """Compile against the specified JDK API version, similarly to javac's '-release'. This requires JDK 9 or newer.
-The supported versions depend on the JDK used; for JDK 17+, the supported versions are 1.8 and 9–25.
+The supported versions depend on the JDK used; for JDK 17+, the supported versions are 1.8 and 9–26.
 This also sets the value of '-jvm-target' to be equal to the selected JDK version.""",
         default = None,
     ),
@@ -423,6 +455,11 @@ It has no effect when -language-version is 2.0 or higher.""",
     "-Xlist-phases": struct(
         flag = "-Xlist-phases",
         doc = "List backend phases.",
+        default = False,
+    ),
+    "-Xlocal-type-aliases": struct(
+        flag = "-Xlocal-type-aliases",
+        doc = "Enable experimental language support for local type aliases.",
         default = False,
     ),
     "-Xmetadata-klib": struct(
@@ -572,12 +609,19 @@ Modes:
         doc = "Validate the backend's state before these phases.",
         default = [],
     ),
+    "-Xprint-configuration": struct(
+        flag = "-Xprint-configuration",
+        doc = "Print compiler configuration.",
+        default = False,
+    ),
     "-Xprofile": struct(
         flag = "-Xprofile",
         doc = """Debug option: Run the compiler with the async profiler and save snapshots to `outputDir`; `command` is passed to the async profiler on start.
 `profilerPath` is the path to libasyncProfiler.so; async-profiler.jar should be on the compiler classpath.
-If it's not on the classpath, the compiler will attempt to load async-profiler.jar from the containing directory of profilerPath.
-Example: -Xprofile=<PATH_TO_ASYNC_PROFILER>/async-profiler/build/libasyncProfiler.so:event=cpu,interval=1ms,threads,start:<SNAPSHOT_DIR_PATH>""",
+If it's not on the classpath, the compiler will attempt to load async-profiler.jar from the containing directory of profilerPath. 
+Individual parameter values are separated by the system path separator.
+Example (Unix/Linux): -Xprofile=<PATH_TO_ASYNC_PROFILER>/async-profiler/build/libasyncProfiler.so:event=cpu,interval=1ms,threads,start:<SNAPSHOT_DIR_PATH>
+Example (Windows): -Xprofile=<PATH_TO_ASYNC_PROFILER>\\async-profiler\\build\\libasyncProfiler.so;event=cpu,interval=1ms,threads,start;<SNAPSHOT_DIR_PATH>""",
         default = None,
     ),
     "-Xprofile-phases": struct(
@@ -639,11 +683,6 @@ problems with parentheses in identifiers on certain platforms.""",
         flag = "-Xseparate-kmp-compilation",
         doc = "Enables the separated compilation scheme, in which common source sets are analyzed against their own dependencies",
         default = False,
-    ),
-    "-Xserialize-ir": struct(
-        flag = "-Xserialize-ir",
-        doc = "Save the IR to metadata (Experimental).",
-        default = "none",
     ),
     "-Xskip-metadata-version-check": struct(
         flag = "-Xskip-metadata-version-check",
@@ -745,11 +784,6 @@ Warning: This feature is not yet production-ready.""",
         doc = "Use inline scopes numbers for inline marker variables.",
         default = False,
     ),
-    "-Xuse-javac": struct(
-        flag = "-Xuse-javac",
-        doc = "Use javac for Java source and class file analysis.",
-        default = False,
-    ),
     "-Xuse-k2": struct(
         flag = "-Xuse-k2",
         doc = "Compile using the experimental K2 compiler pipeline. No compatibility guarantees are provided yet.",
@@ -785,6 +819,11 @@ This can be used in the event of problems with the new implementation.""",
         flag = "-Xverify-ir",
         doc = "IR verification mode (no verification by default).",
         default = None,
+    ),
+    "-Xverify-ir-nested-offsets": struct(
+        flag = "-Xverify-ir-nested-offsets",
+        doc = "Check that offsets of nested IR elements conform to offsets of their containers. Only has effect if '-Xverify-ir' is not 'none'.",
+        default = False,
     ),
     "-Xverify-ir-visibility": struct(
         flag = "-Xverify-ir-visibility",
@@ -835,7 +874,7 @@ The default value is 'inline'.""",
     ),
     "-jvm-target": struct(
         flag = "-jvm-target",
-        doc = "The target version of the generated JVM bytecode (1.8 and 9–25), with 1.8 as the default.",
+        doc = "The target version of the generated JVM bytecode (1.8 and 9–26), with 1.8 as the default.",
         default = None,
     ),
     "-language-version": struct(

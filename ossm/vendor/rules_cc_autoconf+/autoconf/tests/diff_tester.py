@@ -1,8 +1,11 @@
 """The `diff_test` runner."""
 
+from __future__ import annotations
+
 import difflib
 import os
 import platform
+import shutil
 import unittest
 from pathlib import Path
 
@@ -38,7 +41,6 @@ def diff(
 
 
 class DiffTests(unittest.TestCase):
-
     def setUp(self) -> None:
         """Setup class instances"""
 
@@ -48,7 +50,7 @@ class DiffTests(unittest.TestCase):
 
         r = Runfiles.Create()
         if not r:
-            raise EnvironmentError("Failed to locate runfiles")
+            raise OSError("Failed to locate runfiles")
 
         # Use runfiles to locate files
         source_repo = None
@@ -69,7 +71,7 @@ class DiffTests(unittest.TestCase):
 
         return super().setUp()
 
-    def test_diff(self):
+    def test_diff(self) -> None:
         """Compare two files."""
 
         diff_output = diff(
@@ -78,6 +80,18 @@ class DiffTests(unittest.TestCase):
             file1_name=self.file_1_rloc,
             file2_name=self.file_2_rloc,
         )
+
+        # Leave both sides and the diff where a reviewer can find them.
+        outputs_dir = os.environ.get("TEST_UNDECLARED_OUTPUTS_DIR")
+        if outputs_dir:
+            expected = Path(outputs_dir) / "expected"
+            actual = Path(outputs_dir) / "actual"
+            expected.mkdir(parents=True, exist_ok=True)
+            actual.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(self.file_1, expected / self.file_1.name)
+            shutil.copy2(self.file_2, actual / self.file_2.name)
+            if diff_output:
+                (Path(outputs_dir) / "diff.patch").write_text(diff_output + "\n", encoding="utf-8")
 
         divider = "=" * 70
 

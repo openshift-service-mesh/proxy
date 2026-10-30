@@ -1,0 +1,9 @@
+{
+    "url": "https://github.com/alibaba/hessian2-codec/archive/6f5a64770f0374a761eece13c8863b80dc5adcd8.tar.gz",
+    "integrity": "sha256-u0xK9qfjAxFgvzjfqVew7pUOLY3kfUuhTHpljDosdNE=",
+    "strip_prefix": "hessian2-codec-6f5a64770f0374a761eece13c8863b80dc5adcd8",
+    "patch_strip": 1,
+    "patches": {
+        "bazel9_loads.patch": "sha256-oGRpruSmjNaw2DnbzRwTjFIgp54XqtYZopjKWEBSs/U="
+    }
+}

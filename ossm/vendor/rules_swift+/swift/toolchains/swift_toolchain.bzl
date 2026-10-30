@@ -50,6 +50,8 @@ load("//swift/internal:attrs.bzl", "swift_toolchain_driver_attrs")
 load("//swift/internal:autolinking.bzl", "autolink_extract_action_configs")
 load(
     "//swift/internal:feature_names.bzl",
+    "SWIFT_FEATURE_INCREMENTAL_FILE_HASHING",
+    "SWIFT_FEATURE_INDEX_STORE_COMPRESS",
     "SWIFT_FEATURE_MODULE_MAP_HOME_IS_CWD",
     "SWIFT_FEATURE_STATIC_STDLIB",
     "SWIFT_FEATURE_USE_AUTOLINK_EXTRACT",
@@ -615,8 +617,8 @@ def _parse_target_system_name(*, arch, os, target_system_name):
     else:
         return "%s-unknown-%s" % (arch, os)
 
-def _android_target_system_name(ctx, cc_toolchain):
-    """Returns the Android target system name from the C compiler arguments."""
+def _c_compile_args(ctx, cc_toolchain):
+    """Returns the C compiler arguments the CC toolchain passes by default."""
     feature_configuration = cc_common.configure_features(
         ctx = ctx,
         cc_toolchain = cc_toolchain,
@@ -627,13 +629,16 @@ def _android_target_system_name(ctx, cc_toolchain):
         cc_toolchain = cc_toolchain,
         feature_configuration = feature_configuration,
     )
-    compiler_args = cc_common.get_memory_inefficient_command_line(
+    return cc_common.get_memory_inefficient_command_line(
         action_name = C_COMPILE_ACTION_NAME,
         feature_configuration = feature_configuration,
         variables = compile_variables,
     )
+
+def _android_target_system_name(ctx, cc_toolchain):
+    """Returns the Android target system name from the C compiler arguments."""
     target_arg_prefix = "--target="
-    for arg in compiler_args:
+    for arg in _c_compile_args(ctx, cc_toolchain):
         if arg.startswith(target_arg_prefix):
             return arg[len(target_arg_prefix):]
 
@@ -646,6 +651,8 @@ def _resolve_sdkroot(ctx, cc_toolchain):
     resolved cc toolchain's sysroot -- but rules_android_ndk's `@androidndk`
     toolchain reports `sysroot` as the clang directory, not the NDK sysroot
     swiftc needs, so for Android we derive the sysroot from the toolchain files.
+    If the cc toolchain reports no sysroot, the `--sysroot=` argument it passes
+    to C compiles is used, if any.
     """
     if ctx.attr.sdkroot:
         return ctx.attr.sdkroot
@@ -654,7 +661,16 @@ def _resolve_sdkroot(ctx, cc_toolchain):
             idx = f.path.find("/sysroot/")
             if idx != -1:
                 return f.path[:idx] + "/sysroot"
-    return cc_toolchain.sysroot
+    if cc_toolchain.sysroot:
+        return cc_toolchain.sysroot
+
+    # Rules based toolchains don't set the sysroot field so we have to find
+    # it in the arguments instead.
+    sysroot_arg_prefix = "--sysroot="
+    for arg in _c_compile_args(ctx, cc_toolchain):
+        if arg.startswith(sysroot_arg_prefix):
+            return arg[len(sysroot_arg_prefix):]
+    return None
 
 def _swift_toolchain_impl(ctx):
     toolchain_root = ctx.attr.root
@@ -744,6 +760,10 @@ def _swift_toolchain_impl(ctx):
 
     swiftcopts = []
 
+    for arg in _c_compile_args(ctx, cc_toolchain):
+        if arg.startswith("--gcc-toolchain="):
+            swiftcopts.extend(["-Xcc", arg])
+
     if is_exec_config(ctx):
         swiftcopts.extend(ctx.attr._exec_copts[BuildSettingInfo].value)
     else:
@@ -761,6 +781,10 @@ def _swift_toolchain_impl(ctx):
 
     if apple_common.dotted_version(ctx.attr.parsed_version) >= apple_common.dotted_version("6.3"):
         requested_features.append(SWIFT_FEATURE__SUPPORTS_HERMETIC_SWIFTMODULE)
+
+    if apple_common.dotted_version(ctx.attr.parsed_version) >= apple_common.dotted_version("6.4"):
+        requested_features.append(SWIFT_FEATURE_INCREMENTAL_FILE_HASHING)
+        requested_features.append(SWIFT_FEATURE_INDEX_STORE_COMPRESS)
 
     requested_features.extend(ctx.features)
 
@@ -858,6 +882,7 @@ def _swift_toolchain_impl(ctx):
         system_modules = collect_implicit_deps_providers([]),
         implicit_system_modules = collect_implicit_deps_providers([]),
         swift_worker = ctx.attr._worker[DefaultInfo].files_to_run,
+        swift_worker_protocol = "proto" if ctx.attr._use_proto_worker[BuildSettingInfo].value else "json",
         const_protocols_to_gather = ctx.file.const_protocols_to_gather,
         test_configuration = struct(
             binary_name = "{name}",
@@ -892,6 +917,21 @@ architecture-specific content, such as "x86_64" in "lib/swift/linux/x86_64".
 """,
                 mandatory = True,
             ),
+            "const_protocols_to_gather": attr.label(
+                default = Label(
+                    "//swift/toolchains/config:const_protocols_to_gather.json",
+                ),
+                allow_single_file = True,
+                doc = """\
+The label of the file specifying a list of protocols for extraction of conformances'
+const values.
+""",
+            ),
+            "copts": attr.string_list(
+                doc = """\
+A list of additional Swift compiler flags that should be passed to Swift compile actions.
+""",
+            ),
             "cross_import_overlays": attr.label_list(
                 allow_empty = True,
                 doc = """\
@@ -906,30 +946,6 @@ declared as dependencies.
                     [SwiftCrossImportOverlaysInfo],
                 ],
             ),
-            "feature_allowlists": attr.label_list(
-                doc = """\
-A list of `swift_feature_allowlist` targets that allow or prohibit packages from
-requesting or disabling features.
-""",
-                providers = [[SwiftFeatureAllowlistInfo]],
-            ),
-            "os": attr.string(
-                doc = """\
-The name of the operating system that this toolchain targets.
-
-This name should match the name used in the toolchain's directory layout for
-platform-specific content, such as "linux" in "lib/swift/linux".
-""",
-                mandatory = True,
-            ),
-            "package_configurations": attr.label_list(
-                doc = """\
-A list of `swift_package_configuration` targets that specify additional compiler
-configuration options that are applied to targets on a per-package basis.
-""",
-                providers = [[SwiftPackageConfigurationInfo]],
-            ),
-            "root": attr.string(),
             "dynamic_runtime": attr.label_list(
                 doc = """\
 Shared Swift runtime libraries that are added to the dynamic runtime linking
@@ -937,69 +953,19 @@ context.
 """,
                 allow_files = True,
             ),
-            "static_runtime": attr.label_list(
-                doc = """\
-Static Swift runtime archives and supporting linker files that are passed to
-static runtime link actions.
-""",
-                allow_files = True,
-            ),
-            "parsed_version": attr.string(
-                mandatory = True,
-            ),
-            "version_file": attr.label(
-                mandatory = True,
-                allow_single_file = True,
-            ),
-            "copts": attr.string_list(
-                doc = """\
-A list of additional Swift compiler flags that should be passed to Swift compile actions.
-""",
-            ),
-            "_copts": attr.label(
-                default = Label("//swift:copt"),
-                doc = """\
-The label of the `string_list` containing additional flags that should be passed
-to the compiler.
-""",
-            ),
-            "_exec_copts": attr.label(
-                default = Label("//swift:exec_copt"),
-                doc = """\
-The label of the `string_list` containing additional flags that should be passed
-to the compiler for exec transition builds.
-""",
-            ),
-            "_module_mapping": attr.label(
-                default = Label("//swift:module_mapping"),
-                providers = [[SwiftModuleAliasesInfo]],
-            ),
-            "_worker": attr.label(
-                cfg = "exec",
-                allow_files = True,
-                default = Label("//tools/worker"),
-                doc = """\
-An executable that wraps Swift compiler invocations and also provides support
-for incremental compilation using a persistent mode.
-""",
-                executable = True,
-            ),
-            "const_protocols_to_gather": attr.label(
-                default = Label(
-                    "//swift/toolchains/config:const_protocols_to_gather.json",
-                ),
-                allow_single_file = True,
-                doc = """\
-The label of the file specifying a list of protocols for extraction of conformances'
-const values.
-""",
-            ),
             "env": attr.string_dict(
                 doc = """\
 The preserved environment variables required for the toolchain to operate
 normally.
 """,
                 mandatory = False,
+            ),
+            "feature_allowlists": attr.label_list(
+                doc = """\
+A list of `swift_feature_allowlist` targets that allow or prohibit packages from
+requesting or disabling features.
+""",
+                providers = [[SwiftFeatureAllowlistInfo]],
             ),
             "linker_inputs": attr.label_list(
                 allow_files = True,
@@ -1021,11 +987,38 @@ toolchain and do not apply to a cross-compiled SDK target. Leave it unset for an
 ordinary host toolchain, which computes its own flags.
 """,
             ),
+            "os": attr.string(
+                doc = """\
+The name of the operating system that this toolchain targets.
+
+This name should match the name used in the toolchain's directory layout for
+platform-specific content, such as "linux" in "lib/swift/linux".
+""",
+                mandatory = True,
+            ),
+            "package_configurations": attr.label_list(
+                doc = """\
+A list of `swift_package_configuration` targets that specify additional compiler
+configuration options that are applied to targets on a per-package basis.
+""",
+                providers = [[SwiftPackageConfigurationInfo]],
+            ),
+            "parsed_version": attr.string(
+                mandatory = True,
+            ),
+            "root": attr.string(),
             "sdkroot": attr.string(
                 doc = """\
 The root of a SDK to be used for building the target.
 """,
                 mandatory = False,
+            ),
+            "static_runtime": attr.label_list(
+                doc = """\
+Static Swift runtime archives and supporting linker files that are passed to
+static runtime link actions.
+""",
+                allow_files = True,
             ),
             "tool_executable_suffix": attr.string(
                 doc = """\
@@ -1034,11 +1027,48 @@ dependent value (e.g. `.exe` on Window).
 """,
                 mandatory = False,
             ),
+            "version_file": attr.label(
+                mandatory = True,
+                allow_single_file = True,
+            ),
             "xctest_version": attr.string(
                 doc = """\
 The version of XCTest that the toolchain packages.
 """,
                 mandatory = False,
+            ),
+            "_copts": attr.label(
+                default = Label("//swift:copt"),
+                doc = """\
+The label of the `string_list` containing additional flags that should be passed
+to the compiler.
+""",
+            ),
+            "_exec_copts": attr.label(
+                default = Label("//swift:exec_copt"),
+                doc = """\
+The label of the `string_list` containing additional flags that should be passed
+to the compiler for exec transition builds.
+""",
+            ),
+            "_module_mapping": attr.label(
+                default = Label("//swift:module_mapping"),
+                providers = [[SwiftModuleAliasesInfo]],
+            ),
+            "_use_proto_worker": attr.label(
+                cfg = "exec",
+                default = Label("//swift:use_proto_worker"),
+                providers = [BuildSettingInfo],
+            ),
+            "_worker": attr.label(
+                cfg = "exec",
+                allow_files = True,
+                default = Label("//tools/worker"),
+                doc = """\
+An executable that wraps Swift compiler invocations and also provides support
+for incremental compilation using a persistent mode.
+""",
+                executable = True,
             ),
         },
     ),

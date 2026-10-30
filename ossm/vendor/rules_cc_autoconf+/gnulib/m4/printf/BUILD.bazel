@@ -1,7 +1,7 @@
 """https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/printf.m4"""
 
 load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
-load("//autoconf:checks.bzl", "checks")
+load("//autoconf:checks.bzl", "checks", "utils")
 
 # Individual AC_DEFUN* function targets (one target per AC_DEFUN in printf.m4)
 
@@ -22,11 +22,23 @@ autoconf(
     checks = [
         checks.AC_CHECK_FUNC(
             "swprintf",
+            # GNU's program alone: gnulib records swprintf as "only defined as a
+            # macro on MSVC 14"; the default AC_CHECK_FUNC code list would say
+            # yes on MSVC.
+            # https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/doc/posix-functions/swprintf.texi#L22-L23
+            # https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/printf.m4#L2068
+            code = utils.AC_LANG_FUNC_LINK_TRY("swprintf"),
             define = "HAVE_SWPRINTF",
         ),
     ] + select({
         # On Linux with glibc: swprintf works correctly
         "@platforms//os:linux": [
+            checks.AC_DEFINE("HAVE_WORKING_SWPRINTF", "1"),
+        ],
+        # MSVC's UCRT swprintf passes the runtime test (null wide characters in
+        # the output) even though the cross-compile guess for mingw/windows is
+        # "no" (mingw's msvcrt is broken).
+        "@platforms//os:windows": [
             checks.AC_DEFINE("HAVE_WORKING_SWPRINTF", "1"),
         ],
         # On macOS: swprintf does not work correctly (golden shows #undef)
@@ -246,11 +258,9 @@ autoconf(
 
 autoconf(
     name = "printf",
-    checks = [
-        # APPLE_UNIVERSAL_BUILD comes from multiarch dependency
-    ],
     visibility = ["//visibility:public"],
     deps = [
+        # APPLE_UNIVERSAL_BUILD comes from the multiarch dependency
         ":gl_SNPRINTF_PRESENCE",
         ":gl_SWPRINTF_WORKS",
         ":gl_PRINTF_SIZES_C99",

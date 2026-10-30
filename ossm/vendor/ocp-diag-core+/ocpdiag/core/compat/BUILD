@@ -11,6 +11,8 @@ or compatibility layers to address differences in APIs between internal
 and external google libraries.
 """
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
 licenses(["notice"])
 
 # External users may want to use these tools.

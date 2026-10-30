@@ -99,6 +99,10 @@ SWIFT_FEATURE_EMIT_LOCALIZED_STRINGS = "swift.emit_localized_strings"
 # https://docs.google.com/document/d/1cH2sTpgSnJZCkZtJl1aY-rzy4uGPcrI-6RrUpdATO2Q/
 SWIFT_FEATURE_INDEX_WHILE_BUILDING = "swift.index_while_building"
 
+# Compress index-store unit and record files when indexing is enabled Index
+# readers must support compressed stores.
+SWIFT_FEATURE_INDEX_STORE_COMPRESS = "swift.index_store_compress"
+
 # If enabled alongside `swift.index_while_building`, the indexstore will not
 # contain records for symbols in system modules imported by the code being
 # indexed.
@@ -131,6 +135,10 @@ SWIFT_FEATURE_LAYERING_CHECK_FOR_C_DEPS = "swift.layering_check_for_c_deps"
 # any module that is not listed among the direct dependencies of the target.
 SWIFT_FEATURE_LAYERING_CHECK_SWIFT = "swift.layering_check_swift"
 
+# If enabled with `swift.layering_check_swift`, an error will also be emitted
+# for direct dependencies whose modules are never imported.
+SWIFT_FEATURE_LAYERING_CHECK_UNUSED_DEPS = "swift.layering_check_unused_deps"
+
 # If enabled with `swift.layering_check_swift`, Swift layering checks will also
 # be applied to targets in external repositories.
 SWIFT_FEATURE_LAYERING_CHECK_EXTERNAL_SWIFT = "swift.layering_check_external_swift"
@@ -144,6 +152,10 @@ SWIFT_FEATURE_SYSTEM_MODULE = "swift.system_module"
 # invoking a smaller number of frontend processes and passing them batches of
 # source files.
 SWIFT_FEATURE_ENABLE_BATCH_MODE = "swift.enable_batch_mode"
+
+# If enabled, incremental builds hash source and dependency contents during
+# incremental compilation to avoid invalidation when only timestamps change.
+SWIFT_FEATURE_INCREMENTAL_FILE_HASHING = "swift.incremental_file_hashing"
 
 # If enabled, Swift compilation actions will pass the `-enable-testing` flag
 # that modifies visibility controls to let a module be imported with the
@@ -223,6 +235,14 @@ SWIFT_FEATURE_ADD_DEFAULT_PRECOMPILED_MODULES = "swift.add_default_precompiled_m
 # If enabled, Swift modules for dependencies will be passed to the compiler
 # using a JSON file instead of `-I` search paths.
 SWIFT_FEATURE_USE_EXPLICIT_SWIFT_MODULE_MAP = "swift.use_explicit_swift_module_map"
+
+# If enabled together with explicit modules and debug info, object
+# compilations record their own `.swiftmodule` path in debug info instead of
+# embedding modules at link time.
+# https://www.swift.org/blog/module-tracking-in-debug-info/
+# Requires Swift 6.4 or newer for the compiler and debugger support.
+# Enabled by default for Xcode 27 and newer.
+SWIFT_FEATURE_DEBUG_MODULE_PATH = "swift.debug_module_path"
 
 # If enabled, Swift compilation actions will use the same global Clang module
 # cache used by Objective-C compilation actions. This can be disabled because
@@ -321,11 +341,11 @@ SWIFT_FEATURE_DECLARE_SWIFTSOURCEINFO = "swift.emit_swiftsourceinfo"
 # system command line limit.
 SWIFT_FEATURE_NO_EMBED_DEBUG_MODULE = "swift.no_embed_debug_module"
 
-# If enabled, the entry point of a `swift_binary` is not renamed to a
-# target-specific symbol (which is otherwise aliased back to `main` at link
-# time so that the binary's code can also be linked into another binary, such
-# as a test executable). Toolchains whose linkers cannot create such aliases
-# (e.g. wasm-ld, which has no `--defsym`) should enable this feature.
+# If enabled, the entry point of a `swift_binary` or generated `swift_test`
+# runner is not renamed to a target-specific symbol. Otherwise, linker flags
+# select the renamed entry point, allowing dependencies to define their own
+# `main` without colliding. Toolchains whose linkers cannot select renamed
+# entry points (e.g. wasm-ld, which has no `--defsym`) should enable this feature.
 SWIFT_FEATURE_NO_ENTRY_POINT_RENAME = "swift.no_entry_point_rename"
 
 # If enabled, the toolchain will directly generate from the raw proto files
@@ -352,8 +372,9 @@ SWIFT_FEATURE_GENERATE_PATH_TO_UNDERSCORES_FROM_PROTO_FILES = "swift.generate_pa
 # rather than as part of the compilation.
 SWIFT_FEATURE_SPLIT_DERIVED_FILES_GENERATION = "swift.split_derived_files_generation"
 
-# If enabled the skip function bodies frontend flag is passed when using derived
-# files generation. This requires Swift 5.2
+# If enabled, derived files generation skips non-inlinable function bodies that
+# do not declare nested types, preserving those types for the debugger. This
+# requires Swift 5.4.
 SWIFT_FEATURE_ENABLE_SKIP_FUNCTION_BODIES = "swift.skip_function_bodies_for_derived_files"
 
 # If enabled remap the absolute path to Xcode in debug info. When used with
@@ -449,3 +470,8 @@ SWIFT_FEATURE_ENABLE_EMBEDDED = "swift.enable_embedded"
 # Before swift 6.3 using macros lead to absolute paths in swiftmodule files
 # even with -prefix-serialized-debugging-options
 SWIFT_FEATURE__SUPPORTS_HERMETIC_SWIFTMODULE = "swift._supports_hermetic_swiftmodule"
+
+# A private feature that is set by the toolchain if it supports the
+# `-const-gather-protocols-list` driver flag (Swift 6.4 and above). Users should
+# never manually enable, disable, or query this feature.
+SWIFT_FEATURE__SUPPORTS_CONST_GATHER_PROTOCOLS_LIST = "swift._supports_const_gather_protocols_list"

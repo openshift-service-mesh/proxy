@@ -5,7 +5,7 @@
 const https = require("https");
 
 const MIN_VERSION = [8, 0, 0];
-const MAX_VERSION = [22, 99, 99];
+const MAX_VERSION = [24, 99, 99];
 
 const REPOSITORY_TYPES = {
   "darwin-arm64.tar.gz": "darwin_arm64",
@@ -14,6 +14,7 @@ const REPOSITORY_TYPES = {
   "linux-arm64.tar.xz": "linux_arm64",
   "linux-s390x.tar.xz": "linux_s390x",
   "win-x64.zip": "windows_amd64",
+  "win-arm64.zip": "windows_arm64",
   "linux-ppc64le.tar.xz": "linux_ppc64le",
 };
 
@@ -82,18 +83,18 @@ async function main() {
   console.log('# @unsorted-dict-items');
   console.log('NODE_VERSIONS = {');
   nodeRepositories.forEach(({ version, repositories }) => {
+    const versionStr = version.join(".");
     console.log(
       [
-        `# ${version.join(".")}`,
+        `"${versionStr}": {`,
         ...repositories.map(
           ({ filename, sha, type }) =>
-            `"${version.join(
-              "."
-            )}-${type}": ("${filename}", "${filename.replace(
+          `    "${versionStr}-${type}": ("${filename}", "${filename.replace(
               /(\.tar)?\.[^.]+$/,
               ""
             )}", "${sha}"),`
         ),
+	"},",
       ]
         .map((line) => `    ${line}`)
         .join("\n")

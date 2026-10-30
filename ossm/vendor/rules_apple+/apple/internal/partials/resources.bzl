@@ -110,6 +110,9 @@ def _merge_root_infoplists(
         **kwargs
     )
 
+    # A versioned bundle (a macOS framework) keeps its Info.plist in Versions/<v>/Resources.
+    if rule_descriptor.bundle_locations.bundle_version:
+        return [(processor.location.resource, None, depset(direct = files))]
     return [(processor.location.content, None, depset(direct = files))]
 
 def _locales_requested(*, build_setting_locales_to_include, locales_to_include, config_vars):
@@ -258,6 +261,11 @@ def _resources_partial_impl(
 
     infoplists = []
 
+    # Inputs for App Shortcuts training, collected from the resources that survive filtering.
+    app_intents_lproj_dirs = {}
+    app_intents_lproj_files = []
+    app_intents_resource_trees = []
+
     locales_requested = _locales_requested(
         build_setting_locales_to_include = platform_prerequisites.build_settings.locales_to_include,
         config_vars = platform_prerequisites.config_vars,
@@ -306,6 +314,18 @@ def _resources_partial_impl(
                 processing_args["swift_module"] = swift_module or module_name
 
             result = processing_func(**processing_args)
+
+            # Any resource in a top-level locale directory enables training for that locale,
+            # even when the resource itself is not read by the training tool.
+            if parent_dir and field != "framework" and getattr(result, "files", []):
+                lproj_dir = parent_dir.split("/", 1)[0]
+                if lproj_dir.endswith(".lproj"):
+                    app_intents_lproj_dirs[lproj_dir] = None
+            training_resources = getattr(result, "app_intents_resources", None)
+            if training_resources:
+                app_intents_lproj_files.extend(training_resources.lproj_files)
+                app_intents_resource_trees.extend(training_resources.resource_trees)
+
             if hasattr(result, "files"):
                 bundle_files.extend(result.files)
             if hasattr(result, "archives"):
@@ -378,6 +398,11 @@ def _resources_partial_impl(
         )
 
     return struct(
+        app_intents_resources = struct(
+            lproj_dirs = app_intents_lproj_dirs.keys(),
+            lproj_files = app_intents_lproj_files,
+            resource_trees = app_intents_resource_trees,
+        ),
         bundle_files = bundle_files,
         bundle_zips = bundle_zips,
         providers = [final_provider],

@@ -28,6 +28,7 @@ toolchain(
 apple_mac_tools_toolchain(
     name = "mac_tools_toolchain",
     alticonstool = "//tools/alticonstool",
+    app_intents_nl_training_tool = "//tools/app_intents_nl_training_tool",
     bundletool_experimental = "//tools/bundletool:bundletool_experimental",
     clangrttool = "//tools/clangrttool",
     codesigningtool = "//tools/codesigningtool",
@@ -50,7 +51,10 @@ apple_mac_tools_toolchain(
     xctoolrunner = "//tools/xctoolrunner",
 )
 
-toolchain_type(name = "apple_xplat_toolchain_type")
+toolchain_type(
+    name = "apple_xplat_toolchain_type",
+    visibility = ["//test/ios_unit_test_execution_platforms:__pkg__"],
+)
 
 toolchain(
     name = "apple_xplat_toolchain",

@@ -1,11 +1,13 @@
 # M4 to Bazel Migration Guide
 
-This guide teaches how to convert GNU Autoconf M4 macros (from `configure.ac` files) to the equivalent Bazel rules in this repository.
+This guide teaches how to convert GNU Autoconf M4 macros (from `configure.ac` files) to the equivalent Bazel rules in this repository. It serves two readers:
 
-**Important Constraint:** When porting gnulib modules or fixing failing tests, you may **only** modify `BUILD.bazel` files. The following are **not** allowed:
+- **Users migrating their own project.** Read [Quick Start](#quick-start) through [Platform Conditionals](#platform-conditionals). Load `autoconf` from `@rules_cc_autoconf//autoconf:autoconf.bzl` as shown there.
+- **Contributors porting gnulib `.m4` modules into this repository.** Also read [Porting Strategy](#porting-strategy). Ports under `//gnulib/m4` and `//autoconf/macros` load `autoconf_cache` instead (see [`autoconf` vs `autoconf_cache`](#autoconf-vs-autoconf_cache)) and are verified by running GNU autoconf itself against the Bazel output.
 
-- Golden files (e.g. `golden_config*.h.in`, `golden_subst*.h.in`)
-- `configure.ac` files
+**Constraint for gnulib ports in this repository:** When porting gnulib modules or fixing failing conformance tests, you may **only** modify `BUILD.bazel` files under `//gnulib/m4`. The following are **not** allowed:
+
+- Test fixtures under `//gnulib/tests/compat/<module>`: `configure.ac`, `config.h.in`, `subst.h.in`, `test_*.c`
 - `.bzl` files (autoconf rules, checks, macros, etc.)
 - Duplicates targets (e.g. `//gnulib/tests/duplicates:gnulib` and its dependency list)
 
@@ -22,10 +24,13 @@ This guide teaches how to convert GNU Autoconf M4 macros (from `configure.ac` fi
 5. [API Reference](#api-reference)
 6. [Platform Conditionals](#platform-conditionals)
 7. [Dependencies and Reusable Modules](#dependencies-and-reusable-modules)
-8. [Porting Strategy](#porting-strategy)
-9. [Best Practices](#best-practices)
-10. [Cross-Compilation Considerations](#cross-compilation-considerations)
-11. [Complete Examples](#complete-examples)
+8. [Consuming Results Downstream](#consuming-results-downstream)
+9. [Porting Strategy](#porting-strategy)
+10. [Best Practices](#best-practices)
+11. [Cross-Compilation Considerations](#cross-compilation-considerations)
+12. [Complete Examples](#complete-examples)
+13. [Migration Checklist](#migration-checklist)
+14. [Common Pitfalls](#common-pitfalls)
 
 ---
 
@@ -51,9 +56,9 @@ AC_OUTPUT
 load("@rules_cc_autoconf//autoconf:autoconf.bzl", "autoconf")
 load("@rules_cc_autoconf//autoconf:autoconf_hdr.bzl", "autoconf_hdr")
 load("@rules_cc_autoconf//autoconf:checks.bzl", "checks", "macros")
-load("@rules_cc_autoconf//autoconf:package_info.bzl", "package_info")
+load("@rules_cc_autoconf//autoconf:autoconf_package_info.bzl", "autoconf_package_info")
 
-package_info(
+autoconf_package_info(
     name = "package",
     module_bazel = "MODULE.bazel"
 )
@@ -78,28 +83,42 @@ autoconf_hdr(
 
 ## Architecture Overview
 
-The migration system consists of three main components:
+The migration system consists of these components:
 
 ### 1. `autoconf` Rule
 Runs compilation checks against the configured `cc_toolchain` and produces check results. Each check creates a **cache variable** (e.g., `ac_cv_header_stdio_h`) and optionally a **define** (e.g., `HAVE_STDIO_H`) or **subst** value.
+
+### 1b. `autoconf_defaults` Rule
+Holds literal values that a check may override: gnulib's `*_H_DEFAULTS` (`HAVE_FOO=1`, `REPLACE_FOO=0`). Nothing is probed. Targets read a defaults target through `default_deps`, beneath every ordinary result; `deps` rejects it. See [Defaults yield to your values](#defaults-yield-to-your-values).
 
 ### 2. `autoconf_hdr` Rule
 Takes check results from `autoconf` targets and generates header files by processing templates. Supports two modes:
 - `mode = "defines"` — For `config.h` files (processes `#undef` directives)
 - `mode = "subst"` — For substitution files (processes `@VAR@` placeholders)
 
-### 3. `package_info` Rule
+### 3. `autoconf_package_info` Rule
 Provides package metadata (`PACKAGE_NAME`, `PACKAGE_VERSION`, etc.) equivalent to `AC_INIT`.
 
 ### 4. `autoconf_linkopts` Rule (optional)
 Turns **subst** values that hold linker flags (often from `AC_SEARCH_LIBS`) into **`CcInfo`** for `cc_library` / `cc_binary` / `cc_test` dependencies. See [Pattern 7b](#pattern-7b-ac_search_libs-and-autoconf_linkopts).
+
+### `autoconf` vs `autoconf_cache`
+
+`autoconf_cache` (from `//autoconf:autoconf_toolchain.bzl`) is identical to `autoconf` except that it does **not** resolve the `autoconf_toolchain`. Targets that the toolchain itself depends on (its `cache_deps`) must use it; using `autoconf` there would create a dependency cycle. Every port under `//gnulib/m4` and `//autoconf/macros` therefore loads it under the name `autoconf`:
+
+```python
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+```
+
+Projects that consume the rules load `autoconf` from `@rules_cc_autoconf//autoconf:autoconf.bzl` as in the Quick Start. Everything else in this guide (checks, `deps`, `select()`) is the same for both.
 
 ### Data Flow
 
 ```
 configure.ac         →    BUILD.bazel
      ↓                         ↓
-AC_INIT           →    package_info
+AC_INIT           →    autoconf_package_info
 AC_CHECK_*        →    autoconf (checks = [...])
 AC_CONFIG_HEADERS →    autoconf_hdr
 ```
@@ -227,6 +246,28 @@ Use the correct parameter for the right purpose:
 | `requires` | **Gate whether the check runs** — if requirements aren't met, the define is not created | `requires = ["ac_cv_func_foo==1"]` |
 | `condition` | **Select between two values** — the check always runs, but produces different values | `condition = "ac_cv_func_foo", if_true = "1", if_false = "0"` |
 
+#### Expression syntax
+
+`requires` entries and `condition` strings share one grammar, evaluated by the checker:
+
+| Form | Meaning |
+|------|---------|
+| `NAME` | True if the named check passed / the value is truthy (an `AC_SEARCH_LIBS` result is true when the function was found, in libc or in a library) |
+| `!NAME` | Negation |
+| `NAME==1`, `NAME!=0`, `NAME<3`, `NAME>=2` | Compare the recorded value (`==`, `!=`, `<`, `>`, `<=`, `>=`) |
+| `A && B`, `A \|\| B`, `( ... )` | Boolean combination and grouping |
+
+`NAME` is looked up across three buckets: cache variable names (`ac_cv_func_foo`, `gl_cv_...`), define names (`HAVE_FOO`) and subst / M4 variable names (`REPLACE_FOO`). The **cache name is the consistent form**: it always means that one check, so prefer it in `requires` and `condition`. A bare define or subst name is also accepted and is convenient when you want whichever check (or toolchain default) publishes that name. If a bare name resolves to two different results across the dependency graph, the build fails and lists the candidates; switch to the cache name of the check you mean. See [Name results by their cache variable](#name-results-by-their-cache-variable) for the naming table. Example from the `strerror` port:
+
+```python
+checks.AC_SUBST(
+    "REPLACE_STRERROR",
+    condition = "!gl_cv_header_errno_h_complete || !_gl_cv_func_strerror_0_works",
+)
+```
+
+Always write `==`; a bare `=` is accepted only for backward compatibility.
+
 **Anti-pattern:** Don't use `condition` with `if_false = None` to gate a define:
 
 ```python
@@ -305,6 +346,7 @@ macros.AC_CHECK_FUNCS(["printf", "scanf", "fopen"])
 - For plural `AC_CHECK_FUNCS`, prefer `macros.AC_CHECK_FUNCS([...])`; it generates `HAVE_<FUNCTION>` defines for each entry
 - Use individual `checks.AC_CHECK_FUNC` calls only when per-function customization is required
 - Add `define = "HAVE_<FUNCTION>"` for singular calls
+- Do **not** replace an upstream `AC_CHECK_FUNC` with a hand-written `AC_TRY_LINK` / `AC_TRY_COMPILE` because the probe's answer looks wrong on some platform. That changes the cache name (`ac_cv_func_<function>`) that downstream conditions and published overlays reference, and it hides a checker bug. Rerun with `--action_env=RULES_CC_AUTOCONF_DEBUG=debug` and file an issue with the probe output instead; `AC_CHECK_FUNC` is meant to answer exactly as GNU autoconf does
 
 ---
 
@@ -400,6 +442,8 @@ checks.AC_CHECK_SIZEOF("int", define = "SIZEOF_INT")
 checks.AC_CHECK_SIZEOF("size_t", define = "SIZEOF_SIZE_T", includes = ["#include <stddef.h>"])
 checks.AC_CHECK_ALIGNOF("double", define = "ALIGNOF_DOUBLE")
 ```
+
+Without `includes`, the probe compiles with autoconf's default includes (`<sys/types.h>` among them), as `AC_CHECK_SIZEOF([off_t])` does in configure.
 
 **Note:** In `rules_cc_autoconf`, `AC_CHECK_SIZEOF` / `AC_CHECK_ALIGNOF` are implemented with **compile-time** probing (not by executing a test binary). They still encode facts about the **target** toolchain, so interpret results carefully when cross-compiling (see [Cross-Compilation](#cross-compilation-considerations)).
 
@@ -711,7 +755,10 @@ checks.AC_CHECK_HEADER("stdio.h", define = "HAVE_STDIO_H")
 checks.AC_CHECK_FUNC(
     "fopen",
     define = "HAVE_FOPEN",
-    requires = ["HAVE_STDIO_H"],  # Only check if stdio.h exists
+    # Only check if stdio.h exists. The cache name is the consistent form;
+    # the bare define name "HAVE_STDIO_H" also resolves while a single
+    # check publishes it.
+    requires = ["ac_cv_header_stdio_h"],
 )
 ```
 
@@ -721,7 +768,7 @@ checks.AC_CHECK_FUNC(
 checks.AC_CHECK_FUNC(
     "fstat64",
     define = "HAVE_FSTAT64",
-    requires = ["REPLACE_FSTAT=1"],  # Only if REPLACE_FSTAT equals "1"
+    requires = ["REPLACE_FSTAT==1"],  # Only if REPLACE_FSTAT equals "1"
 )
 ```
 
@@ -772,11 +819,13 @@ int main(void) {
 | `AC_PROG_CXX()` | Check for C++ compiler |
 | `AC_PROG_CC_C_O()` | Check `cc -c -o` support |
 | `AC_FAIL(define, ...)` | Check that always fails; emit `#undef` (e.g. little-endian branch for `WORDS_BIGENDIAN`; GNU `AC_C_BIGENDIAN` is usually modeled with `select()` + `AC_DEFINE` / `AC_FAIL`) |
-| `AC_C_INLINE()` | Check for inline keyword |
 | `AC_C_RESTRICT()` | Check for restrict keyword |
 | `AC_COMPUTE_INT(define, expression, ...)` | Compute integer at compile time (compile-time probe in this implementation) |
 | `AC_CHECK_C_COMPILER_FLAG(flag, ...)` | Check C compiler flag |
 | `AC_CHECK_CXX_COMPILER_FLAG(flag, ...)` | Check C++ compiler flag |
+| `AC_BUILD_SETTING(target=..., name=..., ...)` | Expose a Bazel build setting (`string_flag`, `bool_flag`, `int_flag`) as a define and/or subst without compiling anything. Passed through the `build_settings` attribute of `autoconf`, **not** `checks` |
+
+Composite GNU macros such as `AC_C_INLINE`, `AC_C_BIGENDIAN`, `AC_SYS_LARGEFILE`, `AC_FUNC_ALLOCA` or `AC_TYPE_SIZE_T` are **not** members of `checks`. They are ready-made targets under `//autoconf/macros/` (e.g. `//autoconf/macros/AC_C_INLINE`); add them to `deps`. The generated [checks reference](./checks.md) lists every member of `checks`, `macros` and `utils` with its full signature.
 
 ### `macros` Struct — Plural Macros
 
@@ -797,6 +846,23 @@ These return lists of checks with auto-generated define names:
 | `AC_LANG_PROGRAM(prologue, body)` | Build program code from prologue and body |
 | `AC_INCLUDES_DEFAULT` | Default includes (stdio.h, stdlib.h, etc.) |
 
+### gnulib `macros` Struct
+
+Ports under `//gnulib/m4` also have gnulib-specific helpers. They are loaded under a different name to avoid clashing with `macros` from `checks.bzl`:
+
+```python
+load("//gnulib:macros.bzl", gl_macros = "macros")
+```
+
+| Macro | M4 equivalent |
+|-------|---------------|
+| `GL_CHECK_FUNCS_ANDROID(functions, includes = ...)` | `gl_CHECK_FUNCS_ANDROID` |
+| `GL_CHECK_FUNCS_MACOS(functions, includes = ...)` | `gl_CHECK_FUNCS_MACOS` |
+| `GL_CHECK_FUNCS_ANDROID_MACOS(functions, includes = ...)` | `gl_CHECK_FUNCS_ANDROID_MACOS` |
+| `GL_CHECK_NEXT_HEADERS(headers)` | `gl_CHECK_NEXT_HEADERS` |
+| `GL_NEXT_HEADERS(headers)` | `gl_NEXT_HEADERS` |
+| `AC_LIB_HAVE_LINKFLAGS(...)` | `AC_LIB_HAVE_LINKFLAGS` |
+
 ### Common Parameters
 
 Most macros support these parameters:
@@ -808,7 +874,8 @@ Most macros support these parameters:
 | `includes` | list | Include directives (e.g., `["#include <stdio.h>"]`) |
 | `language` | string | `"c"` or `"cpp"` |
 | `requires` | list | Dependencies that must be satisfied |
-| `compile_defines` | list | Defines to add before compilation |
+| `compile_defines` | list | Names of **results from earlier checks** (e.g. `["_GNU_SOURCE"]`); each is prepended to the probe as `#define NAME value`. Not raw macro definitions: `_GNU_SOURCE` and friends come from `//gnulib/m4/extensions` |
+| `copts` | list | Extra compiler flags for this probe only (e.g. `["-std=c11"]`), appended after the toolchain's flags |
 | `condition` | string | Condition for value selection |
 | `if_true` | any | Value when condition is true |
 | `if_false` | any | Value when condition is false |
@@ -830,7 +897,7 @@ When M4 uses a check macro such as:
 
 **Prefer:**
 
-1. **Bazel equivalent check** — e.g. `gl_macros.GL_CHECK_FUNCS_ANDROID(["func"], includes = ["#include <header.h>"])` or `checks.AC_CHECK_FUNC("func", define = "HAVE_FUNC", subst = "HAVE_FUNC")`.
+1. **Bazel equivalent check** — e.g. `gl_macros.GL_CHECK_FUNCS_ANDROID(["func"], includes = ["#include <header.h>"])` (loaded from `//gnulib:macros.bzl`, see [gnulib `macros`](#gnulib-macros-struct)) or `checks.AC_CHECK_FUNC("func", define = "HAVE_FUNC", subst = "HAVE_FUNC")`.
 2. **Depend on the gnulib module** that already implements the check — e.g. `deps = ["//gnulib/m4/timespec_getres:gl_FUNC_TIMESPEC_GETRES"]` instead of defining `HAVE_TIMESPEC_GETRES` via `select()`.
 
 **Avoid:**
@@ -886,6 +953,46 @@ autoconf(
 | `freebsd*` | `@platforms//os:freebsd` |
 | `openbsd*` | `@platforms//os:openbsd` |
 | Default (`*`) | `"//conditions:default"` |
+
+### Select on the OS or on the compiler?
+
+Decide by what the M4 branch is actually about:
+
+- **`case $host_os` branches describe the libc and OS** (`mingw* | windows*` covers both MSVC and MinGW builds). Keep those on `@platforms//os:*` as in the table above.
+- **Anything about the compiler driver** selects on `@rules_cc//cc/compiler:*`: compiler flags (`/w` vs `-w`), defines spelled as options (`/D` vs `-D`), link libraries (`advapi32.lib` vs `-ladvapi32`), and probes that are really `#ifdef _MSC_VER` checks.
+
+Clang targeting MinGW reports itself as plain `clang` on Windows, so a Windows arm that is really an MSVC arm must not be keyed on the OS. The pattern used by the integration overlays:
+
+```python
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+# clang driving the MinGW target (rules_cc reports it as plain `clang`).
+config_setting(
+    name = "windows_clang",
+    constraint_values = ["@platforms//os:windows"],
+    flag_values = {"@rules_cc//cc/compiler": "clang"},
+)
+
+# MSVC-style drivers.
+selects.config_setting_group(
+    name = "msvc_like",
+    match_any = [
+        "@rules_cc//cc/compiler:msvc-cl",
+        "@rules_cc//cc/compiler:clang-cl",
+    ],
+)
+
+cc_library(
+    name = "mylib",
+    linkopts = select({
+        ":msvc_like": ["advapi32.lib", "bcrypt.lib"],
+        ":windows_clang": ["-ladvapi32", "-lbcrypt"],
+        "//conditions:default": [],
+    }),
+)
+```
+
+Most existing gnulib ports select Windows behaviour on `@platforms//os:windows` and have been validated against MSVC only. When touching one, ask which of the two kinds its branch is.
 
 ### Combining Platform-Specific and Common Checks
 
@@ -970,6 +1077,148 @@ autoconf(
 
 ---
 
+## Consuming Results Downstream
+
+Everything above produces results. A downstream `BUILD.bazel` (your project, or a Bazel Central Registry overlay) consumes them through `autoconf_hdr`, `autoconf_srcs` and `autoconf_linkopts`. Four rules matter there.
+
+### Name results by their cache variable
+
+Every check records one result under a unique cache name. Header templates use the define or subst name, but `requires`, `condition` and `autoconf_srcs` conditions look a name up across the cache, define and subst buckets:
+
+| Check | Cache name |
+|-------|------------|
+| `AC_CHECK_HEADER("foo.h")` | `ac_cv_header_foo_h` |
+| `AC_CHECK_FUNC("foo")` | `ac_cv_func_foo` |
+| `AC_CHECK_DECL("foo")` | `ac_cv_have_decl_foo` |
+| `AC_CHECK_TYPE("foo_t")` | `ac_cv_type_foo_t` |
+| `AC_DEFINE("HAVE_FOO")` | `ac_cv_define_HAVE_FOO` |
+| `AC_SUBST("REPLACE_FOO")` | `ac_cv_subst_REPLACE_FOO` |
+| `M4_VARIABLE("GL_GENERATE_FOO_H")` | `GL_GENERATE_FOO_H` |
+| any check with `name = "gl_cv_x"` | `gl_cv_x` |
+
+The cache name is the consistent form and always means that one check. A bare `HAVE_FOO` or `REPLACE_FOO` also resolves, and is convenient when you want whichever check, or toolchain default, publishes that name. If a bare name resolves to two distinct results across your deps, the build fails and prints the candidates (and, when nothing matches, the full list of available names); switch to the cache name of the check you mean. Cache names and check shapes are **public API**: published overlays reference the ports' probe names, including underscore-prefixed ones such as `_gl_cv_func_opendir`, so a port must not rename a probe or change which check kind produces a name.
+
+### Conditional sources with `autoconf_srcs`
+
+```python
+load("@rules_cc_autoconf//autoconf:autoconf_srcs.bzl", "autoconf_srcs")
+
+autoconf_srcs(
+    name = "gnulib_conditional_srcs",
+    srcs = {
+        # gnulib compiles a replacement when HAVE_X = 0 || REPLACE_X = 1
+        "lib/readlink.c": "!ac_cv_func_readlink || REPLACE_READLINK",
+        # GL_GENERATE_ERRNO_H holds the words true/false, both truthy: compare it
+        "lib/strerror-override.c": "GL_GENERATE_ERRNO_H==true || !_gl_cv_func_strerror_0_works",
+    },
+    deps = [
+        "@rules_cc_autoconf//gnulib/m4/readlink",
+        "@rules_cc_autoconf//gnulib/m4/strerror",
+    ],
+)
+```
+
+Each source is compiled only when its expression is true; the grammar is the one in [Expression syntax](#expression-syntax). The gnulib rule is `HAVE_X = 0 || REPLACE_X = 1`; checking only `REPLACE_X` misses every libc that lacks the function (MSVC, often MinGW).
+
+By default the generated file is a copy of the source, which breaks the
+source's own quoted includes of files next to it (`lib/unictype/*.c`
+include `"bitmap.h"`): the copy lives in the output tree, where those files
+are not. `wrap = "include"` makes the generated file a one-line
+`#include "<path of the source>"` instead, so such includes resolve where
+the source lives and diagnostics name the real file. The sources must then
+reach the compiler: list the `autoconf_srcs` target in the library's `deps`
+as well as its `srcs` (it provides the sources as headers of a `CcInfo`).
+The wrapper is named with the `.ac` infix (`foo.c` -> `foo.ac.c`) whatever
+`naming` says: a wrapper named like a root-level source would resolve its own
+`#include "foo.c"` to itself, since quoted includes search the including
+file's directory first. The converter emits this form.
+
+### A standard for every check
+
+Checks compile with Bazel's `--copt`, `--conlyopt` and `--cxxopt` (the CFLAGS
+of a configure run), then the `autoconf` target's own `copts`, `conlyopts`
+and `cxxopts` (as on a `cc_library`), then a check's own `copts`. A target's
+flags are its own: they do not reach the ports of this repository or any
+other dependency, and results computed under them are not shared with
+targets that lack them.
+
+A language standard is not something a port or a project sets for itself.
+The standard of a build belongs to the root module, as it does for every
+other C and C++ dependency: `--cxxopt=-std=c++17` (and `--host_cxxopt`) in
+`.bazelrc`, or a feature of your toolchain enabled with `--features`, which
+the checks honour like `cc_library` does. Either way every check, port and
+compile sees one standard, in one configuration, with the toolchain's cached
+results intact. A module that put `-std=` in its own `copts` would override
+that choice: flags come in the order toolchain, `--copt` / `--conlyopt` /
+`--cxxopt`, target `copts` / `conlyopts` / `cxxopts`, then `--per_file_copt` (or a
+check's `copts`), and every compiler takes the last standard it sees. When
+configure.ac makes a standard mandatory (`AX_CXX_COMPILE_STDCXX(17, noext,
+mandatory)`, `AC_PROG_CC_C99`), translate it the way configure behaves when
+the compiler cannot provide it: a check that probes `__cplusplus` or
+`__STDC_VERSION__` and stops the build with a message naming the flag to
+add. That is `checks.AC_LANG_STANDARD`, which compares the standard the
+compiler runs in (`__STDC_VERSION__`, or `__cplusplus` / `_MSVC_LANG`) with
+the one asked for, at least that version unless `compare` says otherwise,
+and with `error = True` stops the build with a message that spells the flag
+for GCC, clang and MSVC. `checks.AX_CXX_COMPILE_STDCXX("17", "noext")` is
+the autoconf-archive macro on top of it, defining `HAVE_CXX17`:
+
+```python
+checks.AC_LANG_STANDARD("c11", error = True)
+checks.AC_LANG_STANDARD("c++17", define = "HAVE_CXX17")
+```
+
+`error` is also available on `AC_TRY_COMPILE` and `AC_TRY_LINK`, as the
+`AC_MSG_ERROR` of the branch configure takes when a test does not pass.
+Such a check needs no `define`: it is a validation action, run whenever the
+target is built, directly or through a dependency, even though nothing in
+config.h reads its result.
+
+### Libraries the checks need: `cc_deps`
+
+A configure script probes with the project's dependencies on the include and
+link paths: `CPPFLAGS` and `LIBS` carry them, so `AC_CHECK_LIB([gmp], ...)`
+links against gmp and a probe may `#include <gmp.h>`. In Bazel those
+dependencies are `cc_library` targets, and the checks of an `autoconf` target
+see them through `cc_deps`:
+
+```python
+autoconf(
+    name = "autoconf",
+    cc_deps = ["@gmp//:gmp"],
+    checks = [
+        checks.AC_CHECK_LIB("gmp", "__gmpz_init"),
+        checks.AC_CHECK_HEADER("gmp.h"),
+    ],
+)
+```
+
+Every check of the target compiles with the dependencies' include directories
+and defines and links their archives after its own object, with each
+archive's directory on the library search path so the `-l<name>` of an
+`AC_CHECK_LIB` resolves to the dependency's `lib<name>.a` by name; the probe
+answers as it would with the library installed. The dependencies' link flags
+come along with the files they name (`additional_linker_inputs`, such as a
+version script), so the link succeeds in the sandbox. The dependencies' flags are
+part of each check's identity: the same check with and without them never
+shares a result. Prefer this over a static `AC_DEFINE([HAVE_LIBGMP])`, which
+asserts what the probe can establish.
+
+### Defaults yield to your values
+
+The `*_H_DEFAULTS` values (`HAVE_FOO=1`, `REPLACE_FOO=0`, `GNULIB_FOO=0`) are not check results. Each header port keeps them in an `autoconf_defaults` target named `:defaults` (`//gnulib/m4/stdlib_h:defaults`), and targets read them through `default_deps`, never `deps`: the header port lists its own `:defaults` there, and so does every port whose m4 `AC_REQUIRE`s that header's `gl_*_H_DEFAULTS`. An `autoconf` target passes the defaults it reads on to its dependents, still as defaults. A default has the lowest precedence: an ordinary result of the same name, from any check in the graph or from your own target, overrides it without a duplicate error, and two defaults of one name must agree. Two consequences:
+
+- Do not design around the defaults targets. Depend on the header port your templates need and define what your project computes itself.
+- When a later release's port starts publishing a value you set locally as an ordinary result, your copy becomes a duplicate-result error. Comment such overrides with the port they stand in for so they are easy to remove.
+
+Your own defaults follow the same rule: put values that a probe may override into an `autoconf_defaults` target and list it in `default_deps`. `defaults = True` on `autoconf_hdr`, `autoconf_srcs`, `autoconf_linkopts` and `cc_gnulib_conditional_hdrs` is deprecated and ignored: the toolchain carries no defaults any more. Existing BUILD files keep loading; new ones should leave it unset and list `default_deps` where a template reads a header's defaults no dependency brings.
+
+### Refining platform selects
+
+`checks` accepts `select()` keyed on any `config_setting`. Where a port had to choose a default for a fact only a runtime test could establish (see [Cross-Compilation](#cross-compilation-considerations)), your own targets can key on custom `constraint_value`s that describe your environments more precisely and set the value accordingly.
+
+---
+
 ## Porting Strategy
 
 When porting a gnulib M4 module to Bazel, follow this systematic approach:
@@ -1007,7 +1256,7 @@ AC_DEFUN([gl_C32RTOMB_SANITYCHECK],    # Line 94 - Sanity check
 
 **Critical:** Extract all `AC_REQUIRE` statements to build the dependency graph, with one important exception:
 
-> **Ignore `_DEFAULTS` functions.** Functions like `gl_UCHAR_H_DEFAULTS`, `gl_WCHAR_H_DEFAULTS`, etc. set initial shell variable values that get overridden by the actual check functions. In Bazel, these defaults cause duplicate check errors if both the defaults and the actual check try to set the same variable.
+> **`_DEFAULTS` functions are a `default_deps` entry, not a `deps` entry.** Functions like `gl_UCHAR_H_DEFAULTS` and `gl_WCHAR_H_DEFAULTS` set the initial shell variable values (`HAVE_X=1`, `REPLACE_X=0`) that the check functions may reassign. The header port keeps them in an `autoconf_defaults` target, `:defaults`, so `AC_REQUIRE([gl_WCHAR_H_DEFAULTS])` becomes `"//gnulib/m4/wchar_h:defaults"` in `default_deps`; a check's own result overrides a default without a duplicate error. `deps` rejects defaults targets, so the two cannot be confused. Do not depend on the private `gl_*_H_DEFAULTS` or `gl_*_H_REQUIRE_DEFAULTS` targets directly.
 
 **Dependency extraction example:**
 
@@ -1038,7 +1287,7 @@ This pattern separates the "what this module provides" (the package-named aggreg
 ```python
 """https://github.com/coreutils/gnulib/blob/.../m4/c32rtomb.m4"""
 
-load("//autoconf:autoconf.bzl", "autoconf")
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
 load("//autoconf:checks.bzl", "checks")
 
 # gl_FUNC_C32RTOMB - lines 10-56 (FIRST AC_DEFUN in M4)
@@ -1165,8 +1414,9 @@ The rules provide **built-in duplication detection**. When you build, you'll get
 
 After building, you may find that transitive dependencies are incorrect. Common issues:
 
-1. **Duplicate check errors:** A variable is defined both locally and in a dependency
-   - The build will fail with an error like: `Cache variable 'X' is defined both locally and in dependencies`
+1. **Duplicate check errors:** A define or subst is produced by two targets, or twice within one target
+   - Within one target, or between a target and its deps, the build fails with ``Define variable `X` is duplicated on `//pkg:target` `` followed by `LEFT:` / `RIGHT:` lines naming both sources (likewise `Subst variable ...`)
+   - Between two dependencies it fails with `Define 'X' is defined in multiple dependencies with different result files`
    - Solution: Remove the local definition and let the dependency provide it
    - Or: Create a shared target (see Step 4 above)
 
@@ -1178,28 +1428,44 @@ After building, you may find that transitive dependencies are incorrect. Common 
 
 ### Step 6: Understand Global Defaults vs Check Results
 
-**Important architectural difference:** Bazel uses a shared dependency graph with global defaults, while autoconf runs each `configure.ac` independently.
+**The same shape as autoconf, with precedence instead of ordering.** In autoconf, `gl_UCHAR_H_DEFAULTS` sets `HAVE_C32RTOMB=1` as a shell variable and `gl_FUNC_C32RTOMB`, if it runs later, may reassign it to `0`; the last assignment wins. Bazel has no ordering, so the same two steps are two kinds of target: the header port's `autoconf_defaults` target `:defaults`, read through `default_deps`, provides `HAVE_C32RTOMB=1` as a *default*, and `gl_FUNC_C32RTOMB`'s probe provides an *ordinary* result that overrides it wherever both are in the graph. A `configure.ac` that never reaches `gl_FUNC_C32RTOMB` sees the default, exactly as GNU does.
 
-In autoconf:
-- `gl_UCHAR_H_DEFAULTS` sets `HAVE_C32RTOMB=1` as a shell variable
-- If `gl_FUNC_C32RTOMB` is later called, it may override this to `0`
-- Different `configure.ac` files may or may not call `gl_FUNC_C32RTOMB`
+**Porting a `_H_DEFAULTS` macro.** Its assignments become the `substs` of one `autoconf_defaults` target (`M4_VARIABLE`-style shell variables such as `GL_GENERATE_FOO_H` go in `variables`, `AC_DEFINE`s in `defines`); `gl_FOO_H_REQUIRE_DEFAULTS`, which adds the `GNULIB_*` indicators on top, is a second `autoconf_defaults` target with the first in its `deps`; the public `:defaults` aggregates both. A defaults target holds literal values only: nothing is probed, no toolchain is involved, and the files are written at analysis time. A probe that upstream keeps next to the defaults (`gl_STDLIB_H`'s `AC_CHECK_HEADERS_ONCE([random.h])`) belongs in the header's `autoconf` target, where it is an ordinary result.
 
-In Bazel:
-- Global defaults (like `HAVE_C32RTOMB="1"` in `uchar_h`) are shared across all modules
-- There's only ONE value for each variable in the dependency graph
-- Changing a default to make one module's test pass may break other modules
+```python
+load("@rules_cc_autoconf//autoconf:autoconf_defaults.bzl", "autoconf_defaults")
 
-**Key principle:** Existing defaults should NOT be changed to make a new module pass. Defaults are fine as long as nothing in the dependency graph explicitly depends on those targets with conflicting values.
+# gl_UCHAR_H_DEFAULTS
+autoconf_defaults(
+    name = "gl_UCHAR_H_DEFAULTS",
+    substs = {
+        "HAVE_C32RTOMB": "1",
+        "REPLACE_C32RTOMB": "0",
+    },
+)
 
-**Subst test disagreements:** Because of this architectural difference, subst tests may sometimes disagree between Bazel and autoconf+configure. This happens when:
-- Autoconf runs a specific check (e.g., `gl_FUNC_C32RTOMB` → `HAVE_C32RTOMB=0` on macOS)
-- Bazel uses the global default (e.g., `uchar_h` → `HAVE_C32RTOMB=1`)
+# gl_UCHAR_H_REQUIRE_DEFAULTS: the GNULIB_* indicators, on top of the above
+autoconf_defaults(
+    name = "gl_UCHAR_H_REQUIRE_DEFAULTS",
+    substs = {
+        "GNULIB_C32RTOMB": "0",
+    },
+    deps = [":gl_UCHAR_H_DEFAULTS"],
+)
 
-These cases should be evaluated on a case-by-case basis:
-- If the golden file was generated from an autoconf run that included specific checks not in the Bazel dependency graph, the golden may need updating
-- If the Bazel dependency graph should include those checks, add the appropriate dependency
-- Sometimes the disagreement is acceptable - document it and move on
+autoconf_defaults(
+    name = "defaults",
+    visibility = ["//visibility:public"],
+    deps = [":gl_UCHAR_H_REQUIRE_DEFAULTS"],
+)
+```
+
+**Key principle:** a port lists in `default_deps` the `:defaults` of every header whose `gl_*_H_DEFAULTS` its m4 `AC_REQUIRE`s (directly or through a macro it invokes), and nothing else of the defaults. The values in a `:defaults` target mirror the m4's initial assignments; change them only when upstream does.
+
+**Conformance disagreements:** the GNU conformance test compares `subst.h` as well as `config.h`, with the defaults the Bazel target's dependencies bring and nothing else. A disagreement means one of:
+- A missing dependency: the port's m4 requires a header's defaults (or another macro) the BUILD does not list. Add it.
+- A missing override: upstream runs a check that reassigns a default and the port does not. Port the check.
+- An inherent difference (GNU probes the host `PATH`, runs a test binary whose answer is machine-dependent, or two macros legitimately compute one variable differently): list the variable in the suite's `known_divergences` with the reason. It is masked from the comparison and always printed in the test log.
 
 ### Step 7: Run Tests and Iterate
 
@@ -1207,47 +1473,69 @@ These cases should be evaluated on a case-by-case basis:
 # Build the module
 bazel build //gnulib/m4/c32rtomb:c32rtomb
 
-# Run compatibility tests
-bazel test //gnulib/tests/compatibility/c32rtomb:all
+# Run the module's conformance suite
+bazel test //gnulib/tests/compat/c32rtomb:all --test_output=errors
 ```
 
-Compare test output against golden files and fix any discrepancies.
+Every module has a suite under `//gnulib/tests/compat/<module>` declared with
+`gnu_gnulib_diff_test_suite`:
+
+```python
+load("//gnulib/tests:gnu_gnulib_diff_test_suite.bzl", "gnu_gnulib_diff_test_suite")
+
+gnu_gnulib_diff_test_suite(
+    name = "c32rtomb_test",
+    bazel_autoconf_target = "//gnulib/m4/c32rtomb",
+    config_h_in = "config.h.in",
+    configure_ac = "configure.ac",
+    m4_files = ["@gnulib//:all_m4"],
+    subst_h_in = "subst.h.in",
+    test_c = "test_c32rtomb.c",
+    # Only for inherent differences; each entry needs a reason.
+    known_divergences = {
+        "CLIX_PATH": "AC_PATH_PROG probes the host PATH; the Bazel port does not search the host",
+    },
+)
+```
+
+The `<name>_gnu_conformance` test is the oracle: it runs the pinned GNU
+`aclocal`/`autoconf`/`configure` with the Bazel C++ toolchain's compiler and flags and
+requires the Bazel-generated headers to match byte for byte. Fix the port until it
+passes; list only intentional differences from upstream m4 in `known_divergences`.
+No platform needs a checked-in expected output; the oracle produces it. See
+[How the gnulib ports are tested](./gnulib.md#how-the-gnulib-ports-are-tested).
+
+**Debugging a failing probe.** The checker does not record compiler diagnostics. To see
+why a check failed, rerun with the debug variable passed to the actions:
+
+```bash
+bazel build //gnulib/m4/c32rtomb --action_env=RULES_CC_AUTOCONF_DEBUG=debug
+```
+
+The conformance test's undeclared outputs directory (`bazel-testlogs/.../test.outputs/`)
+contains GNU's `config.log`, the Bazel headers, and a `config.h.diff` / `subst.h.diff`
+when they differ.
 
 ### Step 8: Test on Linux (if needed)
 
-When porting modules that have platform-specific behavior, you may need to test on Linux to verify correctness. The repository ships scripts at the workspace root for running Bazel inside Linux Docker containers:
+When porting modules that have platform-specific behavior from macOS or Windows, you may need to test on Linux to verify correctness. `tools/docker_test/docker_test.sh` runs Bazel tests inside a Docker container that mirrors the GitHub CI runner:
 
-#### Available scripts
+```bash
+# Default target set
+./tools/docker_test/docker_test.sh
 
-**1. `test_linux_docker.sh`** — Run a broad test matrix on Linux images (e.g. Ubuntu 22.04, Rocky Linux 9).
+# One module's conformance suite
+./tools/docker_test/docker_test.sh //gnulib/tests/compat/c32rtomb/...
 
-- Usage: `./test_linux_docker.sh [--ubuntu-only | --rocky-only]`
-- Typically runs `bazel test //autoconf/... //gnulib/...` (see script for current defaults)
-- Writes summaries under `docker_test_results/` when configured to do so
-
-**2. `docker_bazel.sh`** — Run an arbitrary Bazel command in the same Docker environment.
-
-- Usage: `./docker_bazel.sh [--amd64] <bazel_command>`
-- Example: `./docker_bazel.sh "test //gnulib/tests/compatibility/c32rtomb:all --test_output=errors"`
-
-For other workflows (targeted module tests, refreshing Linux golden files), use `docker_bazel.sh` with the appropriate `bazel test` / `bazel build` invocations, or add small wrapper scripts in your fork if you need them.
+# Emulated x86_64 (on an arm64 host)
+./tools/docker_test/docker_test.sh --amd64 //gnulib/tests/compat/c32rtomb/...
+```
 
 #### When to use Linux testing
 
 - **Platform-specific checks**: Modules with `select()` or Linux-only assumptions
-- **Golden file updates**: When Linux-specific golden inputs need refreshing
 - **Cross-platform verification**: Confirm conditionals on a real Linux toolchain
 - **Test failures**: Debug Linux-only CI issues
-
-#### Example workflow
-
-```bash
-# Run one compatibility package on Linux
-./docker_bazel.sh "test //gnulib/tests/compatibility/c32rtomb:all --test_output=errors"
-
-# Run a broader slice (same idea as the docker test driver)
-./test_linux_docker.sh --ubuntu-only
-```
 
 ---
 
@@ -1298,7 +1586,10 @@ autoconf(
 
 ### 5. Test Your Migration
 
-Run diff tests against golden files to verify your migration produces correct output:
+For gnulib ports, `gnu_gnulib_diff_test_suite` runs GNU autoconf itself against the
+Bazel output (see [How the gnulib ports are tested](./gnulib.md#how-the-gnulib-ports-are-tested)).
+For your own checks, run diff tests against golden files to verify your migration
+produces correct output:
 
 ```python
 diff_test(
@@ -1307,44 +1598,6 @@ diff_test(
     file2 = ":config.h",
 )
 ```
-
-### 6. Only Split Golden Files When Necessary
-
-Golden files should only be split into platform-specific versions (`golden_config_linux.h.in`, `golden_config_macos.h.in`) when there are **genuine differences** in the expected output between platforms.
-
-**Use a single golden file when:**
-- The output is identical across all platforms
-- Any platform differences are handled in the Bazel targets (not the expected output)
-
-```python
-# GOOD: Single golden file when content is the same
-gnu_gnulib_diff_test_suite(
-    name = "sig_atomic_t_test",
-    golden_config_h = "golden_config.h.in",
-    golden_subst_h = "golden_subst.h.in",
-    ...
-)
-```
-
-**Split golden files only when:**
-- The `gnu_autoconf` test produces genuinely different outputs on different platforms
-- Platform-specific defines have different values (e.g., `REPLACE_FSTAT` is `1` on macOS, `0` on Linux)
-
-```python
-# ONLY when content genuinely differs between platforms
-gnu_gnulib_diff_test_suite(
-    name = "fstat_test",
-    golden_config_h = {
-        "linux": "golden_config_linux.h.in",
-        "macos": "golden_config_macos.h.in",
-    },
-    ...
-)
-```
-
-**Anti-pattern:** Don't split golden files just because you're unsure — first verify the content differs by running `gnu_autoconf` tests on both platforms.
-
----
 
 ## Cross-Compilation Considerations
 
@@ -1355,7 +1608,10 @@ Bazel intentionally avoids runtime checks to ensure:
 2. **Cross-compilation support** without target system access
 3. **Hermetic builds** that don't depend on the build machine's locale, environment, etc.
 
-When M4 macros use `AC_TRY_EVAL` or `AC_RUN_IFELSE` (running compiled code at configure time), these should be replaced with `select()` statements that provide platform-specific defaults.
+The rules will **never** execute a compiled test program. When M4 uses `AC_TRY_EVAL` or `AC_RUN_IFELSE`, you have two options:
+
+1. If the fact can be established without running code, replace the probe with another check, typically `AC_TRY_COMPILE` with `#if` / `#error` on platform macros (see the `strerror` example). The result still has to match what GNU autoconf reports natively on the platforms the conformance test runs on.
+2. Otherwise, choose a sane default per target platform from your understanding of it, expressed with `select()`. The M4's own cross-compiling branch (the last argument of `AC_RUN_IFELSE`, often a `case $host_os`) is a good starting point; quote its lines in the comment. Downstream projects can refine the answer for their environments with custom constraints (see [Refining platform selects](#refining-platform-selects)).
 
 ### Runtime vs compile-time checks
 
@@ -1369,7 +1625,7 @@ In **`rules_cc_autoconf`**, the checker runs **compile** and **link** actions fo
 
 - **`AC_TRY_EVAL` / `AC_RUN_IFELSE`** (and M4 that assumes running the binary on the build machine) — Replace with **`select()`**, explicit **`AC_SUBST`**, or other target-appropriate defaults.
 - **Locale and similar environment probes** (e.g. `gt_LOCALE_FR`) — Usually replace with **`select()`** on OS/CPU, or fixed subst values, rather than executing locale code at configure time.
-- **`WORDS_BIGENDIAN` / `AC_C_BIGENDIAN`** — There is no single runtime probe; model endianness with **`select()`** and **`AC_DEFINE`**, and use **`AC_FAIL`** on branches where a define must be explicitly cleared (see **`AC_FAIL`** in the API table).
+- **`WORDS_BIGENDIAN` / `AC_C_BIGENDIAN`** — There is no single runtime probe; depend on **`//autoconf/macros/AC_C_BIGENDIAN`**, which models endianness with **`select()`** and **`AC_DEFINE`**, and uses **`AC_FAIL`** on branches where a define must stay absent (see **`AC_FAIL`** in the API table).
 
 **Generally “safe” in the sense of not requiring a runnable host binary** (still subject to toolchain correctness when cross-compiling):
 
@@ -1433,17 +1689,15 @@ int main(void) { return 0; }
 
 3. **Use platform selects for known values:**
 
+`WORDS_BIGENDIAN` is a presence macro (code tests it with `#ifdef`), so defining it to `0` on little-endian targets would be wrong. Use `AC_FAIL` on the branch where the define must stay absent: it records a failed check so the header keeps `/* #undef WORDS_BIGENDIAN */`. This is how `//autoconf/macros/AC_C_BIGENDIAN` is implemented; depend on that target rather than re-creating it:
+
 ```python
 autoconf(
-    name = "endian",
+    name = "AC_C_BIGENDIAN",
     checks = select({
-        "@platforms//cpu:x86_64": [
-            checks.AC_DEFINE("WORDS_BIGENDIAN", "0"),
-        ],
-        "@platforms//cpu:arm64": [
-            checks.AC_DEFINE("WORDS_BIGENDIAN", "0"),  # ARM64 is little-endian
-        ],
-        "//conditions:default": [],
+        "@platforms//cpu:ppc": [checks.AC_DEFINE("WORDS_BIGENDIAN", "1")],
+        "@platforms//cpu:s390x": [checks.AC_DEFINE("WORDS_BIGENDIAN", "1")],
+        "//conditions:default": [checks.AC_FAIL("WORDS_BIGENDIAN")],
     }),
 )
 ```
@@ -1452,28 +1706,72 @@ autoconf(
 
 ## Complete Examples
 
-### Example 1: Simple Module (posix_memalign)
+### Example 1: Shared Probe + Conditional Subst (posix_memalign)
 
 **Original M4:** `gnulib/m4/posix_memalign.m4`
 
-**Bazel:**
+**Bazel** (`//gnulib/m4/posix_memalign/BUILD.bazel`, abridged):
 
 ```python
-"""https://github.com/coreutils/gnulib/blob/635dbdcf501d52d2e42daf6b44261af9ce2dfe38/m4/posix_memalign.m4"""
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/posix_memalign.m4"""
 
-load("//autoconf:autoconf.bzl", "autoconf")
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
 load("//autoconf:checks.bzl", "checks")
+load("//gnulib:macros.bzl", gl_macros = "macros")
+
+# gl_CHECK_FUNCS_ANDROID([posix_memalign], [[#include <stdlib.h>]]): probe and
+# config.h define, shared with gl_ALIGNALLOC and gl_PREREQ_PAGEALIGN_ALLOC, which
+# call it without gl_FUNC_POSIX_MEMALIGN (see Step 4).
+autoconf(
+    name = "gl_CHECK_FUNCS_ANDROID_posix_memalign",
+    checks = gl_macros.GL_CHECK_FUNCS_ANDROID(
+        ["posix_memalign"],
+        includes = ["#include <stdlib.h>"],
+    ),
+    visibility = ["//visibility:public"],
+)
 
 autoconf(
-    name = "posix_memalign",
+    name = "gl_FUNC_POSIX_MEMALIGN",
     checks = [
-        checks.AC_CHECK_FUNC("posix_memalign", define = "HAVE_POSIX_MEMALIGN"),
-        checks.AC_SUBST("REPLACE_POSIX_MEMALIGN", "1"),
-    ],
+        # if test $ac_cv_func_posix_memalign = yes; then ... else HAVE_POSIX_MEMALIGN=0; fi
+        checks.AC_SUBST(
+            "HAVE_POSIX_MEMALIGN",
+            condition = "ac_cv_func_posix_memalign",
+            if_false = 0,
+            if_true = 1,
+        ),
+    ] + select({
+        # On OpenBSD >= 6.2 the runtime test passes.
+        "@platforms//os:openbsd": [
+            checks.AC_SUBST("REPLACE_POSIX_MEMALIGN", 0),
+        ],
+        # glibc and macOS fail the AC_RUN_IFELSE test, so an existing
+        # posix_memalign is replaced; where it is absent the default 0 stays.
+        "//conditions:default": [
+            checks.AC_SUBST(
+                "REPLACE_POSIX_MEMALIGN",
+                condition = "ac_cv_func_posix_memalign",
+                if_false = 0,
+                if_true = 1,
+            ),
+        ],
+    }),
     visibility = ["//visibility:public"],
     deps = [
-        "//autoconf/macros/AC_CANONICAL_HOST",
-        "//gnulib/m4/extensions",
+        ":gl_CHECK_FUNCS_ANDROID_posix_memalign",
+        # gl_STDLIB_H_DEFAULTS is a _DEFAULTS macro: listed in default_deps, not here
+        "//autoconf/macros/AC_CANONICAL_HOST",  # AC_REQUIRE([AC_CANONICAL_HOST])
+        "//gnulib/m4/extensions",  # AC_REQUIRE([AC_USE_SYSTEM_EXTENSIONS])
+    ],
+)
+
+# Package-level aggregator: no checks, deps on the AC_DEFUN targets.
+autoconf(
+    name = "posix_memalign",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_POSIX_MEMALIGN",
         "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
     ],
 )
@@ -1486,28 +1784,49 @@ autoconf(
 **Bazel:**
 
 ```python
-"""https://github.com/coreutils/gnulib/blob/635dbdcf501d52d2e42daf6b44261af9ce2dfe38/m4/fstat.m4"""
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/fstat.m4"""
 
-load("//autoconf:autoconf.bzl", "autoconf")
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
 load("//autoconf:checks.bzl", "checks")
 
+# REPLACE_FSTAT=1 is set unconditionally on macOS (stat can return a negative
+# tv_nsec) and Windows (MinGW's stat() timestamps depend on the time zone).
+# Use the same check kind (AC_SUBST) on every branch of the select().
 autoconf(
-    name = "fstat",
+    name = "gl_FUNC_FSTAT",
     checks = select({
         "@platforms//os:macos": [
-            # macOS: stat can return negative tv_nsec
             checks.AC_SUBST("REPLACE_FSTAT", "1"),
         ],
         "@platforms//os:windows": [
-            # Windows: stat returns timezone-affected timestamps
-            checks.M4_VARIABLE("REPLACE_FSTAT", "1"),
+            checks.AC_SUBST("REPLACE_FSTAT", "1"),
         ],
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
     deps = [
-        "//gnulib/m4/sys_stat_h",
+        "//gnulib/m4/fchdir:gl_FUNC_FCHDIR_FOR_CLOSE",  # gl_TEST_FCHDIR
+        "//gnulib/m4/sys_stat_h",  # AC_REQUIRE([gl_SYS_STAT_H])
         "//gnulib/m4/sys_types_h",
+    ],
+)
+
+# Prerequisites of lib/fstat.c and lib/stat-w32.c.
+autoconf(
+    name = "gl_PREREQ_FSTAT",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/stat:gl_PREREQ_STAT_W32",  # AC_REQUIRE([gl_PREREQ_STAT_W32])
+        "//gnulib/m4/sys_stat_h:gl_SYS_STAT_H",
+    ],
+)
+
+autoconf(
+    name = "fstat",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_FSTAT",
+        ":gl_PREREQ_FSTAT",
     ],
 )
 ```
@@ -1519,45 +1838,50 @@ autoconf(
 **Bazel:**
 
 ```python
-"""https://github.com/coreutils/gnulib/blob/635dbdcf501d52d2e42daf6b44261af9ce2dfe38/m4/strerror.m4"""
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/strerror.m4"""
 
-load("//autoconf:autoconf.bzl", "autoconf")
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
 load("//autoconf:checks.bzl", "checks", "utils")
 
 autoconf(
     name = "gl_FUNC_STRERROR_0",
     checks = [
-        # Compile-time platform detection for strerror(0) behavior
+        # AC_CACHE_CHECK([whether strerror(0) succeeds], [gl_cv_func_strerror_0_works])
+        # Upstream uses AC_RUN_IFELSE; the port fails this compile probe on exactly
+        # the platforms the m4's runtime test reports as broken.
         checks.AC_TRY_COMPILE(
             name = "_gl_cv_func_strerror_0_works",
             code = utils.AC_LANG_PROGRAM(
                 [
                     "#if defined(__APPLE__) && defined(__MACH__)",
-                    "  #error \"macOS strerror needs replacement\"",
+                    "  #error \"macOS strerror needs REPLACE_STRERROR_0\"",
+                    "#elif defined(__FreeBSD__) && __FreeBSD__ < 13",
+                    "  #error \"FreeBSD < 13 strerror needs REPLACE_STRERROR_0\"",
+                    "#elif defined(__sun) && defined(__SVR4)",
+                    "  #error \"Solaris strerror needs REPLACE_STRERROR_0\"",
                     "#endif",
                 ],
                 "",
             ),
         ),
-        # Set REPLACE_STRERROR_0 if check fails
+        # case "$gl_cv_func_strerror_0_works" in *yes) ;; *)
+        #   REPLACE_STRERROR_0=1; AC_DEFINE([REPLACE_STRERROR_0], [1], ...) ;;
+        # esac
+        # A shell variable plus AC_DEFINE; the m4 never AC_SUBSTs it.
+        # Gate with `requires`, not `condition` (see Core Concepts).
         checks.AC_DEFINE(
             "REPLACE_STRERROR_0",
-            condition = "_gl_cv_func_strerror_0_works",
-            if_false = 1,
+            "1",
+            requires = ["!_gl_cv_func_strerror_0_works"],
         ),
-    ] + select({
-        "@platforms//os:macos": [
-            checks.AC_SUBST("REPLACE_STRERROR_0", "1"),
-        ],
-        "//conditions:default": [
-            checks.AC_SUBST("REPLACE_STRERROR_0", "0"),
-        ],
-    }),
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//autoconf/macros/AC_CANONICAL_HOST",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
         "//gnulib/m4/errno_h",
         "//gnulib/m4/extensions",
+        "//gnulib/m4/string_h",
     ],
 )
 ```
@@ -1604,7 +1928,7 @@ When migrating an M4 file, follow this checklist:
 - [ ] Handle platform conditionals with `select()`
 - [ ] Add comments referencing original M4 file and line numbers
 - [ ] Add dependencies to `deps` list
-- [ ] Test with diff tests against golden files
+- [ ] For ports in this repository: load `autoconf_cache` and run `bazel test //gnulib/tests/compat/<module>:all`; for your own project, run a `diff_test` against an expected header
 - [ ] Verify no duplicate checks between direct checks and deps
 
 ---
@@ -1618,12 +1942,21 @@ When migrating an M4 file, follow this checklist:
 | Missing `define =` parameter | Add `define = "HAVE_FOO"` to create defines in config.h |
 | Wrong define names | Follow autoconf conventions: `HAVE_<NAME>`, `SIZEOF_<TYPE>`, etc. |
 | Duplicate check errors | Use `//gnulib/m4` targets instead of manual checks |
-| Missing main() wrapper | `AC_TRY_COMPILE` code must include `int main(void) { ... }` or use `utils.AC_LANG_PROGRAM` |
+| Missing main() wrapper | `AC_TRY_COMPILE` / `AC_TRY_LINK` `code` must be a complete program, unless `includes` is also given (then `code` is the body of `main()`); or build it with `utils.AC_LANG_PROGRAM` |
+| Probe fails and you cannot see why | The checker drops compiler output; rerun with `--action_env=RULES_CC_AUTOCONF_DEBUG=debug` |
+| Probe differs between a Windows checkout and a Linux one | Line endings: a BUILD file checked out with CRLF puts CRLF into a check's program. Every check is encoded with LF (`make_check`), so the action and its result are the same from either checkout; a lone `\r` written as an escape is kept |
+| `autoconf` used inside `//gnulib/m4` or `//autoconf/macros` | Load `autoconf = "autoconf_cache"` from `//autoconf:autoconf_toolchain.bzl` to avoid a toolchain dependency cycle |
+| Different check kinds for one variable across `select()` arms | Use the same kind (`AC_SUBST` vs `M4_VARIABLE` vs `AC_DEFINE`) on every branch, matching what the m4 does with it |
+| MSVC flags, `.lib` libs or `/D` defines selected on `@platforms//os:windows` | Clang targeting MinGW is also `os:windows`. Select compiler-driver things on `@rules_cc//cc/compiler:*`; keep only libc/OS behaviour on the OS constraint |
+| Hand-written `AC_TRY_LINK` standing in for an upstream `AC_CHECK_FUNC` | Renames the cache variable consumers reference and hides a checker bug; keep `AC_CHECK_FUNC` and report the wrong answer |
+| Condition names only `REPLACE_X` for a gnulib replacement source | gnulib compiles it when `HAVE_X = 0 \|\| REPLACE_X = 1`; write `!ac_cv_func_x \|\| REPLACE_X` |
+| Bare `HAVE_X` resolves to the wrong result or is ambiguous | Name the probe's cache variable (`ac_cv_func_x`, `_gl_cv_...`) or `ac_cv_define_X` / `ac_cv_subst_X` for the exact check you mean |
 | String literals in defines | Use `'"string"'` (outer single, inner double quotes) |
 | Platform conditionals | Use `select()` for `case "$host_os"` patterns |
 | Cross-compilation failures | Validate sizeof/alignof/compute probes for the real target; replace true **run**-time Autoconf checks with `select()` or explicit substs |
-| Subst test disagrees with autoconf | Evaluate case-by-case: may be due to global defaults vs specific checks (see Step 6) |
+| Conformance test disagrees with GNU autoconf | Add the missing dependency (a header's `:defaults` the m4 requires, or a check the port lacks); use `known_divergences` only for inherent differences (see Step 6) |
 | Changing defaults to fix one module | Don't change existing defaults; they may break other modules |
+| A `:defaults` or `*_DEFAULTS` target in `deps` | Analysis fails: `deps` wants `CcAutoconfInfo`, defaults carry `CcAutoconfDefaultsInfo`.  Move it to `default_deps` |
 | Unnecessary `name` + separate `AC_DEFINE` | Use `define =` directly unless the cache variable is needed in `requires` or you need custom values |
 | Using `condition` with `if_false = None` | Use `requires = ["cache_var==1"]` to gate defines; `condition` is for value selection, not gating |
-| Unnecessary golden file split | Only split into `_linux.h.in` / `_macos.h.in` when content genuinely differs between platforms |
+| Hiding a fixable port behind `known_divergences` | Fix the port so Bazel matches GNU; a divergence entry needs a reason that explains why no port can match |

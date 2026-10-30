@@ -1,10 +1,10 @@
 """A module defining a common framework for "built_tools" rules"""
 
-load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
-load("//foreign_cc/private:cc_toolchain_util.bzl", "absolutize_path_in_str")
+load("//foreign_cc/private:cc_toolchain_util.bzl", "absolutize_path_in_str", "find_cpp_toolchain")
 load("//foreign_cc/private:detect_root.bzl", "detect_root")
 load("//foreign_cc/private:framework.bzl", "FOREIGN_CC_FRAMEWORK_COMMON_ATTRS", "get_env_prelude", "wrap_outputs")
 load("//foreign_cc/private:resource_sets.bzl", "get_resource_env_vars")
+load("//foreign_cc/private/framework:exec_groups.bzl", "FOREIGN_CC_EXEC_GROUP")
 load("//foreign_cc/private/framework:helpers.bzl", "convert_shell_script", "shebang")
 
 # Common attributes for all built_tool rules
@@ -38,8 +38,8 @@ def absolutize(workspace_name, text, force = False):
 def split_system_include_flags(flags):
     """Splits flags into system include flags and remaining flags.
 
-    System include flags are --sysroot and -isystem args, in both
-    '--sysroot=<path>' / '--sysroot <path>' and '-isystem<path>' / '-isystem <path>' forms.
+    Preserve sysroot and system header paths for probes that omit CFLAGS,
+    including joined/separate driver paths and complete forwarded cc1 options.
 
     Args:
         flags (list): list of flags
@@ -49,17 +49,24 @@ def split_system_include_flags(flags):
     """
     system = []
     other = []
+    skip = 0
+    path_flags = ("--sysroot", "-isystem", "-stdlib++-isystem")
     for i in range(len(flags)):
-        if flags[i] in ("--sysroot", "-isystem"):
-            if i + 1 < len(flags):
-                system.append(flags[i])
-                system.append(flags[i + 1])
-        elif flags[i].startswith(("--sysroot=", "-isystem")):
-            system.append(flags[i])
-        elif i != 0 and flags[i - 1] in ("--sysroot", "-isystem"):
-            pass
+        if i < skip:
+            continue
+        flag = flags[i]
+        if (flag in ("-Xclang", "-Xpreprocessor") and i + 3 < len(flags) and
+            flags[i + 1] in ("-internal-isystem", "-internal-externc-isystem") and
+            flags[i + 2] == flag):
+            system.extend(flags[i:i + 4])
+            skip = i + 4
+        elif flag in path_flags and i + 1 < len(flags):
+            system.extend(flags[i:i + 2])
+            skip = i + 2
+        elif flag.startswith(("--sysroot=", "-isystem", "-stdlib++-isystem")):
+            system.append(flag)
         else:
-            other.append(flags[i])
+            other.append(flag)
     return system, other
 
 def built_tool_rule_impl(ctx, script_lines, out_dir, mnemonic, additional_tools = None):
@@ -129,6 +136,7 @@ def built_tool_rule_impl(ctx, script_lines, out_dir, mnemonic, additional_tools 
     # environments. This should not be replaced with `run` until a cross platform implementation
     # is found that guarantees bash exists or appropriately errors out.
     ctx.actions.run_shell(
+        exec_group = FOREIGN_CC_EXEC_GROUP,
         mnemonic = mnemonic,
         inputs = ctx.attr.srcs.files,
         outputs = [out_dir, wrapped_outputs.log_file],
