@@ -1,6 +1,7 @@
 """Pinned x86_64-hosted GCC cross compilers using the shared base sysroot."""
 
 load("//:versions.bzl", "VERSIONS")
+load(":host.bzl", "gcc_host_repository", "host_cpu")
 
 _GCC = VERSIONS["gcc_toolchain"]
 
@@ -20,28 +21,14 @@ def _gcc_repository_impl(ctx):
     # file symlink as an input, including in sandboxes, RBE and test runfiles.
     ctx.symlink(ctx.path(ctx.attr.lld), "bin/ld.lld")
 
-    # These archives do not ship dwp; never fall back to a host executable.
-    ctx.file("xbin/dwp", "#!/bin/bash\necho 'GCC toolchain does not support dwp' >&2\nexit 1\n", executable = True)
+    # These archives do not ship dwp; use the hermetic llvm-dwp, which packages
+    # GCC's (DWARF 5) split debug info, never a host executable.
+    ctx.symlink(ctx.path(ctx.attr.dwp), "bin/" + prefix + "dwp")
     for tool in ["ar", "as", "cpp", "gcc", "gcov", "ld", "nm", "objcopy", "objdump", "readelf", "strip"]:
         binary = "bin/" + prefix + tool
         if not ctx.path(binary).exists:
             fail("GCC archive is missing " + binary)
 
-        # Resolve the repository root from the wrapper's own (symlink-resolved)
-        # location rather than from ${PWD}/external/<repo>, so the wrapper works
-        # from the execroot, from sandboxed/remote actions, and from test
-        # runfiles alike.
-        ctx.file(
-            "xbin/" + tool,
-            """#!/bin/bash
-set -euo pipefail
-ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-export PATH="${ROOT}/bin"
-unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH GCC_EXEC_PREFIX COMPILER_PATH
-exec "${ROOT}/%s" "$@"
-""" % binary,
-            executable = True,
-        )
     cxx_prefix = "aarch64-linux/" if arch == "aarch64" else ""
     for path in [
         "lib/gcc/" + triple + "/" + _GCC["version"] + "/" + filename
@@ -66,13 +53,14 @@ gcc_linux_cc_toolchain_config(
     name = "config",
     arch = %r,
     triple = %r,
+    prefix = %r,
     version = %r,
     sysroot = %r,
 )
 
 filegroup(
     name = "files",
-    srcs = glob(["bin/**", "xbin/**", "lib/**", "lib64/**", "libexec/**", "include/**", %r]) + [%r, %r],
+    srcs = glob(["bin/**", "lib/**", "lib64/**", "libexec/**", "include/**", %r]) + [%r, %r, %r],
 )
 
 cc_library(
@@ -102,16 +90,18 @@ cc_toolchain(
     toolchain_config = ":config",
 )
 
-exports_files(glob(["xbin/*"]))
+exports_files(glob(["bin/*"]))
 """ % (
         str(ctx.attr._config),
         arch,
         triple,
+        prefix,
         _GCC["version"],
         str(ctx.attr.sysroot),
         triple + "/**",
         str(ctx.attr.sysroot),
         str(ctx.attr.lld),
+        str(ctx.attr.dwp),
         cxx_prefix + "lib64/libstdc++.a",
         cxx_include + "/**",
         [cxx_include, cxx_include + "/" + triple, cxx_include + "/backward"],
@@ -122,6 +112,7 @@ _gcc_repository = repository_rule(
     implementation = _gcc_repository_impl,
     attrs = {
         "arch": attr.string(mandatory = True, values = ["x86_64", "aarch64"]),
+        "dwp": attr.label(mandatory = True, allow_single_file = True),
         "lld": attr.label(mandatory = True, allow_single_file = True),
         "sysroot": attr.label(mandatory = True),
         "_config": attr.label(default = Label("//toolchains/gcc:toolchain.bzl")),
@@ -129,15 +120,41 @@ _gcc_repository = repository_rule(
 )
 
 def _gcc_extension_impl(ctx):
+    host = None
+    for mod in ctx.modules:
+        for tag in mod.tags.host:
+            if not mod.is_root:
+                fail("gcc_extension.host may only be set by the root module")
+            if host != None:
+                fail("gcc_extension.host may only be set once")
+            host = tag
+
+    # Only an explicit `host` tag swaps native-arch toolchains for the host GCC
+    # (all of them, or just those named in `host.toolchains`); every other
+    # toolchain is the hermetic download.
+    host_arch = host_cpu(ctx.os) if host else None
+    names = [tag.name for mod in ctx.modules for tag in mod.tags.toolchain]
+    for name in (host.toolchains if host else []):
+        if name not in names:
+            fail("gcc_extension.host(toolchains = ...) names unknown toolchain %r" % name)
     for mod in ctx.modules:
         for tag in mod.tags.toolchain:
-            _gcc_repository(
-                name = tag.name,
-                arch = tag.arch,
-                lld = tag.lld,
-                sysroot = tag.sysroot,
-            )
-    return ctx.extension_metadata(reproducible = True)
+            if host and tag.arch == host_arch and (not host.toolchains or tag.name in host.toolchains):
+                gcc_host_repository(
+                    name = tag.name,
+                    arch = tag.arch,
+                    gcc_version = host.gcc_version,
+                    path = host.path,
+                )
+            else:
+                _gcc_repository(
+                    name = tag.name,
+                    arch = tag.arch,
+                    dwp = tag.dwp,
+                    lld = tag.lld,
+                    sysroot = tag.sysroot,
+                )
+    return ctx.extension_metadata(reproducible = not host)
 
 gcc_extension = module_extension(
     implementation = _gcc_extension_impl,
@@ -145,8 +162,14 @@ gcc_extension = module_extension(
         "toolchain": tag_class(attrs = {
             "name": attr.string(mandatory = True),
             "arch": attr.string(mandatory = True, values = ["x86_64", "aarch64"]),
+            "dwp": attr.label(mandatory = True, doc = "llvm-dwp executable, eg @llvm_minimal_linux_x64//:bin/llvm-dwp."),
             "lld": attr.label(mandatory = True),
             "sysroot": attr.label(mandatory = True),
+        }),
+        "host": tag_class(attrs = {
+            "path": attr.string(mandatory = True, doc = "Absolute GCC installation prefix containing bin/gcc (e.g. /usr)."),
+            "gcc_version": attr.string(doc = "Optional; if set, its major version must match the installed GCC."),
+            "toolchains": attr.string_list(doc = "Optional; names of the native-arch toolchains to replace. Defaults to all of them."),
         }),
     },
 )
