@@ -67,7 +67,8 @@ already-built libstdc++.
 Downstreams can instantiate the downloads with `gcc_extension` from
 `//toolchains/gcc:extensions.bzl`, using a `toolchain(name = ..., arch =
 "x86_64" | "aarch64", sysroot = "@sysroot_linux_...//sysroot",
-lld = "@llvm_minimal_linux_x64//:bin/lld")` tag per target.
+lld = "@llvm_minimal_linux_x64//:bin/lld",
+dwp = "@llvm_minimal_linux_x64//:bin/llvm-dwp")` tag per target.
 The required `lld` label selects the real multicall linker binary from the
 minimal LLVM artifact (not a host installation). Instantiate
 `llvm_minimal_extension` from `//compile:extensions.bzl`, call `setup()`, and
@@ -77,7 +78,43 @@ also executes on x86_64. The GCC repository exposes that binary as
 `bin/ld.lld` and includes it in remote action inputs. GCC links with
 `-fuse-ld=lld`, supports `--start-lib`/`--end-lib`, and enforces a non-executable
 stack. This avoids bfd's excessive memory use on large static links and gold's
-noisy, Rust-incompatible linking.
+noisy, Rust-incompatible linking. The archives ship no `dwp`, so the required
+`dwp` label (`llvm-dwp`, which handles GCC's split DWARF) is exposed as the
+toolchain's `dwp` for `--fission` builds. Like the LLVM toolchain, GCC compiles
+with `-fstack-protector` and `-fno-omit-frame-pointer`, redacts `__DATE__`/`__TIME__`/
+`__TIMESTAMP__` for reproducible outputs, and optimized builds use `-D_FORTIFY_SOURCE=1`,
+`-g0` and section garbage collection (`-ffunction-sections -fdata-sections`,
+`-Wl,--gc-sections`).
+
+#### Host GCC
+
+The extension's `host` tag replaces the native-architecture toolchain with a
+local GCC installation. It may only be declared once, by the root module:
+
+```starlark
+gcc = use_extension("@envoy_toolshed//toolchains/gcc:extensions.bzl", "gcc_extension")
+gcc.toolchain(
+    name = "gcc_linux_x86_64",
+    arch = "x86_64",
+    dwp = "@llvm_minimal_linux_x64//:bin/llvm-dwp",
+    lld = "@llvm_minimal_linux_x64//:bin/lld",
+    sysroot = "@sysroot_linux_amd64//sysroot",
+)
+gcc.host(path = "/usr", gcc_version = "13")  # Optional
+use_repo(gcc, "gcc_linux_x86_64")
+```
+
+Every `toolchain` tag whose `arch` matches the host is replaced, keeping its
+repository name so registered toolchains are unchanged; other architectures stay
+hermetic. To replace only some, list them in `toolchains`, eg
+`gcc.host(path = "/usr", toolchains = ["gcc_linux_x86_64"])`, so that another
+native-arch toolchain stays hermetic (for example one used only for its
+`:libstdcxx`). The
+host repository exposes `:cc_toolchain`, `:config` and `:files`. It uses host
+headers, libc, libstdc++ and binutils (linking with bfd), is not suitable for
+remote execution, and deliberately provides no `:libstdcxx` or `:libgcc`
+targets. `gcc_version` optionally cross-checks the installed major version.
+Without a `host` tag nothing falls back to host tools, headers or libraries.
 Downstreams must instantiate this extension and register their own toolchains;
 toolshed's registrations are dev-only. Register GCC before LLVM, as in
 toolshed's `MODULE.bazel`.
