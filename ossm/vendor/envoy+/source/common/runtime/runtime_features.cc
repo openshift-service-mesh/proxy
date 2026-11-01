@@ -179,12 +179,14 @@ RUNTIME_GUARD(envoy_reloadable_features_scope_upstream_tls_session_cache_by_sni)
 RUNTIME_GUARD(envoy_reloadable_features_shadow_policy_inherit_dynamic_metadata);
 RUNTIME_GUARD(envoy_reloadable_features_skip_partition_original_dst_hosts);
 RUNTIME_GUARD(envoy_reloadable_features_skip_pending_overflow_count_on_active_rq);
+RUNTIME_GUARD(envoy_reloadable_features_spiffe_validator_reject_empty_trust_bundle);
 RUNTIME_GUARD(envoy_reloadable_features_spiffe_validator_use_upstream_subject_alt_names);
 RUNTIME_GUARD(envoy_reloadable_features_ssl_socket_report_connection_reset);
 RUNTIME_GUARD(envoy_reloadable_features_strip_dotdot_segments_with_parameters);
 RUNTIME_GUARD(envoy_reloadable_features_strip_path_parameters_per_segment);
 FALSE_RUNTIME_GUARD(envoy_reloadable_features_strip_upgrade_header_on_failed_websocket_upgrades);
 RUNTIME_GUARD(envoy_reloadable_features_tap_honor_tap_enabled);
+RUNTIME_GUARD(envoy_reloadable_features_tcp_tunnel_allow_upstream_half_close);
 RUNTIME_GUARD(envoy_reloadable_features_test_feature_true);
 RUNTIME_GUARD(envoy_reloadable_features_tls_inspector_enforce_client_tls_version);
 RUNTIME_GUARD(envoy_reloadable_features_udp_hot_restart_session_handoff);
@@ -304,11 +306,6 @@ FALSE_RUNTIME_GUARD(envoy_reloadable_features_google_grpc_disable_tls_13);
 // TODO(jwendell): Flip to true to make gRPC timeout responses return DEADLINE_EXCEEDED
 // instead of UNAVAILABLE.
 FALSE_RUNTIME_GUARD(envoy_reloadable_features_grpc_timeout_returns_deadline_exceeded);
-
-// TODO(yanavlasov): Flip to true after prod testing.
-// Controls whether a stream stays open when HTTP/2 or HTTP/3 upstream half closes
-// before downstream.
-FALSE_RUNTIME_GUARD(envoy_reloadable_features_allow_multiplexed_upstream_half_close);
 
 FALSE_RUNTIME_GUARD(envoy_reloadable_features_ext_proc_graceful_grpc_close);
 
