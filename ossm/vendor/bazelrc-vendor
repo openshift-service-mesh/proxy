@@ -43,6 +43,7 @@ common --override_repository=dragonbox+=%workspace%/ossm/vendor/dragonbox+
 common --override_repository=emsdk+=%workspace%/ossm/vendor/emsdk+
 common --override_repository=envoy++envoy_repo_extension+envoy_repo=%workspace%/ossm/vendor/envoy++envoy_repo_extension+envoy_repo
 common --override_repository=envoy_toolshed++git_prebuilt_extension+git_toolchains=%workspace%/ossm/vendor/envoy_toolshed++git_prebuilt_extension+git_toolchains
+common --override_repository=envoy_toolshed++hunspell_prebuilt_extension+hunspell_toolchains=%workspace%/ossm/vendor/envoy_toolshed++hunspell_prebuilt_extension+hunspell_toolchains
 common --override_repository=envoy_toolshed++sq_prebuilt_extension+sq_toolchains=%workspace%/ossm/vendor/envoy_toolshed++sq_prebuilt_extension+sq_toolchains
 common --override_repository=envoy_toolshed+=%workspace%/ossm/vendor/envoy_toolshed+
 common --override_repository=envoy_toolshed_jq+=%workspace%/ossm/vendor/envoy_toolshed_jq+
@@ -118,6 +119,7 @@ common --override_repository=rules_java++toolchains+remote_java_tools=%workspace
 common --override_repository=rules_java++toolchains+remote_java_tools_linux=%workspace%/ossm/vendor/rules_java++toolchains+remote_java_tools_linux
 common --override_repository=rules_java++toolchains+remote_java_tools_linux_aarch64=%workspace%/ossm/vendor/rules_java++toolchains+remote_java_tools_linux_aarch64
 common --override_repository=rules_java+=%workspace%/ossm/vendor/rules_java+
+common --override_repository=rules_jq+=%workspace%/ossm/vendor/rules_jq+
 common --override_repository=rules_kotlin++rules_kotlin_extensions+com_github_jetbrains_kotlin=%workspace%/ossm/vendor/rules_kotlin++rules_kotlin_extensions+com_github_jetbrains_kotlin
 common --override_repository=rules_kotlin+=%workspace%/ossm/vendor/rules_kotlin+
 common --override_repository=rules_license+=%workspace%/ossm/vendor/rules_license+
