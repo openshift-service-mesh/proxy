@@ -1,0 +1,5 @@
+{
+    "url": "https://github.com/envoyproxy/toolshed/releases/download/rules_jq-v0.0.1/rules_jq-v0.0.1.tar.gz",
+    "integrity": "sha256-1RbeT3kgaBOyjWRbjAHqeqlyXDl1DyqK+NzmqEuB77s=",
+    "strip_prefix": "rules_jq-v0.0.1"
+}
