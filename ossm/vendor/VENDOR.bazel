@@ -21,7 +21,7 @@ ignore("@@rules_java++toolchains+local_jdk")
 # Like the toolchain repos above it symlinks into /usr (libpython3.12.so, the
 # CPython headers), so it must regenerate from the host rather than freeze this
 # machine's paths into the snapshot. This is what replaces the hermetic CPython.
-ignore("@@+_repo_rules+local_python3")
+ignore("@@+local_runtime_repo+local_python3")
 
 # The hermetic CPython interpreter (~300MB, exceeds GitHub's file size limit)
 # is not vendored. Build-time Python runs on the host via the autodetecting
