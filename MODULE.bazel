@@ -346,8 +346,8 @@ use_repo(java_toolchains, "local_jdk")
 # LLVM under /usr (`toolchain_root.path`), then register it ahead of Envoy's via
 # `--extra_toolchains=@llvm_host//:all` in ossm/bazelrc (extra_toolchains
 # outrank module-registered ones). libstdc++ vs libc++ and the host sysroot are
-# selected by env that ossm/bazelrc already sets (`BAZEL_USE_LIBSTDCPP=True` via
-# --config=libstdc++, `BAZEL_USE_HOST_SYSROOT=True`).
+# selected by env that ossm/bazelrc already sets (`BAZEL_USE_LIBSTDCPP=True`,
+# `BAZEL_USE_HOST_SYSROOT=True`).
 #
 # llvm_version only needs a correct *major* (it drives the clang resource-dir
 # lookup, e.g. /usr/lib/clang/21); with a `path` root nothing is downloaded.
@@ -365,10 +365,11 @@ llvm.toolchain(
     cxx_standard = {"": "c++20"},
     llvm_version = "21.1.0",
     # Link the host libstdc++ statically (`-l:libstdc++.a` + `-stdlib=libstdc++`)
-    # instead of toolchains_llvm's default bundled libc++, matching OSSM's
-    # `--config=libstdc++` (WORKSPACE `BAZEL_LINKLIBS=-l%:libstdc++.a`). Requires
-    # the static libstdc++ (libstdc++-static / libstdc++-devel) in the build
-    # container. Use "dynamic-stdc++" here for `-l:libstdc++.so` instead.
+    # instead of toolchains_llvm's default bundled libc++, matching the
+    # `BAZEL_LINKLIBS=-l%:libstdc++.a` / `BAZEL_USE_LIBSTDCPP=True` that
+    # ossm/bazelrc sets. Requires the static libstdc++ (libstdc++-static /
+    # libstdc++-devel) in the build container. Use "dynamic-stdc++" here for
+    # `-l:libstdc++.so` instead.
     stdlib = {"": "stdc++"},
 )
 llvm.toolchain_root(

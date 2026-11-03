@@ -24,7 +24,16 @@ build --extra_toolchains=@llvm_host//:all
 # ~100MB+ artifact -- breaking offline/air-gapped builds and bloating the vendor
 # snapshot. Honored by envoy_toolshed >= 0.5.10.
 build --repo_env=ENVOY_TOOLSHED_SKIP_LLVM_MINIMAL_DOWNLOAD=1
-build --config=libstdc++
+
+# OSSM: inline the former envoy `--config=libstdc++`. Upstream envoy removed that
+# config (and `BAZEL_USE_LIBSTDCPP`) when it switched `--config=gcc` to a
+# hermetic GCC 13 toolchain (see envoy's
+# changelogs/.../build__hermetic-gcc.rst). OSSM builds with the host clang
+# toolchain (@llvm_host), not that GCC, so we keep the two flags the removed
+# config expanded to: statically link the host's libstdc++ so the Envoy binary
+# does not depend on the build host's libstdc++.so.6 GLIBCXX versions at runtime.
+build --action_env=BAZEL_LINKLIBS=-l%:libstdc++.a
+build --repo_env=BAZEL_USE_LIBSTDCPP=True
 build --action_env=Clang_DIR=/usr/lib64/llvm21
 
 # Build wee8 (V8) from source instead of envoy_toolshed's prebuilt libwee8.a.
