@@ -259,12 +259,21 @@ echo ">> Checking for absolute symlinks that escaped into the snapshot"
 # Any remaining absolute symlink pointing outside the workspace means a
 # host-backed repo was vendored instead of ignored; add it to VENDOR.bazel.
 # bazel-external is a generated symlink into the output base (gitignored).
+#
+# This is a hard failure, not a warning: such symlinks bake this machine's
+# host paths into the committed snapshot and, worse, the downstream Konflux
+# git-clone step runs a symlink-safety check that rejects any symlink pointing
+# outside the repo -- so committing one breaks the downstream build at clone
+# time. (This has happened: an upstream bump renamed the host local_runtime
+# python repo's canonical name, silently invalidating its ignore() entry.)
 strays="$(find "${VENDOR_DIR}" -type l -lname '/*' \
   ! -path "${VENDOR_DIR}/bazel-external" 2>/dev/null || true)"
 if [ -n "${strays}" ]; then
-  echo "WARNING: host-path symlinks found in the vendor snapshot:" >&2
+  echo "ERROR: host-path symlinks found in the vendor snapshot:" >&2
   echo "${strays}" >&2
-  echo "Add the owning repos to ${VENDOR_DIR}/VENDOR.bazel via ignore()." >&2
+  echo "Add the owning repos to ${VENDOR_DIR}/VENDOR.bazel via ignore()," >&2
+  echo "then re-run this script. Refusing to produce a broken snapshot." >&2
+  exit 1
 fi
 
 echo ">> Done. Review and commit ${VENDOR_DIR}."
