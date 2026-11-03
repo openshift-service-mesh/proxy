@@ -1,63 +1,55 @@
 --- a/compat/openssl/prefixer/BUILD
 +++ b/compat/openssl/prefixer/BUILD
-@@ -1,31 +1,27 @@
--load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
-+load("@rules_cc//cc:defs.bzl", "cc_binary")
- load("//bazel:toolchains.bzl", "LIBCLANG_CPP", "LIBLLVM")
+@@ -3,13 +3,17 @@
  
  licenses(["notice"])  # Apache 2
  
--cc_library(
--    name = "libstdcxx_headers",
--    hdrs = ["@libstdcxx_sysroot_linux_amd64//:headers"],
--    # TODO(phlax): replace with the hermetic gcc toolchain's libstdc++
+-# GCC's libstdc++ for the prefixer, from a hermetic GCC repository that a host GCC override does
+-# not replace. It is available when Envoy is a dependency too; set this flag to use another.
+-label_flag(
+-    name = "libstdcxx",
+-    build_setting_default = "@gcc_runtime_linux_x86_64//:libstdcxx",
 -)
 -
 +# OSSM: build the prefixer against the host clang toolchain's libstdc++.
 +#
-+# Upstream sources libstdc++ from envoy_toolshed's libstdcxx sysroot, whose repo
-+# name and paths are hardcoded to linux_amd64 / x86_64-linux-gnu. OSSM builds this
-+# exec-config tool with the host toolchain (@llvm_host), which already provides a
-+# full host libstdc++ for the build arch (linked statically via the toolchain's
-+# stdlib="stdc++" setting) -- the same libstdc++ the rest of the //:envoy compile
-+# uses. Keeping the amd64 sysroot breaks the aarch64 build ("libstdc++.a ... is
-+# incompatible with elf64-littleaarch64"), so we drop that plumbing entirely.
++# Upstream sources libstdc++ from a hermetic GCC runtime repo
++# (@gcc_runtime_linux_x86_64, via the :libstdcxx label_flag) and links it with
++# -nostdinc++/-nostdlib++. That repo name is hardcoded to linux_x86_64. OSSM builds
++# this exec-config tool with the host toolchain (@llvm_host), which already
++# provides a full host libstdc++ for the build arch (linked statically via the
++# toolchain's stdlib="stdc++" setting) -- the same libstdc++ the rest of the
++# //:envoy compile uses. Keeping the x86_64 runtime repo breaks the non-x86 builds
++# and the air-gapped vendor snapshot, so we drop that plumbing and let the host
++# clang toolchain supply libstdc++ via -stdlib=libstdc++.
  cc_binary(
      name = "prefixer",
      srcs = ["prefixer.cpp"],
-     additional_linker_inputs = [
-         LIBCLANG_CPP,
--    ] + ([LIBLLVM] if LIBLLVM else []) + [
--        "@libstdcxx_sysroot_linux_amd64//:libs",
--    ],
-+    ] + ([LIBLLVM] if LIBLLVM else []),
+@@ -18,23 +22,18 @@
+     ] + ([LIBLLVM] if LIBLLVM else []),
      copts = [
          "-fno-rtti",  # Required by libclang-cpp
-         # Use libstdc++ for ABI compatibility with libclang-cpp
-         "-stdlib=libstdc++",
--        # libstdc++ headers come from a dedicated libstdc++-flavoured sysroot
--        # (@libstdcxx_sysroot_linux_amd64); the main sysroot is libc-only.
--        # TODO(phlax): source these from the hermetic gcc toolchain instead.
--        "-isystem external/envoy_toolshed++sysroot_extension+libstdcxx_sysroot_linux_amd64/sysroot/usr/include/c++/13",
--        "-isystem external/envoy_toolshed++sysroot_extension+libstdcxx_sysroot_linux_amd64/sysroot/usr/include/x86_64-linux-gnu/c++/13",
+-        # Use the hermetic GCC toolchain's libstdc++ (headers via :libstdcxx) for ABI
+-        # compatibility with libclang-cpp, not the toolchain's libc++. With -nostdinc++
+-        # the toolchain's -stdlib=libc++ has no effect, so silence its warning.
+-        "-nostdinc++",
+-        "-Wno-unused-command-line-argument",
++        # Use libstdc++ for ABI compatibility with libclang-cpp
++        "-stdlib=libstdc++",
      ],
      linkopts = [
          "$(location " + LIBCLANG_CPP + ")",
-@@ -33,17 +29,9 @@
+     ] + (["$(location " + LIBLLVM + ")"] if LIBLLVM else []) + [
          "-Wl,-rpath,$$ORIGIN/../lib",
-         # Use libstdc++ for ABI compatibility with libclang-cpp
-         "-stdlib=libstdc++",
--        # libstdc++ itself lives in the libstdc++ sysroot, not the main one. Only add the gcc dir:
--        # adding usr/lib/x86_64-linux-gnu would also pull in that sysroot's glibc libs/linker scripts.
--        "-Lexternal/envoy_toolshed++sysroot_extension+libstdcxx_sysroot_linux_amd64/sysroot/usr/lib/gcc/x86_64-linux-gnu/13",
--        # Link libstdc++ statically so the tool does not require the sysroot gcc's
--        # GLIBCXX versions from the host's libstdc++.so.6 at runtime.
--        "-l:libstdc++.a",
+-        # libstdc++.a comes from :libstdcxx (statically, so the tool does not need the host's
+-        # libstdc++.so.6); stop the driver adding its own C++ library.
+-        "-nostdlib++",
++        # Use libstdc++ for ABI compatibility with libclang-cpp
++        "-stdlib=libstdc++",
      ],
      visibility = ["//visibility:public"],
      deps = [
--        ":libstdcxx_headers",
+-        ":libstdcxx",
          "@llvm_toolchain_llvm//:clang_tooling_headers",
      ],
--
  )

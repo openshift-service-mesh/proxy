@@ -1,1 +1,0 @@
-PATH = '/github/home/.cache/bazel/_bazel_user/b04c29d37288309a6bc565a347117c08/external/envoy+'
