@@ -1,2 +1,0 @@
-VERSION = '1.41.0-dev'
-API_VERSION = '3.0.0'

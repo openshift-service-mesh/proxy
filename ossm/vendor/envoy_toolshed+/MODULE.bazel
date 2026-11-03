@@ -1,6 +1,6 @@
 module(
     name = "envoy_toolshed",
-    version = "0.5.16.envoy",
+    version = "0.5.17.envoy",
     bazel_compatibility = [">=7.2.1"],
 )
 
@@ -9,7 +9,7 @@ bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "boringssl", version = "0.20260813.0")
 bazel_dep(name = "buildifier_prebuilt", version = "10.0.1", repo_name = "buildifier")
-bazel_dep(name = "envoy_toolshed_jq", version = "0.5.16.envoy")
+bazel_dep(name = "envoy_toolshed_jq", version = "0.5.17.envoy")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_cc", version = "0.2.25")
 bazel_dep(name = "rules_pkg", version = "1.3.0")
@@ -111,6 +111,9 @@ http_archive(
     strip_prefix = "llvm-project-llvmorg-22.1.8",
     url = "https://github.com/llvm/llvm-project/archive/llvmorg-22.1.8.tar.gz",
 )
+
+cert_epoch_ext = use_extension("//certs:extensions.bzl", "cert_epoch_extension")
+use_repo(cert_epoch_ext, "cert_epoch")
 
 git_prebuilt_ext = use_extension("//git:extensions.bzl", "git_prebuilt_extension")
 git_prebuilt_ext.setup()
