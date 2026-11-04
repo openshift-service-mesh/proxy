@@ -1,0 +1,24 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/ssize_t.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "ssize_t",
+    checks = [
+        # Equivalent to gt_TYPE_SSIZE_T macro from ssize_t.m4
+        checks.AC_CHECK_TYPE(
+            "ssize_t",
+            define = "HAVE_SSIZE_T",
+            includes = ["#include <sys/types.h>"],
+        ),
+        # When ssize_t is not found (e.g. MSVC), define it as int in config.h.
+        # Matches upstream: AC_DEFINE_UNQUOTED([ssize_t], [int], ...)
+        checks.AC_DEFINE(
+            "ssize_t",
+            "int",
+            requires = ["!ac_cv_type_ssize_t"],
+        ),
+    ],
+    visibility = ["//visibility:public"],
+)

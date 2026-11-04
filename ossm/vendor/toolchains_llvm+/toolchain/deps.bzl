@@ -1,0 +1,69 @@
+# Copyright 2020 The Bazel Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+load("//toolchain:setup_distributions.bzl", "setup_llvm_distributions")
+
+def bazel_toolchain_dependencies():
+    # Materialize the merged LLVM distribution table. In bzlmod this is done
+    # by the `llvm_distributions` module extension; in WORKSPACE mode the
+    # consumer calls `bazel_toolchain_dependencies()` which dispatches here.
+    setup_llvm_distributions()
+
+    # Load rules_cc if the user has not defined them.
+    if not native.existing_rule("rules_cc"):
+        http_archive(
+            name = "rules_cc",
+            urls = ["https://github.com/bazelbuild/rules_cc/releases/download/0.2.25/rules_cc-0.2.25.tar.gz"],
+            sha256 = "bd7124a844d0403b4b353bcea34d6c8b2ba88dc26881c26c9ee668da89b71846",
+            strip_prefix = "rules_cc-0.2.25",
+        )
+
+    # rules_cc's cc_toolchain_config rule depends on apple_support's Xcode
+    # configuration, including for non-Apple toolchains.
+    if not native.existing_rule("apple_support"):
+        http_archive(
+            name = "apple_support",
+            sha256 = "1aa64bcffe9236bd90dbd00fbe990e0c92f85a0daa0bd73993358fb9f212826f",
+            urls = ["https://github.com/bazelbuild/apple_support/releases/download/2.8.3/apple_support.2.8.3.tar.gz"],
+        )
+
+    # Load bazel_skylib if the user has not defined them.
+    if not native.existing_rule("bazel_skylib"):
+        http_archive(
+            name = "bazel_skylib",
+            urls = [
+                "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.9.2/bazel-skylib-1.9.2.tar.gz",
+                "https://github.com/bazelbuild/bazel-skylib/releases/download/1.9.2/bazel-skylib-1.9.2.tar.gz",
+            ],
+            sha256 = "37cdfbc6faefea94f7b37760a305c98c08981116c2bc9e821e3b423221fad8c8",
+        )
+
+    # Load bazel_features if the user has not defined them.
+    if not native.existing_rule("bazel_features"):
+        http_archive(
+            name = "bazel_features",
+            sha256 = "5450bfb2c8b4bc961c75368838f86156f563cc9adef1be7d504fc5619d54daab",
+            strip_prefix = "bazel_features-1.51.0",
+            url = "https://github.com/bazel-contrib/bazel_features/releases/download/v1.51.0/bazel_features-v1.51.0.tar.gz",
+        )
+
+    # Load mboworks_bzl for version comparisons.
+    if not native.existing_rule("mboworks_bzl"):
+        http_archive(
+            name = "mboworks_bzl",
+            url = "https://github.com/mboworks/bzl/releases/download/0.5.1/bzl-0.5.1.tar.gz",
+            sha256 = "0c51edbd3a3b69ebff59b5ffec411a3ab8cb137a845b9bba9803738cd7bd5c28",
+            strip_prefix = "bzl-0.5.1",
+        )

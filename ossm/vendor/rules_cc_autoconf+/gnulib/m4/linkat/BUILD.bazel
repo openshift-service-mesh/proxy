@@ -1,0 +1,78 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/linkat.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "linkat",
+    checks = [
+        # Note: HAVE_SYMLINK is already provided by openat -> lstat -> symlink dependency
+
+        # gl_CHECK_FUNCS_ANDROID is similar to AC_CHECK_FUNC but with Android-specific handling
+        checks.AC_CHECK_FUNC(
+            "linkat",
+            define = "HAVE_LINKAT",
+            subst = True,
+        ),
+
+        # AC_FUNC_READLINK provides HAVE_READLINK (avoids unistd_h transitive dependency)
+
+        # Runtime checks for linkat behavior (lines 25-102) can't be easily ported
+        # Based on golden files, on macOS:
+        # - LINKAT_SYMLINK_NOTSUP=0 (linkat can create hardlinks to symlinks)
+        # - LINKAT_TRAILING_SLASH_BUG=1 (linkat fails to recognize trailing slash)
+        # - REPLACE_LINKAT=1 (linkat needs replacement due to bugs)
+        # gl_FUNC_LINK_FOLLOWS_SYMLINK (line 15) - sets LINK_FOLLOWS_SYMLINKS
+        # Based on golden files, on macOS/Linux, LINK_FOLLOWS_SYMLINKS=1
+        # This is a runtime check that can't be easily ported
+    ] + select({
+        # Linux: linkat works; link() does NOT follow symlinks.
+        "@platforms//os:linux": [
+            checks.AC_DEFINE("LINK_FOLLOWS_SYMLINKS", "0"),
+            checks.AC_SUBST("REPLACE_LINKAT", 0),
+        ],
+        # macOS: runtime probes for LINKAT_SYMLINK_NOTSUP /
+        # LINKAT_TRAILING_SLASH_BUG; SDK probe drives both bug-defines and
+        # the REPLACE_LINKAT subst. LINK_FOLLOWS_SYMLINKS=1 (BSD heritage).
+        "@platforms//os:macos": [
+            checks.AC_DEFINE("LINK_FOLLOWS_SYMLINKS", "1"),
+            checks.AC_DEFINE(
+                "LINKAT_SYMLINK_NOTSUP",
+                if_true = 0,
+                requires = ["!gl_cv_macos_sdk_modern"],
+            ),
+            checks.AC_DEFINE(
+                "LINKAT_TRAILING_SLASH_BUG",
+                if_true = 1,
+                requires = ["!gl_cv_macos_sdk_modern"],
+            ),
+            checks.AC_SUBST(
+                "REPLACE_LINKAT",
+                condition = "gl_cv_macos_sdk_modern",
+                if_false = "1",
+                if_true = "0",
+            ),
+        ],
+        # Windows: linkat doesn't exist. BCR overlay gates lib/linkat.c on
+        # REPLACE_LINKAT==1, so emit 1 to pull the replacement into the
+        # link. LINK_FOLLOWS_SYMLINKS=1 retained per the conservative
+        # non-Linux default.
+        "@platforms//os:windows": [
+            checks.AC_DEFINE("LINK_FOLLOWS_SYMLINKS", "1"),
+            checks.AC_SUBST("REPLACE_LINKAT", "1"),
+        ],
+        "//conditions:default": [
+            checks.AC_DEFINE("LINK_FOLLOWS_SYMLINKS", "1"),
+            checks.AC_SUBST("REPLACE_LINKAT", 0),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CANONICAL_HOST",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/extensions",
+        "//gnulib/m4/gnulib-common:gl_HOST_MACOS_SDK_MODERN",
+        "//gnulib/m4/openat",
+        "//gnulib/macros/AC_FUNC_READLINK",
+    ],
+)

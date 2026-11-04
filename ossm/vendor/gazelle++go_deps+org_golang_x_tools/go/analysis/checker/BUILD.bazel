@@ -1,0 +1,103 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "checker",
+    srcs = [
+        "checker.go",
+        "print.go",
+    ],
+    importpath = "golang.org/x/tools/go/analysis/checker",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/analysis",
+        "//go/analysis/internal",
+        "//go/packages",
+        "//internal/analysis/driverutil",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":checker",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "checker_test",
+    srcs = ["example_test.go"],
+    deps = select({
+        "@io_bazel_rules_go//go/platform:386": [
+            ":checker",
+            "//go/analysis",
+            "//go/packages",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:amd64": [
+            ":checker",
+            "//go/analysis",
+            "//go/packages",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:arm": [
+            ":checker",
+            "//go/analysis",
+            "//go/packages",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:arm64": [
+            ":checker",
+            "//go/analysis",
+            "//go/packages",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:mips": [
+            ":checker",
+            "//go/analysis",
+            "//go/packages",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:mips64": [
+            ":checker",
+            "//go/analysis",
+            "//go/packages",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:mips64le": [
+            ":checker",
+            "//go/analysis",
+            "//go/packages",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:mipsle": [
+            ":checker",
+            "//go/analysis",
+            "//go/packages",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:ppc64": [
+            ":checker",
+            "//go/analysis",
+            "//go/packages",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:ppc64le": [
+            ":checker",
+            "//go/analysis",
+            "//go/packages",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:riscv64": [
+            ":checker",
+            "//go/analysis",
+            "//go/packages",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:s390x": [
+            ":checker",
+            "//go/analysis",
+            "//go/packages",
+            "//txtar",
+        ],
+        "//conditions:default": [],
+    }),
+)

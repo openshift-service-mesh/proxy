@@ -1,0 +1,262 @@
+//! Binary used for automatic Rust workspace discovery by `rust-analyzer`.
+//! See [rust-analyzer documentation][rd] for a thorough description of this interface.
+//! [rd]: <https://rust-analyzer.github.io/book/configuration.html#workspace.discoverConfig>.
+
+use std::{
+    env,
+    io::{self, Write},
+};
+
+use anyhow::Context;
+use camino::{Utf8Path, Utf8PathBuf};
+use clap::Parser;
+use env_logger::{fmt::Formatter, Target, WriteStyle};
+use gen_rust_project_lib::{
+    bazel_info, generate_rust_project, install_dir, user_config, DiscoverProject, RustAnalyzerArg,
+    BUILD_FILE_NAMES, WORKSPACE_ROOT_FILE_NAMES,
+};
+use log::{LevelFilter, Record};
+
+/// Looks within the current directory for a file that marks a bazel workspace.
+///
+/// # Errors
+///
+/// Returns an error if no file from [`WORKSPACE_ROOT_FILE_NAMES`] is found.
+fn find_workspace_root_file(workspace: &Utf8Path) -> anyhow::Result<Utf8PathBuf> {
+    BUILD_FILE_NAMES
+        .iter()
+        .chain(WORKSPACE_ROOT_FILE_NAMES)
+        .map(|file| workspace.join(file))
+        .find(|p| p.exists())
+        .with_context(|| format!("no root file found for bazel workspace {workspace}"))
+}
+
+fn project_discovery() -> anyhow::Result<DiscoverProject<'static>> {
+    let Config {
+        workspace,
+        execution_root,
+        output_base,
+        bazel,
+        bazel_startup_options,
+        bazel_args,
+        rust_analyzer_argument,
+    } = Config::parse()?;
+
+    // Per-user toggles live in `<launcher_dir>/user_config.json` so
+    // the rendered `discoverConfig.command` stays identical for every
+    // developer.
+    let user = user_config::load(&install_dir()?);
+    log::info!(
+        "user config: per_package_workspaces={}",
+        user.per_package_workspaces
+    );
+
+    log::info!("got rust-analyzer argument: {rust_analyzer_argument:?}");
+
+    // Whole-workspace mode ignores the RA-provided arg — the `{arg}`
+    // template stays in the command for shape-parity with the
+    // per-package case.
+    let ra_arg = if user.per_package_workspaces {
+        match rust_analyzer_argument {
+            Some(ra_arg) => ra_arg,
+            None => RustAnalyzerArg::Buildfile(find_workspace_root_file(&workspace)?),
+        }
+    } else {
+        RustAnalyzerArg::Buildfile(find_workspace_root_file(&workspace)?)
+    };
+
+    // `ASPECT_REPOSITORY` is empty when discover was built inside
+    // rules_rust itself — that produces `//rust:defs.bzl`, only valid
+    // when the outer bazel invocation is IN rules_rust. Fall back to
+    // the apparent `@rules_rust` name so a discover binary shipped to
+    // a downstream workspace still resolves the aspect.
+    let rules_rust_name = match env!("ASPECT_REPOSITORY") {
+        "" => "@rules_rust",
+        other => other,
+    };
+
+    log::info!("resolved rust-analyzer argument: {ra_arg:?}");
+
+    let (per_call_buildfile, targets) = ra_arg.into_target_details(&workspace)?;
+
+    // RA's `add_discovered_project_from_command` dedupes by
+    // buildfile — a match UPDATES, a new one PUSHES. Always report
+    // the workspace-root buildfile so per-package calls update the
+    // single Bazel-project entry instead of accumulating (each new
+    // workspace costs a proc-macro server, ~200-800 MB).
+    let buildfile = find_workspace_root_file(&workspace)?;
+
+    log::debug!(
+        "reporting workspace-root buildfile {buildfile} \
+         (per-call resolved to {per_call_buildfile}, targets {targets})"
+    );
+
+    // Use the generated files to print the rust-project.json.
+    let project = generate_rust_project(
+        &bazel,
+        &output_base,
+        &workspace,
+        &execution_root,
+        &bazel_startup_options,
+        &bazel_args,
+        rules_rust_name,
+        &[targets],
+    )?;
+
+    Ok(DiscoverProject::Finished { buildfile, project })
+}
+
+#[allow(clippy::writeln_empty_string)]
+fn write_discovery<W>(mut writer: W, discovery: DiscoverProject) -> std::io::Result<()>
+where
+    W: Write,
+{
+    serde_json::to_writer(&mut writer, &discovery)?;
+    // `rust-analyzer` reads messages line by line, so we must add a newline after each
+    writeln!(writer, "")
+}
+
+/// Publish per-install state via env vars the library reads.
+/// `dirname(current_exe())` is the launcher dir (setup copies this
+/// binary into it). Pre-set values win so users and tests can override.
+fn self_locate_config() -> anyhow::Result<()> {
+    let launcher_dir = gen_rust_project_lib::install_dir()?;
+    for (name, path) in [
+        ("RULES_RUST_RA_LAUNCHER_DIR", launcher_dir.clone()),
+        ("RULES_RUST_RA_CACHE_DIR", launcher_dir.join("cache")),
+    ] {
+        if env::var_os(name).is_none() {
+            env::set_var(name, path.as_str());
+        }
+    }
+    Ok(())
+}
+
+fn main() -> anyhow::Result<()> {
+    self_locate_config()?;
+
+    let log_format_fn = |fmt: &mut Formatter, rec: &Record| {
+        let message = rec.args();
+        let discovery = DiscoverProject::Progress { message };
+        write_discovery(fmt, discovery)
+    };
+
+    // Treat logs as progress messages.
+    env_logger::Builder::from_default_env()
+        // Never write color/styling info
+        .write_style(WriteStyle::Never)
+        // Format logs as progress messages
+        .format(log_format_fn)
+        // `rust-analyzer` reads the stdout
+        .filter_level(LevelFilter::Debug)
+        .target(Target::Stdout)
+        .init();
+
+    let discovery = match project_discovery() {
+        Ok(discovery) => discovery,
+        Err(error) => DiscoverProject::Error {
+            error: error.to_string(),
+            source: error.source().as_ref().map(ToString::to_string),
+        },
+    };
+
+    write_discovery(io::stdout(), discovery)?;
+    Ok(())
+}
+
+#[derive(Debug)]
+pub struct Config {
+    /// The path to the Bazel workspace directory. If not specified, uses the result of `bazel info workspace`.
+    workspace: Utf8PathBuf,
+
+    /// The path to the Bazel execution root. If not specified, uses the result of `bazel info execution_root`.
+    execution_root: Utf8PathBuf,
+
+    /// The path to the Bazel output user root. If not specified, uses the result of `bazel info output_base`.
+    output_base: Utf8PathBuf,
+
+    /// The path to a Bazel binary.
+    bazel: Utf8PathBuf,
+
+    /// Startup options to pass to `bazel` invocations.
+    /// See the [Command-Line Reference](<https://bazel.build/reference/command-line-reference>)
+    /// for more details.
+    bazel_startup_options: Vec<String>,
+
+    /// Arguments to pass to `bazel` invocations.
+    /// See the [Command-Line Reference](<https://bazel.build/reference/command-line-reference>)
+    /// for more details.
+    bazel_args: Vec<String>,
+
+    /// The argument that `rust-analyzer` can pass to the binary.
+    rust_analyzer_argument: Option<RustAnalyzerArg>,
+}
+
+impl Config {
+    // Parse the configuration flags and supplement with bazel info as needed.
+    pub fn parse() -> anyhow::Result<Self> {
+        let ConfigParser {
+            workspace,
+            bazel,
+            bazel_startup_options,
+            bazel_args,
+            rust_analyzer_argument,
+        } = ConfigParser::parse();
+
+        // We need some info from `bazel info`. Fetch it now.
+        let mut info_map = bazel_info(
+            &bazel,
+            workspace.as_deref(),
+            None,
+            &bazel_startup_options,
+            &bazel_args,
+        )?;
+
+        let config = Config {
+            workspace: info_map
+                .remove("workspace")
+                .expect("'workspace' must exist in bazel info")
+                .into(),
+            execution_root: info_map
+                .remove("execution_root")
+                .expect("'execution_root' must exist in bazel info")
+                .into(),
+            output_base: info_map
+                .remove("output_base")
+                .expect("'output_base' must exist in bazel info")
+                .into(),
+            bazel,
+            bazel_startup_options,
+            bazel_args,
+            rust_analyzer_argument,
+        };
+
+        Ok(config)
+    }
+}
+
+#[derive(Debug, Parser)]
+struct ConfigParser {
+    /// The path to the Bazel workspace directory. If not specified, uses the result of `bazel info workspace`.
+    #[clap(long, env = "BUILD_WORKSPACE_DIRECTORY")]
+    workspace: Option<Utf8PathBuf>,
+
+    /// The path to a Bazel binary.
+    #[clap(long, default_value = "bazel")]
+    bazel: Utf8PathBuf,
+
+    /// Startup options to pass to `bazel` invocations.
+    /// See the [Command-Line Reference](<https://bazel.build/reference/command-line-reference>)
+    /// for more details.
+    #[clap(long = "bazel_startup_option")]
+    bazel_startup_options: Vec<String>,
+
+    /// Arguments to pass to `bazel` invocations.
+    /// See the [Command-Line Reference](<https://bazel.build/reference/command-line-reference>)
+    /// for more details.
+    #[clap(long = "bazel_arg")]
+    bazel_args: Vec<String>,
+
+    /// The argument that `rust-analyzer` can pass to the binary.
+    rust_analyzer_argument: Option<RustAnalyzerArg>,
+}

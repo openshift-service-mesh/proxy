@@ -1,0 +1,24 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/stdint_h.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# gl_AC_HEADER_STDINT_H macro from stdint_h.m4
+autoconf(
+    name = "stdint_h",
+    checks = [
+        # AC_COMPILE_IFELSE with AC_LANG_PROGRAM to check stdint.h
+        checks.AC_TRY_COMPILE(
+            code = """\
+#include <sys/types.h>
+#include <stdint.h>
+int main(void) {
+    uintmax_t i = (uintmax_t) -1;
+    return !i;
+}
+""",
+            define = "HAVE_STDINT_H_WITH_UINTMAX",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+)

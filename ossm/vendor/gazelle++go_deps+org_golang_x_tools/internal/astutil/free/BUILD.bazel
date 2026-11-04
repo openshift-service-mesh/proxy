@@ -1,0 +1,26 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "free",
+    srcs = ["free.go"],
+    importpath = "golang.org/x/tools/internal/astutil/free",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":free",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "free_test",
+    srcs = ["free_test.go"],
+    deps = [":free"],
+)

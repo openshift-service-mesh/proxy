@@ -1,0 +1,35 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "waitgroup",
+    srcs = [
+        "doc.go",
+        "waitgroup.go",
+    ],
+    embedsrcs = ["doc.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/waitgroup",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/analysis",
+        "//go/analysis/passes/inspect",
+        "//go/ast/inspector",
+        "//go/types/typeutil",
+        "//internal/analysis/analyzerutil",
+        "//internal/typesinternal",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":waitgroup",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "waitgroup_test",
+    srcs = ["waitgroup_test.go"],
+    deps = [
+        ":waitgroup",
+        "//go/analysis/analysistest",
+    ],
+)

@@ -1,0 +1,6 @@
+alias(
+    name = "collect_cc_coverage",
+    actual = "//cc/coverage:collect_cc_coverage",
+    deprecation = "Please use //cc/coverage:collect_cc_coverage instead.",
+    visibility = ["//visibility:public"],
+)

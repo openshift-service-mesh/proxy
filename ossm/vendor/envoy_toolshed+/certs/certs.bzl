@@ -1,0 +1,136 @@
+"""Bazel rules for generating test certificate fixtures.
+
+Test certificates, CRLs, OCSP responses and related fixtures used to be
+checked in and refreshed by hand with scripts that shelled out to the
+OpenSSL CLI (and, sometimes, to `faketime`). They can instead be produced at
+build time by `//certs:gen`, which links BoringSSL directly and has no
+dependency on the consuming workspace.
+
+The generator stamps certificates with a validity window that starts on Jan 1
+of a given year, so fixtures never age out of validity. By default that year
+is derived from Bazel's stamped status files, with `year_status_key` acting as
+an optional override; it can also be pinned directly via `year`.
+
+See README.md in this package for the full spec file format.
+"""
+
+def generated_certs(
+        name,
+        spec,
+        outs,
+        srcs = [],
+        static_srcs = [],
+        headers_name = None,
+        gen = Label("//certs:gen"),
+        year = None,
+        year_status_key = "STABLE_CERT_EPOCH_YEAR",
+        testonly = False,
+        tags = [],
+        visibility = None):
+    """Generates test certificates from `spec` and bundles them into a filegroup.
+
+    Args:
+      name: name of the resulting runtime filegroup. Consumers depend on this
+        via `data = [...]`. Generated and checked-in `.h` files are excluded
+        because headers are compile-time inputs, and rules_apple buckets any
+        bundled `.h` resource as a Metal header.
+      spec: the fixture spec file consumed by the generator (see README.md
+        for the spec format).
+      outs: every file the generator writes for this spec. The generator
+        fails if the spec asks for an output that is not declared here. Header
+        outputs are still declared by the genrule and remain referenceable by
+        label, but are excluded from the runtime filegroup.
+      srcs: generator inputs (keys, `.cfg` files, password files).
+      static_srcs: checked-in fixtures that are not generated but that
+        consumers expect to find alongside the generated ones. Checked-in
+        headers are excluded from the runtime filegroup for the same reason as
+        generated headers.
+      headers_name: optional name of an additional filegroup containing only
+        generated `.h` outputs, for consumers that prefer to depend on one
+        label from `hdrs = [...]` instead of listing each generated header.
+      gen: label of the certificate generator binary. Defaults to the one
+        provided by this package; overriding it is only useful for testing
+        the macro itself. Resolved with `Label()` so the default binds to
+        `@envoy_toolshed//certs:gen` regardless of which workspace/module
+        loads this macro.
+      year: if set, the four digit year fixtures are stamped as starting
+        from (Jan 1 of that year). Passed straight to `--year` and disables
+        workspace stamping entirely. Leave unset (the default) to derive the
+        year from Bazel's stamped status files at build time.
+      year_status_key: optional override key looked up in
+        `bazel-out/stable-status.txt`. Consumers that want to pin the year via
+        their `workspace_status_command` may emit
+        `<year_status_key> <YYYY>`; if the key is absent the year is derived
+        from `BUILD_TIMESTAMP` in `bazel-out/volatile-status.txt`, which Bazel
+        writes for stamped builds.
+      testonly: marks the generated targets as test-only.
+      tags: tags applied to the generated targets.
+      visibility: visibility of the generated targets.
+    """
+    gen_label = str(Label(str(gen)))
+
+    if year != None:
+        year_cmd = "YEAR=\"" + str(year) + "\";"
+        year_arg = "\"" + str(year) + "\""
+        stamp = 0
+    else:
+        year_cmd = " ".join([
+            "YEAR=$$(sed -n -E 's/^" + year_status_key + " ([0-9]{4})$$/\\1/p' bazel-out/stable-status.txt 2>/dev/null);",
+            "if [ -z \"$$YEAR\" ]; then",
+            "  TS=$$(sed -n -E 's/^BUILD_TIMESTAMP ([0-9]+)$$/\\1/p' bazel-out/volatile-status.txt 2>/dev/null);",
+            "  if [ -n \"$$TS\" ]; then YEAR=$$(date -u -d \"@$$TS\" +%Y 2>/dev/null || date -u -r \"$$TS\" +%Y); fi;",
+            "fi;",
+            "if [ -z \"$$YEAR\" ]; then YEAR=$$(date -u +%Y); fi;",
+        ])
+        year_arg = "\"$$YEAR\""
+        stamp = 1
+
+    native.genrule(
+        name = name + "_gen",
+        srcs = [spec] + srcs,
+        outs = outs,
+        cmd = " ".join([
+            year_cmd,
+            "$(location " + gen_label + ")",
+            "--spec $(location " + spec + ")",
+            "--in-dir $$(dirname $(location " + spec + "))",
+            "--out-dir $(RULEDIR)",
+            "--year " + year_arg + ";",
+            "missing=\"\";",
+            "for out in $(OUTS); do",
+            "  if [ ! -e \"$$out\" ]; then missing=\"$$missing $$out\"; fi;",
+            "done;",
+            "if [ -n \"$$missing\" ]; then",
+            "  echo \"" + gen_label + " did not create declared output(s):$$missing\" >&2;",
+            "  exit 1;",
+            "fi;",
+        ]),
+        # Undocumented attr to depend on the workspace status files; see
+        # https://github.com/bazelbuild/bazel/issues/4942
+        stamp = stamp,
+        testonly = testonly,
+        tags = tags,
+        tools = [gen_label],
+        visibility = visibility,
+    )
+
+    native.filegroup(
+        name = name,
+        # Generated/checked-in headers are consumed via `hdrs`, not at runtime.
+        # Keep them out of the data filegroup: rules_apple buckets any bundled
+        # `.h` resource as a Metal header and then fails MetallibCompile with
+        # "no input files" when no `.metal` sources accompany them.
+        srcs = [f for f in outs + static_srcs if not f.endswith(".h")],
+        testonly = testonly,
+        tags = tags,
+        visibility = visibility,
+    )
+
+    if headers_name != None:
+        native.filegroup(
+            name = headers_name,
+            srcs = [f for f in outs if f.endswith(".h")],
+            testonly = testonly,
+            tags = tags,
+            visibility = visibility,
+        )

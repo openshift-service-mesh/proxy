@@ -1,0 +1,34 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "gofix",
+    srcs = [
+        "doc.go",
+        "gofix.go",
+    ],
+    embedsrcs = ["doc.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/gofix",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//go/analysis",
+        "//go/analysis/passes/inspect",
+        "//go/analysis/passes/internal/gofixdirective",
+        "//go/ast/inspector",
+        "//internal/analysis/analyzerutil",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":gofix",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "gofix_test",
+    srcs = ["gofix_test.go"],
+    deps = [
+        ":gofix",
+        "//go/analysis/analysistest",
+    ],
+)

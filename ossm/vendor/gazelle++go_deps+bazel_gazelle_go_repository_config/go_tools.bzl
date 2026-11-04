@@ -1,0 +1,1 @@
+GO_TOOLS = {k: Label(v) for k, v in {}.items()}

@@ -1,2 +1,0 @@
-
-INTERPRETER_LABELS = {}

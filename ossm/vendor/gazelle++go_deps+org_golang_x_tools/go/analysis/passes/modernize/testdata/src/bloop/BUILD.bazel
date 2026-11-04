@@ -1,0 +1,20 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "bloop",
+    srcs = ["bloop.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/modernize/testdata/src/bloop",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":bloop",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "bloop_test",
+    srcs = ["bloop_test.go"],
+    embed = [":bloop"],
+)

@@ -1,0 +1,20 @@
+load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
+
+proto_library(
+    name = "test_proto",  # keep
+    srcs = [
+        "invalid.proto",  # keep
+        "test.proto",
+    ],
+    visibility = [
+        "//visibility:public",  # keep
+    ],
+)
+
+go_proto_library(
+    name = "test_go_proto",  # keep
+    importpath = "example.com/test/proto",
+    proto = ":test_proto",
+    visibility = ["//visibility:public"],  # keep
+)

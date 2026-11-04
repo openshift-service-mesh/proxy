@@ -1,0 +1,6 @@
+./diff.go
+./fix.go
+./metaresolver.go
+./print.go
+./profiler.go
+./update.go

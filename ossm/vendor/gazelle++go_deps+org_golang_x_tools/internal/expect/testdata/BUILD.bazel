@@ -1,0 +1,20 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "testdata",
+    srcs = ["test.go"],
+    importpath = "golang.org/x/tools/internal/expect/testdata",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":testdata",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)

@@ -1,0 +1,20 @@
+
+load("@package_metadata//rules:package_metadata.bzl", "package_metadata")
+load("@rules_license//rules:package_info.bzl", "package_info")
+
+package_metadata(
+    name = "package_metadata",
+    purl = "pkg:golang/google.golang.org/protobuf@v1.36.11?checksum=h1:fV6ZwhNocDyBLK0dj%2Bfg8ektcVegBBuEolpbTQyBNVE%3D",
+    visibility = [
+        "//:__subpackages__",
+    ],
+)
+
+package_info(
+    name = "package_info",
+    package_name = "google.golang.org/protobuf",
+    package_url = "https://google.golang.org/protobuf",
+    package_version = "1.36.11",
+    purl = "pkg:golang/google.golang.org/protobuf@v1.36.11?checksum=h1:fV6ZwhNocDyBLK0dj%2Bfg8ektcVegBBuEolpbTQyBNVE%3D",
+    visibility = ["//:__subpackages__"],
+)

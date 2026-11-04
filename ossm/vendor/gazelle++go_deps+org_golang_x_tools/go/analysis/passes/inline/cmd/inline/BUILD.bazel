@@ -1,0 +1,18 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "inline_lib",
+    srcs = ["main.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/inline/cmd/inline",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//go/analysis/passes/inline",
+        "//go/analysis/singlechecker",
+    ],
+)
+
+go_binary(
+    name = "inline",
+    embed = [":inline_lib"],
+    visibility = ["//visibility:public"],
+)

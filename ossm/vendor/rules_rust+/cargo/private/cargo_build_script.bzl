@@ -1,0 +1,959 @@
+"""Rules for Cargo build scripts (`build.rs` files)"""
+
+load("@apple_support//lib:apple_support.bzl", "apple_support")
+load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
+load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("//rust:defs.bzl", "rust_common")
+load("//rust:rust_common.bzl", "BuildInfo", "CrateGroupInfo", "DepInfo")
+
+# buildifier: disable=bzl-visibility
+load(
+    "//rust/private:rustc.bzl",
+    "get_compilation_mode_opts",
+    "get_linker_and_args",
+)
+
+# buildifier: disable=bzl-visibility
+load(
+    "//rust/private:utils.bzl",
+    "dedent",
+    "deduplicate",
+    "expand_dict_value_locations",
+    "find_cc_toolchain",
+    "find_toolchain",
+    _name_to_crate_name = "name_to_crate_name",
+)
+
+# Reexport for cargo_build_script_wrapper.bzl
+name_to_crate_name = _name_to_crate_name
+
+def _cargo_build_script_runfiles_impl(ctx):
+    exe = ctx.actions.declare_file(ctx.label.name)
+    ctx.actions.write(output = exe, content = "", is_executable = True)
+
+    runfiles = ctx.runfiles(files = ctx.files.data)
+
+    return [
+        DefaultInfo(
+            files = depset([exe]),
+            runfiles = runfiles,
+            executable = exe,
+        ),
+    ]
+
+cargo_build_script_runfiles = rule(
+    doc = """\
+A rule for producing runfiles for `cargo_build_script` data dependencies.
+
+This rule creates a runfiles tree from `data` files and produces a fake executable
+so that Bazel's runfiles mechanics can be used. The fake executable is never run
+and is filtered out when merging runfiles.
+
+The script binary is passed directly to `cargo_build_script` via its `script` attribute
+rather than going through this rule.
+""",
+    implementation = _cargo_build_script_runfiles_impl,
+    attrs = {
+        "data": attr.label_list(
+            doc = "Data required by the build script.",
+            allow_files = True,
+        ),
+    },
+    executable = True,
+)
+
+def get_cc_compile_args_and_env(cc_toolchain, feature_configuration):
+    """Gather cc environment variables from the given `cc_toolchain`
+
+    Args:
+        cc_toolchain (cc_toolchain): The current rule's `cc_toolchain`.
+        feature_configuration (FeatureConfiguration): Class used to construct command lines from CROSSTOOL features.
+
+    Returns:
+        tuple: A tuple of the following items:
+            - (sequence): A flattened list of C command line flags.
+            - (sequence): A flattened list of CXX command line flags.
+            - (dict): C environment variables to be set for this configuration.
+    """
+    compile_variables = cc_common.create_compile_variables(
+        feature_configuration = feature_configuration,
+        cc_toolchain = cc_toolchain,
+    )
+    cc_c_args = cc_common.get_memory_inefficient_command_line(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.c_compile,
+        variables = compile_variables,
+    )
+    cc_cxx_args = cc_common.get_memory_inefficient_command_line(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.cpp_compile,
+        variables = compile_variables,
+    )
+    cc_env = cc_common.get_environment_variables(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.c_compile,
+        variables = compile_variables,
+    )
+    return cc_c_args, cc_cxx_args, cc_env
+
+# These get replaced with the non-hermetic values magically, and result in
+# absolute paths, so they shouldn't have PWD prefixed.
+# https://github.com/bazelbuild/apple_support/blob/20913e2a9ad4a00a1849a464b856d04b5cd3bdcb/lib/apple_support.bzl#L174-L198
+_BAZEL_PATH_PLACEHOLDERS = [
+    apple_support.path_placeholders.xcode(),
+    apple_support.path_placeholders.sdkroot(),
+]
+
+def _should_prefix_pwd(path):
+    if paths.is_absolute(path):
+        return False
+
+    if path.startswith("${pwd}"):
+        return False
+
+    for placeholder in _BAZEL_PATH_PLACEHOLDERS:
+        if path.startswith(placeholder):
+            return False
+
+    return True
+
+def _expects_space_separated_arg(flag):
+    return not (flag.endswith("=") or flag.endswith(":"))
+
+def _prefix_pwd_to_flag(args, flag_variations):
+    """Prefix execroot-relative paths for flags that support both concatenated and space-separated forms (unless it ends with `=` or `:`).
+
+    Handles flags like:
+    * `-L /path` (space-separated) or `-L/path` (concatenated).
+    * `-LIBPATH /path` (space-separated) or `-LIBPATH/path` (concatenated) or `-LIBPATH=/path` or `-LIBPATH:/path`
+
+    Args:
+        args (list): List of tool arguments.
+        flag_variations (list[str]): The flag variants to look for (e.g., ["-LIBPATH", "-L"], ["-B"], ["-isystem"], ["-resource-dir"]).
+
+    Returns:
+        list: The modified argument list with relative paths prefixed with ${pwd}.
+    """
+    res = []
+    prefix_next_arg = False
+    for arg in args:
+        # When expecting a path argument and we see -Xclang, skip over it and
+        # map the next argument instead.
+        # ex: -Xclang -internal-isystem -Xclang path
+        # to: -Xclang -internal-isystem -Xclang ${pwd}/path
+        if prefix_next_arg and arg == "-Xclang":
+            res.append(arg)
+            continue
+
+        handled = False
+        new_prefix_next_arg = False
+
+        for flag in sorted(flag_variations, key = len, reverse = True):
+            # Check for exact match first
+            if arg == flag:
+                if _expects_space_separated_arg(flag):
+                    # Flag without '=' or ':': next arg might be space-separated path
+                    new_prefix_next_arg = True
+
+                res.append(arg)
+                handled = True
+                break
+
+            # Check for concatenated form (flag with path)
+            if arg.startswith(flag):
+                path = arg[len(flag):].strip()
+
+                if _should_prefix_pwd(path):
+                    res.append("{}${{pwd}}/{}".format(flag, path))
+                else:
+                    res.append(arg)
+                handled = True
+                break
+
+            # Check for space-separated form (only for flags without '=' or ':').
+            # A leading '-' means the flag's value was omitted and this is
+            # actually the next flag, not a path; leave it untouched.
+            if _expects_space_separated_arg(flag) and prefix_next_arg and not arg.strip().startswith("-") and _should_prefix_pwd(arg.strip()):
+                res.append("${{pwd}}/{}".format(arg.strip()))
+                handled = True
+                break
+
+        if not handled:
+            res.append(arg)
+
+        prefix_next_arg = new_prefix_next_arg
+
+    return res
+
+def _prefix_pwd_to_paths(args):
+    """Prefix execroot-relative paths with ${pwd}.
+
+    Handles plain path arguments without any associated flags.
+
+    Args:
+        args (list): List of path arguments.
+
+    Returns:
+        list: The modified argument list with relative paths prefixed with ${pwd}.
+    """
+    res = []
+    for path in args:
+        path = path.strip()
+        if _should_prefix_pwd(path):
+            res.append("${{pwd}}/{}".format(path))
+        else:
+            res.append(path)
+    return res
+
+def _pwd_flags_sysroot(args):
+    """Prefix execroot-relative paths in --sysroot= arguments with ${pwd}."""
+    return _prefix_pwd_to_flag(args, ["--sysroot=", "--sysroot", "-isysroot"])
+
+def _pwd_flags_fsanitize_ignorelist(args):
+    """Prefix execroot-relative paths in -fsanitize-ignorelist= arguments with ${pwd}."""
+    return _prefix_pwd_to_flag(args, ["-fsanitize-ignorelist="])
+
+def _pwd_flags_isystem(args):
+    """Prefix execroot-relative paths in -isystem-like arguments with ${pwd}."""
+    return _prefix_pwd_to_flag(args, ["-isystem", "-isystem-after", "-internal-isystem", "-cxx-isystem", "-stdlib++-isystem", "/imsvc"])
+
+def _pwd_flags_L(args):
+    """Prefix execroot-relative paths in -L arguments with ${pwd}."""
+    return _prefix_pwd_to_flag(args, ["-LIBPATH=", "-LIBPATH:", "-LIBPATH", "/LIBPATH:", "/LIBPATH", "-L"])
+
+def _pwd_flags_B(args):
+    """Prefix execroot-relative paths in -B arguments with ${pwd}."""
+    return _prefix_pwd_to_flag(args, ["-B"])
+
+def _pwd_flags_compiler_response_file(args):
+    """Prefix execroot-relative compiler response file paths with ${pwd}."""
+
+    # Only the path *to* the response file is fixed. Its contents are left untouched
+    # and won't be resolved by the compiler if they contain execroot-relative paths.
+    # Fixing its content requires reading the file at exec time from cargo_build_script_runner/bin.rs.
+    return _prefix_pwd_to_flag(args, ["@"])
+
+def _pwd_flags_resource_dir(args):
+    """Prefix execroot-relative paths in -resource-dir arguments with ${pwd}."""
+    return _prefix_pwd_to_flag(args, ["-resource-dir=", "-resource-dir"])
+
+def _pwd_flags_imacros(args):
+    """Prefix execroot-relative paths in -imacros arguments with ${pwd}."""
+    return _prefix_pwd_to_flag(args, ["-imacros"])
+
+def _pwd_flags_vfsoverlay(args):
+    """Prefix execroot-relative paths in VFS overlay arguments with ${pwd}."""
+    return _prefix_pwd_to_flag(args, ["-ivfsoverlay", "-vfsoverlay=", "-vfsoverlay", "/vfsoverlay:", "/vfsoverlay"])
+
+_DIRECT_LIB_EXTENSIONS = (".a", ".o", ".so", ".dylib")
+
+def _pwd_flags_direct_libs(args):
+    """Prefix execroot-relative object/library file arguments with ${pwd}.
+
+    Handles bare object and library file paths passed directly to the linker
+    without any associated flag (e.g. a positional path to
+    libclang_rt.builtins.a, or a positional .o/.so/.dylib). These are emitted
+    by some cc toolchains (e.g. hermetic LLVM passing the compiler-rt builtins
+    archive as a positional input) and would otherwise stay execroot-relative
+    and fail to resolve from the build script's working directory.
+
+    Args:
+        args (list): List of tool arguments.
+
+    Returns:
+        list: The modified argument list with relative object/library file
+            paths prefixed with ${pwd}.
+    """
+    res = []
+    for arg in args:
+        if not arg.startswith("-") and _should_prefix_pwd(arg) and arg.endswith(_DIRECT_LIB_EXTENSIONS):
+            res.append("${{pwd}}/{}".format(arg))
+        else:
+            res.append(arg)
+    return res
+
+def _pwd_paths(args):
+    """Prefix execroot-relative paths with ${pwd}."""
+    return _prefix_pwd_to_paths(args)
+
+_PWD_FLAG_PASSES = [
+    _pwd_flags_sysroot,
+    _pwd_flags_resource_dir,
+    _pwd_flags_B,
+    _pwd_flags_L,
+    _pwd_flags_compiler_response_file,
+    _pwd_flags_isystem,
+    _pwd_flags_fsanitize_ignorelist,
+    _pwd_flags_imacros,
+    _pwd_flags_vfsoverlay,
+    _pwd_flags_direct_libs,
+]
+
+def _pwd_flags(args):
+    clang_cl_prefix = "/clang:"
+    clang_cl_wrapped = [arg.startswith(clang_cl_prefix) for arg in args]
+    args = [arg[len(clang_cl_prefix):] if clang_cl_wrapped[i] else arg for i, arg in enumerate(args)]
+
+    for pwd_flags_pass in _PWD_FLAG_PASSES:
+        args = pwd_flags_pass(args)
+
+    return [clang_cl_prefix + arg if clang_cl_wrapped[i] else arg for i, arg in enumerate(args)]
+
+def _feature_enabled(ctx, feature_name, default = False):
+    """Check if a feature is enabled.
+
+    If the feature is explicitly enabled or disabled, return accordingly.
+
+    In the case where the feature is not explicitly enabled or disabled, return the default value.
+
+    Args:
+        ctx: The context object.
+        feature_name: The name of the feature.
+        default: The default value to return if the feature is not explicitly enabled or disabled.
+
+    Returns:
+        Boolean defining whether the feature is enabled.
+    """
+    if feature_name in ctx.disabled_features:
+        return False
+
+    if feature_name in ctx.features:
+        return True
+
+    return default
+
+def _resolve_tristate(attr_value, default_flag_target):
+    """Resolve a tri-state `int` attribute (`-1`/`0`/`1`) to a `bool`.
+
+    `-1` defers to the `BuildSettingInfo` on `default_flag_target`; any other
+    value is treated as truthy/falsy directly.
+
+    Args:
+        attr_value (int): The tri-state attribute value (`-1`, `0`, or `1`).
+        default_flag_target (Target): The `bool_flag` target providing the
+            default when `attr_value` is `-1`.
+
+    Returns:
+        bool: The resolved value.
+    """
+    if attr_value == -1:
+        return default_flag_target[BuildSettingInfo].value
+    return bool(attr_value)
+
+def _rlocationpath(file, workspace_name):
+    if file.short_path.startswith("../"):
+        return file.short_path[len("../"):]
+
+    return "{}/{}".format(workspace_name, file.short_path)
+
+def _create_runfiles_dir(ctx, script, data_runfiles, retain_list):
+    """Create a runfiles directory to represent `CARGO_MANIFEST_DIR`.
+
+    Merges runfiles from both the script binary and the data runfiles target,
+    filtering out the fake executable from the data runfiles.
+
+    Due to the inability to forcibly generate runfiles directories for use as inputs
+    to actions, this function creates a custom runfiles directory that can more
+    consistently be relied upon as an input. For more details see:
+    https://github.com/bazelbuild/bazel/issues/15486
+
+    Args:
+        ctx (ctx): The rule's context object
+        script (Target): The build script binary target.
+        data_runfiles (Target): The `cargo_build_script_runfiles` target providing data files.
+        retain_list (list): A list of strings to keep in generated runfiles directories.
+
+    Returns:
+        Tuple[File, Depset[File], Args]:
+            - The output directory to be created.
+            - Runfile inputs needed by the action.
+            - The args required to create the directory.
+    """
+    runfiles_dir = ctx.actions.declare_directory("{}.cargo_runfiles".format(ctx.label.name))
+
+    # External repos always fall into the `../` branch of `_rlocationpath`.
+    workspace_name = ctx.workspace_name
+
+    fake_exe = ctx.executable.data_runfiles
+
+    def _runfiles_map(file):
+        if file == fake_exe:
+            return None
+        return "{}={}".format(file.path, _rlocationpath(file, workspace_name))
+
+    script_rf = script[DefaultInfo].default_runfiles
+    data_rf = data_runfiles[DefaultInfo].default_runfiles
+
+    all_runfiles_files = depset(transitive = [script_rf.files, data_rf.files])
+
+    args = ctx.actions.args()
+    args.use_param_file("--cargo_manifest_args=@%s", use_always = True)
+    args.add_all([runfiles_dir], expand_directories = False)
+    args.add(",".join(retain_list))
+    args.add_all(all_runfiles_files, map_each = _runfiles_map, allow_closure = True)
+
+    return runfiles_dir, all_runfiles_files, args
+
+def _cargo_build_script_impl(ctx):
+    """The implementation for the `cargo_build_script` rule.
+
+    Args:
+        ctx (ctx): The rules context object
+
+    Returns:
+        list: A list containing a BuildInfo provider
+    """
+    script = ctx.executable.script
+    toolchain = find_toolchain(ctx)
+    out_dir = ctx.actions.declare_directory(ctx.label.name + ".out_dir")
+    env_out = ctx.actions.declare_file(ctx.label.name + ".env")
+    dep_env_out = ctx.actions.declare_file(ctx.label.name + ".depenv")
+    flags_out = ctx.actions.declare_file(ctx.label.name + ".flags")
+    link_flags = ctx.actions.declare_file(ctx.label.name + ".linkflags")
+    link_search_paths = ctx.actions.declare_file(ctx.label.name + ".linksearchpaths")  # rustc-link-search, propagated from transitive dependencies
+    compilation_mode_opt_level = get_compilation_mode_opts(ctx, toolchain).opt_level
+
+    script_data = []
+    for target in ctx.attr.data:
+        script_data.append(target[DefaultInfo].files)
+        script_data.append(target[DefaultInfo].default_runfiles.files)
+
+    workspace_name = ctx.label.workspace_name
+    if not workspace_name:
+        workspace_name = ctx.workspace_name
+
+    extra_output = []
+
+    # Relying on runfiles directories is unreliable when passing data to
+    # dependent actions. Instead, an explicit directory should be created
+    # until more reliable functionality is implemented in Bazel:
+    # https://github.com/bazelbuild/bazel/issues/15486
+    runfiles_dir, runfiles_inputs, runfiles_args = _create_runfiles_dir(
+        ctx = ctx,
+        script = ctx.attr.script,
+        data_runfiles = ctx.attr.data_runfiles,
+        retain_list = ctx.attr._cargo_manifest_dir_filename_suffixes_to_retain[BuildSettingInfo].value,
+    )
+    manifest_dir = "{}/{}/{}".format(runfiles_dir.path, workspace_name, ctx.label.package)
+
+    pkg_name = ctx.attr.pkg_name
+    if pkg_name == "":
+        pkg_name = name_to_pkg_name(ctx.label.name)
+
+    toolchain_tools = [toolchain.all_files]
+
+    env = {}
+
+    use_default_shell_env = _resolve_tristate(
+        ctx.attr.use_default_shell_env,
+        ctx.attr._default_use_default_shell_env,
+    )
+
+    # If enabled, start with the default shell env, which contains any --action_env
+    # settings passed in on the command line and defaults like $PATH.
+    if use_default_shell_env:
+        env.update(ctx.configuration.default_shell_env)
+
+    if toolchain.cargo:
+        env["CARGO"] = "${pwd}/%s" % toolchain.cargo.path
+
+    env.update({
+        "CARGO_CRATE_NAME": name_to_crate_name(pkg_name),
+        "CARGO_MANIFEST_DIR": manifest_dir,
+        "CARGO_PKG_NAME": pkg_name,
+        "HOST": toolchain.exec_triple.str,
+        "NUM_JOBS": "1",
+        "OPT_LEVEL": compilation_mode_opt_level,
+        "RUSTC": toolchain.rustc.path,
+        "RUSTDOC": toolchain.rust_doc.path,
+        "TARGET": toolchain.target_flag_value,
+        # OUT_DIR is set by the runner itself, rather than on the action.
+    })
+
+    # This isn't exactly right, but Bazel doesn't have exact views of "debug" and "release", so...
+    env.update({
+        "DEBUG": {"dbg": "true", "fastbuild": "true", "opt": "false"}.get(ctx.var["COMPILATION_MODE"], "true"),
+        "PROFILE": {"dbg": "debug", "fastbuild": "debug", "opt": "release"}.get(ctx.var["COMPILATION_MODE"], "unknown"),
+    })
+
+    if ctx.attr.version:
+        version = ctx.attr.version.split("+")[0].split(".")
+        patch = version[2].split("-") if len(version) > 2 else [""]
+        env["CARGO_PKG_VERSION_MAJOR"] = version[0]
+        env["CARGO_PKG_VERSION_MINOR"] = version[1] if len(version) > 1 else ""
+        env["CARGO_PKG_VERSION_PATCH"] = patch[0]
+        env["CARGO_PKG_VERSION_PRE"] = patch[1] if len(patch) > 1 else ""
+        env["CARGO_PKG_VERSION"] = ctx.attr.version
+
+    use_cc_toolchain = _resolve_tristate(
+        ctx.attr.use_cc_toolchain,
+        ctx.attr._default_use_cc_toolchain,
+    )
+
+    # Pull in env vars which may be required for the cc_toolchain to work (e.g. on OSX, the SDK version).
+    # We hope that the linker env is sufficient for the whole cc_toolchain.
+    if use_cc_toolchain:
+        cc_toolchain, feature_configuration = find_cc_toolchain(ctx)
+    else:
+        cc_toolchain, feature_configuration = None, None
+    linker, _, link_args, linker_env = get_linker_and_args(ctx, "bin", toolchain, cc_toolchain, feature_configuration, None)
+    env.update(**linker_env)
+    env["LD"] = linker
+    env["LDFLAGS"] = " ".join(_pwd_flags(link_args))
+
+    # Defaults for cxx flags.
+    env["ARFLAGS"] = ""
+    env["CFLAGS"] = ""
+    env["CXXFLAGS"] = ""
+    fallback_tools = []
+    if not cc_toolchain:
+        fallbacks = {
+            "AR": "_fallback_ar",
+            "CC": "_fallback_cc",
+            "CXX": "_fallback_cxx",
+        }
+        for key, attr in fallbacks.items():
+            tool = getattr(ctx.executable, attr)
+            if not tool:
+                fail("cargo_build_script without a cc toolchain requires %s" % attr)
+            fallback_tools.append(tool)
+            env[key] = "${{pwd}}/{}".format(tool.path)
+
+    if cc_toolchain:
+        # MSVC requires INCLUDE to be set
+        cc_c_args, cc_cxx_args, cc_env = get_cc_compile_args_and_env(cc_toolchain, feature_configuration)
+        include = cc_env.get("INCLUDE")
+        if include:
+            if toolchain.exec_triple.str.find("windows") > 0:
+                path_separator = ";"
+            else:
+                path_separator = ":"
+            env["INCLUDE"] = path_separator.join(_pwd_paths(include.split(path_separator)))
+
+        toolchain_tools.append(cc_toolchain.all_files)
+
+        env["CC"] = cc_common.get_tool_for_action(
+            feature_configuration = feature_configuration,
+            action_name = ACTION_NAMES.c_compile,
+        )
+        env["CXX"] = cc_common.get_tool_for_action(
+            feature_configuration = feature_configuration,
+            action_name = ACTION_NAMES.cpp_compile,
+        )
+        env["AR"] = cc_common.get_tool_for_action(
+            feature_configuration = feature_configuration,
+            action_name = ACTION_NAMES.cpp_link_static_library,
+        )
+
+        # Many C/C++ toolchains are missing an action_config for AR because
+        # one was never included in the unix_cc_toolchain_config.
+        if not env["AR"]:
+            env["AR"] = cc_toolchain.ar_executable
+
+        # Populate CFLAGS and CXXFLAGS that cc-rs relies on when building from source, in particular
+        # to determine the deployment target when building for apple platforms (`macosx-version-min`
+        # for example, itself derived from the `macos_minimum_os` Bazel argument).
+        env["CFLAGS"] = " ".join(_pwd_flags(cc_c_args))
+        env["CXXFLAGS"] = " ".join(_pwd_flags(cc_cxx_args))
+        # It may be tempting to forward ARFLAGS, but cc-rs is opinionated enough
+        # that doing so is more likely to hurt than help. If you need to change
+        # ARFLAGS, make changes to cc-rs.
+
+    # Inform build scripts of rustc flags
+    # https://github.com/rust-lang/cargo/issues/9600
+    env["CARGO_ENCODED_RUSTFLAGS"] = "\\x1f".join([
+        # Allow build scripts to locate the generated sysroot
+        "--sysroot=${{pwd}}/{}".format(toolchain.sysroot),
+        # Keep build scripts from baking the exec root into their output
+        "--remap-path-prefix=${pwd}=.",
+    ] + ctx.attr.rustc_flags)
+
+    for f in ctx.attr.crate_features:
+        env["CARGO_FEATURE_" + f.upper().replace("-", "_")] = "1"
+
+    links = ctx.attr.links or ""
+    if links:
+        env["CARGO_MANIFEST_LINKS"] = links
+
+    # Add environment variables from the Rust toolchain.
+    env.update(toolchain.env)
+
+    known_variables = {}
+
+    # Gather data from the `toolchains` attribute.
+    for target in ctx.attr.toolchains:
+        if DefaultInfo in target:
+            toolchain_tools.extend([
+                target[DefaultInfo].files,
+                target[DefaultInfo].default_runfiles.files,
+            ])
+        if platform_common.ToolchainInfo in target:
+            all_files = getattr(target[platform_common.ToolchainInfo], "all_files", depset([]))
+            if type(all_files) == "list":
+                all_files = depset(all_files)
+            toolchain_tools.append(all_files)
+        if platform_common.TemplateVariableInfo in target:
+            variables = getattr(target[platform_common.TemplateVariableInfo], "variables", depset([]))
+            known_variables.update(variables)
+
+    data_labels = {str(t.label): True for t in ctx.attr.data}
+    for t in ctx.attr.tools:
+        if str(t.label) in data_labels:
+            fail("Tool {} also appears in data. tools and data must not overlap.".format(t.label))
+
+    if ctx.attr.build_script_env:
+        _merge_env_dict(env, expand_dict_value_locations(
+            ctx,
+            ctx.attr.build_script_env,
+            deduplicate(
+                ctx.attr.data +
+                getattr(ctx.attr, "compile_data", []) +
+                ctx.attr.tools,
+            ),
+            known_variables,
+        ))
+
+    tools = depset(
+        direct = [
+            ctx.executable._cargo_build_script_runner,
+        ] + fallback_tools + ([toolchain.target_json] if toolchain.target_json else []),
+        transitive = script_data + toolchain_tools,
+    )
+
+    # dep_env_file contains additional environment variables coming from
+    # direct dependency sys-crates' build scripts. These need to be made
+    # available to the current crate build script.
+    # See https://doc.rust-lang.org/cargo/reference/build-scripts.html#-sys-packages
+    # for details.
+    args = ctx.actions.args()
+    args.add(script, format = "--script=%s")
+    args.add(links, format = "--links=%s")
+    args.add_all([out_dir], format_each = "--out_dir=%s", expand_directories = False)
+    args.add(env_out, format = "--env_out=%s")
+    args.add(flags_out, format = "--flags_out=%s")
+    args.add(link_flags, format = "--link_flags=%s")
+    args.add(link_search_paths, format = "--link_search_paths=%s")
+    args.add(dep_env_out, format = "--dep_env_out=%s")
+    args.add(ctx.attr.rundir, format = "--rundir=%s")
+
+    output_groups = {
+        "out_dir": depset([out_dir]),
+    }
+
+    debug_std_streams_output_group = ctx.attr._debug_std_streams_output_group[BuildSettingInfo].value
+    if debug_std_streams_output_group:
+        debug_stdout = ctx.actions.declare_file(ctx.label.name + ".stdout.log")
+        debug_stderr = ctx.actions.declare_file(ctx.label.name + ".stderr.log")
+        args.add(debug_stdout, format = "--stdout=%s")
+        args.add(debug_stderr, format = "--stderr=%s")
+        extra_output.append(debug_stdout)
+        extra_output.append(debug_stderr)
+        output_groups["streams"] = depset([debug_stdout, debug_stderr])
+
+    build_script_inputs = []
+
+    build_script_inputs.extend(ctx.files.build_script_env_files)
+    args.add_all(ctx.files.build_script_env_files, format_each = "--input_dep_env_path=%s")
+
+    for dep in ctx.attr.link_deps:
+        if rust_common.dep_info in dep and dep[rust_common.dep_info].dep_env:
+            dep_env_file = dep[rust_common.dep_info].dep_env
+            args.add(dep_env_file, format = "--input_dep_env_path=%s")
+            build_script_inputs.append(dep_env_file)
+            for dep_build_info in dep[rust_common.dep_info].transitive_build_infos.to_list():
+                build_script_inputs.append(dep_build_info.out_dir)
+
+    for dep in ctx.attr.deps:
+        dep_infos = []
+        if DepInfo in dep:
+            dep_infos = [dep[DepInfo]]
+        else:
+            dep_infos = [
+                dep_variant_info.dep_info
+                for dep_variant_info in dep[CrateGroupInfo].dep_variant_infos.to_list()
+                if dep_variant_info.dep_info
+            ]
+
+        for dep_info in dep_infos:
+            for dep_build_info in dep_info.transitive_build_infos.to_list():
+                build_script_inputs.append(dep_build_info.out_dir)
+
+    experimental_symlink_execroot = ctx.attr._experimental_symlink_execroot[BuildSettingInfo].value or \
+                                    _feature_enabled(ctx, "symlink-exec-root")
+
+    if experimental_symlink_execroot:
+        env["RULES_RUST_SYMLINK_EXEC_ROOT"] = "1"
+
+    out_dir_volatile_basenames = ctx.attr._out_dir_volatile_file_basenames[BuildSettingInfo].value
+    if out_dir_volatile_basenames:
+        env["RULES_RUST_OUT_DIR_VOLATILE_BASENAMES"] = ":".join(out_dir_volatile_basenames)
+
+    emit_warnings_setting = ctx.attr._emit_build_script_warnings[BuildSettingInfo].value
+    if emit_warnings_setting == "on":
+        emit_warnings = True
+    elif emit_warnings_setting == "off":
+        emit_warnings = False
+    else:
+        emit_warnings = ctx.attr.emit_warnings
+    if not emit_warnings:
+        env["RULES_RUST_SUPPRESS_BUILD_SCRIPT_WARNINGS"] = "1"
+
+    ctx.actions.run(
+        executable = ctx.executable._cargo_build_script_runner,
+        arguments = [args, runfiles_args],
+        outputs = [
+            out_dir,
+            env_out,
+            flags_out,
+            link_flags,
+            link_search_paths,
+            dep_env_out,
+            runfiles_dir,
+        ] + extra_output,
+        tools = [
+            ctx.attr.script[DefaultInfo].files_to_run,
+            tools,
+        ],
+        inputs = depset(build_script_inputs, transitive = [runfiles_inputs]),
+        mnemonic = "CargoBuildScriptRun",
+        progress_message = "Running Cargo build script {}".format(pkg_name),
+        env = env,
+        toolchain = None,
+        use_default_shell_env = use_default_shell_env,
+    )
+
+    return [
+        # Although this isn't used anywhere, without this, `bazel build`'ing
+        # the cargo_build_script label won't actually run the build script
+        # since bazel is lazy.
+        DefaultInfo(files = depset([out_dir])),
+        BuildInfo(
+            out_dir = out_dir,
+            rustc_env = env_out,
+            dep_env = dep_env_out,
+            flags = flags_out,
+            linker_flags = link_flags,
+            link_search_paths = link_search_paths,
+            compile_data = depset([runfiles_dir] + extra_output, transitive = script_data),
+        ),
+        OutputGroupInfo(
+            **output_groups
+        ),
+    ]
+
+cargo_build_script = rule(
+    doc = (
+        "A rule for running a crate's `build.rs` files to generate build information " +
+        "which is then used to determine how to compile said crate."
+    ),
+    implementation = _cargo_build_script_impl,
+    attrs = {
+        "build_script_env": attr.string_dict(
+            doc = "Environment variables for build scripts.",
+        ),
+        "build_script_env_files": attr.label_list(
+            doc = dedent("""\
+                Files containing additional environment variables to set for rustc.
+
+                These files should  contain a single variable per line, of format
+                `NAME=value`, and newlines may be included in a value by ending a
+                line with a trailing back-slash (`\\\\`).
+
+                The order that these files will be processed is unspecified, so
+                multiple definitions of a particular variable are discouraged.
+
+                Note that the variables here are subject to
+                [workspace status](https://docs.bazel.build/versions/main/user-manual.html#workspace_status)
+                stamping should the `stamp` attribute be enabled. Stamp variables
+                should be wrapped in brackets in order to be resolved. E.g.
+                `NAME={WORKSPACE_STATUS_VARIABLE}`.
+            """),
+            allow_files = True,
+        ),
+        "crate_features": attr.string_list(
+            doc = "The list of rust features that the build script should consider activated.",
+        ),
+        "data": attr.label_list(
+            doc = "Data required by the build script.",
+            allow_files = True,
+        ),
+        "data_runfiles": attr.label(
+            doc = "The runfiles target providing data file runfiles for the build script.",
+            mandatory = True,
+            cfg = "target",
+            executable = True,
+        ),
+        "deps": attr.label_list(
+            doc = "The Rust build-dependencies of the crate",
+            providers = [[DepInfo], [CrateGroupInfo]],
+            cfg = "exec",
+        ),
+        "emit_warnings": attr.bool(
+            doc = dedent("""\
+                Whether to forward `cargo::warning=` lines from the build script to stderr.
+
+                Honored only when `--@rules_rust//cargo/settings:emit_build_script_warnings`
+                is `auto` (the default). Setting the flag to `on` or `off` overrides
+                this attribute for every target.
+            """),
+            default = True,
+        ),
+        "link_deps": attr.label_list(
+            doc = dedent("""\
+                The subset of the Rust (normal) dependencies of the crate that
+                have the links attribute and therefore provide environment
+                variables to this build script.
+            """),
+        ),
+        "links": attr.string(
+            doc = "The name of the native library this crate links against.",
+        ),
+        "pkg_name": attr.string(
+            doc = "The name of package being compiled, if not derived from `name`.",
+        ),
+        "rundir": attr.string(
+            default = "",
+            doc = dedent("""\
+                A directory to cd to before the cargo_build_script is run.
+
+                This should be a pathrelative to the exec root. The default behaviour (and the
+                behaviour if rundir is set to the empty string) is to change to the relative
+                path corresponding to the cargo manifest directory, which replicates the
+                normal behaviour of cargo so it is easy to write compatible build scripts.
+
+                If set to `.`, the cargo build script will run in the exec root.
+            """),
+        ),
+        "rustc_flags": attr.string_list(
+            doc = dedent("""\
+                List of compiler flags passed to `rustc`.
+
+                These strings are subject to Make variable expansion for predefined
+                source/output path variables like `$location`, `$execpath`, and
+                `$rootpath`. This expansion is useful if you wish to pass a generated
+                file of arguments to rustc: `@$(location //package:target)`.
+            """),
+        ),
+        "script": attr.label(
+            doc = "The binary script to run, generally a `rust_binary` target.",
+            executable = True,
+            mandatory = True,
+            cfg = "exec",
+            providers = [rust_common.crate_info],
+        ),
+        "tools": attr.label_list(
+            doc = "Tools required by the build script.",
+            allow_files = True,
+            cfg = "exec",
+        ),
+        "use_cc_toolchain": attr.int(
+            doc = dedent("""\
+                Whether or not to pull in the resolved `cc_toolchain` when
+                running the build script.
+
+                When enabled, the resolved `cc_toolchain`'s `all_files` are
+                added to the action inputs and the `CC`, `CXX`, `AR`,
+                `CFLAGS`, `CXXFLAGS`, `LDFLAGS`, and `INCLUDE` environment
+                variables are populated from that toolchain (matching Cargo's
+                normal behavior).
+
+                When disabled, the `cc_toolchain` is not requested for the
+                build script action. This can significantly shrink the input
+                trees of `cargo_build_script` actions (particularly with
+                hermetic sysroots) but breaks any build script that needs to
+                compile C/C++ code.
+
+                Unset (`-1`, the default) defers to the
+                `@rules_rust//cargo/settings:use_cc_toolchain` build setting
+                which itself defaults to enabled. Set to `1` to force enable
+                or `0` to force disable for a specific target.
+            """),
+            default = -1,
+            values = [-1, 0, 1],
+        ),
+        "use_default_shell_env": attr.int(
+            doc = dedent("""\
+                Whether or not to include the default shell environment for the build
+                script action. By default Bazel's `default_shell_env` is set for build
+                script actions so crates like `cmake` can probe $PATH to find tools.
+            """),
+            default = -1,
+            values = [-1, 0, 1],
+        ),
+        "version": attr.string(
+            doc = "The semantic version (semver) of the crate",
+        ),
+        "_cargo_build_script_runner": attr.label(
+            executable = True,
+            allow_files = True,
+            default = Label("//cargo/private/cargo_build_script_runner:runner"),
+            cfg = "exec",
+        ),
+        "_cargo_manifest_dir_filename_suffixes_to_retain": attr.label(
+            default = Label("//cargo/settings:cargo_manifest_dir_filename_suffixes_to_retain"),
+        ),
+        "_debug_std_streams_output_group": attr.label(
+            default = Label("//cargo/settings:debug_std_streams_output_group"),
+        ),
+        "_default_use_cc_toolchain": attr.label(
+            default = Label("//cargo/settings:use_cc_toolchain"),
+        ),
+        "_default_use_default_shell_env": attr.label(
+            default = Label("//cargo/settings:use_default_shell_env"),
+        ),
+        "_emit_build_script_warnings": attr.label(
+            default = Label("//cargo/settings:emit_build_script_warnings"),
+        ),
+        "_experimental_symlink_execroot": attr.label(
+            default = Label("//cargo/settings:experimental_symlink_execroot"),
+        ),
+        "_fallback_ar": attr.label(
+            cfg = "exec",
+            executable = True,
+            allow_files = True,
+            default = Label("//cargo/private:no_ar"),
+        ),
+        "_fallback_cc": attr.label(
+            cfg = "exec",
+            executable = True,
+            allow_files = True,
+            default = Label("//cargo/private:no_cc"),
+        ),
+        "_fallback_cxx": attr.label(
+            cfg = "exec",
+            executable = True,
+            allow_files = True,
+            default = Label("//cargo/private:no_cxx"),
+        ),
+        "_out_dir_volatile_file_basenames": attr.label(
+            default = Label("//cargo/settings:out_dir_volatile_file_basenames"),
+        ),
+    },
+    fragments = ["cpp"],
+    toolchains = [
+        str(Label("//rust:toolchain_type")),
+        config_common.toolchain_type("@bazel_tools//tools/cpp:toolchain_type", mandatory = False),
+    ],
+)
+
+def _merge_env_dict(prefix_dict, suffix_dict):
+    """Merges suffix_dict into prefix_dict, appending rather than replacing certain env vars."""
+    for key in ["CFLAGS", "CXXFLAGS", "LDFLAGS"]:
+        if key in prefix_dict and key in suffix_dict and prefix_dict[key]:
+            prefix_dict[key] += " " + suffix_dict.pop(key)
+    prefix_dict.update(suffix_dict)
+
+def name_to_pkg_name(name):
+    """Sanitize the name of cargo_build_script targets.
+
+    Args:
+        name (str): The name value pass to the `cargo_build_script` wrapper.
+
+    Returns:
+        str: A cleaned up name for a build script target.
+    """
+    if name.endswith("_bs"):
+        return name[:-len("_bs")]
+    return name

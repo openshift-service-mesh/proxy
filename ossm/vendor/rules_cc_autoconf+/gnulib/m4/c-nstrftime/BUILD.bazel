@@ -1,0 +1,44 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/c-nstrftime.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "c-nstrftime",
+    checks = select({
+        # On Linux, strftime_l exists
+        "@platforms//os:linux": [
+            checks.AC_DEFINE("HAVE_STRFTIME_L", 1),
+            checks.AC_CHECK_FUNC(
+                "strftime_lz",
+                define = "HAVE_STRFTIME_LZ",
+            ),
+        ],
+        # On macOS/other, use the compile check
+        "//conditions:default": [
+            checks.AC_TRY_COMPILE(
+                code = """#include <time.h>
+
+#ifdef __cplusplus
+extern "C"
+#endif
+char strftime_l ();
+
+int main(void) {
+    return strftime_l();
+}""",
+                define = "HAVE_STRFTIME_L",
+                language = "c",
+            ),
+            checks.AC_CHECK_FUNC(
+                "strftime_lz",
+                define = "HAVE_STRFTIME_LZ",
+            ),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/tm_gmtoff",  # AC_REQUIRE([gl_TM_GMTOFF])
+        # Note: AC_REQUIRE([AC_C_RESTRICT]) is a standard autoconf macro
+    ],
+)

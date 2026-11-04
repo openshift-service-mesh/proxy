@@ -1,0 +1,35 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "stdlib",
+    srcs = [
+        "deps.go",
+        "import.go",
+        "manifest.go",
+        "stdlib.go",
+    ],
+    importpath = "golang.org/x/tools/internal/stdlib",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":stdlib",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "stdlib_test",
+    srcs = ["deps_test.go"],
+    data = glob(["testdata/**"]),
+    deps = [
+        ":stdlib",
+        "@com_github_google_go_cmp//cmp",
+    ],
+)

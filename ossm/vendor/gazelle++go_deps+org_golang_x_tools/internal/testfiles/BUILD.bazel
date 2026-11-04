@@ -1,0 +1,38 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "testfiles",
+    srcs = ["testfiles.go"],
+    importpath = "golang.org/x/tools/internal/testfiles",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+    deps = [
+        "//go/packages",
+        "//internal/testenv",
+        "//txtar",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":testfiles",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "testfiles_test",
+    srcs = ["testfiles_test.go"],
+    deps = [
+        ":testfiles",
+        "//go/analysis",
+        "//go/analysis/analysistest",
+        "//internal/testenv",
+        "//internal/versions",
+        "//txtar",
+    ],
+)

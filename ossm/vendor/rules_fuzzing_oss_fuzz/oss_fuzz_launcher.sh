@@ -1,1 +1,0 @@
-echo 'The OSS-Fuzz engine is not meant to be executed.'; exit 1

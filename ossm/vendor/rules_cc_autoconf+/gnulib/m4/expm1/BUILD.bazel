@@ -1,0 +1,20 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/expm1.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "expm1",
+    checks = [
+        # AC_SUBST([EXPM1_LIBM]) - on macOS, no extra library needed
+        checks.AC_SUBST("EXPM1_LIBM", ""),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/exp",
+        "//gnulib/m4/extensions",
+        "//gnulib/m4/isnand",
+        "//gnulib/m4/ldexp",
+        "//gnulib/m4/round",
+    ],
+)

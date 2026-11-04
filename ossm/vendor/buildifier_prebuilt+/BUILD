@@ -1,0 +1,81 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+
+exports_files(
+    [
+        "binary_runner.bash.template",
+        "binary_runner.bat.template",
+        "runner.bash.template",
+        "runner.bat.template",
+        "WORKSPACE",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# MARK: - Aliases
+
+alias(
+    name = "buildifier",
+    actual = "//buildifier",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "buildozer",
+    actual = "//buildozer",
+    visibility = ["//visibility:public"],
+)
+
+# MARK: - bzl_library targets
+
+bzl_library(
+    name = "defs",
+    srcs = ["defs.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":buildtools",
+    ],
+)
+
+bzl_library(
+    name = "deps",
+    srcs = ["deps.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "rules",
+    srcs = ["rules.bzl"],
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "@bazel_skylib//lib:shell",
+    ],
+)
+
+bzl_library(
+    name = "buildtools",
+    srcs = ["buildtools.bzl"],
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "@bazel_skylib//lib:new_sets",
+        "@bazel_skylib//lib:types",
+    ],
+)
+
+# MARK: - Integration Test
+
+filegroup(
+    name = "local_repository_files",
+    testonly = True,
+    srcs = [
+        "BUILD",
+        "MODULE.bazel",
+        "WORKSPACE",
+        "binary_runner.bash.template",
+        "binary_runner.bat.template",
+        "runner.bash.template",
+        "runner.bat.template",
+        "//buildifier:all_files",
+        "//buildozer:all_files",
+    ] + glob(["*.bzl"]),
+    visibility = ["//:__subpackages__"],
+)

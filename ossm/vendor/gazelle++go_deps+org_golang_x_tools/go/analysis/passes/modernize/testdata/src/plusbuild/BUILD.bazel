@@ -1,0 +1,17 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "plusbuild",
+    srcs = [
+        "plusbuild.go",
+        "plusbuild2.go",
+    ],
+    importpath = "golang.org/x/tools/go/analysis/passes/modernize/testdata/src/plusbuild",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":plusbuild",
+    visibility = ["//visibility:public"],
+)

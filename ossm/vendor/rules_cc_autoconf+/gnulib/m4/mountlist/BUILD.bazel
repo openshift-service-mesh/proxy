@@ -1,0 +1,116 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/mountlist.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# Determines how to get the list of mounted file systems
+# The m4 file has complex logic to determine the mount mechanism:
+# - Linux: uses getmntent (MOUNTED_GETMNTENT1)
+# - macOS/BSD: uses getmntinfo (MOUNTED_GETMNTINFO)
+# - AIX: uses mntctl (MOUNTED_VMOUNT)
+# - etc.
+autoconf(
+    name = "gl_MOUNTLIST",
+    checks = [
+        checks.AC_CHECK_FUNC(
+            "listmntent",
+            define = "HAVE_LISTMNTENT",
+        ),
+        checks.AC_CHECK_HEADER(
+            "sys/statvfs.h",
+            define = "HAVE_SYS_STATVFS_H",
+        ),
+        checks.AC_CHECK_HEADER(
+            "sys/ucred.h",
+            define = "HAVE_SYS_UCRED_H",
+        ),
+        checks.AC_CHECK_HEADER(
+            "sys/mount.h",
+            define = "HAVE_SYS_MOUNT_H",
+        ),
+        checks.AC_CHECK_HEADER(
+            "sys/fs_types.h",
+            define = "HAVE_SYS_FS_TYPES_H",
+        ),
+
+        # This checks for getmntent function and searches for it in libraries
+        checks.AC_CHECK_FUNC(
+            "getmntent",
+            define = "HAVE_GETMNTENT",
+        ),
+
+        # getmntinfo check - exists on macOS/BSD but not Linux
+        checks.AC_CHECK_FUNC(
+            "getmntinfo",
+            define = "HAVE_GETMNTINFO",
+        ),
+
+        # For BeOS/Haiku support
+        checks.AC_CHECK_FUNC(
+            "next_dev",
+            define = "HAVE_NEXT_DEV",
+        ),
+        checks.AC_CHECK_FUNC(
+            "fs_stat_dev",
+            define = "HAVE_FS_STAT_DEV",
+        ),
+        checks.AC_CHECK_HEADER(
+            "fs_info.h",
+            define = "HAVE_FS_INFO_H",
+        ),
+
+        # AC_CHECK_HEADERS([sys/mntent.h]) - from gl_PREREQ_MOUNTLIST_EXTRA
+        checks.AC_CHECK_HEADER(
+            "sys/mntent.h",
+            define = "HAVE_SYS_MNTENT_H",
+        ),
+    ] + select({
+        # Linux: uses getmntent with one argument (glibc, HP-UX style)
+        # This codepath also checks for setmntent, endmntent, hasmntopt
+        "@platforms//os:linux": [
+            checks.AC_CHECK_FUNC(
+                "endmntent",
+                define = "HAVE_ENDMNTENT",
+            ),
+            # MOUNTED_GETMNTENT1 indicates one-argument getmntent variant
+            checks.AC_DEFINE("MOUNTED_GETMNTENT1", "1"),
+            # gl_cv_list_mounted_fs: "yes" when a mount-listing mechanism exists.
+            checks.M4_VARIABLE("gl_cv_list_mounted_fs", "yes"),
+        ],
+        # macOS/BSD: uses getmntinfo instead of getmntent
+        "//conditions:default": [
+            # MOUNTED_GETMNTINFO indicates getmntinfo is used
+            checks.AC_DEFINE("MOUNTED_GETMNTINFO", "1"),
+            checks.M4_VARIABLE("gl_cv_list_mounted_fs", "yes"),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CANONICAL_HOST",
+        "//gnulib/macros/HAVE_SYS_PARAM_H",
+        "//gnulib/m4/mntent_h",
+        "//gnulib/m4/fstypename",
+        # For test compatibility
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ] + select({
+        # On Linux (getmntent1 codepath):
+        # - HAVE_HASMNTOPT_DEFINE and HAVE_SETMNTENT_DEFINE for config.h defines
+        # - sys_types_h for MAJOR_IN_SYSMACROS
+        "@platforms//os:linux": [
+            "//gnulib/m4/hasmntopt:HAVE_HASMNTOPT_DEFINE",
+            "//gnulib/m4/hasmntopt:HAVE_SETMNTENT_DEFINE",
+            "//gnulib/m4/sys_types_h",
+        ],
+        # On macOS (getmntinfo codepath): no additional deps needed
+        # SUBST values come from mntent_h:defaults (HAVE_HASMNTOPT=1, HAVE_SETMNTENT=1)
+        "//conditions:default": [],
+    }),
+)
+
+autoconf(
+    name = "mountlist",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_MOUNTLIST",
+    ],
+)

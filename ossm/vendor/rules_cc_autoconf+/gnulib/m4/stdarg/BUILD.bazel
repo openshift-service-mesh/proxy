@@ -1,0 +1,47 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/stdarg.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+load("//gnulib:macros.bzl", gl_checks = "checks")
+
+autoconf(
+    name = "gl_STDARG_H",
+    checks = [
+        checks.AC_TRY_COMPILE(
+            name = "gl_cv_func_va_copy",
+            code = """\
+#include <stdarg.h>
+#ifndef va_copy
+void (*func) (va_list, va_list) = va_copy;
+#endif
+int main(void) { return 0; }
+""",
+        ),
+        gl_checks.GL_NEXT_HEADER(
+            "stdarg.h",
+            name = "NEXT_STDARG_H",
+        ),
+        checks.AC_SUBST("NEXT_AS_FIRST_DIRECTIVE_STDARG_H", ""),
+        # GL_GENERATE_STDARG_H: upstream sets this true only when va_copy is
+        # missing (AIX without GCC).  On Linux/macOS with GCC/clang va_copy
+        # is always available, so the wrapper is not generated.
+        checks.M4_VARIABLE(
+            "GL_GENERATE_STDARG_H",
+            condition = "gl_cv_func_va_copy",
+            if_false = "true",
+            if_true = "false",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/include_next",  # Required for INCLUDE_NEXT variables
+    ],
+)
+
+autoconf(
+    name = "stdarg",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_STDARG_H",
+    ],
+)

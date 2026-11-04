@@ -1,0 +1,18 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/tzname.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+
+autoconf(
+    name = "tzname",
+    checks = [
+        # gl_TZNAME checks for struct tm.tm_zone member
+        # AC_STRUCT_TIMEZONE checks for tm_zone
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CANONICAL_HOST",  # AC_REQUIRE([AC_CANONICAL_HOST])
+        "//gnulib/m4/tm_gmtoff",
+        # For test compatibility - need basic header defines
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)

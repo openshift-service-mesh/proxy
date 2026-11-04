@@ -1,0 +1,41 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/vasnwprintf-gnu.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "gl_FUNC_VASNWPRINTF_GNU",
+    checks = [
+        checks.AC_DEFINE("SUPPORT_GNU_PRINTF_DIRECTIVES", "1"),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/vasnprintf",  # gl_FUNC_VASNWPRINTF, gl_FUNC_VASNWPRINTF_IS_POSIX
+        "//gnulib/m4/printf",
+        "//gnulib/m4/getpayload",
+        "//gnulib/m4/math_h:long-double-vs-double",
+        "//gnulib/m4/alloca",
+        # Note: We do NOT depend on wchar_h - it would AC_SUBST HAVE_WINT_T which the test doesn't expect
+        # HAVE_WINT_T as a define (in config.h) comes from wint_t:gt_TYPE_WINT_T via vasnprintf deps
+        "//gnulib/m4/mbrtowc",
+        "//gnulib/m4/wcrtomb",
+        "//gnulib/m4/wcslen",
+        "//gnulib/m4/wcsnlen",
+        "//gnulib/m4/strnlen",
+        "//gnulib/m4/snprintf",
+        # Note: c-strtod removed - it transitively pulls in AC_FUNC_NL_LANGINFO which defines
+        # HAVE_NL_LANGINFO in config.h, but vasnwprintf golden expects it undefined on Linux.
+        # HAVE_NL_LANGINFO on macOS comes from vasnprintf's gl_PREREQ_VASNPRINTF_DIRECTIVE_A.
+        "//gnulib/m4/intmax_t",
+        # For test compatibility - need basic header defines
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+autoconf(
+    name = "vasnwprintf-gnu",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_VASNWPRINTF_GNU",
+    ],
+)

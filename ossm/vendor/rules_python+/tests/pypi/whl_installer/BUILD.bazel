@@ -1,0 +1,12 @@
+load("//python:py_test.bzl", "py_test")
+
+py_test(
+    name = "arguments_test",
+    size = "small",
+    srcs = [
+        "arguments_test.py",
+    ],
+    deps = [
+        "//python/private/pypi/whl_installer:lib",
+    ],
+)

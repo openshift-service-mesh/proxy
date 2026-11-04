@@ -1,0 +1,7 @@
+./doublestar.go
+./glob.go
+./globoptions.go
+./globwalk.go
+./match.go
+./utils.go
+./validate.go

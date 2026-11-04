@@ -1,0 +1,80 @@
+load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@bazel_skylib//lib:sets.bzl", "sets")
+load(
+    "//:def.bzl",
+    "gazelle_binary",
+    "gazelle_generation_test",
+)
+load("//tests:tools.bzl", "get_binary")
+
+# Exclude this entire directly from having anything gnerated by Gazelle. That
+# way the test cases won't be fixed by `bazel run //:gazelle` when run in this
+# repository.
+# gazelle:exclude **
+
+_GAZELLE_BINARY_CONFIGS = [
+    [
+        "gazelle",
+        ["//internal/language/test_filegroup"],
+    ],
+    [
+        "gazelle_with_language_loads_from_flag",
+        ["//internal/language/test_loads_from_flag"],
+    ],
+    [
+        "gazelle_with_language_load_for_packed_rules",
+        ["//internal/language/test_load_for_packed_rules"],
+    ],
+    [
+        "gazelle_with_proto_and_go_languages",
+        [
+            "//language/proto",
+            "//language/go:go_default_library",
+        ],
+    ],
+    [
+        "gazelle_with_visibility",
+        ["//language/bazel/visibility"],
+    ],
+]
+
+[gazelle_binary(
+    name = name if version == 1 else name + "_v2",
+    languages = languages,
+    version = version,
+    visibility = ["//visibility:private"],
+) for (name, languages) in _GAZELLE_BINARY_CONFIGS for version in [
+    1,
+    2,
+]]
+
+[gazelle_generation_test(
+    # Name the test the path to the directory containing the WORKSPACE file.
+    name = test_dir if version == 1 else test_dir + "_v2",
+    gazelle_binary = get_binary(test_dir) + ("" if version == 1 else "_v2"),
+    # This is a noop as the default is False. However, it does confirm that
+    # gazelle_generation_test accepts setting common test attributes.
+    local = False,
+    test_data = glob(
+        include = [test_dir + "/**"],
+    ),
+) for test_dir in sets.to_list(sets.make([
+    paths.dirname(p)
+    # Note that glob matches "this package's directories and non-subpackage
+    # subdirectories," so any directory with a BUILD or BUILD.bazel file
+    # will not match, but those with BUILD.in and BUILD.out will.
+    for p in glob([
+        "**/WORKSPACE",
+        "**/MODULE.bazel",
+    ])
+])) for version in [
+    1,
+    2,
+]]
+
+filegroup(
+    name = "all_files",
+    testonly = True,
+    srcs = [],
+    visibility = ["//visibility:public"],
+)

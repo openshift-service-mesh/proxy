@@ -1,0 +1,25 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "expect",
+    srcs = ["yo.go"],
+    importpath = "golang.org/x/tools/internal/packagestest/testdata/groups/two/primarymod/expect",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":expect",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "expect_test",
+    srcs = ["yo_test.go"],
+)

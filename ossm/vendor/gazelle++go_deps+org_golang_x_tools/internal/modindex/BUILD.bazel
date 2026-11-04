@@ -1,0 +1,43 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "modindex",
+    srcs = [
+        "directories.go",
+        "index.go",
+        "lookup.go",
+        "modindex.go",
+        "symbols.go",
+    ],
+    importpath = "golang.org/x/tools/internal/modindex",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+    deps = [
+        "//internal/gopathwalk",
+        "@org_golang_x_mod//module",
+        "@org_golang_x_mod//semver",
+        "@org_golang_x_sync//errgroup",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":modindex",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "modindex_test",
+    srcs = [
+        "dir_test.go",
+        "export_test.go",
+        "lookup_test.go",
+    ],
+    embed = [":modindex"],
+    deps = ["@com_github_google_go_cmp//cmp"],
+)

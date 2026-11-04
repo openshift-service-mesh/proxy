@@ -1,0 +1,19 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+
+filegroup(
+    name = "distribution",
+    srcs = glob(["**"]),
+    visibility = ["//:__subpackages__"],
+)
+
+bzl_library(
+    name = "native_tools_toolchain",
+    srcs = ["native_tools_toolchain.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "tool_access",
+    srcs = ["tool_access.bzl"],
+    visibility = ["//visibility:public"],
+)

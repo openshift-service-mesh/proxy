@@ -1,0 +1,31 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "keys",
+    srcs = [
+        "keys.go",
+        "standard.go",
+        "util.go",
+    ],
+    importpath = "golang.org/x/tools/internal/event/keys",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+    deps = ["//internal/event/label"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":keys",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "keys_test",
+    srcs = ["util_test.go"],
+    embed = [":keys"],
+)

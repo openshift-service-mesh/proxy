@@ -1,0 +1,21 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "stacktest",
+    srcs = ["stacktest.go"],
+    importpath = "golang.org/x/tools/internal/jsonrpc2/stack/stacktest",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+    deps = ["//internal/jsonrpc2/stack"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":stacktest",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)

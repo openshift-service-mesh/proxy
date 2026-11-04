@@ -1,0 +1,24 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/libsigsegv.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//gnulib:macros.bzl", "macros")
+
+autoconf(
+    name = "gl_LIBSIGSEGV",
+    checks = macros.AC_LIB_HAVE_LINKFLAGS(
+        includes = ["#include <sigsegv.h>"],
+        lib_name = "sigsegv",
+        lib_value = "-lsigsegv",
+        ltlib_value = "-lsigsegv",
+        test_code = "sigsegv_deinstall_handler();",
+    ),
+    visibility = ["//visibility:public"],
+)
+
+autoconf(
+    name = "libsigsegv",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_LIBSIGSEGV",
+    ],
+)

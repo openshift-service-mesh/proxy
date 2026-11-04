@@ -1,0 +1,52 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["tests/**"],
+    ),
+)
+
+_CACHE_ENTRIES = {
+    "BUILD_CLAR": "off",
+    "BUILD_EXAMPLES": "off",
+    "BUILD_FUZZERS": "off",
+    "BUILD_SHARED_LIBS": "off",
+    #"EMBED_SSH_PATH": "$(location @libssh2//:libssh2)",
+    "USE_HTTPS": "on",
+}
+
+_LINUX_CACHE_ENTRIES = dict(_CACHE_ENTRIES.items() + {
+    "CMAKE_C_FLAGS": "$${CMAKE_C_FLAGS:-} -fPIC",
+    "REGEX_BACKEND": "pcre2",
+}.items())
+
+cmake(
+    name = "libgit2",
+    cache_entries = select({
+        "@platforms//os:linux": _LINUX_CACHE_ENTRIES,
+        "//conditions:default": _CACHE_ENTRIES,
+    }),
+    # rules_cc >= 0.2.22 passes MSVC `/std:c17`, which defines
+    # `__STDC_VERSION__`; libgit2 1.3.0's `GIT_FLEX_ARRAY` then expands to a
+    # real flexible array member, and `src/diff_driver.c` puts one inside an
+    # array of structs (MSVC C2233). libgit2's CMake build sets no C standard,
+    # so neither do we. No-op off MSVC.
+    features = ["-default_c_std"],
+    lib_source = ":all_srcs",
+    out_static_libs = select({
+        "@platforms//os:windows": ["git2.lib"],
+        "//conditions:default": ["libgit2.a"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "@examples_zlib//:zlib",
+        "@libssh2",
+        "@openssl",
+    ] + select({
+        "@platforms//os:linux": ["@pcre"],
+        "@platforms//os:macos": ["@iconv_macos//:iconv"],
+        "//conditions:default": [],
+    }),
+)

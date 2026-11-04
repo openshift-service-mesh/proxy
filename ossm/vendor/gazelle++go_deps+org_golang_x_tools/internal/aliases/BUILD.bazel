@@ -1,0 +1,32 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "aliases",
+    srcs = [
+        "aliases.go",
+        "aliases_go122.go",
+    ],
+    importpath = "golang.org/x/tools/internal/aliases",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":aliases",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "aliases_test",
+    srcs = ["aliases_test.go"],
+    deps = [
+        ":aliases",
+        "//internal/testenv",
+    ],
+)

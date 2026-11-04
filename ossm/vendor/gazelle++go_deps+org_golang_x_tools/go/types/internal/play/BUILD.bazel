@@ -1,0 +1,22 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "play_lib",
+    srcs = ["play.go"],
+    importpath = "golang.org/x/tools/go/types/internal/play",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//go/ast/astutil",
+        "//go/ast/inspector",
+        "//go/packages",
+        "//go/types/typeutil",
+        "//internal/astutil",
+        "//internal/typeparams",
+    ],
+)
+
+go_binary(
+    name = "play",
+    embed = [":play_lib"],
+    visibility = ["//go/types:__subpackages__"],
+)
