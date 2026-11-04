@@ -38,10 +38,9 @@ build --action_env=Clang_DIR=/usr/lib64/llvm21
 
 # Build wee8 (V8) from source instead of envoy_toolshed's prebuilt libwee8.a.
 # The prebuilt (~124MB) exceeds GitHub's 100MB file limit, so it cannot live in
-# the committed ossm/vendor snapshot, and it has no s390x/ppc64le build. Envoy's
-# //bazel:wee8_engine alias selects the source build when use_prebuilt_libs is
-# False (envoyproxy/envoy, the :wee8_source_build config_setting).
-build --@envoy//bazel:use_prebuilt_libs=False
+# the committed ossm/vendor snapshot, and it has no s390x/ppc64le build.
+# MODULE.bazel applies wee8-from-source.patch to Envoy's //bazel:wee8_engine
+# alias so its default selects the source build.
 build --cxxopt=-Wno-nullability-completeness
 build --host_linkopt=-latomic
 build --linkopt=-latomic

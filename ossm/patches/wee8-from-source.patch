@@ -1,0 +1,12 @@
+diff --git a/bazel/BUILD b/bazel/BUILD
+--- a/bazel/BUILD
++++ b/bazel/BUILD
+@@ -647,7 +647,7 @@
+         ":asan_build": "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
+         ":msan_build": "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
+         ":tsan_build": "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
+-        "//conditions:default": "@envoy_toolshed//v8:wee8",
++        "//conditions:default": "@proxy-wasm-cpp-host//bazel:wee8_no_pointer_compression",
+     }),
+     visibility = ["//visibility:public"],
+ )
