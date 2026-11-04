@@ -1,0 +1,244 @@
+// Copyright 2026 Google LLC.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Removing the following header is prohibited as it can introduce undefined
+// behavior.
+// clang-format off
+#include "gloop/enforce_gloop_support.h"
+// clang-format on
+
+#include "gloop/util/gtl/generic_printer.h"
+
+#include <memory>
+#include <optional>
+#include <ostream>
+#include <sstream>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include "absl/log/log.h"
+#include "absl/strings/internal/generic_printer.h"
+#include "absl/strings/string_view.h"
+#include "absl/strings/substitute.h"
+#include "absl/types/optional_ref.h"
+#include "gloop/base/arena.h"
+#include "gloop/base/arena_allocator.h"
+#include "gloop/base/logging_extensions.h"
+#include "gloop/util/gtl/extend/debug_printing.h"
+#include "gloop/util/gtl/extend/extend.h"
+#include "gloop/util/gtl/generic_printer_test.pb.h"
+#include "gmock/gmock.h"
+#include "google/protobuf/arena.h"
+#include "gtest/gtest.h"
+
+namespace generic_logging_test {
+struct NotStreamable {};
+}  // namespace generic_logging_test
+
+static std::ostream& operator<<(std::ostream& os,
+                                const generic_logging_test::NotStreamable&) {
+  return os << "This overload should NOT be found by GenericPrint.";
+}
+
+// Types to test selection logic for streamable and non-streamable types.
+namespace generic_logging_test {
+struct Streamable {
+  int x;
+  friend std::ostream& operator<<(std::ostream& os, const Streamable& l) {
+    return os << "Streamable{" << l.x << "}";
+  }
+};
+}  // namespace generic_logging_test
+
+namespace {
+
+using ::testing::AllOf;
+using ::testing::ContainsRegex;
+using ::testing::HasSubstr;
+using ::testing::MatchesRegex;
+
+struct AbslStringifiable {
+  template <typename S>
+  friend void AbslStringify(S& sink, const AbslStringifiable&) {
+    sink.Append("AbslStringifiable!");
+  }
+};
+
+auto HasExactlyNInstancesOf(int n, absl::string_view me) {
+  absl::string_view value_m_times = "(.*?$0){$1}.*";
+
+  return AllOf(MatchesRegex(absl::Substitute(value_m_times, me, n)),
+               Not(MatchesRegex(absl::Substitute(value_m_times, me, n + 1))));
+}
+
+template <typename T>
+std::string GenericPrintToString(const T& v) {
+  std::stringstream ss;
+  ss << gtl::GenericPrint(v);
+  {
+    std::stringstream ss2;
+    ss2 << gtl::GenericPrint() << v;
+    EXPECT_EQ(ss.str(), ss2.str());
+  }
+  return ss.str();
+}
+
+TEST(GenericPrinterTest, StringsWithCustomAllocator) {
+  UnsafeArena arena(10);
+  astring s(R"(a"\b)", &arena);
+  EXPECT_EQ(R"("a\"\\b")", GenericPrintToString(s));
+}
+
+TEST(GenericPrinterTest, NotStreamableWithoutGenericPrint) {
+  generic_logging_test::NotStreamable x;
+  std::stringstream ss;
+  ss << x;
+  EXPECT_EQ(ss.str(), "This overload should NOT be found by GenericPrint.");
+}
+
+TEST(GenericPrinterTest, NotStreamableLvalue) {
+  generic_logging_test::NotStreamable x;
+  EXPECT_THAT(
+      GenericPrintToString(x),
+      MatchesRegex(
+          "\\[unprintable value of size [[:digit:]]+ @0x[[:xdigit:]]+\\]"));
+}
+
+TEST(GenericPrinterTest, NotStreamableXvalue) {
+  EXPECT_THAT(
+      GenericPrintToString(generic_logging_test::NotStreamable{}),
+      MatchesRegex(
+          "\\[unprintable value of size [[:digit:]]+ @0x[[:xdigit:]]+\\]"));
+}
+
+TEST(GenericPrinterTest, StreamAdapter) {
+  std::stringstream ss;
+  static_assert(
+      std::is_same<typename std::remove_reference<
+                       decltype(ss << gtl::GenericPrint())>::type,
+                   absl::internal_generic_printer::GenericPrintStreamAdapter::
+                       Impl<std::stringstream>>::value,
+      "expected ostream << gtl::GenericPrint() to yield adapter impl");
+
+  ss << gtl::GenericPrint() << "again, " << "back-up, " << "cue, "
+     << "double-u, " << "eye, "
+     << "four: " << generic_logging_test::NotStreamable{};
+  EXPECT_THAT(
+      ss.str(),
+      MatchesRegex(
+          "again, back-up, cue, double-u, eye, four: .unprintable value.*"));
+}
+
+TEST(GenericPrinterTest, LogStreamAdapter) {
+  std::string str;
+  base_logging::CopyToStringSink str_sink(&str);
+  LOG(INFO).ToSinkAlso(&str_sink)
+      << gtl::GenericPrint() << "again, " << "back-up, " << "cue, "
+      << "double-u, " << "eye, "
+      << "four: " << generic_logging_test::NotStreamable{};
+  EXPECT_THAT(
+      str,
+      MatchesRegex(
+          "again, back-up, cue, double-u, eye, four: .unprintable value.*"));
+}
+
+TEST(GenericPrinterTest, VoidifiedLogStreamAdapter) {
+  std::string str;
+  base_logging::CopyToStringSink sink(&str);
+  LOG_IF(INFO, true).ToSinkAlso(&sink)
+      << gtl::GenericPrint() << "again, " << "back-up, " << "cue, "
+      << std::vector<int>{1};
+  LOG_IF(INFO, false).ToSinkAlso(&sink)
+      << gtl::GenericPrint() << "double-u, " << "eye, " << "four"
+      << std::vector<int>{2};
+  EXPECT_EQ("again, back-up, cue, [1]", str);
+}
+
+TEST(GenericPrinterTest, OptionalRef) {
+  EXPECT_EQ("nullopt", GenericPrintToString(absl::optional_ref<int>()));
+  EXPECT_EQ("nullopt",
+            GenericPrintToString(absl::optional_ref<int>(std::nullopt)));
+  EXPECT_EQ("<3>", GenericPrintToString(absl::optional_ref(3)));
+  EXPECT_EQ("<Streamable{3}>", GenericPrintToString(absl::optional_ref(
+                                   generic_logging_test::Streamable{3})));
+}
+
+TEST(GenericPrinterTest, IsSupportedPointer) {
+  using absl::internal_generic_printer::is_supported_ptr;
+
+  EXPECT_TRUE(is_supported_ptr<std::unique_ptr<std::string>>);
+  EXPECT_TRUE(is_supported_ptr<
+              google::protobuf::Arena::UniquePtr<std::unique_ptr<int>>>);
+  EXPECT_TRUE(is_supported_ptr<std::unique_ptr<int[]>>);
+  EXPECT_TRUE((is_supported_ptr<std::unique_ptr<void, void (*)(void*)>>));
+
+  EXPECT_FALSE(is_supported_ptr<int*>);
+  EXPECT_FALSE(is_supported_ptr<std::shared_ptr<int>>);
+  EXPECT_FALSE(is_supported_ptr<std::weak_ptr<int>>);
+}
+
+TEST(GenericPrinterTest, SmartPointerPrintsNullptrForAllNullptrs) {
+  std::unique_ptr<std::string> up;
+  google::protobuf::Arena::UniquePtr<char> ap;
+
+  EXPECT_EQ("<nullptr>", GenericPrintToString(up));
+  EXPECT_EQ("<nullptr>", GenericPrintToString(ap));
+}
+
+TEST(GenericPrinterTest, SmartPointerPrintsValueIfNonNull) {
+  EXPECT_THAT(GenericPrintToString(std::make_unique<int>(5)),
+              HasSubstr("pointing to 5"));
+
+  EXPECT_THAT(
+      GenericPrintToString(
+          google::protobuf::Arena::MakeUnique<std::unique_ptr<std::string>>(
+              /*arena=*/nullptr, std::make_unique<std::string>("nested"))),
+      ContainsRegex("<.*pointing to <.* pointing to \"nested\".*>>"));
+}
+
+// TODO: If recursive `unique_ptr`s become an issue that needs
+// handling, submit the implementation documented in <link>
+// and re-enable the following disabled test cases.
+//  ...
+// <start DISABLED_ test section>
+TEST(GenericPrinterTest, DISABLED_SmartPointerDetectsRecursion) {
+  struct Recursive : gtl::Extend<Recursive>::With<gtl::DebugPrintingExtension> {
+    std::unique_ptr<Recursive> next;
+    int val;
+  };
+
+  auto r1 = std::make_unique<Recursive>();
+  r1->val = 1;
+  auto& r2 = r1->next = std::make_unique<Recursive>();
+  r2->val = 2;
+  r2->next = std::move(r1);
+
+  EXPECT_THAT(GenericPrintToString(*r2),
+              AllOf(HasExactlyNInstancesOf(1, "val = 2"),
+                    HasExactlyNInstancesOf(1, "val = 1"),
+                    HasExactlyNInstancesOf(1, "<recursive>")));
+
+  r2->next = nullptr;  // break the cycle
+}
+
+TEST(GenericPrinterTest, ProtoEnum) {
+  EXPECT_EQ("0(TEST_PROTO_ENUM0)",
+            GenericPrintToString(gtl::internal::TEST_PROTO_ENUM0));
+  EXPECT_EQ("1(TEST_PROTO_ENUM1)",
+            GenericPrintToString(gtl::internal::TEST_PROTO_ENUM1));
+}
+
+}  // namespace

@@ -1,0 +1,18 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "chautil",
+    srcs = ["lazy.go"],
+    importpath = "golang.org/x/tools/go/callgraph/internal/chautil",
+    visibility = ["//go/callgraph:__subpackages__"],
+    deps = [
+        "//go/ssa",
+        "//go/types/typeutil",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":chautil",
+    visibility = ["//go/callgraph:__subpackages__"],
+)

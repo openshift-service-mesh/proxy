@@ -1,0 +1,113 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/gnulib-common.m4"""
+
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks", "macros")
+
+selects.config_setting_group(
+    name = "linux_x86_64",
+    match_all = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    visibility = ["//gnulib/m4:__subpackages__"],
+)
+
+selects.config_setting_group(
+    name = "linux_aarch64",
+    match_all = [
+        "@platforms//os:linux",
+        "@platforms//cpu:aarch64",
+    ],
+    visibility = ["//gnulib/m4:__subpackages__"],
+)
+
+autoconf(
+    name = "HAVE_FEATURES_H",
+    checks = macros.AC_CHECK_HEADERS(["features.h"]),
+    visibility = ["//gnulib:__subpackages__"],
+)
+
+# Test whether <features.h> exists. Set HAVE_FEATURES_H.
+# Uses shared target to avoid duplicate with argp in aggregates.
+
+autoconf(
+    name = "gl_FEATURES_H",
+    checks = [
+        checks.AC_SUBST(
+            "HAVE_FEATURES_H",
+            condition = "ac_cv_header_features_h",
+            if_false = 0,
+            if_true = 1,
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":HAVE_FEATURES_H",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+# gl_BIGENDIAN - like AC_C_BIGENDIAN, can be AC_REQUIREd
+autoconf(
+    name = "gl_BIGENDIAN",
+    checks = [],
+    visibility = ["//visibility:public"],
+    deps = ["//autoconf/macros/AC_C_BIGENDIAN"],
+)
+
+# gl_HOST_MACOS_SDK_MODERN — rules_cc_autoconf-specific helper.
+#
+# Several upstream gnulib m4 files use AC_RUN_IFELSE to detect OS bugs that
+# Apple has fixed in recent macOS releases (trailing-slash handling in
+# access/chown/open/mkfifo/readlink/rename, lstat-on-symlink-with-slash, etc).
+# rules_cc_autoconf has no AC_TRY_RUN equivalent and adding one would break
+# cross-compilation, so we substitute the closest static signal: the macOS
+# deployment-target version. If the binary is compiled with
+# `-mmacosx-version-min >= 11.0` (Big Sur, 2020), it can only run on a kernel
+# where those bugs are fixed.
+#
+# Cache var: gl_cv_macos_sdk_modern (1 on modern macOS targets, 0 elsewhere).
+# Consumers gate their bug-defines / REPLACE_* substs on this. The threshold
+# (11.0) is conservative — most of the bugs in question were fixed by macOS
+# 10.6 (2009), but lacking authoritative per-bug release dates we keep some
+# margin; lowering would just affect older macOS targets, where we'd
+# correctly fall back to "bug present" (gnulib's M4 cross-compile guess).
+autoconf(
+    name = "gl_HOST_MACOS_SDK_MODERN",
+    checks = [
+        checks.AC_TRY_COMPILE(
+            name = "gl_cv_macos_sdk_modern",
+            code = """\
+#include <Availability.h>
+#if !defined(__MAC_OS_X_VERSION_MIN_REQUIRED) \\
+    || __MAC_OS_X_VERSION_MIN_REQUIRED < 110000
+#error "macOS deployment target is older than 11.0 (Big Sur)"
+#endif
+int main(void) { return 0; }
+""",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# AC_C_RESTRICT - defined in gnulib-common.m4 (overrides Autoconf 2.60-2.70)
+# Re-export from autoconf macro so modules can depend on gnulib-common for it.
+autoconf(
+    name = "AC_C_RESTRICT",
+    checks = [],
+    visibility = ["//visibility:public"],
+    deps = ["//autoconf/macros/AC_C_RESTRICT"],
+)
+
+# gnulib-common - top-level
+autoconf(
+    name = "gnulib-common",
+    checks = [],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FEATURES_H",
+        "//gnulib/m4/00gnulib",
+        "//gnulib/m4/zzgnulib",
+    ],
+)

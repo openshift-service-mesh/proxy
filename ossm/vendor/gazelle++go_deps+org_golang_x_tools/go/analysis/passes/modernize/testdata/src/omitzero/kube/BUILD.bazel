@@ -1,0 +1,14 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "kube",
+    srcs = ["kube.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/modernize/testdata/src/omitzero/kube",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":kube",
+    visibility = ["//visibility:public"],
+)

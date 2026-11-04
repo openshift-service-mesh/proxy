@@ -1,0 +1,18 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "modernize_lib",
+    srcs = ["main.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//go/analysis/multichecker",
+        "//go/analysis/passes/modernize",
+    ],
+)
+
+go_binary(
+    name = "modernize",
+    embed = [":modernize_lib"],
+    visibility = ["//visibility:public"],
+)

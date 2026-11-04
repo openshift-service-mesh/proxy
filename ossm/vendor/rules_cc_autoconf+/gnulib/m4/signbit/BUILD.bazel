@@ -1,0 +1,32 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/signbit.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "signbit",
+    checks = [
+        checks.AC_CHECK_DECL(
+            "copysignf",
+            define = "HAVE_DECL_COPYSIGNF",
+        ),
+        checks.AC_CHECK_DECL(
+            "copysign",
+            define = "HAVE_DECL_COPYSIGN",
+        ),
+        checks.AC_CHECK_DECL(
+            "copysignl",
+            define = "HAVE_DECL_COPYSIGNL",
+        ),
+        # macOS/Linux golden expects REPLACE_SIGNBIT_USING_BUILTINS "1" (override math_h default 0)
+        # On Windows MSVC, __builtin_signbitl etc. don't exist, so use 0.
+    ] + select({
+        "@platforms//os:windows": [
+            checks.AC_SUBST("REPLACE_SIGNBIT_USING_BUILTINS", "0"),
+        ],
+        "//conditions:default": [
+            checks.AC_SUBST("REPLACE_SIGNBIT_USING_BUILTINS", "1"),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+)

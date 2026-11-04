@@ -1,0 +1,18 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "linecount_lib",
+    srcs = ["linecount.go"],
+    importpath = "golang.org/x/tools/go/packages/internal/linecount",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//go/packages",
+        "@org_golang_x_sync//errgroup",
+    ],
+)
+
+go_binary(
+    name = "linecount",
+    embed = [":linecount_lib"],
+    visibility = ["//go/packages:__subpackages__"],
+)

@@ -1,0 +1,83 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/sigaltstack.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks", "utils")
+
+# Shared check for HAVE_SIGALTSTACK
+# AC_CHECK_FUNCS_ONCE([sigaltstack]) - line 21
+autoconf(
+    name = "HAVE_SIGALTSTACK",
+    checks = [
+        checks.AC_CHECK_FUNC(
+            "sigaltstack",
+            define = "HAVE_SIGALTSTACK",
+        ),
+    ],
+    visibility = ["//gnulib:__subpackages__"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+# SV_SIGALTSTACK - lines 16-108
+autoconf(
+    name = "SV_SIGALTSTACK",
+    checks = [
+        # AC_CHECK_FUNCS_ONCE([setrlimit]) - line 21
+        checks.AC_CHECK_FUNC(
+            "setrlimit",
+            define = "HAVE_SETRLIMIT",
+        ),
+
+        # AC_CHECK_TYPE([stack_t], ...) - lines 23-31
+        # Gated on sigaltstack existing: "if test $ac_cv_func_sigaltstack = yes"
+        checks.AC_CHECK_TYPE(
+            "stack_t",
+            includes = ["#include <signal.h>"],
+            requires = ["ac_cv_func_sigaltstack==1"],
+        ),
+        # AC_DEFINE(stack_t, [struct sigaltstack], ...) - lines 24-26
+        # Only define stack_t when the type does NOT exist; otherwise leave
+        # it alone so the system typedef is used.
+        checks.AC_DEFINE(
+            "stack_t",
+            if_true = "struct sigaltstack",
+            requires = ["!ac_cv_type_stack_t"],
+        ),
+    ] + select({
+        "@platforms//os:windows": [
+            # sigaltstack doesn't exist on Windows
+            checks.AC_DEFINE("HAVE_WORKING_SIGALTSTACK", "0"),
+        ],
+        "//conditions:default": [
+            # AC_LINK_IFELSE - lines 36-41 (macOS) and lines 80-84 (cross-compile fallback)
+            # Both paths use the same link test
+            checks.AC_TRY_LINK(
+                name = "sv_cv_sigaltstack",
+                code = utils.AC_LANG_PROGRAM(
+                    ["#include <signal.h>"],
+                    "int x = SA_ONSTACK; stack_t ss; sigaltstack ((stack_t*)0, &ss);",
+                ),
+            ),
+            # Lines 104-105: if sv_cv_sigaltstack != no
+            checks.AC_DEFINE(
+                "HAVE_WORKING_SIGALTSTACK",
+                requires = ["sv_cv_sigaltstack==1"],
+            ),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":HAVE_SIGALTSTACK",
+        "//autoconf/macros/AC_CANONICAL_HOST",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+autoconf(
+    name = "sigaltstack",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":SV_SIGALTSTACK",
+    ],
+)

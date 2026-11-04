@@ -1,0 +1,37 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/fdopendir.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "gl_FUNC_FDOPENDIR",
+    checks = [
+        # Equivalent to gl_FUNC_FDOPENDIR macro from fdopendir.m4
+        # Note: Full implementation includes runtime checks that are not easily
+        # replicable in Bazel
+        checks.AC_CHECK_FUNC(
+            "fdopendir",
+            define = "HAVE_FDOPENDIR",
+        ),
+        checks.AC_CHECK_DECL(
+            "fdopendir",
+            define = "HAVE_DECL_FDOPENDIR",
+            includes = ["#include <dirent.h>"],
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/extensions",
+        "//gnulib/m4/dirent_h",  # AC_REQUIRE([gl_DIRENT_H_DEFAULTS])
+        # Note: AC_REQUIRE([AC_CANONICAL_HOST]) and AC_REQUIRE([gl_USE_SYSTEM_EXTENSIONS])
+        # are standard autoconf macros
+    ],
+)
+
+autoconf(
+    name = "fdopendir",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_FDOPENDIR",
+    ],
+)

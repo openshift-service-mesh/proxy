@@ -1,0 +1,20 @@
+
+load("@package_metadata//rules:package_metadata.bzl", "package_metadata")
+load("@rules_license//rules:package_info.bzl", "package_info")
+
+package_metadata(
+    name = "package_metadata",
+    purl = "pkg:golang/github.com/iancoleman/strcase@v0.3.0?checksum=h1:nTXanmYxhfFAMjZL34Ov6gkzEsSJZ5DbhxWjvSASxEI%3D",
+    visibility = [
+        "//:__subpackages__",
+    ],
+)
+
+package_info(
+    name = "package_info",
+    package_name = "github.com/iancoleman/strcase",
+    package_url = "https://github.com/iancoleman/strcase",
+    package_version = "0.3.0",
+    purl = "pkg:golang/github.com/iancoleman/strcase@v0.3.0?checksum=h1:nTXanmYxhfFAMjZL34Ov6gkzEsSJZ5DbhxWjvSASxEI%3D",
+    visibility = ["//:__subpackages__"],
+)

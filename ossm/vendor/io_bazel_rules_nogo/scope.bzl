@@ -1,3 +1,0 @@
-
-INCLUDES = ["all"]
-EXCLUDES = []

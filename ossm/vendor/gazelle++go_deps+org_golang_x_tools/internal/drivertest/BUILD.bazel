@@ -1,0 +1,36 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "drivertest",
+    srcs = ["driver.go"],
+    importpath = "golang.org/x/tools/internal/drivertest",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+    deps = ["//go/packages"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":drivertest",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "drivertest_test",
+    srcs = ["driver_test.go"],
+    deps = [
+        ":drivertest",
+        "//go/packages",
+        "//internal/diff",
+        "//internal/diff/myers",
+        "//internal/packagesinternal",
+        "//internal/testenv",
+        "//internal/testfiles",
+        "//txtar",
+    ],
+)

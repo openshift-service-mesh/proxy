@@ -1,0 +1,143 @@
+#!/bin/bash
+# Copyright 2018 The Bazel Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -euo pipefail
+
+# Detect platform for toolchain label suffix.
+_host_os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+_host_arch="$(uname -m)"
+if [[ "${_host_arch}" == "x86_64" ]]; then
+  _host_arch="x86_64"
+elif [[ "${_host_arch}" == "aarch64" ]] || [[ "${_host_arch}" == "arm64" ]]; then
+  _host_arch="aarch64"
+fi
+if [[ "${_host_os}" == "darwin" ]]; then
+  _toolchain_suffix="${_host_arch}-darwin"
+else
+  _toolchain_suffix="${_host_arch}-linux"
+fi
+
+# Select the toolchain based on TEST_STDLIB (set by CI matrix).
+# "default" uses the registered llvm_toolchain (builtin-libc++).
+# "libc++", "stdc++", and "dynamic-stdc++" use the corresponding toolchains.
+case "${TEST_STDLIB:-default}" in
+default)
+  toolchain_name=""
+  ;;
+libc++)
+  toolchain_name="@llvm_toolchain_libcxx//:cc-toolchain-${_toolchain_suffix}"
+  ;;
+stdc++)
+  toolchain_name="@llvm_toolchain_stdcpp//:cc-toolchain-${_toolchain_suffix}"
+  ;;
+dynamic-stdc++)
+  toolchain_name="@llvm_toolchain_dynamic_stdcpp//:cc-toolchain-${_toolchain_suffix}"
+  ;;
+*)
+  echo >&2 "Unknown TEST_STDLIB: ${TEST_STDLIB}"
+  exit 1
+  ;;
+esac
+
+scripts_dir="$(dirname "${BASH_SOURCE[0]}")"
+
+# shellcheck source=./tests/scripts/bazel.sh
+source "${scripts_dir}/bazel.sh"
+"${bazel}" version
+
+cd "${scripts_dir}"
+
+# Generate some files needed for the tests.
+echo "Bazel common args: ${common_args[*]}"
+if [[ -n "${toolchain_name}" ]]; then
+  common_test_args+=("--extra_toolchains=${toolchain_name}")
+fi
+
+# Extra test targets (e.g. rules_rust) that require bazel >= 9 and bzlmod.
+targets=(
+  //foreign:pcre
+  @boringssl//...
+)
+
+# rules_rust bzlmod support is unreliable on older Bazel versions;
+# only run rust-related prep and tests on bazel 9+ with bzlmod enabled.
+_use_bazel_version="${USE_BAZEL_VERSION:-latest}"
+if [[ "${_use_bazel_version}" != "8."* ]] && [[ "${USE_BZLMOD:-true}" == "true" ]]; then
+  echo "------------------------------------------------------"
+  echo "Running extra prep steps for rules_rust tests (bazel ${_use_bazel_version} with bzlmod)..."
+  # Generate files needed for rules_go cgo tests.
+  "${bazel}" query "${common_args[@]}" @io_bazel_rules_go//tests/core/cgo:dylib_test >/dev/null
+
+  output_base="$("${bazel}" info output_base)"
+  echo "Output base: ${output_base}"
+
+  # As of rules_go 0.51.0 the 'generate_imported_dylib.sh' expects 'cc' to be available through PATH.
+  if [[ ${USE_BZLMOD:-true} == "true" ]]; then
+    generate_imported_dylib_sh="${output_base}/external/rules_go~/tests/core/cgo/generate_imported_dylib.sh"
+    if [[ ! -f ${generate_imported_dylib_sh} ]]; then
+      generate_imported_dylib_sh="${output_base}/external/rules_go+/tests/core/cgo/generate_imported_dylib.sh"
+    fi
+  else
+    generate_imported_dylib_sh="${output_base}/external/io_bazel_rules_go/tests/core/cgo/generate_imported_dylib.sh"
+  fi
+  echo "Script: '${generate_imported_dylib_sh}'"
+  # The script compiles the `imported.c` next to it into the dylibs expected by
+  # the (manual) dylib_test targets, in the same package directory.
+  _cgo_dir="$(dirname "${generate_imported_dylib_sh}")"
+  "${generate_imported_dylib_sh}" "${IMPORTED_C_PATH:-${_cgo_dir}/imported.c}" "${OUTPUT_DIR:-${_cgo_dir}}" || echo "ERROR: rules_go script 'tests/core/cgo/generate_imported_dylib.sh' failed."
+  echo "------------------------------------------------------"
+
+  targets+=(
+    @rules_rust//test/unit/{interleaved_cc_info,native_deps}:all
+    "@io_bazel_rules_go//tests/core/cgo:all"
+    "-@io_bazel_rules_go//tests/core/cgo:cc_libs_test"
+    "-@io_bazel_rules_go//tests/core/cgo:cgo_abs_paths_test"
+    "-@io_bazel_rules_go//tests/core/cgo:external_includes_test"
+    "-@io_bazel_rules_go//tests/core/cgo:wrapped_cgo_test"
+    -@rules_rust//test/unit/native_deps:{cdylib,bin}_has_native_dep_and_alwayslink_{cc,rust}_linker_test
+  )
+fi
+
+test_args=(
+  "${common_test_args[@]}"
+  "--copt=-Wno-deprecated-builtins" # https://github.com/abseil/abseil-cpp/issues/1201
+  # Disable the "hermetic sandbox /tmp" behavior of Bazel 7 as it results in broken symlinks when
+  # rules_foreign_cc builds pcre.
+  # TODO: Remove this once rules_foreign_cc is fully compatible with Bazel 7.
+  "--sandbox_add_mount_pair=/tmp"
+)
+
+# shellcheck disable=SC2250
+if [[ $OSTYPE == "darwin"* ]]; then
+  MACOSX_VERSION_MIN="$(sw_vers -productVersion)"
+  test_args+=(
+    "--cxxopt=-mmacosx-version-min=${MACOSX_VERSION_MIN:-11.0.0}"
+    "--linkopt=-mmacosx-version-min=${MACOSX_VERSION_MIN:-11.0.0}"
+  )
+fi
+echo "Bazel test args: ${test_args[*]}"
+
+# We exclude the following targets:
+# - cc_libs_test from rules_go because it assumes that stdlibc++ has been dynamically linked, but we
+#   link it statically on linux.
+# - external_includes_test from rules_go because it is a nested bazel test and so takes a long time
+#   to run, and it is not particularly useful to us.
+# - time_zone_format_test from abseil-cpp because it assumes TZ is set to America/Los_Angeles, but
+#   we run the tests in UTC.
+# shellcheck disable=SC2207
+targets+=($("${bazel}" query "${common_args[@]}" 'attr(timeout, short, tests(@com_google_absl//absl/...) except attr(tags, benchmark, tests(@com_google_absl//absl/...)))'))
+targets+=("-@com_google_absl//absl/time/internal/cctz:time_zone_format_test")
+
+"${bazel}" --bazelrc=/dev/null test "${test_args[@]}" -- "${targets[@]}"

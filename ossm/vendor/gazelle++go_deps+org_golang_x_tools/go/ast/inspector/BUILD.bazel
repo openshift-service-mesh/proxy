@@ -1,0 +1,34 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "inspector",
+    srcs = [
+        "cursor.go",
+        "inspector.go",
+        "iter.go",
+        "typeof.go",
+        "walk.go",
+    ],
+    importpath = "golang.org/x/tools/go/ast/inspector",
+    visibility = ["//visibility:public"],
+    deps = ["//go/ast/edge"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":inspector",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "inspector_test",
+    srcs = [
+        "cursor_test.go",
+        "inspector_test.go",
+        "iter_test.go",
+    ],
+    deps = [
+        ":inspector",
+        "//go/ast/edge",
+    ],
+)

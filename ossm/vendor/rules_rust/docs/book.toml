@@ -1,9 +1,0 @@
-[book]
-authors = ["UebelAndre", "illicitonion", "scentini"]
-language = "en"
-multilingual = false
-src = "src"
-title = "rules_rust"
-
-[output.html]
-git-repository-url = "https://github.com/bazelbuild/rules_rust"

@@ -1,0 +1,20 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/sys_msg_h.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+load("//gnulib:macros.bzl", gl_macros = "macros")
+
+autoconf(
+    name = "sys_msg_h",
+    checks = [
+        checks.AC_CHECK_HEADER(
+            "sys/msg.h",
+            define = "HAVE_SYS_MSG_H",
+        ),
+    ] + gl_macros.GL_CHECK_NEXT_HEADERS(["sys/msg.h"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/include_next",
+    ],
+)

@@ -1,0 +1,54 @@
+load("@aspect_bazel_lib//lib:utils.bzl", "is_bazel_7_or_greater")
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("//esbuild/private:resolved_toolchain.bzl", "resolved_toolchain")
+
+# For stardoc to reference the files
+exports_files(["defs.bzl"])
+
+# This is the target rule authors should put in their "toolchains"
+# attribute in order to get a runtime for the correct platform.
+# See https://docs.bazel.build/versions/main/toolchains.html#writing-rules-that-use-toolchains
+toolchain_type(
+    name = "toolchain_type",
+    visibility = ["//visibility:public"],
+)
+
+resolved_toolchain(
+    name = "resolved_toolchain",
+    # Marked manual so that `bazel test //...` passes
+    # even if no toolchain is registered.
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
+# gazelle:exclude dependencies.bzl
+bzl_library(
+    name = "repositories",
+    srcs = ["repositories.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//esbuild/private:toolchains_repo",
+        "//esbuild/private:versions",
+        "@bazel_tools//tools/build_defs/repo:http.bzl",
+        "@bazel_tools//tools/build_defs/repo:utils.bzl",
+    ] + (["@bazel_tools//tools/build_defs/repo:cache.bzl"] if is_bazel_7_or_greater() else []),
+)
+
+bzl_library(
+    name = "defs",
+    srcs = ["defs.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//esbuild/private:esbuild",
+        "@bazel_skylib//lib:types",
+        "@bazel_skylib//rules:write_file",
+        "@bazel_tools//tools/build_defs/repo:http.bzl",
+        "@bazel_tools//tools/build_defs/repo:utils.bzl",
+    ] + (["@bazel_tools//tools/build_defs/repo:cache.bzl"] if is_bazel_7_or_greater() else []),
+)
+
+bzl_library(
+    name = "toolchain",
+    srcs = ["toolchain.bzl"],
+    visibility = ["//visibility:public"],
+)

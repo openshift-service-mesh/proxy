@@ -1,0 +1,39 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# Configured from opentelemetry-cpp/cmake/component-definitions.cmake.in
+
+# ----------------------------------------------------------------------
+# Deprecated components
+# ----------------------------------------------------------------------
+set(OTEL_DEPRECATED_COMPONENTS_LIST @OTEL_DEPRECATED_COMPONENTS_LIST@)
+
+# ----------------------------------------------------------------------
+# Deprecated component replacements (deprecated_name -> replacement_name)
+# ----------------------------------------------------------------------
+
+@OTEL_COMPONENTS_REPLACEMENTS_BLOCK@
+
+# ----------------------------------------------------------------------
+# opentelmetry-cpp Built COMPONENT list
+# ----------------------------------------------------------------------
+set(OTEL_BUILT_COMPONENTS_LIST @OTEL_BUILT_COMPONENTS_LIST@)
+
+# ----------------------------------------------------------------------
+# COMPONENT to TARGET lists
+# ----------------------------------------------------------------------
+
+@OTEL_COMPONENTS_TARGETS_BLOCK@
+
+#-----------------------------------------------------------------------
+# COMPONENT to COMPONENT dependencies
+#-----------------------------------------------------------------------
+
+@OTEL_COMPONENTS_INTERNAL_DEPENDENCIES_BLOCK@
+
+
+#-----------------------------------------------------------------------
+# COMPONENT to THIRDPARTY dependencies
+#-----------------------------------------------------------------------
+
+@OTEL_COMPONENTS_THIRDPARTY_DEPENDENCIES_BLOCK@

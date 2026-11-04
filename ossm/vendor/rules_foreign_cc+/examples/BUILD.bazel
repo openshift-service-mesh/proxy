@@ -1,0 +1,16 @@
+load("@rules_python//python/pip_install:requirements.bzl", "compile_pip_requirements")
+
+exports_files([
+    "cc_wrapper.sh",
+])
+
+test_suite(
+    name = "third_party_tests",
+    tests = ["@rules_foreign_cc_examples_third_party//:all_tests"],
+)
+
+compile_pip_requirements(
+    name = "requirements",
+    requirements_in = "requirements.txt",
+    requirements_txt = "requirements_lock.txt",
+)

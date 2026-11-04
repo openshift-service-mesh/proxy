@@ -1,0 +1,24 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/builtin-expect.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "builtin-expect",
+    checks = [
+        # Use AC_TRY_LINK (not AC_TRY_COMPILE) because MSVC allows calling
+        # undeclared functions (implicit declaration), so a compile-only test
+        # would incorrectly pass. A link test correctly fails on MSVC since
+        # __builtin_expect is not a linkable symbol. On GCC/Clang, the builtin
+        # is expanded inline by the compiler and link still succeeds.
+        checks.AC_TRY_LINK(
+            name = "ac_cv_have___builtin_expect",
+            code = """int main(void) {
+    return __builtin_expect(1, 1);
+}""",
+            define = "HAVE___BUILTIN_EXPECT",
+            language = "c",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+)

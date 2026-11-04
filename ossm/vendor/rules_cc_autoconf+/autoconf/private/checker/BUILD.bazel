@@ -1,0 +1,126 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//tools/cxxopts:cxxopts.bzl", "cxxopts", "linkopts")
+
+cc_library(
+    name = "check_types",
+    srcs = [
+        "check_result.cc",
+    ],
+    hdrs = [
+        "check.h",
+        "check_result.h",
+    ],
+    cxxopts = cxxopts(),
+    visibility = ["//autoconf/private:__subpackages__"],
+    deps = [
+        "//tools/json",
+    ],
+)
+
+cc_library(
+    name = "debug_logger",
+    hdrs = ["debug_logger.h"],
+    cxxopts = cxxopts(),
+)
+
+cc_library(
+    name = "config",
+    srcs = [
+        "check.cc",
+        "config.cc",
+    ],
+    hdrs = ["config.h"],
+    cxxopts = cxxopts(),
+    visibility = ["//autoconf/private:__subpackages__"],
+    deps = [
+        ":check_types",
+        ":debug_logger",
+        "//autoconf/private/common:file_util",
+        "//tools/json",
+    ],
+)
+
+cc_library(
+    name = "check_runner",
+    srcs = [
+        "check_runner.cc",
+        "compilation.cc",
+        "system_header.cc",
+    ],
+    hdrs = [
+        "check_runner.h",
+        "system_header.h",
+    ],
+    cxxopts = cxxopts(),
+    visibility = ["//autoconf/private:__subpackages__"],
+    deps = [
+        ":check_types",
+        ":config",
+        ":debug_logger",
+        "//autoconf/private/common:file_util",
+        "//tools/json",
+    ],
+)
+
+cc_library(
+    name = "condition_evaluator",
+    srcs = [
+        "condition_evaluator.cc",
+    ],
+    hdrs = ["condition_evaluator.h"],
+    cxxopts = cxxopts(),
+    visibility = [
+        "//autoconf/private:__subpackages__",
+        "//gnulib/private:__subpackages__",
+    ],
+    deps = [
+        ":check_types",
+    ],
+)
+
+cc_test(
+    name = "condition_evaluator_test",
+    srcs = ["condition_evaluator_test.cc"],
+    cxxopts = cxxopts(),
+    deps = [":condition_evaluator"],
+)
+
+cc_library(
+    name = "checker",
+    srcs = [
+        "checker.cc",
+    ],
+    hdrs = ["checker.h"],
+    cxxopts = cxxopts(),
+    visibility = ["//autoconf/private:__subpackages__"],
+    deps = [
+        ":check_runner",
+        ":condition_evaluator",
+        "//autoconf/private/common:file_util",
+        "//tools/json",
+    ],
+)
+
+cc_test(
+    name = "system_header_test",
+    srcs = ["system_header_test.cc"],
+    cxxopts = cxxopts(),
+    deps = [":check_runner"],
+)
+
+cc_binary(
+    name = "checker_bin",
+    srcs = [
+        "main.cc",
+    ],
+    cxxopts = cxxopts(),
+    linkopts = linkopts(),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":checker",
+        "//autoconf/private/common:action_args",
+        "//tools/json",
+    ],
+)

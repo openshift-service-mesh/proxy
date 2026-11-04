@@ -1,0 +1,266 @@
+# Copyright 2026 Google LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
+package(
+    default_applicable_licenses = ["//gloop:license"],
+    default_hdrs_check = "strict",
+    default_visibility = ["//visibility:private"],
+    features = ["header_modules"],
+)
+
+cc_library(
+    name = "auto_function_runner",
+    hdrs = ["auto_function_runner.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gloop:enforce_gloop_support",
+        "@abseil-cpp//absl/base:core_headers",
+        "@abseil-cpp//absl/functional:any_invocable",
+    ],
+)
+
+cc_test(
+    name = "auto_function_runner_test",
+    srcs = ["auto_function_runner_test.cc"],
+    deps = [
+        ":auto_function_runner",
+        ":to_callback",
+        "//gloop:gloop_test_main",
+        "//gloop/base:callback",
+        "@abseil-cpp//absl/functional:any_invocable",
+        "@google_benchmark//:benchmark",
+        "@googletest//:gtest",
+    ],
+)
+
+# For only util::functional::FromCallback and friends
+cc_library(
+    name = "from_callback",
+    srcs = [
+        "from_callback_internal.h",
+    ],
+    hdrs = ["from_callback.h"],
+    visibility = ["//gloop:__subpackages__"],
+    deps = [
+        ":callable_once",
+        ":to_callback_internal",
+        ":to_shared_function",
+        "//gloop:enforce_gloop_support",
+        "//gloop/base:callback-types",
+        "//gloop/util/refcount:compact_reference_counted",
+        "//gloop/util/refcount:reffed_ptr",
+        "@abseil-cpp//absl/base:core_headers",
+        "@abseil-cpp//absl/base:nullability",
+        "@abseil-cpp//absl/log:die_if_null",
+    ],
+)
+
+cc_test(
+    name = "from_callback_test",
+    srcs = ["from_callback_test.cc"],
+    deps = [
+        ":from_callback",
+        ":to_callback",
+        "//gloop:gloop_test_main",
+        "//gloop/base:callback",
+        "@abseil-cpp//absl/base:core_headers",
+        "@abseil-cpp//absl/base:nullability",
+        "@abseil-cpp//absl/functional:bind_front",
+        "@google_benchmark//:benchmark",
+        "@googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "to_callback_internal",
+    hdrs = ["to_callback_internal.h"],
+    deps = [
+        "//gloop:enforce_gloop_support",
+        "//gloop/base:callback-types",
+        "//gloop/base:context",
+        "//gloop/base:tracecontext",
+        "//gloop/perftools/tracing:trace_source_location",
+        "//gloop/perftools/tracing:tracing_base",
+        "@abseil-cpp//absl/cleanup",
+    ],
+)
+
+# For only util::functional::ToCallback
+cc_library(
+    name = "to_callback",
+    hdrs = ["to_callback.h"],
+    visibility = ["//gloop:__subpackages__"],
+    deps = [
+        ":from_callback",
+        ":to_callback_internal",
+        ":with_context",
+        "//gloop:enforce_gloop_support",
+        "//gloop/base:callback-types",
+        "//gloop/perftools/tracing:trace_source_location",
+        "//gloop/perftools/tracing:tracing_base",
+        "@abseil-cpp//absl/base:core_headers",
+    ],
+)
+
+cc_test(
+    name = "to_callback_benchmark",
+    srcs = ["to_callback_benchmark.cc"],
+    deps = [
+        ":to_callback",
+        "//gloop:gloop_test_main",
+        "//gloop/base:callback",
+        "//gloop/base:context",
+        "@google_benchmark//:benchmark",
+        "@googletest//:gtest",
+    ],
+)
+
+cc_test(
+    name = "to_callback_test",
+    srcs = ["to_callback_test.cc"],
+    deps = [
+        ":from_callback",
+        ":to_callback",
+        "//gloop:gloop_test_main",
+        "//gloop/base:callback",
+        "//gloop/base:context",
+        "//gloop/base:tracecontext",
+        "@abseil-cpp//absl/functional:bind_front",
+        "@abseil-cpp//absl/log",
+        "@google_benchmark//:benchmark",
+        "@googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "to_shared_function",
+    hdrs = ["to_shared_function.h"],
+    visibility = ["//gloop:__subpackages__"],
+    deps = [
+        "//gloop:enforce_gloop_support",
+        "@abseil-cpp//absl/base:nullability",
+        "@abseil-cpp//absl/memory",
+    ],
+)
+
+cc_test(
+    name = "to_shared_function_test",
+    size = "small",
+    srcs = ["to_shared_function_test.cc"],
+    deps = [
+        ":to_shared_function",
+        "//gloop:gloop_test_main",
+        "@google_benchmark//:benchmark",
+        "@googletest//:gtest",
+    ],
+)
+
+# For only util::functional::WithContext
+cc_library(
+    name = "with_context",
+    srcs = ["with_context_internal.h"],
+    hdrs = ["with_context.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gloop:enforce_gloop_support",
+        "//gloop/base:context",
+        "//gloop/perftools/tracing:trace_source_location",
+        "//gloop/perftools/tracing:tracing_base",
+    ],
+)
+
+cc_library(
+    name = "callable_once",
+    srcs = ["callable_once_internal.h"],
+    hdrs = ["callable_once.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gloop:enforce_gloop_support",
+        "@abseil-cpp//absl/base:core_headers",
+        "@abseil-cpp//absl/functional:bind_front",
+        "@abseil-cpp//absl/log:check",
+    ],
+)
+
+cc_test(
+    name = "with_context_test",
+    srcs = ["with_context_test.cc"],
+    deps = [
+        ":with_context",
+        "//gloop:gloop_test_main",
+        "//gloop/base:context",
+        "//gloop/base:tracecontext",
+        "//gloop/perftools/tracing:mock_trace_event_listener",
+        "//gloop/perftools/tracing:tracing_base",
+        "//gloop/perftools/tracing:with_trace_event_listener",
+        "@abseil-cpp//absl/functional:any_invocable",
+        "@google_benchmark//:benchmark",
+        "@googletest//:gtest",
+    ],
+)
+
+cc_test(
+    name = "with_context_benchmark",
+    srcs = ["with_context_benchmark.cc"],
+    deps = [
+        ":with_context",
+        "//gloop:gloop_test_main",
+        "//gloop/base:context",
+        "@google_benchmark//:benchmark",
+        "@googletest//:gtest",
+    ],
+)
+
+cc_test(
+    name = "callable_once_test",
+    srcs = ["callable_once_test.cc"],
+    deps = [
+        ":callable_once",
+        ":to_callback",
+        "//gloop:gloop_test_main",
+        "//gloop/base:callback",
+        "@abseil-cpp//absl/functional:bind_front",
+        "@abseil-cpp//absl/log:check",
+        "@google_benchmark//:benchmark",
+        "@googletest//:gtest",
+    ],
+)
+
+cc_library(
+    name = "transitional",
+    hdrs = ["transitional.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":with_context",
+        "//gloop:enforce_gloop_support",
+    ],
+)
+
+cc_test(
+    name = "transitional_test",
+    srcs = ["transitional_test.cc"],
+    deps = [
+        ":transitional",
+        "//gloop:gloop_test_main",
+        "//gloop/base:context",
+        "//gloop/base:tracecontext",
+        "@abseil-cpp//absl/functional:any_invocable",
+        "@abseil-cpp//absl/synchronization",
+        "@google_benchmark//:benchmark",
+        "@googletest//:gtest",
+    ],
+)

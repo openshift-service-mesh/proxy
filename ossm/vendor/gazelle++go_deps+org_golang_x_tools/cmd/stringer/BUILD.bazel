@@ -1,0 +1,91 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "stringer_lib",
+    srcs = ["stringer.go"],
+    importpath = "golang.org/x/tools/cmd/stringer",
+    visibility = ["//visibility:private"],
+    deps = ["//go/packages"],
+)
+
+go_binary(
+    name = "stringer",
+    embed = [":stringer_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "stringer_test",
+    srcs = [
+        "endtoend_test.go",
+        "golden_test.go",
+        "multifile_test.go",
+        "util_test.go",
+    ],
+    embed = [":stringer_lib"],
+    deps = [
+        "//internal/testenv",
+    ] + select({
+        "@io_bazel_rules_go//go/platform:aix": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:darwin": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:dragonfly": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:freebsd": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:illumos": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:ios": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:js": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:linux": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:netbsd": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:openbsd": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:osx": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:plan9": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:qnx": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:solaris": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "@io_bazel_rules_go//go/platform:windows": [
+            "//internal/diffp",
+            "//txtar",
+        ],
+        "//conditions:default": [],
+    }),
+)

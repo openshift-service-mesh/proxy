@@ -1,0 +1,10 @@
+filegroup(
+    name = "all_files",
+    testonly = True,
+    srcs = [
+        "BUILD.bazel",
+        "//v2/internal/module:all_files",
+        "//v2/internal/wspace:all_files",
+    ],
+    visibility = ["//visibility:public"],
+)

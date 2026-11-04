@@ -1,7 +1,0 @@
-syntax = "proto3";
-
-import "common.proto";
-
-message message_b {
-    CommonProto field = 1;
-}

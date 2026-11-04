@@ -1,0 +1,29 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "testenv",
+    srcs = [
+        "exec.go",
+        "testenv.go",
+        "testenv_notunix.go",
+        "testenv_unix.go",
+    ],
+    importpath = "golang.org/x/tools/internal/testenv",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+    deps = [
+        "//internal/gocommand",
+        "@org_golang_x_mod//modfile",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":testenv",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)

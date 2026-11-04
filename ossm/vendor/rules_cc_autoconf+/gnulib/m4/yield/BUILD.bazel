@@ -1,0 +1,26 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/yield.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# gl_YIELD macro from yield.m4
+# The M4 macro conditionally sets YIELD_LIB based on gl_threads_api:
+#   if test $gl_threads_api = posix; then
+#     YIELD_LIB="$SCHED_YIELD_LIB"
+#   else
+#     YIELD_LIB=
+#   fi
+#
+# On macOS/Linux with POSIX threads, YIELD_LIB = SCHED_YIELD_LIB = ""
+autoconf(
+    name = "yield",
+    checks = [
+        # AC_SUBST([YIELD_LIB]) - set to SCHED_YIELD_LIB value on POSIX systems
+        # On macOS/Linux, sched_yield is in libc, so YIELD_LIB is empty
+        checks.AC_SUBST("YIELD_LIB", ""),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/threadlib",
+    ],
+)

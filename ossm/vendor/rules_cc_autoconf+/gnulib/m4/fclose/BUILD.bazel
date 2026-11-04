@@ -1,0 +1,55 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/fclose.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# gl_FUNC_FCLOSE macro from fclose.m4
+#
+# Sets REPLACE_FCLOSE=1 when:
+# - fflush doesn't work on input streams (from fflush dependency)
+# - REPLACE_CLOSE=1 (from close dependency)
+# - On OpenEdition
+# - fclose doesn't work on input streams (runtime test)
+#
+# Cross-compile heuristics for fclose_stdin:
+# - glibc: guess no → REPLACE_FCLOSE=1
+# - musl: guess yes
+# - mingw/windows: guess no → REPLACE_FCLOSE=1
+#
+# Since fflush already sets REPLACE_FFLUSH on broken platforms, and that
+# triggers REPLACE_FCLOSE, we mirror those + add glibc which has broken fclose_stdin.
+
+autoconf(
+    name = "fclose",
+    checks = select({
+        # glibc: fflush works but fclose_stdin doesn't
+        "@platforms//os:linux": [
+            checks.AC_SUBST("REPLACE_FCLOSE", 1),
+        ],
+        # macOS: Based on golden file, REPLACE_FCLOSE=1
+        "@platforms//os:macos": [
+            checks.AC_SUBST("REPLACE_FCLOSE", 1),
+        ],
+        # NetBSD/OpenBSD: fflush broken → fclose needs replacement
+        "@platforms//os:netbsd": [
+            checks.AC_SUBST("REPLACE_FCLOSE", 1),
+        ],
+        "@platforms//os:openbsd": [
+            checks.AC_SUBST("REPLACE_FCLOSE", 1),
+        ],
+        # Windows: both fflush and fclose are broken
+        "@platforms//os:windows": [
+            checks.AC_SUBST("REPLACE_FCLOSE", 1),
+        ],
+        # musl and other platforms: assume fclose works
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/close",
+        # gl_FUNC_FCLOSE calls gl_FUNC_FFLUSH_STDIN (NOT gl_FUNC_FFLUSH)
+        # This is important: gl_FUNC_FFLUSH would set REPLACE_FFLUSH, but that shouldn't happen for fclose
+        "//gnulib/m4/fflush:gl_FUNC_FFLUSH_STDIN",
+        # Note: gl_STDIO_H_DEFAULTS is a _DEFAULTS function, so we don't track it as a dependency
+    ],
+)

@@ -1,0 +1,19 @@
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["pyproject.toml"])
+
+filegroup(
+    name = "distribution",
+    srcs = glob(
+        ["**/*"],
+        exclude = [
+            "bazel-*/**",
+            "integration_tests/**",
+            "tests/**",
+        ],
+    ) + [
+        "//dev:distribution",
+        "//sphinxdocs:distribution",
+    ],
+    visibility = ["//visibility:public"],
+)

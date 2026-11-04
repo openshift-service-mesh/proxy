@@ -1,0 +1,533 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
+macro(check_append_cxx_compiler_flag OUTPUT_VAR)
+  foreach(CHECK_FLAG ${ARGN})
+    check_cxx_compiler_flag(${CHECK_FLAG}
+                            "check_cxx_compiler_flag_${CHECK_FLAG}")
+    if(check_cxx_compiler_flag_${CHECK_FLAG})
+      list(APPEND ${OUTPUT_VAR} ${CHECK_FLAG})
+    endif()
+  endforeach()
+endmacro()
+
+if(NOT PATCH_PROTOBUF_SOURCES_OPTIONS_SET)
+  if(MSVC)
+    unset(PATCH_PROTOBUF_SOURCES_OPTIONS CACHE)
+    set(PATCH_PROTOBUF_SOURCES_OPTIONS
+        /wd4244
+        /wd4251
+        /wd4267
+        /wd4309
+        /wd4668
+        /wd4946
+        /wd6001
+        /wd6244
+        /wd6246)
+
+    if(MSVC_VERSION GREATER_EQUAL 1922)
+      # see
+      # https://docs.microsoft.com/en-us/cpp/overview/cpp-conformance-improvements?view=vs-2019#improvements_162
+      # for detail
+      list(APPEND PATCH_PROTOBUF_SOURCES_OPTIONS /wd5054)
+    endif()
+
+    if(MSVC_VERSION GREATER_EQUAL 1925)
+      list(APPEND PATCH_PROTOBUF_SOURCES_OPTIONS /wd4996)
+    endif()
+
+    if(MSVC_VERSION LESS 1910)
+      list(APPEND PATCH_PROTOBUF_SOURCES_OPTIONS /wd4800)
+    endif()
+  else()
+    unset(PATCH_PROTOBUF_SOURCES_OPTIONS CACHE)
+    include(CheckCXXCompilerFlag)
+    check_append_cxx_compiler_flag(
+      PATCH_PROTOBUF_SOURCES_OPTIONS -Wno-type-limits
+      -Wno-deprecated-declarations -Wno-unused-parameter)
+  endif()
+  set(PATCH_PROTOBUF_SOURCES_OPTIONS_SET TRUE)
+  if(PATCH_PROTOBUF_SOURCES_OPTIONS)
+    set(PATCH_PROTOBUF_SOURCES_OPTIONS
+        ${PATCH_PROTOBUF_SOURCES_OPTIONS}
+        CACHE INTERNAL
+              "Options to disable warning of generated protobuf sources" FORCE)
+  endif()
+endif()
+
+function(patch_protobuf_sources)
+  if(PATCH_PROTOBUF_SOURCES_OPTIONS)
+    foreach(PROTO_SRC ${ARGN})
+      unset(PROTO_SRC_OPTIONS)
+      get_source_file_property(PROTO_SRC_OPTIONS ${PROTO_SRC} COMPILE_OPTIONS)
+      if(PROTO_SRC_OPTIONS)
+        list(APPEND PROTO_SRC_OPTIONS ${PATCH_PROTOBUF_SOURCES_OPTIONS})
+      else()
+        set(PROTO_SRC_OPTIONS ${PATCH_PROTOBUF_SOURCES_OPTIONS})
+      endif()
+
+      set_source_files_properties(
+        ${PROTO_SRC} PROPERTIES COMPILE_OPTIONS "${PROTO_SRC_OPTIONS}")
+    endforeach()
+    unset(PROTO_SRC)
+    unset(PROTO_SRC_OPTIONS)
+  endif()
+endfunction()
+
+function(patch_protobuf_targets)
+  if(PATCH_PROTOBUF_SOURCES_OPTIONS)
+    foreach(PROTO_TARGET ${ARGN})
+      unset(PROTO_TARGET_OPTIONS)
+      get_target_property(PROTO_TARGET_OPTIONS ${PROTO_TARGET} COMPILE_OPTIONS)
+      if(PROTO_TARGET_OPTIONS)
+        list(APPEND PROTO_TARGET_OPTIONS ${PATCH_PROTOBUF_SOURCES_OPTIONS})
+      else()
+        set(PROTO_TARGET_OPTIONS ${PATCH_PROTOBUF_SOURCES_OPTIONS})
+      endif()
+
+      set_target_properties(
+        ${PROTO_TARGET} PROPERTIES COMPILE_OPTIONS "${PROTO_TARGET_OPTIONS}")
+    endforeach()
+    unset(PROTO_TARGET)
+    unset(PROTO_TARGET_OPTIONS)
+  endif()
+endfunction()
+
+function(project_build_tools_get_imported_location OUTPUT_VAR_NAME TARGET_NAME)
+
+  # The following if statement was added to support cmake versions < 3.19
+  get_target_property(TARGET_TYPE ${TARGET_NAME} TYPE)
+  if(TARGET_TYPE STREQUAL "INTERFACE_LIBRARY")
+    # For interface libraries, do not attempt to retrieve imported location.
+    set(${OUTPUT_VAR_NAME}
+        ""
+        PARENT_SCOPE)
+    return()
+  endif()
+
+  if(CMAKE_BUILD_TYPE)
+    string(TOUPPER "IMPORTED_LOCATION_${CMAKE_BUILD_TYPE}"
+                   TRY_SPECIFY_IMPORTED_LOCATION)
+    get_target_property(${OUTPUT_VAR_NAME} ${TARGET_NAME}
+                        ${TRY_SPECIFY_IMPORTED_LOCATION})
+  endif()
+  if(NOT ${OUTPUT_VAR_NAME})
+    get_target_property(${OUTPUT_VAR_NAME} ${TARGET_NAME} IMPORTED_LOCATION)
+  endif()
+  if(NOT ${OUTPUT_VAR_NAME})
+    get_target_property(
+      project_build_tools_get_imported_location_IMPORTED_CONFIGURATIONS
+      ${TARGET_NAME} IMPORTED_CONFIGURATIONS)
+    foreach(
+      project_build_tools_get_imported_location_IMPORTED_CONFIGURATION IN
+      LISTS project_build_tools_get_imported_location_IMPORTED_CONFIGURATIONS)
+      get_target_property(
+        ${OUTPUT_VAR_NAME}
+        ${TARGET_NAME}
+        "IMPORTED_LOCATION_${project_build_tools_get_imported_location_IMPORTED_CONFIGURATION}"
+      )
+      if(${OUTPUT_VAR_NAME})
+        break()
+      endif()
+    endforeach()
+  endif()
+  if(${OUTPUT_VAR_NAME})
+    set(${OUTPUT_VAR_NAME}
+        ${${OUTPUT_VAR_NAME}}
+        PARENT_SCOPE)
+  endif()
+endfunction()
+
+#[[
+If we build third party packages with a different CONFIG setting from building
+otel-cpp, cmake may not find a suitable file in imported targets (#705, #1359)
+when linking. But on some platforms, different CONFIG settings can be used when
+these CONFIG settings have the same ABI. For example, on Linux, we can build
+gRPC and protobuf with -DCMAKE_BUILD_TYPE=Release, but build otel-cpp with
+-DCMAKE_BUILD_TYPE=Debug and link these libraries together.
+The properties of imported targets can be found here:
+https://cmake.org/cmake/help/latest/manual/cmake-properties.7.html#properties-on-targets
+]]
+function(project_build_tools_patch_default_imported_config)
+  set(PATCH_VARS
+      IMPORTED_IMPLIB
+      IMPORTED_LIBNAME
+      IMPORTED_LINK_DEPENDENT_LIBRARIES
+      IMPORTED_LINK_INTERFACE_LANGUAGES
+      IMPORTED_LINK_INTERFACE_LIBRARIES
+      IMPORTED_LINK_INTERFACE_MULTIPLICITY
+      IMPORTED_LOCATION
+      IMPORTED_NO_SONAME
+      IMPORTED_OBJECTS
+      IMPORTED_SONAME)
+  foreach(TARGET_NAME ${ARGN})
+    if(TARGET ${TARGET_NAME})
+      get_target_property(IS_IMPORTED_TARGET ${TARGET_NAME} IMPORTED)
+      if(NOT IS_IMPORTED_TARGET)
+        continue()
+      endif()
+
+      get_target_property(IS_ALIAS_TARGET ${TARGET_NAME} ALIASED_TARGET)
+      if(IS_ALIAS_TARGET)
+        continue()
+      endif()
+
+      if(CMAKE_VERSION VERSION_LESS "3.19.0")
+        get_target_property(TARGET_TYPE_NAME ${TARGET_NAME} TYPE)
+        if(TARGET_TYPE_NAME STREQUAL "INTERFACE_LIBRARY")
+          continue()
+        endif()
+      endif()
+
+      get_target_property(DO_NOT_OVERWRITE ${TARGET_NAME} IMPORTED_LOCATION)
+      if(DO_NOT_OVERWRITE)
+        continue()
+      endif()
+
+      # MSVC's STL and debug level must match the target, so we can only move
+      # out IMPORTED_LOCATION_NOCONFIG
+      if(MSVC)
+        set(PATCH_IMPORTED_CONFIGURATION "NOCONFIG")
+      else()
+        get_target_property(PATCH_IMPORTED_CONFIGURATION ${TARGET_NAME}
+                            IMPORTED_CONFIGURATIONS)
+      endif()
+
+      if(NOT PATCH_IMPORTED_CONFIGURATION)
+        continue()
+      endif()
+
+      get_target_property(PATCH_TARGET_LOCATION ${TARGET_NAME}
+                          "IMPORTED_LOCATION_${PATCH_IMPORTED_CONFIGURATION}")
+      if(NOT PATCH_TARGET_LOCATION)
+        continue()
+      endif()
+
+      foreach(PATCH_IMPORTED_KEY IN LISTS PATCH_VARS)
+        get_target_property(
+          PATCH_IMPORTED_VALUE ${TARGET_NAME}
+          "${PATCH_IMPORTED_KEY}_${PATCH_IMPORTED_CONFIGURATION}")
+        if(PATCH_IMPORTED_VALUE)
+          set_target_properties(
+            ${TARGET_NAME} PROPERTIES "${PATCH_IMPORTED_KEY}"
+                                      "${PATCH_IMPORTED_VALUE}")
+          if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+            message(
+              STATUS
+                "Patch: ${TARGET_NAME} ${PATCH_IMPORTED_KEY} will use ${PATCH_IMPORTED_KEY}_${PATCH_IMPORTED_CONFIGURATION}(\"${PATCH_IMPORTED_VALUE}\") by default."
+            )
+          endif()
+        endif()
+      endforeach()
+    endif()
+  endforeach()
+endfunction()
+
+function(project_build_tools_set_export_declaration OUTPUT_VARNAME)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang|Intel|XL|XLClang")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+      set(${OUTPUT_VARNAME}
+          "__attribute__((__dllexport__))"
+          PARENT_SCOPE)
+    else()
+      set(${OUTPUT_VARNAME}
+          "__attribute__((visibility(\"default\")))"
+          PARENT_SCOPE)
+    endif()
+  elseif(MSVC)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+      set(${OUTPUT_VARNAME}
+          "__declspec(dllexport)"
+          PARENT_SCOPE)
+    else()
+      set(${OUTPUT_VARNAME}
+          ""
+          PARENT_SCOPE)
+    endif()
+  elseif(SunPro)
+    set(${OUTPUT_VARNAME}
+        "__global"
+        PARENT_SCOPE)
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(${OUTPUT_VARNAME}
+        "__declspec(dllexport)"
+        PARENT_SCOPE)
+  else()
+    set(${OUTPUT_VARNAME}
+        ""
+        PARENT_SCOPE)
+  endif()
+endfunction()
+
+function(project_build_tools_set_import_declaration OUTPUT_VARNAME)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang|Intel|XL|XLClang")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+      set(${OUTPUT_VARNAME}
+          "__attribute__((__dllimport__))"
+          PARENT_SCOPE)
+    else()
+      set(${OUTPUT_VARNAME}
+          ""
+          PARENT_SCOPE)
+    endif()
+  elseif(MSVC)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+      set(${OUTPUT_VARNAME}
+          "__declspec(dllimport)"
+          PARENT_SCOPE)
+    else()
+      set(${OUTPUT_VARNAME}
+          ""
+          PARENT_SCOPE)
+    endif()
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "SunPro")
+    set(${OUTPUT_VARNAME}
+        "__global"
+        PARENT_SCOPE)
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(${OUTPUT_VARNAME}
+        "__declspec(dllimport)"
+        PARENT_SCOPE)
+  else()
+    set(${OUTPUT_VARNAME}
+        ""
+        PARENT_SCOPE)
+  endif()
+endfunction()
+
+function(project_build_tools_set_shared_library_declaration DEFINITION_VARNAME)
+  project_build_tools_set_export_declaration(EXPORT_DECLARATION)
+  project_build_tools_set_import_declaration(IMPORT_DECLARATION)
+  foreach(TARGET_NAME ${ARGN})
+    target_compile_definitions(
+      ${TARGET_NAME} INTERFACE "${DEFINITION_VARNAME}=${IMPORT_DECLARATION}")
+    target_compile_definitions(
+      ${TARGET_NAME} PRIVATE "${DEFINITION_VARNAME}=${EXPORT_DECLARATION}")
+  endforeach()
+endfunction()
+
+function(project_build_tools_set_static_library_declaration DEFINITION_VARNAME)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang|Intel|XL|XLClang")
+    foreach(TARGET_NAME ${ARGN})
+      target_compile_definitions(
+        ${TARGET_NAME}
+        PUBLIC "${DEFINITION_VARNAME}=__attribute__((visibility(\"default\")))")
+    endforeach()
+  else()
+    foreach(TARGET_NAME ${ARGN})
+      target_compile_definitions(${TARGET_NAME} PUBLIC "${DEFINITION_VARNAME}=")
+    endforeach()
+  endif()
+endfunction()
+
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_ABI_VERSION_1 "WITH_ABI_VERSION_1")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_ABI_VERSION_2 "WITH_ABI_VERSION_2")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_API_ONLY "WITH_API_ONLY")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_ASYNC_EXPORT_PREVIEW
+    "WITH_ASYNC_EXPORT_PREVIEW")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_BENCHMARK "WITH_BENCHMARK")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_CONFIGURATION "WITH_CONFIGURATION")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_CURL_LOGGING "WITH_CURL_LOGGING")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_ELASTICSEARCH "WITH_ELASTICSEARCH")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_ETW "WITH_ETW")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_EXAMPLES "WITH_EXAMPLES")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_EXAMPLES_HTTP "WITH_EXAMPLES_HTTP")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_FUNC_TESTS "WITH_FUNC_TESTS")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_GSL "WITH_GSL")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_HTTP_CLIENT_CURL
+    "WITH_HTTP_CLIENT_CURL")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_METRICS_BOUND_INSTRUMENTS_PREVIEW
+    "WITH_METRICS_BOUND_INSTRUMENTS_PREVIEW")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_METRICS_EXEMPLAR_PREVIEW
+    "WITH_METRICS_EXEMPLAR_PREVIEW")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_NO_DEPRECATED_CODE
+    "WITH_NO_DEPRECATED_CODE")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_NO_GETENV "WITH_NO_GETENV")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_OPENTRACING "WITH_OPENTRACING")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_OTLP_FILE "WITH_OTLP_FILE")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_OTLP_GRPC "WITH_OTLP_GRPC")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_OTLP_GRPC_CREDENTIAL_PREVIEW
+    "WITH_OTLP_GRPC_CREDENTIAL_PREVIEW")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_OTLP_GRPC_SSL_MTLS_PREVIEW
+    "WITH_OTLP_GRPC_SSL_MTLS_PREVIEW")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_OTLP_HTTP "WITH_OTLP_HTTP")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_OTLP_HTTP_COMPRESSION
+    "WITH_OTLP_HTTP_COMPRESSION")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_OTLP_RETRY_PREVIEW
+    "WITH_OTLP_RETRY_PREVIEW")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_OTLP_UTF8_VALIDITY
+    "WITH_OTLP_UTF8_VALIDITY")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_PROMETHEUS "WITH_PROMETHEUS")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_RESOURCE_DETECTORS_PREVIEW
+    "WITH_RESOURCE_DETECTORS_PREVIEW")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_STL "WITH_STL")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_THREAD_INSTRUMENTATION_PREVIEW
+    "WITH_THREAD_INSTRUMENTATION_PREVIEW")
+set(_otelcpp_legacy_option_name_OTELCPP_WITH_ZIPKIN "WITH_ZIPKIN")
+set(_otelcpp_legacy_option_name_OTELCPP_BUILD_W3CTRACECONTEXT_TEST
+    "BUILD_W3CTRACECONTEXT_TEST")
+set(_otelcpp_legacy_option_name_OTELCPP_INSTALL "OPENTELEMETRY_INSTALL")
+set(_otelcpp_legacy_option_name_OTELCPP_SKIP_DYNAMIC_LOADING_TESTS
+    "OPENTELEMETRY_SKIP_DYNAMIC_LOADING_TESTS")
+set(_otelcpp_legacy_option_name_OTELCPP_BUILD_DLL "OPENTELEMETRY_BUILD_DLL")
+set(_otelcpp_legacy_option_name_OTELCPP_BUILD_PACKAGE "BUILD_PACKAGE")
+set(_otelcpp_legacy_option_name_OTELCPP_EXTERNAL_COMPONENT_PATH
+    "OPENTELEMETRY_EXTERNAL_COMPONENT_PATH")
+set(_otelcpp_legacy_option_name_OTELCPP_TARBALL "TARBALL")
+
+function(_otelcpp_get_legacy_option_name __OPTION_NAME __OUTPUT_VARIABLE)
+  if(DEFINED _otelcpp_legacy_option_name_${__OPTION_NAME})
+    set(__LEGACY_OPTION_NAME "${_otelcpp_legacy_option_name_${__OPTION_NAME}}")
+  else()
+    set(__LEGACY_OPTION_NAME "")
+  endif()
+
+  set(${__OUTPUT_VARIABLE}
+      "${__LEGACY_OPTION_NAME}"
+      PARENT_SCOPE)
+endfunction()
+
+function(_otelcpp_get_option_default __OPTION_NAME __LEGACY_OPTION_NAME
+         __DEFAULT_VALUE __OUTPUT_VARIABLE)
+  set(__RESOLVED_DEFAULT "${__DEFAULT_VALUE}")
+
+  if(NOT __LEGACY_OPTION_NAME STREQUAL "")
+    if(DEFINED ${__LEGACY_OPTION_NAME})
+      # Read the legacy value even when the namespaced option takes precedence,
+      # so CMake does not report a recognized deprecated option as unused.
+      set(__LEGACY_VALUE "${${__LEGACY_OPTION_NAME}}")
+      message(
+        DEPRECATION
+          "CMake option ${__LEGACY_OPTION_NAME} is deprecated. Use ${__OPTION_NAME} instead."
+      )
+      # The namespaced option takes precedence when both names are provided.
+      if(NOT DEFINED ${__OPTION_NAME})
+        set(__RESOLVED_DEFAULT "${__LEGACY_VALUE}")
+      elseif(NOT "${${__OPTION_NAME}}" STREQUAL "${__LEGACY_VALUE}")
+        message(
+          WARNING
+            "CMake option ${__LEGACY_OPTION_NAME} is deprecated. Use ${__OPTION_NAME} instead. The values of these options differ: ${__LEGACY_OPTION_NAME}=${__LEGACY_VALUE}, ${__OPTION_NAME}=${${__OPTION_NAME}}"
+        )
+      endif()
+    endif()
+  endif()
+
+  set(${__OUTPUT_VARIABLE}
+      "${__RESOLVED_DEFAULT}"
+      PARENT_SCOPE)
+endfunction()
+
+function(otelcpp_option_flag __OPTION_NAME __HELP_TEXT __DEFAULT_VALUE)
+  set(optionArgs)
+  set(oneValueArgs AVAILABLE_CONDITION UNAVAILABLE_MESSAGE)
+  set(multiValueArgs)
+  cmake_parse_arguments(_otelcpp_option_flag "${optionArgs}" "${oneValueArgs}"
+                        "${multiValueArgs}" "${ARGN}")
+
+  _otelcpp_get_legacy_option_name("${__OPTION_NAME}" __LEGACY_OPTION_NAME)
+
+  if(_otelcpp_option_flag_AVAILABLE_CONDITION)
+    set(_option_available 0)
+    foreach(__cond ${_otelcpp_option_flag_AVAILABLE_CONDITION})
+      string(REGEX REPLACE " +" ";" __cond_dep "${__cond}")
+      if(${__cond_dep})
+        set(_option_available 1)
+        break()
+      endif()
+    endforeach()
+    if(_option_available EQUAL 0)
+      unset(_option_fatal_error_message)
+      if(NOT __LEGACY_OPTION_NAME STREQUAL "" AND DEFINED
+                                                  ${__LEGACY_OPTION_NAME})
+        set(_option_fatal_error_message
+            "${__LEGACY_OPTION_NAME} is unavailable.")
+      endif()
+      if(DEFINED ${__OPTION_NAME})
+        if(_option_fatal_error_message)
+          set(_option_fatal_error_message
+              "${_option_fatal_error_message} ${__OPTION_NAME} is unavailable.")
+        else()
+          set(_option_fatal_error_message "${__OPTION_NAME} is unavailable.")
+        endif()
+      endif()
+      if(_option_fatal_error_message)
+        message(
+          FATAL_ERROR
+            "${_option_fatal_error_message}${_otelcpp_option_flag_UNAVAILABLE_MESSAGE}"
+        )
+      endif()
+      return()
+    endif()
+  endif()
+
+  _otelcpp_get_option_default("${__OPTION_NAME}" "${__LEGACY_OPTION_NAME}"
+                              "${__DEFAULT_VALUE}" __RESOLVED_DEFAULT)
+  option(${__OPTION_NAME} "${__HELP_TEXT}" "${__RESOLVED_DEFAULT}")
+
+  # Set the legacy option variable to the same value as the new option, so that
+  # user can use the legacy option name to access the same value.
+  if(NOT __LEGACY_OPTION_NAME STREQUAL "")
+    set(${__LEGACY_OPTION_NAME}
+        "${${__OPTION_NAME}}"
+        PARENT_SCOPE)
+  endif()
+endfunction()
+
+function(otelcpp_option_variable __OPTION_NAME __DEFAULT_VALUE __CACHE_TYPE
+         __DOC_STRING)
+  _otelcpp_get_legacy_option_name("${__OPTION_NAME}" __LEGACY_OPTION_NAME)
+  _otelcpp_get_option_default("${__OPTION_NAME}" "${__LEGACY_OPTION_NAME}"
+                              "${__DEFAULT_VALUE}" __RESOLVED_DEFAULT)
+  set(${__OPTION_NAME}
+      "${__RESOLVED_DEFAULT}"
+      CACHE "${__CACHE_TYPE}" "${__DOC_STRING}" ${ARGN})
+
+  # Set the legacy option variable to the same value as the new option, so that
+  # user can use the legacy option name to access the same value.
+  if(NOT __LEGACY_OPTION_NAME STREQUAL "")
+    set(${__LEGACY_OPTION_NAME}
+        "${${__OPTION_NAME}}"
+        PARENT_SCOPE)
+  endif()
+endfunction()
+
+include(CMakeDependentOption)
+
+function(otelcpp_dependent_option __OPTION_NAME __HELP_TEXT
+         __CONDITION_TRUE_VALUE __CONDITION_RULE __CONDITION_FALSE_VALUE)
+  _otelcpp_get_legacy_option_name("${__OPTION_NAME}" __LEGACY_OPTION_NAME)
+  _otelcpp_get_option_default("${__OPTION_NAME}" "${__LEGACY_OPTION_NAME}"
+                              "${__CONDITION_TRUE_VALUE}" __RESOLVED_DEFAULT)
+  cmake_dependent_option(
+    ${__OPTION_NAME} "${__HELP_TEXT}" "${__RESOLVED_DEFAULT}"
+    "${__CONDITION_RULE}" "${__CONDITION_FALSE_VALUE}")
+  # cmake_dependent_option uses a normal variable when the condition is false.
+  # Propagate it out of this wrapper function as well as retaining cache values.
+  set(${__OPTION_NAME}
+      "${${__OPTION_NAME}}"
+      PARENT_SCOPE)
+
+  # Set the legacy option variable to the same value as the new option, so that
+  # user can use the legacy option name to access the same value.
+  if(NOT __LEGACY_OPTION_NAME STREQUAL "")
+    set(${__LEGACY_OPTION_NAME}
+        "${${__OPTION_NAME}}"
+        PARENT_SCOPE)
+  endif()
+endfunction()
+
+# Override the value of an already-defined OTELCPP_ option and keep its
+# deprecated legacy option name in sync, so that code reading either name
+# observes the same value.
+function(otelcpp_set_option __OPTION_NAME __VALUE)
+  set(${__OPTION_NAME}
+      "${__VALUE}"
+      PARENT_SCOPE)
+
+  _otelcpp_get_legacy_option_name("${__OPTION_NAME}" __LEGACY_OPTION_NAME)
+  if(NOT __LEGACY_OPTION_NAME STREQUAL "")
+    set(${__LEGACY_OPTION_NAME}
+        "${__VALUE}"
+        PARENT_SCOPE)
+  endif()
+endfunction()

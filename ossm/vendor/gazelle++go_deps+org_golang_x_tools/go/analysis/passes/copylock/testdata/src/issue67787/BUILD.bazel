@@ -1,0 +1,14 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "issue67787",
+    srcs = ["issue67787.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/copylock/testdata/src/issue67787",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":issue67787",
+    visibility = ["//visibility:public"],
+)

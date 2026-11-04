@@ -1,0 +1,3 @@
+./config.go
+./lang.go
+./resolve.go

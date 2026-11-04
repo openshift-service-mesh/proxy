@@ -1,0 +1,17 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "unfortunate",
+    srcs = [
+        "local_go123.go",
+        "local_go124.go",
+    ],
+    importpath = "golang.org/x/tools/go/analysis/passes/copylock/testdata/src/unfortunate",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":unfortunate",
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,13 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/check-math-lib.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+
+autoconf(
+    name = "check-math-lib",
+    checks = [
+        # gl_CHECK_MATH_LIB macro from check-math-lib.m4 is a helper macro for
+        # determining math library dependencies. It's used by other modules and
+        # doesn't define its own checks.
+    ],
+    visibility = ["//visibility:public"],
+)

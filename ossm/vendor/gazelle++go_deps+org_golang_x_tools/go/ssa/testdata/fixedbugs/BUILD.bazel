@@ -1,0 +1,14 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "fixedbugs",
+    srcs = ["issue73594.go"],
+    importpath = "golang.org/x/tools/go/ssa/testdata/fixedbugs",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":fixedbugs",
+    visibility = ["//visibility:public"],
+)

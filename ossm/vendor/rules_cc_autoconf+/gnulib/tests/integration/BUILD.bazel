@@ -1,0 +1,158 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+
+alias(
+    name = "bison",
+    actual = "@bison",
+)
+
+alias(
+    name = "ffmpeg",
+    actual = "@ffmpeg",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+alias(
+    name = "flex",
+    actual = "@flex",
+)
+
+alias(
+    name = "gmp",
+    actual = "@gmp",
+)
+
+alias(
+    name = "libgd",
+    actual = "@libgd",
+)
+
+alias(
+    name = "libmicrohttpd",
+    actual = "@libmicrohttpd",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+alias(
+    name = "libpcap",
+    actual = "@libpcap",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+alias(
+    name = "libssh2",
+    actual = "@libssh2",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+alias(
+    name = "libwebsockets",
+    actual = "@libwebsockets//:websockets",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+alias(
+    name = "m4",
+    actual = "@m4",
+)
+
+alias(
+    name = "mosquitto",
+    actual = "@mosquitto",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+alias(
+    name = "patch",
+    actual = "@patch",
+)
+
+alias(
+    name = "pq",
+    actual = "@postgres//:pq",
+)
+
+alias(
+    name = "readline",
+    actual = "@readline",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+alias(
+    name = "tclsh",
+    actual = "@tcl_lang//:tclsh",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+alias(
+    name = "tcpdump",
+    actual = "@tcpdump",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+alias(
+    name = "tftp-hpa",
+    actual = "@tftp-hpa//:tftp",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+)
+
+alias(
+    name = "x264",
+    actual = "@x264",
+)
+
+[
+    build_test(
+        name = "{}_build_test".format(target.lstrip(":")),
+        targets = [target],
+    )
+    for target in [
+        ":bison",
+        ":ffmpeg",
+        ":flex",
+        ":gmp",
+        ":libgd",
+        ":libmicrohttpd",
+        ":libpcap",
+        ":libssh2",
+        ":libwebsockets",
+        ":m4",
+        ":mosquitto",
+        ":patch",
+        ":pq",
+        ":readline",
+        ":tcpdump",
+        ":tftp-hpa",
+        ":x264",
+        ":tclsh",
+    ]
+]

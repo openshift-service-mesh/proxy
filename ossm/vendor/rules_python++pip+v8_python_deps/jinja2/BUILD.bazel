@@ -1,0 +1,14 @@
+load("@rules_python//python/private/pypi:pkg_aliases.bzl", "pkg_aliases")
+load("@rules_python//python/private/pypi:whl_config_setting.bzl", "whl_config_setting")
+
+package(default_visibility = ["//visibility:public"])
+
+pkg_aliases(
+    name = "jinja2",
+    actual = {
+        whl_config_setting(
+            target_platforms = ("cp312_linux_aarch64", "cp312_linux_x86_64"),
+            version = "3.12",
+        ): "v8_python_deps_312_jinja2_py3_none_any_077ce601",
+    },
+)

@@ -1,0 +1,40 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/mode_t.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "gl_PROMOTED_TYPE_MODE_T",
+    checks = [
+        checks.AC_TRY_COMPILE(
+            name = "gl_cv_promoted_mode_t_is_int",
+            code = """\
+#include <sys/types.h>
+int main(void) {
+    typedef int array[2 * (sizeof (mode_t) < sizeof (int)) - 1];
+    return 0;
+}
+""",
+            compile_defines = ["mode_t"],
+        ),
+        checks.AC_DEFINE(
+            "PROMOTED_MODE_T",
+            condition = "gl_cv_promoted_mode_t_is_int",
+            if_false = "mode_t",
+            if_true = "int",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//autoconf/macros/AC_TYPE_MODE_T",
+    ],
+)
+
+autoconf(
+    name = "mode_t",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_PROMOTED_TYPE_MODE_T",
+    ],
+)
