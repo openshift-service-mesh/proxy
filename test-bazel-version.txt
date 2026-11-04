@@ -1,0 +1,2 @@
+Dummy file to trigger CI and verify Bazel version compatibility.
+This file should be deleted after verification.
