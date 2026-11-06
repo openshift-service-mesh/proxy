@@ -17,3 +17,8 @@ ignore(
     "@@+_repo_rules+local_python3",
     "@@rules_go++go_sdk+main___host_0",
 )
+
+# Gazelle's Go module cache contains transient build scratch, not inputs for
+# //:envoy. Regenerate its host-specific configuration locally without network
+# access instead of capturing the cache in the vendor snapshot.
+ignore("@@gazelle++non_module_deps+bazel_gazelle_go_repository_cache")

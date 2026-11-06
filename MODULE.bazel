@@ -72,6 +72,18 @@ bazel_dep(name = "rules_java", version = "9.9.0")
 bazel_dep(name = "zlib-ng", version = "2.3.3.bcr.2")
 bazel_dep(name = "envoy_toolshed", version = "0.5.20.envoy")
 
+# OSSM: make envoy_toolshed's render_llvm_repo_build tolerate backing
+# @llvm_toolchain_llvm with the host /usr (envoy_llvm.host, see below). Its
+# exports_files(glob([...])) assumes a clean LLVM tarball; over /usr it must
+# skip node_modules (npm's ':'-named Perl man pages crash exports_files) and
+# also export the lib64/ libclang-cpp/libLLVM that RHEL/UBI ships. See the
+# patch header for details.
+single_version_override(
+    module_name = "envoy_toolshed",
+    patch_strip = 1,
+    patches = ["//ossm/patches:envoy_toolshed-host-llvm-glob.patch"],
+)
+
 # Vendor v8's Python wheels for aarch64 as well as x86_64. v8 (from Envoy's
 # bazel-registry) pins markupsafe, whose wheels are arch-specific. Its pip.parse
 # sets no `target_platforms`, so rules_python resolves wheels for the *host* arch
@@ -355,7 +367,7 @@ use_repo(java_toolchains, "local_jdk")
 # --config=libstdc++, `BAZEL_USE_HOST_SYSROOT=True`).
 #
 # llvm_version only needs a correct *major* (it drives the clang resource-dir
-# lookup, e.g. /usr/lib/clang/21); with a `path` root nothing is downloaded.
+# lookup, e.g. /usr/lib/clang/22); with a `path` root nothing is downloaded.
 # Keep the major in sync with the clang shipped in the build container.
 # dev_dependency to match the `toolchains_llvm` bazel_dep above (declared dev
 # because downstream modules bring their own toolchain); OSSM only ever builds
@@ -368,7 +380,7 @@ llvm = use_extension(
 llvm.toolchain(
     name = "llvm_host",
     cxx_standard = {"": "c++20"},
-    llvm_version = "21.1.0",
+    llvm_version = "22.1.8",
     # Link the host libstdc++ statically (`-l:libstdc++.a` + `-stdlib=libstdc++`)
     # instead of toolchains_llvm's default bundled libc++, matching OSSM's
     # `--config=libstdc++` (WORKSPACE `BAZEL_LINKLIBS=-l%:libstdc++.a`). Requires
@@ -404,7 +416,7 @@ use_repo(llvm, "llvm_host")
 # needs) lives at /usr/lib/clang/<major>/include -- OUTSIDE the versioned
 # prefix -- and libclang-cpp/libLLVM live in /usr/lib64. Only /usr sees all of
 # them. The glob-over-/usr fallout (colon-named files, the lib64 export gap) is
-# handled by render_llvm_repo_build's is_host scoping in envoy_toolshed >= 0.5.10.
+# handled by the OSSM render_llvm_repo_build patch declared above.
 envoy_llvm_ext = use_extension("@envoy//bazel:extensions.bzl", "envoy_llvm_extension")
 envoy_llvm_ext.host(path = "/usr")
 use_repo(envoy_llvm_ext, "llvm_toolchain_llvm")

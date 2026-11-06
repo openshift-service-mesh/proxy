@@ -153,7 +153,17 @@ def render_llvm_repo_build(llvm_major):
     """Render BUILD.llvm_repo-shaped BUILD content for a minimal LLVM artifact."""
     return """package(default_visibility = ["//visibility:public"])
 
-exports_files(glob(["bin/*", "lib/**", "include/**", "share/clang/*"], allow_empty = True))
+# OSSM: @llvm_toolchain_llvm is backed by the host /usr (envoy_llvm.host in the
+# root MODULE.bazel), so this glob runs over the whole system prefix rather than
+# a clean LLVM tarball. A broad "lib/**" sweeps non-LLVM junk under /usr/lib --
+# e.g. systemd units ("system-systemd\\x2dcryptsetup.slice") and npm's bundled
+# Perl man pages ("Digest::MD5.3pm.gz") -- whose names contain characters ('\\',
+# ':') that Bazel forbids in target names, so exports_files() aborts loading this
+# BUILD. Scope the lib sweep to the LLVM resource dir and the shared libs, and
+# also cover /usr/lib64 (RHEL/UBI puts libclang-cpp/libLLVM there, LLVM_LIB_DIR=
+# lib64), so only LLVM files are exported and LIBCLANG_CPP/LIBLLVM
+# (bazel/toolchains.bzl) resolve on both lib and lib64 layouts.
+exports_files(glob(["bin/*", "lib/clang/**", "lib/libclang-cpp.so*", "lib/libLLVM.so*", "lib64/libclang-cpp.so*", "lib64/libLLVM.so*", "include/**", "share/clang/*"], allow_empty = True))
 
 filegroup(
     name = "clang",

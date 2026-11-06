@@ -1299,26 +1299,6 @@
         }
       }
     },
-    "@@envoy+//bazel:extensions.bzl%envoy_repo_extension": {
-      "general": {
-        "bzlTransitiveDigest": "c/NwzrJ2gfY5J9VXOSLl1MCWkJf4OuZ9Tc6OA1dX+fg=",
-        "usagesDigest": "GClG4k7fosfl8mL37eMTinR0qEZS5pDUIpP2jOfyTxM=",
-        "recordedInputs": [
-          "REPO_MAPPING:envoy+,bazel_skylib bazel_skylib+",
-          "REPO_MAPPING:envoy+,bazel_tools bazel_tools",
-          "REPO_MAPPING:envoy+,cu envoy++wasm_cargo+cu",
-          "REPO_MAPPING:envoy+,envoy_toolshed envoy_toolshed+",
-          "REPO_MAPPING:envoy+,rules_rust rules_rust+",
-          "REPO_MAPPING:rules_rust+,bazel_tools bazel_tools"
-        ],
-        "generatedRepoSpecs": {
-          "envoy_repo": {
-            "repoRuleId": "@@envoy+//bazel:repo.bzl%_envoy_repo",
-            "attributes": {}
-          }
-        }
-      }
-    },
     "@@envoy+//bazel:extensions.bzl%envoy_toolchains_extension": {
       "general": {
         "bzlTransitiveDigest": "c/NwzrJ2gfY5J9VXOSLl1MCWkJf4OuZ9Tc6OA1dX+fg=",
