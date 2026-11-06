@@ -21,9 +21,7 @@ LOCAL_JOBS=$(( $(nproc) * 3 / 4 ))
 LOCAL_RAM=$(( $(free -m | awk '/^Mem:/{print $2}') * 85 / 100 ))
 
 CNAME="${CNAME:-ossm-$$}"
-_TMPLOG=""
 _cleanup() {
-  rm -f "${_TMPLOG}"
   podman rm -f "${CNAME}" 2>/dev/null || true
 }
 trap _cleanup EXIT
@@ -40,24 +38,7 @@ podman run -d --name "${CNAME}" \
 
 run_in_podman() {
   local cmd="$1"
-  _TMPLOG=$(mktemp)
-
-  local exit_code=0
-  podman exec --workdir /work "${CNAME}" bash -c "${cmd}" > "${_TMPLOG}" 2>&1 || exit_code=$?
-
-  if [[ ${exit_code} -eq 0 ]]; then
-    echo "=== first 300 lines ==="
-    head -300 "${_TMPLOG}"
-    echo "=== last 300 lines ==="
-    tail -300 "${_TMPLOG}"
-  else
-    echo "=== FAILED — full output ==="
-    cat "${_TMPLOG}"
-  fi
-
-  rm -f "${_TMPLOG}"
-  _TMPLOG=""
-  return ${exit_code}
+  podman exec --workdir /work "${CNAME}" bash -c "${cmd}"
 }
 
 collect_artifact() {

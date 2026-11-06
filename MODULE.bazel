@@ -72,6 +72,18 @@ bazel_dep(name = "rules_java", version = "9.9.0")
 bazel_dep(name = "zlib-ng", version = "2.3.3.bcr.2")
 bazel_dep(name = "envoy_toolshed", version = "0.5.3.envoy")
 
+# OSSM: make envoy_toolshed's render_llvm_repo_build tolerate backing
+# @llvm_toolchain_llvm with the host /usr (envoy_llvm.host, see below). Its
+# exports_files(glob([...])) assumes a clean LLVM tarball; over /usr it must
+# skip node_modules (npm's ':'-named Perl man pages crash exports_files) and
+# also export the lib64/ libclang-cpp/libLLVM that RHEL/UBI ships. See the
+# patch header for details.
+single_version_override(
+    module_name = "envoy_toolshed",
+    patch_strip = 1,
+    patches = ["//ossm/patches:envoy_toolshed-host-llvm-glob.patch"],
+)
+
 # Vendor v8's Python wheels for aarch64 as well as x86_64. v8 (from Envoy's
 # bazel-registry) pins markupsafe, whose wheels are arch-specific. Its pip.parse
 # sets no `target_platforms`, so rules_python resolves wheels for the *host* arch
@@ -404,7 +416,7 @@ use_repo(llvm, "llvm_host")
 # needs) lives at /usr/lib/clang/<major>/include -- OUTSIDE the versioned
 # prefix -- and libclang-cpp/libLLVM live in /usr/lib64. Only /usr sees all of
 # them. The glob-over-/usr fallout (colon-named files, the lib64 export gap) is
-# handled by render_llvm_repo_build's is_host scoping in envoy_toolshed >= 0.5.10.
+# handled by the OSSM render_llvm_repo_build patch declared above.
 envoy_llvm_ext = use_extension("@envoy//bazel:extensions.bzl", "envoy_llvm_extension")
 envoy_llvm_ext.host(path = "/usr")
 use_repo(envoy_llvm_ext, "llvm_toolchain_llvm")

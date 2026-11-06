@@ -1182,7 +1182,7 @@
     },
     "@@envoy+//bazel:extensions.bzl%envoy_llvm_extension": {
       "general": {
-        "bzlTransitiveDigest": "gM+4MFQEhEBbNBGyiLVlJhaSpg+PYxiC5ggHyHH1K5Y=",
+        "bzlTransitiveDigest": "tIBg9SDlwgZrlnQUolWMKMdsUeNoWNNMpS4swvO8MO4=",
         "usagesDigest": "Jl/CKNYeQQAcLwDaCjvsw7BVWcvINxkVVWO/zoIMn9A=",
         "recordedInputs": [
           "REPO_MAPPING:envoy+,bazel_skylib bazel_skylib+",
@@ -1227,7 +1227,7 @@
     },
     "@@envoy+//bazel:extensions.bzl%envoy_repo_extension": {
       "general": {
-        "bzlTransitiveDigest": "gM+4MFQEhEBbNBGyiLVlJhaSpg+PYxiC5ggHyHH1K5Y=",
+        "bzlTransitiveDigest": "tIBg9SDlwgZrlnQUolWMKMdsUeNoWNNMpS4swvO8MO4=",
         "usagesDigest": "GClG4k7fosfl8mL37eMTinR0qEZS5pDUIpP2jOfyTxM=",
         "recordedInputs": [
           "REPO_MAPPING:envoy+,bazel_skylib bazel_skylib+",

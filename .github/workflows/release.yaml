@@ -13,7 +13,7 @@ name: Release artifact (post-merge)
 on:
   push:
     branches:
-      - release-1.31
+      - ossm-proxy-1.32
   workflow_dispatch:
     inputs:
       pr_head_sha:

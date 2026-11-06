@@ -1,9 +1,0 @@
-./lex.go
-./parse.y.go
-./print.go
-./quote.go
-./rewrite.go
-./rule.go
-./syntax.go
-./utils.go
-./walk.go
