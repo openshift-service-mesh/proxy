@@ -151,6 +151,11 @@ inline constexpr int64_t kDefaultPeerDelayedAckTimeMs = 25;
 // frequency).
 inline constexpr uint32_t kDefaultMinAckDelayTimeMs = 5;
 
+// Exclusive upper bound on the requested max_ack_delay in an ACK_FREQUENCY
+// frame, matching the 2^14 ms limit on the max_ack_delay transport parameter.
+inline constexpr QuicTime::Delta kMaxAckFrequencyMaxAckDelay =
+    QuicTime::Delta::FromMilliseconds(1 << 14);
+
 // Default shift of the ACK delay in the IETF QUIC ACK frame.
 inline constexpr uint32_t kDefaultAckDelayExponent = 3;
 
@@ -333,6 +338,20 @@ inline constexpr size_t kMaxDuplicatedPacketsSentToServerPreferredAddress = 5;
 
 // Explicit Congestion Notification is the last two bits of the TOS byte.
 constexpr uint8_t kEcnMask = 0x03;
+
+// The maximum number of receive timestamps we are ever willing to send in a
+// single ACK.  This limit is enforced in addition to the peer-specified limit.
+inline constexpr uint32_t kMaxReceiveTimestampsToSend = 32;
+
+// The largest value of the receive timestamp exponent allowed by the
+// specification.
+inline constexpr uint32_t kMaxReceiveTimestampsExponent = 20;
+
+// The largest value of the receive timestamp exponent that is useful for QUICHE
+// congestion control.  QUIC_BUG will occur is a higher value is configured.
+// Only applied to the local values, not the one from the peer.
+inline constexpr uint32_t kMaxReceiveTimestampsUsefulExponent =
+    10;  // 2^10 us ≈ 1ms
 
 }  // namespace quic
 

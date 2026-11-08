@@ -1,9 +1,0 @@
-{
-    "url": "https://github.com/bytecodealliance/wasmtime/archive/refs/tags/v45.0.2.tar.gz",
-    "integrity": "sha256-qVz1cAi4fb4c2roiDqWLdbsLUzaeFm/iHnKQEb0l6eg=",
-    "strip_prefix": "wasmtime-45.0.2",
-    "overlay": {
-        "BUILD.bazel": "sha256-1rpW66VDOIEteKeMgcbEWrqQBVoC9t9tL1ToaR2mEvo=",
-        "cargo-bazel-lock.json": "sha256-68MttHwIIsxauTtbxLAb/bTy5krHK7E11gh1IHwjdG0="
-    }
-}

@@ -459,6 +459,73 @@ TEST_F(QuicReceivedPacketManagerTest, AckDecimationReducesAcks) {
   CheckAckTimeout(clock_.ApproximateNow());
 }
 
+TEST_F(QuicReceivedPacketManagerTest,
+       AckDecimationUsesMaxRetransmittablePacketsBeforeAckFlag) {
+  SetQuicFlag(quic_max_retransmittable_packets_before_ack, 2);
+  EXPECT_FALSE(HasPendingAck());
+
+  // Start ack decimation from 10th packet.
+  received_manager_.set_min_received_before_ack_decimation(10);
+
+  // Receives packets 1 - 30. Before and after decimation starts, an immediate
+  // ack is sent every 2 packets; otherwise the ack timeout is the decimation
+  // delay once decimation starts.
+  for (size_t i = 1; i <= 30; ++i) {
+    RecordPacketReceipt(i, clock_.ApproximateNow());
+    MaybeUpdateAckTimeout(kInstigateAck, i);
+    if (i % 2 == 0) {
+      CheckAckTimeout(clock_.ApproximateNow());
+    } else if (i <= 10) {
+      CheckAckTimeout(clock_.ApproximateNow() + kDelayedAckTime);
+    } else {
+      CheckAckTimeout(clock_.ApproximateNow() + kMinRttMs * 0.25);
+    }
+  }
+}
+
+TEST_F(QuicReceivedPacketManagerTest,
+       AckDecimationUsesMaxRetransmittablePacketsBeforeAckFlagOfFour) {
+  SetQuicFlag(quic_max_retransmittable_packets_before_ack, 4);
+  received_manager_.set_min_received_before_ack_decimation(10);
+
+  // Before decimation starts, ack every 2 packets. After it starts at packet
+  // 10, ack every 4 packets (14, 18, ...).
+  for (size_t i = 1; i <= 22; ++i) {
+    RecordPacketReceipt(i, clock_.ApproximateNow());
+    MaybeUpdateAckTimeout(kInstigateAck, i);
+    if (i <= 10) {
+      if (i % 2 == 0) {
+        CheckAckTimeout(clock_.ApproximateNow());
+      } else {
+        CheckAckTimeout(clock_.ApproximateNow() + kDelayedAckTime);
+      }
+    } else if ((i - 10) % 4 == 0) {
+      CheckAckTimeout(clock_.ApproximateNow());
+    } else {
+      CheckAckTimeout(clock_.ApproximateNow() + kMinRttMs * 0.25);
+    }
+  }
+}
+
+TEST_F(QuicReceivedPacketManagerTest,
+       MaxRetransmittablePacketsBeforeAckFlagIsAtLeastTwo) {
+  SetQuicFlag(quic_max_retransmittable_packets_before_ack, 1);
+  received_manager_.set_min_received_before_ack_decimation(10);
+
+  // A value below 2 still acks every 2 packets after decimation starts.
+  for (size_t i = 1; i <= 20; ++i) {
+    RecordPacketReceipt(i, clock_.ApproximateNow());
+    MaybeUpdateAckTimeout(kInstigateAck, i);
+    if (i % 2 == 0) {
+      CheckAckTimeout(clock_.ApproximateNow());
+    } else if (i <= 10) {
+      CheckAckTimeout(clock_.ApproximateNow() + kDelayedAckTime);
+    } else {
+      CheckAckTimeout(clock_.ApproximateNow() + kMinRttMs * 0.25);
+    }
+  }
+}
+
 TEST_F(QuicReceivedPacketManagerTest, SendDelayedAckDecimation) {
   EXPECT_FALSE(HasPendingAck());
   // The ack time should be based on min_rtt * 1/4, since it's less than the
@@ -1069,6 +1136,23 @@ TEST_F(QuicReceivedPacketManagerTest, ReorderingThresholdOneTriggersAck) {
   // Condition: 99 <= (100 - 1) -> True.
   RecordPacketReceipt(99, clock_.ApproximateNow());
   MaybeUpdateAckTimeout(kInstigateAck, 99);
+  CheckAckTimeout(clock_.ApproximateNow());
+
+  // Packet 101 is missing; receiving Packet 102 hits reordering_threshold = 1
+  // and triggers a single immediate ACK via ReorderingExceedsThreshold().
+  RecordPacketReceipt(102, clock_.ApproximateNow());
+  MaybeUpdateAckTimeout(kInstigateAck, 102);
+  CheckAckTimeout(clock_.ApproximateNow());
+
+  // Packet 101 was already reported missing, so Packet 103 does not trigger
+  // another immediate ACK.
+  RecordPacketReceipt(103, clock_.ApproximateNow());
+  MaybeUpdateAckTimeout(kInstigateAck, 103);
+  CheckAckTimeout(clock_.ApproximateNow() + kDelayedAckTime);
+
+  // Filling the hole (Packet 101) triggers an immediate ACK.
+  RecordPacketReceipt(101, clock_.ApproximateNow());
+  MaybeUpdateAckTimeout(kInstigateAck, 101);
   CheckAckTimeout(clock_.ApproximateNow());
 }
 

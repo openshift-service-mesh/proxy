@@ -1,6 +1,6 @@
 module(
     name = "c-ares",
-    version = "1.34.6.bcr.3",
+    version = "1.34.9",
     bazel_compatibility = [">=7.2.1"],
     compatibility_level = 1,
 )

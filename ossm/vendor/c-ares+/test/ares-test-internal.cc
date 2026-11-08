@@ -26,6 +26,8 @@
 #include "ares-test.h"
 #include "dns-proto.h"
 
+#include <climits>
+#include <cstdint>
 #include <stdio.h>
 
 #ifdef HAVE_UNISTD_H
@@ -83,6 +85,40 @@ TEST_F(LibraryTest, StringLengthWithoutNullTerminator) {
   for(size_t i = 0; i < data.length(); ++i) {
     EXPECT_EQ(ares_strnlen(data.c_str(), i), i);
   }
+}
+
+TEST_F(LibraryTest, StrParseUint) {
+  unsigned int v = 42;
+
+  EXPECT_TRUE(ares_str_parse_uint("0", 128, &v));
+  EXPECT_EQ(0u, v);
+  EXPECT_TRUE(ares_str_parse_uint("128", 128, &v));
+  EXPECT_EQ(128u, v);
+
+  // Exactly UINT_MAX is accepted (the interesting boundary: on a 32-bit
+  // unsigned long it parses to ULONG_MAX without ERANGE).
+  EXPECT_TRUE(ares_str_parse_uint("4294967295", UINT_MAX, &v));
+  EXPECT_EQ(UINT_MAX, v);
+
+  // max == 0 permits only "0".
+  EXPECT_TRUE(ares_str_parse_uint("0", 0, &v));
+  EXPECT_EQ(0u, v);
+
+  // Failure leaves *out untouched.
+  v = 42;
+  EXPECT_FALSE(ares_str_parse_uint("1", 0, &v));
+  EXPECT_EQ(42u, v);
+  EXPECT_FALSE(ares_str_parse_uint("129", 128, &v));
+  EXPECT_EQ(42u, v);
+
+  EXPECT_FALSE(ares_str_parse_uint("4294967296", UINT_MAX, &v)); // over on LP64
+  EXPECT_FALSE(ares_str_parse_uint("12x", UINT_MAX, &v));        // trailing
+  EXPECT_FALSE(ares_str_parse_uint("0x10", UINT_MAX, &v));       // trailing hex
+  EXPECT_FALSE(ares_str_parse_uint(" 5", UINT_MAX, &v));         // leading space
+  EXPECT_FALSE(ares_str_parse_uint("+5", UINT_MAX, &v));         // leading sign
+  EXPECT_FALSE(ares_str_parse_uint("-1", UINT_MAX, &v));         // sign wrap
+  EXPECT_FALSE(ares_str_parse_uint("", UINT_MAX, &v));
+  EXPECT_FALSE(ares_str_parse_uint(NULL, UINT_MAX, &v));
 }
 
 void CheckPtoN4(int size, unsigned int value, const char *input) {
@@ -238,6 +274,23 @@ TEST_F(LibraryTest, InetNetPtoN) {
   EXPECT_EQ(-1, ares_inet_net_pton(AF_INET, "253", &a4, sizeof(a4) - 1));
 }
 
+// An IPv6 network with a prefix length only carries (bits+7)/8 bytes; the
+// rest of the destination must be zeroed rather than left as it was.
+TEST_F(LibraryTest, InetNetPtoNPrefixZeroFills) {
+  unsigned char a6[16];
+
+  memset(a6, 0x41, sizeof(a6));
+  EXPECT_EQ(0, ares_inet_net_pton(AF_INET6, "::1/0", a6, sizeof(a6)));
+  EXPECT_EQ("0000:0000:0000:0000:0000:0000:0000:0000",
+            AddressToString(a6, 16));
+
+  memset(a6, 0x41, sizeof(a6));
+  EXPECT_EQ(64, ares_inet_net_pton(AF_INET6, "2001:db8:1:2:3:4:5:6/64", a6,
+                                   sizeof(a6)));
+  EXPECT_EQ("2001:0db8:0001:0002:0000:0000:0000:0000",
+            AddressToString(a6, 16));
+}
+
 TEST_F(LibraryTest, FreeLongChain) {
   struct ares_addr_node *data = nullptr;
   for (int ii = 0; ii < 100000; ii++) {
@@ -377,6 +430,9 @@ TEST_F(LibraryTest, URI) {
     { ARES_TRUE,  "https://user%25:password@www.example.com",                                              NULL },
     { ARES_TRUE,  "https://user:password%25@www.example.com",                                              NULL },
     { ARES_TRUE,  "https://user@www.example.com",                                                          NULL },
+    { ARES_TRUE,  "https://user@www.example.com:8443",                                                     NULL },
+    { ARES_TRUE,  "dns://user@[fe80::1]:53",                                                               NULL },
+    { ARES_FALSE, "https://user@www.example.com:8443@evil.example.com",                                    NULL }, /* ambiguous authority, '@' not valid in host */
     { ARES_TRUE,  "https://www.example.com/path",                                                          NULL },
     { ARES_TRUE,  "https://www.example.com/path/",                                                         NULL },
     { ARES_TRUE,  "https://www.example.com/a/../",                                                         "https://www.example.com/" },
@@ -466,6 +522,95 @@ TEST_F(LibraryTest, URI) {
   EXPECT_NE(ARES_SUCCESS, ares_uri_parse_buf(NULL, NULL));
   EXPECT_NE(ARES_SUCCESS, ares_uri_parse_buf(NULL, NULL));
 }
+
+// The cache key must distinguish requests whose answers are not
+// interchangeable.  Two shapes are easy to get wrong because names reach the
+// key unescaped: a request with two questions versus one whose name spells out
+// the second, and two requests with the same question count whose names can be
+// made to run together.  Both are narrow to reach -- they need a hand-built
+// record with more than one question, which real servers reject -- but the key
+// asserts they are distinct, so pin it.
+TEST_F(LibraryTest, QcacheKeyDistinguishesQuestions) {
+  struct qcase {
+    const char *n1;
+    const char *n2; /* nullptr for a single-question record */
+  };
+  const qcase cases[] = {
+    { "one.example.net",                      "two.example.net"                        },
+    { "one.example.net|A|IN|two.example.net", nullptr                                  },
+    { "one.example.net",                      "two.example.net|A|IN|three.example.net" },
+    { "one.example.net|A|IN|two.example.net", "three.example.net"                      },
+  };
+  std::vector<std::string> keys;
+
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    ares_dns_record_t *req = nullptr;
+    char              *key = nullptr;
+
+    EXPECT_EQ(ARES_SUCCESS,
+              ares_dns_record_create(&req, 0, ARES_FLAG_RD, ARES_OPCODE_QUERY,
+                                     ARES_RCODE_NOERROR));
+    EXPECT_EQ(ARES_SUCCESS,
+              ares_dns_record_query_add(req, cases[i].n1, ARES_REC_TYPE_A,
+                                        ARES_CLASS_IN));
+    if (cases[i].n2 != nullptr) {
+      EXPECT_EQ(ARES_SUCCESS,
+                ares_dns_record_query_add(req, cases[i].n2, ARES_REC_TYPE_A,
+                                          ARES_CLASS_IN));
+    }
+
+    key = ares_qcache_calc_key(req);
+    ASSERT_NE(nullptr, key);
+    keys.push_back(std::string(key));
+    ares_free_string(key);
+    ares_dns_record_destroy(req);
+  }
+
+  /* Every one of these is a different request, so every key must differ. */
+  for (size_t i = 0; i < keys.size(); i++) {
+    for (size_t j = i + 1; j < keys.size(); j++) {
+      EXPECT_NE(keys[i], keys[j])
+        << "cache key collision between case " << i << " and case " << j
+        << ": " << keys[i];
+    }
+  }
+}
+
+TEST_F(LibraryTest, SysConfigResolvInlineComments)
+{
+  const char resolvconf[] = "nameserver 1.2.3.4 # managed nameserver\n"
+                            "nameserver 2.3.4.5 ; managed nameserver\n"
+                            "search first.com second.com # ignored.example\n"
+                            "lookup bind ; file\n"
+                            "options ndots:5 ; ndots:9\n";
+  ares_sysconfig_t sysconfig;
+  ares_channel_t  *channel = nullptr;
+  ares_buf_t      *buf;
+
+  memset(&sysconfig, 0, sizeof(sysconfig));
+  buf = ares_buf_create_const((const unsigned char *)resolvconf,
+                              sizeof(resolvconf) - 1);
+  ASSERT_NE(nullptr, buf);
+  ASSERT_EQ(ARES_SUCCESS, ares_init(&channel));
+
+  EXPECT_EQ(ARES_SUCCESS,
+            ares_sysconfig_process_buf(channel, &sysconfig, buf,
+                                       ares_sysconfig_parse_resolv_line));
+  EXPECT_EQ((size_t)2, ares_llist_len(sysconfig.sconfig));
+  ASSERT_EQ((size_t)2, sysconfig.ndomains);
+  EXPECT_STREQ("first.com", sysconfig.domains[0]);
+  EXPECT_STREQ("second.com", sysconfig.domains[1]);
+  EXPECT_STREQ("b", sysconfig.lookups);
+  EXPECT_EQ((size_t)5, sysconfig.ndots);
+
+  ares_llist_destroy(sysconfig.sconfig);
+  ares_strsplit_free(sysconfig.domains, sysconfig.ndomains);
+  ares_free(sysconfig.sortlist);
+  ares_free(sysconfig.lookups);
+  ares_buf_destroy(buf);
+  ares_destroy(channel);
+}
+
 #endif /* !CARES_SYMBOL_HIDING */
 
 TEST_F(LibraryTest, InetPtoN) {
@@ -475,7 +620,44 @@ TEST_F(LibraryTest, InetPtoN) {
   EXPECT_EQ(1, ares_inet_pton(AF_INET6, "12:34::ff", &a6));
   EXPECT_EQ(1, ares_inet_pton(AF_INET6, "12:34::ffff:1.2.3.4", &a6));
   EXPECT_EQ(0, ares_inet_pton(AF_INET, "xyzzy", &a4));
+  // Too many octets is unparsable input, not a system error.
+  EXPECT_EQ(0, ares_inet_pton(AF_INET, "1.2.3.4.5", &a4));
+  EXPECT_EQ(0, ares_inet_pton(AF_INET, "0x0102030405", &a4));
   EXPECT_EQ(-1, ares_inet_pton(AF_INET+AF_INET6, "1.2.3.4", &a4));
+}
+
+// ares_inet_pton() parses addresses, not networks: like inet_pton(3) it must
+// reject a "/bits" prefix length.  It used to accept one and, for IPv6, write
+// only (bits+7)/8 bytes of dst while still returning 1.
+TEST_F(LibraryTest, InetPtoNRejectsPrefixLength) {
+  const char *cases6[] = { "::1/0", "ffff::1/16", "2001:db8::1/64",
+                           "2001:db8::1/128", "::ffff:1.2.3.4/8",
+                           "::ffff:1.2.3.4/32" };
+  const char *cases4[] = { "1.2.3.4/8", "1.2.3.4/0", "1.2.3.4/32", "10/8",
+                           "0x0a000000/8" };
+  unsigned char a4[4];
+  unsigned char a6[16];
+  size_t        i;
+
+  for (i = 0; i < sizeof(cases6) / sizeof(*cases6); i++) {
+    EXPECT_EQ(0, ares_inet_pton(AF_INET6, cases6[i], a6)) << cases6[i];
+  }
+  for (i = 0; i < sizeof(cases4) / sizeof(*cases4); i++) {
+    EXPECT_EQ(0, ares_inet_pton(AF_INET, cases4[i], a4)) << cases4[i];
+  }
+
+  // Without a prefix length, the whole destination is written.
+  memset(a6, 0x41, sizeof(a6));
+  EXPECT_EQ(1, ares_inet_pton(AF_INET6, "ffff::1", a6));
+  EXPECT_EQ("ffff:0000:0000:0000:0000:0000:0000:0001",
+            AddressToString(a6, 16));
+  memset(a6, 0x41, sizeof(a6));
+  EXPECT_EQ(1, ares_inet_pton(AF_INET6, "::ffff:1.2.3.4", a6));
+  EXPECT_EQ("0000:0000:0000:0000:0000:ffff:0102:0304",
+            AddressToString(a6, 16));
+  memset(a4, 0x41, sizeof(a4));
+  EXPECT_EQ(1, ares_inet_pton(AF_INET, "1.2.3.4", a4));
+  EXPECT_EQ("1.2.3.4", AddressToString(a4, 4));
 }
 
 TEST_F(LibraryTest, FreeCorruptData) {
@@ -634,6 +816,95 @@ TEST_F(FileChannelTest, GetAddrInfoAllocFail) {
       if (verbose) std::cerr << "Succeeded despite failure of alloc #" << ii << std::endl;
     }
   }
+}
+
+TEST_F(LibraryTest, DNSWriteOversizedRdlength)
+{
+  ares_dns_record_t         *dnsrec = nullptr;
+  ares_dns_rr_t             *rr     = nullptr;
+  unsigned char             *msg    = nullptr;
+  size_t                     msglen = 0;
+
+  // 300 x 255-byte character-strings = rdlength 76500 > 65535.
+  std::vector<unsigned char> str(255, 'x');
+
+  EXPECT_EQ(ARES_SUCCESS,
+            ares_dns_record_create(&dnsrec, 0x1234, 0, ARES_OPCODE_QUERY,
+                                   ARES_RCODE_NOERROR));
+  EXPECT_EQ(ARES_SUCCESS,
+            ares_dns_record_query_add(dnsrec, "example.com", ARES_REC_TYPE_TXT,
+                                      ARES_CLASS_IN));
+  EXPECT_EQ(ARES_SUCCESS, ares_dns_record_rr_add(
+                            &rr, dnsrec, ARES_SECTION_ANSWER, "example.com",
+                            ARES_REC_TYPE_TXT, ARES_CLASS_IN, 3600));
+  for (size_t i = 0; i < 300; i++) {
+    EXPECT_EQ(ARES_SUCCESS, ares_dns_rr_add_abin(rr, ARES_RR_TXT_DATA,
+                                                 str.data(), str.size()));
+  }
+
+  // rdlength does not fit in 16 bits and must not be silently truncated into
+  // a structurally corrupt message reported as ARES_SUCCESS.
+  EXPECT_EQ(ARES_EBADQUERY, ares_dns_write(dnsrec, &msg, &msglen));
+  EXPECT_EQ(nullptr, msg);
+  EXPECT_EQ(0U, msglen);
+
+  ares_dns_record_destroy(dnsrec);
+  ares_free_string(msg);
+}
+
+TEST_F(LibraryTest, DNSWriteMaximumMessageSize)
+{
+  ares_dns_record_t *dnsrec   = nullptr;
+  ares_dns_record_t *parsed   = nullptr;
+  ares_dns_rr_t     *rr       = nullptr;
+  unsigned char     *msg      = nullptr;
+  size_t             msglen   = 0;
+  size_t             overhead = 0;
+  size_t             max_data = 0;
+
+  EXPECT_EQ(ARES_SUCCESS,
+            ares_dns_record_create(&dnsrec, 0x1234, 0, ARES_OPCODE_QUERY,
+                                   ARES_RCODE_NOERROR));
+  EXPECT_EQ(ARES_SUCCESS,
+            ares_dns_record_query_add(dnsrec, "example.com", ARES_REC_TYPE_A,
+                                      ARES_CLASS_IN));
+  EXPECT_EQ(ARES_SUCCESS,
+            ares_dns_record_rr_add(&rr, dnsrec, ARES_SECTION_ANSWER, "",
+                                   ARES_REC_TYPE_RAW_RR, ARES_CLASS_IN, 0));
+  EXPECT_EQ(ARES_SUCCESS, ares_dns_rr_set_u16(rr, ARES_RR_RAW_RR_TYPE, 65432));
+
+  // Measure the fixed framing with a one-byte raw record, so the exact
+  // per-byte limit can be hit: the largest message that fits must write and
+  // parse back, and a single extra byte must be rejected.
+  EXPECT_EQ(ARES_SUCCESS, ares_dns_rr_set_bin(
+                            rr, ARES_RR_RAW_RR_DATA,
+                            reinterpret_cast<const unsigned char *>("x"), 1));
+  EXPECT_EQ(ARES_SUCCESS, ares_dns_write(dnsrec, &msg, &msglen));
+  overhead = msglen - 1; /* framing without the data byte */
+  ares_free_string(msg);
+  msg = nullptr;
+
+  max_data = 65535 - overhead;
+  std::vector<unsigned char> data(max_data, 'x');
+  EXPECT_EQ(ARES_SUCCESS, ares_dns_rr_set_bin(rr, ARES_RR_RAW_RR_DATA,
+                                              data.data(), data.size()));
+  EXPECT_EQ(ARES_SUCCESS, ares_dns_write(dnsrec, &msg, &msglen));
+  EXPECT_EQ(65535U, msglen);
+  EXPECT_EQ(ARES_SUCCESS, ares_dns_parse(msg, msglen, 0, &parsed));
+  ares_dns_record_destroy(parsed);
+  parsed = nullptr;
+  ares_free_string(msg);
+  msg = nullptr;
+
+  data.push_back('x');
+  EXPECT_EQ(ARES_SUCCESS, ares_dns_rr_set_bin(rr, ARES_RR_RAW_RR_DATA,
+                                              data.data(), data.size()));
+  EXPECT_EQ(ARES_EBADQUERY, ares_dns_write(dnsrec, &msg, &msglen));
+  EXPECT_EQ(nullptr, msg);
+  EXPECT_EQ(0U, msglen);
+
+  ares_dns_record_destroy(dnsrec);
+  ares_free_string(msg);
 }
 
 TEST_F(LibraryTest, DNSRecord) {
@@ -1093,6 +1364,107 @@ TEST_F(LibraryTest, DNSRecord) {
   EXPECT_EQ(ARES_FALSE, ares_dns_rr_get_opt_byid(NULL, ARES_RR_A_ADDR, 1, NULL, NULL));
 }
 
+TEST_F(LibraryTest, DNSNameCompression14Bit) {
+  ares_dns_record_t          *dnsrec = NULL;
+  ares_dns_rr_t              *rr     = NULL;
+  unsigned char              *msg    = NULL;
+  size_t                      msglen = 0;
+  std::vector<unsigned char>  txt(255, 'a');
+
+  EXPECT_EQ(ARES_SUCCESS,
+    ares_dns_record_create(&dnsrec, 0x1234, ARES_FLAG_QR,
+      ARES_OPCODE_QUERY, ARES_RCODE_NOERROR));
+
+  EXPECT_EQ(ARES_SUCCESS,
+    ares_dns_record_query_add(dnsrec, "example.com", ARES_REC_TYPE_ANY,
+      ARES_CLASS_IN));
+
+  /* Pad the message well past the 14-bit (16383 byte) compression pointer
+   * limit with large TXT records. */
+  for (size_t i = 0; i < 80; i++) {
+    EXPECT_EQ(ARES_SUCCESS,
+      ares_dns_record_rr_add(&rr, dnsrec, ARES_SECTION_ANSWER, "example.com",
+        ARES_REC_TYPE_TXT, ARES_CLASS_IN, 0));
+    EXPECT_EQ(ARES_SUCCESS,
+      ares_dns_rr_add_abin(rr, ARES_RR_TXT_DATA, txt.data(), txt.size()));
+  }
+
+  /* Past byte 16383, add a repeated owner name.  Its first occurrence lands at
+   * an offset that doesn't fit in 14 bits, so it must not be recorded as a
+   * compression target; the second occurrence must not be emitted as a pointer
+   * to (offset & 0x3FFF), which would corrupt the message.  It instead
+   * compresses only against the in-range example.com target. */
+  for (size_t i = 0; i < 2; i++) {
+    EXPECT_EQ(ARES_SUCCESS,
+      ares_dns_record_rr_add(&rr, dnsrec, ARES_SECTION_ANSWER,
+        "repeat.example.com", ARES_REC_TYPE_TXT, ARES_CLASS_IN, 0));
+    EXPECT_EQ(ARES_SUCCESS,
+      ares_dns_rr_add_abin(rr, ARES_RR_TXT_DATA, txt.data(), txt.size()));
+  }
+
+  EXPECT_EQ(ARES_SUCCESS, ares_dns_write(dnsrec, &msg, &msglen));
+  EXPECT_GT(msglen, 0x3FFFU);
+
+  /* 12 hdr + 17 question + 80*268 compressed TXT + 2*275 repeat TXT.
+   * An exact size also verifies compression remains active for names
+   * below the limit. */
+  EXPECT_EQ(22019U, msglen);
+
+  /* Before the fix this parse failed / mis-parsed on the truncated pointer. */
+  ares_dns_record_t *parsed = NULL;
+  EXPECT_EQ(ARES_SUCCESS, ares_dns_parse(msg, msglen, 0, &parsed));
+  ASSERT_NE(nullptr, parsed);
+
+  size_t ancount = ares_dns_record_rr_cnt(parsed, ARES_SECTION_ANSWER);
+  EXPECT_EQ(82U, ancount);
+  const ares_dns_rr_t *last =
+    ares_dns_record_rr_get_const(parsed, ARES_SECTION_ANSWER, ancount - 1);
+  ASSERT_NE(nullptr, last);
+  EXPECT_STREQ("repeat.example.com", ares_dns_rr_get_name(last));
+
+  ares_dns_record_destroy(parsed);
+  ares_free_string(msg);
+  ares_dns_record_destroy(dnsrec);
+}
+
+TEST_F(LibraryTest, DNSRecordRejectsInvalidBinaryInput) {
+  ares_dns_record_t *dnsrec = NULL;
+  ares_dns_rr_t     *rr     = NULL;
+  unsigned char      data[] = { 'x' };
+
+  EXPECT_EQ(ARES_SUCCESS,
+    ares_dns_record_create(&dnsrec, 0x1234, ARES_FLAG_RD,
+      ARES_OPCODE_QUERY, ARES_RCODE_NOERROR));
+
+  EXPECT_EQ(ARES_SUCCESS,
+    ares_dns_record_rr_add(&rr, dnsrec, ARES_SECTION_ANSWER, "example.com",
+      ARES_REC_TYPE_TXT, ARES_CLASS_IN, 60));
+  EXPECT_EQ(ARES_ENOMEM,
+    ares_dns_rr_add_abin(rr, ARES_RR_TXT_DATA, data, SIZE_MAX));
+  EXPECT_EQ(ARES_EFORMERR,
+    ares_dns_rr_add_abin(rr, ARES_RR_TXT_DATA, NULL, 1));
+
+  EXPECT_EQ(ARES_SUCCESS,
+    ares_dns_record_rr_add(&rr, dnsrec, ARES_SECTION_ANSWER, "example.com",
+      ARES_REC_TYPE_CAA, ARES_CLASS_IN, 60));
+  EXPECT_EQ(ARES_ENOMEM,
+    ares_dns_rr_set_bin(rr, ARES_RR_CAA_VALUE, data, SIZE_MAX));
+  EXPECT_EQ(ARES_EFORMERR,
+    ares_dns_rr_set_bin(rr, ARES_RR_CAA_VALUE, NULL, 1));
+  EXPECT_EQ(ARES_EFORMERR,
+    ares_dns_rr_set_bin(rr, ARES_RR_CAA_TAG, data, sizeof(data)));
+
+  EXPECT_EQ(ARES_SUCCESS,
+    ares_dns_record_rr_add(&rr, dnsrec, ARES_SECTION_ADDITIONAL, "",
+      ARES_REC_TYPE_OPT, ARES_CLASS_IN, 0));
+  EXPECT_EQ(ARES_ENOMEM,
+    ares_dns_rr_set_opt(rr, ARES_RR_OPT_OPTIONS, 3, data, SIZE_MAX));
+  EXPECT_EQ(ARES_EFORMERR,
+    ares_dns_rr_set_opt(rr, ARES_RR_OPT_OPTIONS, 3, NULL, 1));
+
+  ares_dns_record_destroy(dnsrec);
+}
+
 TEST_F(LibraryTest, DNSParseFlags) {
   ares_dns_record_t   *dnsrec = NULL;
   ares_dns_rr_t       *rr     = NULL;
@@ -1229,6 +1601,19 @@ TEST_F(LibraryTest, ArrayMisuse) {
   EXPECT_NE(ARES_SUCCESS, ares_array_remove_last(NULL));
   EXPECT_NE(ARES_SUCCESS, ares_array_sort(NULL, NULL));
   EXPECT_NE(ARES_SUCCESS, ares_array_set_size(NULL, 0));
+
+  /* Overflow in the size calculation must be rejected, not wrapped */
+  ares_array_t *overflow_array = ares_array_create((SIZE_MAX / 2) + 1, NULL);
+  EXPECT_NE((void *)NULL, overflow_array);
+  EXPECT_EQ(ARES_ENOMEM, ares_array_set_size(overflow_array, 2));
+  EXPECT_EQ(ARES_ENOMEM, ares_array_set_size(overflow_array, SIZE_MAX));
+  ares_array_destroy(overflow_array);
+
+  /* Overflow must also be rejected in the malloc-style wrapper, and in
+   * the original-size arm of the realloc wrapper */
+  EXPECT_EQ(NULL, ares_malloc_zero_array(SIZE_MAX, 2));
+  EXPECT_EQ(NULL, ares_malloc_zero_array(2, SIZE_MAX));
+  EXPECT_EQ(NULL, ares_realloc_zero_array(NULL, SIZE_MAX, 1, 2));
 }
 
 TEST_F(LibraryTest, BufMisuse) {
@@ -1468,6 +1853,46 @@ TEST_F(LibraryTest, Array) {
   ares_array_destroy(a);
 }
 
+/* Regression: repeatedly claiming the first element drives the internal
+ * offset up to the allocation size.  Re-inserting afterwards must still
+ * succeed (previously ares_array_insert_at() failed with ARES_EFORMERR
+ * because compaction tried to move from an out-of-range source index). */
+TEST_F(LibraryTest, ArrayClaimFrontThenReuse) {
+  ares_array_t *a = ares_array_create(sizeof(size_t), NULL);
+  EXPECT_NE(nullptr, a);
+
+  for (size_t iter = 0; iter < 4; iter++) {
+    /* Fill exactly to the minimum allocation (ARES__ARRAY_MIN == 4) so a
+     * full front-drain later pushes offset to precisely alloc_cnt. */
+    for (size_t i = 0; i < 4; i++) {
+      size_t val = iter * 100 + i;
+      EXPECT_EQ(ARES_SUCCESS, ares_array_insertdata_last(a, &val));
+    }
+    EXPECT_EQ((size_t)4, ares_array_len(a));
+
+    /* Drain ALL elements from the front so offset climbs to alloc_cnt (the
+     * condition the fix guards); verify copy-out value and FIFO order. */
+    for (size_t i = 0; i < 4; i++) {
+      size_t out = 0;
+      EXPECT_EQ(ARES_SUCCESS, ares_array_claim_at(&out, sizeof(out), a, 0));
+      EXPECT_EQ(iter * 100 + i, out);
+    }
+    EXPECT_EQ((size_t)0, ares_array_len(a));
+
+    /* Array is now empty with offset == alloc_cnt; appending must still
+     * work, and the data must be readable back out. */
+    size_t *ptr = NULL;
+    EXPECT_EQ(ARES_SUCCESS, ares_array_insert_last((void **)&ptr, a));
+    EXPECT_NE(nullptr, ptr);
+    *ptr = 424242;
+    EXPECT_EQ((size_t)424242, *(size_t *)ares_array_at(a, 0));
+    EXPECT_EQ(ARES_SUCCESS, ares_array_remove_first(a));
+  }
+
+  EXPECT_EQ((size_t)0, ares_array_len(a));
+  ares_array_destroy(a);
+}
+
 TEST_F(LibraryTest, HtableVpvp) {
   ares_llist_t       *l = NULL;
   ares_htable_vpvp_t *h = NULL;
@@ -1561,6 +1986,64 @@ TEST_F(LibraryTest, BufReplace) {
 typedef struct {
   ares_socket_t s;
 } test_htable_asvp_t;
+
+TEST_F(LibraryTest, ZeroLengthRawRrKeepsType) {
+  ares_dns_record_t *parsed = NULL;
+  ares_dns_rr_t     *rr     = NULL;
+
+  /* Hand-crafted minimal DNS response with a zero-length RAW_RR.
+   * Header: id=0x1234, QR=1 RD=1 RA=1, QDCOUNT=1, ANCOUNT=1
+   * Question: \x07example\x03com\x00, type A (1), class IN (1)
+   * Answer:   \xc0\x0c (name ptr), type=0xFF98 (65432), class IN,
+   *           TTL=300, RDLENGTH=0 */
+  const unsigned char pkt[] = {
+    /* Header */
+    0x12, 0x34,  /* ID */
+    0x81, 0x80,  /* Flags: QR=1, RD=1, RA=1 */
+    0x00, 0x01,  /* QDCOUNT=1 */
+    0x00, 0x01,  /* ANCOUNT=1 */
+    0x00, 0x00,  /* NSCOUNT=0 */
+    0x00, 0x00,  /* ARCOUNT=0 */
+    /* Question: example.com, type A, class IN */
+    0x07, 'e','x','a','m','p','l','e',
+    0x03, 'c','o','m',
+    0x00,
+    0x00, 0x01,  /* QTYPE=A */
+    0x00, 0x01,  /* QCLASS=IN */
+    /* Answer RR: example.com (compressed), type 65432, class IN, TTL 300 */
+    0xc0, 0x0c,  /* Name pointer */
+    0xff, 0x98,  /* TYPE=65432 */
+    0x00, 0x01,  /* CLASS=IN */
+    0x00, 0x00, 0x01, 0x2c,  /* TTL=300 */
+    0x00, 0x00   /* RDLENGTH=0 */
+  };
+
+  EXPECT_EQ(ARES_SUCCESS,
+    ares_dns_parse(pkt, sizeof(pkt), 0, &parsed));
+  EXPECT_EQ(1, ares_dns_record_rr_cnt(parsed, ARES_SECTION_ANSWER));
+  rr = ares_dns_record_rr_get(parsed, ARES_SECTION_ANSWER, 0);
+  EXPECT_EQ(ARES_REC_TYPE_RAW_RR, ares_dns_rr_get_type(rr));
+  EXPECT_EQ(65432, ares_dns_rr_get_u16(rr, ARES_RR_RAW_RR_TYPE));
+
+  ares_dns_record_destroy(parsed);
+}
+
+TEST_F(LibraryTest, RawRrTypeTostrFromstrRoundtrip) {
+  const char         *str;
+  ares_dns_rec_type_t qtype = (ares_dns_rec_type_t)0;
+
+  str = ares_dns_rec_type_tostr(ARES_REC_TYPE_RAW_RR);
+  EXPECT_NE((const char *)NULL, str);
+  EXPECT_TRUE(ares_dns_rec_type_fromstr(&qtype, str));
+  EXPECT_EQ(ARES_REC_TYPE_RAW_RR, qtype);
+}
+
+TEST_F(LibraryTest, BufReplaceNullBuf) {
+  EXPECT_EQ(ARES_EFORMERR,
+            ares_buf_replace(NULL,
+                             (const unsigned char *)"x", 1,
+                             (const unsigned char *)"y", 1));
+}
 
 TEST_F(LibraryTest, HtableAsvp) {
   ares_llist_t       *l = NULL;

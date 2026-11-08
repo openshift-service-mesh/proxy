@@ -4561,6 +4561,29 @@ quiche_cc_test_library(
     ],
 )
 
+quiche_cc_test_library(
+    name = "quiche_common_platform_code_count_reader",
+    hdrs = [
+        "quiche/common/platform/api/quiche_code_count_reader.h",
+    ],
+    deps = [
+        ":quiche_common_platform_default_quiche_platform_impl_code_count_reader_impl_lib",
+        ":quiche_common_platform_export",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+quiche_platform_impl_cc_test_library(
+    name = "quiche_common_platform_default_quiche_platform_impl_code_count_reader_impl_lib",
+    hdrs = [
+        "quiche/common/platform/default/quiche_platform_impl/quiche_code_count_reader_impl.h",
+    ],
+    deps = [
+        ":quiche_common_platform_export",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
 quiche_cc_library(
     name = "quiche_common_platform_udp_socket_platform",
     hdrs = select({

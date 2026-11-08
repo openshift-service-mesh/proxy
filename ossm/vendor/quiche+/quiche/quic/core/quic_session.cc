@@ -232,7 +232,8 @@ void QuicSession::Initialize() {
     }
     if (config()->HasClientRequestedIndependentOption(kAFIA, perspective_) &&
         connection_->version().IsIetfQuic()) {
-      config()->SetMinAckDelayDraft10Ms(kDefaultMinAckDelayTimeMs);
+      config()->SetMinAckDelayDraft14Us(kDefaultMinAckDelayTimeMs *
+                                        kNumMicrosPerMilli);
     }
     if (config()->HasClientRequestedIndependentOption(kBCFR, perspective_)) {
       bundle_retransmitted_crypto_frames_ = true;
@@ -249,9 +250,11 @@ void QuicSession::Initialize() {
         config()->SetActiveConnectionIdLimitToSend(5);
       }
     }
-  } else if (GetQuicReloadableFlag(quic_receive_ack_frequency) &&
+  } else if (GetQuicReloadableFlag(quic_receive_ack_frequency2) &&
              connection_->version().IsIetfQuic()) {
-    config()->SetMinAckDelayDraft10Ms(kDefaultMinAckDelayTimeMs);
+    QUIC_RELOADABLE_FLAG_COUNT_N(quic_receive_ack_frequency2, 8, 8);
+    config()->SetMinAckDelayDraft14Us(kDefaultMinAckDelayTimeMs *
+                                      kNumMicrosPerMilli);
   }
   connection_->CreateConnectionIdManager();
   connection_->SetFromConfig(*config());
