@@ -1,10 +1,10 @@
 {
   "tools_telemetry": {
     "arch": "amd64",
-    "bazel_version": "9.3.1",
+    "bazel_version": "9.3.2",
     "bazelisk": false,
     "ci": true,
-    "counter": "306",
+    "counter": "310",
     "deps": {
       "aspect_rules_esbuild": "0.23.0",
       "aspect_tools_telemetry": "0.2.6"

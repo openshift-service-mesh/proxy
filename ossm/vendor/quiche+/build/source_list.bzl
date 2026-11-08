@@ -793,6 +793,7 @@ quiche_tool_support_srcs = [
     "quic/tools/web_transport_only_backend.cc",
 ]
 quiche_test_support_hdrs = [
+    "common/platform/api/quiche_code_count_reader.h",
     "common/platform/api/quiche_expect_bug.h",
     "common/platform/api/quiche_fuzztest.h",
     "common/platform/api/quiche_test.h",
@@ -1022,6 +1023,15 @@ balsa_srcs = [
     "balsa/simple_buffer.cc",
     "balsa/standard_header_map.cc",
 ]
+balsa_tests_hdrs = [
+]
+balsa_tests_srcs = [
+    "balsa/balsa_frame_test.cc",
+    "balsa/balsa_headers_sequence_test.cc",
+    "balsa/balsa_headers_test.cc",
+    "balsa/header_properties_test.cc",
+    "balsa/simple_buffer_test.cc",
+]
 masque_test_hdrs = [
 ]
 masque_test_srcs = [
@@ -1126,11 +1136,6 @@ io_test_support_srcs = [
 quiche_tests_hdrs = [
 ]
 quiche_tests_srcs = [
-    "balsa/balsa_frame_test.cc",
-    "balsa/balsa_headers_sequence_test.cc",
-    "balsa/balsa_headers_test.cc",
-    "balsa/header_properties_test.cc",
-    "balsa/simple_buffer_test.cc",
     "binary_http/binary_http_message_test.cc",
     "common/abiding_object_pool_test.cc",
     "common/btree_scheduler_test.cc",
@@ -1203,7 +1208,6 @@ quiche_tests_srcs = [
     "http2/decoder/decode_buffer_test.cc",
     "http2/decoder/decode_http2_structures_test.cc",
     "http2/decoder/http2_frame_decoder_test.cc",
-    "http2/decoder/http2_structure_decoder_remaining_payload_test.cc",
     "http2/decoder/http2_structure_decoder_test.cc",
     "http2/decoder/payload_decoders/altsvc_payload_decoder_test.cc",
     "http2/decoder/payload_decoders/continuation_payload_decoder_test.cc",
@@ -1256,9 +1260,8 @@ quiche_tests_srcs = [
     "oblivious_http/oblivious_http_gateway_test.cc",
     "oblivious_http/oblivious_http_integration_test.cc",
     "quic/core/congestion_control/bandwidth_sampler_test.cc",
-    "quic/core/congestion_control/bbr2_simulator_test.cc",
-    "quic/core/congestion_control/bbr3_simulator_test.cc",
     "quic/core/congestion_control/bbr_sender_test.cc",
+    "quic/core/congestion_control/bbrx_simulator_test.cc",
     "quic/core/congestion_control/cubic_bytes_test.cc",
     "quic/core/congestion_control/general_loss_algorithm_test.cc",
     "quic/core/congestion_control/hybrid_slow_start_test.cc",
@@ -1436,6 +1439,7 @@ io_tests_srcs = [
     "quic/core/io/event_loop_connecting_client_socket_test.cc",
     "quic/core/io/quic_all_event_loops_test.cc",
     "quic/core/io/quic_poll_event_loop_test.cc",
+    "quic/core/io/quic_server_io_harness_test.cc",
     "quic/core/io/socket_test.cc",
     "quic/core/quic_udp_socket_test.cc",
     "quic/tools/quic_default_client_test.cc",
@@ -1568,6 +1572,7 @@ default_platform_impl_tool_support_srcs = [
     "common/platform/default/quiche_platform_impl/quiche_file_utils_impl.cc",
 ]
 default_platform_impl_test_support_hdrs = [
+    "common/platform/default/quiche_platform_impl/quiche_code_count_reader_impl.h",
     "common/platform/default/quiche_platform_impl/quiche_expect_bug_impl.h",
     "common/platform/default/quiche_platform_impl/quiche_fuzztest_impl.h",
     "common/platform/default/quiche_platform_impl/quiche_test_impl.h",

@@ -678,12 +678,13 @@ void QuicConnection::SetFromConfig(const QuicConfig& config) {
     EnableBlackholeAvoidanceViaFlowLabel();
   }
 
-  if (config.HasMinAckDelayDraft10ToSend()) {
-    if (config.GetMinAckDelayDraft10ToSendMs() <=
-        config.GetMaxAckDelayToSendMs()) {  // MinAckDelay is valid.
+  if (config.HasMinAckDelayDraft14ToSend()) {
+    if (config.GetMinAckDelayDraft14ToSendUs() <=
+        config.GetMaxAckDelayToSendMs() *
+            kNumMicrosPerMilli) {  // MinAckDelay is valid.
       set_can_receive_ack_frequency_immediate_ack(true);
-      local_min_ack_delay_ = QuicTime::Delta::FromMilliseconds(
-          config.GetMinAckDelayDraft10ToSendMs());
+      local_min_ack_delay_ = QuicTime::Delta::FromMicroseconds(
+          config.GetMinAckDelayDraft14ToSendUs());
     } else {
       QUIC_BUG(quic_bug_min_ack_delay_too_high)
           << "MinAckDelay higher than MaxAckDelay";
@@ -712,7 +713,7 @@ void QuicConnection::SetFromConfig(const QuicConfig& config) {
 
   if (config.peer_reordering_threshold() != 1 &&
       perspective_ == Perspective::IS_CLIENT && version().IsIetfQuic() &&
-      !config.HasMinAckDelayDraft10ToSend()) {
+      !config.HasMinAckDelayDraft14ToSend()) {
     QuicAckFrequencyFrame frame;
     frame.reordering_threshold = config.peer_reordering_threshold();
     uber_received_packet_manager_.OnAckFrequencyFrame(frame);
@@ -2271,10 +2272,6 @@ bool QuicConnection::OnAckFrequencyFrame(const QuicAckFrequencyFrame& frame) {
     return false;
   }
 
-  if (!can_receive_ack_frequency_immediate_ack_) {
-    QUIC_LOG_EVERY_N_SEC(ERROR, 120) << "Get unexpected AckFrequencyFrame.";
-    return false;
-  }
   if (frame.requested_max_ack_delay < local_min_ack_delay_) {
     QUIC_LOG_EVERY_N_SEC(ERROR, 120)
         << "Received AckFrequencyFrame with requested_max_ack_delay "
@@ -2284,16 +2281,8 @@ bool QuicConnection::OnAckFrequencyFrame(const QuicAckFrequencyFrame& frame) {
                     ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return false;
   }
-  QUIC_RELOADABLE_FLAG_COUNT_N(quic_receive_ack_frequency, 3, 7);
-  if (auto packet_number_space =
-          QuicUtils::GetPacketNumberSpace(
-              last_received_packet_info_.decrypted_level) == APPLICATION_DATA) {
-    uber_received_packet_manager_.OnAckFrequencyFrame(frame);
-  } else {
-    QUIC_LOG_EVERY_N_SEC(ERROR, 120)
-        << "Get AckFrequencyFrame in packet number space "
-        << packet_number_space;
-  }
+  QUIC_RELOADABLE_FLAG_COUNT_N(quic_receive_ack_frequency2, 3, 8);
+  uber_received_packet_manager_.OnAckFrequencyFrame(frame);
   MaybeUpdateAckTimeout();
   return true;
 }
@@ -2309,19 +2298,8 @@ bool QuicConnection::OnImmediateAckFrame(const QuicImmediateAckFrame& frame) {
   if (!UpdatePacketContent(IMMEDIATE_ACK_FRAME)) {
     return false;
   }
-  if (!can_receive_ack_frequency_immediate_ack_) {
-    QUIC_LOG_EVERY_N_SEC(ERROR, 120) << "Got unexpected ImmediateAck Frame.";
-    return false;
-  }
-  QUIC_RELOADABLE_FLAG_COUNT_N(quic_receive_ack_frequency, 1, 7);
-  if (last_received_packet_info_.decrypted_level == ENCRYPTION_FORWARD_SECURE) {
-    uber_received_packet_manager_.OnImmediateAckFrame();
-  } else {
-    QUIC_LOG_EVERY_N_SEC(ERROR, 120)
-        << "Got ImmediateAckFrame at EncryptionLevel "
-        << EncryptionLevelToString(last_received_packet_info_.decrypted_level);
-    return false;
-  }
+  QUIC_RELOADABLE_FLAG_COUNT_N(quic_receive_ack_frequency2, 1, 8);
+  uber_received_packet_manager_.OnImmediateAckFrame();
   should_last_packet_instigate_acks_ = false;
   MaybeUpdateAckTimeout();
   return true;
@@ -4293,7 +4271,7 @@ void QuicConnection::OnHandshakeComplete() {
     // This AckFrequencyFrame is meant to only update the max_ack_delay. All
     // other values are set to the default.
     ack_frequency_frame.ack_eliciting_threshold =
-        kDefaultRetransmittablePacketsBeforeAck;
+        kDefaultRetransmittablePacketsBeforeAck - 1;
     ack_frequency_frame.reordering_threshold = 1;
     visitor_->SendAckFrequency(ack_frequency_frame);
     if (!connected_) {
@@ -6418,6 +6396,52 @@ void QuicConnection::MaybeEnableMultiplePacketNumberSpacesSupport() {
 
 bool QuicConnection::SupportsMultiplePacketNumberSpaces() const {
   return sent_packet_manager_.supports_multiple_packet_number_spaces();
+}
+
+void QuicConnection::EnableIncomingReceiveTimestamps(uint32_t max_timestamps,
+                                                     uint32_t exponent) {
+  if (max_timestamps == 0) {
+    return;
+  }
+  if (!version().IsIetfQuic()) {
+    QUIC_BUG(incoming_receive_timestamps_with_gquic)
+        << "Trying to enable QUIC receive timestamps for non-IETF QUIC";
+    return;
+  }
+  // `exponent` here is the value we are asking the peer to use; log an error if
+  // that value is too high, but still pass it downstream (since we have already
+  // sent it to peer).
+  QUIC_BUG_IF(receive_ts_exponent_too_high,
+              exponent > kMaxReceiveTimestampsUsefulExponent)
+      << "Trying to configure QUIC Receive Timestamps with worse than "
+         "millisecond precision; this is likely to cause issues with "
+         "congestion control.";
+
+  framer_.set_local_max_receive_timestamps_per_ack(max_timestamps);
+  framer_.set_local_receive_timestamps_exponent(exponent);
+}
+
+void QuicConnection::EnableOutgoingReceiveTimestamps(uint32_t max_timestamps,
+                                                     uint32_t exponent) {
+  if (max_timestamps == 0) {
+    return;
+  }
+  if (!version().IsIetfQuic()) {
+    QUIC_BUG(outgoing_receive_timestamps_with_gquic)
+        << "Trying to enable QUIC receive timestamps for non-IETF QUIC";
+    return;
+  }
+  if (exponent > kMaxReceiveTimestampsExponent) {
+    QUIC_BUG(outgoing_receive_timestamps_with_bad_exponent)
+        << "Trying to enable sending receive timestamps with an invalid "
+           "exponent";
+    return;
+  }
+  max_timestamps = std::min(max_timestamps, kMaxReceiveTimestampsToSend);
+
+  uber_received_packet_manager_.set_save_timestamps(true);
+  framer_.set_peer_max_receive_timestamps_per_ack(max_timestamps);
+  framer_.set_peer_receive_timestamps_exponent(exponent);
 }
 
 void QuicConnection::SetLargestReceivedPacketWithAck(
