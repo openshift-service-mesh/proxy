@@ -1,0 +1,18 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/execvp.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "execvp",
+    checks = [
+        # Equivalent to gl_FUNC_EXECVP macro from execvp.m4
+        # Note: REPLACE_EXECVP=1 is set on Windows in the m4, but that's
+        # platform-specific logic that would need select() in Bazel
+        checks.AC_CHECK_FUNC(
+            "execvp",
+            define = "HAVE_EXECVP",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+)

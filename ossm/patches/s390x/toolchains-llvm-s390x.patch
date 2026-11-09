@@ -1,0 +1,41 @@
+diff --git a/ossm/vendor/toolchains_llvm+/toolchain/cc_toolchain_config.bzl b/ossm/vendor/toolchains_llvm+/toolchain/cc_toolchain_config.bzl
+--- a/ossm/vendor/toolchains_llvm+/toolchain/cc_toolchain_config.bzl
++++ b/ossm/vendor/toolchains_llvm+/toolchain/cc_toolchain_config.bzl
+@@ -167,6 +167,15 @@
+             "clang",
+             "glibc_unknown",
+             "x86_64-linux-gnu",
++        ),
++        "linux-s390x": (
++            "clang-s390x-linux",
++            "s390x",
++            "glibc_unknown",
++            "clang",
++            "clang",
++            "glibc_unknown",
++            "s390x-linux-gnu",
+         ),
+         "none-riscv32": (
+             "clang-riscv32-none",
+diff --git a/ossm/vendor/toolchains_llvm+/toolchain/internal/common.bzl b/ossm/vendor/toolchains_llvm+/toolchain/internal/common.bzl
+--- a/ossm/vendor/toolchains_llvm+/toolchain/internal/common.bzl
++++ b/ossm/vendor/toolchains_llvm+/toolchain/internal/common.bzl
+@@ -20,6 +20,7 @@
+     ("linux", "armv7"),
+     ("linux", "ppc64le"),
+     ("linux", "riscv64"),
++    ("linux", "s390x"),
+     ("darwin", "x86_64"),
+     ("darwin", "aarch64"),
+     ("none", "riscv32"),
+diff --git a/ossm/vendor/toolchains_llvm+/toolchain/internal/configure.bzl b/ossm/vendor/toolchains_llvm+/toolchain/internal/configure.bzl
+--- a/ossm/vendor/toolchains_llvm+/toolchain/internal/configure.bzl
++++ b/ossm/vendor/toolchains_llvm+/toolchain/internal/configure.bzl
+@@ -543,6 +543,7 @@
+         "linux-ppc64le": "powerpc64le-unknown-linux-gnu",
+         "linux-x86_64": "x86_64-unknown-linux-gnu",
+         "linux-riscv64": "riscv64-unknown-linux-gnu",
++        "linux-s390x": "s390x-unknown-linux-gnu",
+         "none-riscv32": "riscv32-unknown-none-elf",
+         "none-riscv64": "riscv64-unknown-none-elf",
+         "none-x86_64": "x86_64-unknown-none",

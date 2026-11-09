@@ -1,0 +1,53 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/stat.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# Windows: REPLACE_STAT=1 unconditionally (stat returns time-zone-affected
+# st_atime/st_mtime/st_ctime values).
+# REPLACE_FUNC_STAT_FILE: M4 runs AC_RUN_IFELSE for the stat("file/", &st)
+# trailing-slash bug; cross-compile guess for darwin falls to
+# gl_cross_guess_normal. Modern macOS no longer has the bug (verified via
+# real ./configure), so the macOS branch matches Linux.
+autoconf(
+    name = "stat",
+    checks = [
+        checks.AC_CHECK_HEADER(
+            "sdkddkver.h",
+            define = "HAVE_SDKDDKVER_H",
+        ),
+    ] + select({
+        "@platforms//os:macos": [
+            checks.AC_DEFINE(
+                "REPLACE_FUNC_STAT_FILE",
+                if_true = "1",
+                requires = ["!gl_cv_macos_sdk_modern"],
+            ),
+            checks.AC_SUBST(
+                "REPLACE_STAT",
+                condition = "gl_cv_macos_sdk_modern",
+                if_false = "1",
+                if_true = "0",
+            ),
+        ],
+        "@platforms//os:windows": [
+            checks.AC_DEFINE("REPLACE_FUNC_STAT_FILE", "1"),
+            checks.AC_SUBST("REPLACE_STAT", "1"),
+        ],
+        "//conditions:default": [
+            checks.AC_SUBST("REPLACE_STAT", "0"),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        # REPLACE_FSTAT (macOS golden expects 1); fstat is single canonical owner
+        "//gnulib/m4/fstat",
+        "//gnulib/m4/gnulib-common:gl_HOST_MACOS_SDK_MODERN",
+        # AC_CHECK_FUNCS_ONCE([lstat]) - only need to check if lstat exists,
+        # NOT the full gl_FUNC_LSTAT which sets REPLACE_LSTAT
+        "//gnulib/m4/lstat:HAVE_LSTAT",
+        # NEXT_* for sys/stat.h; golden expects "<sys/stat.h>"
+        "//gnulib/m4/sys_stat_h",
+    ],
+)

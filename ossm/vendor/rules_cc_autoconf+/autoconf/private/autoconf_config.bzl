@@ -1,0 +1,504 @@
+"""# autoconf_config
+
+Common utilities for autoconf rules.
+"""
+
+load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
+load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cpp_toolchain")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("//autoconf/private:ctx_actions_write.bzl", "write")
+load("//autoconf/private:providers.bzl", "CcAutoconfInfo")
+
+_TOOLCHAIN_TYPE = "//autoconf:toolchain_type"
+
+_COPTS_MARKER = "{rules_cc_autoconf:copts}"
+_LINKOPTS_MARKER = "{rules_cc_autoconf:linkopts}"
+
+def encode_result(value, success = True):
+    """Encode a value as a flat result JSON string.
+
+    Returns the content for a result file that can be referenced from
+    ``CcAutoconfInfo``.  Using this function insulates callers from the
+    internal result-file schema.
+
+    Args:
+        value: The result value.  Strings are JSON-encoded (quoted in the
+            output); numbers and booleans are stored as their JSON
+            representation.  Use ``None`` for a valueless define
+            (``#define FOO`` with no value).
+        success: Whether the check succeeded.  Defaults to ``True``.
+            A result with ``success=False`` is rendered as
+            ``/* #undef FOO */`` in the generated header.
+
+    Returns:
+        A JSON string suitable for ``ctx.actions.write``.
+    """
+    return json.encode_indent({
+        "success": success,
+        "value": json.encode(value) if value != None else None,
+    }, indent = " " * 4) + "\n"
+
+def get_autoconf_toolchain_cache(ctx):
+    """Get the content-based cache from the autoconf toolchain.
+
+    Returns the unified content cache from both ``cache_deps`` and ``defaults``
+    on the toolchain.  Used by the ``autoconf`` rule for content-based action
+    deduplication.
+
+    Args:
+        ctx (ctx): The rule context (must declare the autoconf toolchain type).
+
+    Returns:
+        dict[str, File]: Mapping of content keys to result files.
+                         Empty dict if no toolchain is configured.
+    """
+    toolchain = ctx.toolchains[_TOOLCHAIN_TYPE]
+    if not toolchain:
+        return {}
+    cache = getattr(toolchain, "autoconf_cache", None)
+    return cache if cache else {}
+
+def get_autoconf_toolchain_defaults(ctx):
+    """Get default checks from the autoconf toolchain if available.
+
+    Returns only the ``defaults`` portion of the toolchain (not ``cache_deps``).
+    Used by ``autoconf_hdr`` for rendering baseline values.
+
+    Args:
+        ctx (ctx): The rule context.
+
+    Returns:
+        struct: A struct with `cache`, `define`, and `subst` fields, each containing
+                a dict[str, File] mapping variable names to result files.
+                Returns struct(cache={}, define={}, subst={}) if no toolchain is configured.
+    """
+
+    # Access toolchain - returns None if not registered or mandatory=False
+    toolchain = ctx.toolchains[_TOOLCHAIN_TYPE]
+    if not toolchain:
+        return struct(cache = {}, define = {}, subst = {})
+
+    autoconf_defaults = getattr(toolchain, "autoconf_defaults", None)
+    if not autoconf_defaults:
+        return struct(cache = {}, define = {}, subst = {})
+
+    return struct(
+        cache = getattr(autoconf_defaults, "cache", {}),
+        define = getattr(autoconf_defaults, "define", {}),
+        subst = getattr(autoconf_defaults, "subst", {}),
+        unquoted_defines = getattr(autoconf_defaults, "unquoted_defines", []),
+    )
+
+def get_autoconf_toolchain_defaults_by_label(ctx):
+    """Get default checks from the autoconf toolchain, organized by source label.
+
+    Args:
+        ctx (ctx): The rule context.
+
+    Returns:
+        dict: A mapping of source labels to structs with `cache`, `define`, and `subst` fields,
+              each containing a dict[str, File]. Returns empty dict if no toolchain is configured.
+    """
+
+    # Access toolchain - returns None if not registered or mandatory=False
+    toolchain = ctx.toolchains[_TOOLCHAIN_TYPE]
+    if not toolchain:
+        return {}
+
+    autoconf_defaults = getattr(toolchain, "autoconf_defaults", None)
+    if not autoconf_defaults:
+        return {}
+
+    return getattr(autoconf_defaults, "defaults_by_label", {})
+
+def filter_defaults(defaults_by_label, include_labels, exclude_labels):
+    """Filter toolchain defaults based on include/exclude lists.
+
+    Args:
+        defaults_by_label (dict): Mapping of Label -> struct(cache=..., define=..., subst=...) from toolchain.
+        include_labels (list[Label]): If non-empty, only include defaults from these labels.
+            An error is raised if a label is specified but not found in the toolchain.
+        exclude_labels (list[Label]): If non-empty, exclude defaults from these labels.
+            Labels not found in the toolchain are silently ignored.
+
+    Returns:
+        struct: A struct with `cache`, `define`, and `subst` fields, each containing
+                a merged dict[str, File] after filtering.
+    """
+    if include_labels and exclude_labels:
+        fail("defaults_include and defaults_exclude are mutually exclusive")
+
+    result_cache = {}
+    result_define = {}
+    result_subst = {}
+    result_unquoted = {}
+
+    if include_labels:
+        # Only include specified labels
+        for label in include_labels:
+            if label not in defaults_by_label:
+                fail("defaults_include specifies label '{}' but it is not provided by the autoconf toolchain. Available labels: {}".format(
+                    label,
+                    ", ".join([str(label_key) for label_key in defaults_by_label.keys()]),
+                ))
+            label_defaults = defaults_by_label[label]
+            result_cache = result_cache | getattr(label_defaults, "cache", {})
+            result_define = result_define | getattr(label_defaults, "define", {})
+            result_subst = result_subst | getattr(label_defaults, "subst", {})
+            for uq in getattr(label_defaults, "unquoted_defines", []):
+                result_unquoted[uq] = True
+    elif exclude_labels:
+        # Include all except specified labels
+        exclude_set = {label: True for label in exclude_labels}
+        for label, label_defaults in defaults_by_label.items():
+            if label not in exclude_set:
+                result_cache = result_cache | getattr(label_defaults, "cache", {})
+                result_define = result_define | getattr(label_defaults, "define", {})
+                result_subst = result_subst | getattr(label_defaults, "subst", {})
+                for uq in getattr(label_defaults, "unquoted_defines", []):
+                    result_unquoted[uq] = True
+    else:
+        # Include all
+        for label_defaults in defaults_by_label.values():
+            result_cache = result_cache | getattr(label_defaults, "cache", {})
+            result_define = result_define | getattr(label_defaults, "define", {})
+            result_subst = result_subst | getattr(label_defaults, "subst", {})
+            for uq in getattr(label_defaults, "unquoted_defines", []):
+                result_unquoted[uq] = True
+
+    return struct(
+        cache = result_cache,
+        define = result_define,
+        subst = result_subst,
+        unquoted_defines = sorted(result_unquoted.keys()),
+    )
+
+def merge_with_defaults(defaults, results):
+    """Merge check results with toolchain defaults.
+
+    Results from actual targets take precedence over defaults - any variable
+    present in both will use the result value, not the default.
+
+    Args:
+        defaults (dict): Default checks from toolchain (variable name -> File).
+        results (dict): Check results from targets (variable name -> File).
+
+    Returns:
+        dict: Merged results with targets overriding defaults.
+    """
+
+    # Defaults first, then results override
+    return defaults | results
+
+def _same_content_key(file_a, file_b, path_to_content_key):
+    """Return True when two files represent the same check implementation.
+
+    Looks up both files in the reverse content-cache map.  If both resolve
+    to the same content key the conflict is a benign sibling duplication
+    (two independent targets ran an identical check) rather than a genuine
+    implementation mismatch.
+    """
+    key_a = path_to_content_key.get(file_a.path)
+    key_b = path_to_content_key.get(file_b.path)
+    if key_a == None or key_b == None:
+        return False
+    return key_a == key_b
+
+def collect_transitive_results(dep_infos):
+    """Collect transitive cache variable results.
+
+    Args:
+        dep_infos (list): A list of `CcAutoconfInfo`.
+
+    Returns:
+        dict: A mapping with keys "cache", "content_cache", "define", "subst"
+              (each dict[str, File]) and "unquoted_defines" (list[str]).
+    """
+    cache_results = {}
+    content_cache = {}
+    define_results = {}
+    subst_results = {}
+    unquoted_defines_set = {}
+    path_to_content_key = {}
+    for dep_info in dep_infos:
+        # Cache variable names — no conflict detection needed since content-based
+        # dedup handles identity; the same name may appear from different actions
+        # that are semantically identical.
+        for cache_name, cache_file in dep_info.cache_results.items():
+            cache_results[cache_name] = cache_file
+
+        # Content cache — same content key always means the same check, so
+        # merging is safe without conflict detection.  Also build a reverse
+        # map (file path -> content key) so that downstream conflict checks
+        # can distinguish "same implementation, different File object" from
+        # genuinely conflicting implementations.
+        for ckey, cfile in dep_info.content_cache.items():
+            content_cache[ckey] = cfile
+            path_to_content_key[cfile.path] = ckey
+
+        for define_name, define_file in dep_info.define_results.items():
+            if define_name in define_results:
+                existing_file = define_results[define_name]
+                if existing_file.path != define_file.path:
+                    if not _same_content_key(existing_file, define_file, path_to_content_key):
+                        fail("Define '{}' is defined in multiple dependencies with different result files:\n  First:  {}\n  Second: {}\nThis indicates duplicate defines across different autoconf targets.".format(
+                            define_name,
+                            existing_file.path,
+                            define_file.path,
+                        ))
+            define_results[define_name] = define_file
+
+        for subst_name, subst_file in dep_info.subst_results.items():
+            if subst_name in subst_results:
+                existing_file = subst_results[subst_name]
+                if existing_file.path != subst_file.path:
+                    if not _same_content_key(existing_file, subst_file, path_to_content_key):
+                        fail("Subst '{}' is defined in multiple dependencies with different result files:\n  First:  {}\n  Second: {}\nThis indicates duplicate subst across different autoconf targets.".format(
+                            subst_name,
+                            existing_file.path,
+                            subst_file.path,
+                        ))
+            subst_results[subst_name] = subst_file
+
+        for uq in dep_info.unquoted_defines:
+            unquoted_defines_set[uq] = True
+
+    return {
+        "cache": cache_results,
+        "content_cache": content_cache,
+        "define": define_results,
+        "subst": subst_results,
+        "unquoted_defines": sorted(unquoted_defines_set.keys()),
+    }
+
+def collect_transitive_content_cache(dep_infos):
+    """Collect transitive `content_cache` without conflict detection.
+
+    For action deduplication only. Unlike `collect_transitive_results`,
+    this does NOT validate define/subst uniqueness — the sole caller is
+    `autoconf_toolchain`'s `cache_deps` path, which intentionally tolerates
+    overlap so a broad sweep of cache providers (e.g., every gnulib m4
+    module) can be passed without analysis-time conflicts. Last-write-wins
+    is safe because the content key already encodes the full check
+    implementation, so any two files mapped to the same key are
+    interchangeable.
+
+    Args:
+        dep_infos (list): A list of `CcAutoconfInfo`.
+
+    Returns:
+        dict[str, File]: Mapping of content keys to result files.
+    """
+    content_cache = {}
+    for dep_info in dep_infos:
+        for ckey, cfile in dep_info.content_cache.items():
+            content_cache[ckey] = cfile
+    return content_cache
+
+def collect_deps(deps):
+    """Collect `CcAutoconfInfo` from dependencies.
+
+    Args:
+        deps (list): A list of `Target`
+
+    Returns:
+        depset: A depset of `CcAutoconfInfo`.
+    """
+    direct = []
+    transitive = []
+    for dep in deps:
+        info = dep[CcAutoconfInfo]
+        direct.append(info)
+        transitive.append(info.deps)
+
+    return depset(direct, transitive = transitive)
+
+# Some features are incompatible with the probing and result in errors
+# across various toolchain implementations and rules_cc versions.
+_UNSUPPORTED_RULES_CC_FEATURES = [
+    # Enforces declared-only header use; needs `%{module_name}` + cc_library module map.
+    "layering_check",
+    # Adds `-fmodule-map-file` / `-fmodule-name` to compiles; needs module map variables.
+    "use_module_maps",
+    # Toolchain capability to emit `.cppmap` files for cc_library hdrs; no hdrs here.
+    "module_maps",
+    # Synthesizes per-header `-fsyntax-only` actions for cc_library hdrs; nothing to parse.
+    "parse_headers",
+    # Compiles cc_library hdrs into clang PCMs; needs `%{module_name}` + `.pcm` graph.
+    "header_modules",
+    # C++20 named modules orchestration; needs module interface unit context.
+    "cpp_modules",
+]
+
+def get_cc_toolchain_info(ctx):
+    """Get cc_toolchain information for autoconf configuration.
+
+    Args:
+        ctx (ctx): The rule context.
+
+    Returns:
+        A struct containing:
+            - cc_toolchain: The cc_toolchain
+            - feature_configuration: The feature configuration
+            - c_compiler_path: Path to C compiler
+            - cpp_compiler_path: Path to C++ compiler
+            - linker_path: Path to linker
+            - c_flags: List of C compiler flags
+            - cpp_flags: List of C++ compiler flags
+            - c_link_flags: List of C linker flags
+            - cpp_link_flags: List of C++ linker flags
+            - compiler_type: The compiler type
+    """
+    cc_toolchain = find_cpp_toolchain(ctx)
+    feature_configuration = cc_common.configure_features(
+        ctx = ctx,
+        cc_toolchain = cc_toolchain,
+        requested_features = ctx.features,
+        unsupported_features = ctx.disabled_features + _UNSUPPORTED_RULES_CC_FEATURES,
+    )
+
+    c_compiler_path = cc_common.get_tool_for_action(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.c_compile,
+    )
+
+    cpp_compiler_path = cc_common.get_tool_for_action(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.cpp_compile,
+    )
+
+    linker_path = cc_common.get_tool_for_action(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.cpp_link_executable,
+    )
+
+    c_compile_variables = cc_common.create_compile_variables(
+        feature_configuration = feature_configuration,
+        cc_toolchain = cc_toolchain,
+        user_compile_flags = ctx.fragments.cpp.copts + [_COPTS_MARKER],
+    )
+
+    c_flags = cc_common.get_memory_inefficient_command_line(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.c_compile,
+        variables = c_compile_variables,
+    )
+
+    cpp_compile_variables = cc_common.create_compile_variables(
+        feature_configuration = feature_configuration,
+        cc_toolchain = cc_toolchain,
+        user_compile_flags = ctx.fragments.cpp.copts + ctx.fragments.cpp.cxxopts + [_COPTS_MARKER],
+    )
+
+    cpp_flags = cc_common.get_memory_inefficient_command_line(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.cpp_compile,
+        variables = cpp_compile_variables,
+    )
+
+    link_variables = cc_common.create_link_variables(
+        feature_configuration = feature_configuration,
+        cc_toolchain = cc_toolchain,
+        is_linking_dynamic_library = False,
+        is_static_linking_mode = True,
+        user_link_flags = [_LINKOPTS_MARKER],
+    )
+
+    c_link_flags = cc_common.get_memory_inefficient_command_line(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.cpp_link_executable,
+        variables = link_variables,
+    )
+
+    cpp_link_flags = cc_common.get_memory_inefficient_command_line(
+        feature_configuration = feature_configuration,
+        action_name = ACTION_NAMES.cpp_link_executable,
+        variables = link_variables,
+    )
+
+    return struct(
+        cc_toolchain = cc_toolchain,
+        feature_configuration = feature_configuration,
+        c_compiler_path = c_compiler_path,
+        cpp_compiler_path = cpp_compiler_path,
+        linker_path = linker_path,
+        c_flags = c_flags,
+        cpp_flags = cpp_flags,
+        c_link_flags = c_link_flags,
+        cpp_link_flags = cpp_link_flags,
+        compiler_type = cc_toolchain.compiler,
+    )
+
+def create_config_dict(toolchain_info):
+    """Create a config dictionary for the autoconf runner.
+
+    Args:
+        toolchain_info (cc_toolchain): Struct from get_cc_toolchain_info().
+
+    Returns:
+        A dictionary representing the autoconf config.
+    """
+    return {
+        "c_compiler": toolchain_info.c_compiler_path,
+        "c_flags": toolchain_info.c_flags,
+        "c_link_flags": toolchain_info.c_link_flags,
+        "compiler_type": toolchain_info.compiler_type,
+        "cpp_compiler": toolchain_info.cpp_compiler_path,
+        "cpp_flags": toolchain_info.cpp_flags,
+        "cpp_link_flags": toolchain_info.cpp_link_flags,
+        "linker": toolchain_info.linker_path,
+    }
+
+def write_config_json(ctx, config_dict):
+    """Write a config dictionary to a JSON file.
+
+    Args:
+        ctx (ctx): The rule context.
+        config_dict (dict): The config dictionary from create_config_dict().
+
+    Returns:
+        A File representing the config JSON file.
+    """
+    config_json = ctx.actions.declare_file("{}.ac.json".format(ctx.label.name))
+    write(
+        actions = ctx.actions,
+        output = config_json,
+        content = json.encode_indent(config_dict, indent = " " * 4) + "\n",
+    )
+    return config_json
+
+def get_environment_variables(ctx, toolchain_info):
+    """Get environment variables for running autoconf checks.
+
+    Args:
+        ctx (ctx): The rule context.
+        toolchain_info (cc_toolchain): Struct from get_cc_toolchain_info().
+
+    Returns:
+        A dictionary of environment variables.
+    """
+    compile_variables_for_env = cc_common.create_compile_variables(
+        feature_configuration = toolchain_info.feature_configuration,
+        cc_toolchain = toolchain_info.cc_toolchain,
+        user_compile_flags = ctx.fragments.cpp.copts,
+    )
+    compile_env = cc_common.get_environment_variables(
+        feature_configuration = toolchain_info.feature_configuration,
+        action_name = ACTION_NAMES.c_compile,
+        variables = compile_variables_for_env,
+    )
+    link_variables_for_env = cc_common.create_link_variables(
+        feature_configuration = toolchain_info.feature_configuration,
+        cc_toolchain = toolchain_info.cc_toolchain,
+        is_linking_dynamic_library = False,
+        is_static_linking_mode = True,
+    )
+    link_env = cc_common.get_environment_variables(
+        feature_configuration = toolchain_info.feature_configuration,
+        action_name = ACTION_NAMES.cpp_link_executable,
+        variables = link_variables_for_env,
+    )
+
+    # Merge compile and link environment variables, with compile taking precedence
+    # since it has the critical INCLUDE paths for MSVC
+    return link_env | compile_env

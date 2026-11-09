@@ -1,0 +1,32 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+cc_binary(
+    name = "libpng_usage_example",
+    srcs = ["libpng_usage_example.cpp"],
+    deps = [
+        "@examples_zlib//:zlib",
+        "@libpng",
+    ],
+)
+
+sh_test(
+    name = "test_libpng",
+    size = "small",
+    srcs = ["test_libpng.sh"],
+    args = [
+        "$(rlocationpath :libpng_usage_example)",
+        "$(rlocationpath bazel_icon_transparent.png)",
+        "out.png",
+    ],
+    data = [
+        "bazel_icon_transparent.png",
+        ":libpng_usage_example",
+        "@bazel_tools//tools/bash/runfiles",
+    ],
+    visibility = ["//:__pkg__"],
+)
+
+test_suite(
+    name = "all_tests",
+)

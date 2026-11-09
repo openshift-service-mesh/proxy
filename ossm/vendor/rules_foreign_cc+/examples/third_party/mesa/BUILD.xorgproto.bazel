@@ -1,0 +1,21 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(
+        include = ["**"],
+        exclude = ["*.bazel"],
+    ),
+)
+
+configure_make(
+    name = "xorgproto",
+    env = {
+        "PYTHON": "$$EXT_BUILD_ROOT/$(PYTHON3)",
+    },
+    lib_source = ":all_srcs",
+    out_headers_only = True,
+    toolchains = ["@rules_python//python:current_py_toolchain"],
+)

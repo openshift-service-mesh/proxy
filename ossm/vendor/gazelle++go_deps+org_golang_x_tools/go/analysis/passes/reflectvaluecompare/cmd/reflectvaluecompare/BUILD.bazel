@@ -1,0 +1,18 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "reflectvaluecompare_lib",
+    srcs = ["main.go"],
+    importpath = "golang.org/x/tools/go/analysis/passes/reflectvaluecompare/cmd/reflectvaluecompare",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//go/analysis/passes/reflectvaluecompare",
+        "//go/analysis/singlechecker",
+    ],
+)
+
+go_binary(
+    name = "reflectvaluecompare",
+    embed = [":reflectvaluecompare_lib"],
+    visibility = ["//visibility:public"],
+)

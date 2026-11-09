@@ -1,0 +1,29 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "generate-alias_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/golang/protobuf/internal/cmd/generate-alias",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//proto",
+        "@org_golang_google_protobuf//cmd/protoc-gen-go/internal_gengo",
+        "@org_golang_google_protobuf//compiler/protogen",
+        "@org_golang_google_protobuf//reflect/protodesc",
+        "@org_golang_google_protobuf//reflect/protoreflect",
+        "@org_golang_google_protobuf//types/descriptorpb",
+        "@org_golang_google_protobuf//types/known/anypb",
+        "@org_golang_google_protobuf//types/known/durationpb",
+        "@org_golang_google_protobuf//types/known/emptypb",
+        "@org_golang_google_protobuf//types/known/structpb",
+        "@org_golang_google_protobuf//types/known/timestamppb",
+        "@org_golang_google_protobuf//types/known/wrapperspb",
+        "@org_golang_google_protobuf//types/pluginpb",
+    ],
+)
+
+go_binary(
+    name = "generate-alias",
+    embed = [":generate-alias_lib"],
+    visibility = ["//:__subpackages__"],
+)

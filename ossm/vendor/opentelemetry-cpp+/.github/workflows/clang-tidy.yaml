@@ -1,0 +1,120 @@
+name: clang-tidy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  clang-tidy:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cmake_options: all-options-abiv1-preview
+            warning_limit: 73
+          - cmake_options: all-options-abiv2-preview
+            warning_limit: 76
+    env:
+      CC: /usr/bin/clang-22
+      CXX: /usr/bin/clang++-22
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Setup Environment
+        run: |
+          sudo apt update -y
+          sudo apt install -y --no-install-recommends --no-install-suggests \
+          build-essential \
+          cmake \
+          zlib1g-dev \
+          libssl-dev \
+          libcurl4-openssl-dev
+
+      - name: Install clang-22 toolchain
+        run: |
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 22
+          sudo apt install -y clang-22 clang-tidy-22
+          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-22 200
+          sudo update-alternatives --config clang-tidy
+          echo "Using clang-tidy version: $(clang-tidy --version)"
+          echo "clang-tidy installed at: $(which clang-tidy)"
+
+      - name: Install pinned third-party
+        env:
+          # benchmark v1.9.4 trips clang-22's new -Wc2y-extensions on __COUNTER__
+          # and its CMakeLists uses -Werror -pedantic; silence the warning.
+          CXXFLAGS: -Wno-c2y-extensions
+        run: |
+          sudo -E ./ci/install_thirdparty.sh --install-dir /usr/local --tags-file third_party_release
+
+      - name: Build and run clang-tidy
+        id: build
+        env:
+          OTELCPP_CMAKE_CACHE_FILE: ${{ matrix.cmake_options }}.cmake
+          BUILD_DIR: build-${{ matrix.cmake_options }}
+          CXX_STANDARD: '14' # Run clang-tidy on the minimum supported c++ standard
+        run: |
+          ./ci/do_ci.sh cmake.clang_tidy.test
+          echo "build_log=${BUILD_DIR}/opentelemetry-cpp-clang-tidy.log" >> "$GITHUB_OUTPUT"
+
+      - name: Analyze clang-tidy output
+        id: analyze
+        env:
+          BUILD_LOG: ${{ steps.build.outputs.build_log }}
+          CMAKE_OPTIONS: ${{ matrix.cmake_options }}
+        run: |
+          SCRIPT_OUTPUT=$(python3 ./ci/create_clang_tidy_report.py \
+            --build_log "$BUILD_LOG" \
+            --output "./clang_tidy_report-${CMAKE_OPTIONS}.md")
+          export $SCRIPT_OUTPUT
+          echo "Found $TOTAL_WARNINGS unique warnings"
+          echo "clang-tidy report generated at $REPORT_PATH"
+          echo "warning_count=$TOTAL_WARNINGS" >> "$GITHUB_OUTPUT"
+          echo "report_path=$REPORT_PATH" >> "$GITHUB_OUTPUT"
+          cat $REPORT_PATH >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload build log
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Logs-clang-tidy-${{ matrix.cmake_options }}
+          path: ${{ steps.build.outputs.build_log }}
+
+      - name: Upload warning report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Report-clang-tidy-${{ matrix.cmake_options }}
+          path: ${{ steps.analyze.outputs.report_path }}
+
+      - name: Check Warning Limits
+        env:
+          WARNING_COUNT: ${{ steps.analyze.outputs.warning_count }}
+          WARNING_LIMIT: ${{ matrix.warning_limit }}
+          CMAKE_OPTIONS: ${{ matrix.cmake_options }}
+        run: |
+          readonly COUNT="$WARNING_COUNT"
+          readonly LIMIT="$WARNING_LIMIT"
+
+          echo "clang-tidy reported ${COUNT} unique warning(s) with preset '${CMAKE_OPTIONS}'"
+          echo "Limit is ${LIMIT}"
+
+          if [ "$COUNT" -gt "$LIMIT" ]; then
+            echo "::error::clang-tidy reported ${COUNT} warning(s) exceeding the limit of ${LIMIT}"
+            exit 1
+          elif [ "$COUNT" -gt 0 ]; then
+            echo "::warning::clang-tidy reported ${COUNT} warning(s) within the limit of ${LIMIT}"
+          fi
+

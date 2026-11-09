@@ -1,0 +1,54 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/strtok_r.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# gl_PREREQ_STRTOK_R - lines 62-64 (empty)
+autoconf(
+    name = "strtok_r",
+    checks = [
+        checks.AC_CHECK_FUNC(
+            "strtok_r",
+            name = "ac_cv_func_strtok_r",
+        ),
+
+        #   Uses AC_RUN_IFELSE to test for glibc 2.7 bug
+        #     *no)
+        #     ;;
+        #   esac
+        # else
+        # fi
+        # Define HAVE_STRTOK_R in config.h if function exists
+        checks.AC_DEFINE(
+            "HAVE_STRTOK_R",
+            condition = "ac_cv_func_strtok_r",
+            if_true = 1,
+        ),
+        checks.AC_CHECK_DECL(
+            "strtok_r",
+            name = "ac_cv_have_decl_strtok_r",
+            includes = ["#include <string.h>"],
+        ),
+
+        #   HAVE_DECL_STRTOK_R=0
+        # fi
+        # Define HAVE_DECL_STRTOK_R in config.h if declaration exists
+        checks.AC_DEFINE(
+            "HAVE_DECL_STRTOK_R",
+            condition = "ac_cv_have_decl_strtok_r",
+            if_true = 1,
+        ),
+        # Based on golden files, strtok_r works on macOS, so:
+        # - UNDEFINE_STRTOK_R=0
+        # - REPLACE_STRTOK_R=0
+        checks.AC_SUBST("UNDEFINE_STRTOK_R", 0),
+        checks.AC_SUBST("REPLACE_STRTOK_R", 0),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CANONICAL_HOST",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//autoconf/macros/AC_C_RESTRICT",
+        "//gnulib/m4/string_h",
+    ],
+)

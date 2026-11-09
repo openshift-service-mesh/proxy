@@ -1,0 +1,54 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+exports_files(
+    [
+        "BUILD.curl.bazel",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "curl_test",
+    size = "small",
+    srcs = ["curl_test.cc"],
+    defines = select({
+        "@rules_cc//cc/compiler:msvc-cl": ["CURL_STATICLIB"],
+        "//conditions:default": [],
+    }),
+    linkopts = select({
+        "@platforms//os:linux": ["-ldl"],
+        "@rules_cc//cc/compiler:msvc-cl": [
+            "crypt32.lib",
+            "ws2_32.lib",
+            "advapi32.lib",
+            "user32.lib",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "@curl",
+        "@openssl",
+    ],
+)
+
+build_test(
+    name = "build_test",
+    targets = [
+        "@curl//:curl",
+    ],
+    visibility = ["//:__pkg__"],
+)
+
+test_suite(
+    name = "curl_test_suite",
+    tests = [
+        ":build_test",
+        ":curl_test",
+    ],
+    visibility = ["//:__pkg__"],
+)
+
+test_suite(
+    name = "all_tests",
+)

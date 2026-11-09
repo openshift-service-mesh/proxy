@@ -1,0 +1,37 @@
+package(default_visibility = ["//visibility:public"])
+
+# Use this to mark a target that is broken but theoretically fixable, as
+# compared to a target that is fundamentally incompatible with the platform.
+alias(
+    name = "broken",
+    actual = "@platforms//:incompatible",
+)
+
+test_suite(
+    name = "all_tests",
+    tests = [
+        "//apr:all_tests",
+        "//apr_util:all_tests",
+        "//autotools:all_tests",
+        "//bison:all_tests",
+        "//boost:all_tests",
+        "//cares:all_tests",
+        "//curl:all_tests",
+        "//glib:all_tests",
+        "//gn:all_tests",
+        "//gperftools:all_tests",
+        "//iconv:all_tests",
+        "//libgit2:all_tests",
+        "//libjpeg_turbo:all_tests",
+        "//libpng:all_tests",
+        "//libssh2:all_tests",
+        "//log4cxx:all_tests",
+        "//mesa:all_tests",
+        "//openssl:all_tests",
+        "//pcre:all_tests",
+        "//python:all_tests",
+        "//sqlite:all_tests",
+        "//subversion:all_tests",
+        "//zlib:all_tests",
+    ],
+)

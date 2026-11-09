@@ -79,3 +79,5 @@ build:macos --cxxopt=-Wno-range-loop-analysis
 build:macos --host_cxxopt=-Wno-range-loop-analysis
 build:macos --cxxopt=-Wno-deprecated-declarations
 build:macos --host_cxxopt=-Wno-deprecated-declarations
+
+import %workspace%/ossm/bazelrc

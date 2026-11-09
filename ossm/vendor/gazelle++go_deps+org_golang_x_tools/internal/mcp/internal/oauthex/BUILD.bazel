@@ -1,0 +1,24 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "oauthex",
+    srcs = [
+        "oauth2.go",
+        "resource_meta.go",
+    ],
+    importpath = "golang.org/x/tools/internal/mcp/internal/oauthex",
+    visibility = ["//internal/mcp:__subpackages__"],
+    deps = ["//internal/mcp/internal/util"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":oauthex",
+    visibility = ["//internal/mcp:__subpackages__"],
+)
+
+go_test(
+    name = "oauthex_test",
+    srcs = ["oauth2_test.go"],
+    embed = [":oauthex"],
+)

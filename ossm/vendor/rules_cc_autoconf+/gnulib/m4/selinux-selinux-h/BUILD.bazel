@@ -1,0 +1,69 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/selinux-selinux-h.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+load("//gnulib:macros.bzl", gl_macros = "macros")
+
+# gl_HEADERS_SELINUX_SELINUX_H - lines 16-40
+# AC_REQUIRE([gl_CHECK_HEADER_SELINUX_SELINUX_H])
+# Conditionally calls gl_CHECK_NEXT_HEADERS([selinux/selinux.h])
+# when with_selinux != no and header is found
+autoconf(
+    name = "gl_HEADERS_SELINUX_SELINUX_H",
+    checks = gl_macros.GL_NEXT_HEADERS(
+        ["selinux/selinux.h"],
+        condition = "HAVE_SELINUX_SELINUX_H",
+    ),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_CHECK_HEADER_SELINUX_SELINUX_H",
+    ],
+)
+
+# gl_CHECK_HEADER_SELINUX_SELINUX_H - lines 42-70
+# AC_REQUIRE([gl_LIBSELINUX])
+# Checks for selinux/selinux.h and sets USE_SELINUX_SELINUX_H
+autoconf(
+    name = "gl_CHECK_HEADER_SELINUX_SELINUX_H",
+    checks = [
+        checks.AC_CHECK_HEADER(
+            "selinux/selinux.h",
+            define = "HAVE_SELINUX_SELINUX_H",
+            # AC_SUBST too so downstream modules (e.g. gl_HEADERS_SELINUX_SELINUX_H's
+            # condition = "HAVE_SELINUX_SELINUX_H") can resolve via subst lookup,
+            # matching upstream's AC_CHECK_HEADERS_ONCE behavior.
+            subst = "HAVE_SELINUX_SELINUX_H",
+        ),
+        checks.AC_DEFINE(
+            "USE_SELINUX_SELINUX_H",
+            condition = "HAVE_SELINUX_SELINUX_H",
+            if_false = "0",
+            if_true = "1",
+            subst = True,
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_LIBSELINUX",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/include_next",
+    ],
+)
+
+# gl_LIBSELINUX - lines 72-99
+# AC_ARG_WITH, AC_SEARCH_LIBS - library detection not applicable in Bazel
+autoconf(
+    name = "gl_LIBSELINUX",
+    visibility = ["//visibility:public"],
+)
+
+# Package-level aggregator
+autoconf(
+    name = "selinux-selinux-h",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_CHECK_HEADER_SELINUX_SELINUX_H",
+        ":gl_HEADERS_SELINUX_SELINUX_H",
+        ":gl_LIBSELINUX",
+    ],
+)

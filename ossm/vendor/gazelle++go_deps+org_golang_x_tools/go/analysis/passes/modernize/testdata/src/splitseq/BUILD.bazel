@@ -1,0 +1,17 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "splitseq",
+    srcs = [
+        "splitseq.go",
+        "splitseq_go123.go",
+    ],
+    importpath = "golang.org/x/tools/go/analysis/passes/modernize/testdata/src/splitseq",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":splitseq",
+    visibility = ["//visibility:public"],
+)

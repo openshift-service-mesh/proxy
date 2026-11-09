@@ -1,0 +1,21 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "generated",
+    srcs = ["generated.go"],
+    importpath = "golang.org/x/tools/internal/analysis/generated",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+    deps = ["//go/analysis"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":generated",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)

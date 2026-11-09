@@ -1,0 +1,24 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/wctomb.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "wctomb",
+    checks = [
+        # Note: gl_STDLIB_H_DEFAULTS is a _DEFAULTS function, so we ignore it per user's instruction
+        # if false; then
+        # fi
+        # Since the condition is always false, REPLACE_WCTOMB is never set to 1
+        # Based on golden files, REPLACE_WCTOMB=0
+        checks.AC_SUBST("REPLACE_WCTOMB", 0),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        # Note: gl_STDLIB_H_DEFAULTS is a _DEFAULTS function, so we ignore it per user's instruction
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+# Prerequisites of lib/wctomb.c (empty)
+# No separate target needed as it's empty

@@ -1,0 +1,13 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/omp_h.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//gnulib:macros.bzl", gl_macros = "macros")
+
+autoconf(
+    name = "omp_h",
+    checks = gl_macros.GL_NEXT_HEADERS(["omp.h"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/include_next",  # GL_NEXT_HEADERS requires include_next
+    ],
+)

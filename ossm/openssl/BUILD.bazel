@@ -1,0 +1,47 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+
+licenses(["notice"])  # Apache 2
+
+package(default_visibility = ["//visibility:public"])
+
+# Envoy's .bazelrc references `@openssl//:parallel_builds` (under `build:remote`)
+# to bump the foreign_cc OpenSSL build to `-jauto`. There is nothing to build
+# here -- we link the host libraries -- but the flag must still resolve, so we
+# keep a matching (inert) build setting.
+bool_flag(
+    name = "parallel_builds",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "parallel_builds_enabled",
+    flag_values = {":parallel_builds": "True"},
+)
+
+# The target names below mirror those of Envoy's upstream `openssl` module
+# (see envoy's bazel-registry overlay BUILD.bazel). They are backed by the
+# host's OpenSSL rather than a from-source build.
+alias(
+    name = "include",
+    actual = "@system_openssl//:include",
+)
+
+alias(
+    name = "libs",
+    actual = "@system_openssl//:libs",
+)
+
+alias(
+    name = "crypto",
+    actual = "@system_openssl//:crypto",
+)
+
+alias(
+    name = "ssl",
+    actual = "@system_openssl//:ssl",
+)
+
+alias(
+    name = "openssl",
+    actual = "@system_openssl//:openssl",
+)

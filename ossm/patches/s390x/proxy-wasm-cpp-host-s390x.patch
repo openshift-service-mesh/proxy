@@ -1,0 +1,56 @@
+diff --git a/ossm/vendor/proxy-wasm-cpp-host+/bazel/BUILD b/ossm/vendor/proxy-wasm-cpp-host+/bazel/BUILD
+--- a/ossm/vendor/proxy-wasm-cpp-host+/bazel/BUILD
++++ b/ossm/vendor/proxy-wasm-cpp-host+/bazel/BUILD
+@@ -100,21 +100,8 @@
+ )
+ 
+ config_setting(
+-    name = "requested_crypto_system",
++    name = "crypto_system",
+     values = {"define": "crypto=system"},
+-)
+-
+-config_setting(
+-    name = "linux_s390x",
+-    values = {"cpu": "s390x"},
+-)
+-
+-selects.config_setting_group(
+-    name = "crypto_system",
+-    match_any = [
+-        ":requested_crypto_system",
+-        ":linux_s390x",
+-    ],
+ )
+ 
+ # V8 library with pointer compression disabled using V8's Starlark transition.
+diff --git a/ossm/vendor/proxy-wasm-cpp-host+/src/pairs_util.cc b/ossm/vendor/proxy-wasm-cpp-host+/src/pairs_util.cc
+--- a/ossm/vendor/proxy-wasm-cpp-host+/src/pairs_util.cc
++++ b/ossm/vendor/proxy-wasm-cpp-host+/src/pairs_util.cc
+@@ -65,7 +65,7 @@
+ 
+   // Write number of pairs.
+   uint32_t num_pairs =
+-      htowasm(pairs.size(), contextOrEffectiveContext() != nullptr
++      htowasm(static_cast<uint32_t>(pairs.size()), contextOrEffectiveContext() != nullptr
+                                 ? contextOrEffectiveContext()->wasmVm()->usesWasmByteOrder()
+                                 : false);
+   if (pos + sizeof(uint32_t) > end) {
+@@ -77,7 +77,7 @@
+   for (const auto &p : pairs) {
+     // Write name length.
+     uint32_t name_len =
+-        htowasm(p.first.size(), contextOrEffectiveContext() != nullptr
++        htowasm(static_cast<uint32_t>(p.first.size()), contextOrEffectiveContext() != nullptr
+                                     ? contextOrEffectiveContext()->wasmVm()->usesWasmByteOrder()
+                                     : false);
+     if (pos + sizeof(uint32_t) > end) {
+@@ -88,7 +88,7 @@
+ 
+     // Write value length.
+     uint32_t value_len =
+-        htowasm(p.second.size(), contextOrEffectiveContext() != nullptr
++        htowasm(static_cast<uint32_t>(p.second.size()), contextOrEffectiveContext() != nullptr
+                                      ? contextOrEffectiveContext()->wasmVm()->usesWasmByteOrder()
+                                      : false);
+     if (pos + sizeof(uint32_t) > end) {

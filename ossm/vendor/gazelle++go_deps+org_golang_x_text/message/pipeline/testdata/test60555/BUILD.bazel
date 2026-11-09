@@ -1,0 +1,23 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "test60555_lib",
+    srcs = [
+        "catalog_gen.go",
+        "main.go",
+        "message.go",
+    ],
+    importpath = "golang.org/x/text/message/pipeline/testdata/test60555",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//language",
+        "//message",
+        "//message/catalog",
+    ],
+)
+
+go_binary(
+    name = "test60555",
+    embed = [":test60555_lib"],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,12 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/base64.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+
+autoconf(
+    name = "base64",
+    checks = [
+        # gl_FUNC_BASE64 macro from base64.m4 only has prerequisites
+        # Note: AC_REQUIRE([AC_C_RESTRICT]) is a standard autoconf macro
+    ],
+    visibility = ["//visibility:public"],
+)

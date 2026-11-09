@@ -1,0 +1,14 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/getnline.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+
+autoconf(
+    name = "getnline",
+    checks = [
+        # gl_GETNLINE only requires gt_TYPE_SSIZE_T, no direct checks
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/ssize_t",  # AC_REQUIRE([gt_TYPE_SSIZE_T])
+    ],
+)

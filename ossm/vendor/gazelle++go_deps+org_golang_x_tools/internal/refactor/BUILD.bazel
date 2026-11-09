@@ -1,0 +1,49 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "refactor",
+    srcs = [
+        "delete.go",
+        "edit.go",
+        "imports.go",
+        "refactor.go",
+    ],
+    importpath = "golang.org/x/tools/internal/refactor",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+    deps = [
+        "//go/analysis",
+        "//go/ast/edge",
+        "//go/ast/inspector",
+        "//internal/astutil",
+        "//internal/packagepath",
+        "//internal/typesinternal",
+        "//internal/typesinternal/typeindex",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":refactor",
+    visibility = [
+        "//:__subpackages__",
+        "@org_golang_x_tools_go_vcs//:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "refactor_test",
+    srcs = [
+        "delete_test.go",
+        "imports_test.go",
+    ],
+    deps = [
+        ":refactor",
+        "//go/ast/inspector",
+        "//internal/diff",
+        "//internal/testenv",
+        "@com_github_google_go_cmp//cmp",
+    ],
+)

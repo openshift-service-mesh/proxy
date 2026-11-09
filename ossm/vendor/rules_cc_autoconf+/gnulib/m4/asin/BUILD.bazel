@@ -1,0 +1,24 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/asin.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "asin",
+    checks = [
+        # Equivalent to gl_FUNC_ASIN macro from asin.m4
+        checks.AC_CHECK_FUNC(
+            "asin",
+            define = "HAVE_ASIN",
+        ),
+        # Set ASIN_LIBM to empty string (subst-only)
+        # gl_COMMON_DOUBLE_MATHFUNC sets these based on whether the function needs libm
+        # On macOS, asin is in libc, so ASIN_LIBM=""
+        # Note: POW_LIBM is already provided by mathfunc dependency
+        checks.AC_SUBST("ASIN_LIBM", ""),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/mathfunc",  # Uses gl_COMMON_DOUBLE_MATHFUNC([asin])
+    ],
+)

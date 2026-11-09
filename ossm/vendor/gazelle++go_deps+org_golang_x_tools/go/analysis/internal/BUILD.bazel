@@ -1,0 +1,15 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "internal",
+    srcs = ["internal.go"],
+    importpath = "golang.org/x/tools/go/analysis/internal",
+    visibility = ["//go/analysis:__subpackages__"],
+    deps = ["//go/analysis"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":internal",
+    visibility = ["//go/analysis:__subpackages__"],
+)

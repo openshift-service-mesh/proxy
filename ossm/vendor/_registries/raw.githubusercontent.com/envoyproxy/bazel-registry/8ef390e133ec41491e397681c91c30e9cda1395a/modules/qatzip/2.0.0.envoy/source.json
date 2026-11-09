@@ -1,0 +1,12 @@
+{
+    "url": "https://github.com/intel/QATzip/archive/refs/tags/v2.0.0.tar.gz",
+    "integrity": "sha256-o/C0RY0bVuLyKqVRUoqwQdPB0ZA283uLMv3K4L03JIU=",
+    "strip_prefix": "QATzip-2.0.0",
+    "overlay": {
+        "BUILD.bazel": "sha256-XjoqeROAXfkzBrSnFtei4c+ToudGlseQUru52BwGhmE="
+    },
+    "patch_strip": 1,
+    "patches": {
+        "cast.patch": "sha256-TKdTHkjuTITdPAknvqqnzF7KaeGNqa2urAckDSsMpVY="
+    }
+}

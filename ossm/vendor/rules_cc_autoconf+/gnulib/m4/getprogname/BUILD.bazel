@@ -1,0 +1,133 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/getprogname.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+load("//gnulib:macros.bzl", gl_macros = "macros")
+
+# ac_cv_have_decl_program_invocation_name - Shared decl checks (cache + defines, no subst)
+# Used by modules (e.g. argp) that need the cache vars for GNULIB_* defines
+# but set their own subst values per configure.ac overrides.
+autoconf(
+    name = "ac_cv_have_decl_program_invocation_name",
+    checks = [
+        checks.AC_CHECK_DECL(
+            "program_invocation_name",
+            name = "ac_cv_have_decl_program_invocation_name",
+            compile_defines = ["_GNU_SOURCE"],
+            define = "HAVE_DECL_PROGRAM_INVOCATION_NAME",
+            includes = ["#include <errno.h>"],
+        ),
+        checks.AC_CHECK_DECL(
+            "program_invocation_short_name",
+            name = "ac_cv_have_decl_program_invocation_short_name",
+            compile_defines = ["_GNU_SOURCE"],
+            define = "HAVE_DECL_PROGRAM_INVOCATION_SHORT_NAME",
+            includes = ["#include <errno.h>"],
+        ),
+    ],
+    visibility = ["//gnulib:__subpackages__"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/extensions",
+    ],
+)
+
+autoconf(
+    name = "gl_FUNC_GETPROGNAME",
+    checks = [
+        checks.AC_CHECK_HEADER(
+            "sys/process.h",
+            name = "ac_cv_header_sys_process_h",
+        ),
+        checks.AC_SUBST(
+            "HAVE_SYS_PROCESS_H",
+            condition = "ac_cv_header_sys_process_h",
+            if_false = 0,
+            if_true = 1,
+        ),
+    ] + gl_macros.GL_CHECK_FUNCS_ANDROID(
+        ["getprogname"],
+        includes = [],
+    ) + [
+        # HAVE_GETPROGNAME subst: 1 if function exists, 0 otherwise
+        checks.AC_SUBST(
+            "HAVE_GETPROGNAME",
+            condition = "ac_cv_func_getprogname",
+            if_false = 0,
+            if_true = 1,
+        ),
+        # REPLACE_GETPROGNAME - line 25-28, default 0
+        checks.AC_SUBST("REPLACE_GETPROGNAME", "0"),
+        # Subst from shared decl check
+        checks.AC_SUBST(
+            "HAVE_DECL_PROGRAM_INVOCATION_NAME",
+            condition = "ac_cv_have_decl_program_invocation_name",
+            if_false = 0,
+            if_true = 1,
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ac_cv_have_decl_program_invocation_name",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/extensions",
+    ],
+)
+
+# Prerequisite: check program_invocation_short_name, __argv, __progname
+autoconf(
+    name = "gl_PREREQ_GETPROGNAME",
+    checks = [
+        checks.AC_CHECK_FUNC(
+            "getexecname",
+            name = "ac_cv_func_getexecname",
+        ),
+        # Cache+define from ac_cv target; subst override below
+        checks.AC_CHECK_DECL(
+            "__argv",
+            name = "ac_cv_have_decl___argv",
+            define = "HAVE_DECL___ARGV",
+            includes = ["#include <stdlib.h>"],
+        ),
+        checks.AC_TRY_LINK(
+            name = "gl_cv_var___progname",
+            code = """extern char *__progname;
+int main(void) { return *__progname; }""",
+            language = "c",
+            requires = [
+                "!ac_cv_have_decl_program_invocation_name",
+                "!ac_cv_have_decl_program_invocation_short_name",
+                "!ac_cv_have_decl___argv",
+            ],
+        ),
+        # Only define when __progname link check ran and succeeded; otherwise leave undef
+        checks.AC_DEFINE(
+            "HAVE_VAR___PROGNAME",
+            condition = "gl_cv_var___progname",
+            if_false = None,
+            if_true = 1,
+        ),
+        # configure.ac overrides: HAVE_DECL_PROGRAM_INVOCATION_SHORT_NAME=0,
+        # HAVE_DECL___ARGV=0, HAVE_VAR___PROGNAME=1 (Account for global Bazel defaults)
+        checks.AC_SUBST("HAVE_DECL_PROGRAM_INVOCATION_SHORT_NAME", "0"),
+        checks.AC_SUBST("HAVE_DECL___ARGV", "0"),
+        checks.AC_SUBST("HAVE_VAR___PROGNAME", "1"),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ac_cv_have_decl_program_invocation_name",
+        ":gl_FUNC_GETPROGNAME",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/extensions",
+    ],
+)
+
+# Package-level aggregator
+autoconf(
+    name = "getprogname",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_GETPROGNAME",
+        ":gl_PREREQ_GETPROGNAME",
+    ],
+)

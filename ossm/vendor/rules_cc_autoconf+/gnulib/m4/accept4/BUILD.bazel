@@ -1,0 +1,29 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/accept4.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "accept4",
+    checks = select({
+        # On Linux, accept4 exists (it's a Linux-specific extension with _GNU_SOURCE)
+        "@platforms//os:linux": [
+            checks.AC_DEFINE("HAVE_DECL_ACCEPT4", 1),
+            checks.AC_SUBST("HAVE_ACCEPT4", 1),
+        ],
+        # On macOS/other platforms, accept4 doesn't exist
+        "//conditions:default": [
+            checks.AC_DEFINE("HAVE_DECL_ACCEPT4", 0),
+            checks.AC_SUBST("HAVE_ACCEPT4", 0),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/extensions",  # AC_REQUIRE([AC_USE_SYSTEM_EXTENSIONS])
+        # Note: We don't depend on sys_socket_h:defaults to avoid conflict with HAVE_ACCEPT4
+        # We handle HAVE_ACCEPT4 directly based on the declaration check above
+        # Note: AC_CHECK_INCLUDES_DEFAULT is added for test compatibility
+        # (golden files include standard header checks even though not AC_REQUIREd)
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)

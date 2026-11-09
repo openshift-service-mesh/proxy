@@ -1,0 +1,17 @@
+alias(
+    name = "crypto",
+    actual = "@@envoy+//bazel:crypto",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "ssl",
+    actual = "@@envoy+//bazel:ssl",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "zlib",
+    actual = "@@envoy+//bazel:zlib",
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,23 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/off_t.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+
+autoconf(
+    name = "gl_TYPE_OFF_T",
+    checks = [
+        # WINDOWS_64_BIT_OFF_T is set by the largefile dependency
+        # This target exists to provide the gl_TYPE_OFF_T entry point
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/largefile",  # AC_REQUIRE([gl_LARGEFILE]) - sets WINDOWS_64_BIT_OFF_T
+    ],
+)
+
+autoconf(
+    name = "off_t",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_TYPE_OFF_T",
+    ],
+)

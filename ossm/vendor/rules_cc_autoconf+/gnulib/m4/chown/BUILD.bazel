@@ -1,0 +1,56 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/chown.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "chown",
+    checks = [
+        # Standard header defines are provided by AC_CHECK_INCLUDES_DEFAULT dependency
+        # AC_FUNC_CHOWN checks for chown function
+        checks.AC_CHECK_FUNC(
+            "chown",
+            name = "ac_cv_func_chown",
+        ),
+        checks.AC_DEFINE(
+            "HAVE_CHOWN",
+            requires = ["ac_cv_func_chown==1"],
+            subst = True,
+        ),
+        checks.AC_CHECK_FUNC(
+            "fchown",
+            name = "ac_cv_func_fchown",
+        ),
+        checks.AC_DEFINE(
+            "HAVE_FCHOWN",
+            requires = ["ac_cv_func_fchown==1"],
+        ),
+    ] + select({
+        # M4 m4/chown.m4 sets CHOWN_TRAILING_SLASH_BUG + REPLACE_CHOWN=1 when
+        # the runtime probe finds the bug. On macOS we delegate to the shared
+        # gnulib-common SDK-version probe (Big Sur+ → bug fixed); otherwise
+        # fall back to the M4 cross-compile guess "bug present".
+        "@platforms//os:macos": [
+            checks.AC_DEFINE(
+                "CHOWN_TRAILING_SLASH_BUG",
+                if_true = 1,
+                requires = ["!gl_cv_macos_sdk_modern"],
+            ),
+            checks.AC_SUBST(
+                "REPLACE_CHOWN",
+                condition = "gl_cv_macos_sdk_modern",
+                if_false = "1",
+                if_true = "0",
+            ),
+        ],
+        # Linux glibc / Windows / other: no trailing-slash bug.
+        "//conditions:default": [
+            checks.AC_SUBST("REPLACE_CHOWN", "0"),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/gnulib-common:gl_HOST_MACOS_SDK_MODERN",
+    ],
+)
