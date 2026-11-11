@@ -46,7 +46,6 @@ http_archive(
     strip_prefix = ENVOY_REPO + "-" + ENVOY_SHA,
     url = "https://github.com/" + ENVOY_ORG + "/" + ENVOY_REPO + "/archive/" + ENVOY_SHA + ".tar.gz",
     patches = [
-        "//ossm/patches:use-cmake-from-host.patch",
         "//ossm/patches:enable-luajit2-repo.patch",
         "//ossm/patches:use-python-from-host.patch",
         "//ossm/patches:ppc64le-openssl.patch",
@@ -93,7 +92,7 @@ install_deps()
 
 load("@envoy//bazel:dependency_imports.bzl", "envoy_dependency_imports")
 
-envoy_dependency_imports(go_version = "host")
+envoy_dependency_imports(use_host_tools = True)
 
 load("@envoy//bazel:repo.bzl", "envoy_repo")
 
