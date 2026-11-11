@@ -53,18 +53,36 @@ EXTRA_REPOS=(
 )
 
 # Execution-platform (host) prebuilt tools for cross-arch offline builds.
-# protoc and java_tools ship as prebuilt binaries selected by the *execution*
-# platform. This snapshot is vendored on an x86_64 host and --config=aarch64 is
-# a no-op here (it only sets --define=DUMMY; it does not cross-compile), so the
-# arch loop only ever exercises the x86_64 execution platform. The aarch64 host
-# variants are therefore never fetched, and an offline build *on an aarch64
-# host* fails fetching protoc/java_tools. Vendor them explicitly by their
+# protoc, java_tools and protoc-gen-validate ship as prebuilt binaries selected
+# by the *execution* platform. This snapshot is vendored on an x86_64 host and
+# --config=aarch64 is a no-op here (it only sets --define=DUMMY; it does not
+# cross-compile), so the arch loop only ever exercises the x86_64 execution
+# platform. The aarch64 host variants are therefore never fetched, and an offline
+# build *on an aarch64 host* fails fetching them. Vendor them explicitly by their
 # canonical repo names. (Bazel java_tools only ships x86_64 and aarch64 for
 # linux; s390x/ppc host builds fall back to building java_tools from source, so
 # only aarch64 needs to be captured here.)
+#
+# protoc-gen-validate: since 1.3.3.envoy.1 the plugin is a prebuilt release
+# binary (bazel/prebuilt.bzl) rather than a from-source go_binary, selected by
+# the exec platform. The arch loop captures only linux_amd64; the aarch64 host
+# binary must be vendored explicitly or an offline aarch64 build fails fetching
+# it from GitHub.
+#
+# KNOWN GAP (s390x / ppc64le): upstream PREBUILT_PLATFORMS covers only
+# linux/darwin/windows amd64+arm64, and the plugin's `select()` on
+# `//:protoc-gen-validate` has no `//conditions:default`. So on s390x/ppc there
+# is neither a prebuilt to vendor here nor a source fallback -- the native build
+# on those hosts fails configuring `//:protoc-gen-validate` ("no matching
+# conditions"), independent of vendoring. Fixing it needs an OSSM patch that adds
+# a from-source go_binary fallback to that select (the Go sources are still in
+# the module) plus vendoring that source closure's Go deps. Tracked as a
+# follow-up; the from-source path mirrors how java_tools already falls back on
+# these arches. TODO: restore s390x/ppc protoc-gen-validate support.
 CROSS_ARCH_HOST_TOOLS=(
   "@@protobuf++protoc+prebuilt_protoc.linux_aarch_64"
   "@@rules_java++toolchains+remote_java_tools_linux_aarch64"
+  "@@protoc-gen-validate++prebuilt+protoc_gen_validate_prebuilt_linux_arm64"
 )
 
 # Target-platform pip wheels for arches other than the vendoring host. v8 pins
