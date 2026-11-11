@@ -1,29 +1,22 @@
-load("@bazel_gazelle//:def.bzl", "gazelle")
-load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+load("//bazel:prebuilt.bzl", "PREBUILT_PLATFORMS", "prebuilt_binary", "prebuilt_repo_name")
 
-# gazelle:prefix github.com/envoyproxy/protoc-gen-validate
-# gazelle:exclude tests
-# gazelle:exclude example-workspace
-# gazelle:exclude validate/validate.h
-# gazelle:go_naming_convention import_alias
-gazelle(name = "gazelle")
+# The protoc plugin is the prebuilt binary from the upstream release for the
+# platform it runs on, rather than a go_binary: building it from source pulls
+# the Go toolchain, gazelle and the plugin's Go dependencies into every build
+# that generates validators. See bazel/prebuilt.bzl.
+[
+    config_setting(
+        name = "prebuilt_" + platform,
+        constraint_values = info.constraints,
+    )
+    for platform, info in PREBUILT_PLATFORMS.items()
+]
 
-go_binary(
+prebuilt_binary(
     name = "protoc-gen-validate",
-    embed = [":protoc-gen-validate_lib"],
-    importpath = "github.com/envoyproxy/protoc-gen-validate",
+    binary = select({
+        ":prebuilt_" + platform: "@{}//:{}".format(prebuilt_repo_name(platform), info.binary)
+        for platform, info in PREBUILT_PLATFORMS.items()
+    }),
     visibility = ["//visibility:public"],
-)
-
-go_library(
-    name = "protoc-gen-validate_lib",
-    srcs = ["main.go"],
-    importpath = "github.com/envoyproxy/protoc-gen-validate",
-    visibility = ["//visibility:private"],
-    deps = [
-        "//module",
-        "@com_github_lyft_protoc_gen_star_v2//:protoc-gen-star",
-        "@com_github_lyft_protoc_gen_star_v2//lang/go",
-        "@org_golang_google_protobuf//types/pluginpb",
-    ],
 )

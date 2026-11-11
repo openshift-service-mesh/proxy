@@ -1,0 +1,9 @@
+{
+    "url": "https://github.com/boostorg/boost/archive/refs/tags/boost-1.89.0.tar.gz",
+    "integrity": "sha256-VavdyCmBZCmSDM1hZUYQPzkcSXcEkPDSdBbAHEyBE1M=",
+    "strip_prefix": "boost-boost-1.89.0",
+    "overlay": {
+        "BUILD.bazel": "sha256-mg17FOvJcYrmuZMdQcMPQEIkdmFY3FZCdUgfV3gO6wg=",
+        "headers.bzl": "sha256-mQ6et8yNbyCgNT7S0hhSQr+du+bZc9bVrykqupnmuJM="
+    }
+}

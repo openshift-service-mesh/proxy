@@ -1,3 +1,0 @@
-
-# gazelle:map_kind go_binary go_binary //tools/go:def.bzl
-# gazelle:map_kind go_library go_library //tools/go:def.bzl

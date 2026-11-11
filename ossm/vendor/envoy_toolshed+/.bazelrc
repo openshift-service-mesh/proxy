@@ -23,6 +23,11 @@ common --enable_platform_specific_config
 # but only inspect the binary, so let them run on the host exec platform.
 common --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false
 
+# No first-class Java, but //coverage:lcov_merger wraps Bazel's Java lcov merger. Use a hermetic
+# JDK rather than autodetecting one on the host.
+common --java_runtime_version=remotejdk_21
+common --tool_java_runtime_version=remotejdk_21
+
 
 #############################################################################
 # ci
@@ -103,6 +108,8 @@ common:remote-exec --extra_execution_platforms=//platforms/rbe:linux_x64_gcc,//p
 # gcc
 #############################################################################
 
+# This targets x86_64, which only the archives build: on an aarch64 host use
+# --platforms=//platforms:linux_aarch64_libstdcxx for a native build with the host GCC.
 common:gcc --//compile:use_gcc_toolchain=true
 common:gcc --platforms=//platforms:linux_x86_64_libstdcxx
 

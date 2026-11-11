@@ -1,9 +1,0 @@
-
-load("//tools/go:def.bzl", "my_library")
-
-my_library(
-    name = "go_default_library",
-    srcs = ["inherited_lib.go"],
-    importpath = "example.com/mapkind/enabled/inherited",
-    visibility = ["//visibility:public"],
-)

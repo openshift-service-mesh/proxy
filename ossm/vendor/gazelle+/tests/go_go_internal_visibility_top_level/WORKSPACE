@@ -1,1 +1,0 @@
-go_repository(name="org_modernc_ccgo", importpath="modernc.org/ccgo")

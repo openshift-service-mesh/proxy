@@ -1,2 +1,0 @@
-# o_dir/_hidden.txt should be embeded because o_dir overrides exclusion rule
-# for hidden files with :all.

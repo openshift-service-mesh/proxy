@@ -50,17 +50,6 @@ common --override_repository=fast_float+=%workspace%/ossm/vendor/fast_float+
 common --override_repository=flatbuffers+=%workspace%/ossm/vendor/flatbuffers+
 common --override_repository=fmt+=%workspace%/ossm/vendor/fmt+
 common --override_repository=fp16+=%workspace%/ossm/vendor/fp16+
-common --override_repository=gazelle++go_deps+bazel_gazelle_go_repository_config=%workspace%/ossm/vendor/gazelle++go_deps+bazel_gazelle_go_repository_config
-common --override_repository=gazelle++go_deps+com_github_golang_protobuf=%workspace%/ossm/vendor/gazelle++go_deps+com_github_golang_protobuf
-common --override_repository=gazelle++go_deps+com_github_iancoleman_strcase=%workspace%/ossm/vendor/gazelle++go_deps+com_github_iancoleman_strcase
-common --override_repository=gazelle++go_deps+com_github_lyft_protoc_gen_star_v2=%workspace%/ossm/vendor/gazelle++go_deps+com_github_lyft_protoc_gen_star_v2
-common --override_repository=gazelle++go_deps+com_github_spf13_afero=%workspace%/ossm/vendor/gazelle++go_deps+com_github_spf13_afero
-common --override_repository=gazelle++go_deps+org_golang_google_protobuf=%workspace%/ossm/vendor/gazelle++go_deps+org_golang_google_protobuf
-common --override_repository=gazelle++go_deps+org_golang_x_mod=%workspace%/ossm/vendor/gazelle++go_deps+org_golang_x_mod
-common --override_repository=gazelle++go_deps+org_golang_x_sync=%workspace%/ossm/vendor/gazelle++go_deps+org_golang_x_sync
-common --override_repository=gazelle++go_deps+org_golang_x_text=%workspace%/ossm/vendor/gazelle++go_deps+org_golang_x_text
-common --override_repository=gazelle++go_deps+org_golang_x_tools=%workspace%/ossm/vendor/gazelle++go_deps+org_golang_x_tools
-common --override_repository=gazelle+=%workspace%/ossm/vendor/gazelle+
 common --override_repository=gloop+=%workspace%/ossm/vendor/gloop+
 common --override_repository=googleapis+=%workspace%/ossm/vendor/googleapis+
 common --override_repository=googleapis-rules-registry++rules_registry+com_google_googleapis_imports=%workspace%/ossm/vendor/googleapis-rules-registry++rules_registry+com_google_googleapis_imports
@@ -97,6 +86,8 @@ common --override_repository=protobuf++protobuf+protobuf_deps=%workspace%/ossm/v
 common --override_repository=protobuf++protoc+prebuilt_protoc.linux_aarch_64=%workspace%/ossm/vendor/protobuf++protoc+prebuilt_protoc.linux_aarch_64
 common --override_repository=protobuf++protoc+prebuilt_protoc.linux_x86_64=%workspace%/ossm/vendor/protobuf++protoc+prebuilt_protoc.linux_x86_64
 common --override_repository=protobuf+=%workspace%/ossm/vendor/protobuf+
+common --override_repository=protoc-gen-validate++prebuilt+protoc_gen_validate_prebuilt_linux_amd64=%workspace%/ossm/vendor/protoc-gen-validate++prebuilt+protoc_gen_validate_prebuilt_linux_amd64
+common --override_repository=protoc-gen-validate++prebuilt+protoc_gen_validate_prebuilt_linux_arm64=%workspace%/ossm/vendor/protoc-gen-validate++prebuilt+protoc_gen_validate_prebuilt_linux_arm64
 common --override_repository=protoc-gen-validate+=%workspace%/ossm/vendor/protoc-gen-validate+
 common --override_repository=proxy-wasm-cpp-host++proxy_wasm_cpp_host+proxy_wasm_cpp_host_deps=%workspace%/ossm/vendor/proxy-wasm-cpp-host++proxy_wasm_cpp_host+proxy_wasm_cpp_host_deps
 common --override_repository=proxy-wasm-cpp-host+=%workspace%/ossm/vendor/proxy-wasm-cpp-host+
