@@ -125,6 +125,11 @@ read alert 1 0
 				},
 			},
 			flags: []string{
+				// Exact message trace of the handshake depends on selected curves,
+				// as MLKEM causes messages to be split due to its handshake size
+				// and DTLS trying to respect a MTU here.
+				// TODO(crbug.com/507830312): Eventually fix that?
+				"-curves", strconv.Itoa(int(CurveX25519)),
 				"-enable-ocsp-stapling",
 				// This test involves an optional message. Test the message callback
 				// trace to ensure we do not miss or double-report any.
@@ -756,6 +761,21 @@ read alert 1 0
 			expectedLocalError: "remote error: internal error",
 		},
 		{
+			name: "FailCertCallback-Client-TLS12-CustomAlert",
+			config: Config{
+				MaxVersion: VersionTLS12,
+				ClientAuth: RequestClientCert,
+			},
+			flags: []string{
+				"-fail-cert-callback",
+				"-fail-cert-callback-alert",
+				strconv.Itoa(int(alertAccessDenied)),
+			},
+			shouldFail:         true,
+			expectedError:      ":CERT_CB_ERROR:",
+			expectedLocalError: "remote error: access denied",
+		},
+		{
 			testType: serverTest,
 			name:     "FailCertCallback-Server-TLS12",
 			config: Config{
@@ -765,6 +785,21 @@ read alert 1 0
 			shouldFail:         true,
 			expectedError:      ":CERT_CB_ERROR:",
 			expectedLocalError: "remote error: internal error",
+		},
+		{
+			testType: serverTest,
+			name:     "FailCertCallback-Server-TLS12-CustomAlert",
+			config: Config{
+				MaxVersion: VersionTLS12,
+			},
+			flags: []string{
+				"-fail-cert-callback",
+				"-fail-cert-callback-alert",
+				strconv.Itoa(int(alertUnrecognizedName)),
+			},
+			shouldFail:         true,
+			expectedError:      ":CERT_CB_ERROR:",
+			expectedLocalError: "remote error: unrecognized name",
 		},
 		{
 			name: "FailCertCallback-Client-TLS13",
@@ -778,6 +813,21 @@ read alert 1 0
 			expectedLocalError: "remote error: internal error",
 		},
 		{
+			name: "FailCertCallback-Client-TLS13-CustomAlert",
+			config: Config{
+				MaxVersion: VersionTLS13,
+				ClientAuth: RequestClientCert,
+			},
+			flags: []string{
+				"-fail-cert-callback",
+				"-fail-cert-callback-alert",
+				strconv.Itoa(int(alertAccessDenied)),
+			},
+			shouldFail:         true,
+			expectedError:      ":CERT_CB_ERROR:",
+			expectedLocalError: "remote error: access denied",
+		},
+		{
 			testType: serverTest,
 			name:     "FailCertCallback-Server-TLS13",
 			config: Config{
@@ -787,6 +837,21 @@ read alert 1 0
 			shouldFail:         true,
 			expectedError:      ":CERT_CB_ERROR:",
 			expectedLocalError: "remote error: internal error",
+		},
+		{
+			testType: serverTest,
+			name:     "FailCertCallback-Server-TLS13-CustomAlert",
+			config: Config{
+				MaxVersion: VersionTLS13,
+			},
+			flags: []string{
+				"-fail-cert-callback",
+				"-fail-cert-callback-alert",
+				strconv.Itoa(int(alertUnrecognizedName)),
+			},
+			shouldFail:         true,
+			expectedError:      ":CERT_CB_ERROR:",
+			expectedLocalError: "remote error: unrecognized name",
 		},
 		{
 			protocol: dtls,
@@ -1112,6 +1177,34 @@ read alert 1 0
 			},
 			sendWarningAlerts: 5,
 			flags:             []string{"-async"},
+			shouldFail:        true,
+			expectedError:     ":TOO_MANY_WARNING_ALERTS:",
+		},
+		{
+			name: "AlternateEmptyRecordsAndWarningAlerts",
+			config: Config{
+				MaxVersion: VersionTLS12,
+			},
+			sendEmptyRecords:  32,
+			sendWarningAlerts: 4,
+		},
+		{
+			name: "AlternateTooManyEmptyRecordsAndWarningAlerts",
+			config: Config{
+				MaxVersion: VersionTLS12,
+			},
+			sendEmptyRecords:  33,
+			sendWarningAlerts: 4,
+			shouldFail:        true,
+			expectedError:     ":TOO_MANY_EMPTY_FRAGMENTS:",
+		},
+		{
+			name: "AlternateEmptyRecordsAndTooManyWarningAlerts",
+			config: Config{
+				MaxVersion: VersionTLS12,
+			},
+			sendEmptyRecords:  32,
+			sendWarningAlerts: 5,
 			shouldFail:        true,
 			expectedError:     ":TOO_MANY_WARNING_ALERTS:",
 		},
@@ -1970,6 +2063,10 @@ read alert 1 0
 			MinVersion: VersionTLS13,
 		},
 		flags: []string{
+			// Exact message trace of the handshake depends on selected curves,
+			// as MLKEM causes messages to be split due to its handshake size
+			// and DTLS trying to respect a MTU here.
+			"-curves", strconv.Itoa(int(CurveX25519)),
 			"-expect-msg-callback",
 			`read hs 1
 write hs 2

@@ -16,21 +16,44 @@
 
 use alloc::boxed::Box;
 use core::{
+    ffi::c_int,
     future::poll_fn,
-    ops::{Deref, DerefMut},
-    task::Poll,
+    ops::{
+        Deref,
+        DerefMut, //
+    },
+    ptr::NonNull,
+    task::Poll, //
 };
 
 use crate::{
+    HandshakeCompleteMethods,
+    Methods,
+    abort_on_panic,
+    alerts::AlertDescription,
     check_tls_error,
-    connection::{Client, Server, TlsConnectionRef, methods::HasTlsConnectionMethod},
-    context::{SupportedMode, TlsMode},
-    errors::{Error, TlsErrorReason, TlsRetryReason},
-    io::IoStatus,
+    connection::{
+        Client,
+        Server,
+        TlsConnection,
+        TlsConnectionBuilder,
+        methods::HasTlsConnectionMethod, //
+    },
+    context::{
+        HasShutdown,
+        SupportedMode,
+        TlsMode, //
+    },
+    credentials::TlsCredential,
+    errors::{
+        Error,
+        IoError,
+        TlsRetryReason, //
+    }, //
 };
 
 /// # Connection shutdown
-impl<R, M> TlsConnectionRef<R, M> {
+impl<R, M> TlsConnection<R, M> {
     /// Set whether shutting down this connection sends out a `close_notify` alert.
     pub fn set_quiet_shutdown(&mut self, quiet: bool) -> &mut Self {
         unsafe {
@@ -57,7 +80,7 @@ impl<R, M> TlsConnectionRef<R, M> {
 ///
 /// Please refer to [`EstablishedTlsConnection`] and [`TlsConnectionInHandshake`] for allowed
 /// operations.
-impl<R, M> TlsConnectionRef<R, M> {
+impl<R, M> TlsConnection<R, M> {
     /// Access handshake-related options if the connection is in handshake mode.
     pub fn in_handshake<'a>(&'a mut self) -> Option<TlsConnectionInHandshake<'a, R, M>> {
         if self.is_in_handshake() {
@@ -70,130 +93,126 @@ impl<R, M> TlsConnectionRef<R, M> {
     /// Access handshake-related options if a handshake is completed and
     /// the connection is initialised.
     pub fn established<'a>(&'a mut self) -> Option<EstablishedTlsConnection<'a, R, M>> {
-        let session = unsafe {
-            // Safety: the validity of the handle `self.0` is witnessed by `self`.
-            bssl_sys::SSL_get_session(self.ptr())
-        };
-        if session.is_null() {
-            return None;
+        (!self.is_in_handshake()).then_some(EstablishedTlsConnection(self))
+    }
+}
+
+/// # Alerts
+impl<R, M> TlsConnection<R, M>
+where
+    M: HasTlsConnectionMethod,
+{
+    /// Send fatal alert.
+    ///
+    /// This would usually lead to termination of the connection.
+    pub fn send_fatal_alert(
+        &mut self,
+        alert: AlertDescription,
+    ) -> Result<Option<TlsRetryReason>, Error> {
+        let ret = check_tls_error!(self.ptr(), {
+            // Safety: `self.0` is still a valid handle and `alert` is valid by construction.
+            bssl_sys::SSL_send_fatal_alert(self.ptr(), alert as u8)
+        });
+        if let Some(err) = self.take_io_err() {
+            return Err(Error::Io(IoError::Transport(err)));
         }
-        Some(EstablishedTlsConnection(self))
+        Ok(ret)
+    }
+
+    /// Send fatal alert asynchronously.
+    pub fn async_send_fatal_alert<'a>(
+        &'a mut self,
+        alert: AlertDescription,
+    ) -> impl 'a + Send + Future<Output = Result<(), Error>> {
+        poll_fn(move |cx| {
+            self.set_waker(cx.waker());
+            match self.send_fatal_alert(alert) {
+                Ok(Some(TlsRetryReason::WantRead | TlsRetryReason::WantWrite)) => Poll::Pending,
+                Ok(None) => Poll::Ready(Ok(())),
+                Ok(Some(reason)) => unreachable!("unexpected retry reason {reason:?}"),
+                Err(e) => Poll::Ready(Err(e)),
+            }
+        })
     }
 }
 
-bssl_macros::bssl_enum! {
-    /// TLS data-pending reasons
-    pub enum TlsPendingData: i32 {
-        /// TLS connection wants to read more data.
-        WantRead = bssl_sys::SSL_READING as i32,
-        /// TLS connection wants to write more data.
-        WantWrite = bssl_sys::SSL_WRITING as i32,
-    }
-}
-
-/// # Connection state
-///
-/// When operations on [`TlsConnectionRef`] return with pending status,
-/// there will be reasons why the operations should be retried.
-impl<R, M> TlsConnectionRef<R, M> {
-    /// Check the connection if it needs additional data.
-    pub fn wants_data(&self) -> Option<TlsPendingData> {
-        let code = unsafe {
-            // Safety: the validity of the handle is witnessed by `self`.
-            bssl_sys::SSL_want(self.ptr())
-        };
-        let code = i32::try_from(code).ok()?;
-        TlsPendingData::try_from(code).ok()
-    }
-}
-
-impl<R> TlsConnectionRef<R, TlsMode> {
+impl<R> TlsConnection<R, TlsMode> {
     /// Inspect if the connection is suspended for which reason, after invocation of I/O methods.
     pub fn take_pending_reason(&mut self) -> Option<TlsRetryReason> {
-        let methods = self.get_connection_methods();
-        methods.take_pending_reason()
+        self.get_connection_methods().take_pending_reason()
     }
 }
 
 /// A handle to the connection that is valid only during handshake.
+// NOTE(@xfding): this type is strictly for configuration of the connection during the handshake,
+// and no methods should be allowed to drive the TLS state machine.
 #[repr(transparent)]
-pub struct TlsConnectionInHandshake<'a, R, M>(pub(crate) &'a mut TlsConnectionRef<R, M>);
+pub struct TlsConnectionInHandshake<'a, R, M>(pub(crate) &'a mut TlsConnection<R, M>);
 
-impl<R, M> Deref for TlsConnectionInHandshake<'_, R, M> {
-    type Target = TlsConnectionRef<R, M>;
-    fn deref(&self) -> &Self::Target {
-        &*self.0
-    }
-}
-
-impl<R, M> DerefMut for TlsConnectionInHandshake<'_, R, M> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.0
-    }
-}
-
-impl<R, M> TlsConnectionInHandshake<'_, R, M>
-where
-    M: HasTlsConnectionMethod,
-{
-    #[allow(unused)] // This method will be used in the following patch to support some async tasks.
-    pub(super) fn get_connection_methods(
-        &mut self,
-    ) -> &mut super::methods::RustConnectionMethods<M> {
-        unsafe {
-            // Safety: the validity of the handle `self.0` is witnessed by `self`.
-            super::get_connection_methods(self.ptr())
-        }
+impl<R, M> TlsConnectionInHandshake<'_, R, M> {
+    pub(crate) fn ptr(&self) -> *mut bssl_sys::SSL {
+        self.0.ptr()
     }
 }
 
 /// # Handshake
-impl<R, M> TlsConnectionInHandshake<'_, R, M>
+impl<R, M> TlsConnection<R, M>
 where
-    M: HasTlsConnectionMethod,
+    M: SupportedMode,
 {
-    /// Continue the handshake.
+    /// Drive the handshake.
     ///
     /// Call this method after the initial [`Self::accept`] or [`Self::connect`],
     /// should the handshake be suspended.
-    pub fn do_handshake(&mut self) -> Result<&mut Self, Error> {
+    ///
+    /// This method returns `Ok(None)` to signal handshake completion;
+    /// otherwise, `Ok(Some(reason))` is returned and the suspension `reason` must be resolved first
+    /// before this method can make progress again.
+    pub fn do_handshake(&mut self) -> Result<Option<TlsRetryReason>, Error> {
         let conn = self.ptr();
-        check_tls_error!(conn, bssl_sys::SSL_do_handshake(conn));
-        Ok(self)
+        let ret = check_tls_error!(conn, bssl_sys::SSL_do_handshake(conn));
+        if let Some(err) = self.take_io_err() {
+            return Err(Error::Io(IoError::Transport(err)));
+        }
+        Ok(ret)
     }
 }
 
-impl<M> TlsConnectionInHandshake<'_, Server, M>
+impl<M> TlsConnection<Server, M>
 where
-    M: HasTlsConnectionMethod,
+    M: SupportedMode,
 {
     /// Accept a connection by responding to `ClientHello` with `ServerHello`.
-    pub fn accept(&mut self) -> Result<&mut Self, Error> {
-        let conn = self.ptr();
-        check_tls_error!(conn, bssl_sys::SSL_accept(conn));
-        Ok(self)
+    ///
+    /// This method returns `Ok(None)` to signal handshake completion;
+    /// otherwise, given `Ok(Some(reason))` the suspension `reason` must be resolved first
+    /// before calling [`Self::do_handshake`] can make progress again.
+    pub fn accept(&mut self) -> Result<Option<TlsRetryReason>, Error> {
+        self.do_handshake()
     }
 }
 
-impl<M> TlsConnectionInHandshake<'_, Client, M>
+impl<M> TlsConnection<Client, M>
 where
-    M: HasTlsConnectionMethod,
+    M: SupportedMode,
 {
     /// Initiate a connection by sending a `ClientHello`.
-    pub fn connect(&mut self) -> Result<&mut Self, Error> {
-        let conn = self.ptr();
-        check_tls_error!(conn, bssl_sys::SSL_connect(conn));
-        Ok(self)
+    ///
+    /// This method returns `Ok(None)` to signal handshake completion;
+    /// otherwise, given `Ok(Some(reason))` the suspension `reason` must be resolved first
+    /// before calling [`Self::do_handshake`] can make progress again.
+    pub fn connect(&mut self) -> Result<Option<TlsRetryReason>, Error> {
+        self.do_handshake()
     }
 }
 
 /// A handle to the connection that is valid only after initialization, or in other words after
 /// handshake.
 #[repr(transparent)]
-pub struct EstablishedTlsConnection<'a, R, M = TlsMode>(&'a mut TlsConnectionRef<R, M>);
+pub struct EstablishedTlsConnection<'a, R, M = TlsMode>(&'a mut TlsConnection<R, M>);
 
 impl<R, M> Deref for EstablishedTlsConnection<'_, R, M> {
-    type Target = TlsConnectionRef<R, M>;
+    type Target = TlsConnection<R, M>;
     fn deref(&self) -> &Self::Target {
         &*self.0
     }
@@ -205,84 +224,182 @@ impl<R, M> DerefMut for EstablishedTlsConnection<'_, R, M> {
     }
 }
 
-impl<R> EstablishedTlsConnection<'_, R, TlsMode> {
-    /// Perform synchronising shutdown.
+impl<R, M> EstablishedTlsConnection<'_, R, M>
+where
+    M: HasTlsConnectionMethod + HasShutdown,
+{
+    /// Perform shutdown on the write end.
     ///
-    /// # Shutdown protocol
-    /// A live connection can be actively shut down by calling this method at most two times.
-    /// The first call will send `close_notify` down the transport.
-    /// On `Ok` the first call is considered successful with the following return value.
-    /// - [`ShutdownStatus::CloseNotifyReceived`] signifies that a `close_notify` is received from the peer, too.
-    /// - [`ShutdownStatus::CloseNotifyPosted`] signifies that a `close_notify` from our end is sent but that from the peer
-    ///   has not arrived.
-    ///
-    /// In case of no reception of peer `close_notify`, it is necessary to call this method again.
-    /// There are two possible outcomes.
-    /// - [`ShutdownStatus::RemainingApplicationData`] signifies that there are pending application data.
-    ///   Process it until the stream ends.
-    /// - [`ShutdownStatus::CloseNotifyReceived`] signifies that a `close_notify` is received from the peer, too.
-    ///   The connection is then in terminal state.
-    /// To process the remaining application data, normal reading should continue until the end of
-    /// stream, at which [`Self::sync_shutdown`] can be called again to set the connection to the terminal state.
-    pub fn sync_shutdown(&mut self) -> Result<ShutdownStatus, Error> {
+    /// If the method returns `Ok(Some(reason))`, the shutdown will not progress until I/O makes
+    /// progress.
+    pub fn sync_shutdown(&mut self) -> Result<Option<TlsRetryReason>, Error> {
+        // SSL_shutdown has two stages, sending close_notify and waiting for close_notify.
+        // We now believe that only the sending call, aka the first call, is useful.
+        // This method only sends close_notify, so it skips calling SSL_shutdown if close_notify has
+        // already been sent.
+        let rc = unsafe {
+            // Safety: we have exclusive access to the connection state.
+            bssl_sys::SSL_get_shutdown(self.ptr())
+        };
+        if rc & bssl_sys::SSL_SENT_SHUTDOWN != 0 {
+            return Ok(None);
+        }
         let rc = unsafe {
             // Safety: we have exclusive access to the connection state.
             bssl_sys::SSL_shutdown(self.ptr())
         };
-        if self.is_write_closed() {
-            return Ok(ShutdownStatus::CloseNotifyReceived);
+        if matches!(rc, 0 | 1) {
+            return Ok(None);
         }
-        match rc {
-            0 => Ok(ShutdownStatus::CloseNotifyPosted),
-            1 => Ok(ShutdownStatus::CloseNotifyReceived),
-            _ => match self.categorise_error_for_io(rc) {
-                Ok(IoStatus::Ok(_)) => unreachable!(),
-                Ok(IoStatus::Empty | IoStatus::EndOfStream) => {
-                    Err(Error::Io(crate::errors::IoError::EndOfStream))
-                }
-                Ok(IoStatus::Retry(reason)) => Err(Error::TlsRetry(reason)),
-                Err(Error::TlsReason(TlsErrorReason::ApplicationDataOnShutdown)) => {
-                    Ok(ShutdownStatus::RemainingApplicationData)
-                }
-                Err(Error::Library(0, _, _)) => Ok(ShutdownStatus::CloseNotifyReceived),
-                Ok(IoStatus::Err) => Err(Error::Unknown(Box::new("transport error".to_string()))),
-                Err(e) => Err(e),
-            },
+        let ret = check_tls_error!(self.ptr(), rc);
+        if let Some(err) = self.take_io_err() {
+            return Err(Error::Io(IoError::Transport(err)));
         }
+        Ok(ret)
     }
 }
 
-impl<R, M> TlsConnectionInHandshake<'_, R, M>
+impl<R, M> TlsConnection<R, M>
 where
     M: SupportedMode,
 {
     /// Perform asynchronous handshake, until completion or until pending on non-I/O operations.
     ///
-    /// The caller needs to ensure that any pending operations during the handshake are resolved.
-    pub fn async_handshake(&mut self) -> impl Send + Future<Output = Result<(), Error>> + '_ {
+    /// The caller needs to ensure that any pending operations during the handshake are resolved,
+    /// before polling [`Self::async_handshake`] again.
+    pub fn async_handshake(
+        &mut self,
+    ) -> impl Send + Future<Output = Result<Option<TlsRetryReason>, Error>> + '_ {
         poll_fn(move |cx| {
             self.set_waker(cx.waker());
             match self.do_handshake() {
-                Ok(_) => Poll::Ready(Ok(())),
-                Err(Error::TlsRetry(r)) => {
-                    if matches!(r, TlsRetryReason::WantRead | TlsRetryReason::WantWrite) {
-                        Poll::Pending
-                    } else {
-                        Poll::Ready(Err(Error::TlsRetry(r)))
-                    }
-                }
+                Ok(Some(TlsRetryReason::WantRead | TlsRetryReason::WantWrite)) => Poll::Pending,
+                Ok(Some(reason)) => Poll::Ready(Ok(Some(reason))),
+                Ok(None) => Poll::Ready(Ok(None)),
+                Err(e) => Poll::Ready(Err(e)),
+            }
+        })
+    }
+
+    /// Perform asynchronous handshake, until completion, knowing that all possible pending reasons
+    /// will resolve themselves.
+    ///
+    /// The caller needs to ensure that any pending operations due to asynchronous operations such as
+    /// certificate verification and private key operations will eventually resolve and wake up
+    /// the handshake task.
+    /// Otherwise the handshake task will never complete.
+    pub fn async_nonstop_handshake(
+        &mut self,
+    ) -> impl Send + Future<Output = Result<(), Error>> + '_ {
+        poll_fn(move |cx| {
+            self.set_waker(cx.waker());
+            match self.do_handshake() {
+                Ok(Some(_)) => Poll::Pending,
+                Ok(None) => Poll::Ready(Ok(())),
                 Err(e) => Poll::Ready(Err(e)),
             }
         })
     }
 }
 
-/// Shutdown progress
-pub enum ShutdownStatus {
-    /// `close_notify` has been sent.
-    CloseNotifyPosted,
-    /// Peer `close_notify` has been received. The connection is now in terminal state.
-    CloseNotifyReceived,
-    /// There are remaining application data. Consume them first before calling `shutdown` again.
-    RemainingApplicationData,
+bssl_macros::bssl_enum! {
+    enum InfoCallbackConnectionState : i32 {
+        ReadAlert = bssl_sys::SSL_CB_READ_ALERT as i32,
+        WriteAlert = bssl_sys::SSL_CB_WRITE_ALERT as i32,
+        HandshakeStart = bssl_sys::SSL_CB_HANDSHAKE_START as i32,
+        HandshakeDone = bssl_sys::SSL_CB_HANDSHAKE_DONE as i32,
+    }
+}
+
+/// A callback that allows you to inspect the handshake information when the handshake concludes
+/// successfully.
+pub trait HandshakeComplete: Send {
+    /// The callback to be called when handshake is complete with success.
+    fn handshake_complete(&mut self, hs: &HandshakeInfo);
+}
+
+/// A handle to extract handshake information, such as credential.
+pub struct HandshakeInfo(NonNull<bssl_sys::SSL>);
+
+impl HandshakeInfo {
+    /// Return the selected credential for the connection.
+    pub fn get_selected_credential(&self) -> Option<TlsCredential> {
+        let cred = unsafe {
+            // Safety: by BoringSSL invariant, `self.0` is still a valid connection handle.
+            bssl_sys::SSL_get0_selected_credential(self.0.as_ptr())
+        };
+        NonNull::new(cred as *mut _).map(TlsCredential::from_raw_and_upref)
+    }
+}
+
+unsafe extern "C" fn info_callback<M: Methods + HandshakeCompleteMethods>(
+    ssl: *const bssl_sys::SSL,
+    ty: c_int,
+    _: c_int,
+) {
+    // Safety: the const-to-mut cast is safe; we only mutate our own method table, not SSL.
+    let Some(ssl) = NonNull::new(ssl as *mut _) else {
+        return;
+    };
+    let Some(state) = InfoCallbackConnectionState::try_from(ty).ok() else {
+        return;
+    };
+    abort_on_panic(move || {
+        match state {
+            InfoCallbackConnectionState::HandshakeDone => {
+                let Some(mut callback) = (unsafe {
+                    // Safety: `ssl` is a valid handle passed in from BoringSSL.
+                    M::from_ssl(ssl.as_ptr())
+                })
+                .and_then(|methods| methods.handshake_complete_methods()) else {
+                    return;
+                };
+                callback.handshake_complete(&HandshakeInfo(ssl));
+            }
+            InfoCallbackConnectionState::ReadAlert
+            | InfoCallbackConnectionState::WriteAlert
+            | InfoCallbackConnectionState::HandshakeStart => {}
+        }
+    });
+}
+
+/// # Handshake-complete callback
+impl<R, M> TlsConnectionBuilder<R, M>
+where
+    M: HasTlsConnectionMethod,
+{
+    /// Set a callback to be called when the handshake completes successfully.
+    ///
+    /// The callback receives a [`HandshakeInfo`] handle that can be used to
+    /// inspect the result of the handshake, such as the selected credential.
+    pub fn with_handshake_complete_callback(
+        &mut self,
+        callback: impl HandshakeComplete + 'static,
+    ) -> &mut Self {
+        self.as_in_handshake()
+            .set_handshake_complete_callback(callback);
+        self
+    }
+}
+
+/// # Handshake completion notification callback
+impl<R, M> TlsConnectionInHandshake<'_, R, M>
+where
+    M: HasTlsConnectionMethod,
+{
+    /// Set a callback to be called when the handshake completes successfully.
+    pub fn set_handshake_complete_callback(
+        &mut self,
+        callback: impl HandshakeComplete + 'static,
+    ) -> &mut Self {
+        unsafe {
+            // Safety: we only install our own callback function.
+            bssl_sys::SSL_set_info_callback(
+                self.ptr(),
+                Some(info_callback::<super::methods::RustConnectionMethods<M>>),
+            );
+        }
+        self.0.get_connection_methods().handshake_complete = Some(Box::new(callback));
+        self
+    }
 }

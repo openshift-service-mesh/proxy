@@ -44,6 +44,7 @@
 //! );
 //! ```
 
+use alloc::vec::Vec;
 use core::{
     ffi::{c_char, c_int, c_void},
     mem::transmute,
@@ -54,12 +55,13 @@ use core::{
 use bssl_crypto::{FfiSlice, cbb_to_buffer};
 use bssl_macros::bssl_enum;
 
-use crate::ffi::maybe_panic;
+use crate::ffi::abort_on_panic;
 use crate::{errors::PkiError, ffi::Bio};
 
 bssl_enum! {
     /// EVP public key algorithm types.
     #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    #[non_exhaustive]
     pub enum PrivateKeyAlgorithm: i32 {
         /// RSA
         Rsa = bssl_sys::EVP_PKEY_RSA as i32,
@@ -127,7 +129,7 @@ impl PrivateKey {
                 }
                 len
             };
-            maybe_panic(get_password)
+            abort_on_panic(get_password)
         }
 
         let evp_pkey = unsafe {
@@ -161,7 +163,10 @@ impl PrivateKey {
 
     /// This method releases ownership of the internal key handle.
     ///
-    /// This method should only be used for cross-language interoperability.
+    /// # Safety
+    /// - This method should only be used for cross-language interoperability,
+    ///   so the function that accepts an `EVP_PKEY*` handle must uses exactly the same
+    ///   BoringSSL as this crate is linked to.
     pub fn into_raw(self) -> *mut bssl_sys::EVP_PKEY {
         let ptr = self.ptr();
         core::mem::forget(self);

@@ -1,8 +1,17 @@
 {
-  "LogID": "32473.1",
+  "Version": "plants-04",
+  "ID": "32473.1",
+  "LogNumber": 1,
+  "Cosigners": [
+    {
+      "CosignerID": "32473.1",
+      "SignatureAlgorithm": "mldsa44",
+      "PrivateKey": "MDQCAQAwCwYJYIZIAWUDBAMRBCKAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f"
+    }
+  ],
   "Entries": [
     {
-      "Repeat": 8,
+      "Repeat": 9,
       "Subject": {
         "CommonName": "Filler certificates"
       },
@@ -33,6 +42,11 @@
           "SubtreeStart": 8,
           "SubtreeEnd": 13,
           "BitFlipProof": true
+        },
+        {
+          "SubtreeStart": 8,
+          "SubtreeEnd": 13,
+          "UnusedBit": true
         }
       ]
     },
