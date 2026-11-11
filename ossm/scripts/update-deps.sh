@@ -89,6 +89,39 @@ if [ -d "${VENDOR_DIR}" ]; then
 fi
 mkdir -p "${VENDOR_DIR}"
 
+echo ">> Pre-fetching and patching envoy+ (analysis-time source patches)"
+# Some OSSM Envoy patches change build *analysis*, not just the compiled output
+# -- they must be in place before `bazel vendor //:envoy` analyses the target,
+# or the vendor step itself fails. (The post-vendor tree edits further down only
+# work for *build-time* divergences, which never block analysis.) These patches
+# cannot go through an archive_override `patches` attribute either: that changes
+# envoy+'s vendor marker and breaks the air-gapped build's marker validation (see
+# the post-vendor patch step for the full rationale).
+#
+# So we first materialise envoy+ on its own with `bazel vendor --repo` (which
+# runs only its repository rule -- download+extract -- never target analysis, so
+# the broken analysis is not hit), patch the extracted tree, then let the arch
+# loop analyse the *patched* sources. Vendor mode validates a repo by its marker,
+# not its file contents (same invariant the post-vendor edits rely on), so the
+# in-place edit survives the loop without triggering a re-fetch.
+#
+#   openssl-compat-host-libs.patch: upstream compat/openssl/BUILD builds its
+#   runtime libcrypto.so/libssl.so with `cc_shared_library` by relinking
+#   @openssl's *static* libraries. OSSM replaces the @openssl module with the
+#   host's OpenSSL, which provides only precompiled dynamic libraries -- and
+#   rules_cc rejects a precompiled-dynamic-only library as a cc_shared_library
+#   root (analysis-time fail). The patch instead stages the host's existing
+#   libcrypto.so.<major> / libssl.so.<major> into the compat/openssl package
+#   (matching the OSSL_RUNFILES_LIB_DIR that :bssl-compat dlopen()s from).
+ENVOY_ANALYSIS_PATCHES=(
+  "openssl-compat-host-libs.patch"
+)
+bazel vendor --vendor_dir="${VENDOR_DIR}" --repo="@@envoy+"
+for p in "${ENVOY_ANALYSIS_PATCHES[@]}"; do
+  echo "   applying ${p}"
+  patch -p1 -d "${VENDOR_DIR}/envoy+" < "ossm/patches/${p}"
+done
+
 for arch in "${ARCHES[@]}"; do
   echo ">> Vendoring ${TARGET} for --config=${arch}"
   bazel vendor \
@@ -145,6 +178,10 @@ echo ">> Applying OSSM source patches to the vendored Envoy tree"
 #   exec-config tool with the host toolchain (@llvm_host), which already provides a
 #   full host libstdc++ for the build arch, so the patch drops that plumbing and
 #   uses the host toolchain's libstdc++ (-stdlib=libstdc++) instead.
+#
+# NOTE: only *build-time* patches belong here. A patch that changes build
+# *analysis* (e.g. swapping a rule type) must be applied before the arch loop
+# analyses //:envoy -- see the "Pre-fetching and patching envoy+" step above.
 ENVOY_PATCHES=(
   "openssl-prefixer-host-libstdcxx.patch"
 )
