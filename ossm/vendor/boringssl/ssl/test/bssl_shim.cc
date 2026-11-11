@@ -205,8 +205,8 @@ static OwnedSocket Connect(const TestConfig *config) {
   return sock;
 }
 
-// DoRead reads from |ssl|, resolving any asynchronous operations. It returns
-// the result value of the final |SSL_read| call.
+// DoRead reads from `ssl`, resolving any asynchronous operations. It returns
+// the result value of the final `SSL_read` call.
 static int DoRead(SSL *ssl, uint8_t *out, size_t max_out) {
   const TestConfig *config = GetTestConfig(ssl);
   TestState *test_state = GetTestState(ssl);
@@ -253,8 +253,8 @@ static int DoRead(SSL *ssl, uint8_t *out, size_t max_out) {
   return ret;
 }
 
-// WriteAll writes |in_len| bytes from |in| to |ssl|, resolving any asynchronous
-// operations. It returns the result of the final |SSL_write| call.
+// WriteAll writes `in_len` bytes from `in` to `ssl`, resolving any asynchronous
+// operations. It returns the result of the final `SSL_write` call.
 static int WriteAll(SSL *ssl, const void *in_, size_t in_len) {
   TestState *test_state = GetTestState(ssl);
   const uint8_t *in = reinterpret_cast<const uint8_t *>(in_);
@@ -275,8 +275,8 @@ static int WriteAll(SSL *ssl, const void *in_, size_t in_len) {
   return ret;
 }
 
-// DoShutdown calls |SSL_shutdown|, resolving any asynchronous operations. It
-// returns the result of the final |SSL_shutdown| call.
+// DoShutdown calls `SSL_shutdown`, resolving any asynchronous operations. It
+// returns the result of the final `SSL_shutdown` call.
 static int DoShutdown(SSL *ssl) {
   int ret;
   do {
@@ -285,8 +285,8 @@ static int DoShutdown(SSL *ssl) {
   return ret;
 }
 
-// DoSendFatalAlert calls |SSL_send_fatal_alert|, resolving any asynchronous
-// operations. It returns the result of the final |SSL_send_fatal_alert| call.
+// DoSendFatalAlert calls `SSL_send_fatal_alert`, resolving any asynchronous
+// operations. It returns the result of the final `SSL_send_fatal_alert` call.
 static int DoSendFatalAlert(SSL *ssl, uint8_t alert) {
   int ret;
   do {
@@ -318,7 +318,7 @@ static bool CheckListContains(const char *type,
 }
 
 // CheckAuthProperties checks, after the initial handshake is completed or
-// after a renegotiation, that authentication-related properties match |config|.
+// after a renegotiation, that authentication-related properties match `config`.
 static bool CheckAuthProperties(SSL *ssl, bool is_resume,
                                 const TestConfig *config) {
   if (!config->expect_ocsp_response.empty()) {
@@ -439,7 +439,7 @@ static bool IsTLS13PSK(const SSL *ssl) {
                          CredentialConfigType::kPreSharedKey;
 }
 
-// CheckHandshakeProperties checks, immediately after |ssl| completes its
+// CheckHandshakeProperties checks, immediately after `ssl` completes its
 // initial handshake (or False Starts), whether all the properties are
 // consistent with the test configuration and invariants.
 static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
@@ -502,9 +502,7 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
     }
   }
 
-  // early_callback_called is updated in the handshaker, so we don't see it
-  // here.
-  if (!config->handoff && config->is_server && !state->early_callback_called) {
+  if (config->is_server && !state->early_callback_called) {
     fprintf(stderr, "early callback not called\n");
     return false;
   }
@@ -531,7 +529,7 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
   }
 
   // On the server, the protocol selected in the ALPN callback must be echoed
-  // out of |SSL_get0_alpn_selected|. On the client, it should report what the
+  // out of `SSL_get0_alpn_selected`. On the client, it should report what the
   // test expected.
   const std::string &expect_alpn =
       config->is_server ? config->select_alpn : config->expect_alpn;
@@ -670,7 +668,7 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
   }
 
   if (config->expect_no_peer_cert || !config->psk.empty() || IsTLS13PSK(ssl) ||
-      IsPAKE(ssl)) {
+      IsPAKE(ssl) || !config->expect_peer_rpk_sha256.empty()) {
     if (SSL_get_peer_cert_chain(ssl) != nullptr) {
       fprintf(stderr, "Received unexpected peer certificate.\n");
       return false;
@@ -696,6 +694,13 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
     return false;
   }
 
+  if (config->expect_server_sent_requested_padding !=
+      !!SSL_server_sent_requested_padding(ssl)) {
+    fprintf(stderr, "Server padding was %smatched, but wanted opposite.\n",
+            SSL_server_sent_requested_padding(ssl) ? "" : "not ");
+    return false;
+  }
+
   if ((config->expect_hrr && !SSL_used_hello_retry_request(ssl)) ||
       (config->expect_no_hrr && SSL_used_hello_retry_request(ssl))) {
     fprintf(stderr, "Got %sHRR, but wanted opposite.\n",
@@ -706,12 +711,6 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
   if (config->expect_ech_accept != !!SSL_ech_accepted(ssl)) {
     fprintf(stderr, "ECH was %saccepted, but wanted opposite.\n",
             SSL_ech_accepted(ssl) ? "" : "not ");
-    return false;
-  }
-
-  if (config->expect_key_usage_invalid != !!SSL_was_key_usage_invalid(ssl)) {
-    fprintf(stderr, "X.509 key usage was %svalid, but wanted opposite.\n",
-            SSL_was_key_usage_invalid(ssl) ? "in" : "");
     return false;
   }
 
@@ -780,14 +779,13 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
   return true;
 }
 
-static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
-                       bssl::UniquePtr<SSL> *ssl_uniqueptr,
+static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session, SSL *ssl,
                        const TestConfig *config, bool is_resume, bool is_retry,
                        SettingsWriter *writer);
 
 // DoConnection tests an SSL connection against the peer. On success, it returns
-// true and sets |*out_session| to the negotiated SSL session. If the test is a
-// resumption attempt, |is_resume| is true and |session| is the session from the
+// true and sets `*out_session` to the negotiated SSL session. If the test is a
+// resumption attempt, `is_resume` is true and `session` is the session from the
 // previous exchange.
 static bool DoConnection(bssl::UniquePtr<SSL_SESSION> *out_session,
                          SSL_CTX *ssl_ctx, const TestConfig *config,
@@ -825,8 +823,8 @@ static bool DoConnection(bssl::UniquePtr<SSL_SESSION> *out_session,
   // failures in the test runner.
   sock.set_drain_on_close(true);
 
-  // Windows uses |SOCKET| for socket types, but OpenSSL's API requires casting
-  // them to |int|.
+  // Windows uses `SOCKET` for socket types, but OpenSSL's API requires casting
+  // them to `int`.
   bssl::UniquePtr<BIO> bio(
       BIO_new_socket(static_cast<int>(sock.get()), BIO_NOCLOSE));
   if (!bio) {
@@ -868,7 +866,8 @@ static bool DoConnection(bssl::UniquePtr<SSL_SESSION> *out_session,
     bio.release();  // SSL_set_bio takes ownership.
   }
 
-  bool ret = DoExchange(out_session, &ssl, config, is_resume, false, writer);
+  bool ret =
+      DoExchange(out_session, ssl.get(), config, is_resume, false, writer);
   if (!config->is_server && is_resume && config->expect_reject_early_data) {
     // We must have failed due to an early data rejection.
     if (ret) {
@@ -913,12 +912,12 @@ static bool DoConnection(bssl::UniquePtr<SSL_SESSION> *out_session,
       return false;
     }
 
-    assert(!config->handoff);
     config = retry_config;
-    ret = DoExchange(out_session, &ssl, retry_config, is_resume, true, writer);
+    ret = DoExchange(out_session, ssl.get(), retry_config, is_resume, true,
+                     writer);
   }
 
-  // An ECH rejection appears as a failed connection. Note |ssl| may use a
+  // An ECH rejection appears as a failed connection. Note `ssl` may use a
   // different config on ECH rejection.
   if (config->expect_no_ech_retry_configs ||
       !config->expect_ech_retry_configs.empty()) {
@@ -940,7 +939,7 @@ static bool DoConnection(bssl::UniquePtr<SSL_SESSION> *out_session,
     SSL_get0_ech_retry_configs(ssl.get(), &retry_configs, &retry_configs_len);
     if (bssl::Span(retry_configs, retry_configs_len) != expected) {
       fprintf(stderr, "ECH retry configs did not match expectations.\n");
-      // Clear the error queue. Otherwise |SSL_R_ECH_REJECTED| will be printed
+      // Clear the error queue. Otherwise `SSL_R_ECH_REJECTED` will be printed
       // to stderr and the test framework will think the test had the expected
       // expectations.
       ERR_clear_error();
@@ -949,7 +948,7 @@ static bool DoConnection(bssl::UniquePtr<SSL_SESSION> *out_session,
   }
 
   if (!ret) {
-    // Print the |SSL_get_error| code. Otherwise, some failures are silent and
+    // Print the `SSL_get_error` code. Otherwise, some failures are silent and
     // hard to debug.
     int ssl_err = SSL_get_error(ssl.get(), -1);
     if (ssl_err != SSL_ERROR_NONE) {
@@ -977,29 +976,14 @@ static bool DoConnection(bssl::UniquePtr<SSL_SESSION> *out_session,
   return true;
 }
 
-static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
-                       bssl::UniquePtr<SSL> *ssl_uniqueptr,
+static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session, SSL *ssl,
                        const TestConfig *config, bool is_resume, bool is_retry,
                        SettingsWriter *writer) {
   int ret;
-  SSL *ssl = ssl_uniqueptr->get();
   SSL_CTX *session_ctx = SSL_get_SSL_CTX(ssl);
   TestState *test_state = GetTestState(ssl);
 
   if (!config->implicit_handshake) {
-    if (config->handoff) {
-#if defined(HANDSHAKER_SUPPORTED)
-      if (!DoSplitHandshake(ssl_uniqueptr, writer, is_resume)) {
-        return false;
-      }
-      ssl = ssl_uniqueptr->get();
-      test_state = GetTestState(ssl);
-#else
-      fprintf(stderr, "The external handshaker can only be used on Linux\n");
-      return false;
-#endif
-    }
-
     do {
       ret = CheckIdempotentError("SSL_do_handshake", ssl, [&]() -> int {
         return SSL_do_handshake(ssl);
@@ -1031,7 +1015,7 @@ static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
       }
     }
 
-    // Skip the |config->async| logic as this should be a no-op.
+    // Skip the `config->async` logic as this should be a no-op.
     if (config->no_op_extra_handshake && SSL_do_handshake(ssl) != 1) {
       fprintf(stderr, "Extra SSL_do_handshake was not a no-op.\n");
       return false;
@@ -1051,9 +1035,9 @@ static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
         return false;
       }
       // Run the handshake until the specified message. Note that, if a
-      // handshake record contains multiple messages, |SSL_do_handshake| usually
+      // handshake record contains multiple messages, `SSL_do_handshake` usually
       // processes both atomically. The test must ensure there is a record
-      // boundary after the desired message. Checking |last_message_received|
+      // boundary after the desired message. Checking `last_message_received`
       // confirms this.
       do {
         ret = SSL_do_handshake(ssl);
@@ -1159,7 +1143,6 @@ static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
       }
     }
   } else {
-    static const char kInitialWrite[] = "hello";
     bool pending_initial_write = false;
     if (config->read_with_unfinished_write) {
       if (!config->async) {
@@ -1174,15 +1157,19 @@ static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
 
       // Let only one byte of the record through.
       AsyncBioAllowWrite(test_state->async_bio, 1);
-      int write_ret = SSL_write(ssl, kInitialWrite, strlen(kInitialWrite));
+      int write_ret = SSL_write(ssl, config->shim_initial_write.data(),
+                                config->shim_initial_write.size());
       if (SSL_get_error(ssl, write_ret) != SSL_ERROR_WANT_WRITE) {
         fprintf(stderr, "Failed to leave unfinished write.\n");
         return false;
       }
       pending_initial_write = true;
     } else if (config->shim_writes_first) {
-      if (WriteAll(ssl, kInitialWrite, strlen(kInitialWrite)) < 0) {
-        return false;
+      for (int i = 0; i < config->repeat_shim_initial_write; i++) {
+        if (WriteAll(ssl, config->shim_initial_write.data(),
+                     config->shim_initial_write.size()) < 0) {
+          return false;
+        }
       }
     }
     if (!config->shim_shuts_down) {
@@ -1240,7 +1227,8 @@ static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
 
         // Clear the initial write, if unfinished.
         if (pending_initial_write) {
-          if (WriteAll(ssl, kInitialWrite, strlen(kInitialWrite)) < 0) {
+          if (WriteAll(ssl, config->shim_initial_write.data(),
+                       config->shim_initial_write.size()) < 0) {
             return false;
           }
           pending_initial_write = false;
@@ -1312,7 +1300,7 @@ static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
   ret = DoShutdown(ssl);
 
   if (config->shim_shuts_down && config->check_close_notify) {
-    // We initiate shutdown, so |SSL_shutdown| will return in two stages. First
+    // We initiate shutdown, so `SSL_shutdown` will return in two stages. First
     // it returns zero when our close_notify is sent, then one when the peer's
     // is received.
     if (ret != 0) {

@@ -37,6 +37,7 @@ type sessionState struct {
 	hasApplicationSettingsOld   bool
 	localApplicationSettingsOld []byte
 	peerApplicationSettingsOld  []byte
+	peerRawPublicKey            []byte
 }
 
 func (s *sessionState) marshal() []byte {
@@ -80,6 +81,8 @@ func (s *sessionState) marshal() []byte {
 	} else {
 		msg.AddUint8(0)
 	}
+
+	addUint24LengthPrefixedBytes(msg, s.peerRawPublicKey)
 
 	return msg.BytesOrPanic()
 }
@@ -168,6 +171,10 @@ func (s *sessionState) unmarshal(data []byte) bool {
 		}
 	}
 
+	if !readUint24LengthPrefixedBytes(&reader, &s.peerRawPublicKey) {
+		return false
+	}
+
 	if len(reader) > 0 {
 		return false
 	}
@@ -176,6 +183,9 @@ func (s *sessionState) unmarshal(data []byte) bool {
 }
 
 func (c *Conn) encryptTicket(state *sessionState) ([]byte, error) {
+	if c.config.SessionTicketKey == nil {
+		panic("tls: SessionTicketKey not configured")
+	}
 	key := c.config.SessionTicketKey[:]
 	if c.config.Bugs.EncryptSessionTicketKey != nil {
 		key = c.config.Bugs.EncryptSessionTicketKey[:]
@@ -203,6 +213,9 @@ func (c *Conn) encryptTicket(state *sessionState) ([]byte, error) {
 }
 
 func (c *Conn) decryptTicket(encrypted []byte) (*sessionState, bool) {
+	if c.config.SessionTicketKey == nil {
+		panic("tls: SessionTicketKey not configured")
+	}
 	if len(encrypted) < aes.BlockSize+sha256.Size {
 		return nil, false
 	}

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"boringssl.googlesource.com/boringssl.git/ssl/test/runner/hpke"
+	"golang.org/x/crypto/cryptobyte"
 )
 
 const (
@@ -223,6 +224,7 @@ const (
 	extensionQUICTransportParams        uint16 = 57
 	extensionTLSFlags                   uint16 = 62
 	extensionCustom                     uint16 = 1234  // not IANA assigned
+	extensionServerPaddingRequest       uint16 = 4832  // not IANA assigned
 	extensionNextProtoNeg               uint16 = 13172 // not IANA assigned
 	extensionApplicationSettingsOld     uint16 = 17513 // not IANA assigned
 	extensionApplicationSettings        uint16 = 17613 // not IANA assigned
@@ -261,7 +263,6 @@ const (
 	CurveP521           CurveID = 25
 	CurveX25519         CurveID = 29
 	CurveX25519MLKEM768 CurveID = 0x11ec
-	CurveX25519Kyber768 CurveID = 0x6399
 	CurveMLKEM1024      CurveID = 0x0202
 )
 
@@ -329,7 +330,12 @@ const (
 	signatureEd25519 signatureAlgorithm = 0x0807
 	signatureEd448   signatureAlgorithm = 0x0808
 
-	// draft-ietf-tls-tls13-pkcs1-00
+	// ML-DSA algorithms (draft-ietf-tls-mldsa-02)
+	signatureMLDSA44 signatureAlgorithm = 0x0904
+	signatureMLDSA65 signatureAlgorithm = 0x0905
+	signatureMLDSA87 signatureAlgorithm = 0x0906
+
+	// RFC 9963
 	signatureRSAPKCS1WithSHA256Legacy signatureAlgorithm = 0x0420
 
 	// signatureRSAPKCS1WithMD5AndSHA1 is the internal value BoringSSL uses to
@@ -356,7 +362,7 @@ var supportedSignatureAlgorithms = []signatureAlgorithm{
 // SRTP protection profiles (See RFC 5764, section 4.1.2)
 const (
 	SRTP_AES128_CM_HMAC_SHA1_80 uint16 = 0x0001
-	SRTP_AES128_CM_HMAC_SHA1_32        = 0x0002
+	SRTP_AES128_CM_HMAC_SHA1_32 uint16 = 0x0002
 )
 
 // PskKeyExchangeMode values (see RFC 8446, section 4.2.9)
@@ -453,6 +459,7 @@ type ClientSessionState struct {
 	localApplicationSettingsOld []byte
 	peerApplicationSettingsOld  []byte
 	resumptionAcrossNames       bool
+	serverRawPublicKey          []byte
 }
 
 // ClientSessionCache is a cache of ClientSessionState objects that can be used
@@ -665,15 +672,14 @@ type Config struct {
 	// (resumption) support.
 	SessionTicketsDisabled bool
 
-	// SessionTicketKey is used by TLS servers to provide session
-	// resumption. See RFC 5077. If zero, it will be filled with
-	// random data before the first server handshake.
+	// SessionTicketKey, if not nil, is used by TLS servers to provide
+	// session resumption. See RFC 5077.
 	//
 	// If multiple servers are terminating connections for the same host
 	// they should all have the same SessionTicketKey. If the
 	// SessionTicketKey leaks, previously recorded and future TLS
 	// connections using that key are compromised.
-	SessionTicketKey [32]byte
+	SessionTicketKey *[32]byte
 
 	// ClientSessionCache is a cache of ClientSessionState entries
 	// for TLS session resumption.
@@ -775,11 +781,13 @@ type Config struct {
 	// server should be marked as compatible with cross-name resumption.
 	ResumptionAcrossNames bool
 
+	// RequestServerPadding, if not nil, configures a client to request the
+	// specified number of bytes of padding from the server.
+	RequestServerPadding *uint16
+
 	// Bugs specifies optional misbehaviour to be used for testing other
 	// implementations.
 	Bugs ProtocolBugs
-
-	serverInitOnce sync.Once // guards calling (*Config).serverInit
 }
 
 type BadValue int
@@ -872,6 +880,10 @@ type ProtocolBugs struct {
 	// EmptyHelloVerifyRequestCookie, if true, causes a DTLS server to request
 	// an empty cookie in HelloVerifyRequest.
 	EmptyHelloVerifyRequestCookie bool
+
+	// SendLegacyDTLSCookie, if not nil, contains the legacy DTLS 1.2 cookie
+	// to be sent in the ClientHello (not the TLS 1.3 cookie extension).
+	SendLegacyDTLSCookie []byte
 
 	// SkipCertificateStatus, if true, causes the server to skip the
 	// CertificateStatus message. This is legal because CertificateStatus is
@@ -1261,7 +1273,7 @@ type ProtocolBugs struct {
 	EmptyTicketSessionID bool
 
 	// NewSessionIDLength, if non-zero is the length of the session ID to use
-	// when issung new sessions.
+	// when issuing new sessions.
 	NewSessionIDLength int
 
 	// SendClientHelloSessionID, if not nil, is the session ID sent in the
@@ -1531,8 +1543,9 @@ type ProtocolBugs struct {
 	// advertise all configured cipher suite values.
 	AdvertiseAllConfiguredCiphers bool
 
-	// EmptyCertificateList, if true, causes the server to send an empty
-	// certificate list in the Certificate message.
+	// EmptyCertificateList, if true, causes the server or client to send an empty
+	// certificate list in the Certificate message. For a TLS 1.2 RawPublicKey
+	// Certificate (RFC 7250), this causes the SubjectPublicKeyInfo to be empty.
 	EmptyCertificateList bool
 
 	// ExpectNewTicket, if true, causes the client to abort if it does not
@@ -2026,7 +2039,7 @@ type ProtocolBugs struct {
 	// extension to indicate a match.
 	SendNonEmptyTrustAnchorMatch bool
 
-	// AlwaysSendAvailableTrustAnchors, if true, causese the server to always
+	// AlwaysSendAvailableTrustAnchors, if true, causes the server to always
 	// send available trust anchors in EncryptedExtensions, even if unsolicited.
 	AlwaysSendAvailableTrustAnchors bool
 
@@ -2267,23 +2280,27 @@ type ProtocolBugs struct {
 	// send a server_certificate_type extension containing the given values.
 	// For a server, this may not contain more than 1 value.
 	SendServerCertificateTypes []CertificateType
-}
 
-func (c *Config) serverInit() {
-	if c.SessionTicketsDisabled {
-		return
-	}
+	// SendEmptyCertificateAuthorities, if true, causes a TLS 1.3 client or
+	// server to send an empty certificate_authorities extension, instead of
+	// omitting the extension.
+	SendEmptyCertificateAuthorities bool
 
-	// If the key has already been set then we have nothing to do.
-	for _, b := range c.SessionTicketKey {
-		if b != 0 {
-			return
-		}
-	}
+	// ExtensionsWithTrailingData specifies a list of extensions to include
+	// trailing data in.
+	// TODO(crbug.com/505803427): Currently only implemented for ClientHello and
+	// CertificateRequest.
+	ExtensionsWithTrailingData []uint16
 
-	if _, err := io.ReadFull(c.rand(), c.SessionTicketKey[:]); err != nil {
-		c.SessionTicketsDisabled = true
-	}
+	// If SendServerPaddingLength, if not nil, sends the amount of padding
+	// specified in the server padding extension. If this is not set, the
+	// server padding extension will not be sent.
+	SendServerPaddingLength *uint16
+
+	// ExpectedServerPadding, if true, will expect that the server sent back
+	// exactly the amount of padding requested by the client through server
+	// padding extension.
+	ExpectedServerPadding bool
 }
 
 func (c *Config) rand() io.Reader {
@@ -2326,7 +2343,7 @@ func (c *Config) maxVersion() uint16 {
 	return ret
 }
 
-var defaultCurvePreferences = []CurveID{CurveX25519MLKEM768, CurveX25519Kyber768, CurveMLKEM1024, CurveX25519, CurveP256, CurveP384, CurveP521}
+var defaultCurvePreferences = []CurveID{CurveX25519MLKEM768, CurveMLKEM1024, CurveX25519, CurveP256, CurveP384, CurveP521}
 
 func (c *Config) curvePreferences() []CurveID {
 	if c == nil || len(c.CurvePreferences) == 0 {
@@ -2396,6 +2413,49 @@ func (c *Config) verifySignatureAlgorithms() []signatureAlgorithm {
 	return supportedSignatureAlgorithms
 }
 
+const (
+	certPropTrustAnchorID          uint16 = 0
+	certPropTrustAnchorGroups      uint16 = 1
+	certPropTrustAnchorNegotiation uint16 = 2
+)
+
+type CertificatePropertyList struct {
+	TrustAnchorID          []byte
+	TrustAnchorGroups      [][]byte
+	TrustAnchorNegotiation bool
+}
+
+func (c *CertificatePropertyList) Empty() bool {
+	return len(c.TrustAnchorID) == 0 && len(c.TrustAnchorGroups) == 0
+}
+
+func (c *CertificatePropertyList) Marshal() []byte {
+	bb := cryptobyte.NewBuilder(nil)
+	bb.AddUint16LengthPrefixed(func(props *cryptobyte.Builder) {
+		if len(c.TrustAnchorID) != 0 {
+			props.AddUint16(certPropTrustAnchorID)
+			// The ID is encoded directly in the property data, with
+			// no additional length prefix.
+			addUint16LengthPrefixedBytes(props, c.TrustAnchorID)
+		}
+		if len(c.TrustAnchorGroups) != 0 {
+			props.AddUint16(certPropTrustAnchorGroups)
+			props.AddUint16LengthPrefixed(func(prop *cryptobyte.Builder) {
+				prop.AddUint16LengthPrefixed(func(ranges *cryptobyte.Builder) {
+					for _, p := range c.TrustAnchorGroups {
+						addUint8LengthPrefixedBytes(ranges, p)
+					}
+				})
+			})
+		}
+		if c.TrustAnchorNegotiation {
+			props.AddUint16(certPropTrustAnchorNegotiation)
+			props.AddUint16(0) // Zero-length property
+		}
+	})
+	return bb.BytesOrPanic()
+}
+
 type CredentialType int
 
 const (
@@ -2406,11 +2466,24 @@ const (
 	CredentialTypeRawPublicKey
 )
 
+func (c CredentialType) CertificateType() CertificateType {
+	switch c {
+	case CredentialTypeX509, CredentialTypeDelegated:
+		return certTypeX509
+	case CredentialTypeRawPublicKey:
+		return certTypeRawPublicKey
+	default:
+		panic("Unexpected credential type")
+	}
+}
+
 // A Credential is a certificate chain and private key that a TLS endpoint may
 // use to authenticate.
 type Credential struct {
 	Type CredentialType
 	// Certificate is a chain of one or more certificates, leaf first.
+	// For a RawPublicKey credential, this contains exactly one element, which
+	// holds the SubjectPublicKeyInfo data of the raw public key.
 	Certificate [][]byte
 	// RootCertificate is the certificate that issued this chain.
 	RootCertificate []byte
@@ -2472,14 +2545,22 @@ type Credential struct {
 	// AppendToImportedPSKIdentity is a byte string that is appended to the
 	// imported PSK identity.
 	AppendToImportedPSKIdentity []byte
-	// TrustAnchorID, if not empty, is the trust anchor ID for the issuer
-	// of the certificate chain.
-	TrustAnchorID []byte
+	// Properties is the certificate properties (draft-ietf-tls-trust-anchor-ids)
+	// associated with this credential.
+	Properties CertificatePropertyList
+	// SessionIDContext is the session ID context to configure on the credential.
+	SessionIDContext []byte
 }
 
 func (c *Credential) WithSignatureAlgorithms(sigAlgs ...signatureAlgorithm) *Credential {
 	ret := *c
 	ret.SignatureAlgorithms = sigAlgs
+	return &ret
+}
+
+func (c *Credential) WithSessionIDContext(sidCtx []byte) *Credential {
+	ret := *c
+	ret.SessionIDContext = sidCtx
 	return &ret
 }
 
@@ -2510,8 +2591,14 @@ func (c *Credential) signatureAlgorithms() []signatureAlgorithm {
 
 func (c *Credential) WithTrustAnchorID(id []byte) *Credential {
 	ret := *c
-	ret.TrustAnchorID = id
+	ret.Properties.TrustAnchorID = id
 	ret.MustMatchIssuer = true
+	return &ret
+}
+
+func (c *Credential) WithProperties(props CertificatePropertyList) *Credential {
+	ret := *c
+	ret.Properties = props
 	return &ret
 }
 
@@ -2695,6 +2782,12 @@ func containsGREASE(values []uint16) bool {
 	return slices.ContainsFunc(values, isGREASEValue)
 }
 
+func containsSigAlgsGREASE(values []signatureAlgorithm) bool {
+	return slices.ContainsFunc(values, func(s signatureAlgorithm) bool {
+		return isGREASEValue(uint16(s))
+	})
+}
+
 func isAllZero(v []byte) bool {
 	for _, b := range v {
 		if b != 0 {
@@ -2703,6 +2796,3 @@ func isAllZero(v []byte) bool {
 	}
 	return true
 }
-
-// https://github.com/golang/go/issues/45624
-func ptrTo[T any](t T) *T { return &t }

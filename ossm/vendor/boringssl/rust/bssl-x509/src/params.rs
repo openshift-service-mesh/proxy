@@ -27,6 +27,7 @@ use crate::{check_lib_error, errors::PkiError, ffi::slice_into_ffi_raw_parts};
 bssl_enum! {
     /// Trust settings for certificate verification.
     #[derive(Clone, Copy, PartialEq, Eq)]
+    #[non_exhaustive]
     pub enum Trust: i8 {
         /// Compatibility mode.
         Compat = bssl_sys::X509_TRUST_COMPAT as i8,
@@ -46,6 +47,7 @@ bssl_enum! {
 bssl_enum! {
     /// Purpose settings for certificate verification.
     #[derive(Clone, Copy, PartialEq, Eq)]
+    #[non_exhaustive]
     pub enum Purpose: i8 {
         /// SSL client.
         SslClient = bssl_sys::X509_PURPOSE_SSL_CLIENT as i8,
@@ -96,8 +98,6 @@ bitflags::bitflags! {
         /// Treat all trusted certificates as trust anchors regardless of the
         /// [`CertificateVerificationParams::set_trust`] setting.
         const PARTIAL_CHAIN = bssl_sys::X509_V_FLAG_PARTIAL_CHAIN as c_ulong;
-        /// Disable building of alternative chains, when the first built chain was rejected.
-        const NO_ALT_CHAINS = bssl_sys::X509_V_FLAG_NO_ALT_CHAINS as c_ulong;
         /// Disable all time checks during certificate verification.
         const NO_CHECK_TIME = bssl_sys::X509_V_FLAG_NO_CHECK_TIME as c_ulong;
     }
@@ -154,7 +154,7 @@ impl CertificateVerificationParams {
     ///
     /// The handle **must** outlive the use sites.
     /// Verify the callsite contract to honour the lifetime contracts.
-    pub unsafe fn as_raw(&self) -> *mut bssl_sys::X509_VERIFY_PARAM {
+    pub unsafe fn as_ptr(&self) -> *mut bssl_sys::X509_VERIFY_PARAM {
         self.ptr()
     }
 

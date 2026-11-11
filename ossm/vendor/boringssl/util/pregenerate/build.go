@@ -57,6 +57,25 @@ type PerlasmSource struct {
 	Args []string `json:"args,omitempty"`
 }
 
+// findThirdParty locates the deepest package directory `dir` is in - either `dir` itself, or a subdirectory of a `third_party` directory.
+func findThirdParty(dir string) string {
+	for {
+		parent := path.Dir(dir)
+		if path.Base(parent) == "third_party" {
+			return dir
+		}
+		if parent == dir {
+			return dir
+		}
+		dir = parent
+	}
+}
+
+// matchThirdParty returns an edited form of the `dst` path so it has the same `third_party` prefix as `src`.
+func matchThirdParty(src, dst string) string {
+	return path.Join(findThirdParty(src), dst)
+}
+
 // Pregenerate converts an input target to an output target. It returns the
 // result alongside a list of tasks that must be run to build the referenced
 // files.
@@ -110,6 +129,7 @@ func (in *InputTarget) Pregenerate(name string) (out build.Target, tasks []*Task
 			dst = strings.TrimSuffix(path.Base(p.Src), ".pl")
 		}
 		dst = path.Join("gen", name, dst+fileSuffix)
+		dst = matchThirdParty(p.Src, dst)
 		args = append(slices.Clone(args), p.Args...)
 		addTask(list, NewPerlasmTask(dst, p.Src, args))
 		return dst
@@ -385,7 +405,9 @@ func MakePrefixingIncludes(in map[string]InputTarget, targetsOut map[string]buil
 		NewSimpleTask("prefix_symbols", "include/openssl/prefix_symbols.h", func() ([]byte, error) {
 			var headers []string
 			for _, t := range in {
-				headers = append(headers, t.Hdrs...)
+				if t.PrefixSymbols {
+					headers = append(headers, t.Hdrs...)
+				}
 			}
 			syms, err := CollectCSymbols(headers)
 			return BuildCRenamingInclude(syms), err

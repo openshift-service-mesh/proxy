@@ -46,10 +46,22 @@ REPOSITORY_LOCATIONS_SPEC = dict(
         urls = ["https://github.com/bazelbuild/buildtools/archive/v{version}.tar.gz"],
     ),
     envoy_toolshed = dict(
-        version = "0.3.35",
-        sha256 = "5179bc3f912d9c2dd5a6e5215e98222abe088847f021eba9f0f2e9a006deacaa",
-        strip_prefix = "toolshed-bazel-v{version}",
-        urls = ["https://github.com/envoyproxy/toolshed/releases/download/bazel-v{version}/toolshed-bazel-v{version}.tar.gz"],
+        version = "0.4.13.post0",
+        sha256 = "9aa56955047082227a2a09ebe86eb482c0c694d3bfdb8ec63b21afbdc98c1204",
+        strip_prefix = "toolshed-bazel-v{version}/bazel",
+        urls = ["https://github.com/envoyproxy/toolshed/archive/bazel-v{version}.tar.gz"],
+    ),
+    sq_linux_arm64 = dict(
+        version = "1.4.0",
+        sha256 = "ccdbe4a6c79c589a12d6a2eff3fe8f635e7b170a45bf947971c47a018e923ebd",
+        strip_prefix = "sq-{version}-Linux-ARM64",
+        urls = ["https://github.com/envoyproxy/toolshed/releases/download/bins-v0.2.16/sq-{version}-Linux-ARM64.tar.zst"],
+    ),
+    sq_linux_x86_64 = dict(
+        version = "1.4.0",
+        sha256 = "dcef2a3f6ca8090684fdcbad777acbec83c9f6b182e2dca0288b06aa30b938a0",
+        strip_prefix = "sq-{version}-Linux-X64",
+        urls = ["https://github.com/envoyproxy/toolshed/releases/download/bins-v0.2.16/sq-{version}-Linux-X64.tar.zst"],
     ),
     rules_fuzzing = dict(
         # Patch contains workaround for https://github.com/bazelbuild/rules_python/issues/1221
@@ -61,8 +73,8 @@ REPOSITORY_LOCATIONS_SPEC = dict(
     boringssl = dict(
         # To update BoringSSL, which tracks BCR tags, open https://registry.bazel.build/modules/boringssl
         # and select an appropriate tag for the new version.
-        version = "0.20260413.0",
-        sha256 = "3560f7dd3f08e16b9f84d877a5be21ec62071564783009571af5fcc6fad734d2",
+        version = "0.20260929.0",
+        sha256 = "04da9ba0664e0a7f028e961c38d604f2cc6dac852a84ca0e51dc1fa051d4c8fe",
         strip_prefix = "boringssl-{version}",
         urls = ["https://github.com/google/boringssl/archive/{version}.tar.gz"],
     ),
@@ -73,8 +85,8 @@ REPOSITORY_LOCATIONS_SPEC = dict(
         urls = ["https://github.com/aws/aws-lc/archive/v{version}.tar.gz"],
     ),
     openssl = dict(
-        version = "3.5.7",
-        sha256 = "a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8",
+        version = "3.5.9",
+        sha256 = "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a",
         strip_prefix = "openssl-{version}",
         urls = ["https://github.com/openssl/openssl/releases/download/openssl-{version}/openssl-{version}.tar.gz"],
     ),
@@ -370,10 +382,10 @@ REPOSITORY_LOCATIONS_SPEC = dict(
         urls = ["https://archives.boost.io/release/{version}/source/boost_{underscore_version}.tar.gz"],
     ),
     brotli = dict(
-        version = "1.2.0",
-        sha256 = "816c96e8e8f193b40151dad7e8ff37b1221d019dbcb9c35cd3fadbfe6477dfec",
+        version = "42a2ed4355bc6287da6bb6319f090b499cba4550",
+        sha256 = "aae3527bd1eeb596d1dbc994e3eb45b4df6d1c59666438400f09073b761fe913",
         strip_prefix = "brotli-{version}",
-        urls = ["https://github.com/google/brotli/archive/v{version}.tar.gz"],
+        urls = ["https://github.com/google/brotli/archive/{version}.tar.gz"],
     ),
     zstd = dict(
         version = "1.5.7",
@@ -700,8 +712,8 @@ REPOSITORY_LOCATIONS_SPEC = dict(
         urls = ["https://github.com/maxmind/libmaxminddb/releases/download/{version}/libmaxminddb-{version}.tar.gz"],
     ),
     thrift = dict(
-        version = "0.23.0",
-        sha256 = "087ba9517063c8252e9e7fb4e3891a9fd85e20af80e0309e2276eff16791d75c",
+        version = "0.24.0",
+        sha256 = "d3a60676b1df3fb9850f6ce1e8a3df9a0efac036ceb4bce8ce46ee3eca735d2d",
         strip_prefix = "thrift-{version}/lib/py/",
         urls = ["https://github.com/apache/thrift/archive/refs/tags/v{version}.tar.gz"],
     ),
@@ -743,14 +755,14 @@ REPOSITORY_LOCATIONS_SPEC = dict(
         urls = ["https://github.com/Kitware/CMake/releases/download/v{version}/cmake-{version}-linux-aarch64.tar.gz"],
     ),
     fips_go_linux_amd64 = dict(
-        version = "1.26.3",
-        sha256 = "2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556",
+        version = "1.26.5",
+        sha256 = "5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053",
         strip_prefix = "go",
         urls = ["https://dl.google.com/go/go{version}.linux-amd64.tar.gz"],
     ),
     fips_go_linux_arm64 = dict(
-        version = "1.26.3",
-        sha256 = "9d89a3ea57d141c2b22d70083f2c8459ba3890f2d9e818e7e933b75614936565",
+        version = "1.26.5",
+        sha256 = "fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49",
         strip_prefix = "go",
         urls = ["https://dl.google.com/go/go{version}.linux-arm64.tar.gz"],
     ),
@@ -761,8 +773,8 @@ REPOSITORY_LOCATIONS_SPEC = dict(
         urls = ["https://github.com/llvm/llvm-project/releases/download/llvmorg-{version}/clang+llvm-{version}-powerpc64le-linux-ubuntu-18.04.tar.xz"],
     ),
     fips_go_ppc64le = dict(
-        version = "1.26.3",
-        sha256 = "dbd82b50530ead2beb1fd72215117380df3cb16332b51467116dc35b3691dd75",
+        version = "1.26.5",
+        sha256 = "c5d60e2b303bb612f20cd82786594b64874e73b35134025e27d3390bf284ae43",
         strip_prefix = "go",
         urls = ["https://dl.google.com/go/go{version}.linux-ppc64le.tar.gz"],
     ),
