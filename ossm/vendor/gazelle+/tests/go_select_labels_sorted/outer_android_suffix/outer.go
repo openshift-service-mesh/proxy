@@ -1,1 +1,0 @@
-package outer_android_suffix

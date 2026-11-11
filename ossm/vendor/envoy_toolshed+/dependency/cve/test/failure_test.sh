@@ -20,7 +20,25 @@ grep -q "Affected: Example/Widget 1.0 <= v < 1.3 affected" "$TEST_TMPDIR/report"
 grep -q "2 potential CVE vulnerabilities found" "$TEST_TMPDIR/report"
 grep -q "(0 NVD only, 1 CVE Program only, 1 both)" "$TEST_TMPDIR/report"
 
+# A scan that cannot be read fails the test, rather than passing it
+echo "not json" > "$TEST_TMPDIR/broken.json"
+status=0
+SCANNED="$TEST_TMPDIR/broken.json" "$(rlocation "$CVE_TEST")" > "$TEST_TMPDIR/broken" 2>&1 || status=$?
+[[ "$status" -ne 0 ]]
+if grep -q "potential CVE" "$TEST_TMPDIR/broken"; then
+    exit 1
+fi
+
 status=0
 "$(rlocation "$EMPTY_SCAN")" > "$TEST_TMPDIR/empty" 2>&1 || status=$?
 [[ "$status" -eq 1 ]]
 grep -q "No CVE data set" "$TEST_TMPDIR/empty"
+
+# Data files that contain no documents fail the scan for each source (jq exits
+# 4 when it reads no document), rather than passing it empty
+for sources in "$NVD_ONLY_SOURCES" "$CNA_ONLY_SOURCES"; do
+    status=0
+    CVE_FILES="$BLANK_FILES" CVES_SOURCES="$sources" "$(rlocation "$EMPTY_SCAN")" \
+        > "$TEST_TMPDIR/blank" 2>&1 || status=$?
+    [[ "$status" -eq 4 ]]
+done

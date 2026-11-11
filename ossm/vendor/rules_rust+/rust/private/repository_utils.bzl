@@ -340,20 +340,20 @@ load("@rules_rust//rust:toolchain.bzl", "rust_toolchain")
 
 rust_toolchain(
     name = "{toolchain_name}",
-    rust_doc = "//:rustdoc",
+    rust_doc = "{tools}//:rustdoc",
     rust_std = "//:rust_std-{target_triple}",
-    rustc = "//:rustc",
+    rustc = "{tools}//:rustc",
     linker = {linker_label},
     linker_type = {linker_type},
     rust_objcopy = {rust_objcopy_label},
     rustfmt = {rustfmt_label},
-    cargo = "//:cargo",
-    clippy_driver = "//:clippy_driver_bin",
-    cargo_clippy = "//:cargo_clippy_bin",
+    cargo = "{tools}//:cargo",
+    clippy_driver = "{tools}//:clippy_driver_bin",
+    cargo_clippy = "{tools}//:cargo_clippy_bin",
     llvm_cov = {llvm_cov_label},
     llvm_profdata = {llvm_profdata_label},
     llvm_lib = {llvm_lib_label},
-    rustc_lib = "//:rustc_lib",
+    rustc_lib = "{tools}//:rustc_lib",
     allocator_library = {allocator_library},
     global_allocator_library = {global_allocator_library},
     binary_ext = "{binary_ext}",
@@ -393,7 +393,8 @@ def BUILD_for_rust_toolchain(
         extra_rustc_flags = None,
         extra_exec_rustc_flags = None,
         opt_level = None,
-        strip_level = None):
+        strip_level = None,
+        tools_repo = None):
     """Emits a toolchain declaration to match an existing compiler and stdlib.
 
     Args:
@@ -419,10 +420,14 @@ def BUILD_for_rust_toolchain(
         extra_exec_rustc_flags (list, optional): Extra flags to pass to rustc in exec configuration.
         opt_level (dict, optional): Optimization level config for this toolchain.
         strip_level (dict, optional): Strip level config for this toolchain.
+        tools_repo (str, optional): The name of a repository providing the exec tools (rustc,
+                                    cargo, clippy, rustfmt, llvm-tools, linker). When unset the
+                                    tools are expected in the current repository.
 
     Returns:
         str: A rendered template of a `rust_toolchain` declaration
     """
+    tools = "@{}".format(tools_repo) if tools_repo else ""
     if stdlib_linkflags == None:
         stdlib_linkflags = ", ".join([
             '"%s"' % x
@@ -434,14 +439,14 @@ def BUILD_for_rust_toolchain(
 
     rustfmt_label = None
     if include_rustfmt:
-        rustfmt_label = "//:rustfmt_bin"
+        rustfmt_label = tools + "//:rustfmt_bin"
     llvm_cov_label = None
     llvm_profdata_label = None
     llvm_lib_label = None
     if include_llvm_tools:
-        llvm_cov_label = "//:llvm_cov_bin"
-        llvm_profdata_label = "//:llvm_profdata_bin"
-        llvm_lib_label = "//:llvm_lib"
+        llvm_cov_label = tools + "//:llvm_cov_bin"
+        llvm_profdata_label = tools + "//:llvm_profdata_bin"
+        llvm_lib_label = tools + "//:llvm_lib"
     allocator_library_label = None
     if allocator_library:
         allocator_library_label = allocator_library
@@ -452,15 +457,16 @@ def BUILD_for_rust_toolchain(
     linker_label = None
     linker_type = None
     if include_linker:
-        linker_label = "//:rust-lld"
+        linker_label = tools + "//:rust-lld"
         linker_type = "direct"
 
     rust_objcopy_label = None
     if include_objcopy:
-        rust_objcopy_label = "//:rust-objcopy"
+        rust_objcopy_label = tools + "//:rust-objcopy"
 
     return _build_file_for_rust_toolchain_template.format(
         toolchain_name = name,
+        tools = tools,
         binary_ext = system_to_binary_ext(target_triple.system),
         staticlib_ext = system_to_staticlib_ext(target_triple.system, target_triple.abi),
         dylib_ext = system_to_dylib_ext(target_triple.system),

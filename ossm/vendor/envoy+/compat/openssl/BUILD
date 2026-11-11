@@ -1,8 +1,43 @@
+load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//bazel:toolchains.bzl", "LIBCLANG_CPP", "LIBLLVM")
-load("//compat/openssl:bazel/rules.bzl", "mapping_func_filegroup", "patched_bssl_filegroup")
+load("//compat/openssl:bazel/rules.bzl", "mapping_func_filegroup", "openssl_include_dir", "patched_bssl_filegroup")
 
 licenses(["notice"])  # Apache 2
+
+# Must match the major version of the @openssl module, as ossl_dlopen() loads
+# libcrypto.so.<major> and libssl.so.<major>.
+OPENSSL_SOVERSION = "3"
+
+# OSSM: the OpenSSL shared libraries used at runtime (dlopen'd from
+# source/ossl_dlutil.c) as a *data* dependency of :bssl-compat. Upstream builds
+# these with cc_shared_library from @openssl's static libraries; OSSM replaces
+# the @openssl module with the host's OpenSSL, which ships only precompiled
+# dynamic libraries (no static archives to relink). So we stage the host's
+# existing libcrypto.so.<major> / libssl.so.<major> into this package instead,
+# which puts them at the OSSL_RUNFILES_LIB_DIR path :bssl-compat expects.
+genrule(
+    name = "openssl_libs_copy",
+    srcs = ["@openssl//:libs"],
+    outs = [
+        "libcrypto.so." + OPENSSL_SOVERSION,
+        "libssl.so." + OPENSSL_SOVERSION,
+    ],
+    cmd = "for f in $(SRCS); do cp \"$$f\" \"$(RULEDIR)/$$(basename \"$$f\")\"; done",
+)
+
+filegroup(
+    name = "openssl_libs",
+    srcs = [":openssl_libs_copy"],
+    visibility = ["//visibility:private"],
+)
+
+# Directory containing OpenSSL's public headers as openssl/*.h, for the prefixer.
+openssl_include_dir(
+    name = "openssl_include",
+    lib = "@openssl//:ssl",
+    visibility = ["//visibility:private"],
+)
 
 # This genrule runs the prefixer tool to process OpenSSL headers.
 # It generates:
@@ -12,7 +47,7 @@ licenses(["notice"])  # Apache 2
 genrule(
     name = "prefixed_ossl_source",
     srcs = [
-        "@openssl//:include",
+        ":openssl_include",
         "@llvm_toolchain_llvm//:include",
     ],
     outs = [
@@ -180,7 +215,7 @@ genrule(
 
         # Run the prefixer with absolute source path and relative output path
         $(location //compat/openssl/prefixer:prefixer) \
-            --src-path "$(location @openssl//:include)" \
+            --src-path "$(location :openssl_include)" \
             --src-incl "openssl/*.h" \
             --src-skip "openssl/asn1_mac.h" \
             --src-skip "openssl/opensslconf-*.h" \
@@ -907,6 +942,7 @@ mapping_func_filegroup(
         "X509_VERIFY_PARAM_get_flags",
         "X509_VERIFY_PARAM_set_depth",
         "X509_VERIFY_PARAM_set_flags",
+        "X509_VERIFY_PARAM_set_time",
         "X509_VERIFY_PARAM_set_time_posix",
         "X509_VERIFY_PARAM_set1",
         "X509_verify",
@@ -926,7 +962,8 @@ cc_library(
         "source/CRYPTO_BUFFER.h",
         "source/SSL_CTX_set_select_certificate_cb.h",
         "source/SSL_get_curve_name.cc",
-        "source/ssl_compliance_policy.h",
+        "source/custom_bio.cc",
+        "source/custom_bio.h",
         "source/err.cc",
         "source/ext_SSL_get_all_async_fds.c",
         "source/iana_2_ossl_names.cc",
@@ -938,15 +975,15 @@ cc_library(
         "source/ossl_dlutil.h",
         "source/override.cc",
         "source/override.h",
+        "source/ssl_compliance_policy.h",
         "source/stack.c",
-        "source/custom_bio.h",
-        "source/custom_bio.cc",
     ],
+    copts = ["-fvisibility=hidden"],
 
     # Add the OpenSSL shared libraries as a *data* dependency, so they get
     # propagated to dependant targets, and made available in their runfiles
     # directory when they run, so libbssl-compat.a can dlopen() them.
-    data = ["@openssl//:libs"],
+    data = [":openssl_libs"],
     includes = [
         ".",
         "include",
@@ -954,7 +991,12 @@ cc_library(
     ],
     linkopts = ["-ldl"],
     linkstatic = True,
-    copts = ["-fvisibility=hidden"],
+    local_defines = [
+        'OSSL_RUNFILES_LIB_DIR=\\"%s/%s\\"' % (
+            repo_name() or "_main",
+            package_name(),
+        ),
+    ],
     visibility = ["//visibility:public"],
 )
 

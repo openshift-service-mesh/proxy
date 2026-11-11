@@ -1,5 +1,4 @@
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load(":emscripten_build_file.bzl", "EMSCRIPTEN_BUILD_FILE_CONTENT_TEMPLATE")
+load(":emscripten_build_file.bzl", "emscripten_build_file_content")
 load(":revisions.bzl", "EMSCRIPTEN_TAGS")
 load("@rules_cc//cc:defs.bzl", "cc_toolchain", "cc_toolchain_suite")
 load("//emscripten_toolchain:toolchain.bzl", "emscripten_cc_toolchain_config_rule")
@@ -12,21 +11,54 @@ _python_exec_files = rule(
     attrs = {"src": attr.label(cfg = "exec")},
 )
 
+def _emscripten_archive_impl(ctx):
+    archive = "wasm-binaries.{}".format(ctx.attr.type)
+    ctx.download(
+        url = ctx.attr.url,
+        output = archive,
+        sha256 = ctx.attr.sha256,
+    )
+    ctx.file("WORKSPACE", 'workspace(name = "{}")\n'.format(ctx.name))
+    ctx.file(
+        "BUILD.bazel",
+        emscripten_build_file_content(
+            archive = archive,
+            bin_extension = ctx.attr.bin_extension,
+            strip_prefix = ctx.attr.strip_prefix,
+        ),
+    )
+
+_emscripten_archive = repository_rule(
+    implementation = _emscripten_archive_impl,
+    attrs = {
+        "bin_extension": attr.string(),
+        "sha256": attr.string(mandatory = True),
+        "strip_prefix": attr.string(),
+        "type": attr.string(mandatory = True, values = ["tar.xz", "zip"]),
+        "url": attr.string(mandatory = True),
+    },
+    doc = "Downloads an Emscripten release archive; it is extracted by a build action.",
+)
+
 def remote_emscripten_repository(
     name,
     bin_extension,
     **kwargs,
 ):
-    """Imports an Emscripten from an http archive
+    """Imports an Emscripten from a release archive
+
+    The archive is only downloaded by the repository rule; extraction happens
+    in a build action (see emscripten_extract.bzl) so that it is cached and,
+    with remote execution, never has to happen on the machine running Bazel.
 
     Args:
       name: A unique name for this Emscripten repository.
       bin_extension: Extension for the binaries in this Emscripten repository
-      **kwargs: Args for http_archive. Refer to http_archive documentation for more info.
+      **kwargs: url, sha256, type and strip_prefix of the archive.
     """
-    http_archive(
+    _emscripten_archive(
         name = name,
-        build_file_content = EMSCRIPTEN_BUILD_FILE_CONTENT_TEMPLATE.format(bin_extension = bin_extension),
+        bin_extension = bin_extension,
         **kwargs
     )
 

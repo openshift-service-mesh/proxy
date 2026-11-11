@@ -1,3 +1,0 @@
-
-# gazelle:prefix example.com/mapkind
-# gazelle:go_naming_convention go_default_library

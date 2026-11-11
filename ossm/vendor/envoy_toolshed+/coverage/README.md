@@ -36,7 +36,7 @@ coverage_report(
 ```
 
 Signature:
-`coverage_report(name, config, templates=None, source_root="source", source_glob="*.cc", zstd=..., grcov=..., visibility=None)`.
+`coverage_report(name, config, templates=None, source_root="source", source_glob="*.cc", zstd=..., grcov=..., lcov_merge=None, visibility=None)`.
 Template overrides are three labels in **base, index, macros** order.
 The default compressor is toolshed's BCR zstd dependency, not a host binary;
 grcov can be supplied from a consumer-owned repository.
@@ -89,6 +89,107 @@ with instructions to supply `--workspace`.
 Tool, config, jq module, and template paths are resolved through Bazel runfiles.
 The report is a zstd-compressed tar archive containing HTML, covdir, and
 `coverage.json`; it is written to Bazel's requested `--output_file`.
+
+## Smaller per-test reports
+
+Bazel runs an lcov merger once per test, in the coverage postprocessing spawn,
+to produce that test's `coverage.dat`. Every such file describes the whole
+instrumented binary, and in a large C++ tree most of it is function (`FN`,
+`FNDA`) and branch (`BRDA`) records: thousands of mangled names per file,
+repeated for every test, then uploaded, downloaded and parsed again by the
+combined report. The thresholds are validated against line coverage only.
+
+`@envoy_toolshed//coverage:lcov_merger` wraps Bazel's merger and strips those
+records from each merged per-test report before it leaves the spawn:
+
+```
+coverage --coverage_output_generator=@envoy_toolshed//coverage:lcov_merger
+```
+
+Line records are untouched, zero-hit lines included (the baseline report only
+lists files, so dropping them would hide uncovered lines rather than count
+them), and the combined line coverage is identical. The HTML report omits its
+Functions column when no function records remain. To strip a different set of
+record types, instantiate the rule with `strip = [...]`:
+
+```starlark
+load("@envoy_toolshed//coverage:lcov_merger.bzl", "lcov_merger")
+
+lcov_merger(
+    name = "lcov_merger",
+    strip = ["BRDA", "BRF", "BRH"],
+)
+```
+
+## Cheaper exports, nothing but the report uploaded
+
+Two more per-test costs sit in Bazel's `collect_cc_coverage.sh`, which runs the C++
+toolchain's `llvm-cov export` over the whole instrumented binary and leaves its
+intermediates in the coverage directory.
+
+**`//coverage:llvm_support`** is a drop-in `llvm-cov` whose `export` emits only what the
+merger keeps: `-skip-functions -skip-branches` (the report reads line coverage) and an
+`-ignore-filename-regex` for `external/...` and generated `bazel-out/<config>/bin/external/...`
+paths, which the lcov merger discards anyway because the coverage manifest lists
+workspace sources only. For an Envoy test that is ~85% of a 100MB export. Bazel sets the
+toolchain's `LLVM_COV` in the test environment only when nothing else has, so select the
+wrapper with `--test_env` and stage it into the coverage spawns with `--coverage_support`:
+
+```
+coverage --coverage_support=@envoy_toolshed//coverage:llvm_support
+coverage --test_env=LLVM_COV=external/envoy_toolshed+/coverage/llvm/llvm-cov.sh
+```
+
+(`envoy_toolshed+` is the module's canonical repository name under bzlmod.) The wrapper
+finds the real tool beside `COVERAGE_GCOV_PATH`, which toolchains_llvm points at
+`bin/llvm-profdata` in the same directory. The ignore pattern assumes the instrumented
+code is in the main workspace; a consumer instrumenting an external repository sets
+`--test_env=LLVM_COV_IGNORE_FILENAME_REGEX=<pattern>` (empty ignores nothing).
+
+**Without split postprocessing** (`--noexperimental_split_coverage_postprocessing`) the
+export and merge run inside the test action, so the raw profile is never uploaded for a
+second action to fetch; Envoy's full coverage run moved ~160GB through the CAS that way
+and spent as many worker-hours on the postprocessing actions as on the tests. The catch
+is that the coverage directory is then one of the test's output directories, and its
+intermediates (raw profile, unfiltered export, indexed profile: ~290MB per Envoy test)
+are uploaded with the results. `:lcov_merger` is the last step of that pipeline and, when
+it runs inside the test action, removes everything in the directory but the merged
+report (`clean_coverage_dir = False` keeps them). With both in place a test uploads its
+`coverage.dat` and `test.xml`, under 1MB.
+
+## Faster merging of the per-test reports
+
+grcov both merges the per-test tracefiles and renders the report. On a large tree the
+merge is most of the report's time: Envoy's ~1,600 per-test files (1.3GB after
+stripping) took grcov about 30s to parse and merge on a 4-core CI runner, against ~13s
+to render, and the whole thing sits on the critical path after the last test finishes.
+Bazel also runs the generator a second time over the baseline coverage files (file
+lists with no counts) for `_baseline_report.dat`, rendering a report nothing reads.
+
+`lcov-merge` (`rust/lcov`) is a small parallel merger for lcov tracefiles: it sums
+`DA`/`FNDA`/`BRDA` hits, keeps `FN`, recomputes the `LF/LH`, `FNF/FNH`, `BRF/BRH`
+totals and writes a sorted, deterministic result. The same 1,600 files merge in ~4s on
+four threads. It is published with the toolshed bins release; enable it in the consumer's
+`MODULE.bazel` and hand it to the report:
+
+```starlark
+lcov_merge = use_extension("@envoy_toolshed//coverage/lcov:extensions.bzl", "lcov_merge_extension")
+lcov_merge.setup(bins_release_version = "<bins release>")
+use_repo(lcov_merge, "lcov_merge")
+
+coverage_report(
+    name = "report",
+    config = ":config",
+    lcov_merge = "@lcov_merge//:lcov_merge",
+)
+```
+
+With it set, the generator merges the per-test tracefiles into one before grcov runs,
+so grcov only parses one small file, and the baseline report is written as that merged
+tracefile without rendering. Without it the generator behaves as before. The prebuilt
+exists for Linux amd64 and arm64 (`LCOV_MERGE_PLATFORMS`); on any other platform the
+repository is a stub, the report leaves the merger out and grcov merges as before, so a
+consumer can enable it unconditionally.
 
 ## Driver
 

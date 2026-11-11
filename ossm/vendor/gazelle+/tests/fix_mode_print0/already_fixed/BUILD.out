@@ -1,6 +1,0 @@
-rule(
-    name = "good",
-    visibility = [
-        "test",
-    ],
-)

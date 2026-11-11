@@ -72,7 +72,15 @@ def _impl(ctx):
 
     cc_target_os = "emscripten"
 
+    # The binaries are tree artifacts extracted in a build action (bin/,
+    # emscripten/, lib/), so the install root is their parent directory. The
+    # attribute is not exec-transitioned: cc_toolchain's compiler_files etc.
+    # are in the target configuration and the path must match those inputs.
     emscripten_dir = ctx.attr.emscripten_binaries.label.workspace_root
+    for f in ctx.files.emscripten_binaries:
+        if f.is_directory:
+            emscripten_dir = f.dirname
+            break
 
     nodejs_path = ctx.file.nodejs_bin.path
 
@@ -1152,7 +1160,7 @@ emscripten_cc_toolchain_config_rule = rule(
     attrs = {
         "cpu": attr.string(mandatory = True, values = ["asmjs", "wasm"]),
         "em_config": attr.label(mandatory = True, allow_single_file = True),
-        "emscripten_binaries": attr.label(mandatory = True, cfg = "exec"),
+        "emscripten_binaries": attr.label(mandatory = True),
         "nodejs_bin": attr.label(mandatory = True, allow_single_file = True),
         "python_bin": attr.label(mandatory = True, cfg = "exec"),
         "script_extension": attr.string(mandatory = True, values = ["sh", "bat"]),

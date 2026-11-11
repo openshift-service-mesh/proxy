@@ -1,0 +1,11 @@
+module(
+    name = "boost.headers",
+    version = "1.89.0.envoy.1",
+    compatibility_level = 1,
+)
+
+bazel_dep(name = "rules_cc", version = "0.1.5")
+bazel_dep(name = "tar.bzl", version = "0.5.1")
+
+archive = use_extension("//:headers.bzl", "archive")
+use_repo(archive, "boost_headers_archive")

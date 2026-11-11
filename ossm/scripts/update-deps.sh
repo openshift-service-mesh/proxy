@@ -53,18 +53,36 @@ EXTRA_REPOS=(
 )
 
 # Execution-platform (host) prebuilt tools for cross-arch offline builds.
-# protoc and java_tools ship as prebuilt binaries selected by the *execution*
-# platform. This snapshot is vendored on an x86_64 host and --config=aarch64 is
-# a no-op here (it only sets --define=DUMMY; it does not cross-compile), so the
-# arch loop only ever exercises the x86_64 execution platform. The aarch64 host
-# variants are therefore never fetched, and an offline build *on an aarch64
-# host* fails fetching protoc/java_tools. Vendor them explicitly by their
+# protoc, java_tools and protoc-gen-validate ship as prebuilt binaries selected
+# by the *execution* platform. This snapshot is vendored on an x86_64 host and
+# --config=aarch64 is a no-op here (it only sets --define=DUMMY; it does not
+# cross-compile), so the arch loop only ever exercises the x86_64 execution
+# platform. The aarch64 host variants are therefore never fetched, and an offline
+# build *on an aarch64 host* fails fetching them. Vendor them explicitly by their
 # canonical repo names. (Bazel java_tools only ships x86_64 and aarch64 for
 # linux; s390x/ppc host builds fall back to building java_tools from source, so
 # only aarch64 needs to be captured here.)
+#
+# protoc-gen-validate: since 1.3.3.envoy.1 the plugin is a prebuilt release
+# binary (bazel/prebuilt.bzl) rather than a from-source go_binary, selected by
+# the exec platform. The arch loop captures only linux_amd64; the aarch64 host
+# binary must be vendored explicitly or an offline aarch64 build fails fetching
+# it from GitHub.
+#
+# KNOWN GAP (s390x / ppc64le): upstream PREBUILT_PLATFORMS covers only
+# linux/darwin/windows amd64+arm64, and the plugin's `select()` on
+# `//:protoc-gen-validate` has no `//conditions:default`. So on s390x/ppc there
+# is neither a prebuilt to vendor here nor a source fallback -- the native build
+# on those hosts fails configuring `//:protoc-gen-validate` ("no matching
+# conditions"), independent of vendoring. Fixing it needs an OSSM patch that adds
+# a from-source go_binary fallback to that select (the Go sources are still in
+# the module) plus vendoring that source closure's Go deps. Tracked as a
+# follow-up; the from-source path mirrors how java_tools already falls back on
+# these arches. TODO: restore s390x/ppc protoc-gen-validate support.
 CROSS_ARCH_HOST_TOOLS=(
   "@@protobuf++protoc+prebuilt_protoc.linux_aarch_64"
   "@@rules_java++toolchains+remote_java_tools_linux_aarch64"
+  "@@protoc-gen-validate++prebuilt+protoc_gen_validate_prebuilt_linux_arm64"
 )
 
 # Target-platform pip wheels for arches other than the vendoring host. v8 pins
@@ -88,6 +106,39 @@ if [ -d "${VENDOR_DIR}" ]; then
     ! -name VENDOR.bazel -exec rm -rf {} +
 fi
 mkdir -p "${VENDOR_DIR}"
+
+echo ">> Pre-fetching and patching envoy+ (analysis-time source patches)"
+# Some OSSM Envoy patches change build *analysis*, not just the compiled output
+# -- they must be in place before `bazel vendor //:envoy` analyses the target,
+# or the vendor step itself fails. (The post-vendor tree edits further down only
+# work for *build-time* divergences, which never block analysis.) These patches
+# cannot go through an archive_override `patches` attribute either: that changes
+# envoy+'s vendor marker and breaks the air-gapped build's marker validation (see
+# the post-vendor patch step for the full rationale).
+#
+# So we first materialise envoy+ on its own with `bazel vendor --repo` (which
+# runs only its repository rule -- download+extract -- never target analysis, so
+# the broken analysis is not hit), patch the extracted tree, then let the arch
+# loop analyse the *patched* sources. Vendor mode validates a repo by its marker,
+# not its file contents (same invariant the post-vendor edits rely on), so the
+# in-place edit survives the loop without triggering a re-fetch.
+#
+#   openssl-compat-host-libs.patch: upstream compat/openssl/BUILD builds its
+#   runtime libcrypto.so/libssl.so with `cc_shared_library` by relinking
+#   @openssl's *static* libraries. OSSM replaces the @openssl module with the
+#   host's OpenSSL, which provides only precompiled dynamic libraries -- and
+#   rules_cc rejects a precompiled-dynamic-only library as a cc_shared_library
+#   root (analysis-time fail). The patch instead stages the host's existing
+#   libcrypto.so.<major> / libssl.so.<major> into the compat/openssl package
+#   (matching the OSSL_RUNFILES_LIB_DIR that :bssl-compat dlopen()s from).
+ENVOY_ANALYSIS_PATCHES=(
+  "openssl-compat-host-libs.patch"
+)
+bazel vendor --vendor_dir="${VENDOR_DIR}" --repo="@@envoy+"
+for p in "${ENVOY_ANALYSIS_PATCHES[@]}"; do
+  echo "   applying ${p}"
+  patch -p1 -d "${VENDOR_DIR}/envoy+" < "ossm/patches/${p}"
+done
 
 for arch in "${ARCHES[@]}"; do
   echo ">> Vendoring ${TARGET} for --config=${arch}"
@@ -145,6 +196,10 @@ echo ">> Applying OSSM source patches to the vendored Envoy tree"
 #   exec-config tool with the host toolchain (@llvm_host), which already provides a
 #   full host libstdc++ for the build arch, so the patch drops that plumbing and
 #   uses the host toolchain's libstdc++ (-stdlib=libstdc++) instead.
+#
+# NOTE: only *build-time* patches belong here. A patch that changes build
+# *analysis* (e.g. swapping a rule type) must be applied before the arch loop
+# analyses //:envoy -- see the "Pre-fetching and patching envoy+" step above.
 ENVOY_PATCHES=(
   "openssl-prefixer-host-libstdcxx.patch"
 )

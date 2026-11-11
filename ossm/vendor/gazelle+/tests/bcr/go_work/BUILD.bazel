@@ -1,5 +1,0 @@
-load("@gazelle//:def.bzl", "gazelle")
-
-# gazelle:go_naming_convention import
-# gazelle:go_naming_convention_external import
-gazelle(name = "gazelle")
