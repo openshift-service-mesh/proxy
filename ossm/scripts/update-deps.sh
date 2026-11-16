@@ -167,8 +167,8 @@ echo ">> Applying OSSM source patches to the vendored Envoy tree"
 # editing the extracted tree in place is correct and leaves the marker intact.
 #
 #   openssl-prefixer-host-libstdcxx.patch: the compat/openssl prefixer sources
-#   libstdc++ headers from envoy_toolshed's sysroot using hardcoded amd64 paths,
-#   which breaks the non-x86 builds. OSSM builds this
+#   libstdc++ headers and static runtime from hermetic GCC repositories, which
+#   only support x86_64 and aarch64. OSSM builds this
 #   exec-config tool with the host toolchain (@llvm_host), which already provides a
 #   full host libstdc++ for the build arch, so the patch drops that plumbing and
 #   uses the host toolchain's libstdc++ (-stdlib=libstdc++) instead.
@@ -177,7 +177,7 @@ ENVOY_PATCHES=(
 )
 for p in "${ENVOY_PATCHES[@]}"; do
   echo "   applying ${p}"
-  patch -p1 -d "${VENDOR_DIR}/envoy+" < "ossm/patches/${p}"
+  patch --batch --fuzz=0 -p1 -d "${VENDOR_DIR}/envoy+" < "ossm/patches/${p}"
 done
 
 echo ">> Dropping the orphaned hermetic GCC runtime (unused after the prefixer patch)"
