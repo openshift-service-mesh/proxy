@@ -28,6 +28,8 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
     steps:
       - name: Validate inputs
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
@@ -113,6 +115,8 @@ jobs:
   # The comment is created or updated (never duplicated) using an invisible HTML marker
   post-link:
     needs: validate
+    if: always()
+    continue-on-error: true
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -140,11 +144,12 @@ jobs:
             });
             const existing = comments.find(c => (c.body || '').includes(marker));
 
+            if (existing && existing.body.includes(runUrl)) {
+              core.info('Comment already points to this run, skipping update');
+              return;
+            }
+
             if (existing) {
-              if (existing.body === body) {
-                core.info('Comment already up to date, skipping update');
-                return;
-              }
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
