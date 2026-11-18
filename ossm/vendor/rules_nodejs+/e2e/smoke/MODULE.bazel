@@ -1,14 +1,14 @@
-bazel_dep(name = "rules_nodejs", version = "0.0.0", dev_dependency = True)
+bazel_dep(name = "rules_nodejs")
 local_path_override(
     module_name = "rules_nodejs",
     path = "../..",
 )
 
-bazel_dep(name = "aspect_bazel_lib", version = "2.7.7", dev_dependency = True)
-bazel_dep(name = "bazel_skylib", version = "1.7.1", dev_dependency = True)
-bazel_dep(name = "platforms", version = "0.0.10", dev_dependency = True)
+bazel_dep(name = "bazel_lib", version = "3.0.0")
+bazel_dep(name = "bazel_skylib", version = "1.8.1")
+bazel_dep(name = "platforms", version = "0.0.10")
 
-node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node", dev_dependency = True)
+node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
 node.toolchain(node_version = "16.5.0")
 node.toolchain(
     name = "node17",
@@ -22,6 +22,10 @@ node.toolchain(
     ],
     node_version = "15.14.0",
 )
+node.toolchain(
+    name = "node24",
+    node_version = "24.12.0",
+)
 
 # FIXME(6.0): a repo rule with name=foo should create a repo named @foo, not @foo_toolchains
 use_repo(
@@ -30,10 +34,19 @@ use_repo(
     "node15_linux_amd64",
     "node15_windows_amd64",
     "node17_darwin_amd64",
+    "node17_darwin_arm64",
     "node17_linux_amd64",
+    "node17_linux_arm64",
     "node17_windows_amd64",
+    "node24_darwin_amd64",
+    "node24_darwin_arm64",
+    "node24_linux_amd64",
+    "node24_linux_arm64",
+    "node24_windows_amd64",
     "nodejs_darwin_amd64",
+    "nodejs_darwin_arm64",
     "nodejs_linux_amd64",
+    "nodejs_linux_arm64",
     "nodejs_toolchains",
     "nodejs_windows_amd64",
 )
@@ -42,7 +55,7 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 http_archive(
     name = "npm_acorn-8.5.0",
-    build_file_content = """load("@aspect_bazel_lib//lib:copy_directory.bzl", "copy_directory")
+    build_file_content = """load("@bazel_lib//lib:copy_directory.bzl", "copy_directory")
 
 # Turn a source directory into a TreeArtifact for RBE-compat
 copy_directory(

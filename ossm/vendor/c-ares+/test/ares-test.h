@@ -288,6 +288,7 @@ public:
   {
     reply_ = nullptr;
     exact_reply_.clear();
+    disconnect_after_reply_ = false;
     for (ares_socket_t fd : connfds_) {
       sclose(fd);
     }
@@ -296,6 +297,17 @@ public:
     tcp_data_     = NULL;
     tcp_data_len_ = 0;
   }
+
+  void DisconnectAfterReply()
+  {
+    disconnect_after_reply_ = true;
+  }
+
+  // Send reply, with the given query ID, to the client of the most recent
+  // request this server received, on the socket that request arrived on.  The
+  // client did not send this server a request with that query ID: this models
+  // a server answering a query that was only sent to some other server.
+  void SendUnsolicited(const DNSPacket *reply, unsigned short qid);
 
   // The set of file descriptors that the server handles.
   std::set<ares_socket_t> fds() const;
@@ -321,6 +333,8 @@ private:
                                 int rrtype);
   void           ProcessPacket(ares_socket_t fd, struct sockaddr_storage *addr,
                                ares_socklen_t addrlen, byte *data, int len);
+  void SendData(ares_socket_t fd, struct sockaddr_storage *addr,
+                ares_socklen_t addrlen, int qid, std::vector<byte> reply);
   unsigned short udpport_;
   unsigned short tcpport_;
   ares_socket_t  udpfd_;
@@ -330,8 +344,13 @@ private:
   const DNSPacket        *reply_;
   std::string             expected_request_;
   int                     qid_;
+  bool                    disconnect_after_reply_;
   unsigned char          *tcp_data_;
   size_t                  tcp_data_len_;
+  // Where the most recent request came from, for SendUnsolicited().
+  ares_socket_t           last_fd_;
+  struct sockaddr_storage last_addr_;
+  ares_socklen_t          last_addrlen_;
 };
 
 // Test fixture that uses a mock DNS server.
@@ -500,6 +519,11 @@ ACTION_P2(CancelChannel, mockserver, channel)
 ACTION_P(Disconnect, mockserver)
 {
   mockserver->Disconnect();
+}
+
+ACTION_P(DisconnectAfterReply, mockserver)
+{
+  mockserver->DisconnectAfterReply();
 }
 
 // C++ wrapper for struct hostent.

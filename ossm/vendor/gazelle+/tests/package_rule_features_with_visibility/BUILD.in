@@ -1,2 +1,0 @@
-# gazelle:default_visibility //src:__subpackages__
-# gazelle:default_features layering_check

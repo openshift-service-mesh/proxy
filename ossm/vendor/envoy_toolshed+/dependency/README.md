@@ -6,6 +6,12 @@ This package contains three update tools:
 - `registry_updater` for pinned `--registry=` entries in `.bazelrc`
 - `module_updater` for `bazel_dep(...)` versions in `MODULE.bazel`
 
+## CVE scanning
+
+[`cve_scan`](cve/README.md) scans dependency metadata against NVD CVE data,
+provides a report/test target, and updates cached monthly data. See its
+documentation for the dependency JSON contract and YAML configuration.
+
 ## Registry updater
 
 `registry_updater` rewrites a `.bazelrc` `--registry=<url>/<sha>` pin, but it
@@ -220,6 +226,24 @@ or pin an explicit version:
 bazel run //dependency:update_module -- protobuf=35.2.bcr.envoy
 ```
 
+Several dependencies can be given at once. They are resolved from a single
+registry scan and nothing is edited unless every one of them resolves, so a bad
+spec leaves `MODULE.bazel` untouched. If an edit then fails, `MODULE.bazel` is
+restored:
+
+```bash
+bazel run //dependency:update_module -- bazel_skylib protobuf=35.2.bcr.envoy
+```
+
+`--outdated` updates every dependency with a newer version on its current
+registry, as `update_available` in the report. `--outdated=<match>` limits that
+to dependencies whose current registry URL contains `<match>`, eg
+`--outdated=envoyproxy/bazel-registry` to pick up everything a registry bump
+made available while leaving BCR dependencies alone. Dependencies in the
+dependency data that the `MODULE.bazel` does not declare are skipped with a
+warning. `--outdated` cannot be combined with dependency arguments or
+`--report`.
+
 By default, updates stay on the dependency's current registry. If another
 registry has a newer version, that still appears in the report, but the updater
 does not silently jump registries. Use `--registry=<url>` to select another
@@ -228,7 +252,8 @@ registry explicitly.
 Edits go through hermetic `buildozer` from `buildifier_prebuilt`, so the touched
 call is rewritten with buildifier's normal formatting. Matching
 `single_version_override(...)` blocks are updated alongside the `bazel_dep(...)`
-when they exist.
+when their `module_name` attribute exactly equals the dependency name. Comments
+and overrides for other modules are ignored.
 
 Yanked versions are rejected unless `--allow-yanked` is passed.
 

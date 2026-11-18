@@ -7,20 +7,28 @@ fetch --color=yes
 run --color=yes
 build --color=yes
 
-common --legacy_external_runfiles
 common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
 common --@rules_python//python/config_settings:bootstrap_impl=script
 common --incompatible_default_to_explicit_init_py
 
 common --registry=https://bcr.bazel.build/
-common --registry=https://raw.githubusercontent.com/envoyproxy/bazel-registry/b565623d89166dd153aee61ba421ec1638bf7a3e
+common --registry=https://raw.githubusercontent.com/envoyproxy/bazel-registry/1aaaccb88f2950bfdebb9f4d25965f5536165401
 common --experimental_repository_cache_hardlinks
 
 common --repo_env=ANDROID_HOME=
 
 common --enable_platform_specific_config
 
-#
+# Cross-compile tests (eg //compile/test:cross_compile_*) target a foreign platform
+# but only inspect the binary, so let them run on the host exec platform.
+common --@bazel_tools//tools/test:incompatible_use_default_test_toolchain=false
+
+# No first-class Java, but //coverage:lcov_merger wraps Bazel's Java lcov merger. Use a hermetic
+# JDK rather than autodetecting one on the host.
+common --java_runtime_version=remotejdk_21
+common --tool_java_runtime_version=remotejdk_21
+
+
 #############################################################################
 # ci
 #############################################################################
@@ -90,14 +98,18 @@ common:remote-exec --define=engflow_rbe=true
 # This is safe for ordinary (libcxx) targets: gcc requires //compile:libstdcxx
 # on the target platform, so it is not a candidate at all, and the gcc platforms
 # yield no toolchain and are skipped.
+# Both GCC 13.4.0 archives are x86_64-hosted: aarch64 GCC builds cross-compile
+# on linux_x64_gcc workers, not the native arm64 pool.
 common:remote-exec --host_platform=//platforms/rbe:linux_x64
-common:remote-exec --extra_execution_platforms=//platforms/rbe:linux_x64_gcc,//platforms/rbe:linux_arm64_gcc,//platforms/rbe:linux_x64,//platforms/rbe:linux_arm64
+common:remote-exec --extra_execution_platforms=//platforms/rbe:linux_x64_gcc,//platforms/rbe:linux_x64,//platforms/rbe:linux_arm64
 
 
 #############################################################################
 # gcc
 #############################################################################
 
+# This targets x86_64, which only the archives build: on an aarch64 host use
+# --platforms=//platforms:linux_aarch64_libstdcxx for a native build with the host GCC.
 common:gcc --//compile:use_gcc_toolchain=true
 common:gcc --platforms=//platforms:linux_x86_64_libstdcxx
 

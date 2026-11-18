@@ -1,1 +1,0 @@
-GO_ENV = {"GOROOT": "@@rules_go++go_sdk+main___host_0//:ROOT", "GOTOOLCHAIN": "local"}

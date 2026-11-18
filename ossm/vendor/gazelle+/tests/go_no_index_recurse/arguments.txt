@@ -1,5 +1,0 @@
--go_prefix=example.com/repo
--external=vendored
--r=true
--index=false
-foo

@@ -1,2 +1,0 @@
-# p_dir/build.old/static.txt should be embedded because while the subdirectory is named `build.old`,
-# it is a directory and not an actual BUILD file.

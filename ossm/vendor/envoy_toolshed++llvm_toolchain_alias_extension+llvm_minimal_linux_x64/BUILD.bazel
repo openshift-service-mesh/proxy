@@ -1,0 +1,191 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["llvm.bzl"] + glob(["bin/*", "lib/**", "lib64/**", "include/**", "share/clang/*"], allow_empty = True))
+
+filegroup(
+    name = "clang",
+    srcs = [
+        "bin/clang",
+        "bin/clang++",
+        "bin/clang-cpp",
+    ],
+)
+
+filegroup(
+    name = "ld",
+    srcs = [
+        "bin/ld.lld",
+        "bin/ld64.lld",
+    ] + glob(["bin/wasm-ld"], allow_empty = True),
+)
+
+filegroup(
+    name = "include",
+    srcs = glob([
+        "include/**",
+        "lib/clang/22/include/**",
+        "lib/clang/22/share/**",
+        "lib/clang/22/libcxx-msan/include/**",
+    ], allow_empty = True),
+)
+
+filegroup(
+    name = "all_includes",
+    srcs = [
+        ":include",
+        ":cxx_builtin_include",
+        ":extra_config_site",
+    ],
+)
+
+filegroup(
+    name = "cxx_builtin_include",
+    srcs = glob([
+        "include/c++",
+        "lib/clang/22/include",
+        "lib/clang/22/share",
+        "lib/clang/22/libcxx-msan/include",
+        "lib/clang/22/libcxx-msan/source/include",
+    ], allow_empty = True, exclude_directories = 0),
+)
+
+filegroup(
+    name = "extra_config_site",
+    srcs = glob(["include/*/c++/v1/__config_site"], allow_empty = True),
+)
+
+filegroup(
+    name = "bin",
+    srcs = glob(["bin/**"], allow_empty = True),
+)
+
+filegroup(
+    name = "lib",
+    srcs = glob([
+        "lib/clang/22/lib",
+        "lib/**/libc++*.a",
+        "lib/**/libunwind.a",
+        "lib/clang/22/libcxx-msan/lib",
+    ], allow_empty = True, exclude_directories = 0),
+)
+
+filegroup(
+    name = "lib_legacy",
+    srcs = glob([
+        "lib/clang/22/lib/**",
+        "lib/**/libc++*.a",
+        "lib/**/libunwind.a",
+        "lib/clang/22/libcxx-msan/lib/**",
+    ], allow_empty = True),
+)
+
+filegroup(
+    name = "libclang_rt-asan-darwin",
+    srcs = glob(["lib/clang/22/lib/darwin/libclang_rt.asan_osx_dynamic.dylib"], allow_empty = True),
+)
+
+filegroup(
+    name = "libclang_rt-tsan-darwin",
+    srcs = glob(["lib/clang/22/lib/darwin/libclang_rt.tsan_osx_dynamic.dylib"], allow_empty = True),
+)
+
+filegroup(
+    name = "libclang_rt-ubsan-darwin",
+    srcs = glob(["lib/clang/22/lib/darwin/libclang_rt.ubsan_osx_dynamic.dylib"], allow_empty = True),
+)
+
+filegroup(
+    name = "ar",
+    srcs = ["bin/llvm-ar"],
+)
+
+filegroup(
+    name = "as",
+    srcs = [
+        "bin/clang",
+        "bin/llvm-as",
+    ],
+)
+
+filegroup(
+    name = "nm",
+    srcs = ["bin/llvm-nm"],
+)
+
+filegroup(
+    name = "objcopy",
+    srcs = ["bin/llvm-objcopy"],
+)
+
+filegroup(
+    name = "objdump",
+    srcs = ["bin/llvm-objdump"],
+)
+
+filegroup(
+    name = "profdata",
+    srcs = ["bin/llvm-profdata"],
+)
+
+filegroup(
+    name = "dwp",
+    srcs = ["bin/llvm-dwp"],
+)
+
+filegroup(
+    name = "ranlib",
+    srcs = ["bin/llvm-ranlib"],
+)
+
+filegroup(
+    name = "readelf",
+    srcs = ["bin/llvm-readelf"],
+)
+
+filegroup(
+    name = "strip",
+    srcs = ["bin/llvm-strip"],
+)
+
+filegroup(
+    name = "symbolizer",
+    srcs = ["bin/llvm-symbolizer"],
+)
+
+filegroup(
+    name = "clang-tidy",
+    srcs = ["bin/clang-tidy"],
+)
+
+filegroup(
+    name = "clang-format",
+    srcs = ["bin/clang-format"],
+)
+
+filegroup(
+    name = "git-clang-format",
+    srcs = ["bin/git-clang-format"],
+)
+
+filegroup(
+    name = "libclang",
+    srcs = glob(["lib/**/libclang.so*", "lib/**/libclang*.dylib", "lib64/**/libclang.so*", "lib64/**/libclang*.dylib"], allow_empty = True),
+)
+
+filegroup(
+    name = "libclang_cpp",
+    srcs = glob(["lib/**/libclang-cpp.so*", "lib64/**/libclang-cpp.so*"], allow_empty = True),
+)
+
+filegroup(
+    name = "libllvm",
+    srcs = glob(["lib/**/libLLVM.so*", "lib64/**/libLLVM.so*"], allow_empty = True),
+)
+
+cc_library(
+    name = "clang_tooling_headers",
+    hdrs = glob(["include/clang/**", "include/clang-c/**", "include/llvm/**", "include/llvm-c/**"], allow_empty = True),
+    includes = ["include"],
+)

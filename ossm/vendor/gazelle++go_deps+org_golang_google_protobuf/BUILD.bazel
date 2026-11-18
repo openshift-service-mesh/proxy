@@ -1,9 +1,0 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_test")
-
-# gazelle:proto disable
-
-go_test(
-    name = "protobuf_test",
-    srcs = ["integration_test.go"],
-    deps = ["//internal/version"],
-)

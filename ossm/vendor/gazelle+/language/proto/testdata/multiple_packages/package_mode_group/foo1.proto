@@ -1,7 +1,0 @@
-syntax = "proto3";
-
-package multiple_packages.package_mode_group;
-
-option x_package = "111@foo";
-
-import "multiple_packages/package_mode_group/bar1.proto";

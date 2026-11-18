@@ -1,2 +1,0 @@
--mode=diff
--custom-load=@some//repo:rules.bzl,custom_rule

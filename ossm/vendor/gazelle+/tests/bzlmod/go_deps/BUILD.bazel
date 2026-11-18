@@ -1,5 +1,0 @@
-filegroup(
-    name = "test_cases",
-    srcs = glob(["*.bzl"]),
-    visibility = ["//tools/convert-go-deps-test-case:__pkg__"],
-)

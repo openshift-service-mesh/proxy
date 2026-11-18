@@ -1,1 +1,0 @@
-# gazelle:map_kind go_library overridden_library //tools/overridden:def.bzl

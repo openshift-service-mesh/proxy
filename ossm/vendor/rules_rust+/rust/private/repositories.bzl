@@ -286,6 +286,14 @@ _RUST_TOOLCHAIN_REPOSITORY_ATTRS = {
             "If absent, every rule is required to specify its `edition` attribute."
         ),
     ),
+    "exec_tools_repo": attr.string(
+        doc = (
+            "The name of a `rust_toolchain_tools_repository` for the same `exec_triple` and version " +
+            "whose exec tools (rustc, cargo, clippy, rustfmt, llvm-tools) this repository reuses " +
+            "instead of downloading its own copies. Only the standard library for `target_triple` " +
+            "is downloaded."
+        ),
+    ),
     "exec_triple": attr.string(
         doc = "The Rust-style target that this compiler runs on",
         mandatory = True,
@@ -394,36 +402,43 @@ def _rust_toolchain_tools_repository_impl(ctx):
     # rust-objcopy is only available in Rust 1.84.0+
     include_objcopy = _include_rust_objcopy(version, iso_date)
 
-    rustc_content, rustc_sha256 = load_rust_compiler(
-        ctx = ctx,
-        iso_date = iso_date,
-        target_triple = exec_triple,
-        version = version,
-        include_linker = include_linker,
-        include_objcopy = include_objcopy,
-    )
-    clippy_content, clippy_sha256 = load_clippy(
-        ctx = ctx,
-        iso_date = iso_date,
-        target_triple = exec_triple,
-        version = version,
-    )
-    cargo_content, cargo_sha256 = load_cargo(
-        ctx = ctx,
-        iso_date = iso_date,
-        target_triple = exec_triple,
-        version = version,
-    )
+    build_components = []
 
-    build_components = [
-        rustc_content,
-        clippy_content,
-        cargo_content,
-    ]
-    sha256s.update(rustc_sha256 | clippy_sha256 | cargo_sha256)
+    # The exec tools are identical for every target triple of an exec triple and version; when
+    # another tools repository provides them, only the standard library is fetched here.
+    load_exec_tools = not ctx.attr.exec_tools_repo
+
+    if load_exec_tools:
+        rustc_content, rustc_sha256 = load_rust_compiler(
+            ctx = ctx,
+            iso_date = iso_date,
+            target_triple = exec_triple,
+            version = version,
+            include_linker = include_linker,
+            include_objcopy = include_objcopy,
+        )
+        clippy_content, clippy_sha256 = load_clippy(
+            ctx = ctx,
+            iso_date = iso_date,
+            target_triple = exec_triple,
+            version = version,
+        )
+        cargo_content, cargo_sha256 = load_cargo(
+            ctx = ctx,
+            iso_date = iso_date,
+            target_triple = exec_triple,
+            version = version,
+        )
+
+        build_components.extend([
+            rustc_content,
+            clippy_content,
+            cargo_content,
+        ])
+        sha256s.update(rustc_sha256 | clippy_sha256 | cargo_sha256)
 
     # Not all target triples are expected to have dev components
-    if ctx.attr.rustfmt_version:
+    if ctx.attr.rustfmt_version and load_exec_tools:
         rustfmt_version = ctx.attr.rustfmt_version
         rustfmt_iso_date = None
         if rustfmt_version in ("nightly", "beta"):
@@ -445,7 +460,7 @@ def _rust_toolchain_tools_repository_impl(ctx):
         sha256s.update(rustfmt_sha256)
 
     include_llvm_tools = _include_llvm_tools(version, iso_date)
-    if include_llvm_tools:
+    if include_llvm_tools and load_exec_tools:
         llvm_tools_content, llvm_tools_sha256 = load_llvm_tools(
             ctx = ctx,
             target_triple = exec_triple,
@@ -488,6 +503,7 @@ def _rust_toolchain_tools_repository_impl(ctx):
         version = toolchain_version,
         channel = channel,
         iso_date = iso_date,
+        tools_repo = ctx.attr.exec_tools_repo,
     ))
 
     # Not all target triples are expected to have dev components
@@ -1051,7 +1067,7 @@ def rust_repository_set(
     """
 
     all_toolchain_details = {}
-    for toolchain in _get_toolchain_repositories(
+    toolchain_repositories = _get_toolchain_repositories(
         name = name,
         exec_triple = exec_triple,
         extra_target_triples = extra_target_triples,
@@ -1059,7 +1075,17 @@ def rust_repository_set(
         fallback_target_compatible_with = default_target_compatible_with,
         aliases = aliases,
         compact_windows_names = compact_windows_names,
-    ):
+    )
+
+    # The toolchains targeting the exec triple carry the exec tools; the toolchains for the
+    # extra target triples of the same channel reuse them and only fetch their standard library.
+    exec_tools_repos = {
+        toolchain.channel.name: "{}_tools".format(toolchain.name)
+        for toolchain in toolchain_repositories
+        if toolchain.target_triple == exec_triple
+    }
+
+    for toolchain in toolchain_repositories:
         toolchain_extra_exec_rustc_flags = _get_flags_for_triple(
             "extra_exec_rustc_flags",
             extra_exec_rustc_flags,
@@ -1074,10 +1100,14 @@ def rust_repository_set(
         tc_exec_compatible_with = exec_compatible_with if exec_compatible_with != None else triple_to_constraint_set(exec_triple)
         tc_target_compatible_with = toolchain.target_constraints if toolchain.target_constraints != None else triple_to_constraint_set(toolchain.target_triple)
         tools_repo_name = "{}_tools".format(toolchain.name)
+        exec_tools_repo = exec_tools_repos.get(toolchain.channel.name)
+        if exec_tools_repo == tools_repo_name:
+            exec_tools_repo = None
 
         rust_toolchain_tools_repository(
             name = tools_repo_name,
             exec_triple = exec_triple,
+            exec_tools_repo = exec_tools_repo,
             allocator_library = allocator_library,
             global_allocator_library = global_allocator_library,
             target_triple = toolchain.target_triple,

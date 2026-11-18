@@ -15,10 +15,9 @@
 """Helper function for repository rules
 """
 
-load(":node_versions.bzl", "NODE_VERSIONS")
-
 OS_ARCH_NAMES = [
     ("windows", "amd64"),
+    ("windows", "arm64"),
     ("darwin", "amd64"),
     ("darwin", "arm64"),
     ("linux", "amd64"),
@@ -37,9 +36,6 @@ def os_name(rctx):
     Returns:
       A string describing the os for a repository rule
     """
-    if is_windows_os(rctx):
-        return "windows_amd64"
-
     arch = rctx.os.arch
     if arch == "aarch64":
         arch = "arm64"
@@ -56,6 +52,8 @@ def os_name(rctx):
         os_name = "linux"
     elif os_name.startswith("freebsd"):
         os_name = "freebsd"
+    elif is_windows_os(rctx):
+        os_name = "windows"
 
     os_and_arch = (os_name, arch)
     if os_and_arch not in OS_ARCH_NAMES:
@@ -65,18 +63,3 @@ def os_name(rctx):
 
 def is_windows_os(rctx):
     return rctx.os.name.find("windows") != -1
-
-def node_exists_for_os(node_version, os_name, node_repositories):
-    if not node_repositories:
-        node_repositories = NODE_VERSIONS
-
-    return "-".join([node_version, os_name]) in node_repositories.keys()
-
-def assert_node_exists_for_host(rctx):
-    node_version = rctx.attr.node_version
-    node_repositories = rctx.attr.node_repositories
-
-    if not node_exists_for_os(node_version, os_name(rctx), node_repositories):
-        fail("No nodejs is available for {} at version {}".format(os_name(rctx), node_version) +
-             "\n    Consider upgrading by setting node_version in a call to node_repositories in WORKSPACE." +
-             "\n    Note that Node 16.x is the minimum published for Apple Silicon (M1 Macs)")

@@ -4,6 +4,11 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
 package(default_visibility = ["//visibility:public"])
 
+exports_files([
+    "COPYING",
+    "LICENSE",
+])
+
 filegroup(
     name = "common_sources",
     srcs = glob([
@@ -83,12 +88,12 @@ cc_binary(
             "programs/util.h",
         ],
     ),
+    local_defines = ["ZSTD_MULTITHREAD"],
     deps = [
         ":datagen",
         ":util",
         ":zstd",
     ],
-    local_defines = ["ZSTD_MULTITHREAD"],
 )
 
 cc_library(

@@ -38,8 +38,9 @@ common --override_repository=cpp2sky+=%workspace%/ossm/vendor/cpp2sky+
 common --override_repository=dd-trace-cpp+=%workspace%/ossm/vendor/dd-trace-cpp+
 common --override_repository=dragonbox+=%workspace%/ossm/vendor/dragonbox+
 common --override_repository=emsdk+=%workspace%/ossm/vendor/emsdk+
-common --override_repository=envoy++envoy_repo_extension+envoy_repo=%workspace%/ossm/vendor/envoy++envoy_repo_extension+envoy_repo
 common --override_repository=envoy_toolshed++git_prebuilt_extension+git_toolchains=%workspace%/ossm/vendor/envoy_toolshed++git_prebuilt_extension+git_toolchains
+common --override_repository=envoy_toolshed++hunspell_prebuilt_extension+hunspell_toolchains=%workspace%/ossm/vendor/envoy_toolshed++hunspell_prebuilt_extension+hunspell_toolchains
+common --override_repository=envoy_toolshed++llvm_toolchain_alias_extension+llvm_minimal_linux_x64=%workspace%/ossm/vendor/envoy_toolshed++llvm_toolchain_alias_extension+llvm_minimal_linux_x64
 common --override_repository=envoy_toolshed++sq_prebuilt_extension+sq_toolchains=%workspace%/ossm/vendor/envoy_toolshed++sq_prebuilt_extension+sq_toolchains
 common --override_repository=envoy_toolshed+=%workspace%/ossm/vendor/envoy_toolshed+
 common --override_repository=envoy_toolshed_jq+=%workspace%/ossm/vendor/envoy_toolshed_jq+
@@ -47,17 +48,6 @@ common --override_repository=fast_float+=%workspace%/ossm/vendor/fast_float+
 common --override_repository=flatbuffers+=%workspace%/ossm/vendor/flatbuffers+
 common --override_repository=fmt+=%workspace%/ossm/vendor/fmt+
 common --override_repository=fp16+=%workspace%/ossm/vendor/fp16+
-common --override_repository=gazelle++go_deps+bazel_gazelle_go_repository_config=%workspace%/ossm/vendor/gazelle++go_deps+bazel_gazelle_go_repository_config
-common --override_repository=gazelle++go_deps+com_github_golang_protobuf=%workspace%/ossm/vendor/gazelle++go_deps+com_github_golang_protobuf
-common --override_repository=gazelle++go_deps+com_github_iancoleman_strcase=%workspace%/ossm/vendor/gazelle++go_deps+com_github_iancoleman_strcase
-common --override_repository=gazelle++go_deps+com_github_lyft_protoc_gen_star_v2=%workspace%/ossm/vendor/gazelle++go_deps+com_github_lyft_protoc_gen_star_v2
-common --override_repository=gazelle++go_deps+com_github_spf13_afero=%workspace%/ossm/vendor/gazelle++go_deps+com_github_spf13_afero
-common --override_repository=gazelle++go_deps+org_golang_google_protobuf=%workspace%/ossm/vendor/gazelle++go_deps+org_golang_google_protobuf
-common --override_repository=gazelle++go_deps+org_golang_x_mod=%workspace%/ossm/vendor/gazelle++go_deps+org_golang_x_mod
-common --override_repository=gazelle++go_deps+org_golang_x_sync=%workspace%/ossm/vendor/gazelle++go_deps+org_golang_x_sync
-common --override_repository=gazelle++go_deps+org_golang_x_text=%workspace%/ossm/vendor/gazelle++go_deps+org_golang_x_text
-common --override_repository=gazelle++go_deps+org_golang_x_tools=%workspace%/ossm/vendor/gazelle++go_deps+org_golang_x_tools
-common --override_repository=gazelle+=%workspace%/ossm/vendor/gazelle+
 common --override_repository=gloop+=%workspace%/ossm/vendor/gloop+
 common --override_repository=googleapis+=%workspace%/ossm/vendor/googleapis+
 common --override_repository=googleapis-rules-registry++rules_registry+com_google_googleapis_imports=%workspace%/ossm/vendor/googleapis-rules-registry++rules_registry+com_google_googleapis_imports
@@ -95,6 +85,7 @@ common --override_repository=protobuf++protoc+prebuilt_protoc.linux_aarch_64=%wo
 common --override_repository=protobuf++protoc+prebuilt_protoc.linux_ppcle_64=%workspace%/ossm/vendor/protobuf++protoc+prebuilt_protoc.linux_ppcle_64
 common --override_repository=protobuf++protoc+prebuilt_protoc.linux_x86_64=%workspace%/ossm/vendor/protobuf++protoc+prebuilt_protoc.linux_x86_64
 common --override_repository=protobuf+=%workspace%/ossm/vendor/protobuf+
+common --override_repository=protoc-gen-validate++prebuilt+protoc_gen_validate_prebuilt_linux_amd64=%workspace%/ossm/vendor/protoc-gen-validate++prebuilt+protoc_gen_validate_prebuilt_linux_amd64
 common --override_repository=protoc-gen-validate+=%workspace%/ossm/vendor/protoc-gen-validate+
 common --override_repository=proxy-wasm-cpp-host++proxy_wasm_cpp_host+proxy_wasm_cpp_host_deps=%workspace%/ossm/vendor/proxy-wasm-cpp-host++proxy_wasm_cpp_host+proxy_wasm_cpp_host_deps
 common --override_repository=proxy-wasm-cpp-host+=%workspace%/ossm/vendor/proxy-wasm-cpp-host+
@@ -116,6 +107,7 @@ common --override_repository=rules_java++toolchains+remote_java_tools=%workspace
 common --override_repository=rules_java++toolchains+remote_java_tools_linux=%workspace%/ossm/vendor/rules_java++toolchains+remote_java_tools_linux
 common --override_repository=rules_java++toolchains+remote_java_tools_linux_aarch64=%workspace%/ossm/vendor/rules_java++toolchains+remote_java_tools_linux_aarch64
 common --override_repository=rules_java+=%workspace%/ossm/vendor/rules_java+
+common --override_repository=rules_jq+=%workspace%/ossm/vendor/rules_jq+
 common --override_repository=rules_kotlin++rules_kotlin_extensions+com_github_jetbrains_kotlin=%workspace%/ossm/vendor/rules_kotlin++rules_kotlin_extensions+com_github_jetbrains_kotlin
 common --override_repository=rules_kotlin+=%workspace%/ossm/vendor/rules_kotlin+
 common --override_repository=rules_license+=%workspace%/ossm/vendor/rules_license+

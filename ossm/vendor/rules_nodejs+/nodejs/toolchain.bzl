@@ -15,6 +15,8 @@
 """This module implements the node toolchain rule.
 """
 
+load("@rules_cc//cc:defs.bzl", "CcInfo")
+
 NodeInfo = provider(
     doc = "Information about how to invoke Node.js and npm.",
     fields = {
@@ -83,9 +85,10 @@ def _nodejs_toolchain_impl(ctx):
         "NODE_PATH": ctx.file.node.path if ctx.attr.node else ctx.attr.node_path,
         "NPM_PATH": ctx.file.npm.path if ctx.attr.npm else ctx.attr.npm_path,
     })
+    files = [f for f in [ctx.file.node, ctx.file.npm] if f]
     default = DefaultInfo(
-        files = depset([ctx.file.node]) if ctx.attr.node else depset(),
-        runfiles = ctx.runfiles(files = [ctx.file.node] if ctx.attr.node else []),
+        files = depset(files),
+        runfiles = ctx.runfiles(files = files),
     )
     npm_sources = depset([ctx.file.npm] + ctx.files.npm_srcs)
     nodeinfo = NodeInfo(
@@ -161,7 +164,7 @@ def nodejs_toolchain(
     ```
 
     Next, declare which execution platforms or target platforms the toolchain should be selected for
-    based on constraints.
+    based on constraints. A separate toolchain type is used for runtime target platform selection.
 
     ```starlark
     toolchain(
@@ -172,6 +175,15 @@ def nodejs_toolchain(
         ],
         toolchain = ":toolchain",
         toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
+    )
+    toolchain(
+        name = "my_nodejs_runtime",
+        target_compatible_with = [
+            "@platforms//os:linux",
+            "@platforms//cpu:x86_64",
+        ],
+        toolchain = ":toolchain",
+        toolchain_type = "@rules_nodejs//nodejs:runtime_toolchain_type",
     )
     ```
 
@@ -216,7 +228,7 @@ def nodejs_toolchain(
         print("""\
 WARNING: target_tool attribute of nodejs_toolchain is deprecated; use node instead of target_tool.
 
-If your are not calling nodejs_toolchain directly you may need to upgrade to rules_js 2.x to suppress this warning.
+If you are not calling nodejs_toolchain directly you may need to upgrade to rules_js 2.x to suppress this warning.
 """)
         node = target_tool
 
@@ -258,6 +270,6 @@ def node_toolchain(**kwargs):
     print("""\
 WARNING: node_toolchain is deprecated; use nodejs_toolchain instead.
 
-If your are not calling node_toolchain directly you may need to upgrade to rules_js 2.x to suppress this warning.
+If you are not calling node_toolchain directly you may need to upgrade to rules_js 2.x to suppress this warning.
 """)
     nodejs_toolchain(**kwargs)

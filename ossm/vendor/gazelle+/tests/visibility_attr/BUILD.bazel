@@ -1,6 +1,0 @@
-load("//:def.bzl", "gazelle")
-
-gazelle(
-    name = "gazelle",
-    visibility = ["//tests/visibility_attr:__subpackages__"],
-)

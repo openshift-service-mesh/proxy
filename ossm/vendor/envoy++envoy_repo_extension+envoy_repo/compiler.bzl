@@ -1,3 +1,0 @@
-
-USE_LOCAL_SYSROOT = True
-USE_LIBSTDCPP = True

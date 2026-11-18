@@ -4,9 +4,18 @@
 # By default all these toolchains are registered by the nodejs_register_toolchains macro
 # so you don't normally need to interact with these targets.
 
-load(":defs.bzl", "resolved_toolchain")
-
-resolved_toolchain(name = "resolved_toolchain", visibility = ["//visibility:public"])
+alias(
+    name = "resolved_toolchain",
+    actual = "@rules_nodejs//nodejs:current_node_runtime",
+    deprecation = """
+Use one of the following instead:
+- @rules_nodejs//nodejs:current_node_runtime
+- @rules_nodejs//nodejs:current_host_node_runtime
+- @rules_nodejs//nodejs:current_node_toolchain
+See https://github.com/bazel-contrib/rules_nodejs/issues/3795.
+""",
+    visibility = ["//visibility:public"],
+)
 
 
 toolchain(
@@ -16,10 +25,10 @@ toolchain(
     toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
 )
 toolchain(
-    name = "linux_amd64_toolchain_target",
+    name = "linux_amd64_runtime_toolchain",
     target_compatible_with = ["@platforms//os:linux", "@platforms//cpu:x86_64"],
     toolchain = "@nodejs_linux_amd64//:toolchain",
-    toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
+    toolchain_type = "@rules_nodejs//nodejs:runtime_toolchain_type",
 )
 
 toolchain(
@@ -29,10 +38,10 @@ toolchain(
     toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
 )
 toolchain(
-    name = "linux_arm64_toolchain_target",
+    name = "linux_arm64_runtime_toolchain",
     target_compatible_with = ["@platforms//os:linux", "@platforms//cpu:arm64"],
     toolchain = "@nodejs_linux_arm64//:toolchain",
-    toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
+    toolchain_type = "@rules_nodejs//nodejs:runtime_toolchain_type",
 )
 
 toolchain(
@@ -42,23 +51,23 @@ toolchain(
     toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
 )
 toolchain(
-    name = "linux_s390x_toolchain_target",
+    name = "linux_s390x_runtime_toolchain",
     target_compatible_with = ["@platforms//os:linux", "@platforms//cpu:s390x"],
     toolchain = "@nodejs_linux_s390x//:toolchain",
-    toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
+    toolchain_type = "@rules_nodejs//nodejs:runtime_toolchain_type",
 )
 
 toolchain(
     name = "linux_ppc64le_toolchain",
-    exec_compatible_with = ["@platforms//os:linux", "@platforms//cpu:ppc"],
+    exec_compatible_with = ["@platforms//os:linux", "@platforms//cpu:ppc64le"],
     toolchain = "@nodejs_linux_ppc64le//:toolchain",
     toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
 )
 toolchain(
-    name = "linux_ppc64le_toolchain_target",
-    target_compatible_with = ["@platforms//os:linux", "@platforms//cpu:ppc"],
+    name = "linux_ppc64le_runtime_toolchain",
+    target_compatible_with = ["@platforms//os:linux", "@platforms//cpu:ppc64le"],
     toolchain = "@nodejs_linux_ppc64le//:toolchain",
-    toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
+    toolchain_type = "@rules_nodejs//nodejs:runtime_toolchain_type",
 )
 
 toolchain(
@@ -68,10 +77,10 @@ toolchain(
     toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
 )
 toolchain(
-    name = "darwin_amd64_toolchain_target",
+    name = "darwin_amd64_runtime_toolchain",
     target_compatible_with = ["@platforms//os:macos", "@platforms//cpu:x86_64"],
     toolchain = "@nodejs_darwin_amd64//:toolchain",
-    toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
+    toolchain_type = "@rules_nodejs//nodejs:runtime_toolchain_type",
 )
 
 toolchain(
@@ -81,10 +90,10 @@ toolchain(
     toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
 )
 toolchain(
-    name = "darwin_arm64_toolchain_target",
+    name = "darwin_arm64_runtime_toolchain",
     target_compatible_with = ["@platforms//os:macos", "@platforms//cpu:arm64"],
     toolchain = "@nodejs_darwin_arm64//:toolchain",
-    toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
+    toolchain_type = "@rules_nodejs//nodejs:runtime_toolchain_type",
 )
 
 toolchain(
@@ -94,8 +103,21 @@ toolchain(
     toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
 )
 toolchain(
-    name = "windows_amd64_toolchain_target",
+    name = "windows_amd64_runtime_toolchain",
     target_compatible_with = ["@platforms//os:windows", "@platforms//cpu:x86_64"],
     toolchain = "@nodejs_windows_amd64//:toolchain",
+    toolchain_type = "@rules_nodejs//nodejs:runtime_toolchain_type",
+)
+
+toolchain(
+    name = "windows_arm64_toolchain",
+    exec_compatible_with = ["@platforms//os:windows", "@platforms//cpu:aarch64"],
+    toolchain = "@nodejs_windows_arm64//:toolchain",
     toolchain_type = "@rules_nodejs//nodejs:toolchain_type",
+)
+toolchain(
+    name = "windows_arm64_runtime_toolchain",
+    target_compatible_with = ["@platforms//os:windows", "@platforms//cpu:aarch64"],
+    toolchain = "@nodejs_windows_arm64//:toolchain",
+    toolchain_type = "@rules_nodejs//nodejs:runtime_toolchain_type",
 )

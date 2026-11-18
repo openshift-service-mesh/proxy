@@ -1,5 +1,18 @@
-"extensions for bzlmod"
+"""Module extensions for nodejs toolchain registration in MODULE.bazel
 
+Example usage, assuming a `.nvmrc` file is present in the same directory as the `MODULE.bazel` file:
+
+```starlark
+node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
+node.toolchain(node_version_from_nvmrc = "//:.nvmrc")
+use_repo(node, "nodejs_toolchains")
+```
+"""
+
+load("@bazel_features//:features.bzl", "bazel_features")
+load("//nodejs/private:fetch_node_repositories.bzl", "fetch_node_repositories")
+load("//nodejs/private:node_versions.bzl", "NODE_VERSIONS")
+load("//nodejs/private:version_from_attr.bzl", "version_from_attr")
 load(
     ":repositories.bzl",
     "DEFAULT_NODE_REPOSITORY",
@@ -43,15 +56,49 @@ def _toolchain_extension(module_ctx):
             else:
                 registrations[toolchain.name] = toolchain
 
+    supports_facts = hasattr(module_ctx, "facts")
+    new_repository_facts = {}
+
     for k, v in registrations.items():
+        node_version = version_from_attr(module_ctx, v)
+        node_repositories = v.node_repositories or NODE_VERSIONS.get(node_version, {})
+
+        if not node_repositories:
+            node_repositories = (
+                new_repository_facts.get(node_version) or
+                (module_ctx.facts.get(node_version) if supports_facts else None) or
+                # TODO: Add support for node_urls?
+                fetch_node_repositories(module_ctx, node_version)
+            )
+
+            new_repository_facts[node_version] = node_repositories
+
         nodejs_register_toolchains(
             name = k,
-            node_version = v.node_version,
-            node_version_from_nvmrc = v.node_version_from_nvmrc,
+            node_version = node_version,
             node_urls = v.node_urls,
+            node_repositories = node_repositories,
             include_headers = v.include_headers,
             register = False,
         )
+
+    if not hasattr(module_ctx, "extension_metadata"):
+        return  # buildifier: disable=return-value (allow no value)
+
+    if not bazel_features.external_deps.extension_metadata_has_reproducible:
+        return module_ctx.extension_metadata()
+
+    if not supports_facts:
+        return module_ctx.extension_metadata(
+            # if we have new_repository_facts is non-empty, we called
+            # fetch_node_repositories making this invocation non-reproducible.
+            reproducible = not new_repository_facts,
+        )
+
+    return module_ctx.extension_metadata(
+        reproducible = True,
+        facts = new_repository_facts,
+    )
 
 _ATTRS = {
     "name": attr.string(
@@ -66,11 +113,13 @@ _ATTRS = {
         allow_single_file = True,
         doc = """The .nvmrc file containing the version of Node.js to use.
 
+This is recommended to ensure Bazel uses the same Node.js version as non-Bazel tooling.
 If set then the version found in the .nvmrc file is used instead of the one specified by node_version.""",
     ),
     "include_headers": attr.bool(
         doc = """Set headers field in NodeInfo provided by this toolchain.
 
+Required to compile native code into a Node.js binary.
 This setting creates a dependency on a c++ toolchain.
 """,
     ),
@@ -83,6 +132,15 @@ This setting creates a dependency on a c++ toolchain.
  and `{filename}` with the matching entry from the `node_repositories` attribute.
  """,
         default = [DEFAULT_NODE_URL],
+    ),
+    "node_repositories": attr.string_list_dict(
+        doc = """Custom list of node repositories to use
+
+A dictionary mapping Node.js versions to sets of hosts and their corresponding (filename, strip_prefix, sha256) tuples.
+You should list a node binary for every platform users have, likely Mac, Windows, and Linux.
+
+By default, if this attribute has no items, we'll use a list of all public Node.js releases.
+""",
     ),
 }
 

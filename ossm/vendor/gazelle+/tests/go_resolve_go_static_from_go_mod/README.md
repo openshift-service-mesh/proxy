@@ -1,1 +1,0 @@
-TestResolveGoStaticFromGoMod verifies that when using -external=static mode with -go_naming_convention_external=import, gazelle correctly resolves dependencies from go.mod to their external repository labels using the import naming convention.

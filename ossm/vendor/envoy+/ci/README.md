@@ -43,13 +43,14 @@ running tests that reflects the latest built Windows 2019 Envoy image.
 The source for these images is located in the [envoyproxy/envoy-build-tools](https://github.com/envoyproxy/envoy-build-tools)
 repository.
 
-The default toolchain uses the Clang compiler with libc++ for all Linux CI runs with tests and requires no configuration flag. We have an additional Linux CI run with GCC which builds binary only, configured with `--config=gcc`.
+The default toolchain uses the Clang compiler with libc++ for all Linux CI runs with tests and requires no configuration flag. We have an additional Linux CI run with GCC, configured with `--config=gcc`, which builds the binary and runs the tests
+(`ci/do_ci.sh gcc`; `gcc.build` and `gcc.test` run just one of the two).
 
 # Supported compiler configurations
 
 Envoy supports the following compiler toolchain configurations:
 * No configuration flag - Clang compiler with libc++ standard library (default)
-* `--config=gcc` - GCC compiler with libstdc++ standard library
+* `--config=gcc` - Hermetic GCC compiler with libstdc++ standard library (Linux x86_64 only)
 
 # C++ standard library
 
@@ -62,6 +63,22 @@ The standard library is derived from the compiler toolchain:
 
 These are the only supported configurations. Other combinations, such as Clang with libstdc++, are not supported or tested;
 if you need one, you will need to set up your own `cc_toolchain`.
+
+# Hermetic git
+
+CI does not use a `git` installed in the build image. `ci/do_ci.sh` resolves toolshed's prebuilt
+git toolchain (`//tools/git:bin`) once and exports it as `GIT_BIN`, which the CI scripts and
+`bazel/get_workspace_status` use. On macOS, where no prebuilt is published, it uses the host's
+`git` from `PATH`.
+
+To use your own git instead, set `GIT_BIN` before running `ci/do_ci.sh` (inside the container
+when using `ci/run_envoy_docker.sh`, eg `./ci/run_envoy_docker.sh 'GIT_BIN=/usr/bin/git ./ci/do_ci.sh format-api'`).
+Outside `ci/do_ci.sh`, `bazel/get_workspace_status` and `tools/git/*` fall back to `git` on `PATH`
+when `GIT_BIN` is unset.
+
+Bazel actions that need git (eg the `proto_format` genrules) use the git toolchain
+(`@envoy_toolshed//git:toolchain_type`), not `GIT_BIN`. To use a different git there, register
+your own `git_toolchain` (from `@envoy_toolshed//git:defs.bzl`) with `--extra_toolchains`.
 
 # Building and running tests as a developer
 
@@ -180,14 +197,16 @@ The `./ci/run_envoy_docker.sh './ci/do_ci.sh <TARGET>'` targets are:
 * `sizeopt.server_only` &mdash; build Envoy static binary under `-c opt --config=sizeopt` with clang.
 * `coverage` &mdash; build and run tests under `-c dbg` with clang, generating coverage information in `$ENVOY_DOCKER_BUILD_DIR/envoy/generated/coverage/coverage.html`.
 * `coverage <test>` &mdash; build and run a specified test or test dir under `-c dbg` with clang, generating coverage information in `$ENVOY_DOCKER_BUILD_DIR/envoy/generated/coverage/coverage.html`. Specify `//contrib/...` to get contrib coverage.
+* `coverage.fuzz` &mdash; build and run the fuzz tests with clang, generating coverage information in `$ENVOY_DOCKER_BUILD_DIR/envoy/generated/fuzz_coverage/html`. `fuzz_coverage` is the previous name of this target.
 * `msan` &mdash; build and run tests under `-c dbg --config=msan` with clang.
 * `msan <test>` &mdash; build and run a specified test or test dir under `-c dbg --config=msan` with clang.
 * `tsan` &mdash; build and run tests under `-c dbg --config=tsan` with clang.
 * `tsan <test>` &mdash; build and run a specified test or test dir under `-c dbg --config=tsan` with clang.
 * `fuzz` &mdash; build and run fuzz tests under `-c dbg --config=asan-fuzzer` with clang.
 * `fuzz <test>` &mdash; build and run a specified fuzz test or test dir under `-c dbg --config=asan-fuzzer` with clang. If specifying a single fuzz test, must use the full target name with "_with_libfuzzer" for `<test>`.
-* `compile_time_options` &mdash; build Envoy and run tests with various compile-time options toggled to their non-default state, to ensure they still build.
-* `compile_time_options <test>` &mdash; build Envoy and run a specified test or test dir with various compile-time options toggled to their non-default state, to ensure they still build.
+* `cto.<option>` &mdash; run tests with the compile-time options that can be set together (`--config=compile-time-options`) toggled to their non-default state, and one further option, on the tests it can affect: `cto.jemalloc` (jemalloc, all tests), `cto.noadmin` (admin disabled, all tests), `cto.gperftools`, `cto.wamr`, `cto.wasmtime`, `cto.asserts` (release-mode asserts), `cto.nolog` (builds the server with logging disabled).
+* `compile_time_options` (or `cto`) &mdash; run all of the `cto.*` targets.
+* `cto.<option> <test>` &mdash; run a specified test or test dir with that target's options (`cto.asserts` and `cto.nolog` have fixed targets).
 * `clang-tidy <targets>` &mdash; build and run clang-tidy on the specified Bazel targets. If no targets are provided, it uses `CLANG_TIDY_TARGETS` when set, otherwise the default target set.
 * `check_proto_format`&mdash; check configuration, formatting and build issues in API proto files.
 * `fix_proto_format`&mdash; fix configuration, formatting and build issues in API proto files.
@@ -202,6 +221,7 @@ The `./ci/run_envoy_docker.sh './ci/do_ci.sh <TARGET>'` targets are:
 * `registry` &mdash; run the per-workspace Bazel registry updater targets for `.bazelrc`, `api/.bazelrc`, and `bazel/tests/external/.bazelrc`, then regenerate the lockfiles as `lockfiles` does. Set `ENVOY_REGISTRY_HASH` to request a specific hash, and set `ENVOY_REGISTRY_ALLOW_UNSAFE` to allow non-ancestor pins for testing.
 * `registry.check` &mdash; run the per-workspace Bazel registry status targets, verify they all report the same pinned hash, and require a tagged registry pin for non-`-dev` releases.
 * `docs`&mdash; build documentation tree in `generated/docs`.
+* `execution_context` &mdash; build and run the execution_context-enabled test (`//test/common/common:execution_context_enabled_test`) via the `//bazel:execution_context` build setting transition.
 
 ## On Windows
 

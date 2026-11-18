@@ -3,7 +3,7 @@
 load("//nodejs/private:node_versions.bzl", "NODE_VERSIONS")
 load("//nodejs/private:nodejs_repo_host_os_alias.bzl", "nodejs_repo_host_os_alias")
 load("//nodejs/private:nodejs_toolchains_repo.bzl", "PLATFORMS", "nodejs_toolchains_repo")
-load("//nodejs/private:os_name.bzl", "assert_node_exists_for_host", "node_exists_for_os")
+load("//nodejs/private:version_from_attr.bzl", "version_from_attr")
 
 # Default base name for node toolchain repositories
 # created by the module extension
@@ -12,22 +12,18 @@ DEFAULT_NODE_REPOSITORY = "nodejs"
 # Default Node.js URL used as the default for node_urls
 DEFAULT_NODE_URL = "https://nodejs.org/dist/v{version}/{filename}"
 
-# Currently v18 is the "active" LTS release:
+# Currently v22 is the "active" LTS release:
 # https://nodejs.dev/en/about/releases/
 # We can only change that in a major release of rules_nodejs,
 # as it's a semver-breaking change for our users who rely on it.
 DEFAULT_NODE_VERSION = [
-    # 16.18.1-windows_amd64 -> 16.18.1
-    v.split("-")[0]
+    v
     for v in NODE_VERSIONS.keys()
-    if v.startswith("18.")
+    if v.startswith("22.")
 ][-1]  # Versions are sorted increasing, so last one is the latest version
 
-LATEST_KNOWN_NODE_VERSION = [
-    # 16.18.1-windows_amd64 -> 16.18.1
-    v.split("-")[0]
-    for v in NODE_VERSIONS.keys()
-][-1]  # Versions are sorted increasing, so last one is the latest version
+# Versions are sorted increasing, so last one is the latest version
+LATEST_KNOWN_NODE_VERSION = NODE_VERSIONS.keys()[-1]
 
 BUILT_IN_NODE_PLATFORMS = PLATFORMS.keys()
 
@@ -71,33 +67,26 @@ def _download_node(repository_ctx):
     # @nodejs_PLATFORM where PLATFORM is one of BUILT_IN_NODE_PLATFORMS
     host_os = repository_ctx.attr.platform or repository_ctx.name.split("nodejs_", 1)[1]
 
-    node_version = repository_ctx.attr.node_version
-
-    if repository_ctx.attr.node_version_from_nvmrc:
-        node_version = str(repository_ctx.read(repository_ctx.attr.node_version_from_nvmrc)).strip()
-
-    _verify_version_is_valid(node_version)
+    node_version = version_from_attr(repository_ctx, repository_ctx.attr)
 
     node_repositories = repository_ctx.attr.node_repositories
 
     # We insert our default value here, not on the attribute's default, so it isn't documented.
     # The size of NODE_VERSIONS constant is huge and not useful to document.
     if not node_repositories.items():
-        node_repositories = NODE_VERSIONS
-
-    # Skip the download if we know it will fail
-    if not node_exists_for_os(node_version, host_os, node_repositories):
-        return
+        node_repositories = NODE_VERSIONS.get(node_version, {})
 
     node_urls = repository_ctx.attr.node_urls[:]
     if not node_urls:
         # Go back the default if the user explicitly specifies []
         node_urls = [DEFAULT_NODE_URL]
 
-    # Download node & npm
     version_host_os = "%s-%s" % (node_version, host_os)
-    if not version_host_os in node_repositories:
-        fail("Unknown Node.js version-host %s" % version_host_os)
+    if version_host_os not in node_repositories.keys():
+        fail("No nodejs is available for {} at version {}".format(host_os, node_version) +
+             "\n    Consider upgrading by setting node_version in a call to node_repositories in WORKSPACE." +
+             "\n    Note that Node 16.x is the minimum published for Apple Silicon (M1 Macs), and 20.x is the minimum for Windows ARM64.")
+
     filename, strip_prefix, sha256 = node_repositories[version_host_os]
 
     urls = [url.format(version = node_version, filename = filename) for url in node_urls]
@@ -121,6 +110,9 @@ def _download_node(repository_ctx):
         strip_prefix = strip_prefix,
         sha256 = sha256,
     ))
+
+    # Return whether the download was reproducible
+    return sha256 != None
 
 def _prepare_node(repository_ctx):
     """Sets up BUILD files and shell wrappers for the versions of Node.js, npm just set up.
@@ -262,6 +254,7 @@ filegroup(
 
     if repository_ctx.attr.include_headers:
         build_content += """
+load("@rules_cc//cc:defs.bzl", "cc_library")
 cc_library(
   name = "headers",
   hdrs = glob(
@@ -275,6 +268,7 @@ cc_library(
     # -> no results ...
     allow_empty = True,
   ),
+  copts = ["-std=c++17"],
   includes = ["bin/nodejs/include/node"],
 )
 """
@@ -304,15 +298,15 @@ def _strip_bin(path):
 
     return path[len("bin/"):]
 
-def _verify_version_is_valid(version):
-    major, minor, patch = (version.split(".") + [None, None, None])[:3]
-    if not major.isdigit() or not minor.isdigit() or not patch.isdigit():
-        fail("Invalid node version: %s" % version)
-
 def _nodejs_repositories_impl(repository_ctx):
-    assert_node_exists_for_host(repository_ctx)
-    _download_node(repository_ctx)
+    reproducible = _download_node(repository_ctx)
     _prepare_node(repository_ctx)
+
+    # Bazel <8.3.0 lacks repository_ctx.repo_metadata
+    if not hasattr(repository_ctx, "repo_metadata"):
+        return None
+
+    return repository_ctx.repo_metadata(reproducible = reproducible)
 
 _nodejs_repositories = repository_rule(
     _nodejs_repositories_impl,
@@ -443,7 +437,7 @@ def node_repositories(**kwargs):
     print("""\
 WARNING: node_repositories is deprecated; use nodejs_repositories instead.
 
-If your are not calling node_repositories directly you may need to upgrade to rules_js 2.x to suppress this warning.
+If you are not calling node_repositories directly you may need to upgrade to rules_js 2.x to suppress this warning.
 """)
 
     nodejs_repositories(**kwargs)
@@ -475,7 +469,7 @@ def nodejs_register_toolchains(name = DEFAULT_NODE_REPOSITORY, register = True, 
         )
         if register:
             native.register_toolchains(
-                "@%s_toolchains//:%s_toolchain_target" % (name, platform),
+                "@%s_toolchains//:%s_runtime_toolchain" % (name, platform),
                 "@%s_toolchains//:%s_toolchain" % (name, platform),
             )
 

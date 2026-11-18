@@ -1,9 +1,0 @@
-
-load("//custom:def.bzl", "my_custom_macro")
-
-my_custom_macro(
-    name = "go_default_library",
-    srcs = ["foo.go"],
-    importpath = "example.com/aliaskind/foo",
-    visibility = ["//visibility:public"],
-)
