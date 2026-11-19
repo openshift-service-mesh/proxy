@@ -53,18 +53,19 @@ EXTRA_REPOS=(
 )
 
 # Execution-platform (host) prebuilt tools for cross-arch offline builds.
-# protoc and java_tools ship as prebuilt binaries selected by the *execution*
-# platform. This snapshot is vendored on an x86_64 host and --config=aarch64 is
+# protoc, protoc-gen-validate and java_tools ship as prebuilt binaries selected
+# by the *execution* platform. This snapshot is vendored on an x86_64 host and --config=aarch64 is
 # a no-op here (it only sets --define=DUMMY; it does not cross-compile), so the
 # arch loop only ever exercises the x86_64 execution platform. The aarch64 host
 # variants are therefore never fetched, and an offline build *on an aarch64
-# host* fails fetching protoc/java_tools. Vendor them explicitly by their
+# host* fails fetching these tools. Vendor them explicitly by their
 # canonical repo names. (Bazel java_tools only ships x86_64 and aarch64 for
 # linux; s390x/ppc host builds fall back to building java_tools from source, so
 # only aarch64 needs to be captured here.)
 CROSS_ARCH_HOST_TOOLS=(
   "@@protobuf++protoc+prebuilt_protoc.linux_aarch_64"
   "@@protobuf++protoc+prebuilt_protoc.linux_ppcle_64"
+  "@@protoc-gen-validate++prebuilt+protoc_gen_validate_prebuilt_linux_arm64"
   "@@rules_java++toolchains+remote_java_tools_linux_aarch64"
 )
 
