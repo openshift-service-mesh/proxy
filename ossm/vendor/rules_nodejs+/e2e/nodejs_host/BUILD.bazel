@@ -1,0 +1,73 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Dummy test target that imports various targets from the
+# "@nodejs" repository. If a target of the repository is
+# misconfigured, Bazel will complain about missing input files.
+[
+    sh_test(
+        name = "test_%s" % node_toolchain,
+        srcs = ["test.sh"],
+        data = [
+            "@%s//:node" % node_toolchain,
+            "@%s//:node_bin" % node_toolchain,
+            "@%s//:node_files" % node_toolchain,
+            "@%s//:npm" % node_toolchain,
+            "@%s//:npm_bin" % node_toolchain,
+            "@%s//:npm_files" % node_toolchain,
+            "@%s//:npx" % node_toolchain,
+            "@%s//:npx_bin" % node_toolchain,
+        ],
+    )
+    for node_toolchain in [
+        "nodejs",
+        "node16",
+        "node16_nvmrc",
+        "node17_custom",
+        "node26_auto_fetch",
+    ]
+]
+
+[
+    sh_test(
+        name = "test_%s_node_version_%s" % (node_toolchain, tool),
+        srcs = ["version_test.sh"],
+        args = select({
+            "@bazel_tools//src/conditions:linux_x86_64": [
+                "%s_linux_amd64/bin" % node_toolchain,
+                tool,
+            ],
+            "@bazel_tools//src/conditions:darwin": [
+                "%s_darwin_arm64/bin" % node_toolchain,
+                tool,
+            ],
+            "@bazel_tools//src/conditions:windows": [
+                "%s_windows_amd64/bin" % node_toolchain,
+                tool,
+                ".cmd",
+            ],
+        }),
+        data = [
+            "@%s//:%s" % (node_toolchain, tool),
+            "@%s//:node" % node_toolchain,
+            "@bazel_tools//tools/bash/runfiles",
+        ],
+    )
+    for (node_toolchain, tool) in [
+        (
+            "nodejs",
+            "npm",
+        ),
+        (
+            "nodejs",
+            "npx",
+        ),
+        ("node16", "npm"),
+        ("node16", "npx"),
+        ("node16_nvmrc", "npm"),
+        ("node16_nvmrc", "npx"),
+        ("node17_custom", "npm"),
+        ("node17_custom", "npx"),
+        ("node26_auto_fetch", "npm"),
+        ("node26_auto_fetch", "npx"),
+    ]
+]

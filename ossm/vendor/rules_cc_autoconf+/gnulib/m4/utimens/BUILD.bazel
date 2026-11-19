@@ -1,0 +1,45 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/utimens.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# gl_UTIMENS macro from utimens.m4
+# HAVE_FUTIMENS comes from futimens dependency
+# COMPLEX CASE: Uses AC_RUN_IFELSE to test futimesat(fd,NULL,time) behavior
+# on FreeBSD. The runtime test is NOT cross-compile friendly.
+autoconf(
+    name = "utimens",
+    checks = [
+        checks.AC_CHECK_FUNC(
+            "futimes",
+            define = "HAVE_FUTIMES",
+        ),
+        checks.AC_CHECK_FUNC(
+            "lutimes",
+            define = "HAVE_LUTIMES",
+        ),
+    ] + select({
+        # On Linux: futimesat is available (deprecated but exists in glibc)
+        "@platforms//os:linux": [
+            checks.AC_CHECK_FUNC(
+                "futimesat",
+                define = "HAVE_FUTIMESAT",
+            ),
+        ],
+        # On macOS: futimesat does not exist
+        "//conditions:default": [],
+    }) + [
+        # Note: HAVE_WORKING_UTIMES is already provided by utimes dependency
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/time_h",  # AC_REQUIRE([gl_CHECK_TYPE_STRUCT_TIMESPEC])
+        "//gnulib/m4/utimes",  # AC_REQUIRE([gl_FUNC_UTIMES])
+        "//gnulib/m4/futimens",
+        "//gnulib/m4/utimensat",
+        "//autoconf/macros/AC_CANONICAL_HOST",  # AC_REQUIRE([AC_CANONICAL_HOST])
+        # Note: AC_CHECK_INCLUDES_DEFAULT is added for test compatibility
+        # (golden files include standard header checks even though not AC_REQUIREd)
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)

@@ -1,0 +1,9 @@
+
+load("@rules_m4//m4:toolchain_type.bzl", "M4_TOOLCHAIN_TYPE")
+
+toolchain(
+    name = "toolchain",
+    toolchain = "@m4_v1.4.18" + "//rules_m4_internal:toolchain_info",
+    toolchain_type = M4_TOOLCHAIN_TYPE,
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,14 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+# SKIP_SCHEMA_VALIDATION: intentionally invalid to test runtime rejection
+
+file_format: "1.0"
+
+propagator:
+  composite:
+    # This is ok (child 1)
+    - tracecontext:
+    # This is broken (child 2)
+    - tracecontext:
+      foo:
+      bar:

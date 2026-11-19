@@ -1,0 +1,13 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+# SKIP_SCHEMA_VALIDATION: intentionally invalid to test runtime rejection
+
+file_format: "1.0"
+
+tracer_provider:
+  processors:
+    simple:
+      console:
+  sampler:
+    # Must fail, not supported in C++
+    jaeger_remote:

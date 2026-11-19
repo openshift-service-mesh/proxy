@@ -1,0 +1,21 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/stack-direction.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# SV_STACK_DIRECTION from stack-direction.m4
+# COMPLEX CASE: Determines stack growth direction by checking host_cpu
+# or running a test. The M4 macro uses AC_CANONICAL_HOST and a table
+# of known CPU architectures.
+#
+# On most modern systems (x86, x86_64, ARM, etc.), stack grows downward.
+# Default to -1 (downward) which is correct for most platforms.
+autoconf(
+    name = "stack-direction",
+    checks = [
+        # Define STACK_DIRECTION to -1 (grows downward) as default
+        # This is correct for x86, x86_64, ARM, AArch64, etc.
+        checks.AC_DEFINE("STACK_DIRECTION", "-1"),
+    ],
+    visibility = ["//visibility:public"],
+)

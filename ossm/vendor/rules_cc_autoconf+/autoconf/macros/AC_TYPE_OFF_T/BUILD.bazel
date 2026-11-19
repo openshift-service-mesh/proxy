@@ -1,0 +1,25 @@
+"""AC_TYPE_OFF_T - Autoconf builtin macro
+
+Checks if off_t type is defined and its size.
+
+Defines:
+  - off_t (if not defined, defined to long)
+  - SIZEOF_OFF_T (size of off_t)
+"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "AC_TYPE_OFF_T",
+    checks = [
+        checks.AC_CHECK_TYPE("off_t"),
+        checks.AC_DEFINE(
+            "off_t",
+            "long int",
+            requires = ["!ac_cv_type_off_t"],
+        ),
+        checks.AC_CHECK_SIZEOF("off_t"),
+    ],
+    visibility = ["//visibility:public"],
+)

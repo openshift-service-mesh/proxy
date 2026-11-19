@@ -1,0 +1,86 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/sys_times_h.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+load("//gnulib:macros.bzl", gl_macros = "macros")
+
+# Configure a replacement for <sys/times.h>
+autoconf(
+    name = "sys_times_h",
+    checks = [
+        # Note: gl_SYS_TIMES_H_DEFAULTS is a _DEFAULTS function, so we ignore it per user's instruction
+        checks.AC_CHECK_HEADER(
+            "sys/times.h",
+            name = "ac_cv_header_sys_times_h",
+        ),
+        checks.AC_SUBST(
+            "HAVE_SYS_TIMES_H",
+            condition = "ac_cv_header_sys_times_h",
+            if_false = "0",
+            if_true = "1",
+        ),
+    ] + gl_macros.GL_CHECK_NEXT_HEADERS(["sys/times.h"]) + [
+
+        # if test $ac_cv_header_sys_times_h = yes; then
+        # else
+        # fi
+        # Define HAVE_SYS_TIMES_H in config.h if the header exists
+        checks.AC_DEFINE(
+            "HAVE_SYS_TIMES_H",
+            condition = "ac_cv_header_sys_times_h",
+            if_true = 1,
+        ),
+        checks.AC_CHECK_TYPE(
+            "struct tms",
+            name = "ac_cv_type_struct_tms",
+            includes = ["#include <sys/times.h>"],
+            requires = ["ac_cv_header_sys_times_h==1"],
+        ),
+
+        # Set HAVE_STRUCT_TMS based on type check result
+        # Define HAVE_STRUCT_TMS in config.h if the type exists
+        checks.AC_DEFINE(
+            "HAVE_STRUCT_TMS",
+            condition = "ac_cv_type_struct_tms",
+            if_true = 1,
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/include_next",
+        # For test compatibility
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+# defaults - Default AC_SUBST values. Added to gnulib_toolchain.
+
+autoconf(
+    name = "gl_SYS_TIMES_H_DEFAULTS",
+    checks = [
+        checks.AC_SUBST("HAVE_TIMES", 1),
+        checks.AC_SUBST("HAVE_STRUCT_TMS", 1),
+    ],
+    visibility = ["//visibility:private"],
+)
+
+autoconf(
+    name = "gl_SYS_TIMES_H_REQUIRE_DEFAULTS",
+    checks = [
+        checks.AC_SUBST("GNULIB_TIMES", 0),
+    ],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":gl_SYS_TIMES_H_DEFAULTS",
+    ],
+)
+
+autoconf(
+    name = "defaults",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_SYS_TIMES_H_REQUIRE_DEFAULTS",
+    ],
+)
+
+# with_defaults - For external consumers who don't use the toolchain

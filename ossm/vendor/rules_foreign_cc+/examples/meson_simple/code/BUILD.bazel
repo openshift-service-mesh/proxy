@@ -1,0 +1,10 @@
+filegroup(
+    name = "srcs",
+    srcs = [
+        "liba.cpp",
+        "liba.h",
+        "meson.build",
+        "meson_options.txt",
+    ],
+    visibility = ["//meson_simple:__subpackages__"],
+)

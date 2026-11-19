@@ -1,0 +1,40 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/rewinddir.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "gl_FUNC_REWINDDIR",
+    checks = [
+        checks.AC_CHECK_FUNC(
+            "rewinddir",
+            name = "ac_cv_func_rewinddir",
+        ),
+        # if test $ac_cv_func_rewinddir = no; then
+        # else
+        #   if test $DIR_HAS_FD_MEMBER = 0; then
+        #   fi
+        # fi
+        # On macOS, DIR_HAS_FD_MEMBER=1 (not mingw/windows/os2), so REPLACE_REWINDDIR remains 0
+        checks.AC_SUBST("REPLACE_REWINDDIR", 0),
+        # Set HAVE_REWINDDIR as substitution variable
+        checks.AC_DEFINE(
+            "HAVE_REWINDDIR",
+            "1",
+            subst = True,  # Also create substitution variable
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/dirent_h",  # AC_REQUIRE([gl_DIRENT_H_DEFAULTS])
+        "//gnulib/m4/dirent_h:gl_DIRENT_DIR",
+    ],
+)
+
+autoconf(
+    name = "rewinddir",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_REWINDDIR",
+    ],
+)

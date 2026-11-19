@@ -1,0 +1,50 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/symlink.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# Core symlink checks without REPLACE_SYMLINK subst
+# Use this for modules that only need the symlink function check
+autoconf(
+    name = "gl_FUNC_SYMLINK_CORE",
+    checks = [
+        checks.AC_CHECK_FUNC(
+            "symlink",
+            define = "HAVE_SYMLINK",
+            subst = True,
+        ),
+    ],
+    visibility = ["//gnulib:__subpackages__"],
+    deps = [
+        "//autoconf/macros/AC_CANONICAL_HOST",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+autoconf(
+    name = "symlink",
+    # M4 m4/symlink.m4 runs AC_RUN_IFELSE for the trailing-slash bug;
+    # cross-compile guess for darwin falls to gl_cross_guess_normal.
+    # On macOS the SDK probe decides.
+    checks = select({
+        "@platforms//os:macos": [
+            checks.AC_SUBST(
+                "REPLACE_SYMLINK",
+                condition = "gl_cv_macos_sdk_modern",
+                if_false = "1",
+                if_true = "0",
+            ),
+        ],
+        "@platforms//os:windows": [
+            checks.AC_SUBST("REPLACE_SYMLINK", "1"),
+        ],
+        "//conditions:default": [
+            checks.AC_SUBST("REPLACE_SYMLINK", "0"),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_SYMLINK_CORE",
+        "//gnulib/m4/gnulib-common:gl_HOST_MACOS_SDK_MODERN",
+    ],
+)

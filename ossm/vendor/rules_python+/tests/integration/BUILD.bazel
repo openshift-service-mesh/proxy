@@ -1,0 +1,174 @@
+# Copyright 2023 The Bazel Authors. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+load("@rules_bazel_integration_test//bazel_integration_test:defs.bzl", "default_test_runner")
+load("//python:py_binary.bzl", "py_binary")
+load("//python:py_library.bzl", "py_library")
+load("//tests/support:support.bzl", "NOT_WINDOWS")
+load(":integration_test.bzl", "rules_python_integration_test")
+
+licenses(["notice"])
+
+_WORKSPACE_FLAGS = [
+    "--noenable_bzlmod",
+    "--enable_workspace",
+]
+
+default_test_runner(
+    name = "workspace_test_runner",
+    bazel_cmds = [
+        "info {}".format(" ".join(_WORKSPACE_FLAGS)),
+        "test {} //...".format(" ".join(_WORKSPACE_FLAGS)),
+    ],
+    visibility = ["//visibility:public"],
+)
+
+default_test_runner(
+    name = "test_runner",
+    visibility = ["//visibility:public"],
+)
+
+rules_python_integration_test(
+    name = "bzlmod_lockfile_test",
+    bazel_versions = ["9.1.0"],
+    py_main = "bzlmod_lockfile_test.py",
+)
+
+test_suite(
+    name = "subset",
+    tags = ["manual"],
+    tests = [
+        "bzlmod_lockfile_test_bazel_9.1.0",
+        "local_toolchains_test_bazel_self",
+        "uv_lock_test_bazel_self",
+        "validate_test_main_test_bazel_self",
+    ],
+)
+
+rules_python_integration_test(
+    name = "compile_pip_requirements_test",
+)
+
+rules_python_integration_test(
+    name = "compile_pip_requirements_workspace_test",
+    bzlmod = False,
+    workspace_path = "compile_pip_requirements",
+)
+
+rules_python_integration_test(
+    name = "local_toolchains_test",
+    env = {
+        "RULES_PYTHON_BZLMOD_DEBUG": "1",
+    },
+)
+
+rules_python_integration_test(
+    name = "local_toolchains_workspace_test",
+    bzlmod = False,
+    env = {
+        "RULES_PYTHON_BZLMOD_DEBUG": "1",
+    },
+    workspace_path = "local_toolchains",
+)
+
+rules_python_integration_test(
+    name = "pip_parse_test",
+)
+
+rules_python_integration_test(
+    name = "pip_parse_isolated_test",
+)
+
+rules_python_integration_test(
+    name = "pip_parse_workspace_test",
+    bzlmod = False,
+    workspace_path = "pip_parse",
+)
+
+rules_python_integration_test(
+    name = "py_cc_toolchain_registered_test",
+)
+
+rules_python_integration_test(
+    name = "py_cc_toolchain_registered_workspace_test",
+    bzlmod = False,
+    workspace_path = "py_cc_toolchain_registered",
+)
+
+rules_python_integration_test(
+    name = "runtime_manifests_test",
+)
+
+rules_python_integration_test(
+    name = "custom_commands_test",
+    py_main = "custom_commands_test.py",
+)
+
+rules_python_integration_test(
+    name = "toolchain_target_settings_test",
+    py_main = "toolchain_target_settings_test.py",
+)
+
+rules_python_integration_test(
+    name = "validate_test_main_test",
+    py_main = "validate_test_main_test.py",
+)
+
+rules_python_integration_test(
+    name = "unified_pypi_test",
+    py_main = "unified_pypi_test.py",
+)
+
+rules_python_integration_test(
+    name = "uv_lock_test",
+    py_deps = [
+        "@pypiserver//pypiserver",
+        ":uv_lock_pypi_server_lib",
+    ],
+    py_main = "uv_lock_test.py",
+)
+
+rules_python_integration_test(
+    name = "whl_library_test",
+)
+
+py_library(
+    name = "runner_lib",
+    srcs = ["runner.py"],
+    imports = ["../../"],
+)
+
+py_library(
+    name = "uv_lock_pypi_server_lib",
+    srcs = ["uv_lock_pypi_server.py"],
+    imports = ["../../"],
+    # currently windows is not working due to
+    # https://github.com/pypiserver/pypiserver/blob/main/pypiserver/config.py#L123
+    #
+    # class DEFAULTS:
+    #     ....
+    #     PACKAGE_DIRECTORIES = [pathlib.Path("~/packages").expanduser().resolve()]
+    #     ....
+    #
+    # which is loaded through `__init__.py` even though it is not used and breaks because
+    # in a Windows sandbox one cannot resolve the home directory.
+    target_compatible_with = NOT_WINDOWS,
+    deps = ["@pypiserver//pypiserver"],
+)
+
+py_binary(
+    name = "uv_lock_pypi_server",
+    srcs = ["uv_lock_pypi_server.py"],
+    deps = [":uv_lock_pypi_server_lib"],
+)

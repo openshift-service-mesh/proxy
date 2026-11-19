@@ -1,0 +1,18 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+
+# Builds every tool rfcc can produce from source. `manual` because these are
+# long builds; run it explicitly when touching the source-mode toolchains.
+# make and ninja are their registry modules' cc_binary targets; cmake goes
+# through the hub, so no version is pinned here.
+build_test(
+    name = "boostrap_tools",
+    tags = [
+        "large",
+        "manual",
+    ],
+    targets = [
+        "@make//:make",
+        "@ninja//:ninja",
+        "@rules_foreign_cc_toolchains//:cmake_built",
+    ],
+)

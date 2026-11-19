@@ -1,0 +1,95 @@
+---
+bazel: 7.1.1
+# Note, this will tell the user to do the wrong thing (manually run buildifer)
+# See https://github.com/bazelbuild/continuous-integration/issues/1161
+buildifier:
+  version: 6.4.0
+  # Keep this in sync with the list in .pre-commit-config.yaml
+  # https://github.com/bazelbuild/buildtools/issues/479 should fix this by giving us a config file
+tasks:
+  ubuntu2204:
+    name: ubuntu2204
+    platform: ubuntu2204
+    build_targets:
+      - "//..."
+    test_targets:
+      - "//..."
+  ubuntu2204-headers:
+    name: ubuntu2204-headers
+    platform: ubuntu2204
+    working_directory: "e2e/headers"
+    build_targets:
+      - "//..."
+    test_targets:
+      - "//..."
+  ubuntu2204-smoke:
+    name: ubuntu2204-smoke
+    platform: ubuntu2204
+    working_directory: "e2e/smoke"
+    build_targets:
+      - "//..."
+    test_targets:
+      - "//..."
+  ubuntu2204-nodejs_host:
+    name: ubuntu2204-nodejs_host
+    platform: ubuntu2204
+    working_directory: "e2e/nodejs_host"
+    build_targets:
+      - "//..."
+    test_targets:
+      - "//..."
+  macos:
+    name: macos
+    platform: macos
+    build_targets:
+      - "//..."
+    test_flags:
+      - "--test_tag_filters=-skip-on-bazelci-macos"
+    test_targets:
+      - "//..."
+  macos-headers:
+    name: macos-headers
+    platform: macos
+    working_directory: "e2e/headers"
+    build_targets:
+      - "//..."
+    test_flags:
+      - "--test_tag_filters=-skip-on-bazelci-macos"
+    test_targets:
+      - "//..."
+  macos-smoke:
+    name: macos-smoke
+    platform: macos
+    working_directory: "e2e/smoke"
+    build_targets:
+      - "//..."
+    test_flags:
+      - "--test_tag_filters=-skip-on-bazelci-macos"
+    test_targets:
+      - "//..."
+  windows-smoke:
+    name: windows-smoke
+    platform: windows
+    working_directory: "e2e/smoke"
+    build_targets:
+      - "//..."
+    test_flags:
+      - "--test_tag_filters=-skip-on-bazelci-windows"
+    test_targets:
+      - "//..."
+  windows-nodejs_host:
+    name: windows-nodejs_host
+    platform: windows
+    working_directory: "e2e/nodejs_host"
+    build_targets:
+      - "//..."
+    test_targets:
+      - "//..."
+  rbe_ubuntu2204-smoke:
+    name: rbe_ubuntu2204-smoke
+    platform: rbe_ubuntu2204
+    working_directory: "e2e/smoke"
+    build_targets:
+      - "//..."
+    test_targets:
+      - "//..."

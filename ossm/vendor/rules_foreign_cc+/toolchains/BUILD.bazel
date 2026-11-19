@@ -1,0 +1,215 @@
+load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//toolchains:toolchains.bzl", "current_autoconf_toolchain", "current_automake_toolchain", "current_cmake_toolchain", "current_m4_toolchain", "current_make_toolchain", "current_meson_toolchain", "current_msbuild_toolchain", "current_ninja_toolchain", "current_pkgconfig_toolchain")
+load("//toolchains/private:noop_toolchains.bzl", "define_noop_toolchains")
+load(":version_resolution_test.bzl", "version_resolution_test_suite")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "distribution",
+    srcs = glob(["**"]) + [
+        "//toolchains/native_tools:distribution",
+        "//toolchains/patches:distribution",
+        "//toolchains/private:distribution",
+    ],
+    visibility = ["//:__subpackages__"],
+)
+
+toolchain_type(
+    name = "cmake_toolchain",
+)
+
+toolchain_type(
+    name = "ninja_toolchain",
+)
+
+toolchain_type(
+    name = "make_toolchain",
+)
+
+toolchain_type(
+    name = "meson_toolchain",
+)
+
+toolchain_type(
+    name = "pkgconfig_toolchain",
+)
+
+toolchain_type(
+    name = "m4_toolchain",
+)
+
+toolchain_type(
+    name = "autoconf_toolchain",
+)
+
+toolchain_type(
+    name = "automake_toolchain",
+)
+
+toolchain_type(
+    name = "msbuild_toolchain",
+    target_compatible_with = [
+        "@platforms//os:windows",
+    ],
+)
+
+current_cmake_toolchain(
+    name = "current_cmake_toolchain",
+)
+
+current_ninja_toolchain(
+    name = "current_ninja_toolchain",
+)
+
+current_meson_toolchain(
+    name = "current_meson_toolchain",
+)
+
+current_m4_toolchain(
+    name = "current_m4_toolchain",
+)
+
+current_pkgconfig_toolchain(
+    name = "current_pkgconfig_toolchain",
+)
+
+current_make_toolchain(
+    name = "current_make_toolchain",
+)
+
+current_automake_toolchain(
+    name = "current_automake_toolchain",
+)
+
+current_autoconf_toolchain(
+    name = "current_autoconf_toolchain",
+)
+
+current_msbuild_toolchain(
+    name = "current_msbuild_toolchain",
+    target_compatible_with = [
+        "@platforms//os:windows",
+    ],
+)
+
+# Preinstalled cmake will always be the default, if toolchain with more exact constraints
+# is not defined before; registered from workspace_definitions.bzl#rules_foreign_cc_dependencies
+toolchain(
+    name = "preinstalled_cmake_toolchain",
+    toolchain = "//toolchains/private:preinstalled_cmake",
+    toolchain_type = ":cmake_toolchain",
+)
+
+# Preinstalled ninja will always be the default, if toolchain with more exact constraints
+# is not defined before; registered from workspace_definitions.bzl#rules_foreign_cc_dependencies
+toolchain(
+    name = "preinstalled_ninja_toolchain",
+    toolchain = "//toolchains/private:preinstalled_ninja",
+    toolchain_type = ":ninja_toolchain",
+)
+
+# Preinstalled make will always be the default, if toolchain with more exact constraints
+# is not defined before; registered from workspace_definitions.bzl#rules_foreign_cc_dependencies
+toolchain(
+    name = "preinstalled_make_toolchain",
+    toolchain = "//toolchains/private:preinstalled_make",
+    toolchain_type = ":make_toolchain",
+)
+
+toolchain(
+    name = "preinstalled_nmake_toolchain",
+    exec_compatible_with = [
+        "@platforms//os:windows",
+    ],
+    toolchain = "//toolchains/private:preinstalled_nmake",
+    toolchain_type = ":make_toolchain",
+)
+
+toolchain(
+    name = "preinstalled_meson_toolchain",
+    toolchain = "//toolchains/private:preinstalled_meson",
+    toolchain_type = ":meson_toolchain",
+)
+
+toolchain(
+    name = "preinstalled_autoconf_toolchain",
+    toolchain = "//toolchains/private:preinstalled_autoconf",
+    toolchain_type = ":autoconf_toolchain",
+)
+
+toolchain(
+    name = "preinstalled_automake_toolchain",
+    toolchain = "//toolchains/private:preinstalled_automake",
+    toolchain_type = ":automake_toolchain",
+)
+
+toolchain(
+    name = "preinstalled_m4_toolchain",
+    toolchain = "//toolchains/private:preinstalled_m4",
+    toolchain_type = ":m4_toolchain",
+)
+
+toolchain(
+    name = "preinstalled_pkgconfig_toolchain",
+    toolchain = "//toolchains/private:preinstalled_pkgconfig",
+    toolchain_type = ":pkgconfig_toolchain",
+)
+
+toolchain(
+    name = "preinstalled_msbuild_toolchain",
+    exec_compatible_with = ["@platforms//os:windows"],
+    target_compatible_with = ["@platforms//os:windows"],
+    toolchain = "//toolchains/private:preinstalled_msbuild",
+    toolchain_type = ":msbuild_toolchain",
+)
+
+bzl_library(
+    name = "built_toolchains",
+    srcs = ["built_toolchains.bzl"],
+    deps = [
+        "//foreign_cc/private:tool_specs",
+        "//toolchains/private:hub",
+        "//toolchains/private:source_spokes",
+    ],
+)
+
+bzl_library(
+    name = "prebuilt_toolchains",
+    srcs = ["prebuilt_toolchains.bzl"],
+    deps = [
+        "//toolchains/private:binary_spokes",
+    ],
+)
+
+bzl_library(
+    name = "toolchains",
+    srcs = ["toolchains.bzl"],
+    deps = [
+        ":built_toolchains",
+        ":prebuilt_toolchains",
+    ],
+)
+
+py_library(
+    name = "prebuilt_toolchains_gen_lib",
+    srcs = ["prebuilt_toolchains.py"],
+    imports = ["."],
+)
+
+py_test(
+    name = "prebuilt_toolchains_gen_test",
+    size = "small",
+    srcs = ["tests/prebuilt_toolchains_gen_test.py"],
+    main = "tests/prebuilt_toolchains_gen_test.py",
+    deps = [":prebuilt_toolchains_gen_lib"],
+)
+
+version_resolution_test_suite(name = "version_resolution_test")
+
+# Emits the noop_<tool>_toolchain targets. The bzlmod hub
+# (foreign_cc/extensions.bzl) references @rules_foreign_cc//toolchains:noop_<tool>_toolchain
+# directly for mode="noop" tools, so these names and their package visibility
+# must stay stable: renaming or hiding one breaks generated hub BUILD files.
+define_noop_toolchains()

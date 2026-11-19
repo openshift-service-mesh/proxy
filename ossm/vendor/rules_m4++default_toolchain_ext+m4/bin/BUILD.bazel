@@ -1,0 +1,6 @@
+
+alias(
+    name = "m4",
+    actual = "@m4_v1.4.18" + "//bin:m4",
+    visibility = ["//visibility:public"],
+)
