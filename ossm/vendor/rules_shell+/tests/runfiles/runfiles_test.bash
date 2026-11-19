@@ -46,6 +46,8 @@ msys*|mingw*|cygwin*)
   ;;
 esac
 
+_RUNFILES_LIBRARY_FILE="${RUNFILES_LIBRARY_FILE:-bazel_tools/tools/bash/runfiles/runfiles.bash}"
+
 function find_runfiles_lib() {
   # Unset existing definitions of the functions we want to test.
   if type rlocation >&/dev/null; then
@@ -58,14 +60,14 @@ function find_runfiles_lib() {
       export RUNFILES_MANIFEST_FILE="$0.runfiles_manifest"
     elif [[ -f "$0.runfiles/MANIFEST" ]]; then
       export RUNFILES_MANIFEST_FILE="$0.runfiles/MANIFEST"
-    elif [[ -f "$0.runfiles/bazel_tools/tools/bash/runfiles/runfiles.bash" ]]; then
+    elif [[ -f "$0.runfiles/${_RUNFILES_LIBRARY_FILE}" ]]; then
       export RUNFILES_DIR="$0.runfiles"
     fi
   fi
-  if [[ -f "${RUNFILES_DIR:-/dev/null}/bazel_tools/tools/bash/runfiles/runfiles.bash" ]]; then
-    echo "${RUNFILES_DIR}/bazel_tools/tools/bash/runfiles/runfiles.bash"
+  if [[ -f "${RUNFILES_DIR:-/dev/null}/${_RUNFILES_LIBRARY_FILE}" ]]; then
+    echo "${RUNFILES_DIR}/${_RUNFILES_LIBRARY_FILE}"
   elif [[ -f "${RUNFILES_MANIFEST_FILE:-/dev/null}" ]]; then
-    grep -m1 "^bazel_tools/tools/bash/runfiles/runfiles.bash " \
+    grep -m1 "^${_RUNFILES_LIBRARY_FILE} " \
         "$RUNFILES_MANIFEST_FILE" | cut -d ' ' -f 2-
   else
     echo >&2 "ERROR: cannot find //shell/runfiles:runfiles.bash"
@@ -207,6 +209,112 @@ EOF
   [[ -z "$(rlocation "h/ i" || echo failed)" ]] || fail
   [[ -z "$(rlocation "dir with spaces" || echo failed)" ]] || fail
   [[ -z "$(rlocation "dir with spaces/nested/file" || echo failed)" ]] || fail
+}
+
+# Writes a runfiles layout containing unresolved symlinks with relative targets, both as a manifest
+# pointing at the original files and as a materialized runfiles directory.
+function write_relative_symlink_target_layout() {
+  local -r tmpdir="$1"
+  local -r dir="$tmpdir/foo.runfiles"
+
+  mkdir -p "$tmpdir/original/dir/deeply/nested"
+  echo file > "$tmpdir/original/file"
+  echo nested_file > "$tmpdir/original/dir/deeply/nested/file"
+  # Lies next to the runfiles directory and is thus only reachable through a relative target that
+  # leaves the runfiles tree.
+  echo outside > "$tmpdir/outside"
+
+  cat > "$tmpdir/foo.runfiles_manifest" << EOF
+_main/pkg/file $tmpdir/original/file
+_main/pkg/dir $tmpdir/original/dir
+_main/pkg/link ../pkg/file
+_main/pkg/nested/link ../../pkg/link
+_main/pkg/dir_link ./dir
+_main/pkg/dangling ../pkg/missing
+_main/pkg/escaping ../../../outside
+_main/pkg/loop_a loop_b
+_main/pkg/loop_b loop_a
+ _main/pkg/link\swith\sspaces ../pkg/file
+EOF
+
+  mkdir -p "$dir/_main/pkg/nested"
+  ln -s "$tmpdir/original/file" "$dir/_main/pkg/file"
+  ln -s "$tmpdir/original/dir" "$dir/_main/pkg/dir"
+  ln -s ../pkg/file "$dir/_main/pkg/link"
+  ln -s ../../pkg/link "$dir/_main/pkg/nested/link"
+  ln -s ./dir "$dir/_main/pkg/dir_link"
+  ln -s ../pkg/missing "$dir/_main/pkg/dangling"
+  ln -s ../../../outside "$dir/_main/pkg/escaping"
+  ln -s loop_b "$dir/_main/pkg/loop_a"
+  ln -s loop_a "$dir/_main/pkg/loop_b"
+  ln -s ../pkg/file "$dir/_main/pkg/link with spaces"
+}
+
+# Asserts that the given rlocation path resolves to a file with the given contents. Only the
+# contents are compared since the path itself necessarily differs between the two lookup modes: a
+# materialized runfiles directory resolves to the entry in that directory, not to the file it
+# points at.
+function assert_rlocation_contents() {
+  local -r resolved="$(rlocation "$1" || echo failed)"
+  [[ -f "$resolved" ]] || fail "$1 did not resolve to a file, got: $resolved"
+  [[ "$(cat "$resolved")" == "$2" ]] || fail "$1 resolved to $resolved with unexpected contents"
+}
+
+# Asserts that the given rlocation path does not resolve, which rlocation reports as an empty result
+# when it uses the manifest and as a non-zero exit code when it uses the runfiles directory (see the
+# FIXME on runfiles_rlocation_checked).
+function assert_no_rlocation() {
+  local -r resolved="$(rlocation "$1" || echo failed)"
+  [[ -z "$resolved" || "$resolved" == failed ]] || fail "$1 unexpectedly resolved to $resolved"
+}
+
+# The lookups whose outcome must not depend on whether the manifest or the runfiles directory backs
+# them: resolving a relative target against the manifest has to arrive at the same file that the
+# file system arrives at when resolving the corresponding symlink in the runfiles directory.
+function assert_relative_symlink_target_lookups() {
+  assert_rlocation_contents _main/pkg/link file
+  assert_rlocation_contents _main/pkg/nested/link file
+  assert_rlocation_contents "_main/pkg/link with spaces" file
+  # A relative target that resolves to a directory runfile also resolves paths underneath it.
+  [[ -d "$(rlocation _main/pkg/dir_link || echo failed)" ]] || fail
+  assert_rlocation_contents _main/pkg/dir_link/deeply/nested/file nested_file
+  # A target that doesn't resolve to an existing file behaves like a missing runfile.
+  assert_no_rlocation _main/pkg/dangling
+  assert_no_rlocation _main/pkg/dir_link/does/not/exist
+  # A cycle terminates instead of looping forever.
+  assert_no_rlocation _main/pkg/loop_a
+}
+
+function test_manifest_based_relative_symlink_targets() {
+  local -r tmpdir="$(mktemp -d $TEST_TMPDIR/tmp.XXXXXXXX)"
+  write_relative_symlink_target_layout "$tmpdir"
+
+  export RUNFILES_DIR=
+  export RUNFILES_MANIFEST_FILE=$tmpdir/foo.runfiles_manifest
+  source "$runfiles_lib_path"
+
+  assert_relative_symlink_target_lookups
+  # The one lookup the manifest cannot reproduce: a relative target that leaves the runfiles tree
+  # can only be resolved against a materialized runfiles directory, whose existence the manifest
+  # does not imply. Bazel does not generate such a runfile.
+  assert_no_rlocation _main/pkg/escaping
+}
+
+function test_directory_based_relative_symlink_targets() {
+  # MSYS2 may materialize symlinks as copies, which does not preserve relative targets.
+  if is_windows; then
+    return 0
+  fi
+
+  local -r tmpdir="$(mktemp -d $TEST_TMPDIR/tmp.XXXXXXXX)"
+  write_relative_symlink_target_layout "$tmpdir"
+
+  export RUNFILES_DIR="$tmpdir/foo.runfiles"
+  export RUNFILES_MANIFEST_FILE=
+  source "$runfiles_lib_path"
+
+  assert_relative_symlink_target_lookups
+  assert_rlocation_contents _main/pkg/escaping outside
 }
 
 function test_manifest_based_envvars() {
@@ -512,6 +620,97 @@ EOF
   [[ "$(rlocation "repo2+/foo/runfile" "my_module++ext+repo1" || echo failed)" == "$tmpdir/repo2+/runfile" ]] || fail
 }
 
+# Writes a script that reports the repository it lies in via the given function.
+# The function must not be defined by more than one script in a single test, as
+# runfiles_current_repository resolves the path of the script that defines it.
+function write_current_repository_lib() {
+  local -r path="$1"
+  local -r func="$2"
+  local -r result="${3:-}"
+  mkdir -p "$(dirname "$path")"
+  if [[ -n "$result" ]]; then
+    # A stale copy that must never be sourced.
+    cat > "$path" << EOF
+function $func() {
+  echo "$result"
+}
+EOF
+  else
+    cat > "$path" << EOF
+function $func() {
+  runfiles_current_repository 1
+}
+EOF
+  fi
+}
+
+function test_current_repository_directory_based() {
+  local tmpdir="$(mktemp -d $TEST_TMPDIR/tmp.XXXXXXXX)"
+
+  export RUNFILES_DIR="${tmpdir}/mock/runfiles"
+  export RUNFILES_MANIFEST_FILE=
+  write_current_repository_lib "$RUNFILES_DIR/protobuf+3.19.2/foo/lib.sh" repo_of_other
+  write_current_repository_lib "$RUNFILES_DIR/_main/bar/lib.sh" repo_of_main
+  source "$runfiles_lib_path"
+
+  source "$(rlocation "protobuf+3.19.2/foo/lib.sh" "")" || fail
+  [[ "$(repo_of_other || echo failed)" == "protobuf+3.19.2" ]] || fail
+
+  source "$(rlocation "_main/bar/lib.sh" "")" || fail
+  [[ "$(repo_of_main || echo failed)" == "" ]] || fail
+}
+
+function test_current_repository_manifest_based() {
+  local tmpdir="$(mktemp -d $TEST_TMPDIR/tmp.XXXXXXXX)"
+
+  export RUNFILES_DIR=
+  export RUNFILES_MANIFEST_FILE="$tmpdir/foo.runfiles_manifest"
+  write_current_repository_lib "$tmpdir/protobuf+3.19.2/foo/lib.sh" repo_of_other
+  write_current_repository_lib "$tmpdir/_main/bar/lib.sh" repo_of_main
+  cat > "$RUNFILES_MANIFEST_FILE" << EOF
+protobuf+3.19.2/foo/lib.sh $tmpdir/protobuf+3.19.2/foo/lib.sh
+_main/bar/lib.sh $tmpdir/_main/bar/lib.sh
+EOF
+  source "$runfiles_lib_path"
+
+  source "$(rlocation "protobuf+3.19.2/foo/lib.sh" "")" || fail
+  [[ "$(repo_of_other || echo failed)" == "protobuf+3.19.2" ]] || fail
+
+  source "$(rlocation "_main/bar/lib.sh" "")" || fail
+  [[ "$(repo_of_main || echo failed)" == "" ]] || fail
+}
+
+# Both envvars are set at the same time e.g. on Windows with --enable_runfiles,
+# where the runfiles directory contains the MANIFEST file that
+# runfiles_export_envvars promotes to RUNFILES_MANIFEST_FILE. The manifest maps
+# rlocation paths to the locations of the *original* files, so a caller that had
+# been looked up in the runfiles directory could never be found in it.
+function test_current_repository_directory_and_manifest_based() {
+  local tmpdir="$(mktemp -d $TEST_TMPDIR/tmp.XXXXXXXX)"
+
+  export RUNFILES_DIR="${tmpdir}/mock/runfiles"
+  export RUNFILES_MANIFEST_FILE="$RUNFILES_DIR/MANIFEST"
+  write_current_repository_lib "$tmpdir/protobuf+3.19.2/foo/lib.sh" repo_of_other
+  write_current_repository_lib "$tmpdir/_main/bar/lib.sh" repo_of_main
+  # The runfiles directory may hold stale contents, so the manifest wins.
+  mkdir -p "$RUNFILES_DIR"
+  write_current_repository_lib "$RUNFILES_DIR/protobuf+3.19.2/foo/lib.sh" repo_of_other stale
+  write_current_repository_lib "$RUNFILES_DIR/_main/bar/lib.sh" repo_of_main stale
+  cat > "$RUNFILES_MANIFEST_FILE" << EOF
+protobuf+3.19.2/foo/lib.sh $tmpdir/protobuf+3.19.2/foo/lib.sh
+_main/bar/lib.sh $tmpdir/_main/bar/lib.sh
+EOF
+  source "$runfiles_lib_path"
+
+  [[ "$(rlocation "protobuf+3.19.2/foo/lib.sh" "" || echo failed)" == "$tmpdir/protobuf+3.19.2/foo/lib.sh" ]] || fail
+  source "$(rlocation "protobuf+3.19.2/foo/lib.sh" "")" || fail
+  [[ "$(repo_of_other || echo failed)" == "protobuf+3.19.2" ]] || fail
+
+  [[ "$(rlocation "_main/bar/lib.sh" "" || echo failed)" == "$tmpdir/_main/bar/lib.sh" ]] || fail
+  source "$(rlocation "_main/bar/lib.sh" "")" || fail
+  [[ "$(repo_of_main || echo failed)" == "" ]] || fail
+}
+
 function test_directory_based_envvars() {
   export RUNFILES_DIR=mock/runfiles
   export RUNFILES_MANIFEST_FILE=
@@ -520,6 +719,152 @@ function test_directory_based_envvars() {
   runfiles_export_envvars
   [[ "${RUNFILES_DIR:-}" == "mock/runfiles" ]] || fail
   [[ -z "${RUNFILES_MANIFEST_FILE:-}" ]] || fail
+}
+
+# Through the wrapper, awk is on unless the caller has decided: AWK wins if
+# set, RULES_SHELL_RUNFILES_USE_AWK=0 keeps the shell loops. The wrapper must
+# not touch AWK or leave temporaries behind. Only meaningful when the library
+# under test is reached through the wrapper.
+function test_runfiles_bash_awk_default() {
+  if [[ "$_RUNFILES_LIBRARY_FILE" != *runfiles.bash ]]; then
+    return 0
+  fi
+  export RUNFILES_DIR=mock/runfiles
+  export RUNFILES_MANIFEST_FILE=
+
+  (
+    unset AWK RULES_SHELL_RUNFILES_USE_AWK
+    source "$runfiles_lib_path" || fail
+    if command -v awk >&/dev/null; then
+      [[ "${_RULES_SHELL_RUNFILES_AWK:-}" == awk ]] \
+        || fail "expected awk by default, got '${_RULES_SHELL_RUNFILES_AWK:-}'"
+    else
+      [[ -z "${_RULES_SHELL_RUNFILES_AWK:-}" ]] \
+        || fail "expected the shell loops without awk on PATH"
+    fi
+    [[ -z "${AWK+x}" ]] || fail "the wrapper leaked AWK='${AWK}' into the environment"
+    [[ -z "${_rf_bash_dir+x}" ]] \
+      || fail "the wrapper leaked its temporaries into the environment"
+  ) || fail
+
+  (
+    unset AWK
+    export RULES_SHELL_RUNFILES_USE_AWK=0
+    source "$runfiles_lib_path" || fail
+    [[ -z "${_RULES_SHELL_RUNFILES_AWK:-}" ]] \
+      || fail "expected RULES_SHELL_RUNFILES_USE_AWK=0 to keep the shell loops"
+  ) || fail
+
+  (
+    unset RULES_SHELL_RUNFILES_USE_AWK
+    export AWK="$(command -v awk || echo /no/such/awk)"
+    source "$runfiles_lib_path" || fail
+    [[ "$AWK" == /no/such/awk || "${_RULES_SHELL_RUNFILES_AWK:-}" == "$AWK" ]] \
+      || fail "expected a set AWK to be used as is, got '${_RULES_SHELL_RUNFILES_AWK:-}'"
+    [[ -n "${AWK+x}" ]] || fail "the wrapper must not unset AWK"
+  ) || fail
+}
+
+# The public API stays exported through the wrapper, so that a script which
+# inherited it across exec keeps finding it. Checked from a child bash, which
+# only sees what was exported.
+function test_runfiles_bash_exports_public_api() {
+  if [[ "$_RUNFILES_LIBRARY_FILE" != *runfiles.bash ]]; then
+    return 0
+  fi
+  export RUNFILES_DIR=mock/runfiles
+  export RUNFILES_MANIFEST_FILE=
+  source "$runfiles_lib_path"
+
+  local f
+  for f in rlocation runfiles_export_envvars runfiles_current_repository \
+      runfiles_rlocation_checked; do
+    bash -c "[[ \"\$(type -t $f)\" == function ]]" \
+      || fail "expected $f to be exported as a function"
+  done
+  bash -c '[[ -n "${RUNFILES_REPO_MAPPING+x}" ]]' \
+    || fail "expected RUNFILES_REPO_MAPPING to be exported"
+}
+
+# The v4 snippet, taken from the wrapper's own header, and the wrapper have to
+# work on a host without awk: the snippet's awk attempt fails and its shell
+# loop takes over, and runfiles.sh keeps its shell loops instead of the awk the
+# wrapper asks for.
+function test_runfiles_bash_survives_without_awk() {
+  if [[ "$_RUNFILES_LIBRARY_FILE" != *runfiles.bash ]]; then
+    return 0
+  fi
+  local tmpdir="$(mktemp -d $TEST_TMPDIR/tmp.XXXXXXXX)"
+  local lib_dir="$tmpdir/lib/bazel_tools/tools/bash/runfiles"
+  mkdir -p "$lib_dir"
+  cp "$runfiles_lib_path" "$lib_dir/runfiles.bash"
+  cp "$(dirname "$runfiles_lib_path")/runfiles.sh" "$lib_dir/runfiles.sh"
+  touch "$tmpdir/f"
+  printf 'r/f %s\nbazel_tools/tools/bash/runfiles/runfiles.bash %s\n' "$tmpdir/f" \
+    "$lib_dir/runfiles.bash" > "$tmpdir/manifest"
+  {
+    echo '#!/usr/bin/env bash'
+    sed -n '/^# *# --- begin runfiles.bash initialization v4 ---/,/^# *# --- end runfiles.bash initialization v4 ---/p' \
+      "$runfiles_lib_path" | sed 's/^#       //'
+    echo 'rlocation r/f'
+  } > "$tmpdir/script.sh"
+
+  local actual
+  actual=$(RUNFILES_DIR= RUNFILES_MANIFEST_FILE="$tmpdir/manifest" PATH=/nonexistent "$BASH" "$tmpdir/script.sh")
+  [[ "$actual" == "$tmpdir/f" ]] || fail "expected $tmpdir/f without awk, got: $actual"
+}
+
+# The v4 snippet sources the first library it finds, so a library that fails
+# to load has to abort the script rather than leave it without rlocation. A
+# runfiles directory from before runfiles.sh existed has runfiles.bash and
+# nothing for it to source.
+function test_runfiles_bash_init_aborts_when_library_fails() {
+  if [[ "$_RUNFILES_LIBRARY_FILE" != *runfiles.bash ]]; then
+    return 0
+  fi
+  local tmpdir="$(mktemp -d $TEST_TMPDIR/tmp.XXXXXXXX)"
+  mkdir -p "$tmpdir/stale/bazel_tools/tools/bash/runfiles"
+  cp "$runfiles_lib_path" "$tmpdir/stale/bazel_tools/tools/bash/runfiles/runfiles.bash"
+  touch "$tmpdir/f"
+  printf 'r/f %s\n' "$tmpdir/f" > "$tmpdir/manifest"
+  {
+    echo '#!/usr/bin/env bash'
+    sed -n '/^# *# --- begin runfiles.bash initialization v4 ---/,/^# *# --- end runfiles.bash initialization v4 ---/p' \
+      "$runfiles_lib_path" | sed 's/^#       //'
+    echo 'echo reached'
+  } > "$tmpdir/script.sh"
+
+  local output
+  if output=$(RUNFILES_DIR="$tmpdir/stale" RUNFILES_MANIFEST_FILE="$tmpdir/manifest" "$BASH" "$tmpdir/script.sh" 2>&1); then
+    fail "expected the snippet to abort, got: $output"
+  fi
+  [[ "$output" != *reached* ]] || fail "expected the script not to run past the snippet"
+}
+
+# awk takes an operand of the form name=value as an assignment, so the v4
+# snippet has to reach a manifest with such a path some other way.
+function test_runfiles_bash_manifest_path_with_equals_sign() {
+  if [[ "$_RUNFILES_LIBRARY_FILE" != *runfiles.bash ]]; then
+    return 0
+  fi
+  local tmpdir="$(mktemp -d $TEST_TMPDIR/tmp.XXXXXXXX)"
+  local lib_dir="$tmpdir/lib/bazel_tools/tools/bash/runfiles"
+  mkdir -p "$lib_dir"
+  cp "$runfiles_lib_path" "$lib_dir/runfiles.bash"
+  cp "$(dirname "$runfiles_lib_path")/runfiles.sh" "$lib_dir/runfiles.sh"
+  touch "$tmpdir/f"
+  printf 'r/f %s\nbazel_tools/tools/bash/runfiles/runfiles.bash %s\n' "$tmpdir/f" \
+    "$lib_dir/runfiles.bash" > "$tmpdir/out=1.manifest"
+  {
+    echo '#!/usr/bin/env bash'
+    sed -n '/^# *# --- begin runfiles.bash initialization v4 ---/,/^# *# --- end runfiles.bash initialization v4 ---/p' \
+      "$runfiles_lib_path" | sed 's/^#       //'
+    echo 'rlocation r/f'
+  } > "$tmpdir/script.sh"
+
+  local actual
+  actual=$(RUNFILES_DIR= RUNFILES_MANIFEST_FILE="$tmpdir/out=1.manifest" "$BASH" "$tmpdir/script.sh")
+  [[ "$actual" == "$tmpdir/f" ]] || fail "expected the snippet to find the library through out=1.manifest, got: $actual"
 }
 
 function test_with_grep_env_vars_set() {

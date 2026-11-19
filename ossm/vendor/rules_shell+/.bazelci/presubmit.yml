@@ -1,49 +1,85 @@
 ---
-buildifier: latest
+# Avoid https://github.com/bazelbuild/buildtools/commit/4006b543a694f6cf77c2d8cc188c5f53f3bac1d9
+buildifier: 8.2.1
 
 matrix:
   platform:
     - ubuntu2004
+    - ubuntu2004_arm64
     - macos
+    - macos_arm64
     - windows
-  bazel:
-    - 6.x
-    - 7.x
-    - 8.x
+  legacy_bazel:
+    - 7.*
+    - 8.*
+  modern_bazel:
+    - 9.*
+    - last_green
 
 tasks:
-  test_module_bzlmod:
-    name: "Test module (Bzlmod)"
+  test_module_bzlmod_legacy:
+    name: "Test module (${{legacy_bazel}}, Bzlmod)"
     working_directory: "tests/bcr"
-    bazel: ${{ bazel }}
+    bazel: ${{ legacy_bazel }}
     platform: ${{ platform }}
     build_flags:
       - "--enable_bzlmod"
+      - "--noenable_workspace"
     build_targets:
       - "//..."
     test_flags:
       - "--enable_bzlmod"
+      - "--noenable_workspace"
     test_targets:
       - "//..."
   test_module_workspace:
-    name: "Test module (WORKSPACE)"
+    name: "Test module (${{legacy_bazel}}, WORKSPACE)"
     working_directory: "tests/bcr"
-    bazel: ${{ bazel }}
+    bazel: ${{ legacy_bazel }}
     platform: ${{ platform }}
     build_flags:
-      - "--enable_bzlmod"
+      - "--noenable_bzlmod"
+      - "--enable_workspace"
     build_targets:
       - "//..."
     test_flags:
-      - "--enable_bzlmod"
+      - "--noenable_bzlmod"
+      - "--enable_workspace"
     test_targets:
       - "//..."
-  test_module_head:
-    name: "Test module (Bazel@HEAD, Bzlmod)"
+  test_module_modern:
+    name: "Test module (${{modern_bazel}}, Bzlmod)"
     working_directory: "tests/bcr"
-    bazel: last_green
+    bazel: ${{ modern_bazel }}
     platform: ${{ platform }}
     build_targets:
       - "//..."
     test_targets:
       - "//..."
+  tests:
+    name: "Tests (${{modern_bazel}})"
+    bazel: ${{ modern_bazel }}
+    platform: ${{ platform }}
+    build_targets:
+      - "//tests/..."
+    test_targets:
+      - "//tests/..."
+  test_posix_shell_runfiles:
+    # Dash coverage for the POSIX shell runfiles library. The suite runs under
+    # its own `#!/bin/sh`, which is dash on this image, not under the
+    # sh_toolchain, so no toolchain flag is involved. Local repro on a
+    # Debian-based host: bazel test //tests/runfiles:runfiles_sh_test
+    name: "POSIX Runfiles (dash, ${{modern_bazel}})"
+    bazel: ${{ modern_bazel }}
+    platform: ubuntu2004
+    shell_commands:
+      - "/bin/dash -c 'echo dash ready'"
+    build_targets:
+      - "//tests/runfiles:runfiles_sh_test"
+      - "//tests/runfiles:runfiles_sh_no_awk_test"
+    test_flags:
+      # Fail rather than pass under bash if /bin/sh on the CI image ever changes.
+      - "--test_env=RUNFILES_TEST_REQUIRE_POSIX_SH=1"
+    test_targets:
+      - "//tests/runfiles:runfiles_sh_test"
+      - "//tests/runfiles:runfiles_sh_no_awk_test"

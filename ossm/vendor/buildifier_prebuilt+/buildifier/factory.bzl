@@ -23,7 +23,7 @@ def buildifier_attr_factory(*, test_rule):
         ),
         "exclude_patterns": attr.string_list(
             allow_empty = True,
-            doc = "A list of glob patterns passed to the find command. E.g. './vendor/*' to exclude the Go vendor directory. In test rules, this attribute requires the use of the no_sandbox attribute.",
+            doc = "A list of glob patterns matched like the find command's -path option, on all platforms. E.g. './vendor/*' to exclude the Go vendor directory. In test rules, this attribute requires the use of the no_sandbox attribute.",
         ),
         "mode": attr.string(
             default = "fix" if not test_rule else "diff",
@@ -31,8 +31,8 @@ def buildifier_attr_factory(*, test_rule):
             values = ["check", "diff", "print_if_changed"] + ["fix"] if not test_rule else [],
         ),
         "format": attr.string(
-            doc = "Dianostics format. Buildifier always returns 0 if this is set.",
-            values = ["json", "text"],
+            doc = "Diagnostics format. Buildifier always returns 0 if this is set.",
+            values = ["json", "sarif", "text"],
         ),
         "lint_mode": attr.string(
             doc = "Linting mode",
@@ -137,7 +137,7 @@ def buildifier_impl_factory(ctx, *, test_rule):
         if test_rule and not ctx.attr.no_sandbox:
             fail("Cannot use 'exclude_patterns' in a test rule without 'no_sandbox'")
         exclude_patterns = ["-path %s" % shell.quote(pattern) for pattern in ctx.attr.exclude_patterns]
-        exclude_patterns_str = " -o ".join(exclude_patterns) + " -prune -o "
+        exclude_patterns_str = "\\( " + " -o ".join(exclude_patterns) + " \\) -prune -o "
 
     workspace = ""
     if test_rule and ctx.attr.no_sandbox:
@@ -149,7 +149,7 @@ def buildifier_impl_factory(ctx, *, test_rule):
         toolchain = ctx.exec_groups["test"].toolchains["@buildifier_prebuilt//buildifier:toolchain"]
     else:
         toolchain = ctx.toolchains["@buildifier_prebuilt//buildifier:toolchain"]
-    buildifier = toolchain._tool
+    buildifier = toolchain.tool
     runner = toolchain._runner
 
     out_ext = ".bash" if runner.label.name.endswith(".bash.template") else ".bat"
@@ -164,6 +164,7 @@ def buildifier_impl_factory(ctx, *, test_rule):
         "{EXCLUDE_PATTERNS}": exclude_patterns_str,
         "{FORMAT}": ctx.attr.format,
         "{POWERSHELL_ARGS}": _powershell_array_literal(args),
+        "{POWERSHELL_EXCLUDE_PATTERNS}": _powershell_array_literal(ctx.attr.exclude_patterns),
         "{SCAN_WORKSPACE}": "$true" if scan_workspace else "$false",
         "{SOURCE_FILES}": _powershell_array_literal(source_files),
         "{VERBOSE}": str(ctx.attr.verbose).lower(),

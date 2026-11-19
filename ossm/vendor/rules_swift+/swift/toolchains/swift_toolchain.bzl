@@ -50,11 +50,13 @@ load("//swift/internal:attrs.bzl", "swift_toolchain_driver_attrs")
 load("//swift/internal:autolinking.bzl", "autolink_extract_action_configs")
 load(
     "//swift/internal:feature_names.bzl",
+    "SWIFT_FEATURE_EMIT_C_MODULE",
     "SWIFT_FEATURE_INCREMENTAL_FILE_HASHING",
     "SWIFT_FEATURE_INDEX_STORE_COMPRESS",
     "SWIFT_FEATURE_MODULE_MAP_HOME_IS_CWD",
     "SWIFT_FEATURE_STATIC_STDLIB",
     "SWIFT_FEATURE_USE_AUTOLINK_EXTRACT",
+    "SWIFT_FEATURE_USE_C_MODULES",
     "SWIFT_FEATURE_USE_GLOBAL_INDEX_STORE",
     "SWIFT_FEATURE_USE_MODULE_WRAP",
     "SWIFT_FEATURE__SUPPORTS_HERMETIC_SWIFTMODULE",
@@ -635,6 +637,15 @@ def _c_compile_args(ctx, cc_toolchain):
         variables = compile_variables,
     )
 
+def _check_android_api(target_system_name):
+    """Fails for Android API levels below the Swift SDK's minimum (28)."""
+    api = ""
+    for char in target_system_name.elems():
+        api = api + char if char.isdigit() else ""
+    if api and int(api) < 28:
+        fail("The Swift SDK for Android requires API 28 or later, but the " +
+             "C++ toolchain targets {}.".format(target_system_name))
+
 def _android_target_system_name(ctx, cc_toolchain):
     """Returns the Android target system name from the C compiler arguments."""
     target_arg_prefix = "--target="
@@ -724,6 +735,7 @@ def _swift_toolchain_impl(ctx):
     elif ctx.attr.os == "android":
         if not sdkroot:
             fail("Android toolchain requires a sysroot to be set, either via the `sdkroot` attribute or by using a CC toolchain that provides one.")
+        _check_android_api(target_system_name)
         swift_linkopts_cc_info = _swift_sdk_linkopts_cc_info(
             ctx.label,
             ["--sysroot={}".format(sdkroot)] + ctx.attr.linkopts,
@@ -838,6 +850,12 @@ def _swift_toolchain_impl(ctx):
         SWIFT_FEATURE_MODULE_MAP_HOME_IS_CWD,
         SWIFT_FEATURE_USE_GLOBAL_INDEX_STORE,
     ]
+    if ctx.attr.os in ("android", "wasi"):
+        # TODO: We need to scan these if we want to support this
+        unsupported_features.extend([
+            SWIFT_FEATURE_EMIT_C_MODULE,
+            SWIFT_FEATURE_USE_C_MODULES,
+        ])
     if not static_runtime_cc_info:
         unsupported_features.append(SWIFT_FEATURE_STATIC_STDLIB)
 

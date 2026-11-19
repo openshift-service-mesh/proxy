@@ -1,0 +1,5 @@
+{
+    "url": "https://github.com/envoyproxy/toolshed/releases/download/bazel-v0.5.24/toolshed-bazel-v0.5.24.tar.gz",
+    "integrity": "sha256-CRNgw9t9VJBO9XsgDMGAuD/AK7wMFKmZrx6N/a2ONBo=",
+    "strip_prefix": "toolshed-bazel-v0.5.24"
+}

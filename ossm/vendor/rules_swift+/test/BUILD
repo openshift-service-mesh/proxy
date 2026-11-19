@@ -9,6 +9,7 @@ load(":cc_library_tests.bzl", "cc_library_test_suite")
 load(":compiler_arguments_tests.bzl", "compiler_arguments_test_suite")
 load(":const_values_tests.bzl", "const_values_test_suite")
 load(":coverage_settings_tests.bzl", "coverage_settings_test_suite")
+load(":custom_swift_driver_tests.bzl", "custom_swift_driver_test_suite")
 load(":custom_toolchain_linking_tests.bzl", "custom_toolchain_linking_test_suite")
 load(":debug_settings_tests.bzl", "debug_settings_test_suite")
 load(":environment_tests.bzl", "environment_test_suite")
@@ -28,6 +29,7 @@ load(":module_cache_settings_tests.bzl", "module_cache_settings_test_suite")
 load(":module_interface_tests.bzl", "module_interface_test_suite")
 load(":module_mapping_tests.bzl", "module_mapping_test_suite")
 load(":output_file_map_tests.bzl", "output_file_map_test_suite")
+load(":package_interface_tests.bzl", "package_interface_test_suite")
 load(":pch_output_dir_tests.bzl", "pch_output_dir_test_suite")
 load(":precompiled_modules_tests.bzl", "precompiled_modules_test_suite")
 load(":private_deps_tests.bzl", "private_deps_test_suite")
@@ -79,6 +81,8 @@ compiler_arguments_test_suite(name = "compiler_arguments")
 const_values_test_suite(name = "const_values")
 
 coverage_settings_test_suite(name = "coverage_settings")
+
+custom_swift_driver_test_suite(name = "custom_swift_driver")
 
 custom_toolchain_linking_test_suite(name = "custom_toolchain_linking")
 
@@ -137,6 +141,8 @@ synthesize_interface_test_suite(
         "manual",
     ],
 )
+
+package_interface_test_suite(name = "package_interface")
 
 pch_output_dir_test_suite(name = "pch_output_dir_settings")
 

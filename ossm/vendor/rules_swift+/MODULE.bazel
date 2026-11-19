@@ -2,7 +2,7 @@
 
 module(
     name = "rules_swift",
-    version = "4.2.2",
+    version = "4.3.0",
     bazel_compatibility = [">=8.0.0"],
     compatibility_level = 3,
 )
@@ -10,7 +10,7 @@ module(
 bazel_dep(name = "abseil-cpp", version = "20250814.1")
 bazel_dep(name = "apple_support", version = "2.9.1")
 bazel_dep(name = "bazel_linux_packages", version = "0.4.1")
-bazel_dep(name = "bazel_features", version = "1.51.0")
+bazel_dep(name = "bazel_features", version = "1.54.0")
 bazel_dep(name = "bazel_skylib", version = "1.7.1")
 bazel_dep(name = "nlohmann_json", version = "3.12.0.bcr.1")
 bazel_dep(name = "platforms", version = "0.0.11")

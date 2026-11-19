@@ -1,7 +1,12 @@
 """Defines all the features this module supports detecting."""
 
 load("@bazel_features_globals//:globals.bzl", "globals")
-load("//private:util.bzl", "ge", "ge_same_major", "gt", "lt")
+load("//private:util.bzl", "ge", "ge_same_major", "gt", "incompatible", "lt")
+
+# Whether the toolchain types in @bazel_tools are aliases of the types in rules_cc, rules_java and
+# rules_python. The default will be flipped based on the Bazel version, with
+# --repo_env=BAZEL_INCOMPATIBLE_TOOLCHAIN_TYPES_IN_RULES=0|1 as an escape hatch.
+_TOOLCHAIN_TYPES_IN_RULES = incompatible("BAZEL_INCOMPATIBLE_TOOLCHAIN_TYPES_IN_RULES", default = False)
 
 _apple = struct(
     # From Bazel 8.0.0 on, the `xcode_version_flag` is available and the `XcodeVersionConfig`
@@ -66,7 +71,9 @@ _cc = struct(
     _get_link_args_has_param_file_name = ge("10.0.0-pre.20260608.1"),
     # Whether map_directory() can handle additional_params needed for create_cc_compile_action
     # https://github.com/bazelbuild/bazel/commit/0d277213563ce36408f105f01b8f08b043c5fbaf
-    _map_directory_supports_cc_compile = ge("10.0.0rc1")
+    _map_directory_supports_cc_compile = ge("10.0.0rc1") or ge("10.0.0-pre.20261001.2"),
+    # See _TOOLCHAIN_TYPES_IN_RULES.
+    _toolchain_type_in_rules_cc = _TOOLCHAIN_TYPES_IN_RULES,
 )
 
 _docs = struct(
@@ -138,6 +145,9 @@ _java = struct(
     # https://github.com/bazelbuild/bazel/commit/d2783a3c3d1b899beb674e029bfea3519062e8be (HEAD)
     # https://github.com/bazelbuild/bazel/commit/e2249f91ff84541565d8ba841592a0a8a43fcb66 (7.0.0)
     java_info_constructor_module_flags = ge_same_major("7.0.0") or ge("8.0.0-pre.20240101.1"),
+    # Internal only, don't use outside rules_java.
+    # See _TOOLCHAIN_TYPES_IN_RULES.
+    _toolchain_type_in_rules_java = _TOOLCHAIN_TYPES_IN_RULES,
 )
 
 _proto = struct(
@@ -147,6 +157,9 @@ _proto = struct(
 )
 
 _rules = struct(
+    # Whether the native label_flag and label_setting rules have a scope attribute.
+    # https://github.com/bazelbuild/bazel/commit/aee948b9ef8a003846d6867bb018219ce580027e
+    label_build_setting_has_scope = ge("9.0.0-pre.20250106.2"),
     # Whether runfiles may contain all characters. Support for all characters added in:
     # https://github.com/bazelbuild/bazel/commit/c9115305cb81e7fe645f91ca790642cab136b2a1
     all_characters_allowed_in_runfiles = ge("7.4.0"),
@@ -210,6 +223,8 @@ _rules = struct(
     # TODO: Use a larger version range after cherry-picking
     # https://github.com/bazelbuild/bazel/commit/e81949554f3ecab5e2c4afd79031f498f36427fe
     _has_launcher_maker_toolchain = ge_same_major("8.3.0") or ge("9.0.0-pre.20250516.1"),
+    # See _TOOLCHAIN_TYPES_IN_RULES.
+    _toolchain_type_in_rules_python = _TOOLCHAIN_TYPES_IN_RULES,
 )
 
 _toolchains = struct(
