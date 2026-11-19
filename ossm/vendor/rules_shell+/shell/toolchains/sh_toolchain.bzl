@@ -21,17 +21,12 @@ def _sh_toolchain_impl(ctx):
         platform_common.ToolchainInfo(
             path = ctx.attr.path,
             launcher = ctx.executable.launcher,
-            launcher_maker = ctx.executable.launcher_maker,
         ),
     ]
 
 sh_toolchain = rule(
     doc = "A runtime toolchain for shell targets.",
     attrs = {
-        "path": attr.string(
-            doc = "Absolute path to the shell interpreter.",
-            mandatory = True,
-        ),
         "launcher": attr.label(
             doc = "The generic launcher binary to use to run sh_binary/sh_test targets (only used when targeting Windows).",
             cfg = "target",
@@ -39,10 +34,14 @@ sh_toolchain = rule(
             executable = True,
         ),
         "launcher_maker": attr.label(
-            doc = "The tool to use to create a target-specific launcher from the generic launcher binary (only used when targeting Windows).",
+            doc = "No-op.",
             cfg = "exec",
             allow_single_file = True,
             executable = True,
+        ),
+        "path": attr.string(
+            doc = "Absolute path to the shell interpreter.",
+            mandatory = True,
         ),
     },
     implementation = _sh_toolchain_impl,

@@ -352,8 +352,7 @@ function bazel_envoy_api_build() {
         --remote_download_minimal \
         -c fastbuild \
         @envoy_api//test/... \
-        @envoy_api//tools/... \
-        @envoy_api//tools:tap2pcap_test
+        @envoy_api//tools/...
     echo "Building API..."
     bazel build "${BAZEL_BUILD_OPTIONS[@]}" \
         -c fastbuild @envoy_api//envoy/...
@@ -801,6 +800,12 @@ case $CI_TARGET in
         registry_check
         echo "Check bazel lockfiles ..."
         lockfiles_check
+        echo "Check dependency release dates/releases ..."
+        bazel test "${BAZEL_BUILD_OPTIONS[@]}" \
+              //tools/dependency:check_dependencies_test
+        bazel run "${BAZEL_BUILD_OPTIONS[@]}" //tools/dependency:check \
+              -- -v warn \
+                 -c release_dates releases
         echo "Check dependabot ..."
         bazel run "${BAZEL_BUILD_OPTIONS[@]}" \
               //tools/dependency:dependatool

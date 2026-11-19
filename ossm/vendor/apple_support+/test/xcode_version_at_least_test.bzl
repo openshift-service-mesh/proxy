@@ -15,6 +15,7 @@
 """Tests for the `xcode_version_at_least` macro and rule."""
 
 load("@bazel_features//:features.bzl", "bazel_features")
+load("@bazel_features//private:util.bzl", "ge")
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load(
     "//xcode:xcode_config.bzl",
@@ -82,6 +83,8 @@ _select_xcode_26_4_0_test = _make_xcode_select_test("26.4.0.17E192")
 _select_xcode_26_4_1_test = _make_xcode_select_test("26.4.1.17E202")
 _select_xcode_27_0_beta_test = _make_xcode_select_test("27.0.0.27A5228h")
 _select_xcode_padded_26_test = _make_xcode_select_test("26")
+_DEVELOPER_DIR_CONFIG = "xcode_version_at_least_test__developer_dir_config"
+_select_xcode_developer_dir_test = _make_xcode_select_test("", config_name = _DEVELOPER_DIR_CONFIG)
 
 # ------------------------------------------------------------------------------
 
@@ -168,12 +171,31 @@ def _test_single_threshold(namer):
         expected_value = "matched",
     )
 
-    return [
+    tests = [
         "single_threshold_below",
         "single_threshold_equal",
         "single_threshold_above_patch",
         "single_threshold_above_major_beta",
     ]
+    if ge("9.0.0"):
+        xcode_version(
+            name = namer("developer_dir"),
+            version = "/Applications/Xcode.app/Contents/Developer",
+            tags = FIXTURE_TAGS,
+        )
+        xcode_config(
+            name = _DEVELOPER_DIR_CONFIG,
+            default = namer(":developer_dir"),
+            versions = [namer(":developer_dir")],
+            tags = FIXTURE_TAGS,
+        )
+        _select_xcode_developer_dir_test(
+            name = "single_threshold_developer_dir",
+            target_under_test = namer(":single_holder"),
+            expected_value = "matched",
+        )
+        tests.append("single_threshold_developer_dir")
+    return tests
 
 def _test_precisions_and_build_numbers(namer):
     cases = [
@@ -313,11 +335,21 @@ def _test_qualified_labels_in_after(namer):
         minimum_xcode_version = "26.4",
         tags = FIXTURE_TAGS,
     )
+    xcode_version_at_least(
+        name = namer("qual_27_0"),
+        after = [
+            Label("@apple_support//test:" + namer("qual_26_2")),
+            "@apple_support//test:" + namer("qual_26_4"),
+        ],
+        minimum_xcode_version = "27.0",
+        tags = FIXTURE_TAGS,
+    )
     _select_holder(
         name = namer("qual_holder"),
         selected_value = select({
             namer(":qual_26_2"): "xcode_26_2_or_newer",
             namer(":qual_26_4"): "xcode_26_4_or_newer",
+            namer(":qual_27_0"): "xcode_27_0_or_newer",
             "//conditions:default": "older_than_26_2",
         }),
         tags = FIXTURE_TAGS,
@@ -328,8 +360,68 @@ def _test_qualified_labels_in_after(namer):
         target_under_test = namer(":qual_holder"),
         expected_value = "xcode_26_4_or_newer",
     )
+    _select_xcode_27_0_beta_test(
+        name = "label_objects_in_after_match_refined",
+        target_under_test = namer(":qual_holder"),
+        expected_value = "xcode_27_0_or_newer",
+    )
 
-    return ["qualified_labels_in_after_matches_refined"]
+    return [
+        "qualified_labels_in_after_matches_refined",
+        "label_objects_in_after_match_refined",
+    ]
+
+def _test_same_package_label_inheritance(namer):
+    xcode_version_at_least(
+        name = namer("base"),
+        minimum_xcode_version = "26.2",
+        tags = FIXTURE_TAGS,
+    )
+    xcode_version_at_least(
+        name = namer("middle"),
+        after = [namer(":base")],
+        minimum_xcode_version = "26.4",
+        tags = FIXTURE_TAGS,
+    )
+
+    base_label = Label("//test:" + namer("base"))
+    middle_label = Label("//test:" + namer("middle"))
+    cases = [
+        ("package_qualified", ["//test:" + namer("middle")], {}),
+        ("repo_qualified", ["@apple_support//test:" + namer("middle")], {}),
+        ("canonical", [str(middle_label)], {}),
+        ("label_object", [middle_label], {}),
+        ("mixed_references", [base_label, namer(":middle")], {}),
+        ("explicit_flag_values", [middle_label], {namer(":middle") + "_flag": "True"}),
+    ]
+    test_names = []
+    for suffix, after, flag_values in cases:
+        xcode_version_at_least(
+            name = namer(suffix),
+            after = after,
+            flag_values = flag_values,
+            minimum_xcode_version = "27.0",
+            tags = FIXTURE_TAGS,
+        )
+        _select_holder(
+            name = namer(suffix + "_holder"),
+            selected_value = select({
+                namer(":base"): "base",
+                namer(":middle"): "middle",
+                namer(":" + suffix): "highest",
+                "//conditions:default": "default",
+            }),
+            tags = FIXTURE_TAGS,
+        )
+        test_name = "same_package_inheritance_" + suffix
+        _select_xcode_27_0_beta_test(
+            name = test_name,
+            target_under_test = namer(":" + suffix + "_holder"),
+            expected_value = "highest",
+        )
+        test_names.append(test_name)
+
+    return test_names
 
 def _expect_failure_message_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -431,6 +523,7 @@ def xcode_version_at_least_test(name):
             _test_padded_versions,
             _test_chained_select_refinement,
             _test_qualified_labels_in_after,
+            _test_same_package_label_inheritance,
             _test_after_conflicts,
         ] if bazel_features.apple.xcode_config_migrated else [],  # TODO: Remove once we test with Bazel 8+
     )

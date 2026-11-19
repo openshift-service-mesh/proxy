@@ -443,16 +443,26 @@ std::vector<std::string> FullArgsForDisplay(
 // also advanced if necessary past any additional flags (e.g., a path following
 // a flag).
 bool SkipLayeringCheckIncompatibleArgs(std::vector<std::string>::iterator& it) {
-  if (*it == "-emit-module" || *it == "-emit-module-interface" ||
-      *it == "-emit-object" || *it == "-emit-objc-header" ||
-      *it == "-whole-module-optimization") {
+  static const absl::flat_hash_set<absl::string_view> kFlagsToSkip = {
+      "-emit-module", "-emit-module-interface", "-emit-objc-header",
+      "-emit-object", "-incremental",           "-whole-module-optimization",
+  };
+  static const absl::flat_hash_set<absl::string_view> kFlagsWithValuesToSkip = {
+      "-o",
+      "-output-file-map",
+      "-emit-module-path",
+      "-emit-module-interface-path",
+      "-emit-objc-header-path",
+      "-emit-clang-header-path",
+      "-emit-const-values-path",
+      "-num-threads",
+  };
+
+  if (kFlagsToSkip.contains(*it)) {
     // Skip just this argument.
     return true;
   }
-  if (*it == "-o" || *it == "-output-file-map" || *it == "-emit-module-path" ||
-      *it == "-emit-module-interface-path" || *it == "-emit-objc-header-path" ||
-      *it == "-emit-clang-header-path" || *it == "-emit-const-values-path" ||
-      *it == "-num-threads") {
+  if (kFlagsWithValuesToSkip.contains(*it)) {
     // This flag has a value after it that we also need to skip.
     ++it;
     return true;
@@ -879,9 +889,11 @@ int SwiftRunner::PerformLayeringCheck(std::ostream& stderr_stream,
   // Run the compiler again, this time using `-emit-imported-modules` to
   // override whatever other behavior was requested and get the list of imported
   // modules.
+  // Replace only the last extension: targets named `Foo.Bar` and `Foo.Baz` in
+  // the same package must not share `Foo.imported-modules`.
   std::string imported_modules_path =
       ReplaceExtension(deps_modules_path_, ".imported-modules",
-                       /*all_extensions=*/true);
+                       /*all_extensions=*/false);
 
   std::vector<std::string> emit_imports_args;
   for (auto it = args_.begin(); it != args_.end(); ++it) {

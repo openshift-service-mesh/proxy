@@ -22,7 +22,7 @@ load(
     "//xcode:providers.bzl",
     "XcodeVersionPropertiesInfo",
 )
-load("//xcode:xcode_config.bzl", "xcode_config")
+load("//xcode:xcode_config.bzl", "detected_xcodes", "xcode_config")
 load("//xcode:xcode_version.bzl", "xcode_version")
 load(":test_helpers.bzl", "FIXTURE_TAGS", "find_action", "make_all_tests")
 
@@ -620,7 +620,9 @@ def _invalid_xcode_from_mutual_throws(namer):
 
 def _invalid_xcode_from_mutual_throws_test_impl(ctx):
     env = analysistest.begin(ctx)
-    asserts.expect_failure(env, "--xcode_version=6 specified, but '6' is not an available Xcode version. Locally available versions: [8.4]. Remotely available versions: [5.1.2, 8.4].")
+    asserts.expect_failure(env, "Xcode 6 was not found.")
+    asserts.expect_failure(env, "Detected locally: 8.4")
+    asserts.expect_failure(env, "Available remotely: 5.1.2, 8.4")
     return analysistest.end(env)
 
 _invalid_xcode_from_mutual_throws_test = analysistest.make(
@@ -1174,7 +1176,8 @@ def _invalid_xcode_specified(namer):
 
 def _invalid_xcode_specified_test_impl(ctx):
     env = analysistest.begin(ctx)
-    asserts.expect_failure(env, "--xcode_version=6 specified, but '6' is not an available Xcode version. If you believe you have '6' installed")
+    asserts.expect_failure(env, "Bazel couldn’t match the selected Xcode to this project’s supported versions:")
+    asserts.expect_failure(env, "\n  6\n\n")
     return analysistest.end(env)
 
 _invalid_xcode_specified_test = analysistest.make(
@@ -1188,6 +1191,78 @@ _invalid_xcode_specified_test = analysistest.make(
             "//test:invalid_xcode_specified__foo",
         )),
     },
+    expect_failure = True,
+)
+
+# ------------------------------------------------------------------------------
+
+def _detected_xcode_diagnostics(namer):
+    xcode_version(
+        name = namer("supported"),
+        version = "26.5.0.17F42",
+        aliases = ["17F42"],
+        tags = FIXTURE_TAGS,
+    )
+    tests = []
+    for case, versions, selected, hint in [
+        ("unsupported", ["27.0.27A266a"], "27.0 (build 27A266a)", None),
+        ("normalized_duplicates", ["27.0.27A266a", "27.0.0.27A266a"], "27.0 (build 27A266a)", None),
+        ("ambiguous", ["27.0.27A266a", "27.1.27A266a"], "27A266a", None),
+        ("unknown", ["26.5.17F42"], "27A266a", None),
+        ("empty", [], "27A266a", None),
+        ("custom_hint", ["27.0.27A266a"], "27.0 (build 27A266a)", "Follow https://example.com/xcode\nThen run ./setup-xcode {team}."),
+        ("empty_hint", ["27.0.27A266a"], "27.0 (build 27A266a)", ""),
+    ]:
+        detected_xcodes(
+            name = namer(case + "_detected"),
+            versions = versions,
+            tags = FIXTURE_TAGS,
+        )
+        xcode_config(
+            name = namer(case + "_config"),
+            default = namer(":supported"),
+            versions = [namer(":supported")],
+            detected_versions = namer(":" + case + "_detected"),
+            tags = FIXTURE_TAGS,
+            **({"xcode_selection_hint": hint} if hint != None else {})
+        )
+        name = "detected_xcode_diagnostics_" + case
+        _detected_xcode_diagnostics_test(
+            name = name,
+            target_under_test = namer(":" + case + "_config"),
+            expected_selected = selected,
+            expect_detected = bool(versions),
+            expected_hint = hint if hint != None else "Install a supported Xcode version and select it with",
+            custom_hint = hint != None,
+        )
+        tests.append(name)
+    return tests
+
+def _detected_xcode_diagnostics_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "Bazel couldn’t match the selected Xcode to this project’s supported versions:")
+    asserts.expect_failure(env, "\n  " + ctx.attr.expected_selected + "\n\n")
+    asserts.expect_failure(env, "26.5 (build 17F42)")
+    errors = "\n".join([cause.message for cause in analysistest.target_under_test(env)[AnalysisFailureInfo].causes.to_list()])
+    if ctx.attr.expected_hint:
+        asserts.expect_failure(env, ctx.attr.expected_hint)
+    if ctx.attr.custom_hint:
+        asserts.false(env, "Install a supported Xcode version and select it with" in errors)
+    if ctx.attr.expect_detected:
+        asserts.expect_failure(env, "Detected locally:")
+    else:
+        asserts.false(env, "Detected locally:" in errors)
+    return analysistest.end(env)
+
+_detected_xcode_diagnostics_test = analysistest.make(
+    _detected_xcode_diagnostics_test_impl,
+    attrs = {
+        "expected_selected": attr.string(),
+        "expect_detected": attr.bool(),
+        "expected_hint": attr.string(),
+        "custom_hint": attr.bool(),
+    },
+    config_settings = {"//command_line_option:xcode_version": "27A266a"},
     expect_failure = True,
 )
 
@@ -1644,6 +1719,51 @@ _default_sdk_versions_selected_xcode_test = analysistest.make(
             "//test:default_sdk_versions_selected_xcode__foo",
         )),
         "//command_line_option:xcode_version": "6",
+    },
+)
+
+# ------------------------------------------------------------------------------
+
+def _native_xcode_properties(namer):
+    xcode_config(
+        name = "native_xcode_properties__foo",
+        default = namer(":version512"),
+        versions = [namer(":version512")],
+        tags = FIXTURE_TAGS,
+    )
+    xcode_version(
+        name = namer("version512"),
+        default_ios_sdk_version = "101",
+        version = "5.1.2",
+        tags = FIXTURE_TAGS,
+    )
+
+    _native_xcode_properties_test(
+        name = "native_xcode_properties",
+        target_under_test = "native_xcode_properties__foo",
+    )
+    return ["native_xcode_properties"]
+
+def _native_xcode_properties_test_impl(ctx):
+    env = analysistest.begin(ctx)
+
+    target_under_test = analysistest.target_under_test(env)
+    xcode_properties = target_under_test[apple_common.XcodeProperties]
+
+    asserts.equals(env, "5.1.2", xcode_properties.xcode_version)
+    asserts.equals(env, "101", xcode_properties.default_ios_sdk_version)
+
+    return analysistest.end(env)
+
+_native_xcode_properties_test = analysistest.make(
+    _native_xcode_properties_test_impl,
+    config_settings = {
+        "//command_line_option:xcode_version_config": str(Label(
+            "//test:native_xcode_properties__foo",
+        )),
+        str(Label("//xcode:starlark_version_config")): str(Label(
+            "//test:native_xcode_properties__foo",
+        )),
     },
 )
 
@@ -2184,6 +2304,60 @@ _available_xcodes_mode_with_flag_test = analysistest.make(
 
 # ------------------------------------------------------------------------------
 
+def _xcode_config_resolver_remote_only(namer):
+    _make_xcode_fixtures(
+        namer = namer,
+        xcode_config_name = "xcode_config_resolver_remote_only__xcodes",
+        remote_versions = [
+            struct(name = "remote_version", version = "26.5.0.17F42", aliases = ["17F42"], is_default = True),
+        ],
+        local_versions = [
+            struct(name = "local_version", version = "27.2.0.27B52", is_default = True),
+        ],
+    )
+
+    # Model the generated local configuration: it cannot resolve the requested
+    # remote build and must not be analyzed through the unused Starlark flag.
+    xcode_config(
+        name = "xcode_config_resolver_remote_only__local_xcodes",
+        default = namer(":local_version"),
+        versions = [namer(":local_version")],
+        tags = FIXTURE_TAGS,
+    )
+    _xcode_config_resolver_remote_only_test(
+        name = "xcode_config_resolver_remote_only",
+        target_under_test = "//xcode:version_config",
+    )
+    return ["xcode_config_resolver_remote_only"]
+
+def _xcode_config_resolver_remote_only_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    xcode_version_info = target[apple_common.XcodeVersionConfig]
+    asserts.equals(env, "26.5.0.17F42", str(xcode_version_info.xcode_version()))
+    asserts.equals(env, "26.5.0.17F42", target[XcodeVersionPropertiesInfo].xcode_version)
+    asserts.equals(env, "remote", xcode_version_info.availability())
+    asserts.true(env, "no-local" in xcode_version_info.execution_info())
+    asserts.false(env, "no-remote" in xcode_version_info.execution_info())
+    return analysistest.end(env)
+
+_xcode_config_resolver_remote_only_test = analysistest.make(
+    _xcode_config_resolver_remote_only_test_impl,
+    config_settings = {
+        "//command_line_option:xcode_version": "17F42",
+        "//command_line_option:xcode_version_config": str(Label(
+            "//test:xcode_config_resolver_remote_only__xcodes",
+        )),
+        str(Label("//xcode:starlark_version_config")): str(Label(
+            "//test:xcode_config_resolver_remote_only__local_xcodes",
+        )),
+    } | ({
+        "//command_line_option:incompatible_remove_ctx_apple_fragment": "false",
+    } if ge("10.0.0-pre.20260112.1") else {}),
+)
+
+# ------------------------------------------------------------------------------
+
 def _xcode_config_resolver_with_fragment_removed(namer):
     _make_xcode_fixtures(
         namer = namer,
@@ -2327,6 +2501,7 @@ def xcode_config_test(name):
             _valid_alias_dotted_version,
             _valid_alias_nonnumerical,
             _invalid_xcode_specified,
+            _detected_xcode_diagnostics,
             _requires_default,
             _duplicate_aliases_defined_version,
             _duplicate_aliases_within_available_xcodes,
@@ -2346,9 +2521,13 @@ def xcode_config_test(name):
             _available_xcodes_mode_different_alias,
             _available_xcodes_mode_different_alias_fully_specified,
             _available_xcodes_mode_with_flag,
+            _xcode_config_resolver_remote_only,
         ] + ([
             _xcode_config_resolver_with_fragment_removed,
-        ] if _SUPPORTS_INCOMPATIBLE_REMOVE_CTX_APPLE_FRAGMENT else [])) if bazel_features.apple.xcode_config_migrated else [],
+        ] if _SUPPORTS_INCOMPATIBLE_REMOVE_CTX_APPLE_FRAGMENT else []) + ([
+            # TODO: Remove once we no longer support Bazel 8.
+            _native_xcode_properties,
+        ] if getattr(apple_common, "XcodeProperties", None) else [])) if bazel_features.apple.xcode_config_migrated else [],
     )
 
     # TODO: b/311385128 - The following tests from `XcodeConfigTest.java`

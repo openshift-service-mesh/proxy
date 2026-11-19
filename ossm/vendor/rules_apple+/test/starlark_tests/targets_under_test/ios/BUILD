@@ -51,6 +51,7 @@ load(
     "//apple:xctrunner.bzl",
     "xctrunner",
 )
+load("//apple/testing/default_runner:ios_xctestrun_runner.bzl", "ios_xctestrun_runner")
 load(
     "//test/starlark_tests:common.bzl",
     "common",
@@ -4895,6 +4896,41 @@ ios_unit_test(
     deps = [":coverage_hosted_test_lib"],
 )
 
+ios_xctestrun_runner(
+    name = "coverage_export_runner",
+    export_covered_binaries = True,
+)
+
+ios_unit_test(
+    name = "coverage_export_only_test",
+    collect_code_coverage = False,
+    minimum_os_version = common.min_os_ios.baseline,
+    runner = ":coverage_export_runner",
+    tags = common.fixture_tags,
+    test_host = ":coverage_app",
+    deps = [":coverage_hosted_test_lib"],
+)
+
+ios_unit_test(
+    name = "coverage_export_disabled_test",
+    collect_code_coverage = False,
+    minimum_os_version = common.min_os_ios.baseline,
+    runner = "//apple/testing/default_runner:ios_xctestrun_ordered_runner",
+    tags = common.fixture_tags,
+    test_host = ":coverage_app",
+    deps = [":coverage_hosted_test_lib"],
+)
+
+ios_unit_test(
+    name = "coverage_export_with_lcov_test",
+    collect_code_coverage = True,
+    minimum_os_version = common.min_os_ios.baseline,
+    runner = ":coverage_export_runner",
+    tags = common.fixture_tags,
+    test_host = ":coverage_app",
+    deps = [":coverage_hosted_test_lib"],
+)
+
 ios_unit_test(
     name = "coverage_standalone_test",
     size = "large",
@@ -5105,6 +5141,26 @@ ios_ui_test(
 )
 
 ios_ui_test(
+    name = "ui_test_with_fmwk_importing_fmwk",
+    families = [
+        "iphone",
+        "ipad",
+    ],
+    frameworks = [
+        ":fmwk_with_imported_fmwk",
+    ],
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_ios.baseline,
+    tags = common.fixture_tags,
+    test_host = ":app_with_imported_fmwk",
+    deps = [
+        "//test/starlark_tests/resources:objc_test_lib",
+    ],
+)
+
+ios_ui_test(
     name = "ui_test_dummy_runner",
     families = [
         "iphone",
@@ -5279,6 +5335,45 @@ ios_unit_test(
     ],
     frameworks = [
         ":fmwk",
+    ],
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_ios.baseline,
+    tags = common.fixture_tags,
+    deps = [
+        "//test/starlark_tests/resources:objc_test_lib",
+    ],
+)
+
+ios_unit_test(
+    name = "unit_test_with_host_and_fmwk_importing_same_fmwk",
+    families = [
+        "iphone",
+        "ipad",
+    ],
+    frameworks = [
+        ":fmwk_with_imported_fmwk",
+    ],
+    infoplists = [
+        "//test/starlark_tests/resources:Info.plist",
+    ],
+    minimum_os_version = common.min_os_ios.baseline,
+    tags = common.fixture_tags,
+    test_host = ":app_with_imported_fmwk",
+    deps = [
+        "//test/starlark_tests/resources:objc_test_lib",
+    ],
+)
+
+ios_unit_test(
+    name = "unit_test_with_fmwk_importing_fmwk",
+    families = [
+        "iphone",
+        "ipad",
+    ],
+    frameworks = [
+        ":fmwk_with_imported_fmwk",
     ],
     infoplists = [
         "//test/starlark_tests/resources:Info.plist",

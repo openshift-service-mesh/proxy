@@ -41,6 +41,7 @@ func TestBreaking(t *testing.T) {
 	testRunGazelle(t, "breaking_package")
 	testRunGazelle(t, "breaking_package_to_module")
 	testRunGazelle(t, "v2/breaking_module")
+	testRunGazelle(t, "v2/breaking_module_ignored_dirs")
 	testRunGazelle(t, "v2/breaking_package")
 	testRunGazelle(t, "v2/breaking_package_to_module")
 }
@@ -97,7 +98,11 @@ func testRunGazelle(t *testing.T, name string, gazelleArgs ...string) {
 		inputs, goldens := getTestData(t, path.Join("gazelle/buf/testdata", name))
 		dir, cleanup := testtools.CreateFiles(t, inputs)
 		defer cleanup()
-		cmd := exec.Command(gazellePath, append(gazelleArgs, "-build_file_name=BUILD")...)
+		// update-repos doesn't accept -build_file_name.
+		if len(gazelleArgs) == 0 || gazelleArgs[0] != "update-repos" {
+			gazelleArgs = append(gazelleArgs, "-build_file_name=BUILD")
+		}
+		cmd := exec.Command(gazellePath, gazelleArgs...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Dir = dir

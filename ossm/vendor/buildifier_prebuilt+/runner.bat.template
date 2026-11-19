@@ -51,33 +51,69 @@ cd /d "%workspace_dir%" || exit /b 1
 
 :workspace_found
 REM Keep discovered paths inside PowerShell so cmd.exe never reparses them.
+REM Walk the workspace without entering excluded directories, matching each
+REM path like find's -path.
 REM Process files in batches to stay below CreateProcess' command-line limit,
-REM merging per-batch diagnostics when JSON output is requested.
+REM merging per-batch diagnostics when JSON or SARIF output is requested.
 set "BUILDIFIER_EXECUTABLE=%buildifier_path%"
 powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
     "$ErrorActionPreference = 'Stop';" ^
     "$buildifierArgs = @({POWERSHELL_ARGS});" ^
     "$files = @({SOURCE_FILES});" ^
     "if ({SCAN_WORKSPACE}) {" ^
-        "$workspacePrefix = (Get-Location).Path.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar;" ^
-        "$files = @(Get-ChildItem -LiteralPath . -Recurse -File | Where-Object {" ^
-            "($env:include_reparse_points -or -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) -and" ^
-            "$_.Name -cmatch '^(BUILD|WORKSPACE|WORKSPACE\.bzlmod|WORKSPACE\.oss|BUILD\..*\.oss|WORKSPACE\..*\.oss)$|\.(bzl|sky|star|bazel|BUILD)$'" ^
-        "} | ForEach-Object { $_.FullName.Substring($workspacePrefix.Length) });" ^
+        "$excludePatterns = @({POWERSHELL_EXCLUDE_PATTERNS});" ^
+        "$root = (Get-Location).Path;" ^
+        "$found = New-Object 'System.Collections.Generic.List[string]';" ^
+        "$pending = New-Object 'System.Collections.Generic.Stack[string]';" ^
+        "$pending.Push('');" ^
+        "while ($pending.Count -gt 0) {" ^
+            "$relativeDir = $pending.Pop();" ^
+            "foreach ($entry in [IO.DirectoryInfo]::new([IO.Path]::Combine($root, $relativeDir)).EnumerateFileSystemInfos()) {" ^
+                "if (-not $env:include_reparse_points -and ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue };" ^
+                "$relativePath = if ($relativeDir) { $relativeDir + '/' + $entry.Name } else { $entry.Name };" ^
+                "$excluded = $false;" ^
+                "foreach ($pattern in $excludePatterns) { if (('./' + $relativePath) -clike $pattern) { $excluded = $true; break } };" ^
+                "if ($excluded) { continue };" ^
+                "if ($entry.Attributes -band [IO.FileAttributes]::Directory) { $pending.Push($relativePath) }" ^
+                "elseif ($entry.Name -cmatch '^(BUILD|WORKSPACE|WORKSPACE\.bzlmod|WORKSPACE\.oss|BUILD\..*\.oss|WORKSPACE\..*\.oss)$|\.(bzl|sky|star|bazel|BUILD)$') { $found.Add($relativePath.Replace('/', '\')) }" ^
+            "}" ^
+        "};" ^
+        "$found.Sort([StringComparer]::Ordinal);" ^
+        "$files = @($found);" ^
     "};" ^
     "if ($files.Count -eq 0) { Write-Error 'Failed to find files to analyze'; exit 1 };" ^
     "$jsonOutput = '{FORMAT}' -eq 'json';" ^
+    "$sarifOutput = '{FORMAT}' -eq 'sarif';" ^
+    "$sarifBase = $null;" ^
+    "$sarifRules = New-Object System.Collections.ArrayList;" ^
+    "$sarifRuleIndex = @{};" ^
+    "$sarifResults = New-Object System.Collections.ArrayList;" ^
     "$exitCode = 0;" ^
     "$jsonSuccess = $true;" ^
     "$jsonFiles = @();" ^
     "for ($i = 0; $i -lt $files.Count; $i += 100) {" ^
         "$batch = @($files[$i..([Math]::Min($i + 99, $files.Count - 1))]);" ^
-        "if ($jsonOutput) {" ^
+        "if ($jsonOutput -or $sarifOutput) {" ^
             "$batchOutput = & $env:BUILDIFIER_EXECUTABLE @buildifierArgs @batch;" ^
             "if ($LASTEXITCODE -eq 0) {" ^
                 "$batchReport = ($batchOutput -join [Environment]::NewLine) | ConvertFrom-Json;" ^
-                "$jsonSuccess = $jsonSuccess -and [bool]$batchReport.success;" ^
-                "$jsonFiles += @($batchReport.files);" ^
+                "if ($jsonOutput) {" ^
+                    "$jsonSuccess = $jsonSuccess -and [bool]$batchReport.success;" ^
+                    "$jsonFiles += @($batchReport.files);" ^
+                "} else {" ^
+                    "if ($null -eq $sarifBase) { $sarifBase = $batchReport };" ^
+                    "$batchRules = @($batchReport.runs[0].tool.driver.rules);" ^
+                    "foreach ($rule in $batchRules) {" ^
+                        "if (-not $sarifRuleIndex.ContainsKey($rule.id)) {" ^
+                            "[void]$sarifRules.Add($rule);" ^
+                            "$sarifRuleIndex[$rule.id] = $sarifRules.Count - 1;" ^
+                        "}" ^
+                    "};" ^
+                    "foreach ($result in @($batchReport.runs[0].results)) {" ^
+                        "$result.ruleIndex = $sarifRuleIndex[$batchRules[$result.ruleIndex].id];" ^
+                        "[void]$sarifResults.Add($result);" ^
+                    "}" ^
+                "}" ^
             "}" ^
         "} else {" ^
             "& $env:BUILDIFIER_EXECUTABLE @buildifierArgs @batch;" ^
@@ -86,6 +122,11 @@ powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Comma
     "};" ^
     "if ($jsonOutput -and $exitCode -eq 0) {" ^
         "[ordered]@{ success = $jsonSuccess; files = [object[]]$jsonFiles } | ConvertTo-Json -Depth 10 -Compress:('{VERBOSE}' -ne 'true');" ^
+    "};" ^
+    "if ($sarifOutput -and $exitCode -eq 0 -and $null -ne $sarifBase) {" ^
+        "$sarifBase.runs[0].tool.driver.rules = $sarifRules.ToArray();" ^
+        "$sarifBase.runs[0].results = $sarifResults.ToArray();" ^
+        "$sarifBase | ConvertTo-Json -Depth 20 -Compress:('{VERBOSE}' -ne 'true');" ^
     "};" ^
     "exit $exitCode"
 exit /b %ERRORLEVEL%

@@ -35,7 +35,6 @@ sh_toolchain(
     name = "{os}_sh",
     path = {sh_path},
     launcher = "@bazel_tools//tools/launcher",
-    launcher_maker = "@bazel_tools//tools/launcher:launcher_maker",
 )
 """
 
@@ -84,6 +83,10 @@ def _sh_config_impl(repository_ctx):
     repository_ctx.file("BUILD", """
 load("@rules_shell//shell/toolchains:sh_toolchain.bzl", "sh_toolchain")
 """ + "\n".join(toolchains))
+
+    if hasattr(repository_ctx, "repo_metadata"):
+        return repository_ctx.repo_metadata(reproducible = False)
+    return None
 
 sh_config = repository_rule(
     environ = [

@@ -19,6 +19,37 @@ load(":providers.bzl", "ShBinaryInfo", "ShInfo")
 visibility(["//shell"])
 
 _SH_TOOLCHAIN_TYPE = Label("//shell:toolchain_type")
+_LAUNCHER_MAKER_TOOLCHAIN_TYPE = Label("@bazel_tools//tools/launcher:launcher_maker_toolchain_type")
+
+# The root symlink under which //shell/runfiles installs runfiles.bash; see
+# shell/runfiles/README.md.
+_RUNFILES_INIT_PATH = "bazel_tools/tools/bash/runfiles/runfiles.bash"
+
+# The launcher for `use_bash_launcher = True`: the v4 initialization snippet of
+# runfiles.bash, after which the runfiles variables and functions are exported
+# and the script exec'd.
+_LAUNCHER_TEMPLATE = """\
+{shebang}
+
+# --- begin runfiles.bash initialization v4 ---
+set -uo pipefail; set +e; f={init_path}; _rf_p=; _rf_a=
+if [ -n "${{AWK:-}}" ] || [ "${{RULES_SHELL_RUNFILES_USE_AWK:-}}" != 0 ]; then _rf_a=1; fi
+_rf_d() {{ [ -f "$1/$f" ] && _rf_p="$1/$f"; }}
+_rf_m() {{ [ -f "$1" ] || return 1; if [ -n "$_rf_a" ]; then \
+  _rf_p=$(${{AWK:-awk}} -v k="$f " 'index($0,k)==1{{print substr($0,length(k)+1);m=1;exit}}END{{exit !m}}' < "$1" 2>/dev/null); case $? in 0) return;; 1) return 1;; esac; fi; \
+  while IFS= read -r _rf_l || [ -n "$_rf_l" ]; do \
+  case "$_rf_l" in "$f "*) _rf_p="${{_rf_l#"$f "}}"; return;; esac; done < "$1"; return 1; }}
+_rf_d "${{RUNFILES_DIR:-/dev/null}}" || _rf_m "${{RUNFILES_MANIFEST_FILE:-/dev/null}}" || \
+  _rf_d "$0.runfiles" || _rf_m "$0.runfiles_manifest" || _rf_m "$0.exe.runfiles_manifest" || \
+  {{ echo>&2 "ERROR: cannot find $f"; exit 1; }}
+# shellcheck disable=SC1090
+. "$_rf_p" || {{ echo>&2 "ERROR: cannot source $_rf_p"; exit 1; }}; f=; unset -f _rf_d _rf_m; unset _rf_l _rf_p _rf_a; set -e
+# --- end runfiles.bash initialization v4 ---
+
+runfiles_export_envvars
+
+exec "$(rlocation "{src}")" "$@"
+"""
 
 def _to_rlocation_path(ctx, file):
     if file.short_path.startswith("../"):
@@ -51,24 +82,9 @@ def _sh_executable_impl(ctx):
             shebang = "#!{}".format(shell)
         ctx.actions.write(
             entrypoint,
-            content = """{shebang}
-
-# --- begin runfiles.bash initialization v3 ---
-set -uo pipefail; set +e; f=bazel_tools/tools/bash/runfiles/runfiles.bash
-# shellcheck disable=SC1090
-source "${{RUNFILES_DIR:-/dev/null}}/$f" 2>/dev/null || \
-  source "$(grep -sm1 "^$f " "${{RUNFILES_MANIFEST_FILE:-/dev/null}}" | cut -f2- -d' ')" 2>/dev/null || \
-  source "$0.runfiles/$f" 2>/dev/null || \
-  source "$(grep -sm1 "^$f " "$0.runfiles_manifest" | cut -f2- -d' ')" 2>/dev/null || \
-  source "$(grep -sm1 "^$f " "$0.exe.runfiles_manifest" | cut -f2- -d' ')" 2>/dev/null || \
-  {{ echo>&2 "ERROR: cannot find $f"; exit 1; }}; f=; set -e
-# --- end runfiles.bash initialization v3 ---
-
-runfiles_export_envvars
-
-exec "$(rlocation "{src}")" "$@"
-""".format(
+            content = _LAUNCHER_TEMPLATE.format(
                 shebang = shebang,
+                init_path = _RUNFILES_INIT_PATH,
                 src = _to_rlocation_path(ctx, src),
             ),
             is_executable = True,
@@ -135,8 +151,8 @@ def _is_windows_executable(file):
     return file.extension in _WINDOWS_EXECUTABLE_EXTENSIONS
 
 def _create_windows_exe_launcher(ctx, sh_toolchain, primary_output):
-    if not sh_toolchain.launcher or not sh_toolchain.launcher_maker:
-        fail("Windows sh_toolchain requires both 'launcher' and 'launcher_maker' to be set")
+    if not sh_toolchain.launcher:
+        fail("Windows sh_toolchain requires 'launcher' to be set")
 
     bash_launcher = ctx.actions.declare_file(ctx.label.name + ".exe")
 
@@ -154,12 +170,12 @@ def _create_windows_exe_launcher(ctx, sh_toolchain, primary_output):
 
     launcher_artifact = sh_toolchain.launcher
     ctx.actions.run(
-        executable = sh_toolchain.launcher_maker,
+        executable = ctx.toolchains[_LAUNCHER_MAKER_TOOLCHAIN_TYPE].binary,
         inputs = [launcher_artifact],
         outputs = [bash_launcher],
         arguments = [launcher_artifact.path, launch_info, bash_launcher.path],
         use_default_shell_env = True,
-        toolchain = _SH_TOOLCHAIN_TYPE,
+        toolchain = _LAUNCHER_MAKER_TOOLCHAIN_TYPE,
     )
     return bash_launcher
 
@@ -189,19 +205,18 @@ def make_sh_executable_rule(doc, extra_attrs = {}, **kwargs):
         _sh_executable_impl,
         doc = doc,
         attrs = {
-            "srcs": attr.label_list(
-                allow_files = True,
+            "data": attr.label_list(
                 doc = """
-The file containing the shell script.
+Files needed by this rule at runtime. May list file or rule targets. Generally allows any target.
 <p>
-  This attribute must be a singleton list, whose element is the shell script.
-  This script must be executable, and may be a source file or a generated file.
-  All other files required at runtime (whether scripts or data) belong in the
-  <code>data</code> attribute.
+  The <code>runfiles</code> of targets in the <code>data</code> attribute appear in the
+  <code>*.runfiles</code> area of any executable which is output by or has a runtime dependency
+  on this target. This may include data files or binaries used when this target's
+  <code>srcs</code> are executed. See the
+  <a href="https://bazel.build/reference/be/common-definitions#typical.data">data dependencies</a>
+  section for more information about how to depend on and use data files.
 </p>
 """,
-            ),
-            "data": attr.label_list(
                 allow_files = True,
                 flags = ["SKIP_CONSTRAINTS_OVERRIDE"],
             ),
@@ -219,20 +234,55 @@ most build rules</a>.
 </p>
 """,
             ),
-            "_runfiles_dep": attr.label(
-                default = Label("//shell/runfiles"),
+            "env": attr.string_dict(
+                doc = """
+Specifies additional environment variables to set when the target is executed by
+<code>bazel run</code> (for <code>sh_binary</code>) or <code>bazel test</code> (for
+<code>sh_test</code>).
+<p>
+  Values are subject to
+  <a href="https://bazel.build/reference/be/make-variables#predefined_label_variables">$(location)</a>
+  and
+  <a href="https://bazel.build/reference/be/make-variables">"Make variable"</a> substitution.
+</p>
+<p>
+  <em class="harmful">NOTE: The environment variables are not set when you run the target
+  outside of Bazel (for example, by manually executing the binary in <code>bazel-bin/</code>).</em>
+</p>
+""",
             ),
-            "env": attr.string_dict(),
-            "env_inherit": attr.string_list(),
+            "env_inherit": attr.string_list(
+                doc = """
+Specifies additional environment variables to inherit from the external environment when the
+target is executed by <code>bazel test</code>. Has no effect on <code>bazel run</code>.
+""",
+            ),
+            "srcs": attr.label_list(
+                allow_files = True,
+                doc = """
+The file containing the shell script.
+<p>
+  This attribute must be a singleton list, whose element is the shell script.
+  This script must be executable, and may be a source file or a generated file.
+  All other files required at runtime (whether scripts or data) belong in the
+  <code>data</code> attribute.
+</p>
+""",
+            ),
             "use_bash_launcher": attr.bool(
                 doc = "Use a bash launcher initializing the runfiles library",
             ),
+            "_runfiles_dep": attr.label(
+                default = Label("//shell/runfiles"),
+            ),
+            "_use_auto_exec_groups": attr.bool(default = True),
             "_windows_constraint": attr.label(
                 default = "@platforms//os:windows",
             ),
         } | extra_attrs,
         toolchains = [
             config_common.toolchain_type(_SH_TOOLCHAIN_TYPE, mandatory = False),
+            config_common.toolchain_type(_LAUNCHER_MAKER_TOOLCHAIN_TYPE),
         ],
         provides = [ShBinaryInfo],
         **kwargs
