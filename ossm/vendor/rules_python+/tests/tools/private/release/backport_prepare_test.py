@@ -60,9 +60,14 @@ def test_prepare_from_issue_success(mocker, mock_git, mock_gh):
     mock_git.checkout.assert_has_calls(
         [
             call("release/1.7", track_remote="my-remote"),
+            call().__enter__(),
+            call().__exit__(None, None, None),
             call("release/1.8", track_remote="my-remote"),
+            call().__enter__(),
+            call().__exit__(None, None, None),
             call("release/1.9", track_remote="my-remote"),
-            call("work-branch"),  # Restored branch
+            call().__enter__(),
+            call().__exit__(None, None, None),
         ]
     )
 

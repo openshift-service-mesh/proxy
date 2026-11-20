@@ -6,6 +6,10 @@
 
 #include <cstdint>
 #include <optional>
+#include <type_traits>
+#include <utility>
+#include <variant>
+#include <vector>
 
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
@@ -18,6 +22,17 @@
 #include "quiche/common/test_tools/quiche_test_utils.h"
 
 namespace moqt::test {
+
+static_assert(std::is_nothrow_move_constructible_v<KeyValuePairList>);
+static_assert(std::is_nothrow_move_assignable_v<KeyValuePairList>);
+static_assert(!std::is_copy_constructible_v<MoqtProperties>);
+static_assert(!std::is_move_constructible_v<MoqtProperties>);
+static_assert(!std::is_copy_assignable_v<MoqtProperties>);
+static_assert(!std::is_move_assignable_v<MoqtProperties>);
+static_assert(std::is_nothrow_move_constructible_v<TrackProperties>);
+static_assert(std::is_nothrow_move_assignable_v<TrackProperties>);
+static_assert(std::is_nothrow_move_constructible_v<ObjectProperties>);
+static_assert(std::is_nothrow_move_assignable_v<ObjectProperties>);
 
 class LocationTest : public quic::test::QuicTest {};
 
@@ -220,6 +235,10 @@ TEST_F(MessageParametersTest, Update) {
   p1.expires = quic::QuicTimeDelta::FromMilliseconds(100);
   p1.set_forward(false);
   p1.subscriber_priority = 100;
+  p1.fill_parameters = FillParameters{
+      .fill_timeout = quic::QuicTimeDelta::FromMilliseconds(50),
+      .subscriber_priority = 5,
+  };
   p1.new_group_request = 1;
   p1.track_namespace_prefix = TrackNamespace({"foo"});
   MessageParameters p2;
@@ -239,6 +258,7 @@ TEST_F(MessageParametersTest, Update) {
   EXPECT_TRUE(p1.forward());
   EXPECT_EQ(p1.subscriber_priority, 100);
   EXPECT_EQ(p1.group_order, std::nullopt);
+  EXPECT_EQ(p1.fill_parameters, std::nullopt);
   EXPECT_EQ(p1.new_group_request, 1);
   EXPECT_EQ(p1.track_namespace_prefix, TrackNamespace({"bar"}));
 }
@@ -285,8 +305,10 @@ class TrackPropertiesTest : public quic::test::QuicTest {};
 TEST_F(TrackPropertiesTest, DefaultConstructor) {
   TrackProperties properties;
   EXPECT_TRUE(properties.Validate());
+  EXPECT_EQ(properties.size(), 0);
   EXPECT_EQ(properties.object_delivery_timeout(), kDefaultDeliveryTimeout);
   EXPECT_EQ(properties.max_cache_duration(), kDefaultMaxCacheDuration);
+  EXPECT_EQ(properties.subgroup_delivery_timeout(), kDefaultDeliveryTimeout);
   EXPECT_EQ(properties.default_publisher_priority(), kDefaultPublisherPriority);
   EXPECT_EQ(properties.default_publisher_group_order(), kDefaultGroupOrder);
   EXPECT_EQ(properties.dynamic_groups(), kDefaultDynamicGroups);
@@ -294,11 +316,18 @@ TEST_F(TrackPropertiesTest, DefaultConstructor) {
 }
 
 TEST_F(TrackPropertiesTest, AllProperties) {
-  TrackProperties properties(quic::QuicTimeDelta::FromMilliseconds(1),
-                             quic::QuicTimeDelta::FromMilliseconds(2),
-                             quic::QuicTimeDelta::FromMilliseconds(3),
-                             MoqtPriority(10), MoqtGroupOrder::kDescending,
-                             true, "properties");
+  TrackProperties properties({
+      {PropertyType::kObjectDeliveryTimeout,
+       quic::QuicTimeDelta::FromMilliseconds(1)},
+      {PropertyType::kMaxCacheDuration,
+       quic::QuicTimeDelta::FromMilliseconds(2)},
+      {PropertyType::kSubgroupDeliveryTimeout,
+       quic::QuicTimeDelta::FromMilliseconds(3)},
+      {PropertyType::kDefaultPublisherPriority, MoqtPriority(10)},
+      {PropertyType::kDefaultPublisherGroupOrder, MoqtGroupOrder::kDescending},
+      {PropertyType::kDynamicGroups, true},
+      {PropertyType::kImmutableProperties, "properties"},
+  });
   EXPECT_TRUE(properties.Validate());
   EXPECT_EQ(properties.object_delivery_timeout(),
             quic::QuicTimeDelta::FromMilliseconds(1));
@@ -313,86 +342,185 @@ TEST_F(TrackPropertiesTest, AllProperties) {
   EXPECT_EQ(properties.immutable_properties(), "properties");
 }
 
-TEST_F(TrackPropertiesTest, ExplicitDefaults) {
-  TrackProperties properties(kDefaultDeliveryTimeout, kDefaultMaxCacheDuration,
-                             kDefaultDeliveryTimeout, kDefaultPublisherPriority,
-                             kDefaultGroupOrder, kDefaultDynamicGroups, "");
-  EXPECT_TRUE(properties.Validate());
-  EXPECT_EQ(properties.size(), 0);
-  EXPECT_EQ(properties.object_delivery_timeout(), kDefaultDeliveryTimeout);
-  EXPECT_EQ(properties.max_cache_duration(), kDefaultMaxCacheDuration);
-  EXPECT_EQ(properties.subgroup_delivery_timeout(), kDefaultDeliveryTimeout);
-  EXPECT_EQ(properties.default_publisher_priority(), kDefaultPublisherPriority);
-  EXPECT_EQ(properties.default_publisher_group_order(), kDefaultGroupOrder);
-  EXPECT_EQ(properties.dynamic_groups(), kDefaultDynamicGroups);
-  EXPECT_TRUE(properties.immutable_properties().empty());
-}
-
 TEST_F(TrackPropertiesTest, Validate) {
   TrackProperties properties;
   // Unknown property.
-  properties.insert(0x42, 15ULL);
-  properties.insert(0x42, 25ULL);
+  properties.insert({0x42, 15ULL});
+  properties.insert({0x42, 25ULL});
   EXPECT_TRUE(properties.Validate());
 
-  properties.insert(static_cast<uint64_t>(PropertyType::kObjectDeliveryTimeout),
-                    5ULL);
-  properties.insert(static_cast<uint64_t>(PropertyType::kObjectDeliveryTimeout),
-                    6ULL);
+  properties.clear();
+  properties.insert({PropertyType::kDefaultPublisherPriority, 256ULL});
   EXPECT_FALSE(properties.Validate());
 
   properties.clear();
-  properties.insert(static_cast<uint64_t>(PropertyType::kMaxCacheDuration),
-                    5ULL);
-  properties.insert(static_cast<uint64_t>(PropertyType::kMaxCacheDuration),
-                    6ULL);
+  properties.insert({PropertyType::kDefaultPublisherGroupOrder, 0ULL});
+  EXPECT_FALSE(properties.Validate());
+  properties.clear();
+  properties.insert({PropertyType::kDefaultPublisherGroupOrder, 3ULL});
+  EXPECT_FALSE(properties.Validate());
+  properties.clear();
+  properties.insert({PropertyType::kDynamicGroups, 2ULL});
+  properties.insert({PropertyType::kDynamicGroups, 1ULL});
   EXPECT_FALSE(properties.Validate());
 
   properties.clear();
-  properties.insert(
-      static_cast<uint64_t>(PropertyType::kSubgroupDeliveryTimeout), 5ULL);
-  properties.insert(
-      static_cast<uint64_t>(PropertyType::kSubgroupDeliveryTimeout), 6ULL);
+  properties.insert({PropertyType::kDynamicGroups, 2ULL});
   EXPECT_FALSE(properties.Validate());
 
+  // Out-of-range value inside immutable properties also fails Validate().
   properties.clear();
-  properties.insert(
-      static_cast<uint64_t>(PropertyType::kDefaultPublisherPriority), 256ULL);
+  KeyValuePairList immutable;
+  immutable.insert({PropertyType::kDynamicGroups, 2ULL});
+  properties.AddImmutablePropertyList(immutable);
   EXPECT_FALSE(properties.Validate());
+}
+
+TEST_F(TrackPropertiesTest, IsMalformed) {
+  TrackProperties properties;
+  EXPECT_FALSE(properties.IsMalformed());
+
+  // Known track properties and unknown properties are not malformed.
+  properties.insert({PropertyType::kObjectDeliveryTimeout, 5ULL});
+  properties.insert({0x42, 15ULL});
+  properties.insert({0x42, 25ULL});
+  properties.insert({0x43, "unknown_odd"});
+  EXPECT_FALSE(properties.IsMalformed());
+
+  // Object-only properties render the track malformed.
+  TrackProperties prior_group_gap;
+  prior_group_gap.insert({PropertyType::kPriorGroupIdGap, 1ULL});
+  EXPECT_TRUE(prior_group_gap.IsMalformed());
+
+  TrackProperties prior_object_gap;
+  prior_object_gap.insert({PropertyType::kPriorObjectIdGap, 1ULL});
+  EXPECT_TRUE(prior_object_gap.IsMalformed());
+
+  // Duplicate known properties render the track malformed (but pass Validate).
   properties.clear();
-  properties.insert(
-      static_cast<uint64_t>(PropertyType::kDefaultPublisherPriority), 0ULL);
-  properties.insert(
-      static_cast<uint64_t>(PropertyType::kDefaultPublisherPriority), 1ULL);
-  EXPECT_FALSE(properties.Validate());
+  properties.insert({PropertyType::kObjectDeliveryTimeout, 5ULL});
+  properties.insert({PropertyType::kObjectDeliveryTimeout, 6ULL});
+  EXPECT_TRUE(properties.Validate());
+  EXPECT_TRUE(properties.IsMalformed());
 
   properties.clear();
-  properties.insert(
-      static_cast<uint64_t>(PropertyType::kDefaultPublisherGroupOrder), 0ULL);
-  EXPECT_FALSE(properties.Validate());
-  properties.clear();
-  properties.insert(
-      static_cast<uint64_t>(PropertyType::kDefaultPublisherGroupOrder), 3ULL);
-  EXPECT_FALSE(properties.Validate());
-  properties.clear();
-  properties.insert(static_cast<uint64_t>(PropertyType::kDynamicGroups), 2ULL);
-  properties.insert(static_cast<uint64_t>(PropertyType::kDynamicGroups), 1ULL);
-  EXPECT_FALSE(properties.Validate());
+  properties.insert({PropertyType::kMaxCacheDuration, 5ULL});
+  properties.insert({PropertyType::kMaxCacheDuration, 6ULL});
+  EXPECT_TRUE(properties.Validate());
+  EXPECT_TRUE(properties.IsMalformed());
 
   properties.clear();
-  properties.insert(static_cast<uint64_t>(PropertyType::kDynamicGroups), 2ULL);
-  EXPECT_FALSE(properties.Validate());
-  properties.clear();
-  properties.insert(static_cast<uint64_t>(PropertyType::kDynamicGroups), 0ULL);
-  properties.insert(static_cast<uint64_t>(PropertyType::kDynamicGroups), 1ULL);
-  EXPECT_FALSE(properties.Validate());
+  properties.insert({PropertyType::kSubgroupDeliveryTimeout, 5ULL});
+  properties.insert({PropertyType::kSubgroupDeliveryTimeout, 6ULL});
+  EXPECT_TRUE(properties.Validate());
+  EXPECT_TRUE(properties.IsMalformed());
 
   properties.clear();
-  properties.insert(static_cast<uint64_t>(PropertyType::kImmutableProperties),
-                    "foo");
-  properties.insert(static_cast<uint64_t>(PropertyType::kImmutableProperties),
-                    "bar");
-  EXPECT_FALSE(properties.Validate());
+  properties.insert({PropertyType::kDefaultPublisherPriority, 0ULL});
+  properties.insert({PropertyType::kDefaultPublisherPriority, 1ULL});
+  EXPECT_TRUE(properties.Validate());
+  EXPECT_TRUE(properties.IsMalformed());
+
+  properties.clear();
+  properties.insert({PropertyType::kDefaultPublisherGroupOrder, 1ULL});
+  properties.insert({PropertyType::kDefaultPublisherGroupOrder, 2ULL});
+  EXPECT_TRUE(properties.Validate());
+  EXPECT_TRUE(properties.IsMalformed());
+
+  properties.clear();
+  properties.insert({PropertyType::kDynamicGroups, 0ULL});
+  properties.insert({PropertyType::kDynamicGroups, 1ULL});
+  EXPECT_TRUE(properties.Validate());
+  EXPECT_TRUE(properties.IsMalformed());
+
+  properties.clear();
+  properties.insert({PropertyType::kImmutableProperties, "foo"});
+  properties.insert({PropertyType::kImmutableProperties, "bar"});
+  EXPECT_TRUE(properties.Validate());
+  EXPECT_TRUE(properties.IsMalformed());
+}
+
+TEST_F(TrackPropertiesTest, ImmutableProperties) {
+  TrackProperties properties;
+  properties.insert({PropertyType::kObjectDeliveryTimeout, 10ULL});
+
+  KeyValuePairList immutable;
+  immutable.insert({PropertyType::kMaxCacheDuration, 20ULL});
+  immutable.insert({PropertyType::kDynamicGroups, 1ULL});
+  immutable.insert({0x42, 99ULL});
+  properties.AddImmutablePropertyList(immutable);
+
+  EXPECT_TRUE(properties.Validate());
+  EXPECT_FALSE(properties.IsMalformed());
+  EXPECT_FALSE(properties.empty());
+  EXPECT_EQ(properties.object_delivery_timeout(),
+            quic::QuicTimeDelta::FromMilliseconds(10));
+  EXPECT_EQ(properties.max_cache_duration(),
+            quic::QuicTimeDelta::FromMilliseconds(20));
+  EXPECT_TRUE(properties.dynamic_groups());
+  EXPECT_EQ(properties.immutable_properties(), "\x04\x14\x2c\x01\x12\x63");
+  EXPECT_FALSE(properties.contains(
+      static_cast<uint64_t>(PropertyType::kMaxCacheDuration)));
+  EXPECT_FALSE(properties.contains(0x42));
+
+  // If kImmutableProperties is already present (e.g., from the parser),
+  // AddImmutablePropertyList preserves the raw wire bytes.
+  TrackProperties parsed_immutable;
+  parsed_immutable.insert(
+      {PropertyType::kImmutableProperties, "raw_immutable_bytes"});
+  parsed_immutable.AddImmutablePropertyList(immutable);
+  EXPECT_FALSE(parsed_immutable.IsMalformed());
+  EXPECT_EQ(parsed_immutable.immutable_properties(), "raw_immutable_bytes");
+
+  // ForEach only visits outer properties (including the serialized
+  // kImmutableProperties entry).
+  std::vector<uint64_t> visited_keys;
+  properties.ForEach(
+      [&](uint64_t key, std::variant<uint64_t, absl::string_view> /*value*/) {
+        visited_keys.push_back(key);
+        return true;
+      });
+  std::vector<uint64_t> expected_keys = {
+      static_cast<uint64_t>(PropertyType::kObjectDeliveryTimeout),
+      static_cast<uint64_t>(PropertyType::kImmutableProperties),
+  };
+  EXPECT_EQ(visited_keys, expected_keys);
+
+  // Unparseable immutable properties (std::nullopt) -> malformed.
+  TrackProperties unparseable;
+  unparseable.insert({PropertyType::kImmutableProperties, "bad"});
+  unparseable.AddImmutablePropertyList(std::nullopt);
+  EXPECT_TRUE(unparseable.IsMalformed());
+
+  // Nested kImmutableProperties -> malformed.
+  TrackProperties nested;
+  KeyValuePairList nested_inner;
+  nested_inner.insert({PropertyType::kImmutableProperties, "inner"});
+  nested.AddImmutablePropertyList(nested_inner);
+  EXPECT_TRUE(nested.IsMalformed());
+
+  // Known property duplicated between outer and immutable -> malformed.
+  TrackProperties duplicate_outer_inner;
+  duplicate_outer_inner.insert({PropertyType::kMaxCacheDuration, 10ULL});
+  duplicate_outer_inner.AddImmutablePropertyList(immutable);
+  EXPECT_TRUE(duplicate_outer_inner.IsMalformed());
+
+  // Object-only property inside immutable properties -> malformed.
+  TrackProperties gap_in_immutable;
+  KeyValuePairList gap_inner;
+  gap_inner.insert({PropertyType::kPriorGroupIdGap, 1ULL});
+  gap_in_immutable.AddImmutablePropertyList(gap_inner);
+  EXPECT_TRUE(gap_in_immutable.IsMalformed());
+
+  // Empty immutable property list is a no-op and not malformed.
+  TrackProperties empty_immutable;
+  empty_immutable.AddImmutablePropertyList(KeyValuePairList());
+  EXPECT_TRUE(empty_immutable.Validate());
+  EXPECT_FALSE(empty_immutable.IsMalformed());
+  EXPECT_TRUE(empty_immutable.empty());
+  EXPECT_TRUE(empty_immutable.immutable_properties().empty());
+  EXPECT_FALSE(empty_immutable.contains(
+      static_cast<uint64_t>(PropertyType::kImmutableProperties)));
 }
 
 TEST_F(TrackPropertiesTest, CheckForUnknownMandatoryProperty) {
@@ -400,21 +528,20 @@ TEST_F(TrackPropertiesTest, CheckForUnknownMandatoryProperty) {
   QUICHE_EXPECT_OK(properties.CheckForUnknownMandatoryProperty());
 
   // Non-mandatory property types (< 0x4000).
-  properties.insert(static_cast<uint64_t>(PropertyType::kObjectDeliveryTimeout),
-                    5ULL);
-  properties.insert(0x3FFE, 1ULL);
-  properties.insert(0x3FFF, "odd_optional");
+  properties.insert({PropertyType::kObjectDeliveryTimeout, 5ULL});
+  properties.insert({0x3FFE, 1ULL});
+  properties.insert({0x3FFF, "odd_optional"});
   QUICHE_EXPECT_OK(properties.CheckForUnknownMandatoryProperty());
 
   // Non-mandatory property types (> 0x7FFF).
-  properties.insert(0x8000, 2ULL);
-  properties.insert(0x8001, "above_range");
-  properties.insert(0x10000, 3ULL);
+  properties.insert({0x8000, 2ULL});
+  properties.insert({0x8001, "above_range"});
+  properties.insert({0x10000, 3ULL});
   QUICHE_EXPECT_OK(properties.CheckForUnknownMandatoryProperty());
 
   // Min boundary: 0x4000.
   TrackProperties min_mandatory;
-  min_mandatory.insert(kMinMandatoryTrackProperty, 0ULL);
+  min_mandatory.insert({kMinMandatoryTrackProperty, 0ULL});
   EXPECT_TRUE(
       IsFailedPrecondition(min_mandatory.CheckForUnknownMandatoryProperty()));
   EXPECT_EQ(min_mandatory.CheckForUnknownMandatoryProperty().message(),
@@ -422,7 +549,7 @@ TEST_F(TrackPropertiesTest, CheckForUnknownMandatoryProperty) {
 
   // Max boundary: 0x7FFF.
   TrackProperties max_mandatory;
-  max_mandatory.insert(kMaxMandatoryTrackProperty, "mandatory_string");
+  max_mandatory.insert({kMaxMandatoryTrackProperty, "mandatory_string"});
   EXPECT_TRUE(
       IsFailedPrecondition(max_mandatory.CheckForUnknownMandatoryProperty()));
   EXPECT_EQ(max_mandatory.CheckForUnknownMandatoryProperty().message(),
@@ -430,11 +557,132 @@ TEST_F(TrackPropertiesTest, CheckForUnknownMandatoryProperty) {
 
   // In between.
   TrackProperties mid_mandatory;
-  mid_mandatory.insert(0x5000, 42ULL);
+  mid_mandatory.insert({0x5000, 42ULL});
   EXPECT_TRUE(
       IsFailedPrecondition(mid_mandatory.CheckForUnknownMandatoryProperty()));
   EXPECT_EQ(mid_mandatory.CheckForUnknownMandatoryProperty().message(),
             "Unknown mandatory property: 0x5000");
+
+  // Unknown mandatory property inside kImmutableProperties.
+  TrackProperties immutable_mandatory;
+  KeyValuePairList immutable_inner;
+  immutable_inner.insert({0x4500, 1ULL});
+  immutable_mandatory.AddImmutablePropertyList(immutable_inner);
+  EXPECT_TRUE(absl::IsFailedPrecondition(
+      immutable_mandatory.CheckForUnknownMandatoryProperty()));
+  EXPECT_EQ(immutable_mandatory.CheckForUnknownMandatoryProperty().message(),
+            "Unknown mandatory property: 0x4500");
+}
+
+class ObjectPropertiesTest : public quic::test::QuicTest {};
+
+TEST_F(ObjectPropertiesTest, IsMalformed) {
+  ObjectProperties properties;
+  EXPECT_FALSE(properties.IsMalformed());
+
+  // Object-valid properties and unknown non-mandatory properties (including
+  // boundaries just outside [0x4000, 0x7FFF], both outer and in immutable
+  // properties) are not malformed.
+  properties.insert({PropertyType::kObjectDeliveryTimeout, 5ULL});
+  properties.insert({PropertyType::kSubgroupDeliveryTimeout, 5ULL});
+  properties.insert({PropertyType::kPriorGroupIdGap, 1ULL});
+  properties.insert({PropertyType::kPriorObjectIdGap, 2ULL});
+  properties.insert({0x42, 15ULL});
+  properties.insert({0x43, "unknown_odd"});
+  properties.insert({kMinMandatoryTrackProperty - 2, 1ULL});
+  properties.insert({kMinMandatoryTrackProperty - 1, "below_mandatory"});
+  properties.insert({kMaxMandatoryTrackProperty + 1, 2ULL});
+  properties.insert({kMaxMandatoryTrackProperty + 2, "above_mandatory"});
+  KeyValuePairList optional_immutable;
+  optional_immutable.insert({kMinMandatoryTrackProperty - 2, 3ULL});
+  optional_immutable.insert({kMaxMandatoryTrackProperty + 1, 4ULL});
+  properties.AddImmutablePropertyList(optional_immutable);
+  EXPECT_FALSE(properties.IsMalformed());
+
+  // Unknown mandatory properties in [kMinMandatoryTrackProperty,
+  // kMaxMandatoryTrackProperty] (0x4000-0x7FFF) render ObjectProperties
+  // malformed, whether outer or inside kImmutableProperties.
+  for (const KeyValuePair& mandatory_pair :
+       {KeyValuePair{kMinMandatoryTrackProperty, 0ULL},
+        KeyValuePair{0x5000, 42ULL},
+        KeyValuePair{kMaxMandatoryTrackProperty, "mandatory_string"}}) {
+    ObjectProperties outer_mandatory;
+    outer_mandatory.insert(mandatory_pair);
+    EXPECT_TRUE(outer_mandatory.IsMalformed());
+
+    ObjectProperties inner_mandatory;
+    KeyValuePairList immutable_mandatory;
+    immutable_mandatory.insert(mandatory_pair);
+    inner_mandatory.AddImmutablePropertyList(immutable_mandatory);
+    EXPECT_TRUE(inner_mandatory.IsMalformed());
+  }
+
+  // Track-only properties render ObjectProperties malformed.
+  for (PropertyType track_only : {PropertyType::kMaxCacheDuration,
+                                  PropertyType::kDefaultPublisherPriority,
+                                  PropertyType::kDefaultPublisherGroupOrder,
+                                  PropertyType::kDynamicGroups}) {
+    ObjectProperties outer_track_only;
+    outer_track_only.insert({track_only, 1ULL});
+    EXPECT_TRUE(outer_track_only.IsMalformed());
+
+    ObjectProperties inner_track_only;
+    KeyValuePairList immutable;
+    immutable.insert({track_only, 1ULL});
+    inner_track_only.AddImmutablePropertyList(immutable);
+    EXPECT_TRUE(inner_track_only.IsMalformed());
+  }
+
+  // Duplicate object-valid properties also render ObjectProperties malformed.
+  for (PropertyType known_object_prop :
+       {PropertyType::kObjectDeliveryTimeout,
+        PropertyType::kSubgroupDeliveryTimeout, PropertyType::kPriorGroupIdGap,
+        PropertyType::kPriorObjectIdGap}) {
+    ObjectProperties duplicate;
+    duplicate.insert({known_object_prop, 1ULL});
+    duplicate.insert({known_object_prop, 2ULL});
+    EXPECT_TRUE(duplicate.IsMalformed());
+  }
+}
+
+TEST_F(ObjectPropertiesTest, MoveOperations) {
+  TrackProperties track_props({
+      {PropertyType::kObjectDeliveryTimeout,
+       quic::QuicTimeDelta::FromMilliseconds(10)},
+  });
+  KeyValuePairList track_immutable;
+  track_immutable.insert({PropertyType::kDynamicGroups, 1ULL});
+  track_props.AddImmutablePropertyList(track_immutable);
+  TrackProperties expected_track_props = track_props;
+
+  TrackProperties moved_track_props(std::move(track_props));
+  EXPECT_EQ(moved_track_props, expected_track_props);
+  EXPECT_TRUE(moved_track_props.dynamic_groups());
+
+  TrackProperties assigned_track_props;
+  assigned_track_props = std::move(moved_track_props);
+  EXPECT_EQ(assigned_track_props, expected_track_props);
+  EXPECT_TRUE(assigned_track_props.dynamic_groups());
+
+  ObjectProperties object_props({
+      {PropertyType::kPriorGroupIdGap, 2ULL},
+      {PropertyType::kPriorObjectIdGap, 3ULL},
+  });
+  KeyValuePairList object_immutable;
+  object_immutable.insert({PropertyType::kObjectDeliveryTimeout, 15ULL});
+  object_props.AddImmutablePropertyList(object_immutable);
+  ObjectProperties expected_object_props = object_props;
+
+  ObjectProperties moved_object_props(std::move(object_props));
+  EXPECT_EQ(moved_object_props, expected_object_props);
+  EXPECT_EQ(moved_object_props.object_delivery_timeout(),
+            quic::QuicTimeDelta::FromMilliseconds(15));
+
+  ObjectProperties assigned_object_props;
+  assigned_object_props = std::move(moved_object_props);
+  EXPECT_EQ(assigned_object_props, expected_object_props);
+  EXPECT_EQ(assigned_object_props.object_delivery_timeout(),
+            quic::QuicTimeDelta::FromMilliseconds(15));
 }
 
 }  // namespace moqt::test

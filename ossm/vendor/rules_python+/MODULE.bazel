@@ -1,6 +1,6 @@
 module(
     name = "rules_python",
-    version = "2.4.5",
+    version = "2.5.1",
     compatibility_level = 1,
 )
 
@@ -15,7 +15,17 @@ bazel_dep(name = "toml.bzl", version = "0.4.1")
 # Use py_proto_library directly from protobuf repository
 bazel_dep(name = "protobuf", version = "29.0-rc2", repo_name = "com_google_protobuf")
 
+# False in git so source checkouts build and enable Rust tools by default;
+# rewritten to True in release archives (which bundle prebuilt binaries).
+TOOL_DEPS_DEV_ONLY = True
+
 rules_python_config = use_extension("//python/extensions:config.bzl", "config")
+rules_python_config.internal_configure(
+    tool_deps_dev_only = TOOL_DEPS_DEV_ONLY,
+)
+rules_python_config.explicit_init_py(
+    default = True,
+)
 use_repo(
     rules_python_config,
     "pypi__build",
@@ -35,7 +45,10 @@ use_repo(
     "pypi__wheel",
     "pypi__zipp",
     "rules_python_internal",
+    "rules_python_tools",
 )
+
+register_toolchains("@rules_python_tools//toolchains:all")
 
 # We need to do another use_extension call to expose the "pythons_hub"
 # repo.
@@ -84,7 +97,57 @@ pip.parse(
         "windows_x86_64",
     ],
 )
-use_repo(pip, "rules_python_publish_deps")
+pip.dep(name = "pytest")
+pip.dep(name = "pytest-bazel")
+pip.dep(name = "pytest-randomly")
+pip.dep(name = "pytest-shard")
+use_repo(pip, "pypi", "rules_python_publish_deps")
+
+bazel_dep(
+    name = "rules_rust",
+    version = "0.73.0",
+    dev_dependency = TOOL_DEPS_DEV_ONLY,
+)
+
+rust_crates = use_extension(
+    "@rules_rust//crate_universe:extensions.bzl",
+    "crate",
+    dev_dependency = TOOL_DEPS_DEV_ONLY,
+)
+rust_crates.spec(
+    package = "sha2",
+    version = "0.10.8",
+)
+
+# The crates must build for every platform in dev/platforms. Conditional
+# dependencies are resolved for these triples; rules_rust matches them by CPU
+# and OS, e.g. i686-unknown-linux-gnu also matches the i686-unknown-linux-musl
+# platform.
+rust_crates.from_specs(
+    cargo_lockfile = "//crates:Cargo.lock",
+    lockfile = "//crates:Cargo.Bazel.lock",
+    supported_platform_triples = [
+        "aarch64-apple-darwin",
+        "aarch64-pc-windows-msvc",
+        "aarch64-unknown-linux-gnu",
+        "armv7-unknown-linux-gnueabi",
+        "i686-pc-windows-msvc",
+        "i686-unknown-linux-gnu",
+        "riscv64gc-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+    ],
+)
+
+# rules_rust has no @rules_rust//rust/platform config_setting for Linux ppc64le,
+# so don't mark the crates as incompatible with platforms that don't match one
+# of the triples above. Such platforms get only the unconditional dependencies,
+# which suffice for sha2.
+rust_crates.render_config(
+    generate_target_compatible_with = False,
+)
+use_repo(rust_crates, "crates")
 
 # ===== DEV ONLY DEPS AND SETUP BELOW HERE =====
 bazel_dep(name = "sphinxdocs", version = "0.0.0", dev_dependency = True)
@@ -99,19 +162,125 @@ bazel_dep(name = "rules_shell", version = "0.3.0", dev_dependency = True)
 bazel_dep(name = "rules_multirun", version = "0.9.0", dev_dependency = True)
 bazel_dep(name = "bazel_ci_rules", version = "1.0.0", dev_dependency = True)
 bazel_dep(name = "rules_pkg", version = "1.2.0", dev_dependency = True)
-bazel_dep(name = "rules_rust", version = "0.73.0", dev_dependency = True)
 
-rust_crates = use_extension(
-    "@rules_rust//crate_universe:extensions.bzl",
-    "crate",
+# Rust toolchains to cross-compile the release artifacts for other Linux CPUs
+# from Linux x86_64; see dev/release_artifacts. They target musl, which Rust can
+# link statically with its bundled rust-lld, so no C cross toolchain is needed.
+rust = use_extension(
+    "@rules_rust//rust:extensions.bzl",
+    "rust",
     dev_dependency = True,
 )
-rust_crates.spec(
-    package = "sha2",
-    version = "0.10.8",
+rust.repository_set(
+    # rules_rust also registers an x86_64 to x86_64 toolchain from this set, in
+    # name order with its default ones, so the name must sort after
+    # rust_linux_x86_64 for the default x86_64 toolchain to take precedence.
+    name = "rust_release_linux",
+    # The default allocator library needs a C toolchain for the target platform,
+    # but there isn't one. This one is what rules_rust uses for e.g. Windows.
+    allocator_library = "@rules_rust//rust/private/cc:empty",
+    edition = "2021",
+    exec_triple = "x86_64-unknown-linux-gnu",
+    target_compatible_with = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:linux",
+        "//dev/platforms:musl",
+    ],
+    target_triple = "aarch64-unknown-linux-musl",
+    # rules_rust 0.73.0's default version; update it with rules_rust. The
+    # default toolchain builds proc-macros, which rustc only loads if they were
+    # built by the same version.
+    versions = ["1.97.1"],
 )
-rust_crates.from_specs()
-use_repo(rust_crates, "crates")
+
+# Other targets for the same set; the first tag sets the shared attributes.
+rust.repository_set(
+    name = "rust_release_linux",
+    target_compatible_with = [
+        "@platforms//cpu:armv7",
+        "@platforms//os:linux",
+        "//dev/platforms:musl",
+    ],
+    target_triple = "armv7-unknown-linux-musleabihf",
+)
+rust.repository_set(
+    name = "rust_release_linux",
+    target_compatible_with = [
+        "@platforms//cpu:x86_32",
+        "@platforms//os:linux",
+        "//dev/platforms:musl",
+    ],
+    target_triple = "i686-unknown-linux-musl",
+)
+rust.repository_set(
+    name = "rust_release_linux",
+    target_compatible_with = [
+        "@platforms//cpu:ppc64le",
+        "@platforms//os:linux",
+        "//dev/platforms:musl",
+    ],
+    target_triple = "powerpc64le-unknown-linux-musl",
+)
+rust.repository_set(
+    name = "rust_release_linux",
+    target_compatible_with = [
+        "@platforms//cpu:riscv64",
+        "@platforms//os:linux",
+        "//dev/platforms:musl",
+    ],
+    target_triple = "riscv64gc-unknown-linux-musl",
+)
+use_repo(
+    rust,
+    "rust_release_linux__aarch64-unknown-linux-musl__stable",
+    "rust_release_linux__armv7-unknown-linux-musleabihf__stable",
+    "rust_release_linux__i686-unknown-linux-musl__stable",
+    "rust_release_linux__powerpc64le-unknown-linux-musl__stable",
+    "rust_release_linux__riscv64gc-unknown-linux-musl__stable",
+)
+
+# Registered here so that they take precedence over rules_rust's default
+# toolchains, e.g. its Linux x86_64 to aarch64 one also matches the aarch64
+# musl platform.
+register_toolchains(
+    "@rust_release_linux__aarch64-unknown-linux-musl__stable//:toolchain",
+    "@rust_release_linux__armv7-unknown-linux-musleabihf__stable//:toolchain",
+    "@rust_release_linux__i686-unknown-linux-musl__stable//:toolchain",
+    "@rust_release_linux__powerpc64le-unknown-linux-musl__stable//:toolchain",
+    "@rust_release_linux__riscv64gc-unknown-linux-musl__stable//:toolchain",
+    dev_dependency = True,
+)
+
+# Rust toolchains to cross-compile the release artifacts for 32-bit and Arm
+# Windows from Windows x86_64, with MSVC's cross tools; the Arm one needs
+# Visual Studio's optional ARM64 build tools. Unlike the Linux ones, they
+# aren't registered here: no default toolchain targets these platforms from
+# Windows x86_64, and rules_rust registers them.
+rust.repository_set(
+    # As above, its x86_64 toolchain's name must sort after the default one's.
+    # On Windows, rules_rust names toolchains after a hash of the full name:
+    # rw-1886791612 for this one, after rust_windows_x86_64's rw-1704990954.
+    name = "rust_release_windows",
+    edition = "2021",
+    exec_triple = "x86_64-pc-windows-msvc",
+    target_compatible_with = [
+        "@platforms//cpu:x86_32",
+        "@platforms//os:windows",
+    ],
+    target_triple = "i686-pc-windows-msvc",
+    # See above.
+    versions = ["1.97.1"],
+)
+
+# Another target for the same set; the first tag sets the shared attributes.
+rust.repository_set(
+    name = "rust_release_windows",
+    target_compatible_with = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:windows",
+    ],
+    target_triple = "aarch64-pc-windows-msvc",
+)
 
 bazel_dep(name = "other", version = "0", dev_dependency = True)
 bazel_dep(name = "another_module", version = "0", dev_dependency = True)
@@ -217,7 +386,6 @@ dev_pip = use_extension(
         hub_name = "dev_pip",
         parallel_download = False,
         python_version = python_version,
-        requirements_lock = "//dev:requirements.txt",
         # Ensure that we are setting up the following platforms
         target_platforms = [
             "{os}_{arch}",
@@ -250,7 +418,7 @@ dev_pip.parse(
     python_version = "3.14",
     requirements_lock = "//tests/multi_pypi/beta:requirements.txt",
 )
-use_repo(dev_pip, "dev_pip", "pypi", "pypi_alpha", "pypi_beta", "pypiserver")
+use_repo(dev_pip, "dev_pip", "pypi_alpha", "pypi_beta", "pypiserver")
 
 # Bazel integration test setup below
 
@@ -268,12 +436,14 @@ bazel_binaries.local(
 bazel_binaries.download(version = "7.7.0")
 bazel_binaries.download(version = "8.5.1")
 bazel_binaries.download(version = "9.1.0")
+bazel_binaries.download(version = "10.0.0rc2")
 use_repo(
     bazel_binaries,
     "bazel_binaries",
     # These don't appear necessary, but are reported as direct dependencies
     # that should be use_repo()'d, so we add them as requested
     "bazel_binaries_bazelisk",
+    "build_bazel_bazel_10_0_0rc2",
     "build_bazel_bazel_7_7_0",
     "build_bazel_bazel_8_5_1",
     "build_bazel_bazel_9_1_0",

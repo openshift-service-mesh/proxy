@@ -34,9 +34,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Bazel
-        uses: bazel-contrib/setup-bazel@0.19.0
-        with:
-          bazelisk-version: 1.20.0
+        uses: ./.github/actions/setup-bazel
 
       - name: Configure Git Identity
         run: |
@@ -51,16 +49,18 @@ jobs:
           ISSUE: ${{ inputs.issue }}
         run: |
           ARGS=()
-          if [ -n "$VERSION" ]; then
-            ARGS+=("$VERSION")
-          fi
           if [ -n "$ISSUE" ]; then
             ARGS+=("--issue=$ISSUE")
           fi
           ARGS+=("--remote=origin")
           ARGS+=("--no-dry-run")
+          if [ -n "$VERSION" ]; then
+            ARGS+=("--" "$VERSION")
+          fi
           
-          bazel run //dev/release -- promote "${ARGS[@]}"
+          bazel run \
+            --//python/config_settings:py_pbs_distribution=install_only_stripped \
+            //dev/release -- promote "${ARGS[@]}"
 
   publish:
     needs: promote

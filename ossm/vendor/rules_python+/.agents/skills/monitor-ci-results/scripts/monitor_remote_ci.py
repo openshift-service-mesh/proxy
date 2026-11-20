@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -42,6 +43,25 @@ def get_buildkite_jobs(build_url):
     base_url = build_url.split("#")[0]
     if base_url.endswith(".json"):
         base_url = base_url[:-5]
+
+    m = re.search(r"buildkite\.com/([^/]+/[^/]+)/builds/(\d+)", base_url)
+    if m and check_cli("bk"):
+        pipeline, build_number = m.group(1), m.group(2)
+        try:
+            res = subprocess.run(
+                ["bk", "build", "view", build_number, "-p", pipeline, "--json"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            data = json.loads(res.stdout)
+            if isinstance(data, dict) and "jobs" in data:
+                return data["jobs"]
+        except Exception as e:
+            print(
+                f"⚠️ Could not fetch Buildkite jobs via bk CLI for {pipeline}#{build_number}: {e}",
+                file=sys.stderr,
+            )
 
     jobs_url = f"{base_url}/data/jobs.json"
     req = urllib.request.Request(jobs_url, headers={"User-Agent": "ci-monitor"})
@@ -198,14 +218,18 @@ def main():
                 for job in jobs:
                     if job.get("retried_in_job_uuid") or job.get("retried_at"):
                         continue
-                    jname = job.get("name", "unknown_job")
+                    jname = job.get("name") or job.get("label") or "unknown_job"
                     jstate = job.get("state", "unknown")
                     jid = job.get("id", "")
                     jkey = f"bk_{jid}"
+                    log_url = job.get("web_url") or job.get("log_url") or link
 
                     exit_status = job.get("exit_status")
                     is_soft_failed = job.get("soft_failed") is True
                     is_blocked = jstate in ["blocked", "blocked_failed"]
+                    is_manual_block = (
+                        job.get("type") == "manual" or job.get("unblockable") is True
+                    )
                     is_failed = (
                         (
                             jstate in ["failed", "failing"]
@@ -215,27 +239,40 @@ def main():
                         and not is_blocked
                     )
 
-                    if is_blocked:
+                    if is_blocked and is_manual_block:
                         jkey_blocked = f"bk_blocked_{jid}"
                         if jkey_blocked not in monitored:
-                            print(
-                                f"⏸️ Notifying blocked state for Buildkite job '{jname}' (ID: {jid})..."
-                            )
-                            msg = (
-                                f"⚠️ Remote CI Buildkite Job '{jname}' is blocked!\n\n"
-                                f"Build ID: {build_id} | Job ID: {jid}\n"
-                                f"Log URL: {job.get('log_url', link)}\n\n"
-                                f"The user must confirm whether to run the CI jobs."
-                            )
-                            subprocess.run(
-                                [
-                                    "agentapi",
-                                    "send-message",
-                                    "--title=CI Job Blocked",
-                                    args.conv_id,
-                                    msg,
-                                ]
-                            )
+                            unblocked = False
+                            if jid and check_cli("bk"):
+                                print(
+                                    f"🔓 Automatically unblocking Buildkite approval step '{jname}' (ID: {jid})..."
+                                )
+                                res = subprocess.run(
+                                    ["bk", "job", "unblock", jid, "--no-input"]
+                                )
+                                unblocked = res.returncode == 0
+
+                            if not unblocked:
+                                print(
+                                    f"⏸️ Notifying blocked state for Buildkite job '{jname}' (ID: {jid})..."
+                                )
+                                msg = (
+                                    f"⚠️ Remote CI Buildkite Job '{jname}' is blocked!\n\n"
+                                    f"Build ID: {build_id} | Job ID: {jid}\n"
+                                    f"Log URL: {log_url}\n\n"
+                                    "Action required: Unblock the job using the "
+                                    f"retry-ci-job skill (`retry_ci_jobs.py --pr {args.pr} "
+                                    "--unblock`)."
+                                )
+                                subprocess.run(
+                                    [
+                                        "agentapi",
+                                        "send-message",
+                                        "--title=CI Job Blocked",
+                                        args.conv_id,
+                                        msg,
+                                    ]
+                                )
                             monitored[jkey_blocked] = time.time()
                             with open(state_file, "w") as f:
                                 json.dump(monitored, f)
@@ -247,7 +284,7 @@ def main():
                         msg = (
                             f"⚠️ Remote CI Buildkite Job '{jname}' completed with errors!\n\n"
                             f"Build ID: {build_id} | Job ID: {jid}\n"
-                            f"Log URL: {job.get('log_url', link)}\n\n"
+                            f"Log URL: {log_url}\n\n"
                             f"Action required: Start a subagent to run the analyze-ci-failure skill for '{jname}' with build ID '{build_id}' and job ID '{jid}'."
                         )
                         subprocess.run(
@@ -289,26 +326,30 @@ def main():
             elif (
                 state.upper() in ["FAILURE", "FAIL", "CANCELLED", "TIMED_OUT"]
                 or bucket == "fail"
-            ) and name not in monitored:
-                print(f"🚨 Notifying failure for GitHub check '{name}'...")
-                job_id = link.split("/")[-1] if "/" in link else link
-                msg = (
-                    f"⚠️ Remote CI GitHub Check '{name}' completed with errors!\n\n"
-                    f"Link: {link}\n\n"
-                    f"Action required: Start a subagent to run the analyze-ci-failure skill for '{name}' with link '{link}' and job ID '{job_id}'."
-                )
-                subprocess.run(
-                    [
-                        "agentapi",
-                        "send-message",
-                        "--title=CI Check Failed",
-                        args.conv_id,
-                        msg,
-                    ]
-                )
-                monitored[name] = time.time()
-                with open(state_file, "w") as f:
-                    json.dump(monitored, f)
+            ):
+                job_id = link.split("/")[-1].split("?")[0] if "/" in link else link
+                gh_key = f"gh_{job_id}" if job_id else name
+                if gh_key not in monitored:
+                    print(f"🚨 Notifying failure for GitHub check '{name}'...")
+                    msg = (
+                        f"⚠️ Remote CI GitHub Check '{name}' completed with errors!\n\n"
+                        f"Link: {link}\n\n"
+                        f"Action required: Start a subagent to run the "
+                        f"analyze-ci-failure skill for '{name}' with link "
+                        f"'{link}' and job ID '{job_id}'."
+                    )
+                    subprocess.run(
+                        [
+                            "agentapi",
+                            "send-message",
+                            "--title=CI Check Failed",
+                            args.conv_id,
+                            msg,
+                        ]
+                    )
+                    monitored[gh_key] = time.time()
+                    with open(state_file, "w") as f:
+                        json.dump(monitored, f)
 
         time.sleep(args.interval)
 

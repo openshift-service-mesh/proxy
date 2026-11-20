@@ -862,6 +862,54 @@ TEST_F(MoqtMessageSpecificTest, SubscribeInvalidFilter) {
             MoqtError::kProtocolViolation);
 }
 
+TEST_F(MoqtMessageSpecificTest, SubscribeFillParametersInvalidInnerParameter) {
+  char subscribe[] = {
+      0x03, 0x00, 0x11, 0x01,        // id = 1
+      0x01, 0x03, 0x66, 0x6f, 0x6f,  // track_namespace = "foo"
+      0x04, 0x61, 0x62, 0x63, 0x64,  // track_name = "abcd"
+      0x01,                          // 1 parameter
+      0x23, 0x03,                    // fill_parameters (3 bytes)
+      0x01, 0x10, 0x01,  // kForward (0x10) = 1 (not allowed in fill)
+  };
+  absl::StatusOr<std::vector<AnyMoqtControlMessage>> parsed =
+      ParseAllMessages(absl::string_view(subscribe, sizeof(subscribe)),
+                       kDefaultMoqtVersion, kRawQuic);
+  EXPECT_EQ(ExtractMoqtErrorForStatus(parsed.status()),
+            MoqtError::kProtocolViolation);
+}
+
+TEST_F(MoqtMessageSpecificTest, SubscribeFillParametersTrailingData) {
+  char subscribe[] = {
+      0x03, 0x00, 0x10, 0x01,        // id = 1
+      0x01, 0x03, 0x66, 0x6f, 0x6f,  // track_namespace = "foo"
+      0x04, 0x61, 0x62, 0x63, 0x64,  // track_name = "abcd"
+      0x01,                          // 1 parameter
+      0x23, 0x02,                    // fill_parameters (2 bytes)
+      0x00, 0xff,                    // 0 params followed by 1 trailing byte
+  };
+  absl::StatusOr<std::vector<AnyMoqtControlMessage>> parsed =
+      ParseAllMessages(absl::string_view(subscribe, sizeof(subscribe)),
+                       kDefaultMoqtVersion, kRawQuic);
+  EXPECT_EQ(ExtractMoqtErrorForStatus(parsed.status()),
+            MoqtError::kProtocolViolation);
+}
+
+TEST_F(MoqtMessageSpecificTest, SubscribeFillParametersTwice) {
+  char subscribe[] = {
+      0x03, 0x00, 0x12, 0x01,        // id = 1
+      0x01, 0x03, 0x66, 0x6f, 0x6f,  // track_namespace = "foo"
+      0x04, 0x61, 0x62, 0x63, 0x64,  // track_name = "abcd"
+      0x02,                          // 2 parameters
+      0x23, 0x01, 0x00,              // fill_parameters (empty)
+      0x00, 0x01, 0x00,              // duplicate fill_parameters
+  };
+  absl::StatusOr<std::vector<AnyMoqtControlMessage>> parsed =
+      ParseAllMessages(absl::string_view(subscribe, sizeof(subscribe)),
+                       kDefaultMoqtVersion, kRawQuic);
+  EXPECT_EQ(ExtractMoqtErrorForStatus(parsed.status()),
+            MoqtError::kProtocolViolation);
+}
+
 TEST_F(MoqtMessageSpecificTest, SubscribeMaxRendezvousTimeout) {
   char subscribe[] = {
       0x03, 0x00, 0x10, 0x01,        // id
@@ -1487,6 +1535,74 @@ TEST_F(MoqtMessageSpecificTest, SubscribeOkExpirationIsZero) {
   EXPECT_EQ(message.parameters.expires, quic::QuicTimeDelta::Infinite());
 }
 
+TEST_F(MoqtMessageSpecificTest, SubscribeOkImmutableProperties) {
+  // Valid SUBSCRIBE_OK with outer kObjectDeliveryTimeout (0x02 = 10) and
+  // kImmutableProperties (0x0b, delta 0x09) containing kMaxCacheDuration
+  // (0x04 = 20), kDynamicGroups (0x30, delta 0x2c = 1), and unknown key
+  // (0x32, delta 0x02 = 99).
+  const uint8_t subscribe_ok[] = {
+      0x04, 0x00, 0x0c,  // type = SUBSCRIBE_OK, length = 12
+      0x01,              // track_alias = 1
+      0x00,              // 0 message parameters
+      0x02, 0x0a,        // kObjectDeliveryTimeout (0x02) = 10
+      0x09, 0x06,        // kImmutableProperties (+0x09 = 0x0b), len 6
+      0x04, 0x14,        //   kMaxCacheDuration (0x04) = 20
+      0x2c, 0x01,        //   kDynamicGroups (+0x2c = 0x30) = 1
+      0x02, 0x63,        //   unknown (+0x02 = 0x32) = 99
+  };
+  absl::StatusOr<std::vector<AnyMoqtControlMessage>> parsed = ParseAllMessages(
+      absl::string_view(reinterpret_cast<const char*>(subscribe_ok),
+                        sizeof(subscribe_ok)),
+      kDefaultMoqtVersion, /*uses_web_transport=*/false);
+  ASSERT_TRUE(parsed.ok());
+  ASSERT_EQ(parsed->size(), 1u);
+  MoqtSubscribeOk message = std::get<MoqtSubscribeOk>((*parsed)[0]);
+  EXPECT_FALSE(message.properties.IsMalformed());
+  EXPECT_EQ(message.properties.object_delivery_timeout(),
+            quic::QuicTimeDelta::FromMilliseconds(10));
+  EXPECT_EQ(message.properties.max_cache_duration(),
+            quic::QuicTimeDelta::FromMilliseconds(20));
+  EXPECT_TRUE(message.properties.dynamic_groups());
+  EXPECT_EQ(message.properties.immutable_properties(),
+            absl::string_view("\x04\x14\x2c\x01\x02\x63", 6));
+  EXPECT_FALSE(message.properties.contains(0x32));
+
+  // Unparseable kImmutableProperties marks the track malformed.
+  const uint8_t truncated_immutable[] = {
+      0x04, 0x00,
+      0x05,  // type = SUBSCRIBE_OK, length = 5
+      0x01,  // track_alias = 1
+      0x00,  // 0 message parameters
+      0x0b, 0x01,
+      0x04,  // kImmutableProperties (0x0b), len 1: key 0x04 with missing value
+  };
+  parsed = ParseAllMessages(
+      absl::string_view(reinterpret_cast<const char*>(truncated_immutable),
+                        sizeof(truncated_immutable)),
+      kDefaultMoqtVersion, /*uses_web_transport=*/false);
+  ASSERT_TRUE(parsed.ok());
+  ASSERT_EQ(parsed->size(), 1u);
+  EXPECT_TRUE(std::get<MoqtSubscribeOk>((*parsed)[0]).properties.IsMalformed());
+
+  // Nested kImmutableProperties inside kImmutableProperties marks the track
+  // malformed.
+  const uint8_t nested_immutable[] = {
+      0x04, 0x00, 0x06,  // type = SUBSCRIBE_OK, length = 6
+      0x01,              // track_alias = 1
+      0x00,              // 0 message parameters
+      0x0b, 0x02, 0x0b,
+      0x00,  // kImmutableProperties (0x0b) containing kImmutableProperties
+             // (0x0b)
+  };
+  parsed = ParseAllMessages(
+      absl::string_view(reinterpret_cast<const char*>(nested_immutable),
+                        sizeof(nested_immutable)),
+      kDefaultMoqtVersion, /*uses_web_transport=*/false);
+  ASSERT_TRUE(parsed.ok());
+  ASSERT_EQ(parsed->size(), 1u);
+  EXPECT_TRUE(std::get<MoqtSubscribeOk>((*parsed)[0]).properties.IsMalformed());
+}
+
 TEST_F(MoqtMessageSpecificTest, FetchWholeGroup) {
   FetchMessage fetch;
   fetch.SetEndObject(5, std::nullopt);
@@ -2055,7 +2171,7 @@ TEST_F(MoqtDataParserStateMachineTest, EndOfGroupFinArrivesLater) {
   EXPECT_EQ(visitor_.last_message()->object_id, 7);
   EXPECT_EQ(visitor_.last_message()->subgroup_id, 8);
   EXPECT_EQ(visitor_.last_message()->publisher_priority, 7);
-  EXPECT_EQ(visitor_.last_message()->properties, "");
+  EXPECT_TRUE(visitor_.last_message()->properties.empty());
   EXPECT_EQ(visitor_.last_message()->object_status,
             MoqtObjectStatus::kEndOfGroup);
   EXPECT_EQ(visitor_.last_message()->first_object_in_subgroup, false);
@@ -2090,7 +2206,7 @@ TEST_F(MoqtDataParserStateMachineTest,
   EXPECT_EQ(visitor_.parsing_error(), std::nullopt);
   EXPECT_EQ(visitor_.last_message()->object_id, second_object_id + 1);
   EXPECT_EQ(visitor_.last_message()->subgroup_id, 8);
-  EXPECT_EQ(visitor_.last_message()->properties, "");
+  EXPECT_TRUE(visitor_.last_message()->properties.empty());
   EXPECT_EQ(visitor_.last_message()->payload_length, 0);
   EXPECT_EQ(visitor_.last_message()->object_status,
             MoqtObjectStatus::kEndOfGroup);
@@ -2134,6 +2250,51 @@ TEST_F(MoqtMessageSpecificTest, DatagramHasStatusAndProperties) {
   EXPECT_THAT(ParseDatagram(kBadDatagram, object, use_default_priority),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        "Datagram has status and properties"));
+}
+
+TEST_F(MoqtMessageSpecificTest, InvalidObjectProperties) {
+  // Type 0x01 (kProperties), track_alias = 4, group_id = 5, object_id = 6,
+  // priority = 7, 2-byte property blob with kDynamicGroups (0x30) = 2 (invalid
+  // value > 1).
+  constexpr absl::string_view kInvalidPropertyValueDatagram(
+      "\x01\x04\x05\x06\x07\x02\x30\x02", 8);
+  MoqtObject object;
+  bool use_default_priority = false;
+  EXPECT_THAT(ParseDatagram(kInvalidPropertyValueDatagram, object,
+                            use_default_priority),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       "Invalid object properties"));
+
+  // Missing property value inside property blob.
+  constexpr absl::string_view kMalformedPropertyDatagram(
+      "\x01\x04\x05\x06\x07\x01\x02", 7);
+  EXPECT_THAT(
+      ParseDatagram(kMalformedPropertyDatagram, object, use_default_priority),
+      StatusIs(absl::StatusCode::kInvalidArgument,
+               "Unable to read the integer value in a key-value pair"));
+
+  // Invalid property value on a subgroup stream.
+  webtransport::test::InMemoryStream stream(/*stream_id=*/0);
+  MoqtStreamTypeParser type_parser(&stream);
+  MoqtParserTestVisitor data_visitor;
+  MoqtDataParser data_parser(std::move(type_parser), &data_visitor);
+  MoqtDataStreamType stream_type = MoqtDataStreamType::Subgroup(
+      /*subgroup_id=*/0, /*first_object_id=*/0, /*no_properties=*/false,
+      /*default_priority=*/true, /*has_first_object=*/true,
+      /*end_of_group=*/false);
+  char buffer[32];
+  quic::QuicDataWriter writer(sizeof(buffer), buffer);
+  ASSERT_TRUE(writer.WriteMoqVarInt(stream_type.value()));
+  ASSERT_TRUE(writer.WriteMoqVarInt(4));     // track_alias
+  ASSERT_TRUE(writer.WriteMoqVarInt(5));     // group_id
+  ASSERT_TRUE(writer.WriteMoqVarInt(0));     // object_id
+  ASSERT_TRUE(writer.WriteMoqVarInt(2));     // properties length = 2
+  ASSERT_TRUE(writer.WriteMoqVarInt(0x30));  // kDynamicGroups
+  ASSERT_TRUE(writer.WriteMoqVarInt(2));     // value = 2 (invalid)
+  ASSERT_TRUE(writer.WriteMoqVarInt(0));     // payload_length = 0
+  stream.Receive(absl::string_view(buffer, writer.length()), /*fin=*/false);
+  data_parser.ReadAllData();
+  EXPECT_EQ(data_visitor.parsing_error(), "Failed to parse object properties");
 }
 
 TEST_F(MoqtMessageSpecificTest, StreamTypeParserToControlStream) {

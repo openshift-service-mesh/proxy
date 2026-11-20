@@ -35,8 +35,7 @@ licenses(["notice"])
 
 exports_files([
     "runtime_env_toolchain_interpreter.sh",
-    "runtimes_manifest.txt",
-    "runtimes_manifest_workspace.bzl",
+    "runtimes_manifest.bzl",
 ])
 
 distribution_filegroup(
@@ -224,10 +223,13 @@ sentinel(
     visibility = ["//visibility:public"],
 )
 
-py_binary(
-    name = "sync_runtimes_manifest_workspace",
-    srcs = ["tools/sync_runtimes_manifest_workspace.py"],
-    visibility = ["//:__subpackages__"],
+py_library(
+    name = "sort_manifest_lib",
+    srcs = ["tools/sort_manifest.py"],
+    imports = ["../.."],
+    visibility = [
+        "//tests/toolchains:__pkg__",
+    ],
 )
 
 # Tool used by py_test's validation action to statically check that the main
@@ -247,6 +249,11 @@ py_library(
     visibility = [
         "//tests/validate_test_main:__pkg__",
     ],
+)
+
+bzl_library(
+    name = "artifacts_manifest",
+    srcs = ["artifacts_manifest.bzl"],
 )
 
 bzl_library(
@@ -322,6 +329,7 @@ bzl_library(
     deps = [
         ":builders",
         ":cc_helper",
+        ":flags",
         ":py_cc_link_params_info",
         ":py_info",
         ":py_internal",
@@ -338,6 +346,7 @@ bzl_library(
     name = "config_settings",
     srcs = ["config_settings.bzl"],
     deps = [
+        ":common_labels",
         ":text_util",
         ":version",
         ":visibility",
@@ -554,7 +563,6 @@ bzl_library(
         ":py_executable_info",
         ":py_info",
         ":py_internal",
-        ":py_runtime_info",
         ":reexports",
         ":rule_builders",
         ":toolchain_types",
@@ -670,6 +678,7 @@ bzl_library(
         ":common_labels",
         ":reexports",
         "//python:py_runtime_info",
+        "//python/private/pypi:python_tag",
         "@bazel_skylib//rules:common_settings",
     ],
 )
@@ -729,6 +738,7 @@ bzl_library(
         ":py_package",
         ":rule_builders",
         ":stamp_impl",
+        ":toolchain_types",
         ":transition_labels",
         ":version",
     ],
@@ -746,6 +756,7 @@ bzl_library(
         ":python_register_toolchains",
         ":pythons_hub",
         ":repo_utils",
+        ":runtimes_manifest",
         ":toolchains_repo",
         ":version",
         "//python:versions",
@@ -769,6 +780,7 @@ bzl_library(
     deps = [
         ":coverage_deps",
         ":full_version",
+        ":pbs_manifest",
         ":python_repository",
         ":toolchains_repo",
         "//python:versions",
@@ -792,6 +804,7 @@ bzl_library(
     srcs = ["pythons_hub.bzl"],
     deps = [
         ":pbs_manifest",
+        ":runtimes_manifest",
         ":text_util",
         ":toolchains_repo",
         "//python:versions",
@@ -874,6 +887,7 @@ bzl_library(
     name = "toolchains_repo",
     srcs = ["toolchains_repo.bzl"],
     deps = [
+        ":pbs_manifest",
         ":repo_utils",
         ":text_util",
         "//python:versions",
@@ -923,6 +937,12 @@ bzl_library(
     name = "stamp_impl",
     srcs = ["stamp_impl.bzl"],
     deps = [":visibility"],
+)
+
+bzl_library(
+    name = "sentinel_impl",
+    srcs = ["sentinel_impl.bzl"],
+    deps = [":py_info"],
 )
 
 bzl_library(
@@ -1001,13 +1021,8 @@ bzl_library(
 )
 
 bzl_library(
-    name = "runtimes_manifest_workspace",
-    srcs = ["runtimes_manifest_workspace.bzl"],
-)
-
-bzl_library(
-    name = "sentinel_impl",
-    srcs = ["sentinel_impl.bzl"],
+    name = "runtimes_manifest",
+    srcs = ["runtimes_manifest.bzl"],
 )
 
 bzl_library(

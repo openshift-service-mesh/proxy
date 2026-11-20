@@ -65,7 +65,13 @@ def test_process_backports_success(mocker, mock_git, mock_gh):
             call("origin"),
         ]
     )
-    mock_git.checkout.assert_called_once_with("release/2.0", track_remote="origin")
+    mock_git.checkout.assert_has_calls(
+        [
+            call("release/2.0", track_remote="origin"),
+            call().__enter__(),
+            call().__exit__(None, None, None),
+        ]
+    )
     mock_git.cherry_pick.assert_called_once_with("abcdef12")
     mock_changelog.update_changelog.assert_called_once_with("2.0.0", "2026-07-01")
     mock_git.add_modified_and_deleted.assert_called_once()
@@ -206,7 +212,13 @@ def test_process_backports_cherry_pick_failed(mocker, mock_git, mock_gh):
     result = ProcessBackports(args, mock_git, mock_gh).run()
 
     assert result == 1
-    mock_git.checkout.assert_called_once_with("release/2.0", track_remote="origin")
+    mock_git.checkout.assert_has_calls(
+        [
+            call("release/2.0", track_remote="origin"),
+            call().__enter__(),
+            call().__exit__(None, None, None),
+        ]
+    )
     mock_git.cherry_pick.assert_called_once_with("abcdef12")
     mock_git.cherry_pick_abort.assert_called_once()
 

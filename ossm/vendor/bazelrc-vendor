@@ -123,6 +123,7 @@ common --override_repository=rules_oci++oci+oci_regctl_toolchains=%workspace%/os
 common --override_repository=rules_oci+=%workspace%/ossm/vendor/rules_oci+
 common --override_repository=rules_pkg+=%workspace%/ossm/vendor/rules_pkg+
 common --override_repository=rules_proto+=%workspace%/ossm/vendor/rules_proto+
+common --override_repository=rules_python++config+rules_python_tools=%workspace%/ossm/vendor/rules_python++config+rules_python_tools
 common --override_repository=rules_python++pip+v8_python_deps=%workspace%/ossm/vendor/rules_python++pip+v8_python_deps
 common --override_repository=rules_python++pip+v8_python_deps_312_jinja2_py3_none_any_077ce601=%workspace%/ossm/vendor/rules_python++pip+v8_python_deps_312_jinja2_py3_none_any_077ce601
 common --override_repository=rules_python++pip+v8_python_deps_312_markupsafe_cp312_cp312_manylinux_2_17_aarch64_ac07bad8=%workspace%/ossm/vendor/rules_python++pip+v8_python_deps_312_markupsafe_cp312_cp312_manylinux_2_17_aarch64_ac07bad8

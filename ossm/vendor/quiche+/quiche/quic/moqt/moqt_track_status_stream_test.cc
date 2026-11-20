@@ -115,18 +115,43 @@ TEST_F(MoqtTrackStatusRequestStreamTest, ReceiveOkResponse) {
               Writev(ControlMessageOfType(MoqtMessageType::kTrackStatus), _));
   stream.BindStream(&mock_stream_);
 
-  MoqtRequestOk ok(
-      MessageParameters(),
-      TrackProperties(quic::QuicTimeDelta::FromSeconds(5),
-                      quic::QuicTimeDelta::FromSeconds(10),
-                      quic::QuicTimeDelta::FromSeconds(5), std::nullopt,
-                      std::nullopt, std::nullopt, std::nullopt));
+  MoqtRequestOk ok(MessageParameters(),
+                   TrackProperties({
+                       {PropertyType::kObjectDeliveryTimeout,
+                        quic::QuicTimeDelta::FromSeconds(5)},
+                       {PropertyType::kMaxCacheDuration,
+                        quic::QuicTimeDelta::FromSeconds(10)},
+                       {PropertyType::kSubgroupDeliveryTimeout,
+                        quic::QuicTimeDelta::FromSeconds(5)},
+                   }));
   ok.parameters.largest_object = Location(1, 2);
   EXPECT_CALL(response_callback_, Call)
       .WillOnce([&](std::variant<TrackStatusOkData, MoqtRequestErrorInfo> v) {
         ASSERT_TRUE(std::holds_alternative<TrackStatusOkData>(v));
         auto data = std::get<TrackStatusOkData>(v);
         EXPECT_EQ(data, ok);
+      });
+  EXPECT_CALL(mock_stream_, Writev(testing::IsEmpty(), _));
+  QUICHE_EXPECT_OK(
+      stream.OnRawControlMessage(GenericMessageToRawControlMessage(ok)));
+}
+
+TEST_F(MoqtTrackStatusRequestStreamTest, ReceiveOkWithMalformedProperty) {
+  MoqtTrackStatusRequestStream stream = CreateStream();
+  EXPECT_CALL(mock_stream_, CanWrite).WillRepeatedly(Return(true));
+  EXPECT_CALL(mock_stream_,
+              Writev(ControlMessageOfType(MoqtMessageType::kTrackStatus), _));
+  stream.BindStream(&mock_stream_);
+
+  MoqtRequestOk ok;
+  ok.parameters.largest_object = Location(1, 2);
+  ok.properties.insert({PropertyType::kPriorObjectIdGap, 1ULL});
+  EXPECT_CALL(response_callback_, Call)
+      .WillOnce([&](std::variant<TrackStatusOkData, MoqtRequestErrorInfo> v) {
+        ASSERT_TRUE(std::holds_alternative<MoqtRequestErrorInfo>(v));
+        auto info = std::get<MoqtRequestErrorInfo>(v);
+        EXPECT_EQ(info.error_code, RequestErrorCode::kMalformedTrack);
+        EXPECT_EQ(info.reason_phrase, "Malformed track properties");
       });
   EXPECT_CALL(mock_stream_, Writev(testing::IsEmpty(), _));
   QUICHE_EXPECT_OK(
