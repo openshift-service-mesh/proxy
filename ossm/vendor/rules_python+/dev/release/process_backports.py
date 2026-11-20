@@ -380,31 +380,31 @@ class ProcessBackports:
         sorted_shas = self.git.sort_commits_chronologically(shas)
 
         self.git.fetch(args.remote)
-        self.git.checkout(branch_name, track_remote=args.remote)
-        start_sha = self.git.get_commit_sha("HEAD")
+        with self.git.checkout(branch_name, track_remote=args.remote):
+            start_sha = self.git.get_commit_sha("HEAD")
 
-        try:
-            result = self._cherry_pick_and_update_prs(
-                sorted_shas,
-                sha_to_item,
-                body,
-                args.issue,
-                args.remote,
-                args.dry_run,
-                version,
-                branch_name,
-                next_rc_suffix,
-            )
-            failed_prs.extend(result.failed_prs)
-            body = result.body
-        finally:
-            if args.dry_run:
-                logger.info(
-                    "[DRY RUN] Resetting branch %s to %s",
+            try:
+                result = self._cherry_pick_and_update_prs(
+                    sorted_shas,
+                    sha_to_item,
+                    body,
+                    args.issue,
+                    args.remote,
+                    args.dry_run,
+                    version,
                     branch_name,
-                    start_sha,
+                    next_rc_suffix,
                 )
-                self.git.reset_hard(reset_to=start_sha)
+                failed_prs.extend(result.failed_prs)
+                body = result.body
+            finally:
+                if args.dry_run:
+                    logger.info(
+                        "[DRY RUN] Resetting branch %s to %s",
+                        branch_name,
+                        start_sha,
+                    )
+                    self.git.reset_hard(reset_to=start_sha)
 
         if failed_prs:
             logger.error("One or more cherry-picks/resolutions failed:")

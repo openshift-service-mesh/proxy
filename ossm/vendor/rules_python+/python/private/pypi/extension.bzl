@@ -207,6 +207,7 @@ def build_config(
         A struct with the configuration.
     """
     default_hub = None
+    unified_hub_requirements_bzl = False
     defaults = {
         "platforms": default_platforms(),
         "python_version": None,
@@ -221,6 +222,8 @@ def build_config(
                     if default_hub:
                         fail("Duplicate pip.default tag: only one explicit default PyPI hub is allowed.")
                     default_hub = tag.default_hub
+            if tag.unified_hub_requirements_bzl and mod.is_root:
+                unified_hub_requirements_bzl = True
             pyproject_toml = tag.pyproject_toml
             if pyproject_toml:
                 pyproject = read_pyproject(module_ctx, pyproject_toml)
@@ -249,6 +252,7 @@ def build_config(
             _configure(
                 defaults,
                 override = mod.is_root,
+                envsubst = tag.envsubst,
                 index_url = tag.index_url,
                 # extra values that we just add
                 auth_patterns = tag.auth_patterns,
@@ -261,6 +265,7 @@ def build_config(
     return struct(
         auth_patterns = defaults.get("auth_patterns", {}),
         default_hub = default_hub,
+        envsubst = defaults.get("envsubst", []),
         index_url = defaults.get("index_url", "https://pypi.org/simple").rstrip("/"),
         netrc = defaults.get("netrc", None),
         python_version = defaults.get("python_version", None),
@@ -270,6 +275,7 @@ def build_config(
         },
         enable_pipstar_extract = enable_pipstar_extract,
         toml_decode = toml.decode,
+        unified_hub_requirements_bzl = unified_hub_requirements_bzl,
     )
 
 def parse_modules(
@@ -439,6 +445,7 @@ You cannot use both the additive_build_content and additive_build_content_file a
             builder.pip_parse(
                 module_ctx,
                 pip_attr = pip_attr,
+                default_envsubst = config.envsubst,
                 python_version = python_version,
             )
 
@@ -482,6 +489,7 @@ You cannot use both the additive_build_content and additive_build_content_file a
         facts = simpleapi_cache.get_facts(),
         hub_group_map = hub_group_map,
         hub_whl_map = hub_whl_map,
+        unified_hub_requirements_bzl = config.unified_hub_requirements_bzl,
         whl_libraries = whl_libraries,
         whl_mods = whl_mods,
         platform_config_settings = {
@@ -535,6 +543,7 @@ def _create_unified_hub_repo(mods):
         extra_aliases = extra_aliases,
         hubs = hubs,
         packages = packages,
+        requirements_bzl = mods.unified_hub_requirements_bzl,
     )
 
 def _pip_impl(module_ctx):
@@ -680,14 +689,29 @@ Supported keys:
 * `sys_platform`, defaults to a value inferred from the {attr}`os_name`.
 """,
     ),
+    "envsubst": attr.string_list(
+        mandatory = False,
+        doc = """\
+A list of environment variables to substitute (e.g. `["PIP_INDEX_URL",
+"PIP_RETRIES"]`). The corresponding variables are expanded in `index_url`
+using the syntax `$VARNAME` or `${VARNAME}` (expanding to empty string if unset)
+or `${VARNAME:-default}` (expanding to default if the variable is unset or empty
+in the environment). Note: On Bazel 7 changes to the variables named here do
+not cause packages to be re-fetched. Don't fetch different things based on the
+value of these variables.
+
+:::{versionadded} 2.5.0
+:::
+""",
+    ),
     "index_url": attr.string(
         doc = """\
 The index URL to use as a default when downloading packages from PyPI. This is used if nothing is
 specified via `--index-url` or `--extra-index-url` parameters in the `requirements.txt` file or via
 the {attr}`pip.parse.extra_pip_args`.
 
-This value is going to be subject to `envsubst` substitutions if necessary, look at the
-{attr}`pip.parse.envsubst` documentation for more information..
+This value is subject to `envsubst` substitutions if necessary, look at the
+{attr}`pip.default.envsubst` documentation for more information.
 
 The indexes must support Simple API as described here:
 <https://packaging.python.org/en/latest/specifications/simple-repository-api/>
@@ -752,6 +776,26 @@ This is designed to work with dependency management tools like Renovate.
 :::
 
 :::{versionadded} 2.3.0
+:::
+""",
+    ),
+    "unified_hub_requirements_bzl": attr.bool(
+        default = False,
+        doc = """\
+Generate a `requirements.bzl` in the [Unified @pypi Hub](unified-pypi-hub) with
+the per-package macros of a concrete hub's: `requirement`, `whl_requirement`,
+`data_requirement` and `dist_info_requirement`. The labels they return are in
+the unified hub, so they follow {flag}`--venv` like `@pypi//<pkg>`.
+
+This is a migration aid for a repository whose hub used to be named `pypi`:
+after renaming it, its existing `load("@pypi//:requirements.bzl", "requirement")`
+calls keep working and can move to `@pypi//<pkg>` labels one at a time. The
+`all_*` lists are not generated, since they are fixed at loading time and could
+only list one hub's packages; load those from a concrete hub.
+
+Only the root module's value is used.
+
+:::{versionadded} 2.5.0
 :::
 """,
     ),
@@ -996,6 +1040,13 @@ a string `"{os}_{arch}"` as the value here. You could also use `"{os}_{arch}_fre
 the uv.lock file will be used as the primary source for package metadata.
 
 :::{versionadded} 2.2.0
+:::
+
+:::{versionchanged} 2.5.0
+Package platforms follow dependency markers from virtual and editable workspace
+roots, including development dependency groups. All recorded optional extras
+remain enabled, and their dependency markers are respected. Locks without
+workspace roots use package-level resolution markers.
 :::
 """,
         ),

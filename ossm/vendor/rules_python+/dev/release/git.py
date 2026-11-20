@@ -1,6 +1,8 @@
 """Git helper functions for the release tool."""
 
+import contextlib
 import subprocess
+from collections.abc import Iterator
 
 from dev.release.shell import run_cmd
 
@@ -50,20 +52,25 @@ class Git:
         output = self._run_git("tag")
         return output.splitlines() if output else []
 
+    @contextlib.contextmanager
     def checkout(
         self,
         ref: str,
         create_branch: bool = False,
         track_remote: str | None = None,
-    ) -> None:
-        """Checks out a git reference (tag, branch, or commit).
+    ) -> Iterator[None]:
+        """Checks out a git reference and restores the previous branch on exit.
 
         Args:
             ref: The git reference (tag, branch, or commit) to checkout.
             create_branch: If True, creates the branch before checking it out.
             track_remote: If specified, checks out the branch tracking this
               remote's corresponding branch.
+
+        Yields:
+            None.
         """
+        previous_branch = self.get_current_branch()
         cmd = ["checkout"]
         if create_branch:
             cmd.append("-b")
@@ -81,6 +88,12 @@ class Git:
 
         if should_reset_hard:
             self.reset_hard(reset_to=f"{track_remote}/{ref}")
+
+        try:
+            yield
+        finally:
+            if previous_branch:
+                self._run_git("checkout", previous_branch, capture_output=False)
 
     def add(self, *files: str) -> None:
         """Stages files for commit.

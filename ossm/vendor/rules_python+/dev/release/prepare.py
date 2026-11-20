@@ -1,6 +1,7 @@
 """Subcommand to prepare the release (updates changelog, placeholders)."""
 
 import argparse
+import contextlib
 import datetime
 
 from dev.release import changelog_news
@@ -100,101 +101,105 @@ class Prepare:
                     f"[DRY RUN] Branch {branch_name} already exists. Would"
                     " checkout existing branch."
                 )
+                checkout_cm = contextlib.nullcontext()
             else:
                 print(f"Branch {branch_name} already exists. Checking it out...")
-                self.git.checkout(branch_name)
+                checkout_cm = self.git.checkout(branch_name)
         else:
             if args.dry_run:
                 print(f"[DRY RUN] Would create and checkout branch {branch_name}")
+                checkout_cm = contextlib.nullcontext()
             else:
-                self.git.checkout(branch_name, create_branch=True)
+                checkout_cm = self.git.checkout(branch_name, create_branch=True)
 
-        # --- Update files ---
-        if args.dry_run:
-            print(
-                f"[DRY RUN] Would update CHANGELOG.md and version placeholders"
-                f" for {version}"
-            )
-        else:
-            print("Updating changelog and placeholders...")
-            release_date = datetime.date.today().strftime("%Y-%m-%d")
-            changelog_news.update_changelog(version, release_date)
-            replace_version_next(version)
-
-        # --- Commit and Push ---
-        if args.dry_run:
-            print(f"[DRY RUN] Would push branch {branch_name} to origin")
-        else:
-            modified_files = self.git.status()
-            if modified_files:
-                # Stage all modified and deleted tracked files
-                self.git.add_modified_and_deleted()
-                self.git.commit(f"Prepare release {version}")
+        with checkout_cm:
+            # --- Update files ---
+            if args.dry_run:
+                print(
+                    f"[DRY RUN] Would update CHANGELOG.md and version placeholders"
+                    f" for {version}"
+                )
             else:
-                print("No files modified by the release tool. Nothing to commit.")
+                print("Updating changelog and placeholders...")
+                release_date = datetime.date.today().strftime("%Y-%m-%d")
+                changelog_news.update_changelog(version, release_date)
+                replace_version_next(version)
 
-            print(f"Pushing branch {branch_name} to origin...")
-            # Force push to overwrite the remote branch if it already exists (e.g. from a previous run)
-            self.git.push("origin", branch_name, set_upstream=True, force=True)
+            # --- Commit and Push ---
+            if args.dry_run:
+                print(f"[DRY RUN] Would push branch {branch_name} to origin")
+            else:
+                modified_files = self.git.status()
+                if modified_files:
+                    # Stage all modified and deleted tracked files
+                    self.git.add_modified_and_deleted()
+                    self.git.commit(f"Prepare release {version}")
+                else:
+                    print("No files modified by the release tool. Nothing to commit.")
 
-        # --- Create PR ---
-        # Determine if we need to create a PR or reuse an existing one
-        open_pr = self.gh.get_open_pr(branch_name)
-        associated_pr = None
+                print(f"Pushing branch {branch_name} to origin...")
+                # Force push to overwrite the remote branch if it already
+                # exists (e.g. from a previous run)
+                self.git.push("origin", branch_name, set_upstream=True, force=True)
 
-        if not open_pr and issue_num:
-            body = self.gh.get_issue_body(issue_num)
-            state = parse_checklist_state(body)
-            associated_pr = state["prepare_release"].pr
+            # --- Create PR ---
+            # Determine if we need to create a PR or reuse an existing one
+            open_pr = self.gh.get_open_pr(branch_name)
+            associated_pr = None
 
-        if open_pr:
-            pr_num = open_pr["number"]
-            pr_url = open_pr["url"]
-            print(f"Open Pull Request already exists: {pr_url} (PR #{pr_num})")
-        elif associated_pr:
-            pr_num = associated_pr.lstrip("#")
-            pr_url = f"https://github.com/bazel-contrib/rules_python/pull/{pr_num}"
-            print(
-                f"PR #{pr_num} is already associated in tracking issue"
-                f" #{issue_num}. Using it."
-            )
-        else:
+            if not open_pr and issue_num:
+                body = self.gh.get_issue_body(issue_num)
+                state = parse_checklist_state(body)
+                associated_pr = state["prepare_release"].pr
+
+            if open_pr:
+                pr_num = open_pr["number"]
+                pr_url = open_pr["url"]
+                print(f"Open Pull Request already exists: {pr_url} (PR #{pr_num})")
+            elif associated_pr:
+                pr_num = associated_pr.lstrip("#")
+                pr_url = f"https://github.com/bazel-contrib/rules_python/pull/{pr_num}"
+                print(
+                    f"PR #{pr_num} is already associated in tracking issue"
+                    f" #{issue_num}. Using it."
+                )
+            else:
+                if args.dry_run:
+                    target_issue = f"#{issue_num}" if issue_num else "<NEW_ISSUE>"
+                    print(
+                        f"[DRY RUN] Would create Pull Request for branch"
+                        f" {branch_name} targeting issue {target_issue}"
+                    )
+                    pr_num = "<NEW_PR>"
+                else:
+                    pr_url = self.gh.create_pr(
+                        title=f"Prepare release v{version}",
+                        body=f"Work towards #{issue_num}",
+                        base="main",
+                        labels=[RELEASE_PREPARED_LABEL],
+                    )
+                    pr_num = pr_url.split("/")[-1]
+                    print(f"Created Pull Request: {pr_url} (PR #{pr_num})")
+
+            # --- Update checklist ---
             if args.dry_run:
                 target_issue = f"#{issue_num}" if issue_num else "<NEW_ISSUE>"
                 print(
-                    f"[DRY RUN] Would create Pull Request for branch"
-                    f" {branch_name} targeting issue {target_issue}"
+                    f"[DRY RUN] Would update tracking issue {target_issue} checklist"
+                    " 'Prepare Release' task status to PENDING"
                 )
-                pr_num = "<NEW_PR>"
             else:
-                pr_url = self.gh.create_pr(
-                    title=f"Prepare release v{version}",
-                    body=f"Work towards #{issue_num}",
-                    base="main",
-                    labels=[RELEASE_PREPARED_LABEL],
+                print(
+                    f"Updating tracking issue #{issue_num} checklist 'Prepare"
+                    " Release' task status to PENDING..."
                 )
-                pr_num = pr_url.split("/")[-1]
-                print(f"Created Pull Request: {pr_url} (PR #{pr_num})")
-
-        # --- Update checklist ---
-        if args.dry_run:
-            target_issue = f"#{issue_num}" if issue_num else "<NEW_ISSUE>"
-            print(
-                f"[DRY RUN] Would update tracking issue {target_issue} checklist"
-                " 'Prepare Release' task status to PENDING"
-            )
-        else:
-            print(
-                f"Updating tracking issue #{issue_num} checklist 'Prepare"
-                " Release' task status to PENDING..."
-            )
-            body = self.gh.get_issue_body(issue_num)
-            metadata = {"status": "pending", "pr": f"#{pr_num}"}
-            updated_body = update_task_in_body(
-                body, "Prepare Release", checked=False, metadata=metadata
-            )
-            self.gh.update_issue_body(issue_num, updated_body)
-            print("Preparation pipeline completed successfully!")
+                body = self.gh.get_issue_body(issue_num)
+                metadata = {"status": "pending", "pr": f"#{pr_num}"}
+                updated_body = update_task_in_body(
+                    body, "Prepare Release", checked=False, metadata=metadata
+                )
+                self.gh.update_issue_body(issue_num, updated_body)
+                print("Preparation pipeline completed successfully!")
 
         return 0
 

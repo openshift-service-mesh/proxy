@@ -1,4 +1,5 @@
 import argparse
+from unittest.mock import call
 
 from dev.release.gh import RELEASE_PREPARED_LABEL
 from dev.release.prepare import Prepare
@@ -120,7 +121,13 @@ def test_prepare_use_associated_pr_from_tracking_issue(
 
     # Assert
     assert result == 0
-    mock_git.checkout.assert_called_once_with("prepare-2.0.0")
+    mock_git.checkout.assert_has_calls(
+        [
+            call("prepare-2.0.0"),
+            call().__enter__(),
+            call().__exit__(None, None, None),
+        ]
+    )
     mock_git.commit.assert_not_called()
     mock_git.push.assert_called_once_with(
         "origin", "prepare-2.0.0", set_upstream=True, force=True
@@ -150,7 +157,13 @@ def test_prepare_create_pr_when_none_associated(
 
     # Assert
     assert result == 0
-    mock_git.checkout.assert_called_once_with("prepare-2.0.0")
+    mock_git.checkout.assert_has_calls(
+        [
+            call("prepare-2.0.0"),
+            call().__enter__(),
+            call().__exit__(None, None, None),
+        ]
+    )
     mock_git.commit.assert_not_called()
     mock_git.push.assert_called_once_with(
         "origin", "prepare-2.0.0", set_upstream=True, force=True
@@ -185,7 +198,13 @@ def test_prepare_reuse_existing_pr(mocker, release_tool_env, mock_git, mock_gh):
 
     # Assert
     assert result == 0
-    mock_git.checkout.assert_called_once_with("prepare-2.0.0")
+    mock_git.checkout.assert_has_calls(
+        [
+            call("prepare-2.0.0"),
+            call().__enter__(),
+            call().__exit__(None, None, None),
+        ]
+    )
     mock_git.commit.assert_not_called()
     mock_git.push.assert_called_once_with(
         "origin", "prepare-2.0.0", set_upstream=True, force=True

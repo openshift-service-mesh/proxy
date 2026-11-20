@@ -684,6 +684,7 @@ std::unique_ptr<QuicBackendResponse> MasqueServerSession::HandleMasqueRequest(
 
   quiche::HttpHeaderBlock response_headers;
   response_headers[":status"] = "200";
+  response_headers["capsule-protocol"] = "?1";
   if (has_bind_header) {
     // For now the proxy public address is returned as
     // localhost values.

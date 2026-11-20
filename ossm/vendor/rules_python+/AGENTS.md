@@ -19,7 +19,9 @@ Ask for user input and provide a justificaiton if trying to violate them.
 
 ## Style and conventions
 
-Read `.editorconfig` for line length wrapping
+Read `.editorconfig` for line length wrapping. Do not line-break long string
+literals (such as URLs or hashes) to fit line length limits; allow them to
+exceed the limit.
 
 Read `CONTRIBUTING.md` for additional style rules and conventions.
 
@@ -32,6 +34,11 @@ into the sentence, not verbatim.
 When adding `{versionadded}` or `{versionchanged}` sections, add them add the
 end of the documentation text.
 
+Factor non-trivial scripts (such as multi-line shell or Python logic) into
+standalone files (e.g. `.sh` or `.py` files) instead of inlining them via
+heredocs (`<< 'EOF'`), `-c` flags (`bash -c`, `python3 -c`), or multi-line
+workflow `run:` blocks.
+
 ### PR Updates
 
 Once a PR is created, create new commits and merges. Don't use rebase or amend
@@ -40,7 +47,29 @@ because it interferes with code review comments.
 ### PR descriptions
 
 Follow the advice in `CONTRIBUTING.md` for PR descriptions. PR descriptions
-become the commit message upon merge.
+become the commit message upon merge. Keep the PR description clean and
+suitable for use as the commit message; do not put AI disclosures, test
+execution logs, or check checklists in the PR description.
+
+### GitHub PR interaction and AI disclosure
+
+* **Run local checks before pushing:** Run `bazel test --config=fast-tests`
+  and `buildifier` locally before opening or updating a PR.
+* **Post AI disclosure as a PR comment (not in the PR description):** When an
+  AI agent creates or interacts on a PR, post a single comment after the PR is
+  created so maintainers understand who/what they are interacting with. State
+  the level of human oversight (e.g., `human-reviewed`, `semi-autonomous`, or
+  `autonomous`) and explain how comments on the PR will be handled (e.g.,
+  whether an agent automatically monitors and replies to review comments,
+  whether a human reviews and approves agent responses/changes before posting,
+  or whether the human author handles comments directly).
+* **No CI status spam or commit narration:** Do not post comments for every CI
+  run, and do not narrate build IDs, commit SHAs, patch line/file counts, or
+  trivial diff details (e.g., stating a push is "comment-only"). GitHub
+  already displays commits and check statuses.
+* **Comment only when actionable:** Only post a PR comment to answer a
+  reviewer's question, ask a clarifying question, or briefly indicate the PR
+  is ready for re-review (e.g., `PTAL`) once CI is passing.
 
 ### Python pytest conventions
 
@@ -168,6 +197,9 @@ This repository contains 3 Bazel bzlmod modules.
 `python/config_settings/BUILD.bazel` contains build flags that are part of the
 public API. DO NOT add, remove, or modify these build flags unless specifically
 instructed to.
+
+`version.bzl` defines `MINIMUM_BAZEL_VERSION`. Do not add compatibility logic
+or feature guards for Bazel versions older than `MINIMUM_BAZEL_VERSION`.
 
 `bazel query --output=build` can be used to inspect target definitions.
 

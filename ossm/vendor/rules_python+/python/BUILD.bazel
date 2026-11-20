@@ -52,6 +52,7 @@ filegroup(
         "defs.bzl",
         "packaging.bzl",
         "pip.bzl",
+        "pytest_test.bzl",
         "repositories.bzl",
         "versions.bzl",
         "//python/pip_install:bzl",
@@ -64,6 +65,7 @@ filegroup(
 
 exports_files([
     "defs.bzl",
+    "pytest_test.bzl",
     "python.bzl",  # Deprecated, please use defs.bzl
 ])
 
@@ -395,6 +397,13 @@ alias(
     deprecation = "Use //python:py_test instead",
 )
 
+# keep
+bzl_library(
+    name = "pytest_test",
+    srcs = ["pytest_test.bzl"],
+    deps = ["//python/private/pytest_test"],
+)
+
 alias(
     name = "python_bzl",
     actual = ":python",
@@ -425,7 +434,7 @@ bzl_library(
     deps = [
         "//python/private:pbs_manifest",
         "//python/private:platform_info",
-        "//python/private:runtimes_manifest_workspace",
+        "//python/private:runtimes_manifest",
     ],
 )
 

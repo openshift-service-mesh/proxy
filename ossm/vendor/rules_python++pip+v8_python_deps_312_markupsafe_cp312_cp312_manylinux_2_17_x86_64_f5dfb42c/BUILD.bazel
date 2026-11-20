@@ -19,6 +19,7 @@ whl_library_targets(
         "pypi_name=MarkupSafe",
         "pypi_version=2.1.5",
     ],
+    whl_file = "@v8_python_deps_312_markupsafe_cp312_cp312_manylinux_2_17_x86_64_f5dfb42c_whl//:MarkupSafe-2.1.5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
 )
 
 package_metadata(

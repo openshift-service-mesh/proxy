@@ -7,8 +7,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -27,6 +29,38 @@
 
 namespace moqt {
 
+// Helper struct to quickly create Key-Value pairs to use in
+// KeyValuePairList::insert().
+struct KeyValuePair {
+  uint64_t key;
+  std::variant<uint64_t, absl::string_view> value;
+
+  // Constructor used by the KeyValuePair parser, which is agnostic to whether
+  // the key value pair is an Option or a Property.
+  KeyValuePair(uint64_t key, std::variant<uint64_t, absl::string_view> value)
+      : key(key), value(value) {}
+
+  // Templates to allow callers to use enum key types instead of explicitly
+  // casting to uint64_t.
+  template <
+      typename K, typename V, std::enable_if_t<std::is_enum_v<K>, uint64_t> = 0,
+      std::enable_if_t<std::is_integral_v<V> || std::is_enum_v<V>, uint64_t> =
+          0>
+  KeyValuePair(K key, V raw_value)
+      : key(static_cast<uint64_t>(key)),
+        value(static_cast<uint64_t>(raw_value)) {}
+
+  template <typename K, std::enable_if_t<std::is_enum_v<K>, uint64_t> = 0>
+  KeyValuePair(K key, absl::string_view raw_value)
+      : key(static_cast<uint64_t>(key)), value(raw_value) {}
+
+  // QuicTimeDelta that maps to an int.
+  template <typename K, std::enable_if_t<std::is_enum_v<K>, uint64_t> = 0>
+  KeyValuePair(K key, quic::QuicTimeDelta raw_value)
+      : key(static_cast<uint64_t>(key)),
+        value(static_cast<uint64_t>(raw_value.ToMilliseconds())) {}
+};
+
 // Encodes a list of key-value pairs common to both Options and Properties.
 // If the key is odd, it is a length-prefixed string (which may encode further
 // item-specific structure). If the key is even, it is a varint.
@@ -35,9 +69,13 @@ namespace moqt {
 class QUICHE_EXPORT KeyValuePairList {
  public:
   KeyValuePairList() = default;
+  KeyValuePairList(const KeyValuePairList&) = default;
+  KeyValuePairList(KeyValuePairList&&) noexcept = default;
+  KeyValuePairList& operator=(const KeyValuePairList& other) = default;
+  KeyValuePairList& operator=(KeyValuePairList&& other) noexcept = default;
 
   size_t size() const { return map_.size(); }
-  void insert(uint64_t key, std::variant<uint64_t, absl::string_view> value);
+  void insert(KeyValuePair pair);
   size_t count(uint64_t key) const { return map_.count(key); }
   bool contains(uint64_t key) const { return map_.contains(key); }
 
@@ -51,9 +89,7 @@ class QUICHE_EXPORT KeyValuePairList {
   ValueVector Get(uint64_t key) const;
   void clear() { map_.clear(); }
   bool operator==(const KeyValuePairList& other) const = default;
-  KeyValuePairList& operator=(const KeyValuePairList& other) = default;
 
- protected:
   // Returns the first key in the range [min_key, max_key], or nullopt if
   // there is no such key.
   std::optional<uint64_t> first_key_in_range(uint64_t min_key,
@@ -252,6 +288,11 @@ enum class MessageParameter : uint64_t {
   kSubscriberPriority = 0x20,
   kLocationFilter = 0x21,
   kGroupOrder = 0x22,
+  kFillParameters = 0x23,
+  kSubgroupFilter = 0x25,
+  kObjectIdFilter = 0x26,
+  kPriorityFilter = 0x27,
+  kObjectPropertyFilter = 0x28,
   kNewGroupRequest = 0x32,
   kTrackNamespacePrefix = 0x34,
 
@@ -268,15 +309,31 @@ constexpr quic::QuicTimeDelta kDefaultRendezvousTimeout =
 // Limit to prevent the publisher from waiting too long for a rendezvous.
 constexpr quic::QuicTimeDelta kMaxRendezvousTimeout =
     quic::QuicTimeDelta::FromSeconds(30);
+// Parameters that apply to the fill fetch stream in SUBSCRIBE or REQUEST_UPDATE
+// (draft-ietf-moq-transport section 9.20.15).
+struct FillParameters {
+  std::optional<quic::QuicTimeDelta> fill_timeout;
+  std::optional<MoqtPriority> subscriber_priority;
+  std::optional<LocationFilter> location_filter;
+  std::optional<MoqtGroupOrder> group_order;
+
+  bool operator==(const FillParameters& other) const = default;
+};
 struct MessageParameters {
   MessageParameters() = default;
   MessageParameters(const MessageParameters&) = default;
+  explicit MessageParameters(const FillParameters& fill)
+      : fill_timeout(fill.fill_timeout),
+        subscriber_priority(fill.subscriber_priority),
+        location_filter(fill.location_filter),
+        group_order(fill.group_order) {}
   // Constructor for a LocationFilter.
   explicit MessageParameters(const LocationFilter& filter)
       : location_filter(filter) {}
 
   // If |other| has a value in a particular field, replace the current value
-  // with it. Otherwise, leave unchanged.
+  // with it. Otherwise, leave unchanged. The exception is FILL_PARAMETERS,
+  // which does not persist across updates.
   void Update(const MessageParameters& other);
 
   std::optional<quic::QuicTimeDelta> subgroup_delivery_timeout;
@@ -293,6 +350,7 @@ struct MessageParameters {
   std::optional<MoqtPriority> subscriber_priority;
   std::optional<LocationFilter> location_filter;
   std::optional<MoqtGroupOrder> group_order;
+  std::optional<FillParameters> fill_parameters;
   std::optional<uint64_t> new_group_request;
   std::optional<TrackNamespace> track_namespace_prefix;
 
@@ -324,18 +382,20 @@ inline constexpr MoqtGroupOrder kDefaultGroupOrder = MoqtGroupOrder::kAscending;
 inline constexpr bool kDefaultDynamicGroups = false;
 inline constexpr uint64_t kMinMandatoryTrackProperty = 0x4000;
 inline constexpr uint64_t kMaxMandatoryTrackProperty = 0x7FFF;
-class TrackProperties : public KeyValuePairList {
+class QUICHE_EXPORT MoqtProperties : public KeyValuePairList {
  public:
-  TrackProperties() = default;
-  TrackProperties(const TrackProperties&) = default;
-  // Constructor for Original publishers to create their track properties.
-  TrackProperties(std::optional<quic::QuicTimeDelta> object_delivery_timeout,
-                  std::optional<quic::QuicTimeDelta> max_cache_duration,
-                  std::optional<quic::QuicTimeDelta> subgroup_delivery_timeout,
-                  std::optional<MoqtPriority> publisher_priority,
-                  std::optional<MoqtGroupOrder> group_order,
-                  std::optional<bool> dynamic_groups,
-                  std::optional<absl::string_view> immutable_properties);
+  virtual ~MoqtProperties() = default;
+
+  void clear() {
+    KeyValuePairList::clear();
+    immutable_properties_.clear();
+    malformed_immutable_properties_ = false;
+  }
+
+  // Adds the inner KeyValuePairList for kImmutableProperties, or marks it
+  // malformed if |immutable| is std::nullopt. If kImmutableProperties is not
+  // already present in the outer list, serializes |immutable| and inserts it.
+  void AddImmutablePropertyList(std::optional<KeyValuePairList> immutable);
 
   // If present and well-formed, returns the value of the property. Returns the
   // default value if missing or ill-formed.
@@ -348,30 +408,89 @@ class TrackProperties : public KeyValuePairList {
   bool dynamic_groups() const;
   bool empty() const { return size() == 0; }
 
-  // Returns false if the property list contains illegal values or illegally
-  // duplicated properties.
+  // Returns false if the property list contains illegal values.
   bool Validate() const;
+  // Returns true if the property list contains duplicate known properties or
+  // malformed immutable properties. Subclasses override this to also reject
+  // properties invalid for their scope.
+  virtual bool IsMalformed() const;
   // Returns OK if there are no unknown mandatory properties. Otherwise, returns
   // an error.
   absl::Status CheckForUnknownMandatoryProperty() const {
     std::optional<uint64_t> key = first_key_in_range(
         kMinMandatoryTrackProperty, kMaxMandatoryTrackProperty);
+    if (!key.has_value()) {
+      key = immutable_properties_.first_key_in_range(
+          kMinMandatoryTrackProperty, kMaxMandatoryTrackProperty);
+    }
     return !key.has_value()
                ? absl::OkStatus()
                : absl::FailedPreconditionError(absl::StrCat(
                      "Unknown mandatory property: 0x", absl::Hex(*key)));
   }
-  bool operator==(const TrackProperties& other) const = default;
-  TrackProperties& operator=(const TrackProperties& other) = default;
+  bool operator==(const MoqtProperties& other) const = default;
+
+ protected:
+  MoqtProperties() = default;
+  explicit MoqtProperties(std::initializer_list<KeyValuePair> list) {
+    for (const auto& pair : list) {
+      insert(pair);
+    }
+  }
+  MoqtProperties(const MoqtProperties&) = default;
+  MoqtProperties(MoqtProperties&&) noexcept = default;
+  MoqtProperties& operator=(const MoqtProperties& other) = default;
+  MoqtProperties& operator=(MoqtProperties&& other) noexcept = default;
+
+  size_t TotalCount(PropertyType header) const {
+    uint64_t key = static_cast<uint64_t>(header);
+    return count(key) + immutable_properties_.count(key);
+  }
 
  private:
   // Returns the value of the property if there is exactly one, otherwise
   // returns std::nullopt. Must not be called on odd property types.
   std::optional<uint64_t> GetValueIfExactlyOne(PropertyType header) const;
-  // Verifies that there is no more that one instance of an property, and if
-  // present, that the value is acceptable.
+  // Verifies that if a property is present, its values are acceptable.
   bool ValidateInner(PropertyType header, std::optional<uint64_t> min_value,
                      std::optional<uint64_t> max_value) const;
+
+  KeyValuePairList immutable_properties_;
+  bool malformed_immutable_properties_ = false;
+};
+
+class QUICHE_EXPORT TrackProperties : public MoqtProperties {
+ public:
+  TrackProperties() = default;
+  explicit TrackProperties(std::initializer_list<KeyValuePair> list)
+      : MoqtProperties(list) {}
+  TrackProperties(const TrackProperties&) = default;
+  TrackProperties(TrackProperties&&) noexcept = default;
+  TrackProperties& operator=(const TrackProperties& other) = default;
+  TrackProperties& operator=(TrackProperties&& other) noexcept = default;
+  bool operator==(const TrackProperties& other) const = default;
+
+  // Returns true if the property list renders the track malformed (e.g., it
+  // contains object-only properties, duplicate known properties, or malformed
+  // immutable properties).
+  bool IsMalformed() const override;
+};
+
+class QUICHE_EXPORT ObjectProperties : public MoqtProperties {
+ public:
+  ObjectProperties() = default;
+  explicit ObjectProperties(std::initializer_list<KeyValuePair> list)
+      : MoqtProperties(list) {}
+  ObjectProperties(const ObjectProperties&) = default;
+  ObjectProperties(ObjectProperties&&) noexcept = default;
+  ObjectProperties& operator=(const ObjectProperties& other) = default;
+  ObjectProperties& operator=(ObjectProperties&& other) noexcept = default;
+  bool operator==(const ObjectProperties& other) const = default;
+
+  // Returns true if the property list renders the track malformed (e.g., it
+  // contains track-only properties, duplicate known properties, or malformed
+  // immutable properties).
+  bool IsMalformed() const override;
 };
 
 }  // namespace moqt

@@ -25,6 +25,7 @@ whl_library_targets(
         "pypi_name=Jinja2",
         "pypi_version=3.0.3",
     ],
+    whl_file = "@v8_python_deps_312_jinja2_py3_none_any_077ce601_whl//:Jinja2-3.0.3-py3-none-any.whl",
 )
 
 package_metadata(

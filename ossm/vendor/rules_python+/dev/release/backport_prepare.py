@@ -158,16 +158,13 @@ class BackportPrepare:
         if self.git.status():
             raise RuntimeError("Workspace is dirty. Aborting.")
 
-        current_branch = self.git.get_current_branch()
         verify_results = {}  # branch -> (success, reason)
         version_map = {}  # branch -> next_version
 
-        try:
-            for branch in target_branches:
-                minor_ver = branch.split("/")[1]
-                print(f"Verifying application on {branch}...")
-                self.git.checkout(branch, track_remote=args.remote)
-
+        for branch in target_branches:
+            minor_ver = branch.split("/")[1]
+            print(f"Verifying application on {branch}...")
+            with self.git.checkout(branch, track_remote=args.remote):
                 # Determine next version
                 next_version = determine_next_version(branch)
                 version_map[branch] = next_version
@@ -200,10 +197,6 @@ class BackportPrepare:
                     except Exception:
                         pass
                     self.git.reset_hard(reset_to=f"{args.remote}/{branch}")
-        finally:
-            # Restore original branch
-            if current_branch:
-                self.git.checkout(current_branch)
 
         # Generate issue content
         body_lines = [

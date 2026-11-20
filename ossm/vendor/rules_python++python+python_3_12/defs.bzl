@@ -11,7 +11,7 @@ load(
 )
 
 def _with_deprecation(kwargs, *, name):
-    kwargs["python_version"] = "3.12.13"
+    kwargs["python_version"] = "3.12.16"
     return with_deprecation.symbol(
         kwargs,
         symbol_name = name,

@@ -273,7 +273,11 @@ def _fixup_stdlib_paths():
     runtime root inside runfiles across sys.path, sys prefixes, and
     site.PREFIXES.
     """
-    if not _INTERPRETER_ACTUAL_PATH or os.path.isabs(_INTERPRETER_ACTUAL_PATH):
+    if (
+        not _INTERPRETER_ACTUAL_PATH
+        or os.path.isabs(_INTERPRETER_ACTUAL_PATH)
+        or "/" not in _INTERPRETER_ACTUAL_PATH
+    ):
         return
     if not _RUNFILES_ROOT:
         return
@@ -295,7 +299,7 @@ def _fixup_stdlib_paths():
         norm = _norm_path(path_str)
         return norm == runfiles_norm or norm.startswith(runfiles_prefix)
 
-    target_root = _get_windows_path_with_unc_prefix(runtime_root)
+    target_root = runtime_root
     if _is_windows():
         target_root = target_root.replace("/", os.sep)
 

@@ -320,7 +320,7 @@ TEST_F(MoqtFramerSimpleTest, BadObjectInput) {
       /*group_id=*/5,
       /*object_id=*/6,
       /*publisher_priority=*/7,
-      std::string(kDefaultPropertyBlob.data(), kDefaultPropertyBlob.size()),
+      DefaultObjectProperties(),
       /*object_status=*/MoqtObjectStatus::kEndOfTrack,
       /*subgroup_id=*/8,
       /*first_object_in_subgroup=*/true,
@@ -373,7 +373,7 @@ TEST_F(MoqtFramerSimpleTest, BadDatagramInput) {
       /*group_id=*/5,
       /*object_id=*/6,
       /*publisher_priority=*/7,
-      std::string(kDefaultPropertyBlob),
+      DefaultObjectProperties(),
       /*object_status=*/MoqtObjectStatus::kNormal,
       /*subgroup_id=*/std::nullopt,
       /*first_object_in_subgroup=*/std::nullopt,
@@ -414,7 +414,7 @@ TEST_F(MoqtFramerSimpleTest, BadDatagramInput) {
   EXPECT_TRUE(buffer.empty());
 
   // Range indicators cannot be sent in datagrams.
-  object.properties = "";
+  object.properties.clear();
   object.payload_length = 0;
   object.object_status = MoqtObjectStatus::kEndOfNonExistentRange;
   EXPECT_QUIC_BUG(buffer = framer_.SerializeObjectDatagram(
@@ -429,7 +429,7 @@ TEST_F(MoqtFramerSimpleTest, FetchEndOfRangeSerialization) {
       /*group_id=*/5,
       /*object_id=*/7,
       /*publisher_priority=*/0,
-      /*properties=*/"",
+      /*properties=*/ObjectProperties(),
       /*object_status=*/MoqtObjectStatus::kEndOfNonExistentRange,
       /*subgroup_id=*/std::nullopt,
       /*first_object_in_subgroup=*/std::nullopt,
@@ -688,6 +688,52 @@ TEST_F(MoqtFramerSimpleTest, RequestErrorRedirect) {
   EXPECT_QUIC_BUG(buffer = framer_.SerializeRequestError(error),
                   "Redirect presence must match kRedirect error code");
   EXPECT_EQ(buffer.size(), 0);
+}
+
+TEST_F(MoqtFramerSimpleTest, SerializeTrackPropertiesWithImmutableProperties) {
+  TrackProperties properties;
+  properties.insert({PropertyType::kObjectDeliveryTimeout, 10ULL});
+  KeyValuePairList immutable;
+  immutable.insert({PropertyType::kMaxCacheDuration, 20ULL});
+  immutable.insert({PropertyType::kDynamicGroups, 1ULL});
+  properties.AddImmutablePropertyList(immutable);
+
+  quiche::QuicheBuffer buffer = framer_.SerializeRequestOk(
+      MoqtRequestOk{MessageParameters(), properties});
+  const uint8_t expected[] = {
+      0x07,        // MoqtMessageType::kRequestOk
+      0x00, 0x09,  // Payload length = 9
+      0x00,        // 0 parameters
+      0x02, 0x0a,  // kObjectDeliveryTimeout (0x02) = 10
+      0x09, 0x04,  // kImmutableProperties (+0x09 = 0x0b), length = 4
+      0x04, 0x14, 0x2c, 0x01,  // serialized kImmutableProperties bytes
+  };
+  quiche::test::CompareCharArraysWithHexError(
+      "frame encoding", buffer.data(), buffer.size(),
+      reinterpret_cast<const char*>(expected), sizeof(expected));
+
+  // If raw kImmutableProperties bytes are already present in the outer list
+  // (e.g., when relaying a parsed message), they are preserved verbatim.
+  TrackProperties verbatim_properties;
+  verbatim_properties.insert({PropertyType::kObjectDeliveryTimeout, 10ULL});
+  verbatim_properties.insert(
+      {PropertyType::kImmutableProperties,
+       absl::string_view("\x04\x14\x2c\x01\x02\x63", 6)});
+  verbatim_properties.AddImmutablePropertyList(immutable);
+  buffer = framer_.SerializeRequestOk(
+      MoqtRequestOk{MessageParameters(), verbatim_properties});
+  const uint8_t expected_verbatim[] = {
+      0x07,        // MoqtMessageType::kRequestOk
+      0x00, 0x0b,  // Payload length = 11
+      0x00,        // 0 parameters
+      0x02, 0x0a,  // kObjectDeliveryTimeout (0x02) = 10
+      0x09, 0x06,  // kImmutableProperties (+0x09 = 0x0b), length = 6
+      0x04, 0x14, 0x2c, 0x01, 0x02, 0x63,  // verbatim kImmutableProperties
+  };
+  quiche::test::CompareCharArraysWithHexError(
+      "frame encoding", buffer.data(), buffer.size(),
+      reinterpret_cast<const char*>(expected_verbatim),
+      sizeof(expected_verbatim));
 }
 
 }  // namespace moqt::test
