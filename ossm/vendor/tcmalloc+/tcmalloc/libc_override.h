@@ -33,6 +33,7 @@
 #include <new>
 
 #include "tcmalloc/alloc_at_least.h"
+#include "tcmalloc/malloc_extension.h"  // IWYU pragma: keep
 #include "tcmalloc/tcmalloc.h"  // IWYU pragma: keep
 
 #define TCMALLOC_ALIAS(tc_fn) \
@@ -216,7 +217,6 @@ alloc_result_t alloc_at_least(size_t min_size) TCMALLOC_NOTHROW
 alloc_result_t aligned_alloc_at_least(size_t alignment,
                                       size_t min_size) TCMALLOC_NOTHROW
     TCMALLOC_ALIAS(TCMallocInternalAlignedAllocAtLeast);
-
 }  // extern "C"
 
 // NOLINTEND(misc-definitions-in-headers)

@@ -25,20 +25,26 @@
 #include <string.h>
 
 #include <algorithm>
+#include <iterator>
 #include <map>
 #include <string>
 
 #include "absl/base/macros.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
+#include "tcmalloc/internal/environment.h"
 #include "tcmalloc/internal_malloc_extension.h"
 #include "tcmalloc/malloc_extension.h"
+#include "tcmalloc/testing/rseq_util.h"
 
-const size_t kMem = 10 << 20;
+const size_t kMem = 2 << 20;
 const size_t kMin = 8;
 void* blocks[kMem / kMin];
 
 int main() {
+  // TCMallocGuard's allocation before main() activates per-CPU caches unless
+  // deferred.
+
   if (&TCMalloc_Internal_ForceCpuCacheActivation != nullptr) {
     TCMalloc_Internal_ForceCpuCacheActivation();
   }
@@ -97,14 +103,15 @@ int main() {
       "tcmalloc.transfer_cache_free",
       // go/keep-sorted end
   };
-  int scalar_values[ABSL_ARRAYSIZE(kProperties)];
+  int scalar_values[std::size(kProperties)];
 
   if (&MallocExtension_Internal_GetProperties == nullptr ||
       &MallocExtension_Internal_GetNumericProperty == nullptr) {
     // Skip rest of test since we don't link against TCMalloc.  This should only
     // happen under sanitizers.
-#if !defined(ABSL_HAVE_ADDRESS_SANITIZER) && \
-    !defined(ABSL_HAVE_MEMORY_SANITIZER) &&  \
+#if !defined(ABSL_HAVE_ADDRESS_SANITIZER) &&   \
+    !defined(ABSL_HAVE_HWADDRESS_SANITIZER) && \
+    !defined(ABSL_HAVE_MEMORY_SANITIZER) &&    \
     !defined(ABSL_HAVE_THREAD_SANITIZER)
     assert(false &&
            "Not linked against TCMalloc, but not built with sanitizers.");
@@ -113,12 +120,12 @@ int main() {
     return 0;
   }
 
-  std::map<std::string, tcmalloc::MallocExtension::Property> properties;
+  tcmalloc::MallocExtension::PropertyMap properties;
   // Run GetProperties twice.  Once to use some RAM, which will skew our stats,
   // and a second time for the actual read-out.
   MallocExtension_Internal_GetProperties(&properties);
 
-  for (int i = 0; i < ABSL_ARRAYSIZE(kProperties); ++i) {
+  for (int i = 0; i < std::size(kProperties); ++i) {
     absl::string_view property = kProperties[i];
     size_t value;
     bool ret = MallocExtension_Internal_GetNumericProperty(
@@ -128,7 +135,7 @@ int main() {
   }
 
   MallocExtension_Internal_GetProperties(&properties);
-  for (int i = 0; i < ABSL_ARRAYSIZE(kProperties); ++i) {
+  for (int i = 0; i < std::size(kProperties); ++i) {
     absl::string_view property = kProperties[i];
     const size_t scalar_value = scalar_values[i];
     const size_t set_value = properties[std::string(property)].value;

@@ -21,10 +21,12 @@
 #include <cstdint>
 #include <new>
 #include <optional>
+#include <ostream>
 #include <thread>  // NOLINT(build/c++11)
 #include <utility>
 #include <vector>
 
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/base/attributes.h"
 #include "absl/debugging/symbolize.h"
@@ -53,7 +55,7 @@ static bool CheckerIsActive() {
 struct AllocatorArgs {
   std::vector<void*>* arr;
   size_t req_size;
-  size_t req_alignment;
+  std::align_val_t req_alignment;
   size_t block_objects;
   size_t m_dealloc_funcs;
   size_t n_alloc_funcs;
@@ -63,8 +65,7 @@ ABSL_ATTRIBUTE_NOINLINE ABSL_ATTRIBUTE_NO_TAIL_CALL void AllocateBaseCase(
     size_t offset, const AllocatorArgs& args) {
   size_t alloc_objects = args.m_dealloc_funcs * args.block_objects;
   for (size_t i = offset; i < offset + alloc_objects; ++i) {
-    (*args.arr)[i] = operator new(
-        args.req_size, static_cast<std::align_val_t>(args.req_alignment));
+    (*args.arr)[i] = operator new(args.req_size, args.req_alignment);
   }
 }
 
@@ -79,8 +80,7 @@ ABSL_ATTRIBUTE_NOINLINE ABSL_ATTRIBUTE_NO_TAIL_CALL void AllocateRecursive(
 ABSL_ATTRIBUTE_NOINLINE ABSL_ATTRIBUTE_NO_TAIL_CALL void DeallocBaseCase(
     size_t offset, const AllocatorArgs& args) {
   for (size_t i = offset; i < offset + args.block_objects; ++i) {
-    operator delete((*args.arr)[i],
-                    static_cast<std::align_val_t>(args.req_alignment));
+    operator delete((*args.arr)[i], args.req_alignment);
   }
 }
 
@@ -98,7 +98,7 @@ struct Params {
   absl::Duration duration;
   absl::Duration sleep_time;
   size_t size;
-  size_t alignment;
+  std::align_val_t alignment;
 };
 
 void testEntry(Params& p, const tcmalloc::Profile::Sample& e) {
@@ -122,33 +122,7 @@ void testEntry(Params& p, const tcmalloc::Profile::Sample& e) {
     EXPECT_LE(e.min_lifetime, e.avg_lifetime);
     EXPECT_LE(e.avg_lifetime, e.max_lifetime);
 
-    auto log_optional_bool = [](std::optional<bool> item) {
-      if (!item.has_value()) {
-        return "none";
-      }
-      return item.value() ? "true" : "false";
-    };
-
     p.dealloc_bucket_counter++;
-    LOG(INFO) << "-------------------------------------------";
-    LOG(INFO) << "e.count:" << e.count;
-    LOG(INFO) << "e.allocated_size:" << e.allocated_size;
-    LOG(INFO) << "e.requested_size:" << e.requested_size;
-    LOG(INFO) << "e.requested_alignment" << e.requested_alignment;
-    LOG(INFO) << "e.avg_lifetime:" << e.avg_lifetime;
-    LOG(INFO) << "e.min_lifetime:" << e.min_lifetime;
-    LOG(INFO) << "e.max_lifetime:" << e.max_lifetime;
-    LOG(INFO) << "e.stddev_lifetime:" << e.stddev_lifetime;
-    LOG(INFO) << "e.allocator_deallocator_physical_cpu_matched:"
-              << log_optional_bool(
-                     e.allocator_deallocator_physical_cpu_matched);
-    LOG(INFO) << "e.allocator_deallocator_virtual_cpu_matched:"
-              << log_optional_bool(e.allocator_deallocator_virtual_cpu_matched);
-    LOG(INFO) << "e.allocator_deallocator_l3_matched:"
-              << log_optional_bool(e.allocator_deallocator_l3_matched);
-    LOG(INFO) << "e.allocator_deallocator_thread_matched:"
-              << log_optional_bool(e.allocator_deallocator_thread_matched);
-    LOG(INFO) << "e.profile_id:" << e.profile_id;
   }
 }
 
@@ -334,7 +308,7 @@ class DeallocationzTest : public ::testing::Test {
 
  protected:
   size_t req_size_;
-  size_t req_alignment_;
+  std::align_val_t req_alignment_;
   size_t block_objects_;
   size_t m_dealloc_funcs_;
   size_t n_alloc_funcs_;
@@ -346,11 +320,11 @@ class DeallocationzTest : public ::testing::Test {
 TEST_F(DeallocationzTest, SingleThreaded) {
   n_alloc_funcs_ = 3;
   m_dealloc_funcs_ = 4;
-  block_objects_ = 10000;
+  block_objects_ = 100;
   t_threads_ = 1;
-  sleep_time_ = absl::Seconds(5);
+  sleep_time_ = absl::Milliseconds(100);
   req_size_ = 1024 * 1024;
-  req_alignment_ = 64;
+  req_alignment_ = std::align_val_t{64};
   Run();
 }
 
@@ -358,12 +332,12 @@ TEST_F(DeallocationzTest, SingleThreaded) {
 TEST_F(DeallocationzTest, MultiThreaded) {
   n_alloc_funcs_ = 2;
   m_dealloc_funcs_ = 2;
-  block_objects_ = 10000;
+  block_objects_ = 100;
   // for multi-threaded, t_threads must be > 2 (due to design of the test).
   t_threads_ = 4;
-  sleep_time_ = absl::Seconds(9);
+  sleep_time_ = absl::Milliseconds(200);
   req_size_ = 1024 * 1024;
-  req_alignment_ = 64;
+  req_alignment_ = std::align_val_t{64};
   Run();
 }
 
@@ -375,11 +349,11 @@ TEST_F(DeallocationzTest, ConcurrentDeallocationSamples) {
   }
   auto token = tcmalloc::MallocExtension::StartLifetimeProfiling();
   auto token2 = tcmalloc::MallocExtension::StartLifetimeProfiling();
-  absl::SleepFor(absl::Milliseconds(100));
+  absl::SleepFor(absl::Milliseconds(20));
   auto token3 = tcmalloc::MallocExtension::StartLifetimeProfiling();
 
   EXPECT_GT(std::move(token).Stop().Duration(), absl::ZeroDuration());
-  absl::SleepFor(absl::Milliseconds(100));
+  absl::SleepFor(absl::Milliseconds(20));
   EXPECT_GT(std::move(token2).Stop().Duration(), absl::ZeroDuration());
   EXPECT_GT(std::move(token3).Stop().Duration(), absl::ZeroDuration());
 }
@@ -391,7 +365,7 @@ TEST_F(DeallocationzTest, MultipleAllocationPeriods) {
     LOG(INFO) << "Skipping checks due to enabled checkers";
     return;
   }
-  for (int i = 0; i < 100; i++) {
+  for (int i = 0; i < 20; i++) {
     auto token = tcmalloc::MallocExtension::StartLifetimeProfiling();
     absl::SleepFor(absl::Milliseconds(5));
     auto token2 = tcmalloc::MallocExtension::StartLifetimeProfiling();
@@ -423,7 +397,7 @@ TEST_F(DeallocationzTest, ConcurrentProfilerRequests) {
 }
 
 TEST_F(DeallocationzTest, ConcurrentProfilerEnableDisable) {
-  const absl::Duration kDuration = absl::Milliseconds(100);
+  const absl::Duration kDuration = absl::Milliseconds(20);
   const int kIterations = 20;
 
   n_alloc_funcs_ = 3;
@@ -432,7 +406,7 @@ TEST_F(DeallocationzTest, ConcurrentProfilerEnableDisable) {
   t_threads_ = 1;
   sleep_time_ = absl::ZeroDuration();
   req_size_ = 1024 * 1024;
-  req_alignment_ = 64;
+  req_alignment_ = std::align_val_t{64};
 
   std::atomic<bool> completed = false;
   std::thread profiler_thread([&]() {
@@ -467,7 +441,7 @@ TEST_F(DeallocationzTest, ObserveAllocationButNotDeallocation) {
   t_threads_ = 1;
   sleep_time_ = absl::ZeroDuration();
   req_size_ = 1024 * 1024;
-  req_alignment_ = 64;
+  req_alignment_ = std::align_val_t{64};
 
   auto token = tcmalloc::MallocExtension::StartLifetimeProfiling();
   RunAlloc();
@@ -488,7 +462,7 @@ TEST_F(DeallocationzTest, ObserveDeallocationButNotAllocation) {
   t_threads_ = 1;
   sleep_time_ = absl::ZeroDuration();
   req_size_ = 1024 * 1024;
-  req_alignment_ = 64;
+  req_alignment_ = std::align_val_t{64};
 
   RunAlloc();
   auto token = tcmalloc::MallocExtension::StartLifetimeProfiling();
@@ -546,7 +520,7 @@ TEST(LifetimeProfiler, BasicCounterValues) {
     SingleDealloc(2, ptr);
   }
 
-  absl::SleepFor(absl::Seconds(1));
+  absl::SleepFor(absl::Milliseconds(100));
 
   const tcmalloc::Profile profile = std::move(token).Stop();
 
@@ -622,12 +596,9 @@ TEST(LifetimeProfiler, BasicCounterValues) {
   // the stack trace.
   EXPECT_GT(counters.alloc_fn_count, 0);
   EXPECT_GT(counters.dealloc_fn_count, 0);
-  // TODO(b/248332543): Investigate why the symbol count in the callstack is not
-  // as expected for GCC opt builds.
-#if defined(__clang__)
+
   EXPECT_EQ(counters.alloc_fn_count, 6 * kNumAllocations);
   EXPECT_EQ(counters.dealloc_fn_count, 7 * kNumAllocations);
-#endif
 
   for (size_t i = 0; i < counters.counts.size(); i += 2) {
     EXPECT_EQ(counters.counts[i], -counters.counts[i + 1]);
@@ -767,6 +738,245 @@ TEST(LifetimeProfiler, LifetimeBucketing) {
   EXPECT_EQ(absl::Nanoseconds(2000000), BucketizeDuration(2000000));
   EXPECT_EQ(absl::Nanoseconds(2000000), BucketizeDuration(2700000));
   EXPECT_EQ(absl::Nanoseconds(34000000), BucketizeDuration(34200040));
+}
+
+enum class EventType { kAlloc, kDealloc };
+
+class ContainsEventMatcher {
+ public:
+  using is_gtest_matcher = void;
+
+  ContainsEventMatcher(size_t size, EventType type)
+      : size_(size), type_(type) {}
+
+  bool MatchAndExplain(const tcmalloc::Profile& profile,
+                       testing::MatchResultListener* listener) const {
+    const int expected_count = (type_ == EventType::kAlloc) ? 1 : -1;
+    bool found = false;
+    profile.Iterate([&](const tcmalloc::Profile::Sample& s) {
+      if (s.requested_size == size_ && s.count == expected_count) {
+        if ((type_ == EventType::kAlloc && s.allocated_size > 0) ||
+            (type_ == EventType::kDealloc && s.allocated_size == 0)) {
+          found = true;
+        }
+      }
+    });
+    return found;
+  }
+
+  void DescribeTo(std::ostream* os) const {
+    *os << "contains "
+        << (type_ == EventType::kAlloc ? "an allocation" : "a deallocation")
+        << " event for " << size_ << " bytes";
+  }
+
+  void DescribeNegationTo(std::ostream* os) const {
+    *os << "does not contain "
+        << (type_ == EventType::kAlloc ? "an allocation" : "a deallocation")
+        << " event for " << size_ << " bytes";
+  }
+
+ private:
+  size_t size_;
+  EventType type_;
+};
+
+inline auto ContainsAlloc(size_t size) {
+  return ContainsEventMatcher(size, EventType::kAlloc);
+}
+
+inline auto ContainsDealloc(size_t size) {
+  return ContainsEventMatcher(size, EventType::kDealloc);
+}
+
+inline auto ContainsAllocAndDealloc(size_t size) {
+  return testing::AllOf(ContainsAlloc(size), ContainsDealloc(size));
+}
+
+MATCHER_P(HasEventCount, count_matcher, "") {
+  int total = 0;
+  arg.Iterate([&](const tcmalloc::Profile::Sample& s) { ++total; });
+  return testing::ExplainMatchResult(count_matcher, total, result_listener);
+}
+
+TEST(EventTracingTest, BasicAllocationAndDeallocation) {
+  if (CheckerIsActive()) {
+    return;
+  }
+
+  tcmalloc::ScopedProfileSamplingInterval test_sample_interval(1);
+  constexpr size_t kSize = 1024 * 1024;
+
+  auto token = tcmalloc::MallocExtension::StartEventTracing();
+
+  void* ptr = SingleAlloc(2, kSize);
+  absl::SleepFor(absl::Milliseconds(10));
+  SingleDealloc(2, ptr);
+
+  const tcmalloc::Profile profile = std::move(token).Stop();
+  EXPECT_THAT(profile.Type(), testing::Eq(tcmalloc::ProfileType::kEventTrace));
+  EXPECT_THAT(profile, ContainsAllocAndDealloc(kSize));
+}
+
+TEST(EventTracingTest, CensoredEvents) {
+  if (CheckerIsActive()) {
+    return;
+  }
+
+  tcmalloc::ScopedProfileSamplingInterval test_sample_interval(1);
+  constexpr size_t kSize1 = 2 * 1024 * 1024;
+  constexpr size_t kSize2 = 3 * 1024 * 1024;
+
+  // Allocated before tracing begins (left-censored when freed during tracing)
+  void* ptr1 = SingleAlloc(2, kSize1);
+
+  auto token = tcmalloc::MallocExtension::StartEventTracing();
+
+  // Allocated during tracing (right-censored when freed after tracing)
+  void* ptr2 = SingleAlloc(2, kSize2);
+
+  // Deallocate ptr1 during tracing (should produce a free event)
+  SingleDealloc(2, ptr1);
+
+  const tcmalloc::Profile profile = std::move(token).Stop();
+  EXPECT_THAT(profile.Type(), testing::Eq(tcmalloc::ProfileType::kEventTrace));
+
+  // Deallocate ptr2 after tracing has stopped
+  SingleDealloc(2, ptr2);
+
+  EXPECT_THAT(profile, ContainsAllocAndDealloc(kSize1))
+      << "Inflight allocs are seeded when sampling starts.";
+
+  EXPECT_THAT(profile, ContainsAlloc(kSize2));
+  EXPECT_THAT(profile, testing::Not(ContainsDealloc(kSize2)))
+      << "Deallocations which happened after the trace ended are unknowable.";
+}
+
+TEST(EventTracingTest, MultipleAllocations) {
+  if (CheckerIsActive()) {
+    return;
+  }
+
+  tcmalloc::ScopedProfileSamplingInterval test_sample_interval(1);
+
+  // Unusual sizes, should not correspond to other naturally-occurring allocs.
+  const std::vector<size_t> kSizes = {1009, 2003, 4001, 8009};
+
+  auto token = tcmalloc::MallocExtension::StartEventTracing();
+
+  for (size_t size : kSizes) {
+    void* p = SingleAlloc(2, size);
+    SingleDealloc(2, p);
+  }
+
+  const tcmalloc::Profile profile = std::move(token).Stop();
+  EXPECT_THAT(profile.Type(), testing::Eq(tcmalloc::ProfileType::kEventTrace));
+  EXPECT_THAT(profile.Duration(), testing::Gt(absl::ZeroDuration()));
+  EXPECT_THAT(profile.StartTime(), testing::Ne(std::nullopt));
+
+  for (size_t size : kSizes) {
+    EXPECT_THAT(profile, ContainsAllocAndDealloc(size));
+  }
+}
+
+TEST(EventTracingTest, ConcurrentEventTracing) {
+  if (CheckerIsActive()) {
+    return;
+  }
+
+  tcmalloc::ScopedProfileSamplingInterval test_sample_interval(1);
+  constexpr int kThreads = 4;
+  constexpr int kAllocsPerThread = 50;
+
+  auto token = tcmalloc::MallocExtension::StartEventTracing();
+
+  std::vector<std::thread> threads;
+  threads.reserve(kThreads);
+  for (int t = 0; t < kThreads; ++t) {
+    threads.emplace_back([t]() {
+      for (int i = 0; i < kAllocsPerThread; ++i) {
+        void* p = SingleAlloc(1, ((t * 100 + i) + 1) * 256);
+        SingleDealloc(1, p);
+      }
+    });
+  }
+
+  for (auto& t : threads) {
+    t.join();
+  }
+
+  const tcmalloc::Profile profile = std::move(token).Stop();
+  EXPECT_THAT(profile.Type(), testing::Eq(tcmalloc::ProfileType::kEventTrace));
+  EXPECT_THAT(profile,
+              HasEventCount(testing::Ge(kThreads * kAllocsPerThread * 2)));
+}
+
+TEST(EventTracingTest, DefaultMemoryLimitTruncation) {
+  if (CheckerIsActive()) {
+    return;
+  }
+
+  tcmalloc::ScopedProfileSamplingInterval test_sample_interval(1);
+  constexpr size_t kEarlySize = 1009;
+  constexpr size_t kFillerSize = 2003;
+  constexpr size_t kLateSize = 8009;
+
+  auto token = tcmalloc::MallocExtension::StartEventTracing();
+
+  // Alloc-ed within the trace lifetime.
+  void* early_ptr = SingleAlloc(1, kEarlySize);
+  SingleDealloc(1, early_ptr);
+
+  // An event is ~600B, so 50k allocs will produce 100k samples i.e. ~60 MiB,
+  // which is far above the default 16 MiB limit.
+  constexpr int kNumFillerAllocs = 50000;
+  for (int i = 0; i < kNumFillerAllocs; ++i) {
+    void* p = SingleAlloc(1, kFillerSize);
+    SingleDealloc(1, p);
+  }
+
+  // Doesn't make it into the trace.
+  void* late_ptr = SingleAlloc(1, kLateSize);
+  SingleDealloc(1, late_ptr);
+
+  const tcmalloc::Profile profile = std::move(token).Stop();
+  EXPECT_THAT(profile.Type(), testing::Eq(tcmalloc::ProfileType::kEventTrace));
+
+  EXPECT_THAT(profile, ContainsAlloc(kEarlySize));
+  EXPECT_THAT(profile, testing::Not(ContainsAlloc(kLateSize)));
+}
+
+TEST(DeallocationProfilerTest, SeedingFromOtherThreadPreservesThreadMatched) {
+  if (CheckerIsActive()) {
+    return;
+  }
+
+  tcmalloc::ScopedProfileSamplingInterval test_sample_interval(1);
+  constexpr size_t kAllocSize = 1024 * 1024 + 512 * 1024;
+
+  // Allocate on main thread BEFORE starting the deallocation profiler.
+  void* ptr = SingleAlloc(1, kAllocSize);
+  ASSERT_NE(ptr, nullptr);
+
+  // Start the deallocation profiler on a DIFFERENT thread, which seeds
+  // pre-existing live allocations from sampled_allocation_recorder().
+  tcmalloc::MallocExtension::AllocationProfilingToken token;
+  std::thread starter(
+      [&]() { token = tcmalloc::MallocExtension::StartLifetimeProfiling(); });
+  starter.join();
+
+  // Free on the main thread (same thread that allocated `ptr`).
+  SingleDealloc(1, ptr);
+
+  tcmalloc::Profile profile = std::move(token).Stop();
+  int matched_samples = 0;
+  profile.Iterate([&](const tcmalloc::Profile::Sample& s) {
+    if (s.requested_size == kAllocSize && !s.is_censored && s.count > 0 &&
+        s.allocator_deallocator_thread_matched.value_or(false)) {
+      ++matched_samples;
+    }
+  });
+  EXPECT_GE(matched_samples, 1);
 }
 
 }  // namespace

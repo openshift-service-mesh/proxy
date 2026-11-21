@@ -31,17 +31,30 @@
 
 #include "benchmark/benchmark.h"
 #include "absl/random/random.h"
+#include "absl/time/time.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/memory_stats.h"
+#include "tcmalloc/internal/parameter_accessors.h"
 #include "tcmalloc/malloc_extension.h"
+#include "tcmalloc/testing/testutil.h"
 
 namespace {
 
 int64_t GetRSS() {
   tcmalloc::tcmalloc_internal::MemoryStats stats;
   TC_CHECK(tcmalloc::tcmalloc_internal::GetMemoryStats(&stats));
-  return stats.rss;
+
+  // Under mlockall(MCL_CURRENT | MCL_FUTURE), any new arena block mapped for
+  // metadata (such as lazily initializing a sharded transfer cache shard if
+  // the thread migrates across L3 domains during deallocation) is immediately
+  // faulted into RSS. Subtract metadata bytes so we measure only pageheap RSS
+  // changes.
+  std::optional<size_t> metadata_bytes =
+      tcmalloc::MallocExtension::GetNumericProperty("tcmalloc.metadata_bytes");
+  TC_CHECK(metadata_bytes.has_value());
+
+  return stats.rss - *metadata_bytes;
 }
 
 int64_t UnmappedBytes() {
@@ -54,6 +67,28 @@ int64_t UnmappedBytes() {
 }  // namespace
 
 int main() {
+  // Avoid perturbing RSS as a result of sampling.
+  tcmalloc::ScopedNeverSample never;
+  // Flush any filler pages in the sampled partition allocated during startup.
+  // Demand smoothing (skip-subrelease) would otherwise protect these pages,
+  // since the process' entire demand history is the startup burst.
+  tcmalloc::MallocExtension::SetSkipSubreleaseShortInterval(
+      absl::ZeroDuration());
+  tcmalloc::MallocExtension::SetSkipSubreleaseLongInterval(
+      absl::ZeroDuration());
+  if (TCMalloc_Internal_SetHugePageFillerSkipSubreleaseColdShortInterval !=
+      nullptr) {
+    TCMalloc_Internal_SetHugePageFillerSkipSubreleaseColdShortInterval(
+        absl::ZeroDuration());
+  }
+  if (TCMalloc_Internal_SetHugePageFillerSkipSubreleaseColdLongInterval !=
+      nullptr) {
+    TCMalloc_Internal_SetHugePageFillerSkipSubreleaseColdLongInterval(
+        absl::ZeroDuration());
+  }
+  tcmalloc::MallocExtension::ReleaseMemoryToSystem(
+      std::numeric_limits<size_t>::max());
+
   int ret = mlockall(MCL_CURRENT | MCL_FUTURE);
   if (ret != 0) {
     const bool kSoftFail = true;
@@ -117,7 +152,9 @@ int main() {
   int64_t unmapped_diff = after_unmapped - before_unmapped;
   int64_t memusage_diff = before - after;
   TC_CHECK_GE(unmapped_diff, 0);
-  TC_CHECK_EQ(unmapped_diff % tcmalloc::tcmalloc_internal::kHugePageSize, 0);
+  if (!TCMalloc_Internal_GetReleaseMaxFillerPages()) {
+    TC_CHECK_EQ(unmapped_diff % tcmalloc::tcmalloc_internal::kHugePageSize, 0);
+  }
 
   // Try to release all unused memory.
 
@@ -128,7 +165,7 @@ int main() {
 
   unmapped_diff = after_unmapped - before_unmapped;
   memusage_diff = before - after;
-  const double kTolerance = 5e-4;
+  const double kTolerance = 5e-3;
 
   TC_LOG("Unmapped Memory [Before] %v", before_unmapped);
   TC_LOG("Unmapped Memory [After ] %v", after_unmapped);

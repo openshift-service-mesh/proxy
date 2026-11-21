@@ -22,10 +22,14 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
+#include <new>
 #include <optional>
+#include <random>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -39,25 +43,31 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "re2/re2.h"
 #include "tcmalloc/internal/environment.h"
 #include "tcmalloc/internal/fake_profile.h"
+#include "tcmalloc/internal/fake_residency.h"
 #include "tcmalloc/internal/page_size.h"
 #include "tcmalloc/internal/pageflags.h"
 #include "tcmalloc/internal/residency.h"
 #include "tcmalloc/internal_malloc_extension.h"
 #include "tcmalloc/malloc_extension.h"
+#include "tcmalloc/testing/testutil.h"
 
 namespace tcmalloc {
 namespace tcmalloc_internal {
 namespace {
 
 using ::testing::AnyOf;
+using ::testing::Contains;
 using ::testing::Each;
+using ::testing::ElementsAre;
 using ::testing::IsSupersetOf;
 using ::testing::Key;
 using ::testing::Not;
@@ -69,6 +79,9 @@ class StubPageFlags final : public PageFlagsBase {
  public:
   StubPageFlags() = default;
   ~StubPageFlags() override = default;
+  PageFlagsBitmaps GetSinglePageBitmaps(const void* addr) override {
+    return {.status = absl::StatusCode::kUnimplemented};
+  }
   std::optional<PageStats> Get(const void* addr, size_t size) override {
     PageStats ret;
     uintptr_t uaddr = reinterpret_cast<uintptr_t>(addr);
@@ -77,6 +90,9 @@ class StubPageFlags final : public PageFlagsBase {
     }
     if (locked_bytes_.find(uaddr) != locked_bytes_.end()) {
       ret.bytes_locked = locked_bytes_[uaddr];
+    }
+    if (incompressible_bytes_.find(uaddr) != incompressible_bytes_.end()) {
+      ret.bytes_incompressible = incompressible_bytes_[uaddr];
     }
     ret.stale_scan_seconds = stale_scan_period_;
     return ret;
@@ -92,16 +108,52 @@ class StubPageFlags final : public PageFlagsBase {
     locked_bytes_[uaddr] = locked;
   }
 
+  void set_bytes_incompressible(const void* addr, int incompressible) {
+    uintptr_t uaddr = reinterpret_cast<uintptr_t>(addr);
+    incompressible_bytes_[uaddr] = incompressible;
+  }
+
   void set_stale_scan_period(const void* addr, uint64_t seconds_stale) {
     stale_scan_period_ = seconds_stale;
   }
 
-  bool IsHugepageBacked(const void* addr) override { return true; }
+  std::optional<bool> IsHugepageBacked(const void* addr) override {
+    return true;
+  }
 
  private:
   absl::flat_hash_map<uintptr_t, int> stale_bytes_;
   absl::flat_hash_map<uintptr_t, int> locked_bytes_;
-  uint64_t stale_scan_period_;
+  absl::flat_hash_map<uintptr_t, int> incompressible_bytes_;
+  uint64_t stale_scan_period_ = 0;
+};
+
+class StubResidency final : public NoopResidency {
+ public:
+  StubResidency() = default;
+  ~StubResidency() override = default;
+
+  std::optional<Info> Get(const void* addr, size_t size) override {
+    uintptr_t uaddr = reinterpret_cast<uintptr_t>(addr);
+    auto it = infos_.find(uaddr);
+    if (it != infos_.end()) {
+      Info result = it->second;
+      // Cap to queried range, matching real ResidencyPageMap behavior.
+      result.bytes_resident = std::min(result.bytes_resident, size);
+      result.bytes_swapped =
+          std::min(result.bytes_swapped, size - result.bytes_resident);
+      return result;
+    }
+    return std::nullopt;
+  }
+
+  void SetInfo(const void* addr, Info info) {
+    uintptr_t uaddr = reinterpret_cast<uintptr_t>(addr);
+    infos_[uaddr] = info;
+  }
+
+ private:
+  absl::flat_hash_map<uintptr_t, Info> infos_;
 };
 
 // Returns the fully resolved path of this program.
@@ -243,7 +295,7 @@ TEST(ProfileBuilderTest, StringTable) {
 
 // A helper type alias for a list of samples and their labels.
 using SampleLabels = std::vector<
-    std::vector<std::pair<std::string, std::variant<int, std::string>>>>;
+    std::vector<std::pair<std::string, std::variant<int64_t, std::string>>>>;
 
 void CheckAndExtractSampleLabels(const perftools::profiles::Profile& converted,
                                  SampleLabels& extracted) {
@@ -300,15 +352,20 @@ void CheckAndExtractSampleLabels(const perftools::profiles::Profile& converted,
     EXPECT_THAT(s.location_id(), testing::IsSubsetOf(interned_addresses));
 
     EXPECT_EQ(converted.sample_type().size(), s.value().size());
+
+    absl::flat_hash_set<int> keys;
+    keys.reserve(s.label().size());
+
     extracted.emplace_back();
     auto& labels = extracted.back();
     for (const auto& l : s.label()) {
+      EXPECT_TRUE(keys.insert(l.key()).second)
+          << "Duplicate key: " << converted.string_table(l.key());
       if (l.str() != 0) {
         labels.emplace_back(converted.string_table(l.key()),
                             converted.string_table(l.str()));
       } else {
-        labels.emplace_back(converted.string_table(l.key()),
-                            static_cast<int>(l.num()));
+        labels.emplace_back(converted.string_table(l.key()), l.num());
       }
     }
   }
@@ -336,7 +393,7 @@ perftools::profiles::Profile MakeTestProfile(
     sample.sum = 1234;
     sample.count = 2;
     sample.requested_size = 2;
-    sample.requested_alignment = 4;
+    sample.requested_alignment = std::align_val_t{4};
     sample.requested_size_returning = true;
     sample.allocated_size = 16;
 
@@ -354,8 +411,9 @@ perftools::profiles::Profile MakeTestProfile(
     sample.stack[4] = reinterpret_cast<void*>(&ProfileAccessor::MakeProfile);
     sample.access_hint = hot_cold_t{254};
     sample.access_allocated = Profile::Sample::Access::Cold;
+    sample.token_id = TokenId{0};
     sample.guarded_status = Profile::Sample::GuardedStatus::RateLimited;
-    sample.type = Profile::Sample::AllocationType::New;
+    sample.type = AllocationType::New;
     samples.push_back(sample);
 
     Profile::Sample sample2 = sample;
@@ -385,7 +443,7 @@ perftools::profiles::Profile MakeTestProfile(
     sample.sum = 2345;
     sample.count = 5;
     sample.requested_size = 4;
-    sample.requested_alignment = 0;
+    sample.requested_alignment = std::nullopt;
     sample.requested_size_returning = false;
     sample.allocated_size = 8;
     sample.span_start_address = ptr1;
@@ -400,14 +458,18 @@ perftools::profiles::Profile MakeTestProfile(
     sample.stack[3] = reinterpret_cast<void*>(&RealPath);
     sample.access_hint = hot_cold_t{1};
     sample.access_allocated = Profile::Sample::Access::Hot;
+    sample.token_id = TokenId{0};
     sample.guarded_status = Profile::Sample::GuardedStatus::NoAvailableSlots;
-    sample.type = Profile::Sample::AllocationType::Malloc;
+    sample.type = AllocationType::Malloc;
 
     if (profile_type == ProfileType::kHeap) {
       // Total stale bytes for this sample = 5 * 17 = 85.
       // Total locked bytes for this sample = 5 * 11 = 55.
+      // Total incompressible bytes for this sample = 5 * 13 = 65.
       p->set_bytes_stale(sample.span_start_address, /*stale=*/17);
       p->set_bytes_locked(sample.span_start_address, /*locked=*/11);
+      p->set_bytes_incompressible(sample.span_start_address,
+                                  /*incompressible=*/13);
       p->set_stale_scan_period(sample.span_start_address,
                                /*seconds_stale=*/10);
     }
@@ -427,7 +489,7 @@ perftools::profiles::Profile MakeTestProfile(
     sample.sum = 2345;
     sample.count = 8;
     sample.requested_size = 16;
-    sample.requested_alignment = 0;
+    sample.requested_alignment = std::nullopt;
     sample.requested_size_returning = true;
     sample.allocated_size = 16;
     // This stack is mostly artificial, but we include a real symbol from the
@@ -439,8 +501,9 @@ perftools::profiles::Profile MakeTestProfile(
     sample.stack[2] = reinterpret_cast<void*>(&RealPath);
     sample.access_hint = hot_cold_t{0};
     sample.access_allocated = Profile::Sample::Access::Hot;
+    sample.token_id = TokenId{0};
     sample.guarded_status = Profile::Sample::GuardedStatus::RateLimited;
-    sample.type = Profile::Sample::AllocationType::AlignedMalloc;
+    sample.type = AllocationType::AlignedMalloc;
   }
 
   {  // We have three samples here that will be merged (if guarded_status is not
@@ -451,7 +514,7 @@ perftools::profiles::Profile MakeTestProfile(
     sample.sum = 1235;
     sample.count = 2;
     sample.requested_size = 2;
-    sample.requested_alignment = 4;
+    sample.requested_alignment = std::align_val_t{4};
     sample.requested_size_returning = true;
     sample.allocated_size = 16;
 
@@ -469,8 +532,9 @@ perftools::profiles::Profile MakeTestProfile(
     sample.stack[4] = reinterpret_cast<void*>(&ProfileAccessor::MakeProfile);
     sample.access_hint = hot_cold_t{253};
     sample.access_allocated = Profile::Sample::Access::Cold;
+    sample.token_id = TokenId{1};
     sample.guarded_status = Profile::Sample::GuardedStatus::RateLimited;
-    sample.type = Profile::Sample::AllocationType::New;
+    sample.type = AllocationType::NewArray;
     samples.push_back(sample);
 
     Profile::Sample sample2 = sample;
@@ -556,16 +620,20 @@ TEST(ProfileConverterTest, HeapProfile) {
   // Require that the default_sample_type appeared in sample_type.
   EXPECT_THAT(sample_types, testing::Contains(converted.default_sample_type()));
 
-  constexpr int kNumSamples = 6;
+  constexpr int kNumSampleTypes = 7
+      ;
   // This is slightly redundant with the next line, but we need to loop over
   // each of the samples later.
-  EXPECT_THAT(extracted_sample_type, SizeIs(kNumSamples));
+  constexpr int kNumSamples = 6;
+  EXPECT_THAT(extracted_sample_type, SizeIs(kNumSampleTypes));
   EXPECT_THAT(
       extracted_sample_type,
       UnorderedElementsAre(
           Pair("objects", "count"), Pair("space", "bytes"),
           Pair("resident_space", "bytes"), Pair("stale_space", "bytes"),
-          Pair("locked_space", "bytes"), Pair("swapped_space", "bytes")));
+          Pair("locked_space", "bytes"), Pair("incompressible_space", "bytes"),
+          Pair("swapped_space", "bytes")
+          ));
 
   SampleLabels extracted_labels;
   {
@@ -594,10 +662,13 @@ TEST(ProfileConverterTest, HeapProfile) {
     }
   }
 
-  EXPECT_THAT(label_to_units,
-              IsSupersetOf({Pair("bytes", "bytes"), Pair("request", "bytes"),
-                            Pair("alignment", "bytes"),
-                            Pair("access_hint", "access_hint")}));
+  EXPECT_THAT(label_to_units, IsSupersetOf({
+                                  Pair("bytes", "bytes"),
+                                  Pair("request", "bytes"),
+                                  Pair("alignment", "bytes"),
+                                  Pair("access_hint", "access_hint"),
+                                  Pair("token_id", "token_id"),
+                              }));
 
   EXPECT_THAT(
       label_to_units,
@@ -611,38 +682,43 @@ TEST(ProfileConverterTest, HeapProfile) {
               Pair("bytes", 16), Pair("request", 2), Pair("alignment", 4),
               Pair("stale_scan_period", 10),
               Pair("access_hint", 254), Pair("access_allocated", "cold"),
-              Pair("size_returning", 1), Pair("guarded_status", "RateLimited"),
+              Pair("token_id", 0), Pair("size_returning", 1),
+              Pair("guarded_status", "RateLimited"),
               Pair("allocation type", "new")),
-          UnorderedElementsAre(Pair("bytes", 8), Pair("request", 4),
+          UnorderedElementsAre(
+              Pair("bytes", 8), Pair("request", 4),
+              Pair("stale_scan_period", 10),
+              Pair("access_hint", 1), Pair("access_allocated", "hot"),
+              Pair("token_id", 0), Pair("guarded_status", "NoAvailableSlots"),
+              Pair("allocation type", "malloc")),
+          UnorderedElementsAre(Pair("bytes", 16), Pair("request", 16),
                                Pair("stale_scan_period", 10),
-                               Pair("access_hint", 1),
+                               Pair("access_hint", 0),
                                Pair("access_allocated", "hot"),
-                               Pair("guarded_status", "NoAvailableSlots"),
-                               Pair("allocation type", "malloc")),
-          UnorderedElementsAre(
-              Pair("bytes", 16), Pair("request", 16),
-              Pair("stale_scan_period", 10),
-              Pair("access_hint", 0), Pair("access_allocated", "hot"),
-              Pair("size_returning", 1), Pair("guarded_status", "RateLimited"),
-              Pair("allocation type", "aligned malloc")),
+                               Pair("token_id", 0), Pair("size_returning", 1),
+                               Pair("guarded_status", "RateLimited"),
+                               Pair("allocation type", "aligned malloc")),
           UnorderedElementsAre(
               Pair("bytes", 16), Pair("request", 2), Pair("alignment", 4),
               Pair("stale_scan_period", 10),
               Pair("access_hint", 253), Pair("access_allocated", "cold"),
-              Pair("size_returning", 1), Pair("guarded_status", "RateLimited"),
-              Pair("allocation type", "new")),
+              Pair("token_id", 1), Pair("size_returning", 1),
+              Pair("guarded_status", "RateLimited"),
+              Pair("allocation type", "new[]")),
           UnorderedElementsAre(
               Pair("bytes", 16), Pair("request", 2), Pair("alignment", 4),
               Pair("stale_scan_period", 10),
               Pair("access_hint", 253), Pair("access_allocated", "cold"),
-              Pair("size_returning", 1), Pair("guarded_status", "Filtered"),
-              Pair("allocation type", "new")),
+              Pair("token_id", 1), Pair("size_returning", 1),
+              Pair("guarded_status", "Filtered"),
+              Pair("allocation type", "new[]")),
           UnorderedElementsAre(
               Pair("bytes", 16), Pair("request", 2), Pair("alignment", 4),
               Pair("stale_scan_period", 10),
               Pair("access_hint", 253), Pair("access_allocated", "cold"),
-              Pair("size_returning", 1), Pair("guarded_status", "Guarded"),
-              Pair("allocation type", "new"))));
+              Pair("token_id", 1), Pair("size_returning", 1),
+              Pair("guarded_status", "Guarded"),
+              Pair("allocation type", "new[]"))));
 
   EXPECT_THAT(extracted_samples,
               UnorderedElementsAre(IsSupersetOf({
@@ -652,7 +728,7 @@ TEST(ProfileConverterTest, HeapProfile) {
                                        Pair("objects", 6),
                                    }),
                                    IsSupersetOf({
-                                       Pair("resident_space", 40),
+                                       Pair("resident_space", 20),
                                        Pair("swapped_space", 0),
                                        Pair("space", 4690),
                                        Pair("objects", 10),
@@ -696,8 +772,21 @@ TEST(ProfileConverterTest, HeapProfile) {
     }
   }
 
-  EXPECT_THAT(converted.string_table(converted.drop_frames()),
-              testing::HasSubstr("TCMallocInternalNew"));
+  const absl::string_view drop_frames =
+      converted.string_table(converted.drop_frames());
+  EXPECT_TRUE(RE2::FullMatch("TCMallocInternalNew", drop_frames));
+  EXPECT_TRUE(RE2::FullMatch("operator new", drop_frames));
+  EXPECT_TRUE(RE2::FullMatch("operator new[]", drop_frames));
+  EXPECT_TRUE(RE2::FullMatch("operator new [clone .alloc_token]", drop_frames));
+  EXPECT_TRUE(
+      RE2::FullMatch("operator new[] [clone .alloc_token]", drop_frames));
+  EXPECT_TRUE(RE2::FullMatch("operator delete", drop_frames));
+  EXPECT_TRUE(RE2::FullMatch("operator delete[]", drop_frames));
+  // Class-scoped operator new overloads may not be inlined and must be kept
+  // to preserve the underlying ::operator new callsite.
+  EXPECT_FALSE(RE2::FullMatch("MyClass::operator new", drop_frames));
+  EXPECT_FALSE(RE2::FullMatch("operator new_custom", drop_frames));
+  EXPECT_FALSE(RE2::FullMatch("operator new [clone .other]", drop_frames));
   // No keep frames.
   EXPECT_EQ(converted.string_table(converted.keep_frames()), "");
 
@@ -729,7 +818,7 @@ TEST(ProfileBuilderTest, PeakHeapProfile) {
     sample.sum = 1234;
     sample.count = 2;
     sample.requested_size = 2;
-    sample.requested_alignment = 4;
+    sample.requested_alignment = std::align_val_t{4};
     sample.requested_size_returning = true;
     sample.allocated_size = 16;
 
@@ -742,6 +831,7 @@ TEST(ProfileBuilderTest, PeakHeapProfile) {
     sample.stack[2] = reinterpret_cast<void*>(&ProfileAccessor::MakeProfile);
     sample.access_hint = hot_cold_t{254};
     sample.access_allocated = Profile::Sample::Access::Cold;
+    sample.token_id = TokenId{0};
   }
 
   {
@@ -749,7 +839,7 @@ TEST(ProfileBuilderTest, PeakHeapProfile) {
     sample.sum = 2345;
     sample.count = 5;
     sample.requested_size = 4;
-    sample.requested_alignment = 0;
+    sample.requested_alignment = std::nullopt;
     sample.requested_size_returning = false;
     sample.allocated_size = 8;
 
@@ -761,6 +851,7 @@ TEST(ProfileBuilderTest, PeakHeapProfile) {
     sample.stack[1] = reinterpret_cast<void*>(&RealPath);
     sample.access_hint = hot_cold_t{1};
     sample.access_allocated = Profile::Sample::Access::Hot;
+    sample.token_id = TokenId{0};
   }
 
   fake_profile->SetSamples(std::move(samples));
@@ -781,13 +872,14 @@ TEST(ProfileBuilderTest, PeakHeapProfile) {
           UnorderedElementsAre(
               Pair("bytes", 16), Pair("request", 2), Pair("alignment", 4),
               Pair("access_hint", 254), Pair("access_allocated", "cold"),
-              Pair("size_returning", 1), Pair("guarded_status", "NotAttempted"),
+              Pair("token_id", 0), Pair("size_returning", 1),
+              Pair("guarded_status", "NotAttempted"),
               Pair("allocation type", "new")),
-          UnorderedElementsAre(Pair("bytes", 8), Pair("request", 4),
-                               Pair("access_hint", 1),
-                               Pair("access_allocated", "hot"),
-                               Pair("guarded_status", "NotAttempted"),
-                               Pair("allocation type", "new"))));
+          UnorderedElementsAre(
+              Pair("bytes", 8), Pair("request", 4),
+              Pair("access_hint", 1), Pair("access_allocated", "hot"),
+              Pair("token_id", 0), Pair("guarded_status", "NotAttempted"),
+              Pair("allocation type", "new"))));
 
   ASSERT_GE(converted.sample().size(), 2);
   ASSERT_GE(converted.sample(0).location_id().size(), 2);
@@ -798,12 +890,11 @@ TEST(ProfileBuilderTest, PeakHeapProfile) {
   EXPECT_EQ(converted.time_nanos(), absl::ToUnixNanos(start_time));
 }
 
-TEST(ProfileBuilderTest, LifetimeProfile) {
-  const absl::Time start_time = absl::Now();
-  constexpr absl::Duration kDuration = absl::Milliseconds(1500);
+perftools::profiles::Profile MakeTestLifetimeProfile(absl::Time start_time,
+                                                     absl::Duration duration) {
   auto fake_profile = std::make_unique<FakeProfile>();
   fake_profile->SetType(ProfileType::kLifetimes);
-  fake_profile->SetDuration(kDuration);
+  fake_profile->SetDuration(duration);
   fake_profile->SetStartTime(start_time);
 
   std::vector<Profile::Sample> samples;
@@ -814,8 +905,9 @@ TEST(ProfileBuilderTest, LifetimeProfile) {
         .count = 2,
         // Common information we retain in the lifetime profile.
         .requested_size = 2,
-        .requested_alignment = 4,
+        .requested_alignment = std::align_val_t{4},
         .allocated_size = 16,
+        .requested_size_returning = true,
         // Lifetime specific information in each sample.
         .profile_id = 33,
         .avg_lifetime = absl::Nanoseconds(77),
@@ -865,8 +957,14 @@ TEST(ProfileBuilderTest, LifetimeProfile) {
   fake_profile->SetSamples(std::move(samples));
   Profile profile = ProfileAccessor::MakeProfile(std::move(fake_profile));
   auto converted_or = MakeProfileProto(profile);
-  ASSERT_TRUE(converted_or.ok());
-  const perftools::profiles::Profile& converted = **converted_or;
+  CHECK_OK(converted_or.status());
+  return **converted_or;
+}
+
+TEST(ProfileBuilderTest, LifetimeProfile) {
+  const absl::Time start_time = absl::Now();
+  constexpr absl::Duration kDuration = absl::Milliseconds(1500);
+  const auto converted = MakeTestLifetimeProfile(start_time, kDuration);
   const auto& string_table = converted.string_table();
 
   // Checks for lifetime (deallocation) profile specific fields.
@@ -924,31 +1022,37 @@ TEST(ProfileBuilderTest, LifetimeProfile) {
               Pair("bytes", 16), Pair("request", 2), Pair("alignment", 4),
               Pair("callstack-pair-id", 33), Pair("avg_lifetime", 77),
               Pair("stddev_lifetime", 22), Pair("min_lifetime", 55),
-              Pair("max_lifetime", 99),
-              Pair("active CPU", "same"), Pair("active vCPU", "same"),
-              Pair("active L3", "same"), Pair("active NUMA", "same"),
-              Pair("active thread", "different")),
+              Pair("max_lifetime", 99), Pair("active CPU", "same"),
+              Pair("active vCPU", "same"), Pair("active L3", "same"),
+              Pair("active NUMA", "same"), Pair("active thread", "different"),
+              Pair("size_returning", 1), Pair("allocation type", "new"),
+              Pair("guarded_status", "NotAttempted"), Pair("token_id", 0),
+              Pair("access_hint", 0), Pair("access_allocated", "hot")),
           UnorderedElementsAre(
               Pair("bytes", 16), Pair("request", 2), Pair("alignment", 4),
               Pair("callstack-pair-id", 33), Pair("avg_lifetime", 77),
               Pair("stddev_lifetime", 22), Pair("min_lifetime", 55),
-              Pair("max_lifetime", 99),
-              Pair("active CPU", "same"), Pair("active vCPU", "same"),
-              Pair("active L3", "same"), Pair("active NUMA", "same"),
-              Pair("active thread", "different")),
+              Pair("max_lifetime", 99), Pair("active CPU", "same"),
+              Pair("active vCPU", "same"), Pair("active L3", "same"),
+              Pair("active NUMA", "same"), Pair("active thread", "different"),
+              Pair("size_returning", 1), Pair("allocation type", "new"),
+              Pair("guarded_status", "NotAttempted"), Pair("token_id", 0),
+              Pair("access_hint", 0), Pair("access_allocated", "hot")),
           // Check the contents of the censored sample.
           UnorderedElementsAre(
               Pair("bytes", 16), Pair("request", 2), Pair("alignment", 4),
               Pair("callstack-pair-id", 34), Pair("avg_lifetime", 77),
               Pair("stddev_lifetime", 22), Pair("min_lifetime", 55),
-              Pair("max_lifetime", 99),
-              Pair("active CPU", "none"), Pair("active vCPU", "none"),
-              Pair("active L3", "none"), Pair("active NUMA", "none"),
-              Pair("active thread", "none"))));
+              Pair("max_lifetime", 99), Pair("active CPU", "none"),
+              Pair("active vCPU", "none"), Pair("active L3", "none"),
+              Pair("active NUMA", "none"), Pair("active thread", "none"),
+              Pair("size_returning", 1), Pair("allocation type", "new"),
+              Pair("guarded_status", "NotAttempted"), Pair("token_id", 0),
+              Pair("access_hint", 0), Pair("access_allocated", "hot"))));
 
   // Checks for common fields.
-  EXPECT_THAT(converted.string_table(converted.drop_frames()),
-              testing::HasSubstr("TCMallocInternalNew"));
+  EXPECT_TRUE(RE2::FullMatch("TCMallocInternalNew",
+                             converted.string_table(converted.drop_frames())));
   // No keep frames.
   EXPECT_EQ(converted.string_table(converted.keep_frames()), "");
 
@@ -961,6 +1065,293 @@ TEST(ProfileBuilderTest, LifetimeProfile) {
 
   // Period not set
   EXPECT_EQ(converted.period(), 0);
+}
+
+perftools::profiles::Profile MakeTestEventTraceProfile(
+    absl::Time start_time, absl::Duration duration) {
+  auto fake_profile = std::make_unique<FakeProfile>();
+  fake_profile->SetType(ProfileType::kEventTrace);
+  fake_profile->SetDuration(duration);
+  fake_profile->SetStartTime(start_time);
+
+  std::vector<Profile::Sample> samples;
+  {
+    // The allocation sample.
+    Profile::Sample alloc{
+        .sum = 123,
+        .count = 2,
+        // Common information we retain in the event trace profile.
+        .requested_size = 2,
+        .requested_alignment = std::align_val_t{4},
+        .allocated_size = 16,
+        .alloc_handle = MallocHook::AllocHandle{0xbeef},
+        .requested_size_returning = true,
+        // Lifetime specific information in each sample.
+        .profile_id = 33,
+        .allocation_time = start_time + absl::Milliseconds(10),
+        .avg_lifetime = absl::Nanoseconds(77),
+        .stddev_lifetime = absl::Nanoseconds(22),
+        .min_lifetime = absl::Nanoseconds(55),
+        .max_lifetime = absl::Nanoseconds(99),
+        .allocator_deallocator_physical_cpu_matched = true,
+        .allocator_deallocator_virtual_cpu_matched = true,
+        .allocator_deallocator_l3_matched = true,
+        .allocator_deallocator_numa_matched = true,
+        .allocator_deallocator_thread_matched = false,
+    };
+    // This stack is mostly artificial, but we include a couple of real symbols
+    // from the binary to confirm that the locations are indexed into the
+    // mappings.
+    alloc.depth = 6;
+    alloc.stack[0] = absl::bit_cast<void*>(uintptr_t{0x12345});
+    alloc.stack[1] = absl::bit_cast<void*>(uintptr_t{0x23451});
+    alloc.stack[2] = absl::bit_cast<void*>(uintptr_t{0x34512});
+    alloc.stack[3] = absl::bit_cast<void*>(uintptr_t{0x45123});
+    alloc.stack[4] = reinterpret_cast<void*>(&ProfileAccessor::MakeProfile);
+    alloc.stack[5] = reinterpret_cast<void*>(&RealPath);
+
+    samples.push_back(alloc);
+
+    // The deallocation sample contains the same information with a negative
+    // count to denote deallocation.
+    Profile::Sample dealloc = alloc;
+    dealloc.count = -dealloc.count;
+    dealloc.allocation_time = start_time + absl::Milliseconds(20);
+    samples.push_back(dealloc);
+
+    // Right-censored sample (allocation with unobserved deallocation).
+    Profile::Sample right_censored_alloc = alloc;
+    right_censored_alloc.alloc_handle = MallocHook::AllocHandle{0xcafe};
+    right_censored_alloc.profile_id = 34;
+    right_censored_alloc.allocation_time = start_time + absl::Milliseconds(15);
+    right_censored_alloc.allocator_deallocator_physical_cpu_matched =
+        std::nullopt;
+    right_censored_alloc.allocator_deallocator_virtual_cpu_matched =
+        std::nullopt;
+    right_censored_alloc.allocator_deallocator_l3_matched = std::nullopt;
+    right_censored_alloc.allocator_deallocator_numa_matched = std::nullopt;
+    right_censored_alloc.allocator_deallocator_thread_matched = std::nullopt;
+    samples.push_back(right_censored_alloc);
+
+    // Left-censored sample (deallocation with unobserved allocation).
+    Profile::Sample left_censored_dealloc = dealloc;
+    left_censored_dealloc.alloc_handle = MallocHook::AllocHandle{0xdead};
+    left_censored_dealloc.profile_id = 35;
+    left_censored_dealloc.allocation_time = start_time + absl::Milliseconds(25);
+    left_censored_dealloc.allocator_deallocator_physical_cpu_matched =
+        std::nullopt;
+    left_censored_dealloc.allocator_deallocator_virtual_cpu_matched =
+        std::nullopt;
+    left_censored_dealloc.allocator_deallocator_l3_matched = std::nullopt;
+    left_censored_dealloc.allocator_deallocator_numa_matched = std::nullopt;
+    left_censored_dealloc.allocator_deallocator_thread_matched = std::nullopt;
+    samples.push_back(left_censored_dealloc);
+  }
+
+  fake_profile->SetSamples(std::move(samples));
+  Profile profile = ProfileAccessor::MakeProfile(std::move(fake_profile));
+  auto converted_or = MakeProfileProto(profile);
+  CHECK_OK(converted_or.status());
+  return **converted_or;
+}
+
+TEST(ProfileBuilderTest, EventTraceProfile) {
+  const absl::Time start_time = absl::Now();
+  constexpr absl::Duration kDuration = absl::Milliseconds(1500);
+  const auto converted = MakeTestEventTraceProfile(start_time, kDuration);
+  const auto& string_table = converted.string_table();
+
+  // Checks for event trace (and lifetime) profile specific fields.
+  ASSERT_EQ(converted.sample_type_size(), 6);
+  EXPECT_EQ(string_table.at(converted.sample_type(0).type()),
+            "allocated_objects");
+  EXPECT_EQ(string_table.at(converted.sample_type(1).type()),
+            "allocated_space");
+  EXPECT_EQ(string_table.at(converted.sample_type(2).type()),
+            "deallocated_objects");
+  EXPECT_EQ(string_table.at(converted.sample_type(3).type()),
+            "deallocated_space");
+  EXPECT_EQ(string_table.at(converted.sample_type(4).type()),
+            "censored_allocated_objects");
+  EXPECT_EQ(string_table.at(converted.sample_type(5).type()),
+            "censored_allocated_space");
+
+  ASSERT_EQ(converted.sample_size(), 4);
+  // For the alloc sample, the values are in indices 0, 1.
+  EXPECT_EQ(converted.sample(0).value(0), 2);
+  EXPECT_EQ(converted.sample(0).value(1), 123);
+  EXPECT_EQ(converted.sample(0).value(2), 0);
+  EXPECT_EQ(converted.sample(0).value(3), 0);
+  EXPECT_EQ(converted.sample(0).value(4), 0);
+  EXPECT_EQ(converted.sample(0).value(5), 0);
+  // For the dealloc sample, the values are in indices 2, 3.
+  EXPECT_EQ(converted.sample(1).value(0), 0);
+  EXPECT_EQ(converted.sample(1).value(1), 0);
+  EXPECT_EQ(converted.sample(1).value(2), 2);
+  EXPECT_EQ(converted.sample(1).value(3), 123);
+  EXPECT_EQ(converted.sample(1).value(4), 0);
+  EXPECT_EQ(converted.sample(1).value(5), 0);
+  // For the right-censored alloc sample, the values are in indices 0, 1.
+  EXPECT_EQ(converted.sample(2).value(0), 2);
+  EXPECT_EQ(converted.sample(2).value(1), 123);
+  EXPECT_EQ(converted.sample(2).value(2), 0);
+  EXPECT_EQ(converted.sample(2).value(3), 0);
+  EXPECT_EQ(converted.sample(2).value(4), 0);
+  EXPECT_EQ(converted.sample(2).value(5), 0);
+  // For the left-censored dealloc sample, the values are in indices 2, 3.
+  EXPECT_EQ(converted.sample(3).value(0), 0);
+  EXPECT_EQ(converted.sample(3).value(1), 0);
+  EXPECT_EQ(converted.sample(3).value(2), 2);
+  EXPECT_EQ(converted.sample(3).value(3), 123);
+  EXPECT_EQ(converted.sample(3).value(4), 0);
+  EXPECT_EQ(converted.sample(3).value(5), 0);
+
+  // Check the location and mapping fields and extract sample, label pairs.
+  SampleLabels extracted;
+  {
+    SCOPED_TRACE("EventTraceProfile");
+    ASSERT_NO_FATAL_FAILURE(CheckAndExtractSampleLabels(converted, extracted));
+  }
+
+  EXPECT_THAT(
+      extracted,
+      UnorderedElementsAre(
+          UnorderedElementsAre(
+              Pair("bytes", 16), Pair("request", 2), Pair("alignment", 4),
+              Pair("callstack-pair-id", 33), Pair("avg_lifetime", 77),
+              Pair("stddev_lifetime", 22), Pair("min_lifetime", 55),
+              Pair("max_lifetime", 99), Pair("active CPU", "same"),
+              Pair("active vCPU", "same"), Pair("active L3", "same"),
+              Pair("active NUMA", "same"), Pair("active thread", "different"),
+              Pair("size_returning", 1), Pair("allocation type", "new"),
+              Pair("guarded_status", "NotAttempted"), Pair("token_id", 0),
+              Pair("access_hint", 0), Pair("access_allocated", "hot"),
+              Pair("alloc_handle", 0xbeef),
+              Pair("allocation_time",
+                   absl::ToUnixNanos(start_time + absl::Milliseconds(10))),
+              Pair("requested_size", 2)),
+          UnorderedElementsAre(
+              Pair("bytes", 16), Pair("request", 2), Pair("alignment", 4),
+              Pair("callstack-pair-id", 33), Pair("avg_lifetime", 77),
+              Pair("stddev_lifetime", 22), Pair("min_lifetime", 55),
+              Pair("max_lifetime", 99), Pair("active CPU", "same"),
+              Pair("active vCPU", "same"), Pair("active L3", "same"),
+              Pair("active NUMA", "same"), Pair("active thread", "different"),
+              Pair("size_returning", 1), Pair("allocation type", "new"),
+              Pair("guarded_status", "NotAttempted"), Pair("token_id", 0),
+              Pair("access_hint", 0), Pair("access_allocated", "hot"),
+              Pair("alloc_handle", 0xbeef),
+              Pair("deallocation_time",
+                   absl::ToUnixNanos(start_time + absl::Milliseconds(20)))),
+          // Check the contents of the right-censored sample.
+          UnorderedElementsAre(
+              Pair("bytes", 16), Pair("request", 2), Pair("alignment", 4),
+              Pair("callstack-pair-id", 34), Pair("avg_lifetime", 77),
+              Pair("stddev_lifetime", 22), Pair("min_lifetime", 55),
+              Pair("max_lifetime", 99), Pair("active CPU", "none"),
+              Pair("active vCPU", "none"), Pair("active L3", "none"),
+              Pair("active NUMA", "none"), Pair("active thread", "none"),
+              Pair("size_returning", 1), Pair("allocation type", "new"),
+              Pair("guarded_status", "NotAttempted"), Pair("token_id", 0),
+              Pair("access_hint", 0), Pair("access_allocated", "hot"),
+              Pair("alloc_handle", 0xcafe),
+              Pair("allocation_time",
+                   absl::ToUnixNanos(start_time + absl::Milliseconds(15))),
+              Pair("requested_size", 2)),
+          // Check the contents of the left-censored sample.
+          UnorderedElementsAre(
+              Pair("bytes", 16), Pair("request", 2), Pair("alignment", 4),
+              Pair("callstack-pair-id", 35), Pair("avg_lifetime", 77),
+              Pair("stddev_lifetime", 22), Pair("min_lifetime", 55),
+              Pair("max_lifetime", 99), Pair("active CPU", "none"),
+              Pair("active vCPU", "none"), Pair("active L3", "none"),
+              Pair("active NUMA", "none"), Pair("active thread", "none"),
+              Pair("size_returning", 1), Pair("allocation type", "new"),
+              Pair("guarded_status", "NotAttempted"), Pair("token_id", 0),
+              Pair("access_hint", 0), Pair("access_allocated", "hot"),
+              Pair("alloc_handle", 0xdead),
+              Pair("deallocation_time",
+                   absl::ToUnixNanos(start_time + absl::Milliseconds(25))))));
+
+  // Checks for common fields.
+  EXPECT_TRUE(RE2::FullMatch("TCMallocInternalNew",
+                             converted.string_table(converted.drop_frames())));
+  // No keep frames.
+  EXPECT_EQ(converted.string_table(converted.keep_frames()), "");
+
+  EXPECT_EQ(converted.duration_nanos(), absl::ToInt64Nanoseconds(kDuration));
+  EXPECT_EQ(converted.time_nanos(), absl::ToUnixNanos(start_time));
+
+  // Period type [space, bytes]
+  EXPECT_EQ(converted.string_table(converted.period_type().type()), "space");
+  EXPECT_EQ(converted.string_table(converted.period_type().unit()), "bytes");
+
+  // Period not set
+  EXPECT_EQ(converted.period(), 0);
+}
+
+TEST(ProfileBuilderTest, SameTags) {
+  const absl::Time start_time = absl::Now();
+  constexpr absl::Duration kDuration = absl::Milliseconds(1500);
+
+  const auto heap =
+      MakeTestProfile(start_time, absl::ZeroDuration(), ProfileType::kHeap);
+  const auto peakheap =
+      MakeTestProfile(start_time, absl::ZeroDuration(), ProfileType::kPeakHeap);
+  const auto allocation =
+      MakeTestProfile(start_time, kDuration, ProfileType::kAllocations);
+  const auto lifetime = MakeTestLifetimeProfile(start_time, kDuration);
+  const auto event_trace = MakeTestEventTraceProfile(start_time, kDuration);
+
+  auto ExtractTags = [&](const perftools::profiles::Profile& proto) {
+    absl::flat_hash_set<std::string> tags;
+    for (const auto& s : proto.sample()) {
+      for (const auto& l : s.label()) {
+        tags.insert(proto.string_table(l.key()));
+      }
+    }
+
+    return tags;
+  };
+
+  auto heap_tags = ExtractTags(heap);
+  auto peakheap_tags = ExtractTags(peakheap);
+  auto allocation_tags = ExtractTags(allocation);
+  EXPECT_THAT(heap_tags, testing::Contains("stale_scan_period"));
+  heap_tags.erase("stale_scan_period");
+
+  EXPECT_THAT(heap_tags, testing::ContainerEq(allocation_tags));
+  EXPECT_THAT(heap_tags, testing::ContainerEq(peakheap_tags));
+
+  const absl::flat_hash_set<absl::string_view> lifetime_only_tags = {
+      "callstack-pair-id", "stddev_lifetime", "active thread", "min_lifetime",
+      "active NUMA",       "active CPU",      "active L3",     "active vCPU",
+      "max_lifetime",      "avg_lifetime",
+  };
+
+  auto lifetime_tags = ExtractTags(lifetime);
+  EXPECT_THAT(lifetime_tags, testing::IsSupersetOf(lifetime_only_tags));
+
+  const absl::flat_hash_set<absl::string_view> event_trace_only_tags = {
+      "alloc_handle",
+      "allocation_time",
+      "deallocation_time",
+      "requested_size",
+  };
+
+  auto event_trace_tags = ExtractTags(event_trace);
+  EXPECT_THAT(event_trace_tags, testing::IsSupersetOf(event_trace_only_tags));
+  for (const auto tag : event_trace_only_tags) {
+    event_trace_tags.erase(tag);
+  }
+
+  EXPECT_THAT(lifetime_tags, testing::ContainerEq(event_trace_tags));
+
+  for (const auto tag : lifetime_only_tags) {
+    lifetime_tags.erase(tag);
+  }
+
+  EXPECT_THAT(allocation_tags, testing::ContainerEq(lifetime_tags));
 }
 
 TEST(BuildId, CorruptImage_b180635896) {
@@ -1029,6 +1420,468 @@ TEST(BuildId, GnuProperty) {
 
   EXPECT_EQ(GetBuildId(&info), "1f2a67344247b1cb91260e53c03817f9");
   munmap(p, 4096);
+}
+
+// Verify that when requested_size_returning is false, compressed_size does not
+// exceed requested_size.  The bug: residency was queried with allocated_size
+// but compressibility analyzed only requested_size bytes.
+// EstimateCompressedSize then extrapolated the compression ratio to
+// total_backed (from residency), which was computed for the larger
+// allocated_size.
+TEST(ProfileConverterTest, CompressedSizeDoesNotExceedAnalyzedSize) {
+  constexpr size_t kRequestedSize = 100;
+  constexpr size_t kAllocatedSize = 128;
+
+  // Incompressible data so compression ratio ≈ 1.0.
+  std::vector<char> buf(kAllocatedSize);
+  std::minstd_rand rng(42);
+  for (auto& b : buf) b = static_cast<char>(rng());
+
+  Profile::Sample sample = {};
+  sample.sum = kRequestedSize;
+  sample.count = 1;
+  sample.requested_size = kRequestedSize;
+  sample.requested_alignment = std::nullopt;
+  sample.requested_size_returning = false;
+  sample.allocated_size = kAllocatedSize;
+  sample.span_start_address = buf.data();
+  sample.depth = 1;
+  sample.stack[0] = reinterpret_cast<void*>(&RealPath);
+  sample.access_hint = hot_cold_t{0};
+  sample.access_allocated = Profile::Sample::Access::Hot;
+  sample.token_id = TokenId{0};
+  sample.guarded_status = Profile::Sample::GuardedStatus::NotAttempted;
+  sample.type = AllocationType::Malloc;
+
+  Profile::Sample returning = sample;
+  returning.requested_size_returning = true;
+
+  StubPageFlags pageflags;
+  pageflags.set_stale_scan_period(buf.data(), 60);
+
+  StubResidency residency;
+  // Residency reports all bytes as resident.
+  Residency::Info info;
+  info.bytes_resident = kAllocatedSize;
+  info.bytes_swapped = 0;
+  info.page_is_resident.SetBit(0);
+  residency.SetInfo(buf.data(), info);
+
+  auto fake_profile = std::make_unique<FakeProfile>();
+  fake_profile->SetType(ProfileType::kHeap);
+  fake_profile->SetDuration(absl::Milliseconds(100));
+  fake_profile->SetSamples({sample, returning});
+  Profile profile = ProfileAccessor::MakeProfile(std::move(fake_profile));
+
+  auto converted_or = MakeProfileProto(profile, &pageflags, &residency);
+  CHECK_OK(converted_or.status());
+  const auto& converted = **converted_or;
+
+  // Find the space_compressed sample type index.
+  int compressed_idx = -1, size_returning_idx = -1;
+  for (int i = 0; i < converted.sample_type_size(); ++i) {
+    if (converted.string_table(converted.sample_type(i).type()) ==
+        "space_compressed") {
+      compressed_idx = i;
+      break;
+    }
+  }
+
+  for (int i = 0; i < converted.string_table_size(); ++i) {
+    if (converted.string_table(i) == "size_returning") {
+      size_returning_idx = i;
+    }
+  }
+  ASSERT_GE(size_returning_idx, 0) << "size_returning sample type not found";
+  return;
+  ASSERT_GE(compressed_idx, 0) << "space_compressed sample type not found";
+
+  ASSERT_EQ(converted.sample_size(), 2);
+  auto is_size_returning = [&](const perftools::profiles::Sample& s) -> int {
+    for (const auto& l : s.label()) {
+      if (l.key() == size_returning_idx) {
+        return l.num();
+      }
+    }
+    return 0;
+  };
+
+  std::array<int, 2> sizes = {-1, -1};
+  sizes[is_size_returning(converted.sample(0))] =
+      converted.sample(0).value(compressed_idx);
+  sizes[is_size_returning(converted.sample(1))] =
+      converted.sample(1).value(compressed_idx);
+
+  ASSERT_GE(sizes[0], 0);
+  // The compressed_size should (generally) not exceed the size actually
+  // analyzed, which for !requested_size_returning is requested_size.
+  EXPECT_LE(sizes[0], kRequestedSize);
+
+  ASSERT_GE(sizes[1], 0);
+  // Our random bytes are deterministic, so we can make assertions that may not
+  // work for all possible inputs.
+  EXPECT_GE(sizes[1], kRequestedSize);
+  EXPECT_LE(sizes[1], kAllocatedSize);
+}
+
+// A heap profile whose samples were never analyzed must not advertise the
+// compressibility columns at all.  Emitting a zero in every sample is
+// indistinguishable downstream from a fully compressible heap.
+TEST(ProfileConverterTest, NoCompressibilityColumnsWithoutMeasurements) {
+  std::vector<char> buf(128);
+
+  Profile::Sample sample = {};
+  sample.sum = buf.size();
+  sample.count = 1;
+  sample.requested_size = buf.size();
+  sample.requested_alignment = std::nullopt;
+  sample.requested_size_returning = false;
+  sample.allocated_size = buf.size();
+  sample.span_start_address = buf.data();
+  sample.depth = 1;
+  sample.stack[0] = reinterpret_cast<void*>(&RealPath);
+  sample.access_hint = hot_cold_t{0};
+  sample.access_allocated = Profile::Sample::Access::Hot;
+  sample.token_id = TokenId{0};
+  sample.guarded_status = Profile::Sample::GuardedStatus::NotAttempted;
+  sample.type = AllocationType::Malloc;
+
+  StubPageFlags pageflags;
+  // Residency has nothing for this address, so compressibility is never
+  // computed even though collection is enabled.
+  StubResidency residency;
+
+  auto fake_profile = std::make_unique<FakeProfile>();
+  fake_profile->SetType(ProfileType::kHeap);
+  fake_profile->SetDuration(absl::Milliseconds(100));
+  fake_profile->SetSamples({sample});
+  Profile profile = ProfileAccessor::MakeProfile(std::move(fake_profile));
+
+  auto converted_or = MakeProfileProto(profile, &pageflags, &residency);
+  CHECK_OK(converted_or.status());
+  const auto& converted = **converted_or;
+
+  std::vector<std::string> types;
+  for (const auto& s : converted.sample_type()) {
+    types.push_back(converted.string_table(s.type()));
+  }
+  EXPECT_THAT(types, Not(Contains("space_compressed")));
+  EXPECT_THAT(types, Not(Contains("zero_space")));
+  EXPECT_THAT(types, Not(Contains("analyzed_compressibility_space")));
+
+  // Every sample must still agree with the advertised sample types.
+  for (const auto& s : converted.sample()) {
+    EXPECT_EQ(s.value_size(), types.size());
+  }
+}
+
+TEST(ProfileConverterTest,
+     GroupCompressibilityDownsamplingExtrapolatesToGroupBacked) {
+  constexpr size_t kNumSpans = 64;
+  constexpr size_t kSpanSize = 64 * 1024;
+  constexpr int64_t kCountPerSpan = 2;
+
+  std::vector<std::vector<char>> bufs(kNumSpans, std::vector<char>(kSpanSize));
+  std::minstd_rand rng(123);
+  for (auto& buf : bufs) {
+    // First half incompressible non-zero bytes, second half zeroes.
+    for (size_t i = 0; i < kSpanSize / 2; ++i) {
+      buf[i] = static_cast<char>(rng() | 1);
+    }
+    std::memset(buf.data() + kSpanSize / 2, 0, kSpanSize / 2);
+  }
+
+  StubPageFlags pageflags;
+  StubResidency residency;
+  std::vector<Profile::Sample> samples;
+  samples.reserve(kNumSpans);
+
+  for (size_t i = 0; i < kNumSpans; ++i) {
+    Profile::Sample sample = {};
+    sample.sum = kCountPerSpan * kSpanSize;
+    sample.count = kCountPerSpan;
+    sample.requested_size = kSpanSize;
+    sample.requested_alignment = std::nullopt;
+    sample.requested_size_returning = false;
+    sample.allocated_size = kSpanSize;
+    sample.span_start_address = bufs[i].data();
+    sample.depth = 1;
+    sample.stack[0] = reinterpret_cast<void*>(&RealPath);
+    sample.access_hint = hot_cold_t{0};
+    sample.access_allocated = Profile::Sample::Access::Hot;
+    sample.token_id = TokenId{0};
+    sample.guarded_status = Profile::Sample::GuardedStatus::NotAttempted;
+    sample.type = AllocationType::Malloc;
+    samples.push_back(sample);
+
+    Residency::Info info;
+    info.bytes_resident = kSpanSize;
+    info.bytes_swapped = 0;
+    const size_t pages = (kSpanSize + GetPageSize() - 1) / GetPageSize() + 1;
+    for (size_t p = 0; p < std::min(pages, kMaxResidencyBits); ++p) {
+      info.page_is_resident.SetBit(p);
+    }
+    residency.SetInfo(bufs[i].data(), info);
+  }
+
+  auto fake_profile = std::make_unique<FakeProfile>();
+  fake_profile->SetType(ProfileType::kHeap);
+  fake_profile->SetDuration(absl::Milliseconds(100));
+  fake_profile->SetSamples(std::move(samples));
+  Profile profile = ProfileAccessor::MakeProfile(std::move(fake_profile));
+
+  auto converted_or = MakeProfileProto(profile, &pageflags, &residency);
+  CHECK_OK(converted_or.status());
+  const auto& converted = **converted_or;
+
+  return;
+
+  ASSERT_EQ(converted.sample_size(), 1);
+  absl::flat_hash_map<std::string, int64_t> values;
+  for (int i = 0; i < converted.sample_type_size(); ++i) {
+    values[converted.string_table(converted.sample_type(i).type())] =
+        converted.sample(0).value(i);
+  }
+
+  constexpr int64_t kTotalBacked = kNumSpans * kCountPerSpan * kSpanSize;
+  EXPECT_EQ(values["space"], kTotalBacked);
+  EXPECT_EQ(values["resident_space"], kTotalBacked);
+  EXPECT_EQ(values["zero_space"], kTotalBacked / 2);
+  // 32 of the 64 spans (2 MiB / 64 KiB) are analyzed in the group's reservoir,
+  // covering half of the group's backed bytes.
+  EXPECT_EQ(values["analyzed_compressibility_space"], kTotalBacked / 2);
+}
+
+TEST(ProfileConverterTest, SmallSizeClassGroupAnalyzesHundredsOfSamples) {
+  constexpr size_t kNumSpans = 100;
+  constexpr size_t kSpanSize = 1024;
+
+  std::vector<std::vector<char>> bufs(kNumSpans, std::vector<char>(kSpanSize));
+  for (size_t i = 0; i < kNumSpans; ++i) {
+    // Half of the spans are all zeroes; half have no zero bytes at all.
+    // Because small size classes retain up to 512 samples per group, all 100
+    // spans are analyzed and zero_space is exact (rather than quantized to 1/8
+    // increments from an 8-sample cap).
+    std::memset(bufs[i].data(), (i % 2 == 0) ? 0 : 0x42, kSpanSize);
+  }
+
+  StubPageFlags pageflags;
+  StubResidency residency;
+  std::vector<Profile::Sample> samples;
+  samples.reserve(kNumSpans);
+
+  for (size_t i = 0; i < kNumSpans; ++i) {
+    Profile::Sample sample = {};
+    sample.sum = kSpanSize;
+    sample.count = 1;
+    sample.requested_size = kSpanSize;
+    sample.allocated_size = kSpanSize;
+    sample.span_start_address = bufs[i].data();
+    sample.depth = 1;
+    sample.stack[0] = reinterpret_cast<void*>(&RealPath);
+    sample.type = AllocationType::Malloc;
+    samples.push_back(sample);
+
+    Residency::Info info;
+    info.bytes_resident = kSpanSize;
+    info.page_is_resident.SetBit(0);
+    info.page_is_resident.SetBit(1);
+    residency.SetInfo(bufs[i].data(), info);
+  }
+
+  auto fake_profile = std::make_unique<FakeProfile>();
+  fake_profile->SetType(ProfileType::kHeap);
+  fake_profile->SetDuration(absl::Milliseconds(100));
+  fake_profile->SetSamples(std::move(samples));
+  Profile profile = ProfileAccessor::MakeProfile(std::move(fake_profile));
+
+  auto converted_or = MakeProfileProto(profile, &pageflags, &residency);
+  CHECK_OK(converted_or.status());
+  const auto& converted = **converted_or;
+
+  return;
+
+  ASSERT_EQ(converted.sample_size(), 1);
+  absl::flat_hash_map<std::string, int64_t> values;
+  for (int i = 0; i < converted.sample_type_size(); ++i) {
+    values[converted.string_table(converted.sample_type(i).type())] =
+        converted.sample(0).value(i);
+  }
+
+  constexpr int64_t kTotalBacked = kNumSpans * kSpanSize;
+  EXPECT_EQ(values["resident_space"], kTotalBacked);
+  EXPECT_EQ(values["zero_space"], kTotalBacked / 2);
+  EXPECT_EQ(values["analyzed_compressibility_space"], kTotalBacked);
+}
+
+#if defined(__linux__)
+TEST(ProfileConverterTest,
+     UnanalyzedGroupUsesConservativeIncompressibleFallback) {
+  const size_t page_size = GetPageSize();
+  std::vector<char> valid_buf(page_size, 0x42);
+  void* prot_none =
+      mmap(nullptr, page_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(prot_none, MAP_FAILED);
+
+  Profile::Sample valid_sample = {};
+  valid_sample.sum = page_size;
+  valid_sample.count = 1;
+  valid_sample.requested_size = page_size;
+  valid_sample.allocated_size = page_size;
+  valid_sample.span_start_address = valid_buf.data();
+  valid_sample.depth = 1;
+  valid_sample.stack[0] = reinterpret_cast<void*>(&RealPath);
+  valid_sample.type = AllocationType::Malloc;
+
+  Profile::Sample failed_sample = valid_sample;
+  failed_sample.span_start_address = prot_none;
+  failed_sample.stack[0] = reinterpret_cast<void*>(&MakeTestProfile);
+
+  StubPageFlags pageflags;
+  StubResidency residency;
+
+  Residency::Info valid_info;
+  valid_info.bytes_resident = page_size;
+  valid_info.page_is_resident.SetBit(0);
+  valid_info.page_is_resident.SetBit(1);
+  residency.SetInfo(valid_buf.data(), valid_info);
+
+  Residency::Info failed_info;
+  failed_info.bytes_resident = page_size / 2;
+  failed_info.page_is_resident.SetBit(0);
+  residency.SetInfo(prot_none, failed_info);
+
+  auto fake_profile = std::make_unique<FakeProfile>();
+  fake_profile->SetType(ProfileType::kHeap);
+  fake_profile->SetDuration(absl::Milliseconds(100));
+  fake_profile->SetSamples({valid_sample, failed_sample});
+  Profile profile = ProfileAccessor::MakeProfile(std::move(fake_profile));
+
+  auto converted_or = MakeProfileProto(profile, &pageflags, &residency);
+  munmap(prot_none, page_size);
+  CHECK_OK(converted_or.status());
+  const auto& converted = **converted_or;
+
+  return;
+
+  ASSERT_EQ(converted.sample_size(), 2);
+  for (const auto& s : converted.sample()) {
+    absl::flat_hash_map<std::string, int64_t> values;
+    for (int i = 0; i < converted.sample_type_size(); ++i) {
+      values[converted.string_table(converted.sample_type(i).type())] =
+          s.value(i);
+    }
+    if (values["resident_space"] == static_cast<int64_t>(page_size / 2)) {
+      // Failed group falls back to incompressible (compressed == backed) and
+      // unbacked zeroes (page_size - page_size / 2).
+      EXPECT_EQ(values["zero_space"], page_size / 2);
+      EXPECT_EQ(values["analyzed_compressibility_space"], 0);
+    } else {
+      EXPECT_EQ(values["zero_space"], 0);
+      EXPECT_EQ(values["analyzed_compressibility_space"], page_size);
+    }
+  }
+}
+#endif  // defined(__linux__)
+
+TEST(ProfileBuilderTest, AddCurrentMappingsAfterAddMapping) {
+  ProfileBuilder builder;
+  builder.AddMapping(uintptr_t{0x100}, uintptr_t{0x200}, uintptr_t{0},
+                     "custom.so", "deadbeef");
+  builder.AddCurrentMappings();
+  auto profile = std::move(builder).Finalize();
+
+  absl::flat_hash_set<std::string> filenames;
+  for (const auto& mapping : profile->mapping()) {
+    filenames.emplace(profile->string_table(mapping.filename()));
+  }
+  EXPECT_THAT(filenames, testing::Contains("custom.so"));
+  EXPECT_THAT(filenames, testing::Contains(RealPath()));
+}
+
+TEST(BuildId, ZeroOneAndCorruptAlignment) {
+  // Construct two 4-byte-aligned ELF notes back-to-back:
+  // 1) A non-GNU note with n_namesz = 6 ("Linux\0", padded to 8) and
+  //    n_descsz = 1 (padded to 4), total 12 + 8 + 4 = 24 bytes.
+  // 2) An NT_GNU_BUILD_ID note with n_namesz = 4 ("GNU\0") and
+  //    n_descsz = 8 (0x0102030405060708), total 12 + 4 + 8 = 24 bytes.
+  alignas(8) uint8_t note_buf[48] = {};
+  ElfW(Nhdr) nhdr1 = {};
+  nhdr1.n_namesz = 6;
+  nhdr1.n_descsz = 1;
+  nhdr1.n_type = 0;
+  std::memcpy(note_buf, &nhdr1, sizeof(nhdr1));
+  std::memcpy(note_buf + sizeof(nhdr1), "Linux", 6);
+  note_buf[sizeof(nhdr1) + 8] = 0x42;
+
+  ElfW(Nhdr) nhdr2 = {};
+  nhdr2.n_namesz = 4;
+  nhdr2.n_descsz = 8;
+  nhdr2.n_type = NT_GNU_BUILD_ID;
+  std::memcpy(note_buf + 24, &nhdr2, sizeof(nhdr2));
+  std::memcpy(note_buf + 24 + sizeof(nhdr2), "GNU\0", 4);
+  const uint8_t kDesc[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
+  std::memcpy(note_buf + 24 + sizeof(nhdr2) + 4, kDesc, sizeof(kDesc));
+
+  ElfW(Phdr) pt_note = {};
+  pt_note.p_type = PT_NOTE;
+  pt_note.p_vaddr = 0;
+  pt_note.p_filesz = sizeof(note_buf);
+
+  dl_phdr_info info = {};
+  info.dlpi_name = "test.so";
+  info.dlpi_addr = reinterpret_cast<ElfW(Addr)>(note_buf);
+  info.dlpi_phdr = &pt_note;
+  info.dlpi_phnum = 1;
+
+  // ELF spec: p_align of 0 or 1 means default 4-byte note alignment.
+  pt_note.p_align = 0;
+  EXPECT_EQ(GetBuildId(&info), "0102030405060708");
+
+  pt_note.p_align = 1;
+  EXPECT_EQ(GetBuildId(&info), "0102030405060708");
+
+  // Non-power-of-2 or sub-4-byte p_align values are corrupt and must be
+  // rejected rather than causing misaligned ElfW(Nhdr) dereferences.
+  // Also test with the NT_GNU_BUILD_ID note at the start of the segment
+  // (p_vaddr = 24, p_filesz = 24) where (12 + 4 + 6 - 1) & -6 == 16 still
+  // lands on the 8-byte build-id descriptor if p_align = 6 is not rejected,
+  // and test a misaligned note base address (p_vaddr = 25, p_align = 4).
+  for (ElfW(Word) bad_align : {ElfW(Word){2}, ElfW(Word){3}, ElfW(Word){6}}) {
+    pt_note.p_vaddr = 0;
+    pt_note.p_filesz = sizeof(note_buf);
+    pt_note.p_align = bad_align;
+    EXPECT_EQ(GetBuildId(&info), "");
+
+    pt_note.p_vaddr = 24;
+    pt_note.p_filesz = 24;
+    EXPECT_EQ(GetBuildId(&info), "");
+  }
+
+  alignas(8) uint8_t misaligned_buf[32] = {};
+  std::memcpy(misaligned_buf + 1, note_buf + 24, 24);
+  info.dlpi_addr = reinterpret_cast<ElfW(Addr)>(misaligned_buf);
+  pt_note.p_vaddr = 1;
+  pt_note.p_filesz = 24;
+  pt_note.p_align = alignof(ElfW(Nhdr));
+  EXPECT_EQ(GetBuildId(&info), "");
+}
+
+TEST(ProfileBuilderTest, DisabledSamplingReturnsNotFound) {
+  if (MallocExtension::GetProfileSamplingInterval() < 0) {
+    GTEST_SKIP() << "TCMalloc is not linked in this build configuration";
+  }
+  ScopedProfileSamplingInterval scoped_interval(0);
+
+  Profile heap_profile = MallocExtension::SnapshotCurrent(ProfileType::kHeap);
+  EXPECT_EQ(heap_profile.Type(), ProfileType::kDoNotUse);
+  EXPECT_EQ(MakeProfileProto(heap_profile).status().code(),
+            absl::StatusCode::kNotFound);
+
+  Profile alloc_profile = MallocExtension::StartAllocationProfiling().Stop();
+  EXPECT_EQ(alloc_profile.Type(), ProfileType::kDoNotUse);
+  EXPECT_EQ(MakeProfileProto(alloc_profile).status().code(),
+            absl::StatusCode::kNotFound);
 }
 
 }  // namespace

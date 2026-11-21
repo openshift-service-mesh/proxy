@@ -1,0 +1,844 @@
+// Copyright 2019 The TCMalloc Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "tcmalloc/huge_page_tracker.h"
+
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+
+#include <algorithm>
+#include <atomic>
+#include <cerrno>
+#include <cstdint>
+#include <iterator>
+#include <optional>
+#include <random>
+#include <string>
+#include <thread>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+#include "absl/algorithm/container.h"
+#include "absl/base/internal/cycleclock.h"
+#include "absl/base/macros.h"
+#include "absl/base/thread_annotations.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/flags/flag.h"
+#include "absl/random/random.h"
+#include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
+#include "absl/strings/str_join.h"
+#include "absl/strings/string_view.h"
+#include "absl/synchronization/blocking_counter.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/time/time.h"
+#include "tcmalloc/common.h"
+#include "tcmalloc/huge_cache.h"
+#include "tcmalloc/huge_page_subrelease.h"
+#include "tcmalloc/huge_pages.h"
+#include "tcmalloc/internal/clock.h"
+#include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/memory_tag.h"
+#include "tcmalloc/internal/range_tracker.h"
+#include "tcmalloc/internal/system_allocator.h"
+#include "tcmalloc/pages.h"
+#include "tcmalloc/span.h"
+#include "tcmalloc/stats.h"
+#include "tcmalloc/testing/testutil.h"
+
+using tcmalloc::tcmalloc_internal::Length;
+
+ABSL_FLAG(Length, page_tracker_defrag_lim, Length(32),
+          "Max allocation size for defrag test");
+
+namespace tcmalloc {
+namespace tcmalloc_internal {
+
+class PageTrackerTestPeer {
+ public:
+  [[nodiscard]] static bool PinnedByTreatment(const PageTracker& pt,
+                                              HugePageTreatmentType type) {
+    return pt.PinnedByTreatment(type);
+  }
+};
+
+namespace {
+
+// This is an arbitrary distribution taken from page requests from
+// an empirical driver test.  It seems realistic enough. We trim it to
+// [1, last].
+//
+std::discrete_distribution<size_t> EmpiricalDistribution(Length last) {
+  std::vector<size_t> page_counts = []() {
+    std::vector<size_t> ret(12289);
+    ret[1] = 375745576;
+    ret[2] = 59737961;
+    ret[3] = 35549390;
+    ret[4] = 43896034;
+    ret[5] = 17484968;
+    ret[6] = 15830888;
+    ret[7] = 9021717;
+    ret[8] = 208779231;
+    ret[9] = 3775073;
+    ret[10] = 25591620;
+    ret[11] = 2483221;
+    ret[12] = 3595343;
+    ret[13] = 2232402;
+    ret[16] = 17639345;
+    ret[21] = 4215603;
+    ret[25] = 4212756;
+    ret[28] = 760576;
+    ret[30] = 2166232;
+    ret[32] = 3021000;
+    ret[40] = 1186302;
+    ret[44] = 479142;
+    ret[48] = 570030;
+    ret[49] = 101262;
+    ret[55] = 592333;
+    ret[57] = 236637;
+    ret[64] = 785066;
+    ret[65] = 44700;
+    ret[73] = 539659;
+    ret[80] = 342091;
+    ret[96] = 488829;
+    ret[97] = 504;
+    ret[113] = 242921;
+    ret[128] = 157206;
+    ret[129] = 145;
+    ret[145] = 117191;
+    ret[160] = 91818;
+    ret[192] = 67824;
+    ret[193] = 144;
+    ret[225] = 40711;
+    ret[256] = 38569;
+    ret[257] = 1;
+    ret[297] = 21738;
+    ret[320] = 13510;
+    ret[384] = 19499;
+    ret[432] = 13856;
+    ret[490] = 9849;
+    ret[512] = 3024;
+    ret[640] = 3655;
+    ret[666] = 3963;
+    ret[715] = 2376;
+    ret[768] = 288;
+    ret[1009] = 6389;
+    ret[1023] = 2788;
+    ret[1024] = 144;
+    ret[1280] = 1656;
+    ret[1335] = 2592;
+    ret[1360] = 3024;
+    ret[1536] = 432;
+    ret[2048] = 288;
+    ret[2560] = 72;
+    ret[3072] = 360;
+    ret[12288] = 216;
+    return ret;
+  }();
+
+  Length lim = last;
+  auto i = page_counts.begin();
+  // remember lim might be too big (in which case we use the whole
+  // vector...)
+
+  auto j = page_counts.size() > lim.raw_num() ? i + (lim.raw_num() + 1)
+                                              : page_counts.end();
+
+  return std::discrete_distribution<size_t>(i, j);
+}
+
+class PageTrackerTest : public testing::Test {
+ protected:
+  PageTrackerTest()
+      :  // an unlikely magic page
+        huge_(HugePageContaining(reinterpret_cast<void*>(0x1abcde200000))),
+        tracker_(huge_,
+                 /*was_donated=*/false,
+                 absl::base_internal::CycleClock::Now()) {}
+
+  ~PageTrackerTest() override { mock_unback_.VerifyAndClear(); }
+
+  struct PAlloc {
+    PageId p;
+    Length n;
+    SpanAllocInfo span_alloc_info;
+
+    PAlloc(PageId pp, Length nn, SpanAllocInfo s)
+        : p(pp), n(nn), span_alloc_info(s) {}
+  };
+
+  void Mark(PAlloc a, size_t mark) {
+    EXPECT_LE(huge_.first_page(), a.p);
+    size_t index = (a.p - huge_.first_page()).raw_num();
+    size_t end = index + a.n.raw_num();
+    EXPECT_LE(end, kPagesPerHugePage.raw_num());
+    for (; index < end; ++index) {
+      marks_[index] = mark;
+    }
+  }
+
+  class MockMemoryInterface final : public MemoryModifyFunction {
+   public:
+    [[nodiscard]] MemoryModifyStatus operator()(Range r) override {
+      TC_CHECK_LT(actual_index_, std::size(actual_));
+      actual_[actual_index_].r = r;
+      TC_CHECK_LT(actual_index_, std::size(expected_));
+      // Assume expected calls occur and use those return values.
+      const bool success = expected_[actual_index_].success;
+      const int error_number = expected_[actual_index_].error_number;
+      ++actual_index_;
+      return {.success = success, .error_number = error_number};
+    }
+
+    void Expect(PageId p, Length len, bool success, int error_number = 0) {
+      TC_CHECK_LT(expected_index_, kMaxCalls);
+      expected_[expected_index_] = {Range(p, len), success, error_number};
+      ++expected_index_;
+    }
+
+    void VerifyAndClear() {
+      EXPECT_EQ(expected_index_, actual_index_);
+      for (size_t i = 0, n = std::min(expected_index_, actual_index_); i < n;
+           ++i) {
+        EXPECT_EQ(expected_[i].r.p, actual_[i].r.p);
+        EXPECT_EQ(expected_[i].r.n, actual_[i].r.n);
+      }
+      expected_index_ = 0;
+      actual_index_ = 0;
+    }
+
+   private:
+    struct CallArgs {
+      Range r;
+      bool success = true;
+      int error_number = 0;
+    };
+
+    static constexpr size_t kMaxCalls = 10;
+    CallArgs expected_[kMaxCalls] = {};
+    CallArgs actual_[kMaxCalls] = {};
+    size_t expected_index_{0};
+    size_t actual_index_{0};
+  };
+
+  void Check(PAlloc a, size_t mark) {
+    EXPECT_LE(huge_.first_page(), a.p);
+    size_t index = (a.p - huge_.first_page()).raw_num();
+    size_t end = index + a.n.raw_num();
+    EXPECT_LE(end, kPagesPerHugePage.raw_num());
+    for (; index < end; ++index) {
+      EXPECT_EQ(marks_[index], mark);
+    }
+  }
+  void ExpectUnbackPages(PAlloc a, bool success = true) {
+    mock_unback_.Expect(a.p, a.n, success);
+  }
+
+  PAlloc Get(Length n, SpanAllocInfo span_alloc_info) {
+    PageHeapSpinLockHolder l;
+    PageId p =
+        tracker_.Get(n, span_alloc_info, PreferBackedPages::kDisabled).page;
+    return {p, n, span_alloc_info};
+  }
+
+  void Put(PAlloc a) {
+    PageHeapSpinLockHolder l;
+    tracker_.Put(Range(a.p, a.n), a.span_alloc_info);
+  }
+
+  Length ReleaseFree() {
+    PageHeapSpinLockHolder l;
+    return tracker_.ReleaseFree(mock_unback_);
+  }
+
+  // strict because release calls should only happen when we ask
+  MockMemoryInterface mock_unback_;
+
+  size_t marks_[kPagesPerHugePage.raw_num()];
+  HugePage huge_;
+  PageTracker tracker_;
+};
+
+TEST_F(PageTrackerTest, AllocSane) {
+  Length free = kPagesPerHugePage;
+  auto n = Length(1);
+  std::vector<PAlloc> allocs;
+  // This should work without fragmentation.
+  while (n <= free) {
+    ASSERT_GE(tracker_.longest_free_range(), n);
+    EXPECT_EQ(tracker_.used_pages(), kPagesPerHugePage - free);
+    EXPECT_EQ(tracker_.free_pages(), free);
+    PAlloc a = Get(n, {1, AccessDensityPrediction::kSparse});
+    Mark(a, n.raw_num());
+    allocs.push_back(a);
+    free -= n;
+    ++n;
+  }
+
+  // All should be distinct
+  for (auto alloc : allocs) {
+    Check(alloc, alloc.n.raw_num());
+  }
+}
+
+TEST_F(PageTrackerTest, ClearReleasedPages) {
+  static const Length kAllocSize = kPagesPerHugePage / 4;
+  SpanAllocInfo info = {1, AccessDensityPrediction::kSparse};
+  PAlloc a1 = Get(kAllocSize, info);
+  PAlloc a2 = Get(kAllocSize, info);
+  PAlloc a3 = Get(kAllocSize, info);
+  PAlloc a4 = Get(kAllocSize, info);
+
+  Put(a2);
+  ExpectUnbackPages(a2, /*success=*/true);
+  ReleaseFree();
+  mock_unback_.VerifyAndClear();
+
+  ASSERT_TRUE(tracker_.released());
+  ASSERT_EQ(tracker_.released_pages(), kAllocSize);
+  {
+    PageHeapSpinLockHolder l;
+    EXPECT_EQ(tracker_.ClearReleasedPages(), kAllocSize);
+  }
+  EXPECT_FALSE(tracker_.released());
+  EXPECT_EQ(tracker_.released_pages(), Length(0));
+
+  Put(a1);
+  Put(a3);
+  Put(a4);
+}
+
+// Release pins are counted, so two ReleasePages calls holding the same
+// candidate keep it pinned until both let go.  Treatment pins are independent
+// bits.
+TEST_F(PageTrackerTest, ReleasePinsAreCounted) {
+  EXPECT_FALSE(tracker_.DontFreeTracker());
+  EXPECT_FALSE(tracker_.PinnedForRelease());
+
+  tracker_.PinForRelease();
+  tracker_.PinForRelease();
+  EXPECT_TRUE(tracker_.PinnedForRelease());
+  EXPECT_TRUE(tracker_.DontFreeTracker());
+  EXPECT_FALSE(PageTrackerTestPeer::PinnedByTreatment(
+      tracker_, HugePageTreatmentType::kCollapse));
+
+  tracker_.UnpinForRelease();
+  EXPECT_TRUE(tracker_.PinnedForRelease());
+  EXPECT_TRUE(tracker_.DontFreeTracker());
+
+  tracker_.SetDontFreeTracker(HugePageTreatmentType::kCollapse);
+  tracker_.UnpinForRelease();
+  EXPECT_FALSE(tracker_.PinnedForRelease());
+  EXPECT_TRUE(tracker_.DontFreeTracker());
+  EXPECT_TRUE(PageTrackerTestPeer::PinnedByTreatment(
+      tracker_, HugePageTreatmentType::kCollapse));
+
+  tracker_.ClearDontFreeTracker(HugePageTreatmentType::kCollapse);
+  EXPECT_FALSE(tracker_.DontFreeTracker());
+}
+
+TEST_F(PageTrackerTest, ReleasingReturn) {
+  static const Length kAllocSize = kPagesPerHugePage / 4;
+  SpanAllocInfo info = {1, AccessDensityPrediction::kSparse};
+  PAlloc a1 = Get(kAllocSize - Length(3), info);
+  PAlloc a2 = Get(kAllocSize, info);
+  PAlloc a3 = Get(kAllocSize + Length(1), info);
+  PAlloc a4 = Get(kAllocSize + Length(2), info);
+
+  Put(a2);
+  Put(a4);
+  // We now have a hugepage that looks like [alloced] [free] [alloced] [free].
+  // The free parts should be released when we mark the hugepage as such,
+  // but not the allocated parts.
+  ExpectUnbackPages(a2, /*success=*/true);
+  ExpectUnbackPages(a4, /*success=*/true);
+  ReleaseFree();
+  mock_unback_.VerifyAndClear();
+
+  EXPECT_EQ(tracker_.released_pages(), a2.n + a4.n);
+  EXPECT_EQ(tracker_.free_pages(), a2.n + a4.n);
+
+  Put(a1);
+  Put(a3);
+}
+
+// released_pages() is exact between unback calls.  Once unback runs with
+// pageheap_lock dropped, other threads read the count while later ranges are
+// still in flight, so each range must be counted as soon as it succeeds rather
+// than once at the end.
+TEST_F(PageTrackerTest, ReleasingCountsEachRange) {
+  class CountingUnback final : public MemoryModifyFunction {
+   public:
+    explicit CountingUnback(const PageTracker& tracker) : tracker_(tracker) {}
+
+    [[nodiscard]] MemoryModifyStatus operator()(Range r) override {
+      TC_CHECK_LT(calls_, kMaxCalls);
+      // Ranges already released are counted; r is still in flight.
+      expected_[calls_] = released_so_far_;
+      observed_[calls_] = tracker_.released_pages();
+      ++calls_;
+      released_so_far_ += r.n;
+      return {.success = true, .error_number = 0};
+    }
+
+    void Verify(Length total) const {
+      EXPECT_EQ(released_so_far_, total);
+      for (size_t i = 0; i < calls_; ++i) {
+        EXPECT_EQ(observed_[i], expected_[i]) << "call " << i;
+      }
+    }
+
+   private:
+    // A local class cannot have a static data member.
+    enum : size_t { kMaxCalls = 10 };
+    const PageTracker& tracker_;
+    Length released_so_far_;
+    Length expected_[kMaxCalls];
+    Length observed_[kMaxCalls];
+    size_t calls_ = 0;
+  };
+
+  static const Length kAllocSize = kPagesPerHugePage / 4;
+  SpanAllocInfo info = {1, AccessDensityPrediction::kSparse};
+  PAlloc a1 = Get(kAllocSize - Length(3), info);
+  PAlloc a2 = Get(kAllocSize, info);
+  PAlloc a3 = Get(kAllocSize + Length(1), info);
+  PAlloc a4 = Get(kAllocSize + Length(2), info);
+
+  Put(a2);
+  Put(a4);
+  // [alloced] [free] [alloced] [free]: two ranges are unbacked in turn.
+  CountingUnback unback(tracker_);
+  {
+    PageHeapSpinLockHolder l;
+    EXPECT_EQ(tracker_.ReleaseFree(unback), a2.n + a4.n);
+  }
+  unback.Verify(a2.n + a4.n);
+  EXPECT_EQ(tracker_.released_pages(), a2.n + a4.n);
+
+  Put(a1);
+  Put(a3);
+}
+
+TEST_F(PageTrackerTest, ReleasingRetain) {
+  static const Length kAllocSize = kPagesPerHugePage / 4;
+  SpanAllocInfo info = {1, AccessDensityPrediction::kSparse};
+  PAlloc a1 = Get(kAllocSize - Length(3), info);
+  PAlloc a2 = Get(kAllocSize, info);
+  PAlloc a3 = Get(kAllocSize + Length(1), info);
+  PAlloc a4 = Get(kAllocSize + Length(2), info);
+
+  Put(a2);
+  Put(a4);
+  // We now have a hugepage that looks like [alloced] [free] [alloced] [free].
+  // The free parts should be released when we mark the hugepage as such,
+  // but not the allocated parts.
+  ExpectUnbackPages(a2);
+  ExpectUnbackPages(a4);
+  ReleaseFree();
+  mock_unback_.VerifyAndClear();
+
+  // Now we return the other parts, and they shouldn't get released.
+  Put(a1);
+  Put(a3);
+
+  mock_unback_.VerifyAndClear();
+
+  // But they will if we ReleaseFree.
+  ExpectUnbackPages(a1);
+  ExpectUnbackPages(a3);
+  ReleaseFree();
+  mock_unback_.VerifyAndClear();
+}
+
+TEST_F(PageTrackerTest, ReleasingRetainFailure) {
+  static const Length kAllocSize = kPagesPerHugePage / 4;
+  SpanAllocInfo info = {1, AccessDensityPrediction::kSparse};
+  PAlloc a1 = Get(kAllocSize - Length(3), info);
+  PAlloc a2 = Get(kAllocSize, info);
+  PAlloc a3 = Get(kAllocSize + Length(1), info);
+  PAlloc a4 = Get(kAllocSize + Length(2), info);
+
+  Put(a2);
+  Put(a4);
+  // We now have a hugepage that looks like [alloced] [free] [alloced] [free].
+  // The free parts should be released when we mark the hugepage as such if
+  // successful, but not the allocated parts.
+  ExpectUnbackPages(a2, /*success=*/true);
+  ExpectUnbackPages(a4, /*success=*/false);
+  ReleaseFree();
+  mock_unback_.VerifyAndClear();
+
+  EXPECT_EQ(tracker_.released_pages(), a2.n);
+  EXPECT_EQ(tracker_.free_pages(), a2.n + a4.n);
+
+  // Now we return the other parts, and they shouldn't get released.
+  Put(a1);
+  Put(a3);
+
+  mock_unback_.VerifyAndClear();
+
+  // But they will if we ReleaseFree.  We attempt to coalesce the deallocation
+  // of a3/a4.
+  ExpectUnbackPages(a1, /*success=*/true);
+  ExpectUnbackPages(PAlloc{std::min(a3.p, a4.p), a3.n + a4.n, info},
+                    /*success=*/false);
+  ReleaseFree();
+  mock_unback_.VerifyAndClear();
+
+  EXPECT_EQ(tracker_.released_pages(), a1.n + a2.n);
+  EXPECT_EQ(tracker_.free_pages(), a1.n + a2.n + a3.n + a4.n);
+}
+
+TEST_F(PageTrackerTest, Defrag) {
+  absl::BitGen rng;
+  const Length N = absl::GetFlag(FLAGS_page_tracker_defrag_lim);
+  SpanAllocInfo info = {1, AccessDensityPrediction::kSparse};
+  auto dist = EmpiricalDistribution(N);
+
+  std::vector<PAlloc> allocs;
+
+  std::vector<PAlloc> doomed;
+  while (tracker_.longest_free_range() > Length(0)) {
+    Length n;
+    do {
+      n = Length(dist(rng));
+    } while (n > tracker_.longest_free_range());
+    PAlloc a = Get(n, info);
+    (absl::Bernoulli(rng, 1.0 / 2) ? allocs : doomed).push_back(a);
+  }
+
+  for (auto d : doomed) {
+    Put(d);
+  }
+
+  static const size_t kReps = 25 * 1000;
+
+  std::vector<double> frag_samples;
+  std::vector<Length> longest_free_samples;
+  frag_samples.reserve(kReps);
+  longest_free_samples.reserve(kReps);
+  for (size_t i = 0; i < kReps; ++i) {
+    const Length free = kPagesPerHugePage - tracker_.used_pages();
+    // Ideally, we'd like all of our free space to stay in a single
+    // nice little run.
+    const Length longest = tracker_.longest_free_range();
+    double frag = free > Length(0)
+                      ? static_cast<double>(longest.raw_num()) / free.raw_num()
+                      : 1;
+
+    if (i % (kReps / 25) == 0) {
+      absl::PrintF("free = %v longest = %v frag = %f\n", free, longest, frag);
+    }
+    frag_samples.push_back(frag);
+    longest_free_samples.push_back(longest);
+
+    // Randomly grow or shrink (picking the only safe option when we're either
+    // full or empty.)
+    if (tracker_.longest_free_range() == Length(0) ||
+        (absl::Bernoulli(rng, 1.0 / 2) && !allocs.empty())) {
+      size_t index = absl::Uniform<int32_t>(rng, 0, allocs.size());
+      std::swap(allocs[index], allocs.back());
+      Put(allocs.back());
+      allocs.pop_back();
+    } else {
+      Length n;
+      do {
+        n = Length(dist(rng));
+      } while (n > tracker_.longest_free_range());
+      allocs.push_back(Get(n, info));
+    }
+  }
+
+  std::sort(frag_samples.begin(), frag_samples.end());
+  std::sort(longest_free_samples.begin(), longest_free_samples.end());
+
+  {
+    const double p10 = frag_samples[kReps * 10 / 100];
+    const double p25 = frag_samples[kReps * 25 / 100];
+    const double p50 = frag_samples[kReps * 50 / 100];
+    const double p75 = frag_samples[kReps * 75 / 100];
+    const double p90 = frag_samples[kReps * 90 / 100];
+    printf("Fragmentation quantiles:\n");
+    printf("p10: %f p25: %f p50: %f p75: %f p90: %f\n", p10, p25, p50, p75,
+           p90);
+    // We'd like to prety consistently rely on (75% of the time) reasonable
+    // defragmentation (50% of space is fully usable...)
+    // ...but we currently can't hit that mark consistently.
+    EXPECT_GE(p25, 0.07);
+  }
+
+  {
+    const Length p10 = longest_free_samples[kReps * 10 / 100];
+    const Length p25 = longest_free_samples[kReps * 25 / 100];
+    const Length p50 = longest_free_samples[kReps * 50 / 100];
+    const Length p75 = longest_free_samples[kReps * 75 / 100];
+    const Length p90 = longest_free_samples[kReps * 90 / 100];
+    printf("Longest free quantiles:\n");
+    absl::PrintF("p10: %v p25: %v p50: %v p75: %v p90: %v\n", p10, p25, p50,
+                 p75, p90);
+    // Similarly, we'd really like for there usually (p50) to be a space
+    // for a large allocation (N - note that we've cooked the books so that
+    // the page tracker is going to be something like half empty (ish) and N
+    // is small, so that should be doable.)
+    // ...but, of course, it isn't.
+    EXPECT_GE(p50, Length(4));
+  }
+
+  for (auto a : allocs) {
+    Put(a);
+  }
+}
+
+TEST_F(PageTrackerTest, Stats) {
+  struct Helper {
+    static void Stat(const PageTracker& tracker,
+                     std::vector<Length>* small_backed,
+                     std::vector<Length>* small_unbacked,
+                     LargeSpanStats* large) {
+      SmallSpanStats small;
+      *large = LargeSpanStats();
+      tracker.AddSpanStats(&small, large);
+      small_backed->clear();
+      small_unbacked->clear();
+      for (auto i = Length(0); i < kMaxPages; ++i) {
+        for (int j = 0; j < small.normal_length[i.raw_num()]; ++j) {
+          small_backed->push_back(i);
+        }
+
+        for (int j = 0; j < small.returned_length[i.raw_num()]; ++j) {
+          small_unbacked->push_back(i);
+        }
+      }
+    }
+  };
+
+  LargeSpanStats large;
+  std::vector<Length> small_backed, small_unbacked;
+
+  SpanAllocInfo info1 = {kPagesPerHugePage.raw_num(),
+                         AccessDensityPrediction::kDense};
+  const PageId p = Get(kPagesPerHugePage, info1).p;
+  const PageId end = p + kPagesPerHugePage;
+  PageId next = p;
+  Length n = kMaxPages + Length(1);
+  SpanAllocInfo info2 = {n.raw_num(), AccessDensityPrediction::kDense};
+  Put({next, n, info2});
+  next += kMaxPages + Length(1);
+
+  Helper::Stat(tracker_, &small_backed, &small_unbacked, &large);
+  EXPECT_THAT(small_backed, testing::ElementsAre());
+  EXPECT_THAT(small_unbacked, testing::ElementsAre());
+  EXPECT_EQ(large.spans, 1);
+  EXPECT_EQ(large.normal_pages, kMaxPages + Length(1));
+  EXPECT_EQ(large.returned_pages, Length(0));
+
+  ++next;
+  SpanAllocInfo info3 = {1, AccessDensityPrediction::kSparse};
+  Put({next, Length(1), info3});
+  next += Length(1);
+  Helper::Stat(tracker_, &small_backed, &small_unbacked, &large);
+  EXPECT_THAT(small_backed, testing::ElementsAre(Length(1)));
+  EXPECT_THAT(small_unbacked, testing::ElementsAre());
+  EXPECT_EQ(large.spans, 1);
+  EXPECT_EQ(large.normal_pages, kMaxPages + Length(1));
+  EXPECT_EQ(large.returned_pages, Length(0));
+
+  ++next;
+  SpanAllocInfo info4 = {2, AccessDensityPrediction::kSparse};
+  Put({next, Length(2), info4});
+  next += Length(2);
+  Helper::Stat(tracker_, &small_backed, &small_unbacked, &large);
+  EXPECT_THAT(small_backed, testing::ElementsAre(Length(1), Length(2)));
+  EXPECT_THAT(small_unbacked, testing::ElementsAre());
+  EXPECT_EQ(large.spans, 1);
+  EXPECT_EQ(large.normal_pages, kMaxPages + Length(1));
+  EXPECT_EQ(large.returned_pages, Length(0));
+
+  ++next;
+  SpanAllocInfo info5 = {3, AccessDensityPrediction::kSparse};
+  Put({next, Length(3), info5});
+  next += Length(3);
+  ASSERT_LE(next, end);
+  Helper::Stat(tracker_, &small_backed, &small_unbacked, &large);
+  EXPECT_THAT(small_backed,
+              testing::ElementsAre(Length(1), Length(2), Length(3)));
+  EXPECT_THAT(small_unbacked, testing::ElementsAre());
+  EXPECT_EQ(large.spans, 1);
+  EXPECT_EQ(large.normal_pages, kMaxPages + Length(1));
+  EXPECT_EQ(large.returned_pages, Length(0));
+
+  n = kMaxPages + Length(1);
+  ExpectUnbackPages({p, n, info2});
+  ExpectUnbackPages({p + kMaxPages + Length(2), Length(1), info3});
+  ExpectUnbackPages({p + kMaxPages + Length(4), Length(2), info4});
+  ExpectUnbackPages({p + kMaxPages + Length(7), Length(3), info5});
+  EXPECT_EQ(kMaxPages + Length(7), ReleaseFree());
+  Helper::Stat(tracker_, &small_backed, &small_unbacked, &large);
+  EXPECT_THAT(small_backed, testing::ElementsAre());
+  EXPECT_THAT(small_unbacked,
+              testing::ElementsAre(Length(1), Length(2), Length(3)));
+  EXPECT_EQ(large.spans, 1);
+  EXPECT_EQ(large.normal_pages, Length(0));
+  EXPECT_EQ(large.returned_pages, kMaxPages + Length(1));
+}
+
+TEST_F(PageTrackerTest, b151915873) {
+  // This test verifies, while generating statistics for the huge page, that we
+  // do not go out-of-bounds in our bitmaps (b/151915873).
+
+  // While the PageTracker relies on FindAndMark to decide which pages to hand
+  // out, we do not specify where in the huge page we get our allocations.
+  // Allocate single pages and then use their returned addresses to create the
+  // desired pattern in the bitmaps, namely:
+  //
+  // |      | kPagesPerHugePage - 2 | kPagesPerHugePages - 1 |
+  // | .... | not free              | free                   |
+  //
+  // This causes AddSpanStats to try index = kPagesPerHugePage - 1, n=1.  We
+  // need to not overflow FindClear/FindSet.
+
+  std::vector<PAlloc> allocs;
+  allocs.reserve(kPagesPerHugePage.raw_num());
+  SpanAllocInfo info = {1, AccessDensityPrediction::kSparse};
+  for (int i = 0; i < kPagesPerHugePage.raw_num(); i++) {
+    allocs.push_back(Get(Length(1), info));
+  }
+
+  std::sort(allocs.begin(), allocs.end(),
+            [](const PAlloc& a, const PAlloc& b) { return a.p < b.p; });
+
+  Put(allocs.back());
+  allocs.erase(allocs.begin() + allocs.size() - 1);
+
+  ASSERT_EQ(tracker_.used_pages(), kPagesPerHugePage - Length(1));
+
+  SmallSpanStats small;
+  LargeSpanStats large;
+
+  tracker_.AddSpanStats(&small, &large);
+
+  EXPECT_EQ(small.normal_length[1], 1);
+  EXPECT_THAT(0,
+              testing::AllOfArray(&small.normal_length[2],
+                                  &small.normal_length[kMaxPages.raw_num()]));
+}
+
+TEST_F(PageTrackerTest, PreferBackedFreePages) {
+  SpanAllocInfo info = {1, AccessDensityPrediction::kSparse};
+
+  // Partition the hugepage into contiguous allocations:
+  //   sep0 [0, 1), unbacked_hole [1, 3), sep1 [3, 4),
+  //   backed_large [4, 9), sep2 [9, 10),
+  //   backed_small_first [10, 13), sep3 [13, 14),
+  //   backed_small_second [14, 17), tail [17, kPagesPerHugePage)
+  PAlloc sep0 = Get(Length(1), info);
+  PAlloc unbacked_hole = Get(Length(2), info);
+  PAlloc sep1 = Get(Length(1), info);
+  PAlloc backed_large = Get(Length(5), info);
+  PAlloc sep2 = Get(Length(1), info);
+  PAlloc backed_small_first = Get(Length(3), info);
+  PAlloc sep3 = Get(Length(1), info);
+  PAlloc backed_small_second = Get(Length(3), info);
+  PAlloc tail = Get(kPagesPerHugePage - Length(17), info);
+
+  ASSERT_EQ(sep0.p, huge_.first_page() + Length(0));
+  ASSERT_EQ(unbacked_hole.p, huge_.first_page() + Length(1));
+  ASSERT_EQ(sep1.p, huge_.first_page() + Length(3));
+  ASSERT_EQ(backed_large.p, huge_.first_page() + Length(4));
+  ASSERT_EQ(sep2.p, huge_.first_page() + Length(9));
+  ASSERT_EQ(backed_small_first.p, huge_.first_page() + Length(10));
+  ASSERT_EQ(sep3.p, huge_.first_page() + Length(13));
+  ASSERT_EQ(backed_small_second.p, huge_.first_page() + Length(14));
+  ASSERT_EQ(tail.p, huge_.first_page() + Length(17));
+
+  // Subrelease only [1, 3) so it becomes a 2-page unbacked hole.
+  Put(unbacked_hole);
+  ExpectUnbackPages(unbacked_hole);
+  EXPECT_EQ(ReleaseFree(), Length(2));
+  EXPECT_EQ(tracker_.released_pages(), Length(2));
+
+  // Free the three backed holes after ReleaseFree() so they remain backed.
+  Put(backed_large);
+  Put(backed_small_first);
+  Put(backed_small_second);
+
+  // With PreferBackedPages::kDisabled, global best-fit prefers the exact 2-page
+  // unbacked hole over the larger 3-page and 5-page backed holes.
+  {
+    PageHeapSpinLockHolder l;
+    PageTracker::PageAllocation alloc =
+        tracker_.Get(Length(2), info, PreferBackedPages::kDisabled);
+    EXPECT_EQ(alloc.page, unbacked_hole.p);
+    EXPECT_EQ(alloc.previously_unbacked, Length(2));
+  }
+  EXPECT_EQ(tracker_.released_pages(), Length(0));
+
+  // Re-subrelease only [1, 3) back into a 2-page unbacked hole while keeping
+  // the three larger free holes backed.
+  Put(unbacked_hole);
+  {
+    PageHeapSpinLockHolder l;
+    PageBitmap unbacked_bits;
+    unbacked_bits.SetRange(1, 2);
+    EXPECT_EQ(tracker_.MarkSubreleased(unbacked_bits), Length(2));
+  }
+  EXPECT_EQ(tracker_.released_pages(), Length(2));
+
+  // With PreferBackedPages::kEnabled, Get(Length(2)) selects the shortest
+  // backed hole >= 2 pages (length 3), breaking ties by lowest page index
+  // ([10, 13) before [14, 17)), without faulting in the exact-fit unbacked hole
+  // [1, 3).
+  {
+    PageHeapSpinLockHolder l;
+    PageTracker::PageAllocation alloc1 =
+        tracker_.Get(Length(2), info, PreferBackedPages::kEnabled);
+    EXPECT_EQ(alloc1.page, backed_small_first.p);
+    EXPECT_EQ(alloc1.previously_unbacked, Length(0));
+    EXPECT_EQ(tracker_.released_pages(), Length(2));
+
+    PageTracker::PageAllocation alloc2 =
+        tracker_.Get(Length(2), info, PreferBackedPages::kEnabled);
+    EXPECT_EQ(alloc2.page, backed_small_second.p);
+    EXPECT_EQ(alloc2.previously_unbacked, Length(0));
+    EXPECT_EQ(tracker_.released_pages(), Length(2));
+
+    // Requesting Length(4) fits only in backed_large [4, 9).
+    PageTracker::PageAllocation alloc3 =
+        tracker_.Get(Length(4), info, PreferBackedPages::kEnabled);
+    EXPECT_EQ(alloc3.page, backed_large.p);
+    EXPECT_EQ(alloc3.previously_unbacked, Length(0));
+    EXPECT_EQ(tracker_.released_pages(), Length(2));
+
+    // Now the remaining backed holes all have length 1 ([8, 9), [12, 13),
+    // [16, 17)). Requesting Length(2) with PreferBackedPages::kEnabled has no
+    // backed hole >= 2 pages and falls back to FindAndMark(), using [1, 3).
+    PageTracker::PageAllocation fallback =
+        tracker_.Get(Length(2), info, PreferBackedPages::kEnabled);
+    EXPECT_EQ(fallback.page, unbacked_hole.p);
+    EXPECT_EQ(fallback.previously_unbacked, Length(2));
+    EXPECT_EQ(tracker_.released_pages(), Length(0));
+  }
+}
+
+}  // namespace
+}  // namespace tcmalloc_internal
+}  // namespace tcmalloc

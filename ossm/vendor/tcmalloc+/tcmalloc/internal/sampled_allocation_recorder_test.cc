@@ -29,7 +29,6 @@
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "tcmalloc/internal/explicitly_constructed.h"
 #include "tcmalloc/testing/thread_manager.h"
 
 namespace tcmalloc {
@@ -95,8 +94,8 @@ TEST_F(SampleRecorderTest, PrepareForSampling) {
   Info* info1 = Register(1);
   // PrepareForSampling() is invoked in the constructor.
   EXPECT_TRUE(info1->initialized);
-  info1->initialized = false;
-  sample_recorder_.Unregister(info1);
+  sample_recorder_.Unregister(info1,
+                              [](Info& info) { info.initialized = false; });
 
   Info* info2 = Register(2);
   // We are reusing the sample, PrepareForSampling() is invoked in PopDead();
@@ -112,8 +111,8 @@ TEST_F(SampleRecorderTest, Registration) {
   info1->size.store(3);
   EXPECT_THAT(GetSizes(), UnorderedElementsAre(3, 2));
 
-  sample_recorder_.Unregister(info1);
-  sample_recorder_.Unregister(info2);
+  sample_recorder_.Unregister(info1, [](Info&) {});
+  sample_recorder_.Unregister(info2, [](Info&) {});
 }
 
 TEST_F(SampleRecorderTest, Unregistration) {
@@ -123,18 +122,18 @@ TEST_F(SampleRecorderTest, Unregistration) {
   }
   EXPECT_THAT(GetSizes(), UnorderedElementsAre(0, 1, 2));
 
-  sample_recorder_.Unregister(infos[1]);
+  sample_recorder_.Unregister(infos[1], [](Info&) {});
   EXPECT_THAT(GetSizes(), UnorderedElementsAre(0, 2));
 
   infos.push_back(Register(3));
   infos.push_back(Register(4));
   EXPECT_THAT(GetSizes(), UnorderedElementsAre(0, 2, 3, 4));
-  sample_recorder_.Unregister(infos[3]);
+  sample_recorder_.Unregister(infos[3], [](Info&) {});
   EXPECT_THAT(GetSizes(), UnorderedElementsAre(0, 2, 4));
 
-  sample_recorder_.Unregister(infos[0]);
-  sample_recorder_.Unregister(infos[2]);
-  sample_recorder_.Unregister(infos[4]);
+  sample_recorder_.Unregister(infos[0], [](Info&) {});
+  sample_recorder_.Unregister(infos[2], [](Info&) {});
+  sample_recorder_.Unregister(infos[4], [](Info&) {});
   EXPECT_THAT(GetSizes(), IsEmpty());
 
   for (size_t i = 0; i < 10; ++i) {
@@ -177,7 +176,8 @@ TEST_F(SampleRecorderTest, MultiThreaded) {
           Info* info = infoz[p];
           infoz[p] = infoz.back();
           infoz.pop_back();
-          sample_recorder_.Unregister(info);
+          sample_recorder_.Unregister(
+              info, [](Info& info) { info.initialized = false; });
           break;
         }
         case 2: {
@@ -198,7 +198,7 @@ TEST_F(SampleRecorderTest, MultiThreaded) {
   // objects as `UnregisterAll()` is running concurrently. And `Unregister()`
   // assumes the object it is going to mark dead is still alive.
   SampleRecorder<Info, TestAllocator> sample_recorder{allocator_};
-  threads.Start(kThreads, [&](int) { sample_recorder.Register(); });
+  threads.Start(kThreads, [&](int) { (void)sample_recorder.Register(); });
   threads.Start(kThreads, [&](int) { sample_recorder.UnregisterAll(); });
   threads.Start(kThreads, [&](int) {
     sample_recorder.Iterate(
@@ -207,32 +207,9 @@ TEST_F(SampleRecorderTest, MultiThreaded) {
 
   // The threads will hammer away.  Give it a little bit of time for tsan to
   // spot errors.
-  absl::SleepFor(absl::Seconds(3));
+  absl::SleepFor(absl::Milliseconds(100));
   stop.Notify();
   threads.Stop();
-}
-
-TEST_F(SampleRecorderTest, Callback) {
-  auto* info1 = Register(1);
-  auto* info2 = Register(2);
-
-  static const Info* expected;
-
-  auto callback = [](const Info& info) {
-    // We can't use `info` outside of this callback because the object will be
-    // disposed as soon as we return from here.
-    EXPECT_EQ(&info, expected);
-  };
-
-  // Set the callback.
-  EXPECT_EQ(sample_recorder_.SetDisposeCallback(callback), nullptr);
-  expected = info1;
-  sample_recorder_.Unregister(info1);
-
-  // Unset the callback.
-  EXPECT_EQ(callback, sample_recorder_.SetDisposeCallback(nullptr));
-  expected = nullptr;  // no more calls.
-  sample_recorder_.Unregister(info2);
 }
 
 // Similar to Sample<Info> above but requires parameter(s) at initialization.
@@ -263,12 +240,13 @@ TEST(SampleRecorderWithParamTest, RegisterWithParam) {
   EXPECT_THAT(info->info_size, 1);
   EXPECT_TRUE(info->initialized);
   // Set these values to something else.
-  info->info_size = 0;
-  info->initialized = false;
-  sample_recorder.Unregister(info);
+  sample_recorder.Unregister(info, [](InfoWithParam& info) {
+    info.info_size = 0;
+    info.initialized = false;
+  });
   // |info| is not deleted, just marked as dead. Here, Register() would invoke
   // PopDead(), revive the same object, with its fields populated by PopDead().
-  sample_recorder.Register(2);
+  EXPECT_EQ(sample_recorder.Register(2), info);
   EXPECT_THAT(info->info_size, 2);
   EXPECT_TRUE(info->initialized);
 }

@@ -19,24 +19,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <algorithm>
-#include <limits>
 #include <optional>
 
 #include "absl/base/attributes.h"
 #include "absl/base/internal/cycleclock.h"
+#include "absl/base/nullability.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "tcmalloc/huge_address_map.h"
 #include "tcmalloc/huge_allocator.h"
-#include "tcmalloc/huge_page_subrelease.h"
 #include "tcmalloc/huge_pages.h"
 #include "tcmalloc/internal/clock.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/metadata_allocator.h"
+#include "tcmalloc/internal/min_max_tracker.h"
 #include "tcmalloc/internal/system_allocator.h"
-#include "tcmalloc/internal/timeseries_tracker.h"
-#include "tcmalloc/metadata_allocator.h"
 #include "tcmalloc/stats.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
@@ -59,55 +57,6 @@ class MemoryTagFunction {
 
   virtual void operator()(Range r, std::optional<absl::string_view> name) = 0;
 };
-
-// Track the extreme values of a HugeLength value over the past
-// kWindow (time ranges approximate.)
-template <size_t kEpochs = 16>
-class MinMaxTracker {
- public:
-  explicit constexpr MinMaxTracker(Clock clock, absl::Duration w)
-      : kEpochLength(w / kEpochs), timeseries_(clock, w) {}
-
-  void Report(HugeLength val);
-  void Print(Printer& out) const;
-  void PrintInPbtxt(PbtxtRegion& hpaa) const;
-
-  // If t < kEpochLength, these functions return statistics for last epoch. The
-  // granularity is kEpochLength (rounded up).
-  HugeLength MaxOverTime(absl::Duration t) const;
-  HugeLength MinOverTime(absl::Duration t) const;
-
- private:
-  const absl::Duration kEpochLength;
-
-  static constexpr HugeLength kMaxVal =
-      NHugePages(std::numeric_limits<size_t>::max());
-  struct Extrema {
-    HugeLength min, max;
-
-    static Extrema Nil() {
-      Extrema e;
-      e.max = NHugePages(0);
-      e.min = kMaxVal;
-      return e;
-    }
-
-    void Report(HugeLength n) {
-      max = std::max(max, n);
-      min = std::min(min, n);
-    }
-
-    bool empty() const { return (*this == Nil()); }
-
-    bool operator==(const Extrema& other) const;
-  };
-
-  TimeSeriesTracker<Extrema, HugeLength, kEpochs> timeseries_;
-};
-
-// Explicit instantiations are defined in huge_cache.cc.
-extern template class MinMaxTracker<>;
-extern template class MinMaxTracker<600>;
 
 class HugeCache {
  public:
@@ -168,7 +117,7 @@ class HugeCache {
   // memory that's currently backed from the kernel if we have it available.
   // *from_released is set to false if the return range is already backed;
   // otherwise, it is set to true (and the caller should back it.)
-  HugeRange Get(HugeLength n, bool* /*absl_nonnull*/ from_released);
+  [[nodiscard]] HugeRange Get(HugeLength n, bool* absl_nonnull from_released);
 
   // Deallocate <r> (assumed to be backed by the kernel.)
   void Release(HugeRange r);
@@ -179,23 +128,28 @@ class HugeCache {
   // Release to the system up to <n> hugepages of cache contents; returns
   // the number of hugepages released. It also triggers cache shrinking if
   // the cache becomes too big.
-  HugeLength ReleaseCachedPages(HugeLength n);
+  [[nodiscard]] HugeLength ReleaseCachedPages(HugeLength n);
 
   // Backed memory available.
-  HugeLength size() const { return size_; }
+  [[nodiscard]] HugeLength size() const { return size_; }
   // Current limit for how much backed memory we'll cache.
-  HugeLength limit() const { return limit_; }
+  [[nodiscard]] HugeLength limit() const { return limit_; }
   // Sum total of unreleased requests.
-  HugeLength usage() const { return usage_; }
+  [[nodiscard]] HugeLength usage() const { return usage_; }
 
   void AddSpanStats(SmallSpanStats* small, LargeSpanStats* large) const;
 
-  BackingStats stats() const {
+  [[nodiscard]] BackingStats stats() const {
     BackingStats s;
     s.system_bytes = (usage() + size()).in_bytes();
     s.free_bytes = size().in_bytes();
     s.unmapped_bytes = 0;
     return s;
+  }
+
+  [[nodiscard]] bool Contains(HugePage p) const {
+    const HugeAddressMap::Node* node = cache_.Predecessor(p);
+    return node != nullptr && node->range().contains(p);
   }
 
   void Print(Printer& out);
@@ -209,15 +163,15 @@ class HugeCache {
   void MaybeGrowCacheLimit(HugeLength missed);
   // Check if the cache seems consistently too big.  Returns the
   // number of pages *evicted* (not the change in limit).
-  HugeLength MaybeShrinkCacheLimit();
+  [[nodiscard]] HugeLength MaybeShrinkCacheLimit();
 
   // Ensure the cache contains at most <target> hugepages,
   // returning the number removed.
-  HugeLength ShrinkCache(HugeLength target);
+  [[nodiscard]] HugeLength ShrinkCache(HugeLength target);
 
-  HugeRange DoGet(HugeLength n, bool* from_released);
+  [[nodiscard]] HugeRange DoGet(HugeLength n, bool* from_released);
 
-  HugeAddressMap::Node* Find(HugeLength n);
+  [[nodiscard]] HugeAddressMap::Node* Find(HugeLength n);
 
   HugeAddressMap cache_;
   HugeLength size_{NHugePages(0)};
@@ -247,15 +201,15 @@ class HugeCache {
   // 10 hugepages is a good baseline for our cache--easily wiped away
   // by periodic release, and not that much memory on any real server.
   // However, we can go below it if we haven't used that much for 30 seconds.
-  HugeLength MinCacheLimit() const { return NHugePages(10); }
+  [[nodiscard]] HugeLength MinCacheLimit() const { return NHugePages(10); }
 
   void UpdateSize(HugeLength size);
 
-  MinMaxTracker<600> detailed_tracker_;
+  MinMaxTracker<HugeLength, 600> detailed_tracker_;
 
-  MinMaxTracker<> usage_tracker_;
-  MinMaxTracker<> off_peak_tracker_;
-  MinMaxTracker<> size_tracker_;
+  MinMaxTracker<HugeLength> usage_tracker_;
+  MinMaxTracker<HugeLength> off_peak_tracker_;
+  MinMaxTracker<HugeLength> size_tracker_;
 
   HugeLength total_fast_unbacked_{NHugePages(0)};
   HugeLength total_periodic_unbacked_{NHugePages(0)};
@@ -268,10 +222,12 @@ class HugeCache {
   // period. When the cap applies, we also release the minimum amount of free
   // hugepages that we have been consistently holding at anytime for 5 minutes
   // (realized fragmentation).
-  absl::Duration CapDemandInterval() const { return absl::Minutes(5); }
+  [[nodiscard]] absl::Duration CapDemandInterval() const {
+    return absl::Minutes(5);
+  }
 
   // The fraction of the cache that we are happy to return at a time. We use
-  // this to efficiently reduce the fragmenation.
+  // this to efficiently reduce the fragmentation.
   static constexpr double kFractionToReleaseFromCache = 0.2;
 };
 

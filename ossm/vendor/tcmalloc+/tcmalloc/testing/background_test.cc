@@ -55,13 +55,31 @@ TEST(BackgroundTest, Stress) {
 
   mgr.Start(kThreads, [&](int thread_id) { harness.Run(thread_id); });
 
-  absl::SleepFor(absl::Seconds(5));
+  absl::SleepFor(absl::Milliseconds(500));
 
   mgr.Stop();
 
   ScopedBackgroundProcessActionsEnabled background_process_enabled(
       /*value=*/false);
   background.join();
+}
+
+TEST(BackgroundTest, DisableInterruptsSleep) {
+  ScopedBackgroundProcessSleepInterval sleep_time(absl::Hours(1));
+
+  std::thread background([]() { MallocExtension::ProcessBackgroundActions(); });
+
+  absl::SleepFor(absl::Milliseconds(100));
+
+  const absl::Time start = absl::Now();
+  {
+    ScopedBackgroundProcessActionsEnabled background_process_enabled(
+        /*value=*/false);
+    background.join();
+  }
+  const absl::Duration elapsed = absl::Now() - start;
+
+  EXPECT_LT(elapsed, absl::Seconds(10));
 }
 
 }  // namespace

@@ -14,37 +14,318 @@
 
 #include <stddef.h>
 
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <new>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "tcmalloc/internal/profile.pb.h"
+#include "benchmark/benchmark.h"
 #include "gtest/gtest.h"
 #include "absl/base/optimization.h"
+#include "absl/container/btree_set.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/blocking_counter.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/gzip_stream.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
+#include "tcmalloc/internal/linked_list.h"
+#include "tcmalloc/internal/parameter_accessors.h"
 #include "tcmalloc/malloc_extension.h"
 #include "tcmalloc/profile_marshaler.h"
 #include "tcmalloc/testing/testutil.h"
 
-namespace tcmalloc {
-namespace tcmalloc_internal {
+namespace tcmalloc::tcmalloc_internal {
 namespace {
 
+TEST(AllocationSampleTest, TokenAbuse) {
+  auto token = MallocExtension::StartAllocationProfiling();
+  void* ptr = ::operator new(512 * 1024 * 1024);
+  ::operator delete(ptr);
+  // Repeated Claims should happily return null.
+  auto profile = std::move(token).Stop();
+  int count = 0;
+  bool found_large_alloc = false;
+  profile.Iterate([&](const Profile::Sample& sample) {
+    count++;
+    if (sample.requested_size == 512 * 1024 * 1024) {
+      found_large_alloc = true;
+    }
+  });
+
+  if (!kSanitizerPresent) {
+    EXPECT_GE(count, 1);
+    EXPECT_TRUE(found_large_alloc);
+  }
+
+  auto profile2 = std::move(token).Stop();  // NOLINT: use-after-move intended
+  int count2 = 0;
+  profile2.Iterate([&](const Profile::Sample&) { count2++; });
+  EXPECT_EQ(count2, 0);
+
+  // Delete (on the scope ending) without Claim should also be OK.
+  {
+    (void)MallocExtension::StartAllocationProfiling();
+  }
+}
+
+// Verify that profiling sessions concurrent with allocations do not crash due
+// to mutating pointers accessed by the sampling code (b/143623146).
+TEST(AllocationSampleTest, RaceToClaim) {
+  ScopedProfileSamplingInterval ps(1 << 14);
+
+  absl::BlockingCounter counter(2);
+  std::atomic<bool> stop{false};
+
+  std::thread t1([&]() {
+    counter.DecrementCount();
+
+    while (!stop) {
+      auto token = MallocExtension::StartAllocationProfiling();
+      absl::SleepFor(absl::Microseconds(1));
+      auto profile = std::move(token).Stop();
+    }
+  });
+
+  std::thread t2([&]() {
+    counter.DecrementCount();
+
+    const int kNum = 1000000;
+    std::vector<void*> ptrs;
+    while (!stop) {
+      for (int i = 0; i < kNum; i++) {
+        ptrs.push_back(::operator new(1));
+      }
+      for (void* p : ptrs) {
+        sized_delete(p, 1);
+      }
+      ptrs.clear();
+    }
+  });
+
+  // Verify the threads are up and running before we start the clock.
+  counter.Wait();
+
+  absl::SleepFor(absl::Milliseconds(50));
+
+  stop.store(true);
+
+  t1.join();
+  t2.join();
+}
+
+// Similar to the AllocationSampleTest but for DeallocationSample which uses a
+// similar API susceptible to the same race condition. It should be possible to
+// combine these to into a single test if the deallocation profiler is
+// refactored to use a template-d interface shared with the allocation profiler.
+TEST(DeallocationSampleTest, RaceToClaim) {
+  ScopedProfileSamplingInterval ps(1 << 14);
+
+  absl::BlockingCounter counter(2);
+  std::atomic<bool> stop{false};
+
+  std::thread t1([&]() {
+    counter.DecrementCount();
+
+    while (!stop) {
+      auto token = MallocExtension::StartLifetimeProfiling();
+      absl::SleepFor(absl::Microseconds(1));
+      auto profile = std::move(token).Stop();
+    }
+  });
+
+  std::thread t2([&]() {
+    counter.DecrementCount();
+
+    const int kNum = 1000000;
+    std::vector<void*> ptrs;
+    while (!stop) {
+      for (int i = 0; i < kNum; i++) {
+        ptrs.push_back(::operator new(1));
+      }
+      for (void* p : ptrs) {
+        sized_delete(p, 1);
+      }
+      ptrs.clear();
+    }
+  });
+
+  // Verify the threads are up and running before we start the clock.
+  counter.Wait();
+
+  absl::SleepFor(absl::Milliseconds(50));
+
+  stop.store(true);
+
+  t1.join();
+  t2.join();
+}
+
+TEST(AllocationSampleTest, SampleAccuracy) {
+  ScopedBackgroundProcessActionsEnabled disable_background_actions(false);
+  // Disable GWP-ASan, since it allocates different sizes than normal samples.
+  ScopedGuardedSamplingInterval gs(-1);
+
+  constexpr size_t kSamplingRate = 16 * 1024;
+  // Increase sampling rate to decrease flakiness.
+  ScopedProfileSamplingInterval ps(kSamplingRate);
+
+  // Allocate enough memory to get a stable number of samples (~1000 per size).
+  const size_t kTotalPerSize = 1000 * kSamplingRate;
+
+  // (object size, object alignment, keep objects)
+  struct Requests {
+    size_t size;
+    std::optional<std::align_val_t> alignment;
+    std::optional<tcmalloc::hot_cold_t> hot_cold;
+    bool expected_hot;
+    bool keep;
+    // objects we don't delete as we go
+    void* list = nullptr;
+  };
+  std::vector<Requests> sizes = {
+      {8, std::nullopt, std::nullopt, true, false},
+      {16, std::align_val_t{16}, std::nullopt, true, true},
+      {1024, std::nullopt, std::nullopt, true, false},
+      {64 * 1024, std::align_val_t{64}, std::nullopt, true, false},
+      {512 * 1024, std::nullopt, std::nullopt, true, true},
+      {1024 * 1024, std::align_val_t{128}, std::nullopt, true, true},
+      {32, std::nullopt, tcmalloc::hot_cold_t{0}, false, true},
+      {64, std::nullopt, tcmalloc::hot_cold_t{255}, true, true},
+      {8192, std::nullopt, tcmalloc::hot_cold_t{0}, false, true},
+  };
+  absl::btree_set<size_t> sizes_expected;
+  for (auto s : sizes) {
+    sizes_expected.insert(s.size);
+  }
+  auto token = MallocExtension::StartAllocationProfiling();
+
+  // We use new/delete to allocate memory, as malloc returns objects aligned to
+  // std::max_align_t.
+  for (auto& s : sizes) {
+    for (size_t bytes = 0; bytes < kTotalPerSize; bytes += s.size) {
+      void* obj;
+      if (s.alignment.has_value()) {
+        obj = operator new(s.size, *s.alignment);
+      } else if (s.hot_cold.has_value()) {
+        obj = operator new(s.size, *s.hot_cold);
+      } else {
+        obj = operator new(s.size);
+      }
+      if (s.keep) {
+        tcmalloc_internal::SLL_Push(&s.list, obj);
+      } else if (s.alignment.has_value()) {
+        operator delete(obj, *s.alignment);
+      } else {
+        sized_delete(obj, s.size);
+      }
+    }
+  }
+  auto profile = std::move(token).Stop();
+
+  // size -> bytes seen
+  absl::flat_hash_map<size_t, size_t> m;
+
+  // size -> alignment request
+  absl::flat_hash_map<size_t, std::optional<std::align_val_t>> alignment;
+
+  // size -> access_hint
+  absl::flat_hash_map<size_t, hot_cold_t> access_hint;
+
+  // size -> access_allocated
+  absl::flat_hash_map<size_t, Profile::Sample::Access> access_allocated;
+
+  for (auto s : sizes) {
+    alignment[s.size] = s.alignment;
+    access_hint[s.size] = s.hot_cold.value_or(hot_cold_t{255});
+    access_allocated[s.size] = s.expected_hot ? Profile::Sample::Access::Hot
+                                              : Profile::Sample::Access::Cold;
+  }
+
+  profile.Iterate([&](const tcmalloc::Profile::Sample& e) {
+    if (e.type != AllocationType::New) {
+      return;
+    }
+    // Skip unexpected sizes.  They may have been triggered by a background
+    // thread.
+    if (sizes_expected.find(e.requested_size) == sizes_expected.end()) {
+      return;
+    }
+    // Also skip if the access hint doesn't match our expectation, which means
+    // it's a background thread allocation that happened to match our size.
+    if (e.access_hint != access_hint[e.requested_size]) {
+      return;
+    }
+
+    SCOPED_TRACE(e.requested_size);
+
+    // Don't check stack traces until we have evidence that's broken, it's
+    // tedious and done fairly well elsewhere.
+    m[e.allocated_size] += e.sum;
+    EXPECT_EQ(alignment[e.requested_size], e.requested_alignment);
+    EXPECT_EQ(access_hint[e.requested_size], e.access_hint);
+    if (access_allocated[e.requested_size] == Profile::Sample::Access::Cold &&
+        e.access_allocated == Profile::Sample::Access::Hot) {
+      // The allocator may place cold hints into the Hot partition under some
+      // circumstances (e.g. heap partitioning disabled or unsupported).
+    } else {
+      EXPECT_EQ(access_allocated[e.requested_size], e.access_allocated);
+    }
+  });
+
+  if (!kSanitizerPresent) {
+    size_t max_bytes = 0, min_bytes = std::numeric_limits<size_t>::max();
+    EXPECT_EQ(m.size(), sizes_expected.size());
+    for (auto seen : m) {
+      size_t bytes = seen.second;
+      min_bytes = std::min(min_bytes, bytes);
+      max_bytes = std::max(max_bytes, bytes);
+    }
+    // Hopefully we're in a fairly small range, that contains our actual
+    // allocation.
+    EXPECT_GE((min_bytes * 3) / 2, max_bytes);
+    EXPECT_LE((min_bytes * 3) / 4, kTotalPerSize);
+    EXPECT_LE(kTotalPerSize, (max_bytes * 4) / 3);
+  }
+
+  // Remove the objects we left alive
+  for (auto& s : sizes) {
+    while (s.list != nullptr) {
+      void* obj = tcmalloc_internal::SLL_Pop(&s.list);
+      if (s.alignment.has_value()) {
+        operator delete(obj, *s.alignment);
+      } else {
+        sized_delete(obj, s.size);
+      }
+    }
+  }
+}
+
+extern "C" {
+void* __alloc_token_0__ZnwmRKSt9nothrow_t(size_t size, std::nothrow_t);
+void* __alloc_token_1__ZnwmRKSt9nothrow_t(size_t size, std::nothrow_t);
+void* __alloc_token_0__ZnamRKSt9nothrow_t(size_t size, std::nothrow_t);
+void* __alloc_token_1__ZnamRKSt9nothrow_t(size_t size, std::nothrow_t);
+}
+
 TEST(ProfileTest, HeapProfile) {
-#if ABSL_HAVE_ADDRESS_SANITIZER || ABSL_HAVE_MEMORY_SANITIZER || \
-    ABSL_HAVE_THREAD_SANITIZER
+#if ABSL_HAVE_ADDRESS_SANITIZER || ABSL_HAVE_HWADDRESS_SANITIZER || \
+    ABSL_HAVE_MEMORY_SANITIZER || ABSL_HAVE_THREAD_SANITIZER ||     \
+    defined(__SANITIZE_ALLOC_TOKEN__)
   GTEST_SKIP() << "Skipping heap profile test under sanitizers.";
 #endif
 
@@ -61,11 +342,28 @@ TEST(ProfileTest, HeapProfile) {
   // fast path of the first `emplace_back` is taken. We reserve enough space for
   // all insertions so that all `emplace_back` calls go through the fast path
   // and there is only one stack trace for tcmalloc.
-  allocs.reserve(3 * kAllocs);
+  allocs.reserve(5 * kAllocs);
   for (int i = 0; i < kAllocs; i++) {
     allocs.emplace_back(::operator new(alloc_size), deleter);
     allocs.emplace_back(::operator new(alloc_size, std::nothrow), deleter);
+    allocs.emplace_back(
+        __alloc_token_0__ZnwmRKSt9nothrow_t(alloc_size, std::nothrow), deleter);
+    allocs.emplace_back(
+        __alloc_token_1__ZnwmRKSt9nothrow_t(alloc_size, std::nothrow), deleter);
     allocs.emplace_back(__size_returning_new(alloc_size).p, deleter);
+  }
+
+  auto array_deleter = [](void* ptr) { ::operator delete[](ptr); };
+  std::vector<std::unique_ptr<void, decltype(array_deleter)>> array_allocs;
+  array_allocs.reserve(3 * kAllocs);
+  for (int i = 0; i < kAllocs; i++) {
+    array_allocs.emplace_back(::operator new[](alloc_size), array_deleter);
+    array_allocs.emplace_back(
+        __alloc_token_0__ZnamRKSt9nothrow_t(alloc_size, std::nothrow),
+        array_deleter);
+    array_allocs.emplace_back(
+        __alloc_token_1__ZnamRKSt9nothrow_t(alloc_size, std::nothrow),
+        array_deleter);
   }
 
   auto malloc_deleter = [](void* ptr) { free(ptr); };
@@ -91,10 +389,10 @@ TEST(ProfileTest, HeapProfile) {
   perftools::profiles::Profile converted;
   ASSERT_TRUE(converted.ParseFromCodedStream(&coded));
 
-  // Look for "request", "size_returning", "allocation_type", "new", "malloc",
-  // "aligned_malloc" strings in string table.
+  // Look for "request", "size_returning", "allocation_type", "new", "new[]",
+  // "malloc", "aligned_malloc" strings in string table.
   std::optional<int> request_id, size_returning_id, allocation_type_id, new_id,
-      malloc_id, aligned_malloc_id;
+      new_array_id, malloc_id, aligned_malloc_id, token_id;
   for (int i = 0, n = converted.string_table().size(); i < n; ++i) {
     if (converted.string_table(i) == "request") {
       request_id = i;
@@ -104,10 +402,14 @@ TEST(ProfileTest, HeapProfile) {
       allocation_type_id = i;
     } else if (converted.string_table(i) == "new") {
       new_id = i;
+    } else if (converted.string_table(i) == "new[]") {
+      new_array_id = i;
     } else if (converted.string_table(i) == "malloc") {
       malloc_id = i;
     } else if (converted.string_table(i) == "aligned malloc") {
       aligned_malloc_id = i;
+    } else if (converted.string_table(i) == "token_id") {
+      token_id = i;
     }
   }
 
@@ -115,11 +417,15 @@ TEST(ProfileTest, HeapProfile) {
   EXPECT_TRUE(size_returning_id.has_value());
   EXPECT_TRUE(allocation_type_id.has_value());
   EXPECT_TRUE(new_id.has_value());
+  EXPECT_TRUE(new_array_id.has_value());
   EXPECT_TRUE(malloc_id.has_value());
   EXPECT_TRUE(aligned_malloc_id.has_value());
+  EXPECT_TRUE(token_id.has_value());
 
+  absl::flat_hash_map<int, int> token_count;
   size_t count = 0, bytes = 0, samples = 0, size_returning_samples = 0,
-         new_samples = 0, malloc_samples = 0, aligned_malloc_samples = 0;
+         new_samples = 0, new_array_samples = 0, malloc_samples = 0,
+         aligned_malloc_samples = 0;
   for (const auto& sample : converted.sample()) {
     count += sample.value(0);
     bytes += sample.value(1);
@@ -149,6 +455,8 @@ TEST(ProfileTest, HeapProfile) {
 
           if (label.str() == new_id) {
             new_samples++;
+          } else if (label.str() == new_array_id) {
+            new_array_samples++;
           } else if (label.str() == malloc_id) {
             malloc_samples++;
           } else if (label.str() == aligned_malloc_id) {
@@ -158,6 +466,8 @@ TEST(ProfileTest, HeapProfile) {
                          << converted.string_table(label.str()) << " ("
                          << label.str() << ")";
           }
+        } else if (label.key() == token_id) {
+          token_count[label.num()]++;
         }
       }
     }
@@ -170,11 +480,16 @@ TEST(ProfileTest, HeapProfile) {
   // profile.proto.  Since all of the calls to operator new(alloc_size) are
   // similar in these dimensions, we expect to see only 2 samples, one for
   // ::operator new and one for __size_returning_new.
-  EXPECT_EQ(samples, 5);
+  EXPECT_EQ(samples, 10);
   EXPECT_EQ(size_returning_samples, 1);
-  EXPECT_EQ(new_samples, 3);
+  EXPECT_EQ(new_samples, 5);
+  EXPECT_EQ(new_array_samples, 3);
   EXPECT_EQ(malloc_samples, 1);
   EXPECT_EQ(aligned_malloc_samples, 1);
+
+  EXPECT_EQ(token_count[static_cast<int>(TokenId::kAllocToken0)], 2);
+  EXPECT_EQ(token_count[static_cast<int>(TokenId::kAllocToken1)], 2);
+  EXPECT_EQ(token_count[static_cast<int>(TokenId::kNoAllocToken)], 6);
 
   // Dump the profile in case of failures so that it's possible to debug.
   // Since SCOPED_TRACE attaches output to every failure, we use ASSERTs below.
@@ -223,6 +538,125 @@ TEST(ProfileTest, HeapProfile) {
   }
 }
 
+class ScopedEventTraceMemoryLimit {
+ public:
+  explicit ScopedEventTraceMemoryLimit(size_t limit)
+      : previous_(TCMalloc_Internal_GetEventTraceMemoryLimit()) {
+    TCMalloc_Internal_SetEventTraceMemoryLimit(limit);
+  }
+
+  ~ScopedEventTraceMemoryLimit() {
+    TCMalloc_Internal_SetEventTraceMemoryLimit(previous_);
+  }
+
+ private:
+  size_t previous_;
+};
+
+TEST(ProfileTest, EventTraceTruncation) {
+#if ABSL_HAVE_ADDRESS_SANITIZER || ABSL_HAVE_HWADDRESS_SANITIZER || \
+    ABSL_HAVE_MEMORY_SANITIZER || ABSL_HAVE_THREAD_SANITIZER
+  GTEST_SKIP() << "Skipping event trace test under sanitizers.";
+#endif
+
+  // Sample every allocation to make the test deterministic.
+  ScopedProfileSamplingInterval sample_interval(1);
+
+  // Set a small memory limit to force truncation.
+  // Note: A single matched allocation produces 2 records (alloc + dealloc),
+  // each ~600B. A limit of 8192 allows initial allocations (including any
+  // background activity) to be recorded while ensuring late allocations are
+  // truncated by filler allocations.
+  constexpr size_t kEventTraceMemoryLimit = 8192;
+  constexpr size_t kApproximateDeallocationSampleRecordSize = 600;
+  constexpr int kExpectedSampleCount =
+      kEventTraceMemoryLimit / kApproximateDeallocationSampleRecordSize;
+  ASSERT_GT(kExpectedSampleCount, 0) << "Event tracing requires more headroom.";
+
+  ScopedEventTraceMemoryLimit limit(kEventTraceMemoryLimit);
+
+  constexpr size_t kEarlySize = 1009;
+  constexpr size_t kFillerSize = 2003;
+  constexpr size_t kLateSize = 8009;
+
+  const absl::Time test_start = absl::Now();
+  auto token = MallocExtension::StartEventTracing();
+
+  // Early allocations (should be captured in the trace).
+  void* early_ptr = ::operator new(kEarlySize);
+  ::operator delete(early_ptr);
+
+  // Sleep slightly to guarantee a non-zero, measurable duration.
+  absl::SleepFor(absl::Milliseconds(20));
+
+  // Trigger enough allocations to exceed the memory limit.
+  constexpr int kNumFillerAllocs = 50;
+  for (int i = 0; i < kNumFillerAllocs; ++i) {
+    void* p = ::operator new(kFillerSize);
+    ::operator delete(p);
+  }
+
+  absl::SleepFor(absl::Milliseconds(20));
+
+  // Late allocations (should be truncated / dropped due to memory limit).
+  void* late_ptr = ::operator new(kLateSize);
+  ::operator delete(late_ptr);
+
+  Profile profile = std::move(token).Stop();
+  const absl::Time test_stop = absl::Now();
+
+  EXPECT_EQ(profile.Type(), ProfileType::kEventTrace);
+  EXPECT_GE(profile.Duration(), absl::Milliseconds(40));
+  EXPECT_LE(profile.Duration(), test_stop - test_start + absl::Seconds(1));
+  ASSERT_TRUE(profile.StartTime().has_value());
+  EXPECT_GE(*profile.StartTime(), test_start);
+  EXPECT_LE(*profile.StartTime(), test_stop);
+
+  absl::StatusOr<std::string> encoded_or = Marshal(profile);
+  ASSERT_TRUE(encoded_or.ok());
+
+  // NOLINTNEXTLINE - clang-tidy can't associate ASSERT_TRUE as checked access.
+  const absl::string_view encoded = *encoded_or;
+  google::protobuf::io::ArrayInputStream stream(encoded.data(), encoded.size());
+  google::protobuf::io::GzipInputStream gzip_stream(&stream);
+  google::protobuf::io::CodedInputStream coded(&gzip_stream);
+
+  perftools::profiles::Profile converted;
+  ASSERT_TRUE(converted.ParseFromCodedStream(&coded));
+
+  EXPECT_EQ(converted.duration_nanos(),
+            absl::ToInt64Nanoseconds(profile.Duration()));
+  EXPECT_EQ(converted.time_nanos(), absl::ToUnixNanos(*profile.StartTime()));
+
+  std::optional<int> requested_size_id;
+  for (int i = 0, n = converted.string_table().size(); i < n; ++i) {
+    if (converted.string_table(i) == "requested_size") {
+      requested_size_id = i;
+      break;
+    }
+  }
+  EXPECT_TRUE(requested_size_id.has_value());
+  int sample_count = 0;
+  bool contains_early = false;
+  bool contains_late = false;
+  for (const auto& sample : converted.sample()) {
+    sample_count++;
+    for (const auto& label : sample.label()) {
+      if (label.key() == requested_size_id) {
+        if (label.num() == kEarlySize) {
+          contains_early = true;
+        } else if (label.num() == kLateSize) {
+          contains_late = true;
+        }
+      }
+    }
+  }
+
+  EXPECT_LE(sample_count, kExpectedSampleCount)
+      << "Profile should be truncated.";
+  EXPECT_TRUE(contains_early);
+  EXPECT_FALSE(contains_late);
+}
+
 }  // namespace
-}  // namespace tcmalloc_internal
-}  // namespace tcmalloc
+}  // namespace tcmalloc::tcmalloc_internal

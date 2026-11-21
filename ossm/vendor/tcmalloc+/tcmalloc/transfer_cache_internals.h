@@ -32,12 +32,13 @@
 #include "absl/base/optimization.h"
 #include "absl/base/thread_annotations.h"
 #include "absl/types/span.h"
-#include "tcmalloc/central_freelist.h"
+#include "tcmalloc/arena.h"
 #include "tcmalloc/common.h"
 #include "tcmalloc/internal/allocation_guard.h"
 #include "tcmalloc/internal/atomic_stats_counter.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/parameters.h"
 #include "tcmalloc/transfer_cache_stats.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
@@ -58,10 +59,12 @@ class MissCounts {
                  std::memory_order_relaxed);
   }
 
-  size_t Total() const { return total_.load(std::memory_order_relaxed); }
+  [[nodiscard]] size_t Total() const {
+    return total_.load(std::memory_order_relaxed);
+  }
 
   // Returns the number of misses since the last commit call.
-  size_t Commit() {
+  [[nodiscard]] size_t Commit() {
     size_t t = total_.load(std::memory_order_relaxed);
     size_t c = total_committed_.exchange(t, std::memory_order_relaxed);
     if (ABSL_PREDICT_TRUE(t > c)) {
@@ -79,54 +82,50 @@ class MissCounts {
 // TransferCache is used to cache transfers of
 // sizemap.num_objects_to_move(size_class) back and forth between
 // thread caches and the central cache for a given size class.
-template <typename CentralFreeList, typename TransferCacheManager>
-class TransferCache {
+template <typename CentralFreeList, typename ForwarderT>
+class ABSL_CACHELINE_ALIGNED TransferCache {
  public:
-  using Manager = TransferCacheManager;
+  using Forwarder = ForwarderT;
   using FreeList = CentralFreeList;
 
-  TransferCache(
-      Manager* owner, int size_class,
-      central_freelist_internal::PriorityListLength priority_list_length)
-      : TransferCache(owner, size_class, CapacityNeeded(size_class),
-                      priority_list_length) {}
+  explicit TransferCache(int size_class)
+      : TransferCache(size_class, CapacityNeeded(size_class)) {}
 
   struct Capacity {
     int capacity;
     int max_capacity;
   };
 
-  TransferCache(
-      Manager* owner, int size_class, Capacity capacity,
-      central_freelist_internal::PriorityListLength priority_list_length)
+  TransferCache(int size_class, Capacity capacity)
       : lock_(absl::base_internal::SCHEDULE_KERNEL_ONLY),
         low_water_mark_(0),
         slot_info_(SizeInfo({0, capacity.capacity})),
         slots_(nullptr),
-        freelist_do_not_access_directly_(),
-        owner_(owner),
+        forwarder_(),
         max_capacity_(capacity.max_capacity) {
-    freelist().Init(size_class, priority_list_length);
-    slots_ = max_capacity_ != 0 ? reinterpret_cast<void**>(owner_->Alloc(
-                                      max_capacity_ * sizeof(void*)))
-                                : nullptr;
+    freelist().Init(size_class, Parameters::cfl_subbucket_prioritization());
+    slots_ = max_capacity_ != 0
+                 ? reinterpret_cast<void**>(forwarder_.Alloc(
+                       ArenaAlloc::kTransferCache,
+                       max_capacity_ * sizeof(void*), kAlignment))
+                 : nullptr;
   }
 
   TransferCache(const TransferCache&) = delete;
   TransferCache& operator=(const TransferCache&) = delete;
 
   // Compute initial and max capacity that we should configure this cache for.
-  static Capacity CapacityNeeded(size_t size_class) {
+  [[nodiscard]] static Capacity CapacityNeeded(size_t size_class) {
     // We need at least 2 slots to store list head and tail.
     static_assert(kMinObjectsToMove >= 2);
 
-    const size_t bytes = Manager::class_to_size(size_class);
+    const size_t bytes = Forwarder::class_to_size(size_class);
     if (size_class <= 0 || bytes <= 0) return {0, 0};
 
     // Limit the maximum size of the cache based on the size class.  If this
     // is not done, large size class objects will consume a lot of memory if
     // they just sit in the transfer cache.
-    const size_t objs_to_move = Manager::num_objects_to_move(size_class);
+    const size_t objs_to_move = Forwarder::num_objects_to_move(size_class);
     TC_ASSERT_GT(objs_to_move, 0);
 
     // Starting point for the maximum number of entries in the transfer cache.
@@ -154,7 +153,7 @@ class TransferCache {
 
   // Insert the specified batch into the transfer cache.  N is the number of
   // elements in the range.  RemoveRange() is the opposite operation.
-  void InsertRange(int size_class, absl::Span<void* /*absl_nonnull*/> batch)
+  void InsertRange(int size_class, absl::Span<void* absl_nonnull> batch)
       ABSL_LOCKS_EXCLUDED(lock_) {
     const int N = batch.size();
     TC_ASSERT(0 < N && N <= kMaxObjectsToMove);
@@ -168,9 +167,14 @@ class TransferCache {
       if (got > 0) {
         info.used += got;
         SetSlotInfo(info);
+#ifndef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+        insert_hits_.LossyAdd(1);
+#endif
         void** entry = GetSlot(info.used - got);
         memcpy(entry, batch.data(), sizeof(void*) * got);
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
         insert_hits_.LossyAdd(1);
+#endif
         if (got == N) {
           return;
         }
@@ -199,11 +203,18 @@ class TransferCache {
       if (got) {
         info.used -= got;
         SetSlotInfo(info);
-        void** entry = GetSlot(info.used);
-        memcpy(batch.data(), entry, sizeof(void*) * got);
+#ifndef TCMALLOC_INTERNAL_LEGACY_LOCKING2
         remove_hits_.LossyAdd(1);
         remove_object_hits_.LossyAdd(got);
         low_water_mark_ = std::min(low_water_mark_, info.used);
+#endif
+        void** entry = GetSlot(info.used);
+        memcpy(batch.data(), entry, sizeof(void*) * got);
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+        remove_hits_.LossyAdd(1);
+        remove_object_hits_.LossyAdd(got);
+        low_water_mark_ = std::min(low_water_mark_, info.used);
+#endif
         return got;
       }
     }
@@ -218,6 +229,10 @@ class TransferCache {
   // objects not used within a full cycle are unlikely to be used again.
   void TryPlunder(int size_class) ABSL_LOCKS_EXCLUDED(lock_) {
     if (max_capacity_ == 0) return;
+#ifndef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+    if (GetSlotInfo().used == 0) return;
+    const int B = forwarder_.num_objects_to_move(size_class);
+#endif
     if (!lock_.try_lock()) return;
 
     int to_return = low_water_mark_;
@@ -229,7 +244,9 @@ class TransferCache {
     low_water_mark_ = info.used;
     while (true) {
       info = GetSlotInfo();
-      const int B = Manager::num_objects_to_move(size_class);
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+      const int B = forwarder_.num_objects_to_move(size_class);
+#endif
       const size_t num_to_move = std::min({B, info.used, to_return});
       if (num_to_move == 0) break;
 
@@ -243,22 +260,25 @@ class TransferCache {
       lock_.unlock();
 
       freelist().InsertRange({buf, num_to_move});
+#ifndef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+      if (to_return == 0) return;
+#endif
       if (!lock_.try_lock()) return;
     }
     lock_.unlock();
   }
   // Returns the number of free objects in the transfer cache.
-  size_t tc_length() const {
+  [[nodiscard]] size_t tc_length() const {
     return static_cast<size_t>(slot_info_.load(std::memory_order_relaxed).used);
   }
 
   // Fetches the misses for the latest interval and commits them to the total.
-  size_t FetchCommitIntervalMisses() ABSL_LOCKS_EXCLUDED(lock_) {
+  [[nodiscard]] size_t FetchCommitIntervalMisses() ABSL_LOCKS_EXCLUDED(lock_) {
     return insert_object_misses_.Commit() + remove_object_misses_.Commit();
   }
 
   // Returns the number of transfer cache insert/remove hits/misses.
-  TransferCacheStats GetStats() const ABSL_LOCKS_EXCLUDED(lock_) {
+  [[nodiscard]] TransferCacheStats GetStats() const ABSL_LOCKS_EXCLUDED(lock_) {
     TransferCacheStats stats;
 
     stats.insert_hits = insert_hits_.value();
@@ -277,15 +297,15 @@ class TransferCache {
     return stats;
   }
 
-  SizeInfo GetSlotInfo() const {
+  [[nodiscard]] SizeInfo GetSlotInfo() const {
     return slot_info_.load(std::memory_order_relaxed);
   }
 
   // Increases capacity of the cache by a batch size. Returns true if it
   // succeeded at growing the cache by a batch size. Else, returns false.
-  bool IncreaseCacheCapacity(int size_class) ABSL_LOCKS_EXCLUDED(lock_) {
-    int n = Manager::num_objects_to_move(size_class);
-
+  [[nodiscard]] bool IncreaseCacheCapacity(int size_class)
+      ABSL_LOCKS_EXCLUDED(lock_) {
+    int n = forwarder_.num_objects_to_move(size_class);
     AllocationGuardSpinLockHolder h(lock_);
     auto info = slot_info_.load(std::memory_order_relaxed);
     // Check if we can expand this cache?
@@ -297,16 +317,17 @@ class TransferCache {
   }
 
   // Checks if the cache capacity may be increased by a batch size.
-  bool CanIncreaseCapacity(int size_class) const ABSL_LOCKS_EXCLUDED(lock_) {
-    int n = Manager::num_objects_to_move(size_class);
+  [[nodiscard]] bool CanIncreaseCapacity(int size_class) const
+      ABSL_LOCKS_EXCLUDED(lock_) {
+    int n = forwarder_.num_objects_to_move(size_class);
     auto info = GetSlotInfo();
     return max_capacity_ - info.capacity >= n;
   }
 
   // Checks if the cache has at least batch size number of free slots. Returns
   // false if (capacity - used) slots is less than the batch size.
-  bool HasSpareCapacity(int size_class) const {
-    int n = Manager::num_objects_to_move(size_class);
+  [[nodiscard]] bool HasSpareCapacity(int size_class) const {
+    int n = forwarder_.num_objects_to_move(size_class);
     auto info = GetSlotInfo();
     return info.capacity - info.used >= n;
   }
@@ -314,8 +335,11 @@ class TransferCache {
   // REQUIRES: lock_ is *not* held.
   // Tries to shrink the Cache.  Return false if it failed to shrink the cache.
   // Decreases cache_slots_ on success.
-  bool ShrinkCache(int size_class) ABSL_LOCKS_EXCLUDED(lock_) {
-    int N = Manager::num_objects_to_move(size_class);
+  [[nodiscard]] bool ShrinkCache(int size_class) ABSL_LOCKS_EXCLUDED(lock_) {
+    int N = forwarder_.num_objects_to_move(size_class);
+#ifndef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+    if (GetSlotInfo().capacity <= N) return false;
+#endif
 
     void* to_free[kMaxObjectsToMove];
     int num_to_free;
@@ -351,15 +375,18 @@ class TransferCache {
 
   // This is a thin wrapper for the CentralFreeList.  It is intended to ensure
   // that we are not holding lock_ when we access it.
-  ABSL_ATTRIBUTE_ALWAYS_INLINE FreeList& freelist() ABSL_LOCKS_EXCLUDED(lock_) {
+  [[nodiscard]] ABSL_ATTRIBUTE_ALWAYS_INLINE FreeList& freelist()
+      ABSL_LOCKS_EXCLUDED(lock_) {
     return freelist_do_not_access_directly_;
   }
 
-  int32_t max_capacity() const { return max_capacity_; }
+  [[nodiscard]] int32_t max_capacity() const { return max_capacity_; }
 
  private:
+  friend class TransferCacheTestPeer;
+
   // Returns first object of the i-th slot.
-  void** GetSlot(size_t i) ABSL_EXCLUSIVE_LOCKS_REQUIRED(lock_) {
+  [[nodiscard]] void** GetSlot(size_t i) ABSL_EXCLUSIVE_LOCKS_REQUIRED(lock_) {
     return slots_ + i;
   }
 
@@ -377,8 +404,7 @@ class TransferCache {
   absl::base_internal::SpinLock lock_;
 
   // All the following fields are accessed when holding lock_, so they should
-  // be collocated with lock_ on the same cacheline. Align insert_hits_ to
-  // ensure the following fields are on a separate cacheline.
+  // be collocated with lock_ on the same cacheline.
 
   // Lowest value of "slot_info_.used" since last call to TryPlunder. All
   // elements not used for a full cycle (2 seconds) are unlikely to get used
@@ -401,24 +427,26 @@ class TransferCache {
   // entries.
   void** slots_ ABSL_GUARDED_BY(lock_);
 
-  FreeList freelist_do_not_access_directly_;
-
-  Manager* const owner_;
+  // owner_ and max_capacity_ are immutable, so they may share lock_'s line.
+  ABSL_ATTRIBUTE_NO_UNIQUE_ADDRESS Forwarder forwarder_;
 
   // Maximum size of the cache.
   const int32_t max_capacity_;
 
-  // The following 4 *_misses_ counters
-  // are frequently updated, so they should reside in a separate cacheline from
-  // lock_.
-
-  // For these we are deliberately fast-and-loose. Some increments may be lost.
-  StatsCounter insert_misses_;
+  // The following 4 *_misses_ counters are written by every core that misses,
+  // so they get a cacheline of their own, apart from both lock_ and the
+  // freelist's lock.
+  //
+  alignas(ABSL_CACHELINE_SIZE) StatsCounter insert_misses_;
   StatsCounter remove_misses_;
 
   MissCounts insert_object_misses_;
   MissCounts remove_object_misses_;
-} ABSL_CACHELINE_ALIGNED;
+
+  // CentralFreeList carries its own lock at offset 0, so start it on a fresh
+  // cacheline to keep it from false sharing with lock_ or the miss counters.
+  alignas(ABSL_CACHELINE_SIZE) FreeList freelist_do_not_access_directly_;
+};
 
 template <typename Manager>
 void ResizeCaches(Manager& manager, int start_size_class) {
@@ -499,11 +527,15 @@ void ResizeCaches(Manager& manager, int start_size_class) {
 template <typename Manager>
 void TryResizingCaches(Manager& manager) {
   // Resize transfer caches for each set of kNumBaseClasses.
-  for (int i = 0; i < Manager::kNumaPartitions; ++i) {
+  const size_t num_partitions =
+      Parameters::heap_partitioning_mode() != HeapPartitioningMode::kOff
+          ? Manager::kNormalPartitions
+          : Manager::kNormalPartitions / Manager::kSecurityPartitions;
+  for (int i = 0; i < num_partitions; ++i) {
     ResizeCaches(manager, i * Manager::kNumBaseClasses);
   }
-  if (Manager::kHasExpandedClasses) {
-    ResizeCaches(manager, Manager::kExpandedClassesStart);
+  if (Manager::kHasColdClasses) {
+    ResizeCaches(manager, Manager::kColdClassesStart);
   }
 }
 

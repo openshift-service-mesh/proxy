@@ -17,11 +17,14 @@
 
 #include <stddef.h>
 
+#include "absl/base/nullability.h"
+#include "absl/base/optimization.h"
 #include "absl/base/thread_annotations.h"
 #include "tcmalloc/common.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/pageflags.h"
+#include "tcmalloc/internal/residency.h"
 #include "tcmalloc/pages.h"
 #include "tcmalloc/span.h"
 #include "tcmalloc/stats.h"
@@ -30,51 +33,49 @@ GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
 namespace tcmalloc_internal {
 
-class PageMap;
+enum class EnableCollapse : uint8_t;
 
 class PageAllocatorInterface {
  public:
   PageAllocatorInterface(const char* label, MemoryTag tag);
   virtual ~PageAllocatorInterface() = default;
-  // Allocate a run of "n" pages. These pages would be allocated to a total of
-  // 'objects_per_span' objects. Returns zero if out of memory.  Caller should
-  // not pass "n == 0" -- instead, n should have been rounded up already.
-  virtual Span* /*absl_nullable*/ New(Length n, SpanAllocInfo span_alloc_info)
-      ABSL_LOCKS_EXCLUDED(pageheap_lock) = 0;
-
-  // As New, but the returned span is aligned to a <align>-page boundary.
-  // <align> must be a power of two.
-  virtual Span* /*absl_nullable*/ NewAligned(Length n, Length align,
-                                         SpanAllocInfo span_alloc_info)
-      ABSL_LOCKS_EXCLUDED(pageheap_lock) = 0;
-
-  // Delete the span "[p, p+n-1]".
-  // REQUIRES: span was returned by earlier call to New() and
-  //           has not yet been deleted.
-  //
-  // TODO(b/175334169): Prefer the AllocationState-ful API.
-#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING
-  virtual void Delete(Span* /*absl_nonnull*/ span, SpanAllocInfo span_alloc_info)
-      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) = 0;
-#endif  // TCMALLOC_INTERNAL_LEGACY_LOCKING
 
   struct AllocationState {
     Range r;
     bool donated;
 
-    operator bool() const { return ABSL_PREDICT_TRUE(r.p != PageId{0}); }
+    [[nodiscard]] operator bool() const {
+      return ABSL_PREDICT_TRUE(r.p != PageId{0});
+    }
   };
+
+  // Allocate a run of "n" pages. These pages would be allocated to a total of
+  // 'objects_per_span' objects. Returns zero if out of memory.  Caller should
+  // not pass "n == 0" -- instead, n should have been rounded up already.
+  [[nodiscard]] virtual AllocationState New(Length n,
+                                            SpanAllocInfo span_alloc_info)
+      ABSL_LOCKS_EXCLUDED(pageheap_lock) = 0;
+
+  // As New, but the returned span is aligned to a <align>-page boundary.
+  // <align> must be a power of two.
+  [[nodiscard]] virtual AllocationState NewAligned(
+      Length n, Length align, SpanAllocInfo span_alloc_info)
+      ABSL_LOCKS_EXCLUDED(pageheap_lock) = 0;
+
+  // Delete the span "[p, p+n-1]".
+  // REQUIRES: span was returned by earlier call to New() and
+  //           has not yet been deleted.
 
   virtual void Delete(AllocationState s, SpanAllocInfo span_alloc_info)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) = 0;
 
-  virtual BackingStats stats() const
+  [[nodiscard]] virtual BackingStats stats() const
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) = 0;
 
-  virtual void GetSmallSpanStats(SmallSpanStats* result)
+  virtual void GetSmallSpanStats(SmallSpanStats* result) const
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) = 0;
 
-  virtual void GetLargeSpanStats(LargeSpanStats* result)
+  virtual void GetLargeSpanStats(LargeSpanStats* result) const
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) = 0;
 
   // Try to release at least num_pages for reuse by the OS.  Returns
@@ -83,17 +84,22 @@ class PageAllocatorInterface {
   // may also be larger than num_pages since page_heap might decide to
   // release one large range instead of fragmenting it into two
   // smaller released and unreleased ranges.
-  virtual Length ReleaseAtLeastNPages(Length num_pages,
-                                      PageReleaseReason reason)
+  [[nodiscard]] virtual Length ReleaseAtLeastNPages(Length num_pages,
+                                                    PageReleaseReason reason)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) = 0;
 
   // Returns the number of pages that have been released from this page
   // allocator.
-  virtual PageReleaseStats GetReleaseStats() const
+  [[nodiscard]] virtual PageReleaseStats GetReleaseStats() const
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) = 0;
 
-  virtual void TreatHugepageTrackers(bool enable_collapse,
-                                     bool enable_release_free_swapped)
+  // Applies periodic treatments (collapse, sampled-tracker naming, release of
+  // stale or swapped pages) to hugepage trackers.  Hugepage-backing and
+  // residency queries go through pageflags and residency; when either is
+  // null, the /proc-backed implementation is used.  Tests inject fakes.
+  virtual void TreatHugepageTrackers(EnableCollapse enable_collapse,
+                                     PageFlagsBase* pageflags,
+                                     Residency* residency)
       ABSL_LOCKS_EXCLUDED(pageheap_lock) = 0;
 
   // Prints stats about the page heap to *out.
@@ -104,7 +110,7 @@ class PageAllocatorInterface {
   virtual void PrintInPbtxt(PbtxtRegion& region, PageFlagsBase& pageflags)
       ABSL_LOCKS_EXCLUDED(pageheap_lock) = 0;
 
-  const PageAllocInfo& info() const
+  [[nodiscard]] const PageAllocInfo& info() const
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) {
     return info_;
   }

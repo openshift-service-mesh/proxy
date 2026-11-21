@@ -21,6 +21,14 @@
 #include <string.h>
 #include <sys/mman.h>
 
+#ifndef MADV_GUARD_INSTALL
+#define MADV_GUARD_INSTALL 102
+#endif
+
+#ifndef MADV_COLD
+#define MADV_COLD 20
+#endif
+
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -37,9 +45,11 @@
 #include "absl/strings/string_view.h"
 #include "tcmalloc/internal/allocation_guard.h"
 #include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/is_aligned_to.h"
 #include "tcmalloc/internal/page_size.h"
 #include "tcmalloc/internal/range_tracker.h"
 #include "tcmalloc/internal/util.h"
+#include "tcmalloc/testing/smaps.h"
 
 namespace tcmalloc {
 namespace tcmalloc_internal {
@@ -52,10 +62,12 @@ class ResidencySpouse {
 
   template <typename... Args>
   decltype(auto) Get(Args&&... args) {
+    AllocationGuard g;
     return r_.Get(std::forward<Args>(args)...);
   }
 
   decltype(auto) GetUnbackedAndSwappedBitmaps(const void* const addr) {
+    AllocationGuard g;
     return r_.GetUnbackedAndSwappedBitmaps(addr);
   }
 
@@ -65,93 +77,295 @@ class ResidencySpouse {
 
 namespace {
 
+using ::testing::_;
 using ::testing::FieldsAre;
 using ::testing::Optional;
 
+constexpr uint64_t kPageExclusive = (1ULL << 56);
+constexpr uint64_t kPageGuardRegion = (1ULL << 58);
 constexpr uint64_t kPageSwapped = (1ULL << 62);
 constexpr uint64_t kPagePresent = (1ULL << 63);
 
 TEST(ResidenceTest, ThisProcess) {
-  const size_t kPageSize = GetPageSize();
+  const size_t kHardwarePageSize = GetPageSize();
   const int kNumPages = 16;
 
   // Try both private and shared mappings to make sure we have the bit order of
   // /proc/pid/pageflags correct.
   for (const int flags :
        {MAP_ANONYMOUS | MAP_SHARED, MAP_ANONYMOUS | MAP_PRIVATE}) {
-    const size_t kHead = kPageSize * 10;
-    const size_t kTail = kPageSize * 10;
+    const size_t kHead = kHardwarePageSize * 10;
+    const size_t kTail = kHardwarePageSize * 10;
 
+    std::optional<AllocationGuard> g;
+    g.emplace();
     ResidencyPageMap r;
+    g.reset();
+    auto get = [&](const void* addr, size_t size) {
+      AllocationGuard guard;
+      return r.Get(addr, size);
+    };
     // Overallocate kNumPages of memory, so we can munmap the page before and
     // after it.
-    void* p = mmap(nullptr, kNumPages * kPageSize + kHead + kTail,
+    void* p = mmap(nullptr, kNumPages * kHardwarePageSize + kHead + kTail,
                    PROT_READ | PROT_WRITE, flags, -1, 0);
     ASSERT_NE(p, MAP_FAILED) << errno;
 
-    EXPECT_THAT(r.Get(p, (kNumPages + 2) * kPageSize),
-                Optional(FieldsAre(0, 0)));
-    ASSERT_EQ(munmap(p, kPageSize), 0);
+    EXPECT_THAT(get(p, (kNumPages + 2) * kHardwarePageSize),
+                Optional(FieldsAre(0, 0, _)));
     void* q = reinterpret_cast<char*>(p) + kHead;
-    void* last = reinterpret_cast<char*>(p) + kNumPages * kPageSize + kHead;
-    ASSERT_EQ(munmap(last, kPageSize), 0);
+    void* last =
+        reinterpret_cast<char*>(p) + kNumPages * kHardwarePageSize + kHead;
+    ASSERT_EQ(munmap(p, kHardwarePageSize), 0);
+    ASSERT_EQ(munmap(last, kHardwarePageSize), 0);
 
-    EXPECT_THAT(r.Get(p, kHead), Optional(FieldsAre(0, 0)));
-    EXPECT_THAT(r.Get(last, kTail), Optional(FieldsAre(0, 0)));
+    EXPECT_THAT(get(p, kHead), Optional(FieldsAre(0, 0, _)));
+    EXPECT_THAT(get(last, kTail), Optional(FieldsAre(0, 0, _)));
 
-    memset(q, 0, kNumPages * kPageSize);
-    (void)mlock(q, kNumPages * kPageSize);
+    memset(q, 0, kNumPages * kHardwarePageSize);
+    (void)mlock(q, kNumPages * kHardwarePageSize);
     ::benchmark::DoNotOptimize(q);
 
-    EXPECT_THAT(r.Get(p, kHead), Optional(FieldsAre(0, 0)));
-    EXPECT_THAT(r.Get(last, kTail), Optional(FieldsAre(0, 0)));
+    EXPECT_THAT(get(p, kHead), Optional(FieldsAre(0, 0, _)));
+    EXPECT_THAT(get(last, kTail), Optional(FieldsAre(0, 0, _)));
 
-    EXPECT_THAT(r.Get(q, kPageSize), Optional(FieldsAre(kPageSize, 0)));
+    EXPECT_THAT(get(q, kHardwarePageSize),
+                Optional(FieldsAre(kHardwarePageSize, 0, _)));
 
-    EXPECT_THAT(r.Get(q, (kNumPages + 2) * kPageSize),
-                Optional(FieldsAre(kPageSize * kNumPages, 0)));
+    EXPECT_THAT(get(q, (kNumPages + 2) * kHardwarePageSize),
+                Optional(FieldsAre(kHardwarePageSize * kNumPages, 0, _)));
 
-    EXPECT_THAT(r.Get(reinterpret_cast<char*>(q) + 7, kPageSize - 7),
-                Optional(FieldsAre(kPageSize - 7, 0)));
+    EXPECT_THAT(get(reinterpret_cast<char*>(q) + 7, kHardwarePageSize - 7),
+                Optional(FieldsAre(kHardwarePageSize - 7, 0, _)));
 
-    EXPECT_THAT(r.Get(reinterpret_cast<char*>(q) + 7, kPageSize),
-                Optional(FieldsAre(kPageSize, 0)));
+    EXPECT_THAT(get(reinterpret_cast<char*>(q) + 7, kHardwarePageSize),
+                Optional(FieldsAre(kHardwarePageSize, 0, _)));
 
-    EXPECT_THAT(r.Get(reinterpret_cast<char*>(q) + 7, 3 * kPageSize),
-                Optional(FieldsAre(kPageSize * 3, 0)));
-
-    EXPECT_THAT(r.Get(reinterpret_cast<char*>(q) + 7, kNumPages * kPageSize),
-                Optional(FieldsAre(kPageSize * kNumPages - 7, 0)));
+    EXPECT_THAT(get(reinterpret_cast<char*>(q) + 7, 3 * kHardwarePageSize),
+                Optional(FieldsAre(kHardwarePageSize * 3, 0, _)));
 
     EXPECT_THAT(
-        r.Get(reinterpret_cast<char*>(q) + 7, kNumPages * kPageSize - 7),
-        Optional(FieldsAre(kPageSize * kNumPages - 7, 0)));
+        get(reinterpret_cast<char*>(q) + 7, kNumPages * kHardwarePageSize),
+        Optional(FieldsAre(kHardwarePageSize * kNumPages - 7, 0, _)));
 
     EXPECT_THAT(
-        r.Get(reinterpret_cast<char*>(q) + 7, (kNumPages + 1) * kPageSize),
-        Optional(FieldsAre(kPageSize * kNumPages - 7, 0)));
+        get(reinterpret_cast<char*>(q) + 7, kNumPages * kHardwarePageSize - 7),
+        Optional(FieldsAre(kHardwarePageSize * kNumPages - 7, 0, _)));
 
-    EXPECT_THAT(
-        r.Get(reinterpret_cast<char*>(q) + 7, (kNumPages + 1) * kPageSize - 7),
-        Optional(FieldsAre(kPageSize * kNumPages - 7, 0)));
+    EXPECT_THAT(get(reinterpret_cast<char*>(q) + 7,
+                    (kNumPages + 1) * kHardwarePageSize),
+                Optional(FieldsAre(kHardwarePageSize * kNumPages - 7, 0, _)));
 
-    ASSERT_EQ(munmap(q, kNumPages * kPageSize), 0);
+    EXPECT_THAT(get(reinterpret_cast<char*>(q) + 7,
+                    (kNumPages + 1) * kHardwarePageSize - 7),
+                Optional(FieldsAre(kHardwarePageSize * kNumPages - 7, 0, _)));
+
+    std::optional<Residency::Info> q_info =
+        get(q, kNumPages * kHardwarePageSize);
+    ASSERT_TRUE(q_info.has_value());
+    EXPECT_THAT(*q_info, FieldsAre(kHardwarePageSize * kNumPages, 0, _));
+    for (size_t i = 0; i < kNumPages; ++i) {
+      EXPECT_TRUE(q_info->page_is_resident.GetBit(i));
+    }
+
+    ASSERT_EQ(munmap(q, kNumPages * kHardwarePageSize), 0);
   }
 }
 
 TEST(ResidenceTest, CannotOpen) {
-  ResidencySpouse r("/tmp/a667ba48-18ba-4523-a8a7-b49ece3a6c2b");
-  EXPECT_FALSE(r.Get(nullptr, 1).has_value());
+  std::optional<Residency::Info> res;
+  {
+    AllocationGuard g;
+    ResidencySpouse r("/tmp/a667ba48-18ba-4523-a8a7-b49ece3a6c2b");
+    res = r.Get(nullptr, 1);
+  }
+  EXPECT_FALSE(res.has_value());
 }
 
 TEST(ResidenceTest, CannotRead) {
-  ResidencySpouse r("/dev/null");
-  EXPECT_FALSE(r.Get(nullptr, 1).has_value());
+  std::optional<Residency::Info> res;
+  {
+    AllocationGuard g;
+    ResidencySpouse r("/dev/null");
+    res = r.Get(nullptr, 1);
+  }
+  EXPECT_FALSE(res.has_value());
 }
 
 TEST(ResidenceTest, CannotSeek) {
-  ResidencySpouse r("/dev/null");
-  EXPECT_FALSE(r.Get(&r, 1).has_value());
+  std::optional<Residency::Info> res;
+  {
+    AllocationGuard g;
+    ResidencySpouse r("/dev/null");
+    res = r.Get(&r, 1);
+  }
+  EXPECT_FALSE(res.has_value());
+}
+
+TEST(ResidenceTest, GuardPagesNotCountedAsSwapped) {
+  std::string file_path =
+      absl::StrCat(testing::TempDir(), "/guard_pages_residency");
+  int write_fd = signal_safe_open(
+      file_path.c_str(), O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR);
+  ASSERT_NE(write_fd, -1) << errno;
+  const uint64_t entries[3] = {
+      kPageSwapped | kPageGuardRegion,
+      kPagePresent | kPageExclusive,
+      kPageSwapped,
+  };
+  ASSERT_EQ(write(write_fd, entries, sizeof(entries)), sizeof(entries));
+  ASSERT_EQ(close(write_fd), 0);
+
+  const size_t kHardwarePageSize = GetPageSize();
+  std::optional<Residency::Info> info;
+  {
+    AllocationGuard g;
+    ResidencySpouse r(file_path);
+    info = r.Get(nullptr, 3 * kHardwarePageSize);
+  }
+  ASSERT_TRUE(info.has_value());
+  EXPECT_EQ(info->bytes_resident, kHardwarePageSize);
+  EXPECT_EQ(info->bytes_swapped, kHardwarePageSize);
+  EXPECT_FALSE(info->page_is_resident.GetBit(0));
+  EXPECT_TRUE(info->page_is_resident.GetBit(1));
+  EXPECT_FALSE(info->page_is_resident.GetBit(2));
+}
+
+// Anonymous memory that is a VMA of its own: it is surrounded by PROT_NONE
+// guard regions, so the kernel cannot merge it with neighboring mappings.
+class IsolatedAnonMapping {
+ public:
+  IsolatedAnonMapping(size_t size, size_t alignment)
+      : reservation_size_(size + 2 * alignment) {
+    reservation_ = mmap(nullptr, reservation_size_, PROT_NONE,
+                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    CHECK_NE(reservation_, MAP_FAILED) << errno;
+    data_ = reinterpret_cast<char*>((reinterpret_cast<uintptr_t>(reservation_) +
+                                     GetPageSize() + alignment - 1) &
+                                    ~(alignment - 1));
+    CHECK_EQ(mprotect(data_, size, PROT_READ | PROT_WRITE), 0) << errno;
+  }
+
+  ~IsolatedAnonMapping() {
+    CHECK_EQ(munmap(reservation_, reservation_size_), 0) << errno;
+  }
+
+  IsolatedAnonMapping(const IsolatedAnonMapping&) = delete;
+  IsolatedAnonMapping& operator=(const IsolatedAnonMapping&) = delete;
+
+  char* data() const { return data_; }
+
+ private:
+  const size_t reservation_size_;
+  void* reservation_;
+  char* data_;
+};
+
+// Checks that ResidencyPageMap agrees with the kernel's smaps Rss for
+// [addr, addr + size), which must be a VMA of its own. Returns Rss in `rss`.
+void CheckResidencyMatchesSmaps(void* addr, size_t size, size_t& rss) {
+  std::optional<SmapEntry> vma;
+  ASSERT_TRUE(ForEachSmapEntry([&](const SmapEntry& entry) {
+    if (entry.Overlaps(addr, size)) vma = entry;
+  }));
+  ASSERT_TRUE(vma.has_value());
+  ASSERT_EQ(vma->start, reinterpret_cast<uintptr_t>(addr));
+  ASSERT_EQ(vma->end - vma->start, size);
+
+  std::optional<Residency::Info> info;
+  {
+    AllocationGuard g;
+    ResidencyPageMap r;
+    info = r.Get(addr, size);
+  }
+  ASSERT_TRUE(info.has_value());
+  EXPECT_EQ(info->bytes_resident, vma->rss_bytes);
+  EXPECT_EQ(info->page_is_resident.CountBits() * GetPageSize(), vma->rss_bytes);
+  rss = vma->rss_bytes;
+}
+
+void ReadEveryPage(const void* p, size_t size) {
+  const volatile char* v = static_cast<const char*>(p);
+  for (size_t i = 0; i < size; i += GetPageSize()) {
+    (void)v[i];
+  }
+}
+
+TEST(ResidenceSmapsTest, TouchedAnon) {
+  const size_t kSize = 16 * GetPageSize();
+  IsolatedAnonMapping m(kSize, GetPageSize());
+  ASSERT_EQ(madvise(m.data(), kSize, MADV_NOHUGEPAGE), 0) << errno;
+  memset(m.data(), 1, kSize);
+
+  size_t rss;
+  ASSERT_NO_FATAL_FAILURE(CheckResidencyMatchesSmaps(m.data(), kSize, rss));
+  EXPECT_EQ(rss, kSize);
+}
+
+TEST(ResidenceSmapsTest, ReadFaultedAnon) {
+  // Read faults on untouched private anonymous memory map the shared zero
+  // page, which is present in pagemap but not part of Rss.
+  const size_t kSize = 16 * GetPageSize();
+  IsolatedAnonMapping m(kSize, GetPageSize());
+  ASSERT_EQ(madvise(m.data(), kSize, MADV_NOHUGEPAGE), 0) << errno;
+  ReadEveryPage(m.data(), kSize);
+
+  size_t rss;
+  ASSERT_NO_FATAL_FAILURE(CheckResidencyMatchesSmaps(m.data(), kSize, rss));
+  EXPECT_EQ(rss, size_t{0});
+}
+
+TEST(ResidenceSmapsTest, ThpSplit) {
+  IsolatedAnonMapping m(kHugePageSize, kHugePageSize);
+  if (madvise(m.data(), kHugePageSize, MADV_HUGEPAGE) != 0) {
+    GTEST_SKIP() << "MADV_HUGEPAGE not supported: " << errno;
+  }
+  m.data()[0] = 1;
+  // Intact THP: all subpages count.
+  size_t rss;
+  ASSERT_NO_FATAL_FAILURE(
+      CheckResidencyMatchesSmaps(m.data(), kHugePageSize, rss));
+  if (rss != kHugePageSize) {
+    GTEST_SKIP() << "Mapping is not backed by a THP";
+  }
+
+  // MADV_COLD on part of the THP splits it. Newer kernels then remap the
+  // untouched (all-zero) subpages to the shared zero page.
+  if (madvise(m.data() + 100 * GetPageSize(), GetPageSize(), MADV_COLD) != 0) {
+    GTEST_SKIP() << "MADV_COLD not supported: " << errno;
+  }
+  // Keep khugepaged from collapsing the range again between the reads below.
+  ASSERT_EQ(madvise(m.data(), kHugePageSize, MADV_NOHUGEPAGE), 0) << errno;
+  ASSERT_NO_FATAL_FAILURE(
+      CheckResidencyMatchesSmaps(m.data(), kHugePageSize, rss));
+}
+
+TEST(ResidenceSmapsTest, FileBackedMappedTwice) {
+  const size_t kSize = 16 * GetPageSize();
+  std::string path = absl::StrCat(testing::TempDir(), "/residency_smaps_file");
+  int fd = signal_safe_open(path.c_str(), O_CREAT | O_RDWR | O_TRUNC,
+                            S_IRUSR | S_IWUSR);
+  ASSERT_NE(fd, -1) << errno;
+  std::vector<char> contents(kSize, 1);
+  ASSERT_EQ(write(fd, contents.data(), kSize), kSize);
+
+  // Map the file twice, so every page is mapped twice: PM_MMAP_EXCLUSIVE is
+  // clear and only PM_FILE marks the pages as resident. File mappings never
+  // merge with anonymous ones, nor with each other at the same file offset.
+  void* mappings[2];
+  for (void*& m : mappings) {
+    m = mmap(nullptr, kSize, PROT_READ, MAP_PRIVATE, fd, 0);
+    ASSERT_NE(m, MAP_FAILED) << errno;
+  }
+  ASSERT_EQ(close(fd), 0) << errno;
+  for (void* m : mappings) ReadEveryPage(m, kSize);
+
+  for (void* m : mappings) {
+    size_t rss;
+    ASSERT_NO_FATAL_FAILURE(CheckResidencyMatchesSmaps(m, kSize, rss));
+    EXPECT_EQ(rss, kSize);
+    ASSERT_EQ(munmap(m, kSize), 0) << errno;
+  }
 }
 
 // Method that can write a region with a single hugepage
@@ -159,7 +373,8 @@ TEST(ResidenceTest, CannotSeek) {
 // a region with all missing pages, or a region with a hugepage in the middle.
 void GenerateHolesInSinglePage(absl::string_view filename, int case_num,
                                int num_pages) {
-  int write_fd = signal_safe_open(filename.data(), O_CREAT | O_WRONLY, S_IRUSR);
+  int write_fd =
+      signal_safe_open(filename.data(), O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
   CHECK_NE(write_fd, -1) << errno;
   std::vector<uint64_t> buf(num_pages, 0);
   for (int i = 0; i < num_pages; i++) {
@@ -198,6 +413,16 @@ void GenerateHolesInSinglePage(absl::string_view filename, int case_num,
           buf[i] = kPageSwapped;
         } else if (i % 2 == 1) {
           buf[i] = 0;
+        }
+        break;
+      case 6:
+        // Every other page is a MADV_GUARD_INSTALL guard page (PM_SWAP |
+        // PM_GUARD_REGION), rest are present. Guard pages must be treated as
+        // unbacked rather than swapped.
+        if (i % 2 == 0) {
+          buf[i] = kPageSwapped | kPageGuardRegion;
+        } else {
+          buf[i] = kPagePresent;
         }
         break;
     }
@@ -252,6 +477,12 @@ Residency::SinglePageBitmaps GenerateExpectedSinglePageBitmaps(int case_num) {
         }
       }
       break;
+    case 6:
+      // Every other page is a MADV_GUARD_INSTALL guard page, rest are present.
+      for (int idx = 0; idx < 512; idx += 2) {
+        expected_unbacked.SetBit(idx);
+      }
+      break;
   }
   return Residency::SinglePageBitmaps{expected_unbacked, expected_swapped,
                                       absl::StatusCode::kOk};
@@ -268,7 +499,7 @@ bool BitmapsAreEqual(const Bitmap<512>& bitmap1, const Bitmap<512>& bitmap2) {
 }
 
 TEST(PageMapTest, GetUnbackedAndSwappedBitmaps) {
-  constexpr int kNumCases = 6;
+  constexpr int kNumCases = 7;
   std::array<Residency::SinglePageBitmaps, kNumCases> expected;
   for (int i = 0; i < kNumCases; ++i) {
     expected[i] = GenerateExpectedSinglePageBitmaps(i);
@@ -338,7 +569,7 @@ TEST(PageMapIntegrationTest, WorksOnActualData) {
                     MAP_ANONYMOUS | MAP_POPULATE | MAP_PRIVATE, -1, 0);
   ASSERT_NE(addr, MAP_FAILED) << errno;
   auto position = reinterpret_cast<uintptr_t>(addr);
-  if ((position & (kHugePageSize - 1)) != 0) {
+  if (!IsAlignedTo(position, kHugePageSize)) {
     position |= kHugePageSize - 1;
     position++;
     addr = reinterpret_cast<void*>(position);
@@ -366,6 +597,41 @@ TEST(PageMapIntegrationTest, WorksOnActualData) {
   res.unbacked.ClearLowestBit();
   EXPECT_TRUE(res.unbacked.IsZero());
   EXPECT_TRUE(res.swapped.IsZero());
+}
+
+TEST(PageMapIntegrationTest, GuardPages) {
+  const size_t kHardwarePageSize = GetPageSize();
+  void* raw = mmap(nullptr, 2 * kHugePageSize, PROT_READ | PROT_WRITE,
+                   MAP_ANONYMOUS | MAP_POPULATE | MAP_PRIVATE, -1, 0);
+  ASSERT_NE(raw, MAP_FAILED) << errno;
+
+  uint8_t* addr = reinterpret_cast<uint8_t*>(
+      (reinterpret_cast<uintptr_t>(raw) + kHugePageSize - 1) &
+      ~(kHugePageSize - 1));
+  if (madvise(addr + kHardwarePageSize, kHardwarePageSize,
+              MADV_GUARD_INSTALL) != 0) {
+    ASSERT_EQ(munmap(raw, 2 * kHugePageSize), 0) << errno;
+    GTEST_SKIP() << "MADV_GUARD_INSTALL not supported by kernel";
+  }
+
+  std::optional<AllocationGuard> g;
+  g.emplace();
+  ResidencyPageMap r;
+  std::optional<Residency::Info> info = r.Get(addr, kHugePageSize);
+  Residency::SinglePageBitmaps res = r.GetUnbackedAndSwappedBitmaps(addr);
+  g.reset();
+
+  ASSERT_THAT(info,
+              Optional(FieldsAre(kHugePageSize - kHardwarePageSize, 0, _)));
+  EXPECT_TRUE(info->page_is_resident.GetBit(0));
+  EXPECT_FALSE(info->page_is_resident.GetBit(1));
+
+  ASSERT_EQ(res.status, absl::StatusCode::kOk);
+  EXPECT_EQ(res.unbacked.CountBits(), 1);
+  EXPECT_TRUE(res.unbacked.GetBit(1));
+  EXPECT_TRUE(res.swapped.IsZero());
+
+  ASSERT_EQ(munmap(raw, 2 * kHugePageSize), 0) << errno;
 }
 
 }  // namespace

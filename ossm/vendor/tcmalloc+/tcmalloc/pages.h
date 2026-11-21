@@ -19,16 +19,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <string>
 
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "tcmalloc/common.h"
+#include "tcmalloc/internal/bytes.h"
 #include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/is_aligned_to.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/optimization.h"
-#include "tcmalloc/selsan/selsan.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
@@ -37,31 +39,37 @@ namespace tcmalloc_internal {
 // Type that can hold the length of a run of pages
 class Length {
  public:
-  constexpr Length() : n_(0) {}
-  explicit constexpr Length(uintptr_t n) : n_(n) {}
+  constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE Length() : n_(0) {}
+  explicit constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE Length(uintptr_t n) : n_(n) {}
 
   constexpr Length(const Length&) = default;
   constexpr Length& operator=(const Length&) = default;
 
-  constexpr size_t raw_num() const { return n_; }
-  constexpr size_t in_bytes() const { return n_ * kPageSize; }
-  double in_mib() const {
+  [[nodiscard]] constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE size_t raw_num() const {
+    return n_;
+  }
+  [[nodiscard]] constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE size_t in_bytes() const {
+    return n_ * kPageSize;
+  }
+  [[nodiscard]] double in_mib() const {
     return std::ldexp(static_cast<double>(n_),
                       static_cast<int>(kPageShift) - 20);
   }
-  constexpr Length in_pages() const { return *this; }
+  [[nodiscard]] constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE Length in_pages() const {
+    return *this;
+  }
 
-  static constexpr Length min() { return Length(0); }
-  static constexpr Length max() {
+  [[nodiscard]] static constexpr Length min() { return Length(0); }
+  [[nodiscard]] static constexpr Length max() {
     return Length(std::numeric_limits<uintptr_t>::max() >> kPageShift);
   }
 
-  constexpr Length& operator+=(Length rhs) {
+  constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE Length& operator+=(Length rhs) {
     n_ += rhs.n_;
     return *this;
   }
 
-  constexpr Length& operator-=(Length rhs) {
+  constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE Length& operator-=(Length rhs) {
     TC_ASSERT_GE(n_, rhs.n_);
     n_ -= rhs.n_;
     return *this;
@@ -73,13 +81,13 @@ class Length {
   }
 
   constexpr Length& operator/=(size_t rhs) {
-    TC_ASSERT_NE(rhs, 0);
+    TC_ASSERT_NE(rhs, 0u);
     n_ /= rhs;
     return *this;
   }
 
   constexpr Length& operator%=(Length rhs) {
-    TC_ASSERT_NE(rhs.n_, 0);
+    TC_ASSERT_NE(rhs.n_, 0u);
     n_ %= rhs.n_;
     return *this;
   }
@@ -93,15 +101,15 @@ class Length {
 
   template <typename Sink>
   friend void AbslStringify(Sink& sink, const Length& v) {
-    absl::Format(&sink, "%zu", v.in_bytes());
+    absl::Format(&sink, "%zu", v.raw_num());
   }
 
  private:
   uintptr_t n_;
 };
 
-inline bool AbslParseFlag(absl::string_view text, Length* l,
-                          std::string* /* error */) {
+[[nodiscard]] inline bool AbslParseFlag(absl::string_view text, Length* l,
+                                        std::string* /* error */) {
   uintptr_t n;
   if (!absl::SimpleAtoi(text, &n)) {
     return false;
@@ -110,33 +118,39 @@ inline bool AbslParseFlag(absl::string_view text, Length* l,
   return true;
 }
 
-inline std::string AbslUnparseFlag(Length l) {
-  return absl::StrCat(l.raw_num());
+[[nodiscard]] inline std::string AbslUnparseFlag(Length l) {
+  return absl::StrCat(l);
 }
 
 // A single aligned page.
 class PageId {
  public:
-  constexpr PageId() : pn_(0) {}
+  constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE PageId() : pn_(0) {}
   constexpr PageId(const PageId& p) = default;
   constexpr PageId& operator=(const PageId& p) = default;
 
-  constexpr explicit PageId(uintptr_t pn) : pn_(pn) {}
+  constexpr explicit ABSL_ATTRIBUTE_ALWAYS_INLINE PageId(uintptr_t pn)
+      : pn_(pn) {}
 
-  void* start_addr() const {
+  [[nodiscard]] ABSL_ATTRIBUTE_ALWAYS_INLINE void* start_addr() const {
     return reinterpret_cast<void*>(pn_ << kPageShift);
   }
 
-  uintptr_t start_uintptr() const { return pn_ << kPageShift; }
+  [[nodiscard]] constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE uintptr_t
+  start_uintptr() const {
+    return pn_ << kPageShift;
+  }
 
-  size_t index() const { return pn_; }
+  [[nodiscard]] constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE size_t index() const {
+    return pn_;
+  }
 
-  constexpr PageId& operator+=(Length rhs) {
+  constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE PageId& operator+=(Length rhs) {
     pn_ += rhs.raw_num();
     return *this;
   }
 
-  constexpr PageId& operator-=(Length rhs) {
+  constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE PageId& operator-=(Length rhs) {
     TC_ASSERT_GE(pn_, rhs.raw_num());
     pn_ -= rhs.raw_num();
     return *this;
@@ -164,9 +178,13 @@ class PageId {
   uintptr_t pn_;
 };
 
+struct HugeRange;
+
 struct Range {
-  constexpr Range() = default;
-  constexpr Range(PageId page, Length len) : p(page), n(len) {}
+  constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE Range() = default;
+  constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE Range(PageId page, Length len)
+      : p(page), n(len) {}
+  explicit inline Range(HugeRange r);
 
   constexpr Range(const Range&) = default;
   constexpr Range& operator=(const Range&) = default;
@@ -174,29 +192,48 @@ struct Range {
   constexpr Range(Range&&) = default;
   constexpr Range& operator=(Range&&) = default;
 
-  void* start_addr() const { return p.start_addr(); }
-  size_t in_bytes() const { return n.in_bytes(); }
+  [[nodiscard]] ABSL_ATTRIBUTE_ALWAYS_INLINE void* start_addr() const {
+    return p.start_addr();
+  }
+  [[nodiscard]] constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE size_t in_bytes() const {
+    return n.in_bytes();
+  }
 
   PageId p;
   Length n;
 };
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr Length LengthFromBytes(size_t bytes) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length LengthFromBytes(
+    size_t bytes) {
   return Length(bytes >> kPageShift);
 }
 
 // Convert byte size into pages.  This won't overflow, but may return
 // an unreasonably large value if bytes is huge enough.
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr Length BytesToLengthCeil(size_t bytes) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length
+BytesToLengthCeil(size_t bytes) {
   return Length((bytes >> kPageShift) +
-                ((bytes & (kPageSize - 1)) > 0 ? 1 : 0));
+                (IsAlignedTo(bytes, kPageSize) ? 0 : 1));
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr Length BytesToLengthFloor(size_t bytes) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length
+BytesToLengthCeil(std::align_val_t bytes) {
+  return BytesToLengthCeil(static_cast<size_t>(bytes));
+}
+
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length
+BytesToLengthCeil(Bytes bytes) {
+  return BytesToLengthCeil(bytes.raw_num());
+}
+
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length
+BytesToLengthFloor(size_t bytes) {
   return Length(bytes >> kPageShift);
+}
+
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length
+BytesToLengthFloor(Bytes bytes) {
+  return BytesToLengthFloor(bytes.raw_num());
 }
 
 inline constexpr Length kMaxValidPages = Length::max();
@@ -207,89 +244,94 @@ inline PageId& operator++(PageId& p) {  // NOLINT(runtime/references)
   return p += Length(1);
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr bool operator<(PageId lhs, PageId rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE bool
+operator<(PageId lhs, PageId rhs) {
   return lhs.pn_ < rhs.pn_;
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr bool operator>(PageId lhs, PageId rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE bool
+operator>(PageId lhs, PageId rhs) {
   return lhs.pn_ > rhs.pn_;
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr bool operator<=(PageId lhs, PageId rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE bool
+operator<=(PageId lhs, PageId rhs) {
   return lhs.pn_ <= rhs.pn_;
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr bool operator>=(PageId lhs, PageId rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE bool
+operator>=(PageId lhs, PageId rhs) {
   return lhs.pn_ >= rhs.pn_;
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr bool operator==(PageId lhs, PageId rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE bool
+operator==(PageId lhs, PageId rhs) {
   return lhs.pn_ == rhs.pn_;
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr bool operator!=(PageId lhs, PageId rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE bool
+operator!=(PageId lhs, PageId rhs) {
   return lhs.pn_ != rhs.pn_;
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr PageId operator+(PageId lhs, Length rhs) { return lhs += rhs; }
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr PageId operator+(
+    PageId lhs, Length rhs) {
+  return lhs += rhs;
+}
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr PageId operator+(Length lhs, PageId rhs) { return rhs += lhs; }
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr PageId operator+(
+    Length lhs, PageId rhs) {
+  return rhs += lhs;
+}
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr PageId operator-(PageId lhs, Length rhs) { return lhs -= rhs; }
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr PageId operator-(
+    PageId lhs, Length rhs) {
+  return lhs -= rhs;
+}
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr Length operator-(PageId lhs, PageId rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length operator-(
+    PageId lhs, PageId rhs) {
   TC_ASSERT_GE(lhs.pn_, rhs.pn_);
   return Length(lhs.pn_ - rhs.pn_);
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline PageId PageIdContaining(const void* p) {
-  TC_ASSERT_EQ(selsan::RemoveTag(p), p);
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline PageId PageIdContaining(
+    const void* p) {
   return PageId(reinterpret_cast<uintptr_t>(p) >> kPageShift);
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline PageId PageIdContainingTagged(const void* p) {
-  return PageIdContaining(selsan::RemoveTag(p));
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline PageId PageIdContainingTagged(
+    const void* p) {
+  return PageIdContaining(p);
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr bool operator<(Length lhs, Length rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE bool
+operator<(Length lhs, Length rhs) {
   return lhs.n_ < rhs.n_;
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr bool operator>(Length lhs, Length rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE bool
+operator>(Length lhs, Length rhs) {
   return lhs.n_ > rhs.n_;
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr bool operator<=(Length lhs, Length rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE bool
+operator<=(Length lhs, Length rhs) {
   return lhs.n_ <= rhs.n_;
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr bool operator>=(Length lhs, Length rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE bool
+operator>=(Length lhs, Length rhs) {
   return lhs.n_ >= rhs.n_;
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr bool operator==(Length lhs, Length rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE bool
+operator==(Length lhs, Length rhs) {
   return lhs.n_ == rhs.n_;
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr bool operator!=(Length lhs, Length rhs) {
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr ABSL_ATTRIBUTE_ALWAYS_INLINE bool
+operator!=(Length lhs, Length rhs) {
   return lhs.n_ != rhs.n_;
 }
 
@@ -297,30 +339,40 @@ inline Length& operator++(Length& l) { return l += Length(1); }
 
 inline Length& operator--(Length& l) { return l -= Length(1); }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr Length operator+(Length lhs, Length rhs) { return lhs += rhs; }
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length operator+(
+    Length lhs, Length rhs) {
+  return lhs += rhs;
+}
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr Length operator-(Length lhs, Length rhs) { return lhs -= rhs; }
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length operator-(
+    Length lhs, Length rhs) {
+  return lhs -= rhs;
+}
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr Length operator*(Length lhs, size_t rhs) { return lhs *= rhs; }
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length operator*(
+    Length lhs, size_t rhs) {
+  return lhs *= rhs;
+}
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr Length operator*(size_t lhs, Length rhs) { return rhs *= lhs; }
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length operator*(
+    size_t lhs, Length rhs) {
+  return rhs *= lhs;
+}
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr size_t operator/(Length lhs, Length rhs) {
-  TC_ASSERT_NE(rhs.raw_num(), 0);
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr size_t operator/(
+    Length lhs, Length rhs) {
+  TC_ASSERT_NE(rhs.raw_num(), 0u);
   return lhs.raw_num() / rhs.raw_num();
 }
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr Length operator/(Length lhs, size_t rhs) { return lhs /= rhs; }
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length operator/(
+    Length lhs, size_t rhs) {
+  return lhs /= rhs;
+}
 
-TCMALLOC_ATTRIBUTE_CONST
-inline constexpr Length operator%(Length lhs, Length rhs) {
-  TC_ASSERT_NE(rhs.raw_num(), 0);
+[[nodiscard]] TCMALLOC_ATTRIBUTE_CONST inline constexpr Length operator%(
+    Length lhs, Length rhs) {
+  TC_ASSERT_NE(rhs.raw_num(), 0u);
   return lhs %= rhs;
 }
 

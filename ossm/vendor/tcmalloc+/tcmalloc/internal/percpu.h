@@ -25,13 +25,35 @@
 // Offset from __rseq_abi to the cached slabs address.
 #define TCMALLOC_RSEQ_SLABS_OFFSET -4
 
+// Offset from the sampler to the cached slabs address, i.e.
+// &tcmalloc_slabs == &tcmalloc_sampler + TCMALLOC_SAMPLER_SLABS_OFFSET.
+#define TCMALLOC_SAMPLER_SLABS_OFFSET 36
+
 // The bit denotes that tcmalloc_rseq.slabs contains valid slabs offset.
 #define TCMALLOC_CACHED_SLABS_BIT 63
 #define TCMALLOC_CACHED_SLABS_MASK (1ul << TCMALLOC_CACHED_SLABS_BIT)
 
+// TCMALLOC_INTERNAL_PERCPU_HWASAN is derived from compiler predefined macros
+// rather than ABSL_HAVE_HWADDRESS_SANITIZER, since this header must evaluate
+// identically in every translation unit (including the RSEQ assembly sources)
+// regardless of whether absl/base/config.h has already been included.
+#if defined(__has_feature)
+#if __has_feature(hwaddress_sanitizer)
+#define TCMALLOC_INTERNAL_PERCPU_HWASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_HWADDRESS__)
+#define TCMALLOC_INTERNAL_PERCPU_HWASAN 1
+#endif
+#if !defined(TCMALLOC_INTERNAL_PERCPU_HWASAN)
+#define TCMALLOC_INTERNAL_PERCPU_HWASAN 0
+#endif
+
 // TCMALLOC_PERCPU_RSEQ_SUPPORTED_PLATFORM defines whether or not we have an
 // implementation for the target OS and architecture.
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+// TODO(b/478927694): re-enable for HWASan
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__)) && \
+    !TCMALLOC_INTERNAL_PERCPU_HWASAN
 #define TCMALLOC_PERCPU_RSEQ_SUPPORTED_PLATFORM 1
 #else
 #define TCMALLOC_PERCPU_RSEQ_SUPPORTED_PLATFORM 0
@@ -65,6 +87,15 @@
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/linux_syscall_support.h"
 #include "tcmalloc/internal/logging.h"
+
+// The RSEQ gate above is evaluated before any absl header is included; verify
+// that it agrees with absl's detection now that absl/base/config.h is visible.
+#if defined(ABSL_HAVE_HWADDRESS_SANITIZER) && !TCMALLOC_INTERNAL_PERCPU_HWASAN
+#error "HWASan detected by absl but not by the TCMalloc per-CPU RSEQ gate"
+#endif
+#if !defined(ABSL_HAVE_HWADDRESS_SANITIZER) && TCMALLOC_INTERNAL_PERCPU_HWASAN
+#error "HWASan detected by the TCMalloc per-CPU RSEQ gate but not by absl"
+#endif
 
 // TCMALLOC_INTERNAL_PERCPU_USE_RSEQ defines whether TCMalloc support for RSEQ
 // on the target architecture exists. We currently only provide RSEQ for 64-bit
@@ -163,6 +194,11 @@ extern "C" ABSL_CONST_INIT thread_local volatile kernel_rseq __rseq_abi
     ABSL_ATTRIBUTE_INITIAL_EXEC;
 extern "C" ABSL_CONST_INIT thread_local volatile int tcmalloc_cached_vcpu
     ABSL_ATTRIBUTE_INITIAL_EXEC;
+// Note that for builds with RSEQ enabled, we declare the sampler here so that
+// we can reference its address in percpu_tcmalloc.h without creating a
+// circular dependency with the Sampler definition.
+extern "C" ABSL_CONST_INIT thread_local char tcmalloc_sampler
+    ABSL_ATTRIBUTE_INITIAL_EXEC;
 
 // Provide weak definitions here to enable more efficient codegen.
 // If compiler sees only extern declaration when generating accesses,
@@ -170,29 +206,45 @@ extern "C" ABSL_CONST_INIT thread_local volatile int tcmalloc_cached_vcpu
 // that the definition may come from a dynamic library and has to use
 // GOT access. When compiler sees even a weak definition, it knows the
 // declaration will be in the current module and can generate direct accesses.
+//
+// ABSL_ATTRIBUTE_INITIAL_EXEC covers the -fPIC case, where a definition in
+// the current module otherwise gets the general-dynamic model
+// (__tls_get_addr).  Every declaration and definition carries it so that no
+// access falls back to that model.
 ABSL_CONST_INIT thread_local volatile uintptr_t tcmalloc_slabs
-    ABSL_ATTRIBUTE_WEAK = {};
+    ABSL_ATTRIBUTE_INITIAL_EXEC ABSL_ATTRIBUTE_WEAK = {};
 ABSL_CONST_INIT thread_local volatile kernel_rseq __rseq_abi
-    ABSL_ATTRIBUTE_WEAK = {
+    ABSL_ATTRIBUTE_INITIAL_EXEC ABSL_ATTRIBUTE_WEAK = {
         0, static_cast<unsigned>(kCpuIdUninitialized),   0, 0, 0,
         0, {{kCpuIdUninitialized, kCpuIdUninitialized}},
-};
+    };
 ABSL_CONST_INIT thread_local volatile int tcmalloc_cached_vcpu
-    ABSL_ATTRIBUTE_WEAK = kCpuIdUninitialized;
+    ABSL_ATTRIBUTE_INITIAL_EXEC ABSL_ATTRIBUTE_WEAK = kCpuIdUninitialized;
+ABSL_CONST_INIT thread_local char tcmalloc_sampler ABSL_ATTRIBUTE_INITIAL_EXEC
+    ABSL_ATTRIBUTE_WEAK = 0;
 
-inline int GetRealCpuUnsafe() { return __rseq_abi.cpu_id; }
+// Because of the weak definitions we also add this non-weak symbol.
+// It's not used other than ensuring that our asm file with the real TLS layout
+// is actually linked. Without it linker manages to not link the asm file
+// in some configurations since all symbols it provides are already defined
+// (as weak), even though the asm file is in the same static library as other
+// linked in files.
+extern "C" ABSL_CONST_INIT thread_local char tcmalloc_rseq_layout
+    ABSL_ATTRIBUTE_INITIAL_EXEC;
+
+[[nodiscard]] inline int GetRealCpuUnsafe() { return __rseq_abi.cpu_id; }
 #else  // !TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
-inline int GetRealCpuUnsafe() { return kCpuIdUnsupported; }
+[[nodiscard]] inline int GetRealCpuUnsafe() { return kCpuIdUnsupported; }
 #endif
 
 // Functions below are implemented in the architecture-specific percpu_rseq_*.S
 // files.
 extern "C" {
-size_t TcmallocSlab_Internal_PushBatch(size_t size_class, void** batch,
-                                       size_t len);
-size_t TcmallocSlab_Internal_PopBatch(size_t size_class, void** batch,
-                                      size_t len,
-                                      std::atomic<uint16_t>* begin_ptr);
+[[nodiscard]] size_t TcmallocSlab_Internal_PushBatch(size_t size_class,
+                                                     void** batch, size_t len);
+[[nodiscard]] size_t TcmallocSlab_Internal_PopBatch(
+    size_t size_class, void** batch, size_t len,
+    std::atomic<uint16_t>* begin_ptr);
 }  // extern "C"
 
 // NOTE:  We skirt the usual naming convention slightly above using "_" to
@@ -202,20 +254,23 @@ size_t TcmallocSlab_Internal_PopBatch(size_t size_class, void** batch,
 enum class RseqVcpuMode { kNone, kMM };
 
 extern RseqVcpuMode vcpu_mode;
+[[nodiscard]] inline bool IsFast();
+[[nodiscard]] inline bool IsFastNoInit();
 
-inline RseqVcpuMode GetRseqVcpuMode() {
+[[nodiscard]] inline RseqVcpuMode GetRseqVcpuMode() {
+  (void)IsFast();
   return vcpu_mode;
 }
 
 // Return whether we are using any kind of virtual CPUs.
-inline bool UsingVirtualCpus() {
+[[nodiscard]] inline bool UsingVirtualCpus() {
   return GetRseqVcpuMode() != RseqVcpuMode::kNone;
 }
 
 // Return whether we are using flat virtual CPUs (provided by kernel RSEQ).
-bool UsingRseqVirtualCpus();
+[[nodiscard]] bool UsingRseqVirtualCpus();
 
-inline int GetRealCpu() {
+[[nodiscard]] inline int GetRealCpu() {
   // The "unsafe" variant strongly depends on RSEQ.
   int cpu = GetRealCpuUnsafe();
 
@@ -235,6 +290,19 @@ inline int GetRealCpu() {
   return cpu;
 }
 
+// We want to be able to get the address of the sampler in percpu so that we
+// can calculate the address of other thread local variables relative to it.
+// We just return a void* here since percpu doesn't know about the Sampler
+// type and we need to avoid a circular dependency between percpu and
+// the Sampler.
+[[nodiscard]] inline void* GetThreadSamplerAddress() {
+#if TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
+  return &tcmalloc_sampler;
+#else
+  return nullptr;
+#endif
+}
+
 // Static accessors functions for any kind of vCPU IDs, which transparently
 // choose the right vCPU source based on the initialized mode. Wrapping it into
 // a class helps to restrict access and avoid accidental misuse.
@@ -248,7 +316,7 @@ class VirtualCpu {
   // This is safe, because without a RSEQ critical section to detect thread
   // preemption, a thread may be preempted at any point and the virtual (or
   // real) CPU may change.
-  static int get() {
+  [[nodiscard]] static int get() {
 #if TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
     return tcmalloc_cached_vcpu;
 #else   // TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
@@ -258,7 +326,7 @@ class VirtualCpu {
 
   // Returns the last vCPU ID since the last synchronization point.
   // REQUIRES: Synchronize() has been called by this thread
-  static int GetAfterSynchronize() {
+  [[nodiscard]] static int GetAfterSynchronize() {
     const int ret = get();
     TC_ASSERT_GE(ret, kCpuIdInitialized);
     return ret;
@@ -268,17 +336,31 @@ class VirtualCpu {
   // depends on the (per-CPU mutually exclusive) vCPU ID with the current vCPU
   // ID after a thread preemption was detected. This function may be expensive,
   // so it should only be called on slow paths.
-  static int Synchronize();
+  [[nodiscard]] static ABSL_ATTRIBUTE_ALWAYS_INLINE int Synchronize() {
+#if TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
+    int vcpu = kCpuIdUninitialized;
+    switch (GetRseqVcpuMode()) {
+      case RseqVcpuMode::kMM:
+        vcpu = __rseq_abi.mm_cid;
+        break;
+      case RseqVcpuMode::kNone:
+        vcpu = GetRealCpuUnsafe();
+        break;
+    }
 
- private:
-  // The return value of Synchronize() may be overridden by tests if they define
-  // VirtualCpu::TestSynchronize().
-  ABSL_ATTRIBUTE_WEAK static int TestSynchronize();
+    TC_CHECK(IsFastNoInit());
+    TC_CHECK_GE(vcpu, kCpuIdInitialized);
+    tcmalloc_cached_vcpu = vcpu;
+    return vcpu;
+#else   // TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
+    TC_BUG("unsupported without rseq");
+#endif  // TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
+  }
 };
 
-bool InitFastPerCpu();
+[[nodiscard]] bool InitFastPerCpu();
 
-inline bool IsFast() {
+[[nodiscard]] inline bool IsFast() {
   if (!TCMALLOC_INTERNAL_PERCPU_USE_RSEQ) {
     return false;
   }
@@ -298,7 +380,7 @@ inline bool IsFast() {
 
 // As IsFast(), but if this thread isn't already initialized, will not
 // attempt to do so.
-inline bool IsFastNoInit() {
+[[nodiscard]] inline bool IsFastNoInit() {
   if (!TCMALLOC_INTERNAL_PERCPU_USE_RSEQ) {
     return false;
   }

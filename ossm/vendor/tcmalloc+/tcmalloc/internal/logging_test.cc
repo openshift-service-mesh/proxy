@@ -26,7 +26,6 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "absl/base/attributes.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 
@@ -49,14 +48,13 @@ TEST(InternalLogging, MessageFormatting) {
 
   TC_LOG("Hello int=%d str=%s", 42, "bar");
   EXPECT_THAT(*log_buffer,
-              testing::MatchesRegex(
-                  "[0-9]+ .*tcmalloc\\/internal/logging_test\\.cc:[0-9]+\\] "
-                  "Hello int=42 str=bar\\n"));
+              testing::MatchesRegex("[0-9]+ .*logging_test\\.cc:[0-9]+\\] "
+                                    "Hello int=42 str=bar\\n"));
 
   TC_LOG("Long string: %s", long_string.c_str());
   EXPECT_THAT(*log_buffer,
               testing::MatchesRegex(
-                  "[0-9]+ .*tcmalloc\\/internal/logging_test\\.cc:[0-9]+\\] "
+                  "[0-9]+ .*logging_test\\.cc:[0-9]+\\] "
                   "Long string: the quick brown fox jumped over the lazy "
                   "dogthe quick brown fox jumped over the lazy dog.*"));
 
@@ -72,25 +70,20 @@ TEST(Printer, RequiredSpace) {
     std::unique_ptr<char[]> buf(new char[length]);
     Printer printer(buf.get(), length);
 
-    auto get_buf = [&]() {
-      return absl::string_view(
-          buf.get(), std::min<int>(length - 1, printer.SpaceRequired()));
-    };
-
     for (int j = 0; j < i; j++) {
       printer.printf("%s", kChunk);
     }
-    EXPECT_EQ(get_buf(), expected);
+    EXPECT_EQ(printer.view(), expected);
     EXPECT_EQ(length - 1, printer.SpaceRequired());
 
     // Go past the end of the buffer.  This should not overrun or affect the
     // existing contents of buf, but we should see SpaceRequired tick up.
     printer.printf("%s", kChunk);
-    EXPECT_EQ(get_buf(), expected);
+    EXPECT_EQ(printer.view(), expected);
     EXPECT_EQ(length - 1 + kChunk.size(), printer.SpaceRequired());
 
     printer.printf("%s", kChunk);
-    EXPECT_EQ(get_buf(), expected);
+    EXPECT_EQ(printer.view(), expected);
     EXPECT_EQ(length - 1 + 2 * kChunk.size(), printer.SpaceRequired());
 
     expected.append(kChunk);
@@ -106,25 +99,20 @@ TEST(Printer, RequiredSpacePieces) {
     std::unique_ptr<char[]> buf(new char[length]);
     Printer printer(buf.get(), length);
 
-    auto get_buf = [&]() {
-      return absl::string_view(
-          buf.get(), std::min<int>(length - 1, printer.SpaceRequired()));
-    };
-
     for (int j = 0; j < i; j++) {
       printer.Append(kChunk, kChunk);
     }
-    EXPECT_EQ(get_buf(), expected);
+    EXPECT_EQ(printer.view(), expected);
     EXPECT_EQ(length - 1, printer.SpaceRequired());
 
     // Go past the end of the buffer.  This should not overrun or affect the
     // existing contents of buf, but we should see SpaceRequired tick up.
     printer.Append(kChunk, kChunk);
-    EXPECT_EQ(get_buf(), expected);
+    EXPECT_EQ(printer.view(), expected);
     EXPECT_EQ(length - 1 + 2 * kChunk.size(), printer.SpaceRequired());
 
     printer.Append(kChunk, kChunk);
-    EXPECT_EQ(get_buf(), expected);
+    EXPECT_EQ(printer.view(), expected);
     EXPECT_EQ(length - 1 + 4 * kChunk.size(), printer.SpaceRequired());
 
     expected.append(kChunk);
@@ -158,7 +146,7 @@ TEST(Check, OK) {
   TC_ASSERT_LE(-1, 1);
   TC_ASSERT_LE(2, 2);
 
-  ABSL_ATTRIBUTE_UNUSED int unused[] = {
+  int unused [[maybe_unused]][] = {
       (TC_CHECK(true), 1),
       (TC_CHECK_EQ(1, 1), 2),
       (TC_ASSERT(true), 3),
@@ -194,18 +182,18 @@ TEST(Check, DebugAssert) {
 TEST(Check, Message) {
   bool my_false = false;
   EXPECT_DEATH(TC_CHECK(my_false, "ptr=%p foo=%d str=%s", &my_false, 42, "bar"),
-               "[0-9]+ .*tcmalloc\\/internal/logging_test\\.cc:[0-9]+\\] CHECK "
+               "[0-9]+ .*logging_test\\.cc:[0-9]+\\] CHECK "
                "in TestBody: my_false "
                "\\(false\\) ptr=0x[0-9a-f]+ foo=42 str=bar");
 
   int x = -1, y = 1;
   EXPECT_DEATH(TC_CHECK_GE(x, y),
-               "[0-9]+ .*tcmalloc\\/internal/logging_test\\.cc:[0-9]+\\] CHECK "
+               "[0-9]+ .*logging_test\\.cc:[0-9]+\\] CHECK "
                "in TestBody: x >= y \\(-1 >= 1\\)");
 
   int64_t a = -1, b = 1;
   EXPECT_DEATH(TC_CHECK_EQ(a, b, "ptr=%p foo=%d str=%s", &my_false, 42, "bar"),
-               "[0-9]+ .*tcmalloc\\/internal/logging_test\\.cc:[0-9]+\\] CHECK "
+               "[0-9]+ .*logging_test\\.cc:[0-9]+\\] CHECK "
                "in TestBody: a == b \\(-1 "
                "== 1\\) ptr=0x[0-9a-f]+ foo=42 str=bar");
 
@@ -218,7 +206,7 @@ TEST(Check, Message) {
                "bar\\(\\) == Something::kFoo \\(2 == 1\\)");
 
   EXPECT_DEATH(TC_BUG("bad: foo=%d bar=%s", 42, "str"),
-               "[0-9]+ .*tcmalloc\\/internal/logging_test\\.cc:[0-9]+\\] CHECK "
+               "[0-9]+ .*logging_test\\.cc:[0-9]+\\] CHECK "
                "in TestBody: bad: foo=42 bar=str");
 
   int s = 1;
@@ -251,6 +239,56 @@ TEST(Check, Optional) {
   TC_CHECK_NE(noopt, 1);
   EXPECT_DEATH(TC_CHECK_EQ(opt1, opt2), "opt1 == opt2 \\(1 == 2\\)");
   EXPECT_DEATH(TC_CHECK_EQ(opt1, noopt), "opt1 == noopt \\(1 == \\?\\?\\?\\)");
+}
+
+TEST(Printer, NullTerminationAndExactBoundary) {
+  // Append must NUL-terminate the buffer even when the backing memory is
+  // non-zero.
+  char buf[6];
+  memset(buf, 'X', sizeof(buf));
+  Printer p(buf, 5);
+  p.Append("abcd");
+  EXPECT_EQ(p.SpaceRequired(), 4);
+  EXPECT_EQ(p.view(), "abcd");
+  EXPECT_EQ(buf[4], '\0');
+  EXPECT_STREQ(buf, "abcd");
+  EXPECT_EQ(buf[5], 'X');
+
+  // When total_size == left_, Append must not overwrite the 1 byte reserved
+  // for the trailing NUL terminator.
+  memset(buf, 'X', sizeof(buf));
+  Printer p_exact(buf, 4);
+  p_exact.Append("abcd");
+  EXPECT_EQ(p_exact.SpaceRequired(), 4);
+  EXPECT_EQ(p_exact.view(), "");
+  EXPECT_EQ(buf[0], '\0');
+  EXPECT_EQ(buf[3], 'X');
+
+  // When printf returns r == left_, output is truncated and left_ becomes 0.
+  memset(buf, 'X', sizeof(buf));
+  Printer p_printf(buf, 4);
+  p_printf.printf("%s", "abcd");
+  EXPECT_EQ(p_printf.SpaceRequired(), 4);
+  EXPECT_EQ(p_printf.view(), "abc");
+  EXPECT_EQ(buf[3], '\0');
+  EXPECT_STREQ(buf, "abc");
+  EXPECT_EQ(buf[4], 'X');
+
+  // When length == 0, Printer must not write to buf and still track
+  // SpaceRequired().
+  memset(buf, 'X', sizeof(buf));
+  Printer p_zero(buf, 0);
+  p_zero.Append("abcd");
+  p_zero.printf("%s", "efgh");
+  EXPECT_EQ(p_zero.SpaceRequired(), 8);
+  EXPECT_EQ(p_zero.view(), "");
+  EXPECT_EQ(buf[0], 'X');
+
+  Printer p_null(nullptr, 0);
+  p_null.Append("abcd");
+  p_null.printf("%s", "efgh");
+  EXPECT_EQ(p_null.SpaceRequired(), 8);
+  EXPECT_EQ(p_null.view(), "");
 }
 
 }  // namespace

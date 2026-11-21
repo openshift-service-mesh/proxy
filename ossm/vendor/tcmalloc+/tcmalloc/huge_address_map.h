@@ -20,8 +20,9 @@
 #include "absl/base/attributes.h"
 #include "tcmalloc/huge_pages.h"
 #include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/exponential_biased.h"
 #include "tcmalloc/internal/logging.h"
-#include "tcmalloc/metadata_allocator.h"
+#include "tcmalloc/internal/metadata_allocator.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
@@ -46,19 +47,19 @@ class HugeAddressMap {
   class Node {
    public:
     // the range stored at this point
-    HugeRange range() const;
+    [[nodiscard]] HugeRange range() const;
     // Tree structure
-    Node* left();
-    Node* right();
+    [[nodiscard]] Node* left();
+    [[nodiscard]] Node* right();
     // Iterate to the next node in address order
-    const Node* next() const;
-    Node* next();
+    [[nodiscard]] const Node* next() const;
+    [[nodiscard]] Node* next();
     // when were this node's content added (in
     // absl::base_internal::CycleClock::Now units)?
-    int64_t when() const;
+    [[nodiscard]] int64_t when() const;
 
     // What is the length of the longest range in the subtree rooted here?
-    HugeLength longest() const;
+    [[nodiscard]] HugeLength longest() const;
 
    private:
     Node(HugeRange r, int prio);
@@ -78,23 +79,24 @@ class HugeAddressMap {
   };
 
   // Get root of the tree.
-  Node* root();
-  const Node* root() const;
+  [[nodiscard]] Node* root();
+  [[nodiscard]] const Node* root() const;
 
   // Get lowest-addressed node
-  const Node* first() const;
-  Node* first();
+  [[nodiscard]] const Node* first() const;
+  [[nodiscard]] Node* first();
 
   // Returns the highest-addressed range that does not lie completely
   // after p (if any).
-  Node* Predecessor(HugePage p);
+  [[nodiscard]] Node* Predecessor(HugePage p);
+  [[nodiscard]] const Node* Predecessor(HugePage p) const;
 
   // Expensive consistency check.
   void Check();
 
   // Statistics
-  size_t nranges() const;
-  HugeLength total_mapped() const;
+  [[nodiscard]] size_t nranges() const;
+  [[nodiscard]] HugeLength total_mapped() const;
   void Print(Printer& out) const;
   void PrintInPbtxt(PbtxtRegion& hpaa) const;
 
@@ -115,7 +117,7 @@ class HugeAddressMap {
   size_t freelist_size_{0};
   // How we get more
   MetadataAllocator& meta_;
-  Node* Get(HugeRange r);
+  [[nodiscard]] Node* Get(HugeRange r);
   void Put(Node* n);
 
   size_t total_nodes_{0};
@@ -125,10 +127,10 @@ class HugeAddressMap {
   // Note that we always use the same seed, currently; this isn't very random.
   // In practice we're not worried about adversarial input and this works well
   // enough.
-  uint64_t seed_{0};
+  ExponentialBiased::State seed_{0};
 };
 
-inline constexpr HugeAddressMap::HugeAddressMap(MetadataAllocator& meta)
+constexpr HugeAddressMap::HugeAddressMap(MetadataAllocator& meta)
     : meta_(meta) {}
 
 inline HugeRange HugeAddressMap::Node::range() const { return range_; }

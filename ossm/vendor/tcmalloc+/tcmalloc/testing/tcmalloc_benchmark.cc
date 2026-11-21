@@ -14,6 +14,7 @@
 
 #include <malloc.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -25,6 +26,12 @@
 #include <thread>
 #include <vector>
 
+#ifdef __x86_64__
+#include <immintrin.h>
+#elif defined(__aarch64__)
+#include <arm_acle.h>
+#endif
+
 #include "absl/base/attributes.h"
 #include "absl/log/check.h"
 #include "absl/random/random.h"
@@ -33,7 +40,6 @@
 #include "absl/time/time.h"
 #include "benchmark/benchmark.h"
 #include "tcmalloc/common.h"
-#include "tcmalloc/internal/declarations.h"
 #include "tcmalloc/malloc_extension.h"
 #include "tcmalloc/malloc_hook.h"
 #include "tcmalloc/malloc_hook_invoke.h"
@@ -81,6 +87,55 @@ static void BM_new_sized_delete(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_new_sized_delete)->Range(1, 1 << 20);
+
+#if defined(__x86_64__) || defined(__aarch64__)
+// Make each call independent from each other (by an explicit fence), so that
+// the CPU cannot extract ILP from running multiple allocations in parallel,
+// and we measure latency instead of throughput.
+static void BM_new_sized_delete_fence(benchmark::State& state) {
+  const int arg = state.range(0);
+
+  CHECK_EQ(tcmalloc_internal::new_hooks_.size(), 0);
+  CHECK_EQ(tcmalloc_internal::delete_hooks_.size(), 0);
+  for (auto s : state) {
+#if defined(__x86_64__)
+    // LFENCE is blessed after-the-fact to be a full speculation fence.
+    // https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/technical-documentation/speculative-execution-side-channel-mitigations.html
+    // “The LFENCE instruction and the serializing instructions all ensure that
+    // no later instruction will execute, even speculatively, until all prior
+    // instructions have completed locally”
+    _mm_lfence();
+#else
+    __builtin_arm_isb(0xf);
+#endif
+    void* ptr = ::operator new(arg);
+    ::operator delete(ptr, arg);
+  }
+}
+BENCHMARK(BM_new_sized_delete_fence)->Range(1, 1 << 20);
+#endif
+
+static void BM_new_sized_delete_cold(benchmark::State& state) {
+  const int arg = state.range(0);
+  const int hot_cold = state.range(1);
+
+  CHECK_EQ(tcmalloc_internal::new_hooks_.size(), 0);
+  CHECK_EQ(tcmalloc_internal::delete_hooks_.size(), 0);
+  for (auto s : state) {
+    auto ptr = __size_returning_new_hot_cold(
+        arg, static_cast<tcmalloc::hot_cold_t>(hot_cold));
+    ::operator delete(ptr.p, arg);
+  }
+}
+BENCHMARK(BM_new_sized_delete_cold)
+    ->ArgPair(8, 0)
+    ->ArgPair(512, 0)
+    ->ArgPair(32768, 0)
+    ->ArgPair(1048576, 0)
+    ->ArgPair(8, 255)
+    ->ArgPair(512, 255)
+    ->ArgPair(32768, 255)
+    ->ArgPair(1048576, 255);
 
 static void BM_hooked_new_sized_delete(benchmark::State& state) {
   const int arg = state.range(0);
@@ -204,11 +259,19 @@ BENCHMARK(BM_malloc_pages)
     ->Arg(511)
     ->Arg(513)
     ->Arg(1023)
-    ->Arg(1 + 20 * 1024 * 1024 / (8 * 1024))
+    ->Arg(1 + 20 * 1024 * 1024 / tcmalloc::tcmalloc_internal::kPageSize)
     ->Arg(256);
 
+// Returns true when running as a unit test (under blaze/bazel test, where
+// TEST_TMPDIR is set). Benchmarks use this to scale down working set sizes
+// so dry-run unit tests do not OOM or time out under sanitizers and debug
+// builds.
+static bool IsRunningInTestMode() { return getenv("TEST_TMPDIR") != nullptr; }
+
 static void BM_random_malloc_pages(benchmark::State& state) {
-  const int kMaxOnHeap = 5000;
+  const int kMaxOnHeap =
+      std::max<int>(16, (IsRunningInTestMode() ? 256 : 5000) * 8192 /
+                            tcmalloc::tcmalloc_internal::kPageSize);
   const int kMaxRequestSizePages = 127;
 
   // We don't want random number generation to be a large part of
@@ -222,8 +285,7 @@ static void BM_random_malloc_pages(benchmark::State& state) {
     random_request_size[i] =
         absl::Uniform<int32_t>(rand, 0, kMaxRequestSizePages) + 1;
   }
-  void* v[kMaxOnHeap];
-  memset(v, 0, sizeof(v));
+  std::vector<void*> v(kMaxOnHeap, nullptr);
   size_t r = 0;
   for (int i = 0; i < kMaxOnHeap; ++i) {
     v[i] = malloc_pages(random_request_size[r]);
@@ -281,7 +343,19 @@ static void BM_random_new_delete(benchmark::State& state) {
 }
 BENCHMARK(BM_random_new_delete);
 
+static int MaxStatsAllocations() {
+  return IsRunningInTestMode() ? 1 << 10 : 1 << 20;
+}
+
+static int MaxProfileAllocations() {
+  return IsRunningInTestMode() ? 1 << 10 : 1 << 18;
+}
+
 static void BM_get_stats(benchmark::State& state) {
+  if (&MallocExtension_Internal_GetStats == nullptr) {
+    // Sanitizer builds don't provide this function.
+    return;
+  }
   std::vector<std::unique_ptr<char[]>> allocations;
   const int num_allocations = state.range(0);
   allocations.reserve(num_allocations);
@@ -301,7 +375,7 @@ static void BM_get_stats(benchmark::State& state) {
     benchmark::DoNotOptimize(stats);
   }
 }
-BENCHMARK(BM_get_stats)->Range(1, 1 << 20);
+BENCHMARK(BM_get_stats)->Range(1, MaxStatsAllocations());
 
 static void BM_get_stats_internal(benchmark::State& state) {
   if (&MallocExtension_Internal_GetStats == nullptr) {
@@ -329,10 +403,14 @@ static void BM_get_stats_internal(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_get_stats_internal)
-    ->Range(1, 1 << 20)
+    ->Range(1, MaxStatsAllocations())
     ->Unit(benchmark::kMillisecond);
 
 static void BM_get_stats_pageheap_lock(benchmark::State& state) {
+  if (&MallocExtension_Internal_GetStats == nullptr) {
+    // Sanitizer builds don't provide this function.
+    return;
+  }
   std::vector<std::unique_ptr<char[]>> allocations;
   const int num_allocations = state.range(0);
   allocations.reserve(num_allocations);
@@ -384,7 +462,7 @@ static void BM_get_stats_pageheap_lock(benchmark::State& state) {
   stats_thread.join();
 }
 BENCHMARK(BM_get_stats_pageheap_lock)
-    ->Range(1, 1 << 20)
+    ->Range(1, MaxStatsAllocations())
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);
 
@@ -415,7 +493,7 @@ static void BM_get_stats_pbtxt_internal(benchmark::State& state) {
   }
 }
 BENCHMARK(BM_get_stats_pbtxt_internal)
-    ->Range(1, 1 << 20)
+    ->Range(1, MaxStatsAllocations())
     ->Unit(benchmark::kMillisecond);
 
 static void BM_get_stats_pbtxt_pageheap_lock(benchmark::State& state) {
@@ -476,11 +554,15 @@ static void BM_get_stats_pbtxt_pageheap_lock(benchmark::State& state) {
   stats_thread.join();
 }
 BENCHMARK(BM_get_stats_pbtxt_pageheap_lock)
-    ->Range(1, 1 << 20)
+    ->Range(1, MaxStatsAllocations())
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);
 
 static void BM_get_heap_profile(benchmark::State& state) {
+  if (&MallocExtension_Internal_GetStats == nullptr) {
+    // Sanitizer builds don't provide this function.
+    return;
+  }
   std::vector<std::unique_ptr<char[]>> allocations;
   const int num_allocations = state.range(0);
   allocations.reserve(num_allocations);
@@ -498,9 +580,13 @@ static void BM_get_heap_profile(benchmark::State& state) {
         MallocExtension::SnapshotCurrent(ProfileType::kHeap));
   }
 }
-BENCHMARK(BM_get_heap_profile)->Range(1, 1 << 20);
+BENCHMARK(BM_get_heap_profile)->Range(1, MaxStatsAllocations());
 
 static void BM_get_heap_profile_while_allocating(benchmark::State& state) {
+  if (&MallocExtension_Internal_GetStats == nullptr) {
+    // Sanitizer builds don't provide this function.
+    return;
+  }
   std::vector<std::unique_ptr<char[]>> allocations;
   const int num_allocations = state.range(0);
   allocations.reserve(num_allocations);
@@ -538,7 +624,8 @@ static void BM_get_heap_profile_while_allocating(benchmark::State& state) {
   done.Notify();
   profile_thread.join();
 }
-BENCHMARK(BM_get_heap_profile_while_allocating)->Range(1, 1 << 18);
+BENCHMARK(BM_get_heap_profile_while_allocating)
+    ->Range(1, MaxProfileAllocations());
 
 }  // namespace
 }  // namespace tcmalloc

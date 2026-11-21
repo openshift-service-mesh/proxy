@@ -19,25 +19,35 @@
 #include <cstring>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 #include "fuzztest/fuzztest.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
 #include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "tcmalloc/common.h"
 #include "tcmalloc/huge_cache.h"
 #include "tcmalloc/huge_page_filler.h"
+#include "tcmalloc/huge_page_options.h"
 #include "tcmalloc/huge_page_subrelease.h"
 #include "tcmalloc/huge_pages.h"
 #include "tcmalloc/internal/allocation_guard.h"
 #include "tcmalloc/internal/clock.h"
 #include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/fake_residency.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/scoped_allow_allocation.h"
 #include "tcmalloc/internal/memory_tag.h"
 #include "tcmalloc/internal/pageflags.h"
 #include "tcmalloc/internal/range_tracker.h"
@@ -50,549 +60,1982 @@
 namespace tcmalloc::tcmalloc_internal {
 namespace {
 
-// As we read the fuzzer input, we update these variables to control global
-// state.
-int64_t fake_clock = 0;
-bool unback_success = true;
-bool collapse_success = true;
-int collapse_latency = 0;
-int error_number = 0;
-bool is_hugepage_backed = true;
-Bitmap<kMaxResidencyBits> unbacked_bitmap;
-Bitmap<kMaxResidencyBits> swapped_bitmap;
+using testing::HasSubstr;
+
+struct State;
+
+ABSL_CONST_INIT static int64_t fake_clock = 0;
 
 int64_t mock_clock() { return fake_clock; }
 
 double freq() { return 1 << 10; }
 
-absl::flat_hash_set<PageId>& ReleasedPages() {
-  static auto* set = new absl::flat_hash_set<PageId>();
-  return *set;
-}
-
-Bitmap<kMaxResidencyBits> GetBitmap(int value) {
-  int v = value % kMaxResidencyBits;
+// A prefix bitmap models residency that runs out part-way through a
+// hugepage.  Repeating value as a 16-bit pattern instead models sparse
+// residency, so the treatment's per-page reductions (all-of / any-of a group
+// of native pages) and MarkSubreleased see set bits interleaved with clear
+// ones at every offset.
+Bitmap<kMaxResidencyBits> GetBitmap(uint16_t value, bool repeat_pattern) {
   Bitmap<kMaxResidencyBits> bitmap;
-  if (v > 0) {
-    bitmap.SetRange(/*index=*/0, v);
+  if (!repeat_pattern) {
+    const size_t v = value % kMaxResidencyBits;
+    if (v > 0) {
+      bitmap.SetRange(/*index=*/0, v);
+    }
+    return bitmap;
+  }
+  for (size_t i = 0; i < kMaxResidencyBits; ++i) {
+    if ((value >> (i % 16)) & 1) {
+      bitmap.SetBit(i);
+    }
   }
   return bitmap;
 }
 
+// The filler drops pageheap_lock around the system calls it delegates to
+// these hooks (unback, collapse, naming a VMA, and querying pageflags and
+// residency).  Each hook calls State::OnLockDropped(), which takes the lock
+// for an instant and runs a queued reentrant subprogram, so that the fuzzer
+// interleaves other filler operations at every point where another thread
+// could take the lock.  The two hooks the filler also invokes under the lock
+// (naming a VMA when retiring a tracker, IsHugepageBacked from Print) skip it
+// then; every other hook deadlocks if it is reached with the lock held.
 class MockUnback final : public MemoryModifyFunction {
  public:
-  [[nodiscard]] MemoryModifyStatus operator()(Range r) override {
-    if (!unback_success) {
-      return {.success = false, .error_number = 0};
-    }
+  explicit MockUnback(State& state) : state_(state) {}
+  [[nodiscard]] MemoryModifyStatus operator()(Range r) override;
 
-    absl::flat_hash_set<PageId>& released_set = ReleasedPages();
+ private:
+  State& state_;
+};
 
-    PageId end = r.p + r.n;
-    for (; r.p != end; ++r.p) {
-      released_set.insert(r.p);
-    }
+// Models HugePageAwareAllocator::UnbackWithoutLock, which releases
+// pageheap_lock around the system call and reacquires it afterwards.
+class MockUnbackWithoutLock final : public MemoryModifyFunction {
+ public:
+  explicit MockUnbackWithoutLock(State& state) : state_(state) {}
+  [[nodiscard]] MemoryModifyStatus operator()(Range r) override
+      ABSL_NO_THREAD_SAFETY_ANALYSIS;
 
-    return {.success = true, .error_number = error_number};
-  }
+ private:
+  State& state_;
 };
 
 class MockSetAnonVmaName final : public MemoryTagFunction {
  public:
-  void operator()(Range r, std::optional<absl::string_view> name) override {}
+  explicit MockSetAnonVmaName(State& state) : state_(state) {}
+  void operator()(Range r, std::optional<absl::string_view> name) override;
+
+ private:
+  State& state_;
 };
 
 class FakePageFlags : public PageFlagsBase {
  public:
-  FakePageFlags() = default;
+  explicit FakePageFlags(State& state) : state_(state) {}
   std::optional<PageStats> Get(const void* addr, size_t size) override {
-    // unimplemented
-    return std::nullopt;
+    return PageStats{};
   }
 
-  bool IsHugepageBacked(const void* addr) override {
-    return is_hugepage_backed;
-  }
-};
-
-class FakeResidency : public Residency {
- public:
-  FakeResidency() = default;
-  std::optional<Info> Get(const void* addr, size_t size) override {
-    return std::nullopt;
-  };
-
-  SinglePageBitmaps GetUnbackedAndSwappedBitmaps(const void* addr) override {
-    return {unbacked_bitmap, swapped_bitmap, absl::StatusCode::kOk};
-  };
-
-  const size_t kNativePagesInHugePage = kHugePageSize / kPageSize;
-  size_t GetNativePagesInHugePage() const override {
-    return kNativePagesInHugePage;
-  };
+  PageFlagsBitmaps GetSinglePageBitmaps(const void* addr) override;
+  std::optional<bool> IsHugepageBacked(const void* addr) override;
 
  private:
-  absl::flat_hash_map<const void*, SinglePageBitmaps> residency_bitmaps_;
+  State& state_;
+};
+
+class FakeResidency : public NoopResidency {
+ public:
+  explicit FakeResidency(State& state) : state_(state) {}
+
+  SinglePageBitmaps GetUnbackedAndSwappedBitmaps(const void* addr) override;
+
+ private:
+  State& state_;
 };
 
 class MockCollapse final : public MemoryModifyFunction {
  public:
-  [[nodiscard]] MemoryModifyStatus operator()(Range r) override {
-    fake_clock += collapse_latency;
-    return {collapse_success, error_number};
+  explicit MockCollapse(State& state) : state_(state) {}
+  [[nodiscard]] MemoryModifyStatus operator()(Range r) override;
+
+ private:
+  State& state_;
+};
+
+struct Allocate {
+  uint16_t length;
+  uint32_t num_objects;
+  bool density_dense;
+  bool prefer_backed;
+
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const Allocate& a) {
+    absl::Format(&sink,
+                 "Allocate{.length=%d, .num_objects=%d, .density_dense=%v, "
+                 ".prefer_backed=%v}",
+                 a.length, a.num_objects, a.density_dense, a.prefer_backed);
   }
 };
 
-void FuzzFiller(const std::string& s) {
-  const char* data = s.data();
-  size_t size = s.size();
+struct Deallocate {
+  uint32_t tracker_index;
+  uint32_t alloc_index;
+  bool append_on_free;
 
-  // TODO(b/271282540):  Strongly type these parameters from fuzztest.
-  constexpr int kInitBytes = 3;
-  if (size <= kInitBytes || size > 100000) {
-    // size <= kInitBytes for needing some entropy to initialize the filler
-    // with.
-    //
-    // size > 100000 for avoiding overly large inputs given we do extra
-    // checking.
-    return;
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const Deallocate& d) {
+    absl::Format(&sink,
+                 "Deallocate{.tracker_index=%d, .alloc_index=%d, "
+                 ".append_on_free=%v}",
+                 d.tracker_index, d.alloc_index, d.append_on_free);
+  }
+};
+
+struct Release {
+  bool hit_limit;
+  bool use_peak_interval;
+  absl::Duration peak_interval;
+  absl::Duration short_interval;
+  absl::Duration long_interval;
+  uint16_t desired_pages;
+  bool release_partial_allocs;
+  uint16_t min_free_pages_to_break_dense = 1;
+  uint16_t min_free_pages_to_break_sparse = 1;
+
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const Release& r) {
+    absl::Format(
+        &sink,
+        "Release{.hit_limit=%v, .use_peak_interval=%v, "
+        ".peak_interval=absl::Nanoseconds(%v), "
+        ".short_interval=absl::Nanoseconds(%v), "
+        ".long_interval=absl::Nanoseconds(%v), .desired_pages=%d, "
+        ".release_partial_allocs=%v, .min_free_pages_to_break_dense=%d, "
+        ".min_free_pages_to_break_sparse=%d}",
+        r.hit_limit, r.use_peak_interval,
+        absl::ToInt64Nanoseconds(r.peak_interval),
+        absl::ToInt64Nanoseconds(r.short_interval),
+        absl::ToInt64Nanoseconds(r.long_interval), r.desired_pages,
+        r.release_partial_allocs, r.min_free_pages_to_break_dense,
+        r.min_free_pages_to_break_sparse);
+  }
+};
+
+struct AdvanceClock {
+  absl::Duration amount;
+
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const AdvanceClock& a) {
+    absl::Format(&sink, "AdvanceClock{.amount=absl::Nanoseconds(%v)}",
+                 absl::ToInt64Nanoseconds(a.amount));
+  }
+};
+
+struct ToggleUnback {
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const ToggleUnback&) {
+    sink.Append("ToggleUnback{}");
+  }
+};
+
+struct GatherStats {
+  // Print's summary branch, as mallocz's short form takes it.
+  bool summary_only;
+
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const GatherStats& g) {
+    absl::Format(&sink, "GatherStats{.summary_only=%v}", g.summary_only);
+  }
+};
+
+struct ModelTail {
+  uint16_t length;
+
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const ModelTail& m) {
+    absl::Format(&sink, "ModelTail{.length=%d}", m.length);
+  }
+};
+
+struct MemoryLimitHitRelease {
+  uint16_t desired;
+
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const MemoryLimitHitRelease& m) {
+    absl::Format(&sink, "MemoryLimitHitRelease{.desired=%d}", m.desired);
+  }
+};
+
+struct GatherStatsPbtxt {
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const GatherStatsPbtxt&) {
+    sink.Append("GatherStatsPbtxt{}");
+  }
+};
+
+struct GatherSpanStats {
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const GatherSpanStats&) {
+    sink.Append("GatherSpanStats{}");
+  }
+};
+
+struct TreatTrackers {
+  bool enable_collapse;
+  bool enable_unfiltered_collapse;
+  bool collapse_released;
+  bool enable_release_stale_pages;
+  bool preserve_donated_on_collapse;
+
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const TreatTrackers& t) {
+    absl::Format(&sink,
+                 "TreatTrackers{.enable_collapse=%v, "
+                 ".enable_unfiltered_collapse=%v, "
+                 ".collapse_released=%v, "
+                 ".enable_release_stale_pages=%v, "
+                 ".preserve_donated_on_collapse=%v}",
+                 t.enable_collapse, t.enable_unfiltered_collapse,
+                 t.collapse_released, t.enable_release_stale_pages,
+                 t.preserve_donated_on_collapse);
+  }
+};
+
+struct UpdateBitmaps {
+  bool hugepage_backed_set;
+  bool hugepage_backed_val;
+  uint16_t unbacked_bitmap_val;
+  uint16_t swapped_bitmap_val;
+  uint16_t stale_bitmap_val;
+  // Repeat each *_bitmap_val as a 16-bit pattern across the hugepage instead
+  // of setting a prefix of that many bits.
+  bool repeat_pattern;
+
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const UpdateBitmaps& u) {
+    absl::Format(&sink,
+                 "UpdateBitmaps{.hugepage_backed_set=%v, "
+                 ".hugepage_backed_val=%v, .unbacked_bitmap_val=%d, "
+                 ".swapped_bitmap_val=%d, .stale_bitmap_val=%d, "
+                 ".repeat_pattern=%v}",
+                 u.hugepage_backed_set, u.hugepage_backed_val,
+                 u.unbacked_bitmap_val, u.swapped_bitmap_val,
+                 u.stale_bitmap_val, u.repeat_pattern);
+  }
+};
+
+struct ToggleCollapseSuccess {
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const ToggleCollapseSuccess&) {
+    sink.Append("ToggleCollapseSuccess{}");
+  }
+};
+
+struct SetErrorNumber {
+  // Selects one of the errnos the treatment classifies, or raw_value, which
+  // lands in its "other" bucket for any value the switch does not name.
+  uint8_t error_type;
+  uint32_t raw_value;
+
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const SetErrorNumber& s) {
+    absl::Format(&sink, "SetErrorNumber{.error_type=%d, .raw_value=%d}",
+                 s.error_type, s.raw_value);
+  }
+};
+
+struct SetCollapseLatency {
+  absl::Duration latency;
+
+  void Perform(State& state) const;
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const SetCollapseLatency& s) {
+    absl::Format(&sink, "SetCollapseLatency{.latency=absl::Nanoseconds(%v)}",
+                 absl::ToInt64Nanoseconds(s.latency));
+  }
+};
+
+struct ReentrantSubprogram;
+
+using Instruction =
+    std::variant<Allocate, Deallocate, Release, AdvanceClock, ToggleUnback,
+                 GatherStats, ModelTail, MemoryLimitHitRelease,
+                 GatherStatsPbtxt, GatherSpanStats, TreatTrackers,
+                 UpdateBitmaps, ToggleCollapseSuccess, SetErrorNumber,
+                 SetCollapseLatency, ReentrantSubprogram>;
+
+struct ReentrantSubprogram {
+  std::vector<Instruction> subprogram;
+
+  void Perform(State& state) const;
+};
+
+template <typename Sink>
+void AbslStringify(Sink& sink, const Instruction& i);
+
+template <typename Sink>
+void AbslStringify(Sink& sink, const ReentrantSubprogram& r) {
+  absl::Format(&sink, "ReentrantSubprogram{.subprogram={%s}}",
+               absl::StrJoin(r.subprogram, ", ",
+                             [](std::string* out, const Instruction& i) {
+                               absl::StrAppend(out, i);
+                             }));
+}
+
+template <typename Sink>
+void AbslStringify(Sink& sink, const Instruction& i) {
+  std::visit([&](const auto& arg) { absl::Format(&sink, "%v", arg); }, i);
+}
+
+struct State {
+  explicit State(SubreleaseUnbackedMode subrelease_unbacked_mode,
+                 size_t num_instructions)
+      : subrelease_unbacked_mode(subrelease_unbacked_mode),
+        unback(*this),
+        unback_without_lock(*this),
+        collapse(*this),
+        set_anon_vma_name(*this),
+        filler(Clock{.now = mock_clock, .freq = freq}, MemoryTag::kNormal,
+               unback_without_lock, collapse, set_anon_vma_name,
+               subrelease_unbacked_mode) {
+    fake_clock = 0;
+    output.resize(1 << 20);
+    // MockUnback inserts into released_set while the AllocationGuard of the
+    // caller's PageHeapSpinLockHolder is still in force, even though the filler
+    // has dropped pageheap_lock itself, so the set must never grow there.  We
+    // have at most num_instructions allocations, for at most kPagesPerHugePage
+    // pages each, that we can track the released status of.
+    released_set.reserve(kPagesPerHugePage.raw_num() * (num_instructions + 1));
+    non_resident_set.reserve(kPagesPerHugePage.raw_num() *
+                             (num_instructions + 1));
   }
 
-  // Reset global state.
-  MockUnback unback;
-  MockCollapse collapse;
-  MockSetAnonVmaName set_anon_vma_name;
-  bool preferential_collapse;
-  fake_clock = 0;
-  unback_success = true;
-  absl::flat_hash_set<PageId>& released_set = ReleasedPages();
-  released_set.clear();
-  // To avoid reentrancy during unback, reserve space in released_set.
-  // We have at most size/5 allocations, for at most kPagesPerHugePage pages
-  // each, that we can track the released status of.
-  //
-  // TODO(b/73749855): Releasing the pageheap_lock during ReleaseFree will
-  // eliminate the need for this.
-  released_set.reserve(kPagesPerHugePage.raw_num() * size / 5);
+  // Called by every mock the filler invokes with pageheap_lock dropped.  Checks
+  // the filler's accounting, then runs the most recently queued reentrant
+  // subprogram, if any, as another thread would while the lock is free.
+  void OnLockDropped() {
+    // CheckInvariants takes pageheap_lock for an instant.  Another thread
+    // holding it (the binary's own allocator, say) only delays us; a mock
+    // reached while the filler itself still holds it deadlocks here, which is
+    // the intended failure.  Another thread could also take the lock here
+    // whether or not a subprogram does, so the accounting must be consistent
+    // at every drop.
+    ++lock_drops;
+    CheckInvariants();
+    --lock_drops;
+    if (reentrant_stack.empty()) {
+      return;
+    }
+    if (depth >= 5) {
+      return;
+    }
 
-  // We interpret data as a small DSL for exploring the state space of
-  // HugePageFiller.
-  // [0] - Whether to enable preferential userspace collapse.
-  // [1-2] - Reserved.
-  //
-  // Afterwards, we read 5 bytes at a time until the buffer is exhausted.
-  // [i + 0]        - Specifies an operation to perform on the filler (allocate,
-  //                  deallocate, release memory, gather stats, etc.)
-  // [i + 1, i + 4] - Specifies an integer.  We use this as a source of
-  //                  deterministic entropy to allow inputs to be replayed.
-  //                  For example, this input can provide a Length to
-  //                  allocate, or the index of the previous allocation to
-  //                  deallocate.
-  preferential_collapse = data[0] & 0x1;
-  data += kInitBytes;
-  size -= kInitBytes;
+    auto ops = reentrant_stack.back();
+    reentrant_stack.pop_back();
 
-  HugePageFiller<PageTracker> filler(
-      Clock{.now = mock_clock, .freq = freq}, MemoryTag::kNormal, unback,
-      unback, collapse, set_anon_vma_name,
-      HugePageFillerOptions{.use_preferential_collapse =
-                                preferential_collapse});
+    depth++;
+    reentrant_runs++;
+    ScopedAllocationAllow allow;
+    RunInstructions(ops);
+    depth--;
+  }
 
-  std::vector<PageTracker*> trackers;
-  absl::flat_hash_map<PageTracker*,
-                      std::vector<std::pair<Range, SpanAllocInfo>>>
-      allocs;
-
-  // Running counter to allocate pseudo-random addresses
-  size_t next_hugepage = 1;
-
-  for (size_t i = 0; i + 5 <= size; i += 5) {
-    const uint8_t op = data[i];
-    uint32_t value;
-    memcpy(&value, &data[i + 1], sizeof(value));
-
-    switch (op & 0xF) {
-      case 0: {
-        // Allocate.  We divide up our random value by:
-        //
-        // value[0:15]  - We choose a Length to allocate.
-        // value[16:31] - We select num_to_objects.
-        Length n(std::clamp<size_t>(value & 0xFFFF, 1,
-                                    kPagesPerHugePage.raw_num() - 1));
-        AccessDensityPrediction density;
-        const uint32_t lval = (value >> 16);
-        // Choose many objects if the last bit is 1.
-        if (lval & 1) {
-          density = AccessDensityPrediction::kDense;
-        } else {
-          // We need to choose few objects, so only top four bits are used.
-          density = AccessDensityPrediction::kSparse;
-        }
-        size_t num_objects = std::max<size_t>(lval >> 1, 1);
-
-        // Truncate to single object for larger allocations. This ensures that
-        // we always allocate few-object spans from donations.
-        if (n > kPagesPerHugePage / 2) {
-          num_objects = 1;
-          density = AccessDensityPrediction::kSparse;
-        }
-        if (density == AccessDensityPrediction::kDense) {
-          n = Length(1);
-        }
-
-        SpanAllocInfo alloc_info = {.objects_per_span = num_objects,
-                                    .density = density};
-        absl::flat_hash_set<PageId>& released_set = ReleasedPages();
-
-        CHECK_EQ(filler.size().raw_num(), trackers.size());
-        CHECK_EQ(filler.unmapped_pages().raw_num(), released_set.size());
-
-        HugePageFiller<PageTracker>::TryGetResult result;
-        {
-          PageHeapSpinLockHolder l;
-          result = filler.TryGet(n, alloc_info);
-        }
-
-        if (result.pt == nullptr) {
-          // Failed to allocate.  Create a new huge page.
-          //
-          // Donated pages do not necessarily have to have a particular size,
-          // since this may be (kPagesPerHugePage/2,kPagesPerHugePage) in size
-          // *or* the tail of an allocation >PagesPerHugePage.
-          //
-          // Since small objects are likely to be found, we model those tail
-          // donations separately.
-          const bool donated = n > kPagesPerHugePage / 2;
-          result.pt = new PageTracker(HugePage{.pn = next_hugepage}, donated,
-                                      fake_clock);
-          next_hugepage++;
-          {
-            PageHeapSpinLockHolder l;
-
-            result.page = result.pt->Get(n, alloc_info).page;
-            filler.Contribute(result.pt, donated, alloc_info);
-          }
-
-          trackers.push_back(result.pt);
-        }
-
-        // We have now successfully allocated.  Record the alloc and clear any
-        // released bits.
-        for (PageId p = result.page, end = p + n; p != end; ++p) {
-          released_set.erase(p);
-        }
-
-        allocs[result.pt].push_back({{result.page, n}, alloc_info});
-
-        CHECK_EQ(filler.size().raw_num(), trackers.size());
-        CHECK_EQ(filler.unmapped_pages().raw_num(), released_set.size());
-
-        break;
-      }
-      case 1: {
-        // Deallocate.
-        //
-        // value[0:15]  - Index of the huge page (from trackers) to select
-        // value[16:31] - Index of the allocation (on pt) to select
-        if (trackers.empty()) {
-          break;
-        }
-
-        const size_t lo = std::min<size_t>(value & 0xFFFF, trackers.size() - 1);
-        PageTracker* pt = trackers[lo];
-
-        CHECK(!allocs[pt].empty());
-        const size_t hi = std::min<size_t>(value >> 16, allocs[pt].size() - 1);
-        auto [alloc, alloc_info] = allocs[pt][hi];
-
-        // Remove the allocation.
-        std::swap(allocs[pt][hi], allocs[pt].back());
-        allocs[pt].resize(allocs[pt].size() - 1);
-        bool last_alloc = allocs[pt].empty();
-        if (last_alloc) {
-          allocs.erase(pt);
-          std::swap(trackers[lo], trackers.back());
-          trackers.resize(trackers.size() - 1);
-        }
-
+  ~State() {
+    // Shut down, confirm filler is empty.  Putting a partially released
+    // tracker drops the lock, so stop running subprograms that would mutate
+    // allocs while we iterate it.
+    reentrant_stack.clear();
+    CHECK(parked.empty());
+    CHECK_EQ(Length(released_set.size()), filler.unmapped_pages());
+    while (!trackers.empty()) {
+      // Retire the tracker and its allocations before Put, as Deallocate does:
+      // the final Put may unback the hugepage, and CheckNotLive and
+      // CheckInvariants must see neither a stale allocation nor a tracker
+      // deleted on an earlier iteration.
+      PageTracker* pt = trackers.back();
+      trackers.pop_back();
+      auto node = allocs.extract(pt->location());
+      CHECK(!node.empty());
+      std::vector<std::pair<Range, SpanAllocInfo>>& v = node.mapped();
+      while (!v.empty()) {
+        auto [alloc, alloc_info] = v.back();
+        v.pop_back();
+        live_pages[alloc_info.density] -= alloc.n;
         PageTracker* ret;
         {
           PageHeapSpinLockHolder l;
-          ret = filler.Put(pt, alloc, alloc_info);
+          ret =
+              filler.Put(pt, alloc, alloc_info, FillerAppendOnFree::kDisabled);
         }
-        CHECK_EQ(ret != nullptr, last_alloc);
-        absl::flat_hash_set<PageId>& released_set = ReleasedPages();
-        if (ret) {
-          // Clear released_set, since the page has become free.
-          HugePage hp = ret->location();
-          for (PageId p = hp.first_page(),
-                      end = hp.first_page() + kPagesPerHugePage;
-               p != end; ++p) {
-            released_set.erase(p);
-          }
-          delete ret;
-        }
-
-        CHECK_EQ(filler.size().raw_num(), trackers.size());
-        CHECK_EQ(filler.unmapped_pages().raw_num(), released_set.size());
-
-        break;
+        CHECK_EQ(ret != nullptr, v.empty());
       }
-      case 2: {
-        // Release
-        //
-        // value[0]    - Whether are trying to apply TCMalloc's memory limits
-        // value[1]    - Whether using peak interval for skip subrelease
-        // If using peak interval:
-        // value[2:9]  - Peak interval for skip subrelease
-        // value[10:31]- Number of pages to try to release
-        // If not using peak interval:
-        // value[2:9]  - Short interval for skip subrelease
-        // value[10:17]- Long interval for skip subrelease
-        // value[18:29]- Number of pages to try to release
-        // value[30] - Whether we release all free pages from partial allocs.
-        // value[31] - Reserved.
-        bool hit_limit = value & 0x1;
-        bool use_peak_interval = (value >> 1) & 0x1;
-        SkipSubreleaseIntervals skip_subrelease_intervals;
-        if (use_peak_interval) {
-          const uint32_t peak_interval_s = (value >> 2) & 0xFF;
-          skip_subrelease_intervals.peak_interval =
-              absl::Seconds(peak_interval_s);
-          value >>= 10;
-        } else {
-          uint32_t short_interval_s = (value >> 2) & 0xFF;
-          uint32_t long_interval_s = (value >> 10) & 0xFF;
-          if (short_interval_s > long_interval_s) {
-            std::swap(short_interval_s, long_interval_s);
-          }
-          skip_subrelease_intervals.short_interval =
-              absl::Seconds(short_interval_s);
-          skip_subrelease_intervals.long_interval =
-              absl::Seconds(long_interval_s);
-          value >>= 18;
-        }
-        Length desired(value & 0xFFF);
-        const bool release_partial_allocs = (value >> 12) & 0x1;
-        size_t to_release_from_partial_allocs;
+      delete pt;
+    }
+    CHECK(allocs.empty());
+    CHECK(filler.size() == NHugePages(0));
+  }
 
-        Length released;
-        {
-          PageHeapSpinLockHolder l;
-          to_release_from_partial_allocs =
-              HugePageFiller<PageTracker>::kPartialAllocPagesRelease *
-              filler.FreePagesInPartialAllocs().raw_num();
-          released = filler.ReleasePages(desired, skip_subrelease_intervals,
-                                         release_partial_allocs, hit_limit);
-        }
+  void RunInstructions(absl::Span<const Instruction> instrs) {
+    for (const auto& instruction : instrs) {
+      std::visit([&](const auto& instr) { instr.Perform(*this); }, instruction);
+      CheckInvariants();
+    }
+  }
 
-        // We should be able to release all the free pages in partial allocs if
-        // skip-subrelease is disabled.
-        if (release_partial_allocs && !hit_limit &&
-            !skip_subrelease_intervals.SkipSubreleaseEnabled() &&
-            unback_success) {
-          CHECK_GE(released.raw_num(), to_release_from_partial_allocs);
-        }
-        break;
-      }
-      case 3: {
-        // Advance clock
-        //
-        // value[0:31] - Advances clock by this amount in arbitrary units.
-        fake_clock += value;
-        break;
-      }
-      case 4: {
-        // Toggle unback, simulating madvise potentially failing or succeeding.
-        //
-        // value is unused.
-        unback_success = !unback_success;
-        break;
-      }
-      case 5: {
-        // Gather stats
-        //
-        // value is unused.
-        std::string s;
-        s.resize(1 << 20);
-        Printer p(&s[0], s.size());
-        FakePageFlags pageflags;
-        PageHeapSpinLockHolder l;
-        filler.Print(p, true, pageflags);
-        break;
-      }
-      case 6: {
-        // Model a tail from a larger allocation.  The tail can have any size
-        // [1,kPagesPerHugePage).
-        //
-        // value[0:15]  - We choose a Length to allocate.
-        // value[16:31] - Unused.
-        const Length n(std::clamp<size_t>(value & 0xFFFF, 1,
-                                          kPagesPerHugePage.raw_num() - 1));
-        absl::flat_hash_set<PageId>& released_set = ReleasedPages();
+  // Pages held by live allocations on pt.
+  Length LivePagesOn(PageTracker* pt) const {
+    Length n;
+    auto it = allocs.find(pt->location());
+    if (it == allocs.end()) return n;
+    for (const auto& [alloc, alloc_info] : it->second) {
+      n += alloc.n;
+    }
+    return n;
+  }
 
-        auto* pt = new PageTracker(HugePage{.pn = next_hugepage},
-                                   /*was_donated=*/true, fake_clock);
-        next_hugepage++;
-        PageId start;
-        {
-          PageHeapSpinLockHolder l;
+  // Checked at every depth and at every lock drop: the filler updates its
+  // counters before it drops pageheap_lock, so a subprogram interleaved with a
+  // Put or a treatment sees the same accounting another thread would.
+  void CheckInvariants() {
+    PageHeapSpinLockHolder l;
+    // A tracker emptied while ReleaseFreeFromTracker was unbacking it with the
+    // lock dropped leaves size() only once that unback returns.
+    size_t in_flight = 0;
+    for (const PageTracker* pt : parked) {
+      in_flight += pt->BeingReleased();
+    }
+    TC_CHECK_EQ(filler.size(), NHugePages(trackers.size() + in_flight));
+    // Sparse and dense allocations live on disjoint sets of hugepages, so the
+    // per-density counters track our live allocations exactly.
+    for (int d = 0; d < AccessDensityPrediction::kPredictionCounts; ++d) {
+      TC_CHECK_EQ(
+          filler.pages_allocated(static_cast<AccessDensityPrediction>(d)),
+          live_pages[d]);
+    }
+    TC_CHECK_LE(filler.used_pages_in_any_subreleased(), filler.used_pages());
+    TC_CHECK_LE(filler.FreePagesInPartialAllocs(), filler.free_pages());
+    TC_CHECK_EQ(
+        filler.used_pages() + filler.free_pages() + filler.unmapped_pages(),
+        filler.size().in_pages());
+    if (depth != 0 || lock_drops != 0) {
+      // unmapped_pages() runs ahead of released_set while the lock is
+      // dropped: a Put that empties a partially released hugepage subtracts
+      // its released pages before unbacking the rest, and
+      // ReleaseFreeFromTracker adds the pages it is about to unback before
+      // unbacking them.  released_set catches up once the operation returns.
+      return;
+    }
+    TC_CHECK_EQ(filler.unmapped_pages(), Length(released_set.size()));
+    CheckTrackerBitmaps();
+    // Every operation that pins trackers drains the ones it parked before it
+    // returns to the top level.
+    TC_CHECK(parked.empty());
+    TC_CHECK(filler.FetchFullyFreedTracker() == nullptr);
+  }
 
-          start = pt->Get(n, {1, AccessDensityPrediction::kSparse}).page;
-          filler.Contribute(pt, /*donated=*/true,
+  // Retires the trackers the filler parked because a Put emptied them while
+  // a treatment held them pinned.  Each one must be a tracker we saw parked,
+  // and the filler hands it back only once its pins are cleared.
+  void DrainFullyFreedTrackers() ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) {
+    while (PageTracker* pt = filler.FetchFullyFreedTracker()) {
+      TC_CHECK_EQ(parked.erase(pt), 1);
+      TC_CHECK(pt->empty());
+      TC_CHECK(!pt->DontFreeTracker());
+      const HugePage hp = pt->location();
+      for (PageId p = hp.first_page(),
+                  end = hp.first_page() + kPagesPerHugePage;
+           p != end; ++p) {
+        released_set.erase(p);
+        non_resident_set.erase(p);
+      }
+      delete pt;
+    }
+  }
+
+  // Each tracker's released bitmap agrees with its released count, marks no
+  // page a live allocation holds, never covers a resident page, and, summed
+  // over the trackers, is exactly released_set.
+  void CheckTrackerBitmaps() const
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) {
+    size_t released = 0;
+    for (const PageTracker* pt : trackers) {
+      const PageBitmap& rel = pt->released_by_page();
+      TC_CHECK_EQ(pt->released_pages(), Length(rel.CountBits()));
+      TC_CHECK_EQ((rel & pt->allocated_pages_bitmap()).CountBits(), 0);
+      const PageId first = pt->location().first_page();
+      rel.ForEachSet(0, [&](size_t i) {
+        const PageId p = first + Length(i);
+        TC_CHECK(non_resident_set.contains(p), "%v", p);
+        TC_CHECK(released_set.contains(p), "%v", p);
+        ++released;
+      });
+    }
+    TC_CHECK_EQ(released, released_set.size());
+  }
+
+  void MarkUnbackedBitmapPagesNonResident(const void* addr) {
+    const HugePage hp = HugePageContaining(PageIdContaining(addr));
+    const size_t pages_per_huge_page = kHugePageSize / GetPageSize();
+    const PageBitmap scaled = Scale<kPagesPerHugePage.raw_num()>(
+        unbacked_bitmap, pages_per_huge_page, ReductionOp::kAll);
+    scaled.ForEachSet(0, [&](size_t i) {
+      non_resident_set.insert(hp.first_page() + Length(i));
+    });
+  }
+
+  // Every range the filler unbacks lies within one hugepage it has been given
+  // and overlaps no live allocation.  Checked after any interleaved subprogram
+  // has run, which is when the kernel would act on it: a page handed to
+  // another thread in the meantime would have its contents discarded.
+  void CheckNotLive(Range r) const {
+    TC_CHECK_GT(r.n, Length(0));
+    const HugePage hp = HugePageContaining(r.p);
+    TC_CHECK_LE(r.p + r.n, hp.first_page() + kPagesPerHugePage);
+    TC_CHECK_GE(hp.pn, 1);
+    TC_CHECK_LT(hp.pn, next_hugepage);
+    auto it = allocs.find(hp);
+    if (it == allocs.end()) return;
+    for (const auto& [live, live_info] : it->second) {
+      TC_CHECK(!(r.p < live.p + live.n && live.p < r.p + r.n),
+               "unbacking [%v, %v) overlaps live [%v, %v)", r.p, r.p + r.n,
+               live.p, live.p + live.n);
+    }
+  }
+
+  // ReleasePages may claim credit for pages unmapped earlier and left
+  // unaccounted, so it reports at least the pages it unmapped just now, and
+  // nothing is unmapped while unback is failing.
+  void CheckReleased(Length released, Length unmapped_before) const {
+    const Length unmapped_after = filler.unmapped_pages();
+    TC_CHECK_GE(unmapped_after, unmapped_before);
+    TC_CHECK_GE(released, unmapped_after - unmapped_before);
+    if (!unback_success) {
+      TC_CHECK_EQ(unmapped_after, unmapped_before);
+    }
+  }
+
+  SubreleaseUnbackedMode subrelease_unbacked_mode;
+  bool unback_success = true;
+  bool collapse_success = true;
+  int64_t collapse_latency = 0;
+  int error_number = 0;
+  std::optional<bool> is_hugepage_backed = true;
+  Bitmap<kMaxResidencyBits> unbacked_bitmap;
+  Bitmap<kMaxResidencyBits> swapped_bitmap;
+  Bitmap<kMaxResidencyBits> stale_bitmap;
+  absl::flat_hash_set<PageId> released_set;
+  absl::flat_hash_set<PageId> non_resident_set;
+
+  MockUnback unback;
+  MockUnbackWithoutLock unback_without_lock;
+  MockCollapse collapse;
+  MockSetAnonVmaName set_anon_vma_name;
+  HugePageFiller<PageTracker> filler;
+
+  std::vector<PageTracker*> trackers;
+  // Trackers a Put emptied while a treatment held them pinned.  The filler
+  // parks them and hands them back from FetchFullyFreedTracker once the
+  // treatment clears its pins; DrainFullyFreedTrackers retires them.
+  absl::flat_hash_set<PageTracker*> parked;
+  // Live allocations by hugepage; each hugepage has exactly one tracker.
+  absl::flat_hash_map<HugePage, std::vector<std::pair<Range, SpanAllocInfo>>>
+      allocs;
+  size_t next_hugepage = 1;
+  // Pages held by live allocations, by predicted access density.
+  Length live_pages[AccessDensityPrediction::kPredictionCounts];
+  std::vector<absl::Span<const Instruction>> reentrant_stack;
+  int depth = 0;
+  // Nonzero while CheckInvariants runs from a mock the filler called with
+  // pageheap_lock dropped, before any subprogram.
+  int lock_drops = 0;
+  // Bumped whenever a reentrant subprogram runs, so an operation can tell
+  // whether other instructions interleaved with it.
+  size_t reentrant_runs = 0;
+  std::string output;
+};
+
+MemoryModifyStatus MockUnback::operator()(Range r) {
+  state_.OnLockDropped();
+  state_.CheckNotLive(r);
+  if (!state_.unback_success) {
+    return {.success = false, .error_number = 0};
+  }
+
+  PageId end = r.p + r.n;
+  for (; r.p != end; ++r.p) {
+    state_.released_set.insert(r.p);
+    state_.non_resident_set.insert(r.p);
+  }
+
+  return {.success = true, .error_number = state_.error_number};
+}
+
+MemoryModifyStatus MockUnbackWithoutLock::operator()(Range r) {
+  pageheap_lock.AssertHeld();
+  pageheap_lock.unlock();
+  // MockUnback::operator() calls State::OnLockDropped, which only runs queued
+  // reentrant subprograms when pageheap_lock is not held, so the unlock above
+  // is what lets them interleave here.
+  MemoryModifyStatus ret = state_.unback(r);
+  pageheap_lock.lock();
+  return ret;
+}
+
+void MockSetAnonVmaName::operator()(Range r,
+                                    std::optional<absl::string_view> name) {
+  // Treatments name with pageheap_lock dropped, but HandleFullyFreedTracker
+  // and FetchFullyFreedTracker reset the name under it.
+  //
+  // TODO(b/73749855): Move the reset off the lock, then drop this check.
+  if (pageheap_lock.IsHeld()) {
+    return;
+  }
+  state_.OnLockDropped();
+}
+
+PageFlagsBase::PageFlagsBitmaps FakePageFlags::GetSinglePageBitmaps(
+    const void* addr) {
+  state_.OnLockDropped();
+  return {.stale = state_.stale_bitmap, .status = absl::StatusCode::kOk};
+}
+
+std::optional<bool> FakePageFlags::IsHugepageBacked(const void* addr) {
+  // Queried with pageheap_lock dropped by treatments and under it by Print.
+  //
+  // TODO(b/73749855): Query pageflags off the lock in Print, then drop this
+  // check.
+  if (!pageheap_lock.IsHeld()) {
+    state_.OnLockDropped();
+  }
+  return state_.is_hugepage_backed;
+}
+
+Residency::SinglePageBitmaps FakeResidency::GetUnbackedAndSwappedBitmaps(
+    const void* addr) {
+  state_.OnLockDropped();
+  state_.MarkUnbackedBitmapPagesNonResident(addr);
+  return {state_.unbacked_bitmap, state_.swapped_bitmap, absl::StatusCode::kOk};
+}
+
+MemoryModifyStatus MockCollapse::operator()(Range r) {
+  state_.OnLockDropped();
+  fake_clock += state_.collapse_latency;
+  if (state_.collapse_success) {
+    for (PageId p = r.p, end = r.p + r.n; p != end; ++p) {
+      state_.released_set.erase(p);
+      state_.non_resident_set.erase(p);
+    }
+  }
+  return {.success = state_.collapse_success,
+          .error_number = state_.error_number};
+}
+
+void Allocate::Perform(State& state) const {
+  Length n(std::clamp<size_t>(length, 1, kPagesPerHugePage.raw_num() - 1));
+  size_t num_objects = std::max<size_t>(this->num_objects, 1);
+  AccessDensityPrediction density = density_dense
+                                        ? AccessDensityPrediction::kDense
+                                        : AccessDensityPrediction::kSparse;
+  // Truncate to single object for larger allocations. This ensures
+  // that we always allocate few-object spans from donations.
+  if (n > kPagesPerHugePage / 2) {
+    num_objects = 1;
+    density = AccessDensityPrediction::kSparse;
+  }
+  if (density == AccessDensityPrediction::kDense) {
+    n = Length(1);
+  }
+  SpanAllocInfo alloc_info = {.objects_per_span = num_objects,
+                              .density = density};
+
+  if (state.depth == 0) {
+    TC_CHECK_EQ(state.filler.size(), NHugePages(state.trackers.size()));
+    TC_CHECK_EQ(state.filler.unmapped_pages(),
+                Length(state.released_set.size()));
+  }
+
+  const PreferBackedPages prefer_backed_pages =
+      prefer_backed ? PreferBackedPages::kEnabled
+                    : PreferBackedPages::kDisabled;
+  HugePageFiller<PageTracker>::TryGetResult result;
+  {
+    PageHeapSpinLockHolder l;
+    result = state.filler.TryGet(n, alloc_info, prefer_backed_pages);
+  }
+
+  if (result.pt == nullptr) {
+    // Since small objects are likely to be found, we model those
+    // tail donations separately.
+    const bool donated = n > kPagesPerHugePage / 2;
+    result.pt = new PageTracker(HugePage{.pn = state.next_hugepage}, donated,
+                                fake_clock);
+    state.next_hugepage++;
+    {
+      PageHeapSpinLockHolder l;
+      result.page = result.pt->Get(n, alloc_info, prefer_backed_pages).page;
+      state.filler.Contribute(result.pt, donated, alloc_info);
+    }
+    state.trackers.push_back(result.pt);
+  } else {
+    // The filler only hands out hugepages it still owns.
+    TC_CHECK(state.allocs.contains(result.pt->location()));
+  }
+
+  // The range lies within the tracker's hugepage and is disjoint from every
+  // live allocation on it.
+  const HugePage hp = result.pt->location();
+  TC_CHECK(HugePageContaining(result.page) == hp);
+  TC_CHECK(result.page + n <= hp.first_page() + kPagesPerHugePage);
+  for (const auto& [live, live_info] : state.allocs[hp]) {
+    TC_CHECK(!(result.page < live.p + live.n && live.p < result.page + n));
+  }
+
+  for (PageId p = result.page, end = p + n; p != end; ++p) {
+    // Only a previously released hugepage can hand out unmapped pages.
+    TC_CHECK(result.from_released || !state.released_set.contains(p));
+    state.released_set.erase(p);
+    state.non_resident_set.erase(p);
+  }
+
+  state.allocs[hp].push_back({{result.page, n}, alloc_info});
+  state.live_pages[alloc_info.density] += n;
+
+  if (state.depth == 0) {
+    TC_CHECK_EQ(result.pt->used_pages(), state.LivePagesOn(result.pt));
+    TC_CHECK_EQ(state.filler.size(), NHugePages(state.trackers.size()));
+    TC_CHECK_EQ(state.filler.unmapped_pages(),
+                Length(state.released_set.size()));
+  }
+}
+
+void Deallocate::Perform(State& state) const {
+  if (state.trackers.empty()) {
+    return;
+  }
+  const size_t lo = tracker_index % state.trackers.size();
+  PageTracker* pt = state.trackers[lo];
+  std::vector<std::pair<Range, SpanAllocInfo>>& live =
+      state.allocs.at(pt->location());
+  TC_CHECK(!live.empty());
+  const size_t hi = alloc_index % live.size();
+  auto [alloc, alloc_info] = live[hi];
+
+  std::swap(live[hi], live.back());
+  live.pop_back();
+  bool last_alloc = live.empty();
+  if (last_alloc) {
+    state.allocs.erase(pt->location());
+    std::swap(state.trackers[lo], state.trackers.back());
+    state.trackers.resize(state.trackers.size() - 1);
+  }
+
+  state.live_pages[alloc_info.density] -= alloc.n;
+  PageTracker* ret;
+  {
+    PageHeapSpinLockHolder l;
+    ret = state.filler.Put(pt, alloc, alloc_info,
+                           append_on_free ? FillerAppendOnFree::kEnabled
+                                          : FillerAppendOnFree::kDisabled);
+  }
+  if (!last_alloc) {
+    TC_CHECK_EQ(ret, nullptr);
+    if (state.depth == 0) {
+      TC_CHECK_EQ(pt->used_pages(), state.LivePagesOn(pt));
+    }
+  } else if (ret == nullptr) {
+    // Emptied while a treatment or release that dropped the lock held it
+    // pinned, so the filler parked it (or, if its own free pages are being
+    // unbacked, will park it) rather than hand it back.
+    TC_CHECK_GT(state.depth, 0);
+    TC_CHECK(pt->DontFreeTracker());
+    TC_CHECK(state.parked.insert(pt).second);
+  }
+  if (ret) {
+    // Only the hugepage we emptied is handed back.
+    TC_CHECK_EQ(ret, pt);
+    HugePage hp = ret->location();
+    for (PageId p = hp.first_page(), end = hp.first_page() + kPagesPerHugePage;
+         p != end; ++p) {
+      state.released_set.erase(p);
+      state.non_resident_set.erase(p);
+    }
+    delete ret;
+  }
+
+  if (state.depth == 0) {
+    TC_CHECK_EQ(state.filler.size(), NHugePages(state.trackers.size()));
+    TC_CHECK_EQ(state.filler.unmapped_pages(),
+                Length(state.released_set.size()));
+  }
+}
+
+void Release::Perform(State& state) const {
+  SkipSubreleaseIntervals skip_subrelease_intervals;
+  // The filler accepts the peak and the short/long demand intervals together
+  // and gives the peak priority, so set both when use_peak_interval asks for
+  // the peak rather than choosing one.
+  if (use_peak_interval) {
+    skip_subrelease_intervals.peak_interval = peak_interval;
+  }
+  skip_subrelease_intervals.short_interval = short_interval;
+  skip_subrelease_intervals.long_interval = long_interval;
+  if (skip_subrelease_intervals.short_interval >
+      skip_subrelease_intervals.long_interval) {
+    std::swap(skip_subrelease_intervals.short_interval,
+              skip_subrelease_intervals.long_interval);
+  }
+  Length desired(desired_pages);
+  Length to_release_from_partial_allocs;
+
+  const Length unmapped_before = state.filler.unmapped_pages();
+  const size_t runs_before = state.reentrant_runs;
+  Length released;
+  {
+    PageHeapSpinLockHolder l;
+    to_release_from_partial_allocs =
+        Length(HugePageFiller<PageTracker>::kPartialAllocPagesRelease *
+               state.filler.FreePagesInPartialAllocs().raw_num());
+    released = state.filler.ReleasePages(
+        desired, skip_subrelease_intervals,
+        release_partial_allocs ? ReleasePartialAllocPages::kEnabled
+                               : ReleasePartialAllocPages::kDisabled,
+        hit_limit,
+        MinFreePagesToBreak{
+            .dense = Length(std::clamp<size_t>(min_free_pages_to_break_dense, 1,
+                                               kPagesPerHugePage.raw_num())),
+            .sparse =
+                Length(std::clamp<size_t>(min_free_pages_to_break_sparse, 1,
+                                          kPagesPerHugePage.raw_num())),
+        });
+    state.DrainFullyFreedTrackers();
+  }
+  if (state.depth == 0 && runs_before == state.reentrant_runs) {
+    state.CheckReleased(released, unmapped_before);
+  }
+
+  // A subprogram run while the release dropped pageheap_lock may have
+  // allocated from, freed, or itself released the candidates, so the lower
+  // bound only holds when none ran.
+  if (!release_partial_allocs || hit_limit ||
+      skip_subrelease_intervals.SkipSubreleaseEnabled() ||
+      !state.unback_success || state.depth != 0 ||
+      runs_before != state.reentrant_runs) {
+    return;
+  }
+  TC_CHECK_GE(released, to_release_from_partial_allocs);
+}
+
+void AdvanceClock::Perform(State& state) const {
+  const int64_t clamped_amount = absl::ToInt64Nanoseconds(
+      std::clamp(amount, -absl::Hours(1), absl::Hours(1)));
+  fake_clock = std::max<int64_t>(0, fake_clock + clamped_amount);
+}
+
+void ToggleUnback::Perform(State& state) const {
+  state.unback_success = !state.unback_success;
+}
+
+void GatherStats::Perform(State& state) const {
+  Printer p(&state.output[0], state.output.size());
+  FakePageFlags pageflags(state);
+  PageHeapSpinLockHolder l;
+  state.filler.Print(p, /*everything=*/!summary_only, pageflags);
+}
+
+void ModelTail::Perform(State& state) const {
+  // Model a tail from a larger allocation.  The tail can have any
+  // size [1,kPagesPerHugePage).
+  //
+  // length: We choose a Length to allocate.
+  const Length n(
+      std::clamp<size_t>(length, 1, kPagesPerHugePage.raw_num() - 1));
+
+  auto* pt = new PageTracker(HugePage{.pn = state.next_hugepage},
+                             /*was_donated=*/true, fake_clock);
+  state.next_hugepage++;
+  PageId start;
+  {
+    PageHeapSpinLockHolder l;
+    start = pt->Get(n, {1, AccessDensityPrediction::kSparse},
+                    PreferBackedPages::kDisabled)
+                .page;
+    state.filler.Contribute(pt, /*donated=*/true,
                             {1, AccessDensityPrediction::kSparse});
-        }
-
-        trackers.push_back(pt);
-
-        // We have now successfully allocated.  Record the alloc and clear any
-        // released bits.
-        for (PageId p = start, end = p + n; p != end; ++p) {
-          released_set.erase(p);
-        }
-
-        allocs[pt].push_back(
-            {{start, n}, {1, AccessDensityPrediction::kSparse}});
-
-        CHECK_EQ(filler.size().raw_num(), trackers.size());
-        CHECK_EQ(filler.unmapped_pages().raw_num(), released_set.size());
-        break;
-      }
-      case 7: {
-        // Memory limit hit. Release.
-        //
-        // value[0:15]- Number of pages to try to release
-        Length desired(value & 0xFF);
-
-        Length released;
-        const Length free = filler.free_pages();
-        {
-          PageHeapSpinLockHolder l;
-          released = filler.ReleasePages(desired, SkipSubreleaseIntervals{},
-                                         /*release_partial_alloc_pages=*/false,
-                                         /*hit_limit=*/true);
-        }
-        const Length expected =
-            unback_success ? std::min(free, desired) : Length(0);
-        CHECK_GE(released.raw_num(), expected.raw_num());
-        break;
-      }
-      case 8: {
-        // Gather stats in pbtxt format.
-        //
-        // value is unused.
-        std::string s;
-        s.resize(1 << 20);
-        Printer p(&s[0], s.size());
-        FakePageFlags pageflags;
-        {
-          PbtxtRegion region(p, kTop);
-          PageHeapSpinLockHolder l;
-          filler.PrintInPbtxt(region, pageflags);
-        }
-
-        CHECK_LE(p.SpaceRequired(), s.size());
-        s.resize(p.SpaceRequired());
-        break;
-      }
-      case 9: {
-        // Gather span stats.
-        //
-        // value populates ages' now argument.
-        SmallSpanStats small;
-        LargeSpanStats large;
-        filler.AddSpanStats(&small, &large);
-        break;
-      }
-      case 10: {
-        FakePageFlags pageflags;
-        FakeResidency residency;
-        bool enable_collapse = value & 0x1;
-        bool enable_release_free_swap = (value >> 1) & 0x1;
-        bool use_userspace_collapse_heuristics = (value >> 2) & 0x1;
-        PageHeapSpinLockHolder l;
-        filler.TreatHugepageTrackers(enable_collapse, enable_release_free_swap,
-                                     use_userspace_collapse_heuristics,
-                                     &pageflags, &residency);
-        CHECK(filler.FetchFullyFreedTracker() == nullptr);
-        break;
-      }
-      case 11: {
-        is_hugepage_backed = value & 0x1;
-        if (is_hugepage_backed) {
-          unbacked_bitmap.Clear();
-          swapped_bitmap.Clear();
-        } else {
-          value >>= 1;
-          unbacked_bitmap = GetBitmap(value & 0x01FF);
-          value >>= 9;
-          swapped_bitmap = GetBitmap(value & 0x01FF);
-          value >>= 9;
-        }
-        break;
-      }
-      case 12: {
-        // Toggle collapse success.
-        collapse_success = !collapse_success;
-        break;
-      }
-      case 13: {
-        switch (value & 0x3) {
-          case 0: {
-            error_number = ENOMEM;
-            break;
-          }
-          case 1: {
-            error_number = EAGAIN;
-            break;
-          }
-          case 2: {
-            error_number = EBUSY;
-            break;
-          }
-          case 3: {
-            error_number = EINVAL;
-            break;
-          }
-          default: {
-            error_number = (value >> 3);
-            break;
-          }
-        }
-        break;
-      }
-      case 14: {
-        if (value & 0x1) {
-          collapse_latency = 0;
-        } else {
-          collapse_latency = value >> 1;
-        }
-        break;
-      }
-    }
   }
 
-  // Shut down, confirm filler is empty.
-  CHECK_EQ(ReleasedPages().size(), filler.unmapped_pages().raw_num());
-  for (auto& [pt, v] : allocs) {
-    for (size_t i = 0, n = v.size(); i < n; ++i) {
-      auto [alloc, alloc_info] = v[i];
-      PageTracker* ret;
-      {
-        PageHeapSpinLockHolder l;
-        ret = filler.Put(pt, alloc, alloc_info);
-      }
-      CHECK_EQ(ret != nullptr, i + 1 == n);
-    }
+  state.trackers.push_back(pt);
 
-    delete pt;
+  for (PageId p = start, end = p + n; p != end; ++p) {
+    state.released_set.erase(p);
+    state.non_resident_set.erase(p);
   }
 
-  CHECK(filler.size() == NHugePages(0));
+  state.allocs[pt->location()].push_back(
+      {{start, n}, {1, AccessDensityPrediction::kSparse}});
+  state.live_pages[AccessDensityPrediction::kSparse] += n;
+
+  if (state.depth == 0) {
+    TC_CHECK_EQ(state.filler.size(), NHugePages(state.trackers.size()));
+    TC_CHECK_EQ(state.filler.unmapped_pages(),
+                Length(state.released_set.size()));
+  }
+}
+
+void MemoryLimitHitRelease::Perform(State& state) const {
+  Length desired_len(desired);
+  Length released;
+  const Length free = state.filler.free_pages();
+  const Length unmapped_before = state.filler.unmapped_pages();
+  const size_t runs_before = state.reentrant_runs;
+  {
+    PageHeapSpinLockHolder l;
+    released = state.filler.ReleasePages(
+        desired_len, SkipSubreleaseIntervals{},
+        ReleasePartialAllocPages::kDisabled,
+        /*hit_limit=*/true,
+        MinFreePagesToBreak{.dense = Length(1), .sparse = Length(1)});
+    state.DrainFullyFreedTrackers();
+  }
+  // As in Release::Perform, the bounds hold only when no subprogram ran while
+  // the release dropped pageheap_lock.
+  if (state.depth != 0 || runs_before != state.reentrant_runs) {
+    return;
+  }
+  state.CheckReleased(released, unmapped_before);
+  const Length expected =
+      state.unback_success ? std::min(free, desired_len) : Length(0);
+  TC_CHECK_GE(released, expected);
+}
+
+void GatherStatsPbtxt::Perform(State& state) const {
+  // Gather stats in pbtxt format.
+  Printer p(&state.output[0], state.output.size());
+  FakePageFlags pageflags(state);
+  {
+    PbtxtRegion region(p, kTop);
+    PageHeapSpinLockHolder l;
+    state.filler.PrintInPbtxt(region, pageflags);
+  }
+  TC_CHECK_LE(p.SpaceRequired(), state.output.size());
+}
+
+void GatherSpanStats::Perform(State& state) const {
+  // Gather span stats.
+  SmallSpanStats small;
+  LargeSpanStats large;
+  state.filler.AddSpanStats(&small, &large);
+}
+
+void TreatTrackers::Perform(State& state) const {
+  FakePageFlags pageflags(state);
+  FakeResidency residency(state);
+  PageHeapSpinLockHolder l;
+  state.filler.TreatHugepageTrackers(
+      enable_collapse ? EnableCollapse::kEnabled : EnableCollapse::kDisabled,
+      enable_unfiltered_collapse ? EnableUnfilteredCollapse::kEnabled
+                                 : EnableUnfilteredCollapse::kDisabled,
+      enable_release_stale_pages ? ReleaseStalePages::kEnabled
+                                 : ReleaseStalePages::kDisabled,
+      preserve_donated_on_collapse ? PreserveDonatedOnCollapse::kEnabled
+                                   : PreserveDonatedOnCollapse::kDisabled,
+      collapse_released ? CollapseReleasedHugePages::kEnabled
+                        : CollapseReleasedHugePages::kDisabled,
+      &pageflags, &residency);
+  state.DrainFullyFreedTrackers();
+  if (state.subrelease_unbacked_mode == SubreleaseUnbackedMode::kEnabled) {
+    // HandleUnbackedHugePage marks already-unbacked free pages as released
+    // without calling MockUnback; record any newly marked non-resident pages
+    // without erasing bits from released_set so a missed ClearReleasedPages
+    // after collapse is caught by CheckInvariants.
+    for (const PageTracker* pt : state.trackers) {
+      const PageId first = pt->location().first_page();
+      pt->released_by_page().ForEachSet(0, [&](size_t i) {
+        const PageId p = first + Length(i);
+        if (state.non_resident_set.contains(p)) {
+          state.released_set.insert(p);
+        }
+      });
+    }
+  }
+}
+
+void UpdateBitmaps::Perform(State& state) const {
+  if (hugepage_backed_set) {
+    state.is_hugepage_backed = hugepage_backed_val;
+  } else {
+    state.is_hugepage_backed = std::nullopt;
+  }
+  if (state.is_hugepage_backed.value_or(false)) {
+    state.unbacked_bitmap.Clear();
+    state.swapped_bitmap.Clear();
+    state.stale_bitmap.Clear();
+    return;
+  }
+  state.unbacked_bitmap = GetBitmap(unbacked_bitmap_val, repeat_pattern);
+  state.swapped_bitmap = GetBitmap(swapped_bitmap_val, repeat_pattern);
+  state.stale_bitmap = GetBitmap(stale_bitmap_val, repeat_pattern);
+}
+
+void ToggleCollapseSuccess::Perform(State& state) const {
+  state.collapse_success = !state.collapse_success;
+}
+
+void SetErrorNumber::Perform(State& state) const {
+  switch (error_type % 6) {
+    case 0:
+      state.error_number = ENOMEM;
+      break;
+    case 1:
+      state.error_number = EAGAIN;
+      break;
+    case 2:
+      state.error_number = EBUSY;
+      break;
+    case 3:
+      state.error_number = EINVAL;
+      break;
+    case 4:
+      state.error_number = EINTR;
+      break;
+    case 5:
+      // Any errno, including 0 and values the treatment does not classify.
+      state.error_number = static_cast<int>(raw_value);
+      break;
+  }
+}
+
+void SetCollapseLatency::Perform(State& state) const {
+  state.collapse_latency = absl::ToInt64Nanoseconds(
+      std::clamp(latency, absl::ZeroDuration(), absl::Seconds(1)));
+}
+
+// Queued at any depth: a subprogram running while the lock is dropped may
+// itself queue one for a later lock drop, as a third thread would.
+// State::OnLockDropped bounds the nesting.
+void ReentrantSubprogram::Perform(State& state) const {
+  if (subprogram.empty()) {
+    return;
+  }
+  state.reentrant_stack.push_back(subprogram);
+}
+
+// Instructions at every nesting level, since each may allocate.
+size_t CountInstructions(absl::Span<const Instruction> instructions) {
+  size_t count = instructions.size();
+  for (const Instruction& instruction : instructions) {
+    if (const auto* r = std::get_if<ReentrantSubprogram>(&instruction)) {
+      count += CountInstructions(r->subprogram);
+    }
+  }
+  return count;
+}
+
+void FuzzFiller(const std::vector<Instruction>& instructions,
+                SubreleaseUnbackedMode subrelease_unbacked_mode) {
+  State state(subrelease_unbacked_mode, CountInstructions(instructions));
+  state.RunInstructions(instructions);
+}
+
+auto NonNegativeDurationDomain() {
+  return fuzztest::Map([](int64_t ns) { return absl::Nanoseconds(ns); },
+                       fuzztest::NonNegative<int64_t>());
+}
+
+auto AnyDurationDomain() {
+  return fuzztest::Map([](int64_t ns) { return absl::Nanoseconds(ns); },
+                       fuzztest::Arbitrary<int64_t>());
+}
+
+fuzztest::Domain<Instruction> GetInstructionDomain(int depth) {
+  auto base_domain = fuzztest::OneOf(
+      fuzztest::Map([](Allocate a) { return Instruction{a}; },
+                    fuzztest::Arbitrary<Allocate>()),
+      fuzztest::Map([](Deallocate d) { return Instruction{d}; },
+                    fuzztest::Arbitrary<Deallocate>()),
+      fuzztest::Map(
+          [](bool hl, bool upi, absl::Duration pi, absl::Duration si,
+             absl::Duration li, uint16_t dp, bool rpa, uint16_t mfp_dense,
+             uint16_t mfp_sparse) {
+            return Instruction{
+                Release{hl, upi, pi, si, li, dp, rpa, mfp_dense, mfp_sparse}};
+          },
+          fuzztest::Arbitrary<bool>(), fuzztest::Arbitrary<bool>(),
+          NonNegativeDurationDomain(), NonNegativeDurationDomain(),
+          NonNegativeDurationDomain(), fuzztest::Arbitrary<uint16_t>(),
+          fuzztest::Arbitrary<bool>(), fuzztest::Arbitrary<uint16_t>(),
+          fuzztest::Arbitrary<uint16_t>()),
+      fuzztest::Map(
+          [](absl::Duration d) { return Instruction{AdvanceClock{d}}; },
+          AnyDurationDomain()),
+      fuzztest::Map([](ToggleUnback t) { return Instruction{t}; },
+                    fuzztest::Arbitrary<ToggleUnback>()),
+      fuzztest::Map([](GatherStats g) { return Instruction{g}; },
+                    fuzztest::Arbitrary<GatherStats>()),
+      fuzztest::Map([](ModelTail m) { return Instruction{m}; },
+                    fuzztest::Arbitrary<ModelTail>()),
+      fuzztest::Map([](MemoryLimitHitRelease m) { return Instruction{m}; },
+                    fuzztest::Arbitrary<MemoryLimitHitRelease>()),
+      fuzztest::Map([](GatherStatsPbtxt g) { return Instruction{g}; },
+                    fuzztest::Arbitrary<GatherStatsPbtxt>()),
+      fuzztest::Map([](GatherSpanStats g) { return Instruction{g}; },
+                    fuzztest::Arbitrary<GatherSpanStats>()),
+      fuzztest::Map([](TreatTrackers t) { return Instruction{t}; },
+                    fuzztest::Arbitrary<TreatTrackers>()),
+      fuzztest::Map([](UpdateBitmaps u) { return Instruction{u}; },
+                    fuzztest::Arbitrary<UpdateBitmaps>()),
+      fuzztest::Map([](ToggleCollapseSuccess t) { return Instruction{t}; },
+                    fuzztest::Arbitrary<ToggleCollapseSuccess>()),
+      fuzztest::Map([](SetErrorNumber s) { return Instruction{s}; },
+                    fuzztest::Arbitrary<SetErrorNumber>()),
+      fuzztest::Map(
+          [](absl::Duration d) { return Instruction{SetCollapseLatency{d}}; },
+          NonNegativeDurationDomain()));
+
+  if (depth <= 0) {
+    return base_domain;
+  } else {
+    return fuzztest::OneOf(
+        base_domain, fuzztest::Map(
+                         [](std::vector<Instruction> v) {
+                           return Instruction{ReentrantSubprogram{v}};
+                         },
+                         fuzztest::VectorOf(GetInstructionDomain(depth - 1))));
+  }
 }
 
 FUZZ_TEST(HugePageFillerTest, FuzzFiller)
-    ;
+    .WithDomains(fuzztest::VectorOf(GetInstructionDomain(5)).WithMaxSize(20000),
+                 fuzztest::ElementOf({SubreleaseUnbackedMode::kDisabled,
+                                      SubreleaseUnbackedMode::kEnabled}));
+
+TEST(HugePageFillerTest, b510326948) {
+  FuzzFiller(
+      {SetCollapseLatency{.latency = absl::Nanoseconds(9223372036854775807)},
+       SetErrorNumber{.error_type = 3},
+       UpdateBitmaps{.hugepage_backed_set = false,
+                     .hugepage_backed_val = false,
+                     .unbacked_bitmap_val = 65535,
+                     .swapped_bitmap_val = 1},
+       UpdateBitmaps{.hugepage_backed_set = true,
+                     .hugepage_backed_val = false,
+                     .unbacked_bitmap_val = 1,
+                     .swapped_bitmap_val = 1},
+       ToggleCollapseSuccess{},
+       Allocate{
+           .length = 32767, .num_objects = 2147483647, .density_dense = false},
+       TreatTrackers{.enable_collapse = true,
+                     .enable_unfiltered_collapse = false},
+       Deallocate{.tracker_index = 2147483647, .alloc_index = 2147483647},
+       ModelTail{.length = 4096},
+       Allocate{
+           .length = 40147, .num_objects = 2790469646, .density_dense = true},
+       Allocate{.length = 65535, .num_objects = 1, .density_dense = false},
+       Allocate{
+           .length = 65535, .num_objects = 4294967295, .density_dense = false},
+       Allocate{.length = 41298, .num_objects = 1, .density_dense = false},
+       Allocate{
+           .length = 24021, .num_objects = 2147483647, .density_dense = true},
+       SetCollapseLatency{.latency = absl::ZeroDuration()},
+       ModelTail{.length = 0},
+       ToggleUnback{},
+       AdvanceClock{.amount = absl::Nanoseconds(1237243357567017495)},
+       ModelTail{.length = 31734},
+       SetCollapseLatency{.latency = absl::Nanoseconds(1)},
+       GatherStats{}},
+      SubreleaseUnbackedMode::kEnabled);
+}
+
+TEST(
+    HugePageFillerTest,
+    Regression_clusterfuzz_testcase_minimized_huge_page_filler_fuzz_5161409228701696_test) {
+  FuzzFiller(
+      {
+#include "tcmalloc/testdata/huge_page_filler_fuzz/clusterfuzz_testcase_minimized_huge_page_filler_fuzz_5161409228701696_test.inc"
+      },
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(
+    HugePageFillerTest,
+    Regression_clusterfuzz_testcase_minimized_huge_page_filler_fuzz_5516474505363456_test) {
+  FuzzFiller(
+      {
+          Allocate{.length = 1, .num_objects = 1, .density_dense = false},
+          Allocate{.length = 1, .num_objects = 4431, .density_dense = false},
+          TreatTrackers{.enable_collapse = true,
+                        .enable_unfiltered_collapse = true},
+          SetCollapseLatency{.latency = absl::ZeroDuration()},
+          Allocate{.length = 255, .num_objects = 19968, .density_dense = true},
+          Deallocate{.tracker_index = 217, .alloc_index = 286},
+          Allocate{.length = 1, .num_objects = 1, .density_dense = false},
+      },
+      SubreleaseUnbackedMode::kEnabled);
+}
+
+TEST(
+    HugePageFillerTest,
+    Regression_clusterfuzz_testcase_minimized_huge_page_filler_fuzz_6053674183688192_test) {
+  FuzzFiller(
+      {
+#include "tcmalloc/testdata/huge_page_filler_fuzz/clusterfuzz_testcase_minimized_huge_page_filler_fuzz_6053674183688192_test.inc"
+      },
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(
+    HugePageFillerTest,
+    Regression_clusterfuzz_testcase_minimized_huge_page_filler_fuzz_6159120802381824) {
+  FuzzFiller(
+      {
+          SetErrorNumber{.error_type = 0, .raw_value = 1644167168},
+          ToggleUnback{},
+          Allocate{.length = 1, .num_objects = 7680, .density_dense = false},
+          TreatTrackers{.enable_collapse = true,
+                        .enable_unfiltered_collapse = true},
+          TreatTrackers{.enable_collapse = false,
+                        .enable_unfiltered_collapse = false},
+      },
+      SubreleaseUnbackedMode::kEnabled);
+}
+
+TEST(
+    HugePageFillerTest,
+    Regression_clusterfuzz_testcase_minimized_huge_page_filler_fuzz_6512022070886400_test) {
+  FuzzFiller(
+      {
+          TreatTrackers{.enable_collapse = false,
+                        .enable_unfiltered_collapse = false},
+          SetErrorNumber{.error_type = 0, .raw_value = 2483028032},
+          Deallocate{.tracker_index = 0, .alloc_index = 255},
+          Allocate{.length = 255, .num_objects = 128, .density_dense = false},
+          Allocate{.length = 255, .num_objects = 529, .density_dense = true},
+      },
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(
+    HugePageFillerTest,
+    Regression_clusterfuzz_testcase_minimized_huge_page_filler_fuzz_6622985612820480) {
+  FuzzFiller(
+      {
+#include "tcmalloc/testdata/huge_page_filler_fuzz/clusterfuzz_testcase_minimized_huge_page_filler_fuzz_6622985612820480.inc"
+      },
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(HugePageFillerTest,
+     Regression_crash_869dbc1cdf6a1f79b386adf046c7df32257ef684) {
+  FuzzFiller(
+      {
+          SetErrorNumber{.error_type = 0, .raw_value = 1644167168},
+          ToggleUnback{},
+          ToggleUnback{},
+          Allocate{.length = 1, .num_objects = 1, .density_dense = false},
+      },
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(HugePageFillerTest,
+     Regression_crash_e9f3aa3ad83e808a5588ec529c6cdf00d5d397fc) {
+  FuzzFiller(
+      {
+          GatherSpanStats{},
+          GatherSpanStats{},
+          Allocate{.length = 255, .num_objects = 5841, .density_dense = false},
+          Allocate{.length = 1, .num_objects = 202, .density_dense = false},
+          Allocate{.length = 203, .num_objects = 1, .density_dense = false},
+          UpdateBitmaps{.hugepage_backed_set = true,
+                        .hugepage_backed_val = true,
+                        .unbacked_bitmap_val = 0,
+                        .swapped_bitmap_val = 0},
+          UpdateBitmaps{.hugepage_backed_set = true,
+                        .hugepage_backed_val = true,
+                        .unbacked_bitmap_val = 0,
+                        .swapped_bitmap_val = 0},
+          UpdateBitmaps{.hugepage_backed_set = true,
+                        .hugepage_backed_val = true,
+                        .unbacked_bitmap_val = 0,
+                        .swapped_bitmap_val = 0},
+          UpdateBitmaps{.hugepage_backed_set = true,
+                        .hugepage_backed_val = true,
+                        .unbacked_bitmap_val = 0,
+                        .swapped_bitmap_val = 0},
+          UpdateBitmaps{.hugepage_backed_set = true,
+                        .hugepage_backed_val = true,
+                        .unbacked_bitmap_val = 0,
+                        .swapped_bitmap_val = 0},
+          UpdateBitmaps{.hugepage_backed_set = true,
+                        .hugepage_backed_val = true,
+                        .unbacked_bitmap_val = 0,
+                        .swapped_bitmap_val = 0},
+          UpdateBitmaps{.hugepage_backed_set = false,
+                        .hugepage_backed_val = false,
+                        .unbacked_bitmap_val = 0,
+                        .swapped_bitmap_val = 448},
+          SetErrorNumber{.error_type = 1, .raw_value = 23901},
+      },
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(HugePageFillerTest, Regression_testcase_6686265543557120) {
+  FuzzFiller(
+      {
+          TreatTrackers{.enable_collapse = false,
+                        .enable_unfiltered_collapse = false},
+          ModelTail{.length = 255},
+          Release{.hit_limit = false,
+                  .use_peak_interval = false,
+                  .peak_interval = absl::ZeroDuration(),
+                  .short_interval = absl::Seconds(158),
+                  .long_interval = absl::Seconds(200),
+                  .desired_pages = 2050,
+                  .release_partial_allocs = false},
+          Allocate{.length = 255, .num_objects = 4145, .density_dense = false},
+          UpdateBitmaps{.hugepage_backed_set = false,
+                        .hugepage_backed_val = false,
+                        .unbacked_bitmap_val = 72,
+                        .swapped_bitmap_val = 333},
+          Deallocate{.tracker_index = 8241, .alloc_index = 2685},
+      },
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(HugePageFillerTest, b510325622) {
+  FuzzFiller(
+      {SetCollapseLatency{.latency = absl::Nanoseconds(1229275970250789748)},
+       Release{.hit_limit = true,
+               .use_peak_interval = false,
+               .peak_interval = absl::Nanoseconds(1),
+               .short_interval = absl::ZeroDuration(),
+               .long_interval = absl::Nanoseconds(1),
+               .desired_pages = 1,
+               .release_partial_allocs = true},
+       MemoryLimitHitRelease{.desired = 15389},
+       UpdateBitmaps{.hugepage_backed_set = true,
+                     .hugepage_backed_val = false,
+                     .unbacked_bitmap_val = 65533,
+                     .swapped_bitmap_val = 32767},
+       SetCollapseLatency{.latency = absl::Nanoseconds(1876442616651942554)},
+       Allocate{.length = 65535, .num_objects = 0, .density_dense = true},
+       Allocate{
+           .length = 22787, .num_objects = 2147483647, .density_dense = true},
+       SetCollapseLatency{.latency = absl::ZeroDuration()},
+       SetCollapseLatency{.latency = absl::Nanoseconds(1997603242660686471)},
+       Release{.hit_limit = false,
+               .use_peak_interval = true,
+               .peak_interval = absl::ZeroDuration(),
+               .short_interval = absl::ZeroDuration(),
+               .long_interval = absl::ZeroDuration(),
+               .desired_pages = 1,
+               .release_partial_allocs = true},
+       Allocate{.length = 0, .num_objects = 1, .density_dense = false},
+       TreatTrackers{.enable_collapse = true,
+                     .enable_unfiltered_collapse = true},
+       Deallocate{.tracker_index = 4294967295, .alloc_index = 0},
+       GatherStatsPbtxt{}},
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(HugePageFillerTest, DepthDependentDeallocate) {
+  FuzzFiller(
+      {Allocate{.length = 65535, .num_objects = 1, .density_dense = true},
+       ReentrantSubprogram{.subprogram = {Deallocate{
+                               .tracker_index = 4294967295, .alloc_index = 1}}},
+       GatherSpanStats{},
+       TreatTrackers{.enable_collapse = true,
+                     .enable_unfiltered_collapse = true}},
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+// A subprogram run while the lock is dropped queues another, which runs on
+// the next lock drop.
+TEST(HugePageFillerTest, NestedReentrantSubprogram) {
+  FuzzFiller(
+      {Allocate{.length = 1, .num_objects = 1},
+       MemoryLimitHitRelease{.desired = 65535},
+       ReentrantSubprogram{
+           .subprogram = {Allocate{.length = 1, .num_objects = 1},
+                          MemoryLimitHitRelease{.desired = 65535},
+                          ReentrantSubprogram{
+                              .subprogram = {Allocate{.length = 1,
+                                                      .num_objects = 1}}},
+                          Deallocate{.tracker_index = 0, .alloc_index = 0}}},
+       Deallocate{.tracker_index = 0, .alloc_index = 0}},
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(HugePageFillerTest, ConcurrentTreatmentInterferenceStress) {
+  std::vector<Instruction> instructions;
+  instructions.push_back(UpdateBitmaps{
+      .hugepage_backed_set = true,
+      .hugepage_backed_val = false,
+      .unbacked_bitmap_val = 0,
+      .swapped_bitmap_val = 0,
+  });
+
+  const size_t half_hp = kPagesPerHugePage.raw_num() / 2;
+
+  // 1. Allocate 47 trackers, full, 4 objects each
+  for (int i = 0; i < 47; ++i) {
+    instructions.push_back(Allocate{
+        .length = static_cast<uint16_t>(half_hp),
+        .num_objects = 2,
+        .density_dense = false,
+    });
+    instructions.push_back(Allocate{
+        .length = static_cast<uint16_t>(half_hp),
+        .num_objects = 2,
+        .density_dense = false,
+    });
+  }
+
+  // 2. Allocate Tracker 48 (X), 1 object, partial (size = half_hp)
+  // X is at index 47 in trackers vector.
+  // X is the 48th contributed tracker, so it will be sampled by RNG.
+  instructions.push_back(Allocate{
+      .length = static_cast<uint16_t>(half_hp),
+      .num_objects = 1,
+      .density_dense = false,
+  });
+
+  // 3. Fill X. Allocating half_hp will reuse X (since it has half_hp free).
+  // X becomes full with 3 objects.
+  instructions.push_back(Allocate{
+      .length = static_cast<uint16_t>(half_hp),
+      .num_objects = 2,
+      .density_dense = false,
+  });
+
+  // 4. Allocate Trackers 49..64 (16 trackers), full, 4 objects each
+  for (int i = 0; i < 16; ++i) {
+    instructions.push_back(Allocate{
+        .length = static_cast<uint16_t>(half_hp),
+        .num_objects = 2,
+        .density_dense = false,
+    });
+    instructions.push_back(Allocate{
+        .length = static_cast<uint16_t>(half_hp),
+        .num_objects = 2,
+        .density_dense = false,
+    });
+  }
+
+  // 5. Allocate Tracker 65, partial, 4 objects
+  instructions.push_back(Allocate{
+      .length = static_cast<uint16_t>(half_hp),
+      .num_objects = 4,
+      .density_dense = false,
+  });
+
+  // Advance clock to make X eligible for scan (elapsed > 5 minutes)
+  instructions.push_back(AdvanceClock{
+      .amount = absl::Minutes(10),
+  });
+
+  // Queue reentrant deallocation of X (index 47).  It runs at the first hook
+  // the treatment reaches with pageheap_lock dropped: naming X's VMA as a
+  // sampled tracker, or the residency and collapse hooks that follow.  X has
+  // 2 allocations, so we must deallocate both to free it.
+  instructions.push_back(
+      ReentrantSubprogram{.subprogram = {Deallocate{
+                                             .tracker_index = 47,
+                                             .alloc_index = 0,
+                                         },
+                                         Deallocate{
+                                             .tracker_index = 47,
+                                             .alloc_index = 0,
+                                         }}});
+
+  instructions.push_back(TreatTrackers{
+      .enable_collapse = true,
+      .enable_unfiltered_collapse = true,
+  });
+
+  FuzzFiller(instructions, SubreleaseUnbackedMode::kDisabled);
+}
+
+// With collapse disabled, only the pageflags and residency queries drop the
+// lock during treatment.  Freeing the tracker under scan from a reentrant
+// Deallocate must not leave the treatment holding a dangling tracker.
+TEST(HugePageFillerTest, ReentrantDeallocateDuringResidencyQuery) {
+  FuzzFiller({UpdateBitmaps{.hugepage_backed_set = true,
+                            .hugepage_backed_val = false,
+                            .unbacked_bitmap_val = 0,
+                            .swapped_bitmap_val = 0},
+              Allocate{.length = 1, .num_objects = 1},
+              AdvanceClock{.amount = absl::Minutes(10)},
+              ReentrantSubprogram{.subprogram = {Deallocate{.tracker_index = 0,
+                                                            .alloc_index = 0}}},
+              TreatTrackers{.enable_collapse = false,
+                            .enable_unfiltered_collapse = false,
+                            .enable_release_stale_pages = false}},
+             SubreleaseUnbackedMode::kDisabled);
+}
+
+// Freeing the last allocation on a partially released hugepage unbacks the
+// remainder with pageheap_lock dropped, while the tracker is already off the
+// filler's lists.  Another allocation must be able to proceed meanwhile.
+TEST(HugePageFillerTest, ReentrantAllocateDuringUnbackWithoutLock) {
+  FuzzFiller({Allocate{.length = 1, .num_objects = 1},
+              MemoryLimitHitRelease{.desired = 65535},
+              ReentrantSubprogram{
+                  .subprogram = {Allocate{.length = 1, .num_objects = 1}}},
+              Deallocate{.tracker_index = 0, .alloc_index = 0}},
+             SubreleaseUnbackedMode::kDisabled);
+}
+
+// Teardown with two trackers, one partially released.  Putting the released
+// one unbacks the hugepage, and the live-page check must not visit a tracker
+// the teardown already deleted.
+TEST(HugePageFillerTest, TeardownAfterPartialRelease) {
+  FuzzFiller(
+      {Allocate{.length = 1, .num_objects = 1, .density_dense = true},
+       MemoryLimitHitRelease{.desired = 65535}, ModelTail{.length = 32767}},
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(HugePageFillerTest, SubreleaseUnbackedRegression) {
+  FuzzFiller(
+      {ModelTail{.length = 0}, GatherStatsPbtxt{},
+       TreatTrackers{.enable_collapse = true,
+                     .enable_unfiltered_collapse = false},
+       SetCollapseLatency{.latency = absl::Nanoseconds(9223372036854775807)},
+       ToggleUnback{},
+       AdvanceClock{.amount = absl::Nanoseconds(386593854685132995)},
+       AdvanceClock{.amount = absl::Nanoseconds(6294226378870810818)},
+       ToggleCollapseSuccess{}},
+      SubreleaseUnbackedMode::kEnabled);
+}
+
+TEST(HugePageFillerTest, InstructionStringify) {
+  {
+    Instruction inst = Allocate{.length = 1,
+                                .num_objects = 2,
+                                .density_dense = true,
+                                .prefer_backed = true};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s,
+              "Allocate{.length=1, .num_objects=2, .density_dense=true, "
+              ".prefer_backed=true}");
+    EXPECT_THAT(s, Not(HasSubstr("<MAPPING_FUNCTION>")));
+  }
+  {
+    Instruction inst = Deallocate{
+        .tracker_index = 3, .alloc_index = 4, .append_on_free = false};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s,
+              "Deallocate{.tracker_index=3, .alloc_index=4, "
+              ".append_on_free=false}");
+    EXPECT_THAT(s, Not(HasSubstr("<MAPPING_FUNCTION>")));
+  }
+  {
+    Instruction inst = AdvanceClock{.amount = absl::Seconds(1)};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s, "AdvanceClock{.amount=absl::Nanoseconds(1000000000)}");
+  }
+  {
+    Instruction inst = ToggleUnback{};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s, "ToggleUnback{}");
+  }
+  {
+    Instruction inst = Release{.hit_limit = true,
+                               .use_peak_interval = false,
+                               .peak_interval = absl::Seconds(1),
+                               .short_interval = absl::Seconds(2),
+                               .long_interval = absl::Seconds(3),
+                               .desired_pages = 4,
+                               .release_partial_allocs = true};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s,
+              "Release{.hit_limit=true, .use_peak_interval=false, "
+              ".peak_interval=absl::Nanoseconds(1000000000), "
+              ".short_interval=absl::Nanoseconds(2000000000), "
+              ".long_interval=absl::Nanoseconds(3000000000), .desired_pages=4, "
+              ".release_partial_allocs=true, .min_free_pages_to_break_dense=1, "
+              ".min_free_pages_to_break_sparse=1}");
+  }
+  {
+    Instruction inst = GatherStats{.summary_only = true};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s, "GatherStats{.summary_only=true}");
+  }
+  {
+    Instruction inst = ModelTail{.length = 5};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s, "ModelTail{.length=5}");
+  }
+  {
+    Instruction inst = MemoryLimitHitRelease{.desired = 10};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s, "MemoryLimitHitRelease{.desired=10}");
+  }
+  {
+    Instruction inst = GatherStatsPbtxt{};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s, "GatherStatsPbtxt{}");
+  }
+  {
+    Instruction inst = GatherSpanStats{};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s, "GatherSpanStats{}");
+  }
+  {
+    Instruction inst = TreatTrackers{.enable_collapse = true,
+                                     .enable_unfiltered_collapse = false,
+                                     .collapse_released = false,
+                                     .enable_release_stale_pages = true,
+                                     .preserve_donated_on_collapse = true};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s,
+              "TreatTrackers{.enable_collapse=true, "
+              ".enable_unfiltered_collapse=false, .collapse_released=false, "
+              ".enable_release_stale_pages=true, "
+              ".preserve_donated_on_collapse=true}");
+  }
+  {
+    Instruction inst = UpdateBitmaps{.hugepage_backed_set = true,
+                                     .hugepage_backed_val = false,
+                                     .unbacked_bitmap_val = 1,
+                                     .swapped_bitmap_val = 2,
+                                     .stale_bitmap_val = 3,
+                                     .repeat_pattern = true};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(
+        s,
+        "UpdateBitmaps{.hugepage_backed_set=true, .hugepage_backed_val=false, "
+        ".unbacked_bitmap_val=1, .swapped_bitmap_val=2, .stale_bitmap_val=3, "
+        ".repeat_pattern=true}");
+  }
+  {
+    Instruction inst = ToggleCollapseSuccess{};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s, "ToggleCollapseSuccess{}");
+  }
+  {
+    Instruction inst = SetErrorNumber{.error_type = 1, .raw_value = 7};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s, "SetErrorNumber{.error_type=1, .raw_value=7}");
+  }
+  {
+    Instruction inst = SetCollapseLatency{.latency = absl::Seconds(5)};
+    std::string s = absl::StrFormat("%v", inst);
+    EXPECT_EQ(s, "SetCollapseLatency{.latency=absl::Nanoseconds(5000000000)}");
+  }
+}
+
+TEST(HugePageFillerTest, Regression_b525818096) {
+  FuzzFiller(
+      {
+          Allocate{.length = 32767,
+                   .num_objects = 3840777803,
+                   .density_dense = true},
+          UpdateBitmaps{.hugepage_backed_set = false,
+                        .hugepage_backed_val = false,
+                        .unbacked_bitmap_val = 65535,
+                        .swapped_bitmap_val = 49577},
+          ReentrantSubprogram{
+              .subprogram = {MemoryLimitHitRelease{.desired = 1},
+                             Deallocate{.tracker_index = 1322071847,
+                                        .alloc_index = 1}}},
+          Allocate{.length = 32767,
+                   .num_objects = 460278703,
+                   .density_dense = false},
+          Allocate{
+              .length = 5, .num_objects = 3242772467, .density_dense = true},
+          UpdateBitmaps{.hugepage_backed_set = true,
+                        .hugepage_backed_val = false,
+                        .unbacked_bitmap_val = 1,
+                        .swapped_bitmap_val = 0},
+          TreatTrackers{.enable_collapse = true,
+                        .enable_unfiltered_collapse = false},
+      },
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(HugePageFillerTest, b547364068) {
+  FuzzFiller(
+      {GatherStats{},
+       UpdateBitmaps{.hugepage_backed_set = true,
+                     .hugepage_backed_val = false,
+                     .unbacked_bitmap_val = 50451,
+                     .swapped_bitmap_val = 1,
+                     .stale_bitmap_val = 65535},
+       ReentrantSubprogram{.subprogram = {}},
+       ReentrantSubprogram{.subprogram = {}},
+       ReentrantSubprogram{
+           .subprogram = {ReentrantSubprogram{.subprogram = {}}}},
+       MemoryLimitHitRelease{.desired = 57103},
+       ModelTail{.length = 13924},
+       UpdateBitmaps{.hugepage_backed_set = false,
+                     .hugepage_backed_val = true,
+                     .unbacked_bitmap_val = 0,
+                     .swapped_bitmap_val = 32767,
+                     .stale_bitmap_val = 40262},
+       ReentrantSubprogram{.subprogram = {}},
+       ReentrantSubprogram{.subprogram = {AdvanceClock{
+                               .amount = absl::Nanoseconds(1649401658367)}}},
+       TreatTrackers{.enable_collapse = true,
+                     .enable_unfiltered_collapse = true,
+                     .enable_release_stale_pages = false},
+       MemoryLimitHitRelease{.desired = 39243},
+       ReentrantSubprogram{.subprogram = {}},
+       AdvanceClock{.amount = absl::Nanoseconds(-7661516523829048993)},
+       SetCollapseLatency{.latency = absl::Nanoseconds(1)},
+       GatherStats{},
+       Allocate{
+           .length = 65535, .num_objects = 2147483647, .density_dense = false},
+       AdvanceClock{.amount = absl::Nanoseconds(1)},
+       ReentrantSubprogram{.subprogram = {}},
+       SetCollapseLatency{.latency = absl::ZeroDuration()},
+       ReentrantSubprogram{.subprogram = {}},
+       MemoryLimitHitRelease{.desired = 65535},
+       GatherStatsPbtxt{},
+       Allocate{.length = 35885, .num_objects = 0, .density_dense = true},
+       Deallocate{.tracker_index = 3704872317, .alloc_index = 0},
+       GatherStatsPbtxt{},
+       UpdateBitmaps{.hugepage_backed_set = false,
+                     .hugepage_backed_val = false,
+                     .unbacked_bitmap_val = 512,
+                     .swapped_bitmap_val = 1,
+                     .stale_bitmap_val = 0}},
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+// Collapse fails with EINTR, then with errnos the treatment does not name
+// (-1 and 0), so every collapse error bucket, including "other", is counted
+// and printed.  Each rescan needs kRecordInterval to elapse.
+TEST(HugePageFillerTest, CollapseErrorEintrAndRawErrno) {
+  FuzzFiller({UpdateBitmaps{.hugepage_backed_set = true,
+                            .hugepage_backed_val = false,
+                            .unbacked_bitmap_val = 0,
+                            .swapped_bitmap_val = 0},
+              ToggleCollapseSuccess{}, Allocate{.length = 1, .num_objects = 1},
+              SetErrorNumber{.error_type = 4, .raw_value = 0},
+              TreatTrackers{.enable_collapse = true,
+                            .enable_unfiltered_collapse = true},
+              AdvanceClock{.amount = absl::Minutes(10)},
+              SetErrorNumber{.error_type = 5, .raw_value = 4294967295},
+              TreatTrackers{.enable_collapse = true,
+                            .enable_unfiltered_collapse = true},
+              AdvanceClock{.amount = absl::Minutes(10)},
+              SetErrorNumber{.error_type = 5, .raw_value = 0},
+              TreatTrackers{.enable_collapse = true,
+                            .enable_unfiltered_collapse = true},
+              GatherStats{}, GatherStatsPbtxt{},
+              Deallocate{.tracker_index = 0, .alloc_index = 0}},
+             SubreleaseUnbackedMode::kDisabled);
+}
+
+// Skip-subrelease with the peak interval and the short/long demand intervals
+// set together: the filler takes the peak and ignores the demand history.
+TEST(HugePageFillerTest, ReleaseWithPeakAndDemandIntervals) {
+  FuzzFiller({Allocate{.length = 1, .num_objects = 1},
+              Allocate{.length = 1, .num_objects = 1},
+              Allocate{.length = 1, .num_objects = 1},
+              AdvanceClock{.amount = absl::Minutes(1)},
+              Deallocate{.tracker_index = 0, .alloc_index = 1},
+              AdvanceClock{.amount = absl::Minutes(1)},
+              Release{.hit_limit = false,
+                      .use_peak_interval = true,
+                      .peak_interval = absl::Minutes(5),
+                      .short_interval = absl::Seconds(30),
+                      .long_interval = absl::Minutes(2),
+                      .desired_pages = 65535,
+                      .release_partial_allocs = false},
+              Release{.hit_limit = false,
+                      .use_peak_interval = true,
+                      .peak_interval = absl::Nanoseconds(1),
+                      .short_interval = absl::Minutes(2),
+                      .long_interval = absl::Seconds(30),
+                      .desired_pages = 65535,
+                      .release_partial_allocs = true},
+              GatherStats{}},
+             SubreleaseUnbackedMode::kDisabled);
+}
+
+// Residency bitmaps repeated as 16-bit patterns rather than prefixes: the
+// treatment's all-of/any-of page reductions see mixed groups, the filtered
+// collapse sees 256 unbacked but only 64 swapped pages, and subreleasing
+// unbacked free pages and stale pages works from interleaved bits.
+TEST(HugePageFillerTest, SparseResidencyBitmaps) {
+  FuzzFiller({UpdateBitmaps{.hugepage_backed_set = true,
+                            .hugepage_backed_val = false,
+                            .unbacked_bitmap_val = 0xAAAA,
+                            .swapped_bitmap_val = 0x0101,
+                            .stale_bitmap_val = 0x8000,
+                            .repeat_pattern = true},
+              Allocate{.length = 1, .num_objects = 1},
+              Allocate{.length = 1, .num_objects = 1},
+              Allocate{.length = 3, .num_objects = 1},
+              Deallocate{.tracker_index = 0, .alloc_index = 1},
+              TreatTrackers{.enable_collapse = true,
+                            .enable_unfiltered_collapse = false,
+                            .enable_release_stale_pages = true},
+              GatherStats{}, GatherStatsPbtxt{},
+              AdvanceClock{.amount = absl::Minutes(10)},
+              UpdateBitmaps{.hugepage_backed_set = true,
+                            .hugepage_backed_val = false,
+                            .unbacked_bitmap_val = 0x5555,
+                            .swapped_bitmap_val = 0,
+                            .stale_bitmap_val = 0x0001,
+                            .repeat_pattern = true},
+              TreatTrackers{.enable_collapse = false,
+                            .enable_unfiltered_collapse = false,
+                            .enable_release_stale_pages = true},
+              Allocate{.length = 1, .num_objects = 1},
+              Release{.hit_limit = false,
+                      .use_peak_interval = false,
+                      .peak_interval = absl::ZeroDuration(),
+                      .short_interval = absl::ZeroDuration(),
+                      .long_interval = absl::ZeroDuration(),
+                      .desired_pages = 65535,
+                      .release_partial_allocs = true},
+              GatherStats{}},
+             SubreleaseUnbackedMode::kEnabled);
+}
+
+// Print's summary form, before and after subrelease.
+TEST(HugePageFillerTest, PrintSummaryOnly) {
+  FuzzFiller(
+      {GatherStats{.summary_only = true},
+       Allocate{.length = 1, .num_objects = 1},
+       GatherStats{.summary_only = true},
+       MemoryLimitHitRelease{.desired = 65535},
+       GatherStats{.summary_only = true}, GatherStats{.summary_only = false}},
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+// Regression tests for the three lock-drop interleavings while collapsing a
+// partially released tracker with .collapse_released = true:
+//   1. Release between tracker selection and Collapse()
+//   2. Release after Collapse() succeeds and before Restore()
+//   3. Deallocate emptying and parking the tracker during Collapse()
+TEST(HugePageFillerTest, CollapseReleasedInterleavedReleaseBeforeCollapse) {
+  FuzzFiller(
+      {UpdateBitmaps{.hugepage_backed_set = true,
+                     .hugepage_backed_val = false,
+                     .unbacked_bitmap_val = 0,
+                     .swapped_bitmap_val = 0,
+                     .stale_bitmap_val = 0},
+       Allocate{.length = 4, .num_objects = 1},
+       Allocate{.length = 4, .num_objects = 1},
+       Allocate{.length = 4, .num_objects = 1},
+       Deallocate{.tracker_index = 0, .alloc_index = 1},
+       MemoryLimitHitRelease{.desired = 4},
+       Deallocate{.tracker_index = 0, .alloc_index = 1},
+       // First lock drop in Treat() is IsHugepageBacked() before Collapse():
+       // release the remaining free pages before Collapse() re-backs the whole
+       // hugepage.
+       ReentrantSubprogram{.subprogram = {MemoryLimitHitRelease{.desired = 4}}},
+       TreatTrackers{.enable_collapse = true,
+                     .enable_unfiltered_collapse = true,
+                     .collapse_released = true},
+       Deallocate{.tracker_index = 0, .alloc_index = 0}},
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(HugePageFillerTest, CollapseReleasedInterleavedReleaseAfterCollapse) {
+  FuzzFiller(
+      {UpdateBitmaps{.hugepage_backed_set = true,
+                     .hugepage_backed_val = false,
+                     .unbacked_bitmap_val = 0,
+                     .swapped_bitmap_val = 0,
+                     .stale_bitmap_val = 0},
+       // First tracker on regular_alloc_partial_released_ (scanned first),
+       // second tracker on donated_alloc_ (scanned second).
+       Allocate{.length = 4, .num_objects = 1},
+       Allocate{.length = 4, .num_objects = 1},
+       Allocate{.length = 4, .num_objects = 1}, ModelTail{.length = 4},
+       Deallocate{.tracker_index = 0, .alloc_index = 1},
+       MemoryLimitHitRelease{.desired = 4},
+       Deallocate{.tracker_index = 0, .alloc_index = 1},
+       // LIFO subprograms: skip the 4 lock drops of tracker 0
+       // (IsHugepageBacked, GetUnbackedAndSwappedBitmaps, GetSinglePageBitmaps,
+       // MockCollapse), then fire MemoryLimitHitRelease on tracker 1's
+       // IsHugepageBacked drop after tracker 0's Collapse() has returned and
+       // before Restore() runs.
+       ReentrantSubprogram{.subprogram = {MemoryLimitHitRelease{.desired = 4}}},
+       ReentrantSubprogram{.subprogram = {}},
+       ReentrantSubprogram{.subprogram = {}},
+       ReentrantSubprogram{.subprogram = {}},
+       ReentrantSubprogram{.subprogram = {}},
+       TreatTrackers{.enable_collapse = true,
+                     .enable_unfiltered_collapse = true,
+                     .collapse_released = true},
+       Deallocate{.tracker_index = 0, .alloc_index = 0},
+       Deallocate{.tracker_index = 0, .alloc_index = 0}},
+      SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(HugePageFillerTest, CollapseReleasedInterleavedDeallocateDuringCollapse) {
+  FuzzFiller({UpdateBitmaps{.hugepage_backed_set = true,
+                            .hugepage_backed_val = false,
+                            .unbacked_bitmap_val = 0,
+                            .swapped_bitmap_val = 0,
+                            .stale_bitmap_val = 0},
+              Allocate{.length = 4, .num_objects = 1},
+              Allocate{.length = 4, .num_objects = 1},
+              Deallocate{.tracker_index = 0, .alloc_index = 1},
+              MemoryLimitHitRelease{.desired = 4},
+              // LIFO: skip IsHugepageBacked, GetUnbackedAndSwappedBitmaps, and
+              // GetSinglePageBitmaps, then empty and park tracker 0 inside
+              // MockCollapse!
+              ReentrantSubprogram{.subprogram = {Deallocate{.tracker_index = 0,
+                                                            .alloc_index = 0}}},
+              ReentrantSubprogram{.subprogram = {}},
+              ReentrantSubprogram{.subprogram = {}},
+              ReentrantSubprogram{.subprogram = {}},
+              TreatTrackers{.enable_collapse = true,
+                            .enable_unfiltered_collapse = true,
+                            .collapse_released = true}},
+             SubreleaseUnbackedMode::kDisabled);
+}
+
+TEST(HugePageFillerTest, NestedTreatTrackers) {
+  FuzzFiller(
+      {UpdateBitmaps{.hugepage_backed_set = true,
+                     .hugepage_backed_val = false,
+                     .unbacked_bitmap_val = 0,
+                     .swapped_bitmap_val = 0},
+       Allocate{.length = 1, .num_objects = 1},
+       ReentrantSubprogram{
+           .subprogram = {TreatTrackers{.enable_collapse = false},
+                          TreatTrackers{.enable_collapse = true},
+                          Deallocate{.tracker_index = 0, .alloc_index = 0}}},
+       TreatTrackers{.enable_collapse = true}},
+      SubreleaseUnbackedMode::kDisabled);
+}
 
 }  // namespace
 }  // namespace tcmalloc::tcmalloc_internal

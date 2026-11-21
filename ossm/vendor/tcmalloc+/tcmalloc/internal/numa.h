@@ -26,6 +26,7 @@
 #include "absl/functional/function_ref.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/cpu_utils.h"
+#include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/percpu.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
@@ -95,7 +96,7 @@ class NumaTopology {
   void InitForTest(absl::FunctionRef<int(size_t)> open_node_cpulist);
 
   // Returns true if NUMA awareness is available & enabled, otherwise false.
-  bool numa_aware() const {
+  [[nodiscard]] bool numa_aware() const {
     // Explicitly checking NumPartitions here provides a compile time constant
     // false in cases where NumPartitions==1, allowing NUMA awareness to be
     // optimized away.
@@ -106,23 +107,32 @@ class NumaTopology {
   // partitions that other parts of TCMalloc need to concern themselves with.
   // Checking this rather than using kNumaPartitions allows users to avoid work
   // on non-zero partitions when NUMA awareness is disabled.
-  size_t active_partitions() const {
+  [[nodiscard]] size_t active_partitions() const {
     return numa_aware() ? kNumInternalPartitions : 1;
+  }
+
+  // Returns the number of NUMA nodes detected in the system.
+  [[nodiscard]] size_t num_nodes() const {
+    TC_ASSERT_NE(num_nodes_, 0);
+    return num_nodes_;
   }
 
   // Return a value indicating how we should behave with regards to binding
   // memory regions to NUMA nodes.
-  NumaBindMode bind_mode() const { return bind_mode_; }
+  [[nodiscard]] NumaBindMode bind_mode() const {
+    TC_ASSERT_NE(num_nodes_, 0);
+    return bind_mode_;
+  }
 
   // Return the NUMA partition number to which the CPU we're currently
   // executing upon belongs. Note that whilst the CPU->partition mapping is
   // fixed, the return value of this function may change at arbitrary times as
   // this thread migrates between CPUs.
-  size_t GetCurrentPartition() const;
+  [[nodiscard]] size_t GetCurrentPartition() const;
 
   // Like GetCurrentPartition(), but returns a partition number multiplied by
   // ScaleBy.
-  size_t GetCurrentScaledPartition() const;
+  [[nodiscard]] size_t GetCurrentScaledPartition() const;
 
   // Return the NUMA partition number to which `cpu` belongs.  This partition
   // number may exceed NumPartitions as part of providing an unconditional NUMA
@@ -131,15 +141,15 @@ class NumaTopology {
   // It is valid for cpu to equal subtle::percpu::kCpuIdUninitialized or
   // subtle::percpu::kCpuIdUnsupported. In either case partition 0 will be
   // returned.
-  size_t GetCpuPartition(int cpu) const;
+  [[nodiscard]] size_t GetCpuPartition(int cpu) const;
 
   // Like GetCpuPartition(), but returns a partition number multiplied by
   // ScaleBy.
-  size_t GetCpuScaledPartition(int cpu) const;
+  [[nodiscard]] size_t GetCpuScaledPartition(int cpu) const;
 
   // Return a bitmap in which set bits identify the nodes that belong to the
   // specified NUMA `partition`.
-  uint64_t GetPartitionNodes(int partition) const;
+  [[nodiscard]] uint64_t GetPartitionNodes(int partition) const;
 
  private:
   // Maps from NUMA partition to a bitmap of NUMA nodes within the partition.
@@ -147,7 +157,9 @@ class NumaTopology {
   // Indicates whether NUMA awareness is available & enabled.
   bool numa_aware_ = false;
   // Desired memory binding behavior.
-  NumaBindMode bind_mode_ = NumaBindMode::kAdvisory;
+  NumaBindMode bind_mode_ = NumaBindMode::kNone;
+  // The number of NUMA nodes detected in the system.
+  size_t num_nodes_ = 0;
 
   // We maintain two sets of CPU-to-partition information.  One is
   // unconditionally available in cpu_to_scaled_partition_.
@@ -173,7 +185,7 @@ class NumaTopology {
 
 // Opens a /sys/devices/system/node/nodeX/cpulist file for read only access &
 // returns the file descriptor.
-int OpenSysfsCpulist(size_t node);
+[[nodiscard]] int OpenSysfsCpulist(size_t node);
 
 // Initialize the data members of a NumaTopology<> instance.
 //
@@ -185,13 +197,14 @@ int OpenSysfsCpulist(size_t node);
 //
 // Returns true if we're actually NUMA aware; i.e. if we have CPUs mapped to
 // multiple partitions.
-bool InitNumaTopology(size_t cpu_to_scaled_partition[kMaxCpus],
-                      uint64_t* partition_to_nodes, NumaBindMode* bind_mode,
-                      size_t num_partitions, size_t scale_by,
-                      absl::FunctionRef<int(size_t)> open_node_cpulist);
+[[nodiscard]] bool InitNumaTopology(
+    size_t cpu_to_scaled_partition[kMaxCpus], uint64_t* partition_to_nodes,
+    NumaBindMode* bind_mode, size_t num_partitions, size_t scale_by,
+    absl::FunctionRef<int(size_t)> open_node_cpulist, size_t* num_nodes);
 
 // Returns the NUMA partition to which `node` belongs.
-inline size_t NodeToPartition(const size_t node, const size_t num_partitions) {
+[[nodiscard]] inline size_t NodeToPartition(const size_t node,
+                                            const size_t num_partitions) {
   return node % num_partitions;
 }
 
@@ -199,12 +212,12 @@ template <size_t NumPartitions, size_t ScaleBy>
 inline void NumaTopology<NumPartitions, ScaleBy>::Init() {
   static_assert(offsetof(NumaTopology, gated_cpu_to_scaled_partition_) +
                         sizeof(gated_cpu_to_scaled_partition_) +
-                        sizeof(*gated_cpu_to_scaled_partition_.data()) >=
+                        sizeof(gated_cpu_to_scaled_partition_[0]) >=
                     sizeof(NumaTopology),
                 "cpu_to_scaled_partition_ is not the last field");
   numa_aware_ = InitNumaTopology(
       cpu_to_scaled_partition_.data(), partition_to_nodes_, &bind_mode_,
-      kNumInternalPartitions, ScaleBy, OpenSysfsCpulist);
+      kNumInternalPartitions, ScaleBy, OpenSysfsCpulist, &num_nodes_);
   if constexpr (NumPartitions > 1) {
     if (numa_aware_) {
       gated_cpu_to_scaled_partition_ = cpu_to_scaled_partition_;
@@ -217,7 +230,7 @@ inline void NumaTopology<NumPartitions, ScaleBy>::InitForTest(
     absl::FunctionRef<int(size_t)> open_node_cpulist) {
   numa_aware_ = InitNumaTopology(
       cpu_to_scaled_partition_.data(), partition_to_nodes_, &bind_mode_,
-      kNumInternalPartitions, ScaleBy, open_node_cpulist);
+      kNumInternalPartitions, ScaleBy, open_node_cpulist, &num_nodes_);
   if constexpr (NumPartitions > 1) {
     if (numa_aware_) {
       gated_cpu_to_scaled_partition_ = cpu_to_scaled_partition_;

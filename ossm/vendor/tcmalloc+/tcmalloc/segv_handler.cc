@@ -14,6 +14,7 @@
 
 #include "tcmalloc/segv_handler.h"
 
+#include <sys/ucontext.h>
 #include <unistd.h>
 
 #include <csignal>
@@ -139,15 +140,9 @@ GuardedAllocationsErrorType RefineErrorTypeBasedOnContext(
   return RefineErrorTypeBasedOnWriteFlag(error, write_flag);
 }
 
-// This is overridden by selsan, if it's linked in.
-ABSL_ATTRIBUTE_WEAK void SelsanTrapHandler(void* info, void* ctx) {}
-
 // A SEGV handler that prints stack traces for the allocation and deallocation
 // of relevant memory as well as the location of the memory error.
 void SegvHandler(int signo, siginfo_t* info, void* context) {
-  if (signo == SIGTRAP) {
-    SelsanTrapHandler(info, context);
-  }
   if (signo != SIGSEGV) return;
   void* fault = info->si_addr;
   if (!tc_globals.guardedpage_allocator().PointerIsMine(fault)) return;
@@ -179,32 +174,32 @@ void SegvHandler(int signo, siginfo_t* info, void* context) {
       PrintStackTrace(dealloc_trace->stack, dealloc_trace->depth);
       TC_LOG("Use-after-free %s occurs in thread %v at:",
              WriteFlagToString(write_flag), current_thread);
-      RecordCrash("GWP-ASan", "use-after-free");
+      RecordCrash("GWP-ASan", "use-after-free", {});
       break;
     case GuardedAllocationsErrorType::kBufferUnderflow:
     case GuardedAllocationsErrorType::kBufferUnderflowRead:
     case GuardedAllocationsErrorType::kBufferUnderflowWrite:
       TC_LOG("Buffer underflow %s occurs in thread %v at:",
              WriteFlagToString(write_flag), current_thread);
-      RecordCrash("GWP-ASan", "buffer-underflow");
+      RecordCrash("GWP-ASan", "buffer-underflow", {});
       break;
     case GuardedAllocationsErrorType::kBufferOverflow:
     case GuardedAllocationsErrorType::kBufferOverflowRead:
     case GuardedAllocationsErrorType::kBufferOverflowWrite:
       TC_LOG("Buffer overflow %s occurs in thread %v at:",
              WriteFlagToString(write_flag), current_thread);
-      RecordCrash("GWP-ASan", "buffer-overflow");
+      RecordCrash("GWP-ASan", "buffer-overflow", {});
       break;
     case GuardedAllocationsErrorType::kDoubleFree:
       TC_LOG("The memory was freed in thread %v at:", dealloc_trace->thread_id);
       PrintStackTrace(dealloc_trace->stack, dealloc_trace->depth);
       TC_LOG("Double free occurs in thread %v at:", current_thread);
-      RecordCrash("GWP-ASan", "double-free");
+      RecordCrash("GWP-ASan", "double-free", {});
       break;
     case GuardedAllocationsErrorType::kBufferOverflowOnDealloc:
       TC_LOG("Buffer overflow (write) detected in thread %v at free:",
              current_thread);
-      RecordCrash("GWP-ASan", "buffer-overflow-detected-at-free");
+      RecordCrash("GWP-ASan", "buffer-overflow-detected-at-free", {});
       break;
     case GuardedAllocationsErrorType::kUnknown:
       TC_BUG("Unexpected GuardedAllocationsErrorType::kUnknown");

@@ -20,6 +20,7 @@
 
 #include "gtest/gtest.h"
 #include "absl/random/random.h"
+#include "tcmalloc/internal/config.h"
 #include "tcmalloc/malloc_extension.h"
 
 namespace tcmalloc {
@@ -40,7 +41,6 @@ TEST(MallocExtension, SnapshotCurrentIsEmpty) {
   // All of the profiles should be empty.
   ProfileType types[] = {
       ProfileType::kHeap,
-      ProfileType::kFragmentation,
       ProfileType::kPeakHeap,
       ProfileType::kAllocations,
   };
@@ -84,6 +84,20 @@ TEST(MallocExtension, AllocationProfile) {
   for (void* ptr : ptrs) {
     ::operator delete(ptr);
   }
+}
+
+TEST(MallocExtension, GetAllocatedSizeSystemMalloc) {
+  void* ptr = ::operator new(100);
+  std::optional<size_t> size = MallocExtension::GetAllocatedSize(ptr);
+
+  if (tcmalloc_internal::kSanitizerPresent) {
+    EXPECT_TRUE(size.has_value());
+    EXPECT_GE(*size, 100);
+  } else {
+    EXPECT_FALSE(size.has_value());
+  }
+
+  ::operator delete(ptr);
 }
 
 }  // namespace

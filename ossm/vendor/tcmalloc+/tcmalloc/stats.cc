@@ -50,7 +50,7 @@ static void PrintRightAdjustedWithPrefix(Printer& out, const char* prefix,
       out.printf(" ");
     }
   }
-  out.printf("%s%zu", prefix, num.raw_num());
+  out.printf("%s%v", prefix, num);
 }
 
 void PrintStats(const char* label, Printer& out, const BackingStats& backing,
@@ -155,15 +155,13 @@ void PrintStatsInPbtxt(PbtxtRegion& region, const SmallSpanStats& small,
 }
 
 void PageAllocInfo::Print(Printer& out) const {
-  int64_t ticks = TimeTicks();
+  int64_t ticks = std::max<int64_t>(TimeTicks(), 1);
   double hz = freq_ / ticks;
   out.printf("%s: stats on allocation sizes\n", label_);
-  out.printf("%s: %zu pages live small allocation\n", label_,
-             total_small_.raw_num());
-  out.printf("%s: %zu pages of slack on large allocations\n", label_,
-             total_slack_.raw_num());
-  out.printf("%s: largest seen allocation %zu pages\n", label_,
-             largest_seen_.raw_num());
+  out.printf("%s: %v pages live small allocation\n", label_, total_small_);
+  out.printf("%s: %v pages of slack on large allocations\n", label_,
+             total_slack_);
+  out.printf("%s: largest seen allocation %v pages\n", label_, largest_seen_);
   out.printf("%s: per-size information:\n", label_);
 
   auto print_counts = [this, hz, &out](const Counts& c, Length nmin,
@@ -200,28 +198,26 @@ void PageAllocInfo::Print(Printer& out) const {
     print_counts(large_[i], nmin, nmax);
   }
 
-  out.printf("%s: %zu pages (%6.1f MiB) released in total\n", label_,
-             released_.total.raw_num(), released_.total.in_mib());
-  out.printf("%s: %zu pages (%6.1f MiB) released from ReleaseMemoryToSystem\n",
-             label_, released_.release_memory_to_system.raw_num(),
+  out.printf("%s: %v pages (%6.1f MiB) released in total\n", label_,
+             released_.total, released_.total.in_mib());
+  out.printf("%s: %v pages (%6.1f MiB) released from ReleaseMemoryToSystem\n",
+             label_, released_.release_memory_to_system,
              released_.release_memory_to_system.in_mib());
   out.printf(
-      "%s: %zu pages (%6.1f MiB) MiB released from ProcessBackgroundActions\n",
-      label_, released_.process_background_actions.raw_num(),
+      "%s: %v pages (%6.1f MiB) released from ProcessBackgroundActions\n",
+      label_, released_.process_background_actions,
       released_.process_background_actions.in_mib());
-  out.printf(
-      "%s: %zu pages (%6.1f MiB) MiB released from soft malloc limit hits\n",
-      label_, released_.soft_limit_exceeded.raw_num(),
-      released_.soft_limit_exceeded.in_mib());
-  out.printf(
-      "%s: %zu pages (%6.1f MiB) MiB released from hard malloc limit hits\n",
-      label_, released_.hard_limit_exceeded.raw_num(),
-      released_.hard_limit_exceeded.in_mib());
+  out.printf("%s: %v pages (%6.1f MiB) released from soft malloc limit hits\n",
+             label_, released_.soft_limit_exceeded,
+             released_.soft_limit_exceeded.in_mib());
+  out.printf("%s: %v pages (%6.1f MiB) released from hard malloc limit hits\n",
+             label_, released_.hard_limit_exceeded,
+             released_.hard_limit_exceeded.in_mib());
 }
 
 void PageAllocInfo::PrintInPbtxt(PbtxtRegion& region,
                                  absl::string_view stat_name) const {
-  int64_t ticks = TimeTicks();
+  int64_t ticks = std::max<int64_t>(TimeTicks(), 1);
   double hz = freq_ / ticks;
   region.PrintI64("num_small_allocation_pages", total_small_.raw_num());
   region.PrintI64("num_slack_pages", total_slack_.raw_num());
@@ -275,6 +271,7 @@ static Length RoundUp(Length value, Length alignment) {
                 ~(alignment.raw_num() - 1));
 }
 
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
 void PageAllocInfo::RecordAlloc(Range r) {
   static_assert(kMaxPages.in_bytes() == 1024 * 1024, "threshold changed?");
   static_assert(kMaxPages < kPagesPerHugePage, "there should be slack");
@@ -301,6 +298,24 @@ void PageAllocInfo::RecordFree(Range r) {
     large_[i].Free(r.n);
   }
 }
+#else
+void PageAllocInfo::RecordAllocSlow(Range r) {
+  static_assert(kMaxPages < kPagesPerHugePage, "there should be slack");
+  TC_ASSERT_GT(r.n, kMaxPages);
+  Length slack = RoundUp(r.n, kPagesPerHugePage) - r.n;
+  total_slack_ += slack;
+  size_t i = absl::bit_width(r.n.raw_num() - 1);
+  large_[i].Alloc(r.n);
+}
+
+void PageAllocInfo::RecordFreeSlow(Range r) {
+  TC_ASSERT_GT(r.n, kMaxPages);
+  Length slack = RoundUp(r.n, kPagesPerHugePage) - r.n;
+  total_slack_ -= slack;
+  size_t i = absl::bit_width(r.n.raw_num() - 1);
+  large_[i].Free(r.n);
+}
+#endif
 
 void PageAllocInfo::RecordRelease(Length n, Length got,
                                   PageReleaseReason reason) {

@@ -14,19 +14,27 @@
 
 #include "tcmalloc/guarded_page_allocator.h"
 
+#include <sys/mman.h>
+
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cstddef>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <new>
+#include <ostream>
 #include <thread>  // NOLINT(build/c++11)
 #include <vector>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/base/attributes.h"
+#include "absl/base/casts.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/numeric/bits.h"
+#include "absl/strings/str_cat.h"
 #include "tcmalloc/common.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/page_size.h"
@@ -83,7 +91,8 @@ class GuardedPageAllocatorParamTest
 };
 
 TEST_F(GuardedPageAllocatorTest, SingleAllocDealloc) {
-  auto alloc_with_status = gpa_.Allocate(PageSize(), 0, GetStackTrace());
+  auto alloc_with_status =
+      gpa_.Allocate(PageSize(), std::align_val_t{0}, GetStackTrace());
   EXPECT_EQ(alloc_with_status.status, Profile::Sample::GuardedStatus::Guarded);
   EXPECT_EQ(gpa_.successful_allocations(), 1);
   char* buf = static_cast<char*>(alloc_with_status.alloc);
@@ -98,6 +107,72 @@ TEST_F(GuardedPageAllocatorTest, SingleAllocDealloc) {
   EXPECT_DEATH(buf[0] = 'B', "");
   EXPECT_DEATH(buf[PageSize() / 2] = 'B', "");
   EXPECT_DEATH(buf[PageSize() - 1] = 'B', "");
+}
+
+TEST_F(GuardedPageAllocatorTest, GetPageAllocationStatus) {
+  PageBitmap pages;
+  HugePage outside_hp = HugePageContaining(reinterpret_cast<void*>(0x1000));
+  EXPECT_FALSE(gpa_.GetPageAllocationStatus(outside_hp, pages));
+
+  auto alloc_with_status =
+      gpa_.Allocate(PageSize(), std::align_val_t{0}, GetStackTrace());
+  ASSERT_EQ(alloc_with_status.status, Profile::Sample::GuardedStatus::Guarded);
+  void* buf = alloc_with_status.alloc;
+  ASSERT_NE(buf, nullptr);
+
+  HugePage hp = HugePageContaining(buf);
+  EXPECT_TRUE(gpa_.GetPageAllocationStatus(hp, pages));
+
+  const size_t page_offset =
+      (PageIdContaining(buf) - hp.first_page()).raw_num();
+  const size_t num_pages = PageSize() / kPageSize;
+  for (size_t i = 0; i < num_pages; ++i) {
+    EXPECT_TRUE(pages.GetBit(page_offset + i));
+  }
+  EXPECT_EQ(pages.CountBits(), num_pages);
+
+  gpa_.Deallocate(buf);
+  EXPECT_TRUE(gpa_.GetPageAllocationStatus(hp, pages));
+  EXPECT_EQ(pages.CountBits(), 0);
+}
+
+// Applications may lock pages that we have already handed out, either by
+// calling mlock() on them directly or via mlockall(MCL_CURRENT).  Locking
+// constrains what the kernel lets us do to the VMA, so check that quarantining
+// a locked page works and that the remainder of the pool stays usable.
+TEST_F(GuardedPageAllocatorTest, MlockedRegion) {
+  auto alloc_with_status =
+      gpa_.Allocate(PageSize(), std::align_val_t{0}, GetStackTrace());
+  ASSERT_EQ(alloc_with_status.status, Profile::Sample::GuardedStatus::Guarded);
+  char* buf = static_cast<char*>(alloc_with_status.alloc);
+  ASSERT_NE(buf, nullptr);
+  memset(buf, 'A', PageSize());
+
+  const int mlock_err = mlock(buf, PageSize()) == 0 ? 0 : errno;
+  if (mlock_err != 0) {
+    gpa_.Deallocate(buf);
+    GTEST_SKIP() << "mlock failed: " << strerror(mlock_err);
+  }
+
+  gpa_.Deallocate(buf);
+  EXPECT_DEATH(buf[0] = 'B', "");
+  EXPECT_EQ(munlock(buf, PageSize()), 0);
+
+  // Hold every slot simultaneously.  Allocating and freeing one at a time can
+  // recycle a single page, leaving the rest of the pool untouched.
+  char* bufs[kMaxGpaPages];
+  for (size_t i = 0; i < kMaxGpaPages; ++i) {
+    auto realloc_with_status =
+        gpa_.Allocate(PageSize(), std::align_val_t{0}, GetStackTrace());
+    ASSERT_EQ(realloc_with_status.status,
+              Profile::Sample::GuardedStatus::Guarded);
+    bufs[i] = static_cast<char*>(realloc_with_status.alloc);
+    ASSERT_NE(bufs[i], nullptr);
+    memset(bufs[i], 'C', PageSize());
+  }
+  for (size_t i = 0; i < kMaxGpaPages; ++i) {
+    gpa_.Deallocate(bufs[i]);
+  }
 }
 
 TEST_F(GuardedPageAllocatorTest, NoAlignmentProvided) {
@@ -116,7 +191,8 @@ TEST_F(GuardedPageAllocatorTest, NoAlignmentProvided) {
       // Make several allocation attempts to encounter left/right-alignment in
       // the guarded region.
       for (int i = 0; i < kElements; i++) {
-        auto alloc_with_status = gpa_.Allocate(size, 0, GetStackTrace());
+        auto alloc_with_status =
+            gpa_.Allocate(size, std::align_val_t{0}, GetStackTrace());
         EXPECT_EQ(alloc_with_status.status,
                   Profile::Sample::GuardedStatus::Guarded);
         ptrs[i] = alloc_with_status.alloc;
@@ -125,7 +201,7 @@ TEST_F(GuardedPageAllocatorTest, NoAlignmentProvided) {
         ++allocation_count;
 
         size_t observed_alignment =
-            1 << absl::countr_zero(absl::bit_cast<uintptr_t>(ptrs[i]));
+            absl::bit_floor(absl::bit_cast<uintptr_t>(ptrs[i]));
         EXPECT_GE(observed_alignment, std::min(size, kLargeObjectAlignment));
       }
 
@@ -140,7 +216,8 @@ TEST_F(GuardedPageAllocatorTest, NoAlignmentProvided) {
 TEST_F(GuardedPageAllocatorTest, AllocDeallocAligned) {
   for (size_t align = 1; align <= PageSize(); align <<= 1) {
     constexpr size_t alloc_size = 1;
-    auto alloc_with_status = gpa_.Allocate(alloc_size, align, GetStackTrace());
+    auto alloc_with_status = gpa_.Allocate(
+        alloc_size, static_cast<std::align_val_t>(align), GetStackTrace());
     EXPECT_EQ(alloc_with_status.status,
               Profile::Sample::GuardedStatus::Guarded);
     EXPECT_NE(alloc_with_status.alloc, nullptr);
@@ -150,39 +227,70 @@ TEST_F(GuardedPageAllocatorTest, AllocDeallocAligned) {
   EXPECT_EQ(gpa_.successful_allocations(), (32 - __builtin_clz(PageSize())));
 }
 
-TEST_F(GuardedPageAllocatorTest, MismatchedAlignment) {
+struct MisalignedFree {
+  size_t align;
+  size_t misalign;
+};
+
+std::ostream& operator<<(std::ostream& os, const MisalignedFree& p) {
+  return os << "{align=" << p.align << ", misalign=" << p.misalign << "}";
+}
+
+// Every power-of-two alignment up to the page size, paired with every
+// power-of-two offset up to that alignment.
+std::vector<MisalignedFree> MisalignedFreeCases() {
+  std::vector<MisalignedFree> cases;
+  for (size_t align = 1; align <= PageSize(); align <<= 1) {
+    for (size_t misalign = 1; misalign <= align; misalign <<= 1) {
+      cases.push_back({align, misalign});
+    }
+  }
+  return cases;
+}
+
+class GuardedPageAllocatorMisalignedFreeTest
+    : public GuardedPageAllocatorTest,
+      public testing::WithParamInterface<MisalignedFree> {};
+
+// One death test per (align, misalign) pair, rather than a single test looping
+// over all of them, so that test sharding spreads the sweep across shards.
+TEST_P(GuardedPageAllocatorMisalignedFreeTest, MismatchedAlignment) {
 #ifdef ABSL_HAVE_ADDRESS_SANITIZER
   GTEST_SKIP() << "Skipping slow death test under ASan";
 #endif
-  for (size_t align = 1; align <= PageSize(); align <<= 1) {
-    for (size_t misalign = 1; misalign <= align; misalign <<= 1) {
-      constexpr size_t alloc_size = 1;
-      auto alloc_with_status =
-          gpa_.Allocate(alloc_size, align, GetStackTrace());
-      EXPECT_EQ(alloc_with_status.status,
-                Profile::Sample::GuardedStatus::Guarded);
-      EXPECT_NE(alloc_with_status.alloc, nullptr);
-      EXPECT_TRUE(gpa_.PointerIsMine(alloc_with_status.alloc));
-      EXPECT_EQ(reinterpret_cast<uintptr_t>(alloc_with_status.alloc) % align,
-                0);
+  const auto [align, misalign] = GetParam();
+  constexpr size_t alloc_size = 1;
+  auto alloc_with_status = gpa_.Allocate(
+      alloc_size, static_cast<std::align_val_t>(align), GetStackTrace());
+  EXPECT_EQ(alloc_with_status.status, Profile::Sample::GuardedStatus::Guarded);
+  EXPECT_NE(alloc_with_status.alloc, nullptr);
+  EXPECT_TRUE(gpa_.PointerIsMine(alloc_with_status.alloc));
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(alloc_with_status.alloc) % align, 0);
 
-      EXPECT_DEATH(
-          {
-            gpa_.Deallocate(absl::bit_cast<void*>(
-                absl::bit_cast<uintptr_t>(alloc_with_status.alloc) + misalign));
-          },
-          "CHECK in AddrToSlot|Attempted to free corrupted pointer");
+  EXPECT_DEATH(
+      {
+        gpa_.Deallocate(absl::bit_cast<void*>(
+            absl::bit_cast<uintptr_t>(alloc_with_status.alloc) + misalign));
+      },
+      "CHECK in AddrToSlot|Attempted to free corrupted pointer");
 
-      gpa_.Deallocate(alloc_with_status.alloc);
-    }
-  }
+  gpa_.Deallocate(alloc_with_status.alloc);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    VaryAlignment, GuardedPageAllocatorMisalignedFreeTest,
+    testing::ValuesIn(MisalignedFreeCases()),
+    [](const testing::TestParamInfo<MisalignedFree>& info) {
+      return absl::StrCat("Align", info.param.align, "Misalign",
+                          info.param.misalign);
+    });
 
 TEST_P(GuardedPageAllocatorParamTest, AllocDeallocAllPages) {
   size_t num_pages = GetParam();
   char* bufs[kMaxGpaPages];
   for (size_t i = 0; i < num_pages; i++) {
-    auto alloc_with_status = gpa_.Allocate(1, 0, GetStackTrace());
+    auto alloc_with_status =
+        gpa_.Allocate(1, std::align_val_t{0}, GetStackTrace());
     EXPECT_EQ(alloc_with_status.status,
               Profile::Sample::GuardedStatus::Guarded);
     bufs[i] = reinterpret_cast<char*>(alloc_with_status.alloc);
@@ -190,12 +298,13 @@ TEST_P(GuardedPageAllocatorParamTest, AllocDeallocAllPages) {
     EXPECT_TRUE(gpa_.PointerIsMine(bufs[i]));
   }
   EXPECT_EQ(gpa_.successful_allocations(), num_pages);
-  auto alloc_with_status = gpa_.Allocate(1, 0, GetStackTrace());
+  auto alloc_with_status =
+      gpa_.Allocate(1, std::align_val_t{0}, GetStackTrace());
   EXPECT_EQ(alloc_with_status.status,
             Profile::Sample::GuardedStatus::NoAvailableSlots);
   EXPECT_EQ(alloc_with_status.alloc, nullptr);
   gpa_.Deallocate(bufs[0]);
-  alloc_with_status = gpa_.Allocate(1, 0, GetStackTrace());
+  alloc_with_status = gpa_.Allocate(1, std::align_val_t{0}, GetStackTrace());
   EXPECT_EQ(alloc_with_status.status, Profile::Sample::GuardedStatus::Guarded);
   bufs[0] = reinterpret_cast<char*>(alloc_with_status.alloc);
   EXPECT_NE(bufs[0], nullptr);
@@ -210,7 +319,8 @@ INSTANTIATE_TEST_SUITE_P(VaryNumPages, GuardedPageAllocatorParamTest,
                          testing::Values(1, kMaxGpaPages / 2, kMaxGpaPages));
 
 TEST_F(GuardedPageAllocatorTest, PointerIsMine) {
-  auto alloc_with_status = gpa_.Allocate(1, 0, GetStackTrace());
+  auto alloc_with_status =
+      gpa_.Allocate(1, std::align_val_t{0}, GetStackTrace());
   EXPECT_EQ(alloc_with_status.status, Profile::Sample::GuardedStatus::Guarded);
   EXPECT_EQ(gpa_.successful_allocations(), 1);
   void* buf = alloc_with_status.alloc;
@@ -222,14 +332,13 @@ TEST_F(GuardedPageAllocatorTest, PointerIsMine) {
 }
 
 TEST_F(GuardedPageAllocatorTest, Print) {
-  char buf[1024] = {};
-  Printer out(buf, sizeof(buf));
-  gpa_.Print(out);
+  std::string buf = PrintToString(1024, [&](Printer& out) { gpa_.Print(out); });
   EXPECT_THAT(buf, testing::ContainsRegex("GWP-ASan Status"));
 }
 
 TEST_F(GuardedPageAllocatorTest, ZeroByteAllocationAndDeallocation) {
-  auto alloc_with_status = gpa_.Allocate(0, 0, GetStackTrace());
+  auto alloc_with_status =
+      gpa_.Allocate(0, std::align_val_t{0}, GetStackTrace());
   EXPECT_EQ(alloc_with_status.status, Profile::Sample::GuardedStatus::Guarded);
   EXPECT_NE(alloc_with_status.alloc, nullptr);
   void* ptr = alloc_with_status.alloc;
@@ -247,7 +356,8 @@ TEST_F(GuardedPageAllocatorTest, ZeroByteAllocationAndDeallocation) {
 }
 
 TEST_F(GuardedPageAllocatorTest, ZeroByteUseAfterFree) {
-  auto alloc_with_status = gpa_.Allocate(0, 0, GetStackTrace());
+  auto alloc_with_status =
+      gpa_.Allocate(0, std::align_val_t{0}, GetStackTrace());
   EXPECT_EQ(alloc_with_status.status, Profile::Sample::GuardedStatus::Guarded);
   ASSERT_NE(alloc_with_status.alloc, nullptr);
   void* ptr = alloc_with_status.alloc;
@@ -260,7 +370,8 @@ TEST_F(GuardedPageAllocatorTest, ZeroByteUseAfterFree) {
 }
 
 TEST_F(GuardedPageAllocatorTest, ZeroByteDoubleFree) {
-  auto alloc_with_status = gpa_.Allocate(0, 0, GetStackTrace());
+  auto alloc_with_status =
+      gpa_.Allocate(0, std::align_val_t{0}, GetStackTrace());
   EXPECT_EQ(alloc_with_status.status, Profile::Sample::GuardedStatus::Guarded);
   ASSERT_NE(alloc_with_status.alloc, nullptr);
   void* ptr = alloc_with_status.alloc;
@@ -280,7 +391,8 @@ TEST_F(GuardedPageAllocatorTest, ThreadedAllocCount) {
     for (size_t i = 0; i < kNumThreads; i++) {
       threads.push_back(std::thread([this, &allocations, i]() {
         for (size_t j = 0; j < kMaxGpaPages; j++) {
-          allocations[i][j] = gpa_.Allocate(1, 0, GetStackTrace()).alloc;
+          allocations[i][j] =
+              gpa_.Allocate(1, std::align_val_t{0}, GetStackTrace()).alloc;
         }
       }));
     }
@@ -311,7 +423,8 @@ TEST_F(GuardedPageAllocatorTest, ThreadedHighContention) {
       threads.push_back(std::thread([this]() {
         char* buf;
         while (true) {
-          auto alloc_with_status = gpa_.Allocate(1, 0, GetStackTrace());
+          auto alloc_with_status =
+              gpa_.Allocate(1, std::align_val_t{0}, GetStackTrace());
           if (alloc_with_status.status ==
               Profile::Sample::GuardedStatus::Guarded) {
             buf = reinterpret_cast<char*>(alloc_with_status.alloc);
@@ -341,7 +454,8 @@ TEST_F(GuardedPageAllocatorTest, ThreadedHighContention) {
   }
   // Verify all pages have been deallocated now that all threads are done.
   for (size_t i = 0; i < kMaxGpaPages; i++) {
-    auto alloc_with_status = gpa_.Allocate(1, 0, GetStackTrace());
+    auto alloc_with_status =
+        gpa_.Allocate(1, std::align_val_t{0}, GetStackTrace());
     EXPECT_EQ(alloc_with_status.status,
               Profile::Sample::GuardedStatus::Guarded);
     EXPECT_NE(alloc_with_status.alloc, nullptr);
@@ -358,7 +472,9 @@ class SampledAllocationWithFilterTest
 #endif
     // Sanitizers override malloc/free with their own.
 #if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
-    defined(ABSL_HAVE_MEMORY_SANITIZER) || defined(ABSL_HAVE_THREAD_SANITIZER)
+    defined(ABSL_HAVE_MEMORY_SANITIZER) ||  \
+    defined(ABSL_HAVE_THREAD_SANITIZER) ||  \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
     GTEST_SKIP() << "skipping tests on sanitizers";
 #endif
   }
@@ -445,7 +561,7 @@ INSTANTIATE_TEST_SUITE_P(
                  !tc_globals.guardedpage_allocator().PointerIsMine(ptr);
         }));
 
-ABSL_CONST_INIT ABSL_ATTRIBUTE_UNUSED GuardedPageAllocator
+[[maybe_unused]] ABSL_CONST_INIT GuardedPageAllocator
     gpa_is_constant_initializable;
 
 }  // namespace

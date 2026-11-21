@@ -37,11 +37,12 @@ namespace tcmalloc_internal {
 
 class PeakHeapTracker {
  public:
-  constexpr explicit PeakHeapTracker(
-      MetadataObjectAllocator<SampledAllocation>& allocator
-          ABSL_ATTRIBUTE_LIFETIME_BOUND)
-      : recorder_lock_(absl::base_internal::SCHEDULE_KERNEL_ONLY),
-        peak_heap_recorder_(allocator) {}
+  constexpr PeakHeapTracker() = default;
+  void Init(MetadataObjectAllocator<SampledAllocation,
+                                    ArenaAlloc::kSampledAllocation>& allocator)
+      ABSL_NO_THREAD_SAFETY_ANALYSIS {
+    peak_heap_recorder_.Init(allocator);
+  }
 
   // Possibly save high-water-mark allocation stack traces for peak-heap
   // profile. Should be called immediately after sampling an allocation. If
@@ -50,9 +51,10 @@ class PeakHeapTracker {
   void MaybeSaveSample() ABSL_LOCKS_EXCLUDED(recorder_lock_);
 
   // Return the saved high-water-mark heap profile, if any.
-  std::unique_ptr<ProfileBase> DumpSample() ABSL_LOCKS_EXCLUDED(recorder_lock_);
+  [[nodiscard]] std::unique_ptr<ProfileBase> DumpSample()
+      ABSL_LOCKS_EXCLUDED(recorder_lock_);
 
-  size_t CurrentPeakSize() const {
+  [[nodiscard]] size_t CurrentPeakSize() const {
     return do_not_access_directly_peak_sampled_heap_size_.load(
         std::memory_order_relaxed);
   }
@@ -66,10 +68,12 @@ class PeakHeapTracker {
 
   using PeakHeapRecorder =
       SampleRecorder<SampledAllocation,
-                     MetadataObjectAllocator<SampledAllocation>>;
+                     MetadataObjectAllocator<SampledAllocation,
+                                             ArenaAlloc::kSampledAllocation>>;
 
   // Guards the peak heap samples stored in `peak_heap_recorder_`.
-  absl::base_internal::SpinLock recorder_lock_;
+  absl::base_internal::SpinLock recorder_lock_{
+      absl::base_internal::SCHEDULE_KERNEL_ONLY};
 
   absl::Time last_peak_ ABSL_GUARDED_BY(recorder_lock_);
 
@@ -81,7 +85,7 @@ class PeakHeapTracker {
   // when we allocate memory from the system.
   PeakHeapRecorder peak_heap_recorder_ ABSL_GUARDED_BY(recorder_lock_);
 
-  bool IsNewPeak();
+  [[nodiscard]] bool IsNewPeak();
 };
 
 }  // namespace tcmalloc_internal

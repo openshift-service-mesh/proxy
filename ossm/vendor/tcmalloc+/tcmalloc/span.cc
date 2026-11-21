@@ -16,7 +16,7 @@
 
 #include <stdint.h>
 
-#include <atomic>
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <new>
@@ -24,6 +24,7 @@
 #include "absl/base/optimization.h"
 #include "absl/types/span.h"
 #include "tcmalloc/common.h"
+#include "tcmalloc/error_reporting.h"
 #include "tcmalloc/internal/atomic_stats_counter.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
@@ -40,69 +41,9 @@ namespace tcmalloc {
 namespace tcmalloc_internal {
 
 #ifdef NDEBUG
+#else
+static_assert(sizeof(Span) == 128);
 #endif  // NDEBUG
-
-void Span::Sample(SampledAllocation* sampled_allocation) {
-  TC_CHECK(!sampled_ && sampled_allocation);
-  Length pages_per_span = num_pages();
-  TC_CHECK_GT(pages_per_span, Length(0));
-  sampled_ = 1;
-  large_or_sampled_state_.num_pages = pages_per_span.raw_num();
-  large_or_sampled_state_.sampled_allocation = sampled_allocation;
-
-  // The cast to value matches Unsample.
-  tcmalloc_internal::StatsCounter::Value allocated_bytes =
-      static_cast<tcmalloc_internal::StatsCounter::Value>(
-          AllocatedBytes(sampled_allocation->sampled_stack));
-  tc_globals.sampled_objects_size_.Add(allocated_bytes);
-  tc_globals.total_sampled_count_.Add(1);
-}
-
-SampledAllocation* Span::Unsample() {
-  if (!sampled_) {
-    return nullptr;
-  }
-  Length pages_per_span = num_pages();
-  TC_CHECK_GT(pages_per_span, Length(0));
-  TC_CHECK(sampled_ && large_or_sampled_state_.sampled_allocation);
-  sampled_ = 0;
-  large_or_sampled_state_.num_pages = pages_per_span.raw_num();
-  SampledAllocation* sampled_allocation =
-      large_or_sampled_state_.sampled_allocation;
-  large_or_sampled_state_.sampled_allocation = nullptr;
-
-  // The cast to Value ensures no funny business happens during the negation if
-  // sizeof(size_t) != sizeof(Value).
-  tcmalloc_internal::StatsCounter::Value neg_allocated_bytes =
-      -static_cast<tcmalloc_internal::StatsCounter::Value>(
-          AllocatedBytes(sampled_allocation->sampled_stack));
-  tc_globals.sampled_objects_size_.Add(neg_allocated_bytes);
-  return sampled_allocation;
-}
-
-double Span::Fragmentation(size_t object_size) const {
-  if (object_size == 0) {
-    // Avoid crashes in production mode code, but report in tests.
-    TC_ASSERT_NE(object_size, 0);
-    return 0;
-  }
-  const size_t span_objects = bytes_in_span() / object_size;
-  const size_t live = allocated_.load(std::memory_order_relaxed);
-  if (live == 0) {
-    // Avoid crashes in production mode code, but report in tests.
-    TC_ASSERT_NE(live, 0);
-    return 0;
-  }
-  // Assume that all in-use objects in this span are spread evenly
-  // through this span.  So charge the free space in span evenly
-  // to each of the live objects.
-  // A note on units here: StackTraceTable::AddTrace(1, *t)
-  // represents usage (of whatever kind: heap space, allocation,
-  // fragmentation) of 1 object of size t->allocated_size.
-  // So we want to report here the number of objects we are "responsible"
-  // for pinning - NOT bytes.
-  return static_cast<double>(span_objects - live) / live;
-}
 
 // Freelist organization.
 //
@@ -140,125 +81,33 @@ double Span::Fragmentation(size_t object_size) const {
 //              [---|idx|idx|idx|idx|idx|idx|idx]  16-byte object
 //
 
-void* Span::BitmapIdxToPtr(ObjIdx idx, size_t size) const {
-  uintptr_t off = first_page().start_uintptr() + idx * size;
-  return reinterpret_cast<ObjIdx*>(off);
-}
-
-size_t Span::BitmapPopBatch(absl::Span<void*> batch, size_t size) {
-  size_t before = small_span_state_.bitmap.CountBits();
-  size_t count = 0;
-  // Want to fill the batch either with batch.size() objects, or the number of
-  // objects remaining in the span.
-  while (!small_span_state_.bitmap.IsZero() && count < batch.size()) {
-    size_t offset = small_span_state_.bitmap.FindSet(0);
-    TC_ASSERT_LT(offset, small_span_state_.bitmap.size());
-    batch[count] = BitmapIdxToPtr(offset, size);
-    small_span_state_.bitmap.ClearLowestBit();
-    count++;
-  }
-
-  TC_ASSERT_EQ(small_span_state_.bitmap.CountBits() + count, before);
-  allocated_.store(allocated_.load(std::memory_order_relaxed) + count,
-                   std::memory_order_relaxed);
-  return count;
-}
-
-size_t Span::FreelistPopBatch(const absl::Span<void*> batch, size_t size) {
-  TC_ASSERT(!is_large_or_sampled());
-  // Handle spans with bitmap.size() or fewer objects using a bitmap. We expect
-  // spans to frequently hold smaller objects.
-  if (ABSL_PREDICT_FALSE(UseBitmapForSize(size))) {
-    return BitmapPopBatch(batch, size);
-  }
-  return ListPopBatch(batch.data(), batch.size(), size);
-}
-
-size_t Span::ListPopBatch(void** __restrict batch, size_t N, size_t size) {
-  size_t result = 0;
-
-  // Pop from cache.
-  auto csize = cache_size_;
-  ASSUME(csize <= kCacheSize);
-  auto cache_reads = csize < N ? csize : N;
-  const uintptr_t span_start = first_page().start_uintptr();
-  for (; result < cache_reads; result++) {
-    batch[result] =
-        IdxToPtr(small_span_state_.cache[csize - result - 1], size, span_start);
-  }
-
-  // Store this->cache_size_ one time.
-  cache_size_ = csize - result;
-
-  while (result < N) {
-    if (freelist_ == kListEnd) {
-      break;
-    }
-
-    ObjIdx* const host = IdxToPtr(freelist_, size, span_start);
-    uint16_t embed_count = embed_count_;
-
-    size_t iter = embed_count;
-    if (result + embed_count > N) {
-      iter = N - result;
-    }
-    for (size_t i = 0; i < iter; i++) {
-      // Pop from the first object on freelist.
-      batch[result + i] = IdxToPtr(host[embed_count - i], size, span_start);
-    }
-    embed_count -= iter;
-    result += iter;
-
-    if (result == N) {
-      embed_count_ = embed_count;
-      break;
-    }
-
-    // The first object on the freelist is empty, pop it.
-    TC_ASSERT_EQ(embed_count, 0);
-
-    batch[result] = host;
-    result++;
-
-    freelist_ = host[0];
-    embed_count_ = size / sizeof(ObjIdx) - 1;
-  }
-  allocated_.store(allocated_.load(std::memory_order_relaxed) + result,
-                   std::memory_order_relaxed);
-  return result;
-}
-
-uint32_t Span::CalcReciprocal(size_t size) {
-  // Calculate scaling factor. We want to avoid dividing by the size of the
-  // object. Instead we'll multiply by a scaled version of the reciprocal.
-  // We divide kBitmapScalingDenominator by the object size, so later we can
-  // multiply by this reciprocal, and then divide this scaling factor out.
-  TC_ASSERT_GT(size, 0);
-  return kBitmapScalingDenominator / size;
-}
-
-void Span::BuildBitmap(size_t size, size_t count) {
+void Span::BuildBitmap(size_t size, size_t count) __restrict__ {
   // We are using a bitmap to indicate whether objects are used or not. The
   // maximum capacity for the bitmap is bitmap.size() objects.
-  TC_ASSERT_LE(count, small_span_state_.bitmap.size());
-  allocated_.store(0, std::memory_order_relaxed);
-  small_span_state_.bitmap
-      .Clear();  // bitmap can be non-zero from a previous use.
-  small_span_state_.bitmap.SetRange(0, count);
-  TC_ASSERT_EQ(small_span_state_.bitmap.CountBits(), count);
+  TC_ASSERT_LE(count, bitmap_.size());
+  allocated_ = 0;
+  bitmap_.Clear();  // bitmap can be non-zero from a previous use.
+  bitmap_.SetRange(0, count);
+  TC_ASSERT_EQ(bitmap_.CountBits(), count);
 }
 
 int Span::BuildFreelist(size_t size, size_t count, absl::Span<void*> batch,
-                        uint64_t alloc_time) {
-  TC_ASSERT(!is_large_or_sampled());
+                        BitmapMode mode) __restrict__ {
   TC_ASSERT_GT(count, 0);
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
   freelist_ = kListEnd;
-  small_span_state_.alloc_time = alloc_time;
+#endif
 
-  if (UseBitmapForSize(size)) {
+  if (mode != BitmapMode::kDisabled) {
+    return DynamicBitmapBuild(size, count, batch, mode);
+  }
+
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+  if (UseBitmapForSize(size, mode)) {
     BuildBitmap(size, count);
     return BitmapPopBatch(batch, size);
   }
+#endif
 
   // First, push as much as we can into the batch.
   const uintptr_t start = first_page().start_uintptr();
@@ -268,7 +117,19 @@ int Span::BuildFreelist(size_t size, size_t count, absl::Span<void*> batch,
     batch[i] = ptr;
     ptr += size;
   }
-  allocated_.store(result, std::memory_order_relaxed);
+  allocated_ = result;
+
+#ifndef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+  if (ABSL_PREDICT_TRUE(UseBitmapForSize(size, mode))) {
+    TC_ASSERT_LE(count, bitmap_.size());
+    if (result < count) {
+      bitmap_.SetRange(result, count - result);
+    }
+    TC_ASSERT_EQ(bitmap_.CountBits(), count - result);
+    return result;
+  }
+  freelist_ = kListEnd;
+#endif
 
   const ObjIdx idxStep = size / static_cast<size_t>(kAlignment);
   // Valid objects are {0, idxStep, idxStep * 2, ..., idxStep * (count - 1)}.
@@ -288,7 +149,7 @@ int Span::BuildFreelist(size_t size, size_t count, absl::Span<void*> batch,
   // Then, push as much as we can into the cache.
   int cache_size = 0;
   for (; idx < idxEnd && cache_size < kCacheSize; idx += idxStep) {
-    small_span_state_.cache[cache_size] = idx;
+    list_.cache[cache_size] = idx;
     cache_size++;
   }
   cache_size_ = cache_size;
@@ -322,14 +183,121 @@ int Span::BuildFreelist(size_t size, size_t count, absl::Span<void*> batch,
   return result;
 }
 
-Span* Span::New(Range r) { return Static::span_allocator().New(r); }
+namespace {
 
-void Span::Delete(Span* span) {
+// Returns a bitmap with bits [start, end) set to 1, and the rest set to 0.
+Span::BitmapElem BitmapWordInit(size_t start, size_t end) {
+  TC_ASSERT_LT(start, end);
+  return (~Span::BitmapElem{0} << start) &
+         (~Span::BitmapElem{0} >> (Span::kBitsPerWord - end));
+}
+
+// Initialize the bitmap range [0, start) to 0, and [start, end) to 1.
+// If kBackward is set, bitmap words are counted backwards from the end
+// (L1 bitmap). Otherwise, they are counted forwards (L2 bitmap).
+template <bool kBackward>
+void InitBitmapRange(Span::BitmapElem* bm, size_t start, size_t end) {
+  constexpr ptrdiff_t kDir = kBackward ? -1 : 1;
+  constexpr size_t kBitsPerWord = Span::kBitsPerWord;
+  const ptrdiff_t start_word = start / kBitsPerWord;
+  const size_t start_bit = start % kBitsPerWord;
+  const ptrdiff_t end_word = end / kBitsPerWord;
+  const size_t end_bit = end % kBitsPerWord;
+  for (ptrdiff_t w = 0; w < start_word; ++w) {
+    bm[w * kDir] = 0;
+  }
+  if (start == end) {
+    if (start_bit != 0) {
+      bm[start_word * kDir] = 0;
+    }
+    return;
+  }
+  if (start_word == end_word) {
+    bm[start_word * kDir] = BitmapWordInit(start_bit, end_bit);
+    return;
+  }
+  bm[start_word * kDir] = BitmapWordInit(start_bit, Span::kBitsPerWord);
+  for (ptrdiff_t w = start_word + 1; w < end_word; ++w) {
+    bm[w * kDir] = ~Span::BitmapElem{0};
+  }
+  if (end_bit != 0) {
+    bm[end_word * kDir] = BitmapWordInit(0, end_bit);
+  }
+}
+
+}  // namespace
+
+int Span::DynamicBitmapBuild(size_t size, size_t count, absl::Span<void*> batch,
+                             BitmapMode mode) __restrict__ {
+  TC_ASSERT_GT(count, 0);
+  TC_ASSERT_NE(mode, BitmapMode::kDisabled);
+  const size_t result = std::min(batch.size(), count);
+  char* ptr = static_cast<char*>(start_address());
+  for (size_t i = 0; i < result; ++i, ptr += size) {
+    batch[i] = ptr;
+  }
+  allocated_ = result;
+
+  BitmapElem* bm = DynamicBitmap(mode);
+  // Initialize L1 bitmap.
+  InitBitmapRange<true>(bm, result, count);
+
+  // Initialize L2 bitmap depending on the mode.
+  const size_t l1_start = result / kBitsPerWord;
+  const size_t l1_words = (count + kBitsPerWord - 1) / kBitsPerWord;
+  switch (mode) {
+    case BitmapMode::kInline64:
+      // No L2 bitmap.
+      break;
+    case BitmapMode::kInline256:
+      TC_ASSERT_LE(l1_words, kRawBitmapSize);
+      level2_bitmap_ =
+          result == count
+              ? 0
+              : static_cast<uint8_t>(BitmapWordInit(l1_start, l1_words));
+      break;
+    case BitmapMode::kOutlineL2_1:
+      TC_ASSERT_LE(l1_words, kBitsPerWord);
+      raw_bitmap_[0] = result == count ? 0 : BitmapWordInit(l1_start, l1_words);
+      break;
+    case BitmapMode::kOutlineL2_4:
+      TC_ASSERT_LE(l1_words, kRawBitmapSize * kBitsPerWord);
+      // Here and in kOutlineL2_8 case, we can leave some trailing bitmap words
+      // uninitialized. This is OK since we never try to pop more elements than
+      // are available in the span.
+      InitBitmapRange<false>(raw_bitmap_, l1_start, l1_words);
+      break;
+    case BitmapMode::kOutlineL2_8: {
+      // Each L2 bit covers two L1 bits.
+      if ((l1_words & 1) != 0) {
+        bm[-static_cast<ptrdiff_t>(l1_words)] = 0;
+      }
+      const size_t l2_start = l1_start / 2;
+      const size_t l2_end = (l1_words + 1) / 2;
+      TC_ASSERT_LE(l2_end, kRawBitmapSize * kBitsPerWord);
+      InitBitmapRange<false>(raw_bitmap_, l2_start, l2_end);
+      break;
+    }
+    case BitmapMode::kDisabled:
+      ABSL_UNREACHABLE();
+  }
+  return result;
+}
+
+Span* absl_nonnull Span::New(PageId first_page) {
+  return tc_globals.span_allocator().New(first_page);
+}
+
+void Span::Delete(Span* absl_nonnull span) { Delete(absl::MakeSpan(&span, 1)); }
+
+void Span::Delete(absl::Span<Span* absl_nonnull> spans) {
 #ifndef NDEBUG
-  // In debug mode, trash the contents of deleted Spans
-  memset(static_cast<void*>(span), 0x3f, sizeof(*span));
+  for (Span* span : spans) {
+    // In debug mode, trash the contents of deleted Spans
+    memset(static_cast<void*>(span), 0x3f, sizeof(*span));
+  }
 #endif
-  Static::span_allocator().Delete(span);
+  tc_globals.span_allocator().Delete(spans);
 }
 
 }  // namespace tcmalloc_internal

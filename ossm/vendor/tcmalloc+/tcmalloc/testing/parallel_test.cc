@@ -29,6 +29,7 @@ extern "C" {
 void* TCMallocInternalNew(size_t);
 void TCMallocInternalDelete(void*);
 void TCMallocInternalDeleteSized(void*, size_t);
+size_t TCMalloc_Internal_GetAllocatedSize(const void*);
 
 }  // extern "C"
 
@@ -40,7 +41,7 @@ struct Allocator {
       : stop(stop), do_sized_delete(do_sized_delete) {}
 
   void operator()() {
-    const int kNumAllocations = 65536;
+    const int kNumAllocations = 1024;
     std::vector<void*> v;
     v.reserve(kNumAllocations);
 
@@ -53,7 +54,7 @@ struct Allocator {
       }
 
       for (void* ptr : v) {
-        ABSL_CHECK_GE(*MallocExtension::GetAllocatedSize(ptr), size);
+        ABSL_CHECK_GE(TCMalloc_Internal_GetAllocatedSize(ptr), size);
       }
 
       for (void* ptr : v) {
@@ -78,7 +79,7 @@ TEST(ParallelTest, Stable) {
 
   std::thread t1(a1), t2(a2), t3(a3);
 
-  absl::SleepFor(absl::Seconds(1));
+  absl::SleepFor(absl::Milliseconds(100));
 
   stop.store(true, std::memory_order_release);
   t1.join();

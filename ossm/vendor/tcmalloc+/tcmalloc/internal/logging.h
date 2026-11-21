@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <sys/types.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -35,6 +36,7 @@
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "tcmalloc/internal/allocation_guard.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/malloc_extension.h"
@@ -64,17 +66,8 @@ struct StackTrace {
   // memory block.
   AllocHandle sampled_alloc_handle;
 
-  // For small sampled objects, we allocate a full span to hold the
-  // sampled object.  However to avoid disturbing fragmentation
-  // profiles, in such cases we also allocate a small proxy object
-  // using the normal mechanism.
-  //
-  // proxy field is defined only for heap sample stack traces.
-  // For heap samples, proxy==NULL iff size > kMaxSize.
-  void* proxy;
-
   uintptr_t requested_size;
-  uintptr_t requested_alignment;
+  std::optional<std::align_val_t> requested_alignment;
   uintptr_t allocated_size;  // size after sizeclass/page rounding
   bool requested_size_returning;
 
@@ -88,42 +81,53 @@ struct StackTrace {
   // Timestamp of allocation.
   absl::Time allocation_time;
 
+  TokenId token_id;
+  int16_t cpu_id;
+
   Profile::Sample::GuardedStatus guarded_status;
 
   // How the memory was allocated (new/malloc/etc.)
-  Profile::Sample::AllocationType allocation_type;
+  AllocationType allocation_type;
+  int16_t vcpu_id;
+  pid_t thread_id;
 
   // If not nullptr, this is the start address of the span corresponding to this
   // sampled allocation. This may be nullptr for cases where it is not useful
   // for residency analysis such as for peakheapz.
   void* span_start_address = nullptr;
 
-  uintptr_t depth;  // Number of PC values stored in array below
+  uintptr_t depth = 0;  // Number of PC values stored in array below
   // Place stack as last member because it might not all be accessed.
-  void* stack[kMaxStackDepth];
+  // Zero-initialized so uninitialized stack memory (which might contain
+  // cryptographic secrets) is not leaked into the heap and hence core dumps.
+  void* stack[kMaxStackDepth] = {};
 };
 
 #define TC_LOG(msg, ...)                                                \
   tcmalloc::tcmalloc_internal::LogImpl("%d %s:%d] " msg "\n", __FILE__, \
                                        __LINE__, ##__VA_ARGS__)
 
-void RecordCrash(absl::string_view detector, absl::string_view error);
-ABSL_ATTRIBUTE_NORETURN void CrashWithOOM(size_t alloc_size);
-ABSL_ATTRIBUTE_NORETURN void CheckFailed(const char* file, int line,
-                                         const char* msg, int msglen);
+void RecordCrash(absl::string_view detector, absl::string_view error,
+                 absl::Span<void* const> stack);
+[[noreturn]] void CrashWithOOM(size_t alloc_size);
+[[noreturn]] void CheckFailed(const char* file, int line, const char* msg,
+                              int msglen);
 
 template <typename... Args>
-ABSL_ATTRIBUTE_NORETURN ABSL_ATTRIBUTE_NOINLINE void CheckFailed(
+[[noreturn]] ABSL_ATTRIBUTE_NOINLINE void CheckFailed(
     const char* func, const char* file, int line,
     const absl::FormatSpec<int, const char*, int, const char*, Args...>& format,
     const Args&... args) {
-  AllocationGuard no_allocations;
   char buf[512];
-  int n =
-      absl::SNPrintF(buf, sizeof(buf), format, absl::base_internal::GetTID(),
-                     file, line, func, args...);
+  int n;
+  {
+    AllocationGuard no_allocations;
+    n = absl::SNPrintF(buf, sizeof(buf), format, absl::base_internal::GetTID(),
+                       file, line, func, args...);
+  }
   buf[sizeof(buf) - 1] = 0;
-  CheckFailed(file, line, buf, std::min<size_t>(n, sizeof(buf) - 1));
+  CheckFailed(file, line, buf,
+              n < 0 ? 0 : std::min<size_t>(n, sizeof(buf) - 1));
 }
 
 void PrintStackTrace(void* const* stack_frames, size_t depth);
@@ -143,7 +147,7 @@ ABSL_ATTRIBUTE_NOINLINE void LogImpl(
                        args...);
   }
   buf[sizeof(buf) - 1] = 0;
-  (*log_message_writer)(buf, std::min<size_t>(n, sizeof(buf) - 1));
+  (*log_message_writer)(buf, n < 0 ? 0 : std::min<size_t>(n, sizeof(buf) - 1));
 }
 
 // TC_BUG unconditionally aborts the program with the message.
@@ -251,16 +255,19 @@ const T& FormatConvert(const T& v) {
 // Print into buffer
 class Printer {
  private:
-  char* buf_;        // Where should we write next
-  size_t left_;      // Space left in buffer (including space for \0)
+  const char* const start_;  // Start of buffer
+  char* buf_;                // Where should we write next
+  size_t left_;              // Space left in buffer (including space for \0)
   size_t required_;  // Space we needed to complete all printf calls up to this
                      // point
 
  public:
-  // REQUIRES: "length > 0"
-  Printer(char* buf, size_t length) : buf_(buf), left_(length), required_(0) {
-    TC_ASSERT_GT(length, 0);
-    buf[0] = '\0';
+  Printer(char* buf, size_t length)
+      : start_(buf), buf_(buf), left_(length), required_(0) {
+    if (length > 0) {
+      TC_ASSERT_NE(buf, nullptr);
+      buf[0] = '\0';
+    }
   }
 
   Printer(const Printer&) = delete;
@@ -269,15 +276,20 @@ class Printer {
   template <typename... Args>
   void printf(const absl::FormatSpec<Args...>& format, const Args&... args) {
     AllocationGuard enforce_no_alloc;
-    const int r = absl::SNPrintF(buf_, left_, format, args...);
+    char dummy;
+    const int r =
+        absl::SNPrintF(left_ > 0 ? buf_ : &dummy, left_, format, args...);
     if (r < 0) {
       left_ = 0;
       return;
     }
     required_ += r;
 
-    if (static_cast<size_t>(r) > left_) {
-      left_ = 0;
+    if (static_cast<size_t>(r) >= left_) {
+      if (left_ > 0) {
+        buf_ += left_ - 1;
+        left_ = 0;
+      }
     } else {
       left_ -= r;
       buf_ += r;
@@ -290,7 +302,11 @@ class Printer {
     AppendPieces({static_cast<const absl::AlphaNum&>(args).Piece()...});
   }
 
-  size_t SpaceRequired() const { return required_; }
+  [[nodiscard]] size_t SpaceRequired() const { return required_; }
+
+  [[nodiscard]] absl::string_view view() const {
+    return absl::string_view(start_, buf_ - start_);
+  }
 
  private:
   void AppendPieces(std::initializer_list<absl::string_view> pieces) {
@@ -298,7 +314,7 @@ class Printer {
     for (const absl::string_view piece : pieces) total_size += piece.size();
 
     required_ += total_size;
-    if (left_ < total_size) {
+    if (left_ <= total_size) {
       left_ = 0;
       return;
     }
@@ -314,6 +330,7 @@ class Printer {
     }
 
     left_ -= total_size;
+    buf_[0] = '\0';
   }
 };
 
@@ -338,7 +355,7 @@ class PbtxtRegion {
   void PrintRaw(absl::string_view key, absl::string_view value);
 
   // Prints 'key subregion'. Return the created subregion.
-  PbtxtRegion CreateSubRegion(absl::string_view key)
+  [[nodiscard]] PbtxtRegion CreateSubRegion(absl::string_view key)
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
 
 #ifndef NDEBUG
@@ -349,6 +366,27 @@ class PbtxtRegion {
   Printer* out_;
   PbtxtRegionType type_;
 };
+
+#if !defined(NDEBUG)
+ABSL_CONST_INIT extern thread_local int tcmalloc_reentrancy_count;
+#endif
+
+#if 0 && !defined(NDEBUG)
+class [[maybe_unused]] ReentrancyGuard {
+ public:
+  ReentrancyGuard() {
+    TC_CHECK_EQ(tcmalloc_reentrancy_count, 0);
+    ++tcmalloc_reentrancy_count;
+  }
+  ~ReentrancyGuard() { --tcmalloc_reentrancy_count; }
+};
+#else
+class [[maybe_unused]] ReentrancyGuard {
+ public:
+  constexpr ReentrancyGuard() = default;
+  ~ReentrancyGuard() = default;
+};
+#endif
 
 }  // namespace tcmalloc_internal
 }  // namespace tcmalloc

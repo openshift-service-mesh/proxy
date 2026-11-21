@@ -17,11 +17,14 @@
 
 #include <stddef.h>
 
+#include <cstdint>
 #include <optional>
 
+#include "absl/base/nullability.h"
 #include "absl/functional/function_ref.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
+#include "absl/types/span.h"
 #include "tcmalloc/experiment_config.h"
 #include "tcmalloc/internal/config.h"
 
@@ -50,17 +53,29 @@ constexpr size_t kNumExperiments =
 // buffer must be sized for kMaxExperimentID entries.
 //
 // This is exposed for testing purposes only.
-const bool* /*absl_nonnull*/ SelectExperiments(bool* /*absl_nonnull*/ buffer,
-                                           absl::string_view test_target,
-                                           absl::string_view active,
-                                           absl::string_view disabled,
-                                           bool unset);
+void SelectExperiments(bool* absl_nonnull buffer, absl::string_view test_target,
+                       absl::string_view active, absl::string_view disabled,
+                       bool unset, absl::string_view hostname,
+                       absl::Span<const ExperimentConfig> experiments);
+
+[[nodiscard]] absl::string_view LookupHostname();
+
+[[nodiscard]] std::optional<uint64_t> CalculateRolloutBucket(
+    absl::string_view hostname, absl::string_view salt);
+
+// Returns whether config's rollout selects hostname.  For an inverted config,
+// hosts in the treatment slot of any other entry of experiments sharing its
+// salt are excluded, so that entry's treatment arm is unchanged.
+[[nodiscard]] bool IsExperimentRolloutEnabled(
+    const ExperimentConfig& config, absl::string_view hostname,
+    absl::Span<const ExperimentConfig> experiments);
 
 }  // namespace tcmalloc_internal
 
-bool IsExperimentActive(Experiment exp);
+[[nodiscard]] bool IsExperimentActive(Experiment exp);
 
-std::optional<Experiment> FindExperimentByName(absl::string_view name);
+[[nodiscard]] std::optional<Experiment> FindExperimentByName(
+    absl::string_view name);
 
 void WalkExperiments(
     absl::FunctionRef<void(absl::string_view name, bool active)> callback);

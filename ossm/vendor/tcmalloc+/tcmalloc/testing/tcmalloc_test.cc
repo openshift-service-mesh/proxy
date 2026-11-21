@@ -74,7 +74,11 @@
 #include "tcmalloc/huge_pages.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/declarations.h"
+#include "tcmalloc/internal/is_aligned_to.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/memory_tag.h"
+#include "tcmalloc/internal/page_allocation_status.h"
+#include "tcmalloc/internal/page_size.h"
 #include "tcmalloc/internal/parameter_accessors.h"
 #include "tcmalloc/malloc_extension.h"
 #include "tcmalloc/pages.h"
@@ -90,6 +94,8 @@
 const int kLogMaxMemalign = 18;
 
 extern "C" void* reallocarray(void* ptr, size_t nmemb, size_t size);
+extern "C" void* __alloc_token_0_pvalloc(size_t size) noexcept;
+extern "C" void* __alloc_token_1_pvalloc(size_t size) noexcept;
 
 #if !defined(__GLIBC__)
 extern "C" int malloc_trim(size_t pad);
@@ -114,14 +120,6 @@ static const size_t kMaxTestAllocSize = 4 << 10;
 namespace tcmalloc {
 extern ABSL_ATTRIBUTE_WEAK bool want_hpaa();
 }  // namespace tcmalloc
-
-int main(int argc, char** argv) {
-  testing::InitGoogleTest(&argc, argv);
-  constexpr size_t kGiB = 1024 * 1024 * 1024;
-  SetTestResourceLimit(/*limit=*/8 * kGiB);
-
-  return RUN_ALL_TESTS();
-}
 
 namespace tcmalloc::tcmalloc_internal {
 namespace {
@@ -192,15 +190,17 @@ TEST(TcmallocTest, Calloc) {
   }
 }
 
+constexpr int kReallocLargeSize = (1 << 20) - (1 << 10);
+static_assert(kReallocLargeSize > tcmalloc_internal::kMaxSize);
+// 9900 is arbitrary, chosen so the tested deltas stay within a single size
+// class across all size-class configurations (avoiding the 9984-byte boundary
+// in 256 KiB page flexible size classes).
+constexpr int kStartSizes[] = {100, 1000, 9900, 100000, kReallocLargeSize};
+constexpr int kDeltas[] = {1,   -2, 4,    -8,      16,
+                           -32, 64, -128, 1 << 10, -(2 << 10)};
+
 TEST(TcmallocTest, Realloc) {
   // Test that realloc doesn't always reallocate and copy memory.
-  constexpr int kLargeSize = (1 << 20) - (1 << 10);
-  ASSERT_GT(kLargeSize, tcmalloc_internal::kMaxSize);
-  // Select start sizes such that start_size and start_size + delta are expected
-  // to be allocated from the same size class.
-  constexpr int start_sizes[] = {100, 1000, 20000, 100000, kLargeSize};
-  constexpr int deltas[] = {1,   -2, 4,    -8,      16,
-                            -32, 64, -128, 1 << 10, -(2 << 10)};
 
   // When sampling, we always allocate in units of page-size, which makes
   // reallocs of small sizes do extra work (thus, failing these checks).
@@ -209,8 +209,8 @@ TEST(TcmallocTest, Realloc) {
   // reallocated even with sampling.
   ScopedNeverSample never_sample;
 
-  for (int s = 0; s < sizeof(start_sizes) / sizeof(*start_sizes); ++s) {
-    void* p = malloc(start_sizes[s]);
+  for (int s = 0; s < std::size(kStartSizes); ++s) {
+    void* p = malloc(kStartSizes[s]);
     // We stash a copy of the pointer p so we can reference it later.  We must
     // work with the return value of p.
     //
@@ -223,23 +223,33 @@ TEST(TcmallocTest, Realloc) {
     ASSERT_NE(p, nullptr);
     // The larger the start-size, the larger the non-reallocing delta.
     for (int d = 0; d < (s + 1) * 2; ++d) {
-      p = realloc(p, start_sizes[s] + deltas[d]);
+      p = realloc(p, kStartSizes[s] + kDeltas[d]);
       const intptr_t new_ptr = absl::bit_cast<intptr_t>(p);
       benchmark::DoNotOptimize(p);
 
+      // Sanitizers reallocate more aggressively.
+      if (kSanitizerPresent) {
+        continue;
+      }
+
       ASSERT_EQ(orig_ptr, new_ptr)
           << ": realloc should not allocate new memory"
-          << " (" << start_sizes[s] << " + " << deltas[d] << ")";
+          << " (" << kStartSizes[s] << " + " << kDeltas[d] << ")";
     }
     // Test again, but this time reallocing smaller first.
     for (int d = 0; d < s * 2; ++d) {
-      p = realloc(p, start_sizes[s] - deltas[d]);
+      p = realloc(p, kStartSizes[s] - kDeltas[d]);
       const intptr_t new_ptr = absl::bit_cast<intptr_t>(p);
       benchmark::DoNotOptimize(p);
 
+      // Sanitizers reallocate more aggressively.
+      if (kSanitizerPresent) {
+        continue;
+      }
+
       ASSERT_EQ(orig_ptr, new_ptr)
           << ": realloc should not allocate new memory"
-          << " (" << start_sizes[s] << " + " << -deltas[d] << ")";
+          << " (" << kStartSizes[s] << " + " << -kDeltas[d] << ")";
     }
     free(p);
   }
@@ -254,13 +264,8 @@ TEST(TcmallocTest, ReallocArray) {
   // to us here.
   ScopedNeverSample never_sample;
 
-  // Select start sizes such that start_size and start_size + delta are expected
-  // to be allocated from the same size class.
-  constexpr int start_sizes[] = {100, 1000, 20000, 100000};
-  constexpr int deltas[] = {1, -2, 4, -8, 16, -32, 64, -128};
-
-  for (int s = 0; s < sizeof(start_sizes) / sizeof(*start_sizes); ++s) {
-    void* p = malloc(start_sizes[s]);
+  for (int s = 0; s < std::size(kStartSizes); ++s) {
+    void* p = malloc(kStartSizes[s]);
     // We stash a copy of the pointer p so we can reference it later.  We must
     // work with the return value of p.
     //
@@ -273,23 +278,33 @@ TEST(TcmallocTest, ReallocArray) {
     ASSERT_NE(p, nullptr);
     // The larger the start-size, the larger the non-reallocing delta.
     for (int d = 0; d < (s + 1) * 2; ++d) {
-      p = reallocarray(p, start_sizes[s] + deltas[d], 1);
+      p = reallocarray(p, kStartSizes[s] + kDeltas[d], 1);
       const intptr_t new_ptr = absl::bit_cast<intptr_t>(p);
       benchmark::DoNotOptimize(p);
 
+      // Sanitizers reallocate more aggressively.
+      if (kSanitizerPresent) {
+        continue;
+      }
+
       ASSERT_EQ(orig_ptr, new_ptr)
           << ": reallocarray should not allocate new memory"
-          << " (" << start_sizes[s] << " + " << deltas[d] << ")";
+          << " (" << kStartSizes[s] << " + " << kDeltas[d] << ")";
     }
     // Test again, but this time reallocing smaller first.
     for (int d = 0; d < s * 2; ++d) {
-      p = reallocarray(p, start_sizes[s] - deltas[d], 1);
+      p = reallocarray(p, kStartSizes[s] - kDeltas[d], 1);
       const intptr_t new_ptr = absl::bit_cast<intptr_t>(p);
       benchmark::DoNotOptimize(p);
 
+      // Sanitizers reallocate more aggressively.
+      if (kSanitizerPresent) {
+        continue;
+      }
+
       ASSERT_EQ(orig_ptr, new_ptr)
           << ": reallocarray should not allocate new memory"
-          << " (" << start_sizes[s] << " + " << -deltas[d] << ")";
+          << " (" << kStartSizes[s] << " + " << -kDeltas[d] << ")";
     }
     free(p);
   }
@@ -347,7 +362,7 @@ TEST(TCMallocTest, Multithreaded) {
 
   mgr.Start(kThreads, [&](int thread_id) { harness.Run(thread_id); });
 
-  absl::SleepFor(absl::Seconds(3));
+  absl::SleepFor(absl::Milliseconds(500));
 
   mgr.Stop();
 }
@@ -374,7 +389,7 @@ TEST(TCMallocTest, EnormousAllocations) {
 
   // Check that asking for stuff tiny bit smaller than largest possible
   // size returns NULL.
-  for (size_t i = 0; i < 70000; i += absl::Uniform(rand, 1, 20)) {
+  for (size_t i = 0; i < 70000; i += absl::Uniform(rand, 1, 500)) {
     size_t size = kMaxTestSize - i;
     // Convince the compiler that size may change, as to suppress
     // optimization/warnings around the size being too large.
@@ -384,6 +399,24 @@ TEST(TCMallocTest, EnormousAllocations) {
     p = malloc(size);
     ASSERT_EQ(nullptr, p);
     EXPECT_EQ(ENOMEM, errno);
+
+    errno = 0;
+    p = pvalloc(size);
+    EXPECT_EQ(nullptr, p);
+    EXPECT_EQ(ENOMEM, errno);
+    free(p);
+
+    errno = 0;
+    p = __alloc_token_0_pvalloc(size);
+    EXPECT_EQ(nullptr, p);
+    EXPECT_EQ(ENOMEM, errno);
+    free(p);
+
+    errno = 0;
+    p = __alloc_token_1_pvalloc(size);
+    EXPECT_EQ(nullptr, p);
+    EXPECT_EQ(ENOMEM, errno);
+    free(p);
 
     p = ::operator new(size, std::nothrow);
     ASSERT_EQ(nullptr, p);
@@ -405,6 +438,18 @@ TEST(TCMallocTest, EnormousAllocations) {
     p = malloc(kMaxSignedSize + i);
     free(p);
     p = malloc(kMaxSignedSize - i);
+    free(p);
+    p = pvalloc(kMaxSignedSize + i);
+    free(p);
+    p = pvalloc(kMaxSignedSize - i);
+    free(p);
+    p = __alloc_token_0_pvalloc(kMaxSignedSize + i);
+    free(p);
+    p = __alloc_token_0_pvalloc(kMaxSignedSize - i);
+    free(p);
+    p = __alloc_token_1_pvalloc(kMaxSignedSize + i);
+    free(p);
+    p = __alloc_token_1_pvalloc(kMaxSignedSize - i);
     free(p);
   }
 
@@ -534,7 +579,7 @@ TEST(TCMallocTest, MallocAlignment) {
         static_cast<size_t>(1 << lg),
         static_cast<size_t>((1 << lg) + 1),
     };
-    void* ptrs[kNum * ABSL_ARRAYSIZE(sizes)];
+    void* ptrs[kNum * std::size(sizes)];
     int i = 0;
     for (size_t size : sizes) {
       for (int j = 0; j < kNum; i++, j++) {
@@ -559,7 +604,7 @@ TEST(TCMallocTest, CallocAlignment) {
         static_cast<size_t>(1 << lg),
         static_cast<size_t>((1 << lg) + 1),
     };
-    void* ptrs[kNum * ABSL_ARRAYSIZE(sizes)];
+    void* ptrs[kNum * std::size(sizes)];
     int i = 0;
     for (size_t size : sizes) {
       for (int j = 0; j < kNum; i++, j++) {
@@ -584,7 +629,7 @@ TEST(TCMallocTest, ReallocAlignment) {
         static_cast<size_t>(1 << lg),
         static_cast<size_t>((1 << lg) + 1),
     };
-    void* ptrs[kNum * ABSL_ARRAYSIZE(sizes)];
+    void* ptrs[kNum * std::size(sizes)];
     int i = 0;
     for (size_t size : sizes) {
       for (int j = 0; j < kNum; i++, j++) {
@@ -764,14 +809,63 @@ static void check_global_nallocx() __attribute__((constructor(101)));
 static void check_global_nallocx() { TC_CHECK_GE(nallocx(99, 0), 99); }
 #endif
 
+// Boundary allocation sizes covering 0, sub-word, alignment, cacheline, size
+// class, page, and small-to-large transitions.  General size/alignment sweeps
+// are covered by //tcmalloc/testing:tcmalloc_fuzzer.
+constexpr size_t kBoundaryTestSizes[] = {
+    0,
+    1,
+    7,
+    8,
+    9,
+    15,
+    16,
+    17,
+    24,
+    31,
+    32,
+    33,
+    63,
+    64,
+    65,
+    127,
+    128,
+    129,
+    255,
+    256,
+    511,
+    512,
+    1023,
+    1024,
+    1025,
+    4095,
+    4096,
+    4097,
+    kPageSize - 1,
+    kPageSize,
+    kPageSize + 1,
+    65535,
+    65536,
+    kMaxSize - 1,
+    kMaxSize,
+    kMaxSize + 1,
+    kMaxTestAllocSize,
+};
+
 TEST(TCMallocTest, nallocx) {
   // Guarded allocations may have a smaller allocated size than nallocx
   // predicts.  So we disable guarded allocations.
   ScopedGuardedSamplingInterval gs(-1);
 
-  for (size_t size = 0; size <= kMaxTestAllocSize; size += 11) {
+  for (size_t size : kBoundaryTestSizes) {
+    if (size > kMaxTestAllocSize) continue;
     size_t rounded = nallocx(size, 0);
     ASSERT_GE(rounded, size);
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_THREAD_SANITIZER) ||  \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+    rounded = std::max<size_t>(rounded, 1u);
+#endif
     void* ptr = operator new(size);
     ASSERT_EQ(rounded, MallocExtension::GetAllocatedSize(ptr));
     operator delete(ptr);
@@ -783,7 +877,8 @@ TEST(TCMallocTest, nallocx_alignment) {
   // predicts.  So we disable guarded allocations.
   ScopedGuardedSamplingInterval gs(-1);
 
-  for (size_t size = 0; size <= kMaxTestAllocSize; size += 17) {
+  for (size_t size : kBoundaryTestSizes) {
+    if (size > kMaxTestAllocSize) continue;
 #ifndef __riscv
     for (auto align : {0, 1, 7, 8, 10}) {
 #else
@@ -791,58 +886,35 @@ TEST(TCMallocTest, nallocx_alignment) {
 #endif
       size_t rounded = nallocx(size, MALLOCX_LG_ALIGN(align));
       ASSERT_GE(rounded, size);
-      ASSERT_EQ(rounded % (1 << align), 0);
+      if (!kSanitizerPresent) {
+        ASSERT_EQ(rounded % (1 << align), 0) << size << " " << align;
+      }
       void* ptr = memalign(1 << align, size);
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_THREAD_SANITIZER) ||  \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+      rounded = std::max<size_t>(rounded, 1u);
+#endif
       ASSERT_EQ(rounded, MallocExtension::GetAllocatedSize(ptr));
       free(ptr);
     }
   }
 }
 
-TEST(TCMallocTest, GetEstimatedAllocatedSizeHotCold) {
-  // Guarded allocations may have a smaller allocated size than nallocx
-  // predicts.  So we disable guarded allocations.
+TEST(TCMallocTest, NallocxZeroSizeLargeAlignment) {
   ScopedGuardedSamplingInterval gs(-1);
-  for (size_t size = 0; size <= kMaxTestAllocSize; size += 17) {
-    for (hot_cold_t hot_cold : {hot_cold_t{0}, hot_cold_t{255}}) {
-      size_t rounded =
-          MallocExtension::GetEstimatedAllocatedSize(size, hot_cold);
-      ASSERT_GE(rounded, size);
-      auto [ptr, allocated_size] =
-          __size_returning_new_hot_cold(size, hot_cold);
-      ASSERT_EQ(rounded, allocated_size);
-      sized_delete(ptr, size);
-    }
-  }
-}
-
-TEST(TCMallocTest, sdallocx) {
-  for (size_t size = 0; size <= 4096; size += 7) {
-    void* ptr = malloc(size);
-    memset(ptr, 0, size);
-    benchmark::DoNotOptimize(ptr);
-    sdallocx(ptr, size, 0);
-  }
-}
-
-TEST(TCMallocTest, free_sized) {
-  for (size_t size = 0; size <= 4096; size += 7) {
-    void* ptr = malloc(size);
-    memset(ptr, 0, size);
-    benchmark::DoNotOptimize(ptr);
-    free_sized(ptr, size);
-  }
-}
-
-TEST(TCMallocTest, realloc_free_sized) {
-  for (size_t size = 0; size <= 4096; size += 7) {
-    void* ptr = malloc(size);
-    size_t realloc_size = malloc_usable_size(ptr) + 1;
-    ptr = realloc(ptr, realloc_size);
-    memset(ptr, 0, realloc_size);
-    benchmark::DoNotOptimize(ptr);
-    free_sized(ptr, realloc_size);
-  }
+  constexpr int kLgAlign = kPageShift + 1;
+  constexpr size_t kAlign = size_t{1} << kLgAlign;
+  size_t rounded = nallocx(0, MALLOCX_LG_ALIGN(kLgAlign));
+  void* ptr = memalign(kAlign, 0);
+  ASSERT_NE(ptr, nullptr);
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_THREAD_SANITIZER) ||  \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  rounded = std::max<size_t>(rounded, 1u);
+#endif
+  EXPECT_EQ(rounded, MallocExtension::GetAllocatedSize(ptr));
+  free(ptr);
 }
 
 TEST(TCMallocTest, b421895944) {
@@ -879,23 +951,18 @@ TEST(TCMallocTest, FreeSizedDeathTest) {
   const size_t alignment = 512;
   int err = posix_memalign(&ptr, 512, alignment);
   ASSERT_EQ(err, 0) << alignment << " " << size;
+  // TODO(b/250877054): Switch to death test in sanitizers when supported.
+  // Note: ASan does support it.
+#if defined(ABSL_HAVE_HWADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_MEMORY_SANITIZER) || defined(ABSL_HAVE_THREAD_SANITIZER)
+  // This is UB, but when sanitizers support it we will notice the test
+  // failure and fix it.
+  free_sized(ptr, size);
+#else
   EXPECT_DEATH(free_sized(ptr, size), "");
+#endif
 }
 #endif
-
-TEST(TCMallocTest, free_aligned_aligned) {
-  for (size_t size = 7; size <= 4096; size += 7) {
-    for (size_t align = 0; align <= 10; align++) {
-      const size_t alignment = 1 << align;
-      void* ptr = aligned_alloc(alignment, size);
-      ASSERT_NE(ptr, nullptr) << alignment << " " << size;
-      ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr) & (alignment - 1), 0);
-      memset(ptr, 0, size);
-      benchmark::DoNotOptimize(ptr);
-      free_aligned_sized(ptr, alignment, size);
-    }
-  }
-}
 
 #ifndef NDEBUG
 TEST(TCMallocTest, FreeAlignedSizedDeathTest) {
@@ -903,27 +970,22 @@ TEST(TCMallocTest, FreeAlignedSizedDeathTest) {
   const size_t alignment = 1024;
   void* ptr = malloc(size);
   ASSERT_NE(ptr, nullptr) << alignment << " " << size;
+  // TODO(b/250877054): Switch to death test in sanitizers when supported.
+  // Note: ASan does support it.
+#if defined(ABSL_HAVE_HWADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_MEMORY_SANITIZER) || defined(ABSL_HAVE_THREAD_SANITIZER)
+  // This is UB, but when sanitizers support it we will notice the test
+  // failure and fix it.
+  free_aligned_sized(ptr, size, alignment);
+#else
   EXPECT_DEATH(free_aligned_sized(ptr, size, alignment), "");
+#endif
 }
 #endif
 
-TEST(TCMallocTest, sdallocx_alignment) {
-  for (size_t size = 0; size <= 4096; size += 7) {
-    for (size_t align = 3; align <= 10; align++) {
-      const size_t alignment = 1 << align;
-      void* ptr;
-      int err = posix_memalign(&ptr, alignment, size);
-      ASSERT_EQ(err, 0) << alignment << " " << size;
-      ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr) & (alignment - 1), 0);
-      memset(ptr, 0, size);
-      benchmark::DoNotOptimize(ptr);
-      sdallocx(ptr, size, MALLOCX_LG_ALIGN(align));
-    }
-  }
-}
-
 TEST(TCMallocTest, alloc_at_least) {
-  for (size_t size = 0; size <= 4096; size += 7) {
+  for (size_t size : kBoundaryTestSizes) {
+    if (size > 4096) continue;
     auto result = alloc_at_least(size);
     ASSERT_GE(result.size, size);
     memset(result.ptr, 0, size);
@@ -941,21 +1003,6 @@ TEST(TCMallocTest, alloc_at_least) {
     benchmark::DoNotOptimize(result);
     ASSERT_GE(malloc_usable_size(result.ptr), result.size);
     free_sized(result.ptr, result.size);
-  }
-}
-
-TEST(TCMallocTest, aligned_alloc_at_least) {
-  for (size_t size = 7; size <= 4096; size += 7) {
-    for (size_t align = 0; align <= 10; align++) {
-      const size_t alignment = 1 << align;
-      auto result = aligned_alloc_at_least(alignment, size);
-      ASSERT_NE(result.ptr, nullptr) << alignment << " " << size;
-      ASSERT_EQ(reinterpret_cast<uintptr_t>(result.ptr) & (alignment - 1), 0);
-      ASSERT_GE(result.size, size);
-      memset(result.ptr, 0, result.size);
-      benchmark::DoNotOptimize(result);
-      free_aligned_sized(result.ptr, alignment, result.size);
-    }
   }
 }
 
@@ -996,6 +1043,9 @@ std::optional<int64_t> ParseLowLevelAllocator(absl::string_view allocator_name,
 }
 
 TEST(TCMallocTest, GetStatsReportsLowLevel) {
+  if (kSanitizerPresent) {
+    GTEST_SKIP() << "no stats under sanitizers";
+  }
   std::string stats = MallocExtension::GetStats();
   std::optional<int64_t> low_level_bytes =
       ParseLowLevelAllocator("MmapSysAllocator", stats);
@@ -1023,27 +1073,31 @@ void ExpectSameAddresses(T1 v1, T2 v2) {
 }
 }  // end unnamed namespace
 
+#if ABSL_HAVE_FEATURE(kcfi)
+extern "C" char kDeleteNothrow[] asm("_ZdlPvRKSt9nothrow_t");
+extern "C" char kDeleteArrayNothrow[] asm("_ZdaPvRKSt9nothrow_t");
+#endif
+
 TEST(TCMallocTest, TestAliasedFunctions) {
-  void* (*operator_new)(size_t) = &::operator new;
-  void* (*operator_new_nothrow)(size_t, const std::nothrow_t&) =
-      &::operator new;
-  void* (*operator_new_array)(size_t) = &::operator new[];
-  void* (*operator_new_array_nothrow)(size_t, const std::nothrow_t&) =
-      &::operator new[];
-
-  ExpectSameAddresses(operator_new, operator_new_array);
-  ExpectSameAddresses(operator_new_nothrow, operator_new_array_nothrow);
-
+  if (kSanitizerPresent) {
+    GTEST_SKIP() << "Skipping under sanitizers";
+  }
   void (*operator_delete)(void*) = &::operator delete;
+  void (*operator_delete_array)(void*) = &::operator delete[];
+#if ABSL_HAVE_FEATURE(kcfi)
+  ExpectSameAddresses(operator_delete, kDeleteNothrow);
+  ExpectSameAddresses(operator_delete, operator_delete_array);
+  ExpectSameAddresses(operator_delete, kDeleteArrayNothrow);
+#else
   void (*operator_delete_nothrow)(void*, const std::nothrow_t&) =
       &::operator delete;
-  void (*operator_delete_array)(void*) = &::operator delete[];
   void (*operator_delete_array_nothrow)(void*, const std::nothrow_t&) =
       &::operator delete[];
 
   ExpectSameAddresses(operator_delete, operator_delete_nothrow);
   ExpectSameAddresses(operator_delete, operator_delete_array);
   ExpectSameAddresses(operator_delete, operator_delete_array_nothrow);
+#endif
 }
 
 // This test is extremely slow on riscv.
@@ -1158,12 +1212,17 @@ TEST_P(TcmallocSizedNewTest, SizedOperatorNewReturnsExtraCapacity) {
   // the next available class size, which we know is always at least
   // properly aligned, so size 3 should always return extra capacity.
   sized_ptr_t res = New(3);
-  EXPECT_THAT(res.n, testing::Ge(8));
+  if (kSanitizerPresent) {
+    EXPECT_THAT(res.n, testing::Eq(3));
+  } else {
+    EXPECT_THAT(res.n, testing::Ge(8));
+  }
   Delete(res);
 }
 
 TEST_P(TcmallocSizedNewTest, SizedOperatorNew) {
-  for (size_t size = 0; size < 16 * 1024; size += 3) {
+  for (size_t size : kBoundaryTestSizes) {
+    if (size >= 16 * 1024) continue;
     sized_ptr_t res = New(size);
     EXPECT_NE(res.p, nullptr);
     EXPECT_GE(res.n, size);
@@ -1174,13 +1233,38 @@ TEST_P(TcmallocSizedNewTest, SizedOperatorNew) {
   }
 }
 
-TEST_P(TcmallocSizedNewTest, InvalidSizedOperatorNew) {
+// The invalid size below is rejected before alignment or hot/cold matter, so
+// the fixture only needs to reach each of the 8 size-returning entry points
+// once: {default, overaligned} x {default, explicit hot_cold} x
+// {throwing, nothrow}.  Each throwing case is a death test that dumps malloc
+// stats, which is slow, so avoid the redundant instantiations.
+class TcmallocSizedNewInvalidSizeTest : public TcmallocSizedNewTest {};
+
+INSTANTIATE_TEST_SUITE_P(
+    AlignedHotColdThrow, TcmallocSizedNewInvalidSizeTest,
+    testing::Combine(testing::Values(8, 64),
+                     testing::Values(hot_cold_t{128}, hot_cold_t{255}),
+                     testing::Values(ThrowException::kNo,
+                                     ThrowException::kYes)),
+    [](const testing::TestParamInfo<TcmallocSizedNewInvalidSizeTest::ParamType>&
+           info) {
+      std::string name = absl::StrCat(
+          "Align", std::get<0>(info.param), "HotCold",
+          static_cast<int>(std::get<1>(info.param)),
+          std::get<2>(info.param) == ThrowException::kNo ? "Nothrow" : "Throw");
+      return name;
+    });
+
+TEST_P(TcmallocSizedNewInvalidSizeTest, InvalidSizedOperatorNewDeathTest) {
   constexpr size_t kBadSize = std::numeric_limits<size_t>::max();
   if (IsNothrow()) {
     sized_ptr_t res = New(kBadSize);
     EXPECT_EQ(res.p, nullptr);
     EXPECT_EQ(res.n, 0);
   } else {
+#if defined(ABSL_HAVE_THREAD_SANITIZER)
+    GTEST_SKIP() << "Skipping under TSan";
+#endif
     EXPECT_DEATH(New(kBadSize), "");
   }
 }
@@ -1205,40 +1289,40 @@ TEST_P(TcmallocSizedNewTest, SizedOperatorNewMatchesMallocExtensionValue) {
     test(size);
   }
 
-  // Traverse randomized sizes
-  constexpr size_t kOddIncrement = 117;
-  for (size_t size = 32; size <= kMaxTestAllocSize; size += kOddIncrement) {
+  // Traverse several randomized sizes
+  absl::BitGen rng;
+  for (int i = 0; i < 20; ++i) {
+    size_t size = absl::Uniform<size_t>(rng, 32, kMaxTestAllocSize);
     test(size);
   }
 }
 #endif  // #ifndef __riscv
 
-TEST(SizedDeleteTest, SizedOperatorDelete) {
-#ifndef __riscv
-  const size_t kMaxSize = 64 * 1024;
-#else
-  const size_t kMaxSize = 1024;
-#endif  // #ifndef __riscv
-  enum DeleteSize { kSize, kCapacity, kHalfway };
-  for (size_t size = 0; size < kMaxSize; ++size) {
-    for (auto delete_size : {kSize, kCapacity, kHalfway}) {
-      sized_ptr_t res = __size_returning_new(size);
-      switch (delete_size) {
-        case kSize:
-          ::operator delete(res.p, size);
-          break;
-        case kCapacity:
-          ::operator delete(res.p, res.n);
-          break;
-        case kHalfway:
-          ::operator delete(res.p, (size + res.n) / 2);
-          break;
-      }
-    }
-  }
+// Helper to test pointerless & pointer-containing allocation partitioning with
+// the alloc-token instrumentation as we "ignore" the cold hints for
+// pointer-containing allocations provided heap partitioning is enabled.
+template <typename T>
+class HotColdTest : public ::testing::Test {
+ public:
+};
+using PointerlessContainingTypes = ::testing::Types<char*>;
+TYPED_TEST_SUITE(HotColdTest, PointerlessContainingTypes);
+
+template <typename T>
+static bool IsHot(uint8_t label,
+                  tcmalloc::hot_cold_t threshold = kDefaultMinHotAccessHint) {
+  // If full heap partitioning is enabled, we treat all pointer-containing
+  // allocations as hot to avoid mixing pointer-containing and pointerless
+  // allocations in the same cold partition.
+  return static_cast<tcmalloc::hot_cold_t>(label) >= threshold ||
+         (MallocExtension::GetNumericProperty(
+              "tcmalloc.security_partitioning_active")
+                  .value_or(0) == 1 &&
+          std::is_same_v<T, char*>);
 }
 
-TEST(HotColdTest, HotColdNew) {
+TYPED_TEST(HotColdTest, HotColdNew) {
+  ScopedNeverSample never_sample;
   const bool expectColdTags = tcmalloc_internal::ColdFeatureActive();
 
   absl::flat_hash_set<uintptr_t> hot;
@@ -1251,26 +1335,29 @@ TEST(HotColdTest, HotColdNew) {
     void* ptr;
     size_t size;
   };
-  constexpr size_t kSmall = 2 << 10;
   constexpr size_t kLarge = 1 << 20;
+  constexpr int kNumAllocations = 200;
 
   std::vector<SizedPtr> ptrs;
-  ptrs.reserve(1000);
-  for (int i = 0; i < 1000; i++) {
-    size_t size = absl::LogUniform<size_t>(rng, kSmall, kLarge);
+  ptrs.reserve(kNumAllocations);
+  for (int i = 0; i < kNumAllocations; i++) {
+    size_t size = absl::LogUniform<size_t>(rng, 0, kLarge);
     uint8_t label = absl::Uniform<uint8_t>(rng, 0, 127);
     label |= uint8_t{128};
 
-    void* ptr = ::operator new(size, static_cast<tcmalloc::hot_cold_t>(label));
+    void* ptr = ::operator new(sizeof(TypeParam) * 0 + size,
+                               static_cast<tcmalloc::hot_cold_t>(label));
 
     ptrs.emplace_back(SizedPtr{ptr, size});
 
-    EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kCold) << ptr;
+    if (!kSanitizerPresent) {
+      EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kSampledOrCold) << ptr;
+    }
   }
 
   // Delete
   for (SizedPtr s : ptrs) {
-    if (expectColdTags && IsNormalMemory(s.ptr)) {
+    if (!kSanitizerPresent && expectColdTags && IsNormalMemory(s.ptr)) {
       EXPECT_TRUE(hot.insert(reinterpret_cast<uintptr_t>(s.ptr)).second);
     }
 
@@ -1283,17 +1370,19 @@ TEST(HotColdTest, HotColdNew) {
 
   // Allocate some cold objects
   ptrs.clear();
-  for (int i = 0; i < 1000; i++) {
-    size_t size = absl::LogUniform<size_t>(rng, kSmall, kLarge);
+  for (int i = 0; i < kNumAllocations; i++) {
+    size_t size = absl::LogUniform<size_t>(rng, 0, kLarge);
     uint8_t label = absl::Uniform<uint8_t>(rng, 0, 127);
     label &= ~uint8_t{128};
 
-    void* ptr = ::operator new(size, static_cast<tcmalloc::hot_cold_t>(label));
+    void* ptr = ::operator new(sizeof(TypeParam) * 0 + size,
+                               static_cast<tcmalloc::hot_cold_t>(label));
     ptrs.emplace_back(SizedPtr{ptr, size});
   }
 
   for (SizedPtr s : ptrs) {
-    if (expectColdTags && GetMemoryTag(s.ptr) == MemoryTag::kCold) {
+    if (!kSanitizerPresent && expectColdTags &&
+        GetMemoryTag(s.ptr) == MemoryTag::kSampledOrCold) {
       EXPECT_TRUE(cold.insert(reinterpret_cast<uintptr_t>(s.ptr)).second);
     }
 
@@ -1304,7 +1393,7 @@ TEST(HotColdTest, HotColdNew) {
     }
   }
 
-  if (!expectColdTags) {
+  if (!expectColdTags || kSanitizerPresent) {
     return;
   }
 
@@ -1314,12 +1403,17 @@ TEST(HotColdTest, HotColdNew) {
   }
 }
 
-TEST(HotColdTest, NothrowHotColdNew) {
+hot_cold_t MinHotAccessHint() {
+  return static_cast<tcmalloc::hot_cold_t>(
+      TCMalloc_Internal_GetMinHotAccessHint());
+}
+
+TYPED_TEST(HotColdTest, NothrowHotColdNew) {
+  ScopedNeverSample never_sample;
   const bool expectColdTags = tcmalloc_internal::ColdFeatureActive();
   if (!expectColdTags) {
     GTEST_SKIP() << "Cold allocations not enabled";
   }
-  constexpr size_t kSmall = 128 << 10;
   constexpr size_t kLarge = 1 << 20;
 
   absl::BitGen rng;
@@ -1331,18 +1425,22 @@ TEST(HotColdTest, NothrowHotColdNew) {
   };
 
   std::vector<SizedPtr> ptrs;
-  ptrs.reserve(1000);
-  for (int i = 0; i < 1000; i++) {
-    const size_t size = absl::LogUniform<size_t>(rng, kSmall, kLarge);
+  ptrs.reserve(200);
+  for (int i = 0; i < 200; i++) {
+    const size_t size = absl::LogUniform<size_t>(rng, 0, kLarge);
     const uint8_t label = absl::Uniform<uint8_t>(rng, 0, 255);
 
-    void* ptr = ::operator new(size, std::nothrow,
+    void* ptr = ::operator new(sizeof(TypeParam) * 0 + size, std::nothrow,
                                static_cast<tcmalloc::hot_cold_t>(label));
 
     ptrs.emplace_back(SizedPtr{ptr, size});
 
-    if (static_cast<tcmalloc::hot_cold_t>(label) >= kDefaultMinHotAccessHint) {
-      EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kCold);
+    if (kSanitizerPresent) {
+      continue;
+    }
+
+    if (IsHot<TypeParam>(label, MinHotAccessHint())) {
+      EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kSampledOrCold);
     } else {
       EXPECT_TRUE(!IsNormalMemory(ptr)) << size << " " << label;
     }
@@ -1357,12 +1455,12 @@ TEST(HotColdTest, NothrowHotColdNew) {
   }
 }
 
-TEST(HotColdTest, AlignedNothrowHotColdNew) {
+TYPED_TEST(HotColdTest, AlignedNothrowHotColdNew) {
+  ScopedNeverSample never_sample;
   const bool expectColdTags = tcmalloc_internal::ColdFeatureActive();
   if (!expectColdTags) {
     GTEST_SKIP() << "Cold allocations not enabled";
   }
-  constexpr size_t kSmall = 128 << 10;
   constexpr size_t kLarge = 1 << 20;
 
   absl::BitGen rng;
@@ -1375,21 +1473,26 @@ TEST(HotColdTest, AlignedNothrowHotColdNew) {
   };
 
   std::vector<SizedPtr> ptrs;
-  ptrs.reserve(1000);
-  for (int i = 0; i < 1000; i++) {
-    const size_t size = absl::LogUniform<size_t>(rng, kSmall, kLarge);
+  ptrs.reserve(200);
+  for (int i = 0; i < 200; i++) {
+    const size_t size = absl::LogUniform<size_t>(rng, 0, kLarge);
     const std::align_val_t alignment =
         static_cast<std::align_val_t>(1 << absl::Uniform(rng, 0, 6));
     const uint8_t label = absl::Uniform<uint8_t>(rng, 0, 255);
 
-    void* ptr = ::operator new(size, alignment, std::nothrow,
-                               static_cast<tcmalloc::hot_cold_t>(label));
+    void* ptr =
+        ::operator new(sizeof(TypeParam) * 0 + size, alignment, std::nothrow,
+                       static_cast<tcmalloc::hot_cold_t>(label));
 
     ptrs.emplace_back(SizedPtr{ptr, size, alignment});
 
-    if (static_cast<tcmalloc::hot_cold_t>(label) >= kDefaultMinHotAccessHint) {
-      EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kCold);
-    } else {
+    if (kSanitizerPresent) {
+      continue;
+    }
+
+    if (IsHot<TypeParam>(label, MinHotAccessHint())) {
+      EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kSampledOrCold);
+    } else if (expectColdTags) {
       EXPECT_TRUE(!IsNormalMemory(ptr)) << size << " " << label;
     }
   }
@@ -1403,12 +1506,12 @@ TEST(HotColdTest, AlignedNothrowHotColdNew) {
   }
 }
 
-TEST(HotColdTest, ArrayNothrowHotColdNew) {
+TYPED_TEST(HotColdTest, ArrayNothrowHotColdNew) {
+  ScopedNeverSample never_sample;
   const bool expectColdTags = tcmalloc_internal::ColdFeatureActive();
   if (!expectColdTags) {
     GTEST_SKIP() << "Cold allocations not enabled";
   }
-  constexpr size_t kSmall = 128 << 10;
   constexpr size_t kLarge = 1 << 20;
 
   absl::BitGen rng;
@@ -1420,18 +1523,22 @@ TEST(HotColdTest, ArrayNothrowHotColdNew) {
   };
 
   std::vector<SizedPtr> ptrs;
-  ptrs.reserve(1000);
-  for (int i = 0; i < 1000; i++) {
-    const size_t size = absl::LogUniform<size_t>(rng, kSmall, kLarge);
+  ptrs.reserve(200);
+  for (int i = 0; i < 200; i++) {
+    const size_t size = absl::LogUniform<size_t>(rng, 0, kLarge);
     const uint8_t label = absl::Uniform<uint8_t>(rng, 0, 255);
 
-    void* ptr = ::operator new[](size, std::nothrow,
+    void* ptr = ::operator new[](sizeof(TypeParam) * 0 + size, std::nothrow,
                                  static_cast<tcmalloc::hot_cold_t>(label));
 
     ptrs.emplace_back(SizedPtr{ptr, size});
 
-    if (static_cast<tcmalloc::hot_cold_t>(label) >= kDefaultMinHotAccessHint) {
-      EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kCold);
+    if (kSanitizerPresent) {
+      continue;
+    }
+
+    if (IsHot<TypeParam>(label, MinHotAccessHint())) {
+      EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kSampledOrCold);
     } else {
       EXPECT_TRUE(!IsNormalMemory(ptr)) << size << " " << label;
     }
@@ -1439,19 +1546,19 @@ TEST(HotColdTest, ArrayNothrowHotColdNew) {
 
   for (SizedPtr s : ptrs) {
     if (absl::Bernoulli(rng, 0.2)) {
-      ::operator delete(s.ptr);
+      ::operator delete[](s.ptr);
     } else {
-      sized_delete(s.ptr, s.size);
+      sized_array_delete(s.ptr, s.size);
     }
   }
 }
 
-TEST(HotColdTest, ArrayAlignedNothrowHotColdNew) {
+TYPED_TEST(HotColdTest, ArrayAlignedNothrowHotColdNew) {
+  ScopedNeverSample never_sample;
   const bool expectColdTags = tcmalloc_internal::ColdFeatureActive();
   if (!expectColdTags) {
     GTEST_SKIP() << "Cold allocations not enabled";
   }
-  constexpr size_t kSmall = 128 << 10;
   constexpr size_t kLarge = 1 << 20;
 
   absl::BitGen rng;
@@ -1464,20 +1571,25 @@ TEST(HotColdTest, ArrayAlignedNothrowHotColdNew) {
   };
 
   std::vector<SizedPtr> ptrs;
-  ptrs.reserve(1000);
-  for (int i = 0; i < 1000; i++) {
-    const size_t size = absl::LogUniform<size_t>(rng, kSmall, kLarge);
+  ptrs.reserve(200);
+  for (int i = 0; i < 200; i++) {
+    const size_t size = absl::LogUniform<size_t>(rng, 0, kLarge);
     const std::align_val_t alignment =
         static_cast<std::align_val_t>(1 << absl::Uniform(rng, 0, 6));
     const uint8_t label = absl::Uniform<uint8_t>(rng, 0, 255);
 
-    void* ptr = ::operator new[](size, alignment, std::nothrow,
-                                 static_cast<tcmalloc::hot_cold_t>(label));
+    void* ptr =
+        ::operator new[](sizeof(TypeParam) * 0 + size, alignment, std::nothrow,
+                         static_cast<tcmalloc::hot_cold_t>(label));
 
     ptrs.emplace_back(SizedPtr{ptr, size, alignment});
 
-    if (static_cast<tcmalloc::hot_cold_t>(label) >= kDefaultMinHotAccessHint) {
-      EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kCold);
+    if (kSanitizerPresent) {
+      continue;
+    }
+
+    if (IsHot<TypeParam>(label, MinHotAccessHint())) {
+      EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kSampledOrCold);
     } else {
       EXPECT_TRUE(!IsNormalMemory(ptr)) << size << " " << label;
     }
@@ -1492,12 +1604,12 @@ TEST(HotColdTest, ArrayAlignedNothrowHotColdNew) {
   }
 }
 
-TEST(HotColdTest, SizeReturningHotColdNew) {
+TYPED_TEST(HotColdTest, SizeReturningHotColdNew) {
+  ScopedNeverSample never_sample;
   const bool expectColdTags = tcmalloc_internal::ColdFeatureActive();
   if (!expectColdTags) {
     GTEST_SKIP() << "Cold allocations not enabled";
   }
-  constexpr size_t kSmall = 128 << 10;
   constexpr size_t kLarge = 1 << 20;
 
   absl::BitGen rng;
@@ -1510,25 +1622,30 @@ TEST(HotColdTest, SizeReturningHotColdNew) {
   };
 
   std::vector<SizedPtr> ptrs;
-  ptrs.reserve(1000);
-  for (int i = 0; i < 1000; i++) {
-    const size_t requested = absl::LogUniform<size_t>(rng, kSmall, kLarge);
+  ptrs.reserve(200);
+  for (int i = 0; i < 200; i++) {
+    const size_t requested = absl::LogUniform<size_t>(rng, 0, kLarge);
     const uint8_t label = absl::Uniform<uint8_t>(rng, 0, 255);
 
     auto [ptr, actual] = __size_returning_new_hot_cold(
-        requested, static_cast<hot_cold_t>(label));
+        sizeof(TypeParam) * 0 + requested, static_cast<hot_cold_t>(label));
     ASSERT_GE(actual, requested);
 
-    if (static_cast<tcmalloc::hot_cold_t>(label) >= kDefaultMinHotAccessHint) {
-      EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kCold);
-    } else {
-      EXPECT_TRUE(!IsNormalMemory(ptr)) << requested << " " << label;
+    if (!kSanitizerPresent) {
+      if (IsHot<TypeParam>(label, MinHotAccessHint())) {
+        EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kSampledOrCold);
+      } else {
+        EXPECT_TRUE(!IsNormalMemory(ptr)) << requested << " " << label;
+      }
     }
 
     std::optional<size_t> allocated_size =
         MallocExtension::GetAllocatedSize(ptr);
     ASSERT_THAT(allocated_size, testing::Ne(std::nullopt));
-    EXPECT_EQ(actual, *allocated_size);
+    // Sanitizers mis-handle 0-sized allocations.
+    if (!kSanitizerPresent || actual != 0) {
+      EXPECT_EQ(actual, *allocated_size);
+    }
 
     ptrs.emplace_back(SizedPtr{ptr, requested, actual});
   }
@@ -1551,7 +1668,8 @@ TEST(HotColdTest, SizeReturningHotColdNew) {
 
 // Test that setting the min_hot_access_hint parameter has the expected effect
 // on treatment of the allocated data as cold.
-TEST(HotColdTest, HotColdNewMinHotFlag) {
+TYPED_TEST(HotColdTest, HotColdNewMinHotFlag) {
+  ScopedNeverSample never_sample;
   const bool expectColdTags = tcmalloc_internal::ColdFeatureActive();
   if (!expectColdTags) {
     GTEST_SKIP() << "Cold allocations not enabled";
@@ -1561,7 +1679,6 @@ TEST(HotColdTest, HotColdNewMinHotFlag) {
       static_cast<tcmalloc::hot_cold_t>(10);
   Parameters::set_min_hot_access_hint(kNonDefaultMinHotAccessHint);
 
-  constexpr size_t kSmall = 128 << 10;
   constexpr size_t kLarge = 1 << 20;
 
   absl::BitGen rng;
@@ -1573,20 +1690,24 @@ TEST(HotColdTest, HotColdNewMinHotFlag) {
   };
 
   std::vector<SizedPtr> ptrs;
-  ptrs.reserve(1000);
-  for (int i = 0; i < 1000; i++) {
-    const size_t size = absl::LogUniform<size_t>(rng, kSmall, kLarge);
+  ptrs.reserve(200);
+  for (int i = 0; i < 200; i++) {
+    const size_t size = absl::LogUniform<size_t>(rng, 0, kLarge);
     const uint8_t label = absl::Uniform<uint8_t>(rng, 0, 255);
 
-    void* ptr = ::operator new(size, static_cast<tcmalloc::hot_cold_t>(label));
+    void* ptr = ::operator new(sizeof(TypeParam) * 0 + size,
+                               static_cast<tcmalloc::hot_cold_t>(label));
 
     ptrs.emplace_back(SizedPtr{ptr, size});
 
+    if (kSanitizerPresent) {
+      continue;
+    }
+
     // The hotness threshold should have been set to kNonDefaultMinHotAccessHint
     // above via SetFlag.
-    if (static_cast<tcmalloc::hot_cold_t>(label) >=
-        kNonDefaultMinHotAccessHint) {
-      EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kCold);
+    if (IsHot<TypeParam>(label, /*threshold=*/kNonDefaultMinHotAccessHint)) {
+      EXPECT_NE(GetMemoryTag(ptr), MemoryTag::kSampledOrCold);
     } else {
       EXPECT_TRUE(!IsNormalMemory(ptr)) << size << " " << label;
     }
@@ -1604,7 +1725,7 @@ TEST(HotColdTest, HotColdNewMinHotFlag) {
   Parameters::set_min_hot_access_hint(kDefaultMinHotAccessHint);
 }
 
-TEST(HotColdTest, SampleHasRuntimeHint) {
+TYPED_TEST(HotColdTest, SampleHasRuntimeHint) {
   const bool expectColdTags = tcmalloc_internal::ColdFeatureActive();
   if (!expectColdTags) {
     GTEST_SKIP() << "Cold allocations not enabled";
@@ -1617,14 +1738,18 @@ TEST(HotColdTest, SampleHasRuntimeHint) {
   ScopedAlwaysSample always_sample;
   auto token = MallocExtension::StartAllocationProfiling();
   {
-    ptrs[0] = operator new(kLarge, static_cast<hot_cold_t>(1));
-    ptrs[1] = operator new(kSmall, static_cast<hot_cold_t>(2));
-    ptrs[2] = operator new(kLarge, std::nothrow, static_cast<hot_cold_t>(3));
-    ptrs[3] = operator new(kSmall, std::nothrow, static_cast<hot_cold_t>(4));
-    ptrs[4] = operator new(kLarge, std::align_val_t{8}, std::nothrow,
-                           static_cast<hot_cold_t>(5));
-    ptrs[5] = operator new(kSmall, std::align_val_t{8}, std::nothrow,
-                           static_cast<hot_cold_t>(6));
+    ptrs[0] = operator new(sizeof(TypeParam) * 0 + kLarge,
+                           static_cast<hot_cold_t>(1));
+    ptrs[1] = operator new(sizeof(TypeParam) * 0 + kSmall,
+                           static_cast<hot_cold_t>(2));
+    ptrs[2] = operator new(sizeof(TypeParam) * 0 + kLarge, std::nothrow,
+                           static_cast<hot_cold_t>(3));
+    ptrs[3] = operator new(sizeof(TypeParam) * 0 + kSmall, std::nothrow,
+                           static_cast<hot_cold_t>(4));
+    ptrs[4] = operator new(sizeof(TypeParam) * 0 + kLarge, std::align_val_t{8},
+                           std::nothrow, static_cast<hot_cold_t>(5));
+    ptrs[5] = operator new(sizeof(TypeParam) * 0 + kSmall, std::align_val_t{8},
+                           std::nothrow, static_cast<hot_cold_t>(6));
   }
   auto profile = std::move(token).Stop();
 
@@ -1637,11 +1762,19 @@ TEST(HotColdTest, SampleHasRuntimeHint) {
 
   std::vector<hot_cold_t> hints;
   profile.Iterate([&](const Profile::Sample& sample) {
+    // Filter out allocations that can't be ours.
+    if (sample.requested_size != kSmall && sample.requested_size != kLarge) {
+      return;
+    }
+
     hints.push_back(sample.access_hint);
   });
 
-  ASSERT_THAT(hints, testing::SizeIs(ptrs.size()));
-  EXPECT_THAT(hints, testing::UnorderedElementsAreArray({
+  if (kSanitizerPresent) {
+    return;
+  }
+
+  EXPECT_THAT(hints, testing::IsSupersetOf({
                          static_cast<hot_cold_t>(1),
                          static_cast<hot_cold_t>(2),
                          static_cast<hot_cold_t>(3),
@@ -1677,30 +1810,14 @@ TEST(MallocExtension, SizeReturningNewAndSizedDelete) {
 #endif
 }
 
-TEST(TCMalloc, malloc_info) {
-  char* buf = nullptr;
-  size_t size = 0;
-  FILE* fp = open_memstream(&buf, &size);
-  ASSERT_NE(fp, nullptr);
-  EXPECT_EQ(malloc_info(0, fp), 0);
-  EXPECT_EQ(fclose(fp), 0);
-  ASSERT_NE(buf, nullptr);
-  EXPECT_EQ(absl::string_view(buf, size), "<malloc></malloc>\n");
-  free(buf);
-}
-
-TEST(Check, CustomTypes) {
+TEST(Check, CustomTypesDeathTest) {
   Length len1(1), len2(2);
   TC_CHECK_NE(len1, len2);
-  EXPECT_DEATH(
-      TC_CHECK_EQ(len1, len2),
-      absl::StrFormat("len1 == len2 \\(%u == %u\\)", kPageSize, 2 * kPageSize));
+  EXPECT_DEATH(TC_CHECK_EQ(len1, len2), "len1 == len2 \\(1 == 2\\)");
 
   HugeLength hlen1(1.0), hlen2(2.0);
   TC_CHECK_NE(hlen1, hlen2);
-  EXPECT_DEATH(TC_CHECK_EQ(hlen1, hlen2),
-               absl::StrFormat("hlen1 == hlen2 \\(%u == %u\\)", kHugePageSize,
-                               2 * kHugePageSize));
+  EXPECT_DEATH(TC_CHECK_EQ(hlen1, hlen2), "hlen1 == hlen2 \\(1 == 2\\)");
 
   PageId page1{1}, page2{2};
   TC_CHECK_NE(page1, page2);
@@ -1722,6 +1839,70 @@ TEST(Check, CustomTypes) {
 
 TEST(TCMalloc, MallocUsableSizeNullptr) {
   EXPECT_EQ(malloc_usable_size(nullptr), 0);
+}
+
+TEST(TCMalloc, Misc) {
+  constexpr std::align_val_t kAlignment{2097152};
+  ::operator delete(::operator new(0, kAlignment), 0, kAlignment);
+}
+
+TEST(TCMalloc, GetPageAllocationStatus) {
+  // Allocate an object and verify its hugepage status is found and marked
+  // allocated.
+  const size_t kAllocSize = 128 * 1024;
+  void* ptr;
+  {
+    ScopedNeverSample never;
+    ptr = ::operator new(kAllocSize);
+  }
+  ASSERT_NE(ptr, nullptr);
+
+  HugePage hp = HugePageContaining(ptr);
+
+  // Unaligned pointer must be rejected.
+  EXPECT_EQ(GetPageAllocationStatus(static_cast<char*>(hp.start_addr()) + 1),
+            std::nullopt);
+
+  auto status = GetPageAllocationStatus(hp.start_addr());
+  if (kSanitizerPresent) {
+    // Under sanitizers, TCMalloc is replaced and the weak symbol is not
+    // available.
+    EXPECT_EQ(status, std::nullopt);
+  } else {
+    ASSERT_TRUE(status.has_value());
+
+    const size_t hardware_page_size = GetPageSize();
+    const size_t start_page = (reinterpret_cast<uintptr_t>(ptr) -
+                               reinterpret_cast<uintptr_t>(hp.start_addr())) /
+                              hardware_page_size;
+    const size_t num_pages = kAllocSize / hardware_page_size;
+
+    // All pages overlapping with ptr must be allocated in the bitmap.
+    EXPECT_EQ(status->allocated.CountBits(start_page, num_pages), num_pages);
+  }
+
+  ::operator delete(ptr, kAllocSize);
+
+  // Random addresses do not crash and unmanaged addresses return std::nullopt.
+  void* random_unaligned = reinterpret_cast<void*>(0x12345678);
+  EXPECT_EQ(GetPageAllocationStatus(random_unaligned), std::nullopt);
+
+  void* random_aligned = reinterpret_cast<void*>(0x123400000);
+  EXPECT_EQ(GetPageAllocationStatus(random_aligned), std::nullopt);
+}
+
+TEST(TCMallocTest, ReallocOveralignedToSmallSizeClass) {
+  ScopedNeverSample never_sample;
+  const size_t page_size = Length(1).in_bytes();
+  void* p;
+  ASSERT_EQ(posix_memalign(&p, 2 * page_size, page_size), 0);
+  ASSERT_NE(p, nullptr);
+  memset(p, 0xAB, page_size);
+  p = realloc(p, page_size);
+  ASSERT_NE(p, nullptr);
+  EXPECT_EQ(static_cast<unsigned char*>(p)[0], 0xAB);
+  EXPECT_EQ(static_cast<unsigned char*>(p)[page_size - 1], 0xAB);
+  free_sized(p, page_size);
 }
 
 }  // namespace

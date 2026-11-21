@@ -177,15 +177,21 @@ TEST_F(GuardedPageAllocatorProfileTest, RateLimited) {
   constexpr size_t kAllocSize = 1033;
   size_t num_guarded = 0;
   size_t num_sampled = 0;
+  // Accumulate many guarded allocations before stopping. A single non-guarded
+  // sample is not necessarily RateLimited: TrySample also returns Filtered
+  // (probabilistic stacktrace filter) or NoAvailableSlots, so stopping at the
+  // first non-guarded sample can end the window with no RateLimited sample at
+  // all. With the 2:1 guarded sampling interval the rate limiter denies
+  // (RateLimited) roughly every other sampled allocation deterministically, so
+  // requiring enough guarded allocations guarantees many RateLimited events.
+  constexpr size_t kMinGuarded = 25;
   AllocateGuardableUntil(kAllocSize, [&](void* alloc) -> NextSteps {
     if (!IsNormalMemory(alloc)) {
       num_sampled++;
       if (tc_globals.guardedpage_allocator().PointerIsMine(alloc)) {
         num_guarded++;
       }
-      // The expectation is that as soon as there are more sampled allocations
-      // than guarded, at least once the rate limiter kicked in.
-      return {num_guarded > 0 && num_sampled > num_guarded, true};
+      return {num_guarded >= kMinGuarded && num_sampled > num_guarded, true};
     }
     return {false, true};
   });
@@ -378,6 +384,37 @@ TEST_F(GuardedPageAllocatorProfileTest, DynamicParamChange) {
     auto profile = std::move(token).Stop();
     ExamineSamples(profile, Profile::Sample::GuardedStatus::Guarded);
   }
+}
+
+TEST_F(GuardedPageAllocatorProfileTest, EventTraceZeroByteSizeReturningNew) {
+  auto token = MallocExtension::StartEventTracing();
+
+  __sized_ptr_t res;
+  {
+    ScopedAlwaysSample always_sample;
+    AllocateUntilGuarded();
+    tc_globals.guardedpage_allocator().Reset();
+    res = __size_returning_new(0);
+  }
+  ASSERT_TRUE(tc_globals.guardedpage_allocator().PointerIsMine(res.p));
+  EXPECT_EQ(res.n, 0);
+  ::operator delete(res.p);
+
+  auto profile = std::move(token).Stop();
+  int alloc_events = 0;
+  int dealloc_events = 0;
+  profile.Iterate([&](const Profile::Sample& s) {
+    if (s.guarded_status == Profile::Sample::GuardedStatus::Guarded &&
+        s.requested_size == 0 && s.requested_size_returning) {
+      if (s.count > 0) {
+        ++alloc_events;
+      } else if (s.count < 0) {
+        ++dealloc_events;
+      }
+    }
+  });
+  EXPECT_EQ(alloc_events, 1);
+  EXPECT_EQ(dealloc_events, 1);
 }
 
 }  // namespace

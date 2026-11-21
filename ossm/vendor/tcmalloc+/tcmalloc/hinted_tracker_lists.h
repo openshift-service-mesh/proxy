@@ -18,6 +18,7 @@
 #include <cstddef>
 
 #include "absl/base/nullability.h"
+#include "absl/base/optimization.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/linked_list.h"
 #include "tcmalloc/internal/logging.h"
@@ -38,10 +39,10 @@ class HintedTrackerLists {
 
   // Removes a TrackerType from the first non-empty freelist with index at
   // least n and returns it. Returns nullptr if there is none.
-  TrackerType* /*absl_nullable*/ GetLeast(const size_t n) {
+  [[nodiscard]] TrackerType* absl_nullable GetLeast(const size_t n) {
     TC_ASSERT_LT(n, N);
     size_t i = nonempty_.FindSet(n);
-    if (i == N) {
+    if (ABSL_PREDICT_FALSE(i == N)) {
       return nullptr;
     }
     TC_ASSERT(!lists_[i].empty());
@@ -58,30 +59,39 @@ class HintedTrackerLists {
   //
   // Unlike GetLeast, this does not remove the pointer from the list when it is
   // found.
-  TrackerType* /*absl_nullable*/ PeekLeast(const size_t n) {
+  struct PeekResult {
+    TrackerType* absl_nullable tracker;
+    size_t index;
+  };
+
+  [[nodiscard]] PeekResult PeekLeast(const size_t n) {
     TC_ASSERT_LT(n, N);
     size_t i = nonempty_.FindSet(n);
-    if (i == N) {
-      return nullptr;
+    if (ABSL_PREDICT_FALSE(i == N)) {
+      return {nullptr, N};
     }
     TC_ASSERT(!lists_[i].empty());
-    return lists_[i].first();
+    return {lists_[i].first(), i};
   }
 
   // Adds pointer <pt> to the nonempty_[i] list.
   // REQUIRES: i < N && pt != nullptr.
-  void Add(TrackerType* /*absl_nonnull*/ pt TCMALLOC_CAPTURED_BY_THIS,
-           const size_t i) {
+  void Add(TrackerType* absl_nonnull pt TCMALLOC_CAPTURED_BY_THIS,
+           const size_t i, bool prepend) {
     TC_ASSERT_LT(i, N);
     TC_ASSERT_NE(pt, nullptr);
-    lists_[i].prepend(pt);
+    if (prepend) {
+      lists_[i].prepend(pt);
+    } else {
+      lists_[i].append(pt);
+    }
     ++size_;
     nonempty_.SetBit(i);
   }
 
   // Removes pointer <pt> from the nonempty_[i] list.
   // REQUIRES: i < N && pt != nullptr.
-  void Remove(TrackerType* /*absl_nonnull*/ pt, const size_t i) {
+  void Remove(TrackerType* absl_nonnull pt, const size_t i) {
     TC_ASSERT_LT(i, N);
     TC_ASSERT_NE(pt, nullptr);
     if (lists_[i].remove(pt)) {
@@ -90,15 +100,39 @@ class HintedTrackerLists {
     }
     --size_;
   }
-  const TrackerList& operator[](const size_t n) const {
+
+  // Moves pointer <pt> from list `from` to list `to`.
+  // REQUIRES: from < N && to < N && pt != nullptr
+  void Move(TrackerType* absl_nonnull pt TCMALLOC_CAPTURED_BY_THIS,
+            const size_t from, const size_t to, bool prepend) {
+    TC_ASSERT_LT(from, N);
+    TC_ASSERT_LT(to, N);
+    // This check is not strictly required, but we should avoid the linked list
+    // manipulations if we can.
+    TC_ASSERT_NE(from, to);
+    TC_ASSERT_NE(pt, nullptr);
+
+    if (lists_[from].remove(pt)) {
+      TC_ASSERT(nonempty_.GetBit(from));
+      nonempty_.ClearBit(from);
+    }
+    if (prepend) {
+      lists_[to].prepend(pt);
+    } else {
+      lists_[to].append(pt);
+    }
+    nonempty_.SetBit(to);
+  }
+
+  [[nodiscard]] const TrackerList& operator[](const size_t n) const {
     TC_ASSERT_LT(n, N);
     return lists_[n];
   }
-  size_t size() const { return size_; }
+  [[nodiscard]] size_t size() const { return size_; }
 
   // Returns length of the list at an index <n>.
   // REQUIRES: n < N.
-  size_t SizeOfList(const size_t n) const {
+  [[nodiscard]] size_t SizeOfList(const size_t n) const {
     TC_ASSERT_LT(n, N);
     return lists_[n].length();
   }
@@ -107,22 +141,19 @@ class HintedTrackerLists {
   // This quirk is inherited from TrackerList.
   template <typename Functor>
   void Iter(const Functor& func, size_t start) const {
-    size_t i = nonempty_.FindSet(start);
-    while (i < N) {
+    nonempty_.ForEachSet(start, [&](size_t i) GOOGLE_MALLOC_SECTION {
       auto& list = lists_[i];
       TC_ASSERT(!list.empty());
       for (TrackerType* pt : list) {
         func(*pt);
       }
-      i++;
-      if (i < N) i = nonempty_.FindSet(i);
-    }
+    });
   }
 
  private:
-  TrackerList lists_[N];
   size_t size_;
   Bitmap<N> nonempty_;
+  TrackerList lists_[N];
 };
 
 }  // namespace tcmalloc_internal

@@ -15,13 +15,16 @@
 #ifndef TCMALLOC_INTERNAL_CACHE_TOPOLOGY_H_
 #define TCMALLOC_INTERNAL_CACHE_TOPOLOGY_H_
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 
 #include "absl/base/attributes.h"
 #include "absl/strings/string_view.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/cpu_utils.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/sysinfo.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
@@ -29,7 +32,7 @@ namespace tcmalloc_internal {
 
 class CacheTopology {
  public:
-  static CacheTopology& Instance() {
+  [[nodiscard]] static CacheTopology& Instance() {
     ABSL_CONST_INIT static CacheTopology instance;
     return instance;
   }
@@ -38,9 +41,14 @@ class CacheTopology {
 
   void Init();
 
-  unsigned l3_count() const { return l3_count_; }
+  void InitForTest(int (*open_cache_cpulist)(size_t),
+                   std::optional<int> maybe_numcpus = NumCPUsMaybe()) {
+    InitImpl(maybe_numcpus, open_cache_cpulist);
+  }
 
-  unsigned GetL3FromCpuId(int cpu) const {
+  [[nodiscard]] unsigned l3_count() const { return l3_count_; }
+
+  [[nodiscard]] unsigned GetL3FromCpuId(int cpu) const {
     TC_ASSERT_GE(cpu, 0);
     TC_ASSERT_LT(cpu, cpu_count_);
     unsigned l3 = l3_cache_index_[cpu];
@@ -49,7 +57,10 @@ class CacheTopology {
   }
 
  private:
-  unsigned cpu_count_ = 0;
+  void InitImpl(std::optional<int> maybe_numcpus,
+                int (*open_cache_cpulist)(size_t));
+
+  unsigned cpu_count_ = kMaxCpus;
   unsigned l3_count_ = 0;
   uint8_t l3_cache_index_[kMaxCpus] = {};
 };

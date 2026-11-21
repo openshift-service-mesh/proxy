@@ -139,7 +139,7 @@ label##_trampoline:                                               \
   movq %fs:__rseq_abi@TPOFF + TCMALLOC_RSEQ_SLABS_OFFSET, dest
 #define START_RSEQ(src)                        \
   .L##src##_abort:                             \
-  leaq __rseq_cs_##src(%rip), %rax;            \
+  movq __rseq_cs_##src@GOTPCREL(%rip), %rax;   \
   movq %rax, %fs:__rseq_abi@TPOFF+8;           \
   .L##src##_start:
 
@@ -157,7 +157,7 @@ label##_trampoline:                                               \
 #define START_RSEQ(src)                     \
   .L##src##_abort:                          \
   call tcmalloc_internal_tls_fetch_pic@PLT; \
-  leaq __rseq_cs_##src(%rip), %r11;    	    \
+  movq __rseq_cs_##src@GOTPCREL(%rip), %r11;\
   movq %r11, 8(%rax);                       \
   .L##src##_start:
 
@@ -211,6 +211,24 @@ ENCODE_SIZE(tcmalloc_internal_tls_fetch_pic)
 
 /* start of atomic restartable sequences */
 
+/*
+ * ABI note:
+ *
+ * Since rseq can restart your code at any instruction before commit,
+ * and we do not make an effort to restore anything on abort (we just restart),
+ * you cannot modify input parameter registers (in this case: %rdi, %rsi, %rdx).
+ * We do not save callee-preserved registers (%rbx, %rsp, %rbp, %r12-%r15),
+ * so they are also off-limits. The only registers you are allowed to write to
+ * are the unused parameter registers (%rcx, %r8, %r9), the caller-preserved
+ * scratch registers (%r10, %r11, all %xmm) and the return register (%rax).
+ *
+ * You are also responsible for following the normal rseq convention, i.e.,
+ * the only instruction that can write to memory in a way that matters
+ * is the last one. (So we can write to the unused areas of the freelist,
+ * but moving the indexes so that the elements become visible must wait
+ * until the end.)
+ */
+
 /* size_t TcmallocSlab_Internal_PushBatch(
  *     size_t size_class (%rdi),
  *     void** batch (%rsi),
@@ -219,19 +237,22 @@ ENCODE_SIZE(tcmalloc_internal_tls_fetch_pic)
  *   if ((r8 & TCMALLOC_CACHED_SLABS_BIT) == 0) return 0;
  *   r8 &= ~TCMALLOC_CACHED_SLABS_BIT;
  *   Header* hdr = r8 + rdi * 8;
- *   uint64_t r9 = hdr->current;
- *   uint64_t r10 = hdr->end;
- *   if (r9 >= r10) return 0;
- *   r11 = rdx;
- *   r10 = r9 + min(rdx, r10 - r9);
+ *   Header eax = *hdr;
+ *   uint64_t r9 = eax.current;
+ *   uint64_t rax = eax.remaining_capacity;
+ *   if (rax == 0) return 0;
+ *   uint64_t rcx = rax;
+ *   rax = min(len, rax);
+ *   r11 = len;
+ *   Header rcx = {.current = r9 + rax, .remaining_capacity = rcx - rax};
  * loop:
  *   r11--;
- *   rax = batch[r11];
- *   *(r8 + r9 * 8) = rax;
+ *   r10 = batch[r11];
+ *   *(r8 + r9 * 8) = r10;
  *   r9++;
- *   if (r9 != r10) goto loop;
- *   hdr->current = r9;
- *   return rdx - r11;
+ *   if (r9 != rcx.current) goto loop;
+ *   *hdr = rcx;
+ *   return rax;
  * }
  */
   .p2align 6; /* aligns to 2^6 with NOP filling */
@@ -243,26 +264,27 @@ TcmallocSlab_Internal_PushBatch:
   FETCH_SLABS(%r8);
   btrq $TCMALLOC_CACHED_SLABS_BIT, %r8;
   jnc .LTcmallocSlab_Internal_PushBatch_full;
-  movzwq (%r8, %rdi, 4), %r9; /* current */
-  movzwq 2(%r8, %rdi, 4), %r10; /* end */
-  cmpq %r10, %r9;
-  jae .LTcmallocSlab_Internal_PushBatch_full;
+  movl (%r8, %rdi, 4), %eax; /* [current, remaining_capacity] */
+  movzwq %ax, %r9; /* current */
+  shrq $16, %rax; /* remaining_capacity */
+  jz .LTcmallocSlab_Internal_PushBatch_full;
+  movq %rax, %rcx; /* rcx = copy of remaining_capacity */
+  cmpq %rdx, %rax;
+  cmovaq %rdx, %rax; /* num_to_push = min(len, remaining_capacity) */
   movq %rdx, %r11; /* r11 = copy of len */
-  subq %r9, %r10; /* r10 = free capacity */
-  cmpq %rdx, %r10;
-  cmovaq %rdx, %r10; /* r10 = min(len, free capacity) */
-  addq %r9, %r10;
+  subq %rax, %rcx; /* rcx = new remaining_capacity */
+  shlq $16, %rcx;
+  addq %r9, %rcx;  /* rcx = [current, new_remaining_capacity] */
+  addq %rax, %rcx;  /* rcx = [new_current, new_remaining_capacity] */
 .LTcmallocSlab_Internal_PushBatch_loop:
   decq %r11;
-  movq (%rsi, %r11, 8), %rax;
-  movq %rax, (%r8, %r9, 8);
+  movq (%rsi, %r11, 8), %r10;
+  movq %r10, (%r8, %r9, 8);
   incq %r9;
-  cmpq %r9, %r10;
+  cmpw %r9w, %cx;
   jne .LTcmallocSlab_Internal_PushBatch_loop
-  movw %r9w, (%r8, %rdi, 4);
+  movl %ecx, (%r8, %rdi, 4);
 .LTcmallocSlab_Internal_PushBatch_commit:
-  movq %rdx, %rax;
-  subq %r11, %rax;
   ret;
 .LTcmallocSlab_Internal_PushBatch_full:
   xor %rax, %rax;
@@ -270,6 +292,8 @@ TcmallocSlab_Internal_PushBatch:
   CFI(.cfi_endproc)
 ENCODE_SIZE(TcmallocSlab_Internal_PushBatch)
 DEFINE_UPSTREAM_CS(TcmallocSlab_Internal_PushBatch)
+
+/* See TcmallocSlab_Internal_PushBatch for ABI note. */
 
 /* size_t TcmallocSlab_Internal_PopBatch(
  *     size_t size_class (%rdi),
@@ -280,18 +304,21 @@ DEFINE_UPSTREAM_CS(TcmallocSlab_Internal_PushBatch)
  *   if ((r8 & TCMALLOC_CACHED_SLABS_BIT) == 0) return 0;
  *   r8 &= ~TCMALLOC_CACHED_SLABS_BIT;
  *   Header* hdr = GetHeader(rdi, rax, size_class);
- *   uint64_t r9 = hdr->current;
+ *   Header r9 = *hdr;
  *   uint64_t r10 = *begin_ptr;
- *   if (r9 <= r10) return 0;
+ *   if (r9.current <= r10) return 0;
  *   r11 = min(rdx, r9 - r10);
- *   rax = 0;
+ *   Header r10 = r9;
+ *   r10.current -= r11;
+ *   r10.remaining_capacity += r11;
+ *   r9 = r9.current;
  * loop:
  *   r9--;
- *   r10 = *(r8 + r9 * 8);
- *   batch[rax] = r10;
+ *   r11 = *(r8 + r9 * 8);
+ *   batch[rax] = r11;
  *   rax++;
- *   if (rax != r11) goto loop;
- *   hdr->current = r9;
+ *   if (r9 != r10.current) goto loop;
+ *   *hdr = r10;
  *   return rax;
  * }
  */
@@ -305,22 +332,27 @@ TcmallocSlab_Internal_PopBatch:
   xorq %rax, %rax;
   btrq $TCMALLOC_CACHED_SLABS_BIT, %r8;
   jnc .LTcmallocSlab_Internal_PopBatch_commit;
-  movzwq (%r8, %rdi, 4), %r9; /* current */
+  movl (%r8, %rdi, 4), %r9d; /* [current, remaining_capacity] */
   movzwq (%rcx), %r10; /* begin */
-  cmp %r10, %r9;
+  cmpw %r10w, %r9w;
   jbe .LTcmallocSlab_Internal_PopBatch_commit;
-  movq %r9, %r11;
+  movzwq %r9w, %r11;
   subq %r10, %r11; /* r11 = available items */
   cmpq %rdx, %r11;
   cmovaq %rdx, %r11; /* r11 = min(len, available items) */
+  movq %r9, %r10; /* r10 = [current, remaining_capacity] */
+  subq %r11, %r10; /* r10 = [new_current, remaining_capacity] */
+  shlq $16, %r11;
+  addq %r11, %r10; /* r10 = [new_current, new_remaining_capacity] */ 
+  movzwq %r9w, %r9;
 .LTcmallocSlab_Internal_PopBatch_loop:
   decq %r9;
-  movq (%r8, %r9, 8), %r10;
-  movq %r10, (%rsi, %rax, 8);
+  movq (%r8, %r9, 8), %r11;
+  movq %r11, (%rsi, %rax, 8);
   incq %rax;
-  cmpq %rax, %r11;
+  cmpw %r9w, %r10w;
   jne .LTcmallocSlab_Internal_PopBatch_loop
-  movw %r9w, (%r8, %rdi, 4);
+  movl %r10d, (%r8, %rdi, 4);
 .LTcmallocSlab_Internal_PopBatch_commit:
   ret;
   CFI(.cfi_endproc)

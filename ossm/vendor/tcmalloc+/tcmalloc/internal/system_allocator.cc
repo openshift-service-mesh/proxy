@@ -31,10 +31,7 @@
 #include "absl/base/optimization.h"
 #include "absl/numeric/bits.h"
 #include "absl/types/span.h"
-#include "tcmalloc/experiment.h"
-#include "tcmalloc/experiment_config.h"
 #include "tcmalloc/internal/config.h"
-#include "tcmalloc/internal/environment.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/page_size.h"
 #include "tcmalloc/malloc_extension.h"
@@ -45,33 +42,15 @@
 #define MAP_ANONYMOUS MAP_ANON
 #endif
 
-#ifndef MAP_FIXED_NOREPLACE
-#define MAP_FIXED_NOREPLACE 0x100000
-#endif
-
 GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc::tcmalloc_internal::system_allocator_internal {
 
-bool preferential_collapse() {
-  ABSL_CONST_INIT static absl::once_flag flag;
-  ABSL_CONST_INIT static bool preferential_collapse = false;
-  absl::base_internal::LowLevelCallOnce(&flag, [&]() {
-    if (!IsExperimentActive(
-            Experiment::TEST_ONLY_TCMALLOC_PREFERENTIAL_COLLAPSE)) {
-      preferential_collapse = false;
-      return;
-    }
-  });
-
-  return preferential_collapse;
-}
-
 // Structure for discovering alignment
-union MemoryAligner {
+union ABSL_CACHELINE_ALIGNED MemoryAligner {
   void* p;
   double d;
   size_t s;
-} ABSL_CACHELINE_ALIGNED;
+};
 
 static_assert(sizeof(MemoryAligner) < kHugePageSize,
               "hugepage alignment too small");
@@ -98,7 +77,7 @@ int MapFixedNoReplaceFlagAvailable() {
     void* target = reinterpret_cast<void*>(uptr - page_size);
 
     void* ptr2 = mmap(target, 2 * page_size, PROT_NONE,
-                      MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                      kMapFixedNoReplace | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     const bool rejected = ptr2 == MAP_FAILED;
     if (!rejected) {
       if (ptr2 == target) {
@@ -112,10 +91,35 @@ int MapFixedNoReplaceFlagAvailable() {
     }
     munmap(ptr, page_size);
 
-    noreplace_flag = rejected ? MAP_FIXED_NOREPLACE : 0;
+    noreplace_flag = rejected ? kMapFixedNoReplace : 0;
   });
 
   return noreplace_flag;
+}
+
+int ProbeMadvDontNeedAdvice() {
+  const size_t page_size = GetPageSize();
+  void* ptr =
+      mmap(nullptr, page_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (ptr == MAP_FAILED) {
+    // The probe runs lazily on the first Release(), possibly when the process
+    // is already at RLIMIT_AS or vm.max_map_count.  Fall back to the
+    // universally-available advice rather than crashing.
+    return MADV_DONTNEED;
+  }
+  int ret = madvise(ptr, page_size, MADV_DONTNEED_LOCKED);
+  munmap(ptr, page_size);
+  return (ret == 0) ? MADV_DONTNEED_LOCKED : MADV_DONTNEED;
+}
+
+int MadvDontNeedAdviceAvailable() {
+  ABSL_CONST_INIT static int advice;
+  ABSL_CONST_INIT static absl::once_flag flag;
+
+  absl::base_internal::LowLevelCallOnce(
+      &flag, [&]() { advice = ProbeMadvDontNeedAdvice(); });
+
+  return advice;
 }
 
 }  // namespace tcmalloc::tcmalloc_internal::system_allocator_internal

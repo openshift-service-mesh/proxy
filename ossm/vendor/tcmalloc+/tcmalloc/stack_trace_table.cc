@@ -18,6 +18,8 @@
 #include <string.h>
 
 #include <cstdint>
+#include <new>
+#include <optional>
 
 #include "absl/functional/function_ref.h"
 #include "tcmalloc/common.h"
@@ -83,6 +85,7 @@ void StackTraceTable::AddTrace(double sample_weight, const StackTrace& t) {
   s->sample.allocated_size = allocated_size;
   s->sample.alloc_handle = t.sampled_alloc_handle;
   s->sample.access_hint = static_cast<hot_cold_t>(t.access_hint);
+  s->sample.token_id = t.token_id;
   s->sample.access_allocated = t.cold_allocated ? Profile::Sample::Access::Cold
                                                 : Profile::Sample::Access::Hot;
   s->sample.depth = t.depth;

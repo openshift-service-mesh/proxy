@@ -21,7 +21,6 @@
 
 #include <optional>
 #include <ostream>
-
 #include "absl/status/status.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/page_size.h"
@@ -31,7 +30,6 @@ GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
 namespace tcmalloc_internal {
 
-constexpr int kMaxResidencyBits = 512;
 // Abstract base class for Residency, which offers information about memory
 // residency: whether or not specific spans of memory are resident in core ("m
 // in core"), swapped, or not present.
@@ -42,10 +40,15 @@ class Residency {
   struct Info {
     size_t bytes_resident = 0;
     size_t bytes_swapped = 0;
+    // Bitmap of the resident pages. In the case that the queried range is
+    // larger than the size of the residency bitmap, the bitmap will only
+    // cover some prefix of the queried range.
+    ResidencyBitmap page_is_resident;
   };
 
-  virtual std::optional<Info> Get(const void* addr, size_t size) = 0;
-  virtual inline size_t GetNativePagesInHugePage() const = 0;
+  [[nodiscard]] virtual std::optional<Info> Get(const void* addr,
+                                                size_t size) = 0;
+  [[nodiscard]] virtual inline size_t GetHardwarePagesInHugePage() const = 0;
 
   // Struct is ordered with bitmaps first to optimize cacheline usage.
   struct SinglePageBitmaps {
@@ -59,7 +62,8 @@ class Residency {
   // that are swapped. Hugepage-sized regions are assumed to be 2MiB in size. A
   // SinglePageBitmaps struct is returned with the status, the page_unbacked
   // bitmap, and the page_swapped bitmap.
-  virtual SinglePageBitmaps GetUnbackedAndSwappedBitmaps(const void* addr) = 0;
+  [[nodiscard]] virtual SinglePageBitmaps GetUnbackedAndSwappedBitmaps(
+      const void* addr) = 0;
 };
 
 // Residency offers information about memory residency: whether or not specific
@@ -84,11 +88,11 @@ class ResidencyPageMap : public Residency {
   //
   // This is NOT thread-safe. Do not use multiple copies of this class across
   // threads.
-  std::optional<Info> Get(const void* addr, size_t size) override;
+  [[nodiscard]] std::optional<Info> Get(const void* addr, size_t size) override;
 
-  // Getter method for kNativePagesInHugePage.
-  size_t GetNativePagesInHugePage() const override {
-    return kNativePagesInHugePage;
+  // Getter method for kHardwarePagesInHugePage.
+  [[nodiscard]] size_t GetHardwarePagesInHugePage() const override {
+    return kHardwarePagesInHugePage;
   }
 
   // Using a hugepage-aligned address, parse through /proc/self/pagemap
@@ -96,20 +100,23 @@ class ResidencyPageMap : public Residency {
   // that are swapped. Hugepage-sized regions are assumed to be 2MiB in size. A
   // SinglePageBitmaps struct is returned with the status, the page_unbacked
   // bitmap, and the page_swapped bitmap.
-  SinglePageBitmaps GetUnbackedAndSwappedBitmaps(const void* addr) override;
+  [[nodiscard]] SinglePageBitmaps GetUnbackedAndSwappedBitmaps(
+      const void* addr) override;
 
  private:
   // This helper seeks the internal file to the correct location for the given
   // virtual address.
-  absl::StatusCode Seek(uintptr_t vaddr);
+  [[nodiscard]] absl::StatusCode Seek(uintptr_t vaddr);
   // This helper reads information for a single page. This is useful for the
   // boundaries. It continues the read from the last Seek() or last Read
   // operation.
-  std::optional<uint64_t> ReadOne();
+  [[nodiscard]] std::optional<uint64_t> ReadOne();
   // This helper reads information for `num_pages` worth of _full_ pages and
-  // puts the results into `info`. It continues the read from the last Seek() or
+  // puts the results into `info`, starting at `page_index`.
+  // It continues the read from the last Seek() or
   // last Read operation.
-  absl::StatusCode ReadMany(int64_t num_pages, Info& info);
+  [[nodiscard]] absl::StatusCode ReadMany(int64_t num_pages, size_t page_index,
+                                          Info& info);
 
   // For testing.
   friend class ResidencySpouse;
@@ -120,15 +127,15 @@ class ResidencyPageMap : public Residency {
   static constexpr int kPagemapEntrySize = 8;
   static constexpr int kEntriesInBuf = kBufferLength / kPagemapEntrySize;
 
-  const size_t kPageSize = GetPageSize();
+  const size_t kHardwarePageSize = GetPageSize();
 
   static constexpr uintptr_t kHugePageMask = ~(kHugePageSize - 1);
-  const size_t kNativePagesInHugePage = kHugePageSize / kPageSize;
+  const size_t kHardwarePagesInHugePage = kHugePageSize / kHardwarePageSize;
 
   uint64_t buf_[kEntriesInBuf];
   const int fd_;
   const size_t kSizeOfHugepageInPagemap =
-      kPagemapEntrySize * kNativePagesInHugePage;
+      kPagemapEntrySize * kHardwarePagesInHugePage;
 };
 
 inline std::ostream& operator<<(std::ostream& stream,

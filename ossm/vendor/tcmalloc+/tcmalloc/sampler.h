@@ -22,6 +22,7 @@
 #include "absl/base/attributes.h"
 #include "absl/base/optimization.h"
 #include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/exponential_biased.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/malloc_extension.h"
 #include "tcmalloc/parameters.h"
@@ -67,7 +68,7 @@ namespace tcmalloc_internal {
 // allocation is sampled.
 //
 // When an allocation occurs, bytes_until_sample_ is reset to
-// a new independtly sampled geometric number of bytes. The
+// a new independently sampled geometric number of bytes. The
 // memoryless property of the point process means that this may
 // be taken as the number of bytes after the end of the current
 // allocation until the next marked byte. This ensures that
@@ -81,8 +82,10 @@ class Sampler {
  public:
   // Record allocation of "k" bytes. If the allocation needs to be sampled,
   // return its sampling weight (i.e., the expected number of allocations of
-  // this size represented by this sample); otherwise return 0.
-  size_t RecordAllocation(size_t k);
+  // this size represented by this sample); otherwise return 0, or a negative
+  // value if the sampler was just initialized and the allocation should not be
+  // sampled.
+  [[nodiscard]] ssize_t RecordAllocation(size_t k);
 
   // Same as above (but faster), except:
   // b) if this returns false, you must call RecordAllocation
@@ -91,31 +94,33 @@ class Sampler {
   // The point of this function is to only deal with common case of no
   // sampling and let caller (which is in malloc fast-path) to
   // "escalate" to fuller and slower logic only if necessary.
-  bool TryRecordAllocationFast(size_t k);
+  [[nodiscard]] bool TryRecordAllocationFast(size_t k);
 
   // Counterpart of TryRecordAllocationFast that needs to be called
   // on the slow path when TryRecordAllocationFast returns false.
-  size_t RecordedAllocationFast(size_t k);
+  // Returns a negative value if the sampler was just initialized and the
+  // allocation should not be sampled.
+  [[nodiscard]] ssize_t RecordedAllocationFast(size_t k);
 
   // Check if the next allocation of size "k" will be sampled
   // without changing the internal state.
-  bool WillRecordAllocation(size_t k);
+  [[nodiscard]] bool WillRecordAllocation(size_t k);
 
   // Generate a geometric with mean profile_sampling_interval.
   //
   // Remembers the value of sample_interval for use in reweighing the sample
   // later (so that if the flag value changes before the next sample is taken,
   // the next sample is still weighed properly).
-  ssize_t PickNextSamplingPoint();
+  [[nodiscard]] ssize_t PickNextSamplingPoint();
 
   // Returns the current sample interval.
-  static ssize_t GetSampleInterval();
+  [[nodiscard]] static ssize_t GetSampleInterval();
 
   // The following are public for the purposes of testing
 
   // Used to ensure that the hot fields are collocated in the same cache line
   // as __rseq_abi.
-  static constexpr size_t HotDataOffset() {
+  [[nodiscard]] static constexpr size_t HotDataOffset() {
     return offsetof(Sampler, bytes_until_sample_);
   }
 
@@ -131,7 +136,7 @@ class Sampler {
   // weight of the first sample after the sampling interval is changed.
   ssize_t sample_interval_;
 
-  uint64_t rnd_;  // Cheap random number generator
+  ExponentialBiased::State rnd_;  // Cheap random number generator
   bool initialized_;
 
   // Bytes until we sample next.
@@ -149,12 +154,13 @@ class Sampler {
   // Initialize this sampler.
   void Init(uint64_t seed);
 
-  size_t RecordAllocationSlow(size_t k);
-  ssize_t GetGeometricVariable(ssize_t mean);
+  [[nodiscard]] ssize_t RecordAllocationSlow(size_t k);
+  [[nodiscard]] ssize_t GetGeometricVariable(ssize_t mean);
 };
 
-inline size_t Sampler::RecordAllocation(size_t k) {
-  if (!TryRecordAllocationFast(k)) {
+inline ssize_t ABSL_ATTRIBUTE_ALWAYS_INLINE
+Sampler::RecordAllocation(size_t k) {
+  if (ABSL_PREDICT_FALSE(!TryRecordAllocationFast(k))) {
     return RecordAllocationSlow(k);
   }
   return 0;
@@ -173,7 +179,8 @@ Sampler::TryRecordAllocationFast(size_t k) {
       bytes_until_sample_, k, reinterpret_cast<size_t*>(&bytes_until_sample_)));
 }
 
-inline size_t Sampler::RecordedAllocationFast(size_t k) {
+inline ssize_t ABSL_ATTRIBUTE_ALWAYS_INLINE
+Sampler::RecordedAllocationFast(size_t k) {
   // TryRecordAllocationFast already decremented the counter.
   if (ABSL_PREDICT_FALSE(bytes_until_sample_ < 0)) {
     return RecordAllocationSlow(k);
@@ -181,13 +188,14 @@ inline size_t Sampler::RecordedAllocationFast(size_t k) {
   return 0;
 }
 
-inline bool Sampler::WillRecordAllocation(size_t k) {
+inline bool ABSL_ATTRIBUTE_ALWAYS_INLINE
+Sampler::WillRecordAllocation(size_t k) {
   return ABSL_PREDICT_FALSE(bytes_until_sample_ < (k + 1));
 }
 
 // Returns the approximate number of bytes that would have been allocated to
 // obtain this sample.
-double AllocatedBytes(const StackTrace& stack);
+[[nodiscard]] double AllocatedBytes(const StackTrace& stack);
 
 }  // namespace tcmalloc_internal
 }  // namespace tcmalloc

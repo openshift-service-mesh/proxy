@@ -16,6 +16,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <new>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -26,7 +27,11 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/debugging/leak_check.h"
 #include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/is_aligned_to.h"
 #include "tcmalloc/malloc_extension.h"
+#include "tcmalloc/testing/testutil.h"
+
+using tcmalloc::tcmalloc_internal::IsAlignedTo;
 
 namespace tcmalloc {
 namespace {
@@ -72,7 +77,12 @@ class AlignedNew : public ::testing::Test {
 TYPED_TEST_SUITE_P(AlignedNew);
 
 TYPED_TEST_P(AlignedNew, AlignedTest) {
-  const int kAllocations = 1 << 22;
+  // Increase sampling rate to reduce total number of allocations we need for
+  // test speed.
+  ScopedProfileSamplingInterval ps(1024);
+
+  const int kAllocations =
+      32 * MallocExtension::GetProfileSamplingInterval() / sizeof(TypeParam);
   this->ptrs.reserve(kAllocations);
 
   auto token = MallocExtension::StartAllocationProfiling();
@@ -80,7 +90,7 @@ TYPED_TEST_P(AlignedNew, AlignedTest) {
   for (int i = 0; i < kAllocations; i++) {
     TypeParam* p = new TypeParam();
     benchmark::DoNotOptimize(p);
-    ASSERT_EQ(0, reinterpret_cast<uintptr_t>(p) & (alignof(TypeParam) - 1));
+    ASSERT_TRUE(IsAlignedTo(p, alignof(TypeParam)));
 
     this->ptrs.emplace_back(p);
   }
@@ -91,18 +101,20 @@ TYPED_TEST_P(AlignedNew, AlignedTest) {
   // __STDCPP_DEFAULT_NEW_ALIGNMENT__.
   //
   // (size, alignment) -> count
-  using CountMap = absl::flat_hash_map<std::pair<size_t, size_t>, size_t>;
+  using CountMap =
+      absl::flat_hash_map<std::pair<size_t, std::align_val_t>, size_t>;
   CountMap counts;
 
   profile.Iterate([&](const Profile::Sample& e) {
-    counts[{e.requested_size, e.requested_alignment}] += e.count;
+    counts[{e.requested_size,
+            e.requested_alignment.value_or(std::align_val_t{0})}] += e.count;
   });
 
   if (!tcmalloc_internal::kSanitizerPresent) {
-    size_t expected_alignment = 0;
+    std::align_val_t expected_alignment{0};
 #if defined(__STDCPP_DEFAULT_NEW_ALIGNMENT__)
     if (alignof(TypeParam) > __STDCPP_DEFAULT_NEW_ALIGNMENT__) {
-      expected_alignment = alignof(TypeParam);
+      expected_alignment = static_cast<std::align_val_t>(alignof(TypeParam));
     }
 #endif
     EXPECT_GT((counts[{sizeof(TypeParam), expected_alignment}]), 0);
@@ -122,6 +134,10 @@ TYPED_TEST_P(AlignedNew, SizeCheckSampling) {
   // The HeapLeakChecker initializes malloc hooks which we call prior to looking
   // up the size class (and asserting the correct size was passed to TCMalloc).
   ASSERT_FALSE(absl::LeakCheckerIsActive());
+
+  // Increase sampling rate to reduce total number of allocations we need for
+  // test speed.
+  ScopedProfileSamplingInterval ps(1024);
 
   // Allocate enough objects to ensure we sample one.
   const int allocations =
@@ -161,6 +177,10 @@ TYPED_TEST_P(AlignedNew, ArraySizeCheckSampling) {
   // up the size class (and asserting the correct size was passed to TCMalloc).
   ASSERT_FALSE(absl::LeakCheckerIsActive());
 
+  // Increase sampling rate to reduce total number of allocations we need for
+  // test speed.
+  ScopedProfileSamplingInterval ps(1024);
+
   // Allocate enough objects to ensure we sample one.
   const int allocations =
       32 * MallocExtension::GetProfileSamplingInterval() / sizeof(TypeParam);
@@ -182,6 +202,49 @@ REGISTER_TYPED_TEST_SUITE_P(AlignedNew, AlignedTest, SizeCheckSampling,
 typedef ::testing::Types<Aligned4, Aligned8, Aligned16, Aligned32, Aligned64>
     MyTypes;
 INSTANTIATE_TYPED_TEST_SUITE_P(My, AlignedNew, MyTypes);
+
+TEST(UnderalignedNew, Profiled) {
+  constexpr size_t kAllocationSize = 1 << 21;
+  constexpr std::align_val_t kAlignment{1};
+  const size_t bytes = 32 * MallocExtension::GetProfileSamplingInterval();
+
+  std::vector<void*> ptrs;
+  ptrs.reserve(bytes / kAllocationSize + 1);
+
+  auto token = MallocExtension::StartAllocationProfiling();
+
+  for (size_t allocated = 0; allocated < bytes; allocated += kAllocationSize) {
+    ptrs.push_back(::operator new(kAllocationSize, kAlignment));
+  }
+
+  auto profile = std::move(token).Stop();
+
+  size_t count = 0;
+  profile.Iterate([&](const Profile::Sample& e) {
+    if (e.requested_size != kAllocationSize) {
+      return;
+    }
+
+    if (!e.requested_alignment.has_value() ||
+        e.requested_alignment != kAlignment) {
+      return;
+    }
+
+    count += e.count;
+  });
+
+  if (!tcmalloc_internal::kSanitizerPresent) {
+    EXPECT_GT(count, 0);
+  }
+
+  for (void* ptr : ptrs) {
+    ::operator delete(ptr,
+#ifdef __cpp_sized_deallocation
+                      kAllocationSize,
+#endif
+                      kAlignment);
+  }
+}
 
 }  // namespace
 }  // namespace tcmalloc

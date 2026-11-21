@@ -20,178 +20,141 @@
 #include <cstring>
 
 #include "absl/base/attributes.h"
-#include "absl/base/const_init.h"
 #include "absl/base/internal/spinlock.h"
 #include "absl/base/optimization.h"
 #include "absl/types/span.h"
-#include "tcmalloc/allocation_sample.h"
 #include "tcmalloc/arena.h"
 #include "tcmalloc/common.h"
-#include "tcmalloc/cpu_cache.h"
-#include "tcmalloc/deallocation_profiler.h"
 #include "tcmalloc/experiment.h"
 #include "tcmalloc/experiment_config.h"
 #include "tcmalloc/guarded_page_allocator.h"
-#include "tcmalloc/internal/atomic_stats_counter.h"
 #include "tcmalloc/internal/cache_topology.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/environment.h"
-#include "tcmalloc/internal/gwp_asan_state.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/mincore.h"
 #include "tcmalloc/internal/numa.h"
 #include "tcmalloc/internal/parameter_accessors.h"
 #include "tcmalloc/internal/percpu.h"
-#include "tcmalloc/internal/sampled_allocation.h"
+#include "tcmalloc/internal/percpu_state.h"
+#include "tcmalloc/internal/size_class_info.h"
 #include "tcmalloc/internal/sysinfo.h"
-#include "tcmalloc/internal/system_allocator.h"
 #include "tcmalloc/malloc_extension.h"
-#include "tcmalloc/metadata_object_allocator.h"
 #include "tcmalloc/page_allocator.h"
-#include "tcmalloc/pagemap.h"
 #include "tcmalloc/parameters.h"
-#include "tcmalloc/peak_heap_tracker.h"
-#include "tcmalloc/size_class_info.h"
 #include "tcmalloc/sizemap.h"
 #include "tcmalloc/span.h"
-#include "tcmalloc/stack_trace_table.h"
-#include "tcmalloc/thread_cache.h"
 #include "tcmalloc/transfer_cache.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
 namespace tcmalloc_internal {
-// Cacheline-align our SizeMap and CpuCache.  They both have very hot arrays as
-// their first member variables, and aligning them reduces the number of cache
-// lines these arrays use.
-//
-// IF YOU ADD TO THIS LIST, ADD TO STATIC_VAR_SIZE TOO!
-// LINT.IfChange(static_vars)
-ABSL_CONST_INIT absl::base_internal::SpinLock pageheap_lock(
-    absl::base_internal::SCHEDULE_KERNEL_ONLY);
-ABSL_CONST_INIT Arena Static::arena_;
-ABSL_CONST_INIT SizeMap ABSL_CACHELINE_ALIGNED Static::sizemap_;
-TCMALLOC_ATTRIBUTE_NO_DESTROY ABSL_CONST_INIT TransferCacheManager
-    Static::transfer_cache_;
-ABSL_CONST_INIT ShardedTransferCacheManager
-    Static::sharded_transfer_cache_(nullptr, nullptr);
-ABSL_CONST_INIT CpuCache ABSL_CACHELINE_ALIGNED Static::cpu_cache_;
-ABSL_CONST_INIT MetadataObjectAllocator<SampledAllocation>
-    Static::sampledallocation_allocator_{arena_};
-ABSL_CONST_INIT MetadataObjectAllocator<Span> Static::span_allocator_{arena_};
-ABSL_CONST_INIT MetadataObjectAllocator<ThreadCache>
-    Static::threadcache_allocator_{arena_};
-TCMALLOC_ATTRIBUTE_NO_DESTROY ABSL_CONST_INIT SampledAllocationRecorder
-    Static::sampled_allocation_recorder_{sampledallocation_allocator_};
-ABSL_CONST_INIT tcmalloc_internal::StatsCounter Static::sampled_objects_size_;
-ABSL_CONST_INIT tcmalloc_internal::StatsCounter
-    Static::sampled_internal_fragmentation_;
-ABSL_CONST_INIT tcmalloc_internal::StatsCounter Static::total_sampled_count_;
-ABSL_CONST_INIT AllocationSampleList Static::allocation_samples;
-ABSL_CONST_INIT deallocationz::DeallocationProfilerList
-    Static::deallocation_samples;
-ABSL_CONST_INIT std::atomic<int64_t> Static::sampled_alloc_handle_generator{0};
-TCMALLOC_ATTRIBUTE_NO_DESTROY ABSL_CONST_INIT PeakHeapTracker
-    Static::peak_heap_tracker_{sampledallocation_allocator_};
-ABSL_CONST_INIT MetadataObjectAllocator<StackTraceTable::LinkedSample>
-    Static::linked_sample_allocator_{arena_};
-ABSL_CONST_INIT std::atomic<bool> Static::inited_{false};
-ABSL_CONST_INIT std::atomic<bool> Static::cpu_cache_active_{false};
-ABSL_CONST_INIT Static::PageAllocatorStorage Static::page_allocator_;
-ABSL_CONST_INIT PageMap Static::pagemap_;
-ABSL_CONST_INIT GuardedPageAllocator Static::guardedpage_allocator_;
-ABSL_CONST_INIT NumaTopology<kNumaPartitions, kNumBaseClasses>
-    Static::numa_topology_;
-ABSL_CONST_INIT GwpAsanState Static::gwp_asan_state_;
-ABSL_CONST_INIT Static::PerSizeClassCounts Static::per_size_class_counts_;
-TCMALLOC_ATTRIBUTE_NO_DESTROY ABSL_CONST_INIT
-    SystemAllocator<NumaTopology<kNumaPartitions, kNumBaseClasses>>
-        Static::system_allocator_{numa_topology_, kMinMmapAlloc};
+#ifndef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+alignas(ABSL_CACHELINE_SIZE)
+#endif
+    ABSL_CONST_INIT absl::base_internal::SpinLock
+    pageheap_lock(absl::base_internal::SCHEDULE_KERNEL_ONLY);
 
-// LINT.ThenChange(:static_vars_size)
-
-ABSL_CONST_INIT Static tc_globals;
+// We expect tc_globals to be in a zero-initialized section (.bss). This is
+// important to keep binary size smaller. But there is no easy way to enforce
+// this during compilation. ABSL_ATTRIBUTE_SECTION_VARIABLE(.bss) does it,
+// but it places the variable in .bss section, while we want it to be in
+// google_malloc_bss. And compiler does not like
+// ABSL_ATTRIBUTE_SECTION_VARIABLE(google_malloc_bss). So instead,
+// we check this in arena_test.cc (a random test) by declaring another
+// global Static variable with ABSL_ATTRIBUTE_SECTION_VARIABLE(.bss).
+TCMALLOC_ATTRIBUTE_NO_DESTROY ABSL_CONST_INIT Static tc_globals
+    TCMALLOC_SMALL_MODEL;
 
 size_t Static::metadata_bytes() {
-  // This is ugly and doesn't nicely account for e.g. alignment losses
-  // -- I'd like to put all the above in a struct and take that
-  // struct's size.  But we can't due to linking issues.
-  //
-  // TODO(b/242550501):  Progress on constant initialization guarantees allow
-  // state to be consolidated directly into an instance, rather than as a
-  // collection of static variables.  Simplify this.
-  // LINT.IfChange(static_vars_size)
-  const size_t static_var_size =
-      sizeof(pageheap_lock) + sizeof(arena_) + sizeof(sizemap_) +
-      sizeof(sharded_transfer_cache_) + sizeof(transfer_cache_) +
-      sizeof(cpu_cache_) + sizeof(sampledallocation_allocator_) +
-      sizeof(span_allocator_) + +sizeof(threadcache_allocator_) +
-      sizeof(sampled_allocation_recorder_) + sizeof(linked_sample_allocator_) +
-      sizeof(inited_) + sizeof(cpu_cache_active_) + sizeof(page_allocator_) +
-      sizeof(pagemap_) + sizeof(sampled_objects_size_) +
-      sizeof(sampled_internal_fragmentation_) + sizeof(total_sampled_count_) +
-      sizeof(allocation_samples) + sizeof(deallocation_samples) +
-      sizeof(sampled_alloc_handle_generator) + sizeof(peak_heap_tracker_) +
-      sizeof(guardedpage_allocator_) + sizeof(numa_topology_) +
-      sizeof(CacheTopology::Instance()) + sizeof(gwp_asan_state_) +
-      sizeof(per_size_class_counts_) + sizeof(system_allocator_);
-  // LINT.ThenChange(:static_vars)
+  const size_t internal_dependencies_size = sizeof(pageheap_lock) +
+                                            sizeof(CacheTopology::Instance()) +
+                                            sizeof(PerCpuState::state());
 
-  const size_t allocated = arena().stats().bytes_allocated +
-                           AddressRegionFactory::InternalBytesAllocated();
-  return allocated + static_var_size;
+  const size_t allocated =
+      arena().allocated() + AddressRegionFactory::InternalBytesAllocated();
+  return sizeof(*this) + allocated + internal_dependencies_size;
 }
 
 size_t Static::pagemap_residence() {
   // Determine residence of the root node of the pagemap.
-  size_t total = MInCore::residence(&pagemap_, sizeof(pagemap_));
-  return total;
+  return MInCore::residence(&pagemap_, sizeof(pagemap_));
 }
-
-int ABSL_ATTRIBUTE_WEAK default_want_legacy_size_classes();
 
 SizeClassConfiguration Static::size_class_configuration() {
   if (IsExperimentActive(Experiment::TEST_ONLY_TCMALLOC_POW2_SIZECLASS)) {
     return SizeClassConfiguration::kPow2Only;
   }
+  return SizeClassConfiguration::kReuseRelaxedBelow64;
+}
 
-  // TODO(b/242710633): remove this opt out.
-  if (default_want_legacy_size_classes != nullptr &&
-      default_want_legacy_size_classes() > 0) {
-    return SizeClassConfiguration::kLegacy;
+namespace {
+
+bool DeferPerCpuCaches() {
+  const char* e = thread_safe_getenv("TCMALLOC_DEFER_PER_CPU_CACHES");
+  if (e != nullptr) {
+    if (e[0] == '\0' || (e[0] == '0' && e[1] == '\0')) {
+      return false;
+    }
+    if (e[0] == '1' && e[1] == '\0') {
+      return true;
+    }
+    TC_BUG("bad env var '%s'", e);
   }
 
-  if (IsExperimentActive(
-          Experiment::TEST_ONLY_TCMALLOC_REUSE_SIZE_CLASSES_V2) ||
-      IsExperimentActive(Experiment::TCMALLOC_REUSE_SIZE_CLASSES_V2)) {
-    return SizeClassConfiguration::kReuseV2;
+  return false;
+}
+
+}  // namespace
+
+void Static::ActivateCpuCacheIfNecessary() {
+  InitIfNecessary();
+  if (CpuCacheActive()) {
+    return;
+  }
+  if (!Parameters::per_cpu_caches() || !subtle::percpu::IsFast()) {
+    return;
   }
 
-  const char* e = thread_safe_getenv("TCMALLOC_LEGACY_SIZE_CLASSES");
-  if (e == nullptr) {
-    return SizeClassConfiguration::kReuse;
-  } else if (!strcmp(e, "0")) {
-    return SizeClassConfiguration::kReuse;
-  } else {
-    TC_BUG("bad TCMALLOC_LEGACY_SIZE_CLASSES env var '%s'", e);
+  AllocationGuardSpinLockHolder l(init_lock_);
+  if (!CpuCacheActive()) {
+    cpu_cache().Activate();
+    cpu_cache_active_.store(true, std::memory_order_release);
   }
-  return SizeClassConfiguration::kReuse;
 }
 
 ABSL_ATTRIBUTE_COLD ABSL_ATTRIBUTE_NOINLINE void Static::SlowInitIfNecessary() {
-  PageHeapSpinLockHolder l;
+  AllocationGuardSpinLockHolder init_l(init_lock_);
 
   // double-checked locking
-  if (!inited_.load(std::memory_order_acquire)) {
+  if (IsInited()) {
+    return;
+  }
+
+  {
+    PageHeapSpinLockHolder l;
+
+    numa_topology_.Init();
     TC_CHECK(sizemap_.Init(SizeMap::CurrentClasses().classes));
+    system_allocator_.Init(numa_topology_, kMinMmapAlloc);
+    sampledallocation_allocator_.Init(arena_);
+    span_allocator_.Init(arena_);
+    threadcache_allocator_.Init(arena_);
+    linked_sample_allocator_.Init(arena_);
+    sampled_allocation_recorder_.Init(sampledallocation_allocator_);
+    peak_heap_tracker_.Init(sampledallocation_allocator_);
+
     // Verify we can determine the number of CPUs now, since we will need it
     // later for per-CPU caches and initializing the cache topology.
     if (ABSL_PREDICT_FALSE(!NumCPUsMaybe().has_value())) {
       TCMalloc_Internal_SetPerCpuCachesEnabledNoBuildRequirement(false);
     }
     (void)subtle::percpu::IsFast();
-    numa_topology_.Init();
+    PerCpuState::state().Init();
     CacheTopology::Instance().Init();
+    cpu_cache().Init();
+
+    Parameters::InitializeFromExperiments();
 
     // Do a bit of sanitizing: make sure central_cache is aligned properly
     TC_CHECK_EQ((sizeof(transfer_cache_) % ABSL_CACHELINE_SIZE), 0);
@@ -200,11 +163,19 @@ ABSL_ATTRIBUTE_COLD ABSL_ATTRIBUTE_NOINLINE void Static::SlowInitIfNecessary() {
     // state.
     sharded_transfer_cache_.Init();
     new (page_allocator_.memory) PageAllocator;
-    pagemap_.MapRootWithSmallPages();
     guardedpage_allocator_.Init(/*max_allocated_pages=*/64,
                                 /*total_pages=*/128);
-    inited_.store(true, std::memory_order_release);
   }
+
+  if (!DeferPerCpuCaches() && Parameters::per_cpu_caches() &&
+      subtle::percpu::IsFast()) {
+    cpu_cache().Activate();
+    cpu_cache_active_.store(true, std::memory_order_release);
+  }
+
+  // Publish only after activation, so that threads racing to make their first
+  // allocation wait on init_lock_ rather than starting on per-thread caches.
+  inited_.store(true, std::memory_order_release);
 }
 
 }  // namespace tcmalloc_internal

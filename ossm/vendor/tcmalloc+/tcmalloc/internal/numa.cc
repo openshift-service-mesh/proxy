@@ -55,7 +55,8 @@ bool InitNumaTopology(size_t cpu_to_scaled_partition[kMaxCpus],
                       uint64_t* const partition_to_nodes,
                       NumaBindMode* const bind_mode,
                       const size_t num_partitions, const size_t scale_by,
-                      absl::FunctionRef<int(size_t)> open_node_cpulist) {
+                      absl::FunctionRef<int(size_t)> open_node_cpulist,
+                      size_t* num_nodes) {
   // Node 0 will always map to partition 0; record it here in case the system
   // doesn't support NUMA or the user opts out of our awareness of it - in
   // either case we'll record nothing in the loop below.
@@ -63,7 +64,9 @@ bool InitNumaTopology(size_t cpu_to_scaled_partition[kMaxCpus],
   const char* e =
       tcmalloc::tcmalloc_internal::thread_safe_getenv("TCMALLOC_NUMA_AWARE");
 
-  partition_to_nodes[NodeToPartition(0, num_partitions)] |= 1 << 0;
+  partition_to_nodes[NodeToPartition(0, num_partitions)] |= uint64_t{1} << 0;
+  *bind_mode = NumaBindMode::kAdvisory;
+  *num_nodes = 1;
 
   // We rely on rseq to quickly obtain a CPU ID & lookup the appropriate
   // partition in NumaTopology::GetCurrentPartition(). If rseq is unavailable,
@@ -74,11 +77,6 @@ bool InitNumaTopology(size_t cpu_to_scaled_partition[kMaxCpus],
   // whether to enable NUMA awareness by default, and allow the user to
   // override that either way by setting TCMALLOC_NUMA_AWARE in the
   // environment.
-  //
-  // In cases where we don't enable NUMA awareness we simply return. Since the
-  // cpu_to_scaled_partition & partition_to_nodes arrays are zero initialized
-  // we're trivially done - CPUs all map to partition 0, which contains only
-  // CPU 0 added above.
   bool enabled = true;
   if (e == nullptr) {
     // Enable NUMA awareness iff default_want_numa_aware().
@@ -106,7 +104,11 @@ bool InitNumaTopology(size_t cpu_to_scaled_partition[kMaxCpus],
   // allocated prior to lookups. It has kMaxCpus entries which ought to be
   // sufficient, but sanity check that indexing it by CPU number shouldn't
   // exceed its bounds.
-  int num_cpus = NumCPUs();
+  std::optional<int> maybe_num_cpus = NumCPUsMaybe();
+  if (!maybe_num_cpus.has_value()) {
+    return false;
+  }
+  int num_cpus = *maybe_num_cpus;
   TC_CHECK_LE(num_cpus, kMaxCpus);
 
   // We could just always report that we're NUMA aware, but if a NUMA-aware
@@ -121,14 +123,21 @@ bool InitNumaTopology(size_t cpu_to_scaled_partition[kMaxCpus],
     const int fd = open_node_cpulist(node);
     if (fd == -1) {
       // We expect to encounter ENOENT once node surpasses the actual number of
-      // nodes present in the system. Any other error is a problem.
-      TC_CHECK_EQ(errno, ENOENT);
+      // nodes present in the system, or EACCES/EPERM in restricted sandboxes.
+      // Any other error is a problem.
+      TC_CHECK(errno == ENOENT || errno == EACCES || errno == EPERM);
+      // Even the first open may fail in sandboxes, don't set num_nodes to 0.
+      if (node != 0) {
+        *num_nodes = node;
+      }
       break;
     }
 
     // Record this node in partition_to_nodes.
     const size_t partition = NodeToPartition(node, num_partitions);
-    partition_to_nodes[partition] |= 1 << node;
+    if (node < 64) {
+      partition_to_nodes[partition] |= uint64_t{1} << node;
+    }
 
     // cpu_to_scaled_partition_ entries are default initialized to zero, so
     // skip redundantly parsing CPU lists for nodes that map to partition 0.

@@ -18,13 +18,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <memory>
 #include <new>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
-#include "gmock/gmock.h"
+#include "benchmark/benchmark.h"
 #include "gtest/gtest.h"
 #include "absl/base/internal/spinlock.h"
 #include "absl/base/optimization.h"
@@ -33,62 +34,57 @@
 #include "absl/random/random.h"
 #include "absl/types/span.h"
 #include "tcmalloc/common.h"
-#include "tcmalloc/experiment.h"
-#include "tcmalloc/experiment_config.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/pages.h"
+#include "tcmalloc/sizemap.h"
 #include "tcmalloc/static_vars.h"
 
 namespace tcmalloc {
 namespace tcmalloc_internal {
 namespace {
 
-constexpr uint64_t kSpanAllocTime = 1234;
-
 class RawSpan {
  public:
-  void Init(size_t size_class) {
-    size_t size = tc_globals.sizemap().class_to_size(size_class);
-    auto npages = Length(tc_globals.sizemap().class_to_pages(size_class));
-    size_t objects_per_span = npages.in_bytes() / size;
-
-    // Dynamically allocate so ASan can flag if we run out of bounds.
-    buf_ = ::operator new(sizeof(Span), std::align_val_t(alignof(Span)));
-
+  void Init(size_t size, Length npages, size_t objects_per_span,
+            Span::BitmapMode bitmap_mode) {
     int res = posix_memalign(&mem_, kPageSize, npages.in_bytes());
     TC_CHECK_EQ(res, 0);
 
-    span_ = new (buf_) Span(Range(PageIdContaining(mem_), npages));
-    TC_CHECK_EQ(
-        span_->BuildFreelist(size, objects_per_span, {}, kSpanAllocTime), 0);
+    // Dynamically allocate so ASan can flag if we run out of bounds.
+    span_ = std::make_unique<Span>(PageIdContaining(mem_));
+    TC_CHECK_EQ(span_->BuildFreelist(size, objects_per_span, {}, bitmap_mode),
+                0);
   }
 
-  ~RawSpan() {
-    free(mem_);
-    ::operator delete(buf_, std::align_val_t(alignof(Span)));
-  }
+  ~RawSpan() { free(mem_); }
 
   Span& span() { return *span_; }
 
  private:
-  void* buf_ = nullptr;
   void* mem_ = nullptr;
-  Span* span_;
+  std::unique_ptr<Span> span_;
 };
 
-class SpanTest : public testing::TestWithParam<size_t> {
+class SpanTest : public testing::TestWithParam<std::tuple<size_t, bool>> {
  protected:
   size_t size_class_;
   size_t size_;
-  size_t npages_;
+  Length npages_;
   size_t batch_size_;
   size_t objects_per_span_;
   uint32_t reciprocal_;
+  Span::BitmapMode bitmap_mode_;
   RawSpan raw_span_;
 
  private:
   void SetUp() override {
-    size_class_ = GetParam();
+#if ABSL_HAVE_HWADDRESS_SANITIZER
+    GTEST_SKIP()
+        << "Skipping under HWASan, which uses the top bits of the pointer.";
+#endif
+
+    size_class_ = std::get<0>(GetParam());
+    const bool use_bitmap_for_small = std::get<1>(GetParam());
     size_ = tc_globals.sizemap().class_to_size(size_class_);
     if (size_ == 0) {
       GTEST_SKIP() << "Skipping empty size class.";
@@ -96,10 +92,13 @@ class SpanTest : public testing::TestWithParam<size_t> {
 
     npages_ = tc_globals.sizemap().class_to_pages(size_class_);
     batch_size_ = tc_globals.sizemap().num_objects_to_move(size_class_);
-    objects_per_span_ = npages_ * kPageSize / size_;
+    const auto [objects_per_span, bitmap_mode] =
+        Span::CalcBitmapInfo(use_bitmap_for_small, npages_, size_);
+    objects_per_span_ = objects_per_span;
+    bitmap_mode_ = bitmap_mode;
     reciprocal_ = Span::CalcReciprocal(size_);
 
-    raw_span_.Init(size_class_);
+    raw_span_.Init(size_, npages_, objects_per_span_, bitmap_mode_);
   }
 
   void TearDown() override {}
@@ -107,8 +106,9 @@ class SpanTest : public testing::TestWithParam<size_t> {
 
 TEST_P(SpanTest, FreelistBasic) {
   Span& span_ = raw_span_.span();
+  const PageId expected_first_page = span_.first_page();
 
-  EXPECT_FALSE(span_.FreelistEmpty(size_));
+  EXPECT_FALSE(span_.FreelistEmpty(objects_per_span_));
   void* batch[kMaxObjectsToMove];
   size_t popped = 0;
   size_t want = 1;
@@ -118,18 +118,16 @@ TEST_P(SpanTest, FreelistBasic) {
     // Pop all objects in batches of varying size and ensure that we've got
     // all objects.
     for (;;) {
-      size_t n = span_.FreelistPopBatch(absl::MakeSpan(batch, want), size_);
+      size_t n = span_.FreelistPopBatch(absl::MakeSpan(batch, want), size_,
+                                        objects_per_span_, bitmap_mode_);
+      EXPECT_EQ(span_.first_page(), expected_first_page);
       popped += n;
-      EXPECT_NEAR(
-          span_.Fragmentation(size_),
-          static_cast<double>(objects_per_span_) / static_cast<double>(popped) -
-              1.,
-          1e-5);
-      EXPECT_EQ(span_.FreelistEmpty(size_), popped == objects_per_span_);
+      EXPECT_EQ(span_.FreelistEmpty(objects_per_span_),
+                popped == objects_per_span_);
       for (size_t i = 0; i < n; ++i) {
         void* p = batch[i];
         uintptr_t off = reinterpret_cast<char*>(p) - start;
-        EXPECT_LT(off, span_.bytes_in_span());
+        EXPECT_LT(off, npages_.in_bytes());
         EXPECT_EQ(off % size_, 0);
         size_t idx = off / size_;
         EXPECT_FALSE(objects[idx]);
@@ -143,101 +141,196 @@ TEST_P(SpanTest, FreelistBasic) {
         want = 1;
       }
     }
-    EXPECT_TRUE(span_.FreelistEmpty(size_));
-    EXPECT_EQ(span_.FreelistPopBatch(absl::MakeSpan(batch, 1), size_), 0);
+    EXPECT_TRUE(span_.FreelistEmpty(objects_per_span_));
+    EXPECT_EQ(span_.FreelistPopBatch(absl::MakeSpan(batch, 1), size_,
+                                     objects_per_span_, bitmap_mode_),
+              0);
     EXPECT_EQ(popped, objects_per_span_);
 
     // Push all objects back except the last one (which would not be pushed).
-    for (size_t idx = 0; idx < objects_per_span_ - 1; ++idx) {
-      EXPECT_TRUE(objects[idx]);
-      void* ptr = start + idx * size_;
-      bool ok = span_.FreelistPushBatch({&ptr, 1}, size_, reciprocal_);
+    std::vector<size_t> to_push;
+    if (objects_per_span_ > 1) {
+      to_push.reserve(objects_per_span_ - 1);
+      for (size_t idx = 0; idx < objects_per_span_ - 1; ++idx) {
+        EXPECT_TRUE(objects[idx]);
+        to_push.push_back(idx);
+      }
+      if (x == 0) {
+        absl::BitGen rng;
+        std::shuffle(to_push.begin(), to_push.end(), rng);
+      }
+    }
+    size_t push_want = 1;
+    for (size_t pos = 0; pos < to_push.size();) {
+      size_t n = std::min(push_want, to_push.size() - pos);
+      void* ptrs[kMaxObjectsToMove];
+      for (size_t i = 0; i < n; ++i) {
+        size_t idx = to_push[pos + i];
+        EXPECT_TRUE(objects[idx]);
+        objects[idx] = false;
+        ptrs[i] = start + idx * size_;
+      }
+      Span::ObjIdx objidx[kMaxObjectsToMove];
+      Span::ObjectsToIdx({ptrs, n}, &span_, size_, reciprocal_, objidx,
+                         bitmap_mode_);
+      bool ok = span_.FreelistPushBatch(absl::MakeSpan(objidx, n), size_,
+                                        bitmap_mode_);
+      EXPECT_EQ(span_.first_page(), expected_first_page);
       EXPECT_TRUE(ok);
-      EXPECT_FALSE(span_.FreelistEmpty(size_));
-      objects[idx] = false;
-      --popped;
+      EXPECT_FALSE(span_.FreelistEmpty(objects_per_span_));
+      popped -= n;
+      pos += n;
+      ++push_want;
+      if (push_want > batch_size_) {
+        push_want = 1;
+      }
     }
     // On the last iteration we can actually push the last object.
     if (x == 1) {
       void* ptr = start + (objects_per_span_ - 1) * size_;
-      bool ok = span_.FreelistPushBatch({&ptr, 1}, size_, reciprocal_);
+      Span::ObjIdx objidx;
+      Span::ObjectsToIdx({&ptr, 1}, &span_, size_, reciprocal_, &objidx,
+                         bitmap_mode_);
+      bool ok = span_.FreelistPushBatch(absl::MakeSpan(&objidx, 1), size_,
+                                        bitmap_mode_);
+      EXPECT_EQ(span_.first_page(), expected_first_page);
       EXPECT_FALSE(ok);
     }
   }
 }
 
-TEST_P(SpanTest, AllocTime) {
-  Span& span_ = raw_span_.span();
-  EXPECT_EQ(span_.AllocTime(), kSpanAllocTime);
-}
+TEST_P(SpanTest, BuildFreelistReusedSpan) {
+  Span& span = raw_span_.span();
+  const PageId first_page = span.first_page();
+  span.~Span();
+  new (&span) Span(first_page);
 
-TEST_P(SpanTest, FreelistRandomized) {
-  Span& span_ = raw_span_.span();
+  const size_t count = (objects_per_span_ + 1) / 2;
+  const size_t want = std::min(batch_size_, count);
 
-  char* start = static_cast<char*>(span_.start_address());
-
-  // Do a bunch of random pushes/pops with random batch size.
-  absl::BitGen rng;
-  absl::flat_hash_set<void*> objects;
   void* batch[kMaxObjectsToMove];
-  for (size_t x = 0; x < 10000; ++x) {
-    if (!objects.empty() && absl::Bernoulli(rng, 1.0 / 2)) {
-      void* p = *objects.begin();
-      if (span_.FreelistPushBatch({&p, 1}, size_, reciprocal_)) {
-        objects.erase(objects.begin());
-      } else {
-        EXPECT_EQ(objects.size(), 1);
-      }
-      EXPECT_EQ(span_.FreelistEmpty(size_), objects_per_span_ == 1);
-    } else {
-      size_t want = absl::Uniform<int32_t>(rng, 0, batch_size_) + 1;
-      size_t n = span_.FreelistPopBatch(absl::MakeSpan(batch, want), size_);
-      if (n < want) {
-        EXPECT_TRUE(span_.FreelistEmpty(size_));
-      }
-      for (size_t i = 0; i < n; ++i) {
-        EXPECT_TRUE(objects.insert(batch[i]).second);
-      }
-    }
-  }
+  ASSERT_EQ(span.BuildFreelist(size_, count, absl::MakeSpan(batch, want),
+                               bitmap_mode_),
+            want);
 
-  EXPECT_EQ(span_.AllocTime(), kSpanAllocTime);
-  // Now pop everything what's there.
-  for (;;) {
-    size_t n =
-        span_.FreelistPopBatch(absl::MakeSpan(batch, batch_size_), size_);
-    for (size_t i = 0; i < n; ++i) {
-      EXPECT_TRUE(objects.insert(batch[i]).second);
+  char* start = static_cast<char*>(span.start_address());
+  std::vector<bool> seen(count, false);
+  auto record = [&](absl::Span<void* const> ptrs) {
+    for (void* p : ptrs) {
+      uintptr_t off = static_cast<char*>(p) - start;
+      ASSERT_LT(off, count * size_);
+      ASSERT_EQ(off % size_, 0);
+      size_t idx = off / size_;
+      EXPECT_FALSE(seen[idx]);
+      seen[idx] = true;
     }
-    if (n < batch_size_) {
-      break;
-    }
+  };
+
+  record(absl::MakeSpan(batch, want));
+  size_t popped = want;
+  while (!span.FreelistEmpty(count)) {
+    size_t n = span.FreelistPopBatch(absl::MakeSpan(batch, batch_size_), size_,
+                                     count, bitmap_mode_);
+    ASSERT_GT(n, 0);
+    record(absl::MakeSpan(batch, n));
+    popped += n;
   }
-  // Check that we have collected all objects.
-  EXPECT_EQ(objects.size(), objects_per_span_);
-  for (void* p : objects) {
-    uintptr_t off = reinterpret_cast<char*>(p) - start;
-    EXPECT_LT(off, span_.bytes_in_span());
-    EXPECT_EQ(off % size_, 0);
-  }
+  EXPECT_EQ(popped, count);
+  EXPECT_EQ(span.FreelistPopBatch(absl::MakeSpan(batch, 1), size_, count,
+                                  bitmap_mode_),
+            0);
 }
 
-INSTANTIATE_TEST_SUITE_P(All, SpanTest, testing::Range(size_t(1), kNumClasses));
+INSTANTIATE_TEST_SUITE_P(
+    All, SpanTest,
+    testing::Combine(testing::Range(size_t(1), kNumClasses), testing::Bool()));
+
+TEST(SpanBitmapTest, CalcBitmapInfo) {
+  bool saw_enough_waste = false;
+  bool saw_lacking_waste = false;
+  for (size_t size = 8; size <= 2 * kPageSize;
+       size += static_cast<size_t>(kAlignment)) {
+    for (Length pages = Length(1); pages <= Length(4); ++pages) {
+      if (!SizeMap::IsValidSizeClass(size, pages,
+                                     /*num_objects_to_move=*/2)) {
+        continue;
+      }
+      {
+        const auto [objects_per_span, mode] =
+            Span::CalcBitmapInfo(false, pages, size);
+        ASSERT_EQ(objects_per_span, pages.in_bytes() / size);
+        ASSERT_EQ(mode, Span::BitmapMode::kDisabled);
+      }
+
+      const auto [objects_per_span, mode] =
+          Span::CalcBitmapInfo(true, pages, size);
+      const size_t max_objects = pages.in_bytes() / size;
+      if (max_objects <= Span::kBitsPerWord) {
+        ASSERT_EQ(objects_per_span, max_objects);
+        ASSERT_EQ(mode, Span::BitmapMode::kInline64);
+        continue;
+      }
+      if (max_objects <= Span::kRawBitmapSize * Span::kBitsPerWord) {
+        ASSERT_EQ(objects_per_span, max_objects);
+        ASSERT_EQ(mode, Span::BitmapMode::kInline256);
+        continue;
+      }
+
+      size_t bitmap_words =
+          (objects_per_span + Span::kBitsPerWord - 1) / Span::kBitsPerWord;
+      if (bitmap_words > Span::kRawBitmapSize * Span::kBitsPerWord) {
+        bitmap_words = (bitmap_words + 1) & ~size_t{1};
+        ASSERT_EQ(mode, Span::BitmapMode::kOutlineL2_8);
+      } else if (bitmap_words > Span::kBitsPerWord) {
+        ASSERT_EQ(mode, Span::BitmapMode::kOutlineL2_4);
+      } else {
+        ASSERT_EQ(mode, Span::BitmapMode::kOutlineL2_1);
+      }
+      const size_t bitmap_bytes = bitmap_words * sizeof(Span::BitmapElem);
+      ASSERT_LE(objects_per_span * size + bitmap_bytes, pages.in_bytes());
+
+      size_t max_bitmap_words =
+          (max_objects + Span::kBitsPerWord - 1) / Span::kBitsPerWord;
+      if (max_bitmap_words > Span::kRawBitmapSize * Span::kBitsPerWord) {
+        max_bitmap_words = (max_bitmap_words + 1) & ~size_t{1};
+      }
+      const size_t max_bitmap_bytes =
+          max_bitmap_words * sizeof(Span::BitmapElem);
+      const size_t end_waste = pages.in_bytes() % size;
+      if (end_waste >= max_bitmap_bytes) {
+        saw_enough_waste = true;
+        ASSERT_EQ(objects_per_span, max_objects);
+      } else {
+        saw_lacking_waste = true;
+        ASSERT_LT(objects_per_span, max_objects);
+      }
+
+      // Verify that we do not over-subtract objects_per_span and use span bytes
+      // as much as possible: one more object would not fit with its bitmap.
+      const size_t next_objects = objects_per_span + 1;
+      size_t next_bitmap_words =
+          (next_objects + Span::kBitsPerWord - 1) / Span::kBitsPerWord;
+      if (next_bitmap_words > Span::kRawBitmapSize * Span::kBitsPerWord) {
+        next_bitmap_words = (next_bitmap_words + 1) & ~size_t{1};
+      }
+      const size_t next_bitmap_bytes =
+          next_bitmap_words * sizeof(Span::BitmapElem);
+      ASSERT_GT(next_objects * size + next_bitmap_bytes, pages.in_bytes());
+    }
+  }
+  EXPECT_TRUE(saw_lacking_waste);
+  if (kPageSize >= (32 << 10)) {
+    EXPECT_TRUE(saw_enough_waste);
+  }
+}
 
 TEST(SpanAllocatorTest, Alignment) {
-  Range r(PageId{1}, Length{2});
-
   constexpr int kNumSpans = 1000;
   std::vector<Span*> spans;
   spans.reserve(kNumSpans);
 
-  {
-#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING
-    PageHeapSpinLockHolder l;
-#endif  // TCMALLOC_INTERNAL_LEGACY_LOCKING
-    for (int i = 0; i < kNumSpans; ++i) {
-      spans.push_back(Span::New(r));
-    }
+  for (int i = 0; i < kNumSpans; ++i) {
+    spans.push_back(Span::New(PageId{1}));
   }
 
   absl::flat_hash_map<uintptr_t, int> address_mod_cacheline;
@@ -253,14 +346,7 @@ TEST(SpanAllocatorTest, Alignment) {
     EXPECT_EQ(alignment % alignof(Span), 0);
   }
 
-  {
-#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING
-    PageHeapSpinLockHolder l;
-#endif  // TCMALLOC_INTERNAL_LEGACY_LOCKING
-    for (Span* s : spans) {
-      Span::Delete(s);
-    }
-  }
+  Span::Delete(absl::MakeSpan(spans));
 }
 
 }  // namespace

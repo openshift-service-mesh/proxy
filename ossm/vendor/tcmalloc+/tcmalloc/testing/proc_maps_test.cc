@@ -1,0 +1,240 @@
+// Copyright 2026 The TCMalloc Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "tcmalloc/internal/proc_maps.h"
+
+#include <stdint.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstring>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/strings/match.h"
+#include "absl/strings/string_view.h"
+#include "tcmalloc/common.h"
+#include "tcmalloc/cpu_cache.h"
+#include "tcmalloc/internal/config.h"
+#include "tcmalloc/malloc_extension.h"
+#include "tcmalloc/static_vars.h"
+#include "tcmalloc/testing/testutil.h"
+
+namespace tcmalloc {
+namespace tcmalloc_internal {
+namespace {
+
+using ::testing::AnyOf;
+using ::testing::Contains;
+using ::testing::ElementsAre;
+using ::testing::IsEmpty;
+using ::testing::IsSupersetOf;
+using ::testing::Not;
+using ::testing::Optional;
+
+TEST(ProcMapsTest, InspectMappings) {
+  const bool numa_aware = tc_globals.numa_topology().numa_aware();
+
+  std::vector<void*> ptrs;
+
+  // Allocate something to ensure NORMAL region.
+  {
+    ScopedNeverSample never_sample;
+    ptrs.push_back(::operator new(10 << 20));
+  }
+
+  {
+    // Allocate something to ensure sampled SAMPLED_OR_COLD region.  Guarded
+    // allocations have their own GUARDED region, so disable them.
+    //
+    // The size must be <= kMaxSize (8 KiB for small-but-slow).  Larger sampled
+    // allocations take the do_malloc_pages path and are carved from the NORMAL
+    // region instead.
+    constexpr size_t kSampledSize = 4 << 10;
+    static_assert(kSampledSize <= kMaxSize);
+    ScopedAlwaysSample always_sample;
+    ScopedGuardedSamplingInterval never_guard(-1);
+    ptrs.push_back(::operator new(kSampledSize));
+  }
+
+  if (ColdFeatureActive()) {
+    // Allocate something to ensure cold SAMPLED_OR_COLD region.
+    ScopedNeverSample never_sample;
+    ptrs.push_back(::operator new(1 << 20, tcmalloc::hot_cold_t{0}));
+  }
+
+  ProcMapsIterator::Buffer buffer;
+  ProcMapsIterator it(&buffer);
+  ASSERT_TRUE(it.Valid());
+
+  absl::flat_hash_set<std::string> tcmalloc_regions;
+
+  uint64_t start, end, offset;
+  int64_t inode;
+  char* flags;
+  char* filename;
+  dev_t dev;
+
+  while (it.NextExt(&start, &end, &flags, &offset, &inode, &filename, &dev)) {
+    if (absl::StrContains(filename, "[anon:")) {
+      tcmalloc_regions.insert(filename);
+    }
+  }
+
+  // Clean up.
+  for (void* ptr : ptrs) {
+    ::operator delete(ptr);
+  }
+
+  // We include [anon:absl] as part of the bootstrap allocator for the
+  // SystemAllocator.
+  absl::flat_hash_set<std::string> expected = {
+      "[anon:absl]",
+      "[anon:tcmalloc_region_METADATA]",
+  };
+
+  const bool numa_or_partitioned =
+      numa_aware || MallocExtension::GetNumericProperty(
+                        "tcmalloc.security_partitioning_active")
+                            .value_or(0) > 0;
+
+  if (!numa_or_partitioned) {
+    expected.insert("[anon:tcmalloc_region_NORMAL]");
+  }
+
+  if (kSanitizerPresent || !tcmalloc::NamedVMAsSupported()) {
+    GTEST_SKIP()
+        << "Skipping under sanitizers or if named VMAs are not supported";
+  }
+
+  EXPECT_THAT(tcmalloc_regions, IsSupersetOf(expected));
+  if (numa_or_partitioned) {
+    EXPECT_THAT(tcmalloc_regions,
+                AnyOf(Contains("[anon:tcmalloc_region_NORMAL]"),
+                      Contains("[anon:tcmalloc_region_NORMAL_P1]")));
+  }
+  // The sampled span may come from either partition.  (This used to be
+  // guaranteed by the GWP-ASan pool, which now has its own GUARDED region.)
+  EXPECT_THAT(tcmalloc_regions,
+              AnyOf(Contains("[anon:tcmalloc_region_SAMPLED_OR_COLD]"),
+                    Contains("[anon:tcmalloc_region_SAMPLED_OR_COLD_P1]")));
+
+  if (UsePerCpuCache(tc_globals)) {
+    auto slab_matcher = Contains(AnyOf(
+        "[anon:tcmalloc_cpu_slab_both]", "[anon:tcmalloc_cpu_slab_up]",
+        "[anon:tcmalloc_cpu_slab_down]", "[anon:tcmalloc_cpu_slab_exact]"));
+
+    auto metadata = tc_globals.cpu_cache().MetadataMemoryUsage();
+    if (metadata.virtual_size >= kHugePageSize) {
+      EXPECT_THAT(tcmalloc_regions, slab_matcher);
+    } else {
+      // If metadata is not currently at least a hugepage, we don't expect to
+      // match.  This can happen on small machines or with small-but-slow.
+      EXPECT_THAT(tcmalloc_regions, Not(slab_matcher));
+    }
+  }
+}
+
+TEST(ProcMapsTest, ParseNumaMapsLine) {
+  EXPECT_THAT(
+      ParseNumaMapsLine(
+          "7f8b12340000 default file=/lib/libc.so.6 mapped=16 N0=12 N1=4 "
+          "kernelpagesize_kB=4\n"),
+      Optional(NumaMapEntry{0x7f8b12340000ULL, {12, 4, 0}}));
+
+  EXPECT_THAT(
+      ParseNumaMapsLine("7f8b12350000 bind:1 anon=20 dirty=20 N0=5 N1=15"),
+      Optional(NumaMapEntry{0x7f8b12350000ULL, {5, 15, 0}}));
+
+  EXPECT_THAT(ParseNumaMapsLine(
+                  "7f8b12360000 default anon=8 dirty=8 N0=1 N1=2 N2=4 N5=7 "
+                  "kernelpagesize_kB=4"),
+              Optional(NumaMapEntry{0x7f8b12360000ULL, {1, 2, 11}}));
+
+  // Ignore non-N attributes and malformed N tokens.
+  EXPECT_THAT(
+      ParseNumaMapsLine(
+          "7f8b12380000 default 0=99 N1 N1x=20 N-1=20 N1=20x N0=10=20 N0=0 "
+          "N2=3"),
+      Optional(NumaMapEntry{0x7f8b12380000ULL, {0, 0, 3}}));
+
+  EXPECT_THAT(ParseNumaMapsLine("7f8b12370000 default kernelpagesize_kB=4"),
+              Optional(NumaMapEntry{0x7f8b12370000ULL, {0, 0, 0}}));
+  EXPECT_EQ(ParseNumaMapsLine("not_hex default N0=4"), std::nullopt);
+  EXPECT_EQ(ParseNumaMapsLine(""), std::nullopt);
+}
+
+TEST(ProcMapsTest, ReadLines) {
+  auto collect_lines = [](absl::string_view input, size_t chunk_size) {
+    std::vector<std::string> lines;
+    ReadLines(
+        [&](char* buf, size_t count) -> ssize_t {
+          size_t to_read = std::min({input.size(), count, chunk_size});
+          if (to_read > 0) {
+            memcpy(buf, input.data(), to_read);
+            input.remove_prefix(to_read);
+          }
+          return to_read;
+        },
+        [&](absl::string_view line) { lines.emplace_back(line); });
+    return lines;
+  };
+
+  EXPECT_THAT(collect_lines("", 64), IsEmpty());
+  EXPECT_THAT(collect_lines("alpha\nbeta\ngamma\n", 64),
+              ElementsAre("alpha", "beta", "gamma"));
+  EXPECT_THAT(collect_lines("alpha\nbeta\ngamma", 1),
+              ElementsAre("alpha", "beta", "gamma"));
+
+  const std::string overlong(ProcMapsIterator::Buffer::kBufSize * 2 + 17, 'x');
+  const std::string with_overlong = "before\n" + overlong + "\nafter\n";
+  EXPECT_THAT(collect_lines(with_overlong, ProcMapsIterator::Buffer::kBufSize),
+              ElementsAre("before", "after"));
+  EXPECT_THAT(collect_lines(with_overlong, 128),
+              ElementsAre("before", "after"));
+  EXPECT_THAT(collect_lines("before\n" + overlong, 128), ElementsAre("before"));
+}
+
+TEST(ProcMapsTest, ReadProcNumaMaps) {
+  constexpr size_t kSize = 64 << 10;
+  char* region = static_cast<char*>(
+      mmap(nullptr, 3 * kSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(region, MAP_FAILED);
+  char* middle = region + kSize;
+  ASSERT_EQ(mprotect(middle, kSize, PROT_READ | PROT_WRITE), 0);
+  memset(middle, 1, kSize);
+
+  const uintptr_t middle_addr = reinterpret_cast<uintptr_t>(middle);
+  std::optional<NumaMapEntry> found;
+  ReadProcNumaMaps([&](const NumaMapEntry& entry) {
+    if (entry.start_addr == middle_addr) {
+      found = entry;
+    }
+  });
+  ASSERT_EQ(munmap(region, 3 * kSize), 0);
+
+  ASSERT_TRUE(found.has_value());
+  EXPECT_GT(found->node_pages[0] + found->node_pages[1] + found->node_pages[2],
+            0);
+}
+
+}  // namespace
+}  // namespace tcmalloc_internal
+}  // namespace tcmalloc

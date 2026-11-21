@@ -56,19 +56,36 @@
 #undef TCMALLOC_HAVE_STRUCT_MALLINFO2
 #endif
 
-// When possible, name the text section as google_malloc.  This macro should not
-// be applied to header files (as in "GOOGLE_MALLOC_SECTION_BEGIN #include ...")
-// as that may move unrelated code to google_malloc section.
+// When possible, name the text section as google_malloc and the bss section as
+// google_malloc_metadata.  This macro should not be applied to header files (as
+// in "GOOGLE_MALLOC_SECTION_BEGIN #include ...") as that may move unrelated
+// code to google_malloc section.  We separate the google_malloc_data /
+// google_malloc_bss sections to group the metadata together and prevent
+// it from being in .lbss, which is an otherwise cold section.
 #if defined(__clang__) && defined(__linux__)
-#define GOOGLE_MALLOC_SECTION_BEGIN \
-  _Pragma("clang section text = \"google_malloc\"")
-#define GOOGLE_MALLOC_SECTION_END _Pragma("clang section text = \"\"")
+#define GOOGLE_MALLOC_SECTION_BEGIN                          \
+  _Pragma("clang section text = \"google_malloc\"")          \
+      _Pragma("clang section data = \"google_malloc_data\"") \
+          _Pragma("clang section bss = \"google_malloc_bss\"")
+#define GOOGLE_MALLOC_SECTION_END \
+  _Pragma("clang section text = \"\" data = \"\" bss = \"\"")
 // For inline lambdas, which aren't covered
 #define GOOGLE_MALLOC_SECTION __attribute__((section("google_malloc")))
 #else
 #define GOOGLE_MALLOC_SECTION_BEGIN
 #define GOOGLE_MALLOC_SECTION_END
 #define GOOGLE_MALLOC_SECTION
+#endif
+
+// GOOGLE_MALLOC_SECTION_BEGIN places globals in google_malloc_data /
+// google_malloc_bss (normal small sections, not .ldata / .lbss), so
+// RIP-relative small-model addressing is safe even under -mcmodel=medium when
+// the object exceeds -mlarge-data-threshold.
+#if defined(__clang__) && defined(__linux__) && defined(__x86_64__) && \
+    ABSL_HAVE_ATTRIBUTE(model)
+#define TCMALLOC_SMALL_MODEL __attribute__((model("small")))
+#else
+#define TCMALLOC_SMALL_MODEL
 #endif
 
 // TCMALLOC_ATTRIBUTE_NO_DESTROY is defined when clang::no_destroy attribute is
@@ -79,17 +96,34 @@
 #define TCMALLOC_ATTRIBUTE_NO_DESTROY
 #endif
 
-#define TCMALLOC_CAPTURED_BY_THIS ABSL_INTERNAL_ATTRIBUTE_CAPTURED_BY(this)
+#ifdef ABSL_INTERNAL_ATTRIBUTE_CAPTURED_BY_THIS
+#define TCMALLOC_CAPTURED_BY_THIS ABSL_INTERNAL_ATTRIBUTE_CAPTURED_BY_THIS
+#else
+#define TCMALLOC_CAPTURED_BY_THIS
+#endif
 
+// TCMalloc uses asm goto with output constraints to optimize its per-CPU
+// implementation, avoiding an otherwise redundant branch.
+//
+// Support in GCC uncovered a miscompile in the kernel
+// (https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113921) necessitating GCC 12.1,
+// which was released May 2022 (https://gcc.gnu.org/releases.html).
+//
+// Support in Clang landed in Clang 10
+// (https://github.com/llvm/llvm-project/commit/52366088a8e42c2f1e96e8430b84b8b65ec3f7bc),
+// which was released March 2020 (https://releases.llvm.org/).  Nevertheless,
+// we've always used Clang 11+ as our condition for it
+// (https://github.com/google/tcmalloc/commit/ca9fa6e5a5b283eebcf008ba081491a0d946f57d),
+// which was released October 2020.
 #if defined(__GNUC__) && !defined(__clang__)
-#if __GNUC__ < 9 || (__GNUC__ == 9 && __GNUC_MINOR__ < 2)
-#error "GCC 9.2 or higher is required."
+#if __GNUC__ < 12 || (__GNUC__ == 12 && __GNUC_MINOR__ < 1)
+#error "GCC 12.1 or higher is required."
 #endif
 #endif
 
 #if defined(__clang__)
-#if __clang_major__ < 9
-#error "Clang 9 or higher is required."
+#if __clang_major__ < 11
+#error "Clang 11 or higher is required."
 #endif
 #endif
 
@@ -109,38 +143,14 @@ GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
 namespace tcmalloc_internal {
 
-#if defined __x86_64__
-// x86_64 processors use lower 48 bits in virtual to physical address
-// translation with 4-level page tables. The top 16 are thus unused.
-// We don't support 5-level page tables yet.
-// TODO(b/134686025): Under what operating systems can we increase it safely to
-// 17? This lets us use smaller page maps.  On first allocation, a 36-bit page
+// We don't support x86 5-level page tables, nor powerpc64 49-bit address space.
+// TODO(b/134686025): Under what operating systems can we decrease it safely to
+// 47? This lets us use smaller page maps.  On first allocation, a 36-bit page
 // map uses only 96 KB instead of the 4.5 MB used by a 52-bit page map.
 inline constexpr int kAddressBits = 48;
-#elif defined __powerpc64__ && defined __linux__
-// Linux(4.12 and above) on powerpc64 supports 128TB user virtual address space
-// by default, and up to 512TB if user space opts in by specifying hint in mmap.
-// See comments in arch/powerpc/include/asm/processor.h
-// and arch/powerpc/mm/mmap.c.
-inline constexpr int kAddressBits = 49;
-#elif defined __aarch64__ && defined __linux__
-// According to Documentation/arm64/memory.txt of kernel 3.16,
-// AARCH64 kernel supports 48-bit virtual addresses for both user and kernel.
-inline constexpr int kAddressBits = 48;
-#elif defined __riscv && defined __linux__
-inline constexpr int kAddressBits = 48;
-#else
-inline constexpr int kAddressBits = 8 * sizeof(void*);
-#endif
 
-#ifdef TCMALLOC_INTERNAL_SELSAN
-// TODO(b/404529382): add tcmalloc test suite and remove maybe_unused annotation
-[[maybe_unused]] inline constexpr bool kSelSanPresent = true;
-#else
-inline constexpr bool kSelSanPresent = false;
-#endif
-
-#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) ||   \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER) || \
     defined(ABSL_HAVE_MEMORY_SANITIZER) || defined(ABSL_HAVE_THREAD_SANITIZER)
 inline constexpr bool kSanitizerPresent = true;
 #else
@@ -148,9 +158,8 @@ inline constexpr bool kSanitizerPresent = false;
 #endif
 
 // Sanitizers constrain the memory layout which causes problems with the
-// enlarged tags required to represent NUMA partitions and for SelSan.
+// enlarged tags required to represent NUMA partitions.
 #if defined(ABSL_HAVE_MEMORY_SANITIZER) || defined(ABSL_HAVE_THREAD_SANITIZER)
-static_assert(!kSelSanPresent, "MSan/TSan are incompatible with SelSan.");
 inline constexpr bool kSanitizerAddressSpace = true;
 #else
 inline constexpr bool kSanitizerAddressSpace = false;

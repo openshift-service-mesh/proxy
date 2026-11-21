@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <limits>
 #include <new>
 #include <string>
 #include <utility>
@@ -43,7 +44,7 @@ namespace {
 Span* span(intptr_t i) { return reinterpret_cast<Span*>(i + 1); }
 
 // Pick sizeclass to use for page numbered i
-uint8_t sc(intptr_t i) { return i % 16; }
+uint8_t sc(intptr_t i) { return (i % 15) + 1; }
 
 class PageMapTest : public ::testing::TestWithParam<int> {
  public:
@@ -73,7 +74,8 @@ class PageMapTest : public ::testing::TestWithParam<int> {
   }
 
  public:
-  using Map = PageMap2<20, alloc>;
+  static constexpr int kTestBits = kAddressBits - kPageShift;
+  using Map = PageMap<kTestBits, alloc>;
   Map* map;
 
  private:
@@ -84,41 +86,56 @@ TEST_P(PageMapTest, Sequential) {
   const intptr_t limit = GetParam();
 
   for (intptr_t i = 0; i < limit; i++) {
-    map->Ensure(i, 1);
-    map->set(i, span(i));
-    ASSERT_EQ(map->get(i), span(i));
+    ASSERT_TRUE(map->Ensure(Range(PageId(i), Length(1))));
+    map->SetLarge(PageId(i), Length(i + 1), (i & 1) != 0);
+    ASSERT_TRUE(map->GetDescriptor(PageId(i)).valid());
+    ASSERT_FALSE(map->GetDescriptor(PageId(i)).sampled());
+    ASSERT_FALSE(map->GetDescriptor(PageId(i)).freed());
+    ASSERT_EQ(map->GetDescriptor(PageId(i)).size(), Length(i + 1));
+    ASSERT_EQ(map->GetDescriptor(PageId(i)).donated(), (i & 1) != 0);
+    ASSERT_EQ(map->GetExistingDescriptor(PageId(i)).size(), Length(i + 1));
 
     // Test size class handling
-    ASSERT_EQ(0, map->sizeclass(i));
-    ASSERT_EQ(map->get_existing_with_sizeclass(i),
-              (std::pair<Span*, int>(span(i), 0)));
-    map->set_with_sizeclass(i, span(i), sc(i));
-    ASSERT_EQ(sc(i), map->sizeclass(i));
+    ASSERT_EQ(0, map->sizeclass(PageId(i)));
+    map->SetSmall(PageId(i), span(i), sc(i), false);
+    ASSERT_EQ(sc(i), map->sizeclass(PageId(i)));
   }
   for (intptr_t i = 0; i < limit; i++) {
-    ASSERT_EQ(map->get(i), span(i));
-    ASSERT_EQ(map->sizeclass(i), sc(i));
-    ASSERT_EQ(map->get_existing_with_sizeclass(i),
-              (std::pair<Span*, int>(span(i), sc(i))));
+    ASSERT_EQ(map->GetDescriptor(PageId(i)).span(), span(i));
+    ASSERT_EQ(map->GetExistingDescriptor(PageId(i)).span(), span(i));
+    ASSERT_EQ(map->sizeclass(PageId(i)), sc(i));
+    ASSERT_EQ(map->GetDescriptor(PageId(i)).sizeclass(), sc(i));
   }
 }
 
 TEST_P(PageMapTest, Bulk) {
   const intptr_t limit = GetParam();
 
-  map->Ensure(0, limit);
+  ASSERT_TRUE(map->Ensure(Range(PageId(0), Length(limit))));
   for (intptr_t i = 0; i < limit; i++) {
-    map->set(i, span(i));
-    ASSERT_EQ(map->get(i), span(i));
+    map->SetSmall(PageId(i), span(i), sc(i), false);
+    ASSERT_EQ(map->GetDescriptor(PageId(i)).span(), span(i));
   }
   for (intptr_t i = 0; i < limit; i++) {
-    ASSERT_EQ(map->get(i), span(i));
+    ASSERT_EQ(map->GetDescriptor(PageId(i)).span(), span(i));
   }
 }
 
 TEST_P(PageMapTest, Overflow) {
-  const intptr_t kLimit = 1 << 20;
-  ASSERT_FALSE(map->Ensure(kLimit, kLimit + 1));
+  const uintptr_t kLimit = uintptr_t{1} << kTestBits;
+  ASSERT_FALSE(map->Ensure(Range(PageId(kLimit), Length(kLimit + 1))));
+}
+
+TEST_P(PageMapTest, EnsureOverflowAndPartialBounds) {
+  const uintptr_t kLimit = uintptr_t{1} << kTestBits;
+  const Length kMaxLen(std::numeric_limits<uintptr_t>::max());
+  EXPECT_FALSE(map->Ensure(Range(PageId(2), kMaxLen)));
+  EXPECT_FALSE(map->HasLeaf(PageId(2)));
+  EXPECT_FALSE(map->Ensure(Range(PageId(kLimit), kMaxLen)));
+  EXPECT_FALSE(map->Ensure(Range(PageId(kLimit - 1), Length(2))));
+  EXPECT_FALSE(map->HasLeaf(PageId(kLimit - 1)));
+  EXPECT_FALSE(map->Ensure(Range(PageId(1), kMaxLen)));
+  EXPECT_FALSE(map->HasLeaf(PageId(1)));
 }
 
 TEST_P(PageMapTest, RandomAccess) {
@@ -131,16 +148,18 @@ TEST_P(PageMapTest, RandomAccess) {
   std::shuffle(elements.begin(), elements.end(), absl::BitGen());
 
   for (intptr_t i = 0; i < limit; i++) {
-    map->Ensure(elements[i], 1);
-    map->set(elements[i], span(elements[i]));
-    ASSERT_EQ(map->get(elements[i]), span(elements[i]));
+    ASSERT_TRUE(map->Ensure(Range(PageId(elements[i]), Length(1))));
+    map->SetSmall(PageId(elements[i]), span(elements[i]), sc(elements[i]),
+                  false);
+    ASSERT_EQ(map->GetDescriptor(PageId(elements[i])).span(),
+              span(elements[i]));
   }
   for (intptr_t i = 0; i < limit; i++) {
-    ASSERT_EQ(map->get(i), span(i));
+    ASSERT_EQ(map->GetDescriptor(PageId(i)).span(), span(i));
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(Limits, PageMapTest, ::testing::Values(100, 1 << 20));
+INSTANTIATE_TEST_SUITE_P(Limits, PageMapTest, ::testing::Values(100, 1 << 16));
 
 // Surround pagemap with unused memory. This isolates it so that it does not
 // share pages with any other structures. This avoids the risk that adjacent
@@ -149,20 +168,20 @@ INSTANTIATE_TEST_SUITE_P(Limits, PageMapTest, ::testing::Values(100, 1 << 20));
 static struct PaddedPageMap {
   constexpr PaddedPageMap() : padding_before{}, pagemap{}, padding_after{} {}
   uint64_t padding_before[kHugePageSize / sizeof(uint64_t)];
-  PageMap pagemap;
+  ProdPageMap pagemap;
   uint64_t padding_after[kHugePageSize / sizeof(uint64_t)];
 } padded_pagemap_;
 
 TEST(TestMemoryFootprint, Test) {
   uint64_t pagesize = sysconf(_SC_PAGESIZE);
   ASSERT_NE(pagesize, 0);
-  size_t pages = sizeof(PageMap) / pagesize + 1;
+  size_t pages = sizeof(ProdPageMap) / pagesize + 1;
   std::vector<unsigned char> present(pages);
 
   // mincore needs the address rounded to the start page
   uint64_t basepage =
       reinterpret_cast<uintptr_t>(&padded_pagemap_.pagemap) & ~(pagesize - 1);
-  ASSERT_EQ(mincore(reinterpret_cast<void*>(basepage), sizeof(PageMap),
+  ASSERT_EQ(mincore(reinterpret_cast<void*>(basepage), sizeof(ProdPageMap),
                     present.data()),
             0);
   for (int i = 0; i < pages; i++) {

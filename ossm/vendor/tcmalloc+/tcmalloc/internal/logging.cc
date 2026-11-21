@@ -15,6 +15,10 @@
 #include "tcmalloc/internal/logging.h"
 
 #include <fcntl.h>
+
+#include <iterator>
+
+#include "absl/base/thread_annotations.h"
 #ifdef _WINDOWS
 #include <io.h>
 #endif
@@ -28,9 +32,11 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
+#include "absl/algorithm/container.h"
 #include "absl/base/attributes.h"
 #include "absl/base/const_init.h"
 #include "absl/base/internal/spinlock.h"
@@ -52,7 +58,7 @@ namespace tcmalloc_internal {
 // may not be able to heap-allocate while crashing.
 ABSL_CONST_INIT static absl::base_internal::SpinLock crash_lock(
     absl::base_internal::SCHEDULE_KERNEL_ONLY);
-static bool crashed = false;
+static bool crashed ABSL_GUARDED_BY(crash_lock) = false;
 
 static const size_t kStatsBufferSize = 16 << 10;
 #ifndef __APPLE__
@@ -135,7 +141,10 @@ static void RecordTestFailure(absl::string_view detector,
 //
 // detector is the bug detector or tools that found the error
 // error contains the type of error to record.
-void RecordCrash(absl::string_view detector, absl::string_view error) {
+// stack is the stack trace to report as the crashing stack.  If it is empty,
+// the crash reporter unwinds the crashing thread itself.
+void RecordCrash(absl::string_view detector, absl::string_view error,
+                 absl::Span<void* const> stack) {
   TC_ASSERT(!detector.empty());
   TC_ASSERT(!error.empty());
 
@@ -143,10 +152,8 @@ void RecordCrash(absl::string_view detector, absl::string_view error) {
   RecordTestFailure(detector, error);
 }
 
-ABSL_ATTRIBUTE_NOINLINE
-ABSL_ATTRIBUTE_NORETURN
-static void Crash(const char* filename, int line, const char* msg,
-                  size_t msglen, bool oom) {
+[[noreturn]] ABSL_ATTRIBUTE_NOINLINE static void Crash(
+    const char* filename, int line, const char* msg, size_t msglen, bool oom) {
   StackTrace trace;
   trace.depth = absl::GetStackTrace(trace.stack, kMaxStackDepth, 1);
 
@@ -166,6 +173,14 @@ static void Crash(const char* filename, int line, const char* msg,
     if (!crashed) {
       crashed = true;
       first_crash = true;
+#if !defined(NDEBUG)
+      // Reset reentrancy count to allow calls to malloc/free under any signal
+      // handlers that we may trigger from abort().
+      //
+      // We only reset this, rather than permit an unlimited amount of
+      // reentrancy while crashing, in order to maintain modest stack depths.
+      tcmalloc_reentrancy_count = 0;
+#endif
     }
   }
 
@@ -182,8 +197,8 @@ static void Crash(const char* filename, int line, const char* msg,
   abort();
 }
 
-ABSL_ATTRIBUTE_NORETURN void CheckFailed(const char* file, int line,
-                                         const char* msg, int msglen) {
+[[noreturn]] void CheckFailed(const char* file, int line, const char* msg,
+                              int msglen) {
   Crash(file, line, msg, msglen, false);
 }
 
@@ -285,6 +300,10 @@ PbtxtRegion PbtxtRegion::CreateSubRegion(absl::string_view key) {
   PbtxtRegion sub(*out_, kNested);
   return sub;
 }
+
+#if !defined(NDEBUG)
+ABSL_CONST_INIT thread_local int tcmalloc_reentrancy_count = 0;
+#endif
 
 }  // namespace tcmalloc_internal
 }  // namespace tcmalloc

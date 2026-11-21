@@ -1,0 +1,138 @@
+# Copyright 2026 The TCMalloc Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+function(tcmalloc_cc_library)
+  cmake_parse_arguments(TCMALLOC "ALWAYSLINK" "NAME;ALIAS" "SRCS;HDRS;COPTS;LINKOPTS;DEPS" ${ARGN})
+  if(TCMALLOC_SRCS)
+    add_library(${TCMALLOC_NAME} STATIC "")
+    set_target_properties(${TCMALLOC_NAME} PROPERTIES LINKER_LANGUAGE CXX)
+    set(PRIV_SCOPE PRIVATE)
+    set(PUB_SCOPE PUBLIC)
+  else()
+    add_library(${TCMALLOC_NAME} INTERFACE)
+    set(PRIV_SCOPE INTERFACE)
+    set(PUB_SCOPE INTERFACE)
+  endif()
+  target_sources(${TCMALLOC_NAME} ${PRIV_SCOPE} ${TCMALLOC_SRCS} ${TCMALLOC_HDRS})
+  target_compile_options(${TCMALLOC_NAME} ${PRIV_SCOPE} ${TCMALLOC_COPTS})
+  target_link_options(${TCMALLOC_NAME} INTERFACE ${TCMALLOC_LINKOPTS})
+  target_link_libraries(${TCMALLOC_NAME} ${PUB_SCOPE} ${TCMALLOC_DEPS})
+  target_include_directories(${TCMALLOC_NAME} ${PUB_SCOPE} ${tcmalloc_SOURCE_DIR})
+  set(ALIAS_TARGET ${TCMALLOC_NAME})
+  if(TCMALLOC_ALWAYSLINK AND TCMALLOC_SRCS)
+    add_library(${TCMALLOC_NAME}_alwayslink INTERFACE)
+    target_link_libraries(${TCMALLOC_NAME}_alwayslink INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,${TCMALLOC_NAME}>)
+    set(ALIAS_TARGET ${TCMALLOC_NAME}_alwayslink)
+  endif()
+  if(TCMALLOC_ALIAS)
+    add_library(${TCMALLOC_ALIAS} ALIAS ${ALIAS_TARGET})
+  endif()
+endfunction()
+
+function(tcmalloc_cc_binary)
+  cmake_parse_arguments(TCMALLOC "" "NAME;ALIAS;TIMEOUT" "SRCS;HDRS;COPTS;LINKOPTS;DEPS;ENV;ARGS" ${ARGN})
+  add_executable(${TCMALLOC_NAME} "")
+  if(TCMALLOC_SRCS)
+    target_sources(${TCMALLOC_NAME} PRIVATE ${TCMALLOC_SRCS})
+  endif()
+  if(TCMALLOC_HDRS)
+    target_sources(${TCMALLOC_NAME} PRIVATE ${TCMALLOC_HDRS})
+  endif()
+  if(TCMALLOC_COPTS)
+    target_compile_options(${TCMALLOC_NAME} PRIVATE ${TCMALLOC_COPTS})
+  endif()
+  if(TCMALLOC_LINKOPTS)
+    target_link_options(${TCMALLOC_NAME} PRIVATE ${TCMALLOC_LINKOPTS})
+  endif()
+  if(TCMALLOC_DEPS)
+    target_link_libraries(${TCMALLOC_NAME} PUBLIC ${TCMALLOC_DEPS})
+  endif()
+  target_include_directories(${TCMALLOC_NAME} PUBLIC ${CMAKE_SOURCE_DIR})
+endfunction()
+
+function(tcmalloc_cc_test)
+  cmake_parse_arguments(TCMALLOC "" "NAME;ALIAS;TIMEOUT" "SRCS;HDRS;COPTS;LINKOPTS;DEPS;ENV;ARGS" ${ARGN})
+  tcmalloc_cc_binary(${ARGN})
+  add_test(NAME ${TCMALLOC_NAME} COMMAND ${TCMALLOC_NAME} ${TCMALLOC_ARGS})
+  # Entries later in the list win, so rule- and variant-provided values override
+  # these defaults.
+  set(TCMALLOC_TEST_ENV
+    "TEST_TMPDIR=${CMAKE_CURRENT_BINARY_DIR}"
+    "TEST_SRCDIR=${CMAKE_SOURCE_DIR}"
+    ${TCMALLOC_ENV}
+  )
+  set_tests_properties(${TCMALLOC_NAME} PROPERTIES ENVIRONMENT "${TCMALLOC_TEST_ENV}")
+  if(TCMALLOC_TIMEOUT)
+    set_tests_properties(${TCMALLOC_NAME} PROPERTIES TIMEOUT ${TCMALLOC_TIMEOUT})
+  endif()
+endfunction()
+
+function(create_percpu_tcmalloc_testsuite)
+  cmake_parse_arguments(TCMALLOC "" "NAME;ALIAS;TIMEOUT" "SRCS;HDRS;COPTS;LINKOPTS;DEPS;ENV;ARGS" ${ARGN})
+  string(REGEX REPLACE "_test$" "" BASE_NAME ${TCMALLOC_NAME})
+
+  set(COMMON_ARGS)
+  if(TCMALLOC_SRCS)
+    list(APPEND COMMON_ARGS SRCS ${TCMALLOC_SRCS})
+  endif()
+  if(TCMALLOC_HDRS)
+    list(APPEND COMMON_ARGS HDRS ${TCMALLOC_HDRS})
+  endif()
+  if(TCMALLOC_COPTS)
+    list(APPEND COMMON_ARGS COPTS ${TCMALLOC_COPTS})
+  endif()
+  if(TCMALLOC_LINKOPTS)
+    list(APPEND COMMON_ARGS LINKOPTS ${TCMALLOC_LINKOPTS})
+  endif()
+  if(TCMALLOC_DEPS)
+    list(APPEND COMMON_ARGS DEPS ${TCMALLOC_DEPS})
+  endif()
+  if(TCMALLOC_TIMEOUT)
+    list(APPEND COMMON_ARGS TIMEOUT ${TCMALLOC_TIMEOUT})
+  endif()
+  if(TCMALLOC_ARGS)
+    list(APPEND COMMON_ARGS ARGS ${TCMALLOC_ARGS})
+  endif()
+
+  set(DEFAULT_ENV)
+  if(TCMALLOC_ENV)
+    set(DEFAULT_ENV ENV ${TCMALLOC_ENV})
+  endif()
+
+  tcmalloc_cc_test(
+    NAME ${BASE_NAME}_test
+    ${COMMON_ARGS}
+    ${DEFAULT_ENV}
+  )
+  tcmalloc_cc_test(
+    NAME ${BASE_NAME}_flat_test
+    ${COMMON_ARGS}
+    ENV ${TCMALLOC_ENV} "PERCPU_VCPU_MODE=flat"
+  )
+  tcmalloc_cc_test(
+    NAME ${BASE_NAME}_no_glibc_rseq_test
+    ${COMMON_ARGS}
+    ENV ${TCMALLOC_ENV} "GLIBC_TUNABLES=glibc.pthread.rseq=0"
+  )
+  tcmalloc_cc_test(
+    NAME ${BASE_NAME}_mm_vcpu_test
+    ${COMMON_ARGS}
+    ENV ${TCMALLOC_ENV} "BORG_EXPERIMENTS=TEST_ONLY_MM_VCPU" "GLIBC_TUNABLES=glibc.pthread.rseq=0"
+  )
+  tcmalloc_cc_test(
+    NAME ${BASE_NAME}_real_test
+    ${COMMON_ARGS}
+    ENV ${TCMALLOC_ENV} "PERCPU_VCPU_MODE=none"
+  )
+endfunction()

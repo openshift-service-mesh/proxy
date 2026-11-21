@@ -14,6 +14,7 @@
 
 #include <fcntl.h>
 #include <malloc.h>
+#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -21,6 +22,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <new>
 #include <optional>
 #include <string>
@@ -33,6 +36,7 @@
 #include "tcmalloc/internal/allocation_guard.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/page_allocator_hooks.h"
 #include "tcmalloc/malloc_extension.h"
 #include "tcmalloc/malloc_hook.h"
 #include "tcmalloc/malloc_hook_invoke.h"
@@ -43,6 +47,8 @@ namespace tcmalloc {
 namespace {
 
 using tcmalloc_internal::kSanitizerPresent;
+using tcmalloc_internal::page_allocator_delete_hooks;
+using tcmalloc_internal::page_allocator_new_hooks;
 using tcmalloc_testing::MallocHookRecorder;
 using testing::Contains;
 using testing::ElementsAre;
@@ -131,6 +137,41 @@ TEST_F(TCMallocHookTest, FreeSizedInvokesHook) {
                                      kSanitizerPresent ? std::nullopt
                                                        : std::make_optional(15),
                                      allocated_size)));
+}
+
+// Large objects are backed directly by the page heap and freed through a
+// different path than size-classed objects.  Verify hooks still see them with
+// the span-derived allocated size.
+TEST_F(TCMallocHookTest, LargeDeleteInvokesHook) {
+  constexpr size_t kSize = 1 << 20;
+  void* p1 = ::operator new(kSize);
+  size_t allocated_size = GetAllocatedSize(p1);
+  ASSERT_GE(allocated_size, kSize);
+  // Copy pointers to suppress use-after-free warnings.
+  void* copy_p1 = p1;
+  benchmark::DoNotOptimize(copy_p1);
+  ::operator delete(p1);
+  EXPECT_THAT(Log(/*include_mmap=*/false),
+              ElementsAre(NewCall(copy_p1, kSize, allocated_size),
+                          DeleteCall(copy_p1, std::nullopt, allocated_size)));
+}
+
+TEST_F(TCMallocHookTest, LargeSizedDeleteInvokesHook) {
+  constexpr size_t kSize = 1 << 20;
+  void* p1 = ::operator new(kSize);
+  size_t allocated_size = GetAllocatedSize(p1);
+  ASSERT_GE(allocated_size, kSize);
+  // Copy pointers to suppress use-after-free warnings.
+  void* copy_p1 = p1;
+  benchmark::DoNotOptimize(copy_p1);
+  ::operator delete(p1, kSize);
+  EXPECT_THAT(
+      Log(/*include_mmap=*/false),
+      ElementsAre(NewCall(copy_p1, kSize, allocated_size),
+                  DeleteCall(copy_p1,
+                             kSanitizerPresent ? std::nullopt
+                                               : std::make_optional(kSize),
+                             allocated_size)));
 }
 
 TEST_F(TCMallocHookTest, CallocInvokesHook) {
@@ -415,14 +456,8 @@ TEST_F(TCMallocHookTest, SizeReturningOperatorNewInvokesHook) {
 
 TEST_F(TCMallocHookTest, GuardedAllocatedSizeIsRequested) {
   MallocExtension::ActivateGuardedSampling();
-  MallocExtension::SetProfileSamplingInterval(1);
-  // Allocate a large block of memory to make sure
-  // Sampler::RecordAllocationSlow is called so that
-  // Sampler::bytes_until_sample_ is updated.
-  void* p = ::operator new[](256 * 1024 * 1024);
-  ::operator delete[](p);
-
-  MallocExtension::SetGuardedSamplingInterval(0);  // Guard every sample
+  ScopedProfileSamplingInterval profile_sampling(1);
+  ScopedGuardedSamplingInterval guarded_sampling(0);  // Guard every sample
   // Allocate some memory until allocs_until_guarded_sample_ reaches 0.
   for (int i = 0; i < 1000; i++) {
     void* p = ::operator new[](32);
@@ -436,7 +471,6 @@ TEST_F(TCMallocHookTest, GuardedAllocatedSizeIsRequested) {
   EXPECT_EQ(res.n, 34);
 
   ::operator delete(res.p);
-  MallocExtension::SetProfileSamplingInterval(0);
 }
 
 // These are used as callbacks by the sanity-check.  Set* and Reset* register
@@ -521,56 +555,53 @@ TEST(TCMallocTest, GetStatsReportsHooks) {
       stats,
       HasSubstr("MALLOC HOOKS: NEW=0 DELETE=0 SAMPLED_NEW=0 SAMPLED_DELETE=0"));
 
-  // Add a hook, confirm it's reported, add a second, then remove them.
+  // The hook types are staggered so that each counter is observed at 1, then
+  // 2, then back at 0, while no two counters report the same sequence of
+  // values (so a miscounted or swapped hook list is still detected):
+  //
+  //               NEW  DELETE  SAMPLED_NEW  SAMPLED_DELETE
+  //   snapshot 1   1     1          0             0
+  //   snapshot 2   2     1          1             0
+  //   snapshot 3   0     2          2             1
+  //   snapshot 4   0     0          0             2
+  //
+  // Hooks of a type are always removed together: HookList::size() is a
+  // high-water mark, so removing just one of two identical hooks still
+  // reports 2.
   SetNewHook();
-  stats = MallocExtension::GetStats();
-  EXPECT_THAT(
-      stats,
-      HasSubstr("MALLOC HOOKS: NEW=1 DELETE=0 SAMPLED_NEW=0 SAMPLED_DELETE=0"));
-  SetNewHook();
-  stats = MallocExtension::GetStats();
-  EXPECT_THAT(
-      stats,
-      HasSubstr("MALLOC HOOKS: NEW=2 DELETE=0 SAMPLED_NEW=0 SAMPLED_DELETE=0"));
-  ResetNewHook();
-  ResetNewHook();
-
   SetDeleteHook();
   stats = MallocExtension::GetStats();
   EXPECT_THAT(
       stats,
-      HasSubstr("MALLOC HOOKS: NEW=0 DELETE=1 SAMPLED_NEW=0 SAMPLED_DELETE=0"));
+      HasSubstr("MALLOC HOOKS: NEW=1 DELETE=1 SAMPLED_NEW=0 SAMPLED_DELETE=0"));
+
+  SetNewHook();
+  SetSampledNewHook();
+  stats = MallocExtension::GetStats();
+  EXPECT_THAT(
+      stats,
+      HasSubstr("MALLOC HOOKS: NEW=2 DELETE=1 SAMPLED_NEW=1 SAMPLED_DELETE=0"));
+
+  ResetNewHook();
+  ResetNewHook();
   SetDeleteHook();
-  stats = MallocExtension::GetStats();
-  EXPECT_THAT(
-      stats,
-      HasSubstr("MALLOC HOOKS: NEW=0 DELETE=2 SAMPLED_NEW=0 SAMPLED_DELETE=0"));
-  ResetDeleteHook();
-  ResetDeleteHook();
-
   SetSampledNewHook();
-  stats = MallocExtension::GetStats();
-  EXPECT_THAT(
-      stats,
-      HasSubstr("MALLOC HOOKS: NEW=0 DELETE=0 SAMPLED_NEW=1 SAMPLED_DELETE=0"));
-  SetSampledNewHook();
-  stats = MallocExtension::GetStats();
-  EXPECT_THAT(
-      stats,
-      HasSubstr("MALLOC HOOKS: NEW=0 DELETE=0 SAMPLED_NEW=2 SAMPLED_DELETE=0"));
-  ResetSampledNewHook();
-  ResetSampledNewHook();
-
   SetSampledDeleteHook();
   stats = MallocExtension::GetStats();
   EXPECT_THAT(
       stats,
-      HasSubstr("MALLOC HOOKS: NEW=0 DELETE=0 SAMPLED_NEW=0 SAMPLED_DELETE=1"));
+      HasSubstr("MALLOC HOOKS: NEW=0 DELETE=2 SAMPLED_NEW=2 SAMPLED_DELETE=1"));
+
+  ResetDeleteHook();
+  ResetDeleteHook();
+  ResetSampledNewHook();
+  ResetSampledNewHook();
   SetSampledDeleteHook();
   stats = MallocExtension::GetStats();
   EXPECT_THAT(
       stats,
       HasSubstr("MALLOC HOOKS: NEW=0 DELETE=0 SAMPLED_NEW=0 SAMPLED_DELETE=2"));
+
   ResetSampledDeleteHook();
   ResetSampledDeleteHook();
 }
@@ -596,6 +627,48 @@ TEST(TCMallocTest, MarkThreadBusy) {
   ASSERT_TRUE(MallocHook::RemoveNewHook(new_hook));
   ASSERT_TRUE(MallocHook::RemoveDeleteHook(delete_hook));
   log_hooks = false;
+}
+
+TEST(HooksTest, AllocationInHookFails) {
+#ifdef NDEBUG
+  GTEST_SKIP() << "Skipping debug death test in opt build.";
+#endif
+
+  if (kSanitizerPresent) {
+    GTEST_SKIP() << "Sanitizers intercept malloc/new";
+  }
+
+  // The hooks below abort() while the thread may still hold pageheap_lock
+  // (delete hooks are invoked with it held).  A failure signal handler that
+  // allocates (e.g. to symbolize the stack) would then deadlock on that lock
+  // until its watchdog fires, so let SIGABRT terminate the child immediately.
+  const auto new_hook = [](size_t, size_t, size_t, size_t, uint8_t,
+                           tcmalloc_internal::MemoryTag) {
+    ::operator delete(::operator new(1));
+  };
+  EXPECT_DEBUG_DEATH(
+      {
+        signal(SIGABRT, SIG_DFL);
+        EXPECT_TRUE(page_allocator_new_hooks.Add(new_hook));
+        void* ptr = ::operator new(1024 * 1024 * 16);
+        ::operator delete(ptr);
+        EXPECT_TRUE(page_allocator_new_hooks.Remove(new_hook));
+      },
+      "");
+
+  const auto delete_hook = [](size_t, size_t, size_t, uint8_t,
+                              tcmalloc_internal::MemoryTag) {
+    ::operator delete(::operator new(1));
+  };
+  EXPECT_DEBUG_DEATH(
+      {
+        signal(SIGABRT, SIG_DFL);
+        void* ptr = ::operator new(1024 * 1024 * 16);
+        EXPECT_TRUE(page_allocator_delete_hooks.Add(delete_hook));
+        ::operator delete(ptr);
+        EXPECT_TRUE(page_allocator_delete_hooks.Remove(delete_hook));
+      },
+      "");
 }
 
 }  // namespace

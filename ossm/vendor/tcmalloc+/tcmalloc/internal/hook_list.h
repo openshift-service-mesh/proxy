@@ -24,8 +24,11 @@
 
 #include <atomic>
 #include <cstddef>
+#include <utility>
 
+#include "absl/base/attributes.h"
 #include "absl/base/internal/spinlock.h"
+#include "absl/base/optimization.h"
 #include "tcmalloc/internal/config.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
@@ -63,10 +66,11 @@ class HookList final : HookListBase {
   // Store up to n values of the list in output_array, and return the number of
   // elements stored.  Thread-safe and non-blocking.  This is fast (one memory
   // access) if the list is empty.
-  [[nodiscard]] int Traverse(T* output_array, int n) const;
+  [[nodiscard]] ABSL_ATTRIBUTE_NO_SANITIZE_ADDRESS int Traverse(T* output_array,
+                                                                int n) const;
 
   // Fast inline implementation for fast path of Invoke*Hook.
-  [[nodiscard]] bool empty() const {
+  [[nodiscard]] ABSL_ATTRIBUTE_NO_SANITIZE_ADDRESS bool empty() const {
     // empty() is only used as an optimization to determine if we should call
     // Traverse which has proper acquire loads.  Memory reordering around a
     // call to empty will either lead to an unnecessary Traverse call, or will
@@ -74,11 +78,23 @@ class HookList final : HookListBase {
     return priv_end.load(std::memory_order_relaxed) == 0;
   }
 
-  [[nodiscard]] int size() const {
+  [[nodiscard]] ABSL_ATTRIBUTE_NO_SANITIZE_ADDRESS int size() const {
     return priv_end.load(std::memory_order_relaxed);
   }
 
+  template <typename... Args>
+  ABSL_ATTRIBUTE_ALWAYS_INLINE void Invoke(Args&&... args) const {
+    if (ABSL_PREDICT_FALSE(!empty())) {
+      InvokeSlow(std::forward<Args>(args)...);
+    }
+  }
+
  private:
+  template <typename... Args>
+  ABSL_ATTRIBUTE_COLD ABSL_ATTRIBUTE_NOINLINE
+      ABSL_ATTRIBUTE_NO_SANITIZE_ADDRESS void
+      InvokeSlow(Args&&... args) const;
+
   // One more than the index of the last valid element in priv_data.  During
   // 'Remove' this may be past the last valid element in priv_data, but
   // subsequent values will be 0.
@@ -150,6 +166,16 @@ int HookList<T>::Traverse(T* output_array, int n) const {
     }
   }
   return actual_hooks_end;
+}
+
+template <typename T>
+template <typename... Args>
+void HookList<T>::InvokeSlow(Args&&... args) const {
+  T hooks[kHookListMaxValues];
+  int num_hooks = Traverse(hooks, kHookListMaxValues);
+  for (int i = 0; i < num_hooks; ++i) {
+    (*hooks[i])(args...);
+  }
 }
 
 }  // namespace tcmalloc::tcmalloc_internal

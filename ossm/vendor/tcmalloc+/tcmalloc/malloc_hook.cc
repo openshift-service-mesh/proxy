@@ -14,8 +14,11 @@
 
 #include "tcmalloc/malloc_hook.h"
 
+#include <atomic>
+
 #include "absl/base/attributes.h"
 #include "absl/base/call_once.h"
+#include "absl/base/const_init.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/hook_list.h"
 #include "tcmalloc/malloc_hook_invoke.h"
@@ -23,6 +26,9 @@
 extern "C" {
 
 ABSL_ATTRIBUTE_WEAK void MallocHook_InitAtFirstAllocation_HeapLeakChecker() {
+  // Do nothing
+}
+ABSL_ATTRIBUTE_WEAK void MallocHook_InitAtFirstAllocation_ForTesting() {
   // Do nothing
 }
 ABSL_ATTRIBUTE_WEAK void MallocHook_HooksChanged() {
@@ -36,11 +42,20 @@ namespace tcmalloc {
 namespace tcmalloc_internal {
 
 static void RemoveInitialHooksAndCallInitializers();
+ABSL_CONST_INIT static std::atomic<bool> initial_new_hook_active{false};
 
-static void InitialNewHook(const MallocHook::NewInfo& info) {
+void InitAtFirstAllocation() {
+  initial_new_hook_active.store(true, std::memory_order_relaxed);
   ABSL_CONST_INIT static absl::once_flag once;
   absl::base_internal::LowLevelCallOnce(&once,
                                         RemoveInitialHooksAndCallInitializers);
+}
+
+static void InitialNewHook(const MallocHook::NewInfo& info) {
+  if (initial_new_hook_active.exchange(true, std::memory_order_relaxed)) {
+    return;
+  }
+  InitAtFirstAllocation();
   MallocHook::InvokeNewHook(info);
 }
 
@@ -55,6 +70,7 @@ void RemoveInitialHooksAndCallInitializers() {
   // HeapLeakChecker need to get control on the first memory allocation. One can
   // add other modules by following the same weak/strong function pattern.
   MallocHook_InitAtFirstAllocation_HeapLeakChecker();
+  MallocHook_InitAtFirstAllocation_ForTesting();
 }
 
 }  // namespace tcmalloc_internal
@@ -107,39 +123,7 @@ bool MallocHook::RemoveSampledDeleteHook(SampledDeleteHook hook) {
   return tcmalloc_internal::sampled_delete_hooks_.Remove(hook);
 }
 
-// Note: embedding the function calls inside the traversal of HookList would be
-// very confusing, as it is legal for a hook to remove itself and add other
-// hooks.  Doing traversal first, and then calling the hooks ensures we only
-// call the hooks registered at the start.
-#define INVOKE_HOOKS(HookType, hook_list, args)                           \
-  do {                                                                    \
-    HookType hooks[tcmalloc_internal::kHookListMaxValues];                \
-    int num_hooks =                                                       \
-        hook_list.Traverse(hooks, tcmalloc_internal::kHookListMaxValues); \
-    for (int i = 0; i < num_hooks; ++i) {                                 \
-      (*hooks[i]) args;                                                   \
-    }                                                                     \
-  } while (0)
 
-void MallocHook::InvokeNewHookSlow(const NewInfo& info) {
-  INVOKE_HOOKS(NewHook, tcmalloc_internal::new_hooks_, (info));
-}
-
-void MallocHook::InvokeDeleteHookSlow(const DeleteInfo& info) {
-  INVOKE_HOOKS(DeleteHook, tcmalloc_internal::delete_hooks_, (info));
-}
-
-void MallocHook::InvokeSampledNewHookSlow(const SampledAlloc& sampled_alloc) {
-  INVOKE_HOOKS(SampledNewHook, tcmalloc_internal::sampled_new_hooks_,
-               (sampled_alloc));
-}
-
-void MallocHook::InvokeSampledDeleteHookSlow(
-    const
-    SampledAlloc& sampled_alloc) {
-  INVOKE_HOOKS(SampledDeleteHook, tcmalloc_internal::sampled_delete_hooks_,
-               (sampled_alloc));
-}
 
 }  // namespace tcmalloc
 GOOGLE_MALLOC_SECTION_END

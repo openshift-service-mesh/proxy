@@ -23,15 +23,23 @@ namespace tcmalloc {
 enum class Experiment : int {
   // clang-format off
   // go/keep-sorted start
-  TCMALLOC_RELEASE_FREE_SWAPPED,  // TODO: b/438767733 - Complete experiment.
-  TCMALLOC_REUSE_SIZE_CLASSES_V2,  // TODO: b/358126781 - Complete experiment.
-  TEST_ONLY_L3_AWARE,  // TODO: b/239977380 - Complete experiment.
+  TCMALLOC_CFL_PRIORITIZATION_ABLATION,  // TODO: b/567166830 - Complete experiment.
+  TCMALLOC_PGHO_EXPERIMENT,  // TODO: b/460486507 - Complete experiment.
+  TCMALLOC_RELEASE_DRAINED_METADATA_ABLATION,  // TODO: b/205153285 - Complete experiment.
+  TCMALLOC_SONIC_COLLAPSE_RELEASED_HUGEPAGES,  // TODO: b/435718337 - Complete experiment.
+  TCMALLOC_SONIC_DEMAND_CYCLE_60S,  // TODO: b/582367305 - Complete experiment.
+  TCMALLOC_SONIC_FILLER_APPEND_ON_FREE,  // TODO: b/579425486 - Complete experiment.
+  TCMALLOC_SONIC_FIX_MAX_CAPACITY_BUG_ABLATION,  // TODO: b/577007348 - Complete experiment.
+  TCMALLOC_SONIC_MIN_FREE_BYTES_TO_BREAK_HUGEPAGE_DENSE_128K,  // TODO: b/572352809 - Complete experiment.
+  TCMALLOC_SONIC_MIN_FREE_BYTES_TO_BREAK_HUGEPAGE_DENSE_128K_SPARSE_64K,  // TODO: b/572352809 - Complete experiment.
+  TCMALLOC_SONIC_MIN_FREE_BYTES_TO_BREAK_HUGEPAGE_DENSE_64K_SPARSE_64K,  // TODO: b/572352809 - Complete experiment.
+  TCMALLOC_SONIC_PREFER_BACKED_FILLER_PAGES,  // TODO: b/539704318 - Complete experiment.
+  TCMALLOC_SONIC_PRESERVE_DONATED_ON_COLLAPSE,  // TODO: b/572530574 - Complete experiment.
+  TCMALLOC_SONIC_SHARDED_TRANSFER_CACHE,  // TODO: b/538230058 - Complete experiment.
+  TCMALLOC_SONIC_SPAN_BITMAP_ABLATION,  // TODO: b/575736447 - Complete experiment.
+  TCMALLOC_SONIC_TRACK_BROKEN_HUGEPAGES,  // TODO: b/572530574 - Complete experiment.
   TEST_ONLY_MM_VCPU,  // TODO: b/245776120 - Complete experiment.
-  TEST_ONLY_TCMALLOC_EXTENDED_PRIORITY_LISTS_V1,  // TODO: b/437412600 - Complete experiment.
-  TEST_ONLY_TCMALLOC_HUGE_CACHE_RELEASE_30S,  // TODO: b/319872040 - Complete experiment.
   TEST_ONLY_TCMALLOC_POW2_SIZECLASS,
-  TEST_ONLY_TCMALLOC_PREFERENTIAL_COLLAPSE,  // TODO: b/435257627 - Complete experiment.
-  TEST_ONLY_TCMALLOC_REUSE_SIZE_CLASSES_V2,  // TODO: b/358126781 - Complete experiment.
   TEST_ONLY_TCMALLOC_SHARDED_TRANSFER_CACHE,
   // go/keep-sorted end
   kMaxExperimentID,
@@ -41,21 +49,35 @@ enum class Experiment : int {
 struct ExperimentConfig {
   Experiment id;
   absl::string_view name;
+  bool brittle = false;
+  bool force_disable = false;
+  double rollout_lower_bound = 0;
+  double rollout_upper_bound = 0;
+  absl::string_view rollout_salt;
+  bool rollout_inverted = false;
 };
 
 // clang-format off
 inline constexpr ExperimentConfig experiments[] = {
     // go/keep-sorted start
-    {Experiment::TCMALLOC_RELEASE_FREE_SWAPPED, "TCMALLOC_RELEASE_FREE_SWAPPED"},
-    {Experiment::TCMALLOC_REUSE_SIZE_CLASSES_V2, "TCMALLOC_REUSE_SIZE_CLASSES_V2"},
-    {Experiment::TEST_ONLY_L3_AWARE, "TEST_ONLY_L3_AWARE"},
+    {Experiment::TCMALLOC_CFL_PRIORITIZATION_ABLATION, "TCMALLOC_CFL_PRIORITIZATION_ABLATION"},
+    {Experiment::TCMALLOC_PGHO_EXPERIMENT, "TCMALLOC_PGHO_EXPERIMENT"},
+    {Experiment::TCMALLOC_RELEASE_DRAINED_METADATA_ABLATION, "TCMALLOC_RELEASE_DRAINED_METADATA_ABLATION"},
+    {Experiment::TCMALLOC_SONIC_COLLAPSE_RELEASED_HUGEPAGES, "TCMALLOC_SONIC_COLLAPSE_RELEASED_HUGEPAGES", /*brittle=*/false, /*force_disable=*/false, /*rollout_lower_bound=*/0, /*rollout_upper_bound=*/0.01, /*rollout_salt=*/"", /*rollout_inverted=*/true},
+    {Experiment::TCMALLOC_SONIC_DEMAND_CYCLE_60S, "TCMALLOC_SONIC_DEMAND_CYCLE_60S", /*brittle=*/false, /*force_disable=*/false, /*rollout_lower_bound=*/0, /*rollout_upper_bound=*/0.01},
+    {Experiment::TCMALLOC_SONIC_FILLER_APPEND_ON_FREE, "TCMALLOC_SONIC_FILLER_APPEND_ON_FREE", /*brittle=*/false, /*force_disable=*/false, /*rollout_lower_bound=*/0, /*rollout_upper_bound=*/0.01},
+    {Experiment::TCMALLOC_SONIC_FIX_MAX_CAPACITY_BUG_ABLATION, "TCMALLOC_SONIC_FIX_MAX_CAPACITY_BUG_ABLATION", /*brittle=*/false, /*force_disable=*/false, /*rollout_lower_bound=*/0, /*rollout_upper_bound=*/0.01},
+    {Experiment::TCMALLOC_SONIC_MIN_FREE_BYTES_TO_BREAK_HUGEPAGE_DENSE_128K, "TCMALLOC_SONIC_MIN_FREE_BYTES_TO_BREAK_HUGEPAGE_DENSE_128K", /*brittle=*/false, /*force_disable=*/false, /*rollout_lower_bound=*/0, /*rollout_upper_bound=*/0.01, /*rollout_salt=*/"TCMALLOC_SONIC_MIN_FREE_BYTES_TO_BREAK_HUGEPAGE"},
+    {Experiment::TCMALLOC_SONIC_MIN_FREE_BYTES_TO_BREAK_HUGEPAGE_DENSE_128K_SPARSE_64K, "TCMALLOC_SONIC_MIN_FREE_BYTES_TO_BREAK_HUGEPAGE_DENSE_128K_SPARSE_64K", /*brittle=*/false, /*force_disable=*/false, /*rollout_lower_bound=*/0.02, /*rollout_upper_bound=*/0.03, /*rollout_salt=*/"TCMALLOC_SONIC_MIN_FREE_BYTES_TO_BREAK_HUGEPAGE"},
+    {Experiment::TCMALLOC_SONIC_MIN_FREE_BYTES_TO_BREAK_HUGEPAGE_DENSE_64K_SPARSE_64K, "TCMALLOC_SONIC_MIN_FREE_BYTES_TO_BREAK_HUGEPAGE_DENSE_64K_SPARSE_64K", /*brittle=*/false, /*force_disable=*/false, /*rollout_lower_bound=*/0.01, /*rollout_upper_bound=*/0.02, /*rollout_salt=*/"TCMALLOC_SONIC_MIN_FREE_BYTES_TO_BREAK_HUGEPAGE"},
+    {Experiment::TCMALLOC_SONIC_PREFER_BACKED_FILLER_PAGES, "TCMALLOC_SONIC_PREFER_BACKED_FILLER_PAGES", /*brittle=*/false, /*force_disable=*/false, /*rollout_lower_bound=*/0, /*rollout_upper_bound=*/0.01},
+    {Experiment::TCMALLOC_SONIC_PRESERVE_DONATED_ON_COLLAPSE, "TCMALLOC_SONIC_PRESERVE_DONATED_ON_COLLAPSE", /*brittle=*/false, /*force_disable=*/false, /*rollout_lower_bound=*/0, /*rollout_upper_bound=*/0.01},
+    {Experiment::TCMALLOC_SONIC_SHARDED_TRANSFER_CACHE, "TCMALLOC_SONIC_SHARDED_TRANSFER_CACHE", /*brittle=*/false, /*force_disable=*/false, /*rollout_lower_bound=*/0, /*rollout_upper_bound=*/0.01},
+    {Experiment::TCMALLOC_SONIC_SPAN_BITMAP_ABLATION, "TCMALLOC_SONIC_SPAN_BITMAP_ABLATION", /*brittle=*/false, /*force_disable=*/false, /*rollout_lower_bound=*/0, /*rollout_upper_bound=*/0.1},
+    {Experiment::TCMALLOC_SONIC_TRACK_BROKEN_HUGEPAGES, "TCMALLOC_SONIC_TRACK_BROKEN_HUGEPAGES", /*brittle=*/false, /*force_disable=*/false, /*rollout_lower_bound=*/0, /*rollout_upper_bound=*/0.01},
     {Experiment::TEST_ONLY_MM_VCPU, "TEST_ONLY_MM_VCPU"},
-    {Experiment::TEST_ONLY_TCMALLOC_EXTENDED_PRIORITY_LISTS_V1, "TEST_ONLY_TCMALLOC_EXTENDED_PRIORITY_LISTS_V1"},
-    {Experiment::TEST_ONLY_TCMALLOC_HUGE_CACHE_RELEASE_30S, "TEST_ONLY_TCMALLOC_HUGE_CACHE_RELEASE_30S"},
-    {Experiment::TEST_ONLY_TCMALLOC_POW2_SIZECLASS, "TEST_ONLY_TCMALLOC_POW2_SIZECLASS"},
-    {Experiment::TEST_ONLY_TCMALLOC_PREFERENTIAL_COLLAPSE, "TEST_ONLY_TCMALLOC_PREFERENTIAL_COLLAPSE"},
-    {Experiment::TEST_ONLY_TCMALLOC_REUSE_SIZE_CLASSES_V2, "TEST_ONLY_TCMALLOC_REUSE_SIZE_CLASSES_V2"},
-    {Experiment::TEST_ONLY_TCMALLOC_SHARDED_TRANSFER_CACHE, "TEST_ONLY_TCMALLOC_SHARDED_TRANSFER_CACHE"},
+    {Experiment::TEST_ONLY_TCMALLOC_POW2_SIZECLASS, "TEST_ONLY_TCMALLOC_POW2_SIZECLASS", /*brittle=*/true},
+    {Experiment::TEST_ONLY_TCMALLOC_SHARDED_TRANSFER_CACHE, "TEST_ONLY_TCMALLOC_SHARDED_TRANSFER_CACHE", /*brittle=*/true},
     // go/keep-sorted end
 };
 // clang-format on

@@ -14,6 +14,8 @@
 
 #include "tcmalloc/common.h"
 
+#include <cstddef>
+
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/optimization.h"
 
@@ -24,8 +26,10 @@ namespace tcmalloc_internal {
 // This only provides correct answer for TCMalloc-allocated memory,
 // and may give a false positive for non-allocated block.
 extern "C" bool TCMalloc_Internal_PossiblyCold(const void* ptr) {
-  return GetMemoryTag(ptr) == MemoryTag::kCold;
+  return GetMemoryTag(ptr) == MemoryTag::kSampledOrCold;
 }
+
+extern "C" size_t TCMalloc_Internal_GetPageSize() { return kPageSize; }
 
 }  // namespace tcmalloc_internal
 }  // namespace tcmalloc

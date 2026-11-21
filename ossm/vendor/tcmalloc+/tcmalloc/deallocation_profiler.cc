@@ -20,18 +20,19 @@
 #include <cstdint>  // for uintptr_t
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "absl/base/attributes.h"
-#include "absl/base/const_init.h"
 #include "absl/base/internal/low_level_alloc.h"
 #include "absl/base/internal/spinlock.h"
 #include "absl/base/internal/sysinfo.h"
-#include "absl/base/macros.h"
+#include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/debugging/stacktrace.h"  // for GetStackTrace
 #include "absl/functional/function_ref.h"
@@ -46,6 +47,8 @@
 #include "tcmalloc/internal/sampled_allocation.h"
 #include "tcmalloc/internal_malloc_extension.h"
 #include "tcmalloc/malloc_extension.h"
+#include "tcmalloc/parameters.h"
+#include "tcmalloc/sampler.h"
 #include "tcmalloc/static_vars.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
@@ -80,41 +83,50 @@ class AllocAdaptor final {
   void deallocate(T* p, size_t n) { Alloc::Free(p, n * sizeof(T)); }
 };
 
-const int64_t kMaxStackDepth = 64;
-
 // Stores stack traces and metadata for any allocation or deallocation
 // encountered by the profiler.
 struct DeallocationSampleRecord {
-  double weight = 0.0;
-  size_t requested_size = 0;
-  size_t requested_alignment = 0;
-  size_t allocated_size = 0;  // size after sizeclass/page rounding
+  // We define the dtor to ensure it is placed in the desired text section.
+  ~DeallocationSampleRecord() = default;
 
-  int depth = 0;  // Number of PC values stored in array below
-  void* stack[kMaxStackDepth];
-
-  // creation_time is used to capture the life_time of sampled allocations
-  absl::Time creation_time;
+  tcmalloc_internal::StackTrace stack_trace;
   int cpu_id = -1;
   int vcpu_id = -1;
   int l3_id = -1;
   int numa_id = -1;
   pid_t thread_id = 0;
+  bool is_dealloc = false;
 
   template <typename H>
   friend H AbslHashValue(H h, const DeallocationSampleRecord& c) {
-    return H::combine(H::combine_contiguous(std::move(h), c.stack, c.depth),
-                      c.depth, c.requested_size, c.requested_alignment,
-                      c.allocated_size);
+    return H::combine(H::combine_contiguous(std::move(h), c.stack_trace.stack,
+                                            c.stack_trace.depth),
+                      c.stack_trace.depth, c.stack_trace.requested_size,
+                      c.stack_trace.requested_alignment,
+                      c.stack_trace.allocated_size,
+                      c.stack_trace.requested_size_returning,
+                      c.stack_trace.access_hint, c.stack_trace.cold_allocated,
+                      c.stack_trace.token_id, c.stack_trace.guarded_status,
+                      c.stack_trace.allocation_type);
   }
 
   bool operator==(const DeallocationSampleRecord& other) const {
-    if (depth != other.depth || requested_size != other.requested_size ||
-        requested_alignment != other.requested_alignment ||
-        allocated_size != other.allocated_size) {
+    if (stack_trace.depth != other.stack_trace.depth ||
+        stack_trace.requested_size != other.stack_trace.requested_size ||
+        stack_trace.requested_alignment !=
+            other.stack_trace.requested_alignment ||
+        stack_trace.allocated_size != other.stack_trace.allocated_size ||
+        stack_trace.requested_size_returning !=
+            other.stack_trace.requested_size_returning ||
+        stack_trace.access_hint != other.stack_trace.access_hint ||
+        stack_trace.cold_allocated != other.stack_trace.cold_allocated ||
+        stack_trace.token_id != other.stack_trace.token_id ||
+        stack_trace.guarded_status != other.stack_trace.guarded_status ||
+        stack_trace.allocation_type != other.stack_trace.allocation_type) {
       return false;
     }
-    return std::equal(stack, stack + depth, other.stack);
+    return std::equal(stack_trace.stack, stack_trace.stack + stack_trace.depth,
+                      other.stack_trace.stack);
   }
 };
 
@@ -360,6 +372,7 @@ class DeallocationProfiler {
   DeallocationProfiler* next_;
   DeallocationProfilerList* list_ = nullptr;
   friend class DeallocationProfilerList;
+  Mode mode_;
 
   using AllocsTable = absl::flat_hash_map<
       tcmalloc_internal::AllocHandle, DeallocationSampleRecord,
@@ -372,8 +385,23 @@ class DeallocationProfiler {
   class DeallocationStackTraceTable
       final : public tcmalloc_internal::ProfileBase {
    public:
+    explicit DeallocationStackTraceTable(Mode mode)
+        : mode_(mode),
+          max_events_(
+              mode == Mode::kEventTrace
+                  ? std::max<int32_t>(0, static_cast<int32_t>(
+                                             tcmalloc_internal::Parameters::
+                                                 event_trace_memory_limit() /
+                                             sizeof(DeallocationSampleRecord)))
+                  : 0) {
+      if (mode_ == Mode::kEventTrace) {
+        events_.reserve(max_events_);
+      }
+    }
+
     // We define the dtor to ensure it is placed in the desired text section.
     ~DeallocationStackTraceTable() override = default;
+
     void AddTrace(const DeallocationSampleRecord& alloc_trace,
                   const DeallocationSampleRecord& dealloc_trace);
 
@@ -381,7 +409,12 @@ class DeallocationProfiler {
         absl::FunctionRef<void(const Profile::Sample&)> func) const override;
 
     ProfileType Type() const override {
-      return tcmalloc::ProfileType::kLifetimes;
+      switch (mode_) {
+        case Mode::kLifetimes:
+          return tcmalloc::ProfileType::kLifetimes;
+        case Mode::kEventTrace:
+          return tcmalloc::ProfileType::kEventTrace;
+      }
     }
 
     std::optional<absl::Time> StartTime() const override { return start_time_; }
@@ -397,7 +430,7 @@ class DeallocationProfiler {
     // underlying arena must stay alive as long as the profile.
     MyAllocator::LowLevelArenaReference arena_ref_;
 
-    static constexpr int kNumCases = ABSL_ARRAYSIZE(kAllCases);
+    static constexpr int kNumCases = std::size(kAllCases);
 
     struct Key {
       DeallocationSampleRecord alloc;
@@ -433,12 +466,22 @@ class DeallocationProfiler {
       }
     };
 
+    Mode mode_;
+
+    // Used in kLifetimes mode.
     absl::flat_hash_map<Key, Value, absl::Hash<Key>, std::equal_to<Key>,
                         AllocAdaptor<std::pair<const Key, Value>, MyAllocator>>
         table_;
 
+    // Used in kEventTrace mode.
+    // This is technically a fixed-size container -- we ::reserve capacity at
+    // construction time and truncate traces after reaching max_events_, hence
+    // the lack of low-level allocator.
+    int32_t max_events_ = 0;
+    std::vector<DeallocationSampleRecord> events_;
+
     absl::Time start_time_ = absl::Now();
-    absl::Time stop_time_;
+    absl::Time stop_time_ = absl::InfiniteFuture();
   };
 
   // Keep track of allocations that are in flight
@@ -448,8 +491,9 @@ class DeallocationProfiler {
   std::unique_ptr<DeallocationStackTraceTable> reports_ = nullptr;
 
  public:
-  explicit DeallocationProfiler(DeallocationProfilerList* list) : list_(list) {
-    reports_ = std::make_unique<DeallocationStackTraceTable>();
+  explicit DeallocationProfiler(DeallocationProfilerList* list, Mode mode)
+      : list_(list), mode_(mode) {
+    reports_ = std::make_unique<DeallocationStackTraceTable>(mode);
     list_->Add(this);
   }
 
@@ -476,58 +520,60 @@ class DeallocationProfiler {
     DeallocationSampleRecord& allocation =
         allocs_[stack_trace.sampled_alloc_handle];
 
-    allocation.allocated_size = stack_trace.allocated_size;
-    allocation.requested_size = stack_trace.requested_size;
-    allocation.requested_alignment = stack_trace.requested_alignment;
-    allocation.depth = stack_trace.depth;
-    memcpy(allocation.stack, stack_trace.stack,
-           sizeof(void*) * std::min(static_cast<int64_t>(stack_trace.depth),
-                                    kMaxStackDepth));
+    allocation.stack_trace = stack_trace;
     // TODO(mmaas): Do we need to worry about b/65384231 anymore?
-    allocation.creation_time = stack_trace.allocation_time;
-    allocation.cpu_id = tcmalloc_internal::subtle::percpu::GetRealCpu();
-    allocation.vcpu_id = tcmalloc_internal::subtle::percpu::VirtualCpu::get();
+    allocation.cpu_id = stack_trace.cpu_id;
+    allocation.vcpu_id = stack_trace.vcpu_id;
     allocation.l3_id = GetL3Id(allocation.cpu_id);
     allocation.numa_id = GetNumaId(allocation.cpu_id);
-    allocation.thread_id = absl::base_internal::GetTID();
-    // We divide by the requested size to obtain the number of allocations.
-    // TODO(b/248332543): Consider using AllocatedBytes from sampler.h.
-    allocation.weight = static_cast<double>(stack_trace.weight) /
-                        (stack_trace.requested_size + 1);
+    allocation.thread_id = stack_trace.thread_id;
   }
 
-  void ReportFree(tcmalloc_internal::AllocHandle handle) {
+  void ReportFree(tcmalloc_internal::AllocHandle handle,
+                  const DeallocationSampleRecord& dealloc_record) {
     auto it = allocs_.find(handle);
-
-    // Handle the case that we observed the deallocation but not the allocation
-    if (it == allocs_.end()) {
+    // If we are doing a lifetime profile, we don't include left-censored
+    // samples (see `alloc_trace.stack_trace.depth == 0` guard in
+    // `DeallocationStackTraceTable::AddTrace`).  If we don't match here, we can
+    // return early rather than constructing two DeallocationSampleRecords.
+    if (mode_ == Mode::kLifetimes && it == allocs_.end()) {
       return;
     }
 
-    DeallocationSampleRecord sample = it->second;
-    allocs_.erase(it);
+    DeallocationSampleRecord allocation;
 
-    DeallocationSampleRecord deallocation;
-    deallocation.allocated_size = sample.allocated_size;
-    deallocation.requested_alignment = sample.requested_alignment;
-    deallocation.requested_size = sample.requested_size;
-    deallocation.creation_time = absl::Now();
-    deallocation.cpu_id = tcmalloc_internal::subtle::percpu::GetRealCpu();
-    deallocation.vcpu_id = tcmalloc_internal::subtle::percpu::VirtualCpu::get();
-    deallocation.l3_id = GetL3Id(deallocation.cpu_id);
-    deallocation.numa_id = GetNumaId(deallocation.cpu_id);
-    deallocation.thread_id = absl::base_internal::GetTID();
-    deallocation.depth =
-        absl::GetStackTrace(deallocation.stack, kMaxStackDepth, 1);
+    // Handle the (left-censored) case that we observed the deallocation but not
+    // the allocation. Since we only get the handle here, left-censored
+    // deallocations necessarily have depth = 0 and allocated_size = 0.
+    if (it == allocs_.end()) {
+      allocation = {};
+      allocation.stack_trace.sampled_alloc_handle = handle;
+      allocation.stack_trace.depth = 0;
+    } else {
+      allocation = it->second;
+      allocs_.erase(it);
+    }
 
-    reports_->AddTrace(sample, deallocation);
+    // Copy, so we can update with information from sample.
+    DeallocationSampleRecord deallocation = dealloc_record;
+    deallocation.stack_trace = allocation.stack_trace;
+    // But restore details specific to the deallocation.
+    deallocation.stack_trace.depth = dealloc_record.stack_trace.depth;
+    std::copy_n(dealloc_record.stack_trace.stack,
+                dealloc_record.stack_trace.depth,
+                deallocation.stack_trace.stack);
+    deallocation.stack_trace.allocation_time =
+        dealloc_record.stack_trace.allocation_time;
+
+    reports_->AddTrace(allocation, deallocation);
   }
 };
 
-void DeallocationProfilerList::Add(DeallocationProfiler* profiler) {
+void DeallocationProfilerList::Add(
+    DeallocationProfiler* absl_nonnull profiler) {
   AllocationGuardSpinLockHolder h(profilers_lock_);
-  profiler->next_ = first_;
-  first_ = profiler;
+  profiler->next_ = first_.load(std::memory_order_relaxed);
+  first_.store(profiler, std::memory_order_release);
 
   // Whenever a new profiler is created, we seed it with live allocations.
   tcmalloc_internal::tc_globals.sampled_allocation_recorder().Iterate(
@@ -538,22 +584,28 @@ void DeallocationProfilerList::Add(DeallocationProfiler* profiler) {
 }
 
 // This list is very short and we're nowhere near a hot path, just walk
-void DeallocationProfilerList::Remove(DeallocationProfiler* profiler) {
+void DeallocationProfilerList::Remove(
+    DeallocationProfiler* absl_nonnull profiler) {
   AllocationGuardSpinLockHolder h(profilers_lock_);
-  DeallocationProfiler** link = &first_;
-  DeallocationProfiler* cur = first_;
-  while (cur != profiler) {
-    TC_CHECK_NE(cur, nullptr);
-    link = &cur->next_;
+  DeallocationProfiler* cur = first_.load(std::memory_order_relaxed);
+  if (cur == profiler) {
+    first_.store(profiler->next_, std::memory_order_release);
+    return;
+  }
+  while (cur != nullptr && cur->next_ != profiler) {
     cur = cur->next_;
   }
-  *link = profiler->next_;
+  TC_CHECK_NE(cur, nullptr);
+  cur->next_ = profiler->next_;
 }
 
 void DeallocationProfilerList::ReportMalloc(
     const tcmalloc_internal::StackTrace& stack_trace) {
+  if (ABSL_PREDICT_TRUE(first_.load(std::memory_order_acquire) == nullptr)) {
+    return;
+  }
   AllocationGuardSpinLockHolder h(profilers_lock_);
-  DeallocationProfiler* cur = first_;
+  DeallocationProfiler* cur = first_.load(std::memory_order_relaxed);
   while (cur != nullptr) {
     cur->ReportMalloc(stack_trace);
     cur = cur->next_;
@@ -562,10 +614,27 @@ void DeallocationProfilerList::ReportMalloc(
 
 void DeallocationProfilerList::ReportFree(
     tcmalloc_internal::AllocHandle handle) {
+  if (ABSL_PREDICT_TRUE(first_.load(std::memory_order_acquire) == nullptr)) {
+    return;
+  }
+
+  // Unwind the stack trace outside of the lock.  Stack unwinding is expensive,
+  // and while it is unlikely we will have multiple profilers in-flight at the
+  // same time, we can do it once.
+  DeallocationSampleRecord deallocation = {};
+  deallocation.stack_trace.depth = absl::GetStackTrace(
+      deallocation.stack_trace.stack, tcmalloc_internal::kMaxStackDepth, 0);
+  deallocation.stack_trace.allocation_time = absl::Now();
+  deallocation.cpu_id = tcmalloc_internal::subtle::percpu::GetRealCpu();
+  deallocation.vcpu_id = tcmalloc_internal::subtle::percpu::VirtualCpu::get();
+  deallocation.l3_id = GetL3Id(deallocation.cpu_id);
+  deallocation.numa_id = GetNumaId(deallocation.cpu_id);
+  deallocation.thread_id = absl::base_internal::GetTID();
+
   AllocationGuardSpinLockHolder h(profilers_lock_);
-  DeallocationProfiler* cur = first_;
+  DeallocationProfiler* cur = first_.load(std::memory_order_relaxed);
   while (cur != nullptr) {
-    cur->ReportFree(handle);
+    cur->ReportFree(handle, deallocation);
     cur = cur->next_;
   }
 }
@@ -585,10 +654,11 @@ void DeallocationProfiler::DeallocationStackTraceTable::StopAndRecord(
   // allows us to make minimal changes to the rest of the sample processing
   // steps reducing special casing for censored samples. This also allows us to
   // aggregate censored samples just like regular deallocation samples.
-  const DeallocationSampleRecord censored{
-      .creation_time = stop_time_,
-  };
   for (const auto& [unused, alloc] : allocs) {
+    DeallocationSampleRecord censored;
+    censored.stack_trace = alloc.stack_trace;
+    censored.stack_trace.allocation_time = stop_time_;
+    censored.stack_trace.depth = 0;
     AddTrace(alloc, censored);
   }
 }
@@ -596,6 +666,31 @@ void DeallocationProfiler::DeallocationStackTraceTable::StopAndRecord(
 void DeallocationProfiler::DeallocationStackTraceTable::AddTrace(
     const DeallocationSampleRecord& alloc_trace,
     const DeallocationSampleRecord& dealloc_trace) {
+  if (mode_ == Mode::kEventTrace) {
+    // Ensure we can fit up to 2 records (alloc + dealloc) without exceeding
+    // capacity; otherwise silently truncate the trace.
+    if (events_.size() + 2 <= max_events_) {
+      if (alloc_trace.stack_trace.depth > 0) {
+        events_.push_back(alloc_trace);
+      }
+      if (dealloc_trace.stack_trace.depth > 0) {
+        events_.push_back(dealloc_trace);
+        // In-band signal to Iterate() that this is a deallocation event. We can
+        // do this because:
+        // - Matched events propagate the allocated_size via the
+        //   alloc_trace (and the pair can be associated downstream).
+        // - Left-censored events are only passed to ReportFree as
+        //   alloc_handle-s, i.e. we can't know the allocated_size.
+        events_.back().stack_trace.allocated_size = 0;
+        events_.back().is_dealloc = true;
+      }
+    }
+    return;
+  }
+
+  // Left-censored samples cannot be aggregated with lifetimes
+  if (alloc_trace.stack_trace.depth == 0) return;
+
   CpuThreadMatchingStatus status =
       CpuThreadMatchingStatus(alloc_trace.cpu_id == dealloc_trace.cpu_id,
                               alloc_trace.vcpu_id == dealloc_trace.vcpu_id,
@@ -611,12 +706,12 @@ void DeallocationProfiler::DeallocationStackTraceTable::AddTrace(
   DeallocationStackTraceTable::Value& v =
       table_[DeallocationStackTraceTable::Key(alloc_trace, dealloc_trace)];
 
-  const absl::Duration life_time =
-      dealloc_trace.creation_time - alloc_trace.creation_time;
+  const absl::Duration life_time = dealloc_trace.stack_trace.allocation_time -
+                                   alloc_trace.stack_trace.allocation_time;
   double life_time_ns = absl::ToDoubleNanoseconds(life_time);
 
   // Update mean and variance using Welford’s online algorithm.
-  TC_ASSERT_LT(index, ABSL_ARRAYSIZE(v.counts));
+  TC_ASSERT_LT(index, std::size(v.counts));
 
   double old_mean_ns = v.mean_life_times_ns[index];
   v.mean_life_times_ns[index] +=
@@ -632,8 +727,48 @@ void DeallocationProfiler::DeallocationStackTraceTable::AddTrace(
   v.counts[index]++;
 }
 
+namespace {
+
+Profile::Sample ToSample(const tcmalloc_internal::StackTrace& stack_trace) {
+  Profile::Sample sample = {};
+  sample.requested_size = stack_trace.requested_size;
+  sample.requested_alignment = stack_trace.requested_alignment;
+  sample.allocated_size = stack_trace.allocated_size;
+  sample.requested_size_returning = stack_trace.requested_size_returning;
+  sample.access_hint = static_cast<hot_cold_t>(stack_trace.access_hint);
+  sample.access_allocated = stack_trace.cold_allocated
+                                ? Profile::Sample::Access::Cold
+                                : Profile::Sample::Access::Hot;
+  sample.token_id = stack_trace.token_id;
+  sample.guarded_status = stack_trace.guarded_status;
+  sample.type = stack_trace.allocation_type;
+  return sample;
+}
+
+}  // namespace
+
 void DeallocationProfiler::DeallocationStackTraceTable::Iterate(
     absl::FunctionRef<void(const Profile::Sample&)> func) const {
+  if (mode_ == Mode::kEventTrace) {
+    for (const auto& r : events_) {
+      tcmalloc::Profile::Sample s = ToSample(r.stack_trace);
+      s.count = r.is_dealloc ? -1 : 1;
+      s.sum = r.stack_trace.allocated_size;
+      s.allocation_time = r.stack_trace.allocation_time;
+      s.alloc_handle = r.stack_trace.sampled_alloc_handle;
+      s.cpu_id = r.cpu_id;
+      s.vcpu_id = r.vcpu_id;
+      s.l3_id = r.l3_id;
+      s.numa_id = r.numa_id;
+      s.thread_id = r.thread_id;
+      s.depth = std::min<size_t>(r.stack_trace.depth,
+                                 tcmalloc::Profile::Sample::kMaxStackDepth);
+      std::copy(r.stack_trace.stack, r.stack_trace.stack + s.depth, s.stack);
+      func(s);
+    }
+    return;
+  }
+
   uint64_t pair_id = 1;
 
   for (auto& it : table_) {
@@ -641,7 +776,7 @@ void DeallocationProfiler::DeallocationStackTraceTable::Iterate(
     const Value& v = it.second;
 
     // Report total bytes that are a multiple of the object size.
-    size_t allocated_size = k.alloc.allocated_size;
+    size_t allocated_size = k.alloc.stack_trace.allocated_size;
 
     for (const auto& matching_case : kAllCases) {
       const int index = ComputeIndex(matching_case.first, matching_case.second);
@@ -650,7 +785,7 @@ void DeallocationProfiler::DeallocationStackTraceTable::Iterate(
       }
 
       uintptr_t bytes =
-          std::lround(v.counts[index] * k.alloc.weight * allocated_size);
+          std::lround(v.counts[index] * AllocatedBytes(k.alloc.stack_trace));
       int64_t count;
       if (allocated_size != 0) {
         count = (bytes + allocated_size - 1) / allocated_size;
@@ -669,16 +804,15 @@ void DeallocationProfiler::DeallocationStackTraceTable::Iterate(
                                  static_cast<double>((v.counts[index]))));
 
       const auto bucketize = internal::LifetimeNsToBucketedDuration;
-      Profile::Sample sample;
-      sample.sum = sum, sample.requested_size = k.alloc.requested_size,
-      sample.requested_alignment = k.alloc.requested_alignment,
-      sample.allocated_size = allocated_size, sample.profile_id = pair_id++,
+      Profile::Sample sample = ToSample(k.alloc.stack_trace);
+      sample.sum = sum;
+      sample.profile_id = pair_id++;
       // Set the is_censored flag so that when we create a proto
       // sample later we can treat the *_lifetime accordingly.
-          sample.is_censored = (k.dealloc.depth == 0),
-      sample.avg_lifetime = bucketize(v.mean_life_times_ns[index]),
-      sample.stddev_lifetime = bucketize(stddev_life_time_ns),
-      sample.min_lifetime = bucketize(v.min_life_times_ns[index]),
+      sample.is_censored = (k.dealloc.stack_trace.depth == 0);
+      sample.avg_lifetime = bucketize(v.mean_life_times_ns[index]);
+      sample.stddev_lifetime = bucketize(stddev_life_time_ns);
+      sample.min_lifetime = bucketize(v.min_life_times_ns[index]);
       sample.max_lifetime = bucketize(v.max_life_times_ns[index]);
       // Only set the cpu and thread matched flags if the sample is not
       // censored.
@@ -697,8 +831,10 @@ void DeallocationProfiler::DeallocationStackTraceTable::Iterate(
 
       // first for allocation
       sample.count = count;
-      sample.depth = k.alloc.depth;
-      std::copy(k.alloc.stack, k.alloc.stack + k.alloc.depth, sample.stack);
+      sample.depth = k.alloc.stack_trace.depth;
+      std::copy(k.alloc.stack_trace.stack,
+                k.alloc.stack_trace.stack + k.alloc.stack_trace.depth,
+                sample.stack);
       func(sample);
 
       // If this is a right-censored allocation (i.e. we did not observe the
@@ -709,19 +845,21 @@ void DeallocationProfiler::DeallocationStackTraceTable::Iterate(
 
       // second for deallocation
       static_assert(
-          std::is_signed<decltype(tcmalloc::Profile::Sample::count)>::value,
+          std::is_signed_v<decltype(tcmalloc::Profile::Sample::count)>,
           "Deallocation samples are tagged with negative count values.");
       sample.count = -1 * count;
-      sample.depth = k.dealloc.depth;
-      std::copy(k.dealloc.stack, k.dealloc.stack + k.dealloc.depth,
+      sample.depth = k.dealloc.stack_trace.depth;
+      std::copy(k.dealloc.stack_trace.stack,
+                k.dealloc.stack_trace.stack + k.dealloc.stack_trace.depth,
                 sample.stack);
       func(sample);
     }
   }
 }
 
-DeallocationSample::DeallocationSample(DeallocationProfilerList* list) {
-  profiler_ = std::make_unique<DeallocationProfiler>(list);
+DeallocationSample::DeallocationSample(
+    DeallocationProfilerList* absl_nonnull list, Mode mode) {
+  profiler_ = std::make_unique<DeallocationProfiler>(list, mode);
 }
 
 DeallocationSample::~DeallocationSample() = default;

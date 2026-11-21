@@ -17,6 +17,8 @@
 #include <stddef.h>
 #include <sys/types.h>
 
+#include <cstdint>
+#include <numeric>
 #include <utility>
 #include <vector>
 
@@ -30,10 +32,19 @@ namespace tcmalloc_internal {
 namespace {
 
 using testing::ElementsAre;
+using testing::ElementsAreArray;
+using testing::IsEmpty;
 using testing::Pair;
 
 class BitmapTest : public testing::Test {
  protected:
+  template <size_t N>
+  std::vector<size_t> ForEachSetResults(const Bitmap<N>& map, size_t start) {
+    std::vector<size_t> results;
+    map.ForEachSet(start, [&](size_t idx) { results.push_back(idx); });
+    return results;
+  }
+
   template <size_t N>
   std::vector<size_t> FindSetResults(const Bitmap<N>& map) {
     return FindResults<N, true>(map);
@@ -104,15 +115,18 @@ TEST_F(BitmapTest, CheckIsZero) {
   for (size_t i = 0; i < map.size(); ++i) {
     map.Clear();
     EXPECT_EQ(map.IsZero(), true);
-    map.SetBit(i);
+    EXPECT_EQ(map.SetBit(i), false);
     EXPECT_EQ(map.IsZero(), false);
+    EXPECT_EQ(map.SetBit(i), true);
+    EXPECT_TRUE(map.ClearBit(i));
+    EXPECT_FALSE(map.ClearBit(i));
   }
 }
 
 TEST_F(BitmapTest, CheckClearLowestBit) {
   Bitmap<253> map;
   for (size_t i = 0; i < map.size(); ++i) {
-    map.SetBit(i);
+    EXPECT_EQ(map.SetBit(i), false);
   }
   for (size_t i = 0; i < map.size(); ++i) {
     size_t index = map.FindSet(0);
@@ -125,7 +139,7 @@ TEST_F(BitmapTest, GetBitOneSet) {
   const size_t N = 251;
   for (size_t s = 0; s < N; s++) {
     Bitmap<N> map;
-    map.SetBit(s);
+    EXPECT_EQ(map.SetBit(s), false);
     for (size_t i = 0; i < map.size(); ++i) {
       EXPECT_EQ(map.GetBit(i), i == s ? 1 : 0);
     }
@@ -157,24 +171,94 @@ TEST_F(BitmapTest, FindSet) {
               ElementsAre(252, 251, 196, 195, 128, 63, 15, 14, 7, 0));
 }
 
+TEST_F(BitmapTest, ForEachSet) {
+  Bitmap<253> map;
+  EXPECT_THAT(ForEachSetResults(map, 0), IsEmpty());
+  EXPECT_THAT(ForEachSetResults(map, 100), IsEmpty());
+  EXPECT_THAT(ForEachSetResults(map, 253), IsEmpty());
+  EXPECT_THAT(ForEachSetResults(map, 300), IsEmpty());
+
+  map.SetBit(0);
+  map.SetBit(7);
+  map.SetBit(14);
+  map.SetBit(15);
+  map.SetBit(63);
+  map.SetBit(64);
+  map.SetBit(128);
+  map.SetBit(195);
+  map.SetBit(196);
+  map.SetBit(251);
+  map.SetBit(252);
+
+  EXPECT_THAT(ForEachSetResults(map, 0),
+              ElementsAre(0, 7, 14, 15, 63, 64, 128, 195, 196, 251, 252));
+  EXPECT_THAT(ForEachSetResults(map, 1),
+              ElementsAre(7, 14, 15, 63, 64, 128, 195, 196, 251, 252));
+  EXPECT_THAT(ForEachSetResults(map, 7),
+              ElementsAre(7, 14, 15, 63, 64, 128, 195, 196, 251, 252));
+  EXPECT_THAT(ForEachSetResults(map, 8),
+              ElementsAre(14, 15, 63, 64, 128, 195, 196, 251, 252));
+  EXPECT_THAT(ForEachSetResults(map, 15),
+              ElementsAre(15, 63, 64, 128, 195, 196, 251, 252));
+  EXPECT_THAT(ForEachSetResults(map, 16),
+              ElementsAre(63, 64, 128, 195, 196, 251, 252));
+  EXPECT_THAT(ForEachSetResults(map, 63),
+              ElementsAre(63, 64, 128, 195, 196, 251, 252));
+  EXPECT_THAT(ForEachSetResults(map, 64),
+              ElementsAre(64, 128, 195, 196, 251, 252));
+  EXPECT_THAT(ForEachSetResults(map, 65), ElementsAre(128, 195, 196, 251, 252));
+  EXPECT_THAT(ForEachSetResults(map, 251), ElementsAre(251, 252));
+  EXPECT_THAT(ForEachSetResults(map, 252), ElementsAre(252));
+  EXPECT_THAT(ForEachSetResults(map, 253), IsEmpty());
+  EXPECT_THAT(ForEachSetResults(map, 500), IsEmpty());
+
+  map.SetRange(0, 253);
+  std::vector<size_t> all_indices(253);
+  std::iota(all_indices.begin(), all_indices.end(), 0);
+  EXPECT_THAT(ForEachSetResults(map, 0), ElementsAreArray(all_indices));
+  EXPECT_THAT(ForEachSetResults(map, 100),
+              ElementsAreArray(all_indices.begin() + 100, all_indices.end()));
+  EXPECT_THAT(ForEachSetResults(map, 252), ElementsAre(252));
+  EXPECT_THAT(ForEachSetResults(map, 253), IsEmpty());
+
+  Bitmap<64> map64;
+  map64.SetBit(0);
+  map64.SetBit(31);
+  map64.SetBit(63);
+  EXPECT_THAT(ForEachSetResults(map64, 0), ElementsAre(0, 31, 63));
+  EXPECT_THAT(ForEachSetResults(map64, 1), ElementsAre(31, 63));
+  EXPECT_THAT(ForEachSetResults(map64, 32), ElementsAre(63));
+  EXPECT_THAT(ForEachSetResults(map64, 63), ElementsAre(63));
+  EXPECT_THAT(ForEachSetResults(map64, 64), IsEmpty());
+
+  Bitmap<30> map30;
+  map30.SetBit(0);
+  map30.SetBit(15);
+  map30.SetBit(29);
+  EXPECT_THAT(ForEachSetResults(map30, 0), ElementsAre(0, 15, 29));
+  EXPECT_THAT(ForEachSetResults(map30, 1), ElementsAre(15, 29));
+  EXPECT_THAT(ForEachSetResults(map30, 29), ElementsAre(29));
+  EXPECT_THAT(ForEachSetResults(map30, 30), IsEmpty());
+}
+
 TEST_F(BitmapTest, FindClear) {
   Bitmap<253> map;
   map.SetRange(0, 253);
   EXPECT_THAT(FindClearResults(map), ElementsAre(253));
   EXPECT_THAT(FindClearResultsBackwards(map), ElementsAre(-1));
 
-  map.ClearBit(7);
-  map.ClearBit(14);
-  map.ClearBit(15);
-  map.ClearBit(63);
-  map.ClearBit(128);
+  EXPECT_TRUE(map.ClearBit(7));
+  EXPECT_TRUE(map.ClearBit(14));
+  EXPECT_TRUE(map.ClearBit(15));
+  EXPECT_TRUE(map.ClearBit(63));
+  EXPECT_TRUE(map.ClearBit(128));
   EXPECT_THAT(FindClearResults(map), ElementsAre(7, 14, 15, 63, 128, 253));
   EXPECT_THAT(FindClearResultsBackwards(map),
               ElementsAre(128, 63, 15, 14, 7, -1));
-  map.ClearBit(195);
-  map.ClearBit(196);
-  map.ClearBit(251);
-  map.ClearBit(252);
+  EXPECT_TRUE(map.ClearBit(195));
+  EXPECT_TRUE(map.ClearBit(196));
+  EXPECT_TRUE(map.ClearBit(251));
+  EXPECT_TRUE(map.ClearBit(252));
   EXPECT_THAT(FindClearResults(map),
               ElementsAre(7, 14, 15, 63, 128, 195, 196, 251, 252));
   EXPECT_THAT(FindClearResultsBackwards(map),
@@ -221,36 +305,157 @@ TEST_F(BitmapTest, CountBits) {
   EXPECT_EQ(map.CountBits(0, 250), 242);
 }
 
-TEST_F(BitmapTest, CountBitsFuzz) {
-  static constexpr size_t kBits = 253;
-  absl::FixedArray<bool> truth(kBits);
-  Bitmap<kBits> map;
+TEST_F(BitmapTest, BitwiseOperators) {
+  // Test with dead bits (N=253 has 3 dead bits in last word)
+  {
+    Bitmap<253> map1;
+    map1.SetBit(1);
+    map1.SetBit(63);
+    map1.SetBit(64);
+    map1.SetBit(252);
 
-  absl::BitGen rng;
-  for (int i = 0; i < kBits; i++) {
-    bool v = absl::Bernoulli(rng, 0.3);
-    truth[i] = v;
-    if (v) {
-      map.SetBit(i);
-    }
+    Bitmap<253> map2;
+    map2.SetBit(1);
+    map2.SetBit(62);
+    map2.SetBit(64);
+    map2.SetBit(251);
+
+    // Test AND
+    Bitmap<253> and_map = map1 & map2;
+    EXPECT_THAT(FindSetResults(and_map), ElementsAre(1, 64, 253));
+
+    // Test OR
+    Bitmap<253> or_map = map1 | map2;
+    EXPECT_THAT(FindSetResults(or_map), ElementsAre(1, 62, 63, 64, 251, 252));
+
+    // Test XOR
+    Bitmap<253> xor_map = map1 ^ map2;
+    EXPECT_THAT(FindSetResults(xor_map), ElementsAre(62, 63, 251, 252));
+
+    // Test NOT
+    Bitmap<253> not_map = ~map1;
+    EXPECT_THAT(FindClearResults(not_map), ElementsAre(1, 63, 64, 252));
+    EXPECT_EQ(not_map.CountBits(), 253 - 4);
+
+    // Test that dead bits are not mapped.
+    Bitmap<253> all_ones;
+    all_ones.SetRange(0, 253);
+    Bitmap<253> not_map_dead_bits = ~all_ones;
+    EXPECT_TRUE(not_map_dead_bits.IsZero());
   }
 
-  for (int i = 0; i < 100; i++) {
-    SCOPED_TRACE(i);
+  // Test without dead bits (N=64)
+  {
+    Bitmap<64> map1;
+    map1.SetBit(0);
+    map1.SetBit(63);
 
-    // Pick a random starting point and a length, use a naive loop against truth
-    // to calculate the expected bit count.
-    size_t start = absl::Uniform(rng, 0u, kBits);
-    size_t length = absl::Uniform(rng, 0u, kBits - start);
+    Bitmap<64> map2;
+    map2.SetBit(0);
+    map2.SetBit(1);
 
-    size_t expected = 0;
-    for (int j = 0; j < length; j++) {
-      if (truth[start + j]) {
-        expected++;
-      }
+    Bitmap<64> and_map = map1 & map2;
+    EXPECT_THAT(FindSetResults(and_map), ElementsAre(0, 64));
+
+    Bitmap<64> or_map = map1 | map2;
+    EXPECT_THAT(FindSetResults(or_map), ElementsAre(0, 1, 63));
+
+    Bitmap<64> xor_map = map1 ^ map2;
+    EXPECT_THAT(FindSetResults(xor_map), ElementsAre(1, 63));
+
+    Bitmap<64> not_map = ~map1;
+    EXPECT_THAT(FindClearResults(not_map), ElementsAre(0, 63));
+    EXPECT_EQ(not_map.CountBits(), 62);
+  }
+}
+
+TEST_F(BitmapTest, PopBatch) {
+  Bitmap<253> map;
+  map.SetBit(7);
+  map.SetBit(14);
+  map.SetBit(15);
+  map.SetBit(63);
+  map.SetBit(128);
+
+  std::vector<size_t> dest;
+  size_t popped = map.PopBatch([&](size_t v) { dest.push_back(v); }, 3);
+  EXPECT_EQ(dest.size(), popped);
+  EXPECT_THAT(dest, ElementsAre(7, 14, 15));
+  EXPECT_FALSE(map.GetBit(7));
+  EXPECT_FALSE(map.GetBit(14));
+  EXPECT_FALSE(map.GetBit(15));
+  EXPECT_TRUE(map.GetBit(63));
+  EXPECT_TRUE(map.GetBit(128));
+
+  dest.clear();
+  popped = map.PopBatch([&](size_t v) { dest.push_back(v); }, 10);
+  EXPECT_EQ(popped, dest.size());
+  EXPECT_THAT(dest, ElementsAre(63, 128));
+  EXPECT_TRUE(map.IsZero());
+}
+
+TEST_F(BitmapTest, PrevFreeRange) {
+  // Empty bitmap (all free).
+  {
+    Bitmap<253> map;
+    size_t index = map.size(), len = 0;
+    EXPECT_TRUE(map.PrevFreeRange(index, &index, &len));
+    EXPECT_EQ(index, 0);
+    EXPECT_EQ(len, 253);
+    EXPECT_FALSE(map.PrevFreeRange(index, &index, &len));
+  }
+
+  // Full bitmap (no free ranges).
+  {
+    Bitmap<253> map;
+    map.SetRange(0, 253);
+    size_t index = map.size(), len = 0;
+    EXPECT_FALSE(map.PrevFreeRange(index, &index, &len));
+  }
+
+  // Bounds and edge conditions.
+  {
+    Bitmap<64> map;
+    size_t index = 0, len = 0;
+    EXPECT_FALSE(map.PrevFreeRange(0, &index, &len));
+
+    // end > N clamps to N.
+    EXPECT_TRUE(map.PrevFreeRange(100, &index, &len));
+    EXPECT_EQ(index, 0);
+    EXPECT_EQ(len, 64);
+
+    // Partial query: end inside a free range [0, 64).
+    EXPECT_TRUE(map.PrevFreeRange(30, &index, &len));
+    EXPECT_EQ(index, 0);
+    EXPECT_EQ(len, 30);
+  }
+
+  // Multiple ranges matching forward traversal in reverse.
+  {
+    Bitmap<253> map;
+    map.SetRange(0, 253);
+    // Open free ranges: [10, 20), [50, 80), [120, 150), [200, 253)
+    map.ClearRange(10, 10);
+    map.ClearRange(50, 30);
+    map.ClearRange(120, 30);
+    map.ClearRange(200, 53);
+
+    std::vector<std::pair<size_t, size_t>> forward_ranges;
+    size_t f_index = 0, f_len;
+    while (map.NextFreeRange(f_index, &f_index, &f_len)) {
+      forward_ranges.push_back({f_index, f_len});
+      f_index += f_len;
     }
+    EXPECT_THAT(forward_ranges, ElementsAre(Pair(10, 10), Pair(50, 30),
+                                            Pair(120, 30), Pair(200, 53)));
 
-    EXPECT_EQ(expected, map.CountBits(start, length));
+    std::vector<std::pair<size_t, size_t>> backward_ranges;
+    size_t b_index = map.size(), b_len;
+    while (map.PrevFreeRange(b_index, &b_index, &b_len)) {
+      backward_ranges.push_back({b_index, b_len});
+    }
+    EXPECT_THAT(backward_ranges, ElementsAre(Pair(200, 53), Pair(120, 30),
+                                             Pair(50, 30), Pair(10, 10)));
   }
 }
 
@@ -265,6 +470,14 @@ class RangeTrackerTest : public ::testing::Test {
     }
     return ret;
   }
+  std::vector<std::pair<size_t, size_t>> FreeRangesBackwards() {
+    std::vector<std::pair<size_t, size_t>> ret;
+    size_t index = range_.size(), len;
+    while (range_.PrevFreeRange(index, &index, &len)) {
+      ret.push_back({index, len});
+    }
+    return ret;
+  }
   static constexpr size_t kBits = 1017;
   RangeTracker<kBits> range_;
 };
@@ -274,23 +487,28 @@ TEST_F(RangeTrackerTest, Trivial) {
   EXPECT_EQ(0, range_.used());
   EXPECT_EQ(kBits, range_.longest_free());
   EXPECT_THAT(FreeRanges(), ElementsAre(Pair(0, kBits)));
+  EXPECT_THAT(FreeRangesBackwards(), ElementsAre(Pair(0, kBits)));
   ASSERT_EQ(0, range_.FindAndMark(kBits));
   EXPECT_EQ(0, range_.longest_free());
   EXPECT_EQ(kBits, range_.used());
   EXPECT_THAT(FreeRanges(), ElementsAre());
+  EXPECT_THAT(FreeRangesBackwards(), ElementsAre());
   range_.Unmark(0, 100);
   EXPECT_EQ(100, range_.longest_free());
   EXPECT_EQ(kBits - 100, range_.used());
   EXPECT_THAT(FreeRanges(), ElementsAre(Pair(0, 100)));
+  EXPECT_THAT(FreeRangesBackwards(), ElementsAre(Pair(0, 100)));
   // non-contiguous - shouldn't increase longest
   range_.Unmark(200, 100);
   EXPECT_EQ(100, range_.longest_free());
   EXPECT_EQ(kBits - 200, range_.used());
   EXPECT_THAT(FreeRanges(), ElementsAre(Pair(0, 100), Pair(200, 100)));
+  EXPECT_THAT(FreeRangesBackwards(), ElementsAre(Pair(200, 100), Pair(0, 100)));
   range_.Unmark(100, 100);
   EXPECT_EQ(300, range_.longest_free());
   EXPECT_EQ(kBits - 300, range_.used());
   EXPECT_THAT(FreeRanges(), ElementsAre(Pair(0, 300)));
+  EXPECT_THAT(FreeRangesBackwards(), ElementsAre(Pair(0, 300)));
 }
 
 TEST_F(RangeTrackerTest, Mark) {
@@ -299,9 +517,233 @@ TEST_F(RangeTrackerTest, Mark) {
   EXPECT_EQ(range_.used(), 100);
   EXPECT_EQ(range_.longest_free(), kBits - 200);
   EXPECT_THAT(FreeRanges(), ElementsAre(Pair(0, 100), Pair(200, kBits - 200)));
+  EXPECT_THAT(FreeRangesBackwards(),
+              ElementsAre(Pair(200, kBits - 200), Pair(0, 100)));
   range_.Unmark(100, 100);
   EXPECT_EQ(range_.used(), 0);
   EXPECT_EQ(range_.longest_free(), kBits);
+}
+
+TEST(BitmapScaleTest, ScaleAssertionFailures) {
+#ifdef NDEBUG
+  GTEST_SKIP() << "Requires debug mode";
+#endif
+  Bitmap<64> map1;
+  // 1. src_len (64) doesn't divide M (10) and vice versa
+  EXPECT_DEATH((void)Scale<10>(map1, 64, ReductionOp::kAll), "");
+  // 2. src_len > N (64)
+  EXPECT_DEATH((void)Scale<256>(map1, 128, ReductionOp::kAll), "");
+  // 3. src_len == 0
+  EXPECT_DEATH((void)Scale<64>(map1, 0, ReductionOp::kAll), "");
+}
+
+TEST(BitmapScaleTest, Scale) {
+  // Test case 1: N == M (identity)
+  {
+    Bitmap<64> map1;
+    map1.SetBit(3);
+    map1.SetBit(17);
+    map1.SetBit(63);
+
+    auto map_all = Scale<64>(map1, 64, ReductionOp::kAll);
+    auto map_any = Scale<64>(map1, 64, ReductionOp::kAny);
+    for (size_t i = 0; i < 64; ++i) {
+      EXPECT_EQ(map1.GetBit(i), map_all.GetBit(i));
+      EXPECT_EQ(map1.GetBit(i), map_any.GetBit(i));
+    }
+  }
+
+  // Test case 2: N > M (contracting)
+  {
+    Bitmap<64> map1;
+    // We group by 2 bits.
+    // Group 0: bits 0, 1 -> both must be set
+    map1.SetBit(0);
+    map1.SetBit(1);
+
+    // Group 1: bits 2, 3 -> only one set
+    // Should not be set for kAll, should be set for kAny
+    map1.SetBit(2);
+
+    // Group 7: bits 14, 15 -> both set
+    map1.SetBit(14);
+    map1.SetBit(15);
+
+    auto map_all = Scale<8>(map1, 16, ReductionOp::kAll);
+    auto map_any = Scale<8>(map1, 16, ReductionOp::kAny);
+
+    EXPECT_TRUE(map_all.GetBit(0));
+    EXPECT_TRUE(map_any.GetBit(0));
+
+    EXPECT_FALSE(map_all.GetBit(1));
+    EXPECT_TRUE(map_any.GetBit(1));
+
+    for (size_t i = 2; i <= 6; ++i) {
+      EXPECT_FALSE(map_all.GetBit(i));
+      EXPECT_FALSE(map_any.GetBit(i));
+    }
+
+    EXPECT_TRUE(map_all.GetBit(7));
+    EXPECT_TRUE(map_any.GetBit(7));
+  }
+
+  // Test case 3: N < M (expanding)
+  {
+    Bitmap<64> map1;
+    // We expand by 2 bits.
+    map1.SetBit(0);
+    map1.SetBit(7);
+
+    auto map_all = Scale<16>(map1, 8, ReductionOp::kAll);
+    auto map_any = Scale<16>(map1, 8, ReductionOp::kAny);
+
+    // Both operations behave identically for expanding.
+    EXPECT_TRUE(map_all.GetBit(0));
+    EXPECT_TRUE(map_all.GetBit(1));
+    EXPECT_TRUE(map_any.GetBit(0));
+    EXPECT_TRUE(map_any.GetBit(1));
+
+    EXPECT_FALSE(map_all.GetBit(2));
+    EXPECT_FALSE(map_all.GetBit(3));
+    EXPECT_FALSE(map_any.GetBit(2));
+    EXPECT_FALSE(map_any.GetBit(3));
+
+    EXPECT_TRUE(map_all.GetBit(14));
+    EXPECT_TRUE(map_all.GetBit(15));
+    EXPECT_TRUE(map_any.GetBit(14));
+    EXPECT_TRUE(map_any.GetBit(15));
+  }
+}
+
+TEST(BitmapCopyBitsTest, ZeroLength) {
+  Bitmap<128> src;
+  src.SetRange(0, 128);
+  Bitmap<128> dst;
+
+  CopyBits(dst, 0, src, 0, 0);
+  EXPECT_TRUE(dst.IsZero());
+
+  CopyBits(dst, 50, src, 30, 0);
+  EXPECT_TRUE(dst.IsZero());
+
+  CopyBits(dst, 128, src, 128, 0);
+  EXPECT_TRUE(dst.IsZero());
+}
+
+TEST(BitmapCopyBitsTest, SingleBit) {
+  for (size_t src_pos : {0, 1, 63, 64, 65, 127, 200, 252}) {
+    for (size_t dst_pos : {0, 1, 63, 64, 65, 127, 200, 252}) {
+      Bitmap<253> src;
+      src.SetBit(src_pos);
+
+      Bitmap<253> dst;
+      CopyBits(dst, dst_pos, src, src_pos, 1);
+
+      EXPECT_TRUE(dst.GetBit(dst_pos));
+      EXPECT_EQ(dst.CountBits(), 1);
+    }
+  }
+}
+
+TEST(BitmapCopyBitsTest, AlignedWords) {
+  Bitmap<256> src;
+  // Set pattern in word 1 (bits 64..127)
+  src.SetBit(64 + 1);
+  src.SetBit(64 + 10);
+  src.SetBit(64 + 63);
+
+  Bitmap<256> dst;
+  // Copy full word from word 1 to word 2
+  CopyBits(dst, 128, src, 64, 64);
+
+  EXPECT_FALSE(dst.GetBit(128 + 0));
+  EXPECT_TRUE(dst.GetBit(128 + 1));
+  EXPECT_TRUE(dst.GetBit(128 + 10));
+  EXPECT_TRUE(dst.GetBit(128 + 63));
+  EXPECT_EQ(dst.CountBits(), 3);
+}
+
+TEST(BitmapCopyBitsTest, UnalignedOffsets) {
+  // Test straddling word boundaries in source and destination
+  Bitmap<256> src;
+  // Set bits [50, 80)
+  src.SetRange(50, 30);
+
+  Bitmap<256> dst;
+  // Copy [50, 80) in src (crosses 64-bit boundary) to [100, 130) in dst
+  // (crosses 128-bit boundary)
+  CopyBits(dst, 100, src, 50, 30);
+
+  for (size_t i = 0; i < 256; ++i) {
+    if (i >= 100 && i < 130) {
+      EXPECT_TRUE(dst.GetBit(i)) << "Bit " << i << " should be set";
+    } else {
+      EXPECT_FALSE(dst.GetBit(i)) << "Bit " << i << " should be clear";
+    }
+  }
+}
+
+TEST(BitmapCopyBitsTest, PreservesSurroundingBits) {
+  Bitmap<128> src;
+  src.SetBit(10);
+  src.SetBit(12);
+
+  Bitmap<128> dst;
+  dst.SetRange(0, 128);  // All ones initially
+
+  // Copy [8, 16) from src (where only 10 and 12 are set) to [40, 48) in dst.
+  CopyBits(dst, 40, src, 8, 8);
+
+  for (size_t i = 0; i < 128; ++i) {
+    if (i < 40 || i >= 48) {
+      EXPECT_TRUE(dst.GetBit(i))
+          << "Surrounding bit " << i << " should remain set";
+    } else if (i == 40 + 2 || i == 40 + 4) {
+      EXPECT_TRUE(dst.GetBit(i)) << "Copied set bit " << i << " should be set";
+    } else {
+      EXPECT_FALSE(dst.GetBit(i))
+          << "Copied clear bit " << i << " should be clear";
+    }
+  }
+}
+
+TEST(BitmapCopyBitsTest, DifferentSizes) {
+  Bitmap<64> src;
+  src.SetBit(5);
+  src.SetBit(40);
+
+  Bitmap<253> dst;
+  CopyBits(dst, 100, src, 0, 64);
+
+  EXPECT_TRUE(dst.GetBit(105));
+  EXPECT_TRUE(dst.GetBit(140));
+  EXPECT_EQ(dst.CountBits(), 2);
+
+  Bitmap<30> dst_small;
+  CopyBits(dst_small, 0, dst, 100, 30);
+  EXPECT_TRUE(dst_small.GetBit(5));
+  EXPECT_FALSE(dst_small.GetBit(0));
+  EXPECT_EQ(dst_small.CountBits(), 1);
+}
+
+TEST(BitmapCopyBitsTest, SelfCopyAssertionFailure) {
+#ifdef NDEBUG
+  GTEST_SKIP() << "Requires debug mode";
+#endif
+  Bitmap<64> map;
+  EXPECT_DEATH(CopyBits(map, 0, map, 0, 1), "");
+}
+
+TEST(BitmapCopyBitsTest, DeadBitsPreserved) {
+  Bitmap<253> src;
+  src.SetRange(0, 253);
+
+  Bitmap<253> dst;
+  CopyBits(dst, 0, src, 0, 253);
+
+  EXPECT_EQ(dst.CountBits(), 253);
+  Bitmap<253> inverted = ~dst;
+  EXPECT_TRUE(inverted.IsZero());
 }
 
 }  // namespace
