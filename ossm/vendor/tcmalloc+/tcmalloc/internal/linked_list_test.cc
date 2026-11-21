@@ -34,9 +34,9 @@ class LinkedListTest : public ::testing::Test {
  protected:
   LinkedList list_;
 
-  static_assert(!std::is_copy_constructible<LinkedList>::value,
+  static_assert(!std::is_copy_constructible_v<LinkedList>,
                 "LinkedList should not be copyable");
-  static_assert(!std::is_move_constructible<LinkedList>::value,
+  static_assert(!std::is_move_constructible_v<LinkedList>,
                 "LinkedList should not be movable");
 };
 
@@ -121,9 +121,9 @@ class TListTest : public ::testing::Test {
  protected:
   MockSpanList list_;
 
-  static_assert(!std::is_copy_constructible<MockSpanList>::value,
+  static_assert(!std::is_copy_constructible_v<MockSpanList>,
                 "TList should not be copyable");
-  static_assert(!std::is_move_constructible<MockSpanList>::value,
+  static_assert(!std::is_move_constructible_v<MockSpanList>,
                 "TList should not be movable");
 };
 
@@ -192,6 +192,16 @@ TEST_F(TListTest, PrependPushPop) {
     }
   }
 
+  // Check reverse iterator
+  {
+    int x = 0;
+    for (auto it = list_.rbegin(); it != list_.rend(); ++it) {
+      EXPECT_EQ((*it)->index_, x);
+      x++;
+    }
+    EXPECT_EQ(x, N);
+  }
+
   // Remove all N elements from the front of the list.
   for (int i = N; i > 0; i--) {
     EXPECT_EQ(list_.length(), i);
@@ -240,6 +250,41 @@ TEST_F(TListTest, AppendRandomRemove) {
   }
   EXPECT_EQ(list_.length(), 0);
   EXPECT_TRUE(list_.empty());
+}
+
+TEST_F(TListTest, ReverseIteration) {
+  // Empty list reverse iteration
+  EXPECT_TRUE(list_.rbegin() == list_.rend());
+
+  MockSpan* a = MockSpan::New(1);
+  MockSpan* b = MockSpan::New(2);
+  MockSpan* c = MockSpan::New(3);
+  list_.append(a);
+  list_.append(b);
+  list_.append(c);
+
+  std::vector<int> vals;
+  for (auto it = list_.rbegin(); it != list_.rend(); ++it) {
+    vals.push_back((*it)->index_);
+  }
+  EXPECT_EQ(vals, std::vector<int>({3, 2, 1}));
+
+  // Test decrement operator on reverse iterator
+  auto rit = list_.rend();
+  --rit;
+  EXPECT_EQ((*rit)->index_, 1);
+  --rit;
+  EXPECT_EQ((*rit)->index_, 2);
+  --rit;
+  EXPECT_EQ((*rit)->index_, 3);
+  EXPECT_TRUE(rit == list_.rbegin());
+
+  list_.remove(a);
+  list_.remove(b);
+  list_.remove(c);
+  delete a;
+  delete b;
+  delete c;
 }
 
 #ifndef NDEBUG

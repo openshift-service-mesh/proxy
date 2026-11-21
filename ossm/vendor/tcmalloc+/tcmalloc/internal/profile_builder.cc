@@ -17,16 +17,21 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 
 #include "absl/base/casts.h"
+#include "absl/base/optimization.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/hash/hash.h"
+#include "absl/random/random.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
+#include "tcmalloc/internal/compressibility.h"
 #include "tcmalloc/internal/pageflags.h"
+#include "tcmalloc/internal_malloc_extension.h"
 #include "tcmalloc/malloc_extension.h"
 
 #if defined(__linux__)
@@ -42,10 +47,10 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include "tcmalloc/internal/profile.pb.h"
 #include "absl/base/attributes.h"
-#include "absl/base/macros.h"
 #include "absl/status/status.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/string_view.h"
@@ -101,6 +106,58 @@ static const char* GetSoName(const dl_phdr_info* const info) {
 }
 #endif  // defined(__linux__)
 
+// Returns the reservoir capacity (in spans) for a merged callstack group with
+// allocation size `size`, capped by both
+// `CompressionAnalyzer::kMaxCompressibilityBytesPerGroup` and
+// `CompressionAnalyzer::kMaxCompressibilitySamplesPerGroup`.
+size_t MaxCompressibilitySamplesForGroup(size_t size) {
+  const size_t sample_bytes = std::clamp(
+      size, size_t{1}, CompressionAnalyzer::kDefaultMaxLocalCopySize);
+  return std::clamp(
+      CompressionAnalyzer::kMaxCompressibilityBytesPerGroup / sample_bytes,
+      size_t{1}, CompressionAnalyzer::kMaxCompressibilitySamplesPerGroup);
+}
+
+// Online reservoir sampler (Algorithm R) retaining a uniform random subset of
+// at most `max_samples` items from a stream.
+template <typename T>
+class Reservoir {
+ public:
+  void Add(const T& item, size_t max_samples, absl::BitGen& rng) {
+    ++seen_;
+    if (items_.size() < max_samples) {
+      items_.push_back(item);
+      return;
+    }
+    const size_t idx = absl::Uniform<size_t>(rng, 0, seen_);
+    if (idx < max_samples) {
+      items_[idx] = item;
+    }
+  }
+
+  size_t size() const { return items_.size(); }
+  const T& operator[](size_t index) const { return items_[index]; }
+
+ private:
+  size_t seen_ = 0;
+  std::vector<T> items_;
+};
+
+// A sampled resident span retained during the first pass of profile merging for
+// deferred compressibility analysis in the second pass.
+struct CompressibilityCandidate {
+  // Start address of the sampled span in the target process.
+  const void* span_start_address = nullptr;
+  // Meaningful byte size of a single sampled object in the span
+  // (`allocated_size` when size-returning, otherwise `requested_size`).
+  size_t size = 0;
+  // Sample weight (`Profile::Sample::count`), i.e. the estimated number of live
+  // objects represented by this sample.
+  int64_t count = 0;
+  // Residency bitmap and byte counts for `[span_start_address, +size)`.
+  Residency::Info residency_info;
+};
+
 struct SampleMergedData {
   int64_t count = 0;
   int64_t sum = 0;
@@ -108,7 +165,32 @@ struct SampleMergedData {
   std::optional<size_t> swapped_size;
   std::optional<size_t> stale_size;
   std::optional<size_t> locked_size;
+  std::optional<size_t> incompressible_size;
   std::optional<uint64_t> stale_scan_period;
+  size_t compressed_size = 0;
+  size_t zero_size = 0;
+
+  // Total unbacked bytes (`size - (resident + swapped)`) across all
+  // samples in this group, pre-multiplied by each sample's `count`.
+  size_t unbacked_size = 0;
+  // Total backed bytes (`resident + swapped`) across the subset of candidate
+  // spans in this group that were analyzed by `CompressionAnalyzer`,
+  // pre-multiplied by each candidate's `count`. Although `CompressionAnalyzer`
+  // only reads resident pages (never swapped pages), this field and the
+  // exported `analyzed_compressibility_space` metric include each analyzed
+  // span's full backed bytes because `analyzed_backed_compressed` and
+  // `analyzed_backed_zero` are scaled to backed bytes.
+  size_t analyzed_backed = 0;
+  // Estimated compressed bytes across the analyzed candidates in this group,
+  // pre-multiplied by each candidate's `count`.
+  size_t analyzed_backed_compressed = 0;
+  // Estimated zero bytes within backed (resident + swapped) pages across the
+  // analyzed candidates in this group, pre-multiplied by each candidate's
+  // `count`.
+  size_t analyzed_backed_zero = 0;
+  // Reservoir of resident candidate spans sampled from this group for
+  // second-pass compressibility analysis.
+  Reservoir<CompressibilityCandidate> candidates;
 };
 
 // The equality and hash methods of Profile::Sample only use a subset of its
@@ -118,8 +200,8 @@ struct SampleEqWithSubFields {
     auto fields = [](const Profile::Sample& s) {
       return std::tie(s.depth, s.requested_size, s.requested_alignment,
                       s.requested_size_returning, s.allocated_size,
-                      s.access_hint, s.access_allocated, s.guarded_status,
-                      s.type);
+                      s.access_hint, s.access_allocated, s.token_id,
+                      s.guarded_status, s.type);
     };
     return fields(a) == fields(b) &&
            std::equal(a.stack, a.stack + a.depth, b.stack, b.stack + b.depth);
@@ -128,10 +210,11 @@ struct SampleEqWithSubFields {
 
 struct SampleHashWithSubFields {
   size_t operator()(const Profile::Sample& s) const {
-    return absl::HashOf(
-        absl::MakeConstSpan(s.stack, s.depth), s.depth, s.requested_size,
-        s.requested_alignment, s.requested_size_returning, s.allocated_size,
-        s.access_hint, s.access_allocated, s.guarded_status, s.type);
+    return absl::HashOf(absl::MakeConstSpan(s.stack, s.depth), s.depth,
+                        s.requested_size, s.requested_alignment,
+                        s.requested_size_returning, s.allocated_size,
+                        s.access_hint, s.access_allocated, s.token_id,
+                        s.guarded_status, s.type);
   }
 };
 
@@ -139,18 +222,38 @@ using SampleMergedMap =
     absl::flat_hash_map<tcmalloc::Profile::Sample, SampleMergedData,
                         SampleHashWithSubFields, SampleEqWithSubFields>;
 
-SampleMergedMap MergeProfileSamplesAndMaybeGetResidencyInfo(
+struct SampleMergeResult {
+  SampleMergedMap samples;
+  // Whether CompressionAnalyzer produced a result for at least one sample.
+  // Collection being enabled does not imply this: analysis is skipped for any
+  // sample lacking residency information, a span address, or a requested size.
+  bool measured_compressibility = false;
+};
+
+SampleMergeResult MergeProfileSamplesAndMaybeGetResidencyInfo(
     const tcmalloc::Profile& profile, PageFlagsBase* pageflags,
-    Residency* residency) {
-  SampleMergedMap map;
+    Residency* residency, bool collecting_compressibility) {
+  SampleMergeResult result;
+  SampleMergedMap& map = result.samples;
+  std::optional<CompressionAnalyzer> compression_analyzer;
+  if (collecting_compressibility) {
+    compression_analyzer.emplace();
+  }
+  absl::BitGen rng;
 
   profile.Iterate([&](const tcmalloc::Profile::Sample& entry) {
     SampleMergedData& data = map[entry];
     data.count += entry.count;
     data.sum += entry.sum;
+    std::optional<Residency::Info> residency_info;
+    // When the caller did not use a size-returning allocation, only
+    // requested_size bytes are meaningful.  Use the same size for both
+    // residency and compressibility so that EstimateCompressedSize does not
+    // extrapolate to a total_backed derived from the larger allocated_size.
+    const size_t size = entry.requested_size_returning ? entry.allocated_size
+                                                       : entry.requested_size;
     if (residency) {
-      auto residency_info =
-          residency->Get(entry.span_start_address, entry.allocated_size);
+      residency_info = residency->Get(entry.span_start_address, size);
       // As long as `residency_info` provides data in some samples, the merged
       // data will have their sums.
       // NOTE: The data here is comparable to `tcmalloc::Profile::Sample::sum`,
@@ -183,6 +286,12 @@ SampleMergedMap MergeProfileSamplesAndMaybeGetResidencyInfo(
         }
         data.locked_size.value() += entry.count * page_stats->bytes_locked;
 
+        if (!data.incompressible_size.has_value()) {
+          data.incompressible_size.emplace();
+        }
+        data.incompressible_size.value() +=
+            entry.count * page_stats->bytes_incompressible;
+
         if (!data.stale_scan_period.has_value()) {
           data.stale_scan_period = page_stats->stale_scan_seconds;
         } else if (*data.stale_scan_period != page_stats->stale_scan_seconds) {
@@ -192,8 +301,99 @@ SampleMergedMap MergeProfileSamplesAndMaybeGetResidencyInfo(
         }
       }
     }
+
+    if (compression_analyzer.has_value() && residency_info.has_value() &&
+        entry.span_start_address != nullptr && entry.requested_size > 0) {
+      const size_t backed =
+          residency_info->bytes_resident + residency_info->bytes_swapped;
+      TC_ASSERT_LE(backed, size);
+      data.unbacked_size += entry.count * (size - backed);
+      if (residency_info->bytes_resident > 0) {
+        data.candidates.Add(
+            CompressibilityCandidate{
+                .span_start_address = entry.span_start_address,
+                .size = size,
+                .count = entry.count,
+                .residency_info = *residency_info,
+            },
+            MaxCompressibilitySamplesForGroup(size), rng);
+      } else {
+        result.measured_compressibility = true;
+      }
+    }
   });
-  return map;
+
+  if (compression_analyzer.has_value()) {
+    size_t bytes_analyzed = 0;
+    for (size_t round = 0;
+         round < CompressionAnalyzer::kMaxCompressibilitySamplesPerGroup;
+         ++round) {
+      bool any_in_round = false;
+      for (auto& [entry, data] : map) {
+        if (round >= data.candidates.size()) {
+          continue;
+        }
+        any_in_round = true;
+        if (bytes_analyzed >=
+            CompressionAnalyzer::kMaxCompressibilityBytesPerProfile) {
+          break;
+        }
+        const CompressibilityCandidate& cand = data.candidates[round];
+        absl::Span<const char> sample_mem(
+            reinterpret_cast<const char*>(cand.span_start_address), cand.size);
+        absl::StatusOr<CompressionAnalyzer::Results> res =
+            compression_analyzer->Analyze(sample_mem, cand.residency_info);
+        bytes_analyzed +=
+            std::min(cand.residency_info.bytes_resident,
+                     CompressionAnalyzer::kDefaultMaxLocalCopySize);
+        if (res.ok()) {
+          result.measured_compressibility = true;
+          const size_t cand_backed = cand.residency_info.bytes_resident +
+                                     cand.residency_info.bytes_swapped;
+          TC_ASSERT_LE(cand_backed, cand.size);
+          const size_t cand_unbacked = cand.size - cand_backed;
+          const size_t cand_backed_zero = res->zero_bytes > cand_unbacked
+                                              ? res->zero_bytes - cand_unbacked
+                                              : 0;
+          data.analyzed_backed += cand.count * cand_backed;
+          data.analyzed_backed_compressed +=
+              cand.count * std::min(cand_backed, res->compressed_size);
+          data.analyzed_backed_zero += cand.count * cand_backed_zero;
+        }
+      }
+      if (!any_in_round ||
+          bytes_analyzed >=
+              CompressionAnalyzer::kMaxCompressibilityBytesPerProfile) {
+        break;
+      }
+    }
+
+    if (result.measured_compressibility) {
+      for (auto& [entry, data] : map) {
+        const size_t backed =
+            data.resident_size.value_or(0) + data.swapped_size.value_or(0);
+        TC_ASSERT_LE(data.analyzed_backed, backed);
+        if (data.analyzed_backed == backed) {
+          data.compressed_size = data.analyzed_backed_compressed;
+          data.zero_size = data.unbacked_size + data.analyzed_backed_zero;
+        } else if (data.analyzed_backed > 0) {
+          const double scale =
+              static_cast<double>(backed) / data.analyzed_backed;
+          data.compressed_size = std::min(
+              backed, static_cast<size_t>(
+                          data.analyzed_backed_compressed * scale + 0.5));
+          data.zero_size =
+              data.unbacked_size +
+              std::min(backed, static_cast<size_t>(
+                                   data.analyzed_backed_zero * scale + 0.5));
+        } else {
+          data.compressed_size = backed;
+          data.zero_size = data.unbacked_size;
+        }
+      }
+    }
+  }
+  return result;
 }
 
 }  // namespace
@@ -219,7 +419,13 @@ std::string GetBuildId(const dl_phdr_info* const info) {
     const char* note =
         reinterpret_cast<char*>(info->dlpi_addr + pt_note->p_vaddr);
     const char* const last = note + pt_note->p_filesz;
-    const ElfW(Word) align = pt_note->p_align;
+    const ElfW(Word) align =
+        pt_note->p_align <= 1 ? alignof(ElfW(Nhdr)) : pt_note->p_align;
+    if (align < alignof(ElfW(Nhdr)) || (align & (align - 1)) != 0 ||
+        reinterpret_cast<uintptr_t>(note) % alignof(ElfW(Nhdr)) != 0) {
+      // Corrupt PT_NOTE alignment.
+      continue;
+    }
     while (note < last) {
       const ElfW(Nhdr)* const nhdr = reinterpret_cast<const ElfW(Nhdr)*>(note);
       if (note + sizeof(*nhdr) > last) {
@@ -290,7 +496,7 @@ ABSL_CONST_INIT const absl::string_view kProfileDropFrames =
     "TCMallocInternalPvalloc|"
     "TCMallocInternalValloc|"
     "TCMallocInternalRealloc|"
-    "TCMallocInternalNew(Array)?(Aligned)?(Nothrow)?|"
+    "TCMallocInternal(SizeReturning)?New(Array)?(Aligned)?(Nothrow)?|"
     "TCMallocInternalDelete(Array)?(Sized)?(Aligned)?(Nothrow)?|"
     "TCMallocInternalSdallocx|"
     "(tcmalloc_)?size_returning_operator_new(_hot_cold)?(_nothrow)?|"
@@ -321,6 +527,9 @@ ABSL_CONST_INIT const absl::string_view kProfileDropFrames =
     "std::__(u|1)::__allocation_guard::(~)?__allocation_guard|"
     "std::__(u|1)::__split_buffer::(~)?__split_buffer|"
 
+    // Allocation functions renamed by LLVM heap partitioning.
+    "__alloc_token.*|"
+
     // Other misc. memory allocation routines
     "(::)?do_malloc_pages|"
     "(::)?do_realloc|"
@@ -337,8 +546,8 @@ ABSL_CONST_INIT const absl::string_view kProfileDropFrames =
     "slow_alloc|"
     "fast_alloc|"
     "AllocSmall|"
-    "operator new|"
-    "operator delete";
+    R"(operator new(\[\])?( \[clone \.alloc_token\])?|)"
+    R"(operator delete(\[\])?)";
 
 ProfileBuilder::ProfileBuilder()
     : profile_(std::make_unique<perftools::profiles::Profile>()) {
@@ -415,14 +624,54 @@ void ProfileBuilder::InternCallstack(absl::Span<const void* const> stack,
 
 void ProfileBuilder::AddCurrentMappings() {
 #if defined(__linux__)
+  struct CallbackData {
+    ProfileBuilder& builder;
+    bool is_first_entry = true;
+  };
   auto dl_iterate_callback = +[](dl_phdr_info* info, size_t size, void* data) {
     // Skip dummy entry introduced since glibc 2.18.
     if (info->dlpi_phdr == nullptr && info->dlpi_phnum == 0) {
       return 0;
     }
 
-    ProfileBuilder& builder = *static_cast<ProfileBuilder*>(data);
-    const bool is_main_executable = builder.profile_->mapping_size() == 0;
+    CallbackData& cb_data = *static_cast<CallbackData*>(data);
+    ProfileBuilder& builder = cb_data.builder;
+    const bool is_main_executable =
+        std::exchange(cb_data.is_first_entry, false);
+
+    // Storage for path to executable as dlpi_name isn't populated for the
+    // main executable.  +1 to allow for the null terminator that readlink
+    // does not add.
+    char self_filename[PATH_MAX + 1];
+    const char* filename = info->dlpi_name;
+    if (filename == nullptr || filename[0] == '\0') {
+      // This is either the main executable or the VDSO.  The main executable
+      // is always the first entry processed by callbacks.
+      if (is_main_executable) {
+        // This is the main executable.
+        ssize_t ret = readlink("/proc/self/exe", self_filename,
+                               sizeof(self_filename) - 1);
+        if (ret >= 0 && ret < sizeof(self_filename)) {
+          self_filename[ret] = '\0';
+          filename = self_filename;
+        }
+      } else {
+        // This is the VDSO.
+        filename = GetSoName(info);
+      }
+    }
+
+    char resolved_path[PATH_MAX];
+    absl::string_view resolved_filename;
+    if (filename != nullptr) {
+      if (realpath(filename, resolved_path)) {
+        resolved_filename = resolved_path;
+      } else {
+        resolved_filename = filename;
+      }
+    }
+
+    const std::string build_id = GetBuildId(info);
 
     // Evaluate all the loadable segments.
     for (int i = 0; i < info->dlpi_phnum; ++i) {
@@ -438,38 +687,6 @@ void ProfileBuilder::AddCurrentMappings() {
       const size_t memory_limit = memory_start + pt_load->p_memsz;
       const size_t file_offset = pt_load->p_offset;
 
-      // Storage for path to executable as dlpi_name isn't populated for the
-      // main executable.  +1 to allow for the null terminator that readlink
-      // does not add.
-      char self_filename[PATH_MAX + 1];
-      const char* filename = info->dlpi_name;
-      if (filename == nullptr || filename[0] == '\0') {
-        // This is either the main executable or the VDSO.  The main executable
-        // is always the first entry processed by callbacks.
-        if (is_main_executable) {
-          // This is the main executable.
-          ssize_t ret = readlink("/proc/self/exe", self_filename,
-                                 sizeof(self_filename) - 1);
-          if (ret >= 0 && ret < sizeof(self_filename)) {
-            self_filename[ret] = '\0';
-            filename = self_filename;
-          }
-        } else {
-          // This is the VDSO.
-          filename = GetSoName(info);
-        }
-      }
-
-      char resolved_path[PATH_MAX];
-      absl::string_view resolved_filename;
-      if (realpath(filename, resolved_path)) {
-        resolved_filename = resolved_path;
-      } else {
-        resolved_filename = filename;
-      }
-
-      const std::string build_id = GetBuildId(info);
-
       // Add to profile.
       builder.AddMapping(memory_start, memory_limit, file_offset,
                          resolved_filename, build_id);
@@ -478,7 +695,8 @@ void ProfileBuilder::AddCurrentMappings() {
     return 0;
   };
 
-  dl_iterate_phdr(dl_iterate_callback, this);
+  CallbackData cb_data{*this};
+  dl_iterate_phdr(dl_iterate_callback, &cb_data);
 #endif  // defined(__linux__)
 }
 
@@ -497,6 +715,139 @@ int ProfileBuilder::AddMapping(uintptr_t memory_start, uintptr_t memory_limit,
 
   mappings_.emplace(memory_start, mapping_id - 1);
   return mapping_id;
+}
+
+static void AddCommonSampleTags(const tcmalloc::Profile::Sample& entry,
+                                perftools::profiles::Sample& sample,
+                                ProfileBuilder& builder) {
+  const int alignment_id = builder.InternString("alignment");
+  const int bytes_id = builder.InternString("bytes");
+  const int request_id = builder.InternString("request");
+  const int size_returning_id = builder.InternString("size_returning");
+  const int access_hint_id = builder.InternString("access_hint");
+  const int access_allocated_id = builder.InternString("access_allocated");
+  const int cold_id = builder.InternString("cold");
+  const int hot_id = builder.InternString("hot");
+  const int token_id = builder.InternString("token_id");
+  const int allocation_type_id = builder.InternString("allocation type");
+  const int new_id = builder.InternString("new");
+  const int new_array_id = builder.InternString("new[]");
+  const int malloc_id = builder.InternString("malloc");
+  const int aligned_malloc_id = builder.InternString("aligned malloc");
+
+  // add fields that are common to all memory profiles
+  auto add_label = [&](int key, int unit, size_t value) {
+    perftools::profiles::Label& label = *sample.add_label();
+    label.set_key(key);
+    label.set_num(value);
+    label.set_num_unit(unit);
+  };
+
+  auto add_positive_label = [&](int key, int unit, size_t value) {
+    if (value <= 0) return;
+    add_label(key, unit, value);
+  };
+
+  add_positive_label(bytes_id, bytes_id, entry.allocated_size);
+  add_positive_label(request_id, bytes_id, entry.requested_size);
+  if (entry.requested_alignment.has_value()) {
+    add_positive_label(alignment_id, bytes_id,
+                       static_cast<size_t>(*entry.requested_alignment));
+  }
+  add_positive_label(size_returning_id, 0, entry.requested_size_returning);
+
+  auto add_access_label = [&](int key,
+                              tcmalloc::Profile::Sample::Access access) {
+    switch (access) {
+      case tcmalloc::Profile::Sample::Access::Hot: {
+        perftools::profiles::Label& access_label = *sample.add_label();
+        access_label.set_key(key);
+        access_label.set_str(hot_id);
+        break;
+      }
+      case tcmalloc::Profile::Sample::Access::Cold: {
+        perftools::profiles::Label& access_label = *sample.add_label();
+        access_label.set_key(key);
+        access_label.set_str(cold_id);
+        break;
+      }
+      default:
+        break;
+    }
+  };
+
+  add_label(access_hint_id, access_hint_id,
+            static_cast<uint8_t>(entry.access_hint));
+  add_access_label(access_allocated_id, entry.access_allocated);
+
+  add_label(token_id, token_id, static_cast<uint8_t>(entry.token_id));
+
+  perftools::profiles::Label& type_label = *sample.add_label();
+  type_label.set_key(allocation_type_id);
+
+  switch (entry.type) {
+    case AllocationType::New:
+      type_label.set_str(new_id);
+      break;
+    case AllocationType::Malloc:
+      type_label.set_str(malloc_id);
+      break;
+    case AllocationType::AlignedMalloc:
+      type_label.set_str(aligned_malloc_id);
+      break;
+    case AllocationType::NewArray:
+      type_label.set_str(new_array_id);
+      break;
+  }
+
+  const int guarded_status_id = builder.InternString("guarded_status");
+  const int larger_than_one_page_id = builder.InternString("LargerThanOnePage");
+  const int disabled_id = builder.InternString("Disabled");
+  const int rate_limited_id = builder.InternString("RateLimited");
+  const int no_available_slots_id = builder.InternString("NoAvailableSlots");
+  const int m_protect_failed_id = builder.InternString("MProtectFailed");
+  const int filtered_id = builder.InternString("Filtered");
+  const int not_attempted_id = builder.InternString("NotAttempted");
+  const int requested_id = builder.InternString("Requested");
+  const int required_id = builder.InternString("Required");
+  const int guarded_id = builder.InternString("Guarded");
+
+  perftools::profiles::Label& guarded_status_label = *sample.add_label();
+  guarded_status_label.set_key(guarded_status_id);
+  switch (entry.guarded_status) {
+    case Profile::Sample::GuardedStatus::LargerThanOnePage:
+      guarded_status_label.set_str(larger_than_one_page_id);
+      break;
+    case Profile::Sample::GuardedStatus::Disabled:
+      guarded_status_label.set_str(disabled_id);
+      break;
+    case Profile::Sample::GuardedStatus::RateLimited:
+      guarded_status_label.set_str(rate_limited_id);
+      break;
+    case Profile::Sample::GuardedStatus::NoAvailableSlots:
+      guarded_status_label.set_str(no_available_slots_id);
+      break;
+    case Profile::Sample::GuardedStatus::MProtectFailed:
+      guarded_status_label.set_str(m_protect_failed_id);
+      break;
+    case Profile::Sample::GuardedStatus::Filtered:
+      guarded_status_label.set_str(filtered_id);
+      break;
+    case Profile::Sample::GuardedStatus::NotAttempted:
+      guarded_status_label.set_str(not_attempted_id);
+      break;
+    case Profile::Sample::GuardedStatus::Requested:
+      guarded_status_label.set_str(requested_id);
+      break;
+    case Profile::Sample::GuardedStatus::Required:
+      guarded_status_label.set_str(required_id);
+      break;
+    case Profile::Sample::GuardedStatus::Guarded:
+      guarded_status_label.set_str(guarded_id);
+      break;
+    default:
+      ABSL_UNREACHABLE();
+  }
 }
 
 static absl::Status MakeLifetimeProfileProto(const tcmalloc::Profile& profile,
@@ -530,28 +881,39 @@ static absl::Status MakeLifetimeProfileProto(const tcmalloc::Profile& profile,
 
   // Common intern string ids which are going to be used for each sample.
   const int count_id = builder->InternString("count");
-  const int bytes_id = builder->InternString("bytes");
-  const int request_id = builder->InternString("request");
-  const int alignment_id = builder->InternString("alignment");
   const int nanoseconds_id = builder->InternString("nanoseconds");
+  const int cpu_raw_id = builder->InternString("cpu_id");
+  const int active_cpu_id = builder->InternString("active CPU");
+  const int vcpu_raw_id = builder->InternString("vcpu_id");
+  const int active_vcpu_id = builder->InternString("active vCPU");
+  const int l3_raw_id = builder->InternString("l3_id");
+  const int active_l3_id = builder->InternString("active L3");
+  const int numa_raw_id = builder->InternString("numa_id");
+  const int active_numa_id = builder->InternString("active NUMA");
+  const int thread_raw_id = builder->InternString("thread_id");
+  const int active_thread_id = builder->InternString("active thread");
+
+  // Lifetime profiling.
   const int avg_lifetime_id = builder->InternString("avg_lifetime");
   const int stddev_lifetime_id = builder->InternString("stddev_lifetime");
   const int min_lifetime_id = builder->InternString("min_lifetime");
   const int max_lifetime_id = builder->InternString("max_lifetime");
-  const int active_cpu_id = builder->InternString("active CPU");
-  const int active_vcpu_id = builder->InternString("active vCPU");
-  const int active_l3_id = builder->InternString("active L3");
-  const int active_numa_id = builder->InternString("active NUMA");
   const int same_id = builder->InternString("same");
   const int different_id = builder->InternString("different");
-  const int active_thread_id = builder->InternString("active thread");
-  const int callstack_pair_id = builder->InternString("callstack-pair-id");
   const int none_id = builder->InternString("none");
+  const int callstack_pair_id = builder->InternString("callstack-pair-id");
+
+  // Event tracing.
+  const int bytes_id = builder->InternString("bytes");
+  const int alloc_handle_id = builder->InternString("alloc_handle");
+  const int allocation_time_id = builder->InternString("allocation_time");
+  const int deallocation_time_id = builder->InternString("deallocation_time");
+  const int requested_size_id = builder->InternString("requested_size");
 
   profile.Iterate([&](const tcmalloc::Profile::Sample& entry) {
     perftools::profiles::Sample& sample = *converted.add_sample();
 
-    TC_CHECK_LE(entry.depth, ABSL_ARRAYSIZE(entry.stack));
+    TC_CHECK_LE(entry.depth, std::size(entry.stack));
     builder->InternCallstack(absl::MakeSpan(entry.stack, entry.depth), sample);
 
     auto add_label = [&](int key, int unit, size_t value) {
@@ -564,6 +926,13 @@ static absl::Status MakeLifetimeProfileProto(const tcmalloc::Profile& profile,
     auto add_positive_label = [&](int key, int unit, size_t value) {
       if (value <= 0) return;
       add_label(key, unit, value);
+    };
+
+    auto add_optional_int_label = [&](int key, int unit,
+                                      std::optional<int64_t> opt_value) {
+      if (opt_value.has_value()) {
+        add_label(key, unit, static_cast<size_t>(opt_value.value()));
+      }
     };
 
     auto add_optional_string_label =
@@ -581,10 +950,7 @@ static absl::Status MakeLifetimeProfileProto(const tcmalloc::Profile& profile,
           }
         };
 
-    // The following three fields are common across profiles.
-    add_positive_label(bytes_id, bytes_id, entry.allocated_size);
-    add_positive_label(request_id, bytes_id, entry.requested_size);
-    add_positive_label(alignment_id, bytes_id, entry.requested_alignment);
+    AddCommonSampleTags(entry, sample, *builder);
 
     // The following fields are specific to lifetime (deallocation) profiler.
     add_positive_label(callstack_pair_id, count_id, entry.profile_id);
@@ -597,24 +963,44 @@ static absl::Status MakeLifetimeProfileProto(const tcmalloc::Profile& profile,
     add_positive_label(max_lifetime_id, nanoseconds_id,
                        absl::ToInt64Nanoseconds(entry.max_lifetime));
 
+    add_optional_int_label(cpu_raw_id, 0, entry.cpu_id);
     add_optional_string_label(active_cpu_id,
                               entry.allocator_deallocator_physical_cpu_matched,
                               same_id, different_id);
+    add_optional_int_label(vcpu_raw_id, 0, entry.vcpu_id);
     add_optional_string_label(active_vcpu_id,
                               entry.allocator_deallocator_virtual_cpu_matched,
                               same_id, different_id);
+    add_optional_int_label(l3_raw_id, 0, entry.l3_id);
     add_optional_string_label(active_l3_id,
                               entry.allocator_deallocator_l3_matched, same_id,
                               different_id);
+    add_optional_int_label(numa_raw_id, 0, entry.numa_id);
     add_optional_string_label(active_numa_id,
                               entry.allocator_deallocator_numa_matched, same_id,
                               different_id);
+    add_optional_int_label(thread_raw_id, 0, entry.thread_id);
     add_optional_string_label(active_thread_id,
                               entry.allocator_deallocator_thread_matched,
                               same_id, different_id);
 
     int64_t count = abs(entry.count);
     int64_t weight = entry.sum;
+
+    if (auto handle = static_cast<uint64_t>(entry.alloc_handle); handle != 0) {
+      add_label(alloc_handle_id, count_id, handle);
+    }
+    // Set during event tracing, unset (epoch) during lifetime profiling.
+    if (entry.allocation_time > absl::UnixEpoch()) {
+      if (entry.count < 0) {  // Deallocation event
+        add_label(deallocation_time_id, nanoseconds_id,
+                  absl::ToUnixNanos(entry.allocation_time));
+      } else {  // Allocation event or censored allocation
+        add_label(allocation_time_id, nanoseconds_id,
+                  absl::ToUnixNanos(entry.allocation_time));
+        add_label(requested_size_id, bytes_id, entry.requested_size);
+      }
+    }
 
     // Handle censored allocations first since we distinguish
     // the samples based on the is_censored flag.
@@ -652,6 +1038,9 @@ absl::StatusOr<std::unique_ptr<perftools::profiles::Profile>> MakeProfileProto(
     const ::tcmalloc::Profile& profile, PageFlagsBase* pageflags,
     Residency* residency) {
   if (profile.Type() == ProfileType::kDoNotUse) {
+    if (MallocExtension::GetProfileSamplingInterval() == 0) {
+      return absl::NotFoundError("Profile sampling is disabled");
+    }
 #if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
     defined(ABSL_HAVE_LEAK_SANITIZER) ||    \
     defined(ABSL_HAVE_MEMORY_SANITIZER) || defined(ABSL_HAVE_THREAD_SANITIZER)
@@ -668,7 +1057,8 @@ absl::StatusOr<std::unique_ptr<perftools::profiles::Profile>> MakeProfileProto(
   ProfileBuilder builder;
   builder.AddCurrentMappings();
 
-  if (profile.Type() == ProfileType::kLifetimes) {
+  if (profile.Type() == ProfileType::kLifetimes ||
+      profile.Type() == ProfileType::kEventTrace) {
     absl::Status error = MakeLifetimeProfileProto(profile, &builder);
     if (!error.ok()) {
       return error;
@@ -676,27 +1066,45 @@ absl::StatusOr<std::unique_ptr<perftools::profiles::Profile>> MakeProfileProto(
     return std::move(builder).Finalize();
   }
 
-  const int alignment_id = builder.InternString("alignment");
+  // Units.
   const int bytes_id = builder.InternString("bytes");
   const int count_id = builder.InternString("count");
-  const int objects_id = builder.InternString("objects");
-  const int request_id = builder.InternString("request");
-  const int size_returning_id = builder.InternString("size_returning");
-  const int stale_scan_period_id = builder.InternString("stale_scan_period");
   const int seconds_id = builder.InternString("seconds");
+
+  // Sample types: base allocation metrics.
+  // Number of allocated objects (unit: "count").
+  const int objects_id = builder.InternString("objects");
+  // Total allocated virtual memory size (unit: "bytes").
   const int space_id = builder.InternString("space");
+
+  // Sample types: page residency and kernel pageflags (`kHeap` profiles).
+  // Bytes resident in physical RAM (unit: "bytes").
   const int resident_space_id = builder.InternString("resident_space");
+  // Bytes swapped out (unit: "bytes").
   const int swapped_space_id = builder.InternString("swapped_space");
+  // Bytes on pages not accessed within `stale_scan_period` (unit: "bytes").
   const int stale_space_id = builder.InternString("stale_space");
+  // Bytes on `mlock`ed pages (unit: "bytes").
   const int locked_space_id = builder.InternString("locked_space");
-  const int access_hint_id = builder.InternString("access_hint");
-  const int access_allocated_id = builder.InternString("access_allocated");
-  const int cold_id = builder.InternString("cold");
-  const int hot_id = builder.InternString("hot");
-  const int allocation_type_id = builder.InternString("allocation type");
-  const int new_id = builder.InternString("new");
-  const int malloc_id = builder.InternString("malloc");
-  const int aligned_malloc_id = builder.InternString("aligned malloc");
+  // Bytes on pages marked incompressible by kernel pageflags (unit: "bytes").
+  const int incompressible_space_id =
+      builder.InternString("incompressible_space");
+
+  // Sample types: content compressibility analysis (`kHeap` profiles).
+  // Estimated ZSTD-compressed size of backed (`resident_space + swapped_space`)
+  // memory, extrapolated to the group's full backed bytes (unit: "bytes").
+  const int space_compressed_id = builder.InternString("space_compressed");
+  // Estimated zero bytes across `space`: all unbacked bytes plus the
+  // extrapolated zero bytes within backed pages (unit: "bytes").
+  const int zero_space_id = builder.InternString("zero_space");
+  // Backed (`resident_space + swapped_space`) bytes in this group whose spans
+  // were analyzed by `CompressionAnalyzer`, counted against backed space
+  // (unit: "bytes").
+  const int analyzed_compressibility_space_id =
+      builder.InternString("analyzed_compressibility_space");
+
+  // Sample labels.
+  const int stale_scan_period_id = builder.InternString("stale_scan_period");
 
   perftools::profiles::Profile& converted = builder.profile();
 
@@ -741,11 +1149,36 @@ absl::StatusOr<std::unique_ptr<perftools::profiles::Profile>> MakeProfileProto(
     sample_type = converted.add_sample_type();
     sample_type->set_type(locked_space_id);
     sample_type->set_unit(bytes_id);
+
+    sample_type = converted.add_sample_type();
+    sample_type->set_type(incompressible_space_id);
+    sample_type->set_unit(bytes_id);
+  }
+
+  bool collecting_compressibility = false;
+
+  // Only advertise space_compressed/zero_space when at least one sample was
+  // actually analyzed.  Emitting the columns with a zero in every sample is
+  // indistinguishable downstream from a genuinely incompressible heap, so a
+  // profile that never ran the analyzer would otherwise be reported as 100%
+  // compressible rather than as having no data.
+  const auto [samples, exporting_compressibility] =
+      MergeProfileSamplesAndMaybeGetResidencyInfo(profile, pageflags, residency,
+                                                  collecting_compressibility);
+  if (exporting_compressibility) {
+    perftools::profiles::ValueType* sample_type = nullptr;
+
+    sample_type = converted.add_sample_type();
+    sample_type->set_type(zero_space_id);
+    sample_type->set_unit(bytes_id);
+
+    sample_type = converted.add_sample_type();
+    sample_type->set_type(analyzed_compressibility_space_id);
+    sample_type->set_unit(bytes_id);
   }
 
   int default_sample_type_id;
   switch (profile.Type()) {
-    case tcmalloc::ProfileType::kFragmentation:
     case tcmalloc::ProfileType::kHeap:
     case tcmalloc::ProfileType::kPeakHeap:
       default_sample_type_id = space_id;
@@ -759,13 +1192,11 @@ absl::StatusOr<std::unique_ptr<perftools::profiles::Profile>> MakeProfileProto(
 
   converted.set_default_sample_type(default_sample_type_id);
 
-  SampleMergedMap samples = MergeProfileSamplesAndMaybeGetResidencyInfo(
-      profile, pageflags, residency);
   for (const auto& [entry, data] : samples) {
     perftools::profiles::Profile& profile = builder.profile();
     perftools::profiles::Sample& sample = *profile.add_sample();
 
-    TC_CHECK_LE(entry.depth, ABSL_ARRAYSIZE(entry.stack));
+    TC_CHECK_LE(entry.depth, std::size(entry.stack));
     builder.InternCallstack(absl::MakeSpan(entry.stack, entry.depth), sample);
 
     sample.add_value(data.count);
@@ -775,6 +1206,11 @@ absl::StatusOr<std::unique_ptr<perftools::profiles::Profile>> MakeProfileProto(
       sample.add_value(data.swapped_size.value_or(0));
       sample.add_value(data.stale_size.value_or(0));
       sample.add_value(data.locked_size.value_or(0));
+      sample.add_value(data.incompressible_size.value_or(0));
+    }
+    if (exporting_compressibility) {
+      sample.add_value(data.zero_size);
+      sample.add_value(data.analyzed_backed);
     }
 
     // add fields that are common to all memory profiles
@@ -790,101 +1226,10 @@ absl::StatusOr<std::unique_ptr<perftools::profiles::Profile>> MakeProfileProto(
       add_label(key, unit, value);
     };
 
-    add_positive_label(bytes_id, bytes_id, entry.allocated_size);
-    add_positive_label(request_id, bytes_id, entry.requested_size);
-    add_positive_label(alignment_id, bytes_id, entry.requested_alignment);
-    add_positive_label(size_returning_id, 0, entry.requested_size_returning);
+    AddCommonSampleTags(entry, sample, builder);
+
     add_positive_label(stale_scan_period_id, seconds_id,
                        data.stale_scan_period.value_or(0));
-
-    auto add_access_label = [&](int key,
-                                tcmalloc::Profile::Sample::Access access) {
-      switch (access) {
-        case tcmalloc::Profile::Sample::Access::Hot: {
-          perftools::profiles::Label& access_label = *sample.add_label();
-          access_label.set_key(key);
-          access_label.set_str(hot_id);
-          break;
-        }
-        case tcmalloc::Profile::Sample::Access::Cold: {
-          perftools::profiles::Label& access_label = *sample.add_label();
-          access_label.set_key(key);
-          access_label.set_str(cold_id);
-          break;
-        }
-        default:
-          break;
-      }
-    };
-
-    add_label(access_hint_id, access_hint_id,
-              static_cast<uint8_t>(entry.access_hint));
-    add_access_label(access_allocated_id, entry.access_allocated);
-
-    perftools::profiles::Label& type_label = *sample.add_label();
-    type_label.set_key(allocation_type_id);
-
-    switch (entry.type) {
-      case Profile::Sample::AllocationType::New:
-        type_label.set_str(new_id);
-        break;
-      case Profile::Sample::AllocationType::Malloc:
-        type_label.set_str(malloc_id);
-        break;
-      case Profile::Sample::AllocationType::AlignedMalloc:
-        type_label.set_str(aligned_malloc_id);
-        break;
-    }
-
-    const int guarded_status_id = builder.InternString("guarded_status");
-    const int larger_than_one_page_id =
-        builder.InternString("LargerThanOnePage");
-    const int disabled_id = builder.InternString("Disabled");
-    const int rate_limited_id = builder.InternString("RateLimited");
-    const int no_available_slots_id = builder.InternString("NoAvailableSlots");
-    const int m_protect_failed_id = builder.InternString("MProtectFailed");
-    const int filtered_id = builder.InternString("Filtered");
-    const int not_attempted_id = builder.InternString("NotAttempted");
-    const int requested_id = builder.InternString("Requested");
-    const int required_id = builder.InternString("Required");
-    const int guarded_id = builder.InternString("Guarded");
-
-    perftools::profiles::Label& guarded_status_label = *sample.add_label();
-    guarded_status_label.set_key(guarded_status_id);
-    switch (entry.guarded_status) {
-      case Profile::Sample::GuardedStatus::LargerThanOnePage:
-        guarded_status_label.set_str(larger_than_one_page_id);
-        break;
-      case Profile::Sample::GuardedStatus::Disabled:
-        guarded_status_label.set_str(disabled_id);
-        break;
-      case Profile::Sample::GuardedStatus::RateLimited:
-        guarded_status_label.set_str(rate_limited_id);
-        break;
-      case Profile::Sample::GuardedStatus::NoAvailableSlots:
-        guarded_status_label.set_str(no_available_slots_id);
-        break;
-      case Profile::Sample::GuardedStatus::MProtectFailed:
-        guarded_status_label.set_str(m_protect_failed_id);
-        break;
-      case Profile::Sample::GuardedStatus::Filtered:
-        guarded_status_label.set_str(filtered_id);
-        break;
-      case Profile::Sample::GuardedStatus::NotAttempted:
-        guarded_status_label.set_str(not_attempted_id);
-        break;
-      case Profile::Sample::GuardedStatus::Requested:
-        guarded_status_label.set_str(requested_id);
-        break;
-      case Profile::Sample::GuardedStatus::Required:
-        guarded_status_label.set_str(required_id);
-        break;
-      case Profile::Sample::GuardedStatus::Guarded:
-        guarded_status_label.set_str(guarded_id);
-        break;
-      default:
-        ABSL_UNREACHABLE();
-    }
   }
 
   return std::move(builder).Finalize();

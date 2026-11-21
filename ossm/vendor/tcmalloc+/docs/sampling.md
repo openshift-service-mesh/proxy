@@ -43,30 +43,42 @@ We also tell the span that we're sampling it. We can do this because we do
 sampling at tcmalloc page sizes, so each sample corresponds to a particular page
 in the pagemap.
 
-For small allocations, we make two allocations: the returned allocation (which
-uses an entire tcmalloc page, not shared with any other allocations) and a proxy
-allocation in a non-sampled span (the proxy object is used when computing
-fragmentation profiles).
+For small allocations, the returned allocation uses an entire TCMalloc page (not
+shared with any other allocations) on a dedicated span. The returned allocation
+is placed on the sampled page heap, allowing us to use the pointer's tag bits to
+identify that the object was sampled and needs special handling on deallocation.
 
-When allocations are sampled, the virtual addresses associated with the
-allocation are
-[`madvise`d with the `MADV_NOHUGEPAGE` flag](https://github.com/google/tcmalloc/blob/master/tcmalloc/system-alloc.cc).
+For the sampled page heap, the virtual addresses associated with the allocation
+are
+[`madvise`d with the `MADV_NOHUGEPAGE` flag](https://github.com/google/tcmalloc/blob/master/tcmalloc/system_allocator.h).
 This, combined with the whole-page behavior above, means that *every allocation
 gets its own native (OS) page(s)* shared with no other allocations.
 
+For large (`>kMaxSize`) allocations, the returned allocation will be on entire
+TCMalloc pages. These objects are requested directly from the non-sampled page
+heaps. These objects will be packed by [Temeraire](temeraire.md) densely onto
+hugepages. While objects that are exact multiples of 2MB are given their own
+hugepages (the `HugeCache`), the access patterns of other objects may affect
+statistics for the profiled ones.
+
+| Statistic | Small                         | Large                        |
+| :-------- | :---------------------------- | :--------------------------- |
+| RSS       | Prior allocations may have    | Huge page may make pages     |
+:           : used the page                 : resident even though unused  :
+| Stale     | Accurate for > staleness time | Adjacent allocations on same |
+:           : allocs                        : huge page may skew           :
+
 ## How We Free Sampled Objects
 
-Each sampled allocation is tagged. Using this, we can quickly test whether a
-particular allocation might be a sample.
-
-When we are done with the sampled span we release it using
+Each sampled allocation is either tagged or larger than `kMaxSize`. Using this,
+we can quickly test whether a particular allocation might be a sample. When we
+are done with the sampled span we release it using
 [tcmalloc::Span::Unsample()](https://github.com/google/tcmalloc/blob/master/tcmalloc/span.cc).
 
-## How Do We Handle Heap and Fragmentation Profiling
+## How Do We Handle Heap Profiling
 
-To handle heap and fragmentation profiling we just need to traverse the list of
-sampled objects and compute either their degree of fragmentation (with the proxy
-object), or the amount of heap they consume.
+To handle heap profiling we just need to traverse the list of sampled objects
+and compute the amount of heap they consume.
 
 Each allocation gets additional metadata associated with it when it is exposed
 in the heap profile. In the preparation for writing the heap profile,
@@ -148,24 +160,13 @@ Take an allocation that has been chosen to be sampled (of size $$k$$). The byte
 marked `*` is the byte that decreases the counter to zero; the counter starts at
 $$f$$ before this allocation.
 
-$$
-\underbrace{
-\boxed{\phantom{*}}
-\boxed{\phantom{*}}
-\boxed{\phantom{*}}
-\boxed{\phantom{*}}
-\boxed{\phantom{*}}
-\boxed{\phantom{*}}
-\boxed{*}
-}_\text{$f$}
-\underbrace{
-\boxed{\phantom{*}}
-\boxed{\phantom{*}}
-\boxed{\phantom{*}}
-\boxed{\phantom{*}}
-\boxed{\phantom{*}}
-}_\text{$k-f$}
-$$
+```
++---+---+---+---+---+---+---+---+---+---+---+---+
+|   |   |   |   |   |   | * |   |   |   |   |   |
++---+---+---+---+---+---+---+---+---+---+---+---+
+  \_______________________/   \_______________/
+              f                     k - f
+```
 
 The *sampling weight* $$W$$ (n.b. not `allocation count estimate`, which is
 reported as `weight` in `MallocHook::SampledAlloc`) of this allocation is the

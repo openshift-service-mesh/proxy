@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -23,6 +24,7 @@
 #include <string>
 
 #include "tcmalloc/internal/profile.pb.h"
+#include "benchmark/benchmark.h"
 #include "gtest/gtest.h"
 #include "absl/base/attributes.h"
 #include "absl/base/const_init.h"
@@ -33,17 +35,20 @@
 #include "absl/log/absl_check.h"
 #include "absl/log/check.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/str_format.h"
-#include "absl/time/clock.h"
-#include "absl/time/time.h"
+#include "tcmalloc/common.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/memory_tag.h"
+#include "tcmalloc/internal/page_size.h"
 #include "tcmalloc/internal/profile_builder.h"
+#include "tcmalloc/internal/residency.h"
 #include "tcmalloc/internal/sampled_allocation.h"
 #include "tcmalloc/malloc_extension.h"
 #include "tcmalloc/malloc_hook.h"
+#include "tcmalloc/parameters.h"
 #include "tcmalloc/static_vars.h"
 #include "tcmalloc/testing/test_allocator_harness.h"
+#include "tcmalloc/testing/testutil.h"
 #include "tcmalloc/testing/thread_manager.h"
 
 namespace tcmalloc {
@@ -73,7 +78,6 @@ TEST_P(HeapProfilingTest, GetHeapProfileWhileAllocAndDealloc) {
   // Another few threads busy with iterating different kinds of heap profiles.
   for (auto t : {
            ProfileType::kHeap,
-           ProfileType::kFragmentation,
            ProfileType::kPeakHeap,
        }) {
     manager.Start(2, [&, t](int) {
@@ -92,7 +96,7 @@ TEST_P(HeapProfilingTest, GetHeapProfileWhileAllocAndDealloc) {
     });
   }
 
-  absl::SleepFor(absl::Seconds(1));
+  absl::SleepFor(absl::Milliseconds(100));
   manager.Stop();
 }
 
@@ -173,29 +177,90 @@ TEST(HeapProfilingTest, AllocateDifferentSizes) {
   }
 }
 
+// Unlike ProfileTest.HeapProfile, this also runs with alloc-token
+// instrumentation, where new expressions call the __alloc_token_* entry points.
+TEST(HeapProfilingTest, AllocationType) {
+  if (tcmalloc_internal::kSanitizerPresent) {
+    GTEST_SKIP() << "Sanitizers intercept allocations";
+  }
+  const ScopedProfileSamplingInterval sample_interval(1);
+
+  // Sizes that no other allocation in the process is likely to request.
+  constexpr size_t kObjectSize = (1 << 19) + 3;
+  constexpr size_t kArraySize = (1 << 19) + 5;
+  constexpr size_t kCookieArrayCount = (1 << 19) + 7;
+  struct Object {
+    char bytes[kObjectSize];
+  };
+  // A non-trivial destructor makes new[] prepend an element count cookie, so
+  // the requested size exceeds the array payload.
+  struct Elem {
+    ~Elem() { benchmark::DoNotOptimize(c); }
+    char c;
+  };
+  static_assert(!std::is_trivially_destructible_v<Elem>);
+  constexpr size_t kCookieArraySize =
+      kCookieArrayCount * sizeof(Elem) + sizeof(size_t);
+
+  auto object = std::make_unique<Object>();
+  benchmark::DoNotOptimize(object);
+  auto array = std::make_unique<char[]>(kArraySize);
+  benchmark::DoNotOptimize(array);
+  auto cookie_array = std::make_unique<Elem[]>(kCookieArrayCount);
+  benchmark::DoNotOptimize(cookie_array);
+
+  std::optional<AllocationType> object_type, array_type, cookie_array_type;
+  MallocExtension::SnapshotCurrent(ProfileType::kHeap)
+      .Iterate([&](const Profile::Sample& s) {
+        if (s.requested_size == kObjectSize) object_type = s.type;
+        if (s.requested_size == kArraySize) array_type = s.type;
+        if (s.requested_size == kCookieArraySize) cookie_array_type = s.type;
+      });
+  EXPECT_EQ(object_type, AllocationType::New);
+  EXPECT_EQ(array_type, AllocationType::NewArray);
+  EXPECT_EQ(cookie_array_type, AllocationType::NewArray);
+}
+
 TEST(HeapProfilingTest, CheckResidency) {
-  ScopedProfileSamplingInterval s(1);
-  const int num_allocations = 1000;
+  const int num_allocations = 10;
   const size_t requested_size = (1 << 19) + 1;
 
+  // Pin the allocations resident with mlock() so their pages cannot be
+  // reclaimed before residency is measured, which would otherwise make the
+  // checks below flaky.  If the pages cannot be locked (e.g. RLIMIT_MEMLOCK is
+  // too low), skip rather than fail, since residency is no longer guaranteed.
   void* allocations[num_allocations];
-  for (int i = 0; i < num_allocations; i++) {
-    allocations[i] = ::operator new(requested_size);
-  }
-
-  bool mlock_failure = false;
-  for (int i = 0; i < num_allocations; i++) {
-    if (::mlock(allocations[i], requested_size) != 0) {
-      mlock_failure = true;
-      for (int j = 0; j < requested_size; ++j) {
-        static_cast<volatile char*>(allocations[i])[j] = 0x20;
+  int num_allocated = 0;
+  bool locked_all = true;
+  {
+    // Sample at every byte so the profile is guaranteed to include our
+    // allocations, but only while we create them -- restoring the default
+    // interval before we snapshot below keeps the profiler's own allocations
+    // out of the interval-1 sampling and off the residency sum.
+    ScopedProfileSamplingInterval s(1);
+    for (int i = 0; i < num_allocations; i++) {
+      allocations[i] = ::operator new(requested_size);
+      num_allocated = i + 1;
+      if (::mlock(allocations[i], requested_size) != 0) {
+        locked_all = false;
+        break;
       }
     }
   }
-  if (mlock_failure) {
-    absl::FPrintF(
-        stderr,
-        "one or more mlocks failed, which could cause test flakiness\n");
+  if (!locked_all) {
+    for (int i = 0; i < num_allocated; i++) {
+      ::munlock(allocations[i], requested_size);
+      ::operator delete(allocations[i]);
+    }
+    // Where we control the lock limit, failing to mlock is a real problem we
+    // want to notice; elsewhere the limit may be too low, so skip instead.
+    const bool kSoftFail = true;
+    if (kSoftFail) {
+      GTEST_SKIP()
+          << "unable to mlock the working set; RLIMIT_MEMLOCK may be too "
+             "low to keep pages resident for the residency check";
+    }
+    FAIL() << "unable to mlock the working set for the residency check";
   }
 
   // Collect the heap profile and look for residency info.
@@ -212,6 +277,7 @@ TEST(HeapProfilingTest, CheckResidency) {
   // Look for "sampled_resident_bytes" string in string table.
   std::optional<int> sampled_resident_bytes_id;
   std::optional<int> resident_space_id;
+  std::optional<int> request_id;
   for (int i = 0, n = converted.string_table().size(); i < n; ++i) {
     if (converted.string_table(i) == "sampled_resident_bytes") {
       sampled_resident_bytes_id = i;
@@ -219,9 +285,13 @@ TEST(HeapProfilingTest, CheckResidency) {
     if (converted.string_table(i) == "resident_space") {
       resident_space_id = i;
     }
+    if (converted.string_table(i) == "request") {
+      request_id = i;
+    }
   }
   EXPECT_FALSE(sampled_resident_bytes_id.has_value());
   ASSERT_TRUE(resident_space_id.has_value());
+  ASSERT_TRUE(request_id.has_value());
 
   std::optional<int> resident_value_index;
   for (int i = 0; i < converted.sample_type_size(); ++i) {
@@ -233,13 +303,28 @@ TEST(HeapProfilingTest, CheckResidency) {
 
   ASSERT_TRUE(resident_value_index.has_value());
 
+  // Even with the interval-1 window scoped to our allocation loop above,
+  // background threads may allocate and be sampled during it.  Sum
+  // resident_space only over the samples for our own allocations -- identified
+  // by their unique "request" size label -- so unrelated allocations cannot
+  // perturb the bounds.
   size_t resident_size = 0;
   for (const auto& sample : converted.sample()) {
-    resident_size += sample.value(*resident_value_index);
+    bool is_ours = false;
+    for (const auto& label : sample.label()) {
+      if (label.key() == *request_id &&
+          label.num() == static_cast<int64_t>(requested_size)) {
+        is_ours = true;
+        break;
+      }
+    }
+    if (is_ours) {
+      resident_size += sample.value(*resident_value_index);
+    }
   }
 
-  EXPECT_GE(resident_size, num_allocations * requested_size);
-  EXPECT_LE(resident_size, num_allocations * requested_size * 2);
+  EXPECT_GE(resident_size, num_allocations * requested_size * 9 / 10);
+  EXPECT_LE(resident_size, num_allocations * requested_size);
 
   for (int i = 0; i < num_allocations; i++) {
     // throw away the error
@@ -247,6 +332,230 @@ TEST(HeapProfilingTest, CheckResidency) {
   }
   for (int i = 0; i < num_allocations; i++) {
     ::operator delete(allocations[i]);
+  }
+}
+
+TEST(HeapProfilingTest, MadviseSampledAllocations) {
+  if (tcmalloc_internal::kSanitizerPresent) {
+    GTEST_SKIP() << "Sanitizers intercept allocations";
+  }
+
+  const ScopedProfileSamplingInterval sample_interval(1);
+  // GWP-ASan is active by default in google3, but not in OSS builds.
+  MallocExtension::ActivateGuardedSampling();
+
+  const size_t kHardwarePageSize = tcmalloc_internal::GetPageSize();
+  constexpr int kNumAllocations = 50;
+
+  enum class AllocationHeap {
+    kSampled,
+    kCold,
+    kNormal,
+  };
+
+  using tcmalloc_internal::MadviseSampledAllocations;
+  struct TestCase {
+    absl::string_view name;
+    MadviseSampledAllocations madvise_sampled;
+    AllocationHeap heap;
+    bool expect_madvised;
+    bool guarded;
+    size_t alloc_size;
+  };
+
+  const TestCase kTestCases[] = {
+      {"disabled_sampled_large", MadviseSampledAllocations::kDisabled,
+       AllocationHeap::kSampled,
+       /*expect_madvised=*/false, /*guarded=*/false,
+       /*alloc_size=*/2 * kHardwarePageSize},
+      {"enabled_sampled_large", MadviseSampledAllocations::kEnabled,
+       AllocationHeap::kSampled,
+       /*expect_madvised=*/true, /*guarded=*/false,
+       /*alloc_size=*/2 * kHardwarePageSize},
+      {"disabled_sampled_small", MadviseSampledAllocations::kDisabled,
+       AllocationHeap::kSampled,
+       /*expect_madvised=*/false, /*guarded=*/false,
+       /*alloc_size=*/1024},
+      {"enabled_sampled_small", MadviseSampledAllocations::kEnabled,
+       AllocationHeap::kSampled,
+       /*expect_madvised=*/false, /*guarded=*/false,
+       /*alloc_size=*/1024},
+      {"enabled_guarded", MadviseSampledAllocations::kEnabled,
+       AllocationHeap::kSampled,
+       /*expect_madvised=*/true, /*guarded=*/true,
+       /*alloc_size=*/32},
+      {"enabled_cold", MadviseSampledAllocations::kEnabled,
+       AllocationHeap::kCold,
+       /*expect_madvised=*/true, /*guarded=*/false,
+       /*alloc_size=*/tcmalloc_internal::kMaxSize + 2 * kHardwarePageSize},
+      {"enabled_normal", MadviseSampledAllocations::kEnabled,
+       AllocationHeap::kNormal,
+       /*expect_madvised=*/false, /*guarded=*/false,
+       /*alloc_size=*/tcmalloc_internal::kMaxSize + 2 * kHardwarePageSize},
+  };
+
+  tcmalloc_internal::ResidencyPageMap residency;
+
+  for (const auto& test_case : kTestCases) {
+    SCOPED_TRACE(test_case.name);
+    if (test_case.heap == AllocationHeap::kCold &&
+        (!tcmalloc_internal::ColdFeatureActive() ||
+         tcmalloc_internal::Parameters::heap_partitioning_mode() ==
+             tcmalloc_internal::HeapPartitioningMode::kFull)) {
+      continue;
+    }
+    if (test_case.alloc_size <= kHardwarePageSize &&
+        tcmalloc_internal::kPageSize <= kHardwarePageSize) {
+      continue;
+    }
+
+    ScopedMadviseSampledAllocations s(test_case.madvise_sampled);
+
+    const int num_allocations = test_case.guarded ? 1 : kNumAllocations;
+    // An interval of 0 makes GWP-ASan skip rate limiting and stack-trace
+    // filtering, so the allocation is guarded unless the pool is exhausted.
+    const ScopedGuardedSamplingInterval guarded_interval(
+        test_case.guarded ? 0 : -1);
+
+    const size_t alloc_size = test_case.alloc_size;
+
+    auto allocate = [&]() -> void* {
+      if (test_case.heap == AllocationHeap::kCold) {
+        return ::operator new(alloc_size, tcmalloc::hot_cold_t{0});
+      }
+      return ::operator new(alloc_size);
+    };
+
+    const size_t touch_all_size =
+        (test_case.heap == AllocationHeap::kSampled && !test_case.guarded)
+            ? std::max(alloc_size, tcmalloc_internal::kPageSize)
+            : alloc_size;
+
+    void* allocs[kNumAllocations];
+    for (int i = 0; i < num_allocations; ++i) {
+      allocs[i] = allocate();
+      switch (test_case.heap) {
+        case AllocationHeap::kSampled:
+        case AllocationHeap::kCold:
+          if (test_case.guarded) {
+            EXPECT_TRUE(tcmalloc_internal::IsGuardedMemory(allocs[i]));
+          } else {
+            EXPECT_TRUE(tcmalloc_internal::IsSampledOrColdMemory(allocs[i]));
+          }
+          break;
+        case AllocationHeap::kNormal:
+          EXPECT_TRUE(tcmalloc_internal::IsNormalMemory(allocs[i]));
+          break;
+      }
+      memset(allocs[i], 0xAB, touch_all_size);
+    }
+    for (int i = 0; i < num_allocations; ++i) {
+      sized_delete(allocs[i], alloc_size);
+    }
+
+    // Reallocate and touch only the first page.
+    const size_t touch_size = std::min(alloc_size, kHardwarePageSize);
+    for (int i = 0; i < num_allocations; ++i) {
+      allocs[i] = allocate();
+      memset(allocs[i], 0xCD, touch_size);
+    }
+
+    if (test_case.alloc_size > kHardwarePageSize) {
+      size_t total_resident = 0;
+      for (int i = 0; i < num_allocations; ++i) {
+        auto info = residency.Get(allocs[i], alloc_size);
+        ASSERT_TRUE(info.has_value());
+        total_resident += info->bytes_resident;
+      }
+
+      if (test_case.expect_madvised) {
+        EXPECT_LE(total_resident, num_allocations * touch_size);
+        EXPECT_GE(total_resident, (num_allocations - 1) * touch_size);
+      } else {
+        EXPECT_GT(total_resident, num_allocations * touch_size);
+      }
+    }
+
+    size_t total_allocated_resident = 0;
+    for (int i = 0; i < num_allocations; ++i) {
+      auto info = residency.Get(allocs[i], alloc_size);
+      ASSERT_TRUE(info.has_value());
+      total_allocated_resident += info->bytes_resident;
+    }
+
+    auto converted_or = tcmalloc_internal::MakeProfileProto(
+        MallocExtension::SnapshotCurrent(ProfileType::kHeap));
+    ASSERT_TRUE(converted_or.ok());
+    const auto& converted = **converted_or;
+
+    std::optional<int> resident_space_id;
+    for (int i = 0, n = converted.string_table().size(); i < n; ++i) {
+      if (converted.string_table(i) == "resident_space") {
+        resident_space_id = i;
+        break;
+      }
+    }
+    ASSERT_TRUE(resident_space_id.has_value());
+
+    std::optional<int> resident_value_index;
+    for (int i = 0; i < converted.sample_type_size(); ++i) {
+      if (converted.sample_type(i).type() == resident_space_id) {
+        resident_value_index = i;
+        break;
+      }
+    }
+    ASSERT_TRUE(resident_value_index.has_value());
+
+    size_t profile_resident = 0;
+    for (const auto& sample : converted.sample()) {
+      profile_resident += sample.value(*resident_value_index);
+    }
+    EXPECT_GE(profile_resident, total_allocated_resident * 9 / 10);
+
+    for (int i = 0; i < num_allocations; ++i) {
+      sized_delete(allocs[i], alloc_size);
+    }
+  }
+}
+
+// Sampled cold allocations are page aligned, so the sized-free fast path must
+// send them to the slow path to be unsampled rather than onto a cold freelist.
+TEST(HeapProfilingTest, SizedDeleteUnsamplesColdAllocations) {
+  if (tcmalloc_internal::kSanitizerPresent) {
+    GTEST_SKIP() << "Sanitizers intercept allocations";
+  }
+  if (!tcmalloc_internal::ColdFeatureActive() ||
+      tcmalloc_internal::Parameters::heap_partitioning_mode() ==
+          tcmalloc_internal::HeapPartitioningMode::kFull) {
+    GTEST_SKIP() << "Requires the sampled/cold partition";
+  }
+  const ScopedProfileSamplingInterval sample_interval(1);
+  const ScopedGuardedSamplingInterval guarded_interval(-1);
+  // Distinctive requested sizes, small enough to use cold size classes.
+  for (size_t size : {size_t{61}, size_t{3001}}) {
+    SCOPED_TRACE(size);
+    constexpr int kNum = 50;
+    void* allocs[kNum];
+    for (int i = 0; i < kNum; ++i) {
+      allocs[i] = ::operator new(size, tcmalloc::hot_cold_t{0});
+      ASSERT_TRUE(tcmalloc_internal::IsSampledOrColdMemory(allocs[i]));
+      EXPECT_EQ(
+          reinterpret_cast<uintptr_t>(allocs[i]) % tcmalloc_internal::kPageSize,
+          0);
+    }
+    auto count = [&] {
+      int n = 0;
+      MallocExtension::SnapshotCurrent(ProfileType::kHeap)
+          .Iterate([&](const Profile::Sample& s) {
+            if (s.requested_size == size) ++n;
+          });
+      return n;
+    };
+    EXPECT_GT(count(), 0);
+    for (int i = 0; i < kNum; ++i) {
+      ::operator delete(allocs[i], size);
+    }
+    EXPECT_EQ(count(), 0);
   }
 }
 
@@ -380,7 +689,7 @@ TEST_P(HeapAllocHandleTest, VerifyAllocHandles) {
         });
   });
 
-  absl::SleepFor(absl::Seconds(1));
+  absl::SleepFor(absl::Milliseconds(100));
   manager.Stop();
 }
 

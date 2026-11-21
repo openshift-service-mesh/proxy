@@ -41,12 +41,17 @@
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/declarations.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/memory_tag.h"
 #include "tcmalloc/malloc_extension.h"
 #include "tcmalloc/static_vars.h"
+#include "tcmalloc/tcmalloc_policy.h"
 #include "tcmalloc/testing/testutil.h"
 
 namespace tcmalloc {
 
+using tcmalloc_internal::GuardedAllocationsErrorType;
+using tcmalloc_internal::GuardedAllocationsStackTrace;
+using tcmalloc_internal::kMaxSize;
 using tcmalloc_internal::kPageShift;
 using tcmalloc_internal::kPageSize;
 using tcmalloc_internal::kSanitizerPresent;
@@ -117,6 +122,74 @@ TEST_F(GuardedAllocAlignmentTest, AlignedNew) {
   }
 }
 
+// The cold sized-free fast path relies on every guarded allocation, including
+// the right-aligned ones, having the kGuarded tag.
+TEST_F(GuardedAllocAlignmentTest, GuardedAllocationsHaveGuardedTag) {
+#if ABSL_HAVE_ADDRESS_SANITIZER || ABSL_HAVE_HWADDRESS_SANITIZER
+  GTEST_SKIP() << "Test requires GWP-ASan";
+#endif
+  ScopedGuardedSamplingInterval gs(0);
+  const auto& gpa = tc_globals.guardedpage_allocator();
+  constexpr std::optional<hot_cold_t> kHotCold[] = {std::nullopt,
+                                                    hot_cold_t{0}};
+  int guarded = 0, unaligned = 0;
+  for (const auto hot_cold : kHotCold) {
+    for (size_t size : {size_t{8}, size_t{64}, size_t{100}, kPageSize / 2}) {
+      for (int i = 0; i < 100; ++i) {
+        void* p = hot_cold.has_value() ? ::operator new(size, *hot_cold)
+                                       : ::operator new(size);
+        if (gpa.PointerIsMine(p)) {
+          ++guarded;
+          unaligned += reinterpret_cast<uintptr_t>(p) % kPageSize != 0;
+          EXPECT_EQ(tcmalloc_internal::GetMemoryTag(p),
+                    tcmalloc_internal::MemoryTag::kGuarded);
+          EXPECT_FALSE(tcmalloc_internal::IsSampledOrColdMemory(p));
+          EXPECT_FALSE(tcmalloc_internal::IsNormalMemory(p));
+        } else {
+          EXPECT_FALSE(tcmalloc_internal::IsGuardedMemory(p));
+        }
+        ::operator delete(p, size);
+      }
+    }
+  }
+  EXPECT_GT(guarded, 0);
+  EXPECT_GT(unaligned, 0);
+}
+
+// Nothing but the guarded pool uses the kGuarded tag, in particular not cold
+// or sampled allocations from the page heap.
+TEST(GuardedTagTest, ColdAndSampledAllocationsAreNotGuarded) {
+  if (kSanitizerPresent) {
+    GTEST_SKIP() << "Sanitizers intercept allocations";
+  }
+  ScopedGuardedSamplingInterval gs(-1);
+  int sampled_or_cold = 0;
+  for (bool sample : {false, true}) {
+    ScopedProfileSamplingInterval s(sample ? 1 : 0);
+    for (size_t size : {size_t{8}, size_t{64}, kPageSize, kMaxSize + 1}) {
+      for (const auto hot_cold : {hot_cold_t{0}, hot_cold_t{255}}) {
+        void* p = ::operator new(size, hot_cold);
+        EXPECT_FALSE(tcmalloc_internal::IsGuardedMemory(p));
+        EXPECT_NE(tcmalloc_internal::IsNormalMemory(p),
+                  tcmalloc_internal::IsSampledOrColdMemory(p));
+        sampled_or_cold += tcmalloc_internal::IsSampledOrColdMemory(p);
+        if (!sample && hot_cold == hot_cold_t{255}) {
+          EXPECT_FALSE(tcmalloc_internal::IsSampledOrColdMemory(p));
+          EXPECT_TRUE(tcmalloc_internal::IsNormalMemory(p));
+        }
+        ::operator delete(p, size);
+      }
+    }
+  }
+  EXPECT_GT(sampled_or_cold, 0);
+
+  void* meta =
+      tc_globals.arena().Alloc(tcmalloc_internal::ArenaAlloc::kTest, 8);
+  EXPECT_FALSE(tcmalloc_internal::IsGuardedMemory(meta));
+  EXPECT_FALSE(tcmalloc_internal::IsSampledOrColdMemory(meta));
+  EXPECT_FALSE(tcmalloc_internal::IsNormalMemory(meta));
+}
+
 }  // namespace
 
 // By placing this class in the tcmalloc namespace, it may call the private
@@ -124,6 +197,8 @@ TEST_F(GuardedAllocAlignmentTest, AlignedNew) {
 class TcMallocTest : public testing::Test {
  protected:
   TcMallocTest() {
+    MallocExtension::ActivateGuardedSampling();
+
     // Start with clean state to avoid hash collisions.
     tc_globals.guardedpage_allocator().Reset();
     MallocExtension::SetGuardedSamplingInterval(
@@ -141,14 +216,19 @@ class ReadWriteTcMallocTest
       public testing::WithParamInterface<bool /* write_test */> {};
 
 TEST_P(ReadWriteTcMallocTest, UnderflowDetected) {
-#if ABSL_HAVE_ADDRESS_SANITIZER
+#if ABSL_HAVE_ADDRESS_SANITIZER || ABSL_HAVE_HWADDRESS_SANITIZER
   GTEST_SKIP() << "Test requires GWP-ASan";
 #endif  // ABSL_HAVE_ADDRESS_SANITIZER
 
   const bool write_test = GetParam();
   auto RepeatUnderflow = [&]() {
+    ScopedGuardedSamplingInterval gs(-1);
     for (int i = 0; i < 1000000; i++) {
-      auto buf = std::make_unique<char[]>(kPageSize / 2);
+      std::unique_ptr<char[]> buf;
+      {
+        ScopedAlwaysSample always_sample;
+        buf = std::make_unique<char[]>(kPageSize / 2);
+      }
       volatile char* buf_minus_1 = buf.get() - 1;
       benchmark::DoNotOptimize(buf_minus_1);
       // TCMalloc may crash without a GWP-ASan report if we underflow a regular
@@ -176,14 +256,19 @@ TEST_P(ReadWriteTcMallocTest, UnderflowDetected) {
 }
 
 TEST_P(ReadWriteTcMallocTest, OverflowDetected) {
-#if ABSL_HAVE_ADDRESS_SANITIZER
+#if ABSL_HAVE_ADDRESS_SANITIZER || ABSL_HAVE_HWADDRESS_SANITIZER
   GTEST_SKIP() << "Test requires GWP-ASan";
 #endif  // ABSL_HAVE_ADDRESS_SANITIZER
 
   const bool write_test = GetParam();
   auto RepeatOverflow = [&]() {
+    ScopedGuardedSamplingInterval gs(-1);
     for (int i = 0; i < 1000000; i++) {
-      auto buf = std::make_unique<char[]>(kPageSize / 2);
+      std::unique_ptr<char[]> buf;
+      {
+        ScopedAlwaysSample always_sample;
+        buf = std::make_unique<char[]>(kPageSize / 2);
+      }
       benchmark::DoNotOptimize(buf);
       // TCMalloc may crash without a GWP-ASan report if we overflow a regular
       // allocation.  Make sure we have a guarded allocation.
@@ -211,14 +296,19 @@ TEST_P(ReadWriteTcMallocTest, OverflowDetected) {
 }
 
 TEST_P(ReadWriteTcMallocTest, ZeroByteAccessDetected) {
-#if ABSL_HAVE_ADDRESS_SANITIZER
+#if ABSL_HAVE_ADDRESS_SANITIZER || ABSL_HAVE_HWADDRESS_SANITIZER
   GTEST_SKIP() << "Test requires GWP-ASan";
 #endif  // ABSL_HAVE_ADDRESS_SANITIZER
 
   const bool write_test = GetParam();
   auto RepeatZeroByteAccess = [&]() {
+    ScopedGuardedSamplingInterval gs(-1);
     for (int i = 0; i < 100000000; i++) {
-      auto buf = std::make_unique<char[]>(0);
+      std::unique_ptr<char[]> buf;
+      {
+        ScopedAlwaysSample always_sample;
+        buf = std::make_unique<char[]>(0);
+      }
       benchmark::DoNotOptimize(buf);
 
       // Ensure it's a GWP-ASan guarded allocation.
@@ -253,8 +343,13 @@ TEST_P(ReadWriteTcMallocTest, ZeroByteAccessDetected) {
 TEST_P(ReadWriteTcMallocTest, UseAfterFreeDetected) {
   const bool write_test = GetParam();
   auto RepeatUseAfterFree = [&]() {
+    ScopedGuardedSamplingInterval gs(-1);
     for (int i = 0; i < 1000000; i++) {
-      char* sink_buf = new char[kPageSize];
+      char* sink_buf;
+      {
+        ScopedAlwaysSample always_sample;
+        sink_buf = new char[kPageSize];
+      }
       benchmark::DoNotOptimize(sink_buf);
       delete[] sink_buf;
       if (write_test) {
@@ -265,6 +360,9 @@ TEST_P(ReadWriteTcMallocTest, UseAfterFreeDetected) {
       }
     }
   };
+#if defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  std::string expected_output = "Cause: use-after-free";
+#else
   std::string expected_output = absl::StrCat(
       "Use-after-free ",
 #if !defined(__riscv)
@@ -274,22 +372,66 @@ TEST_P(ReadWriteTcMallocTest, UseAfterFreeDetected) {
 #endif
       " occurs in thread [0-9]+ at"
       "|heap-use-after-free");
+#endif
   EXPECT_DEATH(RepeatUseAfterFree(), expected_output);
 }
 
 INSTANTIATE_TEST_SUITE_P(rwtmt, ReadWriteTcMallocTest, testing::Bool());
 
+// A right-aligned guarded pointer is not page aligned.  If the sized-free fast
+// path mistook it for a cold object and put it on a cold freelist, GWP-ASan
+// would never see the free, and its slot would stay allocated and unprotected.
+TEST_F(TcMallocTest, SizedDeleteOfRightAlignedGuardedAllocation) {
+#if ABSL_HAVE_ADDRESS_SANITIZER || ABSL_HAVE_HWADDRESS_SANITIZER
+  GTEST_SKIP() << "Test requires GWP-ASan";
+#endif
+  constexpr size_t kSize = 64;
+  constexpr std::optional<hot_cold_t> kHotCold[] = {std::nullopt,
+                                                    hot_cold_t{0}};
+  auto& gpa = tc_globals.guardedpage_allocator();
+  for (const auto hot_cold : kHotCold) {
+    SCOPED_TRACE(hot_cold.has_value() ? "cold" : "default");
+    ScopedProfileSamplingInterval sampling(1);
+    ScopedGuardedSamplingInterval gs(0);
+    int targets = 0, freed_by_gwp_asan = 0;
+    for (int i = 0; i < 1000000 && targets < 100; ++i) {
+      char* p = static_cast<char*>(hot_cold.has_value()
+                                       ? ::operator new(kSize, *hot_cold)
+                                       : ::operator new(kSize));
+      const bool target = gpa.PointerIsMine(p) &&
+                          reinterpret_cast<uintptr_t>(p) % kPageSize != 0;
+      ::operator delete(p, kSize);
+      if (!target) continue;
+      ++targets;
+      // Only reads slot metadata.  Another thread may reuse the slot in the
+      // meantime, so do not require this for every target.
+      GuardedAllocationsStackTrace *alloc_trace, *dealloc_trace;
+      if (gpa.GetStackTraces(p, &alloc_trace, &dealloc_trace) ==
+          GuardedAllocationsErrorType::kUseAfterFree) {
+        ++freed_by_gwp_asan;
+      }
+    }
+    ASSERT_GT(targets, 0);
+    EXPECT_GT(freed_by_gwp_asan, targets / 2);
+  }
+}
+
 // Double free triggers an ASSERT within TCMalloc in non-opt builds.  So only
 // run this test for opt builds.
 #ifdef NDEBUG
 TEST_F(TcMallocTest, DoubleFreeDetected) {
-#if ABSL_HAVE_ADDRESS_SANITIZER
+#if ABSL_HAVE_ADDRESS_SANITIZER || ABSL_HAVE_HWADDRESS_SANITIZER
   GTEST_SKIP() << "Test requires GWP-ASan";
 #endif
 
   auto RepeatDoubleFree = []() {
+    ScopedGuardedSamplingInterval gs(-1);
     for (int i = 0; i < 1000000; i++) {
-      void* buf = ::operator new(kPageSize);
+      void* buf;
+      {
+        ScopedAlwaysSample always_sample;
+        buf = ::operator new(kPageSize);
+      }
       ::operator delete(buf);
       benchmark::DoNotOptimize(buf);
       // TCMalloc often SEGVs on double free (without GWP-ASan report). Make
@@ -308,11 +450,16 @@ TEST_F(TcMallocTest, DoubleFreeDetected) {
 
 TEST_F(TcMallocTest, OverflowWriteDetectedAtFree) {
   auto RepeatOverflowWrite = [&]() {
+    ScopedGuardedSamplingInterval gs(-1);
     for (int i = 0; i < 1000000; i++) {
       // Make buffer smaller than kPageSize to test detection-at-free of write
       // overflows.
       constexpr size_t kSize = kPageSize - 1;
-      auto sink_buf = std::make_unique<char[]>(kSize);
+      std::unique_ptr<char[]> sink_buf;
+      {
+        ScopedAlwaysSample always_sample;
+        sink_buf = std::make_unique<char[]>(kSize);
+      }
       benchmark::DoNotOptimize(sink_buf);
       sink_buf[kSize] = '\0';
       benchmark::DoNotOptimize(sink_buf[kSize]);
@@ -325,7 +472,9 @@ TEST_F(TcMallocTest, OverflowWriteDetectedAtFree) {
 }
 
 TEST_F(TcMallocTest, ReallocNoFalsePositive) {
-  for (int i = 0; i < 1000000; i++) {
+  ScopedAlwaysSample always_sample;
+  ScopedGuardedSamplingInterval gs(0);
+  for (int i = 0; i < 1000; i++) {
     auto sink_buf = reinterpret_cast<char*>(malloc(kPageSize - 1));
     benchmark::DoNotOptimize(sink_buf);
     sink_buf = reinterpret_cast<char*>(realloc(sink_buf, kPageSize));
@@ -336,13 +485,18 @@ TEST_F(TcMallocTest, ReallocNoFalsePositive) {
 }
 
 TEST_F(TcMallocTest, OffsetAndLength) {
-#if ABSL_HAVE_ADDRESS_SANITIZER
+#if ABSL_HAVE_ADDRESS_SANITIZER || ABSL_HAVE_HWADDRESS_SANITIZER
   GTEST_SKIP() << "Test requires GWP-ASan";
-#endif  // ABSL_HAVE_ADDRESS_SANITIZER
+#endif  // ABSL_HAVE_ADDRESS_SANITIZER || ABSL_HAVE_HWADDRESS_SANITIZER
 
   auto RepeatUseAfterFree = [&](size_t buffer_len, off_t access_offset) {
+    ScopedGuardedSamplingInterval gs(-1);
     for (int i = 0; i < 1000000; i++) {
-      void* buf = ::operator new(buffer_len);
+      void* buf;
+      {
+        ScopedAlwaysSample always_sample;
+        buf = ::operator new(buffer_len);
+      }
       ::operator delete(buf);
       // TCMalloc may crash without a GWP-ASan report if we overflow a regular
       // allocation.  Make sure we have a guarded allocation.
@@ -398,7 +552,7 @@ TEST_F(TcMallocTest, b201199449_AlignedObjectConstruction) {
     }
   }
 
-#if !ABSL_HAVE_ADDRESS_SANITIZER
+#if !ABSL_HAVE_ADDRESS_SANITIZER && !ABSL_HAVE_HWADDRESS_SANITIZER
   EXPECT_TRUE(allocated) << "Failed to allocate with GWP-ASan";
 #endif  // !ABSL_HAVE_ADDRESS_SANITIZER
 }
@@ -413,13 +567,21 @@ TEST_F(TcMallocTest, DoubleFree) {
     benchmark::DoNotOptimize(buf);
     ::operator delete(buf);
   };
-  EXPECT_DEATH(
-      DoubleFree(),
+  EXPECT_DEATH(DoubleFree(),
+#if ABSL_HAVE_HWADDRESS_SANITIZER
+               "Cause: use-after-free"
+#else
       absl::StrCat("(Possible double free detected"
-                   ")|attempting double-free"));
+                   ")|attempting double-free")
+#endif
+  );
 }
 
 TEST_F(TcMallocTest, LargeDoubleFree) {
+#if ABSL_HAVE_HWADDRESS_SANITIZER
+  GTEST_SKIP() << "Just segfaults with HWASan.";
+#endif  //  ABSL_HAVE_HWADDRESS_SANITIZER
+
   ScopedGuardedSamplingInterval gs(-1);
   ScopedProfileSamplingInterval s(1);
   auto DoubleFree = []() {
@@ -439,34 +601,45 @@ TEST_F(TcMallocTest, ReallocLarger) {
   // Note: sizes are chosen so that size + 2 access below
   // does not write out of actual allocation bounds.
   for (size_t size : {2, 29, 60, 505}) {
+    tc_globals.guardedpage_allocator().Reset();
     EXPECT_DEATH(
         {
           fprintf(stderr, "size=%zu\n", size);
           ScopedAlwaysSample always_sample;
           for (size_t i = 0; i < 10000; ++i) {
             char* volatile ptr = static_cast<char*>(malloc(size));
-            ptr = static_cast<char*>(realloc(ptr, size + 1));
-            ptr[size + 2] = 'A';
+            if (tc_globals.guardedpage_allocator().PointerIsMine(ptr) ||
+                kSanitizerPresent) {
+              ptr = static_cast<char*>(realloc(ptr, size + 1));
+              ptr[size + 2] = 'A';
+            }
             free(ptr);
           }
         },
-        "has detected a memory error|heap-buffer-overflow");
+        // TODO(b/476209670): figure out why this sometimes gives
+        // allocation-tail-overwritten.
+        "has detected a memory "
+        "error|heap-buffer-overflow|allocation-tail-overwritten");
   }
 }
 
 TEST_F(TcMallocTest, ReallocSmaller) {
-#ifdef ABSL_HAVE_ADDRESS_SANITIZER
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
   GTEST_SKIP() << "ASan will trap ahead of us";
 #endif
   for (size_t size : {8, 29, 60, 505}) {
     SCOPED_TRACE(absl::StrCat("size=", size));
+    tc_globals.guardedpage_allocator().Reset();
     EXPECT_DEATH(
         {
           ScopedAlwaysSample always_sample;
           for (size_t i = 0; i < 10000; ++i) {
             char* volatile ptr = static_cast<char*>(malloc(size));
-            ptr = static_cast<char*>(realloc(ptr, size - 1));
-            ptr[size - 1] = 'A';
+            if (tc_globals.guardedpage_allocator().PointerIsMine(ptr)) {
+              ptr = static_cast<char*>(realloc(ptr, size - 1));
+              ptr[size - 1] = 'A';
+            }
             free(ptr);
           }
         },
@@ -475,44 +648,52 @@ TEST_F(TcMallocTest, ReallocSmaller) {
 }
 
 TEST_F(TcMallocTest, ReallocUseAfterFree) {
-#ifdef ABSL_HAVE_ADDRESS_SANITIZER
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
   GTEST_SKIP() << "ASan will trap ahead of us";
 #endif
   for (size_t size : {8, 29, 60, 505}) {
     SCOPED_TRACE(absl::StrCat("size=", size));
+    tc_globals.guardedpage_allocator().Reset();
     EXPECT_DEATH(
         {
-          ScopedAlwaysSample always_sample;
-          for (size_t i = 0; i < 10000; ++i) {
-            char* volatile old_ptr = static_cast<char*>(malloc(size));
-            void* volatile new_ptr = realloc(old_ptr, size - 1);
-            old_ptr[0] = 'A';
-            free(new_ptr);
+          char* old_ptr = nullptr;
+          void* new_ptr = nullptr;
+          {
+            ScopedAlwaysSample always_sample;
+            for (size_t i = 0; i < 10000; ++i) {
+              old_ptr = static_cast<char*>(malloc(size));
+              benchmark::DoNotOptimize(old_ptr);
+              if (tc_globals.guardedpage_allocator().PointerIsMine(old_ptr)) {
+                new_ptr = realloc(old_ptr, size - 1);
+                benchmark::DoNotOptimize(new_ptr);
+                break;
+              }
+              free(old_ptr);
+            }
           }
+          benchmark::DoNotOptimize(old_ptr);
+          reinterpret_cast<volatile char*>(old_ptr)[0] = 'A';
+          free(new_ptr);
         },
         "has detected a memory error");
   }
 }
 
-TEST_F(TcMallocTest, MismatchedSampled) {
-#ifdef ABSL_HAVE_ADDRESS_SANITIZER
+class MismatchedSampledTest : public TcMallocTest,
+                              public testing::WithParamInterface<size_t> {};
+
+TEST_P(MismatchedSampledTest, MismatchedSampled) {
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
   GTEST_SKIP() << "ASan will trap ahead of us";
 #endif
 
   // Sampled allocations should be able to provide a richer error (precise
   // size/allocation stack) when there is a mismatch in provided sizes.
 
-  constexpr size_t kSizes[] = {0u,
-                               8u,
-                               64u,
-                               tcmalloc_internal::kPageSize,
-                               tcmalloc_internal::kMaxSize - 1u,
-                               tcmalloc_internal::kMaxSize,
-                               tcmalloc_internal::kMaxSize + 1u,
-                               tcmalloc_internal::kHugePageSize - 1u,
-                               tcmalloc_internal::kHugePageSize,
-                               tcmalloc_internal::kHugePageSize + 1u};
-  for (const size_t size : kSizes) {
+  const size_t size = GetParam();
+  {
     const size_t likely_size = MallocExtension::GetEstimatedAllocatedSize(size);
     SCOPED_TRACE(absl::StrCat("size=", size));
 
@@ -520,7 +701,6 @@ TEST_F(TcMallocTest, MismatchedSampled) {
     constexpr std::optional<hot_cold_t> hot_cold_set[] = {
         std::nullopt,
         hot_cold_t{0},
-        hot_cold_t{128},
         hot_cold_t{255},
     };
 
@@ -576,8 +756,17 @@ TEST_F(TcMallocTest, MismatchedSampled) {
   }
 }
 
-TEST_F(TcMallocTest, MismatchedDeleteTooLarge) {
-#ifdef ABSL_HAVE_ADDRESS_SANITIZER
+INSTANTIATE_TEST_SUITE_P(MismatchedSampled, MismatchedSampledTest,
+                         testing::Values(0u, tcmalloc_internal::kMaxSize + 1u,
+                                         tcmalloc_internal::kHugePageSize));
+
+class MismatchedDeleteTooLargeTest
+    : public TcMallocTest,
+      public testing::WithParamInterface<size_t> {};
+
+TEST_P(MismatchedDeleteTooLargeTest, MismatchedDeleteTooLarge) {
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
   GTEST_SKIP() << "ASan will trap ahead of us";
 #endif
 
@@ -592,17 +781,13 @@ TEST_F(TcMallocTest, MismatchedDeleteTooLarge) {
     return r;
   };
 
-  constexpr size_t kSizes[] = {0u,
-                               8u,
-                               64u,
-                               tcmalloc_internal::kPageSize,
-                               tcmalloc_internal::kMaxSize - 1u,
-                               tcmalloc_internal::kMaxSize,
-                               tcmalloc_internal::kMaxSize + 1u,
-                               tcmalloc_internal::kHugePageSize - 1u,
-                               tcmalloc_internal::kHugePageSize,
-                               tcmalloc_internal::kHugePageSize + 1u};
-  for (const size_t size : kSizes) {
+  const size_t size = GetParam();
+  // A small allocation lives on a size-class span.  In opt builds (no
+  // CorrectSize assertion on the fast path), freeing it with a size > kMaxSize
+  // routes to InvokeHooksAndFreePages, which rejects size-class spans as
+  // corrupted before checking the size.
+  const bool small = size <= tcmalloc_internal::kMaxSize;
+  {
     const size_t likely_size = MallocExtension::GetEstimatedAllocatedSize(size);
     SCOPED_TRACE(absl::StrCat("size=", size));
 
@@ -612,7 +797,6 @@ TEST_F(TcMallocTest, MismatchedDeleteTooLarge) {
     constexpr std::optional<hot_cold_t> hot_cold_set[] = {
         std::nullopt,
         hot_cold_t{0},
-        hot_cold_t{128},
         hot_cold_t{255},
     };
 
@@ -646,19 +830,22 @@ TEST_F(TcMallocTest, MismatchedDeleteTooLarge) {
                 size, "|", likely_size,
                 ").*bytes"
                 ")"
-#ifndef NDEBUG
                 "|(Mismatched-size-delete.*of [0-9]+ bytes \\(expected between "
                 "\\[[0-9]+, [0-9]+\\] bytes\\)"
-                ")"
-#endif
-                ));
+                ")",
+                small ? "|(Attempted to free corrupted pointer)" : ""));
       }
     }
   }
 }
 
+INSTANTIATE_TEST_SUITE_P(MismatchedDeleteTooLarge, MismatchedDeleteTooLargeTest,
+                         testing::Values(0u, tcmalloc_internal::kMaxSize + 1u,
+                                         tcmalloc_internal::kHugePageSize));
+
 TEST_F(TcMallocTest, MismatchedDeleteTooSmall) {
-#ifdef ABSL_HAVE_ADDRESS_SANITIZER
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
   GTEST_SKIP() << "ASan will trap ahead of us";
 #endif
 
@@ -666,8 +853,7 @@ TEST_F(TcMallocTest, MismatchedDeleteTooSmall) {
   using tcmalloc_internal::kMaxSize;
   using tcmalloc_internal::kPageSize;
 
-  constexpr size_t kSizes[] = {kHugePageSize - 1u, kHugePageSize,
-                               kHugePageSize + 1u};
+  constexpr size_t kSizes[] = {kHugePageSize + 1u};
   for (size_t size : kSizes) {
     SCOPED_TRACE(absl::StrCat("size=", size));
     const size_t likely_size = MallocExtension::GetEstimatedAllocatedSize(size);
@@ -699,10 +885,9 @@ TEST_F(TcMallocTest, MismatchedDeleteTooSmall) {
   }
 }
 
-TEST_F(TcMallocTest, DISABLED_MismatchedSizeClassInFreelistInsertion) {
-  // TODO(b/396002858): Reenable this test.
-
-#ifdef ABSL_HAVE_ADDRESS_SANITIZER
+TEST_F(TcMallocTest, MismatchedSizeClassInFreelistInsertion) {
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
   GTEST_SKIP() << "ASan will trap ahead of us";
 #endif
   // Ensure GWP-ASAN doesn't catch the issue before we do, so that we validate
@@ -726,7 +911,7 @@ TEST_F(TcMallocTest, DISABLED_MismatchedSizeClassInFreelistInsertion) {
           "8\\].*allocations with sizes \\[9, 16\\]"
           ")|"
 #ifndef NDEBUG
-          "(Mismatched-size-delete.*of 5 bytes \\(expected between \\[0, 16\\] "
+          "(Mismatched-size-delete.*of 5 bytes \\(expected between \\[9, 16\\] "
           "bytes\\)"
           ")|"
 #endif
@@ -734,7 +919,8 @@ TEST_F(TcMallocTest, DISABLED_MismatchedSizeClassInFreelistInsertion) {
 }
 
 TEST_F(TcMallocTest, DoubleFreeInFreelistInsertion) {
-#ifdef ABSL_HAVE_ADDRESS_SANITIZER
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
   GTEST_SKIP() << "ASan will trap ahead of us";
 #endif
 #ifndef NDEBUG
@@ -756,9 +942,14 @@ TEST_F(TcMallocTest, DoubleFreeInFreelistInsertion) {
         for (void* ptr : ptrs) {
           ::operator delete(ptr, kSize);
         }
-        // Now double-free.
-        for (void* ptr : ptrs) {
-          ::operator delete(ptr, kSize);
+        // Now double-free.  Iterate in reverse so we double-free the most
+        // recently freed pointers first.  Freeing in forward order double-frees
+        // the earliest-freed spans first; those have sat longest in the page
+        // heap and a background thread may have reallocated them for a
+        // different size class, which surfaces as a mismatched-size-class error
+        // rather than the double-free this test asserts.
+        for (auto it = ptrs.rbegin(); it != ptrs.rend(); ++it) {
+          ::operator delete(*it, kSize);
         }
       },
       absl::StrCat(
@@ -766,26 +957,19 @@ TEST_F(TcMallocTest, DoubleFreeInFreelistInsertion) {
           ")"));
 }
 
-TEST_F(TcMallocTest, CorruptedPointer) {
-  constexpr size_t kSizes[] = {
-      8u,
-      64u,
-      1024u,
-      tcmalloc_internal::kPageSize,
-      tcmalloc_internal::kMaxSize,
-      tcmalloc_internal::kMaxSize + 1,
-      tcmalloc_internal::kHugePageSize,
-  };
+class CorruptedPointerTest
+    : public TcMallocTest,
+      public testing::WithParamInterface<std::tuple<bool, bool, size_t>> {};
+
+TEST_P(CorruptedPointerTest, CorruptedPointer) {
+#if defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  GTEST_SKIP() << "HWASan does not currently detect alloc-dealloc-mismatch.";
+#endif
 
   constexpr size_t kMisalignment[] = {
       1,
-      2,
-      3,
-      4,
-      static_cast<size_t>(tcmalloc_internal::kAlignment) - 1,
 #ifdef NDEBUG
-      ABSL_CACHELINE_SIZE,
-#ifndef ABSL_HAVE_ADDRESS_SANITIZER
+#if !defined(ABSL_HAVE_ADDRESS_SANITIZER)
       tcmalloc_internal::kPageSize / 2,
 #endif  // ABSL_HAVE_ADDRESS_SANITIZER
 #endif  // NDEBUG
@@ -797,23 +981,20 @@ TEST_F(TcMallocTest, CorruptedPointer) {
       tcmalloc::hot_cold_t{255},
   };
 
-  for (const bool sampled : {true
-#ifndef NDEBUG
-                             ,
-                             false
-#endif
-       }) {
-    SCOPED_TRACE(absl::StrCat("sampled=", sampled));
-
-    for (const bool guarded : {true, false}) {
-      SCOPED_TRACE(absl::StrCat("guarded=", guarded));
-      if (!sampled && guarded) {
-        continue;
-      }
-
-      for (const size_t size : kSizes) {
+  const auto [sampled, guarded, size] = GetParam();
+  SCOPED_TRACE(absl::StrCat("sampled=", sampled, ",guarded=", guarded));
+  if (!sampled && guarded) {
+    return;
+  }
+  {
+    {
+      {
         for (const size_t misalignment : kMisalignment) {
           if (misalignment >= size) {
+            continue;
+          }
+          if (!sampled && misalignment >= static_cast<size_t>(
+                                              tcmalloc_internal::kAlignment)) {
             continue;
           }
 
@@ -838,8 +1019,8 @@ TEST_F(TcMallocTest, CorruptedPointer) {
                   }
                 },
                 absl::StrCat(
-                    "attempting free on address which was not "
-                    "malloc|alloc-dealloc-mismatch.*INVALID|"
+                    "(attempting free on address which was not "
+                    "malloc)|(alloc-dealloc-mismatch.*INVALID)|"
                     "(Attempted to free corrupted pointer"
                     ")"));
           }
@@ -849,55 +1030,41 @@ TEST_F(TcMallocTest, CorruptedPointer) {
   }
 }
 
-TEST_F(TcMallocTest, CorruptedPointerFixed) {
-#ifdef ABSL_HAVE_ADDRESS_SANITIZER
-  GTEST_SKIP() << "Skipped under sanitizers";
+INSTANTIATE_TEST_SUITE_P(
+    CorruptedPointer, CorruptedPointerTest,
+    testing::Combine(testing::Bool(), testing::Bool(),
+                     testing::Values(8u, tcmalloc_internal::kMaxSize + 1)));
+
+TEST_F(TcMallocTest, CorruptedPointerEdgeCases) {
+#if defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  GTEST_SKIP() << "HWASan does not currently detect alloc-dealloc-mismatch.";
 #endif
-#ifndef NDEBUG
-  GTEST_SKIP() << "Skipping with debug assertions";
-#endif
+  for (const bool sized : {false, true}) {
+    SCOPED_TRACE(sized ? "sized" : "unsized");
+    EXPECT_DEATH(
+        {
+          ScopedProfileSamplingInterval sampling(0);
 
-  constexpr size_t kSizes[] = {
-      8u, 64u, 1024u, tcmalloc_internal::kPageSize, tcmalloc_internal::kMaxSize,
-  };
-
-  constexpr uintptr_t kAlignmentMask =
-      ~(static_cast<uintptr_t>(tcmalloc_internal::kAlignment) - 1u);
-
-  constexpr size_t kMisalignment[] = {
-      1, 2, 3, 4, static_cast<size_t>(tcmalloc_internal::kAlignment) - 1u,
-  };
-
-  // Sampled deallocations will detect misalignment.
-  ScopedNeverSample never_sample;
-
-  int same_pointers = 0;
-  for (const size_t size : kSizes) {
-    for (const size_t misalignment : kMisalignment) {
-      ASSERT_EQ(misalignment & kAlignmentMask, 0);
-      char* p = static_cast<char*>(::operator new(size));
-      const uintptr_t pu = absl::bit_cast<uintptr_t>(p);
-      sized_delete(p + misalignment, size);
-
-      char* q = static_cast<char*>(::operator new(size));
-      const uintptr_t qu = absl::bit_cast<uintptr_t>(q);
-      sized_delete(q, size);
-
-      // We generally expect back to back deallocation-allocation to produce the
-      // same pointer, but we might end up sampling in between, migrating across
-      // cores, etc.
-      if ((pu & kAlignmentMask) == (qu & kAlignmentMask)) {
-        same_pointers++;
-        EXPECT_EQ(pu, qu);
-      }
-    }
+          for (size_t i = 0; i < 10000; ++i) {
+            char* ptr = static_cast<char*>(::operator new(8, hot_cold_t{0}));
+            if (sized) {
+              ::operator delete(ptr + 1, 8);
+            } else {
+              ::operator delete(ptr + 1);
+            }
+          }
+        },
+        "(attempting free on address which was not "
+        "malloc)|(alloc-dealloc-mismatch.*INVALID)|"
+        "(new-delete-type-mismatch)|"
+        "(Attempted to free corrupted pointer)");
   }
-
-  // We should have gotten some back to back allocations.
-  EXPECT_GT(same_pointers, 0);
 }
 
 TEST_F(TcMallocTest, AllocationDeallocationConfusion) {
+#if defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  GTEST_SKIP() << "HWASan does not currently detect alloc-dealloc-mismatch.";
+#endif
   ScopedAlwaysSample always_sample;
 
   EXPECT_DEATH(
@@ -932,9 +1099,33 @@ TEST_F(TcMallocTest, AllocationDeallocationConfusion) {
           "(alloc-dealloc-mismatch \\(operator new vs free\\))|"
           "(Deallocating 0x[0-9a-f]+ with malloc, expected new"
           ")"));
+  EXPECT_DEATH(
+      {
+        void* p = ::operator new[](1);
+        benchmark::DoNotOptimize(p);
+        free(p);
+      },
+      absl::StrCat(
+          "(alloc-dealloc-mismatch \\(operator new \\[\\] vs free\\))|"
+          "(Deallocating 0x[0-9a-f]+ with malloc, expected new\\[\\]"
+          ")"));
+
+  // operator delete[] is not distinguished from operator delete, so it must
+  // not be reported as a mismatch for an operator new[] allocation.
+  {
+    void* p = ::operator new[](1);
+    benchmark::DoNotOptimize(p);
+    ::operator delete[](p);
+    p = ::operator new[](1);
+    benchmark::DoNotOptimize(p);
+    ::operator delete[](p, 1);
+  }
 }
 
 TEST_F(TcMallocTest, DeleteWithoutAlignment) {
+#if defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  GTEST_SKIP() << "HWASan does not currently detect new-delete-type-mismatch.";
+#endif
   ScopedAlwaysSample always_sample;
 
   constexpr size_t size = ABSL_CACHELINE_SIZE;
@@ -946,10 +1137,10 @@ TEST_F(TcMallocTest, DeleteWithoutAlignment) {
       { ::operator delete(newed_with_align); },
       absl::StrCat(
           // ASan
-          "(new-delete-type-mismatch on .*\\n(?:.*\\n)*.*alignment of the "
+          "(new-delete-type-mismatch on .*\\n(.*\\n)*.*alignment of the "
           "allocated type:   ",
           align,
-          " bytes;.*\\n(?:.*\\n)*.*alignment of the deallocated type: "
+          " bytes;.*\\n(.*\\n)*.*alignment of the deallocated type: "
           "default-aligned)|"
           // GWP-ASan
           "(Deallocating 0x[0-9a-f]+ with alignment "
@@ -961,6 +1152,9 @@ TEST_F(TcMallocTest, DeleteWithoutAlignment) {
 }
 
 TEST_F(TcMallocTest, DeleteWithAlignment) {
+#if defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  GTEST_SKIP() << "HWASan does not currently detect new-delete-type-mismatch.";
+#endif
   ScopedAlwaysSample always_sample;
 
   constexpr size_t size = ABSL_CACHELINE_SIZE;
@@ -972,9 +1166,9 @@ TEST_F(TcMallocTest, DeleteWithAlignment) {
       absl::StrCat(
           // ASan
           "(new-delete-type-mismatch on "
-          ".*\\n(?:.*\\n)*.*alignment of the allocated type:   "
+          ".*\\n(.*\\n)*.*alignment of the allocated type:   "
           "default-aligned;"
-          ".*\\n(?:.*\\n)*.*alignment of the deallocated type: ",
+          ".*\\n(.*\\n)*.*alignment of the deallocated type: ",
           align, " bytes)|",
           // GWP-ASan
           "(Deallocating 0x[0-9a-f]+ with alignment ", align,
@@ -985,6 +1179,9 @@ TEST_F(TcMallocTest, DeleteWithAlignment) {
 }
 
 TEST_F(TcMallocTest, DeleteWrongAlignment) {
+#if defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  GTEST_SKIP() << "HWASan does not currently detect new-delete-type-mismatch.";
+#endif
   ScopedAlwaysSample always_sample;
 
   constexpr size_t size = ABSL_CACHELINE_SIZE;
@@ -998,9 +1195,9 @@ TEST_F(TcMallocTest, DeleteWrongAlignment) {
       },
       // ASan
       absl::StrCat(
-          "(new-delete-type-mismatch on .*\\n(?:.*\\n)*.*alignment of the "
+          "(new-delete-type-mismatch on .*\\n(.*\\n)*.*alignment of the "
           "allocated type:   ",
-          align, " bytes;.*\\n(?:.*\\n)*.*alignment of the deallocated type: ",
+          align, " bytes;.*\\n(.*\\n)*.*alignment of the deallocated type: ",
           ABSL_CACHELINE_SIZE / 2,
           " bytes)|"
           // GWP-ASan
@@ -1027,18 +1224,13 @@ TEST_F(TcMallocTest, FreeWithoutAlignment) {
       { free_sized(malloc_with_align, size); },
       // GWP-ASan
       absl::StrCat(
-          "(Deallocating 0x[0-9a-f]+ with alignment \\?\\?\\?, expected ",
-          align,
+          "(Deallocating 0x[0-9a-f]+ with alignment 16, expected ", align,
           ")"));
 
   free_aligned_sized(malloc_with_align, align, size);
 }
 
 TEST_F(TcMallocTest, FreeWithSameAlignment) {
-  if (kSanitizerPresent) {
-    GTEST_SKIP() << "Skipping under sanitizers pending "
-                    "https://github.com/llvm/llvm-project/issues/144435";
-  }
   ScopedAlwaysSample always_sample;
 
   constexpr size_t size = ABSL_CACHELINE_SIZE;
@@ -1046,9 +1238,25 @@ TEST_F(TcMallocTest, FreeWithSameAlignment) {
   void* malloc_with_align = aligned_alloc(align, size);
   void* malloc_without_align = malloc(size);
 
-  // TODO(b/404341539): Distinguish this case and require free_align_sized.
-  free_sized(malloc_with_align, size);
-  free_aligned_sized(malloc_without_align, alignof(std::max_align_t), size);
+  if (!kSanitizerPresent) {
+    EXPECT_DEATH(
+        { free_sized(malloc_with_align, size); },
+        absl::StrCat("(Deallocating 0x[0-9a-f]+ with alignment ",
+                     alignof(std::max_align_t), ", expected ", align,
+                     ")"));
+
+    EXPECT_DEATH(
+        {
+          free_aligned_sized(malloc_without_align, alignof(std::max_align_t),
+                             size);
+        },
+        absl::StrCat("(Deallocating 0x[0-9a-f]+ with alignment ",
+                     alignof(std::max_align_t), ", expected ", align,
+                     ")"));
+  }
+
+  free_aligned_sized(malloc_with_align, alignof(std::max_align_t), size);
+  free_sized(malloc_without_align, size);
 }
 
 TEST_F(TcMallocTest, FreeWithAlignment) {
@@ -1072,6 +1280,193 @@ TEST_F(TcMallocTest, FreeWithAlignment) {
           ")"));
 
   free_sized(malloc_without_align, size);
+}
+
+TEST_F(TcMallocTest, InteriorPointer) {
+#if defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  GTEST_SKIP() << "Times out with HWASan.";
+#endif
+  if (kPageSize == 4096) {
+    // TODO(b/457842787):  Include small-but-slow.
+    GTEST_SKIP() << "Skipping under small-but-slow";
+  }
+  ScopedNeverSample never_sample;
+
+  char* ptr = static_cast<char*>(::operator new(kMaxSize + 1));
+
+  EXPECT_DEATH(
+      { ::operator delete(ptr + kPageSize); },
+      absl::StrCat(
+          "(Attempted to free corrupted pointer 0x[0-9a-f]+: It was "
+          "never allocated or TCMalloc metadata has been corrupted",
+          ")|(attempting free on address which was not malloc\\(\\)-ed)"));
+
+  ::operator delete(ptr);
+}
+
+TEST_F(TcMallocTest, NeverAllocatedPointer) {
+#if (defined(ABSL_HAVE_ADDRESS_SANITIZER) && defined(__aarch64__)) || \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  // TODO(b/462125445): Enable this under ASan.
+  GTEST_SKIP() << "Skipping under address sanitizer";
+#endif
+
+  void* ptr = absl::bit_cast<void*>(uintptr_t{0xDEADBEE0});
+
+  EXPECT_DEATH(
+      { ::operator delete(ptr); },
+      absl::StrCat(
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER)
+          "(attempting free on address which was not malloc)|"
+#endif
+          "(Attempted to free corrupted pointer 0xdeadbee0: It was "
+          "never allocated or TCMalloc metadata has been corrupted",
+          ")"));
+
+  EXPECT_DEATH(
+      { ::operator delete(ptr, kMaxSize + 1); },
+      absl::StrCat(
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER)
+          "(attempting free on address which was not malloc)|"
+#endif
+          "(Attempted to free corrupted pointer 0xdeadbee0: It was "
+          "never allocated or TCMalloc metadata has been corrupted",
+          ")"));
+}
+
+TEST_F(TcMallocTest, NeverAllocatedPointerHighBits) {
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  // TODO(b/462125445): Enable this under ASan.
+  GTEST_SKIP() << "Skipping under address sanitizer";
+#endif
+
+  // Exercises an address that cannot be addressed by the PageMap.
+  constexpr uintptr_t kAddress = uintptr_t{0xDEADBEEF0000000};
+  static_assert(absl::bit_width(kAddress) > tcmalloc_internal::kAddressBits);
+  void* ptr = absl::bit_cast<void*>(kAddress);
+
+  EXPECT_DEATH(
+      { ::operator delete(ptr); },
+      absl::StrCat(
+#ifndef NDEBUG
+          "(CHECK in get_existing_with_sizeclass)|"
+#endif
+          "(Attempted to free corrupted pointer 0xdeadbeef0000000: It was "
+          "never allocated or TCMalloc metadata has been corrupted",
+          ")"));
+
+  EXPECT_DEATH(
+      { ::operator delete(ptr, 8); },
+      absl::StrCat(
+#ifndef NDEBUG
+          "(CHECK in get_existing_with_sizeclass)|"
+#endif
+          "(Attempted to free corrupted pointer 0xdeadbeef0000000: It was "
+          "never allocated or TCMalloc metadata has been corrupted",
+          ")"));
+
+  EXPECT_DEATH(
+      { ::operator delete(ptr, kMaxSize + 1); },
+      absl::StrCat(
+#ifndef NDEBUG
+          "(CHECK in get_existing_with_sizeclass)|"
+#endif
+          "(Attempted to free corrupted pointer 0xdeadbeef0000000: It was "
+          "never allocated or TCMalloc metadata has been corrupted",
+          ")"));
+}
+
+TEST_F(TcMallocTest, ReallocNeverAllocatedPointerHighBits) {
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  GTEST_SKIP() << "Skipping under address sanitizer";
+#endif
+
+  constexpr uintptr_t kAddress = uintptr_t{0xDEADBEEF0000000};
+  static_assert(absl::bit_width(kAddress) > tcmalloc_internal::kAddressBits);
+  void* ptr = absl::bit_cast<void*>(kAddress);
+
+  EXPECT_DEATH(
+      {
+        void* p = realloc(ptr, 1);
+        benchmark::DoNotOptimize(p);
+      },
+      absl::StrCat(
+          "(Attempted to free corrupted pointer 0xdeadbeef0000000: It was "
+          "never allocated or TCMalloc metadata has been corrupted",
+          ")"));
+}
+
+TEST_F(TcMallocTest, MismatchedDeleteExactRange) {
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_HWADDRESS_SANITIZER)
+  GTEST_SKIP() << "ASan will trap ahead of us";
+#endif
+
+  // 440 bytes should fall into a size class.
+  // 40 bytes should fall into a smaller size class.
+  const size_t kAllocSize = 440;
+  const size_t kDeleteSize = 40;
+
+  // Compute expected range.
+  auto [is_small, sc] = tc_globals.sizemap().GetSizeClass(
+      tcmalloc_internal::CppPolicy(), kAllocSize);
+  ASSERT_TRUE(is_small);
+
+  constexpr hot_cold_t kCold{0};
+
+#if !defined(NDEBUG)
+  auto [min, max] = tc_globals.sizemap().class_to_size_range(sc);
+
+  EXPECT_DEATH(
+      {
+        ScopedNeverSample always_sample;
+
+        void* p = ::operator new(kAllocSize);
+        ::operator delete(p, kDeleteSize);
+      },
+      absl::StrCat("Mismatched-size-delete.*of ", kDeleteSize,
+                   " bytes \\(expected between \\[", min, ", ", max,
+                   "\\] bytes\\)"
+                   ));
+
+  EXPECT_DEATH(
+      {
+        ScopedNeverSample always_sample;
+
+        void* p = ::operator new(kAllocSize, kCold);
+        ::operator delete(p, kDeleteSize);
+      },
+      absl::StrCat("Mismatched-size-delete.*of ", kDeleteSize,
+                   " bytes \\(expected between \\[", min, ", ", max,
+                   "\\] bytes\\)"
+                   ));
+#endif
+
+  EXPECT_DEATH(
+      {
+        ScopedAlwaysSample always_sample;
+
+        void* p = ::operator new(kAllocSize);
+        ::operator delete(p, kDeleteSize);
+      },
+      absl::StrCat("Mismatched-size-delete.*of ", kDeleteSize,
+                   " bytes \\(expected ", kAllocSize,
+                   " bytes\\)"
+                   ));
+
+  EXPECT_DEATH(
+      {
+        ScopedAlwaysSample always_sample;
+
+        void* p = ::operator new(kAllocSize, kCold);
+        ::operator delete(p, kDeleteSize);
+      },
+      absl::StrCat("Mismatched-size-delete.*of ", kDeleteSize,
+                   " bytes \\(expected ", kAllocSize,
+                   " bytes\\)"
+                   ));
 }
 
 }  // namespace

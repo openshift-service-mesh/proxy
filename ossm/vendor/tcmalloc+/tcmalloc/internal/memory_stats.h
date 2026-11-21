@@ -15,8 +15,13 @@
 #ifndef TCMALLOC_INTERNAL_MEMORY_STATS_H_
 #define TCMALLOC_INTERNAL_MEMORY_STATS_H_
 
-#include <stdint.h>
+#include <sys/types.h>
 
+#include <cstddef>
+#include <cstdint>
+
+#include "absl/base/macros.h"
+#include "absl/functional/function_ref.h"
 #include "tcmalloc/internal/config.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
@@ -24,15 +29,29 @@ namespace tcmalloc {
 namespace tcmalloc_internal {
 
 struct MemoryStats {
-  int64_t vss;
-  int64_t rss;
-  int64_t shared;
-  int64_t code;
-  int64_t data;
+  // We expose kBufferSize used by GetMemoryStats to facilitate fuzzing.
+  static constexpr size_t kBufferSize = 1024;
+
+  int64_t vss = 0;
+  int64_t rss = 0;
+  int64_t shared = 0;
+  int64_t code = 0;
+  int64_t data = 0;
+  int64_t vmpte = 0;
 };
 
 // Memory stats of a process
-bool GetMemoryStats(MemoryStats* stats);
+[[nodiscard]] bool GetMemoryStats(MemoryStats& stats);
+
+ABSL_DEPRECATE_AND_INLINE()
+[[nodiscard]] inline bool GetMemoryStats(MemoryStats* stats) {
+  return GetMemoryStats(*stats);
+}
+
+// For testing
+[[nodiscard]] bool GetMemoryStatsFromStatus(
+    MemoryStats& stats,
+    absl::FunctionRef<ssize_t(char* buf, size_t count)> read);
 
 }  // namespace tcmalloc_internal
 }  // namespace tcmalloc

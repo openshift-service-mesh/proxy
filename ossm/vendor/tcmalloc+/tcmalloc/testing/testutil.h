@@ -15,6 +15,7 @@
 #ifndef TCMALLOC_TESTING_TESTUTIL_H_
 #define TCMALLOC_TESTING_TESTUTIL_H_
 
+#include <setjmp.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -22,12 +23,16 @@
 #include <cstdint>
 #include <new>
 #include <string>
+#include <type_traits>
+#include <utility>
 
 #include "benchmark/benchmark.h"
 #include "absl/base/attributes.h"
+#include "absl/strings/match.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/parameter_accessors.h"
 #include "tcmalloc/internal/percpu.h"
 #include "tcmalloc/malloc_extension.h"
 
@@ -36,7 +41,7 @@
 // limiting the address-space size we get sufficient coverage without blowing
 // out job limits.
 void SetTestResourceLimit(size_t limit);
-size_t GetTestResourceLimit();
+[[nodiscard]] size_t GetTestResourceLimit();
 
 namespace tcmalloc {
 
@@ -79,9 +84,9 @@ inline void sized_array_aligned_delete(void* ptr, size_t size,
 }
 
 // Get the TCMalloc stats in textproto format.
-std::string GetStatsInPbTxt();
-extern "C" ABSL_ATTRIBUTE_WEAK int MallocExtension_Internal_GetStatsInPbtxt(
-    char* buffer, int buffer_length);
+[[nodiscard]] std::string GetStatsInPbTxt();
+extern "C" [[nodiscard]] ABSL_ATTRIBUTE_WEAK int
+MallocExtension_Internal_GetStatsInPbtxt(char* buffer, int buffer_length);
 
 class ScopedProfileSamplingInterval {
  public:
@@ -91,18 +96,12 @@ class ScopedProfileSamplingInterval {
     // Reset the per-thread sampler.  It may have a very large gap if sampling
     // had been disabled.
     void* ptr = ::operator new(256 * 1024 * 1024);
-    // TODO(b/183453911): Remove workaround for GCC 10.x deleting operator new,
-    // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=94295.
-    benchmark::DoNotOptimize(ptr);
     ::operator delete(ptr);
   }
 
   ~ScopedProfileSamplingInterval() {
     MallocExtension::SetProfileSamplingInterval(previous_);
     void* ptr = ::operator new(256 * 1024 * 1024);
-    // TODO(b/183453911): Remove workaround for GCC 10.x deleting operator new,
-    // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=94295.
-    benchmark::DoNotOptimize(ptr);
     ::operator delete(ptr);
   }
 
@@ -110,72 +109,64 @@ class ScopedProfileSamplingInterval {
   int64_t previous_;
 };
 
-// Sets custom background thread actions enable/disable when in scope.
-class ScopedBackgroundProcessActionsEnabled {
+// Saves the current value of a parameter on construction, sets it to a new
+// value, and restores the previous value on destruction.
+template <auto Getter, auto Setter>
+class ScopedParameter {
  public:
-  explicit ScopedBackgroundProcessActionsEnabled(bool value)
-      : previous_(MallocExtension::GetBackgroundProcessActionsEnabled()) {
-    MallocExtension::SetBackgroundProcessActionsEnabled(value);
-    if (!value) {
-      // If the thread is doing something at the moment, let it finish.
-      // This is unreliable, but simple. The thread sleeps for 1 sec,
-      // so we sleep for 5.
-      absl::SleepFor(absl::Seconds(5));
-    }
+  using ValueType = decltype(Getter());
+
+  explicit ScopedParameter(ValueType value) : previous_(Getter()) {
+    Setter(value);
   }
 
-  ~ScopedBackgroundProcessActionsEnabled() {
-    MallocExtension::SetBackgroundProcessActionsEnabled(previous_);
-  }
+  ~ScopedParameter() { Setter(previous_); }
+
+  ScopedParameter(const ScopedParameter&) = delete;
+  ScopedParameter& operator=(const ScopedParameter&) = delete;
 
  private:
-  bool previous_;
+  ValueType previous_;
 };
+
+// Sets custom background thread actions enable/disable when in scope.
+using ScopedBackgroundProcessActionsEnabled =
+    ScopedParameter<MallocExtension::GetBackgroundProcessActionsEnabled,
+                    MallocExtension::SetBackgroundProcessActionsEnabled>;
+
+// Sets a custom background release rate when in scope.
+using ScopedBackgroundReleaseRate =
+    ScopedParameter<MallocExtension::GetBackgroundReleaseRate,
+                    MallocExtension::SetBackgroundReleaseRate>;
 
 // Sets a custom background thread process sleep interval when in scope.
-class ScopedBackgroundProcessSleepInterval {
- public:
-  explicit ScopedBackgroundProcessSleepInterval(absl::Duration limit)
-      : previous_(MallocExtension::GetBackgroundProcessSleepInterval()) {
-    MallocExtension::SetBackgroundProcessSleepInterval(limit);
-  }
+using ScopedBackgroundProcessSleepInterval =
+    ScopedParameter<MallocExtension::GetBackgroundProcessSleepInterval,
+                    MallocExtension::SetBackgroundProcessSleepInterval>;
 
-  ~ScopedBackgroundProcessSleepInterval() {
-    MallocExtension::SetBackgroundProcessSleepInterval(previous_);
-  }
+using ScopedSkipSubreleaseShortInterval =
+    ScopedParameter<MallocExtension::GetSkipSubreleaseShortInterval,
+                    MallocExtension::SetSkipSubreleaseShortInterval>;
 
- private:
-  absl::Duration previous_;
-};
+using ScopedSkipSubreleaseLongInterval =
+    ScopedParameter<MallocExtension::GetSkipSubreleaseLongInterval,
+                    MallocExtension::SetSkipSubreleaseLongInterval>;
 
 // Sets a custom resource limit when in scope.
-class ScopedResourceLimit {
- public:
-  explicit ScopedResourceLimit(size_t limit)
-      : previous_(GetTestResourceLimit()) {
-    SetTestResourceLimit(limit);
-  }
+using ScopedResourceLimit =
+    ScopedParameter<GetTestResourceLimit, SetTestResourceLimit>;
 
-  ~ScopedResourceLimit() { SetTestResourceLimit(previous_); }
+using ScopedGuardedSamplingInterval =
+    ScopedParameter<MallocExtension::GetGuardedSamplingInterval,
+                    MallocExtension::SetGuardedSamplingInterval>;
 
- private:
-  size_t previous_;
-};
+using ScopedMaxPerCpuCacheSize =
+    ScopedParameter<MallocExtension::GetMaxPerCpuCacheSize,
+                    MallocExtension::SetMaxPerCpuCacheSize>;
 
-class ScopedGuardedSamplingInterval {
- public:
-  explicit ScopedGuardedSamplingInterval(int64_t temporary_value)
-      : previous_(MallocExtension::GetGuardedSamplingInterval()) {
-    MallocExtension::SetGuardedSamplingInterval(temporary_value);
-  }
-
-  ~ScopedGuardedSamplingInterval() {
-    MallocExtension::SetGuardedSamplingInterval(previous_);
-  }
-
- private:
-  int64_t previous_;
-};
+using ScopedMaxTotalThreadCacheBytes =
+    ScopedParameter<MallocExtension::GetMaxTotalThreadCacheBytes,
+                    MallocExtension::SetMaxTotalThreadCacheBytes>;
 
 // Disables both guarded sampling and profile sampling while in scope.
 class ScopedNeverSample {
@@ -201,6 +192,10 @@ class ScopedAlwaysSample {
   ScopedGuardedSamplingInterval guarded_sampling_interval_;
   ScopedProfileSamplingInterval profile_sampling_interval_;
 };
+
+using ScopedMadviseSampledAllocations =
+    ScopedParameter<TCMalloc_Internal_GetMadviseSampledAllocations,
+                    TCMalloc_Internal_SetMadviseSampledAllocations>;
 
 inline void UnregisterRseq() {
 #if TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
@@ -243,8 +238,7 @@ class ScopedFakeCpuId {
 #if TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
     // Now that our unregister_rseq_ member has prevented the kernel from
     // modifying __rseq_abi, we can inject our own CPU ID.
-    tcmalloc_internal::subtle::percpu::__rseq_abi.cpu_id = cpu_id;
-    test_vcpu_ = cpu_id;
+    SetCpuId(cpu_id);
 #endif
   }
 
@@ -252,17 +246,31 @@ class ScopedFakeCpuId {
 #if TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
     // Undo the modification we made in the constructor, as required by
     // ~ScopedFakeCpuId.
-    tcmalloc_internal::subtle::percpu::__rseq_abi.cpu_id =
-        tcmalloc_internal::subtle::percpu::kCpuIdUninitialized;
-    test_vcpu_ = tcmalloc_internal::subtle::percpu::kCpuIdUninitialized;
+    SetCpuId(tcmalloc_internal::subtle::percpu::kCpuIdUninitialized);
+#endif
+  }
+
+  // Simulate migrating across cores.
+  void SwitchTo(const int cpu_id) {
+#if TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
+    // Now that our unregister_rseq_ member has prevented the kernel from
+    // modifying __rseq_abi, we can inject our own CPU ID.
+    SetCpuId(cpu_id);
 #endif
   }
 
  private:
+#if TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
+  // Writes `cpu_id` to every __rseq_abi field VirtualCpu::Synchronize() may
+  // read, so the fake ID is observed regardless of the vCPU mode.
+  static void SetCpuId(const int cpu_id) {
+    auto& rseq_abi = tcmalloc_internal::subtle::percpu::__rseq_abi;
+    rseq_abi.cpu_id = cpu_id;
+    rseq_abi.mm_cid = cpu_id;
+  }
+#endif
 
   const ScopedUnregisterRseq unregister_rseq_;
-  static thread_local int test_vcpu_;
-  friend class tcmalloc_internal::subtle::percpu::VirtualCpu;
 };
 
 // This pragma ensures that a loop does not get unrolled, in which case the
@@ -271,7 +279,7 @@ class ScopedFakeCpuId {
 // Clang, which is why we need this conditional.
 #if (defined(__clang__) || defined(__INTEL_COMPILER))
 #define PRAGMA_NO_UNROLL _Pragma("nounroll")
-#elif (defined(__GNUC__) || defined(__GCUG__))
+#elif defined(__GNUC__)
 // GCC does not always respect "#pragma unroll <N>". The most reliable approach
 // is therefore to completely disable optimizations for this source file.
 #pragma GCC optimize("O0")
@@ -287,7 +295,63 @@ class ScopedFakeCpuId {
 // for the given set of sorted random doubles
 // See "Evaluating the Anderson-Darling Distribution" by
 // Marsaglia and Marsaglia for details.
-double AndersonDarlingTest(absl::Span<const double> random_sample);
+[[nodiscard]] double AndersonDarlingTest(
+    absl::Span<const double> random_sample);
+
+template <typename Function>
+[[nodiscard]] std::string PrintToString(size_t buffer_size, Function&& f) {
+  std::string buf;
+  absl::StringResizeAndOverwrite(buf, buffer_size, [&](char* ptr, size_t size) {
+    tcmalloc_internal::Printer p(ptr, size);
+    if constexpr (std::is_invocable_v<Function,
+                                      tcmalloc_internal::PbtxtRegion&>) {
+      tcmalloc_internal::PbtxtRegion r(p, tcmalloc_internal::kTop);
+      f(r);
+    } else {
+      f(p);
+    }
+    TC_CHECK_LE(p.SpaceRequired(), size);
+    return p.SpaceRequired();
+  });
+  return buf;
+}
+
+// Allows program state to be recorded with `setjmp` into `buf`.  It installs a
+// hook into TCMalloc's logging library that `longjmp`'s back when a CHECK
+// failure is triggered.
+//
+// This enables fuzzing to verify errors are correctly detected and handled
+// gracefully without resorting to death tests.
+//
+// TODO(b/276896007): Remove this facility when fuzztest supports EXPECT_DEATH.
+class LongJmpScope {
+ public:
+  LongJmpScope() {
+    previous_ =
+        std::exchange(tcmalloc_internal::log_message_writer, &FuzzLogWriter);
+  }
+  ~LongJmpScope() { tcmalloc_internal::log_message_writer = previous_; }
+
+  inline static jmp_buf buf_;
+
+ private:
+  static void FuzzLogWriter(const char* msg, int len) {
+    if (!absl::StrContains(absl::string_view(msg, len), "CHECK") ||
+        absl::StrContains(absl::string_view(msg, len), "ReentrancyGuard")) {
+      return;
+    }
+
+#if !defined(NDEBUG)
+    tcmalloc_internal::tcmalloc_reentrancy_count = 0;
+#endif
+    tcmalloc_internal::log_message_writer = previous_;
+    longjmp(buf_, 1);
+  }
+
+  inline static void (*previous_)(const char*, int) = nullptr;
+};
+
+[[nodiscard]] bool NamedVMAsSupported();
 
 }  // namespace tcmalloc
 

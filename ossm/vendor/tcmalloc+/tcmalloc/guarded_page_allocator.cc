@@ -16,6 +16,13 @@
 
 #include <sys/mman.h>
 
+#ifndef MADV_GUARD_INSTALL
+#define MADV_GUARD_INSTALL 102
+#endif
+#ifndef MADV_GUARD_REMOVE
+#define MADV_GUARD_REMOVE 103
+#endif
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -30,6 +37,7 @@
 #include "absl/base/internal/cycleclock.h"
 #include "absl/base/internal/spinlock.h"
 #include "absl/base/internal/sysinfo.h"
+#include "absl/base/nullability.h"
 #include "absl/base/optimization.h"
 #include "absl/debugging/stacktrace.h"
 #include "absl/numeric/bits.h"
@@ -42,6 +50,7 @@
 #include "tcmalloc/internal/memory_tag.h"
 #include "tcmalloc/internal/page_size.h"
 #include "tcmalloc/internal/system_allocator.h"
+#include "tcmalloc/internal/util.h"
 #include "tcmalloc/malloc_extension.h"
 #include "tcmalloc/pagemap.h"
 #include "tcmalloc/pages.h"
@@ -79,6 +88,7 @@ void GuardedPageAllocator::Destroy() {
     TC_ASSERT_NE(err, -1);
     (void)err;
     initialized_ = false;
+    guard_pages_supported_ = false;
   }
 }
 
@@ -96,7 +106,7 @@ void GuardedPageAllocator::Reset() {
 }
 
 GuardedAllocWithStatus GuardedPageAllocator::TrySample(
-    size_t size, size_t alignment, Length num_pages,
+    size_t size, std::align_val_t alignment, Length num_pages,
     const StackTrace& stack_trace) {
   if (num_pages > Length(1)) {
     skipped_allocations_toolarge_.Add(1);
@@ -135,7 +145,17 @@ GuardedAllocWithStatus GuardedPageAllocator::TrySample(
     // point math as well.
     const int64_t profile_sampling_interval =
         tcmalloc::tcmalloc_internal::Parameters::profile_sampling_interval();
-    const int64_t num_sampled = tc_globals.total_sampled_count_.value();
+    // total_sampled_count_ (num_sampled) and successful_allocations_
+    // (num_guarded) are incremented non-atomically, and by design num_sampled
+    // is incremented _after_ num_guarded (see above). A concurrent or reentrant
+    // guarded allocation can therefore have bumped num_guarded but not yet
+    // num_sampled, transiently making num_sampled < num_guarded even though
+    // sampled allocations are a superset of guarded ones. Clamp to the
+    // invariant num_sampled >= num_guarded so this window cannot spuriously
+    // rate-limit (which, with equal intervals, must never happen).
+    const int64_t num_sampled =
+        std::max<int64_t>(tc_globals.total_sampled_count_.value(),
+                          static_cast<int64_t>(num_guarded));
     const int64_t ratio = (num_sampled * 10) / num_guarded;
     if (guarded_sampling_interval * 10 > ratio * profile_sampling_interval) {
       return {nullptr, Profile::Sample::GuardedStatus::RateLimited};
@@ -164,8 +184,39 @@ GuardedAllocWithStatus GuardedPageAllocator::TrySample(
   return Allocate(size, alignment, stack_trace);
 }
 
+GuardedPageAllocator::ProtectResult GuardedPageAllocator::ProtectPage(
+    void* addr, size_t size) {
+  if (guard_pages_supported_) {
+    // A failed madvise() leaves errno set; deallocation must be transparent to
+    // the application.
+    ErrnoRestorer errno_restorer;
+    if (madvise(addr, size, MADV_GUARD_INSTALL) == 0) {
+      return {0, false};
+    }
+    // The kernel accepts MADV_GUARD_INSTALL only on VMAs that are not locked,
+    // and an application may mlock() memory we have already handed out at any
+    // point.  This is not a property we can establish once: fall back to
+    // mprotect() for this page and retry guard regions on the next pass, so
+    // that a later munlock() restores them.  madvise() may have marked part of
+    // the range before failing, so clear any installed guard markers first.
+    madvise(addr, size, MADV_GUARD_REMOVE);
+    mprotect_fallbacks_.Add(1);
+  }
+  const int ret = mprotect(addr, size, PROT_NONE);
+  return {ret, ret == 0};
+}
+
+int GuardedPageAllocator::UnprotectPage(void* addr, size_t size,
+                                        bool mprotect_quarantined) {
+  if (mprotect_quarantined) {
+    return mprotect(addr, size, PROT_READ | PROT_WRITE);
+  }
+  TC_ASSERT(guard_pages_supported_);
+  return madvise(addr, size, MADV_GUARD_REMOVE);
+}
+
 GuardedAllocWithStatus GuardedPageAllocator::Allocate(
-    size_t size, size_t alignment, const StackTrace& stack_trace) {
+    size_t size, std::align_val_t alignment, const StackTrace& stack_trace) {
   const ssize_t free_slot = ReserveFreeSlot();
   if (free_slot == -1) {
     // All slots are reserved.
@@ -173,14 +224,16 @@ GuardedAllocWithStatus GuardedPageAllocator::Allocate(
   }
 
   TC_ASSERT_LE(size, page_size_);
-  TC_ASSERT_LE(alignment, page_size_);
-  TC_ASSERT(alignment == 0 || absl::has_single_bit(alignment));
+  TC_ASSERT_LE(static_cast<size_t>(alignment), page_size_);
+  TC_ASSERT(static_cast<size_t>(alignment) == 0 ||
+            absl::has_single_bit(static_cast<size_t>(alignment)));
   void* result = reinterpret_cast<void*>(SlotToAddr(free_slot));
+  SlotMetadata& d = data_[free_slot];
 
   // For size == 0, the page remains protected.
   if (size > 0) {
-    if (mprotect(result, page_size_, PROT_READ | PROT_WRITE) == -1) {
-      TC_ASSERT(false, "mprotect(.., PROT_READ|PROT_WRITE) failed");
+    if (UnprotectPage(result, page_size_, d.mprotect_quarantined) == -1) {
+      TC_ASSERT(false, "madvise/mprotect failed");
       AllocationGuardSpinLockHolder h(guarded_page_lock_);
       failed_allocations_.LossyAdd(1);
       successful_allocations_.LossyAdd(-1);
@@ -192,7 +245,6 @@ GuardedAllocWithStatus GuardedPageAllocator::Allocate(
   }
 
   // Record stack trace.
-  SlotMetadata& d = data_[free_slot];
   // Count the number of pages that have been used at least once.
   if (ABSL_PREDICT_FALSE(d.allocation_start == 0)) {
     pages_touched_.Add(1);
@@ -206,28 +258,27 @@ GuardedAllocWithStatus GuardedPageAllocator::Allocate(
   d.dealloc_trace.depth = 0;
   d.requested_size = size;
   d.requested_alignment = static_cast<std::align_val_t>(std::max(
-      alignment,
-      std::max(static_cast<size_t>(kAlignment),
-               static_cast<size_t>(__STDCPP_DEFAULT_NEW_ALIGNMENT__))));
+      alignment, std::max(kAlignment, static_cast<std::align_val_t>(
+                                          __STDCPP_DEFAULT_NEW_ALIGNMENT__))));
   d.allocation_start = reinterpret_cast<uintptr_t>(result);
   d.dealloc_count.store(0, std::memory_order_relaxed);
   TC_ASSERT(!d.write_overflow_detected);
-  TC_ASSERT(!alignment || d.allocation_start % alignment == 0);
+  TC_ASSERT(static_cast<size_t>(alignment) == 0 ||
+            d.allocation_start % static_cast<size_t>(alignment) == 0);
 
   stacktrace_filter_.Add({stack_trace.stack, stack_trace.depth}, 1);
   return {result, Profile::Sample::GuardedStatus::Guarded};
 }
 
 // To trigger SEGV handler.
-static ABSL_ATTRIBUTE_NOINLINE ABSL_ATTRIBUTE_NORETURN void ForceTouchPage(
-    void* ptr) {
+[[noreturn]] static ABSL_ATTRIBUTE_NOINLINE void ForceTouchPage(void* ptr) {
   // Spin, in case this thread is waiting for concurrent mprotect() to finish.
   for (;;) {
     *reinterpret_cast<volatile char*>(ptr) = 'X';
   }
 }
 
-void GuardedPageAllocator::Deallocate(void* ptr) {
+void GuardedPageAllocator::Deallocate(void* absl_nonnull ptr) {
   TC_ASSERT(PointerIsMine(ptr));
   const uintptr_t page_addr = GetPageAddr(reinterpret_cast<uintptr_t>(ptr));
   const size_t slot = AddrToSlot(page_addr);
@@ -257,10 +308,13 @@ void GuardedPageAllocator::Deallocate(void* ptr) {
       d.write_overflow_detected = true;
     }
 
-    // Calling mprotect() should also be done outside the guarded_page_lock_
-    // critical section, since mprotect() can have relatively large latency.
-    TC_CHECK_EQ(
-        0, mprotect(reinterpret_cast<void*>(page_addr), page_size_, PROT_NONE));
+    // Calling madvise/mprotect should also be done outside the
+    // guarded_page_lock_ critical section, since it can have relatively large
+    // latency.
+    const auto result =
+        ProtectPage(reinterpret_cast<void*>(page_addr), page_size_);
+    TC_CHECK_EQ(0, result.error);
+    d.mprotect_quarantined = result.mprotect_quarantined;
 
     if (d.write_overflow_detected) {
       ForceTouchPage(ptr);
@@ -282,14 +336,15 @@ void GuardedPageAllocator::Deallocate(void* ptr) {
   FreeSlot(slot);
 }
 
-size_t GuardedPageAllocator::GetRequestedSize(const void* ptr) const {
+size_t GuardedPageAllocator::GetRequestedSize(
+    const void* absl_nonnull ptr) const {
   TC_ASSERT(PointerIsMine(ptr));
   size_t slot = AddrToSlot(GetPageAddr(reinterpret_cast<uintptr_t>(ptr)));
   return data_[slot].requested_size;
 }
 
 std::pair<off_t, size_t> GuardedPageAllocator::GetAllocationOffsetAndSize(
-    const void* ptr) const {
+    const void* absl_nonnull ptr) const {
   TC_ASSERT(PointerIsMine(ptr));
   const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
   const size_t slot = GetNearestSlot(addr);
@@ -297,7 +352,7 @@ std::pair<off_t, size_t> GuardedPageAllocator::GetAllocationOffsetAndSize(
 }
 
 GuardedAllocationsErrorType GuardedPageAllocator::GetStackTraces(
-    const void* ptr, GuardedAllocationsStackTrace** alloc_trace,
+    const void* absl_nonnull ptr, GuardedAllocationsStackTrace** alloc_trace,
     GuardedAllocationsStackTrace** dealloc_trace) const {
   TC_ASSERT(PointerIsMine(ptr));
   const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
@@ -320,7 +375,7 @@ static int GetChainedInterval() {
   }
 }
 
-void GuardedPageAllocator::Print(Printer& out) {
+void GuardedPageAllocator::Print(Printer& out) const {
   out.printf(
       "\n"
       "------------------------------------------------\n"
@@ -335,6 +390,7 @@ void GuardedPageAllocator::Print(Printer& out) {
       "Allocated High-Watermark: %zu / %zu\n"
       "Object Pages Touched: %zu / %zu\n"
       "Currently Quarantined: %zu\n"
+      "Guard Region Fallbacks: %zu\n"
       "PARAMETER tcmalloc_guarded_sample_parameter %d\n",
       // Successful Allocations
       successful_allocations_.value(),
@@ -355,11 +411,13 @@ void GuardedPageAllocator::Print(Printer& out) {
       pages_touched_.value(), total_pages_,
       // Currently Quarantined
       total_pages_ - allocated_pages(),
+      // Guard Region Fallbacks
+      mprotect_fallbacks_.value(),
       // PARAMETER
       GetChainedInterval());
 }
 
-void GuardedPageAllocator::PrintInPbtxt(PbtxtRegion& gwp_asan) {
+void GuardedPageAllocator::PrintInPbtxt(PbtxtRegion& gwp_asan) const {
   gwp_asan.PrintI64("successful_allocations", successful_allocations_.value());
   gwp_asan.PrintI64("failed_allocations", failed_allocations_.value());
   gwp_asan.PrintI64("skipped_allocations_noslots",
@@ -374,8 +432,22 @@ void GuardedPageAllocator::PrintInPbtxt(PbtxtRegion& gwp_asan) {
                     high_allocated_pages_.load(std::memory_order_relaxed));
   gwp_asan.PrintI64("max_allocated_pages", max_allocated_pages_);
   gwp_asan.PrintI64("pages_touched", pages_touched_.value());
+  gwp_asan.PrintI64("mprotect_fallbacks", mprotect_fallbacks_.value());
   gwp_asan.PrintI64("total_pages", total_pages_);
   gwp_asan.PrintI64("tcmalloc_guarded_sample_parameter", GetChainedInterval());
+}
+
+[[nodiscard]] static bool ProbeGuardPagesSupported() {
+  // madvise() fails with EINVAL on kernels without MADV_GUARD_INSTALL; do not
+  // leak that into the caller's errno.
+  ErrnoRestorer errno_restorer;
+  const size_t page_size = GetPageSize();
+  void* page = mmap(nullptr, page_size, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (page == MAP_FAILED) return false;
+  bool supported = (madvise(page, page_size, MADV_GUARD_INSTALL) == 0);
+  munmap(page, page_size);
+  return supported;
 }
 
 // Maps 2 * total_pages_ + 1 pages so that there are total_pages_ unique pages
@@ -385,14 +457,49 @@ void GuardedPageAllocator::MapPages() {
   TC_ASSERT(!first_page_addr_);
   TC_ASSERT_EQ(page_size_ % GetPageSize(), 0);
   size_t len = (2 * total_pages_ + 1) * page_size_;
-  auto base_addr =
-      reinterpret_cast<uintptr_t>(tc_globals.system_allocator().MmapAligned(
-          len, page_size_, MemoryTag::kSampled));
-  TC_ASSERT(base_addr);
-  if (!base_addr) return;
+  guard_pages_supported_ = ProbeGuardPagesSupported();
+  void* base;
+  if (guard_pages_supported_) {
+    // Guard regions make individual pages of an otherwise accessible mapping
+    // inaccessible, so start from readable and writable memory and install
+    // them over the whole pool below.
+    const AddressRange range = tc_globals.system_allocator().Allocate(
+        len, page_size_, MemoryTag::kGuarded);
+    TC_ASSERT(!range.ptr || range.bytes >= len);
+    base = range.ptr;
+    // Allocate() may return more than requested (the default region factory
+    // rounds up to kHugePageSize).  Own the whole range so that no accessible
+    // slack is left beyond the last guard page.
+    len = range.bytes;
+  } else {
+    // Without guard regions the pool is reserved PROT_NONE and slots are made
+    // accessible with mprotect().
+    base = tc_globals.system_allocator().MmapAligned(
+        len, std::max(page_size_, kHugePageSize), MemoryTag::kGuarded);
+  }
+  TC_ASSERT(base);
+  if (!base) return;
+  auto base_addr = reinterpret_cast<uintptr_t>(base);
+
+  // Quarantine the pool before anything can be handed out.
+  bool mprotect_quarantined = !guard_pages_supported_;
+  if (guard_pages_supported_ && madvise(base, len, MADV_GUARD_INSTALL) != 0) {
+    // The mapping is locked.  madvise() may have marked part of the range
+    // before it failed, so clear it (MADV_GUARD_REMOVE is accepted on locked
+    // VMAs) and quarantine with mprotect() instead.  Leaving the pool
+    // accessible is not an option: the guard pages between slots would be
+    // readable and write overflows would go undetected.
+    madvise(base, len, MADV_GUARD_REMOVE);
+    if (mprotect(base, len, PROT_NONE) != 0) {
+      TC_ASSERT(false, "Failed to quarantine page-guarded memory.");
+      return;
+    }
+    mprotect_quarantined = true;
+    mprotect_fallbacks_.Add(1);
+  }
 
   // Tell TCMalloc's PageMap about the memory we own.
-  const PageId page = PageIdContaining(reinterpret_cast<void*>(base_addr));
+  const PageId page = PageIdContaining(base);
   const Length page_len = BytesToLengthFloor(len);
   if (!tc_globals.pagemap().Ensure(Range(page, page_len))) {
     TC_ASSERT(false, "Failed to notify page map of page-guarded memory.");
@@ -400,10 +507,11 @@ void GuardedPageAllocator::MapPages() {
   }
 
   // Allocate memory for slot metadata.
-  data_ = reinterpret_cast<SlotMetadata*>(
-      tc_globals.arena().Alloc(sizeof(*data_) * total_pages_));
+  data_ = reinterpret_cast<SlotMetadata*>(tc_globals.arena().Alloc(
+      ArenaAlloc::kGuardedPageAllocator, sizeof(*data_) * total_pages_));
   for (size_t i = 0; i < total_pages_; ++i) {
     new (&data_[i]) SlotMetadata;
+    data_[i].mprotect_quarantined = mprotect_quarantined;
   }
 
   pages_base_addr_ = base_addr;
@@ -504,11 +612,11 @@ bool GuardedPageAllocator::WriteOverflowOccurred(size_t slot) const {
 GuardedAllocationsErrorType GuardedPageAllocator::GetErrorType(
     uintptr_t addr, const SlotMetadata& d) const {
   if (!d.allocation_start) return GuardedAllocationsErrorType::kUnknown;
-  if (d.dealloc_count.load(std::memory_order_relaxed) >= 2)
-    return GuardedAllocationsErrorType::kDoubleFree;
+  size_t dealloc_count = d.dealloc_count.load(std::memory_order_relaxed);
+  if (dealloc_count >= 2) return GuardedAllocationsErrorType::kDoubleFree;
   if (d.write_overflow_detected)
     return GuardedAllocationsErrorType::kBufferOverflowOnDealloc;
-  if (d.dealloc_trace.depth > 0) {
+  if (dealloc_count == 1) {
     return GuardedAllocationsErrorType::kUseAfterFree;
   }
   if (addr < d.allocation_start) {
@@ -534,8 +642,36 @@ size_t GuardedPageAllocator::AddrToSlot(uintptr_t addr) const {
   return slot;
 }
 
+bool GuardedPageAllocator::GetPageAllocationStatus(HugePage hp,
+                                                   PageBitmap& pages) const {
+  AllocationGuardSpinLockHolder h(guarded_page_lock_);
+  if (!initialized_) {
+    return false;
+  }
+  if (!PointerIsMine(hp.start_addr())) {
+    return false;
+  }
+  const uintptr_t hp_start = reinterpret_cast<uintptr_t>(hp.start_addr());
+  const uintptr_t hp_end = hp_start + kHugePageSize;
+  pages.Clear();
+  for (size_t slot = 0; slot < total_pages_; ++slot) {
+    if (!used_pages_.GetBit(slot)) {
+      continue;
+    }
+    const uintptr_t slot_start = SlotToAddr(slot);
+    const uintptr_t slot_end = slot_start + page_size_;
+    if (slot_start >= hp_start && slot_end <= hp_end) {
+      const size_t page_offset = (slot_start - hp_start) / kPageSize;
+      const size_t num_pages = page_size_ / kPageSize;
+      pages.SetRange(page_offset, num_pages);
+    }
+  }
+  return true;
+}
+
 void GuardedPageAllocator::MaybeRightAlign(size_t slot, size_t size,
-                                           size_t alignment, void** ptr) {
+                                           std::align_val_t alignment,
+                                           void** absl_nonnull ptr) {
   if (!ShouldRightAlign(slot)) return;
   uintptr_t adjusted_ptr =
       reinterpret_cast<uintptr_t>(*ptr) + page_size_ - size;
@@ -552,8 +688,9 @@ void GuardedPageAllocator::MaybeRightAlign(size_t slot, size_t size,
                         static_cast<size_t>(__STDCPP_DEFAULT_NEW_ALIGNMENT__)));
 
   // Ensure valid alignment.
-  alignment = std::max(alignment, default_alignment);
-  uintptr_t alignment_padding = adjusted_ptr & (alignment - 1);
+  const uintptr_t mask =
+      std::max(static_cast<size_t>(alignment), default_alignment) - 1;
+  uintptr_t alignment_padding = adjusted_ptr & mask;
   adjusted_ptr -= alignment_padding;
 
   // Write magic bytes in alignment padding to detect small overflow writes.

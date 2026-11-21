@@ -26,40 +26,41 @@ GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc::tcmalloc_internal {
 
 enum class MemoryTag : uint8_t {
-  // Sampled, infrequently allocated
-  kSampled = 0x0,
-  // Normal memory, NUMA partition 0
+  // Sampled (infrequently allocated) and cold (infrequently accessed) memory
+  kSampledOrCold = 0x0,
+  kSampledOrColdP1 = kSanitizerAddressSpace ? 0xf8 : 0x1,
+  // Normal memory, NUMA or security partition 0
   kNormalP0 = kSanitizerAddressSpace ? 0x1 : 0x4,
-  // Normal memory, NUMA partition 1
+  // Normal memory, NUMA or security partition 1
   kNormalP1 = kSanitizerAddressSpace ? 0xff : 0x6,
   // Normal memory
   kNormal = kNormalP0,
-  // Cold
-  kCold = 0x2,
+  // GWP-ASan guarded allocations.  Only the guarded page pool uses this tag,
+  // so the sized-free fast path excludes guarded pointers, which may be
+  // right-aligned in their page, with the tag check alone.
+  kGuarded = 0x2,
   // Metadata
   kMetadata = 0x3,
-  // SelSan sampled spans, kept separately because we need to quickly
-  // distinguish them from the rest during delete and they also consume
-  // shadow memory. 0xfe is an arbitrary value that shouldn't be used.
-  kSelSan = kSelSanPresent ? 0x1 : 0xfe,
 };
 
 inline constexpr uintptr_t kTagShift = std::min(kAddressBits - 4, 42);
 inline constexpr uintptr_t kTagMask =
     uintptr_t{kSanitizerAddressSpace ? 0x3 : 0x7} << kTagShift;
+inline constexpr uintptr_t kNormalTagMask =
+    uintptr_t{kSanitizerAddressSpace ? 0x3 : 0x5} << kTagShift;
 
-inline MemoryTag GetMemoryTag(const void* ptr) {
+[[nodiscard]] inline MemoryTag GetMemoryTag(const void* ptr) {
   return static_cast<MemoryTag>((reinterpret_cast<uintptr_t>(ptr) & kTagMask) >>
                                 kTagShift);
 }
 
-inline bool IsNormalMemory(const void* ptr) {
-  // This is slightly faster than checking kNormalP0/P1 separetly.
+[[nodiscard]] inline bool IsNormalMemory(const void* ptr) {
+  // This is slightly faster than checking kNormalP0/P1 separately.
   static_assert((static_cast<uint8_t>(MemoryTag::kNormalP0) &
-                 (static_cast<uint8_t>(MemoryTag::kSampled) |
-                  static_cast<uint8_t>(MemoryTag::kCold))) == 0);
-  bool res = (static_cast<uintptr_t>(GetMemoryTag(ptr)) &
-              static_cast<uintptr_t>(MemoryTag::kNormal)) != 0;
+                 (static_cast<uint8_t>(MemoryTag::kSampledOrCold) |
+                  static_cast<uint8_t>(MemoryTag::kSampledOrColdP1))) == 0);
+  bool res = (reinterpret_cast<uintptr_t>(ptr) & kNormalTagMask) ==
+             (static_cast<uintptr_t>(MemoryTag::kNormal) << kTagShift);
   TC_ASSERT(res == (GetMemoryTag(ptr) == MemoryTag::kNormalP0 ||
                     GetMemoryTag(ptr) == MemoryTag::kNormalP1),
             "ptr=%p res=%d tag=%d", ptr, res,
@@ -67,21 +68,31 @@ inline bool IsNormalMemory(const void* ptr) {
   return res;
 }
 
-inline bool IsSelSanMemory(const void* ptr) {
-  // This is a faster way to check for SelSan memory provided we already know
-  // it's not a normal memory, and assuming it's not kMetadata (both assumptions
-  // are checked by the assert below). A straightforward comparison with kSelSan
-  // leads to extraction/check of 2 bits (these use 2 8-byte immediates);
-  // this check can be done with a single BT instruction.
-  // kSelSanPresent part allows to optimize away branches in non SelSan build.
-  bool res =
-      kSelSanPresent && (static_cast<uintptr_t>(GetMemoryTag(ptr)) &
-                         static_cast<uintptr_t>(MemoryTag::kSelSan)) != 0;
-  TC_ASSERT_EQ(res, GetMemoryTag(ptr) == MemoryTag::kSelSan);
+[[nodiscard]] inline bool IsSampledOrColdMemory(MemoryTag tag) {
+  return tag == MemoryTag::kSampledOrCold || tag == MemoryTag::kSampledOrColdP1;
+}
+
+[[nodiscard]] inline bool IsSampledOrColdMemory(const void* ptr) {
+  bool res = (static_cast<uintptr_t>(GetMemoryTag(ptr)) &
+              ~static_cast<uintptr_t>(MemoryTag::kSampledOrColdP1)) == 0;
+  TC_ASSERT(res == IsSampledOrColdMemory(GetMemoryTag(ptr)),
+            "ptr=%p res=%d tag=%d", ptr, res,
+            static_cast<int>(GetMemoryTag(ptr)));
   return res;
 }
 
-absl::string_view MemoryTagToLabel(MemoryTag tag);
+[[nodiscard]] inline bool IsGuardedMemory(const void* ptr) {
+  return GetMemoryTag(ptr) == MemoryTag::kGuarded;
+}
+
+// The bit tests in IsNormalMemory() and IsSampledOrColdMemory() must reject
+// kGuarded.
+static_assert((static_cast<uint8_t>(MemoryTag::kGuarded) &
+               static_cast<uint8_t>(MemoryTag::kNormal)) == 0);
+static_assert((static_cast<uint8_t>(MemoryTag::kGuarded) &
+               ~static_cast<uint8_t>(MemoryTag::kSampledOrColdP1)) != 0);
+
+[[nodiscard]] absl::string_view MemoryTagToLabel(MemoryTag tag);
 
 }  // namespace tcmalloc::tcmalloc_internal
 GOOGLE_MALLOC_SECTION_END

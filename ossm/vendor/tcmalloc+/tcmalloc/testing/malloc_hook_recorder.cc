@@ -15,6 +15,7 @@
 #include "tcmalloc/testing/malloc_hook_recorder.h"
 
 #include <cstddef>
+#include <iterator>
 
 #include "absl/base/optimization.h"
 
@@ -98,7 +99,6 @@ static bool IsMMap(MallocHookRecorder::Type t) {
     case MallocHookRecorder::kMmap:
     case MallocHookRecorder::kMremap:
     case MallocHookRecorder::kMunmap:
-    case MallocHookRecorder::kSbrk:
       return true;
   }
 
@@ -130,7 +130,7 @@ void MallocHookRecorder::AddLog(CallEntry entry) {
   if (CheckSectionVars()) {
     entry.caller = kOther;
     void* stack[32];
-    int depth = absl::GetStackTrace(stack, ABSL_ARRAYSIZE(stack), 3);
+    int depth = absl::GetStackTrace(stack, std::size(stack), 3);
     for (int i = depth - 1; i >= 0; --i) {
       if (ADDR_IN_ATTRIBUTE_SECTION(stack[i], google_malloc)) {
         entry.caller = kTCMalloc;
@@ -255,9 +255,6 @@ std::ostream& operator<<(std::ostream& stream,
     case MallocHookRecorder::kMunmap:
       return stream << ToString(lhs.caller) << "::Munmap(" << lhs.ptr << ", "
                     << *lhs.requested_size << ")";
-    case MallocHookRecorder::kSbrk:
-      return stream << ToString(lhs.caller) << "::Sbrk(" << lhs.ptr << ", "
-                    << static_cast<ptrdiff_t>(*lhs.requested_size) << ")";
   }
   ABSL_UNREACHABLE();
 }

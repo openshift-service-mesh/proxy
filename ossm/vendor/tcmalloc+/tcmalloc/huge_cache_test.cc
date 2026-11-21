@@ -31,13 +31,12 @@
 #include "absl/random/random.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
-#include "tcmalloc/huge_page_subrelease.h"
 #include "tcmalloc/huge_pages.h"
 #include "tcmalloc/internal/clock.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/mock_metadata_allocator.h"
 #include "tcmalloc/internal/system_allocator.h"
-#include "tcmalloc/mock_metadata_allocator.h"
 #include "tcmalloc/mock_virtual_allocator.h"
 #include "tcmalloc/pages.h"
 #include "tcmalloc/stats.h"
@@ -52,14 +51,31 @@ class HugeCacheTest : public testing::TestWithParam<absl::Duration> {
  private:
   // Allow tests to modify the clock used by the cache.
   static int64_t clock_;
+  static int64_t now_calls_;
 
-  static int64_t FakeClock() { return clock_; }
+  static int64_t FakeClock() {
+    ++now_calls_;
+    return clock_;
+  }
 
   static double GetFakeClockFrequency() {
     return absl::ToDoubleNanoseconds(absl::Seconds(2));
   }
 
-  static void ResetClock() { clock_ = 1234; }
+  static void ResetClock() {
+    clock_ = 1234;
+    now_calls_ = 0;
+  }
+
+  // Helper struct whose sole purpose is to call ResetClock() upon construction.
+  struct ClockResetter {
+    ClockResetter() { ResetClock(); }
+  };
+
+  // This ensures ResetClock() is called before the HugeCache constructor runs
+  // (where cache_ inits), so its time series has the same initial state (e.g.,
+  // first epoch)
+  ClockResetter clock_resetter_;
 
   class MockBackingInterface : public MemoryModifyFunction {
    public:
@@ -75,12 +91,13 @@ class HugeCacheTest : public testing::TestWithParam<absl::Duration> {
     // We don't use the first few bytes, because things might get weird
     // given zero pointers.
     vm_allocator_.backing_.resize(1024);
-    ResetClock();
   }
 
   static void Advance(absl::Duration d) {
     clock_ += absl::ToDoubleSeconds(d) * GetFakeClockFrequency();
   }
+
+  static int64_t now_calls() { return now_calls_; }
 
   absl::Duration GetCacheTime() { return GetParam(); }
   void Release(HugeRange r) { cache_.Release(r); }
@@ -93,6 +110,7 @@ class HugeCacheTest : public testing::TestWithParam<absl::Duration> {
 };
 
 int64_t HugeCacheTest::clock_{1234};
+int64_t HugeCacheTest::now_calls_{0};
 
 TEST_P(HugeCacheTest, Basic) {
   bool from;
@@ -267,10 +285,8 @@ static double Frac(HugeLength num, HugeLength denom) {
   return static_cast<double>(num.raw_num()) / denom.raw_num();
 }
 
-// Tests that the cache can grow to fit a working set. The two cache shrinking
-// mechanisms, demand-based release and limit-based release, use two different
-// paths to shrink the cache (ReleaseCachedPagesByDemand vs. Release). We
-// test both paths here.
+// Tests that the cache can grow to fit a working set. The cache shrinking
+// mechanism, limit-based release, uses Release() to shrink the cache.
 TEST_P(HugeCacheTest, Growth) {
   EXPECT_CALL(mock_unback_, Unback(testing::_, testing::_))
       .WillRepeatedly(
@@ -336,8 +352,7 @@ TEST_P(HugeCacheTest, Growth) {
       const HugeLength cached = cache_.size();
       // Allow us 10% slop, but don't get out of bed for tiny caches anyway.
       const double ratio = Frac(cached, hot);
-      SCOPED_TRACE(
-          absl::StrCat(cached.raw_num(), "hps ", Frac(r.first, r.second)));
+      SCOPED_TRACE(absl::StrCat(cached, "hps ", Frac(r.first, r.second)));
       if (ratio > 1 && cached > NHugePages(16)) {
         EXPECT_LE(ratio, 1.1);
       }
@@ -490,71 +505,58 @@ TEST_P(HugeCacheTest, Usage) {
   EXPECT_EQ(NHugePages(0), cache_.usage());
 }
 
-class MinMaxTrackerTest : public testing::Test {
- protected:
-  void Advance(absl::Duration d) {
-    clock_ += absl::ToDoubleSeconds(d) * GetFakeClockFrequency();
+TEST_P(HugeCacheTest, Contains) {
+  bool from;
+  HugeRange r = cache_.Get(NHugePages(4), &from);
+  ASSERT_TRUE(r.valid());
+
+  // Before release into cache, cache does not contain r.
+  for (size_t i = 0; i < 4; ++i) {
+    EXPECT_FALSE(cache_.Contains(r.start() + NHugePages(i)));
   }
 
-  static int64_t FakeClock() { return clock_; }
+  Release(r);
 
-  static double GetFakeClockFrequency() {
-    return absl::ToDoubleNanoseconds(absl::Seconds(2));
+  // After release into cache, cache contains r.
+  for (size_t i = 0; i < 4; ++i) {
+    EXPECT_TRUE(cache_.Contains(r.start() + NHugePages(i)));
   }
 
- private:
-  static int64_t clock_;
-};
+  EXPECT_FALSE(cache_.Contains(r.start() - NHugePages(1)));
+  EXPECT_FALSE(cache_.Contains(r.start() + NHugePages(4)));
+}
 
-int64_t MinMaxTrackerTest::clock_{0};
+TEST_P(HugeCacheTest, ClockCalls) {
+  bool from;
+  const int64_t before_miss = now_calls();
+  HugeRange r = cache_.Get(NHugePages(1), &from);
+  ASSERT_TRUE(from);
+  const int64_t miss_calls = now_calls() - before_miss;
 
-TEST_F(MinMaxTrackerTest, Works) {
-  const absl::Duration kDuration = absl::Seconds(2);
-  MinMaxTracker<> tracker{
-      Clock{.now = FakeClock, .freq = GetFakeClockFrequency}, kDuration};
+  const int64_t before_release = now_calls();
+  Release(r);
+  const int64_t release_calls = now_calls() - before_release;
 
-  tracker.Report(NHugePages(0));
-  EXPECT_EQ(NHugePages(0), tracker.MaxOverTime(kDuration));
-  EXPECT_EQ(NHugePages(0), tracker.MinOverTime(kDuration));
+  const int64_t before_hit = now_calls();
+  r = cache_.Get(NHugePages(1), &from);
+  ASSERT_FALSE(from);
+  const int64_t hit_calls = now_calls() - before_hit;
 
-  tracker.Report(NHugePages(10));
-  EXPECT_EQ(NHugePages(10), tracker.MaxOverTime(kDuration));
-  EXPECT_EQ(NHugePages(0), tracker.MinOverTime(kDuration));
+  const int64_t before_release_unbacked = now_calls();
+  cache_.ReleaseUnbacked(r);
+  const int64_t release_unbacked_calls = now_calls() - before_release_unbacked;
 
-  tracker.Report(NHugePages(5));
-  EXPECT_EQ(NHugePages(10), tracker.MaxOverTime(kDuration));
-  EXPECT_EQ(NHugePages(0), tracker.MinOverTime(kDuration));
-
-  tracker.Report(NHugePages(100));
-  EXPECT_EQ(NHugePages(100), tracker.MaxOverTime(kDuration));
-  EXPECT_EQ(NHugePages(0), tracker.MinOverTime(kDuration));
-
-  // Some tests for advancing time
-  Advance(kDuration / 3);
-  tracker.Report(NHugePages(2));
-  EXPECT_EQ(NHugePages(2), tracker.MaxOverTime(absl::Nanoseconds(1)));
-  EXPECT_EQ(NHugePages(100), tracker.MaxOverTime(kDuration / 2));
-  EXPECT_EQ(NHugePages(100), tracker.MaxOverTime(kDuration));
-  EXPECT_EQ(NHugePages(2), tracker.MinOverTime(absl::Nanoseconds(1)));
-  EXPECT_EQ(NHugePages(0), tracker.MinOverTime(kDuration / 2));
-  EXPECT_EQ(NHugePages(0), tracker.MinOverTime(kDuration));
-
-  Advance(kDuration / 3);
-  tracker.Report(NHugePages(5));
-  EXPECT_EQ(NHugePages(5), tracker.MaxOverTime(absl::Nanoseconds(1)));
-  EXPECT_EQ(NHugePages(5), tracker.MaxOverTime(kDuration / 2));
-  EXPECT_EQ(NHugePages(100), tracker.MaxOverTime(kDuration));
-  EXPECT_EQ(NHugePages(5), tracker.MinOverTime(absl::Nanoseconds(1)));
-  EXPECT_EQ(NHugePages(2), tracker.MinOverTime(kDuration / 2));
-  EXPECT_EQ(NHugePages(0), tracker.MinOverTime(kDuration));
-
-  // This should annihilate everything.
-  Advance(kDuration * 2);
-  tracker.Report(NHugePages(1));
-  EXPECT_EQ(NHugePages(1), tracker.MaxOverTime(absl::Nanoseconds(1)));
-  EXPECT_EQ(NHugePages(1), tracker.MinOverTime(absl::Nanoseconds(1)));
-  EXPECT_EQ(NHugePages(1), tracker.MaxOverTime(kDuration));
-  EXPECT_EQ(NHugePages(1), tracker.MinOverTime(kDuration));
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+  EXPECT_EQ(miss_calls, 3);
+  EXPECT_EQ(release_calls, 5);
+  EXPECT_EQ(hit_calls, 4);
+  EXPECT_EQ(release_unbacked_calls, 3);
+#else
+  EXPECT_EQ(miss_calls, 1);
+  EXPECT_EQ(release_calls, 3);
+  EXPECT_EQ(hit_calls, 2);
+  EXPECT_EQ(release_unbacked_calls, 1);
+#endif
 }
 
 INSTANTIATE_TEST_SUITE_P(All, HugeCacheTest,

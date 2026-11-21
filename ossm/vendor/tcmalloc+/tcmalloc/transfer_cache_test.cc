@@ -18,30 +18,72 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cstring>
 #include <thread>
 #include <vector>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/base/optimization.h"
+#include "absl/strings/str_format.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "tcmalloc/central_freelist.h"
 #include "tcmalloc/common.h"
+#include "tcmalloc/internal/atomic_stats_counter.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/percpu.h"
 #include "tcmalloc/mock_central_freelist.h"
 #include "tcmalloc/mock_transfer_cache.h"
+#include "tcmalloc/static_forwarder.h"
+#include "tcmalloc/static_vars.h"
+#include "tcmalloc/testing/testutil.h"
 #include "tcmalloc/testing/thread_manager.h"
 #include "tcmalloc/transfer_cache_internals.h"
 #include "tcmalloc/transfer_cache_stats.h"
 
 namespace tcmalloc {
 namespace tcmalloc_internal {
+namespace internal_transfer_cache {
+
+class TransferCacheTestPeer {
+ public:
+  template <typename TC>
+  static void VerifyLayout() {
+    // lock_ and the state touched on the hit path share the first cacheline.
+    static_assert(offsetof(TC, lock_) == 0);
+    static_assert(offsetof(TC, slots_) + sizeof(void*) <= ABSL_CACHELINE_SIZE);
+    // The miss counters are written by every core that falls through to the
+    // freelist; they get a cacheline of their own, apart from lock_.
+    static_assert(offsetof(TC, insert_misses_) % ABSL_CACHELINE_SIZE == 0);
+    static_assert(offsetof(TC, remove_object_misses_) + sizeof(MissCounts) <=
+                  offsetof(TC, insert_misses_) + ABSL_CACHELINE_SIZE);
+    // The freelist starts on its own cacheline, apart from lock_ and the miss
+    // counters.
+    constexpr size_t kFreeListOffset =
+        offsetof(TC, freelist_do_not_access_directly_);
+    static_assert(kFreeListOffset % ABSL_CACHELINE_SIZE == 0);
+    static_assert(kFreeListOffset >=
+                  offsetof(TC, insert_misses_) + ABSL_CACHELINE_SIZE);
+  }
+};
+
+}  // namespace internal_transfer_cache
+
 namespace {
 
 using ::testing::Return;
+
+TEST(TransferCacheLayoutTest, HotFieldsDoNotShareCachelines) {
+  internal_transfer_cache::TransferCacheTestPeer::VerifyLayout<
+      internal_transfer_cache::TransferCache<
+          CentralFreeList, StaticForwarder<Static, tc_globals>>>();
+  internal_transfer_cache::TransferCacheTestPeer::VerifyLayout<
+      internal_transfer_cache::TransferCache<
+          BackingTransferCache, StaticForwarder<Static, tc_globals>>>();
+}
 
 template <typename Env>
 using TransferCacheTest = ::testing::Test;
@@ -166,7 +208,7 @@ TYPED_TEST_P(TransferCacheTest, ReadStats) {
     }
   });
 
-  absl::SleepFor(absl::Seconds(1));
+  absl::SleepFor(absl::Milliseconds(100));
   stop.store(true, std::memory_order_release);
 
   t1.join();
@@ -307,7 +349,7 @@ TYPED_TEST_P(TransferCacheTest, Plunder) {
             env.transfer_cache().GetStats().capacity);
 
   const int capacity = env.transfer_cache().GetStats().capacity;
-  env.transfer_cache().ShrinkCache(kSizeClass);
+  EXPECT_TRUE(env.transfer_cache().ShrinkCache(kSizeClass));
   // We should shrink the cache capacity, and at the same time, it should also
   // set low water mark to the new capacity of the cache.
   EXPECT_EQ(env.transfer_cache().GetStats().capacity,
@@ -438,7 +480,7 @@ TYPED_TEST_P(FuzzTest, MultiThreadedBiasedInsert) {
   threads.Start(10, [&](int) { env.RandomlyPoke(); });
 
   auto start = absl::Now();
-  while (start + absl::Seconds(5) > absl::Now()) env.Insert(batch_size);
+  while (start + absl::Seconds(1) > absl::Now()) env.Insert(batch_size);
   threads.Stop();
 }
 
@@ -450,7 +492,7 @@ TYPED_TEST_P(FuzzTest, MultiThreadedBiasedRemove) {
   threads.Start(10, [&](int) { env.RandomlyPoke(); });
 
   auto start = absl::Now();
-  while (start + absl::Seconds(5) > absl::Now()) env.Remove(batch_size);
+  while (start + absl::Seconds(1) > absl::Now()) env.Remove(batch_size);
   threads.Stop();
 }
 
@@ -460,7 +502,7 @@ TYPED_TEST_P(FuzzTest, MultiThreadedBiasedShrink) {
   threads.Start(10, [&](int) { env.RandomlyPoke(); });
 
   auto start = absl::Now();
-  while (start + absl::Seconds(5) > absl::Now()) env.Shrink();
+  while (start + absl::Seconds(1) > absl::Now()) env.Shrink();
   threads.Stop();
 }
 
@@ -470,7 +512,7 @@ TYPED_TEST_P(FuzzTest, MultiThreadedBiasedGrow) {
   threads.Start(10, [&](int) { env.RandomlyPoke(); });
 
   auto start = absl::Now();
-  while (start + absl::Seconds(5) > absl::Now()) env.Grow();
+  while (start + absl::Seconds(1) > absl::Now()) env.Grow();
   threads.Stop();
 }
 
@@ -484,10 +526,24 @@ TEST(ShardedTransferCacheManagerTest, DefaultConstructorDisables) {
     return;
   }
 
-  ShardedTransferCacheManager manager(nullptr, nullptr);
+  ShardedTransferCacheManager manager(nullptr);
   for (int size_class = 0; size_class < kNumClasses; ++size_class) {
     EXPECT_FALSE(manager.should_use(size_class));
   }
+}
+
+TEST(ShardedTransferCacheManagerTest, GenericCacheExperiment) {
+  if (!subtle::percpu::IsFast()) {
+    return;
+  }
+
+  ShardedTransferCacheManager manager(nullptr);
+  manager.Init();
+  EXPECT_EQ(
+      manager.UseGenericCache(),
+      IsExperimentActive(Experiment::TCMALLOC_SONIC_SHARDED_TRANSFER_CACHE) &&
+          !IsExperimentActive(
+              Experiment::TEST_ONLY_TCMALLOC_SHARDED_TRANSFER_CACHE));
 }
 
 TEST(ShardedTransferCacheManagerTest, MinimumNumShards) {
@@ -501,9 +557,6 @@ TEST(ShardedTransferCacheManagerTest, MinimumNumShards) {
   FakeShardedTransferCacheEnvironment env(kNumShards,
                                           /*use_generic_cache=*/true);
   ShardedManager& manager = env.sharded_manager();
-
-  // Sharded cache manager uses a flexible transfer cache.
-  env.transfer_cache_manager().SetPartialLegacyTransferCache(true);
 
   EXPECT_FALSE(manager.shard_initialized(0));
   EXPECT_FALSE(manager.shard_initialized(1));
@@ -599,9 +652,6 @@ TEST(ShardedTransferCacheManagerTest, ShardsOnDemand) {
     FakeShardedTransferCacheEnvironment env(kNumShards, generic_cache_enabled);
     ShardedManager& manager = env.sharded_manager();
 
-    // Sharded cache manager uses a flexible transfer cache.
-    env.transfer_cache_manager().SetPartialLegacyTransferCache(true);
-
     EXPECT_FALSE(manager.shard_initialized(0));
     EXPECT_FALSE(manager.shard_initialized(1));
     EXPECT_FALSE(manager.shard_initialized(2));
@@ -665,9 +715,186 @@ TEST(ShardedTransferCacheManagerTest, ShardsOnDemand) {
   }
 }
 
+class SingleInitFreeList : public MinimalFakeCentralFreeList {
+ public:
+  void Init(size_t size_class,
+            central_freelist_internal::CflSubbucketPrioritization) {
+    TC_CHECK(!initialized_);
+    initialized_ = true;
+    size_class_ = size_class;
+  }
+  [[nodiscard]] int size_class() const { return size_class_; }
+
+ private:
+  bool initialized_ = false;
+  size_t size_class_ = 0;
+};
+
+TEST(ShardedTransferCacheManagerTest, DoesNotDoubleInitFreeList) {
+  if (!subtle::percpu::IsFast()) {
+    return;
+  }
+
+  using ShardedManager =
+      ShardedTransferCacheManagerBase<FakeShardedTransferCacheForwarder,
+                                      FakeCpuLayout, SingleInitFreeList>;
+  FakeShardedTransferCacheForwarder::SetGenericShardedCache(true);
+  FakeShardedTransferCacheForwarder::SetShardedCacheForLargeClassesOnly(false);
+  FakeCpuLayout cpu_layout;
+  cpu_layout.Init(ShardedManager::kMinShardsAllowed);
+  ShardedManager manager(&cpu_layout);
+  manager.Init();
+
+  SingleInitFreeList freelist;
+  void* ptr;
+  freelist.AllocateBatch({&ptr, 1});
+  cpu_layout.SetCurrentCpu(0);
+  manager.Push(kSizeClass, ptr);
+  void* popped = manager.Pop(kSizeClass);
+  ASSERT_EQ(popped, ptr);
+  freelist.FreeBatch({&popped, 1});
+
+  FakeShardedTransferCacheForwarder::SetGenericShardedCache(false);
+}
+
+TEST(ShardedTransferCacheManagerTest, PrintTelemetry) {
+  if (!subtle::percpu::IsFast()) {
+    return;
+  }
+
+  using ShardedManager = FakeShardedTransferCacheEnvironment::ShardedManager;
+  constexpr int kNumShards = ShardedManager::kMinShardsAllowed;
+  FakeShardedTransferCacheEnvironment env(kNumShards,
+                                          /*use_generic_cache=*/true);
+  ShardedManager& manager = env.sharded_manager();
+
+  EXPECT_TRUE(manager.should_use(kSizeClass));
+
+  // 1. Push elements to Shard 0 (CPU 0) and Shard 1 (CPU 2).
+  void* ptr0;
+  env.central_freelist().AllocateBatch(absl::MakeSpan(&ptr0, 1));
+  env.SetCurrentCpu(0);
+  manager.Push(kSizeClass, ptr0);
+
+  void* ptr1;
+  env.central_freelist().AllocateBatch(absl::MakeSpan(&ptr1, 1));
+  env.SetCurrentCpu(2);
+  manager.Push(kSizeClass, ptr1);
+
+  // 2. Pop elements from Shard 0 (CPU 0).
+  env.SetCurrentCpu(0);
+  void* pop0 = manager.Pop(kSizeClass);
+  ASSERT_NE(pop0, nullptr);
+  env.central_freelist().FreeBatch({&pop0, 1});
+
+  StatsCounters<kNumClasses> counts;
+  counts[kSizeClass].Add(10);
+
+  // 3. Verify Print.
+  std::string output = PrintToString(
+      1024 * 1024, [&](Printer& printer) { manager.Print(counts, printer); });
+
+  EXPECT_THAT(output,
+              ::testing::HasSubstr(absl::StrFormat("class %3d", kSizeClass)));
+  EXPECT_THAT(output,
+              ::testing::HasSubstr(absl::StrFormat("%8u insert hits", 2)));
+  EXPECT_THAT(output,
+              ::testing::HasSubstr(absl::StrFormat("%8u remove hits", 1)));
+  EXPECT_THAT(output, ::testing::HasSubstr(absl::StrFormat("%8u objs", 1)));
+
+  // 4. Verify PrintInPbtxt.
+  std::string pbtxt_output = PrintToString(
+      1024 * 1024,
+      [&](PbtxtRegion& region) { manager.PrintInPbtxt(counts, region); });
+  size_t class_size =
+      FakeShardedTransferCacheForwarder::class_to_size(kSizeClass);
+  EXPECT_THAT(pbtxt_output, ::testing::HasSubstr(
+                                absl::StrFormat("sizeclass: %d", class_size)));
+  EXPECT_THAT(pbtxt_output, ::testing::HasSubstr("insert_hits: 2"));
+  EXPECT_THAT(pbtxt_output, ::testing::HasSubstr("remove_hits: 1"));
+  EXPECT_THAT(pbtxt_output, ::testing::HasSubstr("used: 1"));
+  EXPECT_THAT(pbtxt_output, ::testing::HasSubstr("frontend_allocations: 10"));
+
+  // 5. Verify frontline hit rate does not underflow when backend removals
+  // exceed estimated frontend operations (e.g., 2 removals vs 1 frontend op).
+  env.SetCurrentCpu(2);
+  void* pop1 = manager.Pop(kSizeClass);
+  ASSERT_NE(pop1, nullptr);
+  env.central_freelist().FreeBatch({&pop1, 1});
+
+  StatsCounters<kNumClasses> low_counts;
+  low_counts[kSizeClass].Add(1);
+  std::string low_output = PrintToString(1024 * 1024, [&](Printer& printer) {
+    manager.Print(low_counts, printer);
+  });
+  EXPECT_THAT(low_output, ::testing::HasSubstr(absl::StrFormat(
+                              "class %3d [ %8zu bytes ] : %8u objs; %5.1f MiB; "
+                              "%6.1f cum MiB; %5u capacity; %8u max_capacity; "
+                              "%8u insert hits; %8u insert misses (%10lu "
+                              "object misses); %8u remove hits; %8u remove "
+                              "misses (%10lu object misses); 0.00000 frontline "
+                              "hit rate",
+                              kSizeClass, class_size, 0, 0.0, 0.0,
+                              manager.GetStats(kSizeClass).capacity,
+                              manager.GetStats(kSizeClass).max_capacity, 2, 0,
+                              0UL, 2, 0, 0UL)));
+}
+
+TEST(ShardedTransferCacheManagerTest, GetStatsAggregatesInsertObjectMisses) {
+  if (!subtle::percpu::IsFast()) {
+    return;
+  }
+
+  using ShardedManager = FakeShardedTransferCacheEnvironment::ShardedManager;
+  constexpr int kNumShards = ShardedManager::kMinShardsAllowed;
+  FakeShardedTransferCacheEnvironment env(kNumShards,
+                                          /*use_generic_cache=*/true);
+  ShardedManager& manager = env.sharded_manager();
+  ASSERT_TRUE(manager.should_use(kSizeClass));
+
+  // Fill shard 0 to capacity one object at a time.
+  env.SetCurrentCpu(0);
+  void* ptr;
+  env.central_freelist().AllocateBatch({&ptr, 1});
+  manager.InsertRange(kSizeClass, absl::MakeSpan(&ptr, 1));
+  const int capacity = manager.GetStats(kSizeClass).capacity;
+  ASSERT_GT(capacity, 0);
+  while (manager.GetStats(kSizeClass).used < capacity) {
+    env.central_freelist().AllocateBatch({&ptr, 1});
+    manager.InsertRange(kSizeClass, absl::MakeSpan(&ptr, 1));
+  }
+  ASSERT_EQ(manager.GetStats(kSizeClass).insert_misses, 0);
+  ASSERT_EQ(manager.GetStats(kSizeClass).insert_object_misses, 0);
+
+  // The next batch misses in full and is forwarded to the freelist.
+  constexpr int kBatch = 4;
+  void* batch[kBatch];
+  env.central_freelist().AllocateBatch(batch);
+  manager.InsertRange(kSizeClass, absl::MakeSpan(batch));
+
+  const TransferCacheStats stats = manager.GetStats(kSizeClass);
+  EXPECT_EQ(stats.used, capacity);
+  EXPECT_EQ(stats.insert_misses, 1);
+  EXPECT_EQ(stats.insert_object_misses, kBatch);
+
+  StatsCounters<kNumClasses> counts;
+  std::string output = PrintToString(
+      1024 * 1024, [&](Printer& printer) { manager.Print(counts, printer); });
+  EXPECT_THAT(output, ::testing::HasSubstr(absl::StrFormat(
+                          "%8u insert misses (%10lu object misses)", 1,
+                          static_cast<unsigned long>(kBatch))));
+
+  std::string pbtxt_output = PrintToString(
+      1024 * 1024,
+      [&](PbtxtRegion& region) { manager.PrintInPbtxt(counts, region); });
+  EXPECT_THAT(pbtxt_output, ::testing::HasSubstr("insert_misses: 1"));
+  EXPECT_THAT(pbtxt_output, ::testing::HasSubstr(absl::StrFormat(
+                                "insert_object_misses: %d", kBatch)));
+}
+
 namespace unit_tests {
 using Env = FakeTransferCacheEnvironment<internal_transfer_cache::TransferCache<
-    MockCentralFreeList, FakeTransferCacheManager>>;
+    MockCentralFreeList, FakeTransferCacheForwarder>>;
 INSTANTIATE_TYPED_TEST_SUITE_P(TransferCache, TransferCacheTest,
                                ::testing::Types<Env>);
 
@@ -678,7 +905,7 @@ namespace fuzz_tests {
 // as it avoids the overheads of mocks and allows more iterations of the fuzzing
 // itself.
 using Env = FakeTransferCacheEnvironment<internal_transfer_cache::TransferCache<
-    MockCentralFreeList, FakeTransferCacheManager>>;
+    MockCentralFreeList, FakeTransferCacheForwarder>>;
 INSTANTIATE_TYPED_TEST_SUITE_P(TransferCache, FuzzTest, ::testing::Types<Env>);
 
 }  // namespace fuzz_tests
@@ -686,11 +913,12 @@ INSTANTIATE_TYPED_TEST_SUITE_P(TransferCache, FuzzTest, ::testing::Types<Env>);
 namespace resize_tests {
 struct MockTransferCacheManager {
   static constexpr size_t kNumBaseClasses = 3;
-  static constexpr bool kHasExpandedClasses = true;
+  static constexpr bool kHasColdClasses = true;
   static constexpr size_t kMaxSizeClassesToResize = 1;
-  static constexpr size_t kNumaPartitions = 2;
-  static constexpr size_t kExpandedClassesStart =
-      kNumaPartitions * kNumBaseClasses;
+  static constexpr size_t kNormalPartitions = 2;
+  static constexpr size_t kSecurityPartitions = 1;
+  static constexpr size_t kColdClassesStart =
+      kNormalPartitions * kNumBaseClasses;
   static constexpr size_t kNumClasses = 3 * kNumBaseClasses;
 
   MOCK_METHOD(bool, ShrinkCache, (int size_class));
@@ -780,7 +1008,8 @@ TYPED_TEST_P(RealTransferCacheTest, StressResize) {
     int batch_count = 0;
     for (int size_class = 0; size_class < kNumClasses; ++size_class) {
       const size_t batch_size =
-          env.transfer_cache_manager().num_objects_to_move(size_class);
+          env.transfer_cache_manager().forwarder().num_objects_to_move(
+              size_class);
       const int capacity =
           env.transfer_cache_manager().GetStats(size_class).capacity;
       batch_count += batch_size > 0 ? capacity / batch_size : 0;
@@ -794,7 +1023,7 @@ TYPED_TEST_P(RealTransferCacheTest, StressResize) {
   threads.Start(5, [&](int) { env.RandomlyPoke(); });
 
   auto start = absl::Now();
-  while (start + absl::Seconds(5) > absl::Now()) {
+  while (start + absl::Seconds(1) > absl::Now()) {
     env.transfer_cache_manager().TryResizingCaches();
     absl::SleepFor(absl::Milliseconds(10));
   }
@@ -805,11 +1034,66 @@ TYPED_TEST_P(RealTransferCacheTest, StressResize) {
 
 REGISTER_TYPED_TEST_SUITE_P(RealTransferCacheTest, StressResize);
 
-using TransferCacheRealEnv = MultiSizeClassTransferCacheEnvironment<
-    internal_transfer_cache::TransferCache<CentralFreeList,
-                                           FakeMultiClassTransferCacheManager>>;
+using TransferCacheRealEnv =
+    MultiSizeClassTransferCacheEnvironment<TransferCacheManager>;
+
 INSTANTIATE_TYPED_TEST_SUITE_P(TransferCache, RealTransferCacheTest,
                                ::testing::Types<TransferCacheRealEnv>);
+TEST(TransferCacheManagerTest, PrintTelemetry) {
+  TransferCacheRealEnv env;
+  auto& manager = env.transfer_cache_manager();
+
+  int size_class = 1;
+  const size_t batch_size = manager.forwarder().num_objects_to_move(size_class);
+  ASSERT_GT(batch_size, 0);
+
+  // Perform 2 inserts of batch_size.
+  env.Insert(size_class, batch_size);
+  env.Insert(size_class, batch_size);
+
+  // Perform 1 remove of batch_size.
+  env.Remove(size_class, batch_size);
+
+  StatsCounters<kNumClasses> counts;
+  counts[size_class].Add(10);
+
+  // 1. Verify Print telemetry.
+  std::string output = PrintToString(
+      1024 * 1024, [&](Printer& printer) { manager.Print(counts, printer); });
+
+  EXPECT_THAT(output,
+              ::testing::HasSubstr(absl::StrFormat("class %3d", size_class)));
+  EXPECT_THAT(output,
+              ::testing::HasSubstr(absl::StrFormat("%8u insert hits", 2)));
+  EXPECT_THAT(output,
+              ::testing::HasSubstr(absl::StrFormat("%8u remove hits", 1)));
+  EXPECT_THAT(output,
+              ::testing::HasSubstr(absl::StrFormat("%8u objs", batch_size)));
+  EXPECT_THAT(
+      output,
+      ::testing::HasSubstr(absl::StrFormat(
+          "class %3d [ %8zu bytes ] : %8u objs; %5.1f MiB; %6.1f cum "
+          "MiB; %5u capacity; %5u max_capacity; %8u insert hits; %8u "
+          "insert misses (%10lu object misses); %8u remove hits; %8u "
+          "remove misses (%10lu object misses); 0.00000 frontline hit "
+          "rate",
+          size_class, manager.forwarder().class_to_size(size_class), batch_size,
+          0.0, 0.0, manager.GetStats(size_class).capacity,
+          manager.GetStats(size_class).max_capacity, 2, 0, 0UL, 1, 0, 0UL)));
+
+  // 2. Verify PrintInPbtxt telemetry.
+  std::string pbtxt_output = PrintToString(
+      1024 * 1024,
+      [&](PbtxtRegion& region) { manager.PrintInPbtxt(counts, region); });
+  size_t class_size = manager.forwarder().class_to_size(size_class);
+  EXPECT_THAT(pbtxt_output, ::testing::HasSubstr(
+                                absl::StrFormat("sizeclass: %d", class_size)));
+  EXPECT_THAT(pbtxt_output, ::testing::HasSubstr("insert_hits: 2"));
+  EXPECT_THAT(pbtxt_output, ::testing::HasSubstr("remove_hits: 1"));
+  EXPECT_THAT(pbtxt_output,
+              ::testing::HasSubstr(absl::StrFormat("used: %d", batch_size)));
+  EXPECT_THAT(pbtxt_output, ::testing::HasSubstr("frontend_allocations: 10"));
+}
 
 }  // namespace resize_tests
 

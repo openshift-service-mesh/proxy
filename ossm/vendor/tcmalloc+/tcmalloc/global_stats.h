@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "absl/base/nullability.h"
 #include "tcmalloc/arena.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
@@ -45,15 +46,18 @@ struct TCMallocStats {
   AllocatorStats stack_stats;          // StackTrace objects
   AllocatorStats linked_sample_stats;  // StackTraceTable::LinkedSample objects
   size_t pagemap_bytes;                // included in metadata bytes
+  size_t pagemap_root_size;            // Size of pagemap root node array
   size_t percpu_metadata_bytes;        // included in metadata bytes
   BackingStats pageheap;               // Stats from page heap
-  PageAllocator::PeakStats peak_stats;
+  PageAllocatorPeakStats peak_stats;
 
   Length num_released_total;
   Length num_released_release_memory_to_system;
   Length num_released_process_background_actions;
   Length num_released_soft_limit_exceeded;
   Length num_released_hard_limit_exceeded;
+
+  PageAllocator::LimitStats limit_stats;
 
   ArenaStats arena;  // Stats from the metadata Arena
 
@@ -63,22 +67,22 @@ struct TCMallocStats {
 
 void ExtractTCMallocStats(TCMallocStats& r, bool report_residence);
 
-uint64_t InUseByApp(const TCMallocStats& stats);
-uint64_t VirtualMemoryUsed(const TCMallocStats& stats);
-uint64_t UnmappedBytes(const TCMallocStats& stats);
-uint64_t PhysicalMemoryUsed(const TCMallocStats& stats);
-uint64_t RequiredBytes(const TCMallocStats& stats);
-size_t ExternalBytes(const TCMallocStats& stats);
-size_t HeapSizeBytes(const BackingStats& stats);
-size_t LocalBytes(const TCMallocStats& stats);
-size_t SlackBytes(const BackingStats& stats);
+[[nodiscard]] uint64_t InUseByApp(const TCMallocStats& stats);
+[[nodiscard]] uint64_t VirtualMemoryUsed(const TCMallocStats& stats);
+[[nodiscard]] uint64_t UnmappedBytes(const TCMallocStats& stats);
+[[nodiscard]] uint64_t PhysicalMemoryUsed(const TCMallocStats& stats);
+[[nodiscard]] uint64_t RequiredBytes(const TCMallocStats& stats);
+[[nodiscard]] size_t ExternalBytes(const TCMallocStats& stats);
+[[nodiscard]] size_t HeapSizeBytes(const BackingStats& stats);
+[[nodiscard]] size_t LocalBytes(const TCMallocStats& stats);
+[[nodiscard]] size_t SlackBytes(const BackingStats& stats);
 
 // WRITE stats to "out"
 void DumpStats(Printer& out, int level);
 void DumpStatsInPbtxt(Printer& out, int level);
 
-bool GetNumericProperty(const char* /*absl_nonnull*/ name_data, size_t name_size,
-                        size_t* /*absl_nonnull*/ value);
+[[nodiscard]] bool GetNumericProperty(const char* name_data, size_t name_size,
+                                      size_t* absl_nonnull value);
 
 }  // namespace tcmalloc_internal
 }  // namespace tcmalloc

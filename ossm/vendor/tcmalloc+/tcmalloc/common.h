@@ -31,9 +31,11 @@
 #include "absl/numeric/bits.h"
 #include "absl/strings/string_view.h"
 #include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/delay_injection.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/memory_tag.h"
 #include "tcmalloc/internal/optimization.h"
+#include "tcmalloc/internal/range_tracker.h"
 #include "tcmalloc/malloc_extension.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
@@ -97,7 +99,6 @@ static_assert(sizeof(void*) == 8);
 #ifndef TCMALLOC_PAGE_SHIFT
 #ifdef TCMALLOC_INTERNAL_SMALL_BUT_SLOW
 #define TCMALLOC_PAGE_SHIFT 12
-#define TCMALLOC_USE_PAGEMAP3
 #elif defined(TCMALLOC_INTERNAL_256K_PAGES)
 #define TCMALLOC_PAGE_SHIFT 18
 #elif defined(TCMALLOC_INTERNAL_32K_PAGES)
@@ -119,89 +120,94 @@ static_assert(sizeof(void*) == 8);
 
 #if TCMALLOC_PAGE_SHIFT == 12
 inline constexpr size_t kPageShift = 12;
-inline constexpr size_t kNumBaseClasses = 46;
-inline constexpr bool kHasExpandedClasses = false;
+#if defined(__cpp_aligned_new) && __STDCPP_DEFAULT_NEW_ALIGNMENT__ <= 8
+inline constexpr size_t kNumBaseClasses = 80;
+#else
+inline constexpr size_t kNumBaseClasses = 68;
+#endif
+inline constexpr bool kHasColdClasses = false;
 inline constexpr size_t kMaxSize = 8 << 10;
-inline constexpr size_t kMinThreadCacheSize = 4 * 1024;
+inline constexpr int64_t kMinThreadCacheSize = 4 * 1024;
 inline constexpr size_t kMaxThreadCacheSize = 64 * 1024;
 inline constexpr size_t kMaxCpuCacheSize = 10 * 1024;
 inline constexpr size_t kDefaultOverallThreadCacheSize = kMaxThreadCacheSize;
 inline constexpr size_t kStealAmount = kMinThreadCacheSize;
-inline constexpr size_t kDefaultProfileSamplingInterval = 1 << 19;
 #elif TCMALLOC_PAGE_SHIFT == 15
 inline constexpr size_t kPageShift = 15;
-inline constexpr size_t kNumBaseClasses = 78;
-inline constexpr bool kHasExpandedClasses = true;
+inline constexpr size_t kNumBaseClasses = 85;
+inline constexpr bool kHasColdClasses = true;
 inline constexpr size_t kMaxSize = 256 * 1024;
-inline constexpr size_t kMinThreadCacheSize = kMaxSize * 2;
+inline constexpr int64_t kMinThreadCacheSize = kMaxSize * 2;
 inline constexpr size_t kMaxThreadCacheSize = 4 << 20;
 inline constexpr size_t kMaxCpuCacheSize = 1.5 * 1024 * 1024;
 inline constexpr size_t kDefaultOverallThreadCacheSize =
     8u * kMaxThreadCacheSize;
 inline constexpr size_t kStealAmount = 1 << 16;
-inline constexpr size_t kDefaultProfileSamplingInterval = 1 << 21;
 #elif TCMALLOC_PAGE_SHIFT == 18
 inline constexpr size_t kPageShift = 18;
-inline constexpr size_t kNumBaseClasses = 89;
-inline constexpr bool kHasExpandedClasses = true;
+inline constexpr size_t kNumBaseClasses = 85;
+inline constexpr bool kHasColdClasses = true;
 inline constexpr size_t kMaxSize = 256 * 1024;
-inline constexpr size_t kMinThreadCacheSize = kMaxSize * 2;
+inline constexpr int64_t kMinThreadCacheSize = kMaxSize * 2;
 inline constexpr size_t kMaxThreadCacheSize = 4 << 20;
 inline constexpr size_t kMaxCpuCacheSize = 1.5 * 1024 * 1024;
 inline constexpr size_t kDefaultOverallThreadCacheSize =
     8u * kMaxThreadCacheSize;
 inline constexpr size_t kStealAmount = 1 << 16;
-inline constexpr size_t kDefaultProfileSamplingInterval = 1 << 21;
 #elif TCMALLOC_PAGE_SHIFT == 13
 inline constexpr size_t kPageShift = 13;
-inline constexpr size_t kNumBaseClasses = 86;
-inline constexpr bool kHasExpandedClasses = true;
+inline constexpr size_t kNumBaseClasses = 85;
+inline constexpr bool kHasColdClasses = true;
 inline constexpr size_t kMaxSize = 256 * 1024;
-inline constexpr size_t kMinThreadCacheSize = kMaxSize * 2;
+inline constexpr int64_t kMinThreadCacheSize = kMaxSize * 2;
 inline constexpr size_t kMaxThreadCacheSize = 4 << 20;
 inline constexpr size_t kMaxCpuCacheSize = 1.5 * 1024 * 1024;
 inline constexpr size_t kDefaultOverallThreadCacheSize =
     8u * kMaxThreadCacheSize;
 inline constexpr size_t kStealAmount = 1 << 16;
-inline constexpr size_t kDefaultProfileSamplingInterval = 1 << 21;
 #else
 #error "Unsupported TCMALLOC_PAGE_SHIFT value!"
 #endif
 
+inline constexpr size_t kDefaultProfileSamplingInterval = 2 << 20;
+
 // Disable NUMA awareness under Sanitizers to avoid failing to mmap memory.
 #if defined(TCMALLOC_INTERNAL_NUMA_AWARE)
 inline constexpr size_t kNumaPartitions = kSanitizerAddressSpace ? 1 : 2;
+inline constexpr size_t kSecurityPartitions = 1;
 #else
 inline constexpr size_t kNumaPartitions = 1;
+inline constexpr size_t kSecurityPartitions = kSanitizerAddressSpace ? 1 : 2;
 #endif
 
-// We have copies of kNumBaseClasses size classes for each NUMA node, followed
-// by any expanded classes.
-inline constexpr size_t kExpandedClassesStart =
-    kNumBaseClasses * kNumaPartitions;
+inline constexpr size_t kNormalPartitions =
+    kNumaPartitions * kSecurityPartitions;
+static_assert(kNormalPartitions <= 2,
+              "Error: There can be at most 2 normal partitions.");
+
+// We have copies of kNumBaseClasses size classes for each NUMA node or
+// security partition, followed by any cold classes.
+inline constexpr size_t kColdClassesStart = kNumBaseClasses * kNormalPartitions;
 inline constexpr size_t kNumClasses =
-    kExpandedClassesStart + (kHasExpandedClasses ? kNumBaseClasses : 0);
+    kColdClassesStart + (kHasColdClasses ? kNumBaseClasses : 0);
 
 // Size classes are often stored as uint32_t values, but there are some
 // situations where we need to store a size class with as compact a
-// representation as possible (e.g. in PageMap). Here we determine the integer
-// type to use in these situations - i.e. the smallest integer type large
-// enough to store values in the range [0,kNumClasses).
+// representation as possible (e.g. in PageMap). We make sure that we
+// don't choose so many size classes that we need to go to uint16_t
+// (which would bloat the PageMap leaf by ~10%).
 constexpr size_t kMaxClass = kNumClasses - 1;
-using CompactSizeClass =
-    std::conditional_t<kMaxClass <= std::numeric_limits<uint8_t>::max(),
-                       uint8_t, uint16_t>;
-
-// ~64K classes ought to be enough for anybody, but let's be sure.
+using CompactSizeClass = uint8_t;
 static_assert(kMaxClass <= std::numeric_limits<CompactSizeClass>::max());
 
 // Minimum/maximum number of batches in TransferCache per size class.
 // Actual numbers depends on a number of factors, see TransferCache::Init
 // for details.
 inline constexpr size_t kMinObjectsToMove = 2;
-inline constexpr size_t kMaxObjectsToMove = 32;
+inline constexpr size_t kMaxObjectsToMove = 128;
 
 inline constexpr size_t kPageSize = 1 << kPageShift;
+using PageBitmap = Bitmap<kHugePageSize / kPageSize>;
 
 inline constexpr std::align_val_t kAlignment{8};
 // log2 (kAlignment)
@@ -219,10 +225,12 @@ inline constexpr int kMaxOverages = 3;
 // scavenging code will shrink it down when its contents are not in use.
 inline constexpr size_t kMaxDynamicFreeListLength = 8192;
 
-inline constexpr bool ColdFeatureActive() { return kHasExpandedClasses; }
+// TODO: b/529739215 - After merging cold and sampled heaps, this can be
+// removed.
+[[nodiscard]] constexpr bool ColdFeatureActive() { return kHasColdClasses; }
 
-inline constexpr bool IsExpandedSizeClass(unsigned size_class) {
-  return kHasExpandedClasses && (size_class >= kExpandedClassesStart);
+[[nodiscard]] constexpr bool IsColdSizeClass(unsigned size_class) {
+  return kHasColdClasses && (size_class >= kColdClassesStart);
 }
 
 #if !defined(TCMALLOC_INTERNAL_SMALL_BUT_SLOW)
@@ -242,19 +250,15 @@ enum class AllocationAccess {
   kCold,
 };
 
-inline AllocationAccess AccessFromPointer(void* ptr) {
-  if (!kHasExpandedClasses) {
-    TC_ASSERT_NE(GetMemoryTag(ptr), MemoryTag::kCold);
-    return AllocationAccess::kHot;
-  }
-
-  return ABSL_PREDICT_FALSE(GetMemoryTag(ptr) == MemoryTag::kCold)
-             ? AllocationAccess::kCold
-             : AllocationAccess::kHot;
+// new[] allocations are indistinguishable from new allocations at
+// deallocation (operator delete[] aliases operator delete) and are treated
+// identically everywhere except in profiles.
+[[nodiscard]] constexpr bool IsNew(AllocationType type) {
+  return type == AllocationType::New || type == AllocationType::NewArray;
 }
 
-inline MemoryTag NumaNormalTag(size_t numa_partition) {
-  switch (numa_partition) {
+[[nodiscard]] inline MemoryTag MultiNormalTag(size_t partition) {
+  switch (partition) {
     case 0:
       return MemoryTag::kNormalP0;
     case 1:
@@ -265,8 +269,8 @@ inline MemoryTag NumaNormalTag(size_t numa_partition) {
   }
 }
 
-inline size_t NumaPartitionFromPointer(void* ptr) {
-  if constexpr (kNumaPartitions == 1) {
+[[nodiscard]] inline size_t PartitionFromPointer(const void* ptr) {
+  if constexpr (kNormalPartitions == 1) {
     return 0;
   }
 
@@ -278,15 +282,35 @@ inline size_t NumaPartitionFromPointer(void* ptr) {
   }
 }
 
+// TODO: b/470136917 - Investigate if we can beautify this by avoiding two
+// PartitionFromPointer functions.
+[[nodiscard]] inline size_t PartitionFromPointerFast(void* ptr) {
+  TC_ASSERT(GetMemoryTag(ptr) == MemoryTag::kNormal ||
+            GetMemoryTag(ptr) == MemoryTag::kNormalP1);
+  static_assert((static_cast<uint8_t>(MemoryTag::kNormal) & 2) == 0);
+  static_assert((static_cast<uint8_t>(MemoryTag::kNormalP1) & 2) == 2);
+  if constexpr (kNormalPartitions == 1) {
+    return 0;
+  }
+  return !!(static_cast<size_t>(GetMemoryTag(ptr)) & 2);
+}
+
 // Linker initialized, so this lock can be accessed at any time.
 // Note: `CpuCache::ResizeInfo::lock` must be taken before the `pageheap_lock`
 // if both are going to be held simultaneously.
+#ifndef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+ABSL_CACHELINE_ALIGNED
+#endif
 extern absl::base_internal::SpinLock pageheap_lock;
 
 class ABSL_SCOPED_LOCKABLE PageHeapSpinLockHolder {
  public:
-  PageHeapSpinLockHolder()
-      ABSL_EXCLUSIVE_LOCK_FUNCTION(pageheap_lock) = default;
+  // TODO(b/29448043): Remove latency injection.
+  PageHeapSpinLockHolder() ABSL_EXCLUSIVE_LOCK_FUNCTION(pageheap_lock) {
+#ifdef TCMALLOC_INTERNAL_LATENCY_INJECTION
+    ScopedDelay delay(ScopedDelay::page_heap_delay);
+#endif
+  }
   ~PageHeapSpinLockHolder() ABSL_UNLOCK_FUNCTION() = default;
 
  private:
@@ -294,7 +318,7 @@ class ABSL_SCOPED_LOCKABLE PageHeapSpinLockHolder {
 };
 
 // Evaluates a/b, avoiding division by zero.
-inline double safe_div(double a, double b) {
+[[nodiscard]] inline double safe_div(double a, double b) {
   if (b == 0) {
     return 0.;
   } else {

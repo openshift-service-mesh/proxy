@@ -18,16 +18,19 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 
 #include "absl/base/attributes.h"
 #include "absl/base/const_init.h"
 #include "absl/base/macros.h"
+#include "absl/base/nullability.h"
 #include "absl/base/optimization.h"
 #include "absl/types/span.h"
 #include "tcmalloc/common.h"
 #include "tcmalloc/internal/allocation_guard.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/percpu_state.h"
 #include "tcmalloc/metadata_object_allocator.h"
 #include "tcmalloc/static_vars.h"
 #include "tcmalloc/transfer_cache.h"
@@ -37,7 +40,7 @@ namespace tcmalloc {
 namespace tcmalloc_internal {
 
 size_t ThreadCache::per_thread_cache_size_ = kMaxThreadCacheSize;
-std::atomic<size_t> ThreadCache::overall_thread_cache_size_ =
+std::atomic<int64_t> ThreadCache::overall_thread_cache_size_ =
     kDefaultOverallThreadCacheSize;
 int64_t ThreadCache::unclaimed_cache_space_ = kDefaultOverallThreadCacheSize;
 ThreadCache* ThreadCache::thread_heaps_ = nullptr;
@@ -46,7 +49,6 @@ ThreadCache* ThreadCache::next_memory_steal_ = nullptr;
 ABSL_CONST_INIT thread_local ThreadCache* ThreadCache::thread_local_data_
     ABSL_ATTRIBUTE_INITIAL_EXEC = nullptr;
 ABSL_CONST_INIT bool ThreadCache::tsd_inited_ = false;
-pthread_key_t ThreadCache::heap_key_;
 ABSL_CONST_INIT absl::base_internal::SpinLock ThreadCache::threadcache_lock_(
     absl::base_internal::SCHEDULE_KERNEL_ONLY);
 
@@ -162,14 +164,14 @@ void ThreadCache::ReleaseToTransferCache(FreeList* src, size_t size_class,
   int batch_size = tc_globals.sizemap().num_objects_to_move(size_class);
   while (N > batch_size) {
     src->PopBatch(batch_size, batch);
-    static_assert(ABSL_ARRAYSIZE(batch) >= kMaxObjectsToMove,
+    static_assert(std::size(batch) >= kMaxObjectsToMove,
                   "not enough space in batch");
     tc_globals.transfer_cache().InsertRange(
         size_class, absl::Span<void*>(batch, batch_size));
     N -= batch_size;
   }
   src->PopBatch(N, batch);
-  static_assert(ABSL_ARRAYSIZE(batch) >= kMaxObjectsToMove,
+  static_assert(std::size(batch) >= kMaxObjectsToMove,
                 "not enough space in batch");
   tc_globals.transfer_cache().InsertRange(size_class,
                                           absl::Span<void*>(batch, N));
@@ -256,7 +258,7 @@ void ThreadCache::IncreaseCacheLimitLocked() {
 
 void ThreadCache::InitTSD() {
   TC_ASSERT(!tsd_inited_);
-  pthread_key_create(&heap_key_, DestroyThreadCache);
+  PerCpuState::state().Init();
   tsd_inited_ = true;
 }
 
@@ -282,7 +284,7 @@ ThreadCache* ThreadCache::CreateCacheIfNecessary() {
     // and added to the linked list.  So we search for that first.
     if (maybe_reentrant) {
       for (ThreadCache* h = thread_heaps_; h != nullptr; h = h->next_) {
-        if (h->tid_ == me) {
+        if (pthread_equal(h->tid_, me) != 0) {
           heap = h;
           break;
         }
@@ -302,7 +304,7 @@ ThreadCache* ThreadCache::CreateCacheIfNecessary() {
     heap->in_setspecific_ = true;
     // Also keep a copy in __thread for faster retrieval
     thread_local_data_ = heap;
-    pthread_setspecific(heap_key_, heap);
+    PerCpuState::state().RegisterThreadCache(heap);
     heap->in_setspecific_ = false;
   }
   return heap;
@@ -332,7 +334,7 @@ void ThreadCache::BecomeIdle() {
   if (heap->in_setspecific_) return;  // Do not disturb the active caller
 
   heap->in_setspecific_ = true;
-  pthread_setspecific(heap_key_, nullptr);
+  PerCpuState::state().RegisterThreadCache(nullptr);
   // Also update the copy in __thread
   thread_local_data_ = nullptr;
   heap->in_setspecific_ = false;
@@ -346,14 +348,20 @@ void ThreadCache::BecomeIdle() {
   DeleteCache(heap);
 }
 
-void ThreadCache::DestroyThreadCache(void* ptr) {
-  // Note that "ptr" cannot be NULL since pthread promises not
-  // to invoke the destructor on NULL values, but for safety,
-  // we check anyway.
-  if (ptr != nullptr) {
-    thread_local_data_ = nullptr;
-    DeleteCache(reinterpret_cast<ThreadCache*>(ptr));
+void ThreadCache::DestroyThreadCache(ThreadCache* ptr) {
+  // Note that "ptr" cannot be NULL since pthread promises not to invoke the
+  // destructor on NULL values, but for safety, we check anyway.
+  if (ptr == nullptr) {
+    return;
   }
+
+  thread_local_data_ = nullptr;
+  DeleteCache(ptr);
+}
+
+extern "C" void TCMalloc_Internal_DestroyThreadCache(
+    ThreadCache* absl_nullable cache) {
+  ThreadCache::DestroyThreadCache(cache);
 }
 
 void ThreadCache::DeleteCache(ThreadCache* heap) {
@@ -415,9 +423,9 @@ AllocatorStats ThreadCache::GetStats(uint64_t* total_bytes,
   return tc_globals.threadcache_allocator().stats();
 }
 
-void ThreadCache::set_overall_thread_cache_size(size_t new_size) {
+void ThreadCache::set_overall_thread_cache_size(int64_t new_size) {
   // Clip the value to a reasonable minimum
-  if (new_size < kMinThreadCacheSize) new_size = kMinThreadCacheSize;
+  new_size = std::max(new_size, kMinThreadCacheSize);
 
   AllocationGuardSpinLockHolder l(threadcache_lock_);
   overall_thread_cache_size_.store(new_size, std::memory_order_relaxed);

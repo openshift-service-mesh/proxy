@@ -65,7 +65,6 @@ ABSL_CONST_INIT static absl::once_flag init_per_cpu_once;
 ABSL_CONST_INIT static std::atomic<bool> using_upstream_fence{false};
 #endif  // TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
 
-extern "C" thread_local char tcmalloc_sampler ABSL_ATTRIBUTE_INITIAL_EXEC;
 
 ABSL_CONST_INIT RseqVcpuMode vcpu_mode = RseqVcpuMode::kNone;
 
@@ -92,41 +91,7 @@ static bool InitThreadPerCpu() {
 }
 
 bool UsingRseqVirtualCpus() {
-  return GetRseqVcpuMode() == RseqVcpuMode::kMM;
-}
-
-static int UserVirtualCpuId() {
-  TC_BUG("initialized unsupported vCPU mode");
-}
-
-int VirtualCpu::Synchronize() {
-#if TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
-  int vcpu = kCpuIdUninitialized;
-
-  if (TestSynchronize) {
-    vcpu = TestSynchronize();
-    if (vcpu >= kCpuIdInitialized) {
-      tcmalloc_cached_vcpu = vcpu;
-      return vcpu;
-    }
-  }
-
-  switch (GetRseqVcpuMode()) {
-    case RseqVcpuMode::kMM:
-      vcpu = __rseq_abi.mm_cid;
-      break;
-    case RseqVcpuMode::kNone:
-      vcpu = GetRealCpuUnsafe();
-      break;
-  }
-
-  TC_CHECK_GE(vcpu, kCpuIdInitialized);
-  TC_ASSERT_LT(vcpu, NumCPUs());
-  tcmalloc_cached_vcpu = vcpu;
-  return vcpu;
-#else   // TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
-  TC_BUG("unsupported without rseq");
-#endif  // TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
+  return vcpu_mode == RseqVcpuMode::kMM;
 }
 
 static void InitPerCpu() {
@@ -149,6 +114,9 @@ static void InitPerCpu() {
     // objects can overlap.
     volatile auto slabs_addr = reinterpret_cast<uintptr_t>(&tcmalloc_slabs);
     auto rseq_abi_addr = reinterpret_cast<uintptr_t>(&__rseq_abi);
+    volatile auto tcmalloc_rseq_layout_addr =
+        reinterpret_cast<uintptr_t>(&tcmalloc_rseq_layout);
+    TC_CHECK_EQ(rseq_abi_addr, tcmalloc_rseq_layout_addr);
     //  Ensure __rseq_abi alignment required by ABI.
     TC_CHECK_EQ(rseq_abi_addr % 32, 0);
     // Ensure that all our TLS data is in a single cache line.
@@ -160,8 +128,10 @@ static void InitPerCpu() {
     TC_CHECK_EQ(slabs_addr, rseq_abi_addr + TCMALLOC_RSEQ_SLABS_OFFSET);
     // Ensure Sampler is properly aligned.
     TC_CHECK_EQ(sampler_addr % TCMALLOC_SAMPLER_ALIGN, 0);
-    // Ensure that tcmalloc_sampler is located before tcmalloc_slabs.
-    TC_CHECK_LE(sampler_addr + TCMALLOC_SAMPLER_SIZE, slabs_addr);
+    // Ensure that tcmalloc_sampler and the tcmalloc_slabs are the expected
+    // distance apart. This is needed because we reference the slabs address
+    // relative to the sampler address with a fixed offset in inline assembly.
+    TC_CHECK_EQ(sampler_addr + TCMALLOC_SAMPLER_SLABS_OFFSET, slabs_addr);
 
     constexpr int kMEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED_RSEQ = (1 << 8);
     // It is safe to make the syscall below multiple times.
@@ -349,14 +319,16 @@ static void SlowFence(int target) {
 static void UpstreamRseqFenceCpu(int cpu) {
   TC_CHECK(using_upstream_fence.load(std::memory_order_relaxed) &&
            "upstream fence unavailable.");
+  TC_CHECK_GE(cpu, -1);
 
   constexpr int kMEMBARRIER_CMD_PRIVATE_EXPEDITED_RSEQ = (1 << 7);
   constexpr int kMEMBARRIER_CMD_FLAG_CPU = (1 << 0);
 
+  ErrnoRestorer errno_restorer;
   int64_t res = syscall(__NR_membarrier, kMEMBARRIER_CMD_PRIVATE_EXPEDITED_RSEQ,
                         kMEMBARRIER_CMD_FLAG_CPU, cpu);
 
-  TC_CHECK(res == 0 || res == -ENXIO /* missing CPU */,
+  TC_CHECK(res == 0 || (res == -1 && errno == ENXIO) /* missing CPU */,
            "Upstream fence failed.");
 }
 #endif  // TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
@@ -385,8 +357,6 @@ void FenceCpu(int vcpu) {
   }
 
   if (UsingRseqVirtualCpus()) {
-    ASSUME(false);
-
     // With virtual CPUs, we cannot identify the true physical core we need to
     // interrupt.
     FenceAllCpus();
@@ -407,6 +377,17 @@ void FenceCpu(int vcpu) {
 
 void FenceAllCpus() {
 #if TCMALLOC_INTERNAL_PERCPU_USE_RSEQ
+  // An effect of fencing all CPUs is that the cached slabs pointer is reset
+  // because our rseq machinery resets it on every thread schedule. This is
+  // desirable if e.g. because we don't want to hit the fast path the next time
+  // the CPU allocates (i.e., we changed something under the thread).
+  // This also happens to our own thread due to the syscall (depending a bit
+  // on the kernel version). However, when fake CPUs are enabled in tests,
+  // we've unsubscribed from rseq and thus the syscall doesn't reset the
+  // slabs pointer, so uncache it explicitly here so that all CPUs are
+  // handled equal in this respect.
+  tcmalloc_slabs = 0;
+
   if (using_upstream_fence.load(std::memory_order_relaxed)) {
     UpstreamRseqFenceCpu(-1);
     return;

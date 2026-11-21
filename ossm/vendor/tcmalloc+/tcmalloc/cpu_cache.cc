@@ -29,6 +29,7 @@
 #include "tcmalloc/internal_malloc_extension.h"
 #include "tcmalloc/parameters.h"
 #include "tcmalloc/static_vars.h"
+#include "tcmalloc/thread_cache.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
@@ -40,10 +41,8 @@ static void ActivatePerCpuCaches() {
     return;
   }
 
-  if (Parameters::per_cpu_caches() && subtle::percpu::IsFast()) {
-    tc_globals.InitIfNecessary();
-    tc_globals.cpu_cache().Activate();
-    tc_globals.ActivateCpuCache();
+  tc_globals.ActivateCpuCacheIfNecessary();
+  if (tc_globals.CpuCacheActive()) {
     // no need for this thread cache anymore, I guess.
     ThreadCache::BecomeIdle();
     // If there's a problem with this code, let's notice it right away:

@@ -31,7 +31,7 @@
 #include "tcmalloc/huge_pages.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
-#include "tcmalloc/mock_metadata_allocator.h"
+#include "tcmalloc/internal/mock_metadata_allocator.h"
 #include "tcmalloc/mock_virtual_allocator.h"
 
 namespace tcmalloc {
@@ -348,6 +348,26 @@ TEST_P(HugeAllocatorTest, OOM) {
   while (allocator_.Get(n).valid()) {
     n *= 2;
   }
+}
+
+TEST_P(HugeAllocatorTest, Contains) {
+  HugeRange r1 = allocator_.Get(NHugePages(4));
+  ASSERT_TRUE(r1.valid());
+
+  // Before release, free_ does not contain r1.
+  for (size_t i = 0; i < 4; ++i) {
+    EXPECT_FALSE(allocator_.Contains(r1.start() + NHugePages(i)));
+  }
+
+  allocator_.Release(r1);
+
+  // After release, free_ contains r1.
+  for (size_t i = 0; i < 4; ++i) {
+    EXPECT_TRUE(allocator_.Contains(r1.start() + NHugePages(i)));
+  }
+
+  // Pages before r1 are not contained.
+  EXPECT_FALSE(allocator_.Contains(r1.start() - NHugePages(1)));
 }
 
 INSTANTIATE_TEST_SUITE_P(

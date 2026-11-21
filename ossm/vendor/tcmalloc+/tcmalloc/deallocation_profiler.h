@@ -15,10 +15,11 @@
 #ifndef TCMALLOC_DEALLOCATION_PROFILER_H_
 #define TCMALLOC_DEALLOCATION_PROFILER_H_
 
+#include <atomic>
 #include <memory>
 
-#include "absl/base/const_init.h"
 #include "absl/base/internal/spinlock.h"
+#include "absl/base/nullability.h"
 #include "absl/time/time.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
@@ -37,30 +38,36 @@ class DeallocationProfilerList {
   void ReportMalloc(const tcmalloc_internal::StackTrace& stack_trace);
   void ReportFree(tcmalloc_internal::AllocHandle handle);
   void Add(
-      DeallocationProfiler* /*absl_nonnull*/ profiler TCMALLOC_CAPTURED_BY_THIS);
-  void Remove(DeallocationProfiler* /*absl_nonnull*/ profiler);
+      DeallocationProfiler* absl_nonnull profiler TCMALLOC_CAPTURED_BY_THIS);
+  void Remove(DeallocationProfiler* absl_nonnull profiler);
 
  private:
-  DeallocationProfiler* /*absl_nullable*/ first_ = nullptr;
+  std::atomic<DeallocationProfiler*> first_{nullptr};
   absl::base_internal::SpinLock profilers_lock_{
       absl::base_internal::SCHEDULE_KERNEL_ONLY};
 };
 
+// Lifetime profiling is essentially a time-aggregated view of an event trace,
+// so we share the majority of the implementation and switch internally in the
+// cases where the implementations must diverge.
+enum class Mode { kLifetimes, kEventTrace };
+
 class DeallocationSample final
     : public tcmalloc_internal::AllocationProfilingTokenBase {
  public:
-  explicit DeallocationSample(DeallocationProfilerList* /*absl_nonnull*/ list);
+  explicit DeallocationSample(DeallocationProfilerList* absl_nonnull list,
+                              Mode mode);
   // We define the dtor to ensure it is placed in the desired text section.
   ~DeallocationSample() override;
 
-  tcmalloc::Profile Stop() && override;
+  [[nodiscard]] tcmalloc::Profile Stop() && override;
 
  private:
   std::unique_ptr<DeallocationProfiler> profiler_;
 };
 
 namespace internal {
-absl::Duration LifetimeNsToBucketedDuration(double lifetime_ns);
+[[nodiscard]] absl::Duration LifetimeNsToBucketedDuration(double lifetime_ns);
 }  // namespace internal
 }  // namespace deallocationz
 }  // namespace tcmalloc

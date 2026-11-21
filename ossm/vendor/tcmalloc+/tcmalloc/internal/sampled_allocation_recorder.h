@@ -23,6 +23,7 @@
 #define TCMALLOC_INTERNAL_SAMPLED_ALLOCATION_RECORDER_H_
 
 #include <atomic>
+#include <utility>
 
 #include "absl/base/attributes.h"
 #include "absl/base/const_init.h"
@@ -31,6 +32,7 @@
 #include "absl/functional/function_ref.h"
 #include "tcmalloc/internal/allocation_guard.h"
 #include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/logging.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
@@ -55,8 +57,10 @@ class SampleRecorder {
  public:
   using Allocator = AllocatorT;
 
+  constexpr SampleRecorder() = default;
   constexpr explicit SampleRecorder(
       Allocator& allocator ABSL_ATTRIBUTE_LIFETIME_BOUND);
+  constexpr void Init(Allocator& allocator);
   ~SampleRecorder();
 
   SampleRecorder(const SampleRecorder&) = delete;
@@ -67,17 +71,14 @@ class SampleRecorder {
 
   // Registers for sampling.  Returns an opaque registration info.
   template <typename... Targs>
-  T* Register(Targs&&... args);
+  [[nodiscard]] T* Register(Targs&&... args)
+      ABSL_LOCKS_EXCLUDED(graveyard_.lock);
 
-  // Unregisters the sample.
-  void Unregister(T* sample);
-
-  // The dispose callback will be called on all samples the moment they are
-  // being unregistered. Only affects samples that are unregistered after the
-  // callback has been set.
-  // Returns the previous callback.
-  using DisposeCallback = void (*)(const T&);
-  DisposeCallback SetDisposeCallback(DisposeCallback f);
+  // Unregisters the sample and, if it was live, invokes `void callback(T&)`
+  // while holding `sample->lock` under `AllocationGuard`.
+  template <typename Callback>
+  void Unregister(T* sample, Callback&& callback)
+      ABSL_LOCKS_EXCLUDED(graveyard_.lock, sample->lock);
 
   // Unregisters any live samples starting from `all_`. Note that if there are
   // any samples added in front of `all_` in other threads after this function
@@ -86,16 +87,25 @@ class SampleRecorder {
   // Extra care must be taken when `Unregister()` is invoked concurrently with
   // this function to avoid a dead sample (updated by this function) being
   // passed to `Unregister()` which assumes the sample is live.
-  void UnregisterAll();
+  void UnregisterAll() ABSL_LOCKS_EXCLUDED(graveyard_.lock);
 
   // Iterates over all the registered samples.
-  void Iterate(const absl::FunctionRef<void(const T& sample)>& f);
+  void Iterate(const absl::FunctionRef<void(const T& sample)>& f)
+      ABSL_LOCKS_EXCLUDED(graveyard_.lock);
 
  private:
   void PushNew(T* sample);
-  void PushDead(T* sample);
   template <typename... Targs>
-  T* PopDead(Targs&&... args);
+  [[nodiscard]] T* PopDead(Targs&&... args)
+      ABSL_LOCKS_EXCLUDED(graveyard_.lock);
+  // Returns the dead-list successor of `sample`.  `T::dead` is guarded by the
+  // sample's own lock, but the links of samples on the dead list are only
+  // written while `graveyard_.lock` is held, so holding it suffices here.
+  [[nodiscard]] T* NextDead(const T* sample) const
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(graveyard_.lock)
+          ABSL_NO_THREAD_SAFETY_ANALYSIS {
+    return sample->dead;
+  }
 
   // Intrusive lock free linked lists for tracking samples.
   //
@@ -122,22 +132,35 @@ class SampleRecorder {
   //     ^                                      |
   //     +--------------------------------------+
   //
-  std::atomic<T*> all_;
-  T graveyard_;
+  std::atomic<T*> all_ = nullptr;
+  // Derives from T so that `&graveyard_` is a valid `T*` list sentinel, and
+  // redeclares `lock` and `dead` so that `graveyard_.lock` is a distinct field
+  // from `T::lock` for -Wthread-safety-analysis lock-order annotations.
+  struct Graveyard : public T {
+    absl::base_internal::SpinLock lock
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+        ABSL_ACQUIRED_BEFORE(T::lock)
+#else
+        ABSL_ACQUIRED_AFTER(T::lock)
+#endif
+            {absl::base_internal::SCHEDULE_KERNEL_ONLY};
+    T* dead ABSL_GUARDED_BY(lock) = nullptr;
+  };
+  Graveyard graveyard_;
 
-  std::atomic<DisposeCallback> dispose_;
-  Allocator* const allocator_;
+  Allocator* allocator_ = nullptr;
 };
 
 template <typename T, typename Allocator>
-typename SampleRecorder<T, Allocator>::DisposeCallback
-SampleRecorder<T, Allocator>::SetDisposeCallback(DisposeCallback f) {
-  return dispose_.exchange(f, std::memory_order_relaxed);
+constexpr SampleRecorder<T, Allocator>::SampleRecorder(Allocator& allocator) {
+  Init(allocator);
 }
 
 template <typename T, typename Allocator>
-constexpr SampleRecorder<T, Allocator>::SampleRecorder(Allocator& allocator)
-    : all_(nullptr), dispose_(nullptr), allocator_(&allocator) {
+constexpr void SampleRecorder<T, Allocator>::Init(Allocator& allocator)
+    ABSL_NO_THREAD_SAFETY_ANALYSIS {
+  TC_CHECK(!allocator_);
+  allocator_ = &allocator;
   graveyard_.dead = &graveyard_;
 }
 
@@ -161,32 +184,26 @@ void SampleRecorder<T, Allocator>::PushNew(T* sample) {
 }
 
 template <typename T, typename Allocator>
-void SampleRecorder<T, Allocator>::PushDead(T* sample) {
-  if (auto* dispose = dispose_.load(std::memory_order_relaxed)) {
-    dispose(*sample);
-  }
-
-  AllocationGuardSpinLockHolder graveyard_lock(graveyard_.lock);
-  AllocationGuardSpinLockHolder sample_lock(sample->lock);
-  sample->dead = graveyard_.dead;
-  graveyard_.dead = sample;
-}
-
-template <typename T, typename Allocator>
 template <typename... Targs>
 T* SampleRecorder<T, Allocator>::PopDead(Targs&&... args) {
-  AllocationGuardSpinLockHolder graveyard_lock(graveyard_.lock);
+  AllocationGuard enforce_no_alloc;
+  T* sample;
+  {
+    absl::base_internal::SpinLockHolder graveyard_lock(graveyard_.lock);
 
-  // The list is circular, so eventually it collapses down to
-  //   graveyard_.dead == &graveyard_
-  // when it is empty.
-  T* sample = graveyard_.dead;
-  if (sample == &graveyard_) return nullptr;
+    // The list is circular, so eventually it collapses down to
+    //   graveyard_.dead == &graveyard_
+    // when it is empty.
+    sample = graveyard_.dead;
+    if (ABSL_PREDICT_FALSE(sample == &graveyard_)) return nullptr;
 
-  AllocationGuardSpinLockHolder sample_lock(sample->lock);
-  graveyard_.dead = sample->dead;
-  sample->dead = nullptr;
+    graveyard_.dead = NextDead(sample);
+  }
+  absl::base_internal::SpinLockHolder sample_lock(sample->lock);
+  // TODO(b/73749855): This could be moved out but requires updating our lock
+  // annotations.
   sample->PrepareForSampling(std::forward<Targs>(args)...);
+  sample->dead = nullptr;
   return sample;
 }
 
@@ -194,7 +211,7 @@ template <typename T, typename Allocator>
 template <typename... Targs>
 T* SampleRecorder<T, Allocator>::Register(Targs&&... args) {
   T* sample = PopDead(std::forward<Targs>(args)...);
-  if (sample == nullptr) {
+  if (ABSL_PREDICT_FALSE(sample == nullptr)) {
     // Resurrection failed.  Hire a new warlock.
     sample = allocator_->New(std::forward<Targs>(args)...);
     PushNew(sample);
@@ -204,24 +221,49 @@ T* SampleRecorder<T, Allocator>::Register(Targs&&... args) {
 }
 
 template <typename T, typename Allocator>
-void SampleRecorder<T, Allocator>::Unregister(T* sample) {
-  PushDead(sample);
+template <typename Callback>
+void SampleRecorder<T, Allocator>::Unregister(T* sample, Callback&& callback) {
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+  AllocationGuardSpinLockHolder graveyard_lock(graveyard_.lock);
+  AllocationGuardSpinLockHolder sample_lock(sample->lock);
+  if (ABSL_PREDICT_FALSE(sample->dead != nullptr)) {
+    return;
+  }
+  sample->dead = graveyard_.dead;
+  graveyard_.dead = sample;
+#else
+  AllocationGuardSpinLockHolder sample_lock(sample->lock);
+  // Already on the dead list; UnregisterAll visits every sample in `all_`.
+  if (ABSL_PREDICT_FALSE(sample->dead != nullptr)) {
+    return;
+  }
+  {
+    AllocationGuardSpinLockHolder graveyard_lock(graveyard_.lock);
+    sample->dead = graveyard_.dead;
+    graveyard_.dead = sample;
+  }
+#endif
+  std::forward<Callback>(callback)(*sample);
 }
 
 template <typename T, typename Allocator>
 void SampleRecorder<T, Allocator>::UnregisterAll() {
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
   AllocationGuardSpinLockHolder graveyard_lock(graveyard_.lock);
+#endif
   T* sample = all_.load(std::memory_order_acquire);
-  auto* dispose = dispose_.load(std::memory_order_relaxed);
   while (sample != nullptr) {
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
     {
       AllocationGuardSpinLockHolder sample_lock(sample->lock);
       if (sample->dead == nullptr) {
-        if (dispose) dispose(*sample);
         sample->dead = graveyard_.dead;
         graveyard_.dead = sample;
       }
     }
+#else
+    Unregister(sample, [](T&) {});
+#endif
     sample = sample->next;
   }
 }

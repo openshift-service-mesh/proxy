@@ -20,9 +20,9 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
-#include "tcmalloc/central_freelist.h"
+#include "tcmalloc/central_freelist_options.h"
+#include "tcmalloc/huge_page_options.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/parameter_accessors.h"
@@ -32,28 +32,36 @@ GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
 namespace tcmalloc_internal {
 
+// The configured heap partitioning mode.
+enum class HeapPartitioningMode {
+  // Heap partitioning is disabled.
+  kOff = 0,
+  // Full heap partitioning with strong isolation is enabled.
+  kFull = 1,
+  // Lightweight heap partitioning with weaker isolation is enabled; this is a
+  // more performant mode with weaker security properties (vs. kFull).
+  kLight = 2,
+};
+
 class Parameters {
  public:
-  static MallocExtension::BytesPerSecond background_release_rate() {
+  [[nodiscard]] static MallocExtension::BytesPerSecond
+  background_release_rate() {
     return background_release_rate_.load(std::memory_order_relaxed);
   }
 
   static void set_background_release_rate(
-      MallocExtension::BytesPerSecond value) {
-    TCMalloc_Internal_SetBackgroundReleaseRate(static_cast<size_t>(value));
-  }
+      MallocExtension::BytesPerSecond value);
 
-  static uint64_t heap_size_hard_limit();
+  [[nodiscard]] static uint64_t heap_size_hard_limit();
   static void set_heap_size_hard_limit(uint64_t value);
 
-  static bool hpaa_subrelease();
+  [[nodiscard]] static bool hpaa_subrelease();
   static void set_hpaa_subrelease(bool value);
 
-  static bool use_all_buckets_for_few_object_spans_in_cfl();
+  [[nodiscard]] static bool use_all_buckets_for_few_object_spans_in_cfl();
 
-  static absl::Duration huge_cache_release_time();
-
-  static int64_t guarded_sampling_interval() {
+  [[nodiscard]] static int64_t guarded_sampling_interval() {
     return guarded_sampling_interval_.load(std::memory_order_relaxed);
   }
 
@@ -61,17 +69,17 @@ class Parameters {
     TCMalloc_Internal_SetGuardedSamplingInterval(value);
   }
 
-  static int32_t max_per_cpu_cache_size();
+  [[nodiscard]] static int32_t max_per_cpu_cache_size();
 
   static void set_max_per_cpu_cache_size(int32_t value) {
     TCMalloc_Internal_SetMaxPerCpuCacheSize(value);
   }
 
-  static int64_t max_total_thread_cache_bytes() {
+  [[nodiscard]] static int64_t max_total_thread_cache_bytes() {
     return max_total_thread_cache_bytes_.load(std::memory_order_relaxed);
   }
 
-  static tcmalloc::hot_cold_t min_hot_access_hint() {
+  [[nodiscard]] static tcmalloc::hot_cold_t min_hot_access_hint() {
     return min_hot_access_hint_.load(std::memory_order_relaxed);
   }
 
@@ -83,40 +91,127 @@ class Parameters {
     TCMalloc_Internal_SetMaxTotalThreadCacheBytes(value);
   }
 
-  static double peak_sampling_heap_growth_fraction() {
+  [[nodiscard]] static double peak_sampling_heap_growth_fraction() {
     return peak_sampling_heap_growth_fraction_.load(std::memory_order_relaxed);
   }
 
-  static void set_peak_sampling_heap_growth_fraction(double value) {
-    TCMalloc_Internal_SetPeakSamplingHeapGrowthFraction(value);
-  }
-
-  static bool release_partial_alloc_pages() {
+  [[nodiscard]] static ReleasePartialAllocPages release_partial_alloc_pages() {
     return release_partial_alloc_pages_.load(std::memory_order_relaxed);
   }
 
-  static bool huge_region_demand_based_release() {
-    return huge_region_demand_based_release_.load(std::memory_order_relaxed);
+  [[nodiscard]] static EnableCollapse usermode_hugepage_collapse();
+
+  [[nodiscard]] static SubreleaseUnbackedMode subrelease_unbacked_hugepages();
+
+  [[nodiscard]] static TrackBrokenHugepages track_broken_hugepages() {
+    return track_broken_hugepages_.load(std::memory_order_relaxed);
   }
 
-  static bool usermode_hugepage_collapse();
-
-  static bool release_free_swapped();
-
-  static bool use_userspace_collapse_heuristics() {
-    return use_userspace_collapse_heuristics_.load(std::memory_order_relaxed);
+  static void set_track_broken_hugepages(bool value) {
+    TCMalloc_Internal_SetTrackBrokenHugepages(value);
   }
 
-  static bool release_pages_from_huge_region() {
+  [[nodiscard]] static bool back_small_allocations() {
+    return back_small_allocations_.load(std::memory_order_relaxed);
+  }
+
+  [[nodiscard]] static int32_t back_size_threshold_bytes() {
+    return back_size_threshold_bytes_.load(std::memory_order_relaxed);
+  }
+
+  [[nodiscard]] static bool release_pages_from_huge_region() {
     return release_pages_from_huge_region_.load(std::memory_order_relaxed);
   }
 
-  static bool resize_size_class_max_capacity() {
+  [[nodiscard]] static bool resize_size_class_max_capacity() {
     return resize_size_class_max_capacity_.load(std::memory_order_relaxed);
   }
 
-  static bool per_cpu_caches() {
+  [[nodiscard]] static bool per_cpu_caches() {
     return per_cpu_caches_enabled_.load(std::memory_order_relaxed);
+  }
+
+  [[nodiscard]] static EnableUnfilteredCollapse enable_unfiltered_collapse() {
+    return enable_unfiltered_collapse_.load(std::memory_order_relaxed);
+  }
+
+  [[nodiscard]] static PreserveDonatedOnCollapse
+  preserve_donated_on_collapse() {
+    return preserve_donated_on_collapse_.load(std::memory_order_relaxed);
+  }
+
+  static void set_preserve_donated_on_collapse(bool value) {
+    TCMalloc_Internal_SetPreserveDonatedOnCollapse(value);
+  }
+
+  [[nodiscard]] static HugeRegionAdaptiveRelease
+  huge_region_adaptive_release() {
+    return huge_region_adaptive_release_.load(std::memory_order_relaxed);
+  }
+
+  [[nodiscard]] static HugeRegionUsageOption huge_region_option();
+
+  [[nodiscard]] static bool release_max_filler_pages() {
+    return release_max_filler_pages_.load(std::memory_order_relaxed);
+  }
+
+  [[nodiscard]] static size_t min_free_bytes_to_break_dense_hugepage() {
+    return min_free_bytes_to_break_dense_hugepage_.load(
+        std::memory_order_relaxed);
+  }
+
+  static void set_min_free_bytes_to_break_dense_hugepage(size_t value) {
+    TCMalloc_Internal_SetMinFreeBytesToBreakDenseHugepage(value);
+  }
+
+  [[nodiscard]] static size_t min_free_bytes_to_break_sparse_hugepage() {
+    return min_free_bytes_to_break_sparse_hugepage_.load(
+        std::memory_order_relaxed);
+  }
+
+  static void set_min_free_bytes_to_break_sparse_hugepage(size_t value) {
+    TCMalloc_Internal_SetMinFreeBytesToBreakSparseHugepage(value);
+  }
+
+  [[nodiscard]] static CollapseReleasedHugePages collapse_released_hugepages() {
+    return collapse_released_hugepages_.load(std::memory_order_relaxed);
+  }
+
+  static void set_collapse_released_hugepages(bool value) {
+    TCMalloc_Internal_SetCollapseReleasedHugepages(value);
+  }
+
+  [[nodiscard]] static PreferBackedPages prefer_backed_filler_pages() {
+    return prefer_backed_filler_pages_.load(std::memory_order_relaxed);
+  }
+
+  static void set_prefer_backed_filler_pages(bool value) {
+    TCMalloc_Internal_SetPreferBackedFillerPages(value);
+  }
+
+  [[nodiscard]] static FillerAppendOnFree filler_append_on_free() {
+    return filler_append_on_free_.load(std::memory_order_relaxed);
+  }
+
+  static void set_filler_append_on_free(bool value) {
+    TCMalloc_Internal_SetFillerAppendOnFree(value);
+  }
+
+  [[nodiscard]] static MadviseRegionsNoHugepage
+  madvise_cold_regions_nohugepage() {
+    return madvise_cold_regions_nohugepage_.load(std::memory_order_relaxed);
+  }
+
+  [[nodiscard]] static MadviseSampledAllocations madvise_sampled_allocations() {
+    return madvise_sampled_allocations_.load(std::memory_order_relaxed);
+  }
+
+  static void set_madvise_sampled_allocations(MadviseSampledAllocations value) {
+    TCMalloc_Internal_SetMadviseSampledAllocations(value);
+  }
+
+  [[nodiscard]] static size_t event_trace_memory_limit() {
+    return event_trace_memory_limit_.load(std::memory_order_relaxed);
   }
 
   static void set_per_cpu_caches(bool value) {
@@ -132,7 +227,7 @@ class Parameters {
     TCMalloc_Internal_SetPerCpuCachesEnabled(value);
   }
 
-  static int64_t profile_sampling_interval() {
+  [[nodiscard]] static int64_t profile_sampling_interval() {
     return profile_sampling_interval_.load(std::memory_order_relaxed);
   }
 
@@ -140,68 +235,113 @@ class Parameters {
     TCMalloc_Internal_SetProfileSamplingInterval(value);
   }
 
-  static bool background_process_actions_enabled();
-  static absl::Duration background_process_sleep_interval();
+  [[nodiscard]] static bool background_process_actions_enabled() {
+    return background_process_actions_enabled_.load(std::memory_order_relaxed);
+  }
+  static void set_background_process_actions_enabled(bool value) {
+    background_process_actions_enabled_.store(value, std::memory_order_relaxed);
+  }
+  [[nodiscard]] static absl::Duration background_process_sleep_interval() {
+    return absl::Nanoseconds(
+        background_process_sleep_interval_ns_.load(std::memory_order_relaxed));
+  }
+  static void set_background_process_sleep_interval(absl::Duration value) {
+    if (value <= absl::ZeroDuration()) {
+      TC_LOG("Ignoring non-positive background_process_sleep_interval: %v ns",
+             absl::ToInt64Nanoseconds(value));
+      return;
+    }
+    background_process_sleep_interval_ns_.store(absl::ToInt64Nanoseconds(value),
+                                                std::memory_order_relaxed);
+  }
 
   static void set_filler_skip_subrelease_short_interval(absl::Duration value) {
+    if (value >= absl::ZeroDuration()) {
+    }
     TCMalloc_Internal_SetHugePageFillerSkipSubreleaseShortInterval(value);
   }
 
-  static absl::Duration filler_skip_subrelease_short_interval();
+  [[nodiscard]] static absl::Duration filler_skip_subrelease_short_interval() {
+    return absl::Nanoseconds(
+        skip_subrelease_short_interval_ns_.load(std::memory_order_relaxed));
+  }
 
   static void set_filler_skip_subrelease_long_interval(absl::Duration value) {
+    if (value >= absl::ZeroDuration()) {
+    }
     TCMalloc_Internal_SetHugePageFillerSkipSubreleaseLongInterval(value);
   }
 
-  static absl::Duration filler_skip_subrelease_long_interval();
-
-  static void set_cache_demand_release_short_interval(absl::Duration value) {
-    TCMalloc_Internal_SetHugeCacheDemandReleaseShortInterval(value);
+  [[nodiscard]] static absl::Duration filler_skip_subrelease_long_interval() {
+    return absl::Nanoseconds(
+        skip_subrelease_long_interval_ns_.load(std::memory_order_relaxed));
   }
 
-  static absl::Duration cache_demand_release_short_interval();
-
-  static void set_cache_demand_release_long_interval(absl::Duration value) {
-    TCMalloc_Internal_SetHugeCacheDemandReleaseLongInterval(value);
+  static void set_filler_skip_subrelease_cold_short_interval(
+      absl::Duration value) {
+    if (value >= absl::ZeroDuration()) {
+    }
+    TCMalloc_Internal_SetHugePageFillerSkipSubreleaseColdShortInterval(value);
   }
 
-  static absl::Duration cache_demand_release_long_interval();
+  [[nodiscard]] static absl::Duration
+  filler_skip_subrelease_cold_short_interval() {
+    return absl::Nanoseconds(skip_subrelease_cold_short_interval_ns_.load(
+        std::memory_order_relaxed));
+  }
 
-  static bool per_cpu_caches_dynamic_slab_enabled() {
+  static void set_filler_skip_subrelease_cold_long_interval(
+      absl::Duration value) {
+    if (value >= absl::ZeroDuration()) {
+    }
+    TCMalloc_Internal_SetHugePageFillerSkipSubreleaseColdLongInterval(value);
+  }
+
+  [[nodiscard]] static absl::Duration
+  filler_skip_subrelease_cold_long_interval() {
+    return absl::Nanoseconds(
+        skip_subrelease_cold_long_interval_ns_.load(std::memory_order_relaxed));
+  }
+
+  [[nodiscard]] static bool per_cpu_caches_dynamic_slab_enabled() {
     return per_cpu_caches_dynamic_slab_.load(std::memory_order_relaxed);
   }
-  static void set_per_cpu_caches_dynamic_slab_enabled(bool value) {
-    TCMalloc_Internal_SetPerCpuCachesDynamicSlabEnabled(value);
-  }
 
-  static double per_cpu_caches_dynamic_slab_grow_threshold() {
+  [[nodiscard]] static double per_cpu_caches_dynamic_slab_grow_threshold() {
     return per_cpu_caches_dynamic_slab_grow_threshold_.load(
         std::memory_order_relaxed);
   }
-  static void set_per_cpu_caches_dynamic_slab_grow_threshold(double value) {
-    TCMalloc_Internal_SetPerCpuCachesDynamicSlabGrowThreshold(value);
-  }
 
-  static double per_cpu_caches_dynamic_slab_shrink_threshold() {
+  [[nodiscard]] static double per_cpu_caches_dynamic_slab_shrink_threshold() {
     return per_cpu_caches_dynamic_slab_shrink_threshold_.load(
         std::memory_order_relaxed);
   }
-  static void set_per_cpu_caches_dynamic_slab_shrink_threshold(double value) {
-    TCMalloc_Internal_SetPerCpuCachesDynamicSlabShrinkThreshold(value);
+
+  [[nodiscard]] static bool release_drained_slab_metadata() {
+    return release_drained_slab_metadata_.load(std::memory_order_relaxed);
   }
 
-  static central_freelist_internal::PriorityListLength priority_list_length();
+  [[nodiscard]] static bool fix_max_capacity_bug();
+
+  [[nodiscard]] static HeapPartitioningMode heap_partitioning_mode();
+
+  // TODO: b/527473378 - Remove this function once the experiment is cleaned up.
+  [[nodiscard]] static ReleaseStalePages release_stale_pages() {
+    return release_stale_pages_.load(std::memory_order_relaxed);
+  }
+
+  // TODO: b/557224124 - Remove this function once the experiment is cleaned up.
+  [[nodiscard]] static central_freelist_internal::CflSubbucketPrioritization
+  cfl_subbucket_prioritization();
 
  private:
+  friend class Static;
   friend void ::TCMalloc_Internal_SetBackgroundReleaseRate(size_t v);
   friend void ::TCMalloc_Internal_SetGuardedSamplingInterval(int64_t v);
-  friend void ::TCMalloc_Internal_SetHPAASubrelease(bool v);
   friend void ::TCMalloc_Internal_SetReleasePartialAllocPagesEnabled(bool v);
-  friend void ::TCMalloc_Internal_SetHugeRegionDemandBasedRelease(bool v);
   friend void ::TCMalloc_Internal_SetUsermodeHugepageCollapse(bool v);
   friend void ::TCMalloc_Internal_SetReleasePagesFromHugeRegionEnabled(bool v);
   friend void ::TCMalloc_Internal_SetResizeSizeClassMaxCapacityEnabled(bool v);
-  friend void ::TCMalloc_Internal_SetMaxPerCpuCacheSize(int32_t v);
   friend void ::TCMalloc_Internal_SetMaxTotalThreadCacheBytes(int64_t v);
   friend void ::TCMalloc_Internal_SetPeakSamplingHeapGrowthFraction(double v);
   friend void ::TCMalloc_Internal_SetPerCpuCachesEnabledNoBuildRequirement(
@@ -212,32 +352,45 @@ class Parameters {
       absl::Duration v);
   friend void ::TCMalloc_Internal_SetHugePageFillerSkipSubreleaseLongInterval(
       absl::Duration v);
-  friend void ::TCMalloc_Internal_SetHugeCacheDemandReleaseShortInterval(
-      absl::Duration v);
-  friend void ::TCMalloc_Internal_SetHugeCacheDemandReleaseLongInterval(
-      absl::Duration v);
+  friend void ::
+      TCMalloc_Internal_SetHugePageFillerSkipSubreleaseColdShortInterval(
+          absl::Duration v);
+  friend void ::
+      TCMalloc_Internal_SetHugePageFillerSkipSubreleaseColdLongInterval(
+          absl::Duration v);
   friend void ::TCMalloc_Internal_SetPerCpuCachesDynamicSlabEnabled(bool v);
-  friend void ::TCMalloc_Internal_SetPerCpuCachesDynamicSlabGrowThreshold(
-      double v);
-  friend void ::TCMalloc_Internal_SetPerCpuCachesDynamicSlabShrinkThreshold(
-      double v);
 
-  friend void TCMalloc_Internal_SetLifetimeAllocatorOptions(
-      absl::string_view s);
-  friend void ::TCMalloc_Internal_SetMadvise(
-      tcmalloc::tcmalloc_internal::MadvisePreference v);
   friend void ::TCMalloc_Internal_SetMinHotAccessHint(uint8_t v);
-  friend void ::TCMalloc_Internal_SetReleaseFreeSwapped(bool v);
-  friend void ::TCMalloc_Internal_SetUseUserspaceCollapseHeuristics(bool v);
 
-  static std::atomic<MallocExtension::BytesPerSecond> background_release_rate_;
+  friend void ::TCMalloc_Internal_SetBackSmallAllocations(bool v);
+  friend void ::TCMalloc_Internal_SetBackSizeThresholdBytes(int32_t v);
+  friend void ::TCMalloc_Internal_SetEnableUnfilteredCollapse(bool v);
+  friend void ::TCMalloc_Internal_SetHugeRegionAdaptiveReleaseEnabled(bool v);
+  friend void ::TCMalloc_Internal_SetReleaseMaxFillerPages(bool v);
+  friend void ::TCMalloc_Internal_SetMinFreeBytesToBreakDenseHugepage(size_t v);
+  friend void ::TCMalloc_Internal_SetMinFreeBytesToBreakSparseHugepage(
+      size_t v);
+  friend void ::TCMalloc_Internal_SetTrackBrokenHugepages(bool v);
+  friend void ::TCMalloc_Internal_SetPreserveDonatedOnCollapse(bool v);
+  friend void ::TCMalloc_Internal_SetCollapseReleasedHugepages(bool v);
+  friend void ::TCMalloc_Internal_SetPreferBackedFillerPages(bool v);
+  friend void ::TCMalloc_Internal_SetFillerAppendOnFree(bool v);
+  friend void ::TCMalloc_Internal_SetMadviseColdRegionsNoHugepage(bool v);
+  friend void ::TCMalloc_Internal_SetMadviseSampledAllocations(
+      tcmalloc::tcmalloc_internal::MadviseSampledAllocations v);
+  friend void ::TCMalloc_Internal_SetEventTraceMemoryLimit(size_t v);
+  friend void ::TCMalloc_Internal_SetReleaseDrainedSlabMetadata(bool v);
+
+  static void InitializeFromExperiments();
+
+  static std::atomic<bool> background_process_actions_enabled_;
+  static std::atomic<int64_t> background_process_sleep_interval_ns_;
+
   static std::atomic<int64_t> guarded_sampling_interval_;
-  static std::atomic<int32_t> max_per_cpu_cache_size_;
   static std::atomic<int64_t> max_total_thread_cache_bytes_;
   static std::atomic<double> peak_sampling_heap_growth_fraction_;
   static std::atomic<bool> per_cpu_caches_enabled_;
-  static std::atomic<bool> release_partial_alloc_pages_;
-  static std::atomic<bool> huge_region_demand_based_release_;
+  static std::atomic<ReleasePartialAllocPages> release_partial_alloc_pages_;
   static std::atomic<bool> release_pages_from_huge_region_;
   static std::atomic<bool> resize_size_class_max_capacity_;
   static std::atomic<int64_t> profile_sampling_interval_;
@@ -245,8 +398,29 @@ class Parameters {
   static std::atomic<tcmalloc::hot_cold_t> min_hot_access_hint_;
   static std::atomic<double> per_cpu_caches_dynamic_slab_grow_threshold_;
   static std::atomic<double> per_cpu_caches_dynamic_slab_shrink_threshold_;
-  static std::atomic<bool> usermode_hugepage_collapse_enabled_;
-  static std::atomic<bool> use_userspace_collapse_heuristics_;
+  static std::atomic<CollapseReleasedHugePages> collapse_released_hugepages_;
+  static std::atomic<EnableCollapse> usermode_hugepage_collapse_enabled_;
+  static std::atomic<bool> back_small_allocations_;
+  static std::atomic<int32_t> back_size_threshold_bytes_;
+  static std::atomic<EnableUnfilteredCollapse> enable_unfiltered_collapse_;
+  static std::atomic<MadviseSampledAllocations> madvise_sampled_allocations_;
+  static std::atomic<size_t> event_trace_memory_limit_;
+  static std::atomic<HugeRegionAdaptiveRelease> huge_region_adaptive_release_;
+  static std::atomic<ReleaseStalePages> release_stale_pages_;
+  static std::atomic<MallocExtension::BytesPerSecond> background_release_rate_;
+  static std::atomic<int64_t> skip_subrelease_short_interval_ns_;
+  static std::atomic<int64_t> skip_subrelease_long_interval_ns_;
+  static std::atomic<int64_t> skip_subrelease_cold_short_interval_ns_;
+  static std::atomic<int64_t> skip_subrelease_cold_long_interval_ns_;
+  static std::atomic<bool> release_max_filler_pages_;
+  static std::atomic<size_t> min_free_bytes_to_break_dense_hugepage_;
+  static std::atomic<size_t> min_free_bytes_to_break_sparse_hugepage_;
+  static std::atomic<bool> release_drained_slab_metadata_;
+  static std::atomic<TrackBrokenHugepages> track_broken_hugepages_;
+  static std::atomic<PreserveDonatedOnCollapse> preserve_donated_on_collapse_;
+  static std::atomic<PreferBackedPages> prefer_backed_filler_pages_;
+  static std::atomic<FillerAppendOnFree> filler_append_on_free_;
+  static std::atomic<MadviseRegionsNoHugepage> madvise_cold_regions_nohugepage_;
 };
 
 }  // namespace tcmalloc_internal

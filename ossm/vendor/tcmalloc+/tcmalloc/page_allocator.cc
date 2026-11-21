@@ -15,18 +15,26 @@
 #include "tcmalloc/page_allocator.h"
 
 #include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <limits>
 
+#include "absl/base/attributes.h"
 #include "absl/base/macros.h"
 #include "absl/base/optimization.h"
+#include "absl/types/span.h"
 #include "tcmalloc/common.h"
 #include "tcmalloc/huge_page_aware_allocator.h"
+#include "tcmalloc/internal/allocation_guard.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/environment.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/memory_tag.h"
+#include "tcmalloc/internal/page_allocator_hooks.h"
 #include "tcmalloc/pages.h"
 #include "tcmalloc/parameters.h"
-#include "tcmalloc/selsan/selsan.h"
+#include "tcmalloc/span.h"
+#include "tcmalloc/static_forwarder.h"
 #include "tcmalloc/static_vars.h"
 #include "tcmalloc/stats.h"
 
@@ -36,36 +44,52 @@ namespace tcmalloc_internal {
 
 using huge_page_allocator_internal::HugePageAwareAllocatorOptions;
 
-PageAllocator::PageAllocator() {
-  has_cold_impl_ = ColdFeatureActive();
-  size_t part = 0;
+template <typename Forwarder>
+PageAllocatorImpl<Forwarder>::PageAllocatorImpl() {
+  sampled_partition_active_ =
+      Parameters::heap_partitioning_mode() == HeapPartitioningMode::kFull;
 
+  size_t part = 0;
   normal_impl_[0] = new (&choices_[part++].hpaa)
-      HugePageAwareAllocator(HugePageAwareAllocatorOptions{MemoryTag::kNormal});
-  if (tc_globals.numa_topology().numa_aware()) {
-    normal_impl_[1] = new (&choices_[part++].hpaa) HugePageAwareAllocator(
+      Interface(HugePageAwareAllocatorOptions{MemoryTag::kNormal});
+  if (tc_globals.active_partitions() > 1) {
+    normal_impl_[1] = tc_globals.arena().New<Interface>(
+        ArenaAlloc::kPageAllocator,
         HugePageAwareAllocatorOptions{MemoryTag::kNormalP1});
   }
-  sampled_impl_ = new (&choices_[part++].hpaa) HugePageAwareAllocator(
-      HugePageAwareAllocatorOptions{MemoryTag::kSampled});
-  if (selsan::IsEnabled()) {
-    selsan_impl_ = new (&choices_[part++].hpaa) HugePageAwareAllocator(
-        HugePageAwareAllocatorOptions{MemoryTag::kSelSan});
+  sampled_or_cold_impl_[0] = new (&choices_[part++].hpaa)
+      Interface(HugePageAwareAllocatorOptions{MemoryTag::kSampledOrCold});
+  if (sampled_partition_active_) {
+    // this is not the case for NUMA partitions, hence, we can't use the
+    // active_partitions() check.
+    sampled_or_cold_impl_[1] = tc_globals.arena().New<Interface>(
+        ArenaAlloc::kPageAllocator,
+        HugePageAwareAllocatorOptions{MemoryTag::kSampledOrColdP1});
   }
-  if (has_cold_impl_) {
-    cold_impl_ = new (&choices_[part++].hpaa)
-        HugePageAwareAllocator(HugePageAwareAllocatorOptions{MemoryTag::kCold});
-  } else {
-    cold_impl_ = normal_impl_[0];
+
+  size_t total_heaps = 0;
+  all_heaps_[total_heaps++] = sampled_or_cold_impl_[0];
+  if (sampled_partition_active_) {
+    all_heaps_[total_heaps++] = sampled_or_cold_impl_[1];
   }
+  for (size_t partition = 0; partition < active_partitions(); ++partition) {
+    all_heaps_[total_heaps++] = normal_impl_[partition];
+  }
+  heaps_ = absl::MakeConstSpan(all_heaps_.data(), total_heaps);
   alg_ = HPAA;
-  TC_CHECK_LE(part, ABSL_ARRAYSIZE(choices_));
+  TC_CHECK_LE(part, std::size(choices_));
 }
 
-void PageAllocator::ShrinkToUsageLimit(Length n) {
-  BackingStats s = stats();
-  const size_t backed =
-      s.system_bytes - s.unmapped_bytes + tc_globals.metadata_bytes();
+template <typename Forwarder>
+size_t PageAllocatorImpl<Forwarder>::current_backed() const {
+  const BackingStats s = stats();
+  return s.system_bytes - s.unmapped_bytes + tc_globals.metadata_bytes();
+}
+
+template <typename Forwarder>
+void PageAllocatorImpl<Forwarder>::ShrinkToUsageLimitSlow(Length n) {
+  const size_t backed = current_backed();
+
   // New high water marks should be rare.
   if (ABSL_PREDICT_FALSE(backed > peak_backed_bytes_)) {
     peak_backed_bytes_ = backed;
@@ -84,6 +108,7 @@ void PageAllocator::ShrinkToUsageLimit(Length n) {
   // occur if we allocate space for many objects preemptively and only later
   // sample them (incrementing sampled_objects_size_).
 
+  over_limit_ = false;
   if (limits_[kSoft] == std::numeric_limits<size_t>::max()) {
     // Limits are not set.
     return;
@@ -94,35 +119,53 @@ void PageAllocator::ShrinkToUsageLimit(Length n) {
   }
 
   ++limit_hits_[kSoft];
-  if (limits_[kHard] < backed) ++limit_hits_[kHard];
+  const size_t hard_limit = limits_[kHard];
+  const bool hit_hard = hard_limit < backed;
+  if (hit_hard) ++limit_hits_[kHard];
 
   const size_t overage = backed - limits_[kSoft];
-  const Length pages = LengthFromBytes(overage + kPageSize - 1);
-  if (ShrinkHardBy(pages, kSoft)) {
+  const Length pages = BytesToLengthCeil(overage);
+  if (ShrinkHardBy(pages, kSoft) || current_backed() <= limits_[kSoft]) {
     ++successful_shrinks_after_limit_hit_[kSoft];
     return;
   }
 
   // We're still not below limit.
-  if (limits_[kHard] < std::numeric_limits<size_t>::max()) {
+  over_limit_ = true;
+  if (hard_limit < std::numeric_limits<size_t>::max()) {
     // Recompute how many pages we still need to release.
-    BackingStats s = stats();
-    const size_t backed =
-        s.system_bytes - s.unmapped_bytes + tc_globals.metadata_bytes();
-    if (backed <= limits_[kHard]) {
+    const size_t backed = current_backed();
+    if (backed <= hard_limit) {
       // We're already fine in terms of hard limit.
+      over_limit_ = backed > limits_[kSoft];
       return;
     }
-    const size_t overage = backed - limits_[kHard];
-    const Length pages = LengthFromBytes(overage + kPageSize - 1);
-    if (ShrinkHardBy(pages, kHard)) {
+    if (!hit_hard) ++limit_hits_[kHard];
+    const size_t overage = backed - hard_limit;
+    const Length pages = BytesToLengthCeil(overage);
+    // ShrinkHardBy counts only the pages this call released.  Releasing drops
+    // pageheap_lock while unbacking, so the heap may have changed meanwhile:
+    // other threads may have allocated from it (leaving less to release, so
+    // the shortfall is real) or freed and released memory, including
+    // candidates this call had selected and so could not release itself.
+    // Consult the heap rather than the count before aborting.
+    if (ShrinkHardBy(pages, kHard) || current_backed() <= hard_limit) {
       ++successful_shrinks_after_limit_hit_[kHard];
-      TC_ASSERT_EQ(successful_shrinks_after_limit_hit_[kHard],
+      // Not equal: a hard-limit hit that the soft shrink above resolved is
+      // counted in limit_hits_ but not here.
+      TC_ASSERT_LE(successful_shrinks_after_limit_hit_[kHard],
                    limit_hits_[kHard]);
+      over_limit_ = current_backed() > limits_[kSoft];
       return;
     }
-    const size_t hard_limit = limits_[kHard];
     limits_[kHard] = std::numeric_limits<size_t>::max();
+    // Unlock pageheap_lock before aborting so crash/signal handlers (e.g.
+    // FailureSignalHandler or query-of-death loggers, for which limits_[kHard]
+    // is cleared above) can allocate without deadlocking on pageheap_lock.
+#ifndef NDEBUG
+    pageheap_lock.AssertHeld();
+#endif  // NDEBUG
+    pageheap_lock.unlock();
     TC_BUG(
         "Hit hard tcmalloc heap limit of %v "
         "(e.g. --tcmalloc_heap_size_hard_limit). "
@@ -140,7 +183,9 @@ void PageAllocator::ShrinkToUsageLimit(Length n) {
          limits_[kSoft]);
 }
 
-bool PageAllocator::ShrinkHardBy(Length pages, LimitKind limit_kind) {
+template <typename Forwarder>
+bool PageAllocatorImpl<Forwarder>::ShrinkHardBy(Length pages,
+                                                LimitKind limit_kind) {
   const PageReleaseReason release_reason =
       limit_kind == kHard ? PageReleaseReason::kHardLimitExceeded
                           : PageReleaseReason::kSoftLimitExceeded;
@@ -165,42 +210,56 @@ bool PageAllocator::ShrinkHardBy(Length pages, LimitKind limit_kind) {
           limit);
       warned_hugepages = true;
     }
-    if (has_cold_impl_) {
-      ret += static_cast<HugePageAwareAllocator*>(cold_impl_)
-                 ->ReleaseAtLeastNPagesBreakingHugepages(pages - ret,
-                                                         release_reason);
+    for (auto* heap : heaps_) {
+      ret +=
+          static_cast<Interface*>(heap)->ReleaseAtLeastNPagesBreakingHugepages(
+              pages - ret, release_reason);
       if (ret >= pages) {
         return true;
       }
     }
-    if (selsan_impl_) {
-      ret += static_cast<HugePageAwareAllocator*>(selsan_impl_)
-                 ->ReleaseAtLeastNPagesBreakingHugepages(pages - ret,
-                                                         release_reason);
-      if (ret >= pages) {
-        return true;
-      }
-    }
-    for (int partition = 0; partition < active_numa_partitions(); partition++) {
-      ret += static_cast<HugePageAwareAllocator*>(normal_impl_[partition])
-                 ->ReleaseAtLeastNPagesBreakingHugepages(pages - ret,
-                                                         release_reason);
-      if (ret >= pages) {
-        return true;
-      }
-    }
-
-    ret += static_cast<HugePageAwareAllocator*>(sampled_impl_)
-               ->ReleaseAtLeastNPagesBreakingHugepages(pages - ret,
-                                                       release_reason);
   }
   // Return "true", if we got back under the limit.
   return (pages <= ret);
 }
 
-size_t PageAllocator::active_numa_partitions() const {
-  return tc_globals.numa_topology().active_partitions();
+template <typename Forwarder>
+size_t PageAllocatorImpl<Forwarder>::active_partitions() const {
+  return tc_globals.active_partitions();
 }
+
+template <typename Forwarder>
+ABSL_ATTRIBUTE_NOINLINE void PageAllocatorImpl<Forwarder>::InvokeNewHookSlow(
+    AllocationState res, Length n, Length align, SpanAllocInfo span_alloc_info,
+    MemoryTag tag) {
+  AllocationGuard g;
+  size_t start_page_index = res ? res.r.p.index() : 0;
+  page_allocator_new_hooks.Invoke(
+      start_page_index, n.raw_num(), align.raw_num(),
+      span_alloc_info.objects_per_span,
+      static_cast<uint8_t>(span_alloc_info.density), tag);
+}
+
+template <typename Forwarder>
+ABSL_ATTRIBUTE_NOINLINE void PageAllocatorImpl<Forwarder>::InvokeDeleteHookSlow(
+    PageId start_page, Length n, SpanAllocInfo span_alloc_info, MemoryTag tag) {
+  AllocationGuard g;
+  page_allocator_delete_hooks.Invoke(
+      start_page.index(), n.raw_num(), span_alloc_info.objects_per_span,
+      static_cast<uint8_t>(span_alloc_info.density), tag);
+}
+
+template <typename Forwarder>
+ABSL_ATTRIBUTE_NOINLINE void
+PageAllocatorImpl<Forwarder>::InvokeReleaseHookSlow(Length num_pages,
+                                                    Length released,
+                                                    PageReleaseReason reason) {
+  AllocationGuard g;
+  page_allocator_release_hooks.Invoke(num_pages.raw_num(), released.raw_num(),
+                                      reason);
+}
+
+template class PageAllocatorImpl<StaticForwarder<Static, tc_globals>>;
 
 }  // namespace tcmalloc_internal
 }  // namespace tcmalloc

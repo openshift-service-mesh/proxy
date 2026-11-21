@@ -1,0 +1,723 @@
+// Copyright 2019 The TCMalloc Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#ifndef TCMALLOC_HUGE_PAGE_TRACKER_H_
+#define TCMALLOC_HUGE_PAGE_TRACKER_H_
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cerrno>
+#include <climits>
+#include <cstddef>
+#include <limits>
+#include <optional>
+
+#include "absl/algorithm/container.h"
+#include "absl/base/attributes.h"
+#include "absl/base/internal/cycleclock.h"
+#include "absl/base/nullability.h"
+#include "absl/base/optimization.h"
+#include "absl/base/thread_annotations.h"
+#include "absl/numeric/bits.h"
+#include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
+#include "absl/time/time.h"
+#include "absl/types/span.h"
+#include "tcmalloc/common.h"
+#include "tcmalloc/hinted_tracker_lists.h"
+#include "tcmalloc/huge_cache.h"
+#include "tcmalloc/huge_page_options.h"
+#include "tcmalloc/huge_page_subrelease.h"
+#include "tcmalloc/huge_pages.h"
+#include "tcmalloc/internal/clock.h"
+#include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/exponential_biased.h"
+#include "tcmalloc/internal/hardware_pages.h"
+#include "tcmalloc/internal/linked_list.h"
+#include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/memory_tag.h"
+#include "tcmalloc/internal/optimization.h"
+#include "tcmalloc/internal/page_size.h"
+#include "tcmalloc/internal/pageflags.h"
+#include "tcmalloc/internal/range_tracker.h"
+#include "tcmalloc/internal/residency.h"
+#include "tcmalloc/internal/system_allocator.h"
+#include "tcmalloc/pages.h"
+#include "tcmalloc/span.h"
+#include "tcmalloc/stats.h"
+
+GOOGLE_MALLOC_SECTION_BEGIN
+namespace tcmalloc::tcmalloc_internal {
+
+// PageTracker keeps track of the allocation status of every page in a HugePage.
+// It allows allocation and deallocation of a contiguous run of pages.
+//
+// Its mutating methods are annotated as requiring the pageheap_lock, in order
+// to support unlocking the page heap lock in a dynamic annotation-friendly way.
+class PageTracker : public TList<PageTracker>::Elem {
+ public:
+  PageTracker(HugePage p, bool was_donated, uint64_t now)
+      : location_(p),
+        released_count_(0),
+        abandoned_count_(0),
+        donated_(false),
+        was_donated_(was_donated),
+        was_released_(false),
+        abandoned_(false),
+        unbroken_(true),
+        alloctime_(now),
+        tracker_{},
+        num_objects_(0) {
+#ifndef __ppc64__
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
+    // Verify fields are structured so commonly accessed members (as part of
+    // Put) are on the first two cache lines.  This allows the CentralFreeList
+    // to accelerate deallocations by prefetching PageTracker instances before
+    // taking the pageheap_lock.
+    //
+    // On PPC64, kHugePageSize / kPageSize is typically ~2K (16MB / 8KB),
+    // requiring 512 bytes for representing tracker_.  While its cache line size
+    // is larger, the entirety of tracker_ will not fit on two cache lines.
+#ifdef NDEBUG
+    static_assert(offsetof(PageTracker, location_) + sizeof(location_) <=
+                      2 * ABSL_CACHELINE_SIZE,
+                  "location_ should fall within the first two cachelines of "
+                  "PageTracker.");
+    static_assert(
+        offsetof(PageTracker, donated_) + sizeof(donated_) <=
+            2 * ABSL_CACHELINE_SIZE,
+        "donated_ should fall within the first two cachelines of PageTracker.");
+    static_assert(
+        offsetof(PageTracker, tracker_) + sizeof(tracker_) <=
+            2 * ABSL_CACHELINE_SIZE,
+        "tracker_ should fall within the first two cachelines of PageTracker.");
+    static_assert(offsetof(PageTracker, alloctime_) + sizeof(alloctime_) <=
+                      2 * ABSL_CACHELINE_SIZE,
+                  "alloctime_ should fall within the first two cachelines of "
+                  "PageTracker.");
+#endif  // NDEBUG
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+#endif  // __ppc64__
+  }
+
+  struct PageAllocation {
+    PageId page;
+    Length previously_unbacked;
+  };
+
+  struct TrackerFeatures {
+    uint32_t allocations = 0;
+    uint32_t objects = 0;
+    Length longest_free_range = kPagesPerHugePage;
+    double allocation_time = 0.0;
+    double reallocation_time = 0.0;
+    bool is_valid = false;
+    bool is_hugepage_backed = false;
+    bool density = false;
+  };
+
+  // REQUIRES: there's a free range of at least n pages
+  //
+  // Returns a PageId i and a count of previously unbacked pages in the range
+  // [i, i+n) in previously_unbacked.
+  [[nodiscard]] PageAllocation Get(Length n, SpanAllocInfo span_alloc_info,
+                                   PreferBackedPages prefer_backed)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock);
+
+  // REQUIRES: r was the result of a previous call to Get(n)
+  void Put(Range r, SpanAllocInfo span_alloc_info)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock);
+
+  // Returns true if any unused pages have been returned-to-system.
+  [[nodiscard]] bool released() const { return released_count_ > 0; }
+
+  // Was this tracker donated from the tail of a multi-hugepage allocation?
+  // Only up-to-date when the tracker is on a TrackerList in the Filler;
+  // otherwise the value is meaningless.
+  [[nodiscard]] bool donated() const { return donated_; }
+
+  // Set/reset the donated flag. The donated status is lost, for instance,
+  // when further allocations are made on the tracker.
+  void set_donated(bool status) { donated_ = status; }
+
+  // Tracks whether the page was given to the filler in the donated state.  It
+  // is not cleared by the filler, allowing the HugePageAwareAllocator to track
+  // memory persistently donated to the filler.
+  [[nodiscard]] bool was_donated() const { return was_donated_; }
+
+  // Set while the hugepage is fully backed again after having been in the
+  // released state: an allocation re-backed its last released page.  It is a
+  // current-state bit, not history: it is cleared as soon as pages are
+  // released from the hugepage again, so was_released() implies !released().
+  // The filler counts such hugepages in previously_released_huge_pages()
+  // ("became full after being previously released").
+  [[nodiscard]] bool was_released() const { return was_released_; }
+  void set_was_released(bool status) { was_released_ = status; }
+
+  // Tracks whether the page, previously donated to the filler, was abondoned.
+  // When a large allocation is deallocated but the huge page is not
+  // reassembled, the pages are abondoned to the filler for future allocations.
+  [[nodiscard]] bool abandoned() const { return abandoned_; }
+  void set_abandoned(bool status) { abandoned_ = status; }
+  // Tracks how many pages were provided when the originating allocation of a
+  // donated page was deallocated but other allocations were in use.
+  //
+  // Requires was_donated().
+  [[nodiscard]] Length abandoned_count() const {
+    return Length(abandoned_count_);
+  }
+  void set_abandoned_count(Length count) {
+    TC_ASSERT(was_donated_);
+    abandoned_count_ = count.raw_num();
+  }
+
+  // These statistics help us measure the fragmentation of a hugepage and
+  // the desirability of allocating from this hugepage.
+  [[nodiscard]] Length longest_free_range() const {
+    return Length(tracker_.longest_free());
+  }
+  [[nodiscard]] size_t nallocs() const { return tracker_.allocs(); }
+  [[nodiscard]] size_t nobjects() const { return num_objects_; }
+  [[nodiscard]] Length used_pages() const { return Length(tracker_.used()); }
+  [[nodiscard]] Length released_pages() const {
+    return Length(released_count_);
+  }
+  [[nodiscard]] double alloctime() const { return alloctime_; }
+  [[nodiscard]] double last_page_allocation_time() const {
+    return last_page_allocation_time_;
+  }
+  [[nodiscard]] bool fully_freed() const {
+    return longest_free_range() == kPagesPerHugePage;
+  }
+  [[nodiscard]] Length free_pages() const;
+  [[nodiscard]] bool empty() const;
+
+  // This is the snapshot of the features at the time of the last invocation of
+  // RecordFeatures().
+  [[nodiscard]] TrackerFeatures features() const { return features_; }
+  [[nodiscard]] bool unbroken() const { return unbroken_; }
+  void set_unbroken(bool status) { unbroken_ = status; }
+
+  // Returns the hugepage whose availability is being tracked.
+  [[nodiscard]] HugePage location() const { return location_; }
+
+  // Return all unused pages to the system, mark future frees to do same.
+  // Returns the count of pages unbacked.
+  [[nodiscard]] Length ReleaseFree(MemoryModifyFunction& unback)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock);
+
+  [[nodiscard]] Length MarkSubreleased(const PageBitmap& unbacked)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock);
+
+  void ResetReleased() ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) {
+    released_by_page_.Clear();
+    released_count_ = 0;
+  }
+
+  [[nodiscard]] const PageBitmap& released_by_page() const
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) {
+    return released_by_page_;
+  }
+
+  [[nodiscard]] const PageBitmap& allocated_pages_bitmap() const
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) {
+    return tracker_.bits();
+  }
+
+  void AddSpanStats(SmallSpanStats* absl_nullable small,
+                    LargeSpanStats* absl_nullable large) const;
+  [[nodiscard]] bool HasDenseSpans() const { return has_dense_spans_; }
+  void SetHasDenseSpans() { has_dense_spans_ = true; }
+
+  struct HugePageResidencyState {
+    // Records the unbacked bitmap for this hugepage. In terms of TCMalloc
+    // pages. scaled via `ReductionOp::kAll`.
+    PageBitmap unbacked;
+    // Records the swapped bitmap for this hugepage. In terms of TCMalloc
+    // pages. scaled via `ReductionOp::kAny`.
+    PageBitmap swapped;
+    // Records the stale bitmap for this hugepage. In terms of TCMalloc
+    // pages. scaled via `ReductionOp::kAny`.
+    PageBitmap stale;
+    // Records the time (in ticks) when the residency state was last updated.
+    // This is used to determine when the tracker may be revisited for
+    // collapse.
+    double record_time;
+    // Records whether the page is hugepage backed.
+    bool maybe_hugepage_backed = false;
+    // Set when pages are released from this hugepage after a treatment pass
+    // selected it.  Tells the pass that a collapse result or hugepage-backed
+    // observation it made with pageheap_lock dropped is stale, even if the
+    // released pages have since been reallocated.
+    bool released_since_selected = false;
+    // Records whether metrics are valid. It is set the first time the
+    // residency state is queried.
+    bool entry_valid = false;
+    // This records the trackers that are currently being collapsed. This is
+    // used to avoid subreleasing the pages that are being collapsed.
+    bool being_collapsed = false;
+    // Records whether collapse was skipped due to threshold constraints.
+    bool collapse_skipped = false;
+    // Records whether collapse was skipped due to backoff.
+    bool collapse_skipped_due_to_backoff = false;
+  };
+
+  // Clears the tracker's released-page bitmap and count, and returns the
+  // number of pages that were previously marked released.
+  [[nodiscard]] Length ClearReleasedPages()
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) {
+    TC_ASSERT_EQ(released_by_page_.CountBits(), released_count_);
+    const Length count = Length(released_count_);
+    released_by_page_.Clear();
+    released_count_ = 0;
+    return count;
+  }
+
+  void SetHugePageResidencyState(const HugePageResidencyState& state) {
+    hugepage_residency_state_ = state;
+  }
+
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+  [[nodiscard]] HugePageResidencyState GetHugePageResidencyState() const
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) {
+    return hugepage_residency_state_;
+  }
+#else
+  [[nodiscard]] const HugePageResidencyState& GetHugePageResidencyState() const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) {
+    return hugepage_residency_state_;
+  }
+#endif
+  // Called by a treatment pass when it selects this tracker under
+  // pageheap_lock; ReleaseFree sets the flag again if it releases pages from
+  // the hugepage before the pass restores its findings.
+  void ClearReleasedSinceSelected() {
+    hugepage_residency_state_.released_since_selected = false;
+  }
+
+  // Called by a treatment pass when it pins or unpins this tracker under
+  // pageheap_lock; Put sets this flag if any pages are freed while the tracker
+  // is pinned so unbacked subrelease skips the tracker when its residency
+  // snapshot may be stale.
+  void ClearFreedSinceSelected() ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) {
+    freed_since_selected_ = false;
+  }
+  [[nodiscard]] bool freed_since_selected() const
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock) {
+    return freed_since_selected_;
+  }
+
+  void SetBeingCollapsed(bool value) {
+    hugepage_residency_state_.being_collapsed = value;
+  }
+
+  void SetLastAllocationTime(double value) {
+    last_page_allocation_time_ = value;
+  }
+
+  void RecordFeatures() {
+    features_.is_hugepage_backed =
+        hugepage_residency_state_.maybe_hugepage_backed;
+    features_.density = has_dense_spans_;
+    features_.allocations = nallocs();
+    features_.objects = nobjects();
+    features_.allocation_time = last_page_allocation_time_;
+    features_.longest_free_range = longest_free_range();
+  }
+
+  [[nodiscard]] bool BeingCollapsed() const {
+    return hugepage_residency_state_.being_collapsed;
+  }
+
+  void SetBeingReleased(bool value) { being_released_ = value; }
+  [[nodiscard]] bool BeingReleased() const { return being_released_; }
+
+  void SetDontFreeTracker(HugePageTreatmentType type) {
+    dont_free_tracker_mask_ |= static_cast<uint8_t>(type);
+  }
+  void ClearDontFreeTracker(HugePageTreatmentType type) {
+    dont_free_tracker_mask_ &= ~static_cast<uint8_t>(type);
+  }
+  [[nodiscard]] bool DontFreeTracker() const {
+    return dont_free_tracker_mask_ != 0 || release_pins_ != 0;
+  }
+  // Whether treatment `type` in particular holds a pin.  Release pins are a
+  // separate count (PinnedForRelease), so this must not decide whether to
+  // free a tracker; DontFreeTracker() covers both.
+  [[nodiscard]] bool PinnedByTreatment(HugePageTreatmentType type) const {
+    return (dont_free_tracker_mask_ & static_cast<uint8_t>(type)) != 0;
+  }
+  // Pins held by HugePageFiller::ReleasePages on each candidate it keeps a
+  // pointer to while pageheap_lock is dropped.  Unlike the treatment pins
+  // above, concurrent ReleasePages calls may select the same candidate, so
+  // this is a count rather than a bit.  A pinned tracker is parked instead of
+  // freed when its last page is returned (see DontFreeTracker()).
+  void PinForRelease() {
+    TC_CHECK_NE(release_pins_, std::numeric_limits<uint32_t>::max());
+    ++release_pins_;
+  }
+  void UnpinForRelease() {
+    TC_ASSERT_GT(release_pins_, 0);
+    --release_pins_;
+  }
+  [[nodiscard]] bool PinnedForRelease() const { return release_pins_ != 0; }
+
+  struct TagState {
+    bool sampled_for_tagging = false;
+    double record_time = 0;
+  };
+  [[nodiscard]] TagState GetTagState() const { return tagged_state_; }
+  void SetTagState(const TagState& state) { tagged_state_ = state; }
+
+  void SetAnonVmaName(MemoryTagFunction& set_anon_vma_name,
+                      std::optional<absl::string_view> name);
+
+  struct HardwarePageResidencyInfo {
+    HardwareLength n_free_swapped;
+    HardwareLength n_used_swapped;
+    HardwareLength n_free_unbacked;
+    HardwareLength n_used_unbacked;
+    HardwareLength n_free_stale;
+    HardwareLength n_used_stale;
+  };
+
+  [[nodiscard]] HardwarePageResidencyInfo CountInfoInHugePage(
+      const PageBitmap& unbacked, const PageBitmap& swapped,
+      const PageBitmap& stale) const;
+
+ private:
+  friend class PageTrackerTestPeer;
+
+  HugePage location_;
+
+  // Cached value of released_by_page_.CountBits(0, kPagesPerHugePages)
+  //
+  // TODO(b/151663108):  Logically, this is guarded by pageheap_lock.
+  uint16_t released_count_;
+  uint16_t abandoned_count_;
+  bool donated_;
+  bool was_donated_;
+  bool was_released_;
+  // Tracks whether we accounted for the abandoned state of the page. When a
+  // large allocation is deallocated but the huge page can not be reassembled,
+  // we measure the number of pages abandoned to the filler. To make sure that
+  // we do not double-count any future deallocations, we maintain a state and
+  // reset it once we measure those pages in abandoned_count_.
+  bool abandoned_;
+  bool unbroken_;
+  bool has_dense_spans_ = false;
+  // Set while HugePageFiller unbacks this tracker's free pages with
+  // pageheap_lock dropped.  The filler keeps such trackers off its lists (see
+  // HugePageFiller::AddToFillerList) and Collapse() leaves them alone.
+  bool being_released_ = false;
+  // This field is used to avoid freeing this tracker prematurely. When this
+  // is set, any maintenance operation (e.g. collapse) that drops
+  // pageheap_lock might manipulate the tracker state without holding the
+  // lock. When all the pages on the tracked hugepage are freed, this field
+  // is checked to ensure that the tracker is not freed right away.
+  uint8_t dont_free_tracker_mask_ = 0;
+  // Number of HugePageFiller::ReleasePages calls holding this tracker as a
+  // release candidate across a pageheap_lock drop.  Releases nest (a release
+  // drops the lock, an allocation on another thread hits a usage limit and
+  // releases in turn), so 16 bits could plausibly overflow; 32 bits cannot,
+  // and fit in what was padding before alloctime_.
+  uint32_t release_pins_ = 0;
+  double alloctime_;
+  double last_page_allocation_time_ = 0;
+
+  RangeTracker<kPagesPerHugePage.raw_num()> tracker_;
+
+  uint64_t num_objects_;
+
+  TrackerFeatures features_;
+
+  TagState tagged_state_;
+
+  // Bitmap of pages based on them being released to the OS.
+  // * Not yet released pages are unset (considered "free")
+  // * Released pages are set.
+  //
+  // Before releasing any locks to release memory to the OS, we mark the bitmap.
+  //
+  // Once released, a huge page is considered released *until* tracker_ is
+  // exhausted and no pages released_by_page_ are set.  We may have up to
+  // kPagesPerHugePage-1 parallel subreleases in-flight.
+  //
+  // TODO(b/151663108):  Logically, this is guarded by pageheap_lock.
+  PageBitmap released_by_page_;
+
+  static_assert(kPagesPerHugePage.raw_num() <
+                    std::numeric_limits<uint16_t>::max(),
+                "nallocs must be able to support kPagesPerHugePage!");
+
+  HugePageResidencyState hugepage_residency_state_;
+
+  // Set when pages are freed via Put while HugePageTreatmentType::kCollapse
+  // holds a pin on this tracker. Any free page that was faulted in after a
+  // treatment pass read /proc/self/pagemap and then returned to this tracker
+  // before Restore() must have passed through Put during this window.
+  bool freed_since_selected_ = false;
+
+  [[nodiscard]] bool ReleasePages(Range r, MemoryModifyFunction& unback) {
+    bool success = unback(r).success;
+    if (ABSL_PREDICT_TRUE(success)) {
+      unbroken_ = false;
+    }
+    return success;
+  }
+};
+
+inline typename PageTracker::PageAllocation PageTracker::Get(
+    Length n, SpanAllocInfo span_alloc_info, PreferBackedPages prefer_backed) {
+  Length index;
+  bool found_backed = false;
+  if (ABSL_PREDICT_FALSE(prefer_backed == PreferBackedPages::kEnabled &&
+                         released_count_ > 0)) {
+    PageBitmap allocated_or_released =
+        allocated_pages_bitmap() | released_by_page_;
+    size_t best_pos = 0;
+    size_t best_len = std::numeric_limits<size_t>::max();
+    size_t idx = 0;
+    size_t pos;
+    size_t len;
+    while (allocated_or_released.NextFreeRange(idx, &pos, &len)) {
+      if (len >= n.raw_num() && len < best_len) {
+        best_pos = pos;
+        best_len = len;
+      }
+      idx = pos + len;
+    }
+    if (best_len != std::numeric_limits<size_t>::max()) {
+      tracker_.Mark(best_pos, n.raw_num());
+      index = Length(best_pos);
+      found_backed = true;
+    } else {
+      index = Length(tracker_.FindAndMark(n.raw_num()));
+    }
+  } else {
+    index = Length(tracker_.FindAndMark(n.raw_num()));
+  }
+  num_objects_ += span_alloc_info.objects_per_span;
+
+  TC_ASSERT_EQ(released_by_page_.CountBits(), released_count_);
+
+  Length unbacked;
+  // If release_count_ == 0, CountBits will return 0 and ClearRange will be a
+  // no-op (but will touch cachelines) due to the invariants guaranteed by
+  // CountBits() == released_count_.
+  //
+  // This is a performance optimization, not a logical requirement.
+  if (ABSL_PREDICT_FALSE(released_count_ > 0)) {
+    if (found_backed) {
+      TC_ASSERT_EQ(released_by_page_.CountBits(index.raw_num(), n.raw_num()),
+                   0);
+    } else {
+      unbacked =
+          Length(released_by_page_.CountBits(index.raw_num(), n.raw_num()));
+      released_by_page_.ClearRange(index.raw_num(), n.raw_num());
+      TC_ASSERT_GE(Length(released_count_), unbacked);
+      released_count_ -= unbacked.raw_num();
+    }
+  }
+
+  TC_ASSERT_EQ(released_by_page_.CountBits(), released_count_);
+  return PageAllocation{location_.first_page() + index, unbacked};
+}
+
+inline void PageTracker::SetAnonVmaName(MemoryTagFunction& set_anon_vma_name,
+                                        std::optional<absl::string_view> name) {
+  set_anon_vma_name(Range(location_.first_page(), kPagesPerHugePage), name);
+}
+
+inline PageTracker::HardwarePageResidencyInfo PageTracker::CountInfoInHugePage(
+    const PageBitmap& unbacked, const PageBitmap& swapped,
+    const PageBitmap& stale) const {
+  // TODO(b/424551232): Add support for the scenario when native page size is
+  // larger than TCMalloc page size.
+  const size_t kHardwarePagesInHugePage = kHugePageSize / GetPageSize();
+  if (kHardwarePagesInHugePage < kPagesPerHugePage.raw_num()) {
+    return {.n_free_swapped = HardwareLength(0),
+            .n_free_unbacked = HardwareLength(0)};
+  }
+  TC_ASSERT_LE(kHardwarePagesInHugePage, kMaxResidencyBits);
+
+  const PageBitmap& used = tracker_.bits();
+  const PageBitmap free = ~used;
+
+  TC_ASSERT_EQ(kHardwarePagesInHugePage % kPagesPerHugePage.raw_num(), 0);
+  const int shift = kHardwarePagesInHugePage / kPagesPerHugePage.raw_num();
+  const int shift_bits = absl::bit_width<uint8_t>(shift - 1);
+  TC_ASSERT_LT((kHardwarePagesInHugePage - 1) >> shift_bits,
+               kPagesPerHugePage.raw_num());
+
+  return {
+      .n_free_swapped = NHardwarePages((free & swapped).CountBits() * shift),
+      .n_used_swapped = NHardwarePages((used & swapped).CountBits() * shift),
+      .n_free_unbacked = NHardwarePages((free & unbacked).CountBits() * shift),
+      .n_used_unbacked = NHardwarePages((used & unbacked).CountBits() * shift),
+      .n_free_stale = NHardwarePages((free & stale).CountBits() * shift),
+      .n_used_stale = NHardwarePages((used & stale).CountBits() * shift)};
+}
+
+inline void PageTracker::Put(Range r, SpanAllocInfo span_alloc_info) {
+  Length index = r.p - location_.first_page();
+  tracker_.Unmark(index.raw_num(), r.n.raw_num());
+  if (ABSL_PREDICT_FALSE(PinnedByTreatment(HugePageTreatmentType::kCollapse))) {
+    freed_since_selected_ = true;
+  }
+  TC_ASSERT_GE(num_objects_, span_alloc_info.objects_per_span);
+  num_objects_ -= span_alloc_info.objects_per_span;
+}
+
+inline Length PageTracker::ReleaseFree(MemoryModifyFunction& unback) {
+  Length count;
+  size_t index = 0;
+  size_t n;
+  // For purposes of tracking, pages which are not yet released are "free" in
+  // the released_by_page_ bitmap.  We subrelease these pages in an iterative
+  // process:
+  //
+  // 1.  Identify the next range of still backed pages.
+  // 2.  Iterate on tracker_ within this range.  For any free range
+  //     found, mark these as unbacked.
+  // 3.  Release the subrange to the OS.
+  while (released_by_page_.NextFreeRange(index, &index, &n)) {
+    size_t free_index;
+    size_t free_n;
+
+    // Check for freed pages in this unreleased region.
+    if (tracker_.NextFreeRange(index, &free_index, &free_n) &&
+        free_index < index + n) {
+      // If there is a free range which overlaps with [index, index+n), release
+      // it.
+      size_t end = std::min(free_index + free_n, index + n);
+
+      // In debug builds, verify [free_index, end) is backed.
+      Length length = Length(end - free_index);
+      TC_ASSERT_EQ(released_by_page_.CountBits(free_index, length.raw_num()),
+                   0);
+      PageId p = location_.first_page() + Length(free_index);
+
+      if (ABSL_PREDICT_TRUE(ReleasePages(Range(p, length), unback))) {
+        // Mark pages as released.  unback may have dropped pageheap_lock, so
+        // the count is updated per range rather than once after the loop:
+        // other threads observe this tracker between ranges and need
+        // released_count_ to match released_by_page_.
+        released_by_page_.SetRange(free_index, length.raw_num());
+        released_count_ += length.raw_num();
+        hugepage_residency_state_.maybe_hugepage_backed = false;
+        hugepage_residency_state_.released_since_selected = true;
+        count += length;
+      }
+
+      index = end;
+    } else {
+      // [index, index+n) did not have an overlapping range in tracker_, move to
+      // the next backed range of pages.
+      index += n;
+    }
+  }
+
+  TC_ASSERT_LE(Length(released_count_), kPagesPerHugePage);
+  TC_ASSERT_EQ(released_by_page_.CountBits(), released_count_);
+  return count;
+}
+
+inline Length PageTracker::MarkSubreleased(const PageBitmap& unbacked) {
+  // The residency bitmap was captured outside pageheap_lock. Skip this tracker
+  // if any page was freed via Put() since it was selected for treatment, as a
+  // page may have been allocated and faulted in after /proc/self/pagemap was
+  // read.
+  if (ABSL_PREDICT_FALSE(freed_since_selected_)) {
+    return Length(0);
+  }
+
+  // tracker_'s bits are set for allocated pages and clear for free pages.
+  const PageBitmap& used = tracker_.bits();
+
+  auto to_release = (~used) & (~released_by_page_) & unbacked;
+  released_by_page_ = released_by_page_ | to_release;
+
+  const Length count = Length(to_release.CountBits());
+  released_count_ += count.raw_num();
+  // Mark this as broken regardless of whether it had any unbacked free
+  // TCMalloc pages. Marking this will move this tracker to one of the
+  // released lists.
+  unbroken_ = false;
+  TC_ASSERT_LE(Length(released_count_), kPagesPerHugePage);
+  TC_ASSERT_EQ(released_by_page_.CountBits(), released_count_);
+  return count;
+}
+
+inline void PageTracker::AddSpanStats(SmallSpanStats* small,
+                                      LargeSpanStats* large) const {
+  size_t index = 0, n;
+
+  while (tracker_.NextFreeRange(index, &index, &n)) {
+    bool is_released = released_by_page_.GetBit(index);
+    // Find the last bit in the run with the same state (set or cleared) as
+    // index.
+    size_t end;
+    if (index >= kPagesPerHugePage.raw_num() - 1) {
+      end = kPagesPerHugePage.raw_num();
+    } else {
+      end = is_released ? released_by_page_.FindClear(index + 1)
+                        : released_by_page_.FindSet(index + 1);
+    }
+    n = std::min(end - index, n);
+    TC_ASSERT_GT(n, 0);
+
+    if (n < kMaxPages.raw_num()) {
+      if (small != nullptr) {
+        if (is_released) {
+          small->returned_length[n]++;
+        } else {
+          small->normal_length[n]++;
+        }
+      }
+    } else {
+      if (large != nullptr) {
+        large->spans++;
+        if (is_released) {
+          large->returned_pages += Length(n);
+        } else {
+          large->normal_pages += Length(n);
+        }
+      }
+    }
+
+    index += n;
+  }
+}
+
+inline bool PageTracker::empty() const { return tracker_.used() == 0; }
+
+inline Length PageTracker::free_pages() const {
+  return kPagesPerHugePage - used_pages();
+}
+
+}  // namespace tcmalloc::tcmalloc_internal
+GOOGLE_MALLOC_SECTION_END
+
+#endif  // TCMALLOC_HUGE_PAGE_TRACKER_H_

@@ -16,10 +16,14 @@
 
 #include <sys/mman.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <vector>
 
 #include "absl/base/thread_annotations.h"
+#include "tcmalloc/arena.h"
 #include "tcmalloc/common.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
@@ -32,46 +36,47 @@ GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
 namespace tcmalloc_internal {
 
-void PageMap::RegisterSizeClass(Span* span, size_t sc) {
-  const PageId first = span->first_page();
-  const PageId last = span->last_page();
-  TC_ASSERT_EQ(GetDescriptor(first), span);
-  for (PageId p = first; p <= last; ++p) {
-    map_.set_with_sizeclass(p.index(), span, sc);
+template <int BITS, PagemapAllocator Allocator>
+GOOGLE_MALLOC_SECTION int PageMap<BITS, Allocator>::GetAllocatedSpans(
+    std::vector<tcmalloc::malloc_tracing_extension::AllocatedAddressRanges::
+                    SpanDetails>& allocated_spans) {
+  PageHeapSpinLockHolder l;
+  int allocated_span_count = 0;
+  for (std::optional<PageId> p = PageId{0}; p.has_value();
+       p = get_next_set_page(p.value())) {
+    PageMeta meta = GetDescriptor(p.value());
+    if (!meta.valid()) {
+      continue;
+    }
+    CompactSizeClass size_class = meta.sizeclass();
+    Length num_pages;
+    if (size_class != 0) {
+      Span* s = meta.span();
+      if (p.value() != s->first_page()) continue;
+      num_pages = tc_globals.sizemap().class_to_pages(size_class);
+    } else {
+      num_pages = meta.size();
+    }
+    // As documented, GetAllocatedSpans wants to avoid allocating more memory
+    // for the output vector while holding the pageheap_lock. So, we stop
+    // adding more entries after we reach its existing capacity. Note that the
+    // count returned will still be the total number of allocated Spans.
+    if (allocated_spans.capacity() > allocated_spans.size()) {
+      allocated_spans.push_back(
+          {p->start_uintptr(), num_pages.in_bytes(),
+           tc_globals.sizemap().class_to_size(size_class)});
+    }
+    ++allocated_span_count;
+    p = *p + num_pages - Length(1);
   }
+  return allocated_span_count;
 }
 
-void PageMap::UnregisterSizeClass(Span* span) {
-  const PageId first = span->first_page();
-  const PageId last = span->last_page();
-  TC_ASSERT_EQ(GetDescriptor(first), span);
-  for (PageId p = first; p <= last; ++p) {
-    map_.clear_sizeclass(p.index());
-  }
-}
+template class PageMap<kAddressBits - kPageShift, MetaDataAlloc>;
 
-void PageMap::MapRootWithSmallPages() {
-  constexpr size_t kHugePageMask = ~(kHugePageSize - 1);
-  uintptr_t begin = reinterpret_cast<uintptr_t>(map_.RootAddress());
-  // Round begin up to the nearest hugepage, this avoids causing memory before
-  // the start of the pagemap to become mapped onto small pages.
-  uintptr_t rbegin = (begin + kHugePageSize) & kHugePageMask;
-  size_t length = map_.RootSize();
-  // Round end down to the nearest hugepage, this avoids causing memory after
-  // the end of the pagemap becoming mapped onto small pages.
-  size_t rend = (begin + length) & kHugePageMask;
-  // Since we have rounded the start up, and the end down, we also want to
-  // confirm that there is something left between them for us to modify.
-  // For small but slow, the root pagemap is less than a hugepage in size,
-  // so we will not end up forcing it to be small pages.
-  if (rend > rbegin) {
-    size_t rlength = rend - rbegin;
-    ErrnoRestorer errno_restorer;
-    madvise(reinterpret_cast<void*>(rbegin), rlength, MADV_NOHUGEPAGE);
-  }
+void* MetaDataAlloc(size_t bytes) {
+  return tc_globals.arena().Alloc(ArenaAlloc::kPageMap, bytes);
 }
-
-void* MetaDataAlloc(size_t bytes) { return tc_globals.arena().Alloc(bytes); }
 
 }  // namespace tcmalloc_internal
 }  // namespace tcmalloc

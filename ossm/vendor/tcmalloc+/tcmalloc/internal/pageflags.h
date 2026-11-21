@@ -21,6 +21,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <optional>
@@ -28,6 +29,7 @@
 #include "absl/status/status.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/page_size.h"
+#include "tcmalloc/internal/range_tracker.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
@@ -35,7 +37,14 @@ namespace tcmalloc_internal {
 
 struct PageStats {
   size_t bytes_stale = 0;
+  // Number of mlocked bytes (KPF_MLOCKED); counts mlocked pages only and
+  // excludes non-mlocked unevictable pages.
   size_t bytes_locked = 0;
+  // Number of bytes on pages marked KPF_INCOMPRESSIBLE in /proc/self/pageflags
+  // (set by kernels when a page is rejected by in-memory swap compression; 0 on
+  // kernels without this flag). Distinct from userspace compressibility and
+  // zero-byte estimates computed by CompressionAnalyzer.
+  size_t bytes_incompressible = 0;
   // The number of seconds that must elapse (at minimum) for a page to be
   // considered "stale". 0 indicates that kstaled is disabled or we weren't
   // able to read from the scan_seconds sysfs control. (See b/111239799
@@ -50,6 +59,7 @@ struct PageStats {
   // C++20 "= default" when we increase the baseline compiler requirement.
   bool operator==(const PageStats& rhs) const {
     return bytes_stale == rhs.bytes_stale && bytes_locked == rhs.bytes_locked &&
+           bytes_incompressible == rhs.bytes_incompressible &&
            stale_scan_seconds == rhs.stale_scan_seconds;
   }
 
@@ -65,8 +75,21 @@ class PageFlagsBase {
   PageFlagsBase(PageFlagsBase&&) = delete;
   PageFlagsBase& operator=(const PageFlagsBase&) = delete;
   PageFlagsBase& operator=(PageFlagsBase&&) = delete;
-  virtual bool IsHugepageBacked(const void* addr) = 0;
-  virtual std::optional<PageStats> Get(const void* addr, size_t size) = 0;
+  [[nodiscard]] virtual std::optional<bool> IsHugepageBacked(
+      const void* addr) = 0;
+  [[nodiscard]] virtual std::optional<PageStats> Get(const void* addr,
+                                                     size_t size) = 0;
+
+  struct PageFlagsBitmaps {
+    ResidencyBitmap stale;
+    ResidencyBitmap locked;
+    ResidencyBitmap incompressible;
+    uint64_t stale_scan_seconds = 0;
+    absl::StatusCode status = absl::StatusCode::kOk;
+  };
+
+  [[nodiscard]] virtual PageFlagsBitmaps GetSinglePageBitmaps(
+      const void* addr) = 0;
 };
 
 // PageFlags offers a look at kernel page flags to identify pieces of memory as
@@ -97,29 +120,24 @@ class PageFlags final : public PageFlagsBase {
   // dynamic memory allocation would happen.  In contrast, absl::StatusOr may
   // dynamically allocate memory when needed.  Using std::optional allows us to
   // use the function in places where memory allocation is prohibited.
-  std::optional<PageStats> Get(const void* addr, size_t size) override;
-  bool IsHugepageBacked(const void* addr) override;
+  [[nodiscard]] std::optional<PageStats> Get(const void* addr,
+                                             size_t size) override;
+  [[nodiscard]] PageFlagsBitmaps GetSinglePageBitmaps(
+      const void* addr) override;
+  [[nodiscard]] std::optional<bool> IsHugepageBacked(const void* addr) override;
 
  private:
   // Returns the offset in the pageflags file for the given virtual address.
-  size_t GetOffset(uintptr_t vaddr);
-
-  // This helper seeks the internal file to the correct location for the given
-  // virtual address.
-  [[nodiscard]] absl::StatusCode Seek(uintptr_t vaddr);
+  [[nodiscard]] off_t GetOffset(uintptr_t vaddr) const;
 
   // Tries to read staleness information about the page that contains vaddr.
-  // Possibly seeks backwards in an effort to find head hugepages.
-  absl::StatusCode MaybeReadOne(uintptr_t vaddr, uint64_t& flags,
-                                bool& is_huge);
-  // This helper reads staleness information for `num_pages` worth of _full_
-  // pages and puts the results into `output`. It continues the read from the
-  // last Seek() or last Read operation.
-  absl::StatusCode ReadMany(int64_t num_pages, PageStats& output);
+  // Reads the head page if vaddr is a tail hugepage.
+  [[nodiscard]] absl::StatusCode MaybeReadOne(uintptr_t vaddr, uint64_t& flags,
+                                              bool& is_huge);
 
   static constexpr const char* kKstaledScanSeconds =
       "/sys/kernel/mm/kstaled/scan_seconds";
-  uint64_t MaybeReadStaleScanSeconds(
+  [[nodiscard]] uint64_t MaybeReadStaleScanSeconds(
       const char* filename = kKstaledScanSeconds);
 
   // For testing.
@@ -131,13 +149,12 @@ class PageFlags final : public PageFlagsBase {
   static constexpr int kPagemapEntrySize = 8;
   static constexpr int kEntriesInBuf = kBufferLength / kPagemapEntrySize;
 
-  const size_t kPageSize = GetPageSize();
+  const size_t kHardwarePageSize = GetPageSize();
   // You can technically not hard-code this but it would involve many more
   // queries to figure out the size of every page. It's a lot easier to just
   // assume any compound pages are 2 MB.
   static constexpr int kHugePageSize = (2 << 20);
   static constexpr uintptr_t kHugePageMask = ~(kHugePageSize - 1);
-  const size_t kPagesInHugePage = kHugePageSize / kPageSize;
 
   uint64_t buf_[kEntriesInBuf];
   // Information about the previous head page. For any future-encountered tail

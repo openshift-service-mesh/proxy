@@ -15,15 +15,14 @@
 #include "tcmalloc/huge_cache.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <tuple>
 
 #include "absl/base/optimization.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "tcmalloc/huge_address_map.h"
-#include "tcmalloc/huge_page_subrelease.h"
 #include "tcmalloc/huge_pages.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
@@ -33,76 +32,6 @@
 GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
 namespace tcmalloc_internal {
-
-template <size_t kEpochs>
-void MinMaxTracker<kEpochs>::Report(HugeLength val) {
-  timeseries_.Report(val);
-}
-
-template <size_t kEpochs>
-HugeLength MinMaxTracker<kEpochs>::MaxOverTime(absl::Duration t) const {
-  HugeLength m = NHugePages(0);
-  size_t num_epochs = ceil(absl::FDivDuration(t, kEpochLength));
-  timeseries_.IterBackwards(
-      [&](size_t offset, const Extrema& e) { m = std::max(m, e.max); },
-      num_epochs);
-  return m;
-}
-
-template <size_t kEpochs>
-HugeLength MinMaxTracker<kEpochs>::MinOverTime(absl::Duration t) const {
-  HugeLength m = kMaxVal;
-  size_t num_epochs = ceil(absl::FDivDuration(t, kEpochLength));
-  timeseries_.IterBackwards(
-      [&](size_t offset, const Extrema& e) { m = std::min(m, e.min); },
-      num_epochs);
-  return m;
-}
-
-template <size_t kEpochs>
-void MinMaxTracker<kEpochs>::Print(Printer& out) const {
-  // Prints timestamp:min_pages:max_pages for each window with records.
-  // Timestamp == kEpochs - 1 is the most recent measurement.
-  const int64_t millis = absl::ToInt64Milliseconds(kEpochLength);
-  out.printf("\nHugeCache: window %lldms * %zu", millis, kEpochs);
-  int written = 0;
-  timeseries_.Iter(
-      [&](size_t offset, const Extrema& e) {
-        if ((written++) % 100 == 0) {
-          out.printf("\nHugeCache: Usage timeseries ");
-        }
-        out.printf("%zu:%zu:%zd,", offset, e.min.raw_num(), e.max.raw_num());
-      },
-      timeseries_.kSkipEmptyEntries);
-  out.printf("\n");
-}
-
-template <size_t kEpochs>
-void MinMaxTracker<kEpochs>::PrintInPbtxt(PbtxtRegion& hpaa) const {
-  // Prints content of each non-empty epoch, from oldest to most recent data
-  auto huge_cache_history = hpaa.CreateSubRegion("huge_cache_history");
-  huge_cache_history.PrintI64("window_ms",
-                              absl::ToInt64Milliseconds(kEpochLength));
-  huge_cache_history.PrintI64("epochs", kEpochs);
-
-  timeseries_.Iter(
-      [&](size_t offset, const Extrema& e) {
-        auto m = huge_cache_history.CreateSubRegion("measurements");
-        m.PrintI64("epoch", offset);
-        m.PrintI64("min_bytes", e.min.in_bytes());
-        m.PrintI64("max_bytes", e.max.in_bytes());
-      },
-      timeseries_.kSkipEmptyEntries);
-}
-
-template <size_t kEpochs>
-bool MinMaxTracker<kEpochs>::Extrema::operator==(const Extrema& other) const {
-  return (other.max == max) && (other.min == min);
-}
-
-// Explicit instantiations of template
-template class MinMaxTracker<>;
-template class MinMaxTracker<600>;
 
 // The logic for actually allocating from the cache or backing, and keeping
 // the hit rates specified.
@@ -181,19 +110,36 @@ void HugeCache::MaybeGrowCacheLimit(HugeLength missed) {
 
 void HugeCache::IncUsage(HugeLength n) {
   usage_ += n;
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
   usage_tracker_.Report(usage_);
   detailed_tracker_.Report(usage_);
   off_peak_tracker_.Report(NHugePages(0));
+#else
+  const int64_t now = clock_.now();
+  usage_tracker_.Report(usage_, now);
+  detailed_tracker_.Report(usage_, now);
+  off_peak_tracker_.Report(NHugePages(0), now);
+#endif
 }
 
 void HugeCache::DecUsage(HugeLength n) {
   usage_ -= n;
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
   usage_tracker_.Report(usage_);
   detailed_tracker_.Report(usage_);
   const HugeLength max = usage_tracker_.MaxOverTime(cache_time_);
   TC_ASSERT_GE(max, usage_);
   const HugeLength off_peak = max - usage_;
   off_peak_tracker_.Report(off_peak);
+#else
+  const int64_t now = clock_.now();
+  usage_tracker_.Report(usage_, now);
+  detailed_tracker_.Report(usage_, now);
+  const HugeLength max = usage_tracker_.MaxOverTime(cache_time_);
+  TC_ASSERT_GE(max, usage_);
+  const HugeLength off_peak = max - usage_;
+  off_peak_tracker_.Report(off_peak, now);
+#endif
 }
 
 void HugeCache::UpdateSize(HugeLength size) { size_tracker_.Report(size); }
@@ -382,12 +328,13 @@ void HugeCache::Print(Printer& out) {
   const double overflow_rate = safe_ratio(overflows_, fills_);
 
   out.printf(
-      "HugeCache: %zu / %zu hugepages cached / cache limit "
+      "HugeCache: %v / %v hugepages cached / cache limit "
       "(%.3f hit rate, %.3f overflow rate)\n",
-      size_.raw_num(), limit().raw_num(), hit_rate, overflow_rate);
+      size_, limit(), hit_rate, overflow_rate);
   out.printf("HugeCache: %zu MiB fast unbacked, %zu MiB periodic\n",
              total_fast_unbacked_.in_bytes() / 1024 / 1024,
              total_periodic_unbacked_.in_bytes() / 1024 / 1024);
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
   UpdateSize(size());
 
   usage_tracker_.Report(usage_);
@@ -399,6 +346,20 @@ void HugeCache::Print(Printer& out) {
 
   const HugeLength off_peak = usage_max - usage_;
   off_peak_tracker_.Report(off_peak);
+#else
+  const int64_t now = clock_.now();
+  size_tracker_.Report(size(), now);
+
+  usage_tracker_.Report(usage_, now);
+  const HugeLength usage_min = usage_tracker_.MinOverTime(cache_time_);
+  const HugeLength usage_max = usage_tracker_.MaxOverTime(cache_time_);
+  out.printf(
+      "HugeCache: recent usage range: %zu min - %zu curr -  %zu max MiB\n",
+      usage_min.in_mib(), usage_.in_mib(), usage_max.in_mib());
+
+  const HugeLength off_peak = usage_max - usage_;
+  off_peak_tracker_.Report(off_peak, now);
+#endif
   const HugeLength off_peak_min = off_peak_tracker_.MinOverTime(cache_time_);
   const HugeLength off_peak_max = off_peak_tracker_.MaxOverTime(cache_time_);
   out.printf(
@@ -411,7 +372,7 @@ void HugeCache::Print(Printer& out) {
       "HugeCache: recent cache range: %zu min - %zu curr - %zu max MiB\n",
       cache_min.in_mib(), size_.in_mib(), cache_max.in_mib());
 
-  detailed_tracker_.Print(out);
+  detailed_tracker_.Print(out, "HugeCache", "Usage");
 }
 
 void HugeCache::PrintInPbtxt(PbtxtRegion& hpaa) {
@@ -440,6 +401,7 @@ void HugeCache::PrintInPbtxt(PbtxtRegion& hpaa) {
   hpaa.PrintI64("fast_unbacked_bytes", total_fast_unbacked_.in_bytes());
   // bytes unbacked by periodic releaser thread
   hpaa.PrintI64("periodic_unbacked_bytes", total_periodic_unbacked_.in_bytes());
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
   UpdateSize(size());
 
   usage_tracker_.Report(usage_);
@@ -454,6 +416,23 @@ void HugeCache::PrintInPbtxt(PbtxtRegion& hpaa) {
 
   const HugeLength off_peak = usage_max - usage_;
   off_peak_tracker_.Report(off_peak);
+#else
+  const int64_t now = clock_.now();
+  size_tracker_.Report(size(), now);
+
+  usage_tracker_.Report(usage_, now);
+  const HugeLength usage_min = usage_tracker_.MinOverTime(cache_time_);
+  const HugeLength usage_max = usage_tracker_.MaxOverTime(cache_time_);
+  {
+    auto usage_stats = hpaa.CreateSubRegion("huge_cache_usage_stats");
+    usage_stats.PrintI64("min_bytes", usage_min.in_bytes());
+    usage_stats.PrintI64("current_bytes", usage_.in_bytes());
+    usage_stats.PrintI64("max_bytes", usage_max.in_bytes());
+  }
+
+  const HugeLength off_peak = usage_max - usage_;
+  off_peak_tracker_.Report(off_peak, now);
+#endif
   const HugeLength off_peak_min = off_peak_tracker_.MinOverTime(cache_time_);
   const HugeLength off_peak_max = off_peak_tracker_.MaxOverTime(cache_time_);
   {
@@ -471,7 +450,7 @@ void HugeCache::PrintInPbtxt(PbtxtRegion& hpaa) {
     usage_stats.PrintI64("current_bytes", size_.in_bytes());
     usage_stats.PrintI64("max_bytes", cache_max.in_bytes());
   }
-  detailed_tracker_.PrintInPbtxt(hpaa);
+  detailed_tracker_.PrintInPbtxt(hpaa, "huge_cache_history");
 }
 
 }  // namespace tcmalloc_internal

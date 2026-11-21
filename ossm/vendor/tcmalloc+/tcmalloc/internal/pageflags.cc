@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <linux/kernel-page-flags.h>
 #include <stddef.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -30,6 +31,7 @@
 #include "absl/status/status.h"
 #include "absl/strings/numbers.h"
 #include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/is_aligned_to.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/util.h"
 
@@ -50,44 +52,71 @@ namespace {
 #define KPF_MLOCKED 33
 #endif
 #define KPF_STALE 44
+#ifndef KPF_INCOMPRESSIBLE
+// Set by kernels that track pages rejected by in-memory swap compression.
+#define KPF_INCOMPRESSIBLE 47
+#endif
 
 // If a page is Head or Tail it is a compound page. It cannot be both, but it
 // can be neither, in which case it's just a native page and no special handling
 // needs to be done.
 constexpr bool PageHead(uint64_t flags) {
-  constexpr uint64_t kPageHead = (1UL << KPF_COMPOUND_HEAD);
+  constexpr uint64_t kPageHead{uint64_t{1} << KPF_COMPOUND_HEAD};
   return (flags & kPageHead) == kPageHead;
 }
 constexpr bool PageTail(uint64_t flags) {
-  constexpr uint64_t kPageTail = (1UL << KPF_COMPOUND_TAIL);
+  constexpr uint64_t kPageTail{uint64_t{1} << KPF_COMPOUND_TAIL};
   return (flags & kPageTail) == kPageTail;
 }
 constexpr bool PageThp(uint64_t flags) {
-  constexpr uint64_t kPageThp = (1UL << KPF_THP);
+  constexpr uint64_t kPageThp{uint64_t{1} << KPF_THP};
   return (flags & kPageThp) == kPageThp;
 }
 constexpr bool PageHugetlbfs(uint64_t flags) {
-  constexpr uint64_t kPageHuge = (1UL << KPF_HUGE);
+  constexpr uint64_t kPageHuge{uint64_t{1} << KPF_HUGE};
   return (flags & kPageHuge) == kPageHuge;
 }
 constexpr bool IsHugepage(uint64_t flags) {
   return PageThp(flags) || PageHugetlbfs(flags);
 }
 constexpr bool PageStale(uint64_t flags) {
-  constexpr uint64_t kPageStale = (1UL << KPF_STALE);
+  constexpr uint64_t kPageStale{uint64_t{1} << KPF_STALE};
   return (flags & kPageStale) == kPageStale;
 }
 constexpr bool PageLocked(uint64_t flags) {
-  constexpr uint64_t kPageMlocked = (1UL << KPF_MLOCKED);
-  // Locked pages are often "unevictable."  KPF_LOCKED has a different meaning.
-  constexpr uint64_t kPageUnevictable = (1UL << KPF_UNEVICTABLE);
-  return (flags & (kPageMlocked | kPageUnevictable)) != 0;
+  constexpr uint64_t kPageMlocked{uint64_t{1} << KPF_MLOCKED};
+  // Counts mlocked pages only (KPF_MLOCKED). KPF_LOCKED is the short-lived
+  // page-level buffer lock, not mlock, and KPF_UNEVICTABLE is also set on
+  // non-mlocked unevictable pages (such as pages rejected by in-memory swap
+  // compression).
+  return (flags & kPageMlocked) == kPageMlocked;
+}
+constexpr bool PageIncompressible(uint64_t flags) {
+  constexpr uint64_t kPageIncompressible{uint64_t{1} << KPF_INCOMPRESSIBLE};
+  return (flags & kPageIncompressible) == kPageIncompressible;
 }
 
 void MaybeAddToStats(PageStats& stats, const uint64_t flags,
                      const size_t delta) {
   if (PageStale(flags)) stats.bytes_stale += delta;
   if (PageLocked(flags)) stats.bytes_locked += delta;
+  if (PageIncompressible(flags)) stats.bytes_incompressible += delta;
+}
+
+// Updates a contiguous run of set bits in `bitmap` at page index `i`.
+// `cond` indicates whether page `i` has the flag set; `run_start` tracks the
+// start index of the current contiguous run of set pages (or -1 if not in a
+// run) and is flushed to `bitmap` via `SetRange` when `cond` becomes false.
+void UpdateBitmapRun(bool cond, int i, int& run_start,
+                     ResidencyBitmap& bitmap) {
+  if (cond) {
+    if (run_start == -1) {
+      run_start = i;
+    }
+  } else if (run_start != -1) {
+    bitmap.SetRange(run_start, i - run_start);
+    run_start = -1;
+  }
 }
 
 }  // namespace
@@ -108,28 +137,17 @@ PageFlags::~PageFlags() {
   }
 }
 
-size_t PageFlags::GetOffset(const uintptr_t vaddr) {
-  TC_ASSERT_EQ(vaddr % kPageSize, 0);
-  return vaddr / kPageSize * kPagemapEntrySize;
-}
-
-absl::StatusCode PageFlags::Seek(const uintptr_t vaddr) {
-  size_t offset = GetOffset(vaddr);
-  // Note: lseek can't be interrupted.
-  off_t status = ::lseek(fd_, offset, SEEK_SET);
-  if (status != offset) {
-    return absl::StatusCode::kUnavailable;
-  }
-  return absl::StatusCode::kOk;
+off_t PageFlags::GetOffset(const uintptr_t vaddr) const {
+  TC_ASSERT_EQ(vaddr % kHardwarePageSize, 0);
+  return static_cast<off_t>(vaddr / kHardwarePageSize * kPagemapEntrySize);
 }
 
 absl::StatusCode PageFlags::MaybeReadOne(uintptr_t vaddr, uint64_t& flags,
                                          bool& is_huge) {
-  if (auto res = Seek(vaddr); res != absl::StatusCode::kOk) return res;
   static_assert(sizeof(flags) == kPagemapEntrySize);
-  auto status = signal_safe_read(fd_, reinterpret_cast<char*>(&flags),
-                                 kPagemapEntrySize, nullptr);
-  if (status != kPagemapEntrySize) {
+  if (signal_safe_pread(fd_, reinterpret_cast<char*>(&flags), kPagemapEntrySize,
+                        GetOffset(vaddr),
+                        /*bytes_read=*/nullptr) != kPagemapEntrySize) {
     return absl::StatusCode::kUnavailable;
   }
 
@@ -140,15 +158,12 @@ absl::StatusCode PageFlags::MaybeReadOne(uintptr_t vaddr, uint64_t& flags,
   }
 
   if (PageTail(flags)) {
-    if (auto res = Seek(vaddr & kHugePageMask); res != absl::StatusCode::kOk) {
-      return res;
-    }
-    auto status = signal_safe_read(fd_, reinterpret_cast<char*>(&flags),
-                                   kPagemapEntrySize, nullptr);
-    if (status != kPagemapEntrySize) {
+    if (signal_safe_pread(fd_, reinterpret_cast<char*>(&flags),
+                          kPagemapEntrySize, GetOffset(vaddr & kHugePageMask),
+                          /*bytes_read=*/nullptr) != kPagemapEntrySize) {
       return absl::StatusCode::kUnavailable;
     }
-    if (ABSL_PREDICT_FALSE(PageTail(flags))) {
+    if (ABSL_PREDICT_FALSE(!PageHead(flags) || !PageThp(flags))) {
       TC_LOG("Somehow still at tail page even after seeking?");
       return absl::StatusCode::kFailedPrecondition;
     }
@@ -165,58 +180,22 @@ absl::StatusCode PageFlags::MaybeReadOne(uintptr_t vaddr, uint64_t& flags,
   return absl::StatusCode::kOk;
 }
 
-absl::StatusCode PageFlags::ReadMany(int64_t num_pages, PageStats& output) {
-  while (num_pages > 0) {
-    const size_t batch_size = std::min<int64_t>(kEntriesInBuf, num_pages);
-    const size_t to_read = kPagemapEntrySize * batch_size;
-
-    // We read continuously. For the first read, this starts at wherever the
-    // first ReadOne ended. See above note for the reinterpret_cast.
-    auto status =
-        signal_safe_read(fd_, reinterpret_cast<char*>(buf_), to_read, nullptr);
-    if (status != to_read) {
-      return absl::StatusCode::kUnavailable;
-    }
-    for (int i = 0; i < batch_size; ++i) {
-      if (PageHead(buf_[i])) {
-        last_head_read_ = buf_[i];
-      }
-
-      if (PageTail(buf_[i])) {
-        if (ABSL_PREDICT_FALSE(last_head_read_ == -1)) {
-          TC_LOG("Did not see head page before tail page (i=%v, buf=%v)", i,
-                 buf_[i]);
-          return absl::StatusCode::kFailedPrecondition;
-        }
-        auto last_read = last_head_read_;
-        MaybeAddToStats(output, last_read, kPageSize);
-      } else {
-        MaybeAddToStats(output, buf_[i], kPageSize);
-      }
-    }
-    num_pages -= batch_size;
-  }
-  return absl::StatusCode::kOk;
-}
-
-bool PageFlags::IsHugepageBacked(const void* const addr) {
+std::optional<bool> PageFlags::IsHugepageBacked(const void* const addr) {
   if (fd_ < 0) {
-    return false;
+    return std::nullopt;
   }
 
   uint64_t flags = 0;
   uintptr_t uaddr = reinterpret_cast<uintptr_t>(addr);
   // Round address down to get the start of the first page that has any bytes
   // corresponding to the span [addr, addr+size).
-  uintptr_t basePage = uaddr & ~(kPageSize - 1);
-  // Seek into fd.
-  if (auto res = Seek(basePage); res != absl::StatusCode::kOk) return false;
+  uintptr_t basePage = uaddr & ~(kHardwarePageSize - 1);
   // Read entry
   static_assert(sizeof(flags) == kPagemapEntrySize);
-  auto status = signal_safe_read(fd_, reinterpret_cast<char*>(&flags),
-                                 kPagemapEntrySize, nullptr);
-  if (status != kPagemapEntrySize) {
-    return false;
+  if (signal_safe_pread(fd_, reinterpret_cast<char*>(&flags), kPagemapEntrySize,
+                        GetOffset(basePage),
+                        /*bytes_read=*/nullptr) != kPagemapEntrySize) {
+    return std::nullopt;
   }
   // pass entry to check if its hugepage backed.
   return IsHugepage(flags);
@@ -231,106 +210,142 @@ std::optional<PageStats> PageFlags::Get(const void* const addr,
 
   PageStats ret;
   if (size == 0) return ret;
-  uint64_t result_flags = 0;
-  bool is_huge = false;
 
-  uintptr_t uaddr = reinterpret_cast<uintptr_t>(addr);
+  const uintptr_t uaddr = reinterpret_cast<uintptr_t>(addr);
+  const uintptr_t uend = uaddr + size;
   // Round address down to get the start of the first page that has any bytes
   // corresponding to the span [addr, addr+size).
-  uintptr_t basePage = uaddr & ~(kPageSize - 1);
+  uintptr_t vaddr = uaddr & ~(kHardwarePageSize - 1);
   // Round end address up to get the start of the first page that does not
   // have any bytes corresponding to the span [addr, addr+size).
-  // The span is a subset of [basePage, endPage).
-  uintptr_t endPage = (uaddr + size + kPageSize - 1) & ~(kPageSize - 1);
+  // The span is a subset of [vaddr, endPage).
+  const uintptr_t endPage =
+      (uend + kHardwarePageSize - 1) & ~(kHardwarePageSize - 1);
 
-  int64_t remainingPages = (endPage - basePage) / kPageSize;
-
-  if (remainingPages == 1) {
-    if (auto res = MaybeReadOne(basePage, result_flags, is_huge);
-        res != absl::StatusCode::kOk) {
+  int64_t remainingPages = (endPage - vaddr) / kHardwarePageSize;
+  while (remainingPages > 0) {
+    const size_t batch_size = std::min<int64_t>(kEntriesInBuf, remainingPages);
+    const size_t to_read = kPagemapEntrySize * batch_size;
+    if (signal_safe_pread(fd_, reinterpret_cast<char*>(buf_), to_read,
+                          GetOffset(vaddr),
+                          /*bytes_read=*/nullptr) != to_read) {
       return std::nullopt;
     }
-    MaybeAddToStats(ret, result_flags, size);
-    if (ret.bytes_stale > 0) {
-      ret.stale_scan_seconds = MaybeReadStaleScanSeconds();
-    }
-    return ret;
-  }
-
-  // Since the input address might not be page-aligned (it can possibly point
-  // to an arbitrary object), we read staleness about the first page separately
-  // with ReadOne, then read the complete pages with ReadMany, and then read the
-  // last page with ReadOne again if needed.
-
-  // Handle the first page.
-  if (auto res = MaybeReadOne(basePage, result_flags, is_huge);
-      res != absl::StatusCode::kOk) {
-    return std::nullopt;
-  }
-  size_t firstPageSize = kPageSize - (uaddr - basePage);
-  if (is_huge) {
-    // The object starts in the middle of a native page, but the entire page
-    // might be stale. So the situation looks like, simplifying to four native
-    // pages per hugepage to make the diagram fit, an entire hugepage that looks
-    // like (where X is the span of interest):
-    //      .                basePage
-    // [....|..XX|XXXX|XXXX]
-    //  ^^^^^^^              some other stale object(s)
-    //         ^^            firstPageSize
-    //       ^^^^^^^^^^^^^^  `pages_represented` pages, each of kPageSize
-    // The remainingPages <= 0 case covers the situation where the span ends
-    // before the hugepage.
-    const uint64_t base_page_offset = basePage & (kHugePageSize - 1);
-    const uint64_t base_page_index = base_page_offset / kPageSize;
-    const int64_t pages_represented = kPagesInHugePage - base_page_index;
-    remainingPages -= pages_represented;
-    if (remainingPages <= 0) {
-      // This hugepage represents every single page that this object is on;
-      // we're done.
-      MaybeAddToStats(ret, result_flags, size);
-
-      if (ret.bytes_stale > 0) {
-        ret.stale_scan_seconds = MaybeReadStaleScanSeconds();
+    for (size_t i = 0; i < batch_size; ++i, vaddr += kHardwarePageSize) {
+      if (IsAlignedTo(vaddr, kHugePageSize)) {
+        last_head_read_ = -1;
       }
-      return ret;
+      uint64_t flags = buf_[i];
+      if (ABSL_PREDICT_FALSE((PageHead(flags) || PageTail(flags)) &&
+                             !PageThp(flags))) {
+        // TODO(b/127849243): Support non-THP hugepages.
+        return std::nullopt;
+      }
+      if (PageHead(flags)) {
+        last_head_read_ = flags;
+      } else if (PageTail(flags)) {
+        // A tail page's flags are only on the compound head page, which we may
+        // not have read yet (either because the span starts on a tail page or
+        // because earlier pages in a deferred-split THP were unbacked/native).
+        // Simplifying to four native pages per hugepage to make the diagram
+        // fit, an entire hugepage looks like (where X is the span of interest):
+        // .                     vaddr & kHugePageMask (head page)
+        //      .                vaddr
+        // [....|..XX|XXXX|XXXX]
+        //  ^^^^^^^              some other stale object(s)
+        if (ABSL_PREDICT_FALSE(last_head_read_ == -1)) {
+          bool is_huge = false;
+          if (MaybeReadOne(vaddr & kHugePageMask, last_head_read_, is_huge) !=
+                  absl::StatusCode::kOk ||
+              ABSL_PREDICT_FALSE(!is_huge)) {
+            return std::nullopt;
+          }
+        }
+        flags = last_head_read_;
+      }
+      // Intersect [uaddr, uend) (where X is the span of interest) with each
+      // page [vaddr, vaddr + kHardwarePageSize) (delimited by |) to get
+      // [max(uaddr, vaddr), min(uend, vaddr + kHardwarePageSize)):
+      //         .         .           . .       uaddr, uend
+      // [....|..XX|XXXX|XX..]   or   [.XX.]
+      //         ^^ ^^^^ ^^            ^^        page_bytes
+      const size_t page_bytes =
+          std::min(uend, vaddr + kHardwarePageSize) - std::max(uaddr, vaddr);
+      MaybeAddToStats(ret, flags, page_bytes);
     }
-
-    // pages_represented - 1 is the number of full pages represented (see
-    // diagram)
-    MaybeAddToStats(ret, result_flags,
-                    firstPageSize + (pages_represented - 1) * kPageSize);
-
-    // We've read one uint64_t about a single page, but it represents 512 small
-    // pages. So the next page that is of interest is one hugepage away -- seek
-    // to make sure the next read doesn't double-count the native pages in
-    // between the two head pages.
-    if (auto res = Seek((basePage & kHugePageMask) + kHugePageSize);
-        res != absl::StatusCode::kOk) {
-      return std::nullopt;
-    }
-  } else {
-    remainingPages--;
-    MaybeAddToStats(ret, result_flags, firstPageSize);
+    remainingPages -= batch_size;
   }
-
-  // Handle all pages but the last page.
-  if (auto res = ReadMany(remainingPages - 1, ret);
-      res != absl::StatusCode::kOk) {
-    return std::nullopt;
-  }
-
-  // Check final page. It doesn't really matter if is_huge; we just want the
-  // statistics about the page that has the last byte of the object.
-  size_t lastPageSize = kPageSize - (endPage - uaddr - size);
-  if (auto res = MaybeReadOne(endPage - kPageSize, result_flags, is_huge);
-      res != absl::StatusCode::kOk) {
-    return std::nullopt;
-  }
-  MaybeAddToStats(ret, result_flags, lastPageSize);
 
   if (ret.bytes_stale > 0) {
     ret.stale_scan_seconds = MaybeReadStaleScanSeconds();
   }
+  return ret;
+}
+PageFlagsBase::PageFlagsBitmaps PageFlags::GetSinglePageBitmaps(
+    const void* addr) {
+  PageFlagsBitmaps ret;
+  uintptr_t currPage = reinterpret_cast<uintptr_t>(addr);
+  if (!IsAlignedTo(currPage, kHugePageSize)) {
+    TC_LOG("Address is not hugepage aligned");
+    ret.status = absl::StatusCode::kFailedPrecondition;
+    return ret;
+  }
+
+  if (fd_ < 0) {
+    ret.status = absl::StatusCode::kUnavailable;
+    return ret;
+  }
+
+  const size_t kHardwarePagesInHugePage = kHugePageSize / GetPageSize();
+  const size_t kPagemapEntrySize = 8;
+  const size_t kSizeOfHugepageInPagemap =
+      kPagemapEntrySize * kHardwarePagesInHugePage;
+
+  auto status = signal_safe_pread(fd_, reinterpret_cast<char*>(buf_),
+                                  kSizeOfHugepageInPagemap, GetOffset(currPage),
+                                  /*bytes_read=*/nullptr);
+  if (status != kSizeOfHugepageInPagemap) {
+    TC_LOG("Could not read from pageflags file");
+    ret.status = absl::StatusCode::kUnavailable;
+    return ret;
+  }
+
+  last_head_read_ = -1;
+
+  int stale_start = -1;
+  int locked_start = -1;
+  int incompressible_start = -1;
+  for (int i = 0; i < kHardwarePagesInHugePage; ++i) {
+    uint64_t flags = buf_[i];
+
+    if (PageHead(flags)) {
+      last_head_read_ = flags;
+    }
+    if (PageTail(flags)) {
+      if (ABSL_PREDICT_FALSE(last_head_read_ == -1)) {
+        ret.status = absl::StatusCode::kFailedPrecondition;
+        return ret;
+      }
+      flags = last_head_read_;
+    }
+
+    UpdateBitmapRun(PageStale(flags), i, stale_start, ret.stale);
+    UpdateBitmapRun(PageLocked(flags), i, locked_start, ret.locked);
+    UpdateBitmapRun(PageIncompressible(flags), i, incompressible_start,
+                    ret.incompressible);
+  }
+  UpdateBitmapRun(/*cond=*/false, kHardwarePagesInHugePage, stale_start,
+                  ret.stale);
+  UpdateBitmapRun(/*cond=*/false, kHardwarePagesInHugePage, locked_start,
+                  ret.locked);
+  UpdateBitmapRun(/*cond=*/false, kHardwarePagesInHugePage,
+                  incompressible_start, ret.incompressible);
+
+  if (!ret.stale.IsZero()) {
+    ret.stale_scan_seconds = MaybeReadStaleScanSeconds();
+  }
+
+  ret.status = absl::StatusCode::kOk;
   return ret;
 }
 

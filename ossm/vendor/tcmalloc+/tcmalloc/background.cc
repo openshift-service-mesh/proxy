@@ -13,10 +13,19 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
+#include <limits>
 
+#include "absl/base/attributes.h"
+#include "absl/base/call_once.h"
+#include "absl/base/const_init.h"
+#include "absl/base/thread_annotations.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "tcmalloc/central_freelist.h"
+#include "tcmalloc/common.h"
 #include "tcmalloc/cpu_cache.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/percpu.h"
@@ -26,6 +35,30 @@
 #include "tcmalloc/static_vars.h"
 #include "tcmalloc/stats.h"
 
+namespace tcmalloc {
+namespace tcmalloc_internal {
+namespace {
+
+ABSL_CONST_INIT absl::Mutex background_mutex(absl::kConstInit);
+
+bool BackgroundProcessActionsDisabled(void*) {
+  return !Parameters::background_process_actions_enabled();
+}
+
+}  // namespace
+}  // namespace tcmalloc_internal
+}  // namespace tcmalloc
+
+extern "C" {
+
+void MallocExtension_Internal_SetBackgroundProcessActionsEnabled(bool value) {
+  absl::MutexLock l(tcmalloc::tcmalloc_internal::background_mutex);
+  tcmalloc::tcmalloc_internal::Parameters::
+      set_background_process_actions_enabled(value);
+}
+
+}  // extern "C"
+
 // Release memory to the system at a constant rate.
 void MallocExtension_Internal_ProcessBackgroundActions() {
   using ::tcmalloc::tcmalloc_internal::Parameters;
@@ -34,7 +67,7 @@ void MallocExtension_Internal_ProcessBackgroundActions() {
   tcmalloc::MallocExtension::MarkThreadIdle();
 
   absl::Time prev_time = absl::Now();
-  absl::Time last_reclaim = prev_time;
+  absl::Time last_drain = prev_time;
   absl::Time last_shuffle = prev_time;
   absl::Time last_size_class_resize = prev_time;
   absl::Time last_size_class_max_capacity_resize = prev_time;
@@ -52,18 +85,25 @@ void MallocExtension_Internal_ProcessBackgroundActions() {
   // want to separately account for pages released by ProcessBackgroundActions.
   tcmalloc::tcmalloc_internal::ConstantRatePageAllocatorReleaser releaser;
 
+  // We guard actions under background_mutex to ensure concurrent invocations
+  // are serialized and SetBackgroundProcessActionsEnabled(false) waits for any
+  // in-flight iteration to complete.
+  absl::MutexLock l(tcmalloc::tcmalloc_internal::background_mutex);
+  // TODO(b/527641380): ScopedBackgroundProcessActionsEnabled does not work as
+  // intended if actions are temporarily disabled and re-enabled, as the
+  // background thread exits this loop and terminates permanently.
   while (tcmalloc::MallocExtension::GetBackgroundProcessActionsEnabled()) {
     const absl::Duration sleep_time =
         tcmalloc::MallocExtension::GetBackgroundProcessSleepInterval();
 
-    // Reclaim inactive per-cpu caches once per cpu_cache_shuffle_period.
+    // Drain inactive per-cpu caches once per cpu_cache_shuffle_period.
     //
-    // We use a longer 30 sleep cycle reclaim period to make sure that caches
-    // are indeed idle. Reclaim drains entire cache, as opposed to cache shuffle
+    // We use a longer 30 sleep cycle drain period to make sure that caches
+    // are indeed idle. Drain drains entire cache, as opposed to cache shuffle
     // for instance that only shrinks a cache by a few objects at a time. So, we
-    // might have larger performance degradation if we use a shorter reclaim
+    // might have larger performance degradation if we use a shorter drain
     // interval and drain caches that weren't supposed to.
-    const absl::Duration cpu_cache_reclaim_period = 30 * sleep_time;
+    const absl::Duration cpu_cache_drain_period = 30 * sleep_time;
 
     // Shuffle per-cpu caches once per cpu_cache_shuffle_period.
     const absl::Duration cpu_cache_shuffle_period = 5 * sleep_time;
@@ -78,7 +118,7 @@ void MallocExtension_Internal_ProcessBackgroundActions() {
     const absl::Duration cpu_cache_slab_resize_period = 29 * sleep_time;
 
 #ifndef TCMALLOC_INTERNAL_SMALL_BUT_SLOW
-    // We reclaim unused objects from the transfer caches once per
+    // We drain unused objects from the transfer caches once per
     // transfer_cache_plunder_period.
     const absl::Duration transfer_cache_plunder_period = 5 * sleep_time;
     // Resize transfer caches once per transfer_cache_resize_period.
@@ -93,21 +133,21 @@ void MallocExtension_Internal_ProcessBackgroundActions() {
     absl::Time now = absl::Now();
 
     // We follow the cache hierarchy in TCMalloc from outermost (per-CPU) to
-    // innermost (the page heap).  Freeing up objects at one layer can help aid
-    // memory coalescing for inner caches.
+    // innermost (the page heap).  Freeing up objects at one layer can help
+    // aid memory coalescing for inner caches.
 
     if (tcmalloc::MallocExtension::PerCpuCachesActive()) {
-      // Accelerate fences as part of this operation by registering this thread
-      // with rseq.  While this is not strictly required to succeed, we do not
-      // expect an inconsistent state for rseq (some threads registered and some
-      // threads unable to).
+      // Accelerate fences as part of this operation by registering this
+      // thread with rseq.  While this is not strictly required to succeed, we
+      // do not expect an inconsistent state for rseq (some threads registered
+      // and some threads unable to).
       TC_CHECK(tcmalloc::tcmalloc_internal::subtle::percpu::IsFast());
 
-      // Try to reclaim per-cpu caches once every cpu_cache_reclaim_period
+      // Try to drain per-cpu caches once every cpu_cache_drain_period
       // when enabled.
-      if (now - last_reclaim >= cpu_cache_reclaim_period) {
-        tc_globals.cpu_cache().TryReclaimingCaches();
-        last_reclaim = now;
+      if (now - last_drain >= cpu_cache_drain_period) {
+        tc_globals.cpu_cache().TryDrainingCaches();
+        last_drain = now;
       }
 
       if (now - last_shuffle >= cpu_cache_shuffle_period) {
@@ -134,49 +174,66 @@ void MallocExtension_Internal_ProcessBackgroundActions() {
         tc_globals.cpu_cache().ResizeSlabIfNeeded();
         last_slab_resize_check = now;
       }
+
+      tc_globals.cpu_cache().ClearTouchedCpus();
     }
 
-    tc_globals.sharded_transfer_cache().Plunder();
+      tc_globals.sharded_transfer_cache().Plunder();
 
 #ifndef TCMALLOC_INTERNAL_SMALL_BUT_SLOW
-    // Try to plunder and reclaim unused objects from transfer caches.
-    if (now - last_transfer_cache_plunder_check >=
-        transfer_cache_plunder_period) {
-      tc_globals.transfer_cache().TryPlunder();
-      last_transfer_cache_plunder_check = now;
-    }
+      // Try to plunder and reclaim unused objects from transfer caches.
+      if (now - last_transfer_cache_plunder_check >=
+          transfer_cache_plunder_period) {
+        tc_globals.transfer_cache().TryPlunder();
+        last_transfer_cache_plunder_check = now;
+      }
 
-    if (now - last_transfer_cache_resize_check >=
-        transfer_cache_resize_period) {
-      tc_globals.transfer_cache().TryResizingCaches();
-      last_transfer_cache_resize_check = now;
-    }
+      if (now - last_transfer_cache_resize_check >=
+          transfer_cache_resize_period) {
+        tc_globals.transfer_cache().TryResizingCaches();
+        last_transfer_cache_resize_check = now;
+      }
 #endif
 
-    if (now - last_hpaa_hugepage_check >= hpaa_hugepage_check_period) {
-      tc_globals.page_allocator().TreatHugepageTrackers(
-          Parameters::usermode_hugepage_collapse(),
-          Parameters::release_free_swapped());
-      last_hpaa_hugepage_check = now;
-    }
+      if (now - last_hpaa_hugepage_check >= hpaa_hugepage_check_period) {
+        tc_globals.page_allocator().TreatHugepageTrackers(
+            Parameters::usermode_hugepage_collapse(), /*pageflags=*/nullptr,
+            /*residency=*/nullptr);
+        last_hpaa_hugepage_check = now;
+      }
 
-    // If time goes backwards, we would like to cap the release rate at 0.
-    ssize_t bytes_to_release =
-        static_cast<size_t>(Parameters::background_release_rate()) *
-        absl::ToDoubleSeconds(now - prev_time);
-    bytes_to_release = std::max<ssize_t>(bytes_to_release, 0);
+      // If time goes backwards, we would like to cap the release rate at 0.
+      //
+      // TODO(b/495452446): Improve test coverage and possibly move to working
+      // integer space entirely.
+      double calculated_bytes =
+          static_cast<size_t>(Parameters::background_release_rate()) *
+          absl::ToDoubleSeconds(now - prev_time);
+      constexpr double kMaxSsize =
+          static_cast<double>(std::numeric_limits<ssize_t>::max());
 
-    // If release rate is set to 0, do not release memory to system. However, if
-    // we want to release free and backed hugepages from HugeRegion,
-    // ReleaseMemoryToSystem should be able to release those pages to the
-    // system even with bytes_to_release = 0.
-    if (bytes_to_release > 0 || Parameters::release_pages_from_huge_region()) {
-      releaser.Release(bytes_to_release,
-                       /*reason=*/tcmalloc::tcmalloc_internal::
-                           PageReleaseReason::kProcessBackgroundActions);
-    }
+      ssize_t bytes_to_release = calculated_bytes >= kMaxSsize
+                                     ? std::numeric_limits<ssize_t>::max()
+                                     : calculated_bytes;
+      bytes_to_release = std::max<ssize_t>(bytes_to_release, 0);
 
-    prev_time = now;
-    absl::SleepFor(sleep_time);
+      // If release rate is set to 0, do not release memory to system. However,
+      // if we want to release free and backed hugepages from HugeRegion,
+      // ReleaseMemoryToSystem should be able to release those pages to the
+      // system even with bytes_to_release = 0.
+      if (bytes_to_release > 0 ||
+          Parameters::release_pages_from_huge_region()) {
+        releaser.Release(bytes_to_release,
+                         /*reason=*/tcmalloc::tcmalloc_internal::
+                             PageReleaseReason::kProcessBackgroundActions);
+      }
+
+      prev_time = now;
+
+      tcmalloc::tcmalloc_internal::background_mutex.AwaitWithTimeout(
+          absl::Condition(
+              &tcmalloc::tcmalloc_internal::BackgroundProcessActionsDisabled,
+              nullptr),
+          sleep_time);
   }
 }

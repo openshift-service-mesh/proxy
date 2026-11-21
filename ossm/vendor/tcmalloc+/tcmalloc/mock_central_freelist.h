@@ -21,6 +21,8 @@
 #include "absl/base/internal/spinlock.h"
 #include "absl/types/span.h"
 #include "tcmalloc/central_freelist.h"
+#include "tcmalloc/static_forwarder.h"
+#include "tcmalloc/static_vars.h"  // IWYU pragma: keep
 
 namespace tcmalloc {
 namespace tcmalloc_internal {
@@ -43,8 +45,8 @@ class FakeCentralFreeListBase {
   FakeCentralFreeListBase(const FakeCentralFreeListBase&) = delete;
   FakeCentralFreeListBase& operator=(const FakeCentralFreeListBase&) = delete;
 
-  static constexpr void Init(size_t,
-                             central_freelist_internal::PriorityListLength) {}
+  static constexpr void Init(
+      size_t, central_freelist_internal::CflSubbucketPrioritization) {}
 };
 
 // CentralFreeList implementation that backs onto the system's malloc.

@@ -35,12 +35,14 @@ namespace tcmalloc_internal {
 namespace {
 
 // From fs/proc/task_mmu.c:
-#define PM_SWAP 1ULL << 62
-#define PM_PRESENT 1ULL << 63
+#define PM_MMAP_EXCLUSIVE (1ULL << 56)
+#define PM_GUARD_REGION (1ULL << 58)
+#define PM_FILE (1ULL << 61)
+#define PM_SWAP (1ULL << 62)
+#define PM_PRESENT (1ULL << 63)
 
 constexpr bool PageSwapped(uint64_t flags) {
-  constexpr uint64_t kSwap = PM_SWAP;
-  return (flags & kSwap) == kSwap;
+  return (flags & (PM_SWAP | PM_GUARD_REGION)) == PM_SWAP;
 }
 
 constexpr bool PagePresent(uint64_t flags) {
@@ -50,12 +52,20 @@ constexpr bool PagePresent(uint64_t flags) {
 
 // Small helper to interpret /proc/pid/pagemap. Bit 62 represents if the page is
 // swapped, and bit 63 represents if the page is present.
-void Update(const uint64_t input, const size_t size, Residency::Info& info) {
+void Update(const uint64_t input, const size_t size, const size_t page_index,
+            Residency::Info& info) {
   // From fs/proc/task_mmu.c:
-  if (PagePresent(input)) {
+  // Zero-page PTEs are PM_PRESENT without PM_MMAP_EXCLUSIVE or PM_FILE and are
+  // not counted in Rss.
+  bool present = PagePresent(input) && (input & (PM_MMAP_EXCLUSIVE | PM_FILE));
+  bool swapped = PageSwapped(input);
+  if (present) {
     info.bytes_resident += size;
+    if (page_index < kMaxResidencyBits) {
+      info.page_is_resident.SetBit(page_index);
+    }
   }
-  if (PageSwapped(input)) {
+  if (swapped) {
     info.bytes_swapped += size;
   }
 }
@@ -66,7 +76,7 @@ ResidencyPageMap::ResidencyPageMap()
     : fd_(signal_safe_open("/proc/self/pagemap", O_RDONLY)) {
   TC_CHECK_GE(sizeof(buf_), kSizeOfHugepageInPagemap,
               "Buffer size is not large enough to hold the pagemap entries");
-  TC_CHECK_LE(kNativePagesInHugePage, kMaxResidencyBits,
+  TC_CHECK_LE(kHardwarePagesInHugePage, kMaxResidencyBits,
               "Actual number of native pages in a hugepage is larger than the "
               "total capacity of residency bitmaps");
 }
@@ -75,7 +85,7 @@ ResidencyPageMap::ResidencyPageMap(const char* const alternate_filename)
     : fd_(signal_safe_open(alternate_filename, O_RDONLY)) {
   TC_CHECK_GE(sizeof(buf_), kSizeOfHugepageInPagemap,
               "Buffer size is not large enough to hold the pagemap entries");
-  TC_CHECK_LE(kNativePagesInHugePage, kMaxResidencyBits,
+  TC_CHECK_LE(kHardwarePagesInHugePage, kMaxResidencyBits,
               "Actual number of native pages in a hugepage is larger than the "
               "total capacity of residency bitmaps");
 }
@@ -87,7 +97,7 @@ ResidencyPageMap::~ResidencyPageMap() {
 }
 
 absl::StatusCode ResidencyPageMap::Seek(const uintptr_t vaddr) {
-  size_t offset = vaddr / kPageSize * kPagemapEntrySize;
+  size_t offset = vaddr / kHardwarePageSize * kPagemapEntrySize;
   // Note: lseek can't be interrupted.
   off_t status = ::lseek(fd_, offset, SEEK_SET);
   if (status != offset) {
@@ -111,6 +121,7 @@ std::optional<uint64_t> ResidencyPageMap::ReadOne() {
 }
 
 absl::StatusCode ResidencyPageMap::ReadMany(int64_t num_pages,
+                                            size_t page_index,
                                             Residency::Info& info) {
   while (num_pages > 0) {
     const size_t batch_size = std::min<int64_t>(kEntriesInBuf, num_pages);
@@ -123,8 +134,8 @@ absl::StatusCode ResidencyPageMap::ReadMany(int64_t num_pages,
     if (status != to_read) {
       return absl::StatusCode::kUnavailable;
     }
-    for (int i = 0; i < batch_size; ++i) {
-      Update(buf_[i], kPageSize, info);
+    for (size_t i = 0; i < batch_size; ++i) {
+      Update(buf_[i], kHardwarePageSize, page_index++, info);
     }
     num_pages -= batch_size;
   }
@@ -142,12 +153,14 @@ std::optional<Residency::Info> ResidencyPageMap::Get(const void* const addr,
 
   uintptr_t uaddr = reinterpret_cast<uintptr_t>(addr);
   // Round address down to get the start of the page containing the data.
-  uintptr_t basePage = uaddr & ~(kPageSize - 1);
+  uintptr_t basePage = uaddr & ~(kHardwarePageSize - 1);
   // Round end address up to get the end of the page containing the data.
   // The data is in [basePage, endPage).
-  uintptr_t endPage = (uaddr + size + kPageSize - 1) & ~(kPageSize - 1);
+  uintptr_t endPage =
+      (uaddr + size + kHardwarePageSize - 1) & ~(kHardwarePageSize - 1);
 
-  int64_t remainingPages = (endPage - basePage) / kPageSize;
+  int64_t remainingPages = (endPage - basePage) / kHardwarePageSize;
+  size_t page_index = 0;
 
   if (auto res = Seek(basePage); res != absl::StatusCode::kOk) {
     return std::nullopt;
@@ -156,7 +169,7 @@ std::optional<Residency::Info> ResidencyPageMap::Get(const void* const addr,
   if (remainingPages == 1) {
     auto res = ReadOne();
     if (!res.has_value()) return std::nullopt;
-    Update(res.value(), size, info);
+    Update(res.value(), size, page_index++, info);
     return info;
   }
 
@@ -168,21 +181,24 @@ std::optional<Residency::Info> ResidencyPageMap::Get(const void* const addr,
   if (!res.has_value()) return std::nullopt;
 
   // Handle the first page.
-  size_t firstPageSize = kPageSize - (uaddr - basePage);
-  Update(res.value(), firstPageSize, info);
+  size_t firstPageSize = kHardwarePageSize - (uaddr - basePage);
+  Update(res.value(), firstPageSize, page_index++, info);
   remainingPages--;
 
   // Handle all pages but the last page.
-  if (auto res = ReadMany(remainingPages - 1, info);
+  if (auto res = ReadMany(remainingPages - 1, page_index, info);
       res != absl::StatusCode::kOk) {
     return std::nullopt;
   }
+  page_index += remainingPages - 1;
+  remainingPages = 1;
 
   // Check final page
-  size_t lastPageSize = kPageSize - (endPage - uaddr - size);
+  size_t lastPageSize = kHardwarePageSize - (endPage - uaddr - size);
   res = ReadOne();
   if (!res.has_value()) return std::nullopt;
-  Update(res.value(), lastPageSize, info);
+  Update(res.value(), lastPageSize, page_index++, info);
+
   return info;
 }
 
@@ -212,7 +228,7 @@ Residency::SinglePageBitmaps ResidencyPageMap::GetUnbackedAndSwappedBitmaps(
                              absl::StatusCode::kUnavailable};
   }
 
-  for (int native_page_idx = 0; native_page_idx < kNativePagesInHugePage;
+  for (int native_page_idx = 0; native_page_idx < kHardwarePagesInHugePage;
        ++native_page_idx) {
     uint64_t page_map = buf_[native_page_idx];
     if (!PagePresent(page_map)) {

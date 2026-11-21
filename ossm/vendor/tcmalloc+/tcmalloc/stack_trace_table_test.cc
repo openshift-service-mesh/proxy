@@ -19,6 +19,9 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <iterator>
+#include <new>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,10 +45,11 @@ struct AllocationEntry {
   int64_t sum;
   int count;
   size_t requested_size;
-  size_t requested_alignment;
+  std::optional<std::align_val_t> requested_alignment;
   size_t allocated_size;
   MallocHook::AllocHandle alloc_handle;
   uint8_t access_hint;
+  TokenId token_id;
   bool cold_allocated;
   int depth;
   void* stack[64];
@@ -109,7 +113,7 @@ void CheckTraces(const StackTraceTable& table,
     tmp.sum = e.sum;
     tmp.count = e.count;
     tmp.depth = e.depth;
-    ASSERT_LE(tmp.depth, ABSL_ARRAYSIZE(tmp.stack));
+    ASSERT_LE(tmp.depth, std::size(tmp.stack));
     std::copy(e.stack, e.stack + e.depth, tmp.stack);
 
     tmp.requested_size = e.requested_size;
@@ -146,10 +150,11 @@ TEST(StackTraceTableTest, StackTraceTable) {
 
   StackTrace t1 = {};
   t1.requested_size = static_cast<uintptr_t>(512);
-  t1.requested_alignment = static_cast<uintptr_t>(16);
+  t1.requested_alignment = static_cast<std::align_val_t>(16);
   t1.allocated_size = static_cast<uintptr_t>(1024);
   t1.sampled_alloc_handle = AllocHandle{1};
   t1.access_hint = 3;
+  t1.token_id = TokenId::kAllocToken0;
   t1.cold_allocated = true;
   t1.depth = static_cast<uintptr_t>(2);
   t1.stack[0] = reinterpret_cast<void*>(1);
@@ -160,10 +165,11 @@ TEST(StackTraceTableTest, StackTraceTable) {
       .sum = 1024,
       .count = 1,
       .requested_size = 512,
-      .requested_alignment = 16,
+      .requested_alignment = std::align_val_t{16},
       .allocated_size = 1024,
       .alloc_handle = AllocHandle{1},
       .access_hint = 3,
+      .token_id = TokenId::kAllocToken0,
       .cold_allocated = true,
       .depth = 2,
       .stack = {reinterpret_cast<void*>(1), reinterpret_cast<void*>(2)},
@@ -171,10 +177,11 @@ TEST(StackTraceTableTest, StackTraceTable) {
 
   StackTrace t2 = {};
   t2.requested_size = static_cast<uintptr_t>(375);
-  t2.requested_alignment = static_cast<uintptr_t>(0);
+  t2.requested_alignment = std::nullopt;
   t2.allocated_size = static_cast<uintptr_t>(512);
   t2.sampled_alloc_handle = AllocHandle{2};
   t2.access_hint = 254;
+  t2.token_id = TokenId::kNoAllocToken;
   t2.cold_allocated = false;
   t2.depth = static_cast<uintptr_t>(2);
   t2.stack[0] = reinterpret_cast<void*>(2);
@@ -185,10 +192,11 @@ TEST(StackTraceTableTest, StackTraceTable) {
       .sum = 512,
       .count = 1,
       .requested_size = 375,
-      .requested_alignment = 0,
+      .requested_alignment = std::nullopt,
       .allocated_size = 512,
       .alloc_handle = AllocHandle{2},
       .access_hint = 254,
+      .token_id = TokenId::kNoAllocToken,
       .cold_allocated = false,
       .depth = 2,
       .stack = {reinterpret_cast<void*>(2), reinterpret_cast<void*>(1)},
@@ -221,10 +229,11 @@ TEST(StackTraceTableTest, StackTraceTable) {
       .sum = t1_sampled_weight * 1024,
       .count = t1_sampled_weight,
       .requested_size = 512,
-      .requested_alignment = 16,
+      .requested_alignment = std::align_val_t{16},
       .allocated_size = 1024,
       .alloc_handle = AllocHandle{1},
       .access_hint = 3,
+      .token_id = TokenId::kAllocToken0,
       .cold_allocated = true,
       .depth = 2,
       .stack = {reinterpret_cast<void*>(1), reinterpret_cast<void*>(2)},
@@ -280,10 +289,11 @@ TEST(StackTraceTableTest, StackTraceTable) {
   // Same stack as t1, but w/ different size
   StackTrace t3 = {};
   t3.requested_size = static_cast<uintptr_t>(13);
-  t3.requested_alignment = static_cast<uintptr_t>(0);
+  t3.requested_alignment = std::nullopt;
   t3.allocated_size = static_cast<uintptr_t>(17);
   t3.sampled_alloc_handle = AllocHandle{3};
   t3.access_hint = 3;
+  t3.token_id = TokenId::kAllocToken1;
   t3.cold_allocated = false;
   t3.depth = static_cast<uintptr_t>(2);
   t3.stack[0] = reinterpret_cast<void*>(1);
@@ -294,10 +304,11 @@ TEST(StackTraceTableTest, StackTraceTable) {
       .sum = 17,
       .count = 1,
       .requested_size = 13,
-      .requested_alignment = 0,
+      .requested_alignment = std::nullopt,
       .allocated_size = 17,
       .alloc_handle = AllocHandle{3},
       .access_hint = 3,
+      .token_id = TokenId::kAllocToken1,
       .cold_allocated = false,
       .depth = 2,
       .stack = {reinterpret_cast<void*>(1), reinterpret_cast<void*>(2)},
@@ -318,10 +329,11 @@ TEST(StackTraceTableTest, StackTraceTable) {
   // Same stack as t1, but w/ different alignment
   StackTrace t4 = {};
   t4.requested_size = static_cast<uintptr_t>(512);
-  t4.requested_alignment = static_cast<uintptr_t>(32);
+  t4.requested_alignment = static_cast<std::align_val_t>(32);
   t4.allocated_size = static_cast<uintptr_t>(1024);
   t4.sampled_alloc_handle = AllocHandle{4};
   t4.access_hint = 3;
+  t4.token_id = TokenId::kAllocToken0;
   t4.cold_allocated = false;
   t4.depth = static_cast<uintptr_t>(2);
   t4.stack[0] = reinterpret_cast<void*>(1);
@@ -332,10 +344,11 @@ TEST(StackTraceTableTest, StackTraceTable) {
       .sum = 1024,
       .count = 1,
       .requested_size = 512,
-      .requested_alignment = 32,
+      .requested_alignment = std::align_val_t{32},
       .allocated_size = 1024,
       .alloc_handle = AllocHandle{4},
       .access_hint = 3,
+      .token_id = TokenId::kAllocToken0,
       .cold_allocated = false,
       .depth = 2,
       .stack = {reinterpret_cast<void*>(1), reinterpret_cast<void*>(2)},
@@ -356,10 +369,11 @@ TEST(StackTraceTableTest, StackTraceTable) {
   // Same stack as t1, but w/ different hint
   StackTrace t5 = {};
   t5.requested_size = static_cast<uintptr_t>(512);
-  t5.requested_alignment = static_cast<uintptr_t>(32);
+  t5.requested_alignment = static_cast<std::align_val_t>(32);
   t5.allocated_size = static_cast<uintptr_t>(1024);
   t5.sampled_alloc_handle = AllocHandle{5};
   t5.access_hint = 4;
+  t5.token_id = TokenId::kAllocToken0;
   t5.cold_allocated = true;
   t5.depth = static_cast<uintptr_t>(2);
   t5.stack[0] = reinterpret_cast<void*>(1);
@@ -370,10 +384,11 @@ TEST(StackTraceTableTest, StackTraceTable) {
       .sum = 1024,
       .count = 1,
       .requested_size = 512,
-      .requested_alignment = 32,
+      .requested_alignment = std::align_val_t{32},
       .allocated_size = 1024,
       .alloc_handle = AllocHandle{5},
       .access_hint = 4,
+      .token_id = TokenId::kAllocToken0,
       .cold_allocated = true,
       .depth = 2,
       .stack = {reinterpret_cast<void*>(1), reinterpret_cast<void*>(2)},

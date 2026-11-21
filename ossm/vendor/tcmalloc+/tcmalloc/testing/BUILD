@@ -52,9 +52,11 @@ cc_library(
     deps = [
         "//tcmalloc:malloc_extension",
         "//tcmalloc/internal:logging",
+        "//tcmalloc/internal:parameter_accessors",
         "//tcmalloc/internal:percpu",
         "@com_github_google_benchmark//:benchmark",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
     ],
 )
@@ -68,13 +70,10 @@ create_tcmalloc_testsuite(
         "//conditions:default": None,
     }),
     linkstatic = 1,  # get the most realistic performance
-    shard_count = 3,
-    tags = [
-        "noasan",
-        "nomsan",
-        "notsan",
+    shard_count = 20,
+    visibility = [
+        "//tcmalloc:__pkg__",
     ],
-    visibility = ["//visibility:private"],
     deps = [
         ":test_allocator_harness",
         ":testutil",
@@ -83,23 +82,23 @@ create_tcmalloc_testsuite(
         "//tcmalloc:malloc_extension",
         "//tcmalloc/internal:config",
         "//tcmalloc/internal:declarations",
+        "//tcmalloc/internal:is_aligned_to",
         "//tcmalloc/internal:logging",
+        "//tcmalloc/internal:memory_tag",
+        "//tcmalloc/internal:page_allocation_status",
+        "//tcmalloc/internal:page_size",
         "//tcmalloc/internal:parameter_accessors",
         "@com_github_google_benchmark//:benchmark",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/debugging:leak_check",
         "@com_google_absl//absl/numeric:bits",
         "@com_google_absl//absl/random",
-        "@com_google_absl//absl/random:distributions",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:optional",
-        "@com_google_absl//absl/utility",
-        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -113,7 +112,6 @@ create_tcmalloc_benchmark_suite(
     deps = [
         "//tcmalloc:malloc_extension",
         "//tcmalloc:malloc_hook",
-        "//tcmalloc/internal:declarations",
         "@com_github_google_benchmark//:benchmark",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log:check",
@@ -128,8 +126,10 @@ cc_test(
     srcs = ["tcmalloc_fuzzer.cc"],
     copts = TCMALLOC_DEFAULT_COPTS + TCMALLOC_DEFAULT_CXXOPTS,
     malloc = "//tcmalloc/internal:system_malloc",
+    # Each FUZZ_TEST spends ~1 s in FuzzTest's unit-test-mode watchdog loop
+    # regardless of its own work, so ~20 cases need ~10 shards to stay <5 s.
+    shard_count = 10,
     tags = [
-        "noasan",
         "nomsan",
         "notsan",
         "noubsan",
@@ -138,8 +138,34 @@ cc_test(
     deps = [
         "//tcmalloc:common_8k_pages",
         "//tcmalloc:tcmalloc_internal_methods_only",  # buildcleaner: keep
+        "//tcmalloc/internal:config",
         "//tcmalloc/internal:logging",
-        "//tcmalloc/internal:page_size",
+        "@com_google_absl//absl/numeric:bits",
+        "@com_google_fuzztest//fuzztest",
+        "@com_google_fuzztest//fuzztest:init_fuzztest",
+        "@com_google_googletest//:gtest",
+    ],
+)
+
+cc_test(
+    name = "memory_errors_fuzz",
+    srcs = ["memory_errors_fuzz.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS + TCMALLOC_DEFAULT_CXXOPTS,
+    malloc = "//tcmalloc/internal:system_malloc",
+    tags = [
+        "noubsan",  # conflicting symbols
+    ],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":testutil",
+        "//tcmalloc:common_8k_pages",
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc:tcmalloc_internal_methods_only",  # buildcleaner: keep
+        "//tcmalloc/internal:config",
+        "//tcmalloc/internal:memory_tag",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/numeric:bits",
         "@com_google_fuzztest//fuzztest",
         "@com_google_fuzztest//fuzztest:init_fuzztest",
@@ -160,9 +186,28 @@ create_tcmalloc_testsuite(
         "//tcmalloc/internal:allocation_guard",
         "//tcmalloc/internal:config",
         "//tcmalloc/internal:logging",
+        "//tcmalloc/internal:page_allocator_hooks",
         "@com_github_google_benchmark//:benchmark",
         "@com_google_absl//absl/base:malloc_internal",
         "@com_google_absl//absl/debugging:leak_check",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+create_tcmalloc_testsuite(
+    name = "proc_maps_test",
+    srcs = ["proc_maps_test.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    linkstatic = 1,
+    tags = [
+    ],
+    deps = [
+        ":testutil",
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:config",
+        "//tcmalloc/internal:proc_maps",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -192,7 +237,6 @@ cc_test(
     ],
     deps = [
         "//tcmalloc:malloc_extension",
-        "@com_google_absl//absl/types:optional",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -257,6 +301,80 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "rseq_util",
+    testonly = 1,
+    srcs = ["rseq_util.cc"],
+    hdrs = ["rseq_util.h"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    visibility = ["//tcmalloc:tcmalloc_tests"],
+    deps = [
+        ":testutil",
+        "//tcmalloc/internal:environment",
+        "//tcmalloc/internal:percpu",
+        "@com_google_googletest//:gtest_for_library",
+    ],
+    alwayslink = 1,
+)
+
+# Links a gtest TEST(Benchmarks, RunAll) into gunit_main-based *_test targets
+# (which use testing/base/public/benchmark.h) so their embedded BENCHMARKs run
+# in dry mode (10 iterations) during unit testing and do not bitrot.
+cc_library(
+    name = "run_benchmarks",
+    testonly = 1,
+    srcs = ["run_benchmarks.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    visibility = ["//tcmalloc:tcmalloc_tests"],
+    deps = [
+        "@com_github_google_benchmark//:benchmark",
+        "@com_google_googletest//:gtest_for_library",
+    ],
+    alwayslink = 1,
+)
+
+# Provides main() for standalone *_benchmark targets (which use
+# third_party/benchmark without gunit_main), defaulting --benchmark_min_time=10x
+# when running under blaze/bazel test or ctest (TEST_TMPDIR is set).
+cc_library(
+    name = "benchmark_main",
+    testonly = 1,
+    srcs = ["benchmark_main.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    visibility = ["//tcmalloc:tcmalloc_tests"],
+    deps = [
+        "@com_github_google_benchmark//:benchmark",
+    ],
+    alwayslink = 1,
+)
+
+cc_library(
+    name = "smaps",
+    testonly = 1,
+    srcs = ["smaps.cc"],
+    hdrs = ["smaps.h"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    visibility = ["//tcmalloc:tcmalloc_tests"],
+    deps = [
+        "@com_google_absl//absl/functional:function_ref",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+cc_test(
+    name = "smaps_test",
+    srcs = ["smaps_test.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    tags = [
+    ],
+    deps = [
+        ":smaps",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 cc_test(
     name = "outofmemory_test",
     srcs = ["outofmemory_test.cc"],
@@ -298,6 +416,7 @@ cc_test(
     env = {"BORG_EXPERIMENTS": ""},
     linkstatic = 1,
     malloc = "//tcmalloc",
+    shard_count = 2,
     tags = [
         "noasan",
         "nomsan",
@@ -363,6 +482,7 @@ cc_test(
         "notsan",
     ],
     deps = [
+        ":rseq_util",
         "//tcmalloc:malloc_extension",
         "//tcmalloc/internal:logging",
         "//tcmalloc/internal:sysinfo",
@@ -422,10 +542,44 @@ create_tcmalloc_testsuite(
     copts = TCMALLOC_DEFAULT_COPTS,
     linkstatic = 1,
     deps = [
+        ":rseq_util",
         "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:environment",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
+    ],
+)
+
+create_tcmalloc_testsuite(
+    name = "first_allocation_test",
+    srcs = ["first_allocation_test.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    linkstatic = 1,
+    deps = [
+        ":rseq_util",
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:config",
+        "//tcmalloc/internal:environment",
+        "//tcmalloc/internal:parameter_accessors",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+create_tcmalloc_testsuite(
+    name = "first_allocation_large_test",
+    srcs = ["first_allocation_test.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS + ["-DFIRST_ALLOCATION_LARGE"],
+    linkstatic = 1,
+    deps = [
+        ":rseq_util",
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:config",
+        "//tcmalloc/internal:environment",
+        "//tcmalloc/internal:parameter_accessors",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -435,7 +589,9 @@ create_tcmalloc_testsuite(
     copts = TCMALLOC_DEFAULT_COPTS,
     linkstatic = 1,
     deps = [
+        ":rseq_util",
         "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:environment",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
@@ -447,6 +603,7 @@ create_tcmalloc_testsuite(
     srcs = ["limit_test.cc"],
     copts = TCMALLOC_DEFAULT_COPTS,
     linkstatic = 1,
+    shard_count = 11,
     tags = [
         "noasan",
         "nomsan",
@@ -477,8 +634,10 @@ create_tcmalloc_testsuite(
             }),
     linkstatic = 1,
     deps = [
+        ":testutil",
         "//tcmalloc:malloc_extension",
         "//tcmalloc/internal:config",
+        "//tcmalloc/internal:is_aligned_to",
         "@com_github_google_benchmark//:benchmark",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
@@ -500,16 +659,22 @@ create_tcmalloc_testsuite(
         ":testutil",
         "//tcmalloc:malloc_extension",
         "//tcmalloc:malloc_hook",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest_main",
     ],
 )
 
 create_tcmalloc_testsuite(
     name = "memory_errors_test",
+    timeout = "long",
     srcs = ["memory_errors_test.cc"],
     copts = TCMALLOC_DEFAULT_COPTS,
-    shard_count = 3,
+    # Some experiments change size classes, which interferes with death tests.
+    env = {"BORG_EXPERIMENTS": ""},
+    shard_count = 20,
     tags = [
         "nohwasan",
         "nomsan",
@@ -521,6 +686,7 @@ create_tcmalloc_testsuite(
         "//tcmalloc/internal:config",
         "//tcmalloc/internal:declarations",
         "//tcmalloc/internal:logging",
+        "//tcmalloc/internal:memory_tag",
         "@com_github_google_benchmark//:benchmark",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:core_headers",
@@ -599,7 +765,9 @@ create_tcmalloc_testsuite(
     srcs = ["get_stats_test.cc"],
     copts = TCMALLOC_DEFAULT_COPTS,
     linkstatic = 1,
+    shard_count = 4,
     deps = [
+        ":rseq_util",
         ":testutil",
         "//tcmalloc:experiment",
         "//tcmalloc:malloc_extension",
@@ -623,13 +791,15 @@ create_tcmalloc_testsuite(
         "notsan",
     ],
     deps = [
+        ":testutil",
         "//tcmalloc:malloc_extension",
         "//tcmalloc/internal:config",
         "//tcmalloc/internal:logging",
         "//tcmalloc/internal:memory_stats",
+        "//tcmalloc/internal:parameter_accessors",
         "@com_github_google_benchmark//:benchmark",
         "@com_google_absl//absl/random",
-        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -638,7 +808,11 @@ create_tcmalloc_testsuite(
     name = "default_parameters_test",
     srcs = ["default_parameters_test.cc"],
     copts = TCMALLOC_DEFAULT_COPTS,
-    env = {"BORG_EXPERIMENTS": ""},
+    # Test the defaults without experiments, overriding experiment variants.
+    env = {
+        "BORG_DISABLE_EXPERIMENTS": "",
+        "BORG_EXPERIMENTS": "",
+    },
     deps = [
         "//tcmalloc:malloc_extension",
         "@com_google_absl//absl/strings:str_format",
@@ -655,18 +829,7 @@ cc_binary(
         "//tcmalloc:malloc_extension",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/types:optional",
     ],
-)
-
-cc_library(
-    name = "benchmark_main",
-    srcs = ["benchmark_main.cc"],
-    copts = TCMALLOC_DEFAULT_COPTS,
-    visibility = [
-        "//tcmalloc:__subpackages__",
-    ],
-    deps = ["@com_github_google_benchmark//:benchmark"],
 )
 
 cc_test(
@@ -684,6 +847,7 @@ cc_test(
         "//tcmalloc:malloc_extension",
         "//tcmalloc:want_numa_aware",
         "//tcmalloc/internal:affinity",
+        "//tcmalloc/internal:config",
         "//tcmalloc/internal:logging",
         "//tcmalloc/internal:numa",
         "//tcmalloc/internal:page_size",
@@ -756,15 +920,39 @@ create_tcmalloc_testsuite(
 )
 
 create_tcmalloc_testsuite(
-    name = "reclaim_test",
-    srcs = ["reclaim_test.cc"],
+    name = "concurrent_release_test",
+    timeout = "long",
+    srcs = ["concurrent_release_test.cc"],
     copts = TCMALLOC_DEFAULT_COPTS,
+    shard_count = 2,
     tags = [
         "noasan",
         "nomsan",
         "notsan",
     ],
     deps = [
+        ":testutil",
+        ":thread_manager",
+        "//tcmalloc:malloc_extension",
+        "@com_google_absl//absl/random",
+        "@com_google_absl//absl/random:bit_gen_ref",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+create_tcmalloc_testsuite(
+    name = "drain_test",
+    srcs = ["drain_test.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    shard_count = 2,
+    tags = [
+        "noasan",
+        "nomsan",
+        "notsan",
+    ],
+    deps = [
+        ":rseq_util",
         ":test_allocator_harness",
         ":thread_manager",
         "//tcmalloc:malloc_extension",
@@ -783,17 +971,28 @@ create_tcmalloc_testsuite(
     name = "profile_test",
     srcs = ["profile_test.cc"],
     copts = TCMALLOC_DEFAULT_COPTS,
+    shard_count = 4,
+    tags = [
+        "noasan",
+        "nomsan",
+        "notsan",
+    ],
     deps = [
         ":testutil",
         "//tcmalloc:malloc_extension",
         "//tcmalloc:profile_marshaler",
+        "//tcmalloc/internal:linked_list",
+        "//tcmalloc/internal:parameter_accessors",
         "//tcmalloc/internal:profile_cc_proto",
         "@com_github_google_benchmark//:benchmark",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
         "@com_google_protobuf//:protobuf",
     ],
@@ -803,6 +1002,7 @@ create_tcmalloc_testsuite(
     name = "deallocation_profiler_test",
     srcs = ["deallocation_profiler_test.cc"],
     copts = TCMALLOC_DEFAULT_COPTS,
+    shard_count = 2,
     tags = [
         "noasan",
         "nomsan",
@@ -833,13 +1033,11 @@ cc_test(
     deps = [
         "//tcmalloc:common_8k_pages",
         "//tcmalloc:malloc_extension",
-        "//tcmalloc/internal:config",
         "//tcmalloc/internal:logging",
         "//tcmalloc/internal:numa",
         "//tcmalloc/internal:proc_maps",
         "@com_github_google_benchmark//:benchmark",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/debugging:leak_check",
+        "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_googletest//:gtest_main",
@@ -866,8 +1064,23 @@ create_tcmalloc_testsuite(
         "//tcmalloc:malloc_extension",
         "//tcmalloc/internal:config",
         "//tcmalloc/internal:logging",
+        "@com_google_absl//absl/base:config",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "malloc_extension_internal_methods_test",
+    srcs = ["malloc_extension_system_malloc_test.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    malloc = "//tcmalloc:tcmalloc_internal_methods_only",
+    tags = ["noubsan"],
+    deps = [
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:config",
+        "@com_google_absl//absl/random",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -880,6 +1093,7 @@ cc_test(
     tags = ["noubsan"],
     deps = [
         "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:config",
         "@com_google_absl//absl/random",
         "@com_google_googletest//:gtest_main",
     ],
@@ -889,14 +1103,10 @@ create_tcmalloc_testsuite(
     name = "malloc_extension_test",
     srcs = ["malloc_extension_test.cc"],
     copts = TCMALLOC_DEFAULT_COPTS,
-    tags = [
-        "noasan",
-        "nomsan",
-        "notsan",
-    ],
     deps = [
         ":testutil",
         "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:config",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
@@ -948,13 +1158,17 @@ create_tcmalloc_testsuite(
     copts = TCMALLOC_DEFAULT_COPTS,
     deps = [
         ":test_allocator_harness",
+        ":testutil",
         ":thread_manager",
         "//tcmalloc:malloc_extension",
         "//tcmalloc:malloc_hook",
         "//tcmalloc/internal:config",
         "//tcmalloc/internal:logging",
+        "//tcmalloc/internal:memory_tag",
+        "//tcmalloc/internal:page_size",
         "//tcmalloc/internal:profile_builder",
         "//tcmalloc/internal:profile_cc_proto",
+        "//tcmalloc/internal:residency",
         "//tcmalloc/internal:sampled_allocation",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/base:core_headers",
@@ -963,8 +1177,6 @@ create_tcmalloc_testsuite(
         "@com_google_absl//absl/log:absl_check",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -1005,6 +1217,27 @@ create_tcmalloc_testsuite(
     ],
 )
 
+create_tcmalloc_testsuite(
+    name = "cpu_cache_size_test",
+    srcs = ["cpu_cache_size_test.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    tags = [
+        "noasan",
+        "nomsan",
+        "notsan",
+    ],
+    deps = [
+        ":test_allocator_harness",
+        ":testutil",
+        ":thread_manager",
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:sysinfo",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 cc_test(
     name = "parallel_test",
     srcs = ["parallel_test.cc"],
@@ -1018,6 +1251,94 @@ cc_test(
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
+    ],
+)
+
+create_tcmalloc_testsuite(
+    name = "partitioning_fuzz_test",
+    srcs = ["partitioning_fuzz_test.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS + TCMALLOC_DEFAULT_CXXOPTS,
+    tags = [
+        "noasan",
+        "nomsan",
+        "notsan",
+        "noubsan",
+    ],
+    deps = [
+        ":testutil",
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:affinity",
+        "//tcmalloc/internal:memory_tag",
+        "@com_google_absl//absl/types:span",
+        "@com_google_fuzztest//fuzztest",
+        "@com_google_fuzztest//fuzztest:init_fuzztest",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_binary(
+    name = "partitioning_test_helper",
+    testonly = 1,
+    srcs = ["partitioning_test_helper.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    malloc = "//tcmalloc",
+    deps = [
+        ":testutil",
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:memory_tag",
+        "//tcmalloc/internal:parameter_accessors",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+cc_binary(
+    name = "partitioning_test_helper_partitioning_default_on",
+    testonly = 1,
+    srcs = ["partitioning_test_helper.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    malloc = "//tcmalloc",
+    deps = [
+        ":testutil",
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc:tcmalloc_enable_heap_partitioning_default_on",
+        "//tcmalloc/internal:memory_tag",
+        "//tcmalloc/internal:parameter_accessors",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+cc_binary(
+    name = "partitioning_test_helper_partitioning_default_on_numa",
+    testonly = 1,
+    srcs = ["partitioning_test_helper.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    malloc = "//tcmalloc:tcmalloc_numa_aware",
+    deps = [
+        ":testutil",
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc:tcmalloc_enable_heap_partitioning_default_on",
+        "//tcmalloc/internal:memory_tag",
+        "//tcmalloc/internal:parameter_accessors",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+    ],
+)
+
+cc_binary(
+    name = "partitioning_test_helper_numa",
+    testonly = 1,
+    srcs = ["partitioning_test_helper.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS,
+    malloc = "//tcmalloc:tcmalloc_numa_aware",
+    deps = [
+        ":testutil",
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:memory_tag",
+        "//tcmalloc/internal:parameter_accessors",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
     ],
 )
 
@@ -1051,5 +1372,66 @@ cc_test(
     copts = TCMALLOC_DEFAULT_COPTS,
     deps = [
         "//tcmalloc:alloc_at_least",
+    ],
+)
+
+create_tcmalloc_testsuite(
+    name = "percpu_stale_test",
+    srcs = ["percpu_stale_test.cc"],
+    copts = TCMALLOC_DEFAULT_COPTS + TCMALLOC_DEFAULT_CXXOPTS,
+    linkstatic = 1,
+    deps = [
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc/internal:sysinfo",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+create_tcmalloc_testsuite(
+    name = "central_freelist_tracing_test",
+    srcs = ["central_freelist_tracing_test.cc"],
+    linkstatic = 1,
+    deps = [
+        "//tcmalloc:malloc_hook",
+        "//tcmalloc/internal:central_freelist_hooks",
+        "//tcmalloc/internal:logging",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+create_tcmalloc_testsuite(
+    name = "page_allocator_tracing_test",
+    srcs = ["page_allocator_tracing_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":testutil",
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc:malloc_hook",
+        "//tcmalloc/internal:config",
+        "//tcmalloc/internal:logging",
+        "//tcmalloc/internal:memory_tag",
+        "//tcmalloc/internal:page_allocator_hooks",
+        "@com_google_absl//absl/base",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+create_tcmalloc_testsuite(
+    name = "reentrancy_test",
+    srcs = ["reentrancy_test.cc"],
+    deps = [
+        "//tcmalloc:malloc_extension",
+        "//tcmalloc:malloc_hook",
+        "//tcmalloc/internal:config",
+        "//tcmalloc/internal:logging",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_googletest//:gtest_main",
     ],
 )

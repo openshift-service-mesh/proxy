@@ -1,0 +1,10 @@
+{
+  "url": "https://github.com/google/tcmalloc/archive/3af1b0191e7e5ec2d3f3b1142ccc75ae0083a71a.tar.gz",
+  "integrity": "sha256-iRjEuHjILv6XRv97Y/mNkzmcswMjV/es7RgQtIVmRvc=",
+  "strip_prefix": "tcmalloc-3af1b0191e7e5ec2d3f3b1142ccc75ae0083a71a",
+  "patch_strip": 1,
+  "patches": {
+    "tcmalloc.patch": "sha256-kTt3vb3pNAXXWxwJ23CC6flW6UgKHzdXJJKMjdkd4x4=",
+    "copts-gcc-attributes.patch": "sha256-r7lNAOKClDzlMsZ0kdU/09tHTWAOGNrZZV452tnh7V0="
+  }
+}

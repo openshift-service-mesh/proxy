@@ -18,14 +18,18 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <tuple>
+#include <vector>
 
+#include "gtest/gtest.h"
 #include "fuzztest/fuzztest.h"
+#include "absl/strings/string_view.h"
 #include "tcmalloc/malloc_extension.h"
 
 namespace tcmalloc {
 namespace {
 
-void FuzzGetProperty(const std::string& property) {
+void FuzzGetProperty(absl::string_view property) {
   std::optional<size_t> val = MallocExtension::GetNumericProperty(property);
   if (!val.has_value()) {
     // Rather than inspect the result of MallocExtension::GetProperties, we
@@ -35,15 +39,17 @@ void FuzzGetProperty(const std::string& property) {
     return;
   }
 
-  std::map<std::string, MallocExtension::Property> properties =
-      MallocExtension::GetProperties();
-  if (properties.find(property) == properties.end()) {
+  MallocExtension::PropertyMap properties = MallocExtension::GetProperties();
+  if (properties.find(std::string(property)) == properties.end()) {
     __builtin_trap();
   }
 }
 
 FUZZ_TEST(MallocExtensionTest, FuzzGetProperty)
+    .WithDomains(fuzztest::String())
     ;
+
+TEST(MallocExtensionTest, FuzzGetPropertyRegression) { FuzzGetProperty(""); }
 
 }  // namespace
 }  // namespace tcmalloc

@@ -19,12 +19,25 @@
 #include <signal.h>
 #include <stdarg.h>
 #include <string.h>
+
+#if defined(__linux__)
+#include <sys/uio.h>
+#if defined(__GLIBC__) && \
+    ((__GLIBC__ > 2) || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 15))
+#define HAS_PROCESS_VM_READV 1
+#endif
+#endif  // defined(__linux__)
 #include <unistd.h>
 
+#include <algorithm>
+#include <limits>
 #include <type_traits>
 
+#include "absl/base/nullability.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "tcmalloc/internal/config.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
@@ -35,7 +48,7 @@ int signal_safe_open(const char* path, int flags, ...) {
   int fd;
   va_list ap;
   using mode_t_va_arg_type =
-      std::conditional<sizeof(mode_t) < sizeof(int), int, mode_t>::type;
+      std::conditional_t<sizeof(mode_t) < sizeof(int), int, mode_t>;
 
   va_start(ap, flags);
   mode_t mode = va_arg(ap, mode_t_va_arg_type);
@@ -121,6 +134,80 @@ ssize_t signal_safe_read(int fd, char* buf, size_t count, size_t* bytes_read) {
   if (rc != -1 || errno == EINTR)
     rc = total_bytes;  // return the cumulative bytes read
   return rc;
+}
+
+ssize_t signal_safe_pread(int fd, char* absl_nonnull buf, size_t count,
+                          off_t offset, size_t* absl_nullable bytes_read) {
+  if (offset < 0 ||
+      count > static_cast<size_t>(std::numeric_limits<off_t>::max() - offset)) {
+    if (bytes_read != nullptr) *bytes_read = 0;
+    errno = offset < 0 ? EINVAL : EOVERFLOW;
+    return -1;
+  }
+
+  ssize_t rc;
+  size_t total_bytes = 0;
+
+  do {
+    rc = pread(fd, buf + total_bytes, count - total_bytes,
+               offset + static_cast<off_t>(total_bytes));
+    if (rc > 0) total_bytes += rc;
+    if (rc == 0) break;  // EOF
+  } while (total_bytes < count && (rc > 0 || errno == EINTR));
+
+  if (bytes_read != nullptr) *bytes_read = total_bytes;
+
+  if (rc != -1 || errno == EINTR) {
+    rc = total_bytes;  // return the cumulative bytes read
+  }
+  return rc;
+}
+
+bool SafeCopyMemory(absl::Span<const absl::string_view> src_chunks, void* dst) {
+  if (src_chunks.empty() || dst == nullptr) {
+    return false;
+  }
+#if defined(HAS_PROCESS_VM_READV)
+  size_t dst_offset = 0;
+  constexpr size_t kMaxIov = 64;
+  static_assert(kMaxIov <= IOV_MAX);
+  struct iovec src_vec[kMaxIov];
+
+  while (!src_chunks.empty()) {
+    // Process in batches of up to kMaxIov chunks.
+    const size_t batch_count = std::min<size_t>(src_chunks.size(), kMaxIov);
+    size_t batch_bytes = 0;
+    for (size_t i = 0; i < batch_count; ++i) {
+      src_vec[i] =
+          iovec{const_cast<char*>(src_chunks[i].data()), src_chunks[i].size()};
+      batch_bytes += src_chunks[i].size();
+    }
+    src_chunks.remove_prefix(batch_count);
+
+    struct iovec dst_iov;
+    dst_iov.iov_base = static_cast<char*>(dst) + dst_offset;
+    dst_iov.iov_len = batch_bytes;
+
+    ssize_t bytes = process_vm_readv(getpid(), &dst_iov, /*liovcnt=*/1, src_vec,
+                                     /*riovcnt=*/batch_count, /*flags=*/0);
+    if (bytes != batch_bytes) {
+      return false;
+    }
+
+    dst_offset += batch_bytes;
+  }
+  return true;
+#else
+  return false;
+#endif  // defined(HAS_PROCESS_VM_READV)
+}
+
+bool SafeCopyMemory(const void* src, void* dst, size_t size) {
+  if (size == 0) {
+    return false;
+  }
+  const absl::string_view chunk(static_cast<const char*>(src), size);
+  return SafeCopyMemory(absl::MakeConstSpan(&chunk, 1), dst);
 }
 
 }  // namespace tcmalloc_internal

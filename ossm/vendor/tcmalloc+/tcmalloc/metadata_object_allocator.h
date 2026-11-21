@@ -25,6 +25,7 @@
 #include "absl/base/internal/spinlock.h"
 #include "absl/base/optimization.h"
 #include "absl/base/thread_annotations.h"
+#include "absl/types/span.h"
 #include "tcmalloc/arena.h"
 #include "tcmalloc/common.h"
 #include "tcmalloc/internal/allocation_guard.h"
@@ -47,12 +48,18 @@ struct AllocatorStats {
 
 // Simple allocator for objects of a specified type.  External locking
 // is required before accessing one of these objects.
-template <class T>
+template <class T, ArenaAlloc AllocType>
 class MetadataObjectAllocator {
  public:
+  constexpr MetadataObjectAllocator() = default;
   constexpr explicit MetadataObjectAllocator(
       Arena& arena ABSL_ATTRIBUTE_LIFETIME_BOUND)
-      : arena_(&arena), free_list_(nullptr), stats_{0, 0} {}
+      : arena_(&arena) {}
+
+  void Init(Arena& arena) {
+    TC_CHECK(!arena_);
+    arena_ = &arena;
+  }
 
   // Allocates storage for a T.
   //
@@ -65,27 +72,40 @@ class MetadataObjectAllocator {
                        std::forward<Args>(args)...);
   }
 
-  template <typename... Args>
-  [[nodiscard]] ABSL_ATTRIBUTE_RETURNS_NONNULL T* NewWithSize(
-      size_t size, std::align_val_t align, Args&&... args) {
-    T* ret = LockAndAllocMemory(size, align);
-    return new (ret) T(std::forward<Args>(args)...);
-  }
-
-  void Delete(T* p) ABSL_ATTRIBUTE_NONNULL() {
+  void Delete(T* absl_nonnull p) {
     p->~T();
-    LockAndDeleteMemory(p);
+    AllocationGuardSpinLockHolder l(metadata_lock_);
+    DeleteMemory(p);
   }
 
-  AllocatorStats stats() const {
+  void Delete(absl::Span<T* absl_nonnull> ptrs) {
+    for (T* p : ptrs) {
+      p->~T();
+    }
+    AllocationGuardSpinLockHolder l(metadata_lock_);
+    for (T* p : ptrs) {
+      DeleteMemory(p);
+    }
+  }
+
+  [[nodiscard]] AllocatorStats stats() const {
     AllocationGuardSpinLockHolder l(metadata_lock_);
 
     return stats_;
   }
 
  private:
-  ABSL_ATTRIBUTE_RETURNS_NONNULL T* LockAndAllocMemory(size_t size,
-                                                       std::align_val_t align) {
+  template <typename... Args>
+  [[nodiscard]] ABSL_ATTRIBUTE_RETURNS_NONNULL T* NewWithSize(
+      size_t size, std::align_val_t align, Args&&... args) {
+    static_assert(sizeof(T) >= sizeof(void*),
+                  "Object size must be at least pointer sized to fit intrusive "
+                  "freelist link pointer");
+    T* ret = LockAndAllocMemory(size, align);
+    return new (ret) T(std::forward<Args>(args)...);
+  }
+  [[nodiscard]] ABSL_ATTRIBUTE_RETURNS_NONNULL T* LockAndAllocMemory(
+      size_t size, std::align_val_t align) {
     TC_ASSERT_GE(static_cast<size_t>(align), alignof(T));
 
     AllocationGuardSpinLockHolder l(metadata_lock_);
@@ -95,7 +115,7 @@ class MetadataObjectAllocator {
     stats_.in_use++;
     if (ABSL_PREDICT_FALSE(result == nullptr)) {
       stats_.total++;
-      result = reinterpret_cast<T*>(arena_->Alloc(size, align));
+      result = reinterpret_cast<T*>(arena_->Alloc(AllocType, size, align));
       ABSL_ANNOTATE_MEMORY_IS_UNINITIALIZED(result, size);
       return result;
     } else {
@@ -109,9 +129,8 @@ class MetadataObjectAllocator {
     return result;
   }
 
-  void LockAndDeleteMemory(T* p) ABSL_ATTRIBUTE_NONNULL() {
-    AllocationGuardSpinLockHolder l(metadata_lock_);
-
+  void DeleteMemory(T* absl_nonnull p)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(metadata_lock_) {
     *(reinterpret_cast<void**>(p)) = free_list_;
 #ifdef ABSL_HAVE_ADDRESS_SANITIZER
     // Poison the object on the freelist.  We do not dereference it after this
@@ -123,15 +142,15 @@ class MetadataObjectAllocator {
   }
 
   // Arena from which to allocate memory
-  Arena* arena_;
+  Arena* arena_ = nullptr;
 
   mutable absl::base_internal::SpinLock metadata_lock_{
       absl::base_internal::SCHEDULE_KERNEL_ONLY};
 
   // Free list of already carved objects
-  T* free_list_ ABSL_GUARDED_BY(metadata_lock_);
+  T* free_list_ ABSL_GUARDED_BY(metadata_lock_) = nullptr;
 
-  AllocatorStats stats_ ABSL_GUARDED_BY(metadata_lock_);
+  AllocatorStats stats_ ABSL_GUARDED_BY(metadata_lock_) = {};
 };
 
 }  // namespace tcmalloc_internal

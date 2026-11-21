@@ -14,6 +14,16 @@
 
 build --cxxopt='-std=c++17'
 
+test --test_output=errors
+
+# Disable noisy warnings from dependencies.
+build --per_file_copt=-external/.*@-w
+build --host_per_file_copt=-external/.*@-w
+
+# Disable noisy warnings in TCMalloc.
+build:clang --copt=-Wno-nullability-completeness
+build:gcc --copt=-Wno-sign-compare
+
 # Flip incompatible_disallow_empty_glob to avoid breaking forward compatibility, see
 # https://github.com/bazelbuild/bazel/pull/15327 for details.
 build --incompatible_disallow_empty_glob
@@ -26,6 +36,9 @@ common --incompatible_config_setting_private_default_visibility
 # Link Google Test against Abseil and RE2.
 build --define='absl=1'
 
+# Use thread-safe death tests in Google Test.
+build --copt=-DGTEST_DEFAULT_DEATH_TEST_STYLE='\"threadsafe\"' --host_copt=-DGTEST_DEFAULT_DEATH_TEST_STYLE='\"threadsafe\"'
+
 # AllocationGuard.CooperativeDeathTest checks for "SIGABRT received"
 # message printed by this signal handler.
 test --test_env="GTEST_INSTALL_FAILURE_SIGNAL_HANDLER=1"
@@ -34,3 +47,28 @@ test --test_env="GTEST_INSTALL_FAILURE_SIGNAL_HANDLER=1"
 build:asan-libfuzzer --@rules_fuzzing//fuzzing:cc_engine=@rules_fuzzing//fuzzing/engines:libfuzzer
 build:asan-libfuzzer --@rules_fuzzing//fuzzing:cc_engine_instrumentation=libfuzzer
 build:asan-libfuzzer --@rules_fuzzing//fuzzing:cc_engine_sanitizer=asan
+
+# Configure our Docker toolchain setup.
+build --extra_toolchains=@docker_toolchain//:all
+build:libstdc++ --features=libstdc++
+build:gcc --platforms=//ci:linux_gcc
+build:clang --platforms=//ci:linux_clang
+
+# Remote build configuration for CI.
+build:remote-base --define=EXECUTOR=remote
+build:remote-base --remote_cache=grpcs://us-east1-remotebuildexecution.googleapis.com
+build:remote-base --remote_executor=grpcs://us-east1-remotebuildexecution.googleapis.com
+build:remote-base --remote_instance_name=projects/tcmalloc-94329/instances/ci-east
+build:remote-base --jobs=100
+build:remote-base --remote_download_minimal
+# Retry up for up to 15 minutes under heavy load (exponential backoff).
+build:remote-base --remote_retries=20 --remote_retry_max_delay=60s
+
+# Apply Bazel 9.3+ settings (such as --remote_grpc_service_config and test
+# toolchain compatibility) when running on Bazel 9.3+.
+try-import-if-bazel-version >=9.3.0 %workspace%/ci/bazel9.bazelrc
+
+build:remote --config=remote-base
+build:remote --extra_execution_platforms=//ci:rbe
+build:remote --host_platform=//ci:rbe
+build:remote --platforms=//ci:rbe

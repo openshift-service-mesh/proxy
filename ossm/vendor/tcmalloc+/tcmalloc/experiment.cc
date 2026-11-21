@@ -14,11 +14,13 @@
 
 #include "tcmalloc/experiment.h"
 
-#include <string.h>
-
 #include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
-#include <functional>
+#include <cstring>
+#include <limits>
 #include <map>
 #include <optional>
 #include <string>
@@ -30,15 +32,25 @@
 #include "absl/functional/function_ref.h"
 #include "absl/hash/hash.h"
 #include "absl/strings/match.h"
-#include "absl/strings/numbers.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
+#include "absl/strings/strip.h"
 #include "tcmalloc/experiment_config.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/environment.h"
-#include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal_malloc_extension.h"
 #include "tcmalloc/malloc_extension.h"
+
+// Loops over `experiments` must not be unrolled or otherwise specialized on
+// the number of experiments: adding or retiring an experiment should not
+// change the size of the generated code, since that perturbs the layout of
+// unrelated (hot) code and data in the final binary. See b/562930846.
+// TODO(b/573695160): Try to get rid of this pragma.
+#if defined(__clang__)
+#define TCMALLOC_EXPERIMENT_LOOP_NO_UNROLL \
+  _Pragma("clang loop unroll(disable) vectorize(disable) interleave(disable)")
+#else
+#define TCMALLOC_EXPERIMENT_LOOP_NO_UNROLL
+#endif
 
 GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
@@ -51,25 +63,7 @@ const char kDisableExperiments[] = "BORG_DISABLE_EXPERIMENTS";
 constexpr absl::string_view kEnableAll = "enable-all-known-experiments";
 constexpr absl::string_view kDisableAll = "all";
 
-// Experiments that have known issues with brittle tests, are not enabled
-// involuntarily in tests, and shouldn't be enabled widely.
-bool HasBrittleTestFailures(Experiment exp) {
-  if (exp == Experiment::TEST_ONLY_TCMALLOC_POW2_SIZECLASS) {
-    return true;
-  }
-
-  if (exp == Experiment::TEST_ONLY_TCMALLOC_REUSE_SIZE_CLASSES_V2 ||
-      exp == Experiment::TCMALLOC_REUSE_SIZE_CLASSES_V2) {
-    return true;
-  }
-  if (exp == Experiment::TEST_ONLY_TCMALLOC_SHARDED_TRANSFER_CACHE) {
-    return true;
-  }
-
-  return false;
-}
-
-bool IsCompilerExperiment(Experiment exp) {
+bool IsCompilerExperiment(Experiment exp [[maybe_unused]]) {
 #ifdef NPX_COMPILER_ENABLED_EXPERIMENT
   return exp == Experiment::NPX_COMPILER_EXPERIMENT;
 #else
@@ -77,7 +71,9 @@ bool IsCompilerExperiment(Experiment exp) {
 #endif
 }
 
-bool LookupExperimentID(absl::string_view label, Experiment* exp) {
+bool LookupExperimentID(absl::string_view label, Experiment* exp,
+                        absl::Span<const ExperimentConfig> experiments) {
+  TCMALLOC_EXPERIMENT_LOOP_NO_UNROLL
   for (auto config : experiments) {
     if (config.name == label) {
       *exp = config.id;
@@ -96,11 +92,14 @@ const bool* GetSelectedExperiments() {
     const char* test_target = thread_safe_getenv("TEST_TARGET");
     const char* active_experiments = thread_safe_getenv(kExperiments);
     const char* disabled_experiments = thread_safe_getenv(kDisableExperiments);
+    absl::string_view hostname = LookupHostname();
+
     SelectExperiments(
         by_id, test_target ? test_target : "",
         active_experiments ? active_experiments : "",
         disabled_experiments ? disabled_experiments : "",
-        active_experiments == nullptr && disabled_experiments == nullptr);
+        active_experiments == nullptr && disabled_experiments == nullptr,
+        hostname, experiments);
   });
   return by_id;
 }
@@ -125,33 +124,125 @@ void ParseExperiments(absl::string_view labels, F f) {
 
 }  // namespace
 
-const bool* SelectExperiments(bool* buffer, absl::string_view test_target,
-                              absl::string_view active,
-                              absl::string_view disabled, bool unset) {
+absl::string_view LookupHostname() {
+  return {};
+}
+
+std::optional<uint64_t> CalculateRolloutBucket(absl::string_view hostname,
+                                               absl::string_view salt) {
+  // Ensure no experiments are selected.
+  return std::nullopt;
+}
+
+bool IsExperimentRolloutEnabled(
+    const ExperimentConfig& config, absl::string_view hostname,
+    absl::Span<const ExperimentConfig> experiments) {
+  if (hostname.empty()) {
+    // Without a hostname there is no rollout bucket.  Non-inverted rollouts
+    // stay off; inverted (holdback) rollouts fall back to the enabled
+    // majority.
+    return config.rollout_inverted;
+  }
+
+  // Ensure experiments are i.i.d. from one another by using their own names as
+  // a salt, unless explicitly requested.
+  absl::string_view salt =
+      config.rollout_salt.empty() ? config.name : config.rollout_salt;
+  const std::optional<uint64_t> val = CalculateRolloutBucket(hostname, salt);
+  if (!val.has_value()) {
+    return false;
+  }
+
+  constexpr int digits = std::numeric_limits<double>::digits;
+  // Scale val onto [0, 1.0).
+  const double target = std::ldexp(*val >> (64 - digits), -digits);
+  const double lower = config.rollout_lower_bound;
+  const double upper = config.rollout_upper_bound;
+  if (!config.rollout_inverted) {
+    return target >= lower && target < upper;
+  }
+
+  // Inverted: the ablation arm is the top slice [1 - max_width, 1.0), where
+  // max_width is the maximum (upper-lower) distance across all experiment arms
+  // sharing the salt.
+  //
+  // Every other host, including the original treatment slot but excluding other
+  // experiments with the same salt, has the experiment enabled.  Anchoring the
+  // ablation arm at 1.0 lets several equally sized arms that share a salt
+  // (multi-arm experiments) share a single ablation arm.
+  double max_width = upper - lower;
+
+  TCMALLOC_EXPERIMENT_LOOP_NO_UNROLL
+  for (const auto& other : experiments) {
+    if (other.name == config.name) {
+      continue;
+    }
+
+    const absl::string_view other_salt =
+        other.rollout_salt.empty() ? other.name : other.rollout_salt;
+    if (other_salt != salt) {
+      continue;
+    }
+
+    max_width = std::max(max_width,
+                         other.rollout_upper_bound - other.rollout_lower_bound);
+
+    if (target >= other.rollout_lower_bound &&
+        target < other.rollout_upper_bound) {
+      return false;
+    }
+  }
+
+  const double ablation_lower = 1.0 - max_width;
+  if (target >= ablation_lower) {
+    return false;
+  }
+  return true;
+}
+
+void SelectExperiments(bool* buffer, absl::string_view test_target,
+                       absl::string_view active, absl::string_view disabled,
+                       bool unset, absl::string_view hostname,
+                       absl::Span<const ExperimentConfig> experiments) {
   memset(buffer, 0, sizeof(*buffer) * kNumExperiments);
 
   if (active == kEnableAll) {
     std::fill(buffer, buffer + kNumExperiments, true);
   }
 
-  ParseExperiments(active, [buffer](absl::string_view token) {
+  TCMALLOC_EXPERIMENT_LOOP_NO_UNROLL
+  for (const auto& config : experiments) {
+    if (config.rollout_upper_bound > 0) {
+      if (IsExperimentRolloutEnabled(config, hostname, experiments)) {
+        buffer[static_cast<int>(config.id)] = true;
+      }
+    }
+  }
+
+  ParseExperiments(active, [buffer, experiments](absl::string_view token) {
     Experiment id;
-    if (LookupExperimentID(token, &id)) {
+    if (LookupExperimentID(token, &id, experiments)) {
       buffer[static_cast<int>(id)] = true;
     }
   });
 
   // The compiler experiments should be env variable independent.
 #ifdef NPX_COMPILER_ENABLED_EXPERIMENT
-  if (!absl::StrContains(active, NPX_COMPILER_ENABLED_EXPERIMENT)) {
+#define Q(x) STR(x)
+#define STR(x) #x
+  if (!absl::StrContains(active, Q(NPX_COMPILER_ENABLED_EXPERIMENT))) {
     Experiment id;
-    if (LookupExperimentID(NPX_COMPILER_ENABLED_EXPERIMENT, &id)) {
+    if (LookupExperimentID(Q(NPX_COMPILER_ENABLED_EXPERIMENT), &id,
+                           experiments)) {
       buffer[static_cast<int>(id)] = true;
     }
   }
+#undef STR
+#undef Q
 #endif
 
   if (disabled == kDisableAll) {
+    TCMALLOC_EXPERIMENT_LOOP_NO_UNROLL
     for (auto config : experiments) {
       // Exclude compile-time experiments
       if (!IsCompilerExperiment(config.id)) {
@@ -161,72 +252,117 @@ const bool* SelectExperiments(bool* buffer, absl::string_view test_target,
   }
 
   // disable non-compiler experiments
-  ParseExperiments(disabled, [buffer](absl::string_view token) {
+  ParseExperiments(disabled, [buffer, experiments](absl::string_view token) {
     Experiment id;
-    if (LookupExperimentID(token, &id) && !IsCompilerExperiment(id)) {
+    if (LookupExperimentID(token, &id, experiments) &&
+        !IsCompilerExperiment(id)) {
       buffer[static_cast<int>(id)] = false;
     }
   });
 
-  // Enable some random combination of experiments for tests that don't
+  // Flip some random combination of experiments for tests that don't
   // explicitly set any of the experiment env vars. This allows to get better
   // test coverage of experiments before production.
+  // Flipping enables normal experiments, and disables inverted rollouts
+  // (holdbacks): the latter are enabled by default (tests have no hostname),
+  // so disabling them covers the non-default (ablation) code path.
   // Tests can opt out by exporting BORG_EXPERIMENTS="".
-  // Enabled experiments are selected based on the stable test target name hash,
+  // Flipped experiments are selected based on the stable test target name hash,
   // this allows get a wide range of experiment permutations on a large test
   // base, but at the same time avoids flaky test failures (if a particular
   // test fails only with a particular experiment combination).
-  // It would be nice to print what experiments we enable, but printing even
+  // It would be nice to print what experiments we flip, but printing even
   // to stderr breaks some tests that capture subprocess output.
   if (unset && !test_target.empty()) {
-    TC_CHECK(active.empty() && disabled.empty());
+    // TODO: b/454666418 - Replace with TC_CHECK when the synchronization
+    // experimentation is finished.
+    assert(active.empty() && disabled.empty());
     uint64_t seed =
         static_cast<uint64_t>(absl::base_internal::CycleClock::Now());
     const size_t target_hash = absl::HashOf(test_target, seed);
     constexpr size_t kVanillaOneOf = 11;
-    constexpr size_t kEnableOneOf = 3;
-    if ((target_hash % kVanillaOneOf) == 0) {
-      return buffer;
-    }
+    constexpr size_t kFlipOneOf = 3;
+    if ((target_hash % kVanillaOneOf) != 0) {
+      auto flip = [buffer](const ExperimentConfig& config) {
+        buffer[static_cast<int>(config.id)] = !config.rollout_inverted;
+      };
+      int num_flipped_experiments = 0;
+      const ExperimentConfig* last_config = nullptr;
+      TCMALLOC_EXPERIMENT_LOOP_NO_UNROLL
+      for (const auto& config : experiments) {
+        if (IsCompilerExperiment(config.id) || config.brittle) {
+          continue;
+        }
+        last_config = &config;
 
-    int num_enabled_experiments = 0;
-    Experiment experiment_id = Experiment::kMaxExperimentID;
-    for (auto config : experiments) {
-      if (IsCompilerExperiment(config.id) ||
-          HasBrittleTestFailures(config.id)) {
-        continue;
+        // Flipping is specifically based on the experiment name so that it's
+        // stable when experiments are added/removed.
+        const bool flipped =
+            ((target_hash ^ absl::HashOf(config.name)) % kFlipOneOf) == 0;
+        if (flipped) {
+          flip(config);
+        }
+        num_flipped_experiments += flipped;
       }
-      experiment_id = config.id;
-
-      // Enabling is specifically based on the experiment name so that it's
-      // stable when experiments are added/removed.
-      bool enabled =
-          ((target_hash ^ absl::HashOf(config.name)) % kEnableOneOf) == 0;
-      buffer[static_cast<int>(config.id)] |= enabled;
-      num_enabled_experiments += enabled;
-    }
-    // In case the hash-based selection above did not work out, select the last
-    // experiment.
-    if (num_enabled_experiments == 0 &&
-        experiment_id != Experiment::kMaxExperimentID) {
-      TC_CHECK(!buffer[static_cast<int>(experiment_id)]);
-      buffer[static_cast<int>(experiment_id)] = true;
+      // In case the hash-based selection above did not work out, flip the
+      // last experiment.
+      if (num_flipped_experiments == 0 && last_config != nullptr) {
+        flip(*last_config);
+      }
     }
   }
 
-  return buffer;
+  // Ensure unsafe experiments are disabled.
+  TCMALLOC_EXPERIMENT_LOOP_NO_UNROLL
+  for (const auto& config : experiments) {
+    if (config.force_disable) {
+      buffer[static_cast<int>(config.id)] = false;
+    }
+  }
 }
+
+static_assert([] {
+  auto salt_of = [](const ExperimentConfig& e) {
+    return e.rollout_salt.empty() ? e.name : e.rollout_salt;
+  };
+  for (const auto& e : experiments) {
+    // Rollout bounds must be in [0, 1].
+    if (e.rollout_lower_bound < 0.0) return false;
+    if (e.rollout_upper_bound > 1.0) return false;
+    if (!e.rollout_inverted) continue;
+    // The ablation arm [1 - (upper - lower), 1) must be non-empty and
+    // must not overlap the treatment slot [lower, upper), i.e.
+    // 1 - (upper - lower) >= upper.
+    if (e.rollout_upper_bound <= e.rollout_lower_bound) return false;
+    if (2 * e.rollout_upper_bound - e.rollout_lower_bound > 1.0) {
+      return false;
+    }
+    // At most one experiment per rollout_salt may be inverted: two would both
+    // be active on every host outside their slots and the shared holdback, so
+    // neither holdback could be read out alone.
+    for (const auto& other : experiments) {
+      if (other.rollout_inverted && other.name != e.name &&
+          salt_of(other) == salt_of(e)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}());
 
 }  // namespace tcmalloc_internal
 
 bool IsExperimentActive(Experiment exp) {
-  TC_ASSERT_GE(static_cast<int>(exp), 0);
-  TC_ASSERT_LT(exp, Experiment::kMaxExperimentID);
+  // TODO: b/454666418 - Replace with TC_CHECK when the synchronization
+  // experimentation is finished.
+  assert(static_cast<int>(exp) >= 0);
+  assert(exp < Experiment::kMaxExperimentID);
 
   return tcmalloc_internal::GetSelectedExperiments()[static_cast<int>(exp)];
 }
 
 std::optional<Experiment> FindExperimentByName(absl::string_view name) {
+  TCMALLOC_EXPERIMENT_LOOP_NO_UNROLL
   for (const auto& config : experiments) {
     if (name == config.name) {
       return config.id;
@@ -238,16 +374,27 @@ std::optional<Experiment> FindExperimentByName(absl::string_view name) {
 
 void WalkExperiments(
     absl::FunctionRef<void(absl::string_view name, bool active)> callback) {
+  TCMALLOC_EXPERIMENT_LOOP_NO_UNROLL
   for (const auto& config : experiments) {
     callback(config.name, IsExperimentActive(config.id));
   }
 }
 
 extern "C" void MallocExtension_Internal_GetExperiments(
-    std::map<std::string, MallocExtension::Property>* result) {
+    tcmalloc::MallocExtension::PropertyMap* result) {
   WalkExperiments([&](absl::string_view name, bool active) {
     (*result)[absl::StrCat("tcmalloc.experiment.", name)].value = active;
   });
+}
+
+extern "C" bool MallocExtension_Internal_GetExperiment(absl::string_view name,
+                                                       bool* active) {
+  std::optional<Experiment> exp = FindExperimentByName(name);
+  if (!exp.has_value()) {
+    return false;
+  }
+  *active = IsExperimentActive(*exp);
+  return true;
 }
 
 }  // namespace tcmalloc

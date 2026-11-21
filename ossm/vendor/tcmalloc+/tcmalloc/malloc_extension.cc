@@ -32,7 +32,9 @@
 #include "absl/base/call_once.h"
 #include "absl/base/internal/low_level_alloc.h"
 #include "absl/functional/function_ref.h"
+#include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
+#include "absl/strings/strip.h"
 #include "absl/time/time.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
@@ -43,8 +45,7 @@
      defined(ABSL_HAVE_THREAD_SANITIZER) ||    \
      defined(ABSL_HAVE_HWADDRESS_SANITIZER) || \
      defined(ABSL_HAVE_DATAFLOW_SANITIZER) ||  \
-     defined(ABSL_HAVE_LEAK_SANITIZER)) &&     \
-    !defined(TCMALLOC_INTERNAL_SELSAN)
+     defined(ABSL_HAVE_LEAK_SANITIZER))
 #define TCMALLOC_UNDER_SANITIZERS 1
 static constexpr size_t kTerabyte = (size_t)(1ULL << 40);
 
@@ -88,7 +89,7 @@ static size_t SanitizerVirtualMemoryOverhead() { return 20 * kTerabyte; }
 
 static size_t SanitizerMemoryUsageMultiplier() { return 1; }
 
-static size_t SanitizerStackSizeMultiplier() { return 1; }
+static size_t SanitizerStackSizeMultiplier() { return 3; }
 #endif
 
 #if defined(ABSL_HAVE_DATAFLOW_SANITIZER)
@@ -301,6 +302,20 @@ MallocExtension::StartLifetimeProfiling() {
   return tcmalloc_internal::AllocationProfilingTokenAccessor::MakeToken(
       std::unique_ptr<tcmalloc_internal::AllocationProfilingTokenBase>(
           MallocExtension_Internal_StartLifetimeProfiling()));
+#else
+  return {};
+#endif
+}
+
+MallocExtension::AllocationProfilingToken MallocExtension::StartEventTracing() {
+#if ABSL_INTERNAL_HAVE_WEAK_MALLOCEXTENSION_STUBS
+  if (&MallocExtension_Internal_StartEventTracing == nullptr) {
+    return {};
+  }
+
+  return tcmalloc_internal::AllocationProfilingTokenAccessor::MakeToken(
+      std::unique_ptr<tcmalloc_internal::AllocationProfilingTokenBase>(
+          MallocExtension_Internal_StartEventTracing()));
 #else
   return {};
 #endif
@@ -561,58 +576,6 @@ void MallocExtension::SetSkipSubreleaseLongInterval(absl::Duration value) {
 #endif
 }
 
-absl::Duration MallocExtension::GetCacheDemandReleaseShortInterval() {
-#if ABSL_INTERNAL_HAVE_WEAK_MALLOCEXTENSION_STUBS
-  if (MallocExtension_Internal_GetCacheDemandReleaseShortInterval == nullptr) {
-    return absl::ZeroDuration();
-  }
-
-  absl::Duration value;
-  MallocExtension_Internal_GetCacheDemandReleaseShortInterval(&value);
-  return value;
-#else
-  return absl::ZeroDuration();
-#endif
-}
-
-void MallocExtension::SetCacheDemandReleaseShortInterval(absl::Duration value) {
-#if ABSL_INTERNAL_HAVE_WEAK_MALLOCEXTENSION_STUBS
-  if (MallocExtension_Internal_SetCacheDemandReleaseShortInterval == nullptr) {
-    return;
-  }
-
-  MallocExtension_Internal_SetCacheDemandReleaseShortInterval(value);
-#else
-  (void)value;
-#endif
-}
-
-absl::Duration MallocExtension::GetCacheDemandReleaseLongInterval() {
-#if ABSL_INTERNAL_HAVE_WEAK_MALLOCEXTENSION_STUBS
-  if (MallocExtension_Internal_GetCacheDemandReleaseLongInterval == nullptr) {
-    return absl::ZeroDuration();
-  }
-
-  absl::Duration value;
-  MallocExtension_Internal_GetCacheDemandReleaseLongInterval(&value);
-  return value;
-#else
-  return absl::ZeroDuration();
-#endif
-}
-
-void MallocExtension::SetCacheDemandReleaseLongInterval(absl::Duration value) {
-#if ABSL_INTERNAL_HAVE_WEAK_MALLOCEXTENSION_STUBS
-  if (MallocExtension_Internal_SetCacheDemandReleaseLongInterval == nullptr) {
-    return;
-  }
-
-  MallocExtension_Internal_SetCacheDemandReleaseLongInterval(value);
-#else
-  (void)value;
-#endif
-}
-
 std::optional<size_t> MallocExtension::GetNumericProperty(
     absl::string_view property) {
 #if ABSL_INTERNAL_HAVE_WEAK_MALLOCEXTENSION_STUBS
@@ -623,11 +586,20 @@ std::optional<size_t> MallocExtension::GetNumericProperty(
       return value;
     }
   }
+  // We query experiments via a weak symbol rather than calling experiment.h
+  // directly to avoid a build dependency cycle between :malloc_extension and
+  // :experiment.
+  constexpr absl::string_view kExperimentPrefix = "tcmalloc.experiment.";
+  if (&MallocExtension_Internal_GetExperiment != nullptr &&
+      absl::StartsWith(property, kExperimentPrefix)) {
+    bool active;
+    if (MallocExtension_Internal_GetExperiment(
+            absl::StripPrefix(property, kExperimentPrefix), &active)) {
+      return active ? 1 : 0;
+    }
+  }
 #endif
 #if TCMALLOC_UNDER_SANITIZERS
-  // TODO(b/273946827): Add local tcmalloc tests for the various sanitizer
-  // configs as opposed to depending on
-  // //testing/sanitizer_common:malloc_extension_test
   // LINT.IfChange(SanitizerGetProperty)
   if (property == "dynamic_tool.virtual_memory_overhead") {
     return SanitizerVirtualMemoryOverhead();
@@ -663,17 +635,6 @@ std::optional<size_t> MallocExtension::GetNumericProperty(
   return std::nullopt;
 }
 
-size_t MallocExtension::GetEstimatedAllocatedSize(size_t size,
-                                                  hot_cold_t hot_cold) {
-#if ABSL_INTERNAL_HAVE_WEAK_MALLOCEXTENSION_STUBS
-  if (MallocExtension_Internal_GetEstimatedAllocatedSize != nullptr) {
-    return MallocExtension_Internal_GetEstimatedAllocatedSize(size, hot_cold);
-  }
-#endif
-  // Fall-through to assuming that the hot/cold hint doesn't affect the
-  return nallocx(size, 0);
-}
-
 size_t MallocExtension::GetEstimatedAllocatedSize(size_t size) {
   return nallocx(size, 0);
 }
@@ -704,9 +665,8 @@ MallocExtension::Ownership MallocExtension::GetOwnership(const void* p) {
   return MallocExtension::Ownership::kUnknown;
 }
 
-std::map<std::string, MallocExtension::Property>
-MallocExtension::GetProperties() {
-  std::map<std::string, MallocExtension::Property> ret;
+MallocExtension::PropertyMap MallocExtension::GetProperties() {
+  MallocExtension::PropertyMap ret;
 #if TCMALLOC_UNDER_SANITIZERS
   // Unlike other extension points this one fills in sanitizer data before the
   // weak function is called so that the weak function can override as needed.

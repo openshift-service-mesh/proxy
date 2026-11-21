@@ -22,15 +22,17 @@
 #include <utility>
 
 #include "absl/base/attributes.h"
-#include "absl/base/dynamic_annotations.h"
 #include "absl/base/optimization.h"
 #include "absl/numeric/bits.h"
 #include "absl/types/span.h"
 #include "tcmalloc/common.h"
 #include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/is_aligned_to.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/internal/optimization.h"
-#include "tcmalloc/size_class_info.h"
+#include "tcmalloc/internal/size_class_info.h"
+#include "tcmalloc/malloc_extension.h"
+#include "tcmalloc/pages.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
@@ -41,10 +43,17 @@ extern const SizeClasses kSizeClasses;
 
 // Experimental size classes:
 extern const SizeClasses kExperimentalPow2SizeClasses;
-extern const SizeClasses kLegacySizeClasses;
-extern const SizeClasses kLowFragSizeClasses;
-extern const SizeClasses kReuseSizeClasses;
-extern const SizeClasses kReuseSizeClassesV2;
+extern const SizeClasses kFlexibleSizeClasses;
+extern const SizeClasses kFlexibleNoReuseSizeClasses;
+extern const SizeClasses kFlexibleNoReuseNo4056SizeClasses;
+
+enum class SizeClassConfiguration {
+  kPow2Only = 2,
+  kReuseRelaxedBelow64 = 8,
+  kFlexible = 9,
+  kFlexibleNoReuse = 10,
+  kFlexibleNoReuseNo4056 = 11,
+};
 
 // Size-class information + mapping
 class SizeMap {
@@ -53,45 +62,6 @@ class SizeMap {
   static constexpr int kLargeSizeAlignment = 128;
 
  private:
-  // Shifts the provided value right by `n` bits.
-  //
-  // TODO(b/281517865): the LLVM codegen for ClassIndexMaybe() doesn't use
-  // an immediate shift for the `>> 3` and `>> 7` operations due to a missed
-  // optimization / miscompile in clang, resulting in this codegen:
-  //
-  //   mov        $0x3,%ecx
-  //   mov        $0x7,%eax
-  //   add        %edi,%eax
-  //   shr        %cl,%rax
-  //
-  // Immediate shift has latency 1 vs 3 for cl shift, and also the `add` can
-  // be far more efficient, which we force into inline assembly here:
-  //
-  //   lea        0x7(%rdi),%rax
-  //   shr        $0x3,%rax
-  //
-  // Benchmark:
-  // BM_new_sized_delete/1      6.51ns ± 5%   6.00ns ± 1%   -7.73%  (p=0.000)
-  // BM_new_sized_delete/8      6.51ns ± 5%   6.01ns ± 1%   -7.66%  (p=0.000)
-  // BM_new_sized_delete/64     6.52ns ± 5%   6.04ns ± 1%   -7.37%  (p=0.000)
-  // BM_new_sized_delete/512    6.71ns ± 6%   6.21ns ± 1%   -7.40%  (p=0.000)
-  template <int n>
-  ABSL_ATTRIBUTE_ALWAYS_INLINE static inline size_t Shr(size_t value) {
-    TC_ASSERT_LE(value, std::numeric_limits<uint32_t>::max());
-#if defined(__x86_64__)
-    asm("shrl %[n], %k[value]" : [value] "+r"(value) : [n] "n"(n));
-    return value;
-#elif defined(__aarch64__)
-    size_t result;
-    asm("lsr %[result], %[value], %[n]"
-        : [result] "=r"(result)
-        : [value] "r"(value), [n] "n"(n));
-    return result;
-#else
-    return value >> n;
-#endif
-  }
-
   //-------------------------------------------------------------------
   // Mapping from size to size_class and vice versa
   //-------------------------------------------------------------------
@@ -114,18 +84,51 @@ class SizeMap {
   //   1025       (1025 + 127 + (120<<7)) / 128   129
   //   ...
   //   32768      (32768 + 127 + (120<<7)) / 128  376
+  static constexpr int kSmallSizeAlignment = 8;
   static constexpr size_t kClassArraySize =
-      ((kMaxSize + 127 + (120 << 7)) >> 7) + 1;
+      kLargeSize / kSmallSizeAlignment +
+      (kMaxSize - kLargeSize) / kLargeSizeAlignment + 1;
 
   // Batch size is the number of objects to move at once.
   typedef unsigned char BatchSize;
+
+  // If TCMalloc is compiled without NUMA support, and with cold allocations
+  // (cold classes), then the class_array_ will consist of 6 regions:
+  //
+  //   [0, kClassArraySize)                   : Hot New R0
+  //   [kClassArraySize, 2*kClassArraySize)   : Hot New R1
+  //   [2*kClassArraySize, 3*kClassArraySize) : Hot Malloc R0
+  //   [3*kClassArraySize, 4*kClassArraySize) : Hot Malloc R1
+  //   [4*kClassArraySize, 5*kClassArraySize) : Cold New R0
+  //   [5*kClassArraySize, 6*kClassArraySize) : Cold New R1
+  //
+  // * If the heap partitioning feature is not active, then the lookups for
+  //   region 1 will contain the same information as for region 0,
+  //   and both Hot New and Hot Malloc point to P0.
+  // * If the heap partitioning feature is active in kFull mode:
+  //   Cold R1 will be the same as Hot R1. Namely, it will point to the
+  //   [kNumBaseClasses, kColdClassesStart) size classes.
+  // * If the heap partitioning feature is active in kLight mode: Hot Malloc R0
+  //   exclusively points to P0; Hot New R0 and Hot New R1 point to P1;
+  //   Cold New R0 and Cold New R1 point to Cold P0.
+  //
+  // If NUMA support is compiled in, the R1 regions won't exist.
+  // Similarly, for cold memory, if cold classes are not compiled in.
+  static constexpr size_t kHotRegions = 2 * kSecurityPartitions;
+  static constexpr size_t kColdRegionsStart = kHotRegions;
+  static constexpr size_t kColdRegions =
+      (kHasColdClasses ? 1 : 0) * kSecurityPartitions;
+  static constexpr size_t kTotalClassArraySize =
+      kClassArraySize * (kHotRegions + kColdRegions);
 
   // class_array_ is accessed on every malloc, so is very hot.  We make it the
   // first member so that it inherits the overall alignment of a SizeMap
   // instance.  In particular, if we create a SizeMap instance that's cache-line
   // aligned, this member is also aligned to the width of a cache line.
-  CompactSizeClass
-      class_array_[kClassArraySize * (kHasExpandedClasses ? 2 : 1)] = {0};
+  //
+  // For the mapping with the cold and/or security partitions, see the comment
+  // for kTotalClassArraySize.
+  CompactSizeClass class_array_[kTotalClassArraySize] = {0};
 
   // Number of objects to move between a per-thread list and a central
   // list in one shot.  We want this to be not too small so we can
@@ -137,23 +140,45 @@ class SizeMap {
   // If size is no more than kMaxSize, compute index of the
   // class_array[] entry for it, putting the class index in output
   // parameter idx and returning true. Otherwise return false.
-  ABSL_ATTRIBUTE_ALWAYS_INLINE static inline bool ClassIndexMaybe(size_t s,
-                                                                  size_t& idx) {
+  [[nodiscard]] ABSL_ATTRIBUTE_ALWAYS_INLINE static bool ClassIndexMaybe(
+      size_t s, size_t& idx) {
     if (ABSL_PREDICT_TRUE(s <= kLargeSize)) {
-      idx = Shr<3>(s + 7);
+      idx = (s + kSmallSizeAlignment - 1) / kSmallSizeAlignment;
       return true;
-    } else if (s <= kMaxSize) {
-      idx = Shr<7>(s + 127 + (120 << 7));
+    } else if (ABSL_PREDICT_TRUE(s <= kMaxSize)) {
+      idx = ((s + kLargeSizeAlignment - 1 +
+              (kLargeSize / kSmallSizeAlignment -
+               kLargeSize / kLargeSizeAlignment) *
+                  kLargeSizeAlignment) /
+             kLargeSizeAlignment);
+
+      // TODO(b/64294063): Add a dummy statement to keep the tail of the fast
+      // and the slow paths from being deduplicated, turning the shifts into
+      // a variable-width shift (shr reg, cl on x86); these are especially
+      // bad on Skylake, where they require three µops that often run in
+      // three successive cycles. (If we are compiling with BMI2,
+      // the compiler will use the much cheaper SHRX instruction, and
+      // the problem is more modest.)
+      //
+      // See SLOW_PATH_BARRIER() in tcmalloc.cc for more information
+      // about this technique.
+      asm volatile("");
+
       return true;
     }
     return false;
   }
 
-  ABSL_ATTRIBUTE_ALWAYS_INLINE static inline size_t ClassIndex(size_t s) {
+  [[nodiscard]] ABSL_ATTRIBUTE_ALWAYS_INLINE static size_t ClassIndex(
+      size_t s) {
     size_t ret;
     TC_CHECK(ClassIndexMaybe(s, ret));
     return ret;
   }
+
+  // Set the specified class_array_ region from region 0 adjusting all
+  // values by `adjust`.
+  void SetClassArrayRegion(size_t region, CompactSizeClass adjust);
 
   // Mapping from size class to number of pages to allocate at a time
   unsigned char class_to_pages_[kNumClasses] = {0};
@@ -163,17 +188,16 @@ class SizeMap {
 
  protected:
   // Set the give size classes to be used by TCMalloc.
-  bool SetSizeClasses(absl::Span<const SizeClassInfo> size_classes);
+  [[nodiscard]] bool SetSizeClasses(
+      absl::Span<const SizeClassInfo> size_classes);
 
   // Check that the size classes meet all requirements.
-  static bool ValidSizeClasses(absl::Span<const SizeClassInfo> size_classes);
-
-  size_t cold_sizes_[kNumBaseClasses] = {0};
-  size_t cold_sizes_count_ = 0;
+  [[nodiscard]] static bool ValidSizeClasses(
+      absl::Span<const SizeClassInfo> size_classes);
 
  public:
   // Returns size classes to use in the current process.
-  static const SizeClasses& CurrentClasses();
+  [[nodiscard]] static const SizeClasses& CurrentClasses();
 
   // Checks assumptions used to generate the current size classes.
   // Prints any wrong assumptions to stderr.
@@ -186,12 +210,18 @@ class SizeMap {
   constexpr SizeMap() = default;
 
   // Initialize the mapping arrays.  Returns true on success.
-  bool Init(absl::Span<const SizeClassInfo> size_classes);
+  [[nodiscard]] bool Init(absl::Span<const SizeClassInfo> size_classes);
+
+  struct SizeMapResult {
+    bool is_small;
+    size_t size_class;
+  };
 
   // Returns the size class for size `size` respecting the alignment
   // & access requirements of `policy`.
   //
-  // Returns true on success. Returns false if either:
+  // Returns true for `is_small` for size class-ful allocations. Returns false
+  // if either:
   // - the size exceeds the maximum size class size.
   // - the align size is greater or equal to the default page size
   // - no matching properly aligned size class is available
@@ -205,30 +235,41 @@ class SizeMap {
   // TODO(b/171978365): Replace the output parameter with returning
   // absl::optional<uint32_t>.
   template <typename Policy>
-  // clang does not correctly optimize out the array bounds check,
-  // leading to high overhead. Disable UBSan to avoid the performance
-  // regression.
-  // TODO(b/406313446): Remove ABSL_ATTRIBUTE_NO_SANITIZE_UNDEFINED once clang
-  // optimizes out the array bounds check.
-  ABSL_ATTRIBUTE_NO_SANITIZE_UNDEFINED ABSL_ATTRIBUTE_ALWAYS_INLINE inline bool
-  GetSizeClass(Policy policy, size_t size, size_t* size_class) const {
-    const size_t align = policy.align();
+  [[nodiscard]] ABSL_ATTRIBUTE_ALWAYS_INLINE SizeMapResult
+  GetSizeClass(Policy policy, size_t size) const {
+    const size_t align = static_cast<size_t>(policy.align());
     TC_ASSERT(absl::has_single_bit(align));
 
     if (ABSL_PREDICT_FALSE(align > kPageSize)) {
-      ABSL_ANNOTATE_MEMORY_IS_UNINITIALIZED(size_class, sizeof(*size_class));
-      return false;
+      return {false};
     }
 
     size_t idx;
     if (ABSL_PREDICT_FALSE(!ClassIndexMaybe(size, idx))) {
-      ABSL_ANNOTATE_MEMORY_IS_UNINITIALIZED(size_class, sizeof(*size_class));
-      return false;
+      return {false};
     }
-    if (kHasExpandedClasses && policy.is_cold()) {
-      *size_class = class_array_[idx + kClassArraySize];
+    size_t size_class;
+    // Note, if security heap partitioning is enabled, only data (region 0)
+    // is added to the cold heap. See the comment for kTotalClassArraySize
+    // for more details.
+    if (kHasColdClasses && policy.is_cold()) {
+      TC_ASSERT(IsNew(policy.allocation_type()));
+      TC_ASSERT_LT(idx + (policy.security_partition() + kColdRegionsStart) *
+                             kClassArraySize,
+                   kTotalClassArraySize);
+      size_class =
+          class_array_[idx + (policy.security_partition() + kColdRegionsStart) *
+                                 kClassArraySize];
     } else {
-      *size_class = class_array_[idx] + policy.scaled_numa_partition();
+      const size_t type_offset =
+          IsNew(policy.allocation_type()) ? 0 : kSecurityPartitions;
+      TC_ASSERT_LT(
+          idx + (policy.security_partition() + type_offset) * kClassArraySize,
+          kTotalClassArraySize);
+      size_class =
+          class_array_[idx + (policy.security_partition() + type_offset) *
+                                 kClassArraySize] +
+          policy.scaled_numa_partition();
     }
 
     // Don't search for suitably aligned class for operator new
@@ -239,7 +280,7 @@ class SizeMap {
     // than kAlignment, this is just an unnecessary check that always fails.
     if (__builtin_constant_p(align) &&
         align <= static_cast<size_t>(kAlignment)) {
-      return true;
+      return {true, size_class};
     }
 
     // Predict that size aligned allocs most often directly map to a proper
@@ -249,50 +290,55 @@ class SizeMap {
     static_assert((kMaxSize % kPageSize) == 0, "the loop below won't work");
     // Profiles say we usually get the right class based on the size,
     // so avoid the loop overhead on the fast path.
-    if (ABSL_PREDICT_FALSE(class_to_size(*size_class) & (align - 1))) {
+    if (ABSL_PREDICT_FALSE(!IsAlignedTo(class_to_size(size_class), align))) {
       do {
-        ++*size_class;
-      } while (ABSL_PREDICT_FALSE(class_to_size(*size_class) & (align - 1)));
+        ++size_class;
+      } while (
+          ABSL_PREDICT_FALSE(!IsAlignedTo(class_to_size(size_class), align)));
     }
-    return true;
+    return {true, size_class};
   }
 
   // Returns size class for given size, or 0 if this instance has not been
   // initialized yet. REQUIRES: size <= kMaxSize.
   template <typename Policy>
-  ABSL_ATTRIBUTE_ALWAYS_INLINE inline size_t SizeClass(Policy policy,
-                                                       size_t size) const {
+  [[nodiscard]] ABSL_ATTRIBUTE_ALWAYS_INLINE size_t
+  SizeClass(Policy policy, size_t size) const {
     ASSUME(size <= kMaxSize);
-    size_t ret = 0;
-    GetSizeClass(policy, size, &ret);
-    return ret;
+    return GetSizeClass(policy, size).size_class;
   }
 
-  // Get the byte-size for a specified class. REQUIRES: size_class <=
-  // kNumClasses.
+  // Get the byte-size for a specified class.
+  //
+  // Returns 0 for unused size classes (cold classes when cold feature is
+  // disabled, or the second normal partition when NUMA and heap partitioning
+  // are disabled).
+  //
+  // REQUIRES: size_class <= kNumClasses.
   //
   // clang does not correctly optimize out the array bounds check,
   // leading to high overhead. Disable UBSan to avoid the performance
   // regression.
   // TODO(b/406313446): Remove ABSL_ATTRIBUTE_NO_SANITIZE_UNDEFINED once clang
   // optimizes out the array bounds check.
-  ABSL_ATTRIBUTE_NO_SANITIZE_UNDEFINED
-  ABSL_ATTRIBUTE_ALWAYS_INLINE inline size_t class_to_size(
-      size_t size_class) const {
+  [[nodiscard]] ABSL_ATTRIBUTE_NO_SANITIZE_UNDEFINED
+      ABSL_ATTRIBUTE_ALWAYS_INLINE size_t
+      class_to_size(size_t size_class) const {
     TC_ASSERT_LT(size_class, kNumClasses);
     return class_to_size_[size_class];
   }
 
   // Mapping from size class to number of pages to allocate at a time
-  ABSL_ATTRIBUTE_ALWAYS_INLINE inline size_t class_to_pages(
-      size_t size_class) const {
+  [[nodiscard]] ABSL_ATTRIBUTE_ALWAYS_INLINE Length
+  class_to_pages(size_t size_class) const {
     TC_ASSERT_LT(size_class, kNumClasses);
-    return class_to_pages_[size_class];
+    return Length(class_to_pages_[size_class]);
   }
 
   // Returns the inclusive range of possible sizes for a given size class.
   // REQUIRES: size_class < kNumClasses.
-  std::pair<size_t, size_t> class_to_size_range(size_t size_class) const {
+  [[nodiscard]] std::pair<size_t, size_t> class_to_size_range(
+      size_t size_class) const {
     TC_ASSERT_LT(size_class, kNumClasses);
     if (size_class == 0) {
       return {0, 0};
@@ -314,19 +360,14 @@ class SizeMap {
   // amortize the lock overhead for accessing the central list.  Making
   // it too big may temporarily cause unnecessary memory wastage in the
   // per-thread free list until the scavenger cleans up the list.
-  ABSL_ATTRIBUTE_ALWAYS_INLINE inline SizeMap::BatchSize num_objects_to_move(
-      size_t size_class) const {
+  [[nodiscard]] ABSL_ATTRIBUTE_ALWAYS_INLINE SizeMap::BatchSize
+  num_objects_to_move(size_t size_class) const {
     TC_ASSERT_LT(size_class, kNumClasses);
     return num_objects_to_move_[size_class];
   }
 
-  ABSL_ATTRIBUTE_ALWAYS_INLINE absl::Span<const size_t> ColdSizeClasses()
-      const {
-    return {cold_sizes_, cold_sizes_count_};
-  }
-
-  static bool IsValidSizeClass(size_t size, size_t num_pages,
-                               size_t num_objects_to_move);
+  [[nodiscard]] static bool IsValidSizeClass(size_t size, Length num_pages,
+                                             size_t num_objects_to_move);
 };
 
 }  // namespace tcmalloc_internal

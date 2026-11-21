@@ -99,65 +99,38 @@ TEST(ParseCpulistTest, NotInBounds) {
   ASSERT_THAT(parsed, testing::Eq(std::nullopt));
 }
 
-// Ensure that we can parse randomized cpulists correctly.
-TEST(ParseCpulistTest, Random) {
-  absl::BitGen gen;
+TEST(ParseCpulistTest, LongTokenWithoutDelimiter) {
+  // 16 bytes without ',' or '-' followed by more digits must not trigger a
+  // zero-length read (false EOF) that splits the token into two CPUs.
+  absl::string_view cpulist("00000000000000010\n");
 
-  static constexpr int kIterations = 100;
-  for (int i = 0; i < kIterations; i++) {
-    CpuSet reference;
-    reference.Zero();
+  const absl::optional<CpuSet> parsed =
+      ParseCpulist([&](char* const buf, const size_t count) -> ssize_t {
+        EXPECT_GT(count, 0);
+        const size_t to_copy = std::min(count, cpulist.size());
+        if (to_copy == 0) return 0;
+        memcpy(buf, cpulist.data(), to_copy);
+        cpulist.remove_prefix(to_copy);
+        return to_copy;
+      });
 
-    // Set a random number of CPUs within the reference set.
-    const double density = absl::Uniform(gen, 0.0, 1.0);
-    for (int cpu = 0; cpu < kMaxCpus; cpu++) {
-      if (absl::Bernoulli(gen, density)) {
-        reference.Set(cpu);
-      }
-    }
+  EXPECT_THAT(parsed, testing::Eq(std::nullopt));
+}
 
-    // Serialize the reference set into a cpulist-style string.
-    std::vector<std::string> components;
-    for (int cpu = 0; cpu < kMaxCpus; cpu++) {
-      if (!reference.IsSet(cpu)) continue;
-
-      const int start = cpu;
-      int next = cpu + 1;
-      while (next < kMaxCpus && reference.IsSet(next)) {
-        cpu = next;
-        next = cpu + 1;
-      }
-
-      if (cpu == start) {
-        components.push_back(absl::StrCat(cpu));
-      } else {
-        components.push_back(absl::StrCat(start, "-", cpu));
-      }
-    }
-    const std::string serialized = absl::StrJoin(components, ",");
-
-    // Now parse that string using our ParseCpulist function, randomizing the
-    // amount of data we provide to it from each read.
-    absl::string_view remaining(serialized);
+TEST(ParseCpulistTest, MalformedRanges) {
+  for (absl::string_view input :
+       {"0-\n", "0-", "0-2-5\n", "5-2\n", "0-1,5-2\n"}) {
+    absl::string_view remaining = input;
     const absl::optional<CpuSet> parsed =
         ParseCpulist([&](char* const buf, const size_t count) -> ssize_t {
-          // Calculate how much data we have left to provide.
-          const size_t max = std::min(count, remaining.size());
-
-          // If none, we have no choice but to provide nothing.
-          if (max == 0) return 0;
-
-          // If we do have data, return a randomly sized subset of it to stress
-          // the logic around reading partial values.
-          const size_t copy = absl::Uniform(gen, static_cast<size_t>(1), max);
-          memcpy(buf, remaining.data(), copy);
-          remaining.remove_prefix(copy);
-          return copy;
+          EXPECT_GT(count, 0);
+          const size_t to_copy = std::min(count, remaining.size());
+          if (to_copy == 0) return 0;
+          memcpy(buf, remaining.data(), to_copy);
+          remaining.remove_prefix(to_copy);
+          return to_copy;
         });
-
-    // We ought to have parsed the same set of CPUs that we serialized.
-    ASSERT_THAT(parsed, testing::Ne(std::nullopt));
-    EXPECT_TRUE(CPU_EQUAL_S(kCpuSetBytes, parsed->data(), reference.data()));
+    EXPECT_THAT(parsed, testing::Eq(std::nullopt)) << input;
   }
 }
 

@@ -38,19 +38,21 @@ class Bitmap {
  public:
   constexpr Bitmap() : bits_{} {}
 
-  size_t size() const { return N; }
-  bool GetBit(size_t i) const;
+  [[nodiscard]] size_t size() const { return N; }
+  [[nodiscard]] bool GetBit(size_t i) const;
 
-  void SetBit(size_t i);
-  void ClearBit(size_t i);
+  // Sets the bit at index `i`.  Returns the previous value of that bit.
+  bool SetBit(size_t i);
+  // Clears the bit at index `i`.  Returns the previous value of that bit.
+  bool ClearBit(size_t i);
 
   // Returns the number of set bits [index, ..., index + n - 1].
-  size_t CountBits(size_t index, size_t n) const;
+  [[nodiscard]] size_t CountBits(size_t index, size_t n) const;
   // Returns the total number of set bits.
-  size_t CountBits() const;
+  [[nodiscard]] size_t CountBits() const;
 
   // Returns whether the bitmap is entirely zero or not.
-  bool IsZero() const;
+  [[nodiscard]] bool IsZero() const;
 
   // Equivalent to SetBit on bits [index, index + 1, ... index + n - 1].
   void SetRange(size_t index, size_t n);
@@ -59,19 +61,89 @@ class Bitmap {
   // Clears the lowest set bit. Special case is faster than more flexible code.
   void ClearLowestBit();
 
+  template <typename Visitor>
+  [[nodiscard]] ABSL_ATTRIBUTE_ALWAYS_INLINE size_t PopBatch(Visitor visitor,
+                                                             size_t limit) {
+    size_t count = 0;
+#ifdef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+    for (size_t i = 0; i < kWords; ++i) {
+      if (count >= limit) break;
+      size_t word = bits_[i];
+      while (word != 0 && count < limit) {
+        size_t off = absl::countr_zero(word);
+        visitor(i * kWordSize + off);
+        count++;
+        word &= word - 1;
+      }
+      bits_[i] = word;
+    }
+#else
+    for (size_t i = 0; i < kWords && count < limit; ++i) {
+      size_t word = bits_[i];
+      if (word == 0) continue;
+      const size_t base = i * kWordSize;
+      do {
+        size_t off = absl::countr_zero(word);
+        visitor(base + off);
+        count++;
+        word &= word - 1;
+      } while (word != 0 && count < limit);
+      bits_[i] = word;
+    }
+#endif
+    return count;
+  }
+
+  template <typename Visitor>
+  void ForEachSet(size_t start, Visitor visitor) const {
+    if (start >= N) return;
+    size_t word_idx = start / kWordSize;
+    size_t offset = start % kWordSize;
+    size_t word = bits_[word_idx] & ((~size_t{0}) << offset);
+    while (true) {
+      while (word != 0) {
+        size_t off = absl::countr_zero(word);
+        size_t idx = word_idx * kWordSize + off;
+        if constexpr (kDeadBits > 0) {
+          if (idx >= N) return;
+        }
+        visitor(idx);
+        word &= word - 1;
+      }
+      ++word_idx;
+      if (word_idx >= kWords) break;
+      word = bits_[word_idx];
+    }
+  }
+
   // If there is at least one free range at or after <start>,
   // put it in *index, *length and return true; else return false.
-  bool NextFreeRange(size_t start, size_t* index, size_t* length) const;
+  [[nodiscard]] bool NextFreeRange(size_t start, size_t* index,
+                                   size_t* length) const;
+
+  // If there is at least one free range before and exclusive of <end>,
+  // put it in *index, *length and return true; else return false.
+  // To iterate backwards through all free ranges:
+  //   size_t index = bitmap.size(), n;
+  //   while (bitmap.PrevFreeRange(index, &index, &n)) { ... }
+  [[nodiscard]] bool PrevFreeRange(size_t end, size_t* index,
+                                   size_t* length) const;
 
   // Returns index of the first {true, false} bit >= index, or N if none.
-  size_t FindSet(size_t index) const;
-  size_t FindClear(size_t index) const;
+  [[nodiscard]] size_t FindSet(size_t index) const;
+  [[nodiscard]] size_t FindClear(size_t index) const;
 
   // Returns index of the first {set, clear} bit in [index, 0] or -1 if none.
-  ssize_t FindSetBackwards(size_t index) const;
-  ssize_t FindClearBackwards(size_t index) const;
+  [[nodiscard]] ssize_t FindSetBackwards(size_t index) const;
+  [[nodiscard]] ssize_t FindClearBackwards(size_t index) const;
 
   void Clear();
+
+  // Bitwise operators.
+  [[nodiscard]] Bitmap<N> operator~() const;
+  [[nodiscard]] Bitmap<N> operator&(const Bitmap<N>& other) const;
+  [[nodiscard]] Bitmap<N> operator|(const Bitmap<N>& other) const;
+  [[nodiscard]] Bitmap<N> operator^(const Bitmap<N>& other) const;
 
  private:
   static constexpr size_t kWordSize = sizeof(size_t) * 8;
@@ -80,7 +152,20 @@ class Bitmap {
 
   size_t bits_[kWords];
 
-  size_t CountWordBits(size_t i, size_t from, size_t to) const;
+  template <size_t OtherN>
+  friend class Bitmap;
+
+  template <size_t DstN, size_t SrcN>
+  friend void CopyBits(Bitmap<DstN>& dst_bitmap, size_t dst,
+                       const Bitmap<SrcN>& src_bitmap, size_t src, size_t len);
+
+  // Reads bits [src_idx, src_idx+k) into a size_t.  k must be <=kWordSize.
+  [[nodiscard]] static size_t ExtractBits(const Bitmap<N>& src, size_t src_idx,
+                                          size_t k);
+  // Writes the first k bits of val to [dst_idx, dst_idx+k).
+  static void WriteBits(Bitmap<N>& dst, size_t dst_idx, size_t val, size_t k);
+
+  [[nodiscard]] size_t CountWordBits(size_t i, size_t from, size_t to) const;
 
   template <bool Value>
   void SetWordBits(size_t i, size_t from, size_t to);
@@ -88,11 +173,13 @@ class Bitmap {
   void SetRangeValue(size_t index, size_t n);
 
   template <bool Goal>
-  size_t FindValue(size_t index) const;
+  [[nodiscard]] size_t FindValue(size_t index) const;
   template <bool Goal>
-  ssize_t FindValueBackwards(size_t index) const;
+  [[nodiscard]] ssize_t FindValueBackwards(size_t index) const;
 };
 
+constexpr size_t kMaxResidencyBits = 512;
+using ResidencyBitmap = Bitmap<kMaxResidencyBits>;
 // Tracks allocations in a range of items of fixed size.  Supports
 // finding an unset range of a given length, while keeping track of
 // the largest remaining unmarked length.
@@ -102,20 +189,20 @@ class RangeTracker {
   constexpr RangeTracker()
       : bits_{}, longest_free_(N), nused_(0), nallocs_(0) {}
 
-  size_t size() const;
+  [[nodiscard]] size_t size() const;
   // Number of bits marked
-  size_t used() const;
+  [[nodiscard]] size_t used() const;
   // Longest contiguous range of clear bits.
-  size_t longest_free() const;
+  [[nodiscard]] size_t longest_free() const;
   // Count of live allocations.
-  size_t allocs() const;
+  [[nodiscard]] size_t allocs() const;
 
   // REQUIRES: there is a free range of at least n bits
   // (i.e. n <= longest_free()).
   //
   // Finds and marks n free bits, returning index of the first bit.  Chooses by
   // best fit.
-  size_t FindAndMark(size_t n);
+  [[nodiscard]] size_t FindAndMark(size_t n);
 
   // REQUIRES: the range [index, index + n) is fully unmarked.
   void Mark(size_t index, size_t n);
@@ -126,11 +213,20 @@ class RangeTracker {
   void Unmark(size_t index, size_t n);
   // If there is at least one free range at or after <start>,
   // put it in *index, *length and return true; else return false.
-  bool NextFreeRange(size_t start, size_t* index, size_t* length) const;
+  [[nodiscard]] bool NextFreeRange(size_t start, size_t* index,
+                                   size_t* length) const;
+
+  // If there is at least one free range before and exclusive of <end>,
+  // put it in *index, *length and return true; else return false.
+  // To iterate backwards through all free ranges:
+  //   size_t index = tracker.size(), n;
+  //   while (tracker.PrevFreeRange(index, &index, &n)) { ... }
+  [[nodiscard]] bool PrevFreeRange(size_t end, size_t* index,
+                                   size_t* length) const;
 
   void Clear();
 
-  Bitmap<N> bits() const;
+  [[nodiscard]] const Bitmap<N>& bits() const;
 
  private:
   Bitmap<N> bits_;
@@ -145,18 +241,17 @@ class RangeTracker {
       return N <= std::numeric_limits<T>::max();
     }
     struct U32 {
-      using type =
-          typename std::conditional<Fit<uint32_t>(), uint32_t, uint64_t>::type;
+      using type = std::conditional_t<Fit<uint32_t>(), uint32_t, uint64_t>;
     };
 
     struct U16 {
-      using type = typename std::conditional<Fit<uint16_t>(), uint16_t,
-                                             typename U32::type>::type;
+      using type =
+          std::conditional_t<Fit<uint16_t>(), uint16_t, typename U32::type>;
     };
 
     struct U8 {
-      using type = typename std::conditional<Fit<uint8_t>(), uint8_t,
-                                             typename U16::type>::type;
+      using type =
+          std::conditional_t<Fit<uint8_t>(), uint8_t, typename U16::type>;
     };
 
    public:
@@ -281,7 +376,7 @@ inline void RangeTracker<N>::Unmark(size_t index, size_t n) {
 }
 
 template <size_t N>
-inline Bitmap<N> RangeTracker<N>::bits() const {
+inline const Bitmap<N>& RangeTracker<N>::bits() const {
   return bits_;
 }
 
@@ -291,6 +386,14 @@ template <size_t N>
 inline bool RangeTracker<N>::NextFreeRange(size_t start, size_t* index,
                                            size_t* length) const {
   return bits_.NextFreeRange(start, index, length);
+}
+
+// If there is at least one free range before <end>,
+// put it in *index, *length and return true; else return false.
+template <size_t N>
+inline bool RangeTracker<N>::PrevFreeRange(size_t end, size_t* index,
+                                           size_t* length) const {
+  return bits_.PrevFreeRange(end, index, length);
 }
 
 template <size_t N>
@@ -345,21 +448,27 @@ inline bool Bitmap<N>::GetBit(size_t i) const {
 }
 
 template <size_t N>
-inline void Bitmap<N>::SetBit(size_t i) {
+inline bool Bitmap<N>::SetBit(size_t i) {
   TC_ASSERT_LT(i, N);
   size_t word = i / kWordSize;
   size_t offset = i % kWordSize;
   ASSUME(word < kWords);
-  bits_[word] |= (size_t{1} << offset);
+  size_t mask = size_t{1} << offset;
+  bool old = bits_[word] & mask;
+  bits_[word] |= mask;
+  return old;
 }
 
 template <size_t N>
-inline void Bitmap<N>::ClearBit(size_t i) {
+inline bool Bitmap<N>::ClearBit(size_t i) {
   TC_ASSERT_LT(i, N);
   size_t word = i / kWordSize;
   size_t offset = i % kWordSize;
   ASSUME(word < kWords);
-  bits_[word] &= ~(size_t{1} << offset);
+  size_t mask = size_t{1} << offset;
+  bool old = bits_[word] & mask;
+  bits_[word] &= ~mask;
+  return old;
 }
 
 template <size_t N>
@@ -452,6 +561,19 @@ inline bool Bitmap<N>::NextFreeRange(size_t start, size_t* index,
 }
 
 template <size_t N>
+inline bool Bitmap<N>::PrevFreeRange(size_t end, size_t* index,
+                                     size_t* length) const {
+  if (end == 0) return false;
+  if (end > N) end = N;
+  ssize_t j = FindClearBackwards(end - 1);
+  if (j < 0) return false;
+  ssize_t i = FindSetBackwards(j);
+  *index = i + 1;
+  *length = j - i;
+  return true;
+}
+
+template <size_t N>
 inline size_t Bitmap<N>::FindSet(size_t index) const {
   return FindValue<true>(index);
 }
@@ -478,6 +600,48 @@ inline void Bitmap<N>::Clear() {
   }
 }
 
+// Bitwise ~ requires special handling of the dead bits.
+template <size_t N>
+inline Bitmap<N> Bitmap<N>::operator~() const {
+  Bitmap<N> result;
+  for (size_t i = 0; i < kWords; ++i) {
+    result.bits_[i] = ~bits_[i];
+  }
+  if constexpr (kDeadBits > 0) {
+    result.bits_[kWords - 1] &= (~static_cast<size_t>(0)) >> kDeadBits;
+  }
+  return result;
+}
+
+// Bitwise (&, |, ^) do not require special handling of the dead bits, since
+// 0 & 0 = 0, 0 | 0 = 0, and 0 ^ 0 = 0.
+template <size_t N>
+inline Bitmap<N> Bitmap<N>::operator&(const Bitmap<N>& other) const {
+  Bitmap<N> result;
+  for (size_t i = 0; i < kWords; ++i) {
+    result.bits_[i] = bits_[i] & other.bits_[i];
+  }
+  return result;
+}
+
+template <size_t N>
+inline Bitmap<N> Bitmap<N>::operator|(const Bitmap<N>& other) const {
+  Bitmap<N> result;
+  for (size_t i = 0; i < kWords; ++i) {
+    result.bits_[i] = bits_[i] | other.bits_[i];
+  }
+  return result;
+}
+
+template <size_t N>
+inline Bitmap<N> Bitmap<N>::operator^(const Bitmap<N>& other) const {
+  Bitmap<N> result;
+  for (size_t i = 0; i < kWords; ++i) {
+    result.bits_[i] = bits_[i] ^ other.bits_[i];
+  }
+  return result;
+}
+
 template <size_t N>
 template <bool Goal>
 inline size_t Bitmap<N>::FindValue(size_t index) const {
@@ -501,8 +665,15 @@ inline size_t Bitmap<N>::FindValue(size_t index) const {
   word *= kWordSize;
   ASSUME(here != 0);
   size_t ret = absl::countr_zero(here) + word;
-  if (kDeadBits > 0) {
-    if (ret > N) ret = N;
+  if constexpr (kDeadBits > 0) {
+    if constexpr (Goal) {
+      // We did not early return above, so a set bit was found.  Dead bits are
+      // never set.
+      ASSUME(ret < N);
+    } else {
+      // FindClear inverts the word, so we need to clamp.
+      if (ret > N) ret = N;
+    }
   }
   return ret;
 }
@@ -531,6 +702,120 @@ inline ssize_t Bitmap<N>::FindValueBackwards(size_t index) const {
   ASSUME(here != 0);
   size_t ret = absl::bit_width(here) - 1 + word;
   return ret;
+}
+
+// Reduction operations for Scale(). In the case of contracting bitmaps,
+// we need to reduce multiple (n) bits to a single bit.
+//
+// - kAny: If any of the n bits are set, the resulting bit is set.
+// - kAll: If all of the n bits are set, the resulting bit is set.
+enum class ReductionOp {
+  kAny,
+  kAll,
+};
+
+// Scales `src` bitmap from `src_len` bits to `M` bits. If it's a contraction,
+// applies `op` to reduce multiple bits to one. If it's an expansion (or
+// identity), `op` is a no-op.
+template <size_t M, size_t N>
+[[nodiscard]] Bitmap<M> Scale(const Bitmap<N>& src, size_t src_len,
+                              ReductionOp op) {
+  static_assert(M > 0);
+  TC_ASSERT_GT(src_len, 0);
+  TC_ASSERT_LE(src_len, N);
+  TC_ASSERT(src_len % M == 0 || M % src_len == 0);
+
+  Bitmap<M> res;
+  const size_t src_per_dst = std::max<size_t>(1, src_len / M);
+  const size_t dst_per_src = std::max<size_t>(1, M / src_len);
+
+  const size_t required_count = (op == ReductionOp::kAll) ? src_per_dst : 1;
+
+  size_t dst_idx = 0;
+  for (size_t src_idx = 0; src_idx < src_len; src_idx += src_per_dst) {
+    size_t count = src.CountBits(src_idx, src_per_dst);
+    if (count >= required_count) {
+      res.SetRange(dst_idx, dst_per_src);
+    }
+    dst_idx += dst_per_src;
+  }
+  return res;
+}
+
+template <size_t N>
+inline size_t Bitmap<N>::ExtractBits(const Bitmap<N>& src, size_t src_idx,
+                                     size_t k) {
+  TC_ASSERT_GT(k, 0);
+  TC_ASSERT_LE(k, kWordSize);
+  TC_ASSERT_LE(src_idx, N);
+  TC_ASSERT_LE(k, N - src_idx);
+
+  const size_t word_idx = src_idx / kWordSize;
+  const size_t bit_offset = src_idx % kWordSize;
+  ASSUME(word_idx < kWords);
+
+  size_t val = src.bits_[word_idx] >> bit_offset;
+  if (bit_offset + k > kWordSize) {
+    ASSUME(word_idx + 1 < kWords);
+    val |= src.bits_[word_idx + 1] << (kWordSize - bit_offset);
+  }
+  if (k < kWordSize) {
+    val &= (size_t{1} << k) - 1;
+  }
+  return val;
+}
+
+template <size_t N>
+inline void Bitmap<N>::WriteBits(Bitmap<N>& dst, size_t dst_idx, size_t val,
+                                 size_t k) {
+  TC_ASSERT_GT(k, 0);
+  TC_ASSERT_LE(k, kWordSize);
+  TC_ASSERT_LE(dst_idx, N);
+  TC_ASSERT_LE(k, N - dst_idx);
+
+  const size_t word_idx = dst_idx / kWordSize;
+  const size_t bit_offset = dst_idx % kWordSize;
+  TC_ASSERT_LE(bit_offset + k, kWordSize);
+  ASSUME(word_idx < kWords);
+
+  const size_t mask =
+      (k == kWordSize) ? ~size_t{0} : (((size_t{1} << k) - 1) << bit_offset);
+  dst.bits_[word_idx] =
+      (dst.bits_[word_idx] & ~mask) | ((val << bit_offset) & mask);
+}
+
+// Copies [src, src+len) bits from src_bitmap into the [dst, dst+len) bits of
+// dst_bitmap.  dst_bitmap and src_bitmap must not alias one another.
+template <size_t DstN, size_t SrcN>
+inline void CopyBits(Bitmap<DstN>& dst_bitmap, size_t dst,
+                     const Bitmap<SrcN>& src_bitmap, size_t src, size_t len) {
+  if constexpr (DstN == SrcN) {
+    TC_ASSERT_NE(&dst_bitmap, &src_bitmap);
+  }
+
+  TC_ASSERT_LE(dst, DstN);
+  TC_ASSERT_LE(src, SrcN);
+  TC_ASSERT_LE(len, DstN - dst);
+  TC_ASSERT_LE(len, SrcN - src);
+
+  if (len == 0) {
+    return;
+  }
+
+  constexpr size_t kWordSize = sizeof(size_t) * 8;
+
+  size_t remaining = len;
+  size_t cur_src = src;
+  size_t cur_dst = dst;
+  while (remaining > 0) {
+    const size_t dst_offset = cur_dst % kWordSize;
+    const size_t k = std::min(remaining, kWordSize - dst_offset);
+    const size_t val = Bitmap<SrcN>::ExtractBits(src_bitmap, cur_src, k);
+    Bitmap<DstN>::WriteBits(dst_bitmap, cur_dst, val, k);
+    cur_src += k;
+    cur_dst += k;
+    remaining -= k;
+  }
 }
 
 }  // namespace tcmalloc_internal

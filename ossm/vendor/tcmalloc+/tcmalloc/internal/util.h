@@ -24,7 +24,10 @@
 #include <sys/types.h>
 #include <time.h>
 
+#include "absl/base/nullability.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/logging.h"
 
@@ -46,7 +49,7 @@ namespace tcmalloc_internal {
 // signal_safe_open() - a wrapper for open(2) which ignores signals
 // Semantics equivalent to open(2):
 //   returns a file-descriptor (>=0) on success, -1 on failure, error in errno
-int signal_safe_open(const char* path, int flags, ...);
+[[nodiscard]] int signal_safe_open(const char* path, int flags, ...);
 
 // signal_safe_close() - a wrapper for close(2) which ignores signals
 // Semantics equivalent to close(2):
@@ -80,7 +83,22 @@ ssize_t signal_safe_write(int fd, const char* buf, size_t count,
 // read by a previous read.  To handle this case the optional bytes_written
 // parameter is provided, when not-NULL, it will always return the total bytes
 // read before any error.
-ssize_t signal_safe_read(int fd, char* buf, size_t count, size_t* bytes_read);
+[[nodiscard]] ssize_t signal_safe_read(int fd, char* buf, size_t count,
+                                       size_t* bytes_read);
+
+// signal_safe_pread() - a wrapper for pread(2) which ignores signals
+// Semantics equivalent to pread(2):
+//   returns number of bytes read, -1 on failure, error in errno
+//   additionally, (if not nullptr) total bytes read in *bytes_read
+//
+// In the interrupted (EINTR) or partial-read case, signal_safe_pread will
+// continue attempting to read into buf from offset + total_bytes without
+// modifying fd's file offset.  If an error occurs after a partial read,
+// signal_safe_pread returns -1 and (when bytes_read is non-null) stores the
+// total bytes read before the error in *bytes_read.
+[[nodiscard]] ssize_t signal_safe_pread(int fd, char* absl_nonnull buf,
+                                        size_t count, off_t offset,
+                                        size_t* absl_nullable bytes_read);
 
 // signal_safe_poll() - a wrapper for poll(2) which ignores signals
 // Semantics equivalent to poll(2):
@@ -90,7 +108,22 @@ ssize_t signal_safe_read(int fd, char* buf, size_t count, size_t* bytes_read);
 // poll for data.  Unlike ppoll/pselect, signal_safe_poll is *ignoring* signals
 // not attempting to re-enable them.  Protecting us from the traditional races
 // involved with the latter.
-int signal_safe_poll(struct ::pollfd* fds, int nfds, absl::Duration timeout);
+[[nodiscard]] int signal_safe_poll(struct ::pollfd* fds, int nfds,
+                                   absl::Duration timeout);
+
+// Copies memory from multiple source memory chunks (`src_chunks`) to `dst`
+// safely using process_vm_readv. If any source chunk points to unmapped or
+// concurrently freed/mprotected memory, this function returns false without
+// triggering a SIGSEGV crash. Returns true if all chunks were successfully
+// copied.
+[[nodiscard]] bool SafeCopyMemory(
+    absl::Span<const absl::string_view> src_chunks, void* dst);
+
+// Copies `size` bytes from `src` to `dst` safely using process_vm_readv.
+// If `src` points to unmapped or concurrently freed/mprotected memory, this
+// function returns false without triggering a SIGSEGV crash. Returns true if
+// exactly `size` bytes were successfully copied.
+[[nodiscard]] bool SafeCopyMemory(const void* src, void* dst, size_t size);
 
 class ScopedSigmask {
  public:
@@ -113,11 +146,19 @@ class ScopedSigmask {
 inline ScopedSigmask::ScopedSigmask() noexcept {
   sigset_t set;
   sigfillset(&set);
-  Setmask(SIG_SETMASK, &set, &old_set_);
+  Setmask(SIG_BLOCK, &set, &old_set_);
 }
 
 inline ScopedSigmask::~ScopedSigmask() noexcept {
-  Setmask(SIG_SETMASK, &old_set_, nullptr);
+  // pthread_sigmask filters libc-internal signals (such as glibc's SIGTIMER)
+  // out of the new mask, so SIG_SETMASK would unblock them on threads that
+  // blocked them with a raw syscall.  Unblock only what was unblocked on entry.
+  sigset_t unblock;
+  sigemptyset(&unblock);
+  for (int sig = 1; sig < NSIG; ++sig) {
+    if (sigismember(&old_set_, sig) == 0) sigaddset(&unblock, sig);
+  }
+  Setmask(SIG_UNBLOCK, &unblock, nullptr);
 }
 
 inline void ScopedSigmask::Setmask(int how, sigset_t* set, sigset_t* old) {

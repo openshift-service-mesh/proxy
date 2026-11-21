@@ -1,16 +1,20 @@
-func                  call div jcc jmp load mul pop push rmw rsp store
-aligned_alloc            -   -   7   -    6   -   2    1   1   1     2
-calloc                   -   -   6   -    6   1   2    3   1   2     2
-delete                   -   -   4   -    5   -   -    -   -   -     3
-delete(size)             -   -   4   -    4   -   -    -   -   -     3
-delete(size,align)       -   -   6   -    5   -   -    -   -   -     3
-malloc                   -   -   5   -    6   -   -    -   1   -     2
-new                      -   -   4   -    5   -   -    -   1   -     2
-new(align)               -   -   6   -    6   -   -    -   1   -     2
-new(align)->size         -   -   6   -    7   -   -    -   1   -     2
-new(align,cold)->size    -   -   6   -    8   -   -    -   1   -     2
-new(align,nothrow)       -   -   6   -    6   -   -    -   1   -     2
-new(cold)->size          -   -   4   -    7   -   -    -   1   -     2
-new(nothrow)             -   -   4   -    5   -   -    -   1   -     2
-new->size                -   -   4   -    6   -   -    -   1   -     2
-posix_memalign           -   -   8   -    6   -   3    3   1   2     3
+func                    call cmov cmp cycles div jcc jmp load mul pop push rmw rsp store
+aligned_alloc              -    -   6     29   -   7   -    6   -   1    1   2   1     1
+calloc                     -    -   4     31   -   6   -    6   1   1    1   2   3     1
+delete                     -    -   5     32   -   6   -    5   -   -    -   -   -     3
+delete(size)               -    -   4     24   -   5   -    3   -   -    -   -   -     3
+delete(size,align)         -    -   6     25   -   7   -    4   -   -    -   -   -     3
+malloc                     -    -   4     27   -   5   -    6   -   -    -   2   -     1
+malloc(token_1)            -    -   4     27   -   5   -    6   -   -    -   2   -     1
+new                        -    -   3     27   -   4   -    5   -   -    -   2   -     1
+new(align)                 -    -   5     28   -   6   -    6   -   -    -   2   -     1
+new(align)->size           -    -   5     28   -   6   -    7   -   -    -   2   -     1
+new(align,cold)->size      -    1   6     32   -   6   -    8   -   -    -   2   -     1
+new(align,nothrow)         -    -   5     28   -   6   -    6   -   -    -   2   -     1
+new(cold)->size            -    1   4     30   -   4   -    7   -   -    -   2   -     1
+new(cold,token_1)->size    -    1   4     30   -   4   -    7   -   -    -   2   -     1
+new(nothrow)               -    -   3     27   -   4   -    5   -   -    -   2   -     1
+new(token_1)               -    -   3     27   -   4   -    5   -   -    -   2   -     1
+new(token_1)->size         -    -   3     27   -   4   -    6   -   -    -   2   -     1
+new->size                  -    -   3     27   -   4   -    6   -   -    -   2   -     1
+posix_memalign             -    -   8     30   -   8   -    6   -   1    1   2   3     2

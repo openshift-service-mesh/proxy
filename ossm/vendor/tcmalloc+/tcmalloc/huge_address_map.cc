@@ -121,20 +121,20 @@ HugeLength HugeAddressMap::total_mapped() const { return total_size_; }
 void HugeAddressMap::Print(Printer& out) const {
   out.printf("HugeAddressMap: treap %zu / %zu nodes used / created\n",
              used_nodes_, total_nodes_);
-  const size_t longest = root_ ? root_->longest_.raw_num() : 0;
-  out.printf("HugeAddressMap: %zu contiguous hugepages available\n", longest);
+  const HugeLength longest = root_ ? root_->longest_ : NHugePages(0);
+  out.printf("HugeAddressMap: %v contiguous hugepages available\n", longest);
 }
 
 void HugeAddressMap::PrintInPbtxt(PbtxtRegion& hpaa) const {
   hpaa.PrintI64("num_huge_address_map_treap_nodes_used", used_nodes_);
   hpaa.PrintI64("num_huge_address_map_treap_nodes_created", total_nodes_);
-  const size_t longest = root_ ? root_->longest_.in_bytes() : 0;
-  hpaa.PrintI64("contiguous_free_bytes", longest);
+  const HugeLength longest = root_ ? root_->longest_ : NHugePages(0);
+  hpaa.PrintI64("contiguous_free_bytes", longest.in_bytes());
 }
 
-HugeAddressMap::Node* HugeAddressMap::Predecessor(HugePage p) {
-  Node* n = root();
-  Node* best = nullptr;
+const HugeAddressMap::Node* HugeAddressMap::Predecessor(HugePage p) const {
+  const Node* n = root();
+  const Node* best = nullptr;
   while (n) {
     HugeRange here = n->range_;
     if (here.contains(p)) return n;
@@ -151,6 +151,11 @@ HugeAddressMap::Node* HugeAddressMap::Predecessor(HugePage p) {
   }
 
   return best;
+}
+
+HugeAddressMap::Node* HugeAddressMap::Predecessor(HugePage p) {
+  const Node* n = static_cast<const HugeAddressMap*>(this)->Predecessor(p);
+  return const_cast<Node*>(n);
 }
 
 void HugeAddressMap::Merge(Node* b, HugeRange r, Node* a) {

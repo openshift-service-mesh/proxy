@@ -1,0 +1,2305 @@
+# Copyright 2026 The TCMalloc Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_experiment
+  ALIAS
+    tcmalloc::experiment
+  HDRS
+    "experiment.h"
+    "experiment_config.h"
+  SRCS
+    "experiment.cc"
+  DEPS
+    "absl::base"
+    "absl::core_headers"
+    "absl::function_ref"
+    "absl::hash"
+    "absl::nullability"
+    "absl::optional"
+    "absl::span"
+    "absl::strings"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_environment"
+    "tcmalloc::malloc_extension"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_tcmalloc
+  ALIAS
+    tcmalloc::tcmalloc
+  ALWAYSLINK
+  SRCS
+    "libc_override.h"
+    "tcmalloc.cc"
+    "tcmalloc.h"
+  COPTS
+    "-DTCMALLOC_INTERNAL_8K_PAGES"
+  DEPS
+    "absl::base"
+    "absl::bits"
+    "absl::config"
+    "absl::core_headers"
+    "absl::dynamic_annotations"
+    "absl::memory"
+    "absl::span"
+    "absl::stacktrace"
+    "absl::status"
+    "absl::statusor"
+    "absl::str_format"
+    "absl::strings"
+    "absl::symbolize"
+    "absl::time"
+    "tcmalloc::alloc_at_least"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::experiment"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_central_freelist_hooks"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_declarations"
+    "tcmalloc::internal_is_aligned_to"
+    "tcmalloc::internal_linked_list"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_optimization"
+    "tcmalloc::internal_overflow"
+    "tcmalloc::internal_packed_ptr"
+    "tcmalloc::internal_page_allocation_status"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_prefetch"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::malloc_hook"
+    "tcmalloc::malloc_tracing_extension"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_tcmalloc_internal_methods_only
+  ALIAS
+    tcmalloc::tcmalloc_internal_methods_only
+  ALWAYSLINK
+  HDRS
+    "tcmalloc.h"
+  SRCS
+    "tcmalloc.cc"
+  COPTS
+    "-DTCMALLOC_INTERNAL_METHODS_ONLY"
+  DEPS
+    "absl::base"
+    "absl::bits"
+    "absl::config"
+    "absl::core_headers"
+    "absl::dynamic_annotations"
+    "absl::memory"
+    "absl::span"
+    "absl::stacktrace"
+    "absl::status"
+    "absl::statusor"
+    "absl::str_format"
+    "absl::strings"
+    "absl::symbolize"
+    "absl::time"
+    "tcmalloc::alloc_at_least"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::experiment"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_central_freelist_hooks"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_declarations"
+    "tcmalloc::internal_is_aligned_to"
+    "tcmalloc::internal_linked_list"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_optimization"
+    "tcmalloc::internal_overflow"
+    "tcmalloc::internal_packed_ptr"
+    "tcmalloc::internal_page_allocation_status"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_prefetch"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::malloc_hook"
+    "tcmalloc::malloc_tracing_extension"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_tcmalloc_deprecated_perthread
+  ALIAS
+    tcmalloc::tcmalloc_deprecated_perthread
+  ALWAYSLINK
+  SRCS
+    "libc_override.h"
+    "tcmalloc.cc"
+    "tcmalloc.h"
+  COPTS
+    "-DTCMALLOC_DEPRECATED_PERTHREAD"
+  DEPS
+    "absl::base"
+    "absl::bits"
+    "absl::config"
+    "absl::core_headers"
+    "absl::dynamic_annotations"
+    "absl::memory"
+    "absl::span"
+    "absl::stacktrace"
+    "absl::status"
+    "absl::statusor"
+    "absl::str_format"
+    "absl::strings"
+    "absl::symbolize"
+    "absl::time"
+    "tcmalloc::alloc_at_least"
+    "tcmalloc::common_deprecated_perthread"
+    "tcmalloc::experiment"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_central_freelist_hooks"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_declarations"
+    "tcmalloc::internal_is_aligned_to"
+    "tcmalloc::internal_linked_list"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_optimization"
+    "tcmalloc::internal_overflow"
+    "tcmalloc::internal_packed_ptr"
+    "tcmalloc::internal_page_allocation_status"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_prefetch"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::malloc_hook"
+    "tcmalloc::malloc_tracing_extension"
+)
+
+tcmalloc_cc_library_variants(
+  NAME
+    tcmalloc_common
+  ALIAS
+    tcmalloc::common
+  ALWAYSLINK
+  HDRS
+    "allocation_sample.h"
+    "allocation_sampling.h"
+    "arena.h"
+    "central_freelist.h"
+    "central_freelist_options.h"
+    "common.h"
+    "cpu_cache.h"
+    "deallocation_profiler.h"
+    "error_reporting.h"
+    "global_stats.h"
+    "guarded_allocations.h"
+    "guarded_page_allocator.h"
+    "hinted_tracker_lists.h"
+    "histogram.h"
+    "huge_address_map.h"
+    "huge_allocator.h"
+    "huge_cache.h"
+    "huge_page_aware_allocator.h"
+    "huge_page_filler.h"
+    "huge_page_options.h"
+    "huge_page_subrelease.h"
+    "huge_page_tracker.h"
+    "huge_page_treatment.h"
+    "huge_pages.h"
+    "huge_region.h"
+    "metadata_object_allocator.h"
+    "page_allocator.h"
+    "page_allocator_interface.h"
+    "pagemap.h"
+    "pages.h"
+    "parameters.h"
+    "peak_heap_tracker.h"
+    "sampler.h"
+    "segv_handler.h"
+    "sizemap.h"
+    "span.h"
+    "span_stats.h"
+    "stack_trace_table.h"
+    "static_forwarder.h"
+    "static_vars.h"
+    "stats.h"
+    "tcmalloc_policy.h"
+    "thread_cache.h"
+    "transfer_cache.h"
+    "transfer_cache_internals.h"
+    "transfer_cache_stats.h"
+  SRCS
+    "allocation_sample.cc"
+    "allocation_sampling.cc"
+    "arena.cc"
+    "arena.h"
+    "background.cc"
+    "central_freelist.h"
+    "central_freelist_options.h"
+    "common.cc"
+    "common.h"
+    "cpu_cache.cc"
+    "cpu_cache.h"
+    "deallocation_profiler.cc"
+    "error_reporting.cc"
+    "experimental_pow2_size_class.cc"
+    "flexible_no_reuse_no_40_56_size_classes.cc"
+    "flexible_no_reuse_size_classes.cc"
+    "flexible_size_classes.cc"
+    "global_stats.cc"
+    "guarded_allocations.h"
+    "guarded_page_allocator.cc"
+    "guarded_page_allocator.h"
+    "hinted_tracker_lists.h"
+    "histogram.h"
+    "huge_address_map.cc"
+    "huge_allocator.cc"
+    "huge_allocator.h"
+    "huge_cache.cc"
+    "huge_cache.h"
+    "huge_page_aware_allocator.h"
+    "huge_page_filler.h"
+    "huge_page_options.h"
+    "huge_page_subrelease.h"
+    "huge_page_tracker.h"
+    "huge_page_treatment.h"
+    "huge_pages.h"
+    "huge_region.h"
+    "metadata_object_allocator.h"
+    "page_allocator.cc"
+    "page_allocator.h"
+    "page_allocator_interface.cc"
+    "page_allocator_interface.h"
+    "pagemap.cc"
+    "pagemap.h"
+    "parameters.cc"
+    "peak_heap_tracker.cc"
+    "sampler.cc"
+    "sampler.h"
+    "segv_handler.cc"
+    "segv_handler.h"
+    "size_classes.cc"
+    "sizemap.cc"
+    "span.cc"
+    "span.h"
+    "span_stats.h"
+    "stack_trace_table.cc"
+    "stack_trace_table.h"
+    "static_forwarder.h"
+    "static_vars.cc"
+    "static_vars.h"
+    "stats.cc"
+    "thread_cache.cc"
+    "thread_cache.h"
+    "transfer_cache.cc"
+    "transfer_cache.h"
+    "transfer_cache_internals.h"
+    "transfer_cache_stats.h"
+  DEPS
+    "absl::base"
+    "absl::bits"
+    "absl::cleanup"
+    "absl::core_headers"
+    "absl::dynamic_annotations"
+    "absl::fixed_array"
+    "absl::flat_hash_map"
+    "absl::flat_hash_map"
+    "absl::flat_hash_set"
+    "absl::inlined_vector"
+    "absl::function_ref"
+    "absl::hash"
+    "absl::malloc_internal"
+    "absl::memory"
+    "absl::nullability"
+    "absl::span"
+    "absl::stacktrace"
+    "absl::str_format"
+    "absl::strings"
+    "absl::synchronization"
+    "absl::time"
+    "tcmalloc::experiment"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_atomic_stats_counter"
+    "tcmalloc::internal_bytes"
+    "tcmalloc::internal_cache_topology"
+    "tcmalloc::internal_central_freelist_hooks"
+    "tcmalloc::internal_clock"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_cpu_utils"
+    "tcmalloc::internal_delay_injection"
+    "tcmalloc::internal_environment"
+    "tcmalloc::internal_explicitly_constructed"
+    "tcmalloc::internal_exponential_biased"
+    "tcmalloc::internal_gwp_asan_state"
+    "tcmalloc::internal_hardware_pages"
+    "tcmalloc::internal_hook_list"
+    "tcmalloc::internal_is_aligned_to"
+    "tcmalloc::internal_linked_list"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_stats"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_metadata_allocator"
+    "tcmalloc::internal_min_max_tracker"
+    "tcmalloc::internal_mincore"
+    "tcmalloc::internal_numa"
+    "tcmalloc::internal_optimization"
+    "tcmalloc::internal_packed_ptr"
+    "tcmalloc::internal_page_allocator_hooks"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_pageflags"
+    "tcmalloc::internal_parameter_accessors"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_percpu_state"
+    "tcmalloc::internal_percpu_tcmalloc"
+    "tcmalloc::internal_prefetch"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_residency"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::internal_sampled_allocation_recorder"
+    "tcmalloc::internal_size_class_info"
+    "tcmalloc::internal_stacktrace_filter"
+    "tcmalloc::internal_sysinfo"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::internal_timeseries_tracker"
+    "tcmalloc::internal_top_k_buffer"
+    "tcmalloc::internal_util"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::malloc_hook"
+    "tcmalloc::malloc_tracing_extension"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_tcmalloc_enable_heap_partitioning_default_on
+  ALIAS
+    tcmalloc::tcmalloc_enable_heap_partitioning_default_on
+  ALWAYSLINK
+  SRCS
+    "enable_heap_partitioning_default_on.cc"
+  DEPS
+    "absl::core_headers"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_want_hpaa
+  ALIAS
+    tcmalloc::want_hpaa
+  ALWAYSLINK
+  SRCS
+    "want_hpaa.cc"
+  COPTS
+    "-g0"
+  DEPS
+    "absl::core_headers"
+    "tcmalloc::internal_config"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_want_disable_huge_region_more_often
+  ALIAS
+    tcmalloc::want_disable_huge_region_more_often
+  ALWAYSLINK
+  SRCS
+    "want_disable_huge_region_more_often.cc"
+  COPTS
+    "-g0"
+  DEPS
+    "absl::core_headers"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_want_disable_cfl_subbucket_prioritization
+  ALIAS
+    tcmalloc::want_disable_cfl_subbucket_prioritization
+  ALWAYSLINK
+  SRCS
+    "want_disable_cfl_subbucket_prioritization.cc"
+  COPTS
+    "-g0"
+  DEPS
+    "absl::core_headers"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_want_disable_subrelease_unbacked_hugepages
+  ALIAS
+    tcmalloc::want_disable_subrelease_unbacked_hugepages
+  ALWAYSLINK
+  SRCS
+    "want_disable_subrelease_unbacked_hugepages.cc"
+  COPTS
+    "-g0"
+  DEPS
+    "absl::core_headers"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_want_disable_release_stale_pages
+  ALIAS
+    tcmalloc::want_disable_release_stale_pages
+  ALWAYSLINK
+  SRCS
+    "want_disable_release_stale_pages.cc"
+  COPTS
+    "-g0"
+  DEPS
+    "absl::core_headers"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_want_numa_aware
+  ALIAS
+    tcmalloc::want_numa_aware
+  ALWAYSLINK
+  SRCS
+    "want_numa_aware.cc"
+  COPTS
+    "-g0"
+  DEPS
+    "absl::core_headers"
+    "tcmalloc::internal_config"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_tcmalloc_large_pages
+  ALIAS
+    tcmalloc::tcmalloc_large_pages
+  ALWAYSLINK
+  SRCS
+    "libc_override.h"
+    "tcmalloc.cc"
+    "tcmalloc.h"
+  COPTS
+    "-DTCMALLOC_INTERNAL_32K_PAGES"
+  DEPS
+    "absl::base"
+    "absl::bits"
+    "absl::config"
+    "absl::core_headers"
+    "absl::dynamic_annotations"
+    "absl::memory"
+    "absl::span"
+    "absl::stacktrace"
+    "absl::status"
+    "absl::statusor"
+    "absl::str_format"
+    "absl::strings"
+    "absl::symbolize"
+    "absl::time"
+    "tcmalloc::alloc_at_least"
+    "tcmalloc::common_large_pages"
+    "tcmalloc::experiment"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_central_freelist_hooks"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_declarations"
+    "tcmalloc::internal_is_aligned_to"
+    "tcmalloc::internal_linked_list"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_optimization"
+    "tcmalloc::internal_overflow"
+    "tcmalloc::internal_packed_ptr"
+    "tcmalloc::internal_page_allocation_status"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_prefetch"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::malloc_hook"
+    "tcmalloc::malloc_tracing_extension"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_tcmalloc_256k_pages
+  ALIAS
+    tcmalloc::tcmalloc_256k_pages
+  ALWAYSLINK
+  SRCS
+    "libc_override.h"
+    "tcmalloc.cc"
+    "tcmalloc.h"
+  COPTS
+    "-DTCMALLOC_INTERNAL_256K_PAGES"
+  DEPS
+    "absl::base"
+    "absl::bits"
+    "absl::config"
+    "absl::core_headers"
+    "absl::dynamic_annotations"
+    "absl::memory"
+    "absl::span"
+    "absl::stacktrace"
+    "absl::status"
+    "absl::statusor"
+    "absl::str_format"
+    "absl::strings"
+    "absl::symbolize"
+    "absl::time"
+    "tcmalloc::alloc_at_least"
+    "tcmalloc::common_256k_pages"
+    "tcmalloc::experiment"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_central_freelist_hooks"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_declarations"
+    "tcmalloc::internal_is_aligned_to"
+    "tcmalloc::internal_linked_list"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_optimization"
+    "tcmalloc::internal_overflow"
+    "tcmalloc::internal_packed_ptr"
+    "tcmalloc::internal_page_allocation_status"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_prefetch"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::malloc_hook"
+    "tcmalloc::malloc_tracing_extension"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_tcmalloc_256k_pages_numa_aware
+  ALIAS
+    tcmalloc::tcmalloc_256k_pages_numa_aware
+  ALWAYSLINK
+  SRCS
+    "libc_override.h"
+    "tcmalloc.cc"
+    "tcmalloc.h"
+  COPTS
+    "-DTCMALLOC_INTERNAL_256K_PAGES"
+    "-DTCMALLOC_INTERNAL_NUMA_AWARE"
+  DEPS
+    "absl::base"
+    "absl::bits"
+    "absl::config"
+    "absl::core_headers"
+    "absl::dynamic_annotations"
+    "absl::memory"
+    "absl::span"
+    "absl::stacktrace"
+    "absl::status"
+    "absl::statusor"
+    "absl::str_format"
+    "absl::strings"
+    "absl::symbolize"
+    "absl::time"
+    "tcmalloc::alloc_at_least"
+    "tcmalloc::common_256k_pages_numa_aware"
+    "tcmalloc::experiment"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_central_freelist_hooks"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_declarations"
+    "tcmalloc::internal_is_aligned_to"
+    "tcmalloc::internal_linked_list"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_optimization"
+    "tcmalloc::internal_overflow"
+    "tcmalloc::internal_packed_ptr"
+    "tcmalloc::internal_page_allocation_status"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_prefetch"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::malloc_hook"
+    "tcmalloc::malloc_tracing_extension"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_tcmalloc_small_but_slow
+  ALIAS
+    tcmalloc::tcmalloc_small_but_slow
+  ALWAYSLINK
+  SRCS
+    "libc_override.h"
+    "tcmalloc.cc"
+    "tcmalloc.h"
+  COPTS
+    "-DTCMALLOC_INTERNAL_SMALL_BUT_SLOW"
+  DEPS
+    "absl::base"
+    "absl::bits"
+    "absl::config"
+    "absl::core_headers"
+    "absl::dynamic_annotations"
+    "absl::memory"
+    "absl::span"
+    "absl::stacktrace"
+    "absl::status"
+    "absl::statusor"
+    "absl::str_format"
+    "absl::strings"
+    "absl::symbolize"
+    "absl::time"
+    "tcmalloc::alloc_at_least"
+    "tcmalloc::common_small_but_slow"
+    "tcmalloc::experiment"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_central_freelist_hooks"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_declarations"
+    "tcmalloc::internal_is_aligned_to"
+    "tcmalloc::internal_linked_list"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_optimization"
+    "tcmalloc::internal_overflow"
+    "tcmalloc::internal_packed_ptr"
+    "tcmalloc::internal_page_allocation_status"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_prefetch"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::malloc_hook"
+    "tcmalloc::malloc_tracing_extension"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_tcmalloc_numa_aware
+  ALIAS
+    tcmalloc::tcmalloc_numa_aware
+  ALWAYSLINK
+  SRCS
+    "libc_override.h"
+    "tcmalloc.cc"
+    "tcmalloc.h"
+  COPTS
+    "-DTCMALLOC_INTERNAL_NUMA_AWARE"
+  DEPS
+    "absl::base"
+    "absl::bits"
+    "absl::config"
+    "absl::core_headers"
+    "absl::dynamic_annotations"
+    "absl::memory"
+    "absl::span"
+    "absl::stacktrace"
+    "absl::status"
+    "absl::statusor"
+    "absl::str_format"
+    "absl::strings"
+    "absl::symbolize"
+    "absl::time"
+    "tcmalloc::alloc_at_least"
+    "tcmalloc::common_numa_aware"
+    "tcmalloc::experiment"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_central_freelist_hooks"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_declarations"
+    "tcmalloc::internal_is_aligned_to"
+    "tcmalloc::internal_linked_list"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_optimization"
+    "tcmalloc::internal_overflow"
+    "tcmalloc::internal_packed_ptr"
+    "tcmalloc::internal_page_allocation_status"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_prefetch"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::malloc_hook"
+    "tcmalloc::malloc_tracing_extension"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_tcmalloc_latency_injection
+  ALIAS
+    tcmalloc::tcmalloc_latency_injection
+  ALWAYSLINK
+  SRCS
+    "libc_override.h"
+    "tcmalloc.cc"
+    "tcmalloc.h"
+  COPTS
+    "-DTCMALLOC_INTERNAL_8K_PAGES"
+    "-DTCMALLOC_INTERNAL_LATENCY_INJECTION"
+  DEPS
+    "absl::base"
+    "absl::bits"
+    "absl::config"
+    "absl::core_headers"
+    "absl::dynamic_annotations"
+    "absl::memory"
+    "absl::span"
+    "absl::stacktrace"
+    "absl::status"
+    "absl::statusor"
+    "absl::str_format"
+    "absl::strings"
+    "absl::symbolize"
+    "absl::time"
+    "tcmalloc::alloc_at_least"
+    "tcmalloc::common_latency_injection"
+    "tcmalloc::experiment"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_central_freelist_hooks"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_declarations"
+    "tcmalloc::internal_delay_injection"
+    "tcmalloc::internal_is_aligned_to"
+    "tcmalloc::internal_linked_list"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_optimization"
+    "tcmalloc::internal_overflow"
+    "tcmalloc::internal_packed_ptr"
+    "tcmalloc::internal_page_allocation_status"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_prefetch"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::malloc_hook"
+    "tcmalloc::malloc_tracing_extension"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_tcmalloc_legacy_locking2
+  ALIAS
+    tcmalloc::tcmalloc_legacy_locking2
+  ALWAYSLINK
+  SRCS
+    "libc_override.h"
+    "tcmalloc.cc"
+    "tcmalloc.h"
+  COPTS
+    "-DTCMALLOC_INTERNAL_8K_PAGES"
+    "-DTCMALLOC_INTERNAL_LEGACY_LOCKING2"
+  DEPS
+    "absl::base"
+    "absl::bits"
+    "absl::config"
+    "absl::core_headers"
+    "absl::dynamic_annotations"
+    "absl::memory"
+    "absl::span"
+    "absl::stacktrace"
+    "absl::status"
+    "absl::statusor"
+    "absl::str_format"
+    "absl::strings"
+    "absl::symbolize"
+    "absl::time"
+    "tcmalloc::alloc_at_least"
+    "tcmalloc::common_legacy_locking2"
+    "tcmalloc::experiment"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_central_freelist_hooks"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_declarations"
+    "tcmalloc::internal_is_aligned_to"
+    "tcmalloc::internal_linked_list"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_optimization"
+    "tcmalloc::internal_overflow"
+    "tcmalloc::internal_packed_ptr"
+    "tcmalloc::internal_page_allocation_status"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_prefetch"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::malloc_hook"
+    "tcmalloc::malloc_tracing_extension"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_mock_central_freelist
+  ALIAS
+    tcmalloc::mock_central_freelist
+  HDRS
+    "mock_central_freelist.h"
+  SRCS
+    "mock_central_freelist.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::base"
+    "absl::span"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_logging"
+)
+
+tcmalloc_cc_library_variants(
+  NAME
+    tcmalloc_mock_static_forwarder
+  ALIAS
+    tcmalloc::mock_static_forwarder
+  HDRS
+    "mock_static_forwarder.h"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::core_headers"
+    "absl::span"
+    "absl::strings"
+    "absl::synchronization"
+    "absl::time"
+    "tcmalloc::internal_central_freelist_hooks"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_hook_list"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_mock_virtual_allocator
+  ALIAS
+    tcmalloc::mock_virtual_allocator
+  HDRS
+    "mock_virtual_allocator.h"
+  DEPS
+    "absl::core_headers"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_system_allocator"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_page_allocator_test_util
+  ALIAS
+    tcmalloc::page_allocator_test_util
+  HDRS
+    "page_allocator_test_util.h"
+  SRCS
+    "page_allocator_test_util.h"
+  DEPS
+    "absl::span"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::malloc_extension"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_mock_transfer_cache
+  ALIAS
+    tcmalloc::mock_transfer_cache
+  HDRS
+    "mock_transfer_cache.h"
+  SRCS
+    "mock_transfer_cache.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::core_headers"
+    "absl::flat_hash_map"
+    "absl::random_distributions"
+    "absl::random_random"
+    "absl::span"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_logging"
+    "tcmalloc::mock_central_freelist"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_mock_cpu_cache
+  ALIAS
+    tcmalloc::mock_cpu_cache
+  HDRS
+    "mock_cpu_cache.h"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::base"
+    "absl::bits"
+    "absl::core_headers"
+    "absl::string_view"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_numa"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_percpu_tcmalloc"
+    "tcmalloc::internal_sysinfo"
+    "tcmalloc::mock_central_freelist"
+    "tcmalloc::mock_transfer_cache"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_mock_huge_page_static_forwarder
+  ALIAS
+    tcmalloc::mock_huge_page_static_forwarder
+  HDRS
+    "mock_huge_page_static_forwarder.h"
+  SRCS
+    "mock_huge_page_static_forwarder.cc"
+  DEPS
+    "absl::base"
+    "absl::bits"
+    "absl::core_headers"
+    "absl::flat_hash_map"
+    "absl::hash"
+    "absl::malloc_internal"
+    "absl::string_view"
+    "absl::time"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_clock"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_packed_ptr"
+    "tcmalloc::internal_system_allocator"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_page_aware_allocator_fuzz
+  SRCS
+    "huge_page_aware_allocator_fuzz.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::bits"
+    "absl::check"
+    "absl::core_headers"
+    "absl::status"
+    "absl::str_format"
+    "absl::strings"
+    "absl::time"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_clock"
+    "tcmalloc::internal_fake_residency"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_pageflags"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_residency"
+    "tcmalloc::internal_scoped_allow_allocation"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::mock_huge_page_static_forwarder"
+    "tcmalloc::tcmalloc"
+  ARGS
+    "--fuzztest_stack_limit_kb=2048"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_cache_fuzz
+  SRCS
+    "huge_cache_fuzz.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::check"
+    "absl::core_headers"
+    "absl::flat_hash_set"
+    "absl::span"
+    "absl::str_format"
+    "absl::strings"
+    "absl::time"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_clock"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_mock_metadata_allocator"
+    "tcmalloc::mock_virtual_allocator"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_region_fuzz
+  SRCS
+    "huge_region_fuzz.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::check"
+    "absl::core_headers"
+    "absl::flat_hash_set"
+    "absl::span"
+    "absl::str_format"
+    "absl::string_view"
+    "absl::strings"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::tcmalloc"
+  ARGS
+    "--fuzztest_stack_limit_kb=2048"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_page_filler_fuzz
+  SRCS
+    "huge_page_filler_fuzz.cc"
+    "testdata/huge_page_filler_fuzz/clusterfuzz_testcase_minimized_huge_page_filler_fuzz_5161409228701696_test.inc"
+    "testdata/huge_page_filler_fuzz/clusterfuzz_testcase_minimized_huge_page_filler_fuzz_6053674183688192_test.inc"
+    "testdata/huge_page_filler_fuzz/clusterfuzz_testcase_minimized_huge_page_filler_fuzz_6622985612820480.inc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::check"
+    "absl::flat_hash_map"
+    "absl::flat_hash_set"
+    "absl::span"
+    "absl::status"
+    "absl::str_format"
+    "absl::string_view"
+    "absl::strings"
+    "absl::time"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_clock"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_fake_residency"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_pageflags"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_residency"
+    "tcmalloc::internal_scoped_allow_allocation"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::tcmalloc"
+  ARGS
+    "--fuzztest_stack_limit_kb=2048"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_page_treatment_fuzz
+  SRCS
+    "huge_page_treatment_fuzz.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::span"
+    "absl::string_view"
+    "absl::strings"
+    "absl::time"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_span_fuzz
+  SRCS
+    "span_fuzz.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::span"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_testutil"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_sizemap_fuzz
+  SRCS
+    "sizemap_fuzz.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::span"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_size_class_info"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_central_freelist_fuzz
+  SRCS
+    "central_freelist_fuzz.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::check"
+    "absl::span"
+    "absl::str_format"
+    "absl::time"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::mock_static_forwarder_8k_pages"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_transfer_cache_fuzz
+  SRCS
+    "transfer_cache_fuzz.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::check"
+    "absl::str_format"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::mock_central_freelist"
+    "tcmalloc::mock_transfer_cache"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_test_variants(
+  NAME
+    tcmalloc_arena_test
+  SRCS
+    "arena_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::base"
+    "absl::core_headers"
+    "tcmalloc::internal_config"
+  TIMEOUT
+    300
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_transfer_cache_test
+  SRCS
+    "transfer_cache_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::core_headers"
+    "absl::span"
+    "absl::str_format"
+    "absl::time"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_atomic_stats_counter"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::mock_central_freelist"
+    "tcmalloc::mock_transfer_cache"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_testutil"
+    "tcmalloc::testing_thread_manager"
+  TIMEOUT
+    300
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_transfer_cache_benchmark
+  SRCS
+    "transfer_cache_benchmark.cc"
+  DEPS
+    "absl::optional"
+    "absl::random_distributions"
+    "absl::random_random"
+    "benchmark::benchmark"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::mock_central_freelist"
+    "tcmalloc::mock_transfer_cache"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_benchmark_main"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_histogram_test
+  SRCS
+    "histogram_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::time"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_logging"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_testutil"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_cache_test
+  SRCS
+    "huge_cache_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::random_random"
+    "absl::strings"
+    "absl::time"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_clock"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_mock_metadata_allocator"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::mock_virtual_allocator"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_allocator_test
+  SRCS
+    "huge_allocator_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::base"
+    "absl::random_random"
+    "absl::time"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_mock_metadata_allocator"
+    "tcmalloc::mock_virtual_allocator"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_page_subrelease_test
+  SRCS
+    "huge_page_subrelease_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::strings"
+    "absl::time"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_clock"
+    "tcmalloc::internal_logging"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_testutil"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_page_tracker_test
+  SRCS
+    "huge_page_tracker_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::base"
+    "absl::core_headers"
+    "absl::flags"
+    "absl::flat_hash_map"
+    "absl::flat_hash_map"
+    "absl::flat_hash_set"
+    "absl::inlined_vector"
+    "absl::flat_hash_set"
+    "absl::random_random"
+    "absl::status"
+    "absl::str_format"
+    "absl::strings"
+    "absl::synchronization"
+    "absl::time"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_clock"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_testutil"
+  TIMEOUT
+    900
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_page_filler_benchmark
+  SRCS
+    "huge_page_filler_benchmark.cc"
+  DEPS
+    "absl::core_headers"
+    "absl::string_view"
+    "absl::time"
+    "benchmark::benchmark"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_clock"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_fake_residency"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_pageflags"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_residency"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_benchmark_main"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_page_filler_test
+  SRCS
+    "huge_page_filler_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::base"
+    "absl::core_headers"
+    "absl::flags"
+    "absl::flat_hash_map"
+    "absl::flat_hash_map"
+    "absl::flat_hash_set"
+    "absl::inlined_vector"
+    "absl::flat_hash_set"
+    "absl::random_random"
+    "absl::status"
+    "absl::str_format"
+    "absl::strings"
+    "absl::synchronization"
+    "absl::time"
+    "benchmark::benchmark"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_clock"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_fake_residency"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_pageflags"
+    "tcmalloc::internal_range_tracker"
+    "tcmalloc::internal_residency"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_testutil"
+  TIMEOUT
+    900
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_page_treatment_test
+  SRCS
+    "huge_page_treatment_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::status"
+    "absl::strings"
+    "absl::time"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_clock"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_numa"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_pageflags"
+    "tcmalloc::internal_residency"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_smaps"
+  TIMEOUT
+    900
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_page_aware_allocator_benchmark
+  SRCS
+    "huge_page_aware_allocator_benchmark.cc"
+  DEPS
+    "absl::core_headers"
+    "absl::flags"
+    "absl::random_random"
+    "absl::synchronization"
+    "benchmark::benchmark"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_sysinfo"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_benchmark_main"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_page_aware_allocator_test
+  SRCS
+    "huge_page_aware_allocator_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::base"
+    "absl::btree"
+    "absl::core_headers"
+    "absl::flat_hash_map"
+    "absl::nullability"
+    "absl::random_bit_gen_ref"
+    "absl::random_distributions"
+    "absl::random_random"
+    "absl::str_format"
+    "absl::strings"
+    "absl::synchronization"
+    "absl::time"
+    "benchmark::benchmark"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_fake_residency"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_pageflags"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::mock_huge_page_static_forwarder"
+    "tcmalloc::page_allocator_test_util"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_testutil"
+    "tcmalloc::testing_thread_manager"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_region_test
+  SRCS
+    "huge_region_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::core_headers"
+    "absl::fixed_array"
+    "absl::random_random"
+    "absl::span"
+    "absl::string_view"
+    "absl::synchronization"
+    "absl::time"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_clock"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_system_allocator"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_thread_manager"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_guarded_page_allocator_benchmark
+  SRCS
+    "guarded_page_allocator_benchmark.cc"
+  DEPS
+    "benchmark::benchmark"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_benchmark_main"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_guarded_page_allocator_test
+  SRCS
+    "guarded_page_allocator_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::base"
+    "absl::bits"
+    "absl::core_headers"
+    "absl::flat_hash_set"
+    "absl::strings"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_sysinfo"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_testutil"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_guarded_page_allocator_profile_test
+  SRCS
+    "guarded_page_allocator_profile_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::check"
+    "absl::flat_hash_set"
+    "absl::function_ref"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_testutil"
+)
+
+tcmalloc_cc_test_variants(
+  NAME
+    tcmalloc_pagemap_test
+  SRCS
+    "pagemap_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::random_random"
+    "tcmalloc::internal_config"
+)
+
+tcmalloc_cc_test_variants(
+  NAME
+    tcmalloc_stack_trace_table_test
+  SRCS
+    "stack_trace_table_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::core_headers"
+    "absl::str_format"
+    "absl::strings"
+    "tcmalloc::internal_logging"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::malloc_hook"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_malloc_extension_fuzz
+  SRCS
+    "malloc_extension_fuzz.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::string_view"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_page_allocator_test
+  SRCS
+    "page_allocator_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::base"
+    "absl::nullability"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_page_allocator_hooks"
+    "tcmalloc::internal_pageflags"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::page_allocator_test_util"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_testutil"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_page_allocator_test_partitioned
+  SRCS
+    "page_allocator_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::base"
+    "absl::nullability"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_memory_tag"
+    "tcmalloc::internal_page_allocator_hooks"
+    "tcmalloc::internal_pageflags"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::page_allocator_test_util"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_testutil"
+  ENV
+    "TCMALLOC_HEAP_PARTITIONING=true"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_error_reporting_test
+  SRCS
+    "error_reporting_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::internal_sampled_allocation"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_segv_handler_test
+  SRCS
+    "segv_handler_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_logging"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_thread_cache_test
+  SRCS
+    "thread_cache_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::time"
+    "benchmark::benchmark"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_parameter_accessors"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::tcmalloc_deprecated_perthread"
+    "tcmalloc::testing_smaps"
+    "tcmalloc::testing_testutil"
+)
+
+tcmalloc_cc_test_variants(
+  NAME
+    tcmalloc_size_classes_test
+  SRCS
+    "size_classes_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::core_headers"
+    "absl::random_random"
+    "absl::span"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_size_class_info"
+)
+
+tcmalloc_cc_test_variants(
+  NAME
+    tcmalloc_span_test
+  SRCS
+    "span_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::base"
+    "absl::core_headers"
+    "absl::flat_hash_map"
+    "absl::flat_hash_set"
+    "absl::random_random"
+    "absl::span"
+    "benchmark::benchmark"
+    "tcmalloc::internal_logging"
+  TIMEOUT
+    900
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_span_benchmark
+  SRCS
+    "span_benchmark.cc"
+  DEPS
+    "absl::random_random"
+    "absl::span"
+    "benchmark::benchmark"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_allocation_guard"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_benchmark_main"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_stats_test
+  SRCS
+    "stats_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::base"
+    "absl::time"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_logging"
+    "tcmalloc::tcmalloc"
+    "tcmalloc::testing_testutil"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_global_stats_test
+  SRCS
+    "global_stats_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "tcmalloc::internal_parameter_accessors"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::tcmalloc_deprecated_perthread"
+    "tcmalloc::testing_testutil"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_huge_address_map_test
+  SRCS
+    "huge_address_map_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_mock_metadata_allocator"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_malloc_extension
+  ALIAS
+    tcmalloc::malloc_extension
+  HDRS
+    "internal_malloc_extension.h"
+    "malloc_extension.h"
+  SRCS
+    "malloc_extension.cc"
+  DEPS
+    "absl::base"
+    "absl::core_headers"
+    "absl::function_ref"
+    "absl::malloc_internal"
+    "absl::nullability"
+    "absl::optional"
+    "absl::span"
+    "absl::strings"
+    "absl::time"
+    "tcmalloc::malloc_hook"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_malloc_tracing_extension
+  ALIAS
+    tcmalloc::malloc_tracing_extension
+  HDRS
+    "internal_malloc_tracing_extension.h"
+    "malloc_tracing_extension.h"
+  SRCS
+    "malloc_tracing_extension.cc"
+  DEPS
+    "absl::core_headers"
+    "absl::status"
+    "absl::statusor"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_new_extension
+  ALIAS
+    tcmalloc::new_extension
+  HDRS
+    "new_extension.h"
+  DEPS
+    "absl::core_headers"
+    "tcmalloc::malloc_extension"
+)
+
+tcmalloc_cc_test_variants(
+  NAME
+    tcmalloc_new_extension_test
+  SRCS
+    "new_extension_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::bits"
+    "absl::core_headers"
+    "absl::random_random"
+    "benchmark::benchmark"
+    "tcmalloc::internal_is_aligned_to"
+    "tcmalloc::internal_page_size"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::testing_testutil"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_experiment_config_test
+  SRCS
+    "experiment_config_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "tcmalloc::experiment"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_experiment_fuzz
+  SRCS
+    "experiment_fuzz.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::flat_hash_map"
+    "absl::flat_hash_set"
+    "absl::inlined_vector"
+    "absl::strings"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::experiment"
+    "tcmalloc::tcmalloc"
+)
+
+create_percpu_tcmalloc_testsuite(
+  NAME
+    tcmalloc_cpu_cache_test
+  SRCS
+    "cpu_cache_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::btree"
+    "absl::core_headers"
+    "absl::dynamic_annotations"
+    "absl::flat_hash_set"
+    "absl::random_bit_gen_ref"
+    "absl::random_random"
+    "absl::span"
+    "absl::str_format"
+    "absl::string_view"
+    "absl::strings"
+    "absl::synchronization"
+    "absl::time"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_affinity"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_optimization"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_percpu_tcmalloc"
+    "tcmalloc::internal_size_class_info"
+    "tcmalloc::internal_sysinfo"
+    "tcmalloc::mock_central_freelist"
+    "tcmalloc::mock_cpu_cache"
+    "tcmalloc::mock_transfer_cache"
+    "tcmalloc::testing_rseq_util"
+    "tcmalloc::testing_testutil"
+    "tcmalloc::testing_thread_manager"
+  ENV
+    "BORG_EXPERIMENTS="
+  TIMEOUT
+    900
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_cpu_cache_fuzz
+  SRCS
+    "cpu_cache_fuzz.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::bits"
+    "absl::core_headers"
+    "absl::span"
+    "absl::str_format"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_percpu_tcmalloc"
+    "tcmalloc::internal_sysinfo"
+    "tcmalloc::mock_central_freelist"
+    "tcmalloc::mock_cpu_cache"
+    "tcmalloc::mock_transfer_cache"
+    "tcmalloc::testing_rseq_util"
+    "tcmalloc::testing_testutil"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_cpu_cache_activate_test
+  SRCS
+    "cpu_cache_activate_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::base"
+    "absl::random_random"
+    "absl::synchronization"
+    "absl::time"
+    "benchmark::benchmark"
+    "tcmalloc::common_deprecated_perthread"
+    "tcmalloc::internal_percpu"
+    "tcmalloc::internal_sysinfo"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::tcmalloc_deprecated_perthread"
+    "tcmalloc::testing_rseq_util"
+)
+
+tcmalloc_cc_test_variants(
+  NAME
+    tcmalloc_central_freelist_test
+  SRCS
+    "central_freelist_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::base"
+    "absl::bits"
+    "absl::core_headers"
+    "absl::fixed_array"
+    "absl::flat_hash_map"
+    "absl::flat_hash_map"
+    "absl::flat_hash_set"
+    "absl::inlined_vector"
+    "absl::flat_hash_set"
+    "absl::memory"
+    "absl::random_random"
+    "absl::span"
+    "absl::str_format"
+    "absl::strings"
+    "absl::synchronization"
+    "absl::time"
+    "benchmark::benchmark"
+    "tcmalloc::internal_logging"
+    "tcmalloc::internal_size_class_info"
+    "tcmalloc::testing_testutil"
+    "tcmalloc::testing_thread_manager"
+)
+
+tcmalloc_cc_test_variants(
+  NAME
+    tcmalloc_central_freelist_benchmark
+  SRCS
+    "central_freelist_benchmark.cc"
+  DEPS
+    "absl::base"
+    "absl::core_headers"
+    "absl::flat_hash_map"
+    "absl::flat_hash_map"
+    "absl::flat_hash_set"
+    "absl::inlined_vector"
+    "absl::random_random"
+    "absl::span"
+    "absl::synchronization"
+    "absl::time"
+    "benchmark::benchmark"
+    "tcmalloc::internal_bytes"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_logging"
+    "tcmalloc::testing_benchmark_main"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_profile_marshaler
+  ALIAS
+    tcmalloc::profile_marshaler
+  HDRS
+    "profile_marshaler.h"
+  SRCS
+    "profile_marshaler.cc"
+  DEPS
+    "absl::statusor"
+    "protobuf::libprotobuf"
+    "tcmalloc::internal_profile_builder"
+    "tcmalloc::malloc_extension"
+)
+
+tcmalloc_cc_test(
+  NAME
+    tcmalloc_profile_marshaler_test
+  SRCS
+    "profile_marshaler_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::memory"
+    "absl::statusor"
+    "absl::strings"
+    "absl::time"
+    "protobuf::libprotobuf"
+    "re2::re2"
+    "tcmalloc::internal_fake_profile"
+    "tcmalloc::internal_profile_cc_proto"
+    "tcmalloc::malloc_extension"
+    "tcmalloc::profile_marshaler"
+    "tcmalloc::tcmalloc"
+)
+
+tcmalloc_cc_test_variants(
+  NAME
+    tcmalloc_allocation_sample_test
+  SRCS
+    "allocation_sample_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "absl::core_headers"
+    "absl::random_bit_gen_ref"
+    "absl::random_random"
+    "absl::synchronization"
+    "absl::time"
+    "tcmalloc::internal_logging"
+    "tcmalloc::testing_thread_manager"
+)
+
+tcmalloc_cc_test_variants(
+  NAME
+    tcmalloc_pages_test
+  SRCS
+    "pages_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "benchmark::benchmark"
+)
+
+tcmalloc_cc_test_variants(
+  NAME
+    tcmalloc_sizemap_test
+  SRCS
+    "sizemap_test.cc"
+  DEPS
+    "GTest::gtest_main"
+    "GTest::gmock_main"
+    "GTest::gmock"
+    "tcmalloc::internal_parameter_accessors"
+    "tcmalloc::internal_size_class_info"
+    "tcmalloc::malloc_extension"
+)
+
+tcmalloc_cc_test_variants(
+  NAME
+    tcmalloc_static_forwarder_test
+  SRCS
+    "static_forwarder_test.cc"
+  DEPS
+    "GTest::gtest"
+    "GTest::gmock"
+    "absl::core_headers"
+    "absl::fixed_array"
+    "absl::flat_hash_map"
+    "absl::flat_hash_set"
+    "absl::inlined_vector"
+    "absl::span"
+    "absl::str_format"
+    "fuzztest::fuzztest"
+    "fuzztest::fuzztest_gtest_main"
+    "tcmalloc::experiment"
+    "tcmalloc::internal_logging"
+    "tcmalloc::testing_testutil"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_malloc_hook_internal
+  ALIAS
+    tcmalloc::malloc_hook_internal
+  HDRS
+    "malloc_hook.h"
+  SRCS
+    "malloc_hook.cc"
+  DEPS
+    "absl::base"
+    "absl::core_headers"
+    "absl::span"
+    "absl::time"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_hook_list"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_malloc_hook_sanitizer
+  ALIAS
+    tcmalloc::malloc_hook_sanitizer
+  ALWAYSLINK
+  SRCS
+    "malloc_hook_sanitizer.cc"
+  DEPS
+    "absl::config"
+    "absl::core_headers"
+    "absl::span"
+    "absl::time"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_hook_list"
+    "tcmalloc::malloc_hook_internal"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_malloc_hook
+  ALIAS
+    tcmalloc::malloc_hook
+  HDRS
+    "malloc_hook.h"
+  DEPS
+    "absl::core_headers"
+    "absl::span"
+    "absl::time"
+    "tcmalloc::internal_config"
+    "tcmalloc::internal_hook_list"
+    "tcmalloc::malloc_hook_internal"
+    "tcmalloc::malloc_hook_sanitizer"
+)
+
+tcmalloc_cc_library(
+  NAME
+    tcmalloc_alloc_at_least
+  ALIAS
+    tcmalloc::alloc_at_least
+  HDRS
+    "alloc_at_least.h"
+  SRCS
+    "alloc_at_least.cc"
+  DEPS
+    "absl::core_headers"
+)
+
+tcmalloc_cc_binary(
+  NAME
+    tcmalloc_dump_cpu_slab_allocation
+  SRCS
+    "dump_cpu_slab_allocation.cc"
+  DEPS
+    "absl::string_view"
+    "tcmalloc::common_8k_pages"
+    "tcmalloc::internal_numa"
+    "tcmalloc::internal_percpu_tcmalloc"
+    "tcmalloc::mock_central_freelist"
+    "tcmalloc::mock_transfer_cache"
+    "tcmalloc::tcmalloc"
+)
+

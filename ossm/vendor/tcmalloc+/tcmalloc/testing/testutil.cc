@@ -18,7 +18,17 @@
 
 #include <pthread.h>
 #include <stdlib.h>
+#include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
+
+#ifndef PR_SET_VMA
+#define PR_SET_VMA 0x53564d41
+#endif
+
+#ifndef PR_SET_VMA_ANON_NAME
+#define PR_SET_VMA_ANON_NAME 0
+#endif
 
 #include <cmath>
 #include <cstdint>
@@ -42,10 +52,6 @@ void SetTestResourceLimit(size_t limit) {
 #define USE_RESOURCE RLIMIT_AS
 #else
 #define USE_RESOURCE RLIMIT_RSS
-#endif
-
-#ifdef TCMALLOC_INTERNAL_SELSAN
-  return;  // SelSan allocates lots of virtual memory.
 #endif
 
   // Be careful we don't overflow rlim - if we would, this is a no-op
@@ -79,15 +85,10 @@ size_t GetTestResourceLimit() {
 }
 
 namespace tcmalloc {
-thread_local int ScopedFakeCpuId::test_vcpu_ =
-    tcmalloc_internal::subtle::percpu::kCpuIdUninitialized;
-namespace tcmalloc_internal::subtle::percpu {
-int VirtualCpu::TestSynchronize() { return ScopedFakeCpuId::test_vcpu_; }
-}  // namespace tcmalloc_internal::subtle::percpu
 
 std::string GetStatsInPbTxt() {
   // When huge page telemetry is enabled, the output can become very large.
-  const int buffer_length = 3 << 20;
+  const int buffer_length = 3 << 21;
   std::string buf;
   if (&MallocExtension_Internal_GetStatsInPbtxt == nullptr) {
     return buf;
@@ -173,6 +174,22 @@ double AndersonDarlingTest(absl::Span<const double> random_sample) {
   double ad_statistic = AndersonDarlingStatistic(random_sample);
   double p = AndersonDarlingPValue(random_sample.size(), ad_statistic);
   return p;
+}
+
+bool NamedVMAsSupported() {
+  static const bool pr_set_vma_works = [] {
+    constexpr size_t kMmapSize = 4096;
+    void* addr = mmap(NULL, kMmapSize, PROT_NONE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (addr == MAP_FAILED) {
+      return false;
+    }
+    int err =
+        prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, addr, kMmapSize, "test");
+    munmap(addr, kMmapSize);
+    return err == 0;
+  }();
+  return pr_set_vma_works;
 }
 
 }  // namespace tcmalloc

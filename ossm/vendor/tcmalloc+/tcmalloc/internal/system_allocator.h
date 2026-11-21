@@ -20,11 +20,14 @@
 
 #include <asm/unistd.h>
 
+#include <algorithm>
 #include <cstring>
 #include <optional>
 
+#include "absl/strings/match.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
+#include "tcmalloc/internal/is_aligned_to.h"
 #include "tcmalloc/internal/logging.h"
 #ifdef __linux__
 #include <linux/mempolicy.h>
@@ -40,11 +43,13 @@
 #include "tcmalloc/experiment.h"
 #include "tcmalloc/experiment_config.h"
 #include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/environment.h"
 #include "tcmalloc/internal/exponential_biased.h"
 #include "tcmalloc/internal/memory_tag.h"
 #include "tcmalloc/internal/numa.h"
 #include "tcmalloc/internal/optimization.h"
 #include "tcmalloc/internal/page_size.h"
+#include "tcmalloc/internal/strerror.h"
 #include "tcmalloc/internal/util.h"
 #include "tcmalloc/malloc_extension.h"
 
@@ -56,6 +61,18 @@
 #define MADV_COLLAPSE 25 /* Synchronous hugepage collapse */
 #endif
 
+#ifndef MADV_POPULATE_READ
+#define MADV_POPULATE_READ 22
+#endif
+
+#ifndef MADV_POPULATE_WRITE
+#define MADV_POPULATE_WRITE 23
+#endif
+
+#ifndef MADV_DONTNEED_LOCKED
+#define MADV_DONTNEED_LOCKED 24
+#endif
+
 // The <sys/prctl.h> on some systems may not define these macros yet even though
 // the kernel may have support for the new PR_SET_VMA syscall, so we explicitly
 // define them here.
@@ -65,6 +82,10 @@
 
 #ifndef PR_SET_VMA_ANON_NAME
 #define PR_SET_VMA_ANON_NAME 0
+#endif
+
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
 #endif
 
 GOOGLE_MALLOC_SECTION_BEGIN
@@ -81,13 +102,23 @@ struct MemoryModifyStatus {
   int error_number;
 };
 
-template <typename Topology>
+template <typename Topology, size_t NormalPartitions>
 class SystemAllocator {
  public:
-  constexpr explicit SystemAllocator(const Topology& topology
-                                         ABSL_ATTRIBUTE_LIFETIME_BOUND,
-                                     size_t min_mmap_size)
-      : topology_(topology), min_mmap_size_(min_mmap_size) {}
+  constexpr SystemAllocator() = default;
+  SystemAllocator(const Topology& topology ABSL_ATTRIBUTE_LIFETIME_BOUND,
+                  size_t min_mmap_size) {
+    Init(topology, min_mmap_size);
+  }
+
+  void Init(const Topology& topology,
+            size_t min_mmap_size) ABSL_NO_THREAD_SAFETY_ANALYSIS {
+    TC_CHECK(!topology_);
+    topology_ = &topology;
+    min_mmap_size_ = min_mmap_size;
+    madvise_ = MadvisePreference::kDontNeed;
+    InitRegionFactory();
+  }
 
   // REQUIRES: "alignment" is a power of two or "0" to indicate default
   // alignment REQUIRES: "alignment" and "size" <= kTagMask
@@ -108,7 +139,7 @@ class SystemAllocator {
 
   // Returns the number of times we failed to give pages back to the OS after a
   // call to Release.
-  int release_errors() const {
+  [[nodiscard]] int release_errors() const {
     return release_errors_.load(std::memory_order_relaxed);
   }
 
@@ -116,7 +147,7 @@ class SystemAllocator {
     madvise_.store(v, std::memory_order_relaxed);
   }
 
-  MadvisePreference madvise_preference() const {
+  [[nodiscard]] MadvisePreference madvise_preference() const {
     return madvise_.load(std::memory_order_relaxed);
   }
 
@@ -150,16 +181,12 @@ class SystemAllocator {
   // practice we will unconditionally fault the range.)
   //
   // REQUIRES: [start, start + length) is a range aligned to 4KiB boundaries.
-  inline void Back(void* start, size_t length) {
-    // TODO(b/134694141): use madvise when we have better support for that;
-    // taking faults is not free.
-
-    // TODO(b/134694141): enable this, if we can avoid causing trouble for apps
-    // that routinely make large mallocs they never touch (sigh).
+  void Back(void* start, size_t length) {
+    madvise(start, length, MADV_POPULATE_READ | MADV_POPULATE_WRITE);
   }
 
   // Returns the current address region factory.
-  [[nodiscard]] AddressRegionFactory* GetRegionFactory() const;
+  [[nodiscard]] AddressRegionFactory* GetRegionFactory();
 
   // Sets the current address region factory to factory.
   void SetRegionFactory(AddressRegionFactory* factory);
@@ -173,41 +200,48 @@ class SystemAllocator {
       ABSL_LOCKS_EXCLUDED(spinlock_);
 
  private:
-  const Topology& topology_;
-  const size_t min_mmap_size_;
+  const Topology* topology_ = nullptr;
+  ;
+  size_t min_mmap_size_ = 0;
 
-  static constexpr size_t kNumaPartitions = Topology::kNumPartitions;
+  static constexpr size_t kNumPartitions =
+      std::max(Topology::kNumPartitions, NormalPartitions);
+  static constexpr size_t kSecurityPartitions =
+      Topology::kNumPartitions > 1 ? 1 : NormalPartitions;
 
   mutable absl::base_internal::SpinLock spinlock_{
       absl::base_internal::SCHEDULE_KERNEL_ONLY};
 
-  uintptr_t rnd_ ABSL_GUARDED_BY(spinlock_) = 0;
+  ExponentialBiased::State rnd_ ABSL_GUARDED_BY(spinlock_){0};
   absl::once_flag rnd_flag_;
 
-  uintptr_t next_sampled_addr_ ABSL_GUARDED_BY(spinlock_) = 0;
-  uintptr_t next_selsan_addr_ ABSL_GUARDED_BY(spinlock_) = 0;
-  std::array<uintptr_t, kNumaPartitions> next_normal_addr_
+  std::array<uintptr_t, kSecurityPartitions> next_sampled_or_cold_addr_
       ABSL_GUARDED_BY(spinlock_) = {0};
-  uintptr_t next_cold_addr_ ABSL_GUARDED_BY(spinlock_) = 0;
+  uintptr_t next_guarded_addr_ ABSL_GUARDED_BY(spinlock_) = 0;
+  std::array<uintptr_t, kNumPartitions> next_normal_addr_
+      ABSL_GUARDED_BY(spinlock_) = {0};
   uintptr_t next_metadata_addr_ ABSL_GUARDED_BY(spinlock_) = 0;
 
   std::atomic<int> release_errors_{0};
-  std::atomic<MadvisePreference> madvise_{MadvisePreference::kDontNeed};
+  std::atomic<MadvisePreference> madvise_{MadvisePreference::kNever};
+  std::atomic<bool> has_custom_region_factory_{false};
+  bool unlock_vmas_ = false;
 
   void DiscardMappedRegions() ABSL_EXCLUSIVE_LOCKS_REQUIRED(spinlock_);
 
   // Checks that there is sufficient space available in the reserved region
   // for the next allocation, if not allocate a new region.
   // Then returns a pointer to the new memory.
-  std::pair<void*, size_t> AllocateFromRegion(size_t size, size_t alignment,
-                                              MemoryTag tag)
+  [[nodiscard]] std::pair<void*, size_t> AllocateFromRegion(size_t size,
+                                                            size_t alignment,
+                                                            MemoryTag tag)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(spinlock_);
 
-  std::array<AddressRegion*, kNumaPartitions> normal_region_
+  std::array<AddressRegion*, kNumPartitions> normal_region_
       ABSL_GUARDED_BY(spinlock_){{nullptr}};
-  AddressRegion* sampled_region_ ABSL_GUARDED_BY(spinlock_){nullptr};
-  AddressRegion* selsan_region_ ABSL_GUARDED_BY(spinlock_){nullptr};
-  AddressRegion* cold_region_ ABSL_GUARDED_BY(spinlock_){nullptr};
+  std::array<AddressRegion*, kSecurityPartitions> sampled_or_cold_region_
+      ABSL_GUARDED_BY(spinlock_){{nullptr}};
+  AddressRegion* guarded_region_ ABSL_GUARDED_BY(spinlock_){nullptr};
   AddressRegion* metadata_region_ ABSL_GUARDED_BY(spinlock_){nullptr};
 
   class MmapRegion final : public AddressRegion {
@@ -215,7 +249,8 @@ class SystemAllocator {
     MmapRegion(uintptr_t start, size_t size,
                AddressRegionFactory::UsageHint hint)
         : start_(start), free_size_(size), hint_(hint) {}
-    std::pair<void*, size_t> Alloc(size_t size, size_t alignment) override;
+    [[nodiscard]] std::pair<void*, size_t> Alloc(size_t size,
+                                                 size_t alignment) override;
     ~MmapRegion() override = default;
 
     static void operator delete(void*) { __builtin_trap(); }
@@ -233,32 +268,47 @@ class SystemAllocator {
 
     static void operator delete(void*) { __builtin_trap(); }
 
-    AddressRegion* Create(void* start, size_t size, UsageHint hint) override;
-    size_t GetStats(absl::Span<char> buffer) override;
-    size_t GetStatsInPbtxt(absl::Span<char> buffer) override;
+    [[nodiscard]] AddressRegion* Create(void* start, size_t size,
+                                        UsageHint hint) override;
+    [[nodiscard]] size_t GetStats(absl::Span<char> buffer) override;
+    [[nodiscard]] size_t GetStatsInPbtxt(absl::Span<char> buffer) override;
 
    private:
     std::atomic<size_t> bytes_reserved_{0};
   };
 
-  MmapRegionFactory mmap_factory_ ABSL_GUARDED_BY(spinlock_);
-  AddressRegionFactory* region_factory_ ABSL_GUARDED_BY(spinlock_) =
-      &mmap_factory_;
+  // Union hack to call the constructor lazily, to make this class
+  // suitable for placing in .bss section.
+  union DefaultFactory {
+    constexpr DefaultFactory() : dummy(false) {}
+    ~DefaultFactory() {}
+    MmapRegionFactory factory;
+    bool dummy;
+  };
+  DefaultFactory mmap_factory_ ABSL_GUARDED_BY(spinlock_);
+  AddressRegionFactory* region_factory_ ABSL_GUARDED_BY(spinlock_) = nullptr;
 
-  AddressRegionFactory::UsageHint TagToHint(MemoryTag tag) const;
+  [[nodiscard]] AddressRegionFactory::UsageHint TagToHint(MemoryTag tag) const;
   void BindMemory(void* base, size_t size, size_t partition) const
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(spinlock_);
-  uintptr_t RandomMmapHint(size_t size, size_t alignment, MemoryTag tag)
+  [[nodiscard]] uintptr_t RandomMmapHint(size_t size, size_t alignment,
+                                         MemoryTag tag)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(spinlock_);
   [[nodiscard]] void* MmapAlignedLocked(size_t size, size_t alignment,
                                         MemoryTag tag)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(spinlock_);
-  [[nodiscard]] bool ReleasePages(void* start, size_t length) const;
+
+  enum class ReleaseStatus {
+    kSuccess,
+    kFailure,
+    kRetryAfterMunlock,
+  };
+
+  [[nodiscard]] ReleaseStatus ReleasePages(void* start, size_t length) const;
+  void InitRegionFactory();
 };
 
 namespace system_allocator_internal {
-
-bool preferential_collapse();
 
 // Check that no bit is set at position ADDRESS_BITS or higher.
 template <int ADDRESS_BITS>
@@ -268,31 +318,48 @@ void CheckAddressBits(uintptr_t ptr) {
 
 // Specialize for the bit width of a pointer to avoid undefined shift.
 template <>
-ABSL_ATTRIBUTE_UNUSED inline void CheckAddressBits<8 * sizeof(void*)>(
+[[maybe_unused]] inline void CheckAddressBits<8 * sizeof(void*)>(
     uintptr_t ptr) {}
 
 static_assert(kAddressBits <= 8 * sizeof(void*),
               "kAddressBits must be smaller than the pointer size");
 
 // Rounds size down to a multiple of alignment.
-inline size_t RoundDown(const size_t size, const size_t alignment) {
+[[nodiscard]] inline size_t RoundDown(const size_t size,
+                                      const size_t alignment) {
   // Checks that the alignment has only one bit set.
   TC_ASSERT(absl::has_single_bit(alignment));
   return (size) & ~(alignment - 1);
 }
 
 // Rounds size up to a multiple of alignment.
-inline size_t RoundUp(const size_t size, const size_t alignment) {
+[[nodiscard]] inline size_t RoundUp(const size_t size, const size_t alignment) {
   return RoundDown(size + alignment - 1, alignment);
 }
 
-int MapFixedNoReplaceFlagAvailable();
+[[nodiscard]] int MapFixedNoReplaceFlagAvailable();
+// Probes whether MADV_DONTNEED_LOCKED is supported, returning the advice to
+// use.  Falls back to MADV_DONTNEED if the probe cannot be performed.
+[[nodiscard]] int ProbeMadvDontNeedAdvice();
+// Cached result of ProbeMadvDontNeedAdvice().
+[[nodiscard]] int MadvDontNeedAdviceAvailable();
+
+inline constexpr int kMapFixedNoReplace = MAP_FIXED_NOREPLACE;
 
 }  // namespace system_allocator_internal
 
-template <typename Topology>
-AddressRange SystemAllocator<Topology>::Allocate(size_t bytes, size_t alignment,
-                                                 const MemoryTag tag) {
+template <typename Topology, size_t NormalPartitions>
+void SystemAllocator<Topology, NormalPartitions>::InitRegionFactory()
+    ABSL_NO_THREAD_SAFETY_ANALYSIS {
+  if (region_factory_ == nullptr) {
+    new (&mmap_factory_.factory) MmapRegionFactory();
+    region_factory_ = &mmap_factory_.factory;
+  }
+}
+
+template <typename Topology, size_t NormalPartitions>
+AddressRange SystemAllocator<Topology, NormalPartitions>::Allocate(
+    size_t bytes, size_t alignment, const MemoryTag tag) {
   // If default alignment is set request the minimum alignment provided by
   // the system.
   alignment = std::max(alignment, GetPageSize());
@@ -312,31 +379,37 @@ AddressRange SystemAllocator<Topology>::Allocate(size_t bytes, size_t alignment,
   return {result, actual_bytes};
 }
 
-template <typename Topology>
-AddressRegionFactory* SystemAllocator<Topology>::GetRegionFactory() const {
+template <typename Topology, size_t NormalPartitions>
+AddressRegionFactory*
+SystemAllocator<Topology, NormalPartitions>::GetRegionFactory() {
   AllocationGuardSpinLockHolder lock_holder(spinlock_);
+  InitRegionFactory();
   return region_factory_;
 }
 
-template <typename Topology>
-void SystemAllocator<Topology>::SetRegionFactory(
+template <typename Topology, size_t NormalPartitions>
+void SystemAllocator<Topology, NormalPartitions>::SetRegionFactory(
     AddressRegionFactory* factory) {
   AllocationGuardSpinLockHolder lock_holder(spinlock_);
   DiscardMappedRegions();
   region_factory_ = factory;
+  if (factory != &mmap_factory_.factory) {
+    has_custom_region_factory_.store(true, std::memory_order_relaxed);
+  }
 }
 
-template <typename Topology>
-void SystemAllocator<Topology>::DiscardMappedRegions() {
+template <typename Topology, size_t NormalPartitions>
+void SystemAllocator<Topology, NormalPartitions>::DiscardMappedRegions() {
   std::fill(normal_region_.begin(), normal_region_.end(), nullptr);
-  sampled_region_ = nullptr;
-  selsan_region_ = nullptr;
-  cold_region_ = nullptr;
+  std::fill(sampled_or_cold_region_.begin(), sampled_or_cold_region_.end(),
+            nullptr);
+  guarded_region_ = nullptr;
   metadata_region_ = nullptr;
 }
 
-template <typename Topology>
-std::pair<void*, size_t> SystemAllocator<Topology>::MmapRegion::Alloc(
+template <typename Topology, size_t NormalPartitions>
+std::pair<void*, size_t>
+SystemAllocator<Topology, NormalPartitions>::MmapRegion::Alloc(
     size_t request_size, size_t alignment) {
   using system_allocator_internal::RoundUp;
 
@@ -358,16 +431,15 @@ std::pair<void*, size_t> SystemAllocator<Topology>::MmapRegion::Alloc(
   TC_ASSERT_EQ(result % GetPageSize(), 0);
   void* result_ptr = reinterpret_cast<void*>(result);
   if (mprotect(result_ptr, actual_size, PROT_READ | PROT_WRITE) != 0) {
-    TC_LOG("mprotect(%p, %v) failed (%s)", result_ptr, actual_size,
-           strerror(errno));
+    TC_LOG("mprotect(%p, %v) failed (%v)", result_ptr, actual_size,
+           StrError(errno));
     return {nullptr, 0};
   }
   // For cold regions (kInfrequentAccess) and sampled regions
   // (kInfrequentAllocation), we want as granular of access telemetry as
   // possible; this hint means we can get 4kiB granularity instead of 2MiB.
   if (hint_ == AddressRegionFactory::UsageHint::kInfrequentAccess ||
-      hint_ == AddressRegionFactory::UsageHint::kInfrequentAllocation ||
-      system_allocator_internal::preferential_collapse()) {
+      hint_ == AddressRegionFactory::UsageHint::kInfrequentAllocation) {
     // This is only advisory, so ignore the error.
     ErrnoRestorer errno_restorer;
     (void)madvise(result_ptr, actual_size, MADV_NOHUGEPAGE);
@@ -376,8 +448,9 @@ std::pair<void*, size_t> SystemAllocator<Topology>::MmapRegion::Alloc(
   return {result_ptr, actual_size};
 }
 
-template <typename Topology>
-AddressRegion* SystemAllocator<Topology>::MmapRegionFactory::Create(
+template <typename Topology, size_t NormalPartitions>
+AddressRegion*
+SystemAllocator<Topology, NormalPartitions>::MmapRegionFactory::Create(
     void* start, size_t size, UsageHint hint) {
   void* region_space = MallocInternal(sizeof(MmapRegion));
   if (!region_space) return nullptr;
@@ -386,8 +459,8 @@ AddressRegion* SystemAllocator<Topology>::MmapRegionFactory::Create(
       MmapRegion(reinterpret_cast<uintptr_t>(start), size, hint);
 }
 
-template <typename Topology>
-size_t SystemAllocator<Topology>::MmapRegionFactory::GetStats(
+template <typename Topology, size_t NormalPartitions>
+size_t SystemAllocator<Topology, NormalPartitions>::MmapRegionFactory::GetStats(
     absl::Span<char> buffer) {
   Printer printer(buffer.data(), buffer.size());
   size_t allocated = bytes_reserved_.load(std::memory_order_relaxed);
@@ -398,8 +471,9 @@ size_t SystemAllocator<Topology>::MmapRegionFactory::GetStats(
   return printer.SpaceRequired();
 }
 
-template <typename Topology>
-size_t SystemAllocator<Topology>::MmapRegionFactory::GetStatsInPbtxt(
+template <typename Topology, size_t NormalPartitions>
+size_t
+SystemAllocator<Topology, NormalPartitions>::MmapRegionFactory::GetStatsInPbtxt(
     absl::Span<char> buffer) {
   Printer printer(buffer.data(), buffer.size());
   size_t allocated = bytes_reserved_.load(std::memory_order_relaxed);
@@ -408,8 +482,9 @@ size_t SystemAllocator<Topology>::MmapRegionFactory::GetStatsInPbtxt(
   return printer.SpaceRequired();
 }
 
-template <typename Topology>
-std::pair<void*, size_t> SystemAllocator<Topology>::AllocateFromRegion(
+template <typename Topology, size_t NormalPartitions>
+std::pair<void*, size_t>
+SystemAllocator<Topology, NormalPartitions>::AllocateFromRegion(
     size_t request_size, size_t alignment, const MemoryTag tag) {
   using system_allocator_internal::RoundUp;
 
@@ -443,6 +518,7 @@ std::pair<void*, size_t> SystemAllocator<Topology>::AllocateFromRegion(
       TC_ASSERT_EQ(result.second, size);
     } else {
       TC_ASSERT_EQ(result.second, 0);
+      munmap(ptr, size);
     }
     return result;
   }
@@ -454,12 +530,12 @@ std::pair<void*, size_t> SystemAllocator<Topology>::AllocateFromRegion(
             return &normal_region_[0];
           case MemoryTag::kNormalP1:
             return &normal_region_[1];
-          case MemoryTag::kSampled:
-            return &sampled_region_;
-          case MemoryTag::kSelSan:
-            return &selsan_region_;
-          case MemoryTag::kCold:
-            return &cold_region_;
+          case MemoryTag::kSampledOrCold:
+            return &sampled_or_cold_region_[0];
+          case MemoryTag::kSampledOrColdP1:
+            return &sampled_or_cold_region_[1];
+          case MemoryTag::kGuarded:
+            return &guarded_region_;
           case MemoryTag::kMetadata:
             return &metadata_region_;
         }
@@ -476,30 +552,50 @@ std::pair<void*, size_t> SystemAllocator<Topology>::AllocateFromRegion(
 
   // Allocation failed so we need to reserve more memory.
   // Reserve new region and try allocation again.
-  void* ptr = MmapAlignedLocked(min_mmap_size_, min_mmap_size_, tag);
-  if (!ptr) return {nullptr, 0};
+  size_t region_size = min_mmap_size_;
+  void* ptr = MmapAlignedLocked(region_size, region_size, tag);
+  if (!ptr) {
+    // Reserving a full min_mmap_size_ region may fail under constrained virtual
+    // address space (e.g. a 4 GiB RLIMIT_AS sandbox once multiple tags are
+    // active). Fall back to reserving only what is needed for this request.
+    region_size = RoundUp(request_size, kHugePageSize);
+    if (region_size < request_size) return {nullptr, 0};
+    ptr =
+        MmapAlignedLocked(region_size, std::max(alignment, kHugePageSize), tag);
+    if (!ptr) return {nullptr, 0};
+  }
 
   const auto region_type = TagToHint(tag);
-  region = region_factory_->Create(ptr, min_mmap_size_, region_type);
+  region = region_factory_->Create(ptr, region_size, region_type);
   if (!region) {
-    munmap(ptr, min_mmap_size_);
+    munmap(ptr, region_size);
     return {nullptr, 0};
   }
   return region->Alloc(request_size, alignment);
 }
 
-template <typename Topology>
-void* SystemAllocator<Topology>::MmapAligned(size_t size, size_t alignment,
-                                             const MemoryTag tag) {
+template <typename Topology, size_t NormalPartitions>
+void* SystemAllocator<Topology, NormalPartitions>::MmapAligned(
+    size_t size, size_t alignment, const MemoryTag tag) {
   AllocationGuardSpinLockHolder l(spinlock_);
   return MmapAlignedLocked(size, alignment, tag);
 }
 
-template <typename Topology>
-void* SystemAllocator<Topology>::MmapAlignedLocked(size_t size,
-                                                   size_t alignment,
-                                                   const MemoryTag tag) {
+template <typename Topology, size_t NormalPartitions>
+void* SystemAllocator<Topology, NormalPartitions>::MmapAlignedLocked(
+    size_t size, size_t alignment, const MemoryTag tag) {
   using system_allocator_internal::MapFixedNoReplaceFlagAvailable;
+
+  constexpr uintptr_t kTagFree = uintptr_t{1} << kTagShift;
+  // Each memory tag partition spans kTagFree bytes (whereas kTagMask is the
+  // multi-bit mask across all tags), so requests with size or alignment larger
+  // than kTagFree would cross tag boundaries or clear tag bits in
+  // RandomMmapHint.
+  // TODO(b/141325493): Support allocations and alignments larger than kTagFree.
+  if (size == 0 || size > kTagFree || alignment == 0 || alignment > kTagFree ||
+      !absl::has_single_bit(alignment)) {
+    return nullptr;
+  }
 
   TC_ASSERT_LE(size, kTagMask);
   TC_ASSERT_LE(alignment, kTagMask);
@@ -508,18 +604,18 @@ void* SystemAllocator<Topology>::MmapAlignedLocked(size_t size,
   uintptr_t& next_addr =
       *[&]() ABSL_EXCLUSIVE_LOCKS_REQUIRED(spinlock_) GOOGLE_MALLOC_SECTION {
         switch (tag) {
-          case MemoryTag::kSampled:
-            return &next_sampled_addr_;
-          case MemoryTag::kSelSan:
-            return &next_selsan_addr_;
+          case MemoryTag::kSampledOrCold:
+            return &next_sampled_or_cold_addr_[0];
+          case MemoryTag::kSampledOrColdP1:
+            return &next_sampled_or_cold_addr_[1];
+          case MemoryTag::kGuarded:
+            return &next_guarded_addr_;
           case MemoryTag::kNormalP0:
             numa_partition = 0;
             return &next_normal_addr_[0];
           case MemoryTag::kNormalP1:
-            numa_partition = 1;
+            numa_partition = topology_->numa_aware() ? 1 : 0;
             return &next_normal_addr_[1];
-          case MemoryTag::kCold:
-            return &next_cold_addr_;
           case MemoryTag::kMetadata:
             return &next_metadata_addr_;
         }
@@ -529,7 +625,7 @@ void* SystemAllocator<Topology>::MmapAlignedLocked(size_t size,
       }();
 
   bool first = !next_addr;
-  if (!next_addr || next_addr & (alignment - 1) ||
+  if (!next_addr || !IsAlignedTo(next_addr, alignment) ||
       GetMemoryTag(reinterpret_cast<void*>(next_addr)) != tag ||
       GetMemoryTag(reinterpret_cast<void*>(next_addr + size - 1)) != tag) {
     next_addr = RandomMmapHint(size, alignment, tag);
@@ -547,6 +643,12 @@ void* SystemAllocator<Topology>::MmapAlignedLocked(size_t size,
 
     void* result = mmap(hint, size, PROT_NONE, flags, -1, 0);
     if (result == hint) {
+      if (unlock_vmas_) {
+        int ret;
+        do {
+          ret = munlock(result, size);
+        } while (ret == -1 && errno == EAGAIN);
+      }
       if (numa_partition.has_value()) {
         BindMemory(result, size, *numa_partition);
       }
@@ -565,14 +667,18 @@ void* SystemAllocator<Topology>::MmapAlignedLocked(size_t size,
       // result == hint or MAP_FAILED.  Any other value indicates incorrect
       // detection.
       TC_CHECK_EQ(result, MAP_FAILED);
+      // Address collisions with MAP_FIXED_NOREPLACE fail with EEXIST; ENOMEM
+      // indicates size exceeds RLIMIT_AS or VM limits, so retrying other hints
+      // of the same size will also fail.
+      if (errno == ENOMEM) return nullptr;
     } else {
       if (result == MAP_FAILED) {
-        TC_LOG("mmap(%p, %v) reservation failed (%s)", hint, size,
-               strerror(errno));
+        TC_LOG("mmap(%p, %v) reservation failed (%v)", hint, size,
+               StrError(errno));
         return nullptr;
       }
       if (int err = munmap(result, size)) {
-        TC_LOG("munmap(%p, %v) failed (%s)", result, size, strerror(errno));
+        TC_LOG("munmap(%p, %v) failed (%v)", result, size, StrError(errno));
         TC_ASSERT_EQ(err, 0);
       }
     }
@@ -594,11 +700,9 @@ void* SystemAllocator<Topology>::MmapAlignedLocked(size_t size,
   return nullptr;
 }
 
-template <typename Topology>
-MemoryModifyStatus SystemAllocator<Topology>::Release(void* start,
-                                                      size_t length) {
-  bool result = false;
-
+template <typename Topology, size_t NormalPartitions>
+MemoryModifyStatus SystemAllocator<Topology, NormalPartitions>::Release(
+    void* start, size_t length) {
 #if defined(MADV_DONTNEED) || defined(MADV_REMOVE)
   ErrnoRestorer errno_restorer;
   const size_t pagemask = GetPageSize() - 1;
@@ -617,54 +721,52 @@ MemoryModifyStatus SystemAllocator<Topology>::Release(void* start,
   TC_ASSERT_GE(new_start, reinterpret_cast<size_t>(start));
   TC_ASSERT_LE(new_end, end);
 
-  if (new_end > new_start) {
-    void* new_ptr = reinterpret_cast<void*>(new_start);
-    size_t new_length = new_end - new_start;
+  if (new_end <= new_start) {
+    return {false, errno};
+  }
 
-    if (!ReleasePages(new_ptr, new_length)) {
-      // Try unlocking.
-      int ret;
-      do {
-        ret = munlock(reinterpret_cast<char*>(new_start), new_end - new_start);
-      } while (ret == -1 && errno == EAGAIN);
+  void* new_ptr = reinterpret_cast<void*>(new_start);
+  size_t new_length = new_end - new_start;
 
-      if (ret != 0 || !ReleasePages(new_ptr, new_length)) {
-        // If we fail to munlock *or* fail our second attempt at madvise,
-        // increment our failure count.
-        release_errors_.fetch_add(1, std::memory_order_relaxed);
-      } else {
-        result = true;
-      }
-    } else {
-      result = true;
+  ReleaseStatus result = ReleasePages(new_ptr, new_length);
+  if (result == ReleaseStatus::kSuccess) {
+    return {true, errno};
+  } else if (result == ReleaseStatus::kRetryAfterMunlock) {
+    // Try unlocking.
+    int ret;
+    do {
+      ret = munlock(reinterpret_cast<char*>(new_start), new_length);
+    } while (ret == -1 && errno == EAGAIN);
+
+    if (ret == 0 &&
+        ReleasePages(new_ptr, new_length) == ReleaseStatus::kSuccess) {
+      return {true, errno};
     }
   }
+
+  release_errors_.fetch_add(1, std::memory_order_relaxed);
 #endif
 
-  return {result, errno};
+  return {false, errno};
 }
 
-template <typename Topology>
-MemoryModifyStatus SystemAllocator<Topology>::Collapse(void* start,
-                                                       size_t length) {
+template <typename Topology, size_t NormalPartitions>
+MemoryModifyStatus SystemAllocator<Topology, NormalPartitions>::Collapse(
+    void* start, size_t length) {
   int ret = -1;
   int attempts = 0;
   constexpr int kMaxAttempts = 3;
   ErrnoRestorer errno_restorer;
   do {
-    // Enable THP for the range before attempting to collapse the memory. This
-    // memory was previously madvise'd MADV_NOHUGEPAGE when it was allocated.
-    if (system_allocator_internal::preferential_collapse()) {
-      ret = madvise(start, length, MADV_HUGEPAGE);
-    }
     ret = madvise(start, length, MADV_COLLAPSE);
     ++attempts;
-  } while (ret == -1 && errno == EAGAIN && attempts < kMaxAttempts);
+  } while (ret == -1 && (errno == EAGAIN || errno == EINTR) &&
+           attempts < kMaxAttempts);
   return {ret == 0, errno};
 }
 
-template <typename Topology>
-void SystemAllocator<Topology>::SetAnonVmaName(
+template <typename Topology, size_t NormalPartitions>
+void SystemAllocator<Topology, NormalPartitions>::SetAnonVmaName(
     void* start, size_t length, std::optional<absl::string_view> name) {
 #ifdef __linux__
   // Make a best-effort attempt to name the allocated region based on its
@@ -674,33 +776,35 @@ void SystemAllocator<Topology>::SetAnonVmaName(
   // CONFIG_ANON_VMA_NAME kernel option.  This is OK since the call is
   // primarily a debugging aid.
   ErrnoRestorer errno_restorer;
-  if (name.has_value()) {
-    TC_ASSERT_EQ(strlen(name.value().data()), name.value().size());
-    prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, start, length, name.value().data());
+  char vma_name[256];
+  if (name.has_value() && !name->empty()) {
+    TC_ASSERT(!absl::StrContains(*name, '\0'));
+    const size_t len = std::min(name->size(), sizeof(vma_name) - 1);
+    memcpy(vma_name, name->data(), len);
+    vma_name[len] = '\0';
   } else {
-    char name[256];
     MemoryTag tag = GetMemoryTag(start);
-    absl::SNPrintF(name, sizeof(name), "tcmalloc_region_%s",
+    absl::SNPrintF(vma_name, sizeof(vma_name), "tcmalloc_region_%s",
                    MemoryTagToLabel(tag));
-    prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, start, length, name);
   }
+  prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, start, length, vma_name);
 #endif  // __linux__
 }
 
 // Bind the memory region spanning `size` bytes starting from `base` to NUMA
 // nodes assigned to `partition`. Returns zero upon success, or a standard
 // error code upon failure.
-template <typename Topology>
-void SystemAllocator<Topology>::BindMemory(void* const base, const size_t size,
-                                           const size_t partition) const {
+template <typename Topology, size_t NormalPartitions>
+void SystemAllocator<Topology, NormalPartitions>::BindMemory(
+    void* const base, const size_t size, const size_t partition) const {
   // If NUMA awareness is unavailable or disabled, or the user requested that
   // we don't bind memory then do nothing.
-  const NumaBindMode bind_mode = topology_.bind_mode();
-  if (!topology_.numa_aware() || bind_mode == NumaBindMode::kNone) {
+  const NumaBindMode bind_mode = topology_->bind_mode();
+  if (!topology_->numa_aware() || bind_mode == NumaBindMode::kNone) {
     return;
   }
 
-  const uint64_t nodemask = topology_.GetPartitionNodes(partition);
+  const uint64_t nodemask = topology_->GetPartitionNodes(partition);
   int err =
       syscall(__NR_mbind, base, size, MPOL_BIND | MPOL_F_STATIC_NODES,
               &nodemask, sizeof(nodemask) * 8, MPOL_MF_STRICT | MPOL_MF_MOVE);
@@ -719,30 +823,26 @@ void SystemAllocator<Topology>::BindMemory(void* const base, const size_t size,
          nodemask);
 }
 
-template <typename Topology>
-AddressRegionFactory::UsageHint SystemAllocator<Topology>::TagToHint(
-    MemoryTag tag) const {
+template <typename Topology, size_t NormalPartitions>
+AddressRegionFactory::UsageHint
+SystemAllocator<Topology, NormalPartitions>::TagToHint(MemoryTag tag) const {
   using UsageHint = AddressRegionFactory::UsageHint;
   switch (tag) {
     case MemoryTag::kNormal:
-      if (topology_.numa_aware()) {
+      if (topology_->numa_aware()) {
         return UsageHint::kNormalNumaAwareS0;
       }
       return UsageHint::kNormal;
     case MemoryTag::kNormalP1:
-      if (topology_.numa_aware()) {
+      if (topology_->numa_aware()) {
         return UsageHint::kNormalNumaAwareS1;
       }
       return UsageHint::kNormal;
-    case MemoryTag::kSelSan:
-      if (topology_.numa_aware()) {
-        return UsageHint::kNormalNumaAwareS0;
-      }
-      return UsageHint::kNormal;
-    case MemoryTag::kSampled:
-      return UsageHint::kInfrequentAllocation;
-    case MemoryTag::kCold:
+    case MemoryTag::kSampledOrCold:
+    case MemoryTag::kSampledOrColdP1:
       return UsageHint::kInfrequentAccess;
+    case MemoryTag::kGuarded:
+      return UsageHint::kInfrequentAllocation;
     case MemoryTag::kMetadata:
       return UsageHint::kMetadata;
   }
@@ -751,13 +851,18 @@ AddressRegionFactory::UsageHint SystemAllocator<Topology>::TagToHint(
   __builtin_unreachable();
 }
 
-template <typename Topology>
-uintptr_t SystemAllocator<Topology>::RandomMmapHint(size_t size,
-                                                    size_t alignment,
-                                                    const MemoryTag tag) {
+template <typename Topology, size_t NormalPartitions>
+uintptr_t SystemAllocator<Topology, NormalPartitions>::RandomMmapHint(
+    size_t size, size_t alignment, const MemoryTag tag) {
   // Rely on kernel's mmap randomization to seed our RNG.
   absl::base_internal::LowLevelCallOnce(
       &rnd_flag_, [&]() GOOGLE_MALLOC_SECTION {
+        // `TCMALLOC_MLOCKALL_UNLOCK_FUTURE` controls whether we `munlock` VMAs
+        // as we allocate them so that `mlockall` does not force
+        // TCMalloc-managed memory to be mlocked.
+        const char* e = thread_safe_getenv("TCMALLOC_MLOCKALL_UNLOCK_FUTURE");
+        unlock_vmas_ = absl::NullSafeStringView(e) == "1";
+
         const size_t page_size = GetPageSize();
         void* seed = mmap(nullptr, page_size, PROT_NONE,
                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -765,9 +870,10 @@ uintptr_t SystemAllocator<Topology>::RandomMmapHint(size_t size,
           TC_BUG("Initial mmap() reservation failed (errno=%v, size=%v)", errno,
                  page_size);
         }
+        const uintptr_t seed_value = reinterpret_cast<uintptr_t>(seed);
         munmap(seed, page_size);
         spinlock_.AssertHeld();
-        rnd_ = reinterpret_cast<uintptr_t>(seed);
+        rnd_ = ExponentialBiased::State{seed_value};
       });
 
 #if !defined(ABSL_HAVE_MEMORY_SANITIZER) && !defined(ABSL_HAVE_THREAD_SANITIZER)
@@ -791,9 +897,21 @@ uintptr_t SystemAllocator<Topology>::RandomMmapHint(size_t size,
   // tag.
   alignment = absl::bit_ceil(std::max(alignment, size));
 
-  rnd_ = ExponentialBiased::NextRandom(rnd_);
-  uintptr_t addr = rnd_ & kAddrMask & ~(alignment - 1) & ~kTagMask;
-  addr |= static_cast<uintptr_t>(tag) << kTagShift;
+  auto next_addr = [&](uintptr_t mask) ABSL_EXCLUSIVE_LOCKS_REQUIRED(
+                       spinlock_) GOOGLE_MALLOC_SECTION {
+    uintptr_t a;
+    do {
+      rnd_ = ExponentialBiased::NextRandom(rnd_);
+      const uintptr_t rnd_addr =
+          static_cast<uintptr_t>(ExponentialBiased::GetRandom(rnd_))
+          << (ExponentialBiased::kStateBits - ExponentialBiased::kRandomBits);
+      a = rnd_addr & mask & ~(alignment - 1) & ~kTagMask;
+      a |= static_cast<uintptr_t>(tag) << kTagShift;
+    } while (a == 0);
+    return a;
+  };
+
+  uintptr_t addr = next_addr(kAddrMask);
 
 #if defined(ABSL_HAVE_THREAD_SANITIZER)
 #if defined(__x86_64__)
@@ -826,19 +944,19 @@ uintptr_t SystemAllocator<Topology>::RandomMmapHint(size_t size,
   };
 
   for (int i = 0; i < 10 && !reserved_for_app(addr); ++i) {
-    rnd_ = ExponentialBiased::NextRandom(rnd_);
-    addr = rnd_ & kHiAppMask & ~(alignment - 1) & ~kTagMask;
-    addr |= static_cast<uintptr_t>(tag) << kTagShift;
+    addr = next_addr(kHiAppMask);
   }
 #endif
 
+  TC_ASSERT_NE(addr, 0);
   TC_ASSERT_EQ(GetMemoryTag(reinterpret_cast<const void*>(addr)), tag);
   return addr;
 }
 
-template <typename Topology>
-inline bool SystemAllocator<Topology>::ReleasePages(void* start,
-                                                    size_t length) const {
+template <typename Topology, size_t NormalPartitions>
+inline typename SystemAllocator<Topology, NormalPartitions>::ReleaseStatus
+SystemAllocator<Topology, NormalPartitions>::ReleasePages(void* start,
+                                                          size_t length) const {
   // TODO(b/424551232): madvise rounds up length to the multiple of page size.
   // If TCMalloc's page size is lower than the system's page size, madvise may
   // corrupt the in-use memory. Check that the requested size and start address
@@ -847,10 +965,9 @@ inline bool SystemAllocator<Topology>::ReleasePages(void* start,
   const uintptr_t e = s + length;
   const uintptr_t mask = GetPageSize() - 1;
   if ((s & mask) != 0 || (e & mask) != 0) {
-    return false;
+    return ReleaseStatus::kFailure;
   }
 
-  int ret;
   // Note -- ignoring most return codes, because if this fails it
   // doesn't matter...
   // Moreover, MADV_REMOVE *will* fail (with EINVAL) on private memory,
@@ -858,15 +975,23 @@ inline bool SystemAllocator<Topology>::ReleasePages(void* start,
 #ifdef MADV_REMOVE
   // MADV_REMOVE deletes any backing storage for tmpfs or anonymous shared
   // memory.
-  do {
-    ret = madvise(start, length, MADV_REMOVE);
-  } while (ret == -1 && errno == EAGAIN);
+#ifndef TCMALLOC_INTERNAL_LEGACY_LOCKING2
+  if (ABSL_PREDICT_FALSE(
+          has_custom_region_factory_.load(std::memory_order_relaxed)))
+#endif
+  {
+    int ret;
+    do {
+      ret = madvise(start, length, MADV_REMOVE);
+    } while (ret == -1 && errno == EAGAIN);
 
-  if (ret == 0) {
-    return true;
+    if (ret == 0) {
+      return ReleaseStatus::kSuccess;
+    }
   }
 #endif
 
+  ReleaseStatus status = ReleaseStatus::kFailure;
 #ifdef MADV_FREE
   const bool do_madvfree = [&]() {
     switch (madvise_preference()) {
@@ -882,9 +1007,16 @@ inline bool SystemAllocator<Topology>::ReleasePages(void* start,
   }();
 
   if (do_madvfree) {
+    int ret;
     do {
       ret = madvise(start, length, MADV_FREE);
     } while (ret == -1 && errno == EAGAIN);
+
+    if (ret == 0) {
+      status = ReleaseStatus::kSuccess;
+    } else if (errno == EINVAL) {
+      status = ReleaseStatus::kRetryAfterMunlock;
+    }
   }
 #endif
 #ifdef MADV_DONTNEED
@@ -903,16 +1035,21 @@ inline bool SystemAllocator<Topology>::ReleasePages(void* start,
 
   // MADV_DONTNEED drops page table info and any anonymous pages.
   if (do_madvdontneed) {
+    const int advice = system_allocator_internal::MadvDontNeedAdviceAvailable();
+    int ret;
     do {
-      ret = madvise(start, length, MADV_DONTNEED);
+      ret = madvise(start, length, advice);
     } while (ret == -1 && errno == EAGAIN);
+
+    if (ret == 0) {
+      return ReleaseStatus::kSuccess;
+    }
+    status = advice == MADV_DONTNEED ? ReleaseStatus::kRetryAfterMunlock
+                                     : ReleaseStatus::kFailure;
   }
 #endif
-  if (ret == 0) {
-    return true;
-  }
 
-  return false;
+  return status;
 }
 
 }  // namespace tcmalloc_internal

@@ -54,11 +54,16 @@ bool StackMatches(const char* target, const void* const* stack, size_t len) {
   return false;
 }
 
+// An 11000 byte allocation aligned to 2K will map to the same size class as
+// malloc(11000).
+constexpr size_t kRequestedSize = 11000;
+constexpr size_t kRequestedAlignment = 2048;
+
 template <bool CheckSize>
 size_t CountMatchingBytes(const char* target, Profile profile) {
   size_t sum = 0;
   profile.Iterate([&](const Profile::Sample& e) {
-    if (e.requested_size == 10000 || !CheckSize) {
+    if (e.requested_size == kRequestedSize || !CheckSize) {
       if (StackMatches(target, e.stack, e.depth)) {
         sum += static_cast<size_t>(e.sum);
       }
@@ -67,11 +72,6 @@ size_t CountMatchingBytes(const char* target, Profile profile) {
 
   return sum;
 }
-
-// A 10000 byte allocation aligned to 2K will map to the same size class as
-// malloc(10000).
-constexpr size_t kRequestedSize = 10000;
-constexpr size_t kRequestedAlignment = 2048;
 
 ABSL_ATTRIBUTE_NOINLINE static void* AllocateAllocate(bool align) {
   void* p;
@@ -162,7 +162,7 @@ TEST(Sampling, AlwaysSampling) {
   for (int i = 0; i < kIters; ++i) {
     allocs.push_back(AllocateZeroByte());
   }
-  const absl::optional<size_t> alloc_size =
+  const std::optional<size_t> alloc_size =
       MallocExtension::GetAllocatedSize(allocs[0]);
   ASSERT_THAT(alloc_size, testing::Ne(std::nullopt));
   EXPECT_GT(*alloc_size, 0);
@@ -187,7 +187,7 @@ TEST(Sampling, InternalFragmentation) {
   ScopedGuardedSamplingInterval gs(-1);
   ScopedProfileSamplingInterval s(1);
 
-  static constexpr size_t kBytes = 1 << 30;
+  static constexpr size_t kBytes = 1 << 28;
   // A power of 2 is very likely a size class, but we will check this.
   static constexpr size_t kLowFragmentationSize = 1 << 13;
   // A power of 2 + 1 is very unlikely to correspond exactly to a size class.
@@ -200,7 +200,7 @@ TEST(Sampling, InternalFragmentation) {
   low.reserve(kNumLow);
   high.reserve(kNumHigh);
 
-  const absl::optional<size_t> starting_fragmentation =
+  const std::optional<size_t> starting_fragmentation =
       MallocExtension::GetNumericProperty(
           "tcmalloc.sampled_internal_fragmentation");
   ASSERT_THAT(starting_fragmentation, testing::Ne(std::nullopt));
@@ -231,7 +231,7 @@ TEST(Sampling, InternalFragmentation) {
     low.push_back(::operator new(kLowFragmentationSize));
   }
 
-  const absl::optional<size_t> actual_low =
+  const std::optional<size_t> actual_low =
       MallocExtension::GetAllocatedSize(low[0]);
   ASSERT_THAT(actual_low, testing::Ne(std::nullopt));
 
@@ -239,13 +239,13 @@ TEST(Sampling, InternalFragmentation) {
     high.push_back(::operator new(kHighFragmentationSize));
   }
 
-  const absl::optional<size_t> actual_high =
+  const std::optional<size_t> actual_high =
       MallocExtension::GetAllocatedSize(high[0]);
   ASSERT_THAT(actual_high, testing::Ne(std::nullopt));
 
   const size_t ending_profiled_fragmentation = ProfiledFragmentation();
 
-  const absl::optional<size_t> ending_fragmentation =
+  const std::optional<size_t> ending_fragmentation =
       MallocExtension::GetNumericProperty(
           "tcmalloc.sampled_internal_fragmentation");
   ASSERT_THAT(ending_fragmentation, testing::Ne(std::nullopt));

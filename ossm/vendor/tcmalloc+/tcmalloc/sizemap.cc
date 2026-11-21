@@ -19,16 +19,21 @@
 #include <cstdio>
 #include <cstring>
 #include <new>
+#include <vector>
 
 #include "absl/base/macros.h"
+#include "absl/base/nullability.h"
 #include "absl/types/span.h"
 #include "tcmalloc/common.h"
 #include "tcmalloc/huge_page_aware_allocator.h"
 #include "tcmalloc/internal/config.h"
+#include "tcmalloc/internal/is_aligned_to.h"
 #include "tcmalloc/internal/logging.h"
+#include "tcmalloc/internal/parameter_accessors.h"
 #include "tcmalloc/internal/sampled_allocation.h"
+#include "tcmalloc/internal/size_class_info.h"
 #include "tcmalloc/pages.h"
-#include "tcmalloc/size_class_info.h"
+#include "tcmalloc/parameters.h"
 #include "tcmalloc/span.h"
 #include "tcmalloc/static_vars.h"
 
@@ -40,13 +45,14 @@ const SizeClasses& SizeMap::CurrentClasses() {
   switch (Static::size_class_configuration()) {
     case SizeClassConfiguration::kPow2Only:
       return kExperimentalPow2SizeClasses;
-    case SizeClassConfiguration::kReuse:
+    case SizeClassConfiguration::kReuseRelaxedBelow64:
       return kSizeClasses;
-    case SizeClassConfiguration::kReuseV2:
-      return kReuseSizeClassesV2;
-    case SizeClassConfiguration::kLegacy:
-      // TODO(b/242710633): remove this opt out.
-      return kLegacySizeClasses;
+    case SizeClassConfiguration::kFlexible:
+      return kFlexibleSizeClasses;
+    case SizeClassConfiguration::kFlexibleNoReuse:
+      return kFlexibleNoReuseSizeClasses;
+    case SizeClassConfiguration::kFlexibleNoReuseNo4056:
+      return kFlexibleNoReuseNo4056SizeClasses;
   }
   TC_BUG("unreachable");
 }
@@ -54,9 +60,9 @@ const SizeClasses& SizeMap::CurrentClasses() {
 bool SizeMap::CheckAssumptions() {
   bool failed = false;
   auto a = CurrentClasses().assumptions;
-  if (a.has_expanded_classes != kHasExpandedClasses) {
-    fprintf(stderr, "kHasExpandedClasses: assumed %d, actual %d\n",
-            a.has_expanded_classes, kHasExpandedClasses);
+  if (a.has_cold_classes != kHasColdClasses) {
+    fprintf(stderr, "kHasColdClasses: assumed %d, actual %d\n",
+            a.has_cold_classes, kHasColdClasses);
     failed |= true;
   }
 #ifdef NDEBUG
@@ -90,7 +96,7 @@ bool SizeMap::CheckAssumptions() {
   return !failed;
 }
 
-bool SizeMap::IsValidSizeClass(size_t size, size_t pages,
+bool SizeMap::IsValidSizeClass(size_t size, Length pages,
                                size_t num_objects_to_move) {
   if (size == 0) {
     TC_LOG("size class is 0");
@@ -104,19 +110,19 @@ bool SizeMap::IsValidSizeClass(size_t size, size_t pages,
   const size_t alignment = size > SizeMap::kLargeSize
                                ? kLargeSizeAlignment
                                : static_cast<size_t>(kAlignment);
-  if ((size & (alignment - 1)) != 0) {
+  if (!IsAlignedTo(size, alignment)) {
     TC_LOG("%v not aligned properly %v", size, alignment);
     return false;
   }
-  if (pages == 0) {
+  if (pages == Length(0)) {
     TC_LOG("pages should not be 0");
     return false;
   }
-  if (pages > 32) {
+  if (pages > Length(32)) {
     TC_LOG("pages %v limited to 32", pages);
     return false;
   }
-  const size_t objects_per_span = Length(pages).in_bytes() / size;
+  const size_t objects_per_span = pages.in_bytes() / size;
   if (objects_per_span < 1) {
     TC_LOG("each span must have at least one object");
     return false;
@@ -150,27 +156,24 @@ bool SizeMap::SetSizeClasses(absl::Span<const SizeClassInfo> size_classes) {
     return false;
   }
 
-  class_to_size_[0] = 0;
-  class_to_pages_[0] = 0;
-  num_objects_to_move_[0] = 0;
-
   int curr = 1;
   for (int c = 1; c < num_classes; c++) {
     class_to_size_[curr] = size_classes[c].size;
-    class_to_pages_[curr] = size_classes[c].pages;
+    class_to_pages_[curr] = BytesToLengthFloor(size_classes[c].bytes).raw_num();
     num_objects_to_move_[curr] = size_classes[c].num_to_move;
     ++curr;
   }
 
-  // Fill any unspecified size classes with 0.
-  for (int x = curr; x < kNumBaseClasses; x++) {
-    class_to_size_[x] = 0;
-    class_to_pages_[x] = 0;
-    num_objects_to_move_[x] = 0;
-  }
-
   // Copy selected size classes into the upper registers.
   for (int i = 1; i < (kNumClasses / kNumBaseClasses); i++) {
+    // Don't populate info for classes that will never be used.
+    // This helps to catch bugs, and prevents cpu cache, transfer cache
+    // and other components from allocating resources for these classes.
+    const bool is_cold = IsColdSizeClass(i * kNumBaseClasses);
+    if ((is_cold && !kHasColdClasses) ||
+        (!is_cold && i >= tc_globals.active_partitions())) {
+      continue;
+    }
     std::copy(&class_to_size_[0], &class_to_size_[kNumBaseClasses],
               &class_to_size_[kNumBaseClasses * i]);
     std::copy(&class_to_pages_[0], &class_to_pages_[kNumBaseClasses],
@@ -185,22 +188,22 @@ bool SizeMap::SetSizeClasses(absl::Span<const SizeClassInfo> size_classes) {
 // Return true if all size classes meet the requirements for alignment
 // ordering and min and max values.
 bool SizeMap::ValidSizeClasses(absl::Span<const SizeClassInfo> size_classes) {
-  if (size_classes.empty()) {
+  int num_classes = size_classes.size();
+  if (num_classes <= 1 || num_classes > kNumBaseClasses) {
     return false;
   }
-  int num_classes = size_classes.size();
-  if (kHasExpandedClasses && num_classes > kNumBaseClasses) {
-    num_classes = kNumBaseClasses;
-  }
-
-  if (size_classes[0].size != 0 || size_classes[0].pages != 0 ||
+  if (size_classes[0].size != 0 || size_classes[0].bytes != Bytes(0) ||
       size_classes[0].num_to_move != 0) {
     return false;
   }
 
   for (int c = 1; c < num_classes; c++) {
     size_t class_size = size_classes[c].size;
-    size_t pages = size_classes[c].pages;
+    Length pages = BytesToLengthFloor(size_classes[c].bytes);
+    if (Bytes(pages.in_bytes()) != size_classes[c].bytes) {
+      TC_LOG("Non-page multiple span size %v: %v", c, size_classes[c].bytes);
+      return false;
+    }
     size_t num_objects_to_move = size_classes[c].num_to_move;
     // Each size class must be larger than the previous size class.
     if (class_size <= size_classes[c - 1].size) {
@@ -228,64 +231,87 @@ bool SizeMap::ValidSizeClasses(absl::Span<const SizeClassInfo> size_classes) {
 bool SizeMap::Init(absl::Span<const SizeClassInfo> size_classes) {
   // Do some sanity checking on add_amount[]/shift_amount[]/class_array[]
   TC_CHECK_EQ(ClassIndex(0), 0);
-  TC_CHECK_LT(ClassIndex(kMaxSize), sizeof(class_array_));
-  static_assert(kAlignment <= std::align_val_t{16}, "kAlignment is too large");
+  TC_CHECK_EQ(ClassIndex(kMaxSize), kClassArraySize - 1);
+  TC_CHECK_EQ(ClassIndex(kLargeSize) + 1, ClassIndex(kLargeSize + 1));
+  static_assert(kSmallSizeAlignment <= static_cast<size_t>(kAlignment));
+  static_assert(static_cast<size_t>(kAlignment) <= 16);
 
   if (!SetSizeClasses(size_classes)) {
     return false;
   }
 
-  int next_size = 0;
-  for (int c = 1; c < kNumClasses; c++) {
-    const int max_size_in_class = class_to_size_[c];
-
-    for (int s = next_size; s <= max_size_in_class;
-         s += static_cast<size_t>(kAlignment)) {
+  // Fill in the canonical class array in region 0.
+  for (int c = 1, s = 0; c < kNumClasses && s <= kMaxSize; c++) {
+    for (; s <= class_to_size_[c]; s += kSmallSizeAlignment) {
       class_array_[ClassIndex(s)] = c;
     }
-    next_size = max_size_in_class + static_cast<size_t>(kAlignment);
-    if (next_size > kMaxSize) {
-      break;
+  }
+
+  // Point all lookups in hot regions (Malloc R0, New R1, Malloc R1)
+  // directly to New R0. We only overwrite the lookups if heap
+  // partitioning is active with the dedicated size classes.
+  for (size_t i = 1; i < kHotRegions; ++i) {
+    SetClassArrayRegion(i, 0);
+  }
+
+  const bool heap_partitioning_full =
+      Parameters::heap_partitioning_mode() == HeapPartitioningMode::kFull;
+  if (ColdFeatureActive()) {
+    SetClassArrayRegion(kColdRegionsStart, +kColdClassesStart);
+    if (kSecurityPartitions > 1) {
+      // Point all lookups in Cold New R1 to either Hot New R1 or Cold New R0.
+      SetClassArrayRegion(kColdRegionsStart + 1, heap_partitioning_full
+                                                     ? +kNumBaseClasses
+                                                     : +kColdClassesStart);
     }
   }
 
-  if (!ColdFeatureActive()) {
-    return true;
-  }
-
-  memset(cold_sizes_, 0, sizeof(cold_sizes_));
-  cold_sizes_count_ = 0;
-  // Point all lookups in the upper register of class_array_ (allocations
-  // seeking cold memory) to the lower size classes.  This gives us an easy
-  // fallback for sizes that are too small for moving to cold memory (due to
-  // intrusive span metadata).
-  std::copy(&class_array_[0], &class_array_[kClassArraySize],
-            &class_array_[kClassArraySize]);
-
-  for (int c = kExpandedClassesStart; c < kNumClasses; c++) {
-    size_t max_size_in_class = class_to_size_[c];
-    if (max_size_in_class == 0 || !Span::IsNonIntrusive(max_size_in_class)) {
-      next_size = max_size_in_class + static_cast<size_t>(kAlignment);
-      continue;
-    }
-
-    TC_CHECK(Span::IsNonIntrusive(max_size_in_class), "size=%v",
-             max_size_in_class);
-    cold_sizes_[cold_sizes_count_] = c;
-    ++cold_sizes_count_;
-
-    for (int s = next_size; s <= max_size_in_class;
-         s += static_cast<size_t>(kAlignment)) {
-      class_array_[ClassIndex(s) + kClassArraySize] = c;
-    }
-    next_size = max_size_in_class + static_cast<size_t>(kAlignment);
-    if (next_size > kMaxSize) {
-      break;
+  if (kSecurityPartitions > 1 && tc_globals.multiple_non_numa_partitions()) {
+    // Route Hot Malloc R1 to security partition P1.
+    SetClassArrayRegion(kSecurityPartitions + 1, +kNumBaseClasses);
+    // Route Hot New R1 to security partition P1.
+    SetClassArrayRegion(1, +kNumBaseClasses);
+    if (!heap_partitioning_full) {
+      // In kLight mode, route Hot New R0 to P1.
+      SetClassArrayRegion(0, +kNumBaseClasses);
     }
   }
+
   return true;
+}
+
+void SizeMap::SetClassArrayRegion(size_t region, CompactSizeClass adjust) {
+  // Ensure R0 is the canonical non-adjusted array.
+  TC_CHECK_EQ(class_array_[0], 1);
+  for (size_t i = 0; i < kClassArraySize; ++i) {
+    class_array_[region * kClassArraySize + i] = class_array_[i] + adjust;
+  }
 }
 
 }  // namespace tcmalloc_internal
 }  // namespace tcmalloc
+
+extern "C" {
+
+void TCMalloc_Internal_GetSizeClasses(
+    std::vector<tcmalloc::tcmalloc_internal::TracerSizeClassInfo>* absl_nonnull
+        size_classes) {
+  tcmalloc::tcmalloc_internal::tc_globals.InitIfNecessary();
+  size_t num_classes = tcmalloc::tcmalloc_internal::kNumClasses;
+  size_classes->resize(num_classes);
+  for (size_t i = 0; i < num_classes; ++i) {
+    (*size_classes)[i].size =
+        tcmalloc::tcmalloc_internal::tc_globals.sizemap().class_to_size(i);
+    (*size_classes)[i].span_size_in_bytes =
+        tcmalloc::tcmalloc_internal::tc_globals.sizemap()
+            .class_to_pages(i)
+            .in_bytes();
+    (*size_classes)[i].num_objects_to_move =
+        tcmalloc::tcmalloc_internal::tc_globals.sizemap().num_objects_to_move(
+            i);
+  }
+}
+
+}  // extern "C"
+
 GOOGLE_MALLOC_SECTION_END

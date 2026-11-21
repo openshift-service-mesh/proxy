@@ -24,7 +24,7 @@
 #include "absl/base/attributes.h"
 #include "absl/base/internal/cycleclock.h"
 #include "absl/base/optimization.h"
-#include "tcmalloc/internal/config.h"
+#include "absl/hash/hash.h"
 #include "tcmalloc/internal/exponential_biased.h"
 #include "tcmalloc/internal/logging.h"
 #include "tcmalloc/parameters.h"
@@ -55,7 +55,7 @@ ABSL_ATTRIBUTE_NOINLINE void Sampler::Init(uint64_t seed) {
   tc_globals.InitIfNecessary();
 
   // Initialize PRNG
-  rnd_ = seed;
+  rnd_ = ExponentialBiased::State{seed};
   // Step it forward 20 times for good measure
   for (int i = 0; i < 20; i++) {
     rnd_ = ExponentialBiased::NextRandom(rnd_);
@@ -66,7 +66,7 @@ ABSL_ATTRIBUTE_NOINLINE void Sampler::Init(uint64_t seed) {
 
 ssize_t Sampler::PickNextSamplingPoint() {
   sample_interval_ = GetSampleInterval();
-  if (sample_interval_ <= 0) {
+  if (ABSL_PREDICT_FALSE(sample_interval_ <= 0)) {
     // In this case, we don't want to sample ever, and the larger a
     // value we put here, the longer until we hit the slow path
     // again. However, we have to support the flag changing at
@@ -100,10 +100,9 @@ ssize_t Sampler::GetGeometricVariable(ssize_t mean) {
   // Take the top 26 bits as the random number
   // (This plus the 1<<58 sampling bound give a max possible step of
   // 5194297183973780480 bytes.)
-  const uint64_t prng_mod_power = 48;  // Number of bits in prng
-  // The uint32_t cast is to prevent a (hard-to-reproduce) NAN
-  // under piii debug for some binaries.
-  double q = static_cast<uint32_t>(rnd_ >> (prng_mod_power - 26)) + 1.0;
+  double q = (ExponentialBiased::GetRandom(rnd_) >>
+              (ExponentialBiased::kRandomBits - 26)) +
+             1.0;
   // Put the computed p-value through the CDF of a geometric.
   double interval = (std::log2(q) - 26) * (-std::log(2.0) * mean);
 
@@ -120,15 +119,16 @@ ssize_t Sampler::GetGeometricVariable(ssize_t mean) {
     return static_cast<ssize_t>(interval);
 }
 
-size_t Sampler::RecordAllocationSlow(size_t k) {
+ssize_t Sampler::RecordAllocationSlow(size_t k) {
   if (ABSL_PREDICT_FALSE(!initialized_)) {
     initialized_ = true;
-    Init(static_cast<uint64_t>(absl::base_internal::CycleClock::Now()) +
-         reinterpret_cast<uintptr_t>(this));
+    Init(absl::HashOf(
+        static_cast<uint64_t>(absl::base_internal::CycleClock::Now()),
+        reinterpret_cast<uintptr_t>(this)));
     // Avoid missampling 0.
     bytes_until_sample_ -= k + 1;
     if (ABSL_PREDICT_TRUE(bytes_until_sample_ >= 0)) {
-      return 0;
+      return -1;
     }
   }
 
@@ -143,8 +143,14 @@ size_t Sampler::RecordAllocationSlow(size_t k) {
   // total samples. Multiplying by T, the mean number of bytes between samples,
   // gives us a weight of T + k - f.
   //
+  // A request larger than the largest ssize_t wraps bytes_until_sample_ past
+  // zero and back to a non-negative value in TryRecordAllocationFast, so the
+  // counter no longer encodes f.  Such a request cannot be satisfied anyway;
+  // clamp the weight rather than derive it from the wrapped counter.
   ssize_t weight;
-  if (ABSL_PREDICT_FALSE(__builtin_ssubl_overflow(
+  if (ABSL_PREDICT_FALSE(
+          k > static_cast<size_t>(std::numeric_limits<ssize_t>::max())) ||
+      ABSL_PREDICT_FALSE(__builtin_ssubl_overflow(
           sample_interval_, bytes_until_sample_ + kIntervalOffset, &weight))) {
     weight = std::numeric_limits<ssize_t>::max();
   }

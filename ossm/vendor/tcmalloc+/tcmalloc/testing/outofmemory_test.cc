@@ -36,13 +36,13 @@ class OutOfMemoryTest : public ::testing::Test {
   OutOfMemoryTest() {
     MallocExtension::SetBackgroundProcessActionsEnabled(false);
     // If memory releaser thread is doing anything at the moment, let it finish.
-    absl::SleepFor(absl::Seconds(1));
+    absl::SleepFor(absl::Milliseconds(100));
   }
 };
 
 TEST_F(OutOfMemoryTest, TestUntilFailure) {
   ScopedNeverSample never_sample;
-  ScopedResourceLimit limit{6 * kGiB};
+  ScopedResourceLimit limit{8 * kGiB};
 
   // Check that large allocations fail with NULL instead of crashing.
   static const size_t kIncrement = 100 << 20;
@@ -60,7 +60,7 @@ TEST_F(OutOfMemoryTest, TestUntilFailure) {
 
 TEST_F(OutOfMemoryTest, SmallAllocs) {
   ScopedNeverSample never_sample;
-  ScopedResourceLimit limit{6 * kGiB};
+  ScopedResourceLimit limit{8 * kGiB};
 
   // Check that large allocations fail with NULL instead of crashing.
   static constexpr size_t kSize = tcmalloc_internal::kHugePageSize / 2 - 1;
