@@ -28,10 +28,10 @@ new_local_repository(
 # 1. Determine SHA256 `wget https://github.com/envoyproxy/envoy/archive/$COMMIT.tar.gz && sha256sum $COMMIT.tar.gz`
 # 2. Update .bazelversion, envoy.bazelrc and .bazelrc if needed.
 #
-# Commit date: 11/05/26
-ENVOY_SHA = "53c4d3e2d075d36ad8a6390374a4e7f359f9797c"
+# Commit date: 2026-10-12
+ENVOY_SHA = "eb0a95ba450a3e29a9a8e75f672e2c294493eea2"
 
-ENVOY_SHA256 = "19a67e7f29da104dffc508627cbc5f3c60da00d3a9d9ab9dd05696dbb5a0dff5"
+ENVOY_SHA256 = "2167290c62a6355cb7e329ca1d48033ef009d6e588b4dddccbc407199b47fed3"
 
 ENVOY_ORG = "envoyproxy"
 
