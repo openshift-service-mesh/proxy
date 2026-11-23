@@ -16,7 +16,9 @@ envoy_cc_library(
     deps = [
         "//envoy/common:exception_lib",
         "//envoy/server:config_tracker_interface",
+        "//envoy/upstream:cluster_manager_interface",
         "//source/common/protobuf:utility_lib",
+        "//source/common/upstream:endpoint_config_dump_lib",
         "@abseil-cpp//absl/algorithm:container",
         "@abseil-cpp//absl/status:statusor",
         "@abseil-cpp//absl/strings",
@@ -173,6 +175,8 @@ envoy_cc_library(
         ":filter_chain_config_writer_lib",
         ":listener_writer_lib",
         "//envoy/common:optref_lib",
+        "//envoy/config:xds_config_tracker_interface",
+        "//envoy/config:xds_manager_interface",
         "//envoy/event:dispatcher_interface",
         "//envoy/http:async_client_interface",
         "//envoy/server:admin_interface",
