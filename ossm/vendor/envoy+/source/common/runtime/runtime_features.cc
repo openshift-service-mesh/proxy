@@ -192,6 +192,7 @@ FALSE_RUNTIME_GUARD(envoy_reloadable_features_quic_enable_reset_ssl_after_handsh
 RUNTIME_GUARD(envoy_reloadable_features_quic_hot_restart_time_wait_before_forward);
 RUNTIME_GUARD(envoy_reloadable_features_quic_mtls_resumption_disabled_by_default);
 RUNTIME_GUARD(envoy_reloadable_features_quic_mtls_server_enabled);
+RUNTIME_GUARD(envoy_reloadable_features_quic_report_zero_stream_limit_before_handshake);
 // Ignore the automated "remove this flag" issue: we should keep this for 1 year. Confirm with
 // @danzh2010 or @RyanTheOptimist before removing.
 RUNTIME_GUARD(envoy_reloadable_features_quic_send_server_preferred_address_to_all_clients);
@@ -227,6 +228,7 @@ RUNTIME_GUARD(envoy_reloadable_features_udp_send_zero_length_datagrams);
 RUNTIME_GUARD(envoy_reloadable_features_udp_set_do_not_fragment);
 RUNTIME_GUARD(envoy_reloadable_features_uhv_allow_malformed_url_encoding);
 RUNTIME_GUARD(envoy_reloadable_features_unambiguous_tls_session_context_id);
+RUNTIME_GUARD(envoy_reloadable_features_unified_mux);
 RUNTIME_GUARD(envoy_reloadable_features_upstream_bind_config_fix_port_exhaustion);
 RUNTIME_GUARD(envoy_reloadable_features_upstream_http_filters_correct_stats_prefix);
 RUNTIME_GUARD(envoy_reloadable_features_upstream_wasm_filter_uses_root_scope);
@@ -275,8 +277,6 @@ FALSE_RUNTIME_GUARD(envoy_reloadable_features_enable_stats_explicit_tags);
 // descriptor_value fields by default.
 FALSE_RUNTIME_GUARD(
     envoy_reloadable_features_enable_formatter_for_ratelimit_action_descriptor_value);
-// TODO(adisuissa) reset to true to enable unified mux by default
-FALSE_RUNTIME_GUARD(envoy_reloadable_features_unified_mux);
 // OAuth2 filter cookie encryption: when true, encrypt() emits AES-256-GCM ciphertexts with a
 // "gcm." marker; when false (the default), it emits the legacy AES-256-CBC format with no
 // marker. The default is false so that newly upgraded instances stay wire-compatible with
