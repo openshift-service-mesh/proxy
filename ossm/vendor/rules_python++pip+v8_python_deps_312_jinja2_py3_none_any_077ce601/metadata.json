@@ -1,0 +1,11 @@
+{
+	"name": "Jinja2",
+	"provides_extra": [
+		"i18n"
+	],
+	"requires_dist": [
+		"MarkupSafe (>=2.0)",
+		"Babel (>=2.7) ; extra == 'i18n'"
+	],
+	"version": "3.0.3"
+}

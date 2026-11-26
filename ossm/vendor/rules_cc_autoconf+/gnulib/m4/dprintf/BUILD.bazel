@@ -1,0 +1,53 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/dprintf.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# gl_FUNC_DPRINTF - lines 10-18
+autoconf(
+    name = "gl_FUNC_DPRINTF",
+    checks = [
+        # gl_CHECK_FUNCS_ANDROID([dprintf], [[#include <stdio.h>]])
+        checks.AC_CHECK_FUNC("dprintf"),
+        checks.AC_DEFINE(
+            "HAVE_DPRINTF",
+            condition = "ac_cv_func_dprintf",
+            if_true = 1,
+            subst = True,
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+# gl_REPLACE_DPRINTF - lines 20-33
+# Sets REPLACE_DPRINTF=1 when dprintf exists (replacement mode);
+# stays 0 when the function is absent.
+autoconf(
+    name = "gl_REPLACE_DPRINTF",
+    checks = [
+        # if test $ac_cv_func_dprintf = yes ...; then REPLACE_DPRINTF=1; fi
+        checks.AC_SUBST(
+            "REPLACE_DPRINTF",
+            condition = "ac_cv_func_dprintf",
+            if_false = "0",
+            if_true = "1",
+        ),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_DPRINTF",
+    ],
+)
+
+# gl_PREREQ_DPRINTF - line 35 (no-op)
+
+autoconf(
+    name = "dprintf",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_DPRINTF",
+    ],
+)

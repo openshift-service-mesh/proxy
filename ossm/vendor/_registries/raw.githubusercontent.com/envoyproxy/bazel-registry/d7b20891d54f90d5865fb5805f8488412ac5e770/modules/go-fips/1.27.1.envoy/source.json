@@ -1,0 +1,10 @@
+{
+    "url": "https://go.dev/dl/go1.27.1.linux-amd64.tar.gz",
+    "integrity": "sha256-Y9M58NpatTY1pW8kkKeYTf4S38/yKtdJ9j7a9ZAWhEU=",
+    "strip_prefix": "go",
+    "overlay": {
+        "BUILD.bazel": "sha256-lvg0QivLoWgkMYpiM0mbKvpSoGb6b7W2+HILGezab+I=",
+        "go_fips.bzl": "sha256-QoN5LFZNhDhKAL7vna551YfPOiPdG5I2IQetgO1xCo4=",
+        "go_fips_ext.bzl": "sha256-ysr8IpehDO+YVMg5MERSHZVqlkB5nKS0zHPxe6Gfa0w="
+    }
+}

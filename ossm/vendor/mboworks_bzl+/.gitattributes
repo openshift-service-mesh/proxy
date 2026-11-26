@@ -1,0 +1,9 @@
+.bcr export-ignore
+.bcr/** export-ignore
+.github export-ignore
+.github/** export-ignore
+.pre-commit export-ignore
+.pre-commit/** export-ignore
+.pre-commit-config.yaml export-ignore
+tools export-ignore
+tools/** export-ignore

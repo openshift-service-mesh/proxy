@@ -1,0 +1,84 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/access.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+# HAVE_ACCESS - Shared check for access function existence
+# Used by modules that need HAVE_ACCESS without the full replacement logic.
+autoconf(
+    name = "HAVE_ACCESS",
+    checks = [
+        checks.AC_CHECK_FUNC(
+            "access",
+            define = "HAVE_ACCESS",
+        ),
+    ],
+    visibility = ["//gnulib:__subpackages__"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+    ],
+)
+
+# gl_FUNC_ACCESS — m4/access.m4
+#
+# M4 logic:
+#   mingw*/windows*  -> REPLACE_ACCESS=1 unconditionally (access==_access has no X_OK).
+#   *                -> runtime probe (access("link-to-file/", R_OK)); when no,
+#                       set REPLACE_ACCESS=1 + AC_DEFINE([ACCESS_TRAILING_SLASH_BUG]).
+#                       Cross-compile guess: linux/glibc/midipix -> yes; else
+#                       gl_cross_guess_normal (== "no" / replacement needed).
+#
+# On macOS the SDK-version probe decides (Big Sur+ → no bug; older →
+# fall back to M4 guess of "bug present"). Windows stays per the M4 case.
+autoconf(
+    name = "gl_FUNC_ACCESS",
+    checks = select({
+        "@platforms//os:macos": [
+            checks.AC_DEFINE(
+                "ACCESS_TRAILING_SLASH_BUG",
+                if_true = 1,
+                requires = ["!gl_cv_macos_sdk_modern"],
+            ),
+            checks.AC_SUBST(
+                "REPLACE_ACCESS",
+                condition = "gl_cv_macos_sdk_modern",
+                if_false = "1",
+                if_true = "0",
+            ),
+        ],
+        "@platforms//os:windows": [
+            checks.AC_TRY_LINK(
+                name = "gl_cv_func_access_x_ok_works",
+                code = """\
+#error "ACCESS_X_OK_NOT_SUPPORTED"
+int main(void) { return 0; }
+""",
+            ),
+            checks.AC_SUBST(
+                "REPLACE_ACCESS",
+                condition = "!gl_cv_func_access_x_ok_works",
+            ),
+        ],
+        "//conditions:default": [
+            # Linux/glibc: M4 cross-compile guess is "yes" (no bug).
+            checks.AC_SUBST("REPLACE_ACCESS", "0"),
+        ],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":HAVE_ACCESS",
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/gnulib-common:gl_HOST_MACOS_SDK_MODERN",
+        # AC_CHECK_FUNCS_ONCE([lstat]) - provided by lstat dependency
+        "//gnulib/m4/lstat",
+    ],
+)
+
+# Package-level aggregator target
+autoconf(
+    name = "access",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gl_FUNC_ACCESS",
+    ],
+)

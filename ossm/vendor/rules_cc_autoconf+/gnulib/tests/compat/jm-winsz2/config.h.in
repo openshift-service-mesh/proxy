@@ -1,0 +1,2 @@
+/* config.h.in */
+#undef GWINSZ_IN_SYS_IOCTL

@@ -1,0 +1,45 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_python//python/private:bzlmod_enabled.bzl", "BZLMOD_ENABLED")  # buildifier: disable=bzl-visibility
+load("//tests/support:support.bzl", "SUPPORTS_BZLMOD")
+load("//tests/support/pytest_test:pytest_test.bzl", "pytest_test")
+
+pytest_test(
+    name = "runfiles_test",
+    srcs = ["runfiles_test.py"],
+    data = [
+        "//tests/support:current_build_settings",
+    ],
+    env = {
+        "BZLMOD_ENABLED": "1" if BZLMOD_ENABLED else "0",
+    },
+    python_versions = [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14",
+    ],
+    target_compatible_with = SUPPORTS_BZLMOD,
+    deps = ["//python/runfiles"],
+)
+
+pytest_test(
+    name = "pathlib_test",
+    srcs = ["pathlib_test.py"],
+    python_versions = [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14",
+    ],
+    target_compatible_with = SUPPORTS_BZLMOD,
+    deps = ["//python/runfiles"],
+)
+
+build_test(
+    name = "publishing",
+    targets = [
+        "//python/runfiles:wheel.publish",
+    ],
+)

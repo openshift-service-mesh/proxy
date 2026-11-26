@@ -1,0 +1,324 @@
+# Copyright 2020 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Test
+
+on:
+
+  pull_request:
+    branches:
+    - main
+    - 'envoy-release/**'
+    - 'istio-release/**'
+
+  push:
+    branches:
+    - main
+    - 'envoy-release/**'
+    - 'istio-release/**'
+
+  schedule:
+    - cron: '0 0 * * *'
+
+  workflow_dispatch:
+
+concurrency:
+
+  group: ${{ github.head_ref || github.run_id }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+
+  test_data:
+    name: build test data
+
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Free up disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox /opt/hostedtoolcache
+        echo "Free disk space: " $(df -h /)
+
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+    - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      with:
+        disk-cache: ${{ github.job }}
+        cache-save: ${{ github.event_name != 'pull_request' }}
+
+    - name: Bazel build
+      run: >
+        bazel build
+        --verbose_failures
+        --test_output=errors
+        --config=clang
+        --config=hermetic-llvm
+        -c opt
+        $(bazel query 'kind(was.*_rust_binary, //test/test_data/...)')
+        $(bazel query 'kind(_optimized_wasm_cc_binary, //test/test_data/...)')
+
+    # Currently, in Github Action, "Bazel build step" creates `wasm_canary_check.wasm` directory as a temporal directory.
+    # Since the name of this directory has "*.wasm" pattern, the step "Mangle build rules to use existing test data" fails.
+    # So, here, we clear out the directories in test_data.
+    - name: Clean up test data
+      shell: bash
+      run: |
+        # Remove temporal directories
+        for i in $(find bazel-bin/test/test_data/ -mindepth 1 -maxdepth 1 -type d); do \
+          rm -rf $i; \
+        done
+
+    - name: Upload test data
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: test_data
+        path: bazel-bin/test/test_data/*.wasm
+        if-no-files-found: error
+        retention-days: 3
+
+  build:
+    name: ${{ matrix.action }} with ${{ matrix.name }}
+
+    needs: test_data
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: 'NullVM on Linux/x86_64'
+          engine: 'null'
+          os: ubuntu-24.04
+          arch: x86_64
+          action: test
+          flags: --config=gcc
+        - name: 'NullVM on Linux/x86_64 with ASan'
+          engine: 'null'
+          os: ubuntu-24.04
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm --config=clang-asan --define=crypto=system
+        - name: 'NullVM on Linux/x86_64 with TSan'
+          engine: 'null'
+          os: ubuntu-24.04
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm --config=clang-tsan
+        - name: 'NullVM on Windows/x86_64'
+          engine: 'null'
+          os: windows-2022
+          arch: x86_64
+          action: test
+          targets: -//test/fuzz/...
+        - name: 'V8 on Linux/x86_64'
+          engine: 'v8'
+          repo: 'v8'
+          os: ubuntu-24.04
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm --define=crypto=system
+          cache: true
+        - name: 'V8 on Linux/x86_64 with ASan'
+          engine: 'v8'
+          repo: 'v8'
+          os: ubuntu-24.04
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm --config=clang-asan
+          cache: true
+        - name: 'V8 on Linux/x86_64 with TSan'
+          engine: 'v8'
+          repo: 'v8'
+          os: ubuntu-24.04
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm --config=clang-tsan
+          cache: true
+        - name: 'V8 on Linux/x86_64 with GCC'
+          engine: 'v8'
+          repo: 'v8'
+          os: ubuntu-24.04
+          arch: x86_64
+          action: test
+          flags: --config=gcc
+          cache: true
+        - name: 'V8 on Linux/aarch64'
+          engine: 'v8'
+          repo: 'v8'
+          os: ubuntu-24.04-arm
+          arch: aarch64
+          action: test
+          targets: -//test/fuzz/...
+          flags: --config=hermetic-llvm --@v8//bazel/config:v8_target_cpu=arm64
+          cache: true
+        - name: 'V8 on macOS/x86_64'
+          engine: 'v8'
+          repo: 'v8'
+          os: macos-15
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm
+          cache: true
+        - name: 'WAMR interp on Linux/x86_64'
+          engine: 'wamr-interp'
+          repo: 'com_github_bytecodealliance_wasm_micro_runtime'
+          os: ubuntu-24.04
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm
+        - name: 'WAMR interp on macOS/x86_64'
+          engine: 'wamr-interp'
+          repo: 'com_github_bytecodealliance_wasm_micro_runtime'
+          os: macos-15
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm
+        - name: 'WAMR jit on Linux/x86_64'
+          engine: 'wamr-jit'
+          repo: 'com_github_bytecodealliance_wasm_micro_runtime'
+          os: ubuntu-24.04
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm
+          deps: lld-18
+          cache: true
+        - name: 'WAMR jit on macOS/x86_64'
+          engine: 'wamr-jit'
+          repo: 'com_github_bytecodealliance_wasm_micro_runtime'
+          os: macos-15
+          arch: x86_64
+          action: test
+          cache: true
+          flags: --config=hermetic-llvm
+        - name: 'WasmEdge on Linux/x86_64'
+          engine: 'wasmedge'
+          repo: 'com_github_wasmedge_wasmedge'
+          os: ubuntu-24.04
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm
+        - name: 'WasmEdge on macOS/x86_64'
+          engine: 'wasmedge'
+          repo: 'com_github_wasmedge_wasmedge'
+          os: macos-15
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm
+        - name: 'Wasmtime on Linux/x86_64'
+          engine: 'wasmtime'
+          repo: 'com_github_bytecodealliance_wasmtime'
+          os: ubuntu-24.04
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm -c opt
+        - name: 'Wasmtime on Linux/x86_64 with ASan'
+          engine: 'wasmtime'
+          repo: 'com_github_bytecodealliance_wasmtime'
+          os: ubuntu-24.04
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm --config=clang-asan --define=crypto=system
+        - name: 'Wasmtime on Linux/aarch64'
+          engine: 'wasmtime'
+          repo: 'com_github_bytecodealliance_wasmtime'
+          os: ubuntu-24.04-arm
+          arch: aarch64
+          action: build
+          flags: --config=hermetic-llvm
+        - name: 'Wasmtime on Linux/s390x'
+          engine: 'wasmtime'
+          repo: 'com_github_bytecodealliance_wasmtime'
+          os: ubuntu-24.04
+          arch: s390x
+          action: test
+          flags: --config=clang --test_timeout=1800
+          # s390x build-tools image built from bazel/external/Dockerfile.bazel
+          run_under: docker run --rm --env HOME=$HOME --env USER=$(id -un) --volume "$HOME:$HOME" --workdir $(pwd) --user $(id -u):$(id -g) --platform linux/s390x ghcr.io/proxy-wasm/build-tools:ubuntu-24.04-bazel-7.7.1
+          cache: true
+        - name: 'Wasmtime on macOS/x86_64'
+          engine: 'wasmtime'
+          repo: 'com_github_bytecodealliance_wasmtime'
+          os: macos-15
+          arch: x86_64
+          action: test
+          flags: --config=hermetic-llvm
+
+    steps:
+    - name: Free up disk space
+      if: ${{ matrix.deps != '' && startsWith(matrix.os, 'ubuntu') }}
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* /usr/local/lib/android /usr/local/share/chromium /opt/microsoft /opt/google /usr/lib/firefox /opt/hostedtoolcache
+        echo "Free disk space: " $(df -h /)
+
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+    - name: Compute job hash
+      id: job-hash
+      run: echo "hash=$(echo -n '${{ matrix.engine }}-${{ matrix.flags }}-${{ matrix.os }}-${{ matrix.arch }}' | sha1sum | cut -c1-10)" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Install dependencies (Linux)
+      if: ${{ matrix.deps != '' && startsWith(matrix.os, 'ubuntu') }}
+      run: sudo apt update -y && sudo apt install -y ${{ matrix.deps }}
+
+    - name: Activate Docker/QEMU
+      if: startsWith(matrix.run_under, 'docker')
+      uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+    - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      if: ${{ matrix.cache }}
+      with:
+        disk-cache: ${{ github.job }}-${{ steps.job-hash.outputs.hash }}
+        cache-save: ${{ github.event_name != 'pull_request' }}
+
+    - name: Download test data
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: test_data
+        path: test/test_data/
+
+    - name: Mangle build rules to use existing test data
+      shell: bash
+      run: |
+        sed 's/\.wasm//g' test/BUILD > test/BUILD.tmp && mv test/BUILD.tmp test/BUILD
+        echo "package(default_visibility = [\"//visibility:public\"])" > test/test_data/BUILD
+        for i in $(cd test/test_data && ls -1 *.wasm | sed 's/\.wasm$//g'); do \
+          echo "filegroup(name = \"$i\", srcs = [\"$i.wasm\"])" >> test/test_data/BUILD; \
+        done
+
+    - name: Bazel build/test
+      shell: bash
+      run: >
+        ${{ matrix.run_under }}
+        bazel ${{ matrix.action }}
+        --verbose_failures
+        --test_output=all
+        --define engine=${{ matrix.engine }}
+        ${{ matrix.flags }}
+        -- //test/... ${{ matrix.targets }}
+
+    - name: Bazel build/test (signed Wasm module)
+      if: ${{ matrix.engine != 'null' && !startsWith(matrix.os, 'windows') }}
+      run: >
+        ${{ matrix.run_under }}
+        bazel ${{ matrix.action }}
+        --verbose_failures
+        --test_output=all
+        --define engine=${{ matrix.engine }}
+        ${{ matrix.flags }}
+        --per_file_copt=src/signature_util.cc,test/signature_util_test.cc@-DPROXY_WASM_VERIFY_WITH_ED25519_PUBKEY=\"$(xxd -p -c 256 test/test_data/signature_key1.pub | cut -c3- | tr -d '\n')\"
+        //test:signature_util_test
+

@@ -1,0 +1,10 @@
+{
+    "url": "https://sourceware.org/elfutils/ftp/0.196/elfutils-0.196.tar.bz2",
+    "strip_prefix": "elfutils-0.196",
+    "overlay": {
+        "BUILD.bazel": "sha256-U1KU84dCWohVsYJ+qZy0Si3hIG7HAhf/AUU+4DZ8QcE=",
+        "gen_mnemonics.c": "sha256-oqixvQ11cjX8A3LuDLQDFWEJkfuwTz92+9sfBcGUFWw=",
+        "lib/config.h": "sha256-3f1y+lb2zDI5/i9qV2puPiAuG+/MIRR81dfv+mFlPkM="
+    },
+    "integrity": "sha256-/VzGt3rWdzysk8s/QV+TGKw7NFXuz4Afa0p0LE9scgk="
+}

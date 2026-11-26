@@ -1,0 +1,19 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/csharpcomp.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+
+autoconf(
+    name = "gt_CSHARPCOMP",
+    checks = [
+        # TODO: `AC_CHECK_PROG` has `PATH` reliance. A hermetic interface is required.
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Top-level target
+autoconf(
+    name = "csharpcomp",
+    checks = [],
+    visibility = ["//visibility:public"],
+    deps = [":gt_CSHARPCOMP"],
+)

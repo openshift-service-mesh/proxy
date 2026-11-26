@@ -1,0 +1,27 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/hypot.m4
+
+gl_FUNC_HYPOT:
+- AC_REQUIRE([gl_MATH_H_DEFAULTS])
+- AC_REQUIRE([gl_USE_SYSTEM_EXTENSIONS])
+- AC_CHECK_FUNCS([hypot])
+- AC_SUBST([HYPOT_LIBM])
+"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "hypot",
+    checks = [
+        # HYPOT_LIBM is empty on macOS
+        checks.AC_SUBST("HYPOT_LIBM", ""),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//gnulib/m4/extensions",  # AC_REQUIRE([gl_USE_SYSTEM_EXTENSIONS])
+        "//gnulib/m4/fabs",
+        "//gnulib/m4/frexp",
+        "//gnulib/m4/ldexp",
+        "//gnulib/m4/sqrt",
+    ],
+)

@@ -1,0 +1,29 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+# load("@rules_cc//cc:defs.bzl", "cc_test")
+
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+exports_files(
+    [
+        "BUILD.gperftools.bazel",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "malloc_test",
+    size = "small",
+    srcs = ["malloc_test.cc"],
+    malloc = "@gperftools//:gperftools_build",
+)
+
+build_test(
+    name = "build_test",
+    targets = [
+        "@gperftools//:gperftools_build",
+    ],
+)
+
+test_suite(
+    name = "all_tests",
+)

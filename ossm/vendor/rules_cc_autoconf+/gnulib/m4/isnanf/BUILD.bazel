@@ -1,0 +1,26 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/isnanf.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "isnanf",
+    checks = [
+        # gl_FUNC_ISNANF checks for isnanf function
+        checks.AC_CHECK_FUNC(
+            "isnanf",
+            name = "_gl_cv_func_isnanf",
+        ),
+        # HAVE_ISNANF_IN_LIBC: isnanf() is available in libc without -lm
+        checks.AC_DEFINE("HAVE_ISNANF_IN_LIBC", "1"),
+        # AC_SUBST([ISNANF_LIBM]) - library needed for isnanf
+        # On macOS/Linux, if isnanf exists, it's in libc, so ISNANF_LIBM is empty
+        checks.AC_SUBST("ISNANF_LIBM", ""),
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//autoconf/macros/AC_CHECK_INCLUDES_DEFAULT",
+        "//gnulib/m4/exponentf",
+        "//gnulib/m4/math_h",
+    ],
+)

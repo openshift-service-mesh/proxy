@@ -1,0 +1,27 @@
+"""https://github.com/coreutils/gnulib/blob/1039a5f2cee3cda1c11f64a5eb3a15b2e87cd2f0/m4/isapipe.m4"""
+
+load("//autoconf:autoconf_toolchain.bzl", autoconf = "autoconf_cache")
+load("//autoconf:checks.bzl", "checks")
+
+autoconf(
+    name = "isapipe",
+    checks = [
+        checks.AC_CHECK_FUNC(
+            "isapipe",
+            define = "HAVE_ISAPIPE",
+        ),
+    ] + select({
+        "@platforms//os:linux": [
+            # Linux has FIFO pipes, PIPE_LINK_COUNT_MAX is 1
+            checks.AC_DEFINE("HAVE_FIFO_PIPES", "1"),
+            checks.AC_DEFINE_UNQUOTED("PIPE_LINK_COUNT_MAX", "(1)"),
+        ],
+        "@platforms//os:macos": [
+            # macOS has FIFO-like pipes, PIPE_LINK_COUNT_MAX is 0
+            checks.AC_DEFINE("HAVE_FIFO_PIPES", "1"),
+            checks.AC_DEFINE_UNQUOTED("PIPE_LINK_COUNT_MAX", "(0)"),
+        ],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+)

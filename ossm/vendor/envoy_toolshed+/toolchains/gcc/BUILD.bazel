@@ -1,0 +1,240 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:versions.bzl", "VERSIONS")
+load(":host_test.bzl", "fallback_host_test", "host_toolchain_names_test", "host_tools_test")
+load(":toolchain_test.bzl", "gcc_compile_flags", "gcc_link_flags", "gcc_opt_flags_test", "gcc_paths_test", "gcc_runtime_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "extensions.bzl",
+    "host.bzl",
+    "toolchain.bzl",
+])
+
+alias(
+    name = "linux_x64",
+    actual = "@gcc_linux_x86_64//:cc_toolchain",
+)
+
+# Selection is driven by the target platform: target_compatible_with
+# //compile:libstdcxx means gcc is only a candidate for platforms that ask for
+# libstdc++ (ie //platforms:linux_x86_64_libstdcxx and the wee8 transition).
+#
+# Placement is driven by execution platform ORDER, not by an exec constraint.
+# Bazel tie-breaks between two compatible toolchains by taking the first
+# execution platform in --extra_execution_platforms that yields a toolchain, so
+# the gcc platforms are listed first in .bazelrc and gcc claims
+# //platforms/rbe:linux_x64_gcc before clang can.
+#
+# There is deliberately no //compile:gcc_worker here. Requiring it meant gcc
+# matched no exec platform when building without RBE (the only exec platform is
+# @platforms//host, which carries the //compile:worker default of
+# :llvm_worker), and it also stranded host tooling under --config=rbe-gcc.
+# //compile:llvm_worker is still required by the llvm toolchains, which is what
+# prevents clang being scheduled into the gcc container.
+#
+# Both archives execute on x86_64, including the aarch64 cross compiler.
+toolchain(
+    name = "linux_x64_toolchain",
+    exec_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+        "//compile:libstdcxx",
+    ],
+    toolchain = ":linux_x64",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+)
+
+alias(
+    name = "linux_arm64",
+    actual = "@gcc_linux_aarch64//:cc_toolchain",
+)
+
+gcc_paths_test(
+    name = "linux_x64_paths_test",
+    compiler = "@gcc_linux_x86_64//:bin/gcc",
+    dwp = "@llvm_minimal_linux_x64//:bin/llvm-dwp",
+    lld = "@llvm_minimal_linux_x64//:bin/lld",
+    sysroot = "@sysroot_linux_amd64//sysroot",
+    target_under_test = ":linux_x64",
+)
+
+[
+    gcc_opt_flags_test(
+        name = "%s_opt_flags_test" % name,
+        target_under_test = ":" + name,
+    )
+    for name in [
+        "linux_x64",
+        "linux_arm64",
+    ]
+]
+
+gcc_paths_test(
+    name = "linux_arm64_paths_test",
+    compiler = "@gcc_linux_aarch64//:bin/aarch64-linux-gcc",
+    dwp = "@llvm_minimal_linux_x64//:bin/llvm-dwp",
+    lld = "@llvm_minimal_linux_x64//:bin/lld",
+    sysroot = "@sysroot_linux_arm64//sysroot",
+    target_under_test = ":linux_arm64",
+)
+
+[
+    gcc_runtime_test(
+        name = "linux_{}_runtime_test".format(arch),
+        arch = arch,
+        compiler = "@gcc_linux_{}//:bin/{}gcc".format(
+            arch,
+            "aarch64-linux-" if arch == "aarch64" else "",
+        ),
+        libgcc = "@gcc_linux_{}//:libgcc".format(arch),
+        target_under_test = "@gcc_linux_{}//:libstdcxx".format(arch),
+        version = VERSIONS["gcc_toolchain"]["version"],
+    )
+    for arch in [
+        "x86_64",
+        "aarch64",
+    ]
+]
+
+[
+    gcc_link_flags(
+        name = "linux_{}_link_flags".format(arch),
+        toolchain = "@gcc_linux_{}//:cc_toolchain".format(arch),
+    )
+    for arch in [
+        "x86_64",
+        "aarch64",
+    ]
+]
+
+[
+    gcc_compile_flags(
+        name = "linux_{}_compile_flags".format(arch),
+        toolchain = "@gcc_linux_{}//:cc_toolchain".format(arch),
+    )
+    for arch in [
+        "x86_64",
+        "aarch64",
+    ]
+]
+
+[
+    sh_test(
+        name = "linux_{}_lld_test".format(arch),
+        srcs = ["lld_test.sh"],
+        args = [
+            "$(rootpath @gcc_linux_{}//:bin/{}gcc)".format(
+                arch,
+                "aarch64-linux-" if arch == "aarch64" else "",
+            ),
+            "$(rootpath :linux_{}_link_flags)".format(arch),
+            arch,
+            "$(rootpath :linux_{}_compile_flags)".format(arch),
+        ],
+        data = [
+            ":linux_{}_compile_flags".format(arch),
+            ":linux_{}_link_flags".format(arch),
+            "@gcc_linux_{}//:files".format(arch),
+            "@gcc_linux_{}//:bin/{}gcc".format(
+                arch,
+                "aarch64-linux-" if arch == "aarch64" else "",
+            ),
+        ],
+        exec_compatible_with = [
+            "@platforms//os:linux",
+            "@platforms//cpu:x86_64",
+        ],
+        target_compatible_with = ["@platforms//os:linux"],
+    )
+    for arch in [
+        "x86_64",
+        "aarch64",
+    ]
+]
+
+[
+    sh_test(
+        name = "linux_{}_runtime_abi_test".format(arch),
+        srcs = ["runtime_abi_test.sh"],
+        args = [
+            "$(rootpath @gcc_linux_{}//:bin/{}gcc)".format(
+                arch,
+                "aarch64-linux-" if arch == "aarch64" else "",
+            ),
+            "$(rootpath @sysroot_linux_{}//sysroot)".format("amd64" if arch == "x86_64" else "arm64"),
+            arch,
+            VERSIONS["gcc_toolchain"]["version"],
+            "$(rootpath //compile/test:check_glibc.sh)",
+        ],
+        data = [
+            "//compile/test:check_glibc.sh",
+            "@gcc_linux_{}//:files".format(arch),
+            "@gcc_linux_{}//:bin/{}gcc".format(
+                arch,
+                "aarch64-linux-" if arch == "aarch64" else "",
+            ),
+            "@sysroot_linux_{}//sysroot".format("amd64" if arch == "x86_64" else "arm64"),
+        ],
+        exec_compatible_with = [
+            "@platforms//os:linux",
+            "@platforms//cpu:x86_64",
+        ],
+        target_compatible_with = ["@platforms//os:linux"],
+    )
+    for arch in [
+        "x86_64",
+        "aarch64",
+    ]
+]
+
+toolchain(
+    name = "linux_arm64_toolchain",
+    exec_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:aarch64",
+        "//compile:libstdcxx",
+    ],
+    toolchain = ":linux_arm64",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+)
+
+# No archive runs on other Linux hosts (eg aarch64), where the host GCC is the fallback: this
+# matches only the host's own platform there, and nothing where an archive does run. It is
+# registered after the archives, which x86_64 remote workers can still run from such a host,
+# and only for local execution: it uses absolute host paths.
+toolchain(
+    name = "linux_host_toolchain",
+    exec_compatible_with = [
+        "@platforms//os:linux",
+        "@gcc_host_platform//:cpu",
+        "//compile:local_execution",
+    ],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@gcc_host_platform//:cpu",
+        "//compile:libstdcxx",
+    ],
+    toolchain = "@gcc_host//:cc_toolchain",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+)
+
+host_toolchain_names_test(
+    name = "host_toolchain_names_test",
+)
+
+fallback_host_test(
+    name = "fallback_host_test",
+)
+
+host_tools_test(
+    name = "host_tools_test",
+)
