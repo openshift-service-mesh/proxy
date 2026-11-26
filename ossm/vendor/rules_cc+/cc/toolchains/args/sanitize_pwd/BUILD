@@ -22,9 +22,3 @@ cc_args(
         "//conditions:default": {"PWD": "/proc/self/cwd"},
     }),
 )
-
-filegroup(
-    name = "srcs",
-    srcs = ["BUILD"],
-    visibility = ["//cc/toolchains/args:__pkg__"],
-)

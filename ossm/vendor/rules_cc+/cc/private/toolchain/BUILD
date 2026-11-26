@@ -59,12 +59,6 @@ cc_library(
 )
 
 filegroup(
-    name = "grep-includes",
-    srcs = ["empty.cc"],
-    deprecation = "grep-includes is always empty, you must provide your own.",
-)
-
-filegroup(
     name = "empty",
     srcs = [],
 )

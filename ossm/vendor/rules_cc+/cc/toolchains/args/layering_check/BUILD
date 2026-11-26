@@ -95,9 +95,3 @@ cc_args(
     iterate_over = "@rules_cc//cc/toolchains/variables:dependent_module_map_files",
     requires_not_none = "@rules_cc//cc/toolchains/variables:dependent_module_map_files",
 )
-
-filegroup(
-    name = "srcs",
-    srcs = ["BUILD"],
-    visibility = ["//cc/toolchains/args:__pkg__"],
-)

@@ -21,6 +21,7 @@ rules_cc_integration_test(
     name = "cc_integration_test",
     shard_count = 10,
     target_compatible_with = select({
+        "@platforms//os:macos": ["@platforms//:incompatible"],
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }) if bazel_features.cc.cc_common_is_in_rules_cc else ["@platforms//:incompatible"],
@@ -39,7 +40,10 @@ rules_cc_integration_test(
 
 rules_cc_integration_test(
     name = "cc_shared_library_tests",
+    # These could probably be made to work on all CI platforms,
+    # but the default toolchains are not properly configured for it.
     target_compatible_with = select({
+        "@platforms//os:macos": ["@platforms//:incompatible"],
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
@@ -63,7 +67,6 @@ rules_cc_integration_test(
     name = "cc_static_library_failure_tests",
     tags = ["notap"],
     target_compatible_with = select({
-        # The default Apple toolchain does not provide symbol_check.
         "@platforms//os:macos": ["@platforms//:incompatible"],
         "//conditions:default": STATIC_LIBRARY_VERSION_GATE,
     }),
@@ -72,7 +75,10 @@ rules_cc_integration_test(
 
 rules_cc_integration_test(
     name = "cc_shared_library_toolchain_tests",
+    # These could probably be made to work on all CI platforms,
+    # but the default toolchains are not properly configured for it.
     target_compatible_with = select({
+        "@platforms//os:macos": ["@platforms//:incompatible"],
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [] if _features_ge("9.2.0") else ["@platforms//:incompatible"],
     }),

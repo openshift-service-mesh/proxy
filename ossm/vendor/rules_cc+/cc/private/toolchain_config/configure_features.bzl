@@ -14,12 +14,7 @@
 """Helper functions for C++ feature configuration."""
 
 load("//cc:action_names.bzl", "ACTION_NAMES")
-load("//cc/common:feature_names.bzl", "feature_names")
 load("//cc/common:semantics.bzl", cc_semantics = "semantics")
-
-# Loaded from //cc/private instead of //cc/common to avoid a load cycle through the compatibility
-# proxy, which loads //cc/private:cc_common.bzl, which loads this file.
-load("//cc/private:cc_info.bzl", "CcInfo")
 
 ALL_COMPILE_ACTIONS = [
     ACTION_NAMES.c_compile,
@@ -65,56 +60,13 @@ OBJC_ACTIONS = [
     ACTION_NAMES.objc_executable,
 ]
 
-# Requested whenever coverage is generally enabled. Since it doesn't tell the toolchain whether the
-# current target is actually instrumented, prefer the two features below.
-_LEGACY_COVERAGE_FEATURE = "coverage"
-
-# Requested whenever coverage is generally enabled, even if the current target isn't instrumented.
-_COVERAGE_ENABLED_FEATURE = "coverage_enabled"
-
-# Requested only if the current target is instrumented for coverage.
-_COVERAGE_INSTRUMENTED_FEATURE = "coverage_instrumented"
-
-_LLVM_COVERAGE_MAP_FORMAT_FEATURE = "llvm_coverage_map_format"
-_GCC_COVERAGE_MAP_FORMAT_FEATURE = "gcc_coverage_map_format"
-
-def _should_instrument_for_coverage(ctx):
-    if ctx.coverage_instrumented():
-        return True
-
-    # The target itself isn't matched by the instrumentation filter, but it may still include
-    # headers provided by an instrumented dependency, which have to be instrumented as well.
-    # For example, think about a cc_test that tests functionality defined in a header file that is
-    # supplied by a cc_library.
-    #
-    # Only direct dependencies are checked, for two reasons:
-    # a) It is a good practice to declare libraries which you directly rely on. Including headers
-    #    from a library hidden deep inside the transitive closure makes build dependencies less
-    #    readable and can lead to unexpected breakage.
-    # b) Traversing the transitive closure for each target would be too expensive.
-    for attr_name in ["deps", "implementation_deps"]:
-        attr_value = getattr(ctx.attr, attr_name, None)
-
-        # configure_features is public API and thus can be called by rules that have arbitrary
-        # attributes with these names.
-        if type(attr_value) != "list":
-            continue
-        for dep in attr_value:
-            if type(dep) == "Target" and CcInfo in dep and ctx.coverage_instrumented(dep):
-                return True
-    return False
-
-def _get_coverage_features(ctx, cpp_configuration):
-    coverage_features = [
-        _LEGACY_COVERAGE_FEATURE,
-        _COVERAGE_ENABLED_FEATURE,
-    ]
+def _get_coverage_features(cpp_configuration):
+    coverage_features = []
+    coverage_features.append("coverage")
     if cpp_configuration.use_llvm_coverage_map_format():
-        coverage_features.append(_LLVM_COVERAGE_MAP_FORMAT_FEATURE)
+        coverage_features.append("llvm_coverage_map_format")
     else:
-        coverage_features.append(_GCC_COVERAGE_MAP_FORMAT_FEATURE)
-    if _should_instrument_for_coverage(ctx):
-        coverage_features.append(_COVERAGE_INSTRUMENTED_FEATURE)
+        coverage_features.append("gcc_coverage_map_format")
     return coverage_features
 
 def configure_features(
@@ -162,30 +114,30 @@ def configure_features(
     if not cc_toolchain._supports_header_parsing:
         # TODO(b/159096411): Remove once supports_header_parsing has been removed from the
         # cc_toolchain rule.
-        all_unsupported_features_set.add(feature_names.PARSE_HEADERS)
+        all_unsupported_features_set.add("parse_headers")
 
     if (language != "objc" and
         language != "objcpp" and
         cc_toolchain._cc_info.compilation_context._module_map == None):
-        all_unsupported_features_set.add(feature_names.MODULE_MAPS)
+        all_unsupported_features_set.add("module_maps")
 
     if cpp_configuration.force_pic():
-        if feature_names.SUPPORTS_PIC in all_unsupported_features_set:
+        if "supports_pic" in all_unsupported_features_set:
             fail("PIC compilation is requested but the toolchain does not support it " +
-                 "(feature named '{}' is not enabled)".format(feature_names.SUPPORTS_PIC))
-        all_requested_features_set.add(feature_names.SUPPORTS_PIC)
+                 "(feature named 'supports_pic' is not enabled)")
+        all_requested_features_set.add("supports_pic")
 
     if cpp_configuration.apple_generate_dsym:
-        all_requested_features_set.add(feature_names.GENERATE_DSYM_FILE)
+        all_requested_features_set.add("generate_dsym_file")
     else:
-        all_requested_features_set.add(feature_names.NO_GENERATE_DEBUG_SYMBOLS)
+        all_requested_features_set.add("no_generate_debug_symbols")
 
     if language == "objc" or language == "objcpp":
         all_requested_features_set.add("lang_objc")
         if cpp_configuration.objc_generate_linkmap:
-            all_requested_features_set.add(feature_names.GENERATE_LINKMAP)
+            all_requested_features_set.add("generate_linkmap")
         if cpp_configuration.objc_should_strip_binary:
-            all_requested_features_set.add(feature_names.DEAD_STRIP)
+            all_requested_features_set.add("dead_strip")
 
     all_features = [cpp_configuration.compilation_mode()]
     all_features.extend(DEFAULT_ACTION_CONFIGS)
@@ -202,13 +154,13 @@ def configure_features(
             all_features.append("nonhost")
 
     if ctx.configuration.coverage_enabled:
-        all_features.extend(_get_coverage_features(ctx, cpp_configuration))
+        all_features.extend(_get_coverage_features(cpp_configuration))
 
-    if feature_names.FDO_INSTRUMENT not in all_unsupported_features_set:
+    if "fdo_instrument" not in all_unsupported_features_set:
         if cpp_configuration.fdo_instrument() != None:
-            all_features.append(feature_names.FDO_INSTRUMENT)
+            all_features.append("fdo_instrument")
         elif cpp_configuration.cs_fdo_instrument() != None:
-            all_features.append(feature_names.CS_FDO_INSTRUMENT)
+            all_features.append("cs_fdo_instrument")
 
     fdo_context = cc_toolchain._fdo_context
     branch_fdo_provider = getattr(fdo_context, "branch_fdo_profile", None)
@@ -222,40 +174,40 @@ def configure_features(
     if branch_fdo_provider != None and cpp_configuration.compilation_mode() == "opt":
         if ((branch_fdo_provider.branch_fdo_mode == "llvm_fdo" or
              branch_fdo_provider.branch_fdo_mode == "llvm_cs_fdo") and
-            feature_names.FDO_OPTIMIZE not in all_unsupported_features_set):
-            all_features.append(feature_names.FDO_OPTIMIZE)
-            if feature_names.MEMPROF_OPTIMIZE not in all_unsupported_features_set:
-                all_features.append(feature_names.ENABLE_FDO_MEMPROF_OPTIMIZE)
-            if feature_names.THIN_LTO not in all_unsupported_features_set:
-                all_features.append(feature_names.ENABLE_FDO_THINLTO)
-            if (feature_names.SPLIT_FUNCTIONS not in all_unsupported_features_set and
+            "fdo_optimize" not in all_unsupported_features_set):
+            all_features.append("fdo_optimize")
+            if "memprof_optimize" not in all_unsupported_features_set:
+                all_features.append("enable_fdo_memprof_optimize")
+            if "thin_lto" not in all_unsupported_features_set:
+                all_features.append("enable_fdo_thinlto")
+            if ("split_functions" not in all_unsupported_features_set and
                 not enable_propeller_optimize):
-                all_features.append(feature_names.ENABLE_FDO_SPLIT_FUNCTIONS)
+                all_features.append("enable_fdo_split_functions")
 
         if branch_fdo_provider.branch_fdo_mode == "llvm_cs_fdo":
-            all_features.append(feature_names.CS_FDO_OPTIMIZE)
+            all_features.append("cs_fdo_optimize")
 
         if branch_fdo_provider.branch_fdo_mode == "auto_fdo":
-            all_features.append(feature_names.AUTOFDO)
-            if feature_names.MEMPROF_OPTIMIZE not in all_unsupported_features_set:
-                all_features.append(feature_names.ENABLE_AUTOFDO_MEMPROF_OPTIMIZE)
-            if feature_names.THIN_LTO not in all_unsupported_features_set:
-                all_features.append(feature_names.ENABLE_AFDO_THINLTO)
-            if feature_names.FSAFDO not in all_unsupported_features_set:
-                all_features.append(feature_names.ENABLE_FSAFDO)
-                if feature_names.SPLIT_FUNCTIONS not in all_unsupported_features_set:
-                    all_features.append(feature_names.ENABLE_FDO_SPLIT_FUNCTIONS)
+            all_features.append("autofdo")
+            if "memprof_optimize" not in all_unsupported_features_set:
+                all_features.append("enable_autofdo_memprof_optimize")
+            if "thin_lto" not in all_unsupported_features_set:
+                all_features.append("enable_afdo_thinlto")
+            if "fsafdo" not in all_unsupported_features_set:
+                all_features.append("enable_fsafdo")
+                if "split_functions" not in all_unsupported_features_set:
+                    all_features.append("enable_fdo_split_functions")
 
         if branch_fdo_provider.branch_fdo_mode == "xbinary_fdo":
-            all_features.append(feature_names.XBINARYFDO)
-            if feature_names.THIN_LTO not in all_unsupported_features_set:
-                all_features.append(feature_names.ENABLE_XBINARYFDO_THINLTO)
+            all_features.append("xbinaryfdo")
+            if "thin_lto" not in all_unsupported_features_set:
+                all_features.append("enable_xbinaryfdo_thinlto")
 
     if cpp_configuration._fdo_prefetch_hints_label != None:
-        all_features.append(feature_names.FDO_PREFETCH_HINTS)
+        all_features.append("fdo_prefetch_hints")
 
     if enable_propeller_optimize:
-        all_features.append(feature_names.PROPELLER_OPTIMIZE)
+        all_features.append("propeller_optimize")
 
     for feature in all_features:
         if feature not in all_unsupported_features_set:
@@ -272,9 +224,9 @@ def configure_features(
                 .format(cc_toolchain._toolchain_label, feature))
 
     if (cpp_configuration.force_pic() and
-        not feature_configuration.is_enabled(feature_names.PIC) and
-        not feature_configuration.is_enabled(feature_names.SUPPORTS_PIC)):
+        not feature_configuration.is_enabled("pic") and
+        not feature_configuration.is_enabled("supports_pic")):
         fail("PIC compilation is requested but the toolchain does not support it " +
-             "(feature named '{}' is not enabled)".format(feature_names.SUPPORTS_PIC))
+             "(feature named 'supports_pic' is not enabled)")
 
     return feature_configuration

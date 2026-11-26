@@ -448,8 +448,7 @@ def tool_path(name, path):
     Args:
         name: Name of the tool.
         path: Location of the tool; Can be absolute path (in case of non hermetic
-            toolchain), a path relative to the cc_toolchain's package, or the path of a
-            generated file.
+            toolchain), or path relative to the cc_toolchain's package.
 
     Returns:
         A ToolPathInfo provider.

@@ -178,9 +178,3 @@ cc_feature(
     feature_name = "thin_lto",
     visibility = ["//visibility:public"],
 )
-
-filegroup(
-    name = "srcs",
-    srcs = ["BUILD"],
-    visibility = ["//cc/toolchains/args:__pkg__"],
-)

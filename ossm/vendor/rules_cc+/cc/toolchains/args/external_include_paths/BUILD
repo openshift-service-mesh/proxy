@@ -20,9 +20,3 @@ cc_nested_args(
     },
     iterate_over = "//cc/toolchains/variables:external_include_paths",
 )
-
-filegroup(
-    name = "srcs",
-    srcs = ["BUILD"],
-    visibility = ["//cc/toolchains/args:__pkg__"],
-)

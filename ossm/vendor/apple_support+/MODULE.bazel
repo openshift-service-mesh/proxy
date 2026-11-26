@@ -4,13 +4,13 @@ module(
     name = "apple_support",
     bazel_compatibility = [">=7.4.0"],
     compatibility_level = 1,
-    version = "2.9.1",
+    version = "2.8.4",
 )
 
 bazel_dep(name = "bazel_features", version = "1.27.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 bazel_dep(name = "platforms", version = "0.0.9")
-bazel_dep(name = "rules_cc", version = "0.2.25")
+bazel_dep(name = "rules_cc", version = "0.2.20")
 
 apple_cc_configure = use_extension("//crosstool:setup.bzl", "apple_cc_configure_extension")
 use_repo(apple_cc_configure, "local_config_apple_cc", "local_config_apple_cc_toolchains")

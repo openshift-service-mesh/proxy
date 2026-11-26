@@ -20,9 +20,3 @@ cc_args(
     args = ["-static-libgcc"],
     requires_any_of = [":static_link_cpp_runtimes_enabled"],
 )
-
-filegroup(
-    name = "srcs",
-    srcs = ["BUILD"],
-    visibility = ["//cc/toolchains/args:__pkg__"],
-)

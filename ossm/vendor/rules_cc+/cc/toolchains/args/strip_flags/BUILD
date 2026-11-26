@@ -66,9 +66,3 @@ cc_args(
     format = {"input_file": "//cc/toolchains/variables:input_file"},
     requires_not_none = "//cc/toolchains/variables:input_file",
 )
-
-filegroup(
-    name = "srcs",
-    srcs = ["BUILD"],
-    visibility = ["//cc/toolchains/args:__pkg__"],
-)
