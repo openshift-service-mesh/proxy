@@ -144,4 +144,23 @@ mv "${MODULE_BAZEL}.tmp" "${MODULE_BAZEL}"
 # --lockfile_mode=update during loading) as an uncommitted change and stamps
 # BUILD_SCM_STATUS=Modified on released binaries, and any job passing
 # --lockfile_mode=error hard-fails on this bot's own PRs.
-bazel mod deps --lockfile_mode=update
+#
+# ossm/bazelrc imports forced repository overrides for offline builds. Those
+# overrides bypass vendor freshness checks, so after an Envoy update Bazel can
+# evaluate old vendored extensions against the new module graph. Reset each
+# generated override and use an empty vendor directory for this online refresh.
+# An empty --vendor_dir value resolves to the workspace root in Bazel 8, so use
+# a temporary directory instead. Passing an empty override path removes the
+# earlier rc-file override without modifying the snapshot or its configuration
+# (including on failure).
+mkdir -p "${ENVOY_MODULE_FILES_DIR}/vendor"
+ONLINE_REPO_FLAGS=("--vendor_dir=${ENVOY_MODULE_FILES_DIR}/vendor")
+if [[ -f "${ROOT}/ossm/vendor/bazelrc-vendor" ]]; then
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" == "common --override_repository="* ]]; then
+      repo="${line#common --override_repository=}"
+      ONLINE_REPO_FLAGS+=("--override_repository=${repo%%=*}=")
+    fi
+  done < "${ROOT}/ossm/vendor/bazelrc-vendor"
+fi
+bazel mod deps --lockfile_mode=update "${ONLINE_REPO_FLAGS[@]}"
